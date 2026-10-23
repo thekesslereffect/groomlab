@@ -1800,6 +1800,27 @@ TEST(GpuPreview, ASubdivideOfNoViewportLevelsHandsOn) {
     EXPECT_FALSE(gpu::findLookChain(doc(1), &smooth, &why) && !smooth.stages.empty());
 }
 
+TEST(GpuPreview, AClumpVaryingEachStrandsPullRunsOnTheCpu) {
+    // strandStrengthRandom is the CPU's for now: a Clump using it refuses the GPU its params, saying so.
+    const auto doc = [](double random) {
+        return loadGraphJson(R"({"version": 1, "output": "out",
+          "nodes": [{"name": "scalp", "type": "Scalp"}, {"name": "scatter", "type": "Scatter"},
+                    {"name": "clump", "type": "Clump", "params": {"strandStrengthRandom": )" + std::to_string(random) + R"(}},
+                    {"name": "out", "type": "Output"}],
+          "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"}, {"from": "scatter", "to": "clump", "input": "strands"},
+                          {"from": "clump", "to": "out", "input": "strands"}]})");
+    };
+    std::string why;
+    for (const double random : {0.0, 0.5}) {
+        const GraphDocument d = doc(random);
+        gpu::LookChain chain;
+        ASSERT_TRUE(gpu::findLookChain(d, &chain, &why)) << why;
+        gpu::LookParams params;
+        EXPECT_EQ(gpu::readLookParams(d, chain, {}, &params, &why), random == 0.0) << why;
+    }
+    EXPECT_NE(why.find("strandStrengthRandom"), std::string::npos) << why;
+}
+
 TEST(GpuPreview, StageTableNamesRealTypesAndParams) {
     // Every row of look_stages.inc names a registered node type, and every param it lists (mapped,
     // ramp, vector, number) is one of that type's, of the kind it says: a typo there would keep a

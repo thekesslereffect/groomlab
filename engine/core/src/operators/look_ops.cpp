@@ -855,6 +855,10 @@ public:
                       "fraction"}
                 .range(0, 1)
                 .in("Random"),
+            ParamSpec{"strandStrengthRandom", 0.0, "Each strand's strength scaled down by up to this share, at random per "
+                                                   "strand: some hug the clump, some hang loose", "fraction"}
+                .range(0, 1)
+                .in("Random"),
             ParamSpec{"lockRadiusRandom", 0.0, "Each clump's lock radius up to this share bigger or smaller, at random per "
                                                "clump", "fraction"}
                 .range(0, 1)
@@ -1172,6 +1176,8 @@ private:
         auto clumpStrength = [&](std::size_t c) {
             return 1.0f - strengthRandom * unitFloat(hashCombine(used[c]->id, seed ^ 0x57E4Aull));
         };
+        // Per strand (by its ID), on top: how far it follows its clump's pull.
+        const auto strandRandom = static_cast<float>(params().getDouble("strandStrengthRandom"));
         auto clumpRadius = [&](std::size_t c) {
             return radius * (1.0f + radiusRandom * (2.0f * unitFloat(hashCombine(used[c]->id, seed ^ 0x2AD1Bull)) - 1.0f));
         };
@@ -1539,7 +1545,8 @@ private:
             Vec3f* pts = out->strandPoints(s);
             if (clumpIds) (*clumpIds)[s] = numbers[c];
 
-            const float escape = strengthRandom > 0.0f ? clumpStrength(c) : 1.0f;
+            float escape = strengthRandom > 0.0f ? clumpStrength(c) : 1.0f;
+            if (strandRandom > 0.0f) escape *= 1.0f - strandRandom * unitFloat(hashCombine(out->ids()[s], seed ^ 0x5E7A9ull));
             // Volumize: read on the strand as it came (its points are still the input's here).
             const float volume = volumizing ? volumize.at(*out, s) : 0.0f;
             // Point i pushed out from the center's axis (its point `axisPoint`, running along
