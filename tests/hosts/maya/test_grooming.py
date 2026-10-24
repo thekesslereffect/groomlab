@@ -3338,6 +3338,47 @@ class GroomingTest(unittest.TestCase):
         self.assertTrue(groomlab.card_stats(groom)["baked"])
         self.assertEqual(groomlab.follow_scene_files(), [])  # once
 
+
+    def test_save_as_takes_the_graphs_files_and_simulate_bakes_along(self):
+        # The files the graph reads (an image, a UDIM set) and a Simulate node's bake, beside the
+        # scene: a Save As elsewhere copies them into the new scene's folder and points there.
+        from groomlab import graph as gm
+        home = tempfile.mkdtemp(prefix="groomlab_save_as_").replace("\\", "/")
+        cmds.workspace(home, openWorkspace=True)
+        os.makedirs(home + "/shot")
+        cmds.file(rename=home + "/shot/hero.ma")
+        cmds.file(save=True, type="mayaAscii", force=True)
+        caches = home + "/shot/groomlab/hero/caches"
+        os.makedirs(caches)
+        for name in ("tint.png", "root.1001.png", "root.1002.png"):
+            with open(caches + "/" + name, "wb") as f:
+                f.write(name.encode())
+        with open(caches + "/sim.abc", "wb") as f:
+            f.write(b"abc")
+        model = gm.GraphModel.from_groom(self.groom, gm.OperatorCatalog.from_maya())
+        model.add_node("HairColor", name="tinted", params={"map": "groomlab/hero/caches/tint.png"})
+        model.insert_before("output", "tinted")
+        model.set_param("length", "keep", groomlab.texture_map("groomlab/hero/caches/root.<UDIM>.png"))
+        model.save(self.groom)
+        cmds.setAttr(self.groom + ".simCaches", json.dumps(
+            {"simulate": {"file": "groomlab/hero/caches/sim.abc", "object": "", "stamp": "1"}}), type="string")
+        cmds.file(save=True, type="mayaAscii", force=True)
+        elsewhere = home + "/elsewhere"
+        os.makedirs(elsewhere)
+        cmds.file(rename=elsewhere + "/hero2.ma")
+        cmds.file(save=True, type="mayaAscii", force=True)  # the plugin's save callbacks copy the files
+        for name in ("tint.png", "root.1001.png", "root.1002.png", "sim.abc"):
+            self.assertTrue(os.path.isfile(elsewhere + "/groomlab/hero2/caches/" + name), name)
+        files = {(f["kind"], f["key"]): f["path"] for f in groomlab.file_dependencies(self.groom)}
+        self.assertEqual(files[("param", "tinted.map")], "groomlab/hero2/caches/tint.png")
+        self.assertEqual(files[("param", "length.keep")], "groomlab/hero2/caches/root.<UDIM>.png")
+        self.assertEqual(files[("simCache", "simulate")], "groomlab/hero2/caches/sim.abc")
+        with open(elsewhere + "/hero2.ma") as f:
+            saved = f.read()
+        self.assertIn("groomlab/hero2/caches/tint.png", saved)  # in the file saved, too
+        self.assertIn("groomlab/hero2/caches/sim.abc", saved)
+        self.assertEqual(groomlab.follow_scene_files(), [])  # once
+
     def test_cornrows_ponytail_and_braid_cards(self):
         # Two cornrows over the crown (feed: strands picked up along the rows, within
         # feed_distance, over the first feed_until of each row), a ponytail braid gathering a

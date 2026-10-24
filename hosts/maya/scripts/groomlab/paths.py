@@ -97,7 +97,8 @@ def _relative(value):
 def follow_scene_files():
     """When a save gives the scene another name or folder (Save Scene As, the first save of an
     untitled scene): the files its grooms name relative to the scene (texture maps, card bakes,
-    guide caches, groom files) are copied from where they were into the new scene's own asset
+    guide caches, groom files, Simulate bakes, the images and Alembic files the graph reads) are
+    copied from where they were into the new scene's own asset
     folder (groomlab/<old scene>/... -> groomlab/<new scene>/...; other relative paths keep
     their path under the new folder) and the grooms repointed there, so the saved scene is whole
     and never shares files with the scene it came from. A file already at a destination with
@@ -197,6 +198,46 @@ def follow_scene_files():
                 new = follow(value)
                 if new and new != value:
                     cmds.setAttr(groom + "." + attr, new, type="string")
+        # The Simulate nodes' bakes.
+        text = cmds.getAttr(groom + ".simCaches") or ""
+        bakes = json.loads(text) if text.strip() else {}
+        touched = False
+        for bake in bakes.values() if isinstance(bakes, dict) else []:
+            value = (bake.get("file") or "").replace("\\", "/") if isinstance(bake, dict) else ""
+            if _relative(value):
+                new = follow(value)
+                if new and new != value:
+                    bake["file"] = new
+                    touched = True
+        if touched:
+            cmds.setAttr(groom + ".simCaches", json.dumps(bakes), type="string")
+        # The files the graph reads (images, Alembic files, texture maps in params; inside
+        # compounds too). A UDIM set's tiles go together.
+        from groomlab import presets
+        graph = get_graph(groom)
+        touched = False
+        for _label, params, name, path in list(presets._file_params(graph)):
+            value = path.replace("\\", "/")
+            if not _relative(value):
+                continue
+            token = next((t for t in presets.UDIM_TOKENS if t in value), None)
+            if token:  # a UDIM set: its tiles follow together, the token kept
+                import glob
+                folder, base = os.path.split(value)
+                root = next((b for b in (old_base, project_root()) if b and os.path.isdir(os.path.join(b, folder))), None)
+                pattern = glob.escape(base).replace(glob.escape(token), "[1-9][0-9][0-9][0-9]")
+                tiles = sorted(glob.glob(os.path.join(glob.escape(os.path.join(root, folder)), pattern))) if root else []
+                for tile in tiles:
+                    follow(folder + "/" + os.path.basename(tile))
+                new = home(value) if tiles else None
+            else:
+                new = follow(value)
+            if new and new != value:
+                presets.set_file_param(params, name, new)
+                touched = True
+        if touched:
+            from groomlab.params import set_graph
+            set_graph(groom, graph)
         # The card mesh's and hair cap's materials (absolute paths into the old scene's folder).
         for texture in _material_textures(card_mesh(groom)) + _material_textures(_existing_scalp_cap(groom)):
             value = cmds.getAttr(texture + ".fileTextureName") or ""

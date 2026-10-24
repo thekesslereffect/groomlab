@@ -87,7 +87,8 @@ Files are never shared by accident:
   active when the tool was set up.
 
 **Save Scene As** (and the first save of an untitled scene) copies the files the grooms name
-into the new scene's own folder (`groomlab/<old name>/...` to `groomlab/<new name>/...`; other
+relative to the scene (texture maps, card bakes, the guide cache, the groom file, Simulate bakes,
+the images and Alembic files the graph reads, a UDIM set's tiles together) into the new scene's own folder (`groomlab/<old name>/...` to `groomlab/<new name>/...`; other
 relative paths keep their path under the new folder) and repoints the grooms (and their card
 mesh and hair cap materials) there before the file is written, so the saved scene is whole and
 independent of the one it came from. A file already at a destination with other content is
