@@ -109,9 +109,9 @@ Game cards as glTF, below).
   cards, 0.05; `separationIterations`, 8): cards closer than a gap to another card, or passing
   through it, are pushed apart along their normals (`separateCards`, `engine/core/src/
   card_separation.cpp`). The gap is a share of the narrower card's width (between a hair and a
-  feather card, the larger share), so it fits any scale. Each pass moves every card by the mean of
-  what its neighbours ask of each station, held at the root and free from a third of the way along,
-  smoothed along the card; only points within half the narrower card's width of the other count,
+  feather card, the larger share), so it fits any scale. Each pass moves every card along its own
+  normal by one smooth curve (held at the root, free from a third of the way along) fitted to what
+  its neighbours ask of its stations, so a card bends as a whole and never twists or kinks; only points within half the narrower card's width of the other count,
   and a pair keeps the side most of those lie on, so a card through another goes to that side.
   The cards of one down feather never push each other, and cards of different Cards nodes don't
   meet. Only the mesh moves (`Card::refShift` on the stations): the texture, baked from where the

@@ -250,9 +250,9 @@ struct CardMesh {
 // Pushes apart cards closer than their gap (a share of the narrower card's width: `hairGap` for
 // hair cards, `featherGap` for feather cards, between the two kinds the larger), or passing
 // through each other, along their normals,
-// in `iterations` passes: each pass moves every card by the mean of what its neighbours ask of it
-// at each station, held at the root and free from a third of the way along, its shift smoothed
-// along it. A pair keeps the side it is mostly on (a card through another goes to that side).
+// in `iterations` passes: each pass moves every card along its own normal by one smooth curve
+// (held at the root, free from a third of the way along) fitted to what its neighbours ask of its
+// stations, so a card bends as a whole and never twists or kinks. A pair keeps the side it is mostly on (a card through another goes to that side).
 // Cards of one feather (a down feather's cross) never push each other. Writes Card::refShift and
 // samples the stations again. Deterministic: the same cards give the same result.
 void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float featherGap, int iterations);

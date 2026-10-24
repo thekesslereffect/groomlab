@@ -75,6 +75,26 @@ TEST(CardSeparation, ADownFeathersCrossAndAZeroGapAreLeftAlone) {
     EXPECT_GE(offAt(mixed[0], mixed[1], kRef - 1), 0.9f * 0.2f * 0.25f);
 }
 
+TEST(CardSeparation, ACardBendsAsAWholeNeverKinked) {
+    // A short card crossing the middle of a long one: the long one bends smoothly (along its own
+    // normal, no station off the curve its neighbours make), not just where the short one is.
+    CardMesh::Card shortCard = card({0, 0.4f, -0.02f}, 0.5f, 0.04f);
+    for (std::size_t i = 0; i < kRef; ++i) shortCard.refCenter[i].y = 0.4f + 0.2f * static_cast<float>(i) / (kRef - 1);
+    std::vector<CardMesh::Card> cards{card({0, 0, 0}, 0.5f), shortCard};
+    separateCards(cards, 0.1f, 0.0f, 8);
+    const std::vector<Vec3f>& shift = cards[0].refShift;
+    ASSERT_EQ(shift.size(), kRef);
+    float most = 0.0f, bend = 0.0f;
+    for (std::size_t i = 0; i < kRef; ++i) {
+        EXPECT_NEAR(shift[i].x, 0.0f, 1e-6f);  // along its normal (z) alone
+        EXPECT_NEAR(shift[i].y, 0.0f, 1e-6f);
+        most = std::max(most, std::abs(shift[i].z));
+        if (i > 0 && i + 1 < kRef) bend = std::max(bend, std::abs(shift[i - 1].z - 2.0f * shift[i].z + shift[i + 1].z));
+    }
+    EXPECT_GT(most, 0.0f);
+    EXPECT_LT(bend, 0.1f * most) << "no kink: each station on the curve its neighbours make";
+}
+
 TEST(CardSeparation, TheSameCardsComeOutTheSame) {
     auto make = [] {
         std::vector<CardMesh::Card> cards;

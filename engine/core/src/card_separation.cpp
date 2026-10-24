@@ -8,10 +8,12 @@
 //
 // A card's shape here is its reference shape (the fixed resolution its texture is made from) plus
 // its shift: the stations, and so the mesh, carry the shift; the texture stays where the strands
-// are. A feather card's halves fold out of its plane (Card::spine): a point beside it is measured
+// are. A card moves along its own normal only, by one smooth curve from its root (smoothCurve), so
+// it stays a clean card: no twist, no kink. A feather card's halves fold out of its plane (Card::spine): a point beside it is measured
 // against the half it lies over.
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -149,6 +151,58 @@ bool over(const Shape& s, const Vec3f& q, Over* out) {
     return found;
 }
 
+// A share of each pass's correction (the rest left to the next): neighbours pushing each other
+// settle instead of overshooting.
+constexpr float kDamping = 0.7f;
+
+// The move along a card that best fits what its stations ask (`asked`, by `weight`; a station
+// nobody asks of has weight 0): f(u) (a + b u + c u^2), f the freedom from the root, least
+// squares. Held at the root, smooth all along (it bends as a whole), and a station nobody asks of
+// follows the curve.
+std::vector<float> smoothCurve(const std::vector<float>& asked, const std::vector<float>& weight) {
+    const std::size_t n = asked.size();
+    double m[3][3] = {}, r[3] = {}, total = 0.0;
+    std::vector<std::array<double, 3>> basis(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const double u = static_cast<double>(i) / static_cast<double>(n - 1), f = freedom(static_cast<float>(u));
+        basis[i] = {f, f * u, f * u * u};
+        if (weight[i] <= 0.0f) continue;
+        total += weight[i];
+        for (int a = 0; a < 3; ++a) {
+            r[a] += weight[i] * basis[i][a] * asked[i];
+            for (int b = 0; b < 3; ++b) m[a][b] += weight[i] * basis[i][a] * basis[i][b];
+        }
+    }
+    std::vector<float> out(n, 0.0f);
+    if (total <= 0.0) return out;
+    for (int a = 0; a < 3; ++a) m[a][a] += 1e-4 * total;  // (a touch of ridge: one asked station still solves)
+    // Gaussian elimination, 3x3.
+    for (int col = 0; col < 3; ++col) {
+        int pivot = col;
+        for (int row = col + 1; row < 3; ++row) {
+            if (std::abs(m[row][col]) > std::abs(m[pivot][col])) pivot = row;
+        }
+        std::swap(m[col], m[pivot]);
+        std::swap(r[col], r[pivot]);
+        if (std::abs(m[col][col]) < 1e-30) return out;
+        for (int row = col + 1; row < 3; ++row) {
+            const double k = m[row][col] / m[col][col];
+            for (int b = col; b < 3; ++b) m[row][b] -= k * m[col][b];
+            r[row] -= k * r[col];
+        }
+    }
+    double coef[3];
+    for (int row = 2; row >= 0; --row) {
+        double v = r[row];
+        for (int b = row + 1; b < 3; ++b) v -= m[row][b] * coef[b];
+        coef[row] = v / m[row][row];
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+        out[i] = static_cast<float>(coef[0] * basis[i][0] + coef[1] * basis[i][1] + coef[2] * basis[i][2]);
+    }
+    return out;
+}
+
 }  // namespace
 
 void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float featherGap, int iterations) {
@@ -220,17 +274,18 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
             }
             pairs[k].side = sum >= 0.0f ? 1.0f : -1.0f;
         }, 16);
-        // Each card's own moves: from its points over a neighbour (pushed off it), and from the
-        // neighbour's points over it (pushed the other way), half of each correction. A point
+        // Each card's own move, along its own normal (it never twists): what each station is asked
+        // for, from its points over a neighbour (pushed off it) and from the neighbour's points over
+        // it (pushed the other way), half of each correction; then one smooth curve through those
+        // (smoothCurve), so a card bends as a whole and never kinks where a neighbour ends. A point
         // outside the other card's box (grown by its gap) can't be within reach of it.
-        std::vector<std::vector<Vec3f>> moves(count);
+        std::vector<std::vector<float>> moves(count);
         std::vector<float> largest(count, 0.0f);
         parallelFor(0, count, [&](std::size_t c) {
             const Shape& sc = shapes[c];
             const std::size_t n = sc.center.size();
             if (n == 0 || partners[c].empty()) return;
-            std::vector<Vec3f> sum(n, Vec3f{});
-            std::vector<float> weight(n, 0.0f);
+            std::vector<float> sum(n, 0.0f), weight(n, 0.0f);
             for (const auto& [p, k] : partners[c]) {
                 const float gap = pairGap(c, p), reach = reachOf(c, p);
                 // The side c keeps of p (the pair's side is b's of a).
@@ -244,7 +299,7 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
                         if (!sp.box.contains(q) || !over(sp, q, &o) || std::abs(o.distance) >= reach) continue;
                         const float need = gap - side * o.distance;
                         if (need <= 0.0f) continue;
-                        sum[i] += o.normal * (side * 0.5f * need);
+                        sum[i] += o.normal.dot(sc.normal[i]) * side * 0.5f * need;
                         weight[i] += 1.0f;
                     }
                 }
@@ -256,7 +311,7 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
                         if (!sc.box.contains(q) || !over(sc, q, &o) || std::abs(o.distance) >= reach) continue;
                         const float need = gap + side * o.distance;  // p keeps the side opposite c's
                         if (need <= 0.0f) continue;
-                        const Vec3f push = o.normal * (side * 0.5f * need);
+                        const float push = side * 0.5f * need;  // along c's normal there
                         sum[o.station] += push * (1.0f - o.t);
                         weight[o.station] += 1.0f - o.t;
                         sum[o.station + 1] += push * o.t;
@@ -264,11 +319,14 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
                     }
                 }
             }
-            std::vector<Vec3f> move(n, Vec3f{});
+            std::vector<float> asked(n, 0.0f);
             for (std::size_t i = 0; i < n; ++i) {
-                if (weight[i] <= 0.0f) continue;
-                move[i] = sum[i] * (freedom(static_cast<float>(i) / static_cast<float>(n - 1)) / weight[i]);
-                largest[c] = std::max(largest[c], move[i].length());
+                if (weight[i] > 0.0f) asked[i] = sum[i] / weight[i];
+            }
+            std::vector<float> move = smoothCurve(asked, weight);
+            for (float& m : move) {
+                m *= kDamping;
+                largest[c] = std::max(largest[c], std::abs(m));
             }
             moves[c] = std::move(move);
         }, 4);
@@ -276,14 +334,10 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
         bool moved = false;
         for (std::size_t c = 0; c < count; ++c) {
             std::vector<Vec3f>& shift = cards[c].refShift;
-            const std::vector<Vec3f>& move = moves[c];
+            const std::vector<float>& move = moves[c];
             if (move.empty()) continue;
             moved = moved || largest[c] > 0.05f * gapOf(c);
-            for (std::size_t i = 0; i < shift.size(); ++i) shift[i] += move[i];
-            // Smoothed along the card (1 2 1), the root held: no kink where a neighbour ends.
-            const std::vector<Vec3f> was = shift;
-            for (std::size_t i = 1; i + 1 < shift.size(); ++i) shift[i] = (was[i - 1] + was[i] * 2.0f + was[i + 1]) * 0.25f;
-            shift[0] = Vec3f{};
+            for (std::size_t i = 0; i < shift.size(); ++i) shift[i] += shapes[c].normal[i] * move[i];
         }
         if (!moved) break;
     }
