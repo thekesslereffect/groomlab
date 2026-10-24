@@ -23,6 +23,10 @@ from gui_support import CLASSIC_GRAPH, activate, drag, hover, settle_undo
 _menu.ASK_TO_SAVE = False  # no save prompt in tests (scenes stay untitled here)
 
 
+def classic_links():
+    return sorted((c["from"], c["to"], c["input"]) for c in CLASSIC_GRAPH["connections"])
+
+
 def wait(ms):
     """Let Qt run events and timers for `ms` milliseconds (PySide2 has no QTest.qWait)."""
     import time
@@ -175,6 +179,52 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(self.editor.model.source_of("interpolate", "guides"), "guides")
         self.assertEqual(self.editor.scene.selectedItems(), [])  # no rubber band from the port drag
         self.editor.hide()
+
+    def test_alt_shift_drag_cuts_the_links_it_crosses(self):
+        # Across length -> width: the link goes; the output left unconnected, the groom keeps its
+        # graph (not applied), and Ctrl+Z puts the editor back to it.
+        QtCore, QtWidgets = self.ge.QtCore, self.ge.QtWidgets
+        self.editor.resize(1200, 600)
+        self.editor.show()
+        QtWidgets.QApplication.processEvents()
+        try:
+            view = self.editor.view
+            middle = self.edge("length", "width").path().pointAtPercent(0.5)
+            start = view.mapFromScene(middle - QtCore.QPointF(0, 30))
+            end = view.mapFromScene(middle + QtCore.QPointF(0, 30))
+            settle_undo()
+            before = cmds.undoInfo(query=True, undoName=True)
+            drag(view.viewport(), start, end, steps=4, modifiers=QtCore.Qt.AltModifier | QtCore.Qt.ShiftModifier)
+            self.assertIsNone(self.editor.model.source_of("width", "strands"))
+            self.assertFalse(any(e.cutting for e in self.editor.scene.items() if isinstance(e, self.ge.EdgeItem)))
+            self.assertIsNone(self.editor.scene._cut_line)
+            self.assertEqual(self.stored_links(), classic_links())  # (the groom's graph as it was)
+            self.assertTrue(self.editor.undo())
+            self.assertEqual(self.editor.model.source_of("width", "strands"), "length")
+            self.assertEqual(cmds.undoInfo(query=True, undoName=True), before, "Maya's history untouched")
+        finally:
+            self.editor.hide()
+
+    def test_a_cut_is_one_edit(self):
+        # Two links at once, the output left unconnected: one Ctrl+Z puts both back.
+        settle_undo()
+        self.editor.cut_links([self.edge("length", "width").link(), self.edge("width", "resample").link()])
+        self.assertIsNone(self.editor.model.source_of("width", "strands"))
+        self.assertIsNone(self.editor.model.source_of("resample", "strands"))
+        self.assertTrue(self.editor.undo())
+        self.assertEqual(self.editor.model.source_of("width", "strands"), "length")
+        self.assertEqual(self.editor.model.source_of("resample", "strands"), "width")
+        # An optional link (Interpolate's scalp): applied, one step of Maya's history.
+        self.editor.cut_links([self.edge("scalp", "interpolate").link()])
+        self.assertNotIn(("scalp", "interpolate", "scalp"), self.stored_links())
+        self.assertIn("cut 1 link", self.editor.status.text())
+        self.assertTrue(self.editor.undo())
+        wait(50)
+        self.assertEqual(self.stored_links(), classic_links())
+        self.assertEqual(self.editor.model.source_of("interpolate", "scalp"), "scalp")
+
+    def stored_links(self):
+        return sorted((c["from"], c["to"], c["input"]) for c in groomlab.get_graph(self.groom)["connections"])
 
     def test_tab_added_nodes_wire_after_the_selection(self):
         self.editor.items["length"].setSelected(True)

@@ -118,6 +118,9 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   - **Snapping:** compatible ports light up while you drag, and a drop near one snaps to it.
   - **Moving a link:** drag a linked input to move its link elsewhere, or drop it on empty space
     to remove it.
+  - **Cutting links:** Alt+Shift+drag across links (Hypershade's gesture): the ones the line
+    crosses turn red, and letting go disconnects them, as one edit. A cut that leaves the output
+    unconnected is not applied until it is wired again; Ctrl+Z puts the graph back.
   - **Refused links:** mismatched types and cycles are refused, with the reason in the status
     bar.
 - **Toolbar:** the groom, **Add Node**, **Presets** and **Live** (with **Apply** while Live is

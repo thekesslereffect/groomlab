@@ -54,6 +54,7 @@ const std::vector<Shortcut>& shortcuts() {
         {"graph.frameAll", "Graph", "A", "Frame the whole graph", kMaya | kApp},
         {"graph.rename", "Graph", "F2 / double-click", "Rename the node (a Compound: double-click opens it)", kApp},
         {"graph.delete", "Graph", "Delete", "Delete the selected nodes or link", kMaya | kApp},
+        {"graph.cut", "Graph", "Alt+Shift+drag", "Cut every connection crossed", kMaya},
         {"graph.copy", "Graph", "Ctrl+C / Ctrl+V", "Copy / paste the selected nodes (their links between them too)", kApp},
         {"graph.select", "Graph", "Ctrl+click / Shift+click / drag", "Toggle / add a node to the selection; drag on empty space: select in a box", kApp},
         {"graph.navigate", "Graph", "Middle-drag / wheel", "Pan / zoom the graph", kMaya | kApp},
