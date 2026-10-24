@@ -712,6 +712,7 @@ export function createStrandViewer(canvas: HTMLCanvasElement, opts: ViewerOption
    * to 64 cells along the strands' longest side, half floats, filtered.
    */
   let gridTexture: Data3DTexture | null = null;
+  const kGridMedianHairs = 0.155;  // the hairs a typical occupied cell holds (the hero's, as its look was tuned)
   function densityGrid(data: StrandData) {
     const n = data.count;
     const pts = data.offsets[n];
@@ -753,8 +754,16 @@ export function createStrandViewer(canvas: HTMLCanvasElement, opts: ViewerOption
         }
       }
     }
+    // Each groom's grid normalized to the same density in its typical occupied cell (the median's
+    // hairs a cell, the hero's as tuned), so the self-shadowing reads alike on any groom whatever its
+    // widths (a groom with no Width node takes the engine's default) or its preview's share.
+    const occupied: number[] = [];
+    for (let i = 0; i < grid.length; i++) if (grid[i] > 0) occupied.push(grid[i]);
+    occupied.sort((a, b) => a - b);
+    const median = occupied.length ? occupied[occupied.length >> 1] * cell : 0;
+    const norm = median > 0 ? kGridMedianHairs / median : 1;
     const half = new Uint16Array(grid.length);
-    for (let i = 0; i < grid.length; i++) half[i] = DataUtils.toHalfFloat(Math.min(grid[i], 60000));
+    for (let i = 0; i < grid.length; i++) half[i] = DataUtils.toHalfFloat(Math.min(grid[i] * norm, 60000));
     gridTexture?.dispose();
     gridTexture = new Data3DTexture(half, nx, ny, nz);
     gridTexture.format = RedFormat;
