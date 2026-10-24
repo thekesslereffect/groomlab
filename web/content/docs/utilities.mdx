@@ -151,6 +151,26 @@ groomlab.missing_files(groom)                         # what is missing, by kind
 groomlab.find_missing_files([groom], "D:/recovered")  # relinked, still_missing, ambiguous
 ```
 
+## Files in a pipeline
+
+Every file a groom uses shows in Maya's **File Path Editor** (Windows > General Editors) under
+**GroomLab**: its texture maps, the images and Alembic files its graph reads, its guide cache,
+Simulate bakes, card bake and the groom file it renders from. Repath them there or with Replace
+String and the groom follows, its paths kept relative to the scene.
+
+Farm submitters, publish and archive scripts can collect them too (Maya's own Archive Scene only
+sees Maya's node types):
+
+```python
+for groom in cmds.ls(type="groomLabShape"):
+    for f in groomlab.file_dependencies(groom):      # kind, key, path, resolved, exists
+        print(f["resolved"])
+groomlab.repath_file(groom, "map", "density", "/publish/hair/density.png")
+```
+
+Each file is a small `groomLabFile` node connected to its groom (`ls -type groomLabFile`, the path
+in its `fileName`), kept in step as the groom changes and before every save.
+
 ## Colliders
 
 Click **Pick** on the Collider row of the Attribute Editor's **Inputs**, then click the body,

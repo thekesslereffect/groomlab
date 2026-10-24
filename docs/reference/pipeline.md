@@ -445,6 +445,20 @@ utils.copy_graph(groom, ["hair2", "hair3"], guides="keep", maps=False)
   relinked to files of the same name in a folder you pick and its subfolders, in one undo step
   (`find_missing_files`; see A map's image). The Script Editor lists each file relinked, still
   missing or ambiguous; nothing is asked when nothing is missing.
+- **Every file a groom uses, for pipelines and the File Path Editor:** `file_dependencies(groom)`
+  lists them ({kind, key, path as stored, resolved, exists}: texture maps, the graph's file params
+  inside compounds too, the guide cache, the groom file, each Simulate node's bake, the card bake's
+  files) and `repath_file(groom, kind, key, path)` points one elsewhere, stored portable (a card
+  bake moves as a whole). Maya's File Path Editor lists them under **GroomLab**: each file has a
+  `groomLabFile` node (`hosts/maya/src/file_node.h`: `fileName` the file as it resolves, connected
+  to its groom by `groom`, `fileKind` and `fileKey` saying which file), kept in step on idle after
+  the groom's files change and before every save (`groomlab.dependencies`, `sync_file_nodes`); a
+  Repath or Replace String there goes back to the groom on idle, relative as GroomLab stores it.
+  The nodes' upkeep makes no undo step; undoing the editor's change brings the groom's path back.
+  Maya's own `file -query -list` and Archive Scene see only Maya's node types (file textures,
+  references, audio): a pipeline collects GroomLab's files with `file_dependencies` over every
+  groom (or `ls -type groomLabFile` and each node's `fileName`). Referenced grooms keep the nodes
+  their file saved.
 - **Command:** `groomLabConvert` builds the curves and meshes (`-guideCurves`, `-strandCurves`,
   `-strandMesh`; see `hosts/maya/src/convert_cmd.h`).
 

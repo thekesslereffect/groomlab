@@ -2008,6 +2008,13 @@ void GroomShape::makeFrame(MDataBlock& data, Lane& lane, const ViewResult* resul
 }
 
 MStatus GroomShape::setDependentsDirty(const MPlug& plug, MPlugArray& affected) {
+    // What names the groom's files: their groomLabFile nodes follow on idle (file_node.h).
+    if (plug == aScalpMaps || plug == aCardMaps || plug == aGuideCache || plug == aGroomFile || plug == aSimCaches || plug == aGraph) {
+        MString call("try:\n    from groomlab import dependencies\n    dependencies.sync_soon('");
+        call += MFnDependencyNode(thisMObject()).name();
+        call += "')\nexcept ImportError:\n    pass";
+        MGlobal::executePythonCommandOnIdle(call);
+    }
     // Display-only: the viewport redraws what it has (the draw override reads them on a version change).
     const bool display =
         plug == aGuideSelection || plug == aSoftSelectRadius || plug == aStrandColorMode ||

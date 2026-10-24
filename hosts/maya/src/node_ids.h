@@ -10,5 +10,6 @@ namespace groomlab::maya {
 constexpr unsigned int kGroomLabShapeTypeId = 0x0007F100;
 constexpr unsigned int kGroomLabFrameDataTypeId = 0x0007F101;  // GroomFrameData (outFrame)
 constexpr unsigned int kGroomLabMarkerSetTypeId = 0x0007F102;  // groomLabMarkerSet (Transfer Groom window)
+constexpr unsigned int kGroomLabFileTypeId = 0x0007F103;       // groomLabFile (a groom's file, for the File Path Editor)
 
 }  // namespace groomlab::maya
