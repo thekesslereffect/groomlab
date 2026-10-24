@@ -16,6 +16,11 @@ step with the helper's graph both ways, as Maya's GroomLab Graph Editor keeps it
   Maya's editor and the app's, and the other way round.
 - Blender's frames are the graph's backdrops (Maya's: a title, a rectangle, a color), kept with the
   layout; the nodes inside one are its children.
+- Blender's reroutes are the graph's pins (Maya's, Blueprints' reroute nodes: {"points", "routes"},
+  layout only). A link through reroutes is the plain connection from its source to its input, and
+  the reroutes it passes are its route; one reroute feeding several inputs is a bundle (one pin in
+  several routes). A reroute that routes no link yet (no input, or no outputs) is the user's: it
+  stays as left, the links into it too, and is no pin.
 - A node dropped on a link (Blender splices it in) is the graph's insert_on_link."""
 
 import hashlib
@@ -1033,6 +1038,144 @@ def frame_at(tree, at):
     return best
 
 
+# ---- Pins: Blender's reroutes ---------------------------------------------------------------------
+
+def reroutes(tree):
+    return [n for n in tree.nodes if n.bl_idname == "NodeReroute"]
+
+
+def pin_of(reroute):
+    """The pin a reroute is ("pin<N>"; "" for a reroute that routes nothing yet)."""
+    return str(reroute.get("gl_pin") or "")
+
+
+def _pin_number(pin):
+    """pin12 -> 12 (0 for another name): pins sort and number by it (Maya's)."""
+    digits = pin[3:] if pin.startswith("pin") else ""
+    return int(digits) if digits.isdigit() else 0
+
+
+def connections_of(data):
+    """{(to, input): (from, output)} of a graph ("" for the source's first output)."""
+    return {(c["to"], c["input"]): (c["from"], c.get("output") or "") for c in data.get("connections", [])}
+
+
+def prune_pins(pins, connections):
+    """The graph's pins ({"points", "routes"}) that hold, as Blender can draw them: routes whose link
+    is there, from the same source, through pins that exist, none twice; each pin fed from one place
+    (a reroute has one input: a route feeding it from elsewhere is left out, its link drawn straight);
+    pins no route passes left out. Returns (points {id: [x, y]}, routes {(to, input): (from, output,
+    [via])})."""
+    pins = pins if isinstance(pins, dict) else {}
+    points = {}
+    for p in pins.get("points") or []:
+        if isinstance(p, dict) and p.get("id") and isinstance(p.get("x"), (int, float)) and isinstance(p.get("y"), (int, float)):
+            points[str(p["id"])] = [float(p["x"]), float(p["y"])]
+    routes, fed = {}, {}
+    for r in pins.get("routes") or []:
+        if not isinstance(r, dict) or not r.get("to") or not r.get("input"):
+            continue
+        key, source = (r["to"], r["input"]), (r.get("from"), r.get("output") or "")
+        via = [str(v) for v in r.get("via") or []]
+        if not via or connections.get(key) != source or key in routes or len(set(via)) != len(via):
+            continue
+        if any(v not in points for v in via):
+            continue
+        feeds = [("node",) + source] + [("pin", v) for v in via[:-1]]
+        if any(fed.get(v, f) != f for v, f in zip(via, feeds)):
+            continue
+        fed.update(zip(via, feeds))
+        routes[key] = (source[0], source[1], via)
+    used = {v for r in routes.values() for v in r[2]}
+    return {k: v for k, v in points.items() if k in used}, routes
+
+
+def pins_dict(points, routes):
+    """{"points", "routes"} as the graph keeps them (Maya's _pins_dict: routes by (to, input), points
+    by number, "output" only when not the first)."""
+    out_routes = []
+    for (to, input_name), (src, output, via) in sorted(routes.items()):
+        entry = {"from": src, "to": to, "input": input_name, "via": list(via)}
+        if output:
+            entry["output"] = output
+        out_routes.append(entry)
+    out_points = [{"id": k, "x": v[0], "y": v[1]} for k, v in sorted(points.items(), key=lambda kv: (_pin_number(kv[0]), kv[0]))]
+    return {"points": out_points, "routes": out_routes}
+
+
+def chains(tree):
+    """{(to, input): (source node, its output's identifier, [reroutes, source first])}: every link
+    into a GroomLab node's input, followed back through the reroutes to the GroomLab node feeding it
+    (none when they lead nowhere: a reroute with no input)."""
+    into = {l.to_node.as_pointer(): l for l in tree.links if l.to_node.bl_idname == "NodeReroute"}
+    out = {}
+    for link in tree.links:
+        b = link.to_node
+        if not (ours(b) and b.gl_name):
+            continue
+        a, socket, via = link.from_node, link.from_socket, []
+        while a is not None and a.bl_idname == "NodeReroute" and a not in via:
+            via.insert(0, a)
+            feed = into.get(a.as_pointer())
+            a, socket = (feed.from_node, feed.from_socket) if feed is not None else (None, None)
+        if a is not None and ours(a) and a.gl_name:
+            out[(b.gl_name, link.to_socket.identifier)] = (a, socket.identifier, via)
+    return out
+
+
+def _source_of(a, identifier):
+    return a.gl_name, "" if identifier == _first_output(a) else identifier
+
+
+def tree_pins(tree, connections):
+    """The tree's reroutes as the graph's pins ({"points", "routes"}): the routes of the links that
+    are the graph's connections (`connections`), through reroutes that are pins (each id once)."""
+    owner = {}
+    for r in reroutes(tree):
+        owner.setdefault(pin_of(r), r)
+    points, routes = {}, {}
+    for key, (a, identifier, via) in chains(tree).items():
+        source = _source_of(a, identifier)
+        if not via or connections.get(key) != source:
+            continue
+        if any(not pin_of(r) or owner.get(pin_of(r)) != r for r in via):
+            continue
+        routes[key] = (source[0], source[1], [pin_of(r) for r in via])
+        for r in via:
+            points[pin_of(r)] = ui_of(r)
+    return pins_dict(points, routes)
+
+
+def assign_pins(tree, connections):
+    """The reroutes on the links that are the graph's connections become pins (a new one: the next
+    "pin<N>"); the others route nothing now and are pins no more."""
+    taken = {}
+    for r in reroutes(tree):
+        taken.setdefault(pin_of(r), r)
+    used = set()
+    for key, (a, identifier, via) in chains(tree).items():
+        if via and connections.get(key) == _source_of(a, identifier):
+            used.update(r.as_pointer() for r in via)
+    number = max([_pin_number(p) for p in taken] or [0])
+    with building():
+        for r in reroutes(tree):
+            pin = pin_of(r)
+            if r.as_pointer() not in used:
+                if pin:
+                    del r["gl_pin"]
+            elif not pin or taken.get(pin) != r:  # new, or a copy of another (Shift+D copies the id)
+                number += 1
+                r["gl_pin"] = "pin%d" % number
+
+
+def _same_pins(a, b):
+    def key(pins):
+        pins = pins or {}
+        return ([(p.get("id"), round(float(p.get("x", 0)), 1), round(float(p.get("y", 0)), 1)) for p in pins.get("points") or []],
+                pins.get("routes") or [])
+    return key(a) == key(b)
+
+
 def auto_layout(data):
     """Columns by depth from the sources, rows in the graph's order (Maya's auto_layout): every
     node's "ui". Returns {node: [x, y]}."""
@@ -1059,15 +1202,17 @@ def auto_layout(data):
     return out
 
 
-def set_positions(scalp, positions, backdrops=None):
-    """{node: [x, y]} (and the backdrops, all of them, when given) into the helper's graph
-    (edit_graph set_positions: a graph that does not load yet takes them too)."""
-    if not positions and backdrops is None:
+def set_positions(scalp, positions, backdrops=None, pins=None):
+    """{node: [x, y]} (and the backdrops, all of them, and the pins, {points, routes}, when given)
+    into the helper's graph (edit_graph set_positions: a graph that does not load yet takes them too)."""
+    if not positions and backdrops is None and pins is None:
         return
     rt = groom.ensure(scalp)
     args = {"positions": positions or {}}
     if backdrops is not None:
         args["backdrops"] = list(backdrops)
+    if pins is not None:
+        args["pins"] = pins
     _call("edit_graph", session=rt.session, op="set_positions", **args)
     groom.remember_graph(scalp, rt)
 
@@ -1078,11 +1223,12 @@ def _moved(node):
     return was is None or len(was) != 2 or abs(was[0] - at[0]) > 0.05 or abs(was[1] - at[1]) > 0.05
 
 
-def push_positions(scalp, tree=None, data=None):
+def push_positions(scalp, tree=None, data=None, pins=True):
     """The positions of the nodes the user moved into the helper's graph (moves are not edits: they
     go with the next edit, a save, a preset). Nodes the user did not move keep the graph's
     position, which an edit of the helper's may have changed (an inserted preset moves the nodes
-    after it over). Returns the graph."""
+    after it over). The frames and (with `pins`) the reroutes go too when they changed. Returns the
+    graph."""
     tree = tree or tree_of(scalp)
     rt = groom.ensure(scalp)
     if data is None:
@@ -1107,7 +1253,13 @@ def push_positions(scalp, tree=None, data=None):
     backdrops = backdrops_of(tree)
     was = tree.get("gl_backdrops")
     changed = was is not None and not _same_backdrops(backdrops, json.loads(was))
-    set_positions(scalp, moved, backdrops if changed else None)
+    # The reroutes are the pins, the same way: moved, made, rewired or deleted since the tree last
+    # had them from the graph (or sent them), all of them go (routes checked against the graph's
+    # links: a link the graph no longer has keeps no route).
+    routed = tree_pins(tree, connections_of(data)) if pins else None
+    was = tree.get("gl_pins")
+    rerouted = routed is not None and was is not None and not _same_pins(routed, json.loads(was))
+    set_positions(scalp, moved, backdrops if changed else None, routed if rerouted else None)
     if changed:
         with building():
             tree["gl_backdrops"] = json.dumps(backdrops)
@@ -1115,6 +1267,13 @@ def push_positions(scalp, tree=None, data=None):
             data["backdrops"] = backdrops
         else:
             data.pop("backdrops", None)
+    if rerouted:
+        with building():
+            tree["gl_pins"] = json.dumps(routed)
+        if routed["routes"]:
+            data["pins"] = routed
+        else:
+            data.pop("pins", None)
     return data
 
 
@@ -1168,9 +1327,13 @@ def build_tree(scalp, tree, data, rt=None):
     with building():
         existing = {}
         kept_frames = []
+        kept_reroutes = []
         for node in list(tree.nodes):
             if node.bl_idname == "NodeFrame":
                 kept_frames.append(node)
+                continue
+            if node.bl_idname == "NodeReroute":
+                kept_reroutes.append((node, get_location(node)))
                 continue
             gname = node.gl_name if ours(node) else None
             gtype = next((n.get("type") for n in gnodes if n["name"] == gname), None) if gname else None
@@ -1182,7 +1345,9 @@ def build_tree(scalp, tree, data, rt=None):
         # the nodes inside each can be its children (moving it moves them, as in Maya).
         for node in existing.values():
             node.parent = None
-        backdrops = [b for b in data.get("backdrops") or [] if isinstance(b, dict)]
+        for node, _ in kept_reroutes:
+            node.parent = None
+        backdrops =[b for b in data.get("backdrops") or [] if isinstance(b, dict)]
         for i, backdrop in enumerate(backdrops):
             frame = kept_frames[i] if i < len(kept_frames) else tree.nodes.new("NodeFrame")
             frame.parent = None
@@ -1239,19 +1404,58 @@ def build_tree(scalp, tree, data, rt=None):
             node.color = tinted("Output" if node.gl_is_output else category_of(op_type, specs))
             set_values(node, gnode, scene, drivers)
             made[name] = node
+        # The pins as reroutes: the tree's own for the pins it has (Shift+D's copy of one, the
+        # second, is the user's), new ones for the rest; a reroute that was a pin the graph no
+        # longer has goes; one that never was (the user's, routing nothing yet) stays where it is.
+        connections = {k: v for k, v in connections_of(data).items() if k[0] in made and v[0] in made}
+        points, routes = prune_pins(data.get("pins"), connections)
+        pin_nodes, loose = {}, []
+        for node, at in kept_reroutes:
+            pin = pin_of(node)
+            if pin and pin in points and pin not in pin_nodes:
+                pin_nodes[pin] = node
+            elif pin and pin not in points:
+                tree.nodes.remove(node)
+            else:
+                if pin:
+                    del node["gl_pin"]
+                loose.append((node, at))
+        users = {node.as_pointer() for node, _ in loose}
+        placed = list(loose)
+        for pin in sorted(points, key=lambda p: (_pin_number(p), p)):
+            node = pin_nodes.get(pin)
+            if node is None:
+                node = pin_nodes[pin] = tree.nodes.new("NodeReroute")
+                node["gl_pin"] = pin
+            placed.append((node, (points[pin][0], -points[pin][1])))
+        for node, at in placed:
+            set_location(node, at)
+            inside = frame_at(tree, at) if backdrops else None
+            if inside is not None:
+                node.parent = inside
         # The links: only those that differ are removed or made (a node being dragged keeps its own).
+        # A routed link runs source -> its reroutes -> input; links into a reroute that is no pin
+        # are the user's.
         wanted = {}
+
+        def want(out, inp):
+            wanted[(out.node.name, out.identifier, inp.node.name, inp.identifier)] = (out, inp)
+
         for c in data.get("connections", []):
             src, dst = made.get(c.get("from")), made.get(c.get("to"))
             if src is None or dst is None:
                 continue
             out = src.outputs.get(c.get("output") or "") if c.get("output") else (src.outputs[0] if len(src.outputs) else None)
             inp = dst.inputs.get(c.get("input", ""))
-            if out is not None and inp is not None:
-                wanted[(src.name, out.identifier, dst.name, inp.identifier)] = (out, inp)
+            if out is None or inp is None:
+                continue
+            for pin in routes.get((c["to"], c["input"]), (None, None, []))[2]:
+                want(out, pin_nodes[pin].inputs[0])
+                out = pin_nodes[pin].outputs[0]
+            want(out, inp)
         for link in list(tree.links):
             key = (link.from_node.name, link.from_socket.identifier, link.to_node.name, link.to_socket.identifier)
-            if wanted.pop(key, None) is None:
+            if wanted.pop(key, None) is None and link.to_node.as_pointer() not in users:
                 tree.links.remove(link)
         for out, inp in wanted.values():
             tree.links.new(out, inp)
@@ -1260,6 +1464,7 @@ def build_tree(scalp, tree, data, rt=None):
                 scalp.groomlab.view_node = ""
         tree["gl_sig"] = signature(tree)
         tree["gl_backdrops"] = json.dumps(backdrops_of(tree))
+        tree["gl_pins"] = json.dumps(tree_pins(tree, connections))
         tree["gl_generation"] = process.generation()
     return tree
 
@@ -1283,8 +1488,10 @@ def _first_output(node):
 
 def sync_from_tree(tree):
     """The user's edits of the tree (nodes added, duplicated, deleted, renamed, muted; links made
-    or removed) as edit_graph ops in the helper; then the groom evaluates and the tree is rebuilt
-    from the graph (a link the graph refused goes away). True when anything was sent."""
+    or removed, through reroutes or not) as edit_graph ops in the helper; then the groom evaluates
+    and the tree is rebuilt from the graph (a link the graph refused goes away). The reroutes on its
+    links are the graph's pins, sent with the layout: reroutes alone are no edit. True when anything
+    was sent."""
     scalp = tree.gl_scalp
     if not groom.is_groom(scalp):
         return False
@@ -1295,21 +1502,19 @@ def sync_from_tree(tree):
         return False
     rt = groom.ensure(scalp)
     session = rt.session
-    data = push_positions(scalp, tree)
+    data = push_positions(scalp, tree, pins=False)  # (the reroutes go once the links are the graph's)
     gnodes = {n["name"]: n for n in data.get("nodes", [])}
     refused = []
+    sent = []
 
     def edit(**args):
+        sent.append(args["op"])
         try:
             return _call("edit_graph", session=session, **args)
         except HelperError as e:
             refused.append(e.message)
             return None
 
-    with building():
-        for node in list(tree.nodes):
-            if node.bl_idname == "NodeReroute":
-                tree.nodes.remove(node)  # GroomLab graphs have none (frames are its backdrops: push_positions)
     nodes = [n for n in tree.nodes if ours(n)]
     # Renames (F2, the sidebar's Name field).
     for node in nodes:
@@ -1360,13 +1565,9 @@ def sync_from_tree(tree):
     have = {}
     for c in current.get("connections", []):
         have[(c["to"], c["input"])] = (c["from"], c.get("output") or "")
-    want = {}
-    for link in tree.links:
-        a, b = link.from_node, link.to_node
-        if not (ours(a) and ours(b) and a.gl_name and b.gl_name):
-            continue
-        output = link.from_socket.identifier
-        want[(b.gl_name, link.to_socket.identifier)] = (a.gl_name, "" if output == _first_output(a) else output)
+    # (A link through reroutes is the link from where they lead back to: plugging another output
+    # into a reroute feeds every input after it from that output.)
+    want = {key: _source_of(a, identifier) for key, (a, identifier, _) in chains(tree).items()}
     # A node dropped on a link (Blender splices it in): the graph's insert_on_link, one step (Maya's
     # insert_on_wire), which picks the node's input as Maya does; the graph's links are then the truth.
     for (dst, inp, src, output, mid) in insertions(have, want, gnodes):
@@ -1394,13 +1595,24 @@ def sync_from_tree(tree):
     for node in nodes:
         if node.gl_name and node.gl_name in gnodes and bool(node.mute) != (node.gl_name in bypassed):
             edit(op="set_bypass", name=node.gl_name, bypass=bool(node.mute))
+    # The reroutes on the graph's links now are its pins (layout: with the positions). After a
+    # refusal the tree is made again from the graph, pins as they were (a reroute fed from an output
+    # its inputs cannot take keeps its own).
+    pins = tree.get("gl_pins")
     if refused:
         _note(scalp, refused[-1])
+        with building():
+            tree.pop("gl_pins", None)
     else:
         _messages.pop(scalp.groomlab.uid, None)
+        final = _call("get_graph", session=session)["graph"] if sent else current
+        assign_pins(tree, connections_of(final))
+        push_positions(scalp, tree, final)
     from . import graph
-    groom.remember_graph(scalp, rt)
     tree["gl_sig"] = signature(tree)
+    if not sent:  # only reroutes made, rewired or deleted on the same links: layout, nothing evaluates
+        return tree.get("gl_pins") != pins
+    groom.remember_graph(scalp, rt)
     graph.refresh(scalp, rt)  # the 3D view's list; the tree is rebuilt from the graph (pending)
     groom.mark(scalp, "eval")
     return True
@@ -1528,6 +1740,10 @@ def after_undo(*args):
                         if node is not None and node.gl_type == gnode.get("type"):
                             at = ui_of(node)
                             gnode["ui"] = {"x": at[0], "y": at[1]}
+                    by_pin = {pin_of(r): r for r in reroutes(tree) if pin_of(r)}
+                    for point in (data.get("pins") or {}).get("points") or []:
+                        if isinstance(point, dict) and point.get("id") in by_pin:
+                            point["x"], point["y"] = ui_of(by_pin[point["id"]])
                 current = _call("get_graph", session=rt.session)["graph"]
                 if json.dumps(current, sort_keys=True) != json.dumps(data, sort_keys=True):
                     try:

@@ -334,6 +334,53 @@ class GraphApiTest(unittest.TestCase):
         self.assertEqual(old.position("scatter"), (12.0, 34.0))
         self.assertEqual([b["title"] for b in old.backdrops], ["old"])
 
+    def test_pins_route_links_and_follow_the_graph(self):
+        # Pins are layout: written with save_layout, nothing evaluates again; links run through them
+        # source first; renames follow; a link gone or from elsewhere takes its route along.
+        model = gm.GraphModel.from_groom(self.groom, self.catalog)
+        model.save(self.groom)
+        a = model.add_pin("width", "strands", 10, 20)
+        b = model.add_pin("width", "strands", 30, 40, index=0)
+        self.assertEqual(model.route("width", "strands"), [b, a])
+        c = model.add_pin("resample", "strands", 50, 60)
+        model.save_layout(self.groom)
+        stored = json.loads(cmds.getAttr(self.groom + ".graph"))
+        self.assertEqual(sorted(p["id"] for p in stored["pins"]["points"]), sorted([a, b, c]))
+        self.assertEqual(cmds.getAttr(self.groom + ".graph"), model.to_json())
+        again = gm.GraphModel.from_groom(self.groom, self.catalog)
+        self.assertEqual(again.route("width", "strands"), [b, a])
+        self.assertEqual(again.pin_position(a), (10.0, 20.0))
+        self.assertNotIn("pins", gm.without_layout(stored))
+        # Joining: only pins of one signal (width.strands and resample.strands carry other links).
+        self.assertFalse(model.merge_pins(a, c))
+        self.assertTrue(model.merge_pins(a, b))
+        self.assertEqual(model.route("width", "strands"), [a])
+        # A rename follows; a removed pin straightens its link; a link gone drops its route and pins.
+        model.rename_node("width", "thick")
+        self.assertEqual(model.route("thick", "strands"), [a])
+        model.remove_pin(a)
+        self.assertEqual(model.route("thick", "strands"), [])
+        model.disconnect("resample", "strands")
+        model.prune_pins()
+        self.assertEqual(model.pins, {})
+        self.assertNotIn("pins", model.to_dict())
+        # A link from another source now: its old route goes.
+        d = model.add_pin("thick", "strands", 0, 0)
+        model.connect("interpolate", "thick", "strands")
+        self.assertEqual(model.route("thick", "strands"), [])
+        model.prune_pins()
+        self.assertNotIn(d, model.pins)
+        # What a link drawn out of a pin runs through, and a route set by hand.
+        e = model.add_pin("thick", "strands", 1, 1)
+        f = model.add_pin("thick", "strands", 2, 2)
+        self.assertEqual(model.route_to(e), [e])
+        self.assertEqual(model.route_to(f), [e, f])
+        self.assertEqual(model.pin_links(f), [(("thick", "strands"), 1)])
+        model.connect("interpolate", "resample", "strands")
+        model.set_route("resample", "strands", model.route_to(e))
+        self.assertEqual(model.route("resample", "strands"), [e])
+        self.assertEqual(model.pin_links(e), [(("resample", "strands"), 0), (("thick", "strands"), 0)])
+
     def test_model_rejects_bad_edits(self):
         model = gm.GraphModel.from_groom(self.groom, self.catalog)
         with self.assertRaises(gm.GraphError):

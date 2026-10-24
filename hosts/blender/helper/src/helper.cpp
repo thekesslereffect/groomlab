@@ -1842,8 +1842,54 @@ json Helper::run(const std::string& cmd, const json& args) {
                         g["backdrops"] = std::move(backdrops);
                     }
                 }
+                // And the pins the links are drawn through (Maya's GraphModel._pins_dict, Blender's
+                // reroutes, layout only): {"points": [{"id", "x", "y"}], "routes": [{"from", "output"?,
+                // "to", "input", "via": [pin ids]}]}, all of them each time (no routes: none).
+                if (args.contains("pins") && !args["pins"].is_null()) {
+                    const json& given = args["pins"];
+                    if (!given.is_object()) fail("bad_request", "pins is {points, routes}");
+                    const json noPoints = json::array(), noRoutes = json::array();
+                    const json& givenPoints = given.contains("points") ? given["points"] : noPoints;
+                    const json& givenRoutes = given.contains("routes") ? given["routes"] : noRoutes;
+                    if (!givenPoints.is_array() || !givenRoutes.is_array()) fail("bad_request", "pins is {points: [...], routes: [...]}");
+                    json points = json::array(), routes = json::array();
+                    for (const json& p : givenPoints) {
+                        if (!p.is_object() || !p.contains("id") || !p["id"].is_string()) fail("bad_request", "a pin is {id, x, y}");
+                        json kept = {{"id", p["id"]}};
+                        for (const char* k : {"x", "y"}) {
+                            if (!p.contains(k) || !p[k].is_number() || !std::isfinite(p[k].get<double>())) {
+                                fail("bad_request", std::string("a pin's ") + k + " is a number");
+                            }
+                            kept[k] = p[k].get<double>();
+                        }
+                        points.push_back(std::move(kept));
+                    }
+                    for (const json& r : givenRoutes) {
+                        if (!r.is_object()) fail("bad_request", "a route is {from, output?, to, input, via}");
+                        json kept = json::object();
+                        for (const char* k : {"from", "to", "input"}) {
+                            if (!r.contains(k) || !r[k].is_string()) fail("bad_request", std::string("a route's ") + k + " is text");
+                            kept[k] = r[k];
+                        }
+                        if (r.contains("output") && !r["output"].is_null()) {
+                            if (!r["output"].is_string()) fail("bad_request", "a route's output is text");
+                            if (!r["output"].get<std::string>().empty()) kept["output"] = r["output"];
+                        }
+                        if (!r.contains("via") || !r["via"].is_array() || r["via"].empty()) fail("bad_request", "a route's via is [pin ids]");
+                        for (const json& v : r["via"]) {
+                            if (!v.is_string()) fail("bad_request", "a route's via is [pin ids]");
+                        }
+                        kept["via"] = r["via"];
+                        routes.push_back(std::move(kept));
+                    }
+                    if (routes.empty()) {
+                        g.erase("pins");
+                    } else {
+                        g["pins"] = {{"points", std::move(points)}, {"routes", std::move(routes)}};
+                    }
+                }
                 const json positions = args.contains("positions") && !args["positions"].is_null() ? args["positions"] : json::object();
-                if (!args.contains("positions") && !args.contains("backdrops")) need(args, "positions");
+                if (!args.contains("positions") && !args.contains("backdrops") && !args.contains("pins")) need(args, "positions");
                 if (!positions.is_object()) fail("bad_request", "positions is {node: [x, y]}");
                 for (const auto& [name, at] : positions.items()) {
                     if (!at.is_array() || at.size() != 2 || !at[0].is_number() || !at[1].is_number()) {

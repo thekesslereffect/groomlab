@@ -3465,14 +3465,14 @@ TEST(AppCards, BuildBakeAndExportCards) {
     EXPECT_TRUE(frame.item(DisplayItemId::Cards).shown);
     EXPECT_FALSE(frame.item(DisplayItemId::Strands).shown) << "the cards stand in for the strands";
 
-    // The bake: the six maps as TGA (Unreal's layout, the Maya host's names), the atlas and
+    // The bake: the seven maps as TGA (Unreal's layout, the Maya host's names), the atlas and
     // the viewport's preview, 64 px square; the session takes it.
     const std::string dir = tempPath("groomlab_app_cards_bake");
     const CardBakeFiles bake = doc->bakeCards(dir, "sample", 64, 1.0f);
-    ASSERT_EQ(bake.paths.size(), 8u);
+    ASSERT_EQ(bake.paths.size(), 9u);
     EXPECT_EQ(bake.size, 64);
     EXPECT_EQ(bake.cards, view.cards->cards.size());
-    for (const char* map : {"Depth", "Coverage", "Tangent", "Attribute", "Color", "AO"}) {
+    for (const char* map : {"Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "Normal"}) {
         const std::string path = dir + "/sample_" + map + ".tga";
         EXPECT_TRUE(std::filesystem::exists(path)) << path;
         std::ifstream in(path, std::ios::binary);
@@ -3528,7 +3528,7 @@ TEST(AppCards, BuildBakeAndExportCards) {
     ASSERT_EQ(g["meshes"].size(), 2u);
     EXPECT_EQ(g["meshes"][0]["name"], "groomlab_app_cards_cards");
     EXPECT_EQ(g["meshes"][1]["name"], "groomlab_app_cards_scalpCap");
-    EXPECT_EQ(g["images"].size(), 3u);  // BaseColor and ORM for the cards, BaseColor for the cap
+    EXPECT_EQ(g["images"].size(), 4u);  // BaseColor, ORM and Normal for the cards, BaseColor for the cap
     EXPECT_EQ(g["materials"][0]["alphaMode"], "MASK");
     EXPECT_EQ(g["buffers"].size(), 1u);
     std::remove(glb.c_str());

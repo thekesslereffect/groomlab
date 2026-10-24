@@ -16,8 +16,14 @@ OperatorCatalog.from_maya).
     model.save(groom)
 
 The graph dict matches the groom's JSON (see engine/core/include/groomlab/graph_io.h), with the
-layout in it as every host keeps it: an optional "ui": {"x": .., "y": ..} per node and the
-graph's "backdrops", which evaluation ignores and groom files carry to the standalone app.
+layout in it as every host keeps it: an optional "ui": {"x": .., "y": ..} per node, the graph's
+"backdrops" and its "pins", which evaluation ignores and groom files carry to the standalone app.
+
+Pins are reroute points (Unreal's Blueprint reroute nodes) that links are drawn through, to tidy
+the wires: {"points": [{"id", "x", "y"}], "routes": [{"from", "output"?, "to", "input", "via":
+[pin ids, source to destination]}]}. A pin carries one signal (its routes share a source), so
+several links from one output can run through the same pins as a bundle. A route whose link is
+gone, or comes from another source now, is dropped, and a pin no route passes goes with it.
 
 A node can have several outputs (a Map node: luminance, r, g, b, a); a connection
 {"from", "to", "input"} reads the source's first output, or the one its "output" names
@@ -187,8 +193,8 @@ def node_fields(node):
 
 
 def without_layout(data):
-    """A graph's dict without the editors' layout (every node's "ui", the backdrops)."""
-    out = {k: v for k, v in data.items() if k != "backdrops"}
+    """A graph's dict without the editors' layout (every node's "ui", the backdrops, the pins)."""
+    out = {k: v for k, v in data.items() if k not in ("backdrops", "pins")}
     out["nodes"] = [{k: v for k, v in n.items() if k != "ui"} for n in data.get("nodes", [])]
     return out
 
@@ -210,6 +216,12 @@ def map_source(value):
 
 
 BACKDROPS_KEY = "__backdrops__"
+
+
+def _pin_number(pin):
+    """pin12 -> 12 (0 for another name): pins sort and number by it."""
+    digits = pin[3:] if pin.startswith("pin") else ""
+    return int(digits) if digits.isdigit() else 0
 CLIPBOARD_KEY = "groomlabNodes"
 
 
@@ -235,6 +247,8 @@ class GraphModel(object):
         self.connections = []    # [{"from": src, "to": dst, "input": port[, "output": src's output]}]
         self.output = None
         self.backdrops = []      # [{"title", "x", "y", "w", "h", "color"}]: layout only
+        self.pins = {}           # pin id -> [x, y]: layout only (see the module's notes)
+        self.routes = {}         # (to, input) -> {"from", "output", "via": [pin ids]}
         self.renamed = {}        # old name -> new name (a path inside a compound: "compound1/sculpt1") since
                                  # the last save (the groom's viewNode and Sculpt edits follow)
         self.copied = {}         # pasted node -> the node it copies, since the last save (Sculpt edits follow)
@@ -280,6 +294,7 @@ class GraphModel(object):
             self.order.append(n["name"])
         self.output = data.get("output")
         self.backdrops = [dict(b) for b in data.get("backdrops") or [] if isinstance(b, dict)]
+        self._load_pins(data.get("pins"))
         # Every connection made again as connect makes it (its checks), in one go in the core.
         self.connections = [dict(c) for c in data.get("connections", [])]
         edit = self._edit()
@@ -317,6 +332,9 @@ class GraphModel(object):
             data["output"] = self.output
         if self.backdrops:
             data["backdrops"] = copy.deepcopy(self.backdrops)
+        pins = self._pins_dict()
+        if pins:
+            data["pins"] = pins
         return data
 
     def to_json(self, indent=None, layout=True):
@@ -499,6 +517,10 @@ class GraphModel(object):
             stored.pop("backdrops", None)
             if self.backdrops:
                 stored["backdrops"] = copy.deepcopy(self.backdrops)
+            stored.pop("pins", None)
+            pins = self._pins_dict()
+            if pins:
+                stored["pins"] = pins
             new = json.dumps(stored, separators=(",", ":"))
         if new != text:
             cmds.setAttr(groom + ".graph", new, type="string")
@@ -555,6 +577,12 @@ class GraphModel(object):
                 c["to"] = new
         if self.output == old:
             self.output = new
+        routes = {}
+        for (to, input_name), route in self.routes.items():
+            if route["from"] == old:
+                route["from"] = new
+            routes[(new if to == old else to, input_name)] = route
+        self.routes = routes
         self._moved([(old, new)])
 
     def _moved(self, moves):
@@ -723,6 +751,134 @@ class GraphModel(object):
 
     def param_spec(self, name, param):
         return next((p for p in self.node_spec(name)["params"] if p["name"] == param), None)
+
+    # -- Pins (layout: links drawn through reroute points) ----------------------
+
+    def _load_pins(self, data):
+        self.pins, self.routes = {}, {}
+        if not isinstance(data, dict):
+            return
+        for p in data.get("points") or []:
+            if isinstance(p, dict) and p.get("id"):
+                self.pins[str(p["id"])] = [float(p.get("x", 0.0)), float(p.get("y", 0.0))]
+        for r in data.get("routes") or []:
+            if isinstance(r, dict) and r.get("to") and r.get("input") and r.get("via"):
+                self.routes[(r["to"], r["input"])] = {"from": r.get("from"), "output": r.get("output"),
+                                                      "via": [str(v) for v in r["via"]]}
+
+    def _source(self, to, input_name):
+        """(from, output) of the link into to.input (output None: its first), or None."""
+        for c in self.connections:
+            if c["to"] == to and c["input"] == input_name:
+                return c["from"], c.get("output")
+        return None
+
+    def prune_pins(self):
+        """Drops what no longer holds: routes whose link is gone or comes from elsewhere now, pins
+        they name that are gone, and pins no route passes."""
+        routes = {}
+        for key, route in self.routes.items():
+            via = [v for v in route["via"] if v in self.pins]
+            if via and self._source(*key) == (route["from"], route["output"]):
+                routes[key] = dict(route, via=via)
+        self.routes = routes
+        used = {v for r in routes.values() for v in r["via"]}
+        self.pins = {k: v for k, v in self.pins.items() if k in used}
+
+    def _pins_dict(self):
+        self.prune_pins()
+        if not self.routes:
+            return None
+        routes = []
+        for (to, input_name), r in sorted(self.routes.items()):
+            entry = {"from": r["from"], "to": to, "input": input_name, "via": list(r["via"])}
+            if r["output"]:
+                entry["output"] = r["output"]
+            routes.append(entry)
+        points = [{"id": k, "x": v[0], "y": v[1]} for k, v in sorted(self.pins.items(), key=lambda kv: _pin_number(kv[0]))]
+        return {"points": points, "routes": routes}
+
+    def route(self, to, input_name):
+        """The pins the link into to.input runs through, source first (ids; [] for none)."""
+        r = self.routes.get((to, input_name))
+        if not r or self._source(to, input_name) != (r["from"], r["output"]):
+            return []
+        return [v for v in r["via"] if v in self.pins]
+
+    def pin_source(self, pin):
+        """(from, output) of the signal a pin carries, or None."""
+        for r in self.routes.values():
+            if pin in r["via"]:
+                return r["from"], r["output"]
+        return None
+
+    def pin_links(self, pin):
+        """The links (to, input) running through a pin, and each one's place of it in its route."""
+        return [(key, r["via"].index(pin)) for key, r in sorted(self.routes.items())
+                if pin in r["via"] and self._source(*key) == (r["from"], r["output"])]
+
+    def route_to(self, pin):
+        """The pins from the source up to and including `pin` (a link drawn out of it runs through
+        these): the first of its links' routes, [] for none."""
+        links = self.pin_links(pin)
+        if not links:
+            return []
+        (key, index), = links[:1]
+        return list(self.routes[key]["via"][:index + 1])
+
+    def set_route(self, to, input_name, via):
+        """The link into to.input runs through `via` (pin ids), from its source as it is now."""
+        source = self._source(to, input_name)
+        if source is None:
+            raise GraphError("%s.%s has no link to route" % (to, input_name))
+        if via:
+            self.routes[(to, input_name)] = {"from": source[0], "output": source[1], "via": list(via)}
+        else:
+            self.routes.pop((to, input_name), None)
+
+    def add_pin(self, to, input_name, x, y, index=None):
+        """A new pin at (x, y) on the link into to.input, at `index` in its route (None: last, by
+        the destination). Returns its id."""
+        source = self._source(to, input_name)
+        if source is None:
+            raise GraphError("%s.%s has no link to pin" % (to, input_name))
+        pin = "pin%d" % (1 + max([_pin_number(k) for k in self.pins] or [0]))
+        self.pins[pin] = [float(x), float(y)]
+        via = self.route(to, input_name)
+        via.insert(len(via) if index is None else max(0, min(index, len(via))), pin)
+        self.routes[(to, input_name)] = {"from": source[0], "output": source[1], "via": via}
+        return pin
+
+    def move_pin(self, pin, x, y):
+        self.pins[pin] = [float(x), float(y)]
+
+    def pin_position(self, pin):
+        return tuple(self.pins[pin])
+
+    def remove_pin(self, pin):
+        """Takes the pin out of every route through it (those links straighten there)."""
+        self.pins.pop(pin, None)
+        for r in self.routes.values():
+            r["via"] = [v for v in r["via"] if v != pin]
+        self.prune_pins()
+
+    def merge_pins(self, keep, drop):
+        """Routes through `drop` run through `keep` instead (a pin dropped on another): only pins
+        carrying the same signal merge. Returns whether they did."""
+        if keep == drop or keep not in self.pins or drop not in self.pins:
+            return False
+        if self.pin_source(keep) != self.pin_source(drop):
+            return False
+        for r in self.routes.values():
+            via = []
+            for v in r["via"]:
+                v = keep if v == drop else v
+                if not via or via[-1] != v:
+                    via.append(v)
+            r["via"] = via
+        self.pins.pop(drop, None)
+        self.prune_pins()
+        return True
 
     def set_position(self, name, x, y):
         self._node(name)["ui"] = {"x": float(x), "y": float(y)}

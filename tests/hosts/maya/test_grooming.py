@@ -1782,7 +1782,7 @@ class GroomingTest(unittest.TestCase):
         paths = groomlab.bake_cards(self.groom, folder, resolution=256, name="fur")
         self.assertEqual(sorted(os.path.basename(p) for p in paths),
                          ["fur_AO.tga", "fur_Atlas.json", "fur_Attribute.tga", "fur_Color.tga", "fur_Coverage.tga",
-                          "fur_Depth.tga", "fur_Tangent.tga"])
+                          "fur_Depth.tga", "fur_Normal.tga", "fur_Tangent.tga"])
         self.assertEqual(os.path.getsize(os.path.join(folder, "fur_Coverage.tga")), 18 + 256 * 256)
         self.assertEqual(os.path.getsize(os.path.join(folder, "fur_Attribute.tga")), 18 + 4 * 256 * 256)
         # The cards view shows them (cardMaps); a live mesh, when there is one, gets them as its material.
@@ -1874,7 +1874,7 @@ class GroomingTest(unittest.TestCase):
         groomlab.create_cards(self.groom, max_cards=20)
         folder = tempfile.mkdtemp(prefix="groomlab_nomesh_")
         paths = groomlab.bake_cards(self.groom, folder, resolution=128, name="bare")
-        self.assertEqual(len(paths), 7)  # six maps and the atlas
+        self.assertEqual(len(paths), 8)  # seven maps and the atlas
         self.assertIsNone(groomlab.card_mesh(self.groom))  # none made
         self.assertIn("bare_Color.tga", cmds.getAttr(self.groom + ".cardMaps"))
         first = cmds.getAttr(self.groom + ".cardMaps")
@@ -2140,7 +2140,7 @@ class GroomingTest(unittest.TestCase):
         folder = tempfile.mkdtemp(prefix="groomlab_unreal_cards_")
         result = groomlab.export_cards_unreal(self.groom, folder, name="hero", resolution=128)
         self.assertTrue(os.path.getsize(result["fbx"]) > 1000)
-        self.assertEqual(len(result["maps"]), 8)  # the cards' six and the scalp's two
+        self.assertEqual(len(result["maps"]), 9)  # the cards' seven and the scalp's two
         self.assertTrue(os.path.getsize(result["scalpCap"]) > 1000)
         with open(result["manifest"]) as f:
             manifest = json.load(f)
@@ -2223,6 +2223,7 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(kinds["Mask"], 6)
         self.assertEqual(kinds["AO"], 0)         # gray
         self.assertEqual(kinds["Tangent"], 2)    # RGB
+        self.assertEqual(kinds["Normal"], 2)     # RGB
         with open(result["manifest"]) as f:
             manifest = json.load(f)
         self.assertEqual(manifest["engine"], "Unity")

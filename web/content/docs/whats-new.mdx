@@ -13,6 +13,33 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.29.0 (October 24, 2026)
+
+- **Pins in the Graph Editor.** Tidy crossing wires the way Unreal's Blueprints do: double-click a
+  link to put a pin on it, then drag the pin to route the link. Drop a pin on another pin of the
+  same output and they join, so links from one output run through one pin as a bundle. Drag from a
+  pin's right side to an input for another link of its signal; drop a link from an output on a pin
+  to feed every link through it from there. Select a pin and press **Delete** to remove it (the
+  link stays). In Maya and the app; Blender shows pins as its own reroute nodes. Pins are saved
+  with the groom and travel between all three.
+- **Snap.** A **Snap** toggle on the Graph Editor's top bar puts the nodes and pins you drag on
+  the grid. It's remembered between sessions.
+- **Cut links with Alt+Shift+drag.** As in Maya's Hypershade: every link the line crosses turns
+  red, and letting go disconnects them as one edit. (From Omar Hesham's pull request.)
+- **Undo an edit that left the graph unfinished.** Cutting or deleting a link that leaves the
+  output unconnected isn't applied to the groom until it is wired again; Ctrl+Z now puts the graph
+  back, instead of undoing the step before it.
+- **Normal map for game cards.** Every card bake and export writes a tangent-space `_Normal` map
+  beside the others: DirectX's green in Unreal's TGAs, OpenGL's for Unity's PNGs and glTF's normal
+  texture. `_Tangent` keeps its name (Unreal's own slot for the strand direction); use `_Normal` in
+  a card material that doesn't use Unreal's Hair shading model. (From Omar Hesham's pull request.)
+- **Wireframe on shaded for cards in Maya.** The groom's cards view now draws the cards' edges
+  with Shading > Wireframe on Shaded, in Maya's wireframe color (lead or active when selected), and
+  Wireframe mode shows the edges alone, like any mesh.
+- **Clump: Strand Strength Random.** In Clump's Random group: each strand's pull toward its clump
+  scaled down at random, so strands don't sit perfectly on their guide (on top of Strength Random,
+  per clump). Drags of it evaluate on the CPU for now.
+
 ## 0.28.0 (October 23, 2026)
 
 - **Align Photo.** The Photos tab's **Align Photo...** opens the Photos window on the photo: the

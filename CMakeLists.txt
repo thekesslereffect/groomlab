@@ -8,7 +8,7 @@ if(POLICY CMP0141)
     set(CMAKE_POLICY_DEFAULT_CMP0141 NEW)
 endif()
 
-project(GroomLab VERSION 0.28.0 LANGUAGES CXX)
+project(GroomLab VERSION 0.29.0 LANGUAGES CXX)
 
 # Maya 2022 devkit targets C++17 (Visual Studio 2019 / v142 ABI; v143 is binary compatible).
 set(CMAKE_CXX_STANDARD 17)

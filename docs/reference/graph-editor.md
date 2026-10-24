@@ -118,9 +118,25 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   - **Snapping:** compatible ports light up while you drag, and a drop near one snaps to it.
   - **Moving a link:** drag a linked input to move its link elsewhere, or drop it on empty space
     to remove it.
+  - **Cutting links:** Alt+Shift+drag across links (Hypershade's gesture): the ones the line
+    crosses turn red, and letting go disconnects them, as one edit. A cut that leaves the output
+    unconnected is not applied until it is wired again; Ctrl+Z puts the graph back.
+  - **Pins:** double-click a link to put a pin on it (Unreal's reroute nodes): the link runs
+    through it, and dragging the pin routes the link, to tidy crossing wires. Links from one output
+    can share pins: drop a pin on another pin of the same output and they join, the links running
+    through it as a bundle. As in Blueprints, drag from a pin's nub (its right side) to an input
+    for another link of the same signal, running through the pins up to it; drop a link from an
+    output on a pin and every link through it is fed from that output instead (one undo step); drop
+    an input's link end on a pin and that input takes the pin's signal. Delete takes a selected pin
+    out (the link straightens there). Pins are
+    layout, as node positions are: no undo step, nothing evaluates again, and the groom file keeps
+    them (the "pins" of its graph, graph_pins.h): the app draws and edits them the same way (there
+    adding, removing, joining and feeding a pin are undo steps, as its backdrops are), and Blender
+    shows them as its own reroute nodes.
   - **Refused links:** mismatched types and cycles are refused, with the reason in the status
     bar.
-- **Toolbar:** the groom, **Add Node**, **Presets** and **Live** (with **Apply** while Live is
+- **Toolbar:** the groom, **Add Node**, **Presets**, **Snap** (nodes and pins you move land on
+  the grid's dots; remembered between sessions) and **Live** (with **Apply** while Live is
   off); the **...** menu holds Undo and Redo, Frame, Tidy Layout, Group into Compound (Ctrl+G), Ungroup
   Compound (Ctrl+Shift+G; also on a Compound's right-click menu and in its panel), Delete, Copy
   Graph and Paste Graph (also in the Presets menu: see Sharing a look as text), Units, Theme and

@@ -496,6 +496,46 @@ TEST(Clump, PullsTipsOntoTheirCenter) {
     EXPECT_NEAR(maxDisplacement(*lg.eval(clump), *before), 0.0f, 1e-6f);
 }
 
+TEST(Clump, StrandStrengthRandomLetsEachStrandHangLooseItsOwnWay) {
+    // One center; at strength 1 every tip lands on it. With strandStrengthRandom each strand's pull
+    // is scaled down by its own random share: tips spread off the center, each strand the same
+    // every evaluation, and the strands of one clump differ (unlike strengthRandom, per clump).
+    LookGraph lg;
+    auto centers = std::make_shared<GuideSet>();
+    centers->add(1, test::straightCurve({0.5f, 0, 0.5f}, {0, 1, 0}, 8));
+    lg.ext.set("centers", GuidesPtr(centers), 7);
+    const NodeId src = lg.g.addNode(op::kGuides);
+    lg.g.node(src).params().set("input", std::string("centers"));
+    const NodeId clump = lg.add(op::kClump, lg.scatter);
+    lg.g.connect(src, clump, 1);
+    lg.g.node(clump).params().set("centersFrom", std::string("inputCurves"));
+    lg.g.node(clump).params().set("strength", 1.0);
+    const StrandsPtr before = lg.eval(lg.scatter);
+    auto tipOff = [&](const StrandSet& s, std::size_t k) {
+        const Vec3f tip = s.strandPoints(k)[s.strandPointCount(k) - 1];
+        return std::hypot(tip.x - 0.5f, tip.z - 0.5f);  // across the center (straight up y)
+    };
+    const StrandsPtr tight = lg.eval(clump);
+    for (std::size_t k = 0; k < tight->strandCount(); ++k) EXPECT_LT(tipOff(*tight, k), 1e-4f);
+
+    lg.g.node(clump).params().set("strandStrengthRandom", 0.6);
+    const StrandsPtr loose = lg.eval(clump);
+    std::vector<float> share;  // how much of its root's distance each tip keeps
+    for (std::size_t k = 0; k < loose->strandCount(); ++k) {
+        const float from = tipOff(*before, k);
+        if (from < 0.05f) continue;
+        share.push_back(tipOff(*loose, k) / from);
+    }
+    ASSERT_GT(share.size(), 10u);
+    const auto [lo, hi] = std::minmax_element(share.begin(), share.end());
+    EXPECT_LE(*hi, 0.6f + 1e-3f);   // at most 60% left loose
+    EXPECT_GT(*hi - *lo, 0.2f);     // and each strand its own way
+    lg.g.node(clump).params().set("strandStrengthRandom", 0.0);
+    EXPECT_NEAR(maxDisplacement(*lg.eval(clump), *tight), 0.0f, 1e-6f);
+    lg.g.node(clump).params().set("strandStrengthRandom", 0.6);
+    EXPECT_NEAR(maxDisplacement(*lg.eval(clump), *loose), 0.0f, 1e-6f);  // the same every time (by each strand's ID)
+}
+
 TEST(Clump, PullsEachPointToTheCentersPointAtItsOwnArcLength) {
     // A long, a short and a longer strand beside a straight center up y, at strength 1 all along:
     // each point lands on the center's point as far from the root as the point is along its

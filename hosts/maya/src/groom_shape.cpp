@@ -2374,6 +2374,7 @@ std::vector<std::string> GroomShape::bakeCards(const std::string& directory, con
             mask[4 * i + 2] = t.attribute[4 * i + 3];  // root (0) to tip (1), in the detail mask's slot
             mask[4 * i + 3] = smoothness;              // 1 - the hair look's roughness
         }
+        const std::vector<std::uint8_t> normal = cardNormalOpenGl(t);  // Unity's green: OpenGL's
         // Encoded side by side (writeCompressedPngs: the bytes of one at a time).
         std::vector<PngImage> images;
         auto png = [&](const char* map, int channels, const std::vector<std::uint8_t>& pixels) {
@@ -2386,6 +2387,7 @@ std::vector<std::string> GroomShape::bakeCards(const std::string& directory, con
         png("Tangent", 3, t.tangent);
         png("Depth", 1, t.depth);
         png("Attribute", 4, t.attribute);
+        png("Normal", 3, normal);
         writeCompressedPngs(paths, images);
         return paths;
     }

@@ -18,11 +18,13 @@ module's strands are **bit for bit** the desktop's (see "Checking it").
 | `engine/web/src/web_probe.cpp` | `groomlab_web_probe`: the same `WebGroom` built natively, for comparisons. |
 | `engine/web/tools/compare.mjs` | The module in Node, printing what the probe prints. `diff_positions.mjs` compares raw dumps. |
 | `engine/web/tools/make_sample.mjs` | Writes `web/public/samples/manny_hair.groom` and its texture map `masks/manny_hair/highlights.png` with the module. |
-| `engine/web/tools/make_home_samples.mjs` | Writes the home page's grooms (`manny_curls.groom`, `manny_short_curls.groom`) with the module. |
+| `engine/web/tools/make_home_samples.mjs` | Writes the Try section's groom (`manny_curls.groom`) with the module. (The hero's, `webhero.groom`, is groomed in Maya and exported.) |
+| `engine/web/tools/make_hair_bsdf.mjs` | Copies `engine/gpu/shaders/hair_bsdf.glsl` into `web/components/home/hair-bsdf.ts` (the viewer shades with it, as the app's lookdev and Maya's viewport do); `--check` says whether the copy is in step. Run it when the shading changes. |
 | `engine/web/tools/test_maps.mjs` | Checks the module's maps (vertex maps, texture maps by path, by name, UDIM, `..`, missing, re-read). |
 | `engine/web/tools/png.mjs` | A small gray PNG writer for those two. |
 | `web/public/wasm/groomlab.{js,wasm}` | The build's output (copied there by the build). Committed, so the site builds without Emscripten. |
 | `web/public/wasm/groomlab-worker.js` | A classic worker that loads the module and answers the page. |
+| `web/vercel.json` | The site's cache headers: `/samples/*` and `/wasm/*` kept by the browser for an hour, then used while revalidated in the background (a week): a page loaded again starts the engine without a round trip. A change to those files reaches a returning visitor within the hour. |
 | `web/lib/groomlab-wasm/index.ts` | The page's typed client of that worker. |
 | `web/components/view/groom-view.tsx` | The `/view` page: viewer, sliders, open, download, drop. `?groom=<name>` opens `/samples/<name>.groom`. |
 | `web/components/home/home-engine.ts` | The home page's grooms grown by the engine (see "The home page"). |
@@ -182,15 +184,22 @@ empty.
 
 | Viewer | Groom | Strands drawn | What the page sets |
 | --- | --- | --- | --- |
-| Hero | `manny_curls.groom`: Curly, tuned, on guides standing off the head; a Transform node, `length` (scale 1.8), between Interpolate and Clump | ~11,000 (phones ~6,000) | nothing |
-| "Try the node graph" | `manny_short_curls.groom` | ~7,000, more with Scatter's density, up to 16,000 | each card's switch: `setBypass` on `clump`, `curl`, `noise`, `color`; each slider: the groom's `"exposed"` params, ranges and labels from `listControls()`; the seed |
+| Hero | `webhero.groom`: a ball of curls on a 5 cm sphere, groomed in Maya and exported (its HairColor at melanin 0.6, redness 1); its own space (`space` in `engine-grooms.ts`), no bare head while it loads | ~22,000 (phones ~12,000) | nothing |
+| "Try the node graph" | `manny_curls.groom`: Curly, tuned, on guides standing off the head | ~7,000, more with Scatter's density, up to 16,000 | each card's switch: `setBypass` on `clump`, `curl`, `noise`, `color`; each slider: the groom's `"exposed"` params, ranges and labels from `listControls()`; the seed |
 
-`manny_short_curls.groom`'s chain is the Try section's, node for node: Scalp, Scatter, Interpolate
-(with the Guides node), Clump, Curl, Noise, HairColor, Output. Its Scatter density is a plain number
-(a slider) and keeps to the hair's part of the head by `guideRadius` around the guides' roots.
+`manny_curls.groom`'s chain is the Try section's, node for node: Scalp, Scatter, Interpolate (with
+the Guides node), Transform (`length`, scale 1.8), Clump, Curl, Noise, HairColor, Output. Its Scatter
+density is a plain number (a slider) and keeps to the hair's part of the head by `guideRadius`
+around the guides' roots.
 
-`node engine/web/tools/make_home_samples.mjs` writes both grooms (the Curly preset on the Manny head,
-guides baked from small combing graphs) and prints their controls and full strand counts:
+The viewer shades the strands with GroomLab's hair shading (`hair_bsdf.glsl`, as the app and Maya's
+viewport do), the groom's highlight from the engine (`evaluate`'s `look`: core's `hairLobes` of its
+HairColor), the strands' appearance color turned back into their base color, the hair volume's depth
+standing in for Maya's density grid, lit by a key and a camera light and shown through ACES (Maya's
+default view).
+
+`node engine/web/tools/make_home_samples.mjs` writes the Try groom (the Curly preset on the Manny head,
+guides baked from a small combing graph) and prints its controls and full strand count:
 `web/components/home/engine-grooms.ts` mirrors them (the page draws its sliders before the engine
 answers), so change both together. The preview density is a share of the full count.
 

@@ -814,6 +814,11 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                         return false;
                     }
                 }
+                // Each strand's own share of the pull (strandStrengthRandom): the CPU's for now.
+                if (stage.level < 0 && params.getDouble("strandStrengthRandom") > 0.0) {
+                    *why = doc.nameOf(id) + " varies each strand's pull (strandStrengthRandom): the CPU's";
+                    return false;
+                }
                 // A Clump's params but its strength, volumize and profiles, `get` reading a number.
                 auto shape = [&](const ParamSet& clump, const auto& get) {
                     s.value[2] = static_cast<float>(get("flatness"));

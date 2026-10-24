@@ -183,6 +183,14 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
         graphStatus_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         row->addSpacing(8);
         row->addWidget(graphStatus_, 1);
+        // Snap: nodes and pins dragged land on the grid (Maya's Graph Editor's Snap).
+        graphSnap_ = new QToolButton(graphBar_);
+        graphSnap_->setObjectName(QStringLiteral("graphSnapButton"));
+        graphSnap_->setText(tr("Snap"));
+        graphSnap_->setToolTip(tr("Nodes and pins you drag land on the grid"));
+        graphSnap_->setCheckable(true);
+        graphSnap_->setAutoRaise(true);
+        row->addWidget(graphSnap_);
         graphEdit_ = menuButton(QStringLiteral("\u00B7\u00B7\u00B7"), "graphEditButton",
                                 tr("Edit: undo, framing, layout, groups, Copy and Paste Graph, units, theme"));
         const QString chip = theme::uiColor("hover").name();
@@ -190,10 +198,11 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
                                                 "#graphBar QToolButton { color: %3; font-weight: 700; padding: 3px 9px; border: none; border-radius: 5px; }"
                                                 "#graphBar QToolButton:hover, #graphBar QToolButton:pressed { background: %4; color: %5; }"
                                                 "#graphBar QToolButton:disabled { color: %6; }"
+                                                "#graphBar QToolButton:checked { background: %4; color: %7; }"
                                                 "#graphBar QToolButton::menu-indicator { image: none; width: 0px; }"
                                                 "#graphBar QLabel { color: %6; }")
                                      .arg(theme::uiColor("panel").name(), theme::divider().name(), theme::textSoft().name(), chip,
-                                          theme::text().name(), theme::textMuted().name()));
+                                          theme::text().name(), theme::textMuted().name(), theme::nodeSelected().name()));
     }
     auto* graphBody = new QWidget();
     auto* graphColumn = new QVBoxLayout(graphBody);

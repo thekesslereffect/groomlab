@@ -427,6 +427,8 @@ TEST(GameExports, CardsRoundTripThroughGlb) {
     EXPECT_FLOAT_EQ(material["pbrMetallicRoughness"]["roughnessFactor"].get<float>(), 0.35f);
     EXPECT_FLOAT_EQ(material["pbrMetallicRoughness"]["metallicFactor"].get<float>(), 0.0f);
     EXPECT_EQ(material["occlusionTexture"]["index"], material["pbrMetallicRoughness"]["metallicRoughnessTexture"]["index"]);
+    ASSERT_TRUE(material.contains("normalTexture"));  // the strands' normal, glTF's green
+    EXPECT_NE(material["normalTexture"]["index"], material["pbrMetallicRoughness"]["baseColorTexture"]["index"]);
     EXPECT_EQ(material["extras"]["groomlab"]["kind"], "cards");
     const int baseColor = material["pbrMetallicRoughness"]["baseColorTexture"]["index"];
     const json& image = d["images"][d["textures"][baseColor]["source"].get<int>()];
@@ -783,7 +785,7 @@ TEST(Budget, CardBakeOfAHundredThousandStrandsAt2048) {
     EXPECT_EQ(t.size, 2048);
 }
 
-// Unity's six card maps (groomLabBakeCards -layout unity) at 2048, as PNGs.
+// Unity's seven card maps (groomLabBakeCards -layout unity) at 2048, as PNGs.
 std::vector<std::pair<int, std::vector<std::uint8_t>>> unityMaps(const CardTextures& t) {
     const std::size_t n = static_cast<std::size_t>(t.size) * static_cast<std::size_t>(t.size);
     std::vector<std::uint8_t> baseColor(4 * n), mask(4 * n);
@@ -797,7 +799,7 @@ std::vector<std::pair<int, std::vector<std::uint8_t>>> unityMaps(const CardTextu
         mask[4 * i + 2] = t.attribute[4 * i + 3];
         mask[4 * i + 3] = 166;
     }
-    return {{4, baseColor}, {4, mask}, {1, t.occlusion}, {3, t.tangent}, {1, t.depth}, {4, t.attribute}};
+    return {{4, baseColor}, {4, mask}, {1, t.occlusion}, {3, t.tangent}, {1, t.depth}, {4, t.attribute}, {3, cardNormalOpenGl(t)}};
 }
 
 TEST(Budget, SixUnityCardMapsEncodeAsPngAt2048) {

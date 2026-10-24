@@ -18,6 +18,7 @@
 #include <QFileDialog>
 #include <QMenu>
 #include <QTimer>
+#include <QSettings>
 #include <QToolButton>
 #include <QUrl>
 
@@ -480,6 +481,14 @@ void AppActions::wireGraphEditor(MainWindow& w) {
     m->shell_->graphAddButton()->setMenu(add);
     m->shell_->graphPresetsButton()->setMenu(m->presetsMenu_);
     m->shell_->graphEditButton()->setMenu(edit);
+    // Snap, remembered between sessions (a test's app starts with it off).
+    QToolButton* snap = m->shell_->graphSnapButton();
+    if (m->interactive_) snap->setChecked(QSettings().value(QStringLiteral("graph/snap"), false).toBool());
+    m->graph_->setSnapping(snap->isChecked());
+    QObject::connect(snap, &QToolButton::toggled, snap, [m](bool on) {
+        m->graph_->setSnapping(on);
+        if (m->interactive_) QSettings().setValue(QStringLiteral("graph/snap"), on);
+    });
 
     // The right-click menus of the graph: a node's, a backdrop's, the canvas's.
     m->graph_->setMenuFiller([m](QMenu* menu, NodeGraphView::MenuTarget target, const QPointF& at) {

@@ -602,13 +602,15 @@ TEST(GraphIo, RoundTripKeepsParamsAndConnections) {
 }
 
 TEST(GraphIo, TheEditorsLayoutTravelsWithTheGraph) {
-    // Each node's "ui" and the graph's "backdrops": carried by load and save (and clone), so the
-    // positions Maya's Graph Editor and the app's node graph keep survive every host.
+    // Each node's "ui", the graph's "backdrops" and its "pins" (the links' reroute points): carried
+    // by load and save (and clone), so the layout Maya's Graph Editor and the app's node graph keep
+    // survives every host.
     GraphDocument doc = loadGraphJson(R"({
         "nodes": [{"name": "s", "type": "Scalp", "ui": {"x": 12.5, "y": -3}},
                   {"name": "o", "type": "Output"}],
         "connections": [], "output": "o",
-        "backdrops": [{"title": "Roots", "x": 0, "y": 0, "w": 10, "h": 20, "color": [1, 2, 3]}]})");
+        "backdrops": [{"title": "Roots", "x": 0, "y": 0, "w": 10, "h": 20, "color": [1, 2, 3]}],
+        "pins": {"points": [{"id": "pin1", "x": 5, "y": 6}], "routes": [{"from": "s", "to": "o", "input": "strands", "via": ["pin1"]}]}})");
     ASSERT_EQ(doc.positions.size(), 1u);
     EXPECT_DOUBLE_EQ(doc.positions.at("s").x, 12.5);
     EXPECT_DOUBLE_EQ(doc.positions.at("s").y, -3.0);
@@ -619,8 +621,12 @@ TEST(GraphIo, TheEditorsLayoutTravelsWithTheGraph) {
         if (n["name"] == "o") EXPECT_FALSE(n.contains("ui"));
     }
     EXPECT_EQ(saved["backdrops"][0]["title"], "Roots");
+    EXPECT_EQ(saved["pins"]["points"][0]["id"], "pin1");
+    EXPECT_EQ(saved["pins"]["routes"][0]["via"], nlohmann::json({"pin1"}));
     EXPECT_EQ(saveGraphJson(loadGraphJson(saveGraphJson(doc))), saveGraphJson(doc));
-    EXPECT_FALSE(nlohmann::json::parse(saveGraphJson(loadGraphJson("{}"))).contains("backdrops"));
+    const nlohmann::json bare = nlohmann::json::parse(saveGraphJson(loadGraphJson("{}")));
+    EXPECT_FALSE(bare.contains("backdrops"));
+    EXPECT_FALSE(bare.contains("pins"));
 }
 
 TEST(GraphIo, IntegralJsonNumbersBecomeDeclaredTypes) {

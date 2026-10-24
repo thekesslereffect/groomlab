@@ -332,7 +332,8 @@ def bake_cards(groom, directory=None, resolution=None, name=None, occlusion=1.0,
     folder, asset_folder("cards")/<asset_name>) as TGA files, in Unreal's hair card layout:
     <name>_Depth, _Coverage (opacity), _Tangent (strand direction in card space),
     _Attribute (root U, root V, seed, coordU root to tip), _Color (the strands' color,
-    sRGB) and _AO (ambient occlusion); `name` defaults to the groom's asset_name. By default
+    sRGB), _AO (ambient occlusion) and _Normal (the strands' normal in card tangent space,
+    DirectX's green); `name` defaults to the groom's asset_name. By default
     no file the groom doesn't own is written over (a free name_2... instead), and never
     another groom's bake. `resolution` defaults to the Cards node's atlasSize. No card mesh is
     needed: with `store` the groom's cards view shows the cards with these maps from then on

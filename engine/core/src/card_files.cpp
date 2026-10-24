@@ -16,7 +16,7 @@ namespace groomlab {
 namespace fs = std::filesystem;
 
 const std::vector<std::string>& cardMapNames() {
-    static const std::vector<std::string> names = {"Depth", "Coverage", "Tangent", "Attribute", "Color", "AO"};
+    static const std::vector<std::string> names = {"Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "Normal"};
     return names;
 }
 
@@ -161,7 +161,7 @@ std::string writeCardBake(const CardBake& bake, const CardBakePaths& at, bool pr
     std::error_code ec;
     const fs::path folder = fs::u8path(at.prefix).parent_path();
     if (!folder.empty()) fs::create_directories(folder, ec);
-    // Unreal's hair card textures, and the ambient occlusion: written side by side.
+    // Unreal's hair card textures, the ambient occlusion and the normal: written side by side.
     // With iridescence, the Color map carries it as its alpha.
     std::vector<std::uint8_t> colorAlpha;
     if (t.iridescence.size() * 3 == t.color.size()) {
@@ -173,7 +173,7 @@ std::string writeCardBake(const CardBake& bake, const CardBakePaths& at, bool pr
     }
     const std::vector<std::pair<int, const std::vector<std::uint8_t>*>> maps = {
         {1, &t.depth}, {1, &t.coverage}, {3, &t.tangent}, {4, &t.attribute},
-        colorAlpha.empty() ? std::make_pair(3, &t.color) : std::make_pair(4, static_cast<const std::vector<std::uint8_t>*>(&colorAlpha)), {1, &t.occlusion}};
+        colorAlpha.empty() ? std::make_pair(3, &t.color) : std::make_pair(4, static_cast<const std::vector<std::uint8_t>*>(&colorAlpha)), {1, &t.occlusion}, {3, &t.normal}};
     const std::vector<std::string> paths = at.maps();
     parallelFor(0, maps.size(), [&](std::size_t i) { writeTga(paths[i], t.size, t.size, maps[i].first, *maps[i].second); }, 1);
     // The atlas: every card's cell by its strands, so the cards rebuilt from now on (guides

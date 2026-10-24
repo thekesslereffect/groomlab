@@ -1325,7 +1325,7 @@ class ExtrasTest(SceneMixin, unittest.TestCase):
 
     def test_card_bake_files(self):
         # A card bake's files and record (card_files.h): what Maya's Python and the app share.
-        self.assertEqual(gl.card_map_names(), ["Depth", "Coverage", "Tangent", "Attribute", "Color", "AO"])
+        self.assertEqual(gl.card_map_names(), ["Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "Normal"])
         self.assertEqual(gl.card_bake_suffixes()[-1], "Atlas.json")
         self.assertEqual(gl.card_bake_files("a/b_")[4], "a/b_Color.tga")
         self.assertEqual(gl.groom_file_card_bake_prefix("hair"), "hair_cards/hair_")

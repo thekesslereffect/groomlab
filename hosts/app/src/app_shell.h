@@ -72,6 +72,7 @@ public:
     QToolButton* graphAddButton() const { return graphAdd_; }
     QToolButton* graphPresetsButton() const { return graphPresets_; }
     QToolButton* graphEditButton() const { return graphEdit_; }
+    QToolButton* graphSnapButton() const { return graphSnap_; }
     QLabel* graphStatus() const { return graphStatus_; }
     void setGraphStatus(const QString& text);  // what the last graph edit did
 
@@ -155,6 +156,7 @@ private:
     QToolButton* graphAdd_ = nullptr;
     QToolButton* graphPresets_ = nullptr;
     QToolButton* graphEdit_ = nullptr;
+    QToolButton* graphSnap_ = nullptr;
     QLabel* graphStatus_ = nullptr;
     // The pieces.
     GroomTools* groomToolsWidget_ = nullptr;

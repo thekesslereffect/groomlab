@@ -22,6 +22,7 @@
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_hierarchy.h"
+#include "groomlab/hair_color.h"
 #include "groomlab/guide_set.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/node_catalog.h"
@@ -361,6 +362,7 @@ bool WebGroom::load(const std::string& groomText, const std::string& objText) {
         offsets_.clear();
         positions_.clear();
         colors_.clear();
+        widths_.clear();
         readScalp();
         return true;
     } catch (const std::exception& e) {
@@ -638,6 +640,7 @@ bool WebGroom::evaluate(double density) {
     offsets_.clear();
     positions_.clear();
     colors_.clear();
+    widths_.clear();
     guideOffsets_.clear();
     guidePositions_.clear();
     errors_.clear();
@@ -663,9 +666,14 @@ bool WebGroom::evaluate(double density) {
         if (offsets_.empty()) offsets_.push_back(0);
         positions_.reserve(strands->pointCount() * 3);
         for (const Vec3f& p : strands->positions()) positions_.insert(positions_.end(), {p.x, p.y, p.z});
-        // The strands' own colors as the hair looks, else the look's one color (sRGB for the page).
+        // The widths as the Width node made them (the viewer draws them as coverage, as Maya's
+        // viewport does); -1 throughout without any.
+        if (strands->widths().size() == strands->pointCount()) widths_.assign(strands->widths().begin(), strands->widths().end());
+        else widths_.assign(strands->pointCount(), -1.0f);
+        // The strands' own hair colors (their base colors, as Maya's viewport hands its hair shading
+        // them: HairColor's, tips, variation), else the look's one color; sRGB for the page.
         colors_.resize(strands->pointCount() * 3);
-        if (const auto look = strandLookColors(strands, true)) {
+        if (const auto look = strandLookColors(strands, false)) {
             const std::vector<float> rgba = look->rgba();
             for (std::size_t i = 0; i < strands->pointCount(); ++i) {
                 for (int c = 0; c < 3; ++c) colors_[i * 3 + c] = toSrgb(rgba[i * 4 + c]);
@@ -673,9 +681,8 @@ bool WebGroom::evaluate(double density) {
         } else {
             StrandChannelMeans means;
             const std::array<float, 3> c = strandsLookColor(strands.get(), view.versions.strands, kDefaultStrandColor, means);
-            const std::array<float, 3> shown = hairAppearanceColor(c);
             for (std::size_t i = 0; i < strands->pointCount(); ++i) {
-                for (int k = 0; k < 3; ++k) colors_[i * 3 + k] = toSrgb(shown[k]);
+                for (int k = 0; k < 3; ++k) colors_[i * 3 + k] = toSrgb(c[k]);
             }
         }
         // The guides: the flat ones, else the active hierarchy's.
@@ -705,8 +712,26 @@ std::string WebGroom::statsJson() const {
     if (session_) {
         for (const auto& [name, ms] : session_->nodeTimes()) nodes.push_back({{"node", name}, {"ms", ms}});
     }
+    // The hair's highlight as Maya's viewport shades it (hair_shading.cpp setHairMaterial: core's
+    // hairLobes of the groom's HairColor; engine/gpu/shaders/hair_bsdf.glsl takes them): the R lobe's
+    // weight, the longitudinal width B, the azimuthal spread, the index of refraction, the cuticle
+    // tilt (radians), the azimuthal roughness the RGB is absorbed by, and each strand's variation
+    // (specular, roughness, tilt, pigment), the viewport's own on top as Maya's default draws it.
+    json look = nullptr;
+    if (session_) {
+        const HairLook l = session_->hairLook();
+        const HairLobes lobes = hairLobes(l);
+        constexpr float kPi = 3.14159265f;
+        look = {{"specular", lobes.specularTint},
+                {"width", hairLongitudinalWidth(lobes.roughness)},
+                {"spread", hairAzimuthalSpread(lobes.azimuthalRoughness)},
+                {"ior", lobes.ior},
+                {"tilt", lobes.shiftDegrees * kPi / 180.0f},
+                {"azimuthalRoughness", lobes.azimuthalRoughness},
+                {"variation", {l.specularRandom + 0.3f, l.roughnessRandom + 0.3f, 4.0f * kPi / 180.0f, 0.3f}}};
+    }
     return json{{"errors", errors_}, {"nodes", nodes}, {"evaluateMs", evaluateMs_}, {"strands", strandCount()},
-                {"points", positions_.size() / 3}}
+                {"points", positions_.size() / 3}, {"look", look}}
         .dump();
 }
 

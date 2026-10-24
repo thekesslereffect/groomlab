@@ -195,6 +195,7 @@ json build(const GltfDocument& doc, Buffer& buffer, bool imagesInBuffer) {
         if (m.metallicRoughnessTexture >= 0) pbr["metallicRoughnessTexture"] = textureRef(m.metallicRoughnessTexture, m.name);
         json material = {{"name", m.name}, {"pbrMetallicRoughness", pbr}, {"alphaMode", alphaModeName(m.alphaMode)},
                          {"doubleSided", m.doubleSided}};
+        if (m.normalTexture >= 0) material["normalTexture"] = textureRef(m.normalTexture, m.name);
         if (m.alphaMode == GltfMaterial::AlphaMode::Mask) material["alphaCutoff"] = std::clamp(m.alphaCutoff, 0.0f, 1.0f);
         if (m.occlusionTexture >= 0) {
             json occlusion = textureRef(m.occlusionTexture, m.name);
@@ -488,19 +489,29 @@ int addCardsToGltf(GltfDocument& doc, const CardMesh& cards, const CardTextures&
         orm[3 * i + 1] = 255;
         orm[3 * i + 2] = 255;
     }
-    // Both maps encoded side by side.
-    std::vector<std::vector<std::uint8_t>> pngs =
-        encodePngs({{textures.size, textures.size, 4, &rgba}, {textures.size, textures.size, 3, &orm}});
+    // The normal map with glTF's green (OpenGL's), when the bake has one.
+    const bool hasNormal = textures.normal.size() == textures.tangent.size() && !textures.normal.empty();
+    const std::vector<std::uint8_t> normal = hasNormal ? cardNormalOpenGl(textures) : std::vector<std::uint8_t>();
+    // The maps encoded side by side.
+    std::vector<PngImage> images = {{textures.size, textures.size, 4, &rgba}, {textures.size, textures.size, 3, &orm}};
+    if (hasNormal) images.push_back({textures.size, textures.size, 3, &normal});
+    std::vector<std::vector<std::uint8_t>> pngs = encodePngs(images);
     const int baseColor = static_cast<int>(doc.textures.size());
     doc.textures.push_back({settings.name + "_BaseColor", std::move(pngs[0])});
     const int ormTexture = static_cast<int>(doc.textures.size());
     doc.textures.push_back({settings.name + "_ORM", std::move(pngs[1])});
+    int normalTexture = -1;
+    if (hasNormal) {
+        normalTexture = static_cast<int>(doc.textures.size());
+        doc.textures.push_back({settings.name + "_Normal", std::move(pngs[2])});
+    }
 
     GltfMaterial m;
     m.name = settings.name + "_Mat";
     m.baseColorTexture = baseColor;
     m.metallicRoughnessTexture = ormTexture;
     m.occlusionTexture = ormTexture;
+    m.normalTexture = normalTexture;
     m.metallic = 0.0f;
     m.roughness = settings.roughness;
     m.alphaMode = settings.alphaMode;

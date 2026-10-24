@@ -164,6 +164,8 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
                          "along each strand; on a feather's card along each barb, from the shaft out)",
             "Color": "RGB: base color, sRGB",
             "AO": "R: ambient occlusion (1 open)",
+            "Normal": "RGB: the strands' normal as round fibers in tangent space (x across U, y along V, z out), "
+                      "DirectX's green (Unreal's), linear",
             "ScalpColor": "RGB: the hair's color on the scalp (sRGB), in the scalp's UVs, for the hair cap",
             "ScalpCoverage": "R: how much hair covers the skin, in the scalp's UVs",
         },
@@ -183,7 +185,7 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
 # (HairSim.MIN/MAX_STRAND_PARTICLE_COUNT) and takes up to 64,000 strands a group (MAX_STRAND_COUNT).
 UNITY_STRAND_POINTS = (3, 128)
 UNITY_MAX_STRANDS = 64000
-UNITY_CARD_MAPS = ("BaseColor", "Mask", "AO", "Tangent", "Depth", "Attribute")
+UNITY_CARD_MAPS = ("BaseColor", "Mask", "AO", "Tangent", "Depth", "Attribute", "Normal")
 
 
 def _unity_points(value, what):
@@ -302,7 +304,8 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
 
     Maps: <name>_BaseColor (RGB color, sRGB; A coverage, for alpha clipping), _Mask (HDRP's
     mask map: R metallic 0, G ambient occlusion, B root (0) to tip (1), A smoothness from the
-    hair look), _AO, _Tangent (strand direction in tangent space), _Depth and _Attribute. With
+    hair look), _AO, _Tangent (strand direction in tangent space), _Depth, _Attribute and _Normal
+    (the strands' normal in tangent space, OpenGL's green). With
     `scalp` (and a scalp with UVs), <name>_ScalpBaseColor (color, coverage in alpha) and the
     hair cap <name>_scalpCap.fbx. The groom keeps its own bake (cardMaps and materials are
     left as they were). Returns {"fbx", "scalpCap", "maps", "manifest"}."""
@@ -386,11 +389,13 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
             "Depth": "R (gray): distance off the card plane (0.5 on it, higher in front), linear",
             "Attribute": "R, G: root UV on the scalp; B: seed per strand; A: root (0) to tip (1) along each strand "
                          "(a feather's barbs: from the shaft out), linear",
+            "Normal": "RGB: the strands' normal as round fibers in tangent space (R along +U, G along +V, B out), "
+                      "OpenGL's green, linear (import as a Normal map)",
             "ScalpBaseColor": "RGB: the hair's color on the scalp (sRGB); A: how much hair covers the skin",
         },
         "import": {
             "textures": "BaseColor and ScalpBaseColor sRGB with Alpha Is Transparency; Mask, AO, Tangent, "
-                        "Depth and Attribute linear (sRGB off)",
+                        "Depth and Attribute linear (sRGB off); Normal as Texture Type Normal map",
             "model": "Convert Units on (the FBX is in meters, so its scale stays 1)",
         },
         "materials": {
@@ -399,6 +404,7 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
                 "Base Color Map": maps.get("BaseColor"),
                 "Alpha Clipping": True, "Alpha Clip Threshold": 0.5, "Double-Sided": True,
                 "Mask Map": maps.get("Mask"),
+                "Normal Map": maps.get("Normal"),
                 "Hair Strand Direction": "Tangent map * 2 - 1 (strands run +V, root to tip)",
                 "Smoothness": smoothness,
             },
@@ -407,6 +413,7 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
                 "Base Map": maps.get("BaseColor"),
                 "Alpha Clipping": True, "Threshold": 0.5, "Render Face": "Both",
                 "Occlusion Map": maps.get("AO"),
+                "Normal Map": maps.get("Normal"),
                 "Smoothness": smoothness,
             },
             "scalpCap": "Transparent (alpha blend) with ScalpBaseColor, drawn under the cards",

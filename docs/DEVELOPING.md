@@ -1122,7 +1122,7 @@ main settings as sliders (cards per clump, layers, width scale, segments, variat
 max cards, the atlas resolution; each drag one undo step), the stats of the last view (cards,
 triangles, textures; "changed since the bake" when stale), Bake maps (resolution, occlusion) and
 the baked atlas as a picture. The bake (`GroomDocument::bakeCards`) writes `<stem>_cards/<stem>_
-Depth|Coverage|Tangent|Attribute|Color|AO.tga` beside the groom in Unreal's hair card layout (the
+Depth|Coverage|Tangent|Attribute|Color|AO|Normal.tga` beside the groom in Unreal's hair card layout (the
 Maya host's names), `_Atlas.json` (the cells rebuilt cards keep: the session takes it through
 `setCardMaps`) and `_Preview.png` (color x occlusion, the coverage in alpha: the viewport's map).
 Saving names the last bake in the file (`"cardBake"`: the prefix relative to the groom, the

@@ -762,15 +762,15 @@ TEST(CardPresets, OneTableForEveryHost) {
     EXPECT_THROW(cardNodeKind(graph, "nothing"), std::invalid_argument);
 }
 
-// A card bake as every host names, writes and records it (card_files.h): the six maps of
+// A card bake as every host names, writes and records it (card_files.h): the seven maps of
 // Unreal's layout, the atlas and the preview at <folder>/<name>_, a groom file's at
 // <stem>_cards/<stem>_ beside it, and the cardMaps text formatted, parsed and moved.
 TEST(CardFiles, OneLayoutAndRecordForEveryHost) {
-    EXPECT_EQ(cardMapNames(), (std::vector<std::string>{"Depth", "Coverage", "Tangent", "Attribute", "Color", "AO"}));
+    EXPECT_EQ(cardMapNames(), (std::vector<std::string>{"Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "Normal"}));
     const CardBakePaths at = CardBakePaths::in("C:\\bakes\\hair", "hair");
     EXPECT_EQ(at.prefix, "C:/bakes/hair/hair_");
     EXPECT_EQ(at.map("Color"), "C:/bakes/hair/hair_Color.tga");
-    EXPECT_EQ(at.files().size(), 7u);
+    EXPECT_EQ(at.files().size(), 8u);
     EXPECT_EQ(at.files().back(), at.atlas());
     EXPECT_EQ(at.preview(), "C:/bakes/hair/hair_Preview.png");
     EXPECT_EQ(groomFileCardBakePrefix("bob"), "bob_cards/bob_");

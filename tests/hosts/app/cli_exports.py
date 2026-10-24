@@ -69,7 +69,7 @@ def main(exe, groom, work):
         chunk_length, chunk_type = struct.unpack("<I4s", f.read(8))
         doc = json.loads(f.read(chunk_length))
     assert chunk_type == b"JSON" and len(doc["images"]) >= 2 and doc["meshes"][0]["name"].endswith("_cards"), doc.get("meshes")
-    for m in ("Depth", "Coverage", "Tangent", "Attribute", "Color", "AO"):
+    for m in ("Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "Normal"):
         tga = os.path.join(bake, "cli_%s.tga" % m)
         with open(tga, "rb") as f:
             header = f.read(18)

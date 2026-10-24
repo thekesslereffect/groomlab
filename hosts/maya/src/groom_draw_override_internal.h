@@ -38,6 +38,7 @@ inline const MString kSelectedItem("groomLabSelectedGuides");
 inline const MString kPartsItem("groomLabParts");
 inline const MString kFlowItem("groomLabFlowArrows");
 inline const MString kCardsItem("groomLabCards");
+inline const MString kCardWiresItem("groomLabCardWires");  // (not the builder's: updateCardWires)
 inline const MString kScalpMapItem("groomLabScalpMap");
 inline const MString kStrandMeshItem("groomLabStrandMesh");
 inline const MString kFlowFieldItem("groomLabFlowField");

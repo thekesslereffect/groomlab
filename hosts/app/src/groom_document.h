@@ -113,7 +113,7 @@ struct ExportResult {
 // core's CardBake.)
 struct CardBakeFiles {
     std::string prefix;              // <folder>/<name>_ (CardBakePaths)
-    std::vector<std::string> paths;  // _Depth, _Coverage, _Tangent, _Attribute, _Color, _AO (TGA), _Atlas.json, _Preview.png
+    std::vector<std::string> paths;  // _Depth, _Coverage, _Tangent, _Attribute, _Color, _AO, _Normal (TGA), _Atlas.json, _Preview.png
     std::string preview;             // the viewport's RGBA map: the color darkened by half the AO, the coverage in alpha
     std::string atlas;               // the atlas JSON the session keeps cells by
     std::string stamp;               // cardsBakeStamp of the bake
@@ -361,6 +361,19 @@ public:
     std::string setBackdropColor(int index, int r, int g, int b);
     std::string removeBackdrop(int index);
     void setBackdropRect(int index, double x, double y, double w, double h);
+    // The links' pins (graph_pins.h: the graph's "pins", Unreal's reroute nodes, layout only, as
+    // Maya's Graph Editor keeps them). Adding one on the link into to.input (at `index` in its
+    // route, -1 last; its id to *made), removing one, joining two of one signal, linking an input
+    // from the signal a pin carries (through the pins up to it) and feeding every link through a
+    // pin from another output are each an undo step; moving one is not (as node moves are not).
+    // "" or the error.
+    std::string addPin(const std::string& to, const std::string& input, double x, double y, int index = -1,
+                       std::string* made = nullptr);
+    std::string removePin(const std::string& pin);
+    std::string mergePins(const std::string& keep, const std::string& drop);
+    std::string linkFromPin(const std::string& pin, const std::string& to, const std::string& input);
+    std::string feedPin(const std::string& pin, const std::string& from, const std::string& output);
+    void movePin(const std::string& pin, double x, double y);
     // A node's behaviour version as saved and its operator's newest (graph_edit.h): Upgrade is on
     // offer while the first is lower. {0, 0} for no such node.
     std::pair<int, int> nodeVersion(const std::string& node) const;
@@ -704,7 +717,7 @@ public:
     // The same strands and scalp handed to `bake` (a map export's bake, card_files.h).
     CardBake bakeCardsInMemoryWith(const std::function<CardBake(StrandsPtr, MeshPtr)>& bake);
     // Writes the bake as files: <directory>/<name>_<map>.tga for Depth, Coverage, Tangent,
-    // Attribute, Color and AO (the Maya host's layout and names), <name>_Atlas.json (the cells
+    // Attribute, Color, AO and Normal (the Maya host's layout and names), <name>_Atlas.json (the cells
     // rebuilt cards keep) and <name>_Preview.png (the viewport's RGBA map). The session takes
     // the bake (setCardMaps): the cards keep its cells from now on and the stats say when they
     // went stale. Throws std::runtime_error.

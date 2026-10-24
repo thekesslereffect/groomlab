@@ -23,6 +23,10 @@ from gui_support import CLASSIC_GRAPH, activate, drag, hover, settle_undo
 _menu.ASK_TO_SAVE = False  # no save prompt in tests (scenes stay untitled here)
 
 
+def classic_links():
+    return sorted((c["from"], c["to"], c["input"]) for c in CLASSIC_GRAPH["connections"])
+
+
 def wait(ms):
     """Let Qt run events and timers for `ms` milliseconds (PySide2 has no QTest.qWait)."""
     import time
@@ -175,6 +179,132 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(self.editor.model.source_of("interpolate", "guides"), "guides")
         self.assertEqual(self.editor.scene.selectedItems(), [])  # no rubber band from the port drag
         self.editor.hide()
+
+    def test_alt_shift_drag_cuts_the_links_it_crosses(self):
+        # Across length -> width: the link goes; the output left unconnected, the groom keeps its
+        # graph (not applied), and Ctrl+Z puts the editor back to it.
+        QtCore, QtWidgets = self.ge.QtCore, self.ge.QtWidgets
+        self.editor.resize(1200, 600)
+        self.editor.show()
+        QtWidgets.QApplication.processEvents()
+        try:
+            view = self.editor.view
+            middle = self.edge("length", "width").path().pointAtPercent(0.5)
+            start = view.mapFromScene(middle - QtCore.QPointF(0, 30))
+            end = view.mapFromScene(middle + QtCore.QPointF(0, 30))
+            settle_undo()
+            before = cmds.undoInfo(query=True, undoName=True)
+            drag(view.viewport(), start, end, steps=4, modifiers=QtCore.Qt.AltModifier | QtCore.Qt.ShiftModifier)
+            self.assertIsNone(self.editor.model.source_of("width", "strands"))
+            self.assertFalse(any(e.cutting for e in self.editor.scene.items() if isinstance(e, self.ge.EdgeItem)))
+            self.assertIsNone(self.editor.scene._cut_line)
+            self.assertEqual(self.stored_links(), classic_links())  # (the groom's graph as it was)
+            self.assertTrue(self.editor.undo())
+            self.assertEqual(self.editor.model.source_of("width", "strands"), "length")
+            self.assertEqual(cmds.undoInfo(query=True, undoName=True), before, "Maya's history untouched")
+        finally:
+            self.editor.hide()
+
+    def test_pins_route_links_and_snap_puts_them_on_the_grid(self):
+        # Double-click a link: a pin there, the link through it; no undo step (layout), the groom's
+        # graph keeps it. Delete takes it out. Snap lands a dragged node on the grid.
+        from PySide2 import QtTest
+        QtCore, QtWidgets = self.ge.QtCore, self.ge.QtWidgets
+        self.editor.resize(1200, 600)
+        self.editor.show()
+        QtWidgets.QApplication.processEvents()
+        try:
+            view = self.editor.view
+            middle = self.edge("length", "width").path().pointAtPercent(0.5)
+            settle_undo()
+            before = cmds.undoInfo(query=True, undoName=True)
+            QtTest.QTest.mouseDClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, view.mapFromScene(middle))
+            wait(50)
+            pins = self.editor.model.route("width", "strands")
+            self.assertEqual(len(pins), 1)
+            pin = self.editor.pin_items[pins[0]]
+            self.assertTrue(pin.isSelected())
+            self.assertEqual(self.edge("length", "width").pins, [pin])
+            self.assertEqual(cmds.undoInfo(query=True, undoName=True), before, "a pin is layout: no undo step")
+            self.assertEqual(groomlab.get_graph(self.groom)["pins"]["routes"][0]["to"], "width")
+            # Moved, the link follows it.
+            pin.setPos(pin.pos() + QtCore.QPointF(0, 120))
+            path = self.edge("length", "width").path()
+            self.assertTrue(any((path.pointAtPercent(i / 64.0) - pin.scenePos()).manhattanLength() < 2 for i in range(65)))
+            self.editor.scene.clearSelection()
+            pin.setSelected(True)
+            self.editor.delete_selected()
+            self.assertEqual(self.editor.model.route("width", "strands"), [])
+            self.assertEqual(self.editor.model.source_of("width", "strands"), "length", "the link stays")
+            self.assertNotIn("pins", groomlab.get_graph(self.groom))
+            # Snap: a node dragged lands on the grid's dots.
+            self.editor.snap_box.setChecked(True)
+            node = self.editor.items["width"]
+            start = view.mapFromScene(node.scenePos() + QtCore.QPointF(20, 8))
+            drag(view.viewport(), start, start + QtCore.QPoint(37, 29), steps=3)
+            grid = self.ge.GRID
+            self.assertEqual((node.pos().x() % grid, node.pos().y() % grid), (0.0, 0.0))
+            self.assertEqual(self.editor.model.position("width"), (node.pos().x(), node.pos().y()))
+        finally:
+            self.editor.snap_box.setChecked(False)
+            self.editor.hide()
+
+    def test_links_drag_out_of_pins_and_into_them(self):
+        # Blueprints' reroute nodes: a link dragged from a pin's nub carries its signal, through the
+        # pins up to it; a link from an output dropped on a pin feeds every link through it.
+        QtCore, QtWidgets = self.ge.QtCore, self.ge.QtWidgets
+        self.editor.resize(1200, 600)
+        self.editor.show()
+        QtWidgets.QApplication.processEvents()
+        try:
+            view, model = self.editor.view, self.editor.model
+            width = self.editor.items["width"]
+            under = width.scenePos() + QtCore.QPointF(-60, width.height + 80)
+            pin = model.add_pin("width", "strands", under.x(), under.y())
+            self.editor.rebuild()
+            QtWidgets.QApplication.processEvents()
+            item = self.editor.pin_items[pin]
+            nub = view.mapFromScene(item.scenePos() + QtCore.QPointF(self.ge.PinItem.NUB, 0))
+            port = view.mapFromScene(self.editor.items["resample"].inputs["strands"].scene_center())
+            drag(view.viewport(), nub, port, steps=4)
+            self.assertEqual(model.source_of("resample", "strands"), "length")
+            self.assertEqual(model.route("resample", "strands"), [pin])
+            self.assertEqual(groomlab.get_graph(self.groom)["pins"]["routes"][0]["via"], [pin])
+            # The interpolate's output dropped on the pin: both links come from it now, through the pin.
+            item = self.editor.pin_items[pin]
+            out = view.mapFromScene(self.editor.items["interpolate"].output.scene_center())
+            drag(view.viewport(), out, view.mapFromScene(item.scenePos() + QtCore.QPointF(-2, 0)), steps=4)
+            self.assertEqual(model.source_of("width", "strands"), "interpolate")
+            self.assertEqual(model.source_of("resample", "strands"), "interpolate")
+            self.assertEqual((model.route("width", "strands"), model.route("resample", "strands")), ([pin], [pin]))
+            stored = {(c["from"], c["to"], c["input"]) for c in groomlab.get_graph(self.groom)["connections"]}
+            self.assertIn(("interpolate", "resample", "strands"), stored)
+            self.assertTrue(self.editor.undo())  # the feed: one step
+            wait(50)
+            self.assertEqual(self.editor.model.source_of("resample", "strands"), "length")
+        finally:
+            self.editor.hide()
+
+    def test_a_cut_is_one_edit(self):
+        # Two links at once, the output left unconnected: one Ctrl+Z puts both back.
+        settle_undo()
+        self.editor.cut_links([self.edge("length", "width").link(), self.edge("width", "resample").link()])
+        self.assertIsNone(self.editor.model.source_of("width", "strands"))
+        self.assertIsNone(self.editor.model.source_of("resample", "strands"))
+        self.assertTrue(self.editor.undo())
+        self.assertEqual(self.editor.model.source_of("width", "strands"), "length")
+        self.assertEqual(self.editor.model.source_of("resample", "strands"), "width")
+        # An optional link (Interpolate's scalp): applied, one step of Maya's history.
+        self.editor.cut_links([self.edge("scalp", "interpolate").link()])
+        self.assertNotIn(("scalp", "interpolate", "scalp"), self.stored_links())
+        self.assertIn("cut 1 link", self.editor.status.text())
+        self.assertTrue(self.editor.undo())
+        wait(50)
+        self.assertEqual(self.stored_links(), classic_links())
+        self.assertEqual(self.editor.model.source_of("interpolate", "scalp"), "scalp")
+
+    def stored_links(self):
+        return sorted((c["from"], c["to"], c["input"]) for c in groomlab.get_graph(self.groom)["connections"])
 
     def test_tab_added_nodes_wire_after_the_selection(self):
         self.editor.items["length"].setSelected(True)
@@ -757,7 +887,7 @@ class GraphEditorTest(unittest.TestCase):
             try:
                 self.assertEqual(panel.groom, self.groom)
                 self.assertEqual(panel.preset.currentText(), "Unreal Hair Cards")
-                self.assertEqual(panel.table.rowCount(), 6)
+                self.assertEqual(panel.table.rowCount(), 7)
                 self.assertEqual(panel.format.currentData(), "tga")
                 panel.preset.setCurrentIndex(panel.preset.findText("Unity HDRP Hair"))
                 self.assertEqual(panel.table.rowCount(), 5)

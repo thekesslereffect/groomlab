@@ -187,6 +187,19 @@ TEST(Cards, BakeCoversTheCardsAndWritesTga) {
     }
     ASSERT_GT(n, 0u);
     EXPECT_GT(up / static_cast<double>(n), 200.0);
+    // The normal: out of the card (z, blue, high) where the strands are; DirectX's green, OpenGL's
+    // the other way up.
+    ASSERT_EQ(t.normal.size(), 3u * 256u * 256u);
+    double out = 0.0;
+    for (std::size_t p = 0; p < 256u * 256u; ++p) {
+        if (t.coverage[p] > 128) out += t.normal[p * 3 + 2];
+    }
+    EXPECT_GT(out / static_cast<double>(n), 200.0);
+    const std::vector<std::uint8_t> gl = cardNormalOpenGl(t);
+    for (std::size_t p = 0; p < 256u * 256u; p += 97) {
+        EXPECT_EQ(gl[p * 3], t.normal[p * 3]);
+        EXPECT_EQ(gl[p * 3 + 1], 255 - t.normal[p * 3 + 1]);
+    }
 
     const std::string path = (std::filesystem::temp_directory_path() / "groomlab_cards_alpha.tga").string();
     writeTga(path, t.size, t.size, 1, t.coverage);
@@ -953,6 +966,29 @@ TEST(Cards, CardsShadeLikeTheirStrandsLitDrawing) {
     const DisplayGeometry g = cardGeometry(mesh, true);
     ASSERT_EQ(g.bitangents.size(), g.normals.size());
     for (std::size_t i = 0; i < g.normals.size(); ++i) EXPECT_FLOAT_EQ(g.bitangents[i], g.normals[i]);
+}
+
+// The cards' wireframe: every quad's four edges, each once (neighbors share theirs), no diagonals.
+TEST(Cards, WireframeIsTheQuadsEdgesOnce) {
+    const auto plane = test::makePlane(16);
+    const CardMesh mesh = buildCards(*clumpedFur(), plane.get(), CardSettings{});
+    ASSERT_FALSE(mesh.cards.empty());
+    const DisplayGeometry g = cardGeometry(mesh, false);
+    const DisplayGeometry wire = cardWireGeometry(g);
+    EXPECT_FALSE(wire.triangles);
+    EXPECT_EQ(wire.positions, g.positions);
+    // A card of r rows and c columns of quads has r (c + 1) + c (r + 1) edges.
+    std::size_t expected = 0;
+    for (const CardMesh::Card& card : mesh.cards) {
+        const std::size_t rows = static_cast<std::size_t>(card.stations - 1), columns = static_cast<std::size_t>(std::max(card.across, 1));
+        expected += rows * (columns + 1) + columns * (rows + 1);
+    }
+    EXPECT_EQ(wire.indices.size(), 2 * expected);
+    std::set<std::pair<std::uint32_t, std::uint32_t>> seen;
+    for (std::size_t i = 0; i < wire.indices.size(); i += 2) {
+        EXPECT_TRUE(seen.insert({wire.indices[i], wire.indices[i + 1]}).second) << "an edge twice";
+    }
+    EXPECT_TRUE(cardWireGeometry(DisplayGeometry{}).empty());
 }
 
 // Two clumps alike in shape side by side, standing up: clump 0 dark, clump 1 light, both

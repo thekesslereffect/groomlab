@@ -25,6 +25,14 @@
 //                                  feed, a line by the cursor says why, and a drop there changes
 //                                  nothing (a picked-up wire goes back)
 //   click a wire                   selects it; Delete removes it
+//   double-click a wire            puts a pin there (Unreal's reroute node, the graph's "pins":
+//                                  graph_pins.h): the wire runs through it; drag the pin to route
+//                                  it, drop it on another pin of the same signal to join them (a
+//                                  bundle); drag from its nub (right) to an input for another wire
+//                                  of its signal; drop a wire from an output on it to feed every
+//                                  wire through it from there (a picked-up input's wire: that
+//                                  input takes the pin's signal); Delete removes a selected pin
+//   Snap (the Graph Editor's bar)  nodes and pins you drag land on the grid (setSnapping)
 //   double-click a node            renames it (a glass prompt); a Compound opens instead: its
 //                                  nodes back in the graph (Ungroup)
 //   right-click                    a node's menu, a backdrop's or the canvas's: the host fills
@@ -197,7 +205,17 @@ public:
     // Copy and paste (Ctrl+C, Ctrl+V): the clipboard's text, as Maya's Graph Editor writes it.
     void copySelected();
     void paste();
-    void deleteSelected();  // Delete: the selected nodes (or the selected wire)
+    void deleteSelected();  // Delete: the selected nodes (or the selected wire, pin or backdrop)
+    // Snap: nodes and pins dragged land on the grid (24 scene units, the docked canvas's lines).
+    void setSnapping(bool on) { snapping_ = on; }
+    bool snapping() const { return snapping_; }
+    // The pins as drawn (tests, scripts): their ids, where one is (scene units), the pins a wire
+    // runs through, and the selected one ("" none).
+    std::vector<std::string> pinIds() const;
+    QPointF pinPos(const std::string& pin) const;
+    std::vector<std::string> wirePins(int wire) const;
+    std::string selectedPin() const;
+    void selectPin(const std::string& pin);
     // While a wire is dragged over a port: why it cannot connect there ("" when it can, or when
     // no wire is over a port). connectionProblem says it for the output (node, port) to the input
     // (node, port) by index: "" when they fit.
@@ -311,7 +329,16 @@ private:
     struct Wire {
         int from = -1, to = -1;  // node indices
         int output = 0, input = 0;  // port indices
+        std::vector<int> pins;     // the pins it runs through (indices into pins_), source first
         QPainterPath path;         // scene units
+    };
+    // A pin the wires run through (the graph's "pins", graph_pins.h): drawn over the wires in the
+    // color of the signal it carries.
+    struct Pin {
+        std::string id;
+        QPointF pos;  // scene units, its center
+        QColor color;
+        int from = -1, output = 0;  // the signal: its source node and output (as a wire's)
     };
     // A backdrop framing part of the graph (the graph's "backdrops", graph_io.h: Maya's Graph
     // Editor's and a preset's): drawn behind the nodes, layout only.
@@ -320,7 +347,7 @@ private:
         QRectF rect;  // scene units
         QColor color;
     };
-    enum class Drag { None, Pan, Zoom, Move, Wire, Camera, Band, Backdrop, BackdropResize };
+    enum class Drag { None, Pan, Zoom, Move, Wire, Camera, Band, Backdrop, BackdropResize, Pin };
 
     void rebuild();      // nodes_, wires_ and backdrops_ from the document
     void autoLayout();   // positions for nodes the document gives none
@@ -338,6 +365,9 @@ private:
     int nodeAt(const QPointF& scene) const;
     // A port under a scene point: the node and port indices, output or input.
     bool portAt(const QPointF& scene, int* node, int* port, bool* output) const;
+    int pinAt(const QPointF& scene, bool* nub = nullptr) const;  // -1 none; `nub`: on its nub
+    int pieceAt(const Wire& wire, const QPointF& scene) const;    // which of its pieces (between its points) is nearest
+    QPointF snappedIf(const QPointF& scene) const;                // on the grid while Snap is on
     int wireAt(const QPointF& scene) const;
     bool bypassButtonAt(const QPointF& scene, int* node) const;
     bool inputsButtonAt(const QPointF& scene, int* node) const;
@@ -370,6 +400,12 @@ private:
     std::vector<Node> nodes_;
     std::vector<Wire> wires_;
     std::vector<Backdrop> backdrops_;
+    std::vector<Pin> pins_;
+    int selectedPin_ = -1;
+    int dragPin_ = -1;      // the pin being moved
+    QPointF pinStart_;      // where it was when the move began
+    int dragWirePin_ = -1;  // a wire dragged out of a pin's nub: that pin
+    bool snapping_ = false;
     std::map<std::string, double> times_;     // ms per node in its last run
     std::map<std::string, std::string> notes_;  // a note per node from its last run
     std::map<std::string, std::string> errors_;  // an error per failing node

@@ -44,7 +44,7 @@
 // (GroomData::scaleReference, the scalp area the groom is 1x at, written when set) and
 // "scaleTransformReference" (the transform scale it is 1x at, written when set): the groom scales
 // with its scalp (GroomSession::groomScale); without a reference the first one measured is it. "cardBake": the
-// last card bake's files, <prefix>Depth|Coverage|Tangent|Attribute|Color|AO.tga,
+// last card bake's files, <prefix>Depth|Coverage|Tangent|Attribute|Color|AO|Normal.tga,
 // <prefix>Atlas.json and <prefix>Preview.png (the hosts' layout), and the stamp of what each
 // Cards node's cards were made from (the stale check; empty: unknown, every node stale).
 // "simCaches": each baked Simulate node's guide cache (engine/io sim_cache.h: Alembic curves, a
