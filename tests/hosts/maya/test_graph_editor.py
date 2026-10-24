@@ -370,6 +370,16 @@ class GraphApiTest(unittest.TestCase):
         self.assertEqual(model.route("thick", "strands"), [])
         model.prune_pins()
         self.assertNotIn(d, model.pins)
+        # What a link drawn out of a pin runs through, and a route set by hand.
+        e = model.add_pin("thick", "strands", 1, 1)
+        f = model.add_pin("thick", "strands", 2, 2)
+        self.assertEqual(model.route_to(e), [e])
+        self.assertEqual(model.route_to(f), [e, f])
+        self.assertEqual(model.pin_links(f), [(("thick", "strands"), 1)])
+        model.connect("interpolate", "resample", "strands")
+        model.set_route("resample", "strands", model.route_to(e))
+        self.assertEqual(model.route("resample", "strands"), [e])
+        self.assertEqual(model.pin_links(e), [(("resample", "strands"), 0), (("thick", "strands"), 0)])
 
     def test_model_rejects_bad_edits(self):
         model = gm.GraphModel.from_groom(self.groom, self.catalog)

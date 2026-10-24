@@ -249,6 +249,42 @@ class GraphEditorTest(unittest.TestCase):
             self.editor.snap_box.setChecked(False)
             self.editor.hide()
 
+    def test_links_drag_out_of_pins_and_into_them(self):
+        # Blueprints' reroute nodes: a link dragged from a pin's nub carries its signal, through the
+        # pins up to it; a link from an output dropped on a pin feeds every link through it.
+        QtCore, QtWidgets = self.ge.QtCore, self.ge.QtWidgets
+        self.editor.resize(1200, 600)
+        self.editor.show()
+        QtWidgets.QApplication.processEvents()
+        try:
+            view, model = self.editor.view, self.editor.model
+            width = self.editor.items["width"]
+            under = width.scenePos() + QtCore.QPointF(-60, width.height + 80)
+            pin = model.add_pin("width", "strands", under.x(), under.y())
+            self.editor.rebuild()
+            QtWidgets.QApplication.processEvents()
+            item = self.editor.pin_items[pin]
+            nub = view.mapFromScene(item.scenePos() + QtCore.QPointF(self.ge.PinItem.NUB, 0))
+            port = view.mapFromScene(self.editor.items["resample"].inputs["strands"].scene_center())
+            drag(view.viewport(), nub, port, steps=4)
+            self.assertEqual(model.source_of("resample", "strands"), "length")
+            self.assertEqual(model.route("resample", "strands"), [pin])
+            self.assertEqual(groomlab.get_graph(self.groom)["pins"]["routes"][0]["via"], [pin])
+            # The interpolate's output dropped on the pin: both links come from it now, through the pin.
+            item = self.editor.pin_items[pin]
+            out = view.mapFromScene(self.editor.items["interpolate"].output.scene_center())
+            drag(view.viewport(), out, view.mapFromScene(item.scenePos() + QtCore.QPointF(-2, 0)), steps=4)
+            self.assertEqual(model.source_of("width", "strands"), "interpolate")
+            self.assertEqual(model.source_of("resample", "strands"), "interpolate")
+            self.assertEqual((model.route("width", "strands"), model.route("resample", "strands")), ([pin], [pin]))
+            stored = {(c["from"], c["to"], c["input"]) for c in groomlab.get_graph(self.groom)["connections"]}
+            self.assertIn(("interpolate", "resample", "strands"), stored)
+            self.assertTrue(self.editor.undo())  # the feed: one step
+            wait(50)
+            self.assertEqual(self.editor.model.source_of("resample", "strands"), "length")
+        finally:
+            self.editor.hide()
+
     def test_a_cut_is_one_edit(self):
         # Two links at once, the output left unconnected: one Ctrl+Z puts both back.
         settle_undo()

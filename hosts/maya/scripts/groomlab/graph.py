@@ -812,6 +812,30 @@ class GraphModel(object):
                 return r["from"], r["output"]
         return None
 
+    def pin_links(self, pin):
+        """The links (to, input) running through a pin, and each one's place of it in its route."""
+        return [(key, r["via"].index(pin)) for key, r in sorted(self.routes.items())
+                if pin in r["via"] and self._source(*key) == (r["from"], r["output"])]
+
+    def route_to(self, pin):
+        """The pins from the source up to and including `pin` (a link drawn out of it runs through
+        these): the first of its links' routes, [] for none."""
+        links = self.pin_links(pin)
+        if not links:
+            return []
+        (key, index), = links[:1]
+        return list(self.routes[key]["via"][:index + 1])
+
+    def set_route(self, to, input_name, via):
+        """The link into to.input runs through `via` (pin ids), from its source as it is now."""
+        source = self._source(to, input_name)
+        if source is None:
+            raise GraphError("%s.%s has no link to route" % (to, input_name))
+        if via:
+            self.routes[(to, input_name)] = {"from": source[0], "output": source[1], "via": list(via)}
+        else:
+            self.routes.pop((to, input_name), None)
+
     def add_pin(self, to, input_name, x, y, index=None):
         """A new pin at (x, y) on the link into to.input, at `index` in its route (None: last, by
         the destination). Returns its id."""

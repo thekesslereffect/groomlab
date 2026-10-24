@@ -9,6 +9,8 @@ Edits a GraphModel (groomlab.graph) and writes it back to the groom:
 - Delete removes selected nodes or connections; Alt+Shift+drag across links cuts them (Hypershade's gesture);
 - double-click a link to put a pin on it (Unreal's reroute nodes): links run through their pins,
   which move like nodes, and a pin dropped on another carrying the same signal joins it (a bundle);
+  drag from a pin's nub to an input for another link of its signal, drop a link from an output
+  (or an input) on a pin to feed every link through it from there (or that input from the pin);
   Delete takes a selected pin out. Snap (the top bar) puts nodes and pins on the grid;
 - right-click a node for Set Output / Rename / Delete;
 - parameters of the selected node appear on the right; numbers get a slider
@@ -1202,12 +1204,34 @@ def snapped(point):
     return QtCore.QPointF(round(point.x() / GRID) * GRID, round(point.y() / GRID) * GRID)
 
 
+class PinPort(object):
+    """A pin as a link drag's start (dragged from its nub): an output port of the signal it carries,
+    drawn from the pin, so the scene's link drag treats it as that output."""
+
+    is_output = True
+    is_param = False
+    highlight = False
+
+    def __init__(self, pin_item):
+        self.pin_item = pin_item
+        edge = pin_item.edges[0]
+        self.node_item, self.name = edge.src_item, edge.output
+        self.port_type, self.value_kind = edge.src_port.port_type, edge.src_port.value_kind
+
+    def scene_center(self):
+        return self.pin_item.scenePos()
+
+    def update(self):
+        pass
+
+
 class PinItem(QtWidgets.QGraphicsItem):
     """A reroute point links run through (Unreal's Blueprint reroute node): moved and selected like a
     node, in the color of the signal it carries; dropped on another pin of the same signal, it
     joins it, so links from one output run through it as a bundle."""
 
     RADIUS = 6.0
+    NUB = 10.0  # the nub links are dragged out of: right of the pin, as an output port
 
     def __init__(self, editor, pin, color):
         super(PinItem, self).__init__()
@@ -1218,18 +1242,26 @@ class PinItem(QtWidgets.QGraphicsItem):
         self.setAcceptHoverEvents(True)
         self.setFlags(QtWidgets.QGraphicsItem.ItemIsMovable | QtWidgets.QGraphicsItem.ItemIsSelectable |
                       QtWidgets.QGraphicsItem.ItemSendsGeometryChanges)
-        self.setToolTip("Pin: drag to route the link; drop on another pin of the same link to join them; "
-                        "Delete removes it")
+        self.setToolTip("Pin: drag to route the link; drop on another pin of the same link to join them. "
+                        "Drag from its nub (right) for another link of this signal; drop a link on it to feed "
+                        "its links from there. Delete removes it")
         self.setPos(*editor.model.pin_position(pin))
 
     def boundingRect(self):
         r = self.RADIUS + 3.0
-        return QtCore.QRectF(-r, -r, 2 * r, 2 * r)
+        return QtCore.QRectF(-r, -r, 2 * r + self.NUB, 2 * r)
 
     def shape(self):
         path = QtGui.QPainterPath()
-        path.addEllipse(self.boundingRect())
+        r = self.RADIUS + 3.0
+        path.addEllipse(QtCore.QRectF(-r, -r, 2 * r, 2 * r))
+        path.addEllipse(QtCore.QPointF(self.NUB, 0), 5.0, 5.0)
         return path
+
+    def nub_at(self, scene_pos):
+        """Whether a scene point is on the nub (the right of the pin, where links are dragged out)."""
+        local = self.mapFromScene(scene_pos)
+        return local.x() > self.RADIUS * 0.5 and abs(local.y()) < self.RADIUS + 3.0
 
     def paint(self, painter, option, widget=None):
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -1237,6 +1269,11 @@ class PinItem(QtWidgets.QGraphicsItem):
         painter.setPen(QtGui.QPen(SELECTED if self.isSelected() else self.color.darker(160), 2.0))
         painter.setBrush(self.color.lighter(120) if self.hovered else self.color)
         painter.drawEllipse(QtCore.QPointF(0, 0), r, r)
+        if self.hovered or self.isSelected():  # the nub, as an output port's arrow
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.setBrush(self.color)
+            painter.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(self.NUB - 3.0, -4.0), QtCore.QPointF(self.NUB + 3.0, 0.0),
+                                                 QtCore.QPointF(self.NUB - 3.0, 4.0)]))
 
     def hoverEnterEvent(self, event):
         self.hovered = True
@@ -1668,6 +1705,12 @@ class GraphScene(QtWidgets.QGraphicsScene):
             self._begin_cut(event.scenePos())
             event.accept()
             return
+        pin = self.pin_at(event.scenePos())
+        if pin is not None and pin.edges and pin.nub_at(event.scenePos()) and event.button() == QtCore.Qt.LeftButton:
+            event.accept()  # a link out of the pin's nub (Blueprints'), of the signal it carries
+            self._detach = None
+            self._begin(PinPort(pin), event.scenePos())
+            return
         port = self.port_at(event.scenePos())
         if port is not None and event.button() == QtCore.Qt.LeftButton:
             if self._drag_port is not None:
@@ -1720,6 +1763,10 @@ class GraphScene(QtWidgets.QGraphicsScene):
             return
         super(GraphScene, self).mouseMoveEvent(event)
         self._hover_drop_wire(event.scenePos())
+
+    def pin_at(self, pos):
+        """The pin at a scene point, or None."""
+        return next((i for i in self.items(pos) if isinstance(i, PinItem)), None)
 
     def edge_at(self, pos, exclude=None):
         """The wire at a scene point (none of `exclude`'s, a NodeItem's own), or None."""
@@ -1780,7 +1827,20 @@ class GraphScene(QtWidgets.QGraphicsScene):
                 self.editor.report("Not linked: %s" % refused)
             elif end is not None:
                 out, inp = (start, end) if start.is_output else (end, start)
-                self.editor.link(out.node_item.name, inp.node_item.name, inp.name, detach=detach, output=out.name)
+                if isinstance(out, PinPort):
+                    self.editor.link_from_pin(out.pin_item.pin, inp.node_item.name, inp.name)
+                else:
+                    self.editor.link(out.node_item.name, inp.node_item.name, inp.name, detach=detach, output=out.name)
+            elif self.pin_at(event.scenePos()) is not None and not isinstance(start, PinPort):
+                # Dropped on a pin: an output feeds the pin's links from there; an input (or a link's
+                # end picked up off one) takes the pin's signal.
+                pin = self.pin_at(event.scenePos()).pin
+                if detach:
+                    self.editor.link_from_pin(pin, *detach)
+                elif start.is_output:
+                    self.editor.feed_pin(pin, start.node_item.name, start.name)
+                else:
+                    self.editor.link_from_pin(pin, start.node_item.name, start.name)
             elif detach:
                 self.editor.unlink(*detach)  # a picked-up link dropped on nothing: removed
             elif not start.is_output:
@@ -5008,6 +5068,42 @@ class GraphEditor(QtWidgets.QWidget):
         self.pin_items[pin].setSelected(True)
         self.report("pinned %s.%s (drag the pin to route it; Delete removes it)" % (dst, input_name))
 
+    def link_from_pin(self, pin, dst, input_name):
+        """Link the signal a pin carries to dst.input_name, through the pins up to it (one undo
+        step, as any link)."""
+        source = self.model.pin_source(pin)
+        if source is None:
+            return
+        via = self.model.route_to(pin)
+        self.link(source[0], dst, input_name, output=source[1])
+        if self.model.source_of(dst, input_name) == source[0] and via:
+            self.model.set_route(dst, input_name, via)
+            self._layout_dirty = True
+            self.commit_layout()
+            self.rebuild()
+
+    def feed_pin(self, pin, src, output):
+        """Every link through the pin comes from src's `output` now (Blueprints' reroute node fed
+        again), running on through the pin and the ones after it: one undo step. Nothing changes
+        when one of them can't take it (its reason said)."""
+        links = self.model.pin_links(pin)
+        if not links:
+            return
+        before = self.model.to_dict()
+        try:
+            for (to, input_name), index in links:
+                via = self.model.routes[(to, input_name)]["via"][index:]
+                self.model.connect(src, to, input_name, output=output, by_hand=True)
+                self.model.set_route(to, input_name, via)
+        except gm.GraphError as e:
+            self.model.load_dict(before)
+            self.report("Not linked: %s" % e)
+            self.rebuild()
+            return
+        self.rebuild()
+        self.changed()
+        self.report("%d link%s fed from %s through the pin" % (len(links), "" if len(links) == 1 else "s", src))
+
     def pin_moved(self, pin, pos):
         if self.model is not None and pin in self.model.pins:
             self.model.move_pin(pin, pos.x(), pos.y())
@@ -5872,6 +5968,9 @@ class GraphEditor(QtWidgets.QWidget):
             self.report("not applied: " + "; ".join(problems))
             return False
         from maya import cmds
+        # The layout write a sync may still be waiting to skip is behind this edit now: an undo back
+        # to that text later is a change to show, not our own write.
+        self._layout_text = None
         self.model.save(self.groom)  # one undo step
         count = cmds.getAttr(self.groom + ".outStrandCount")
         import groomlab

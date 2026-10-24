@@ -124,7 +124,11 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   - **Pins:** double-click a link to put a pin on it (Unreal's reroute nodes): the link runs
     through it, and dragging the pin routes the link, to tidy crossing wires. Links from one output
     can share pins: drop a pin on another pin of the same output and they join, the links running
-    through it as a bundle. Delete takes a selected pin out (the link straightens there). Pins are
+    through it as a bundle. As in Blueprints, drag from a pin's nub (its right side) to an input
+    for another link of the same signal, running through the pins up to it; drop a link from an
+    output on a pin and every link through it is fed from that output instead (one undo step); drop
+    an input's link end on a pin and that input takes the pin's signal. Delete takes a selected pin
+    out (the link straightens there). Pins are
     layout, as node positions are: no undo step, nothing evaluates again, and the groom file keeps
     them (the "pins" of its graph; the app and Blender carry them but don't draw them yet).
   - **Refused links:** mismatched types and cycles are refused, with the reason in the status
