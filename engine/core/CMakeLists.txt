@@ -14,6 +14,7 @@ add_library(groomlab_core_objects OBJECT
     src/brush_catalog.cpp
     src/camera_solve.cpp
     src/cards.cpp
+    src/card_separation.cpp
     src/color_patterns.cpp
     src/card_atlas.cpp
     src/card_bake.cpp

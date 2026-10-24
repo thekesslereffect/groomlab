@@ -132,6 +132,14 @@ struct CardSettings {
     // card bends along the rachis as the groom's feather does (Card::spine). Off: a flat strip of
     // one quad per segment. Down feathers' crossed cards stay flat either way.
     bool featherSpine = true;
+    // Separation: cards closer than a gap to another card, or passing through it, are pushed apart
+    // along their normals (separateCards), roots held. The gap is a share of the narrower card's
+    // width: `separation` for hair cards (0: none), `featherSeparation` for feather cards (the
+    // larger share between a hair and a feather card), in `separationIterations` passes. Only the mesh moves (Card::refShift): the texture,
+    // baked from where the strands are, stays as it is.
+    float separation = 0.0f;
+    float featherSeparation = 0.0f;
+    int separationIterations = 8;
 };
 
 // Stations along a card its color is kept at (Card::colors), root to tip.
@@ -165,6 +173,9 @@ struct CardMesh {
         // segments only adds or removes edge loops and the UVs stay as they are.
         std::vector<Vec3f> refCenter, refSide, refNormal, refShading;
         std::vector<float> refWidth;
+        // Per reference station, how far the card's mesh moved off its strands to clear the cards
+        // around it (separateCards; empty: none): the stations carry it, the texture doesn't.
+        std::vector<Vec3f> refShift;
         // The card's texture-space width: the widest station (refWidth's max). The texture
         // keeps this one scale along the whole card: a point at offset x across a station
         // maps to u = 0.5 + x / textureWidth of the cell, so narrower stations (a taper)
@@ -236,6 +247,15 @@ struct CardMesh {
     std::size_t textureCount() const;    // cards with a texture of their own
 };
 
+// Pushes apart cards closer than their gap (a share of the narrower card's width: `hairGap` for
+// hair cards, `featherGap` for feather cards, between the two kinds the larger), or passing
+// through each other, along their normals,
+// in `iterations` passes: each pass moves every card by the mean of what its neighbours ask of it
+// at each station, held at the root and free from a third of the way along, its shift smoothed
+// along it. A pair keeps the side it is mostly on (a card through another goes to that side).
+// Cards of one feather (a down feather's cross) never push each other. Writes Card::refShift and
+// samples the stations again. Deterministic: the same cards give the same result.
+void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float featherGap, int iterations);
 // The cards of a strand set, without atlas cells or vertices (layoutCards adds
 // them). With settings.variations, cards are grouped into that many shared textures.
 std::vector<CardMesh::Card> makeCards(const StrandSet& strands, const ScalpMesh* scalp, const CardSettings& settings);

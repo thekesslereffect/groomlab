@@ -256,11 +256,26 @@ std::vector<CardNodeSummary> summarizeCardNodes(const CardMesh& mesh, const Stra
         for (const CardMesh::Card* card : members[n]) {
             if (card->feather >= 0) feathers.insert(card->feather);
             const auto columns = static_cast<std::size_t>(std::max(card->across, 1) + 1);
-            const std::size_t first = card->firstVertex;
-            const std::size_t end = std::min(mesh.positions.size(), first + columns * static_cast<std::size_t>(card->stations));
-            for (std::size_t v = first; v < end; ++v) {
-                const Vec3f& p = mesh.positions[v];
-                h = hashFloat(hashFloat(hashFloat(h, p.x), p.y), p.z);
+            if (!card->refShift.empty()) {
+                // Moved off its strands to clear its neighbours (separateCards): the vertices it
+                // would have without the move (its texture is made from those, and a change of the
+                // separation leaves them alone), as the mesh would hold them.
+                CardMesh::Card still = *card;
+                still.refShift.clear();
+                detail::sampleStations(still);
+                const std::vector<Vec3f> root = detail::cardRow(still, 0);
+                for (int k = 0; k < still.stations; ++k) {
+                    for (const Vec3f& p : detail::cardVertexRow(still, static_cast<std::size_t>(k), root)) {
+                        h = hashFloat(hashFloat(hashFloat(h, p.x), p.y), p.z);
+                    }
+                }
+            } else {
+                const std::size_t first = card->firstVertex;
+                const std::size_t end = std::min(mesh.positions.size(), first + columns * static_cast<std::size_t>(card->stations));
+                for (std::size_t v = first; v < end; ++v) {
+                    const Vec3f& p = mesh.positions[v];
+                    h = hashFloat(hashFloat(hashFloat(h, p.x), p.y), p.z);
+                }
             }
             summary.triangles += 2 * (columns - 1) * static_cast<std::size_t>(std::max(card->stations - 1, 0));
             if (card->variationOf < 0) ++summary.textures;
@@ -344,16 +359,11 @@ void buildCardVertices(CardMesh& mesh, bool holdInCell) {
         // Seated (Card::base): the rows near the root bend from where the stations put them to
         // the base, all the way at the root row, none from a tenth of the card on.
         const std::vector<Vec3f> root = detail::cardRow(card, 0);
-        const bool seated = card.base.size() == root.size();
         for (int k = 0; k < card.stations; ++k) {
             const std::size_t i = static_cast<std::size_t>(k);
             const float along = static_cast<float>(k) / static_cast<float>(card.stations - 1);
-            std::vector<Vec3f> points = detail::cardRow(card, i);
+            std::vector<Vec3f> points = detail::cardVertexRow(card, i, root);
             const std::array<float, 3> tint = detail::cardTint(card, along);
-            if (seated && along < detail::kBaseBlend) {
-                const float w = 1.0f - along / detail::kBaseBlend;
-                for (std::size_t e = 0; e < points.size(); ++e) points[e] += (card.base[e] - root[e]) * w;
-            }
             if (spine) {
                 // Left edge, the spine on the shaft, right edge; each edge lifted along the normal
                 // by its half's fold (Card::spine), at the flat card's texture coordinates.

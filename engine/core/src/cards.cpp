@@ -73,7 +73,9 @@ void sampleStations(CardMesh::Card& card) {
         const float f = static_cast<float>(k) / static_cast<float>(n - 1) * static_cast<float>(last);
         const std::size_t i = std::min(static_cast<std::size_t>(f), last - 1);
         const float w = f - static_cast<float>(i);
-        card.center.push_back(card.refCenter[i] * (1.0f - w) + card.refCenter[i + 1] * w);
+        Vec3f center = card.refCenter[i] * (1.0f - w) + card.refCenter[i + 1] * w;
+        if (card.refShift.size() == card.refCenter.size()) center += card.refShift[i] * (1.0f - w) + card.refShift[i + 1] * w;
+        card.center.push_back(center);
         card.side.push_back((card.refSide[i] * (1.0f - w) + card.refSide[i + 1] * w).normalized());
         card.normal.push_back((card.refNormal[i] * (1.0f - w) + card.refNormal[i + 1] * w).normalized());
         card.width.push_back(card.refWidth[i] * (1.0f - w) + card.refWidth[i + 1] * w);
@@ -85,6 +87,16 @@ void sampleStations(CardMesh::Card& card) {
             card.shading.push_back((card.refShading[i] * (1.0f - w) + card.refShading[i + 1] * w).normalized());
         }
     }
+}
+
+std::vector<Vec3f> cardVertexRow(const CardMesh::Card& card, std::size_t i, const std::vector<Vec3f>& root) {
+    std::vector<Vec3f> points = cardRow(card, i);
+    const float along = static_cast<float>(i) / static_cast<float>(std::max(card.stations - 1, 1));
+    if (card.base.size() == root.size() && along < kBaseBlend) {
+        const float w = 1.0f - along / kBaseBlend;
+        for (std::size_t e = 0; e < points.size(); ++e) points[e] += (card.base[e] - root[e]) * w;
+    }
+    return points;
 }
 
 std::vector<Vec3f> cardRow(const CardMesh::Card& card, std::size_t i) {
@@ -1384,6 +1396,10 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
     for (CardMesh::Card& card : featherCards) {
         if (card.variationOf >= 0) card.variationOf += offset;
         out.push_back(std::move(card));
+    }
+    // Cards through each other, or too close, pushed apart (the mesh alone).
+    if (settings.separation > 0.0f || settings.featherSeparation > 0.0f) {
+        separateCards(out, settings.separation, settings.featherSeparation, settings.separationIterations);
     }
     // Each card's own strands' colors, root to tip: its tint over the texture it shares.
     const detail::StrandColors colors = detail::colorsOf(s, CardBakeSettings{}.color);
