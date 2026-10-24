@@ -2137,6 +2137,20 @@ class AuthoringTest(HelperTestCase):
         self.call("edit_graph", op="set_positions", positions={"noise": [1.0, 2.0]}, backdrops=[])
         self.assertNotIn("backdrops", self.graph())
         self.assertEqual(self.node("noise")["ui"], {"x": 1.0, "y": 2.0})
+        # So do the pins the links are drawn through (Blender's reroutes): as given, all of them.
+        link = next(c for c in self.graph()["connections"] if c["to"] == "noise")
+        route = {"from": link["from"], "to": "noise", "input": link["input"], "via": ["pin1", "pin2"]}
+        pins = {"points": [{"id": "pin1", "x": 120.0, "y": 300.0}, {"id": "pin2", "x": 160.0, "y": 280.5}], "routes": [route]}
+        self.assertEqual(self.call("edit_graph", op="set_positions", pins=pins)["graphError"], "")
+        self.assertEqual(self.graph()["pins"], pins)
+        self.assertEqual(self.call("undo_state")["undoDepth"], depth)
+        for bad in ({"points": "pin1"}, {"points": [{"id": "pin1", "x": "a", "y": 0}], "routes": []},
+                    {"points": [], "routes": [dict(route, via=[])]}, {"points": [], "routes": [dict(route, to=3)]}, []):
+            with self.assertRaises(HelperError):
+                self.call("edit_graph", op="set_positions", pins=bad)
+        self.assertEqual(self.graph()["pins"], pins)
+        self.call("edit_graph", op="set_positions", pins={"points": [], "routes": []})
+        self.assertNotIn("pins", self.graph())
 
     def test_node_library_and_presets(self):
         folders = self.h.call("nodes_folder")

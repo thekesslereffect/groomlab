@@ -164,7 +164,7 @@ All but the process ones take `"session": <id>`.
 | `list_nodes` | | `[{name, type, version, output}]` |
 | `node_spec` | `node` | GraphEdit::nodeSpecJson: ports, params with their ParamSpec metadata (group, advanced, unit, showWhen, min/max...), `outdated` |
 | `get_param` / `set_param` | `node`, `param`, `value` | the value (`set`: false for a spec default); set checks the kind as the editors do, and a map value's source, keys and expression ("Authoring" below) |
-| `edit_graph` | `op`: add_node (`type`, `name`, `params`, `x`, `y`: defaults fitted to the scalp), remove_node, rename_node, connect (`from`, `to`, `input`, `output`: the user's link, `GraphEdit::connectByHand`: a Clump picking its centers fed centers takes them, `centersFrom` `inputPoints`), disconnect, set_output, upgrade_node, set_positions (`positions` {node: [x, y]}: each node's `"ui"`; `backdrops`), set_bypass (`name`, `bypass`), set_evaluation (`name`, `mode`: always, viewportOnly or renderOnly); the undoable authoring ops (group, ungroup, expose_param, unexpose_param, compound_expose, compound_unexpose, insert_on_link, add_control, link_control, unlink_control: "Authoring" below) | `graphError` ("" when the graph loads); a graph that does not load yet takes every op (set_graph refuses it) |
+| `edit_graph` | `op`: add_node (`type`, `name`, `params`, `x`, `y`: defaults fitted to the scalp), remove_node, rename_node, connect (`from`, `to`, `input`, `output`: the user's link, `GraphEdit::connectByHand`: a Clump picking its centers fed centers takes them, `centersFrom` `inputPoints`), disconnect, set_output, upgrade_node, set_positions (`positions` {node: [x, y]}: each node's `"ui"`; `backdrops`; `pins`), set_bypass (`name`, `bypass`), set_evaluation (`name`, `mode`: always, viewportOnly or renderOnly); the undoable authoring ops (group, ungroup, expose_param, unexpose_param, compound_expose, compound_unexpose, insert_on_link, add_control, link_control, unlink_control: "Authoring" below) | `graphError` ("" when the graph loads); a graph that does not load yet takes every op (set_graph refuses it) |
 | `list_presets` | | presets with title, description, category; the folders searched |
 | `apply_preset` | `name` or `path` | the graph replaced, fitted to the scalp (`fitFactor`), controls applied; `missingMaps` the preset reads that the groom lacks (`name`, `kind`, `value`, `color`), which the add-on then makes with `map_create` (graph.make_required_maps, as Maya and the app make them); `groups` [{`name`, `draw`}] the guide groups it reads (presetRequiredGroups), which the add-on makes empty when missing (graph.make_required_groups) and, for `draw`, picks the Draw tool drawing into (graph.draw_into) |
 | `insert_preset` | `name` or `path`, `after`, `nodeName` | the preset's look as a Compound after `after`; `node` |
@@ -454,7 +454,7 @@ it is kept as `edit_graph` keeps it, without a step (`"undoable": false`).
 | `edit_graph` `op=insert_on_link` | `from`, `to`, `input`, `node`, `output` | the one link routed through `node`: its first input that takes from's output, `node` feeding `to.input` (Maya's `insert_on_link`, a node dropped on a wire) |
 | `edit_graph` `op=add_control` | `node`, `param`, `name` (the param's), `default` (the param's value), `min` (0), `max` (1) | `{"node", "control"}`: a Control node (the slider) wired to the param, exposed first (params.py's `add_control`) |
 | `edit_graph` `op=link_control` / `unlink_control` | `node`, `param`, `control` (`<node>_<param>`) | a keyed param (`paramControls`): the param reads control `<node>_<param>` (three, X Y Z or R G B, for a vector), which the host keys and gives with `set_controls`; refused for counts and seeds (`animatable` false), maps, Control nodes. Unlinked, the control's value now goes back into the param (`value`) |
-| `edit_graph` `op=set_positions` | `positions` {node: [x, y]}, `backdrops` [{`title`, `x`, `y`, `w`, `h`, `color` [r, g, b] 0-255}] (all of them; [] none) | the layout: node positions and the graph's `backdrops` (Maya's `save_layout`); not an undo step |
+| `edit_graph` `op=set_positions` | `positions` {node: [x, y]}, `backdrops` [{`title`, `x`, `y`, `w`, `h`, `color` [r, g, b] 0-255}] (all of them; [] none), `pins` {`points` [{`id`, `x`, `y`}], `routes` [{`from`, `output`?, `to`, `input`, `via` [pin ids]}]} (all of them; no routes: none) | the layout: node positions, the graph's `backdrops` and its `pins` (Maya's `save_layout`), kept as given; not an undo step |
 | `set_param` | `node`, `param`, `value` | a map value (`texture`, `colorSet`, `attribute`, `expression`, `guide`; `component` r g b a luminance; `min`, `max`) is checked before the graph takes it: a mappable param, one source naming something, no other keys, an expression that compiles (`expression` error with its position); a vec3 param that takes a vector expression (`vectorExpression`) takes `{"expression"}` alone. Not an undo step (the add-on's widgets: Blender's undo) |
 | `controls_list` | | `controls` [{`name`, `kind` (control, variable, keyed), `node`, `param`?, `variable`?, `default`, `min`?, `max`?, `value`, `set`}], `unused` (values for names the graph no longer reads) |
 | `set_controls` | `controls` {name: number, or null to unset}, `replace` | `{"changed", "controls"}`: the controls' values now (`GroomSession::setControls`; Maya's `ctl_` attributes). Not an undo step: the host's properties and their fcurves hold them, given again each frame as `set_time` is; saved in the `.groom` (`controls`) |
@@ -726,7 +726,11 @@ extension zip installed by `blender --command extension install-file` into a thr
   the curve widget); presets applied (the preset's layout) and inserted (a Compound after the
   selected node with its exposed params, the nodes after it moved over); positions kept through a
   rebuild and an undo, Tidy Layout, saved in the `.groom` where Maya's editor reads them and read
-  back from it; View and Set as Output; an outdated node (TestCApiLift at version 1, in
+  back from it; the graph's pins as reroutes (a bundle: one reroute, two links out; a route whose
+  link is gone left out) and reroutes as pins (one put on a link: the same connection, routed, no
+  evaluation and no undo step; moved: layout; fed from another output: both links through it
+  rewired; fed from a mesh: refused, as it was; left with no link out: the link gone, the reroute
+  kept, no pin, then a pin again; saved in the `.groom`); View and Set as Output; an outdated node (TestCApiLift at version 1, in
   `groomlab-helper-testhooks` only: tests/engine/capi/capi_versioned_op.cpp) upgraded; the header,
   menus and panels drawn; the tree removed with the groom.
 - `blender.addon_graph_authoring`: the Graph Editor's authoring (section 7, "Authoring"), with its
@@ -1000,6 +1004,22 @@ swatch of its color, then New Script Node, Import Node..., Open Nodes Folder (`g
   renamed or recolored since the tree last had them, `tree["gl_backdrops"]`, all of them via
   `set_positions backdrops`); a rebuild makes one frame per graph backdrop (`shrink` off) and
   parents the nodes inside each, so moving it moves them. Node positions use `location_absolute`.
+- **Pins**: Blender reroutes (`NodeReroute`), the reroute points Maya's editor draws links
+  through (the graph's `pins`: `{points, routes}`, layout only). A link through reroutes is the
+  plain connection from the GroomLab output they lead back to into its input, which evaluates as
+  a direct link; the reroutes it passes are its route (`via`, source first), each reroute a pin
+  (`gl_pin`, `pin<N>`). One reroute feeding several inputs is a bundle: one pin in several routes.
+  Shift+right-drag across a link puts a reroute on it (the same connection: only the pins change,
+  nothing evaluates, no undo step); dragging from a reroute's output links that signal on; plugging
+  another output into a reroute feeds every link after it from there (connections, through
+  `edit_graph` like any link; refused by one of them: the tree goes back to the graph, the reroute
+  fed as it was). X on a reroute removes the links through it (Blender's), Ctrl+X straightens them.
+  A reroute that routes no link (no input, or no link out) is no pin and stays as the user left it,
+  links into it too, until it routes one; a pin the graph no longer has (its link removed or
+  rewired elsewhere) goes on the next rebuild. Pins go with the positions as backdrops do
+  (`push_positions`, `tree["gl_pins"]`, all of them via `set_positions pins`); a rebuild makes a
+  reroute per pin the graph's routes pass (routes whose link is gone or comes from elsewhere, and
+  those Blender cannot draw, a pin fed from two places, left out) and parents those inside a frame.
 - **Node library**: Save as Node... (`save_node`), Save to Library (the same id, one version past
   the node's and the library's), Update Node (`edit_graph update_library_node`), Import Node...
   (`import_node`, then the node added), Open Nodes Folder (`nodes_folder`), Save as Preset...

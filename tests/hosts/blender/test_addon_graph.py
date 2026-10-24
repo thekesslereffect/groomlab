@@ -5,7 +5,9 @@ added, linked, unlinked, renamed, muted and deleted in the tree go to the helper
 link the graph refuses goes away; params set on the nodes (scene units in, centimeters in the
 helper) and from the 3D view's panel; ramps through Blender's curve widget; presets applied and
 inserted (a Compound with its exposed params); positions kept through rebuilds and undo, and saved
-in the .groom where Maya's editor reads them ("ui": {"x", "y"}, y down); View and Set as Output;
+in the .groom where Maya's editor reads them ("ui": {"x", "y"}, y down); the graph's pins as
+reroutes and back (a bundle, a reroute put on a link, moved, fed from another output, refused, left
+with no link out); View and Set as Output;
 an outdated node upgraded (groomlab-helper-testhooks: TestCApiLift at version 2)."""
 
 import importlib
@@ -469,6 +471,146 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(bpy.ops.groomlab.load_groom(filepath=path), {"FINISHED"})
         self.assertAlmostEqual(node_of(self.tree(), name).location.x, 777.0, 3)
         self.assertAlmostEqual(node_of(self.tree(), name).location.y, -333.0, 3)
+
+    def test_5b_pins_as_reroutes(self):
+        head = self.head
+        rt = groom.runtime(head)
+        session = rt.session
+
+        def call(cmd, **args):
+            return process.call(cmd, session=session, **args)
+
+        def pin_node(pin):
+            return next((r for r in gt.reroutes(self.tree()) if gt.pin_of(r) == pin), None)
+
+        def tree_links():
+            return {(l.from_node.name, l.to_node.name, l.to_socket.identifier) for l in self.tree().links}
+
+        def pins():
+            return helper_graph(head).get("pins") or {"points": [], "routes": []}
+
+        # Two Gravity nodes off interpolate (a branch nothing reads): one output into two inputs.
+        src = "interpolate"
+        other = next(to for (to, inp), (frm, _) in gt.connections_of(helper_graph(head)).items() if frm == src and inp == "strands")
+        g1, g2 = (call("edit_graph", op="add_node", type="Gravity", x=600.0 + 200.0 * i, y=900.0)["name"] for i in range(2))
+        for g in (g1, g2):
+            call("edit_graph", op="connect", **{"from": src, "to": g, "input": "strands"})
+        # The graph's pins (Maya's) as reroutes: the link into g1 through pin1 and pin2, into g2
+        # through pin1 (a bundle: one reroute, two links out); a route whose link is not there is
+        # left out, and the pin only it passes.
+        gt.set_positions(head, {}, pins={
+            "points": [{"id": "pin1", "x": 400.0, "y": 850.0}, {"id": "pin2", "x": 500.0, "y": 880.0},
+                       {"id": "pin7", "x": 0.0, "y": 0.0}],
+            "routes": [{"from": src, "to": g1, "input": "strands", "via": ["pin1", "pin2"]},
+                       {"from": src, "to": g2, "input": "strands", "via": ["pin1"]},
+                       {"from": "scalp", "to": other, "input": "strands", "via": ["pin7"]}]})
+        gt.rebuild(head)
+        settle(head)
+        tree = self.tree()
+        self.assertEqual(sorted(gt.pin_of(r) for r in gt.reroutes(tree)), ["pin1", "pin2"])
+        r1, r2 = pin_node("pin1"), pin_node("pin2")
+        pin_in = r1.inputs[0].identifier
+        self.assertEqual(gt.get_location(r1), (400.0, -850.0))
+        links = tree_links()
+        self.assertTrue({(src, r1.name, pin_in), (r1.name, r2.name, pin_in), (r2.name, g1, "strands"),
+                         (r1.name, g2, "strands")} <= links)
+        self.assertFalse({(src, g1, "strands"), (src, g2, "strands")} & links)
+        self.assertEqual(len([l for l in tree.links if l.from_node == r1]), 2)
+        self.assertFalse(gt.sync_from_tree(tree))  # the tree is the graph
+        self.assertEqual(rt.errors, [])
+        serial, depth = rt.last["serial"], call("undo_state")["undoDepth"]
+
+        # A reroute moved: layout, as a node's move (with the next edit, a save, a preset).
+        gt.set_location(r2, (520.0, -900.0))
+        self.assertFalse(gt.sync_from_tree(tree))
+        gt.push_positions(head)
+        self.assertEqual(pins()["points"], [{"id": "pin1", "x": 400.0, "y": 850.0}, {"id": "pin2", "x": 520.0, "y": 900.0}])
+        self.assertEqual(len(pins()["routes"]), 2)
+
+        # A reroute put on a link (Shift+right-drag): the same connection, now routed through it.
+        connections = gt.connections_of(helper_graph(head))
+        with gt.building():
+            tree.links.remove(next(l for l in tree.links if l.from_node.name == src and l.to_node.name == other))
+            r3 = tree.nodes.new("NodeReroute")
+            gt.set_location(r3, (300.0, -100.0))
+            tree.links.new(node_of(tree, src).outputs[0], r3.inputs[0])
+            tree.links.new(r3.outputs[0], node_of(tree, other).inputs["strands"])
+        self.assertTrue(gt.sync_from_tree(tree))
+        self.assertEqual(gt.pin_of(r3), "pin3")
+        self.assertEqual(gt.connections_of(helper_graph(head)), connections)
+        self.assertIn({"from": src, "to": other, "input": "strands", "via": ["pin3"]}, pins()["routes"])
+        self.assertIn({"id": "pin3", "x": 300.0, "y": 100.0}, pins()["points"])
+        settle(head)
+        self.assertEqual(rt.last["serial"], serial)  # nothing evaluated
+        self.assertEqual(call("undo_state")["undoDepth"], depth)  # no undo step
+
+        # Another output plugged into the bundle's reroute: both links through it come from there.
+        tree = self.tree()
+        with gt.building():
+            tree.links.remove(next(l for l in tree.links if l.to_node == pin_node("pin1")))
+            tree.links.new(node_of(tree, other).outputs[0], pin_node("pin1").inputs[0])
+        self.assertTrue(gt.sync_from_tree(tree))
+        connections = gt.connections_of(helper_graph(head))
+        self.assertEqual((connections[(g1, "strands")], connections[(g2, "strands")]), ((other, ""), (other, "")))
+        routes = {r["to"]: r for r in pins()["routes"]}
+        self.assertEqual((routes[g1]["from"], routes[g1]["via"]), (other, ["pin1", "pin2"]))
+        self.assertEqual((routes[g2]["from"], routes[g2]["via"]), (other, ["pin1"]))
+        settle(head)
+        self.assertEqual(rt.errors, [])
+        self.assertIn((other, pin_node("pin1").name, pin_in), tree_links())
+
+        # One its inputs cannot take (the scalp's mesh): refused, the reroute fed as it was.
+        tree = self.tree()
+        with gt.building():
+            tree.links.remove(next(l for l in tree.links if l.to_node == pin_node("pin1")))
+            tree.links.new(node_of(tree, "scalp").outputs[0], pin_node("pin1").inputs[0])
+        gt.sync_from_tree(tree)
+        self.assertTrue(gt.message(head))
+        settle(head)
+        self.assertEqual(gt.connections_of(helper_graph(head)), connections)
+        self.assertIn((other, pin_node("pin1").name, pin_in), tree_links())
+        self.assertNotIn(("scalp", pin_node("pin1").name, pin_in), tree_links())
+        self.assertEqual(len(pins()["routes"]), 3)
+
+        # A reroute left with no link out routes nothing: the link is gone, the reroute no pin, and it
+        # stays as the user left it; a link drawn out of it again makes it a pin again.
+        tree = self.tree()
+        r2_name = pin_node("pin2").name
+        with gt.building():
+            tree.links.remove(next(l for l in tree.links if l.from_node.name == r2_name))
+        self.assertTrue(gt.sync_from_tree(tree))
+        self.assertNotIn((g1, "strands"), gt.connections_of(helper_graph(head)))
+        self.assertNotIn("pin2", [p["id"] for p in pins()["points"]])
+        settle(head)
+        tree = self.tree()
+        self.assertIn(r2_name, tree.nodes)
+        self.assertEqual(gt.pin_of(tree.nodes[r2_name]), "")
+        self.assertIn((pin_node("pin1").name, r2_name, pin_in), tree_links())
+        with gt.building():
+            tree.links.new(tree.nodes[r2_name].outputs[0], node_of(tree, g1).inputs["strands"])
+        self.assertTrue(gt.sync_from_tree(tree))
+        self.assertEqual(gt.connections_of(helper_graph(head))[(g1, "strands")], (other, ""))
+        self.assertIn({"from": other, "to": g1, "input": "strands", "via": ["pin1", "pin4"]}, pins()["routes"])
+        settle(head)
+        # Saved in the .groom where Maya reads them.
+        path = os.path.join(bu.TMP, "graph_pins.groom")
+        groom.save_groom(head, path)
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["graph"]["pins"], pins())
+
+        # The reroutes and the branch deleted, the link closed again: no pins.
+        tree = self.tree()
+        with gt.building():
+            for r in gt.reroutes(tree):
+                tree.nodes.remove(r)
+            for g in (g1, g2):
+                tree.nodes.remove(node_of(tree, g))
+            tree.links.new(node_of(tree, src).outputs[0], node_of(tree, other).inputs["strands"])
+        self.assertTrue(gt.sync_from_tree(tree))
+        settle(head)
+        self.assertNotIn("pins", helper_graph(head))
+        self.assertEqual(rt.errors, [])
+        self.assert_tree_is_graph()
 
     def test_6_view_and_output(self):
         head, tree = self.head, self.tree()
