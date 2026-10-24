@@ -9,17 +9,17 @@
  */
 import { createGroomEngine, type GroomControl, type GroomEngine } from '@/lib/groomlab-wasm';
 import type { EngineEdits, EngineSource } from './engine-grooms';
-import type { RootMesh, StrandData } from './strand-data';
+import type { HairLook, RootMesh, StrandData } from './strand-data';
 
 /** Engine space (the Manny head in centimetres) to the viewers' groom space (head-mesh.ts parseHead's). */
-const CENTER = [0, 3.1, -0.4];
-const SCALE = 0.1;
+const MANNY_SPACE: NonNullable<EngineSource['space']> = { center: [0, 3.1, -0.4], scale: 0.1 };
 
-function toGroomSpace(positions: Float32Array) {
+function toGroomSpace(positions: Float32Array, space: NonNullable<EngineSource['space']>) {
+  const { center, scale } = space;
   for (let i = 0; i < positions.length; i += 3) {
-    positions[i] = (positions[i] - CENTER[0]) * SCALE;
-    positions[i + 1] = (positions[i + 1] - CENTER[1]) * SCALE;
-    positions[i + 2] = (positions[i + 2] - CENTER[2]) * SCALE;
+    positions[i] = (positions[i] - center[0]) * scale;
+    positions[i + 1] = (positions[i + 1] - center[1]) * scale;
+    positions[i + 2] = (positions[i + 2] - center[2]) * scale;
   }
   return positions;
 }
@@ -42,6 +42,8 @@ export interface EngineView {
   scalp: RootMesh | null;
   /** The guides, for the viewer to draw when they are shown (null: the groom has none). */
   guides: StrandData | null;
+  /** The hair's highlight (the groom's HairColor's), for the viewer's shading. */
+  look: HairLook | null;
   stats: { strands: number; guides: number; evaluateMs: number; totalMs: number };
 }
 
@@ -75,9 +77,27 @@ const smooth = (e: number) => {
   return t * t * (3 - 2 * t);
 };
 
+/** sRGB 0-1 to linear and back. */
+const toLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+const toSrgb = (c: number) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
 /**
- * The scalp colored as a groom's scalp texture would be: the root color of the strands nearby,
- * darker, over the skin, so the hair reads full with a preview's share of the strands. Both in
+ * The color hair of base color `srgb` looks (core's hairAppearanceColor, hair_color.h: its absorption
+ * as aiStandardHair takes a base color, at the default azimuthal roughness, through the appearance
+ * fit), sRGB.
+ */
+function hairAppearance(srgb: number): number {
+  const b = 0.2;  // kHairAzimuthalRoughness
+  const b2 = b * b;
+  const d = 5.969 - 0.215 * b + 2.532 * b2 - 10.73 * b2 * b + 5.574 * b2 * b2 + 0.245 * b2 * b2 * b;
+  const l = Math.log(Math.min(Math.max(toLinear(srgb), 1e-8), 1)) / d;
+  const sigma = l * l;
+  return toSrgb(0.03 + 0.97 * Math.exp(-3.52 * Math.pow(sigma, 0.79)));
+}
+
+/**
+ * The scalp colored as a groom's scalp texture would be: the color the strands nearby look (their
+ * base color's appearance), over the skin, so the hair reads full with a preview's share of the
+ * strands. Both in
  * engine space (cm); roots are bucketed in a grid of `cell` cm.
  */
 function paintScalp(scalp: RootMesh, strands: StrandData, skin: number[]): Float32Array {
@@ -130,9 +150,10 @@ function paintScalp(scalp: RootMesh, strands: StrandData, skin: number[]): Float
             }
           }
         }
-    // A few roots around this vertex: under the hair.
+    // A few roots around this vertex: under the hair, the color it looks, in its shadow.
     const t = smooth(near / 3);
-    const root = w > 0 ? [(r / w) * 0.7, (g / w) * 0.7, (b / w) * 0.7] : skin;
+    const shade = 0.2;
+    const root = w > 0 ? [hairAppearance(r / w) * shade, hairAppearance(g / w) * shade, hairAppearance(b / w) * shade] : skin;
     for (let c = 0; c < 3; c++) out[q + c] = skin[c] + (root[c] - skin[c]) * t;
   }
   return out;
@@ -143,6 +164,7 @@ export function attachEngineGroom(opts: EngineGroomOptions): EngineGroom {
   const timing = (name: string) => opts.onTiming?.(name, performance.now());
   const root = engine();
   const { source } = opts;
+  const space = source.space ?? MANNY_SPACE;
   let disposed = false;
   let slot: GroomEngine | null = null;
   /** What the engine has; what the page wants. */
@@ -222,18 +244,20 @@ export function attachEngineGroom(opts: EngineGroomOptions): EngineGroom {
           const colors = paintScalp(scalp, r.strands, opts.skin);
           opts.onTiming?.('paintMs', performance.now() - p0);
           painted = {
-            positions: first ? toGroomSpace(scalp.positions) : scalp.positions,
+            positions: first ? toGroomSpace(scalp.positions, space) : scalp.positions,
             normals: scalp.normals && scalp.normals.length === scalp.positions.length ? scalp.normals : undefined,
             indices: scalp.indices,
             colors,
           };
         }
-        toGroomSpace(r.strands.positions);
-        if (r.guides) toGroomSpace(r.guides.positions);
+        toGroomSpace(r.strands.positions, space);
+        if (r.strands.widths) for (let i = 0; i < r.strands.widths.length; i++) r.strands.widths[i] *= space.scale;
+        if (r.guides) toGroomSpace(r.guides.positions, space);
         opts.onView({
           strands: r.strands,
           scalp: painted,
           guides: r.guides,
+          look: r.look,
           stats: { strands: r.strands.count, guides: r.guides?.count ?? 0, evaluateMs: r.evaluateMs, totalMs: r.totalMs },
         });
         opts.onTiming?.('evaluateMs', r.evaluateMs);

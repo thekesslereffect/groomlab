@@ -45,6 +45,7 @@ EMSCRIPTEN_BINDINGS(groomlab_web) {
         .function("offsets", +[](const WebGroom& g) { return view(g.offsets()); })
         .function("positions", +[](const WebGroom& g) { return view(g.positions()); })
         .function("colors", +[](const WebGroom& g) { return view(g.colors()); })
+        .function("widths", +[](const WebGroom& g) { return view(g.widths()); })
         .function("guideOffsets", +[](const WebGroom& g) { return view(g.guideOffsets()); })
         .function("guidePositions", +[](const WebGroom& g) { return view(g.guidePositions()); })
         .function("scalpPositions", +[](const WebGroom& g) { return view(g.scalpPositions()); })

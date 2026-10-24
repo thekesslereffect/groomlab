@@ -75,8 +75,8 @@ export async function mountGroom3D(canvas: HTMLCanvasElement, opts: Groom3DOptio
   const [center, radius] = opts.framing ?? [[0, 0.1, 0], 1.45];
   viewer.setFraming(center, radius);
   const skin = opts.skin ?? [0.7, 0.68, 0.66];
-  // The bare head, until the engine's scalp comes.
-  if (head) {
+  // The bare head, until the engine's scalp comes (a groom on another mesh shows nothing until then).
+  if (head && opts.engine.source.bareHead !== false) {
     viewer.setScalp(
       headRootMesh(head, (_x, _y, _z, out) => {
         out[0] = skin[0];
@@ -126,6 +126,7 @@ export async function mountGroom3D(canvas: HTMLCanvasElement, opts: Groom3DOptio
               e.onReady?.();
             }
             const t0 = performance.now();
+            if (view.look) viewer.setLook(view.look);
             viewer.setStrands(view.strands);
             if (view.scalp) viewer.setScalp(view.scalp);
             realGuides = view.guides;

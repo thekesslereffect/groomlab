@@ -72,6 +72,8 @@ public:
     const std::vector<std::uint32_t>& offsets() const { return offsets_; }
     const std::vector<float>& positions() const { return positions_; }
     const std::vector<float>& colors() const { return colors_; }
+    // Each point's width (the strand's diameter there, scene units; -1 every point: no widths).
+    const std::vector<float>& widths() const { return widths_; }
     // The guides as drawn (the flat guides, else the hierarchy's), the same layout.
     const std::vector<std::uint32_t>& guideOffsets() const { return guideOffsets_; }
     const std::vector<float>& guidePositions() const { return guidePositions_; }
@@ -79,7 +81,8 @@ public:
     const std::vector<float>& scalpPositions() const { return scalpPositions_; }
     const std::vector<float>& scalpNormals() const { return scalpNormals_; }
     const std::vector<std::uint32_t>& scalpIndices() const { return scalpIndices_; }
-    // The evaluation's messages (errors, one per line) and node timings, as JSON: {errors, nodes}.
+    // The evaluation's messages (errors, one per line), node timings and the hair's highlight (Maya's
+    // viewport's: hair_bsdf.glsl's material), as JSON: {errors, nodes, evaluateMs, strands, points, look}.
     std::string statsJson() const;
 
     // The groom as a .groom file's text, with the edits made since it loaded.
@@ -105,7 +108,7 @@ private:
     mutable std::string error_;
     double evaluateMs_ = 0.0;
     std::vector<std::uint32_t> offsets_, guideOffsets_, scalpIndices_;
-    std::vector<float> positions_, colors_, guidePositions_, scalpPositions_, scalpNormals_;
+    std::vector<float> positions_, colors_, widths_, guidePositions_, scalpPositions_, scalpNormals_;
     std::vector<std::string> errors_;
 };
 

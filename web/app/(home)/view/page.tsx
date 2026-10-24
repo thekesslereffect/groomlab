@@ -10,5 +10,5 @@ export const metadata: Metadata = {
 
 /** A proof of concept: the real engine, built to WebAssembly, evaluating a groom in the page. */
 export default function ViewPage() {
-  return <GroomView sample="/samples/manny_hair.groom" />;
+  return <GroomView sample="/samples/webhero.groom" />;
 }

@@ -6,10 +6,11 @@ import { button } from '@/components/store-buttons';
 import { cn } from '@/lib/cn';
 import { siteConfig } from '@/site.config';
 import { HeroViewer } from './hero-viewer';
+import { TunePanel } from './tune-panel';
 
 const delay = (s: number) => ({ '--d': `${s}s` }) as CSSProperties;
 
-/** The opening, split in two: the promise on the left, a head of curls in 3D on the right. */
+/** The opening, split in two: the promise on the left, a ball of curls in 3D on the right. */
 export function Hero() {
   return (
     <section id="hero" aria-labelledby="hero-title" className="relative overflow-x-clip">
@@ -51,6 +52,7 @@ export function Hero() {
 
         <div className="rise relative -mx-[var(--gutter)] sm:mx-0" style={delay(0.15)}>
           <HeroViewer />
+          <TunePanel />
         </div>
       </div>
     </section>

@@ -5,9 +5,9 @@ import { HERO_GROOM } from './engine-grooms';
 import { StrandViewport } from './strand-viewport';
 
 /*
- * The hero's head of curls: big, in 3D, standing on the page with no frame, grown once by the
- * GroomLab engine in the browser (manny_curls.groom; the bare head shows while it loads). Under it
- * on the right, a hint that a drag turns it.
+ * The hero's ball of curls: big, in 3D, standing on the page with no frame, grown once by the
+ * GroomLab engine in the browser (webhero.groom, as groomed in Maya). Under it on the right, a hint
+ * that a drag turns it.
  */
 
 const engine = { source: HERO_GROOM };
@@ -20,9 +20,9 @@ export function HeroViewer() {
         fill={1}
         yaw={2.45}
         skin={[0.17, 0.16, 0.16]}
-        framing={[[0, 0.2, 0], 2.3]}
+        framing={[[0, 0, 0], 1.75]}
         engine={engine}
-        label="A head of brown curls in 3D; drag to turn it"
+        label="A ball of brown curls in 3D; drag to turn it"
       />
       {/* A drag turns it. */}
       <div

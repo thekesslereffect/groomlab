@@ -5,7 +5,7 @@
  * .groom, list its sliders, set them, evaluate at a preview density and save the edited file.
  * Nothing here is fetched until createGroomEngine() is called: pages that never ask never pay.
  */
-import type { RootMesh, StrandData } from '@/components/home/strand-data';
+import type { HairLook, RootMesh, StrandData } from '@/components/home/strand-data';
 
 /** One slider: a Control node's value, or a node param exposed by the groom. */
 export interface GroomControl {
@@ -74,6 +74,8 @@ export interface GroomEvaluation {
   errors: string[];
   /** Milliseconds per node in this evaluation (nodes from cache take none). */
   nodes: { node: string; ms: number }[];
+  /** The hair's highlight as Maya's viewport shades it (null: no groom). */
+  look: HairLook | null;
 }
 
 export interface GroomEngine {
@@ -129,11 +131,13 @@ interface RawEvaluation {
   offsets: Uint32Array;
   positions: Float32Array;
   colors: Float32Array;
+  widths: Float32Array;
   guides: { offsets: Uint32Array; positions: Float32Array } | null;
   evaluateMs: number;
   totalMs: number;
   errors: string[];
   nodes: { node: string; ms: number }[];
+  look: HairLook | null;
 }
 
 /**
@@ -195,12 +199,13 @@ function slotApi(call: Call, slot: string, slotOf: (name: string) => GroomEngine
       if (flushing) await flushing;
       const r = await at<RawEvaluation>('evaluate', { density: options?.density ?? DEFAULT_PREVIEW_DENSITY });
       return {
-        strands: { count: r.count, offsets: r.offsets, positions: r.positions, colors: r.colors },
+        strands: { count: r.count, offsets: r.offsets, positions: r.positions, colors: r.colors, widths: r.widths, density: options?.density ?? DEFAULT_PREVIEW_DENSITY },
         guides: r.guides ? { count: r.guides.offsets.length - 1, offsets: r.guides.offsets, positions: r.guides.positions } : null,
         evaluateMs: r.evaluateMs,
         totalMs: r.totalMs,
         errors: r.errors,
         nodes: r.nodes,
+        look: r.look ?? null,
       };
     },
     scalpMesh: () => at<RootMesh>('scalp'),
