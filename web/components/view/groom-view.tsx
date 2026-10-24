@@ -102,7 +102,7 @@ async function engineFiles(picked: PickedFile[], groomPath: string | null): Prom
   );
 }
 
-/** A bundled sample named by the page's address (?groom=manny_short_curls: the home page's link), else null. */
+/** A bundled sample named by the page's address (?groom=manny_curls: the home page's link), else null. */
 function sampleFromAddress() {
   const name = new URLSearchParams(window.location.search).get('groom');
   return name && /^[a-z0-9_]{1,64}$/.test(name) ? `/samples/${name}.groom` : null;
@@ -143,7 +143,7 @@ export function GroomView({ sample }: { sample: string }) {
   const [density, setDensity] = useState(0.25);
   const [stats, setStats] = useState<Stats | null>(null);
   const [version, setVersion] = useState('');
-  const [fileName, setFileName] = useState('manny_hair.groom');
+  const [fileName, setFileName] = useState('webhero.groom');
   const [dragging, setDragging] = useState(false);
   const [ready, setReady] = useState(false);
   /** The files the groom reads that nobody provided (texture maps): the notice asks for them. */
@@ -167,6 +167,8 @@ export function GroomView({ sample }: { sample: string }) {
         const viewer = viewerRef.current;
         if (space && viewer) {
           const strands: StrandData = { ...r.strands, positions: toSpace(r.strands.positions, space) };
+          if (strands.widths) for (let i = 0; i < strands.widths.length; i++) strands.widths[i] *= space.scale;
+          if (r.look) viewer.setLook(r.look);
           viewer.setStrands(strands);
           viewer.setGuides(null);
           if (!framedRef.current) {
@@ -392,9 +394,11 @@ export function GroomView({ sample }: { sample: string }) {
             Drop a .groom (with its .obj and maps, or its folder) to open it
           </div>
         )}
-        <p className="absolute bottom-3 left-3 max-w-[70%] text-[11.5px] leading-snug text-gl-ink-3">
-          Manny head by Nick Rutlinh (GroomLab), CC BY 4.0
-        </p>
+        {fileName.startsWith('manny_') && (
+          <p className="absolute bottom-3 left-3 max-w-[70%] text-[11.5px] leading-snug text-gl-ink-3">
+            Manny head by Nick Rutlinh (GroomLab), CC BY 4.0
+          </p>
+        )}
       </div>
 
       <aside className="flex flex-col border-l border-white/[0.08] bg-gl-panel lg:min-h-0">

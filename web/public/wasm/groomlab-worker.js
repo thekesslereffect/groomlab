@@ -135,11 +135,13 @@ const ops = {
       offsets: g.offsets().slice(),
       positions: g.positions().slice(),
       colors: g.colors().slice(),
+      widths: g.widths().slice(),
       guides: guideOffsets.length > 1 ? { offsets: guideOffsets, positions: g.guidePositions().slice() } : null,
       evaluateMs: g.evaluateMs(),
       totalMs: performance.now() - t0,
       errors: stats.errors,
       nodes: stats.nodes,
+      look: stats.look,
     };
   },
   scalp({ slot }) {

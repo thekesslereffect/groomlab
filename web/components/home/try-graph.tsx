@@ -6,10 +6,10 @@ import { useId, useMemo, useState, type CSSProperties, type ReactNode } from 're
 import type { GroomControl } from '@/lib/groomlab-wasm';
 import { cn } from '@/lib/cn';
 import {
-  SHORT_CURLS_FULL,
-  SHORT_CURLS_SEED,
-  SHORT_CURLS_SLIDERS,
-  SHORT_CURLS_URL,
+  CURLS_FULL,
+  CURLS_SEED,
+  CURLS_SLIDERS,
+  CURLS_URL,
   sliderValues,
   type EngineEdits,
   type EngineSlider,
@@ -20,7 +20,7 @@ import { category, port, type Category, type PortType } from './graph-theme';
 import { StrandViewport } from './strand-viewport';
 
 /*
- * "Try the node graph": the chain of a real groom (manny_short_curls.groom), node for node, grown by
+ * "Try the node graph": the chain of a real groom (manny_curls.groom), node for node, grown by
  * the GroomLab engine in the browser. Each card is one of its nodes: its switch is the node's bypass,
  * its sliders the node's params with the engine's ranges and labels (the app's ValueSlider: the
  * field fills as it is dragged). The strands in the viewport are grown again on the spot, in the
@@ -43,25 +43,25 @@ const initialState = (values: Record<string, number>): State => ({
   values,
   bypass: { clump: false, curl: false, noise: false, color: false },
   showGuides: false,
-  seed: SHORT_CURLS_SEED,
+  seed: CURLS_SEED,
 });
 
 const SEED = 'param:scatter.seed';
 const DENSITY = 'param:scatter.density';
 
 const engineSource: EngineSource = {
-  url: SHORT_CURLS_URL,
+  url: CURLS_URL,
   slot: 'try',
-  fullStrands: SHORT_CURLS_FULL,
+  fullStrands: CURLS_FULL,
   strands: 7000,
-  densityParam: [DENSITY, SHORT_CURLS_SLIDERS[0].value],
+  densityParam: [DENSITY, CURLS_SLIDERS[0].value],
   maxStrands: 16000,
 };
 
 export function TryGraph() {
   // The sliders: the groom's exposed params, as the engine lists them once it has loaded.
-  const [sliders, setSliders] = useState<EngineSlider[]>(SHORT_CURLS_SLIDERS);
-  const [s, setS] = useState<State>(() => initialState(sliderValues(SHORT_CURLS_SLIDERS)));
+  const [sliders, setSliders] = useState<EngineSlider[]>(CURLS_SLIDERS);
+  const [s, setS] = useState<State>(() => initialState(sliderValues(CURLS_SLIDERS)));
   const [stats, setStats] = useState<GroomStats | null>(null);
   const strands = stats ? stats.strands.toLocaleString('en-US') : '7,000';
   const setValue = (id: string) => (v: number) => setS((prev) => ({ ...prev, values: { ...prev.values, [id]: v } }));
@@ -71,7 +71,7 @@ export function TryGraph() {
     () => ({
       source: engineSource,
       onControls: (controls: GroomControl[]) => {
-        const next = SHORT_CURLS_SLIDERS.map((fallback) => {
+        const next = CURLS_SLIDERS.map((fallback) => {
           const c = controls.find((x) => x.id === fallback.id);
           return c ? { id: c.id, label: c.label, min: c.min, max: c.max, step: c.step, value: c.value } : fallback;
         });
@@ -131,7 +131,7 @@ export function TryGraph() {
           </div>
           <p className="hidden justify-end pt-2 lg:flex">
             <Link
-              href="/view?groom=manny_short_curls"
+              href="/view?groom=manny_curls"
               className="inline-flex items-center gap-1.5 text-[13px] text-gl-ink-2 underline-offset-4 hover:text-gl-ink hover:underline"
             >
               Open it in the viewer
@@ -160,6 +160,9 @@ export function TryGraph() {
         >
           <Static label="guides" value={String(stats ? stats.guides : 127)} />
         </Node>
+        <Node cat="Shape" name="Transform" out="strands">
+          {slider('param:length.scale', 'Shape')}
+        </Node>
         <Node cat="Look" name="Clump" out="strands" on={!s.bypass.clump} onToggle={setOn('clump')}>
           {slider('param:clump.strength', 'Look')}
           {slider('param:clump.count', 'Look')}
@@ -181,7 +184,7 @@ export function TryGraph() {
       </ol>
       <p className="flex justify-center lg:hidden">
         <Link
-          href="/view?groom=manny_short_curls"
+          href="/view?groom=manny_curls"
           className="inline-flex items-center gap-1.5 text-[13px] text-gl-ink-2 underline-offset-4 hover:text-gl-ink hover:underline"
         >
           Open it in the viewer
