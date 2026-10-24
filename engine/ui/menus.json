@@ -51,7 +51,8 @@
         "groom.transfer",
         "graph.copyToGrooms",
         "-",
-        "files.findMissing"
+        "files.findMissing",
+        {"id": "files.collect", "hosts": ["maya"]}
       ]},
       "-",
       {"ref": "menus/theme"},

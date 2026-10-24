@@ -1501,6 +1501,35 @@ def _count(section):
     return sum(len(entries) for kinds in section.values() for entries in kinds.values())
 
 
+def collect_files_report(grooms=None):
+    """Collect Files: the files the selected grooms (else every groom) use from outside the scene's
+    folder copied into it and the grooms repointed (groomlab.collect_files). Reports in the Script
+    Editor and over the viewport, never in a dialog. Returns the report (None for an untitled scene)."""
+    import groomlab
+    if grooms is None:
+        grooms = cmds.ls(selection=True, dag=True, type=groomlab.GROOM_TYPE, long=True) or \
+            cmds.ls(type=groomlab.GROOM_TYPE, long=True) or []
+    if not grooms:
+        cmds.warning("GroomLab: no grooms in the scene")
+        return None
+    try:
+        report = groomlab.collect_files(grooms)
+    except ValueError as e:
+        cmds.warning("GroomLab: %s" % e)
+        return None
+    for groom, kinds in sorted(report["copied"].items()):
+        for kind, entries in sorted(kinds.items()):
+            for key, path in sorted(entries.items()):
+                print("GroomLab: %s: %s %s -> %s" % (groom, kind, key, path))
+    for groom, kinds in sorted(report["missing"].items()):
+        for kind, entries in sorted(kinds.items()):
+            for key, path in sorted(entries.items()):
+                cmds.warning("GroomLab: %s: %s %s is missing (%s): Find Missing Files relinks it" % (groom, kind, key, path))
+    _say("collected %d file(s) into the scene's folder; %d there already, %d missing (Script Editor)"
+         % (_count(report["copied"]), report["inside"], _count(report["missing"])))
+    return report
+
+
 def find_missing_files_dialog(folder=None, grooms=None, recursive=True):
     """Find Missing Files: the files the selected grooms (else every groom) name that are missing
     (texture maps, graph params, guide caches) relinked to files of the same name in `folder` and
@@ -1988,6 +2017,7 @@ ACTIONS = {
     "groom.transfer": transfer_dialog,
     "graph.copyToGrooms": copy_graph_dialog,
     "files.findMissing": find_missing_files_dialog,
+    "files.collect": lambda *_: collect_files_report(),
     "hotkeys.install": install_hotkeys,
     "help.docs": open_docs,
     "help.shortcuts": show_shortcuts,

@@ -91,6 +91,7 @@ maya_add_plugin(GroomLab
     src/guides_cmd.cpp
     src/import_cmd.cpp
     src/marker_set.cpp
+    src/file_node.cpp
     src/parts_cmd.cpp
     src/scalp_maps_cmd.cpp
     src/transfer_cmd.cpp

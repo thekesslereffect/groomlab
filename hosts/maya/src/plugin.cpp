@@ -18,6 +18,7 @@
 #include "groomlab/version.h"
 #include "guides_cmd.h"
 #include "import_cmd.h"
+#include "file_node.h"
 #include "marker_set.h"
 #include "parts_cmd.h"
 #include "scalp_maps_cmd.h"
@@ -70,6 +71,17 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
     status = MHWRender::MDrawRegistry::registerSubSceneOverrideCreator(
         GroomShape::kDrawDbClassification, GroomSubSceneOverride::kRegistrantId, GroomSubSceneOverride::creator);
     CHECK_MSTATUS_AND_RETURN_IT(status);
+
+    // A groom's files, one node each, for Maya's File Path Editor (file_node.h), listed there under
+    // GroomLab for this session (registered on every load: the type goes with the plugin). Another
+    // groomLab type kept in the preferences (a development build's) would hold the label: it goes.
+    status = plugin.registerNode(groomlab::maya::GroomFileNode::kTypeName, groomlab::maya::GroomFileNode::kTypeId,
+                                 groomlab::maya::GroomFileNode::creator, groomlab::maya::GroomFileNode::initialize);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
+    MGlobal::executeCommand("for ($t in `filePathEditor -query -listRegisteredTypes`) "
+                            "if (startsWith($t, \"groomLab\") && $t != \"groomLabFile.fileName\") filePathEditor -deregisterType $t;"
+                            "if (!stringArrayContains(\"groomLabFile.fileName\", `filePathEditor -query -listRegisteredTypes`)) "
+                            "filePathEditor -registerType \"groomLabFile.fileName\" -typeLabel \"GroomLab\" -temporary;");
 
     // The Transfer Groom window's marker points (marker_set.h).
     status = plugin.registerNode(groomlab::maya::MarkerSet::kTypeName, groomlab::maya::MarkerSet::kTypeId,
@@ -182,10 +194,17 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
             try {
                 groomlab::maya::refreshMayaPaths();
                 callGroomlab("remember_scene_folder");
+                callGroomlab("sync_file_nodes");  // the File Path Editor's nodes as the grooms resolve here
             } catch (...) {
             }
         }));
     }
+    gCallbacks.append(MSceneMessage::addCallback(MSceneMessage::kAfterImport, [](void*) {
+        try {
+            callGroomlab("sync_file_nodes");
+        } catch (...) {
+        }
+    }));
     // The process-wide caches (a distance field per collider surface, surface graphs, subdivision
     // plans, decoded textures, the array pools: process_caches.h) outlive the grooms that filled
     // them: let go before a new or opened scene (the closing scene's grooms free what they hold).
@@ -220,6 +239,7 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
             groomlab::maya::refreshMayaPaths();
             callGroomlab("follow_scene_files");
             callGroomlab("store_scale_references");  // a groom reopens at the scale it had
+            callGroomlab("sync_file_nodes");  // the File Path Editor's nodes as the files are now (file_node.h)
         } catch (...) {
         }
     }));
@@ -301,6 +321,9 @@ PLUGIN_EXPORT MStatus uninitializePlugin(MObject obj) {
     CHECK_MSTATUS_AND_RETURN_IT(MHWRender::MDrawRegistry::deregisterDrawOverrideCreator(
         groomlab::maya::MarkerSet::kDrawDbClassification, groomlab::maya::MarkerSet::kRegistrantId));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterNode(groomlab::maya::MarkerSet::kTypeId));
+    MGlobal::executeCommand("if (stringArrayContains(\"groomLabFile.fileName\", `filePathEditor -query -listRegisteredTypes`)) "
+                            "filePathEditor -deregisterType \"groomLabFile.fileName\" -temporary;");
+    CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterNode(groomlab::maya::GroomFileNode::kTypeId));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterNode(GroomShape::kTypeId));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterData(groomlab::maya::GroomFrameData::kTypeId));
     return MS::kSuccess;

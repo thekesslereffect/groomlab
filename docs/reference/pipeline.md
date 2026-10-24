@@ -87,7 +87,8 @@ Files are never shared by accident:
   active when the tool was set up.
 
 **Save Scene As** (and the first save of an untitled scene) copies the files the grooms name
-into the new scene's own folder (`groomlab/<old name>/...` to `groomlab/<new name>/...`; other
+relative to the scene (texture maps, card bakes, the guide cache, the groom file, Simulate bakes,
+the images and Alembic files the graph reads, a UDIM set's tiles together) into the new scene's own folder (`groomlab/<old name>/...` to `groomlab/<new name>/...`; other
 relative paths keep their path under the new folder) and repoints the grooms (and their card
 mesh and hair cap materials) there before the file is written, so the saved scene is whole and
 independent of the one it came from. A file already at a destination with other content is
@@ -445,6 +446,30 @@ utils.copy_graph(groom, ["hair2", "hair3"], guides="keep", maps=False)
   relinked to files of the same name in a folder you pick and its subfolders, in one undo step
   (`find_missing_files`; see A map's image). The Script Editor lists each file relinked, still
   missing or ambiguous; nothing is asked when nothing is missing.
+- **Every file a groom uses, for pipelines and the File Path Editor:** `file_dependencies(groom)`
+  lists them ({kind, key, path as stored, resolved, exists}: texture maps, the graph's file params
+  inside compounds too, the guide cache, the groom file, each Simulate node's bake, the card bake's
+  files) and `repath_file(groom, kind, key, path)` points one elsewhere, stored portable (a card
+  bake moves as a whole). Maya's File Path Editor lists them under **GroomLab**: each file has a
+  `groomLabFile` node (`hosts/maya/src/file_node.h`: `fileName` the file as it resolves, connected
+  to its groom by `groom`, `fileKind` and `fileKey` saying which file), kept in step on idle after
+  the groom's files change and before every save (`groomlab.dependencies`, `sync_file_nodes`); a
+  Repath or Replace String there goes back to the groom on idle, relative as GroomLab stores it.
+  The nodes' upkeep makes no undo step; undoing the editor's change brings the groom's path back.
+  A scene opened (or imported) from another folder or machine reads its nodes' saved paths as no
+  edit: the grooms keep their own (relative) paths and the nodes are refreshed from them once it
+  is open.
+  Maya's own `file -query -list` and Archive Scene see only Maya's node types (file textures,
+  references, audio): a pipeline collects GroomLab's files with `file_dependencies` over every
+  groom (or `ls -type groomLabFile` and each node's `fileName`). Referenced grooms keep the nodes
+  their file saved.
+- **Collect Files:** `collect_files(grooms=None)` (GroomLab > Utilities > **Collect Files**)
+  copies every file the grooms use from outside the scene's folder into its asset folder
+  (`masks/<groom>` for maps and graph images, `caches/<groom>`, `cards/<groom>` for a whole card
+  bake, `exports/<groom>` for the groom file; a UDIM set's tiles; a file of the same content there
+  already reused, other content a free name) and repoints the grooms, relative: Archive Scene and
+  any copy of the scene's folder then carry them. Files already inside stay; missing ones are
+  reported (`{"copied", "missing", "inside"}`). The scene must be saved; one undo step.
 - **Command:** `groomLabConvert` builds the curves and meshes (`-guideCurves`, `-strandCurves`,
   `-strandMesh`; see `hosts/maya/src/convert_cmd.h`).
 

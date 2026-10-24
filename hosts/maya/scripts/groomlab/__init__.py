@@ -131,3 +131,6 @@ from groomlab import sculpts  # noqa: F401
 # grooms (Yeti's read from the scene data, without Yeti), groomlab.importers.
 from groomlab.importers.xgen import import_xgen, xgen_descriptions  # noqa: F401
 from groomlab.importers.yeti import import_yeti, yeti_nodes  # noqa: F401
+# Every file a groom uses (maps, file params, caches, bakes, the groom file), for pipelines and
+# Maya's File Path Editor (a groomLabFile node per file): groomlab.dependencies.
+from groomlab.dependencies import collect_files, file_dependencies, repath_file, sync_all as sync_file_nodes  # noqa: F401

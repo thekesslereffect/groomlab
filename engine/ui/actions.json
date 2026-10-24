@@ -135,6 +135,7 @@
     "flow.deleteAll": {"label": "Delete All Flow Arrows", "tip": "Remove every flow arrow and sink from the groom (one undo step). They are kept on the groom, laid with the Flow tool (Groom Tools > Create > Flow), and the Flow node lays the strands along them"},
     "groom.transfer": {"label": "Transfer Groom to Scalp...", "tip": "Move the groom onto another mesh (a new sculpt, a retopologized head, another character): guides, parts and flow re-rooted"},
     "graph.copyToGrooms": {"label": "Copy Graph to Other Grooms...", "tip": "The active groom's graph (its look) onto the other selected grooms; their guides kept or replaced"},
+    "files.collect": {"label": "Collect Files", "tip": "Copy every file the selected grooms (else every groom) use from outside the scene's folder into its groomlab folder, and point the grooms at the copies: the scene's folder then holds everything (Archive Scene, a zip, another machine)"},
     "files.findMissing": {"label": "Find Missing Files...", "tip": "Relink the selected grooms' (else every groom's) missing texture maps, images, Alembic files and caches to files of the same name in a folder you pick",
                     "tips": {"app": "Relink the groom's missing texture maps, images and Alembic files to files of the same name in a folder you pick"}},
 

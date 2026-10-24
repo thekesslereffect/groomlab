@@ -13,6 +13,25 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.30.0 (October 24, 2026)
+
+- **GroomLab files in Maya's File Path Editor.** Every file a groom uses shows under **GroomLab**:
+  its texture maps, the images and Alembic files its graph reads, its guide cache, Simulate bakes,
+  card bake and the groom file it renders from. Repath them there, or with Replace String, and the
+  groom follows, its paths kept relative to the scene. A scene opened from another folder or
+  machine keeps its grooms' paths; the entries just show where the files are now. (Requested by
+  Omar Hesham.)
+- **For pipelines.** Farm submitters, publish and archive scripts can collect a groom's files with
+  `groomlab.file_dependencies(groom)` and repoint one with `groomlab.repath_file`. Maya's own
+  Archive Scene only sees Maya's node types, so use these (or Collect Files) for GroomLab's files.
+- **Collect Files.** GroomLab > Utilities > **Collect Files** copies every file the grooms use from
+  outside the scene's folder into its groomlab folder and points the grooms at the copies, so the
+  scene's folder holds everything for Archive Scene, a zip or another machine. One undo step.
+- **Fixed: Save As left some files behind.** Saving a scene under a new name or folder copied its
+  texture maps, card bakes and caches along, but not Simulate bakes or the images and Alembic files
+  the graph reads (HairColor's and FeatherColor's images, ImportCurves' file): they went missing in
+  the new scene. Now they come along too.
+
 ## 0.29.0 (October 24, 2026)
 
 - **Pins in the Graph Editor.** Tidy crossing wires the way Unreal's Blueprints do: double-click a
