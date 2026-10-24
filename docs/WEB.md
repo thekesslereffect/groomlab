@@ -24,6 +24,7 @@ module's strands are **bit for bit** the desktop's (see "Checking it").
 | `engine/web/tools/png.mjs` | A small gray PNG writer for those two. |
 | `web/public/wasm/groomlab.{js,wasm}` | The build's output (copied there by the build). Committed, so the site builds without Emscripten. |
 | `web/public/wasm/groomlab-worker.js` | A classic worker that loads the module and answers the page. |
+| `web/vercel.json` | The site's cache headers: `/samples/*` and `/wasm/*` kept by the browser for an hour, then used while revalidated in the background (a week): a page loaded again starts the engine without a round trip. A change to those files reaches a returning visitor within the hour. |
 | `web/lib/groomlab-wasm/index.ts` | The page's typed client of that worker. |
 | `web/components/view/groom-view.tsx` | The `/view` page: viewer, sliders, open, download, drop. `?groom=<name>` opens `/samples/<name>.groom`. |
 | `web/components/home/home-engine.ts` | The home page's grooms grown by the engine (see "The home page"). |
