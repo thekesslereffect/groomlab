@@ -151,6 +151,19 @@ groomlab.missing_files(groom)                         # what is missing, by kind
 groomlab.find_missing_files([groom], "D:/recovered")  # relinked, still_missing, ambiguous
 ```
 
+## Collect Files
+
+**Collect Files** copies every file the selected grooms (or every groom) use from outside the
+scene's folder into its groomlab folder (masks, caches, cards and exports, under each groom's
+name) and points the grooms at the copies, kept relative. The scene's folder then holds
+everything, ready for Archive Scene, a zip or another machine. Files already inside stay where
+they are; a missing file is listed in the Script Editor (Find Missing Files relinks it). Save the
+scene first. It is one undo step (the copies stay).
+
+```python
+groomlab.collect_files()   # copied, missing, inside
+```
+
 ## Files in a pipeline
 
 Every file a groom uses shows in Maya's **File Path Editor** (Windows > General Editors) under

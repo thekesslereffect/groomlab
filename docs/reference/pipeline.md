@@ -459,6 +459,13 @@ utils.copy_graph(groom, ["hair2", "hair3"], guides="keep", maps=False)
   references, audio): a pipeline collects GroomLab's files with `file_dependencies` over every
   groom (or `ls -type groomLabFile` and each node's `fileName`). Referenced grooms keep the nodes
   their file saved.
+- **Collect Files:** `collect_files(grooms=None)` (GroomLab > Utilities > **Collect Files**)
+  copies every file the grooms use from outside the scene's folder into its asset folder
+  (`masks/<groom>` for maps and graph images, `caches/<groom>`, `cards/<groom>` for a whole card
+  bake, `exports/<groom>` for the groom file; a UDIM set's tiles; a file of the same content there
+  already reused, other content a free name) and repoints the grooms, relative: Archive Scene and
+  any copy of the scene's folder then carry them. Files already inside stay; missing ones are
+  reported (`{"copied", "missing", "inside"}`). The scene must be saved; one undo step.
 - **Command:** `groomLabConvert` builds the curves and meshes (`-guideCurves`, `-strandCurves`,
   `-strandMesh`; see `hosts/maya/src/convert_cmd.h`).
 

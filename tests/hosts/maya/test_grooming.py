@@ -4899,6 +4899,106 @@ class MapImagesTest(unittest.TestCase):
         model.save(g)
         self.assertEqual(menu.find_missing_files_dialog(grooms=[g]), {"relinked": {}, "still_missing": {}, "ambiguous": {}})
         self.assertEqual(self.count(), count)
+    def test_files_are_listed_for_pipelines_and_the_file_path_editor(self):
+        # file_dependencies lists every file the groom uses; a groomLabFile node mirrors each in
+        # Maya's File Path Editor (no undo step); a repath there goes back to the groom, relative.
+        from groomlab import dependencies
+        from groomlab import graph as gm
+        groomlab.set_graph(self.groom, CLASSIC_GRAPH)
+        original = self.density_map(1.0)
+        model = gm.GraphModel.from_groom(self.groom, gm.OperatorCatalog.from_maya())
+        model.add_node("HairColor", name="color", params={"map": "textures/tint.png"})
+        model.insert_before("output", "color")
+        model.save(self.groom)
+        cmds.setAttr(self.groom + ".groomFile", "renders/hair.groom", type="string")
+        files = {(f["kind"], f["key"]): f for f in groomlab.file_dependencies(self.groom)}
+        self.assertEqual(set(files), {("map", "density"), ("param", "color.map"), ("attribute", "groomFile")})
+        self.assertTrue(os.path.samefile(files[("map", "density")]["resolved"], original))
+        self.assertTrue(files[("map", "density")]["exists"])
+        self.assertFalse(files[("param", "color.map")]["exists"])
+        self.assertEqual(files[("attribute", "groomFile")]["path"], "renders/hair.groom")
+        settle = cmds.undoInfo(query=True, undoName=True)
+        dependencies.sync(self.groom)
+        nodes = dependencies.file_nodes(self.groom)
+        self.assertEqual(set(nodes), set(files))
+        self.assertEqual(cmds.undoInfo(query=True, undoName=True), settle, "the nodes' upkeep is no undo step")
+        self.assertIn("groomLabFile.fileName", cmds.filePathEditor(query=True, listRegisteredTypes=True))
+        listed = cmds.filePathEditor(query=True, listFiles=os.path.dirname(original).replace("\\", "/"), withAttribute=True) or []
+        self.assertIn(nodes[("map", "density")] + ".fileName", listed)
+        # The editor's Repath: the groom reads the moved map, stored relative.
+        moved = self.home + "/moved"
+        os.makedirs(moved)
+        shutil.copy(original, moved + "/" + os.path.basename(original))
+        cmds.filePathEditor(nodes[("map", "density")] + ".fileName", repath=moved, force=True)
+        dependencies.file_node_changed(nodes[("map", "density")])  # (on idle in an interactive Maya)
+        stored = next(m["texture"] for m in groomlab.maps(self.groom) if m["name"] == "density")
+        self.assertEqual(stored, "moved/" + os.path.basename(original))
+        self.assertFalse([e for e in groomlab.errors(self.groom) if "density" in e])  # the map reads the moved image
+        # The pipeline's own repath, and a file the groom stops using takes its node along.
+        self.assertEqual(groomlab.repath_file(self.groom, "attribute", "groomFile", self.home + "/out/hair.groom"),
+                         "out/hair.groom")
+        with self.assertRaises(ValueError):
+            groomlab.repath_file(self.groom, "simCache", "simulate", self.home + "/x.abc")
+        cmds.setAttr(self.groom + ".groomFile", "", type="string")
+        dependencies.sync(self.groom)
+        self.assertNotIn(("attribute", "groomFile"), dependencies.file_nodes(self.groom))
+        # A groom deleted: its nodes go before the save.
+        other = groomlab.create_groom(cmds.polySphere()[0])
+        cmds.setAttr(other + ".groomFile", "renders/other.groom", type="string")
+        dependencies.sync(other)
+        made = list(dependencies.file_nodes(other).values())
+        self.assertEqual(len(made), 1)
+        cmds.delete(cmds.listRelatives(other, parent=True))
+        groomlab.sync_file_nodes()
+        self.assertFalse(cmds.objExists(made[0]))
+
+    def test_collect_files_copies_what_lies_outside_the_scene_into_its_folder(self):
+        # A map and a graph image outside the scene's folder are copied into its groomlab folder
+        # and the groom points at the copies (relative); a file inside stays; a missing one is
+        # reported. One undo step.
+        from groomlab import graph as gm
+        from groomlab.ui import menu
+        scene = self.home + "/shot"
+        os.makedirs(scene)
+        cmds.file(rename=scene + "/shot.ma")
+        cmds.file(save=True, type="mayaAscii")
+        with self.assertRaises(ValueError):
+            cmds.file(new=True, force=True)
+            groomlab.collect_files()
+        cmds.file(scene + "/shot.ma", open=True, force=True)
+        self.groom = cmds.ls(type="groomLabShape", long=True)[0]
+        groomlab.set_graph(self.groom, CLASSIC_GRAPH)
+        elsewhere = tempfile.mkdtemp(prefix="groomlab_elsewhere_").replace("\\", "/")
+        outside = write_image(elsewhere + "/maps/density.png", gray=255)
+        groomlab.import_map(self.groom, outside, name="density")
+        tint = write_image(elsewhere + "/tex/tint.png", gray=120)
+        write_image(scene + "/textures/keep.png", gray=60)
+        model = gm.GraphModel.from_groom(self.groom, gm.OperatorCatalog.from_maya())
+        model.add_node("HairColor", name="color", params={"map": tint})
+        model.set_param("length", "keep", groomlab.texture_map("textures/keep.png"))  # (relative: inside the scene)
+        model.insert_before("output", "color")
+        model.save(self.groom)
+        cmds.setAttr(self.groom + ".guideCache", elsewhere + "/gone.abc", type="string")
+        settle = cmds.undoInfo(query=True, undoName=True)
+        report = menu.collect_files_report()
+        asset = groomlab.asset_name(self.groom)
+        self.assertEqual(report["copied"], {self.groom: {
+            "map": {"density": "groomlab/shot/masks/%s/density.png" % asset},
+            "param": {"color.map": "groomlab/shot/masks/%s/tint.png" % asset}}})
+        self.assertEqual(report["missing"], {self.groom: {"attribute": {"guideCache": elsewhere + "/gone.abc"}}})
+        self.assertEqual(report["inside"], 1)
+        self.assertTrue(os.path.isfile(scene + "/groomlab/shot/masks/%s/density.png" % asset))
+        files = {(f["kind"], f["key"]): f for f in groomlab.file_dependencies(self.groom)}
+        self.assertEqual(files[("param", "length.keep")]["path"], "textures/keep.png")  # inside: untouched
+        self.assertTrue(files[("map", "density")]["exists"])
+        self.assertGreater(self.count(), 0)
+        cmds.undo()  # one step: the paths back (the copies stay)
+        self.assertEqual(cmds.undoInfo(query=True, undoName=True), settle)
+        self.assertTrue(os.path.samefile(groomlab.map_texture(self.groom, "density"), outside))
+        # Again: the copies there already are reused, not duplicated.
+        again = groomlab.collect_files()
+        self.assertEqual(again["copied"][self.groom]["map"]["density"], "groomlab/shot/masks/%s/density.png" % asset)
+        self.assertEqual(sorted(os.listdir(scene + "/groomlab/shot/masks/%s" % asset)), ["density.png", "tint.png"])
 
 
 def write_photo(path, width, height, spot=None):
@@ -4936,58 +5036,6 @@ def maya_projection(camera, points, width, height):
     return out
 
 
-    def test_files_are_listed_for_pipelines_and_the_file_path_editor(self):
-        # file_dependencies lists every file the groom uses; a groomLabFile node mirrors each in
-        # Maya's File Path Editor (no undo step); a repath there goes back to the groom, relative.
-        from groomlab import dependencies
-        from groomlab import graph as gm
-        groomlab.set_graph(self.groom, CLASSIC_GRAPH)
-        original = self.density_map(1.0)
-        model = gm.GraphModel.from_groom(self.groom, gm.OperatorCatalog.from_maya())
-        model.add_node("HairColor", name="color", params={"map": "textures/tint.png"})
-        model.insert_before("output", "color")
-        model.save(self.groom)
-        cmds.setAttr(self.groom + ".groomFile", "renders/hair.groom", type="string")
-        files = {(f["kind"], f["key"]): f for f in groomlab.file_dependencies(self.groom)}
-        self.assertEqual(set(files), {("map", "density"), ("param", "color.map"), ("attribute", "groomFile")})
-        self.assertTrue(os.path.samefile(files[("map", "density")]["resolved"], original))
-        self.assertTrue(files[("map", "density")]["exists"])
-        self.assertFalse(files[("param", "color.map")]["exists"])
-        self.assertEqual(files[("attribute", "groomFile")]["path"], "renders/hair.groom")
-        settle = cmds.undoInfo(query=True, undoName=True)
-        dependencies.sync(self.groom)
-        nodes = dependencies.file_nodes(self.groom)
-        self.assertEqual(set(nodes), set(files))
-        self.assertEqual(cmds.undoInfo(query=True, undoName=True), settle, "the nodes' upkeep is no undo step")
-        self.assertIn("groomLabFile.fileName", cmds.filePathEditor(query=True, listRegisteredTypes=True))
-        listed = cmds.filePathEditor(query=True, listFiles=os.path.dirname(original).replace("\\", "/"), withAttribute=True) or []
-        self.assertIn(nodes[("map", "density")] + ".fileName", listed)
-        # The editor's Repath: the groom reads the moved map, stored relative.
-        moved = self.home + "/moved"
-        os.makedirs(moved)
-        shutil.copy(original, moved + "/" + os.path.basename(original))
-        cmds.filePathEditor(nodes[("map", "density")] + ".fileName", repath=moved, force=True)
-        dependencies.file_node_changed(nodes[("map", "density")])  # (on idle in an interactive Maya)
-        stored = next(m["texture"] for m in groomlab.maps(self.groom) if m["name"] == "density")
-        self.assertEqual(stored, "moved/" + os.path.basename(original))
-        self.assertGreater(self.count(), 0)
-        # The pipeline's own repath, and a file the groom stops using takes its node along.
-        self.assertEqual(groomlab.repath_file(self.groom, "attribute", "groomFile", self.home + "/out/hair.groom"),
-                         "out/hair.groom")
-        with self.assertRaises(ValueError):
-            groomlab.repath_file(self.groom, "simCache", "simulate", self.home + "/x.abc")
-        cmds.setAttr(self.groom + ".groomFile", "", type="string")
-        dependencies.sync(self.groom)
-        self.assertNotIn(("attribute", "groomFile"), dependencies.file_nodes(self.groom))
-        # A groom deleted: its nodes go before the save.
-        other = groomlab.create_groom(cmds.polySphere()[0])
-        cmds.setAttr(other + ".groomFile", "renders/other.groom", type="string")
-        dependencies.sync(other)
-        made = list(dependencies.file_nodes(other).values())
-        self.assertEqual(len(made), 1)
-        cmds.delete(cmds.listRelatives(other, parent=True))
-        groomlab.sync_file_nodes()
-        self.assertFalse(cmds.objExists(made[0]))
 
 class ReferenceTest(unittest.TestCase):
     """Reference photos as cameras (Groom Tools > Reference): import, how they show, locking,

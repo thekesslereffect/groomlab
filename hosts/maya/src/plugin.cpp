@@ -73,11 +73,14 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
     CHECK_MSTATUS_AND_RETURN_IT(status);
 
     // A groom's files, one node each, for Maya's File Path Editor (file_node.h), listed there under
-    // GroomLab for this session (registered on every load: the type goes with the plugin).
+    // GroomLab for this session (registered on every load: the type goes with the plugin). Another
+    // groomLab type kept in the preferences (a development build's) would hold the label: it goes.
     status = plugin.registerNode(groomlab::maya::GroomFileNode::kTypeName, groomlab::maya::GroomFileNode::kTypeId,
                                  groomlab::maya::GroomFileNode::creator, groomlab::maya::GroomFileNode::initialize);
     CHECK_MSTATUS_AND_RETURN_IT(status);
-    MGlobal::executeCommand("if (!stringArrayContains(\"groomLabFile.fileName\", `filePathEditor -query -listRegisteredTypes`)) "
+    MGlobal::executeCommand("for ($t in `filePathEditor -query -listRegisteredTypes`) "
+                            "if (startsWith($t, \"groomLab\") && $t != \"groomLabFile.fileName\") filePathEditor -deregisterType $t;"
+                            "if (!stringArrayContains(\"groomLabFile.fileName\", `filePathEditor -query -listRegisteredTypes`)) "
                             "filePathEditor -registerType \"groomLabFile.fileName\" -typeLabel \"GroomLab\" -temporary;");
 
     // The Transfer Groom window's marker points (marker_set.h).

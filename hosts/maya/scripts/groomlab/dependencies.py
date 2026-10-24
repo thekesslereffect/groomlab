@@ -226,3 +226,100 @@ def file_node_changed(node):
         sync(groom)  # the node shows the groom's path again
     finally:
         cmds.undoInfo(stateWithoutFlush=state)
+
+
+# ---- Collect Files ---------------------------------------------------------------------------------
+
+# Where Collect Files puts each kind of file in the scene's asset folder (paths.asset_folder).
+_COLLECT_FOLDERS = {"map": "masks", "param": "masks", "attribute": "caches", "simCache": "caches", "cardBake": "cards"}
+
+
+def _inside(path, folder):
+    full, root = os.path.normcase(os.path.abspath(path)), os.path.normcase(os.path.abspath(folder))
+    return full.startswith(root.rstrip("\\/") + os.sep)
+
+
+def _tiles(path):
+    """The files a path names: itself, or a UDIM set's tiles."""
+    from groomlab import presets
+    import glob
+    for token in presets.UDIM_TOKENS:
+        if token in path:
+            folder, base = os.path.split(path)
+            pattern = glob.escape(base).replace(glob.escape(token), "[1-9][0-9][0-9][0-9]")
+            return sorted(glob.glob(os.path.join(glob.escape(folder), pattern)))
+    return [path] if os.path.isfile(path) else []
+
+
+def _copy_into(src, folder):
+    """`src` copied into `folder` under its own name (the same content there already: that file; other
+    content: a free name). Returns the copy's path."""
+    import filecmp
+    import shutil
+    from groomlab.paths import _unique_path
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    dst = os.path.join(folder, os.path.basename(src)).replace("\\", "/")
+    if os.path.exists(dst) and not filecmp.cmp(src, dst, shallow=False):
+        dst = _unique_path(dst)
+    if not os.path.exists(dst):
+        shutil.copy2(src, dst)
+    return dst
+
+
+def collect_files(grooms=None):
+    """Copy every file the grooms use (file_dependencies) that lies outside the scene's folder into
+    its asset folder (groomlab/<scene>/masks/<groom>, caches/<groom>, cards/<groom>...) and point the
+    grooms at the copies, so the scene's folder holds all of it (Archive Scene, a zip, a copy to
+    another machine). A file there already stays; a missing file is reported, not looked for (Find
+    Missing Files does that). A UDIM set copies every tile, a card bake every file of it. `grooms`:
+    a groom or a list (default every groom). One undo step (the copies stay). Returns {"copied":
+    {groom: {kind: {key: stored path}}}, "missing": {groom: {kind: {key: path}}}, "inside": files
+    already in the scene's folder}. Raises ValueError while the scene is untitled."""
+    from groomlab.base import undo_chunk
+    from groomlab.paths import asset_folder, asset_name, scene_folder
+    if not scene_folder():
+        raise ValueError("save the scene first: its files are collected into its folder")
+    if grooms is None:
+        grooms = cmds.ls(type=GROOM_TYPE, long=True) or []
+    elif isinstance(grooms, str):
+        grooms = [grooms]
+    report = {"copied": {}, "missing": {}, "inside": 0}
+
+    def note(section, groom, kind, key, value):
+        report[section].setdefault(groom, {}).setdefault(kind, {})[key] = value
+
+    with undo_chunk("collect files"):
+        for groom in grooms:
+            if cmds.referenceQuery(groom, isNodeReferenced=True):
+                continue  # a referenced groom's files belong to its file
+            bake_done = False
+            for f in file_dependencies(groom):
+                kind, key, resolved = f["kind"], f["key"], f["resolved"]
+                if _inside(resolved, scene_folder()):
+                    report["inside"] += 1
+                    continue
+                files = _tiles(resolved)
+                if not files:
+                    note("missing", groom, kind, key, f["path"])
+                    continue
+                if kind == "cardBake":  # the bake moves as a whole: every file of its prefix
+                    if bake_done:
+                        continue
+                    bake_done = True
+                    prefix = resolved[:-len(key)]
+                    from groomlab.cards import _BAKE_FILES
+                    target = "%s/%s" % (asset_folder("cards"), asset_name(groom))
+                    copies = [_copy_into(prefix + s, target) for s in _BAKE_FILES if os.path.isfile(prefix + s)]
+                    moved = next(c for c in copies if c.endswith(key))
+                    note("copied", groom, kind, key, repath_file(groom, kind, key, moved))
+                    continue
+                folder = _COLLECT_FOLDERS.get(kind, "caches")
+                if kind == "attribute" and key == "groomFile":
+                    folder = "exports"
+                target = "%s/%s" % (asset_folder(folder), asset_name(groom))
+                copies = [_copy_into(t, target) for t in files]
+                # (A UDIM set: its token kept, in the new folder.)
+                stored = target + "/" + os.path.basename(resolved) if len(files) > 1 else copies[0]
+                note("copied", groom, kind, key, repath_file(groom, kind, key, stored))
+    return report
