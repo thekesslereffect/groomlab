@@ -50,6 +50,7 @@
 #include "viewport.h"
 
 #include "groomlab/graph.h"
+#include "groomlab/graph_pins.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/node_library.h"
 
@@ -75,6 +76,9 @@ constexpr qreal kPasteOffsetX = 40.0, kPasteOffsetY = 60.0;
 
 // A backdrop's title bar and its resize grip (the corner), scene units, as Maya's BackdropItem.
 constexpr qreal kBackdropHeader = 28.0, kBackdropGrip = 14.0;
+// A pin (the wires' reroute points): its dot's radius, its nub's distance right of its center, and
+// the grid Snap puts nodes and pins on (the docked canvas's lines).
+constexpr qreal kPinRadius = 6.0, kPinNub = 11.0, kGrid = 24.0;
 }  // namespace
 
 NodeGraphView::NodeGraphView(QWidget* parent) : QWidget(parent) {
@@ -188,6 +192,7 @@ void NodeGraphView::rebuild() {
     nodes_.clear();
     wires_.clear();
     backdrops_.clear();
+    pins_.clear();
     if (!document_) return;
     // The backdrops as the graph keeps them (title, a rectangle, an optional color).
     const nlohmann::json& graph = document_->graph();
@@ -269,10 +274,31 @@ void NodeGraphView::rebuild() {
             if (to.inputs[i].name == c.input) wire.input = static_cast<int>(i);
         }
         if (wire.input < 0) continue;  // a Field port the spec does not list: not drawn
+        // The pins it runs through (each made once: a bundle's wires share theirs).
+        for (const std::string& id : pinRoute(graph, c.to, c.input)) {
+            int at = -1;
+            for (std::size_t i = 0; i < pins_.size(); ++i) {
+                if (pins_[i].id == id) at = static_cast<int>(i);
+            }
+            if (at < 0) {
+                Pin pin;
+                pin.id = id;
+                double x = 0.0, y = 0.0;
+                pinPosition(graph, id, &x, &y);
+                pin.pos = QPointF(x, y);
+                pin.color = theme::portColor(from.outputs.empty() ? std::string() : from.outputs[wire.output].type);
+                pin.from = wire.from;
+                pin.output = wire.output;
+                at = static_cast<int>(pins_.size());
+                pins_.push_back(std::move(pin));
+            }
+            wire.pins.push_back(at);
+        }
         wire.path = wirePathFor(wire);
         wires_.push_back(wire);
     }
     if (selectedWire_ >= static_cast<int>(wires_.size())) selectedWire_ = -1;
+    if (selectedPin_ >= static_cast<int>(pins_.size())) selectedPin_ = -1;
     selection_.erase(std::remove_if(selection_.begin(), selection_.end(), [&](const std::string& n) { return index(n) < 0; }), selection_.end());
     if (!selected_.empty() && index(selected_) < 0) {
         selected_ = selection_.empty() ? std::string() : selection_.back();
@@ -361,8 +387,93 @@ QPainterPath NodeGraphView::wirePath(const QPointF& from, const QPointF& to, qre
 QPainterPath NodeGraphView::wirePathFor(const Wire& wire) const {
     const Node& from = nodes_[wire.from];
     const Node& to = nodes_[wire.to];
+    if (!wire.pins.empty()) {
+        // Through its pins: each piece leaves level and arrives level (as Maya's, and Unreal's
+        // reroute nodes), wherever the pins lie.
+        std::vector<QPointF> points{outputPos(from, wire.output)};
+        for (int p : wire.pins) points.push_back(pins_[p].pos);
+        points.push_back(inputPos(to, wire.input));
+        QPainterPath path(points.front());
+        for (std::size_t i = 1; i < points.size(); ++i) {
+            const QPointF a = points[i - 1], b = points[i];
+            const qreal dx = std::max(50.0, std::abs(b.x() - a.x()) * 0.5);
+            path.cubicTo(a + QPointF(dx, 0), b - QPointF(dx, 0), b);
+        }
+        return path;
+    }
     const qreal below = std::max(from.pos.y() + from.size.height(), to.pos.y() + to.size.height());
     return wirePath(outputPos(from, wire.output), inputPos(to, wire.input), below);
+}
+
+int NodeGraphView::pinAt(const QPointF& scene, bool* nub) const {
+    for (int i = static_cast<int>(pins_.size()) - 1; i >= 0; --i) {
+        const QPointF d = scene - pins_[i].pos;
+        const bool onNub = d.x() > kPinRadius * 0.5 && d.x() < kPinNub + 5.0 && std::abs(d.y()) < kPinRadius + 3.0;
+        if (onNub || d.x() * d.x() + d.y() * d.y() <= (kPinRadius + 3.0) * (kPinRadius + 3.0)) {
+            if (nub) *nub = onNub;
+            return i;
+        }
+    }
+    return -1;
+}
+
+int NodeGraphView::pieceAt(const Wire& wire, const QPointF& scene) const {
+    std::vector<QPointF> points{outputPos(nodes_[wire.from], wire.output)};
+    for (int p : wire.pins) points.push_back(pins_[p].pos);
+    points.push_back(inputPos(nodes_[wire.to], wire.input));
+    int best = 0;
+    qreal nearest = std::numeric_limits<qreal>::max();
+    for (std::size_t k = 1; k < points.size(); ++k) {
+        const QPointF a = points[k - 1], b = points[k];
+        const qreal dx = std::max(50.0, std::abs(b.x() - a.x()) * 0.5);
+        QPainterPath piece(a);
+        piece.cubicTo(a + QPointF(dx, 0), b - QPointF(dx, 0), b);
+        for (int i = 0; i <= 16; ++i) {
+            const QPointF d = piece.pointAtPercent(i / 16.0) - scene;
+            const qreal d2 = d.x() * d.x() + d.y() * d.y();
+            if (d2 < nearest) nearest = d2, best = static_cast<int>(k) - 1;
+        }
+    }
+    return best;
+}
+
+QPointF NodeGraphView::snappedIf(const QPointF& scene) const {
+    if (!snapping_) return scene;
+    return QPointF(std::round(scene.x() / kGrid) * kGrid, std::round(scene.y() / kGrid) * kGrid);
+}
+
+std::vector<std::string> NodeGraphView::pinIds() const {
+    std::vector<std::string> ids;
+    for (const Pin& p : pins_) ids.push_back(p.id);
+    return ids;
+}
+
+QPointF NodeGraphView::pinPos(const std::string& pin) const {
+    for (const Pin& p : pins_) {
+        if (p.id == pin) return p.pos;
+    }
+    return QPointF(std::nan(""), 0.0);
+}
+
+std::vector<std::string> NodeGraphView::wirePins(int wire) const {
+    std::vector<std::string> ids;
+    if (wire < 0 || wire >= wireCount()) return ids;
+    for (int p : wires_[wire].pins) ids.push_back(pins_[p].id);
+    return ids;
+}
+
+std::string NodeGraphView::selectedPin() const { return selectedPin_ >= 0 ? pins_[selectedPin_].id : std::string(); }
+
+void NodeGraphView::selectPin(const std::string& pin) {
+    selectedPin_ = -1;
+    for (std::size_t i = 0; i < pins_.size(); ++i) {
+        if (pins_[i].id == pin) selectedPin_ = static_cast<int>(i);
+    }
+    if (selectedPin_ >= 0) {
+        selectedWire_ = selectedBackdrop_ = -1;
+        selectNode({});
+    }
+    update();
 }
 
 int NodeGraphView::nodeIndex(const std::string& name) const {
@@ -878,11 +989,24 @@ void NodeGraphView::paintEvent(QPaintEvent* /*event*/) {
         painter.setBrush(Qt::NoBrush);
         painter.drawPath(w.path);
     }
+    // The pins over the wires: a dot in the signal's color, its nub (where wires are dragged out)
+    // to its right; the selected one ringed.
+    for (std::size_t i = 0; i < pins_.size(); ++i) {
+        const Pin& p = pins_[i];
+        const bool selected = static_cast<int>(i) == selectedPin_;
+        painter.setPen(QPen(selected ? theme::nodeSelected() : p.color.darker(160), 2.0));
+        painter.setBrush(p.color);
+        painter.drawEllipse(p.pos, kPinRadius, kPinRadius);
+        painter.setPen(Qt::NoPen);
+        painter.drawPolygon(QPolygonF({p.pos + QPointF(kPinNub - 3.0, -4.0), p.pos + QPointF(kPinNub + 3.0, 0.0),
+                                       p.pos + QPointF(kPinNub - 3.0, 4.0)}));
+    }
     if (drag_ == Drag::Wire && dragWireFrom_ >= 0) {
         QColor color = theme::portColor(nodes_[dragWireFrom_].outputs[dragWirePort_].type);
         painter.setPen(QPen(color, 2.0, Qt::DashLine));
         painter.setBrush(Qt::NoBrush);
-        painter.drawPath(wirePath(outputPos(nodes_[dragWireFrom_], dragWirePort_), dragWireTo_));
+        const QPointF start = dragWirePin_ >= 0 ? pins_[dragWirePin_].pos : outputPos(nodes_[dragWireFrom_], dragWirePort_);
+        painter.drawPath(wirePath(start, dragWireTo_));
     }
     // The nodes, the selected ones last (the current one on top).
     for (const Node& n : nodes_) {
@@ -956,6 +1080,8 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
         return;
     }
     if (event->button() != Qt::LeftButton) return;
+    selectedPin_ = -1;
+    dragWirePin_ = -1;
     int node = -1, port = -1;
     bool output = false;
     if (bypassButtonAt(pressScene_, &node)) {
@@ -986,6 +1112,25 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
                     break;
                 }
             }
+        }
+        update();
+        return;
+    }
+    // A pin: its nub drags a wire of its signal out (Blueprints'), the rest of it moves it.
+    bool nub = false;
+    if (const int pin = pinAt(pressScene_, &nub); pin >= 0) {
+        if (nub && pins_[pin].from >= 0) {
+            drag_ = Drag::Wire;
+            dragWireFrom_ = pins_[pin].from;
+            dragWirePort_ = pins_[pin].output;
+            dragWireInputNode_ = dragWireInputPort_ = -1;
+            dragWirePin_ = pin;
+            dragWireTo_ = pressScene_;
+        } else {
+            selectPin(pins_[pin].id);
+            drag_ = Drag::Pin;
+            dragPin_ = pin;
+            pinStart_ = pins_[pin].pos;
         }
         update();
         return;
@@ -1086,7 +1231,10 @@ void NodeGraphView::mouseMoveEvent(QMouseEvent* event) {
                 for (std::size_t i = 0; i < nodes_.size(); ++i) {
                     if (static_cast<int>(i) == dragNode_ || isSelected(nodes_[i].name)) moved.push_back(static_cast<int>(i));
                 }
-                for (int i : moved) nodes_[i].pos += delta / scale_;
+                // The pressed node goes where the cursor took it (on the grid with Snap); the rest
+                // of the selection by the same step.
+                const QPointF step = snappedIf(moveStart_ + (toScene(now) - pressScene_)) - nodes_[dragNode_].pos;
+                for (int i : moved) nodes_[i].pos += step;
                 for (Wire& w : wires_) {
                     if (std::find(moved.begin(), moved.end(), w.from) != moved.end() || std::find(moved.begin(), moved.end(), w.to) != moved.end()) {
                         w.path = wirePathFor(w);
@@ -1102,6 +1250,15 @@ void NodeGraphView::mouseMoveEvent(QMouseEvent* event) {
             dragWireTo_ = toScene(now);
             updateWireHint(dragWireTo_);
             update();
+            break;
+        case Drag::Pin:
+            if (dragPin_ >= 0 && dragPin_ < static_cast<int>(pins_.size())) {
+                pins_[dragPin_].pos = snappedIf(pinStart_ + (toScene(now) - pressScene_));
+                for (Wire& w : wires_) {
+                    if (std::find(w.pins.begin(), w.pins.end(), dragPin_) != w.pins.end()) w.path = wirePathFor(w);
+                }
+                update();
+            }
             break;
         case Drag::Band:
             band_.setBottomRight(now);
@@ -1169,6 +1326,32 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
         carried_.clear();
         return;
     }
+    if (drag == Drag::Pin && dragPin_ >= 0 && document_) {
+        // Dropped on another pin of its signal: they join (an undo step); else it stays where it
+        // was put (not an undo step, as node moves).
+        const int pin = dragPin_;
+        dragPin_ = -1;
+        if (pin < static_cast<int>(pins_.size()) && pins_[pin].pos != pinStart_) {
+            int onto = -1;
+            for (std::size_t i = 0; i < pins_.size(); ++i) {
+                const QPointF d = pins_[i].pos - pins_[pin].pos;
+                if (static_cast<int>(i) != pin && d.x() * d.x() + d.y() * d.y() <= 4.0 * kPinRadius * kPinRadius) onto = static_cast<int>(i);
+            }
+            if (onto >= 0) {
+                const std::string error = document_->mergePins(pins_[onto].id, pins_[pin].id);
+                if (error.empty()) {
+                    emit status(tr("Pins joined: the wires run through one pin"));
+                    emit edited();
+                } else {
+                    emit message(tr("Pins not joined: %1").arg(QString::fromStdString(error)));
+                }
+                refresh();
+                return;
+            }
+            document_->movePin(pins_[pin].id, pins_[pin].pos.x(), pins_[pin].pos.y());
+        }
+        return;
+    }
     if (drag == Drag::Move && dragNode_ >= 0 && document_) {
         // Every moved node keeps where it was put (not an undo step, as Maya's moves).
         if ((nodes_[dragNode_].pos - moveStart_).manhattanLength() > 0.0) {
@@ -1213,10 +1396,26 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
                 const Node& from = nodes_[dragWireFrom_];
                 const Node& to = nodes_[node];
                 const bool first = dragWirePort_ == 0;
-                error = document_->connectNodes(from.name, first ? std::string() : from.outputs[dragWirePort_].name, to.name,
-                                                to.inputs[port].name);
+                if (dragWirePin_ >= 0) {  // out of a pin: through the pins up to it
+                    error = document_->linkFromPin(pins_[dragWirePin_].id, to.name, to.inputs[port].name);
+                } else {
+                    error = document_->connectNodes(from.name, first ? std::string() : from.outputs[dragWirePort_].name, to.name,
+                                                    to.inputs[port].name);
+                }
                 if (error.empty()) emit edited();
             }
+        } else if (const int pin = dragWirePin_ < 0 ? pinAt(at) : -1; pin >= 0) {
+            // Onto a pin: a picked-up input's wire takes the pin's signal; a wire from an output
+            // feeds every wire through the pin from there (an undo step).
+            if (dragWireInputNode_ >= 0) {
+                error = document_->linkFromPin(pins_[pin].id, nodes_[dragWireInputNode_].name,
+                                               nodes_[dragWireInputNode_].inputs[dragWireInputPort_].name);
+            } else {
+                const Node& from = nodes_[dragWireFrom_];
+                error = document_->feedPin(pins_[pin].id, from.name, dragWirePort_ == 0 ? std::string() : from.outputs[dragWirePort_].name);
+                if (error.empty()) emit status(tr("The pin's wires come from %1 now").arg(QString::fromStdString(from.name)));
+            }
+            if (error.empty()) emit edited();
         } else if (nodeAt(at) >= 0) {
             // On a card but no port: nothing changes (a picked-up wire is not lost by a near miss).
             if (dragWireInputNode_ < 0) error = tr("Drop the wire on an input port").toStdString();
@@ -1225,7 +1424,7 @@ void NodeGraphView::mouseReleaseEvent(QMouseEvent* event) {
             if (error.empty()) emit edited();
         }
         if (!error.empty()) emit message(QString::fromStdString(error));
-        dragWireFrom_ = dragWirePort_ = dragWireInputNode_ = dragWireInputPort_ = -1;
+        dragWireFrom_ = dragWirePort_ = dragWireInputNode_ = dragWireInputPort_ = dragWirePin_ = -1;
         wireHint_.clear();
         refresh();
     }
@@ -1419,6 +1618,14 @@ void NodeGraphView::deleteSelected() {
     std::string error;
     if (selectedBackdrop_ >= 0) {
         removeBackdrop(selectedBackdrop_);
+        return;
+    }
+    if (selectedPin_ >= 0 && selectedPin_ < static_cast<int>(pins_.size())) {
+        error = document_->removePin(pins_[selectedPin_].id);
+        selectedPin_ = -1;
+        if (!error.empty()) emit message(QString::fromStdString(error));
+        else emit edited();
+        refresh();
         return;
     }
     if (selectedWire_ >= 0 && selectedWire_ < static_cast<int>(wires_.size())) {
@@ -1689,6 +1896,22 @@ void NodeGraphView::mouseDoubleClickEvent(QMouseEvent* event) {
     } else if (const int b = node < 0 ? backdropTitleAt(scene) : -1; b >= 0) {
         drag_ = Drag::None;
         renameBackdrop(b);
+    } else if (const int w = node < 0 && pinAt(scene) < 0 ? wireAt(scene) : -1; w >= 0 && document_) {
+        // A pin where the wire was double-clicked (Unreal's reroute node): the wire runs through it.
+        drag_ = Drag::None;
+        std::string from, output, to, input, made;
+        wireLink(w, &from, &output, &to, &input);
+        const QPointF at = snappedIf(scene);
+        const std::string error = document_->addPin(to, input, at.x(), at.y(), pieceAt(wires_[w], scene), &made);
+        if (error.empty()) {
+            emit status(tr("Pinned %1.%2: drag the pin to route the wire, Delete removes it")
+                            .arg(QString::fromStdString(to), QString::fromStdString(input)));
+            emit edited();
+            refresh();
+            selectPin(made);
+        } else {
+            emit message(QString::fromStdString(error));
+        }
     }
     event->accept();
 }
@@ -1802,7 +2025,7 @@ void NodeGraphView::keyPressEvent(QKeyEvent* event) {
             break;
         case Qt::Key_Delete:
         case Qt::Key_Backspace:
-            if (!document_ || (selectedWire_ < 0 && selection_.empty() && selectedBackdrop_ < 0)) break;
+            if (!document_ || (selectedWire_ < 0 && selection_.empty() && selectedBackdrop_ < 0 && selectedPin_ < 0)) break;
             deleteSelected();
             event->accept();
             return;

@@ -130,7 +130,9 @@ The **Graph Editor** is a dockable node editor for the selected groom:
     an input's link end on a pin and that input takes the pin's signal. Delete takes a selected pin
     out (the link straightens there). Pins are
     layout, as node positions are: no undo step, nothing evaluates again, and the groom file keeps
-    them (the "pins" of its graph; the app and Blender carry them but don't draw them yet).
+    them (the "pins" of its graph, graph_pins.h): the app draws and edits them the same way (there
+    adding, removing, joining and feeding a pin are undo steps, as its backdrops are), and Blender
+    shows them as its own reroute nodes.
   - **Refused links:** mismatched types and cycles are refused, with the reason in the status
     bar.
 - **Toolbar:** the groom, **Add Node**, **Presets**, **Snap** (nodes and pins you move land on

@@ -361,6 +361,19 @@ public:
     std::string setBackdropColor(int index, int r, int g, int b);
     std::string removeBackdrop(int index);
     void setBackdropRect(int index, double x, double y, double w, double h);
+    // The links' pins (graph_pins.h: the graph's "pins", Unreal's reroute nodes, layout only, as
+    // Maya's Graph Editor keeps them). Adding one on the link into to.input (at `index` in its
+    // route, -1 last; its id to *made), removing one, joining two of one signal, linking an input
+    // from the signal a pin carries (through the pins up to it) and feeding every link through a
+    // pin from another output are each an undo step; moving one is not (as node moves are not).
+    // "" or the error.
+    std::string addPin(const std::string& to, const std::string& input, double x, double y, int index = -1,
+                       std::string* made = nullptr);
+    std::string removePin(const std::string& pin);
+    std::string mergePins(const std::string& keep, const std::string& drop);
+    std::string linkFromPin(const std::string& pin, const std::string& to, const std::string& input);
+    std::string feedPin(const std::string& pin, const std::string& from, const std::string& output);
+    void movePin(const std::string& pin, double x, double y);
     // A node's behaviour version as saved and its operator's newest (graph_edit.h): Upgrade is on
     // offer while the first is lower. {0, 0} for no such node.
     std::pair<int, int> nodeVersion(const std::string& node) const;

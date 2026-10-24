@@ -17,6 +17,7 @@
 #include "groomlab/attributes.h"
 #include "groomlab/flow.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/graph_pins.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/node_library.h"
 #include "groomlab/parts.h"
@@ -582,6 +583,7 @@ std::string GroomDocument::editGraph(const std::string& label, const std::functi
     const json before = graph_;
     try {
         edit(graph_);
+        prunePins(graph_);  // the pins of links gone, or fed from elsewhere now, go with them
     } catch (const std::exception& e) {
         graph_ = before;
         return e.what();
@@ -1115,6 +1117,7 @@ std::string GroomDocument::renameNode(const std::string& node, const std::string
         GraphEdit edit(g.dump());
         edit.renameNode(node, newName);
         g = json::parse(edit.toJson());
+        renamePinNode(g, node, newName);
         moved = edit.movedNodes();  // a compound's inner nodes' edits go with it
     }, moved);
 }
@@ -1462,6 +1465,65 @@ void GroomDocument::setBackdropRect(int index, double x, double y, double w, dou
     (*b)["w"] = std::max(120.0, w);
     (*b)["h"] = std::max(80.0, h);
     dirty_ = true;
+}
+
+// ---- Pins (graph_pins.h) ------------------------------------------------------------------------
+
+std::string GroomDocument::addPin(const std::string& to, const std::string& input, double x, double y, int index, std::string* made) {
+    std::string pin;
+    const std::string error = editGraph("add pin", [&](json& g) {
+        pin = groomlab::addPin(g, to, input, x, y, index);
+        if (pin.empty()) throw std::invalid_argument("nothing feeds " + to + "." + input + " to pin");
+    });
+    if (error.empty() && made) *made = pin;
+    return error;
+}
+
+std::string GroomDocument::removePin(const std::string& pin) {
+    return editGraph("remove pin", [&](json& g) {
+        if (!groomlab::removePin(g, pin)) throw std::invalid_argument("no pin '" + pin + "'");
+    });
+}
+
+std::string GroomDocument::mergePins(const std::string& keep, const std::string& drop) {
+    return editGraph("join pins", [&](json& g) {
+        if (!groomlab::mergePins(g, keep, drop)) throw std::invalid_argument("those pins carry different links' signals");
+    });
+}
+
+std::string GroomDocument::linkFromPin(const std::string& pin, const std::string& to, const std::string& input) {
+    const std::optional<PinSource> source = pinSource(graph_, pin);
+    if (!source) return "no pin '" + pin + "'";
+    const std::vector<std::string> via = pinRouteTo(graph_, pin);
+    return editGraph("connect " + source->from + " to " + to, [&](json& g) {
+        GraphEdit edit(g.dump());
+        edit.connectByHand(source->from, to, input, source->output);
+        g = json::parse(edit.toJson());
+        setPinRoute(g, to, input, via);
+    });
+}
+
+std::string GroomDocument::feedPin(const std::string& pin, const std::string& from, const std::string& output) {
+    const std::vector<PinLink> links = pinLinks(graph_, pin);
+    if (links.empty()) return "no pin '" + pin + "'";
+    return editGraph("feed pin from " + from, [&](json& g) {
+        // Each link through the pin from `from` now, on through the pin and the ones after it; one
+        // that can't take it throws (the core's checks): nothing changes.
+        std::vector<std::pair<PinLink, std::vector<std::string>>> routes;
+        for (const PinLink& link : links) {
+            std::vector<std::string> via = pinRoute(g, link.to, link.input);
+            via.erase(via.begin(), via.begin() + static_cast<std::ptrdiff_t>(std::min(link.index, via.size())));
+            routes.emplace_back(link, std::move(via));
+        }
+        GraphEdit edit(g.dump());
+        for (const auto& [link, via] : routes) edit.connectByHand(from, link.to, link.input, output);
+        g = json::parse(edit.toJson());
+        for (const auto& [link, via] : routes) setPinRoute(g, link.to, link.input, via);
+    });
+}
+
+void GroomDocument::movePin(const std::string& pin, double x, double y) {
+    if (groomlab::movePin(graph_, pin, x, y)) dirty_ = true;
 }
 
 // ---- The stored texts (parts, flow, correctives) ------------------------------------------------

@@ -66,6 +66,7 @@
 #include "groomlab/brush_catalog.h"
 #include "groomlab/correctives.h"
 #include "groomlab/field.h"
+#include "groomlab/graph_pins.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/transfer.h"
@@ -3456,6 +3457,88 @@ TEST(AppPanels, GraphBackdropsAreMadeNamedColoredMovedResizedAndDeleted) {
     view.refresh();
     EXPECT_EQ(view.backdropCount(), 1);
     EXPECT_EQ(view.backdropTitle(0), QStringLiteral("Frizz"));
+}
+
+TEST(AppPanels, GraphPinsRouteWiresAndWiresDragOutOfThemAndIntoThem) {
+    // As Maya's Graph Editor's (Unreal's reroute nodes): double-click a wire for a pin on it, drag
+    // the pin (no undo step, on the grid with Snap), drag from its nub for another wire of its
+    // signal, drop an output's wire on it to feed its wires from there; Delete removes it.
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    const std::string length = nodeOfType(*doc, "Length"), interpolate = nodeOfType(*doc, "Interpolate");
+    std::string noise;
+    ASSERT_EQ(doc->addNode("Noise", 0.0f, 900.0f, &noise), "");
+    NodeGraphView view;
+    view.resize(1400, 900);
+    view.setDocument(doc.get());
+    const qreal s = view.viewScale();
+    auto widget = [&](const QPointF& scene) { return (scene * view.viewScale() + view.viewPan()).toPoint(); };
+    int wire = -1;
+    std::string to, input;
+    for (int i = 0; i < view.wireCount(); ++i) {
+        std::string from, output;
+        if (view.wireLink(i, &from, &output, &to, &input) && from == length) {
+            wire = i;
+            break;
+        }
+    }
+    ASSERT_GE(wire, 0);
+    mouse(&view, QEvent::MouseButtonDblClick, widget(view.wirePathOf(wire).pointAtPercent(0.5)));
+    ASSERT_EQ(view.pinIds().size(), 1u);
+    const std::string pin = view.pinIds().front();
+    EXPECT_EQ(view.selectedPin(), pin);
+    EXPECT_EQ(doc->graph()["pins"]["routes"][0]["to"], to);
+    EXPECT_EQ(doc->undoText(), "Undo add pin");
+    // Dragged: the wire follows it, the graph keeps where it was put (no undo step).
+    const QPointF before = view.pinPos(pin);
+    mouse(&view, QEvent::MouseButtonPress, widget(before));
+    mouse(&view, QEvent::MouseMove, widget(before) + QPoint(0, 80));
+    mouse(&view, QEvent::MouseButtonRelease, widget(before) + QPoint(0, 80));
+    EXPECT_NEAR(view.pinPos(pin).y(), before.y() + 80 / s, 1e-3);
+    EXPECT_NEAR(doc->graph()["pins"]["points"][0]["y"].get<double>(), before.y() + 80 / s, 1e-3);
+    EXPECT_EQ(doc->undoText(), "Undo add pin");
+    // With Snap: on the grid.
+    view.setSnapping(true);
+    const QPointF at = view.pinPos(pin);
+    mouse(&view, QEvent::MouseButtonPress, widget(at));
+    mouse(&view, QEvent::MouseMove, widget(at) + QPoint(37, 29));
+    mouse(&view, QEvent::MouseButtonRelease, widget(at) + QPoint(37, 29));
+    EXPECT_EQ(std::fmod(view.pinPos(pin).x(), 24.0), 0.0);
+    EXPECT_EQ(std::fmod(view.pinPos(pin).y(), 24.0), 0.0);
+    view.setSnapping(false);
+    // Out of its nub into the Noise's input: the length's signal, through the pin.
+    const QPoint nub = widget(view.pinPos(pin) + QPointF(11.0, 0.0));
+    const QPoint noiseIn = inputAt(view, noise, portOf(*doc, noise, "inputs", "strands"));
+    mouse(&view, QEvent::MouseButtonPress, nub);
+    mouse(&view, QEvent::MouseMove, noiseIn);
+    mouse(&view, QEvent::MouseButtonRelease, noiseIn);
+    EXPECT_EQ(pinRoute(doc->graph(), noise, "strands"), std::vector<std::string>{pin});
+    bool fed = false;
+    for (const GroomDocument::ConnectionInfo& c : doc->connections()) fed = fed || (c.to == noise && c.from == length);
+    EXPECT_TRUE(fed);
+    // The interpolate's output dropped on the pin: both wires through it come from there now.
+    const QRectF card = view.nodeRect(interpolate);
+    const QPoint out = QPointF(card.right(), card.top() + (28.0 + 8.0 + 18.0 * 0.5) * s).toPoint();
+    mouse(&view, QEvent::MouseButtonPress, out);
+    mouse(&view, QEvent::MouseMove, widget(view.pinPos(pin)));
+    mouse(&view, QEvent::MouseButtonRelease, widget(view.pinPos(pin)));
+    int fromInterpolate = 0;
+    for (const GroomDocument::ConnectionInfo& c : doc->connections()) {
+        if ((c.to == noise || (c.to == to && c.input == input)) && c.from == interpolate) ++fromInterpolate;
+    }
+    EXPECT_EQ(fromInterpolate, 2);
+    EXPECT_EQ(pinLinks(doc->graph(), pin).size(), 2u);
+    EXPECT_EQ(doc->undoText(), "Undo feed pin from " + interpolate);
+    EXPECT_EQ(doc->undo(), "");
+    view.refresh();
+    EXPECT_EQ(pinSource(doc->graph(), pin), (PinSource{length, ""}));
+    // Delete removes the selected pin; the wires stay.
+    view.selectPin(pin);
+    const auto links = doc->connections().size();
+    key(&view, QEvent::KeyPress, Qt::Key_Delete);
+    EXPECT_TRUE(view.pinIds().empty());
+    EXPECT_FALSE(doc->graph().contains("pins"));
+    EXPECT_EQ(doc->connections().size(), links);
 }
 
 TEST(AppPanels, GraphLinkDragsSayWhyAndRestoreOnARefusedDrop) {

@@ -34,6 +34,7 @@ add_executable(groomlab_tests
     engine/core/test_golden.cpp
     engine/core/test_surface_paths.cpp
     engine/core/test_graph.cpp
+    engine/core/test_graph_pins.cpp
     engine/core/test_grooming.cpp
     engine/core/test_hierarchy.cpp
     engine/core/test_tubes.cpp
