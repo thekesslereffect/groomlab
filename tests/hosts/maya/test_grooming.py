@@ -4999,6 +4999,47 @@ class MapImagesTest(unittest.TestCase):
         again = groomlab.collect_files()
         self.assertEqual(again["copied"][self.groom]["map"]["density"], "groomlab/shot/masks/%s/density.png" % asset)
         self.assertEqual(sorted(os.listdir(scene + "/groomlab/shot/masks/%s" % asset)), ["density.png", "tint.png"])
+        # A UDIM set of one tile keeps its token; a card bake made outside comes whole, under one prefix.
+        write_image(elsewhere + "/udim/root.1001.png", gray=90)
+        model = gm.GraphModel.from_groom(self.groom, gm.OperatorCatalog.from_maya())
+        model.set_param("length", "keep", groomlab.texture_map(elsewhere + "/udim/root.<UDIM>.png"))
+        model.save(self.groom)
+        groomlab.create_cards(self.groom, max_cards=8)
+        groomlab.bake_cards(self.groom, elsewhere + "/bake", resolution=32, name="lock")
+        report = groomlab.collect_files()
+        self.assertEqual(report["copied"][self.groom]["param"]["length.keep"],
+                         "groomlab/shot/masks/%s/root.<UDIM>.png" % asset)
+        self.assertTrue(os.path.isfile(scene + "/groomlab/shot/masks/%s/root.1001.png" % asset))
+        prefix = groomlab_core.card_maps_prefix(cmds.getAttr(self.groom + ".cardMaps"))
+        self.assertEqual(prefix, "groomlab/shot/cards/%s/lock_" % asset)
+        bakes = [f for f in groomlab.file_dependencies(self.groom) if f["kind"] == "cardBake"]
+        self.assertGreater(len(bakes), 3)
+        self.assertTrue(all(f["exists"] and f["path"].startswith(prefix) for f in bakes))
+
+    def test_a_moved_scene_keeps_its_paths_and_its_file_nodes_follow(self):
+        # The file nodes save absolute paths; opened from another folder, the grooms keep their
+        # relative paths and the nodes show where the files are now.
+        from groomlab import dependencies
+        scene = self.home + "/shot"
+        os.makedirs(scene)
+        cmds.file(rename=scene + "/shot.ma")
+        cmds.file(save=True, type="mayaAscii")
+        self.groom = cmds.ls(type="groomLabShape", long=True)[0]
+        write_image(scene + "/textures/density.png", gray=255)
+        groomlab.import_map(self.groom, scene + "/textures/density.png", name="density")
+        cmds.file(save=True, type="mayaAscii")  # (the nodes made before the save)
+        node = dependencies.file_nodes(self.groom)[("map", "density")]
+        self.assertTrue(os.path.samefile(cmds.getAttr(node + ".fileName"), scene + "/textures/density.png"))
+        moved = tempfile.mkdtemp(prefix="groomlab_moved_").replace("\\", "/") + "/shot"
+        shutil.copytree(scene, moved)
+        cmds.file(moved + "/shot.ma", open=True, force=True)
+        groom = cmds.ls(type="groomLabShape", long=True)[0]
+        stored = next(m["texture"] for m in groomlab.maps(groom) if m["name"] == "density")
+        self.assertEqual(stored, "textures/density.png")
+        node = dependencies.file_nodes(groom)[("map", "density")]
+        self.assertTrue(os.path.samefile(cmds.getAttr(node + ".fileName"), moved + "/textures/density.png"))
+        dependencies.file_node_changed(node)  # (nothing to take: the node is the groom's)
+        self.assertEqual(next(m["texture"] for m in groomlab.maps(groom) if m["name"] == "density"), "textures/density.png")
 
 
 def write_photo(path, width, height, spot=None):

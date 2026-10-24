@@ -65,9 +65,9 @@ def file_dependencies(groom):
         add("simCache", node, bake.get("file") if isinstance(bake, dict) else "")
     prefix = groomlab_core.card_maps_prefix(cmds.getAttr(groom + ".cardMaps") or "")
     if prefix:
-        for suffix in _BAKE_FILES:
-            if os.path.isfile(resolve_path(prefix + suffix, groom) or ""):
-                add("cardBake", suffix, prefix + suffix)
+        present = [s for s in _BAKE_FILES if os.path.isfile(resolve_path(prefix + s, groom) or "")]
+        for suffix in present or ["Color.tga"]:  # (none there: the bake's color map, missing)
+            add("cardBake", suffix, prefix + suffix)
     return out
 
 
@@ -135,9 +135,9 @@ def _node_name(groom, kind, key):
 
 
 def sync(groom):
-    """The groom's groomLabFile nodes as its files are now: one each (made, renamed as needed),
-    their fileName the file as it resolves; nodes of files it no longer has removed. No undo step.
-    A referenced groom is left as its file has it."""
+    """The groom's groomLabFile nodes as its files are now: one each (made when new), their
+    fileName the file as it resolves; nodes of files it no longer has removed. No undo step. A
+    referenced groom is left as its file has it."""
     if not cmds.objExists(groom) or cmds.referenceQuery(groom, isNodeReferenced=True):
         return
     have = file_nodes(groom)
@@ -235,8 +235,10 @@ _COLLECT_FOLDERS = {"map": "masks", "param": "masks", "attribute": "caches", "si
 
 
 def _inside(path, folder):
-    full, root = os.path.normcase(os.path.abspath(path)), os.path.normcase(os.path.abspath(folder))
-    return full.startswith(root.rstrip("\\/") + os.sep)
+    """Whether `path` lies in `folder`, folders compared as Save As's file following does (case,
+    Windows' short names)."""
+    from groomlab.paths import _relative_to
+    return _relative_to(path, folder) is not None
 
 
 def _tiles(path):
@@ -276,6 +278,7 @@ def collect_files(grooms=None):
     a groom or a list (default every groom). One undo step (the copies stay). Returns {"copied":
     {groom: {kind: {key: stored path}}}, "missing": {groom: {kind: {key: path}}}, "inside": files
     already in the scene's folder}. Raises ValueError while the scene is untitled."""
+    from groomlab import presets
     from groomlab.base import undo_chunk
     from groomlab.paths import asset_folder, asset_name, scene_folder
     if not scene_folder():
@@ -304,22 +307,48 @@ def collect_files(grooms=None):
                     note("missing", groom, kind, key, f["path"])
                     continue
                 if kind == "cardBake":  # the bake moves as a whole: every file of its prefix
-                    if bake_done:
-                        continue
-                    bake_done = True
-                    prefix = resolved[:-len(key)]
-                    from groomlab.cards import _BAKE_FILES
-                    target = "%s/%s" % (asset_folder("cards"), asset_name(groom))
-                    copies = [_copy_into(prefix + s, target) for s in _BAKE_FILES if os.path.isfile(prefix + s)]
-                    moved = next(c for c in copies if c.endswith(key))
-                    note("copied", groom, kind, key, repath_file(groom, kind, key, moved))
+                    if not bake_done:
+                        bake_done = True
+                        target = "%s/%s" % (asset_folder("cards"), asset_name(groom))
+                        note("copied", groom, kind, key, _collect_bake(groom, resolved[:-len(key)], key, target))
                     continue
                 folder = _COLLECT_FOLDERS.get(kind, "caches")
                 if kind == "attribute" and key == "groomFile":
                     folder = "exports"
                 target = "%s/%s" % (asset_folder(folder), asset_name(groom))
                 copies = [_copy_into(t, target) for t in files]
-                # (A UDIM set: its token kept, in the new folder.)
-                stored = target + "/" + os.path.basename(resolved) if len(files) > 1 else copies[0]
+                udim = any(t in resolved for t in presets.UDIM_TOKENS)  # its token kept, in the new folder
+                stored = target + "/" + os.path.basename(resolved) if udim else copies[0]
                 note("copied", groom, kind, key, repath_file(groom, kind, key, stored))
     return report
+
+
+def _collect_bake(groom, prefix, key, target):
+    """A card bake's files (prefix + each suffix there) copied into `target` under one prefix (its
+    own name, or a free <name>_2_... when any of them would land on other content), the groom and
+    its card mesh's and hair cap's materials pointed there. Returns the stored path of `key`."""
+    import filecmp
+    import shutil
+    from groomlab.cards import _BAKE_FILES, _existing_scalp_cap, _material_textures, card_mesh
+    files = [s for s in _BAKE_FILES if os.path.isfile(prefix + s)]
+    stem = os.path.basename(prefix)
+
+    def clash(name):
+        return any(os.path.exists("%s/%s%s" % (target, name, s)) and
+                   not filecmp.cmp(prefix + s, "%s/%s%s" % (target, name, s), shallow=False) for s in files)
+
+    name, n = stem, 2
+    while clash(name):
+        name, n = "%s_%d_" % (stem.rstrip("_"), n), n + 1
+    if not os.path.isdir(target):
+        os.makedirs(target)
+    for s in files:
+        if not os.path.exists("%s/%s%s" % (target, name, s)):
+            shutil.copy2(prefix + s, "%s/%s%s" % (target, name, s))
+    stored = repath_file(groom, "cardBake", key, "%s/%s%s" % (target, name, key))
+    for texture in _material_textures(card_mesh(groom)) + _material_textures(_existing_scalp_cap(groom)):
+        value = (cmds.getAttr(texture + ".fileTextureName") or "").replace("\\", "/")
+        for s in files:
+            if _same(value, prefix + s):
+                cmds.setAttr(texture + ".fileTextureName", "%s/%s%s" % (target, name, s), type="string")
+    return stored

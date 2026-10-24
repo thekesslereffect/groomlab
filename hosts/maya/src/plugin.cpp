@@ -194,10 +194,17 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
             try {
                 groomlab::maya::refreshMayaPaths();
                 callGroomlab("remember_scene_folder");
+                callGroomlab("sync_file_nodes");  // the File Path Editor's nodes as the grooms resolve here
             } catch (...) {
             }
         }));
     }
+    gCallbacks.append(MSceneMessage::addCallback(MSceneMessage::kAfterImport, [](void*) {
+        try {
+            callGroomlab("sync_file_nodes");
+        } catch (...) {
+        }
+    }));
     // The process-wide caches (a distance field per collider surface, surface graphs, subdivision
     // plans, decoded textures, the array pools: process_caches.h) outlive the grooms that filled
     // them: let go before a new or opened scene (the closing scene's grooms free what they hold).

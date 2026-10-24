@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "file_node.h"
 
+#include <maya/MFileIO.h>
 #include <maya/MFnDependencyNode.h>
 #include <maya/MFnMessageAttribute.h>
 #include <maya/MFnStringData.h>
@@ -43,7 +44,12 @@ MStatus GroomFileNode::initialize() {
 }
 
 bool GroomFileNode::setInternalValue(const MPlug& plug, const MDataHandle& handle) {
-    if (plug == aFileName) {
+    // A file being read sets the path it was saved with (another machine's or folder's when the
+    // scene moved): not an edit. groomlab.dependencies refreshes the nodes from their grooms once
+    // the scene is open (sync_file_nodes).
+    const bool reading = MFileIO::isReadingFile() || MFileIO::isOpeningFile() || MFileIO::isImportingFile() ||
+                         MFileIO::isReferencingFile();
+    if (plug == aFileName && !reading) {
         // On idle, after the edit that set it (the editor's Repath sets several in a row): the
         // groom takes the path when it differs from what it has (groomlab.dependencies keeps the
         // node as the groom has it too, so its own writes come back as no change).

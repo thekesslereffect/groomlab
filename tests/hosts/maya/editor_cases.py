@@ -3683,7 +3683,7 @@ class DockableWindowsTest(unittest.TestCase):
                              ["Guides to Curves", "Curves to Guides...", "Strands to Curves...", "Strands to Mesh...",
                               "Bake Node to Guides...", "Bake Scale Maps", "Delete All Flow Arrows",
                               "Transfer Groom to Scalp...",
-                              "Copy Graph to Other Grooms...", "Find Missing Files..."])
+                              "Copy Graph to Other Grooms...", "Find Missing Files...", "Collect Files"])
             for entry in entries:
                 self.assertTrue(cmds.menuItem(entry, query=True, annotation=True))  # a tooltip each
         finally:

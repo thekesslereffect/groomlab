@@ -455,6 +455,9 @@ utils.copy_graph(groom, ["hair2", "hair3"], guides="keep", maps=False)
   the groom's files change and before every save (`groomlab.dependencies`, `sync_file_nodes`); a
   Repath or Replace String there goes back to the groom on idle, relative as GroomLab stores it.
   The nodes' upkeep makes no undo step; undoing the editor's change brings the groom's path back.
+  A scene opened (or imported) from another folder or machine reads its nodes' saved paths as no
+  edit: the grooms keep their own (relative) paths and the nodes are refreshed from them once it
+  is open.
   Maya's own `file -query -list` and Archive Scene see only Maya's node types (file textures,
   references, audio): a pipeline collects GroomLab's files with `file_dependencies` over every
   groom (or `ls -type groomLabFile` and each node's `fileName`). Referenced grooms keep the nodes
