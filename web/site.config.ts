@@ -14,7 +14,7 @@ export const siteConfig = {
   tagline: 'The universal groom system.',
   description:
     'A free, universal groom system for hair, fur, feathers and scales: groom guides by hand, style with a node graph, render in Arnold and RenderMan and export the same groom to Unreal, Unity, USD and glTF. Runs in Maya 2022 to 2027 (2023 to 2027 in beta), with a standalone app and Blender in beta.',
-  version: '0.28.0',
+  version: '0.29.0',
 
   // The deployed site's address (for social previews). NEXT_PUBLIC_SITE_URL overrides it.
   url: process.env.NEXT_PUBLIC_SITE_URL ?? 'https://getgroomlab.com',
