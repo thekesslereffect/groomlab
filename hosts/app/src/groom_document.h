@@ -113,7 +113,7 @@ struct ExportResult {
 // core's CardBake.)
 struct CardBakeFiles {
     std::string prefix;              // <folder>/<name>_ (CardBakePaths)
-    std::vector<std::string> paths;  // _Depth, _Coverage, _Tangent, _Attribute, _Color, _AO (TGA), _Atlas.json, _Preview.png
+    std::vector<std::string> paths;  // _Depth, _Coverage, _Tangent, _Attribute, _Color, _AO, _Normal (TGA), _Atlas.json, _Preview.png
     std::string preview;             // the viewport's RGBA map: the color darkened by half the AO, the coverage in alpha
     std::string atlas;               // the atlas JSON the session keeps cells by
     std::string stamp;               // cardsBakeStamp of the bake
@@ -704,7 +704,7 @@ public:
     // The same strands and scalp handed to `bake` (a map export's bake, card_files.h).
     CardBake bakeCardsInMemoryWith(const std::function<CardBake(StrandsPtr, MeshPtr)>& bake);
     // Writes the bake as files: <directory>/<name>_<map>.tga for Depth, Coverage, Tangent,
-    // Attribute, Color and AO (the Maya host's layout and names), <name>_Atlas.json (the cells
+    // Attribute, Color, AO and Normal (the Maya host's layout and names), <name>_Atlas.json (the cells
     // rebuilt cards keep) and <name>_Preview.png (the viewport's RGBA map). The session takes
     // the bake (setCardMaps): the cards keep its cells from now on and the stats say when they
     // went stale. Throws std::runtime_error.

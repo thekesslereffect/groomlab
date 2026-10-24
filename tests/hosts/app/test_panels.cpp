@@ -3778,7 +3778,7 @@ TEST(AppPanels, CardMapsPanelPicksPresetsEditsThePackingAndExports) {
     panel.setTarget(ExportPanel::Target::CardMaps);
     EXPECT_STREQ(ExportPanel::targetName(ExportPanel::Target::CardMaps), "maps");
     EXPECT_EQ(panel.mapPreset(), QStringLiteral("Unreal Hair Cards"));
-    EXPECT_EQ(panel.mapFileCount(), 6);
+    EXPECT_EQ(panel.mapFileCount(), 7);
     EXPECT_EQ(panel.options().mapSettings.format, "tga");
     EXPECT_EQ(panel.options().mapPreset.files[3].channels, (std::vector<std::string>{"rootuv.u", "rootuv.v", "seed", "root"}));
     ASSERT_TRUE(panel.setMapPreset(QStringLiteral("Unity HDRP Hair")));

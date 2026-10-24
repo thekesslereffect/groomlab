@@ -53,7 +53,10 @@ strand's world tangent.)
 1. New Material, **Shading Model** Hair, **Blend Mode** Masked, **Two Sided** on, **Used with
    Static Lighting**/**Skeletal Mesh** as the cards are meshed.
 2. `ColorMap` = the `_Color` texture (sRGB), `CoverageMap` = `_Coverage` (linear, **Opacity
-   Mask**), `TangentMap` = `_Tangent` (linear, **Tangent**: `x 2 - 1`).
+   Mask**), `TangentMap` = `_Tangent` (linear, **Tangent**: `x 2 - 1`). (The Hair shading model's
+   Normal pin is this tangent; `_Normal`, the strands' normal with DirectX's green, is for a card
+   material with another shading model, Default Lit for a mobile or stylized look, into
+   **Normal** with Normal map compression.)
 3. `CardColor = ColorMap.RGB x 2 x VertexColor.RGB` (each card's own color over its shared texture's).
 4. The iridescence is `ColorMap.A`; the angle as for strands, with the card's tangent from
    `TangentMap` (transformed tangent to world) or, simpler, the card's own normal:

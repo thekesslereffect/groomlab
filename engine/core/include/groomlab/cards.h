@@ -18,7 +18,7 @@
 //
 // bakeCardTextures renders the strands into the atlas in Unreal's hair card
 // layout: depth, coverage, tangent, attribute (root UV, seed, coordU) and
-// color, plus ambient occlusion.
+// color, plus ambient occlusion and the strands' normal.
 //
 // Feathers (a Propagate node's barbs: the featherId, shaftU, side and isShaft channels) are
 // carded the way games do them: one alpha-tested strip per feather along its shaft, bending
@@ -335,6 +335,10 @@ struct CardTextures {
     // 3: each strand's own direction in card space (x across, y along the card root to tip, z out):
     // a feather's barbs run diagonal to its shaft, and so does their tangent.
     std::vector<std::uint8_t> tangent;
+    // 3: the strands' normal as round fibers in card tangent space (x across, y along the card
+    // root to tip, z out), with DirectX's green as Unreal reads it (y down: 255 - an OpenGL map's;
+    // cardNormalOpenGl turns it for glTF and Unity).
+    std::vector<std::uint8_t> normal;
     // 4: root U, root V, seed, coordU (0 root .. 1 tip along each strand: along each barb, from
     // the shaft out, on a feather's card; the gradient along the shaft is the card's own V).
     std::vector<std::uint8_t> attribute;
@@ -345,6 +349,8 @@ struct CardTextures {
     std::vector<std::uint8_t> iridescence;
 };
 CardTextures bakeCardTextures(const StrandSet& strands, const CardMesh& cards, const CardBakeSettings& settings);
+// The normal map with OpenGL's green (y up), as glTF and Unity read it.
+std::vector<std::uint8_t> cardNormalOpenGl(const CardTextures& textures);
 
 // The groom baked onto its scalp (a hair cap): the hair near the skin, seen
 // from outside, in the scalp's UVs. Low card LODs leave the skin showing

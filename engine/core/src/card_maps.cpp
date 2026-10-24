@@ -219,6 +219,7 @@ CardTextures cardTexturesFromMaps(const CardMaps& m) {
     t.depth.resize(pixels);
     t.occlusion.resize(pixels);
     t.tangent.resize(pixels * 3);
+    t.normal.resize(pixels * 3);
     t.color.resize(pixels * 3);
     t.attribute.resize(pixels * 4);
     if (m.iridescent) t.iridescence.resize(pixels);
@@ -229,6 +230,8 @@ CardTextures cardTexturesFromMaps(const CardMaps& m) {
             t.occlusion[p] = to8(m.ao[p]);
             for (std::size_t k = 0; k < 3; ++k) {
                 t.tangent[p * 3 + k] = to8(0.5f + 0.5f * m.tangent[p * 3 + k]);
+                const float normal = m.normal[p * 3 + k];
+                t.normal[p * 3 + k] = to8(0.5f + 0.5f * (k == 1 ? -normal : normal));  // DirectX's green, as a preset packs it
                 t.color[p * 3 + k] = to8(linearToSrgb(m.color[p * 3 + k]));
             }
             t.attribute[p * 4 + 0] = to8(m.rootU[p]);
@@ -239,6 +242,12 @@ CardTextures cardTexturesFromMaps(const CardMaps& m) {
         }
     }, kRowGrain);
     return t;
+}
+
+std::vector<std::uint8_t> cardNormalOpenGl(const CardTextures& t) {
+    std::vector<std::uint8_t> out = t.normal;
+    for (std::size_t i = 1; i < out.size(); i += 3) out[i] = static_cast<std::uint8_t>(255 - out[i]);
+    return out;
 }
 
 CardMaps downsampleCardMaps(const CardMaps& m, int factor) {
@@ -333,23 +342,24 @@ bool fileSafe(const std::string& s) {
 const std::vector<CardMapPreset>& builtinCardMapPresets() {
     static const std::vector<CardMapPreset> presets = {
         // Unreal's groom asset, Cards LOD: the textures its Default layout takes (Hair Attributes
-        // reads them), plus color and occlusion. The bake's own files, byte for byte.
+        // reads them), plus color, occlusion and the normal. The bake's own files, byte for byte.
         preset("Unreal Hair Cards",
                "Unreal's hair card textures, as Bake Maps writes them: Depth, Coverage, Tangent, Attribute (root U, root V, "
-               "seed, root to tip), Color (with the iridescence in alpha when the groom has any) and AO",
+               "seed, root to tip), Color (with the iridescence in alpha when the groom has any), AO and Normal (DirectX)",
                "tga", "directx",
                {file("Depth", {"depth"}), file("Coverage", {"coverage"}), file("Tangent", {"tangent.x", "tangent.y", "tangent.z"}),
                 file("Attribute", {"rootuv.u", "rootuv.v", "seed", "root"}),
-                file("Color", {"color.r", "color.g", "color.b", "iridescence?"}), file("AO", {"ao"})}),
-        // Three textures for a hair card material of your own (Hair shading model, Masked): the
-        // color with occlusion in alpha (sRGB on; alpha stays linear), the data (sRGB off) and the
-        // tangent.
+                file("Color", {"color.r", "color.g", "color.b", "iridescence?"}), file("AO", {"ao"}),
+                file("Normal", {"normal.x", "normal.y", "normal.z"})}),
+        // Four textures for a hair card material of your own (Hair shading model, Masked): the
+        // color with occlusion in alpha (sRGB on; alpha stays linear), the data (sRGB off), the
+        // tangent and the normal.
         preset("Unreal (packed)",
-               "Three textures for an Unreal hair card material of your own: Color (RGB) + AO (A), Data (depth, root to "
-               "tip, seed, coverage: R G B A, sRGB off) and Tangent",
+               "Four textures for an Unreal hair card material of your own: Color (RGB) + AO (A), Data (depth, root to "
+               "tip, seed, coverage: R G B A, sRGB off), Tangent and Normal (DirectX)",
                "tga", "directx",
                {file("Color", {"color.r", "color.g", "color.b", "ao"}), file("Data", {"depth", "root", "seed", "coverage"}),
-                file("Tangent", {"tangent.x", "tangent.y", "tangent.z"})}),
+                file("Tangent", {"tangent.x", "tangent.y", "tangent.z"}), file("Normal", {"normal.x", "normal.y", "normal.z"})}),
         // Unity HDRP's Hair shader graph: base color and alpha, a normal map (OpenGL's green), the
         // Lit mask map's layout (metallic 0, AO, detail: root to tip, smoothness: the specular),
         // the strand direction, and the rest for the graph (depth, ID, thickness).

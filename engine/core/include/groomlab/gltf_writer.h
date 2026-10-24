@@ -45,6 +45,7 @@ struct GltfMaterial {
     int baseColorTexture = -1;          // an index into GltfDocument::textures; -1: none
     int metallicRoughnessTexture = -1;  // G roughness, B metallic
     int occlusionTexture = -1;          // R occlusion
+    int normalTexture = -1;             // tangent space, OpenGL's green (y up)
     float metallic = 0.0f;
     float roughness = 0.5f;
     float occlusionStrength = 1.0f;

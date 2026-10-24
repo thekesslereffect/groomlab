@@ -270,7 +270,7 @@ void bindGroom(py::module_& m) {
         .def_property_readonly("empty", &CacheRef::empty);
 
     py::class_<CardBakeRef>(m, "CardBakeRef",
-                            "A card bake's files: <prefix>Depth|Coverage|Tangent|Attribute|Color|AO.tga, <prefix>Atlas.json, "
+                            "A card bake's files: <prefix>Depth|Coverage|Tangent|Attribute|Color|AO|Normal.tga, <prefix>Atlas.json, "
                             "<prefix>Preview.png (prefix relative to the groom file), and the stamp of what the cards were made from.")
         .def(py::init<>())
         .def(py::init([](const std::string& prefix, const std::string& strands) { return CardBakeRef{prefix, strands}; }),
@@ -621,11 +621,11 @@ void bindGroom(py::module_& m) {
           py::arg("path"), py::arg("face_counts"), py::arg("vertex_ids"), py::arg("vertex_count"), py::arg("channels") = 1,
           "A .ptx file as values per mesh vertex (`channels` each): the mean of the vertex's corner texels.");
     // A card bake's files and its record (card_files.h).
-    m.def("card_map_names", &cardMapNames, "Depth, Coverage, Tangent, Attribute, Color, AO: the maps a card bake writes.");
+    m.def("card_map_names", &cardMapNames, "Depth, Coverage, Tangent, Attribute, Color, AO, Normal: the maps a card bake writes.");
     m.def("card_bake_suffixes", &cardBakeSuffixes,
-          "The file suffixes of a card bake after its prefix: the six maps' .tga then Atlas.json.");
+          "The file suffixes of a card bake after its prefix: the seven maps' .tga then Atlas.json.");
     m.def("card_bake_files", [](const std::string& prefix) { return CardBakePaths(prefix).files(); }, py::arg("prefix"),
-          "A bake's files at a prefix (<folder>/<name>_): the six maps then the atlas.");
+          "A bake's files at a prefix (<folder>/<name>_): the seven maps then the atlas.");
     m.def("groom_file_card_bake_prefix", &groomFileCardBakePrefix, py::arg("stem"),
           "\"<stem>_cards/<stem>_\": where a groom file's bake sits, relative to the file's folder.");
     m.def("format_card_maps", &formatCardMaps, py::arg("prefix"), py::arg("stamp") = std::string(), py::arg("bake") = 0,
@@ -659,12 +659,14 @@ void bindGroom(py::module_& m) {
         .def_readonly("coverage", &CardTextures::coverage)
         .def_readonly("depth", &CardTextures::depth)
         .def_readonly("tangent", &CardTextures::tangent)
+        .def_readonly("normal", &CardTextures::normal)
         .def_readonly("attribute", &CardTextures::attribute)
         .def_readonly("color", &CardTextures::color)
         .def_readonly("occlusion", &CardTextures::occlusion)
         .def("coverage_view", [](py::object self) { const auto& t = self.cast<const CardTextures&>(); return bytesView(self, t.coverage, t.size, 1); })
         .def("depth_view", [](py::object self) { const auto& t = self.cast<const CardTextures&>(); return bytesView(self, t.depth, t.size, 1); })
         .def("tangent_view", [](py::object self) { const auto& t = self.cast<const CardTextures&>(); return bytesView(self, t.tangent, t.size, 3); })
+        .def("normal_view", [](py::object self) { const auto& t = self.cast<const CardTextures&>(); return bytesView(self, t.normal, t.size, 3); })
         .def("attribute_view", [](py::object self) { const auto& t = self.cast<const CardTextures&>(); return bytesView(self, t.attribute, t.size, 4); })
         .def("color_view", [](py::object self) { const auto& t = self.cast<const CardTextures&>(); return bytesView(self, t.color, t.size, 3); })
         .def("occlusion_view", [](py::object self) { const auto& t = self.cast<const CardTextures&>(); return bytesView(self, t.occlusion, t.size, 1); });

@@ -153,7 +153,7 @@ TEST(CardMaps, TheUnrealPresetWritesTheBakesOwnFiles) {
     const auto preset = findCardMapPreset("Unreal Hair Cards");
     ASSERT_TRUE(preset);
     const std::vector<std::string> paths = writeCardMaps(*bake.maps, *preset, settings, (dir / "new").generic_u8string(), "fur");
-    ASSERT_EQ(paths.size(), 6u);
+    ASSERT_EQ(paths.size(), 7u);
     for (std::size_t i = 0; i < paths.size(); ++i) {
         const std::string map = cardMapNames()[i];
         EXPECT_EQ(fs::path(paths[i]).filename().u8string(), "fur_" + map + ".tga");
@@ -243,6 +243,30 @@ TEST(CardMaps, NormalsAreRoundFibersOutOfTheCard) {
         EXPECT_FLOAT_EQ(gl[p * 3], dx[p * 3]);
         EXPECT_NEAR(gl[p * 3 + 1], 1.0f - dx[p * 3 + 1], 1e-6f);
     }
+}
+
+// The normal is in the card's tangent space (x across, y along, z out), not the groom's: the
+// whole groom and its cards turned (x, y, z to z, x, y), the map stays as it was.
+TEST(CardMaps, NormalsStayInTangentSpaceWhenTheGroomTurns) {
+    FurMaps f = furMaps(128, 0);
+    CardBakeSettings bake;
+    bake.size = 128;
+    bake.dilate = 0;
+    bake.occlusion = 0.0f;
+    const CardMaps before = bakeCardMaps(*f.strands, f.mesh, bake);
+    auto turn = [](const Vec3f& p) { return Vec3f{p.z, p.x, p.y}; };
+    StrandSet turned = *f.strands;
+    for (Vec3f& p : turned.mutablePositions()) p = turn(p);
+    for (CardMesh::Card& card : f.mesh.cards) {
+        ASSERT_FALSE(card.source);
+        for (std::vector<Vec3f>* values : {&card.center, &card.side, &card.normal, &card.shading, &card.refCenter,
+                                           &card.refSide, &card.refNormal, &card.refShading, &card.base}) {
+            for (Vec3f& value : *values) value = turn(value);
+        }
+    }
+    const CardMaps after = bakeCardMaps(turned, f.mesh, bake);
+    ASSERT_EQ(after.normal.size(), before.normal.size());
+    for (std::size_t i = 0; i < before.normal.size(); ++i) EXPECT_NEAR(after.normal[i], before.normal[i], 5e-5f) << i;
 }
 
 TEST(CardMaps, RootRunsFromRootToTipAndIdsDifferPerClump) {

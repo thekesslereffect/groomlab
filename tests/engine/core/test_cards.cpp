@@ -187,6 +187,19 @@ TEST(Cards, BakeCoversTheCardsAndWritesTga) {
     }
     ASSERT_GT(n, 0u);
     EXPECT_GT(up / static_cast<double>(n), 200.0);
+    // The normal: out of the card (z, blue, high) where the strands are; DirectX's green, OpenGL's
+    // the other way up.
+    ASSERT_EQ(t.normal.size(), 3u * 256u * 256u);
+    double out = 0.0;
+    for (std::size_t p = 0; p < 256u * 256u; ++p) {
+        if (t.coverage[p] > 128) out += t.normal[p * 3 + 2];
+    }
+    EXPECT_GT(out / static_cast<double>(n), 200.0);
+    const std::vector<std::uint8_t> gl = cardNormalOpenGl(t);
+    for (std::size_t p = 0; p < 256u * 256u; p += 97) {
+        EXPECT_EQ(gl[p * 3], t.normal[p * 3]);
+        EXPECT_EQ(gl[p * 3 + 1], 255 - t.normal[p * 3 + 1]);
+    }
 
     const std::string path = (std::filesystem::temp_directory_path() / "groomlab_cards_alpha.tga").string();
     writeTga(path, t.size, t.size, 1, t.coverage);

@@ -192,6 +192,7 @@ named `<groom>_<map>`) renders the strands into the atlas as TGA files in Unreal
 | `_Attribute` | R, G: root UV on the scalp; B: seed per strand; A: coordU, 0 root to 1 tip along each strand (a feather's barbs: from the shaft out) |
 | `_Color` | base color, sRGB: the strands' color as the viewport shows it (the color nodes' RGB channels, per point along the strands where a tip color, Bands or FeatherColor vary it, else melanin); with FeatherColor's iridescence an RGBA map, its alpha the iridescence (255 full) |
 | `_AO` | ambient occlusion from the hair around (1 open) |
+| `_Normal` | the strands' normal as round fibers, in card tangent space: x across (U), y along V, z out, so a strand's middle faces out of the card and its edges turn to the sides; 0.5 + 0.5 n with DirectX's green (Unreal's: y down). A normal map, separate from `_Tangent` (the strands' direction): for a card material without Unreal's Hair shading model, whose Normal pin is the tangent |
 
 Strands are drawn at their own width, at least a texel wide and opaque (`minStrandTexels`: a
 viewport draws every strand at least a pixel wide, and a hair's width is a fraction of a texel, so
@@ -219,7 +220,7 @@ a **hair cap**: a copy of the scalp just above the skin, following it, textured 
 
 **For Unreal:** Export Unreal Cards (`groomlab.export_cards_unreal(groom, folder, name, lod=None)`)
 bakes and writes `<name>_cards.fbx` (UV0 is the atlas, V root to tip, with a material pointing at
-the maps; the mesh it makes for this is removed after), the six maps, the scalp maps with the hair
+the maps; the mesh it makes for this is removed after), the seven maps, the scalp maps with the hair
 cap `<name>_scalpCap.fbx` (when the scalp has UVs; `scalp=False` leaves them out), and
 `<name>_cards.json` listing what each channel holds. `name` defaults to the groom's asset name,
 with `_<lod>` when `lod` says which level of detail it is (`"hero"`, `"mid"`, `"low"`), so LODs
@@ -600,13 +601,14 @@ writes into `directory` (default: the scene's exports folder), named like Export
 | `_Tangent` | strand direction in tangent space (R along +U, G along +V root to tip, B out), 0.5 + 0.5 t: HDRP Hair's strand direction |
 | `_Depth` | distance off the card plane (0.5 on it), for pixel depth offset |
 | `_Attribute` | R, G: root UV on the scalp; B: seed per strand; A: root to tip |
+| `_Normal` | the strands' normal as round fibers in tangent space (R along +U, G along +V, B out), OpenGL's green: import as a Normal map |
 | `_ScalpBaseColor` | the hair cap: RGB the hair's color on the scalp, A how much hair covers the skin |
 
 - `<name>_unity.json`: the files, what each channel holds, import settings (BaseColor sRGB with
   Alpha Is Transparency; the others linear) and suggested materials: **HDRP** (a Hair Shader Graph
-  or HDRP/Lit: Base Color Map, Alpha Clipping 0.5, Double-Sided, Mask Map, the Tangent map into
-  Hair Strand Direction) and **URP** (Universal Render Pipeline/Lit: Base Map, Alpha Clipping 0.5,
-  Render Face Both, Occlusion Map, Smoothness).
+  or HDRP/Lit: Base Color Map, Alpha Clipping 0.5, Double-Sided, Mask Map, Normal Map, the Tangent
+  map into Hair Strand Direction) and **URP** (Universal Render Pipeline/Lit: Base Map, Alpha
+  Clipping 0.5, Render Face Both, Occlusion Map, Normal Map, Smoothness).
 
 **Feathers** (Feather cards) go in the same FBX and atlas as the hair's cards: a strip (or, for
 down, crossed cards) per feather with its baked barbs and rachis, folded along its spine
@@ -649,6 +651,7 @@ CLI and pipelines can use it too.
 |---|---|
 | `<mesh>_BaseColor` | baseColorTexture. RGB: the baked color (sRGB); A: coverage |
 | `<mesh>_ORM` | occlusionTexture (R: ambient occlusion) and metallicRoughnessTexture (G, B at 1: roughnessFactor is the hair look's roughness, metallicFactor 0) |
+| `<mesh>_Normal` | normalTexture: the strands' normal as round fibers in tangent space (glTF's green, y up), with the TANGENT attribute's frame |
 
   `alphaMode` MASK with `alphaCutoff` 0.5 (hard, depth-correct edges, nothing to sort), or BLEND /
   OPAQUE with `alpha_mode`; double-sided. The hair cap blends. Each material's `extras.groomlab`

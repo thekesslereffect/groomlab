@@ -359,14 +359,15 @@ public:
     std::vector<SimStatus> simulationStatus();
     // Bakes the current cards' textures as TGA files in `directory`, Unreal's
     // hair card layout: <base>_Depth, _Coverage, _Tangent, _Attribute (root UV,
-    // seed, coordU), _Color, and _AO; returns the paths. resolution 0: the
+    // seed, coordU), _Color, _AO and _Normal; returns the paths. resolution 0: the
     // Cards nodes' atlasSize. No card mesh needed. `store`: the groom's cardMaps
     // name the bake (its cards view shows it); false for an export. `base` is made
     // file safe, and takes _2, _3... when another groom's bake has it in `directory`.
     // Throws std::runtime_error.
     // `layout` "unity" writes PNG maps for Unity instead (never stored): <base>_BaseColor
     // (RGB color, A coverage), _Mask (HDRP's mask map: R metallic 0, G AO, B root to tip,
-    // A smoothness from the hair look), _AO, _Tangent, _Depth and _Attribute; no atlas record.
+    // A smoothness from the hair look), _AO, _Tangent, _Depth, _Attribute and _Normal
+    // (OpenGL's green); no atlas record.
     std::vector<std::string> bakeCards(const std::string& directory, const std::string& base, int resolution,
                                        float occlusion = 1.0f, bool store = true, const std::string& layout = "unreal");
     // The cards a bake makes and their maps, in memory: the groom at cardDensity (with

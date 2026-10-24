@@ -169,7 +169,7 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     bake_->setFontSize(13);
     bake_->setFill(theme::actionFill(theme::yellow()), theme::actionFill(theme::yellow()));
     bake_->setTextColor(theme::actionText(theme::ink()), theme::actionText(theme::ink()));
-    bake_->setToolTip(tr("Bake the cards' maps (depth, coverage, tangent, attribute, color, occlusion) as TGA files beside the "
+    bake_->setToolTip(tr("Bake the cards' maps (depth, coverage, tangent, attribute, color, occlusion, normal) as TGA files beside the "
                          "groom, in Unreal's hair card layout; the viewport shows them on the cards"));
     bakeRow->addWidget(bake_, 1);
     bakeResolution_ = new QComboBox(this);

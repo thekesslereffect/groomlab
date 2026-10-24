@@ -492,6 +492,7 @@ std::vector<std::string> writeUnityCardMaps(const CardTextures& t, float roughne
         mask[4 * i + 2] = t.attribute[4 * i + 3];                          // root (0) to tip (1)
         mask[4 * i + 3] = smoothness;                                      // 1 - the hair look's roughness
     }
+    const std::vector<std::uint8_t> normal = cardNormalOpenGl(t);  // Unity's green: OpenGL's
     std::vector<std::string> paths;
     std::vector<PngImage> images;
     auto png = [&](const char* map, int channels, const std::vector<std::uint8_t>& pixels) {
@@ -504,6 +505,7 @@ std::vector<std::string> writeUnityCardMaps(const CardTextures& t, float roughne
     png("Tangent", 3, t.tangent);
     png("Depth", 1, t.depth);
     png("Attribute", 4, t.attribute);
+    png("Normal", 3, normal);
     writeCompressedPngs(paths, images);
     return paths;
 }
@@ -603,6 +605,8 @@ json exportEngineCards(Session& s, const json& args, bool unity) {
                             "along each strand; on a feather's card along each barb, from the shaft out)"},
               {"Color", "RGB: base color, sRGB"},
               {"AO", "R: ambient occlusion (1 open)"},
+              {"Normal", "RGB: the strands' normal as round fibers in tangent space (x across U, y along V, z out), "
+                         "DirectX's green (Unreal's), linear"},
               {"ScalpColor", "RGB: the hair's color on the scalp (sRGB), in the scalp's UVs, for the hair cap"},
               {"ScalpCoverage", "R: how much hair covers the skin, in the scalp's UVs"}}},
             {"scalpCap", withScalp ? json(baseName(capFbx)) : json()},
@@ -630,10 +634,12 @@ json exportEngineCards(Session& s, const json& args, bool unity) {
               {"Depth", "R (gray): distance off the card plane (0.5 on it, higher in front), linear"},
               {"Attribute", "R, G: root UV on the scalp; B: seed per strand; A: root (0) to tip (1) along each strand "
                             "(a feather's barbs: from the shaft out), linear"},
+              {"Normal", "RGB: the strands' normal as round fibers in tangent space (R along +U, G along +V, B out), "
+                         "OpenGL's green, linear (import as a Normal map)"},
               {"ScalpBaseColor", "RGB: the hair's color on the scalp (sRGB); A: how much hair covers the skin"}}},
             {"import",
              {{"textures", "BaseColor and ScalpBaseColor sRGB with Alpha Is Transparency; Mask, AO, Tangent, "
-                           "Depth and Attribute linear (sRGB off)"},
+                           "Depth and Attribute linear (sRGB off); Normal as Texture Type Normal map"},
               {"model", "Convert Units on (the FBX is in meters, so its scale stays 1)"}}},
             {"materials",
              {{"HDRP",
@@ -641,6 +647,7 @@ json exportEngineCards(Session& s, const json& args, bool unity) {
                 {"Base Color Map", mapOr("BaseColor")},
                 {"Alpha Clipping", true}, {"Alpha Clip Threshold", 0.5}, {"Double-Sided", true},
                 {"Mask Map", mapOr("Mask")},
+                {"Normal Map", mapOr("Normal")},
                 {"Hair Strand Direction", "Tangent map * 2 - 1 (strands run +V, root to tip)"},
                 {"Smoothness", smoothness}}},
               {"URP",
@@ -648,6 +655,7 @@ json exportEngineCards(Session& s, const json& args, bool unity) {
                 {"Base Map", mapOr("BaseColor")},
                 {"Alpha Clipping", true}, {"Threshold", 0.5}, {"Render Face", "Both"},
                 {"Occlusion Map", mapOr("AO")},
+                {"Normal Map", mapOr("Normal")},
                 {"Smoothness", smoothness}}},
               {"scalpCap", "Transparent (alpha blend) with ScalpBaseColor, drawn under the cards"}}},
             {"uv", "UV0: the atlas; V runs root (low) to tip (high); cards sharing a texture may be mirrored in U"},

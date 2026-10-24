@@ -5,8 +5,8 @@
 //
 // In memory (bakeCardsInMemory): the cards every Cards node of the strands built (their card
 // layers), laid out in one atlas, and their maps baked. On disk, at a prefix <folder>/<name>_:
-// <prefix><map>.tga for the six maps in Unreal's hair card layout (cardMapNames: Depth,
-// Coverage, Tangent, Attribute, Color, AO), <prefix>Atlas.json (the cells rebuilt cards keep) and
+// <prefix><map>.tga for the seven maps in Unreal's hair card layout (cardMapNames: Depth,
+// Coverage, Tangent, Attribute, Color, AO, Normal), <prefix>Atlas.json (the cells rebuilt cards keep) and
 // <prefix>Preview.png (the viewport's map: the color darkened by half the occlusion, the coverage
 // in alpha; display.h writeCardBakePreview makes one from the maps). A groom file keeps its bake
 // beside it at <stem>_cards/<stem>_ (groom_file.h's "cardBake" names it relative to the file).
@@ -28,7 +28,7 @@
 
 namespace groomlab {
 
-// Depth, Coverage, Tangent, Attribute, Color, AO: the maps a bake writes, in that order.
+// Depth, Coverage, Tangent, Attribute, Color, AO, Normal: the maps a bake writes, in that order.
 const std::vector<std::string>& cardMapNames();
 
 // Where a bake's files are: `prefix` plus each file's suffix.
@@ -45,9 +45,9 @@ struct CardBakePaths {
     std::string map(const std::string& name) const { return prefix + name + ".tga"; }
     std::string atlas() const { return prefix + "Atlas.json"; }
     std::string preview() const { return prefix + "Preview.png"; }
-    // The six maps, cardMapNames' order.
+    // The seven maps, cardMapNames' order.
     std::vector<std::string> maps() const;
-    // The six maps then the atlas: the bake as a host copies or owns it (the preview is made
+    // The seven maps then the atlas: the bake as a host copies or owns it (the preview is made
     // again from the maps).
     std::vector<std::string> files() const;
     // Whether the bake is there: its atlas and color map exist.
@@ -90,7 +90,7 @@ CardBake bakeCardMapsInMemory(StrandsPtr strands, MeshPtr scalp, const CardMapEx
 // The resolution an export bakes at (settings.resolution, else the cards' atlasSize, else 2048;
 // 16 to 8192).
 int cardMapResolution(const CardMesh& cards, const CardMapExport& settings);
-// Writes the bake's files at `at` (folders made): the six maps (side by side), the atlas and,
+// Writes the bake's files at `at` (folders made): the seven maps (side by side), the atlas and,
 // with `preview`, the preview. Returns the stamp of what the cards were made from
 // (cardsBakeStamp). Throws std::runtime_error.
 std::string writeCardBake(const CardBake& bake, const CardBakePaths& at, bool preview = true);
