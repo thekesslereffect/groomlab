@@ -31,6 +31,7 @@
 #include <maya/MVector.h>
 #include <maya/MUIDrawManager.h>
 #include <maya/MFrameContext.h>
+#include <maya/MHWGeometryUtilities.h>
 #include <maya/MGlobal.h>
 #include <maya/MDagPath.h>
 #include <maya/MDagPathArray.h>
@@ -270,6 +271,8 @@ bool GroomSubSceneOverride::requiresUpdate(const MHWRender::MSubSceneContainer&,
         if (lodWanted() && lodViewOf(frameContext) != lodDrawn_) return true;
         // Multisample anti-aliasing turned on or off: the blendable segments split, or join, again.
         if (lodWanted() && frameContext.getPostEffectEnabled(MHWRender::MFrameContext::kAntiAliasing) != lodAntiAliased_) return true;
+        // The cards' wireframe in the groom's wireframe color: selected or not, recolored.
+        if (cardWiresShown_ && wireColor() != cardWireColor_) return true;
         return needsUpdate();
     } catch (const std::exception&) {
         return true;  // update() reports it
@@ -355,6 +358,42 @@ void GroomSubSceneOverride::addUIDrawables(MHWRender::MUIDrawManager& draw, cons
         points_.clear();
         pointColors_.clear();
     }
+}
+
+std::array<float, 4> GroomSubSceneOverride::wireColor() const {
+    MDagPath path;
+    if (MDagPath::getAPathTo(object_, path) != MS::kSuccess) return {0.0f, 0.0f, 0.0f, 1.0f};
+    const MColor c = MHWRender::MGeometryUtilities::wireframeColor(path);
+    return {c.r, c.g, c.b, 1.0f};
+}
+
+void GroomSubSceneOverride::updateCardWires(MHWRender::MSubSceneContainer& container, bool rebuilt,
+                                            const std::shared_ptr<const DisplayGeometry>& cards) {
+    if (rebuilt) cardWires_ = cards && !cards->empty() ? std::make_shared<const DisplayGeometry>(cardWireGeometry(*cards)) : nullptr;
+    const auto drawn = items_.find(kCardsItem.asChar());
+    MHWRender::MRenderItem* cardsItem = container.find(kCardsItem);
+    cardWiresShown_ = cardWires_ && cardsItem && drawn != items_.end() && drawn->second.shown;
+    if (!cardWiresShown_) {
+        if (!cardWires_) {
+            const float none[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            updateItem(container, kCardWiresItem, none, 0, nullptr, 1.0f);  // its buffers given back
+        } else if (container.find(kCardWiresItem)) {
+            hideItem(container, kCardWiresItem);
+        }
+        return;
+    }
+    cardWireColor_ = wireColor();
+    const auto wire = items_.find(kCardWiresItem.asChar());
+    if (rebuilt || !container.find(kCardWiresItem) || wire == items_.end() || !wire->second.shown) {
+        updateItem(container, kCardWiresItem, cardWireColor_.data(), MHWRender::MRenderItem::sDormantWireDepthPriority, cardWires_, 1.0f);
+    } else {
+        restyleItem(container, kCardWiresItem, cardWireColor_.data(), 1.0f);
+    }
+    if (MHWRender::MRenderItem* item = container.find(kCardWiresItem)) {
+        item->setDrawMode(MHWRender::MGeometry::kWireframe);
+        item->enable(true);
+    }
+    cardsItem->setDrawMode(static_cast<MHWRender::MGeometry::DrawMode>(MHWRender::MGeometry::kShaded | MHWRender::MGeometry::kTextured));
 }
 
 void GroomSubSceneOverride::addTubeWires(MHWRender::MUIDrawManager& draw) {
@@ -760,8 +799,11 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
         lastDots().clumpCenters = static_cast<std::size_t>(
             std::count(pointColors_.begin(), pointColors_.end(), theme.clumpCenters));
     }
+    bool cardsRebuilt = false;
+    std::shared_ptr<const DisplayGeometry> cards;
     for (const DisplayItem& item : frame.items) {
         const MString& name = kItemNames[static_cast<std::size_t>(item.id)];
+        if (item.id == DisplayItemId::Cards && item.rebuilt && !item.keep) cardsRebuilt = true, cards = item.geometry;
         // The strand lines as built, for the level of detail (the builder keeps none).
         if (item.rebuilt && (item.id == DisplayItemId::Strands || item.id == DisplayItemId::ColoredStrands)) {
             lodLines_[item.id == DisplayItemId::Strands ? 0 : 1] =
@@ -785,6 +827,7 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
             restyleItem(container, name, item.color.data(), item.lineWidth);
         }
     }
+    updateCardWires(container, cardsRebuilt, cards);
     currentDraw().uploadMs = lap();
     // The maps (reloaded above when rewritten) go to the shader every time: cheap, and a
     // rebake with the same paths shows without rebuilding the cards. Without them: solid.

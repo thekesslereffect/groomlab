@@ -240,6 +240,31 @@ DisplayGeometry cardGeometry(const CardMesh& cardMesh, bool textured) {
     return cardBatch;
 }
 
+DisplayGeometry cardWireGeometry(const DisplayGeometry& cards) {
+    DisplayGeometry wire;
+    if (!cards.triangles || cards.indices.size() % 6 != 0) return wire;
+    // Each quad is two triangles (a, b, c) (a, c, d): its edges ab, bc, cd, da; a neighbor's
+    // shared edge is kept once.
+    std::vector<std::uint64_t> edges;
+    edges.reserve(cards.indices.size() / 6 * 4);
+    for (std::size_t q = 0; q < cards.indices.size(); q += 6) {
+        const std::uint32_t v[4] = {cards.indices[q], cards.indices[q + 1], cards.indices[q + 2], cards.indices[q + 5]};
+        for (int e = 0; e < 4; ++e) {
+            const std::uint32_t a = v[e], b = v[(e + 1) % 4];
+            edges.push_back((static_cast<std::uint64_t>(std::min(a, b)) << 32) | std::max(a, b));
+        }
+    }
+    std::sort(edges.begin(), edges.end());
+    edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+    wire.positions = cards.positions;
+    wire.indices.reserve(edges.size() * 2);
+    for (const std::uint64_t e : edges) {
+        wire.indices.push_back(static_cast<std::uint32_t>(e >> 32));
+        wire.indices.push_back(static_cast<std::uint32_t>(e));
+    }
+    return wire;
+}
+
 std::vector<std::uint8_t> combineCardMaps(const std::uint8_t* c, const std::uint8_t* cov, const std::uint8_t* occ,
                                           std::size_t width, std::size_t height) {
     // sRGB <-> linear by table, the AO darkening in linear light.

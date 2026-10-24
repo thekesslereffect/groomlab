@@ -38,6 +38,10 @@ def run():
         gpu_preview_check()
         run_steps(async_commit_steps(), finish)
         return
+    if os.environ.get("GROOMLAB_VIEWPORT_CASE") == "cards":  # the cards view alone (baked, MSAA, wireframe)
+        cards_check(os.environ.get("GROOMLAB_VIEWPORT_SNAPSHOTS"))
+        finish()
+        return
     if os.environ.get("GROOMLAB_VIEWPORT_CASE") == "colors":  # the strands' own colors alone
         strand_colors_check(os.environ.get("GROOMLAB_VIEWPORT_SNAPSHOTS"))
         finish()
@@ -2154,6 +2158,27 @@ def cards_check(snapshots=None):
     finally:
         cmds.setAttr("hardwareRenderingGlobals.multiSampleEnable", False)
         cmds.setAttr(groom + ".displayHairShading", 0)
+    # Wireframe on shaded (issue #19): the cards' quads' edges over them, as over a mesh; in
+    # wireframe the edges alone. (The scalp hidden: only the cards' wires can differ.)
+    groomlab.compare_cards(groom, True)
+    cmds.setAttr(scalp + ".visibility", False)
+    panel = persp_panel()
+    try:
+        shaded_path = shot("cards_shaded")[0]
+        cmds.modelEditor(panel, edit=True, wireframeOnShaded=True)
+        wired_path = shot("cards_wire_on_shaded")[0]
+        cmds.modelEditor(panel, edit=True, displayAppearance="wireframe")
+        wire_path, wire_pixels, wire_color = shot("cards_wireframe")
+    finally:
+        cmds.modelEditor(panel, edit=True, wireframeOnShaded=False, displayAppearance="smoothShaded")
+        cmds.setAttr(scalp + ".visibility", True)
+    wired = differ(shaded_path, wired_path)
+    check("wireframe on shaded on %s draws the cards' edges over them (%.4f of the pixels differ)" % (api, wired),
+          wired > 0.005)
+    # (Maya's dormant wireframe color is a dark blue; the cards' faces are the hair's color.)
+    check("wireframe on %s draws the cards' edges, not their faces (%d pixels, mean color %s; %s)"
+          % (api, wire_pixels, ["%.0f" % c for c in wire_color], wire_path),
+          wire_pixels > 0 and wire_color[2] > wire_color[0] + 40)
     groomlab.compare_cards(groom, False)
     check("the cards made no errors", not groomlab.errors(groom))
     cmds.file(new=True, force=True)

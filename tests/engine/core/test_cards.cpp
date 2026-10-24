@@ -968,6 +968,29 @@ TEST(Cards, CardsShadeLikeTheirStrandsLitDrawing) {
     for (std::size_t i = 0; i < g.normals.size(); ++i) EXPECT_FLOAT_EQ(g.bitangents[i], g.normals[i]);
 }
 
+// The cards' wireframe: every quad's four edges, each once (neighbors share theirs), no diagonals.
+TEST(Cards, WireframeIsTheQuadsEdgesOnce) {
+    const auto plane = test::makePlane(16);
+    const CardMesh mesh = buildCards(*clumpedFur(), plane.get(), CardSettings{});
+    ASSERT_FALSE(mesh.cards.empty());
+    const DisplayGeometry g = cardGeometry(mesh, false);
+    const DisplayGeometry wire = cardWireGeometry(g);
+    EXPECT_FALSE(wire.triangles);
+    EXPECT_EQ(wire.positions, g.positions);
+    // A card of r rows and c columns of quads has r (c + 1) + c (r + 1) edges.
+    std::size_t expected = 0;
+    for (const CardMesh::Card& card : mesh.cards) {
+        const std::size_t rows = static_cast<std::size_t>(card.stations - 1), columns = static_cast<std::size_t>(std::max(card.across, 1));
+        expected += rows * (columns + 1) + columns * (rows + 1);
+    }
+    EXPECT_EQ(wire.indices.size(), 2 * expected);
+    std::set<std::pair<std::uint32_t, std::uint32_t>> seen;
+    for (std::size_t i = 0; i < wire.indices.size(); i += 2) {
+        EXPECT_TRUE(seen.insert({wire.indices[i], wire.indices[i + 1]}).second) << "an edge twice";
+    }
+    EXPECT_TRUE(cardWireGeometry(DisplayGeometry{}).empty());
+}
+
 // Two clumps alike in shape side by side, standing up: clump 0 dark, clump 1 light, both
 // blending toward a light tip per point (HairColor's colorR/G/B, per strand and per point).
 StrandsPtr twoColoredClumps() {

@@ -757,7 +757,7 @@ class GraphEditorTest(unittest.TestCase):
             try:
                 self.assertEqual(panel.groom, self.groom)
                 self.assertEqual(panel.preset.currentText(), "Unreal Hair Cards")
-                self.assertEqual(panel.table.rowCount(), 6)
+                self.assertEqual(panel.table.rowCount(), 7)
                 self.assertEqual(panel.format.currentData(), "tga")
                 panel.preset.setCurrentIndex(panel.preset.findText("Unity HDRP Hair"))
                 self.assertEqual(panel.table.rowCount(), 5)

@@ -185,6 +185,15 @@ private:
     // Styles an item and keeps its geometry.
     void restyleItem(MHWRender::MSubSceneContainer& container, const MString& name, const float color[4],
                      float lineWidth = 1.0f);
+    // The cards' wireframe (cardWireGeometry), drawn as Maya draws a mesh's: in wireframe and
+    // wireframe on shaded only (the cards themselves in shaded and textured), in the groom's
+    // wireframe color (Maya's: dormant, or lead and active when selected). `rebuilt`: the cards
+    // were built again (`cards` what they are now); else only shown, hidden or recolored with them.
+    void updateCardWires(MHWRender::MSubSceneContainer& container, bool rebuilt, const std::shared_ptr<const DisplayGeometry>& cards);
+    std::array<float, 4> wireColor() const;  // Maya's wireframe color for the groom now
+    std::shared_ptr<const DisplayGeometry> cardWires_;
+    std::array<float, 4> cardWireColor_{};
+    bool cardWiresShown_ = false;
     // The colored strand lines take new colors (their range or source changed), their positions
     // and indices kept.
     void recolorStrands(MHWRender::MSubSceneContainer& container, const StrandColors& colors, const float color[4]);

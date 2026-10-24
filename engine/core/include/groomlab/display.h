@@ -286,6 +286,9 @@ void writeOverlayColors(const DisplayGeometry& geometry, const std::vector<float
 // bitangents: the card effect's, which two-sided lighting never turns round) with the atlas uvs
 // when `textured` (else zeros) and each card's tint as colors (RGBA: half the tint, alpha 1).
 DisplayGeometry cardGeometry(const CardMesh& cards, bool textured);
+// The edges of cardGeometry's quads (not the diagonals its triangles split them by), each once, as
+// lines over its positions: the cards' wireframe (Maya's wireframe on shaded).
+DisplayGeometry cardWireGeometry(const DisplayGeometry& cards);
 
 // ---- StrandMesh nodes -------------------------------------------------------------------------
 
