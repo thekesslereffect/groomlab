@@ -121,9 +121,16 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   - **Cutting links:** Alt+Shift+drag across links (Hypershade's gesture): the ones the line
     crosses turn red, and letting go disconnects them, as one edit. A cut that leaves the output
     unconnected is not applied until it is wired again; Ctrl+Z puts the graph back.
+  - **Pins:** double-click a link to put a pin on it (Unreal's reroute nodes): the link runs
+    through it, and dragging the pin routes the link, to tidy crossing wires. Links from one output
+    can share pins: drop a pin on another pin of the same output and they join, the links running
+    through it as a bundle. Delete takes a selected pin out (the link straightens there). Pins are
+    layout, as node positions are: no undo step, nothing evaluates again, and the groom file keeps
+    them (the "pins" of its graph; the app and Blender carry them but don't draw them yet).
   - **Refused links:** mismatched types and cycles are refused, with the reason in the status
     bar.
-- **Toolbar:** the groom, **Add Node**, **Presets** and **Live** (with **Apply** while Live is
+- **Toolbar:** the groom, **Add Node**, **Presets**, **Snap** (nodes and pins you move land on
+  the grid's dots; remembered between sessions) and **Live** (with **Apply** while Live is
   off); the **...** menu holds Undo and Redo, Frame, Tidy Layout, Group into Compound (Ctrl+G), Ungroup
   Compound (Ctrl+Shift+G; also on a Compound's right-click menu and in its panel), Delete, Copy
   Graph and Paste Graph (also in the Presets menu: see Sharing a look as text), Units, Theme and

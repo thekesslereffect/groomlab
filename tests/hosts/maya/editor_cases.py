@@ -205,6 +205,50 @@ class GraphEditorTest(unittest.TestCase):
         finally:
             self.editor.hide()
 
+    def test_pins_route_links_and_snap_puts_them_on_the_grid(self):
+        # Double-click a link: a pin there, the link through it; no undo step (layout), the groom's
+        # graph keeps it. Delete takes it out. Snap lands a dragged node on the grid.
+        from PySide2 import QtTest
+        QtCore, QtWidgets = self.ge.QtCore, self.ge.QtWidgets
+        self.editor.resize(1200, 600)
+        self.editor.show()
+        QtWidgets.QApplication.processEvents()
+        try:
+            view = self.editor.view
+            middle = self.edge("length", "width").path().pointAtPercent(0.5)
+            settle_undo()
+            before = cmds.undoInfo(query=True, undoName=True)
+            QtTest.QTest.mouseDClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, view.mapFromScene(middle))
+            wait(50)
+            pins = self.editor.model.route("width", "strands")
+            self.assertEqual(len(pins), 1)
+            pin = self.editor.pin_items[pins[0]]
+            self.assertTrue(pin.isSelected())
+            self.assertEqual(self.edge("length", "width").pins, [pin])
+            self.assertEqual(cmds.undoInfo(query=True, undoName=True), before, "a pin is layout: no undo step")
+            self.assertEqual(groomlab.get_graph(self.groom)["pins"]["routes"][0]["to"], "width")
+            # Moved, the link follows it.
+            pin.setPos(pin.pos() + QtCore.QPointF(0, 120))
+            path = self.edge("length", "width").path()
+            self.assertTrue(any((path.pointAtPercent(i / 64.0) - pin.scenePos()).manhattanLength() < 2 for i in range(65)))
+            self.editor.scene.clearSelection()
+            pin.setSelected(True)
+            self.editor.delete_selected()
+            self.assertEqual(self.editor.model.route("width", "strands"), [])
+            self.assertEqual(self.editor.model.source_of("width", "strands"), "length", "the link stays")
+            self.assertNotIn("pins", groomlab.get_graph(self.groom))
+            # Snap: a node dragged lands on the grid's dots.
+            self.editor.snap_box.setChecked(True)
+            node = self.editor.items["width"]
+            start = view.mapFromScene(node.scenePos() + QtCore.QPointF(20, 8))
+            drag(view.viewport(), start, start + QtCore.QPoint(37, 29), steps=3)
+            grid = self.ge.GRID
+            self.assertEqual((node.pos().x() % grid, node.pos().y() % grid), (0.0, 0.0))
+            self.assertEqual(self.editor.model.position("width"), (node.pos().x(), node.pos().y()))
+        finally:
+            self.editor.snap_box.setChecked(False)
+            self.editor.hide()
+
     def test_a_cut_is_one_edit(self):
         # Two links at once, the output left unconnected: one Ctrl+Z puts both back.
         settle_undo()

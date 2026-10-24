@@ -222,6 +222,10 @@ GraphDocument parse(json root) {
     if (root.contains("backdrops") && root.at("backdrops").is_array() && !root.at("backdrops").empty()) {
         doc.backdropsJson = root.at("backdrops").dump();
     }
+    // The editors' reroute points the links are drawn through (carried, never evaluated).
+    if (root.contains("pins") && root.at("pins").is_object() && !root.at("pins").empty()) {
+        doc.pinsJson = root.at("pins").dump();
+    }
 
     for (const json& c : root.value("connections", json::array())) {
         const NodeId from = doc.node(c.at("from").get<std::string>());
@@ -366,6 +370,10 @@ std::string saveGraphJson(const GraphDocument& doc) {
     if (!doc.backdropsJson.empty()) {
         json backdrops = json::parse(doc.backdropsJson, nullptr, false);
         if (backdrops.is_array()) root["backdrops"] = std::move(backdrops);
+    }
+    if (!doc.pinsJson.empty()) {
+        json pins = json::parse(doc.pinsJson, nullptr, false);
+        if (pins.is_object()) root["pins"] = std::move(pins);
     }
     return root.dump(2);
 }
