@@ -120,7 +120,9 @@ std::vector<GuideId> pickGuidesInView(const std::vector<std::array<float, 2>>& l
     // Hidden groups can't be picked.
     const std::vector<GuideId> candidates = guidesAt(*h, level, group, readHiddenGuideGroups(groom.node()));
     const SelectionProjector view = selectionProjector(M3dView::active3dView());
-    std::vector<GuideId> picked = pickGuides(*h, candidates, view.project, lasso, rootsOnly, clickPixels,
+    // Only what the view shows: guide points behind the scalp are not picked.
+    const ViewProjector visible = visibleProjector(view.project, scalpVisibility(shape->evaluatedScalp(), activeToolView()));
+    std::vector<GuideId> picked = pickGuides(*h, candidates, visible, lasso, rootsOnly, clickPixels,
                                              view.matrix.valid() ? &view.matrix : nullptr);
     if (symmetry != "none" && !picked.empty()) {  // each picked guide's mirror guide too
         BrushToolSettings mirror;

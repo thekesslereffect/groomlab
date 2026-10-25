@@ -3378,7 +3378,9 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
             } else {
                 for (const Pixel& p : lasso) polygon.push_back({p.x, p.y});
             }
-            picked = pickGuides(*h, candidates, pixelProjector(t.view.projection), polygon, optBool(args, "rootsOnly", false),
+            // Only what the view shows: guide points behind the scalp are not picked.
+            const ViewProjector visible = visibleProjector(pixelProjector(t.view.projection), scalpVisibility(s.groom->scalp(), t.view));
+            picked = pickGuides(*h, candidates, visible, polygon, optBool(args, "rootsOnly", false),
                                 static_cast<float>(optNumber(args, "clickPixels", 12.0)), &t.view.projection);
             // With symmetry (the tool's), each picked guide's mirror guide too.
             const MeshPtr scalp = s.groom->scalp();

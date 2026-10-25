@@ -318,7 +318,8 @@ std::size_t BrushSession::select(const std::vector<QPointF>& lasso, SelectMode m
         for (const QPointF& p : lasso) polygon.push_back(port(p));
     }
     std::vector<GuideId> picked =
-        pickGuides(*h, candidates, pixelProjector(view_.projection), polygon, false, 12.0f, &view_.projection);
+        pickGuides(*h, candidates, visibleProjector(pixelProjector(view_.projection), scalpVisibility(host_->scalp(), view_)), polygon,
+                   false, 12.0f, &view_.projection);  // (only what the view shows: nothing behind the scalp)
     // With symmetry, each picked guide's mirror guide too.
     const MeshPtr scalp = host_->scalp();
     picked = withMirrorGuides(*h, picked, StrokeSymmetry::of(s.brush, scalp.get()));

@@ -85,6 +85,20 @@ ViewProjector pixelProjector(const ViewProjection& view) {
     };
 }
 
+std::shared_ptr<const ScalpVisibility> scalpVisibility(const std::shared_ptr<const ScalpMesh>& scalp, const ToolView& view) {
+    Vec3f eye, along;
+    bool ortho = false;
+    if (!scalp || scalp->triangleCount() == 0 || !view.camera(eye, along, ortho)) return nullptr;
+    return std::make_shared<const ScalpVisibility>(scalp, eye, along, ortho);
+}
+
+ViewProjector visibleProjector(ViewProjector project, std::shared_ptr<const ScalpVisibility> occlusion) {
+    if (!occlusion) return project;
+    return [project = std::move(project), occlusion = std::move(occlusion)](const Vec3f& world, std::array<float, 2>* view) {
+        return project(world, view) && !occlusion->hidden(world);  // (on screen first: the cheaper test)
+    };
+}
+
 std::vector<GuideId> pickGuides(const GuideHierarchy& h, const std::vector<GuideId>& candidates,
                                 const ViewProjector& project, const std::vector<std::array<float, 2>>& lasso,
                                 bool rootsOnly, float clickPixels, const ViewProjection* bounds) {

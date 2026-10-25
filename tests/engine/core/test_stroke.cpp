@@ -508,6 +508,34 @@ TEST(GuidePicking, LassoBoundsAndClicks) {
     EXPECT_EQ(guidesAt(h, -1, "", {"children"}), guidesAt(h, 0));
 }
 
+TEST(GuidePicking, OnlyWhatTheViewShows) {
+    // A guide on the front of the head and one on its back, seen from the front: through
+    // visibleProjector a lasso over the whole view (or a click on the back guide's root) picks
+    // only the front one; the scalp hides the other.
+    const auto scalp = sphereWithUVs();
+    GuideHierarchy h;
+    const GroupId g = h.addGroup("primary");
+    for (const Vec3f& n : {Vec3f(0.0f, 0.5f, 1.0f).normalized(), Vec3f(0.0f, 0.5f, -1.0f).normalized()}) {
+        std::vector<Vec3f> pts;
+        for (int k = 0; k <= 6; ++k) pts.push_back(n * (1.0f + 0.04f * static_cast<float>(k)));
+        h.addGuide(g, pts);
+    }
+    h.evaluate(scalp.get());
+    const GuideId front = h.guides()[0].id, back = h.guides()[1].id;
+    const std::array<double, 16> matrix = test::lookAtProjection({0, 1.2f, 4}, {0, 0.6f, 0}, 40.0, 1.0);
+    const ViewProjection view(matrix, 800, 800);
+    const ToolView tool = ToolView::fromMatrix(matrix, 800, 800);
+    const std::vector<std::array<float, 2>> everything{{1, 1}, {799, 1}, {799, 799}, {1, 799}};
+    const std::vector<GuideId> all = guidesAt(h, -1);
+    EXPECT_EQ(pickGuides(h, all, pixelProjector(view), everything, false, 12.0f), (std::vector<GuideId>{front, back}));
+    const ViewProjector visible = visibleProjector(pixelProjector(view), scalpVisibility(scalp, tool));
+    EXPECT_EQ(pickGuides(h, all, visible, everything, false, 12.0f, &view), std::vector<GuideId>{front});
+    std::array<float, 2> at{};
+    ASSERT_TRUE(pixelProjector(view)(h.guides()[1].points.front(), &at));
+    EXPECT_TRUE(pickGuides(h, {back}, visible, {at}, false, 12.0f).empty()) << "a click on the hidden guide picks nothing";
+    EXPECT_EQ(visibleProjector(pixelProjector(view), nullptr)(h.guides()[1].points.front(), &at), true) << "no scalp: as before";
+}
+
 TEST(GuidePicking, SelectionModes) {
     const std::vector<GuideId> selected{4, 2, 9}, picked{9, 7, 7, 1};
     EXPECT_EQ(combineSelection(selected, picked, SelectMode::Replace), picked);
