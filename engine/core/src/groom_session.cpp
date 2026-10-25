@@ -1527,6 +1527,7 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
     ctx.framesPerSecond = fps_;
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
+    ctx.liveDrag = liveDrag_;
     ctx.externals = &externals;
     ctx.paths = paths();
     ctx.buildCards = request.buildCards;
@@ -2010,6 +2011,7 @@ bool GroomSession::warmStroke(const ViewRequest& request) {
     ctx.framesPerSecond = fps_;
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
+    ctx.liveDrag = liveDrag_;
     ctx.externals = &externals;
     ctx.paths = paths();
     // The node a stroke would show (the view's node, as evaluate picks it).
@@ -2048,6 +2050,7 @@ std::shared_ptr<DetachedEvaluation> GroomSession::detachWarm(const ViewRequest& 
     ctx.framesPerSecond = fps_;
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
+    ctx.liveDrag = liveDrag_;
     ctx.externals = &job->externals_;
     ctx.paths = job->paths_.get();
     const auto it = sculptDoc_->nodesByName.find(flat_.result(request.viewNode));
@@ -2113,6 +2116,7 @@ std::shared_ptr<DetachedEvaluation> GroomSession::detachStroke(const ViewRequest
     ctx.framesPerSecond = fps_;
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
+    ctx.liveDrag = liveDrag_;
     ctx.externals = &job->externals_;
     ctx.paths = job->paths_.get();
     ctx.buildCards = request.buildCards;
@@ -2162,6 +2166,7 @@ std::shared_ptr<DetachedEvaluation> GroomSession::detach(const ViewRequest& requ
     ctx.framesPerSecond = fps_;
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
+    ctx.liveDrag = liveDrag_;
     ctx.externals = &job->externals_;
     ctx.paths = job->paths_.get();
     ctx.buildCards = request.buildCards;
@@ -2540,6 +2545,16 @@ GroomStats GroomSession::stats() const {
     out.strokeDocument = sculptDoc_ != nullptr;
     out.simulations = simulationStatus();
     return out;
+}
+
+bool GroomSession::viewRefinesStrands() const {
+    if (!doc_) return false;
+    bool refines = false;
+    doc_->graph.forEachActiveUpstream(doc_->output, [&](const std::string&, const Operator& op) {
+        refines = refines || (op.typeName() == op::kSubdivide && op.params().getInt("viewportLevels") > 0);
+        return !refines;
+    });
+    return refines;
 }
 
 std::vector<std::pair<std::string, double>> GroomSession::nodeTimes() const {

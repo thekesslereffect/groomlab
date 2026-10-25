@@ -35,17 +35,20 @@ public:
             notAnimatable({"levels", std::int64_t{2}, "Renders and exports: each level doubles the segments, a smooth curve "
                                                       "through the points (0: as they come)"})
                 .range(0, kMaxLevels),
-            notAnimatable({"viewportLevels", std::int64_t{1}, "The viewport's levels (fewer draws faster; 0 lets the GPU "
-                                                              "preview run the nodes before it)"})
+            notAnimatable({"viewportLevels", std::int64_t{1}, "The viewport's levels (fewer draws faster; while a param is "
+                                                              "dragged none, so the GPU previews the nodes before it)"})
                 .range(0, kMaxLevels),
         };
     }
 
-    // The levels this evaluation subdivides by (the viewport's or the render's).
+    // The levels this evaluation subdivides by (the viewport's or the render's; none while a host
+    // drags a param in the viewport: EvalContext::liveDrag).
     int levelsFor(const EvalContext& ctx) const {
+        if (ctx.viewport && ctx.liveDrag) return 0;
         const std::int64_t levels = params().getInt(ctx.viewport ? "viewportLevels" : "levels");
         return static_cast<int>(std::clamp<std::int64_t>(levels, 0, kMaxLevels));
     }
+    std::uint64_t contextSalt(const EvalContext& ctx) const override { return hash64(0x5DB0u + static_cast<std::uint64_t>(levelsFor(ctx))); }
 
     Value evaluate(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
         const StrandsPtr in = requireStrands(inputs, op::kSubdivide);

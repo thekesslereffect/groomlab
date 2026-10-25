@@ -356,6 +356,10 @@ public:
     // writes session()'s frames: sim_cache.h).
     SimRun simulateTo(int frame, const SimProgress& progress = {});
     void invalidateSimulation(const std::string& node = {});
+    // A param drag in the viewport (GroomSession::setLiveDrag): on, the viewport's Subdivide hands
+    // its strands on so the GPU's preview runs the drag; off, the next evaluation refines again.
+    // The groom evaluates again either way.
+    void setLiveDrag(bool on);
     std::vector<SimStatus> simulationStatus();
     // Bakes the current cards' textures as TGA files in `directory`, Unreal's
     // hair card layout: <base>_Depth, _Coverage, _Tangent, _Attribute (root UV,

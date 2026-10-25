@@ -711,6 +711,14 @@ public:
     // The compounds the documents hold as their nodes inline (GraphEdit::flattenCompounds): a
     // host's node name or param (a compound's, an exposed param) as the documents name them.
     const GraphEdit::FlatCompounds& flatCompounds() const { return flat_; }
+    // A host's live param drag (EvalContext::liveDrag): while on, the viewport's Subdivide nodes
+    // hand their input on, so the GPU's preview runs the nodes before them (the next view's
+    // evaluation makes their result again); off, the next view refines them again.
+    void setLiveDrag(bool on) { liveDrag_ = on; }
+    bool liveDrag() const { return liveDrag_; }
+    // Whether the output is refined for the viewport by a Subdivide (one not bypassed, of viewport
+    // levels): what a live drag (setLiveDrag) hands on.
+    bool viewRefinesStrands() const;
 
 private:
     void parseAll();  // GroomData's texts
@@ -786,6 +794,7 @@ private:
     // The graph: parsed once per change; the documents below are its clones.
     std::unique_ptr<GraphDocument> parsed_;
     GraphEdit::FlatCompounds flat_;  // parsed_'s compounds inline (flattenCompounds)
+    bool liveDrag_ = false;          // setLiveDrag
     std::unique_ptr<GraphDocument> doc_;        // the view's
     std::uint64_t docGeneration_ = 0;           // each new doc_ (a detached evaluation's base)
     std::uint64_t strokeDocGeneration_ = 0;     // each time sculptDoc_ goes or takes another graph (adoptWarm)

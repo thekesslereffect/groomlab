@@ -470,11 +470,37 @@ void MainWindow::setDocument(std::unique_ptr<GroomDocument> document) {
             gpu::OverrideValue v;
             // A number, a vec3 or a profile's keys (anything else is the CPU's).
             if (!gpuOverrideFromJson(value, &v)) return false;
-            if (!gpu_.drag(node, name, v, &why)) return false;
+            if (!gpu_.drag(node, name, v, &why)) {
+                // A Subdivide refining the output for the viewport ends the GPU's run: for the drag
+                // the view hands the strands on unrefined (GroomSession::setLiveDrag) and the GPU
+                // runs the nodes before it; the release refines them again. Not for a drag of the
+                // Subdivide itself (its levels are what the drag shows).
+                GroomSession& session = document_->session();
+                std::string draggedType;
+                for (const GroomDocument::NodeInfo& n : document_->nodes()) {
+                    if (n.name == node) draggedType = n.type;
+                }
+                if (session.liveDrag() || !session.viewRefinesStrands() || draggedType == "Subdivide") return false;
+                session.setLiveDrag(true);
+                reevaluate(true);  // the view without the refinement
+                if (!gpu_.drag(node, name, v, &why)) {
+                    session.setLiveDrag(false);
+                    return false;
+                }
+            }
             viewport_->update();
             return true;
         };
-        document_->livePreviewEnded = [this] { gpu_.endDrag(); };
+        document_->livePreviewEnded = [this] {
+            gpu_.endDrag();
+            if (document_ && document_->session().liveDrag()) {
+                // Refined again: by the commit that follows, or (a release at the value it had) here.
+                document_->session().setLiveDrag(false);
+                QTimer::singleShot(0, this, [this] {
+                    if (document_) reevaluate();
+                });
+            }
+        };
     }
     params_->setDocument(document_.get());
     graphParams_->setDocument(document_.get());
