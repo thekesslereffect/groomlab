@@ -114,7 +114,7 @@ protected:
     void leaveEvent(QEvent* event) override;
 
 private:
-    enum class Drag { None, Orbit, Pan, Dolly, Stroke, Radius, Strength, Box, Menu };
+    enum class Drag { None, Orbit, Pan, Dolly, Stroke, Radius, Strength, Box, Paint, Menu };
     void cameraMoved();
     bool cameraPress(QMouseEvent* event, bool alt);  // the camera's buttons; false: not a camera drag
     float pressure() const;
@@ -125,6 +125,7 @@ private:
     Drag drag_ = Drag::None;
     QPoint last_;
     QPointF pressAt_;
+    bool paintMoved_ = false;  // a brush's Ctrl+Shift drag (Drag::Paint) moved: it paints (else a click)
     float dragStart_ = 0.0f;  // the radius or strength when its drag started
     bool bHeld_ = false;      // B is down: a left drag sizes the brush
     bool bDragged_ = false;   // ... and did, so releasing B keeps the mode

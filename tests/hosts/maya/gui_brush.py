@@ -268,6 +268,26 @@ def step_redo():
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke=" ".join("%d %d" % (tx - 200 + 20 * k, ty) for k in range(14)))
     check("a stroke from empty space starts when it reaches hair", cmds.getAttr(groom + ".guideData") != data)
 
+    # Ctrl+Shift with a brush: the selection painted with the ring (each guide it passes over
+    # selected), the rest frozen, one undo step; a Ctrl+Shift click toggles the guide under it.
+    gl = state["groomlab"]
+    gl.clear_guide_selection(groom)
+    data = cmds.getAttr(groom + ".guideData")
+    selected = cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select " + " ".join("%d %d" % (tx - 200 + 20 * k, ty) for k in range(14)))
+    painted = gl.selected_guides(groom)
+    check("a Ctrl+Shift drag paints guides into the selection (%d)" % len(painted), len(painted) > 0 and selected == len(painted))
+    check("... and freezes the rest (the guides change)", cmds.getAttr(groom + ".guideData") != data)
+    cmds.undo()
+    check("one undo takes the painted selection and the freeze back", not gl.selected_guides(groom) and
+          cmds.getAttr(groom + ".guideData") == data)
+    cmds.redo()
+    gx, gy = to_view(cmds.groomLabGuides(groom, guidePoints=painted[0])[-3:])
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (gx, gy))
+    check("a Ctrl+Shift click toggles the guide under it", len(gl.selected_guides(groom)) == len(painted) - 1)
+    gl.clear_guide_selection(groom)
+    from groomlab.painting import unfreeze_all
+    unfreeze_all(groom)  # (the strokes after it brush every guide)
+
     before = len(cmds.groomLabGuides(groom, listGuides="primary"))
     state["groomlab"].brush_tool("place", length=0.7)
     px, py = to_view((0.3, 0.3, 0.9))

@@ -236,6 +236,14 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
             bDragged_ = bHeld_;
             return;
         }
+        if (event->button() == Qt::LeftButton && event->modifiers().testFlag(Qt::ControlModifier) &&
+            event->modifiers().testFlag(Qt::ShiftModifier)) {
+            // Ctrl+Shift: selecting guides without leaving the brush (a drag paints them in with the
+            // ring, a click toggles one).
+            drag_ = Drag::Paint;
+            paintMoved_ = false;
+            return;
+        }
         if (event->button() == Qt::LeftButton) {
             drag_ = Drag::Stroke;
             if (!session_->press(event->position(), pressure(), strokeModifiers(event))) {
@@ -324,6 +332,18 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
             session_->showBox(pressAt_, event->position());
             refreshOverlay();
             break;
+        case Drag::Paint:
+            if (!session_) break;
+            syncView();
+            // Once it moves it paints (from the press on): the guides under the ring join the selection.
+            if (!paintMoved_ && (event->position() - pressAt_).manhattanLength() >= 4.0) {
+                paintMoved_ = true;
+                session_->paintSelection(pressAt_);
+            }
+            if (paintMoved_) session_->paintSelection(event->position());
+            session_->hover(event->position());
+            refreshOverlay();
+            break;
         case Drag::None:
         case Drag::Menu:
             break;
@@ -367,6 +387,17 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
             emit selectionChanged();
             break;
         }
+        case Drag::Paint:
+            syncView();
+            if (paintMoved_) {
+                session_->soloSelection();  // the rest frozen, one undo step (the Select tool's solo)
+            } else {
+                session_->select({event->position()}, SelectMode::Toggle, true);  // a click: the guide under it
+            }
+            session_->hover(event->position());
+            refreshOverlay();
+            emit selectionChanged();
+            break;
         case Drag::Radius:
         case Drag::Strength:
             emit brushSettingsChanged();

@@ -336,6 +336,26 @@ std::size_t BrushSession::select(const std::vector<QPointF>& lasso, SelectMode m
     return picked.size();
 }
 
+std::size_t BrushSession::paintSelection(const QPointF& at) {
+    std::vector<QPointF> ring;
+    const double r = tool_.settings.screenRadius;
+    for (int k = 0; k < 24; ++k) {
+        const double a = 6.283185307 * k / 24.0;
+        ring.push_back(at + QPointF(r * std::cos(a), r * std::sin(a)));
+    }
+    return select(ring, SelectMode::Add, false);
+}
+
+void BrushSession::soloSelection() {
+    if (!document_) return;
+    const std::vector<GuideId> selection = document_->selection();
+    const std::shared_ptr<const GuideHierarchy> authored = document_->session().authoredHierarchy();
+    GuideHierarchy probe = authored ? *authored : GuideHierarchy{};
+    if (freezeToSelection(probe, selection)) {
+        document_->editGuides("solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
+    }
+}
+
 void BrushSession::warm(const ViewRequest& request) {
     if (!document_) return;
     ViewRequest r = request;

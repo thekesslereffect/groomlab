@@ -3444,7 +3444,20 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
             ids.clear();
         }
         setSelection(t, combineSelection(t.selection, ids, mode));
+        // "solo" (a brush's Ctrl+Shift painting, when it ends): every guide not selected frozen,
+        // one undo step when that changed anything.
+        bool froze = false;
+        if (optBool(args, "solo", false)) {
+            const std::shared_ptr<const GuideHierarchy> stored = s.groom->authoredHierarchy();
+            GuideHierarchy probe = stored ? *stored : GuideHierarchy{};
+            const std::vector<GuideId> selection = t.selection;
+            if (freezeToSelection(probe, selection)) {
+                editGuides(t, "solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
+                froze = true;
+            }
+        }
         result = selectionJson(t);
+        result["froze"] = froze;
         return true;
     }
     if (cmd == "pick_level") {
