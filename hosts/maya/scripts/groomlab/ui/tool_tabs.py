@@ -413,7 +413,10 @@ class GuidesTab(_GroomTab):
         return item.data(0, QtCore.Qt.UserRole) if item else None
 
     def refresh(self):
-        current = self.group()
+        # The palette's group stays highlighted (a new group is picked there before the list is
+        # filled again); with none picked there ("all groups"), the row that was.
+        picked = getattr(self.owner, "current_group", None)
+        current = (picked() if picked else "") or self.group()
         self.tree.clear()
         if not self.groom:
             self.sync_segments()
