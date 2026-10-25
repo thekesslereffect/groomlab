@@ -150,8 +150,35 @@ FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const Sc
         }
     }
     if (any) {
+        // A station says which way the vane lies only where its barbs head across together: where
+        // they nearly cancel (curled back on themselves near the tip: a sum a sliver of the
+        // others') or head against the stations nearer the strongest one, the side would flip
+        // there and shear the card. Those take their neighbours'.
+        std::vector<float> strength(K, 0.0f), nonzero;
+        for (std::size_t k = 0; k < K; ++k) {
+            strength[k] = across[k].length();
+            if (strength[k] > 1e-12f) nonzero.push_back(strength[k]);
+        }
+        std::nth_element(nonzero.begin(), nonzero.begin() + static_cast<std::ptrdiff_t>(nonzero.size() / 2), nonzero.end());
+        const float weak = 0.15f * nonzero[nonzero.size() / 2];
         std::vector<char> known(K, 0);
-        for (std::size_t k = 0; k < K; ++k) known[k] = across[k].length() > 1e-12f;
+        for (std::size_t k = 0; k < K; ++k) known[k] = strength[k] > std::max(weak, 1e-12f);
+        const auto strongest = static_cast<std::size_t>(std::max_element(strength.begin(), strength.end()) - strength.begin());
+        for (const int step : {1, -1}) {
+            std::size_t last = strongest;
+            for (auto k = static_cast<std::ptrdiff_t>(strongest) + step; k >= 0 && k < static_cast<std::ptrdiff_t>(K); k += step) {
+                const auto at = static_cast<std::size_t>(k);
+                if (!known[at]) continue;
+                if (across[at].dot(across[last]) < 0.0f) {
+                    known[at] = 0;
+                    continue;
+                }
+                last = at;
+            }
+        }
+        for (std::size_t k = 0; k < K; ++k) {
+            if (!known[k]) across[k] = Vec3f{};
+        }
         for (std::size_t k = 1; k < K; ++k) {
             if (!known[k] && known[k - 1]) across[k] = across[k - 1], known[k] = 1;
         }
