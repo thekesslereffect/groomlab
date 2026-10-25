@@ -1,0 +1,3 @@
+// The executable's icon (Explorer, the taskbar before Qt sets the window's): the GroomLab logo,
+// made from icons/app_icon.svg (the site's icon.svg).
+IDI_ICON1 ICON "groomlab.ico"

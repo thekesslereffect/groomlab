@@ -44,6 +44,7 @@
 #include <vector>
 
 #include <QApplication>
+#include <QIcon>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -130,6 +131,7 @@ int main(int argc, char** argv) {
     }
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("GroomLab"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/groomlab/icons/app_icon.svg")));  // every window's, the taskbar's
     QApplication::setOrganizationName(QStringLiteral("GroomLab"));
     QApplication::setApplicationVersion(QString::fromLatin1(groomlab::kVersionString));  // About, Check for Updates
     QSettings::setDefaultFormat(QSettings::IniFormat);  // the recent files: an .ini in the user's config folder

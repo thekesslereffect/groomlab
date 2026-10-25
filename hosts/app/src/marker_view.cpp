@@ -280,7 +280,7 @@ void MarkerView::mouseMoveEvent(QMouseEvent* event) {
             cameraChanged();
             return;
         case Drag::Dolly:
-            camera_.dolly(1.0f + (delta.x() - delta.y()) * 0.005f);
+            camera_.dolly(1.0f - (delta.x() + delta.y()) * 0.005f);  // as Maya: right or down zooms in
             cameraChanged();
             return;
         case Drag::Point: {
