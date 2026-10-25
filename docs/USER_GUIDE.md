@@ -343,7 +343,7 @@ mask as it is when you let go. (A direction given per strand by an expression, o
 its inclination, roll and strength all mapped, evaluates as usual, as does a Jiggle's history
 dragged past the frames Maya sampled for it, and a Curl that adds points. So do sliders that pick
 which strands a node reads: BlendNeighbors' neighbors, Tangle's fraction, radius and seed.) A Cull,
-a Split (its output a) or a Mirror after the look keeps the drag on the GPU too: the nodes before it
+a Split (any of its outputs) or a Mirror after the look keeps the drag on the GPU too: the nodes before it
 run there and their strands are kept or mirrored as it last kept or mirrored them; its own sliders,
 and a Cull or Split keeping by anything but a number, a texture or a color set, evaluate as usual.
 Brushing does too, SelfCollide and Static included, masked nodes as well. Letting go evaluates as

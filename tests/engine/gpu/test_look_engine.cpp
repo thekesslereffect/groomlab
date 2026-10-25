@@ -5907,8 +5907,9 @@ TEST_P(LookEngineTest, MeshCutAtAHundredThousandStrands) {
                 p.base->pointCount(), ms[2]);
 }
 
-// A Cull, Split (its output a) or Mirror after Interpolate, a Noise and a Width, a Noise after it.
-std::string gatherGraph(const std::string& type, const std::string& params) {
+// A Cull, Split or Mirror after Interpolate, a Noise and a Width, a Noise after it (taking a Split's
+// output `output`).
+std::string gatherGraph(const std::string& type, const std::string& params, const std::string& output = "") {
     return R"({"nodes": [
         {"name": "scalp", "type": "Scalp"}, {"name": "scatter", "type": "Scatter", "params": {"density": 40.0, "length": 3.0}},
         {"name": "guides", "type": "Guides"}, {"name": "interpolate", "type": "Interpolate", "params": {"keepClearance": false}},
@@ -5922,7 +5923,8 @@ std::string gatherGraph(const std::string& type, const std::string& params) {
         {"from": "guides", "to": "interpolate", "input": "guides"}, {"from": "scalp", "to": "interpolate", "input": "scalp"},
         {"from": "interpolate", "to": "noise", "input": "strands"}, {"from": "noise", "to": "width", "input": "strands"},
         {"from": "width", "to": "picked", "input": "strands"},
-        {"from": "picked", "to": "after", "input": "strands"}, {"from": "after", "to": "output", "input": "strands"}],
+        {"from": "picked", "to": "after", "input": "strands")" + (output.empty() ? "" : R"(, "output": ")" + output + "\"") + R"(},
+        {"from": "after", "to": "output", "input": "strands"}],
       "output": "output"})";
 }
 
@@ -5935,20 +5937,24 @@ TEST_P(LookEngineTest, CullSplitAndMirrorRunADragUpTheirInputAsTheCpuDoes) {
         const char* name;
         const char* type;
         const char* params;
+        const char* output = "";  // a Split's output the Noise after it takes
     };
     const Case cases[] = {{"Cull", "Cull", R"({"keep": 0.6, "seed": 3})"},
-                          {"Split", "Split", R"({"weightA": 1.0, "weightB": 1.0})"},
+                          {"Split a", "Split", R"({"weightA": 1.0, "weightB": 1.0})"},
+                          {"Split b", "Split", R"({"weightA": 1.0, "weightB": 1.0, "weightC": 1.0})", "b"},
+                          {"Split d", "Split", R"({"weightA": 1.0, "weightB": 1.0, "weightD": 1.0})", "d"},
                           {"Mirror (replace)", "Mirror", R"({"axis": "x", "mode": "replace"})"},
                           {"Mirror (add)", "Mirror", R"({"axis": "x", "mode": "add"})"}};
     for (const Case& c : cases) {
         SCOPED_TRACE(c.name);
-        const std::string graph = gatherGraph(c.type, c.params);
+        const std::string graph = gatherGraph(c.type, c.params, c.output);
         GroomSession session(groom(graph));
         ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
         const GraphDocument& doc = *session.viewDocument();
         const NodeId picked = doc.nodesByName.at("picked");
         const StrandsPtr in = valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("width")));
-        const StrandsPtr made = valueAs<StrandsPtr>(doc.graph.cachedValue(picked));
+        const std::size_t port = *c.output ? doc.graph.outputIndex(picked, c.output) : 0;
+        const StrandsPtr made = valueAs<StrandsPtr>(doc.graph.cachedValue(picked, port));
         ASSERT_TRUE(in && made);
         EXPECT_NE(in->strandCount(), made->strandCount()) << "the test's premise: it keeps or adds strands";
         gpu::LookChain chain;
@@ -5958,6 +5964,7 @@ TEST_P(LookEngineTest, CullSplitAndMirrorRunADragUpTheirInputAsTheCpuDoes) {
         EXPECT_EQ(chain.stages.front().node, picked);
         EXPECT_TRUE(gpu::gathers(chain.stages.front().kind));
         EXPECT_EQ(chain.base, picked) << "its result the base";
+        EXPECT_EQ(chain.baseOutput, port);
         EXPECT_EQ(chain.stages[1].from, 0u) << "the Noise after it takes its result";
         for (const auto& [node, value] : {std::pair<const char*, double>{"noise", 0.55}, {"width", 0.016}}) {
             SCOPED_TRACE(node);

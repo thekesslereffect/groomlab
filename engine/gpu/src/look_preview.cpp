@@ -13,7 +13,7 @@ namespace groomlab::gpu {
 namespace {
 
 bool sameChain(const LookChain& a, const LookChain& b) {
-    if (a.stages.size() != b.stages.size() || a.base != b.base) return false;
+    if (a.stages.size() != b.stages.size() || a.base != b.base || a.baseOutput != b.baseOutput) return false;
     for (std::size_t k = 0; k < a.stages.size(); ++k) {
         if (a.stages[k].node != b.stages[k].node || a.stages[k].level != b.stages[k].level) return false;
     }
@@ -266,7 +266,8 @@ void LookPreview::endStroke() {
 ChangesPtr LookPreview::upload(LookEngine& engine, const LookPlan& plan, const ScalpMesh* scalp, bool incremental) {
     const Graph& graph = plan.doc->graph;
     const std::uint64_t serial = graph.resultSerial(plan.chain.base);
-    const ChangesPtr changes = incremental && engine.base() && baseSerial_ && baseNode_ == plan.chain.base
+    // (A Split's b, c or d: the graph tracks its first output's changes; the engine compares.)
+    const ChangesPtr changes = incremental && engine.base() && baseSerial_ && baseNode_ == plan.chain.base && plan.chain.baseOutput == 0
                                    ? graph.changesSince(plan.chain.base, baseSerial_, true)  // of the base as made
                                    : nullptr;
     engine.setBase(plan.base, scalp, changes.get());

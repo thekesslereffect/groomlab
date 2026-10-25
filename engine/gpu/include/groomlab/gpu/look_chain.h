@@ -68,7 +68,7 @@
 // Flow (the field and scalp its last evaluation traced along, FlowState: the field baked at the
 // vertices, its pins and sinks asked where it asks the field itself; each step's closest point down
 // the scalp's mesh as Tie's routes find them; not over a scalp deformed away from its rest pose), in
-// any order. Cull, Split (its output a) and Mirror, which keep or add strands: a run through one
+// any order. Cull, Split (any output: LookChain::baseOutput) and Mirror, which keep or add strands: a run through one
 // starts with it (its result the base, its node the chain's base too), the nodes before it a run of
 // their own up its input (LookBranch, made on a sibling engine first, as a Merge's input b's), whose
 // strands it copies into its result's layout as its last evaluation laid it out (GatherInputs: each
@@ -165,6 +165,7 @@ struct LookStage {
 // what the GPU starts from.
 struct LookChain {
     NodeId base = 0, output = 0;
+    std::size_t baseOutput = 0;  // the base's output the run takes (a Split's b, c or d)
     std::vector<LookStage> stages;  // graph order: the first takes the base's strands
     std::vector<NodeId> passOn;     // nodes that must hand their input (or its points) on as it came (checked on the cache)
     std::size_t indexOf(NodeId node) const;
@@ -801,7 +802,9 @@ private:
         std::shared_ptr<const GatherInputs> inputs;
     };
     std::map<NodeId, GatherMemo> gather_;
-    bool readGather(const GraphDocument& doc, NodeId id, const ScalpMesh* groomScalp, StageInputs* out, std::string* why);
+    // `output`: its output the run takes (a Split's b, c or d).
+    bool readGather(const GraphDocument& doc, NodeId id, std::size_t output, const ScalpMesh* groomScalp, StageInputs* out,
+                    std::string* why);
     MeshPtr scalpMesh_;  // the last read's (a Clump's centers' branch reads with it)
     // A Clump's centers made by a branch the run moves (LookCentersRun): what that branch's run
     // takes, kept as a chain's is (its own reader; its mapped values, read once per evaluation).
