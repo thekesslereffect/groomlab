@@ -165,17 +165,33 @@ CardPoint projectOntoCard(const CardMesh::Card& cardIn, const Vec3f& p, int& seg
     float best = std::numeric_limits<float>::max();
     int bestK = lo;
     float bestT = 0.0f;
+    bool bestBetween = false;
+    // Each station's plane faces the way the card runs there (the mean of its segments' ways):
+    // a point lies between two stations' planes, and how far between them is how far along.
+    // The planes turn from station to station, so a point off the middle (a wide card's edge)
+    // moves along smoothly as it moves; projecting it onto the nearest segment instead pinned
+    // every point outside a bend to the station there, and the strands baked in steps.
+    auto facing = [&](int k) {
+        const std::size_t a = static_cast<std::size_t>(std::max(k - 1, 0));
+        const std::size_t b = static_cast<std::size_t>(std::min(k + 1, last + 1));
+        return (card.center[b] - card.center[a]).normalized();
+    };
     for (int pass = 0; pass < 2; ++pass) {
         for (int k = lo; k <= hi; ++k) {
             const Vec3f& a = card.center[static_cast<std::size_t>(k)];
-            const Vec3f ab = card.center[static_cast<std::size_t>(k) + 1] - a;
-            const float len2 = std::max(ab.dot(ab), 1e-20f);
-            float t = (p - a).dot(ab) / len2;
+            const Vec3f& b = card.center[static_cast<std::size_t>(k) + 1];
+            const float da = (p - a).dot(facing(k)), db = (p - b).dot(facing(k + 1));
             // Past the root or the tip: keep going (it lands outside the texture).
-            t = std::clamp(t, k == 0 ? -10.0f : 0.0f, k == last ? 10.0f : 1.0f);
-            const Vec3f q = a + ab * t;
+            float t = da - db > 1e-20f ? da / (da - db) : 0.5f;
+            const float clamped = std::clamp(t, k == 0 ? -10.0f : 0.0f, k == last ? 10.0f : 1.0f);
+            const Vec3f q = a + (b - a) * clamped;
+            // Between this segment's planes beats any other's nearest end (outside a bend, a
+            // neighbour's end station can be nearer than the point's own segment).
             const float d2 = (p - q).dot(p - q);
-            if (d2 < best) best = d2, bestK = k, bestT = t;
+            const bool between = clamped == t;
+            if ((between && !bestBetween) || (between == bestBetween && d2 < best)) {
+                best = d2, bestK = k, bestT = clamped, bestBetween = between;
+            }
         }
         // Near the window's edge: it may be better elsewhere, search it all.
         if (segment < 0 || (bestK != lo && bestK != hi) || (lo == 0 && hi == last)) break;
