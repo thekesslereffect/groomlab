@@ -320,12 +320,21 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
                 }
             }
             std::vector<float> asked(n, 0.0f);
+            float most = 0.0f;  // the most any station asks
             for (std::size_t i = 0; i < n; ++i) {
-                if (weight[i] > 0.0f) asked[i] = sum[i] / weight[i];
+                if (weight[i] <= 0.0f) continue;
+                asked[i] = sum[i] / weight[i];
+                most = std::max(most, std::abs(asked[i]));
             }
+            // Never farther than a station asks: the curve through a few asked stations swings
+            // out where none asks (a tip past the neighbour), and that swing would shear the card.
+            // Scaled down whole, so it stays the smooth curve it is (clipped, it would kink).
             std::vector<float> move = smoothCurve(asked, weight);
+            float swing = 0.0f;
+            for (const float m : move) swing = std::max(swing, std::abs(m));
+            const float scale = kDamping * (swing > most ? most / swing : 1.0f);
             for (float& m : move) {
-                m *= kDamping;
+                m *= scale;
                 largest[c] = std::max(largest[c], std::abs(m));
             }
             moves[c] = std::move(move);
@@ -337,7 +346,19 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
             const std::vector<float>& move = moves[c];
             if (move.empty()) continue;
             moved = moved || largest[c] > 0.05f * gapOf(c);
-            for (std::size_t i = 0; i < shift.size(); ++i) shift[i] += shapes[c].normal[i] * move[i];
+            // At most half the card's width off where its strands are, all passes told: a card
+            // through another is never deeper than that, and one crowded on every side (a dense
+            // coat, each neighbour asking) would otherwise walk away from its strands.
+            // (Scaled down whole, as the move: no kink where it would reach that.)
+            const float most = 0.5f * widthOf[c];
+            float farthest = 0.0f;
+            for (std::size_t i = 0; i < shift.size(); ++i) {
+                shift[i] += shapes[c].normal[i] * move[i];
+                farthest = std::max(farthest, shift[i].length());
+            }
+            if (farthest > most) {
+                for (Vec3f& s : shift) s *= most / farthest;
+            }
         }
         if (!moved) break;
     }

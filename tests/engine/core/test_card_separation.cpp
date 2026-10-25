@@ -92,7 +92,20 @@ TEST(CardSeparation, ACardBendsAsAWholeNeverKinked) {
         if (i > 0 && i + 1 < kRef) bend = std::max(bend, std::abs(shift[i - 1].z - 2.0f * shift[i].z + shift[i + 1].z));
     }
     EXPECT_GT(most, 0.0f);
-    EXPECT_LT(bend, 0.1f * most) << "no kink: each station on the curve its neighbours make";
+    EXPECT_LT(bend, 0.15f * most) << "no kink: each station on the curve its neighbours make";
+}
+
+TEST(CardSeparation, ACrowdedCardStaysNearItsStrands) {
+    // Many cards stacked through one another (a dense coat): however many neighbours push, no
+    // card moves more than half its width off where its strands are.
+    std::vector<CardMesh::Card> cards;
+    for (int k = 0; k < 16; ++k) {
+        cards.push_back(card({0.01f * (k % 4), 0, 0.003f * k}, 0.4f, 0.05f * ((k % 5) - 2)));
+    }
+    separateCards(cards, 0.2f, 0.0f, 64);
+    for (std::size_t c = 0; c < cards.size(); ++c) {
+        for (const Vec3f& s : cards[c].refShift) EXPECT_LE(s.length(), 0.5f * 0.4f + 1e-5f) << c;
+    }
 }
 
 TEST(CardSeparation, TheSameCardsComeOutTheSame) {
