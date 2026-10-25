@@ -13,6 +13,17 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.31.2 (October 25, 2026)
+
+- **Fixed: stair-stepped strands in card bakes.** On wide cards that bend, baked strands ran in
+  steps (and some pieces landed in the wrong place). Strands now follow the card smoothly.
+- **Fixed: hair cards with wide tips.** A few cards flared out at the tip for the handful of
+  longer strands running past the rest, or for one strand drifting off its clump. Cards now keep
+  to their lock.
+- **Flyaways get cards of their own.** Strands a Flyaway node pushes out no longer widen their
+  clump's card: each gets a thin one-strand card, first in line for **Flyaway Cards** (the
+  longest first).
+
 ## 0.31.1 (October 24, 2026)
 
 - **Fixed: Separation could shear cards.** In a dense groom a few cards were bent at the tip or
