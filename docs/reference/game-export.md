@@ -105,6 +105,18 @@ Game cards as glTF, below).
   size. `ruffle` pushes alternate cards of a clump in and out along their normal (a share of their
   width, never farther than their strands lie off it) and turns them a little the other way, so
   layered cards never share a plane (no z-fighting, more volume); a lone card is never ruffled.
+- **Separation** (its own section: `separation` for hair cards, off by default; `featherSeparation` for feather
+  cards, 0.05; `separationIterations`, 8): cards closer than a gap to another card, or passing
+  through it, are pushed apart along their normals (`separateCards`, `engine/core/src/
+  card_separation.cpp`). The gap is a share of the narrower card's width (between a hair and a
+  feather card, the larger share), so it fits any scale. Each pass moves every card along its own
+  normal by one smooth curve (held at the root, free from a third of the way along) fitted to what
+  its neighbours ask of its stations, so a card bends as a whole and never twists or kinks; only points within half the narrower card's width of the other count,
+  and a pair keeps the side most of those lie on, so a card through another goes to that side.
+  The cards of one down feather never push each other, and cards of different Cards nodes don't
+  meet. Only the mesh moves (`Card::refShift` on the stations): the texture, baked from where the
+  strands are, stays, and so does the bake's stale stamp. On a dense contour coat (414 feather
+  cards) it takes intersecting card pairs from 56 to 5 for about 55 ms a rebuild.
 - **The hair fits on its card, the card on the groom:** each card is as wide as nine in ten of
   its strands spread across it (in its plane), plus a `margin` (a tenth of the width each side)
   kept clear of the texture's edges, and as long as nine in ten of its strands reach (it carries on

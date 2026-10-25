@@ -294,6 +294,9 @@ groomlab_precompile(groomlab_app_ui <nlohmann/json.hpp> <QCheckBox> <QColor> <QC
     <QSpinBox> <QString> <QTimer> <QVBoxLayout> <QWidget>)
 
 qt_add_executable(groomlab_app src/main.cpp)
+if(WIN32)
+    target_sources(groomlab_app PRIVATE groomlab.rc)  # the executable's icon (groomlab.ico)
+endif()
 set_target_properties(groomlab_app PROPERTIES WIN32_EXECUTABLE TRUE OUTPUT_NAME "GroomLab")
 target_link_libraries(groomlab_app PRIVATE groomlab_app_ui nlohmann_json::nlohmann_json groomlab::warnings)
 

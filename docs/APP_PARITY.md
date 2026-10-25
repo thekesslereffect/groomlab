@@ -43,7 +43,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Map kinds | **guides**, **vertices**, **texture** (a "vertex map", a "texture map"); values **gray** (one value) or **color** (r g b a) | weight map, image map |
 | HairColor's two ways | **Natural** (the `melanin` mode: pigment and redness, as real hair) and **Picked color** (the `color` mode) | melanin/color in panels; the param panel lists the raw choices |
 | Symmetry | **Symmetry** with **World X** or **Topology** | Sym X, Mirror (Mirror is the node) |
-| Numbers | the spec's `decimals` (none for counts and pixels, one for degrees, by the slider's span otherwise); trailing zeros dropped; fractions as percentages with one decimal; units after the field (cm, µm, %, °, px, cm/s²) | 0.350 next to 0.35, 1.0000 |
+| Numbers | the spec's `decimals` (none for counts and pixels, one for degrees, by the slider's span otherwise), a small number with two significant digits (0.035, up to six decimals); trailing zeros dropped; fractions as percentages with one decimal; units after the field (cm, µm, %, °, px, cm/s²) | 0.350 next to 0.35, 1.0000 |
 | Node categories (Add Node) | Sources, Grow, Shape, Deform, Collide, Look, Motion, Feathers, Color, Convert, Fields & Curves, Utility, Games, from `node_catalog.cpp` | a host's own list |
 
 ## Files: .groom import, reload, save

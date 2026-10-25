@@ -691,6 +691,26 @@ public:
                                                  "vane (lift, droop, cupping): two quads per segment. Off: a flat strip"})
                 .in("Feathers")
                 .when("featherMode", {"auto", "perFeather"}),
+            ParamSpec{"separation", 0.0, "Cards closer than this gap to another card, or passing through it, are pushed apart "
+                                         "along their normals, roots held (a share of the narrower card's width; 0: off). "
+                                         "Only the mesh moves: the texture stays as baked", "fraction"}
+                .range(0, 1)
+                .soft(0, 0.2)
+                .in("Separation")
+                .when("featherMode", {"auto", "perVane", "off"}),
+            ParamSpec{"featherSeparation", 0.05, "Feather cards closer than this gap to another card, or passing through it, are "
+                                                 "pushed apart along their normals, roots held, so overlapping feathers lie on each "
+                                                 "other instead of clipping (a share of the narrower card's width; 0: off). Only the "
+                                                 "mesh moves: the texture stays as baked", "fraction"}
+                .range(0, 1)
+                .soft(0, 0.2)
+                .in("Separation")
+                .when("featherMode", {"auto", "perFeather"}),
+            notAnimatable({"separationIterations", std::int64_t{8}, "Passes of the cards' separation (separation, "
+                                                                    "featherSeparation): more settle crowded cards further"})
+                .range(1, 64)
+                .soft(1, 16)
+                .in("Separation"),
             notAnimatable({"atlasSize", std::int64_t{2048}, "Atlas resolution to bake (pixels); several Cards nodes share one "
                                                             "atlas and bake, at the largest of theirs", "pixels"})
                 .range(16, 16384)
@@ -755,6 +775,9 @@ public:
         s.featherSegments = static_cast<int>(params().getInt("featherSegments"));
         s.featherMinLength = static_cast<float>(params().getDouble("featherMinLength"));
         s.featherSpine = params().getBool("featherSpine");
+        s.separation = static_cast<float>(params().getDouble("separation"));
+        s.featherSeparation = static_cast<float>(params().getDouble("featherSeparation"));
+        s.separationIterations = static_cast<int>(params().getInt("separationIterations"));
         // Only the feathers (perFeather) or only the hair (off): the cards are made from those
         // strands alone, so what the others do never makes this node's bake stale.
         StrandsPtr source = in;

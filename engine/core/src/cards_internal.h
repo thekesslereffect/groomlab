@@ -37,6 +37,9 @@ std::vector<Vec3f> cardRow(const CardMesh::Card& card, std::size_t i);
 
 // The share of a card's length over which its mesh bends from its stations' rows to its base.
 constexpr float kBaseBlend = 0.1f;
+// A station's vertices as the mesh has them: its row (cardRow), bent toward the base near the
+// root (`root`: cardRow(card, 0)).
+std::vector<Vec3f> cardVertexRow(const CardMesh::Card& card, std::size_t i, const std::vector<Vec3f>& root);
 
 // Seats a card on the scalp its strands grow from (Card::base): each vertex of its root row
 // (stations sampled) moved along the scalp's normal under it to `clearance` above the skin (a

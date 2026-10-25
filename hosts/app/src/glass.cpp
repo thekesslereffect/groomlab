@@ -29,7 +29,12 @@
 namespace groomlab::app {
 
 QString trimmedNumber(double value, int decimals) {
-    QString text = QString::number(value, 'f', std::clamp(decimals, 0, 12));
+    decimals = std::clamp(decimals, 0, 12);
+    // A small number keeps two significant digits (0.035, not 0: a density fitted to a large
+    // scalp), six decimals at most.
+    if (value != 0.0 && std::abs(value) < 1.0)
+        decimals = std::max(decimals, std::min(6, static_cast<int>(std::ceil(-std::log10(std::abs(value)))) + 1));
+    QString text = QString::number(value, 'f', decimals);
     if (text.contains(QLatin1Char('.'))) {
         while (text.endsWith(QLatin1Char('0'))) text.chop(1);
         if (text.endsWith(QLatin1Char('.'))) text.chop(1);

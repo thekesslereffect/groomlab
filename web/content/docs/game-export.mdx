@@ -28,6 +28,12 @@ baking.
   node whose maps are out of date shows an orange badge.
 - **Bake Scalp** bakes the hair near the skin into the scalp's UVs, with a hair cap mesh, so low
   LODs don't show bare skin between cards.
+- **Cards that don't pass through each other** (the Cards node's Separation section): **Feather Separation** (on by default, 0.05)
+  pushes feather cards that cross or nearly touch apart along their normals, so overlapping
+  feathers lie on each other instead of clipping; **Separation** does the same for hair cards
+  (off by default). The gap is a share of the narrower card's width, the roots stay where they
+  are, and only the mesh moves: the baked maps stay valid. **Separation Iterations** (8) settles
+  crowded cards further. (SelfCollide separates strands, not cards.)
 - Cards are always built from the full groom; the viewport preview density does not affect them.
 
 ## Export card maps

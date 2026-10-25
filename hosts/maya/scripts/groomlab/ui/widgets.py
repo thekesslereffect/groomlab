@@ -854,10 +854,15 @@ class CompactSpinBox(QtWidgets.QDoubleSpinBox):
 
 def format_number(value, decimals=None):
     """A number as every GroomLab host shows it: `decimals` places at most (the spec's), trailing zeros
-    dropped (0.35, 12, 980); None: six significant digits."""
+    dropped (0.35, 12, 980), but a small number keeps two significant digits (0.035, not 0: a density
+    fitted to a large scalp), six places at most; None: six significant digits."""
     if decimals is None:
         return "%.6g" % value
-    text = "%.*f" % (max(0, int(decimals)), value)
+    decimals = max(0, int(decimals))
+    if 0.0 < abs(value) < 1.0:
+        import math
+        decimals = max(decimals, min(6, int(math.ceil(-math.log10(abs(value)))) + 1))
+    text = "%.*f" % (decimals, value)
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return "0" if text in ("-0", "") else text

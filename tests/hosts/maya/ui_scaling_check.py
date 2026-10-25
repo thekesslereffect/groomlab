@@ -388,6 +388,8 @@ def main():
         # Numbers as every host shows them: the spec's decimals, trailing zeros dropped.
         _expect(widgets.format_number(0.35, 3) == "0.35" and widgets.format_number(1.0, 3) == "1"
                 and widgets.format_number(980.0, 1) == "980", "numbers drop trailing zeros")
+        _expect(widgets.format_number(0.0347, 1) == "0.035" and widgets.format_number(0.00874, 1) == "0.0087"
+                and widgets.format_number(1e-9, 3) == "0", "small numbers keep two significant digits")
         _expect(widgets.display_decimals(3, 100.0) == 1 and widgets.display_decimals(4, 1e4) == 0, "unit decimals")
         _expect(units.param_label("length", "Simulate", "gravity").endswith(u"/s²"), "gravity's unit")
         # The Add Node menu: the core's categories, spaced labels, each with what it does.

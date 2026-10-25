@@ -42,6 +42,7 @@ add_executable(groomlab_tests
     engine/core/test_keyed_params.cpp
     engine/core/test_value_inputs.cpp
     engine/core/test_cards.cpp
+    engine/core/test_card_separation.cpp
     engine/core/test_card_maps.cpp
     engine/core/test_fields.cpp
     engine/core/test_game_exports.cpp

@@ -3005,7 +3005,13 @@ TEST(AppPanels, NumbersShowTheSpecsDecimalsWithoutTrailingZeros) {
     EXPECT_EQ(trimmedNumber(0.35, 3), QStringLiteral("0.35"));
     EXPECT_EQ(trimmedNumber(1.0, 3), QStringLiteral("1"));
     EXPECT_EQ(trimmedNumber(12.5, 1), QStringLiteral("12.5"));
-    EXPECT_EQ(trimmedNumber(-0.0001, 2), QStringLiteral("0"));
+    EXPECT_EQ(trimmedNumber(-0.0, 2), QStringLiteral("0"));
+    // A small number keeps two significant digits (a density fitted to a large scalp), six
+    // decimals at most.
+    EXPECT_EQ(trimmedNumber(0.0347, 1), QStringLiteral("0.035"));
+    EXPECT_EQ(trimmedNumber(0.00874, 1), QStringLiteral("0.0087"));
+    EXPECT_EQ(trimmedNumber(-0.0001, 2), QStringLiteral("-0.0001"));
+    EXPECT_EQ(trimmedNumber(1e-9, 3), QStringLiteral("0"));
     EXPECT_EQ(trimmedNumber(980.0, 1), QStringLiteral("980"));
     // A fraction as a percentage: the spec's decimals less two, 0 to 1; degrees one; else the spec's.
     const DisplayUnit fraction = displayUnit("fraction", false, 3);

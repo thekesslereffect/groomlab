@@ -34,7 +34,8 @@ QPixmap tintedIcon(const QString& resource, const QColor& color, int size, qreal
 QPixmap coloredIcon(const QString& resource, int size, qreal devicePixelRatio);
 
 // A number with at most `decimals` decimals and its trailing zeros dropped ("0.35", not "0.350";
-// "1", not "1.000"), as every host shows a param (docs/APP_PARITY.md, Glossary: Numbers).
+// "1", not "1.000"), a small one with two significant digits ("0.035", up to six decimals), as
+// every host shows a param (docs/APP_PARITY.md, Glossary: Numbers).
 QString trimmedNumber(double value, int decimals);
 
 // A tooltip with the keys of shortcut `id` from the one shortcut table (groomlab/shortcuts.h, the
