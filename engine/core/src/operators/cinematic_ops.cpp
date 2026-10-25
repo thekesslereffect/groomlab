@@ -623,13 +623,6 @@ public:
                 .range(0, 1)
                 .in("Shape")
                 .when("featherMode", {"auto", "perVane", "off"}),
-            ParamSpec{"separation", 0.0, "Cards closer than this gap to another card, or passing through it, are pushed apart "
-                                         "along their normals, roots held (a share of the narrower card's width; 0: off). "
-                                         "Only the mesh moves: the texture stays as baked", "fraction"}
-                .range(0, 1)
-                .soft(0, 0.2)
-                .in("Shape")
-                .when("featherMode", {"auto", "perVane", "off"}),
             notAnimatable({"minStrands", std::int64_t{3}, "Groups with fewer strands make no card (their strands are flyaways)"})
                 .atLeast(1)
                 .soft(1, 20)
@@ -698,19 +691,26 @@ public:
                                                  "vane (lift, droop, cupping): two quads per segment. Off: a flat strip"})
                 .in("Feathers")
                 .when("featherMode", {"auto", "perFeather"}),
+            ParamSpec{"separation", 0.0, "Cards closer than this gap to another card, or passing through it, are pushed apart "
+                                         "along their normals, roots held (a share of the narrower card's width; 0: off). "
+                                         "Only the mesh moves: the texture stays as baked", "fraction"}
+                .range(0, 1)
+                .soft(0, 0.2)
+                .in("Separation")
+                .when("featherMode", {"auto", "perVane", "off"}),
             ParamSpec{"featherSeparation", 0.05, "Feather cards closer than this gap to another card, or passing through it, are "
                                                  "pushed apart along their normals, roots held, so overlapping feathers lie on each "
                                                  "other instead of clipping (a share of the narrower card's width; 0: off). Only the "
                                                  "mesh moves: the texture stays as baked", "fraction"}
                 .range(0, 1)
                 .soft(0, 0.2)
-                .in("Feathers")
+                .in("Separation")
                 .when("featherMode", {"auto", "perFeather"}),
             notAnimatable({"separationIterations", std::int64_t{8}, "Passes of the cards' separation (separation, "
                                                                     "featherSeparation): more settle crowded cards further"})
                 .range(1, 64)
                 .soft(1, 16)
-                .in("Shape"),
+                .in("Separation"),
             notAnimatable({"atlasSize", std::int64_t{2048}, "Atlas resolution to bake (pixels); several Cards nodes share one "
                                                             "atlas and bake, at the largest of theirs", "pixels"})
                 .range(16, 16384)
