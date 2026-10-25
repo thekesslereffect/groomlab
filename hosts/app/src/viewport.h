@@ -12,7 +12,7 @@
 // held: a left drag sets the strength (brush mode too), Y held: a left press opens the marking
 // menu (markingMenuPressed; the drag and the release go to it), S select mode, Escape the camera. Alt with any button is always the camera (Maya's); without
 // Alt the plain buttons orbit, pan and dolly in camera mode. In brush mode a left drag strokes
-// (Ctrl: the opposite, Shift: smooth, Shift+click: solo the guide and pick its level), the middle button sets the
+// (Ctrl: the opposite, Shift: smooth, Ctrl+Shift: paint the selection, a click adding a guide), the middle button sets the
 // radius (Shift: the strength), the right orbits; in select mode a left click or box picks
 // (Shift: toggle, Ctrl: deselect, Ctrl+Shift: add). A pen's pressure (QTabletEvent) scales the
 // stroke.
@@ -83,9 +83,8 @@ signals:
     void strokeReleasing();
     // A stroke's press or drag changed the session's preview: the host evaluates and redraws.
     void strokeDabbed();
-    // A stroke ended (committed when it changed something, which the host shows); a level was
-    // picked (Shift+click: the brush's level and group changed); the radius or strength was
-    // dragged; the selection changed.
+    // A stroke ended (committed when it changed something, which the host shows); the brush's
+    // settings changed (the radius or strength dragged); the selection changed.
     void strokeEnded();
     void brushSettingsChanged();
     void selectionChanged();

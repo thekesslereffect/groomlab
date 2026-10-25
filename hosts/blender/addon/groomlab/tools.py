@@ -413,18 +413,10 @@ def evaluate_live(scalp):
 
 def stroke_end(scalp):
     """Commits the stroke (one undo step in the helper), evaluates every strand again, refreshes
-    the palette (a Shift+click solos a guide and picks its level)."""
+    the palette."""
     scene = groom.scene_of(scalp)
     r = call(scalp, "stroke_end")
     groom_tools(scalp).last_end = r
-    if r.get("released") == "shift_click" and r.get("level") is not None and r.get("level", -2) >= -1:
-        group = r.get("group") or ""
-        refresh_info(scalp, scene)
-        with props.quiet():
-            t = scene.groomlab_tools
-            if group and any(g.name == group for g in t.groups):
-                t.group = group
-        push_quiet(scalp, scene)
     after_edit(scalp, scene, r.get("undo"), refresh=r.get("committed", False))
     warn = r.get("warnings") or []
     status(scene, "; ".join(warn) if warn else "")

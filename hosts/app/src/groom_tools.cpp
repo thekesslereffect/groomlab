@@ -323,8 +323,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     row->addWidget(label(tr("Group"), "about", targetRow_));
     group_ = new QComboBox(targetRow_);
     group_->setObjectName(QStringLiteral("brushGroup"));
-    group_->setToolTip(tr("The guide group brushes edit and new guides go into; All groups: every guide (Shift+click a guide picks its "
-                          "group)"));
+    group_->setToolTip(tr("The guide group brushes edit and new guides go into; All groups: every guide"));
     group_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     group_->setMinimumContentsLength(6);
     connect(group_, &QComboBox::currentIndexChanged, this, [this](int) { groupPicked(); });
@@ -481,8 +480,8 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
                 b->setProperty("role", "tool");
                 b->setText(tr("Unfreeze All"));
                 b->setIcon(tinted(iconPath("unfreeze"), theme::text(), theme::text(), 22, devicePixelRatioF()));
-                b->setToolTip(tr("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again (Shift+click off a "
-                                 "guide with a brush does the same)"));
+                b->setToolTip(tr("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again (Ctrl+Shift+click off "
+                                 "a guide with a brush does the same)"));
                 connect(b, &QToolButton::clicked, this, &GroomTools::unfreezeAllRequested);
                 allTiles_.push_back(b);
                 buttons.push_back(b);

@@ -764,7 +764,7 @@ public:
     // (nothing recorded then).
     struct TubeTargets {
         // "selection" (the selected guides), "solo" (the guides left unfrozen while others are
-        // frozen, a brush's Shift+click, not their children; or a groom's only guide) or "none".
+        // frozen, a brush's Ctrl+Shift selection, not their children; or a groom's only guide) or "none".
         std::string source = "none";
         std::vector<GuideId> guides;
         std::vector<std::string> shapes;  // the shapes among them, in the guides' order, once each

@@ -1042,7 +1042,7 @@ class ToolsTest(HelperTestCase):
         stretched = self.guides()
         lengths = [np.linalg.norm(np.diff(stretched[g], axis=0), axis=1).sum() for g in moved]
         self.assertGreater(max(lengths), 0.0405)  # stretch: longer with the drag
-        # Shift+drag with a brush smooths: the press waits (a Shift+click solos), the drag smooths
+        # Shift+drag with a brush smooths: the press waits (a Shift+click alone does nothing), the drag smooths
         # (a tester found Blender's Shift held did nothing: its drags were refused, no stroke yet).
         end = self.stroke("comb", self.comb_events(), shift=True)
         self.assertEqual(end["released"], "stroke")
@@ -1131,8 +1131,10 @@ class ToolsTest(HelperTestCase):
         self.step("undo")
         self.assertTrue(r["graphChanged"])
         self.assertNotIn("scatter_density", [m["name"] for m in self.call("maps_list")["maps"]])
-        # Solo: Place with soloNewGuides freezes every other guide in its step; Shift+click a guide
-        # solos it; a solo selection freezes the rest; a pick of nothing unfreezes all.
+        # Solo: Place with soloNewGuides freezes every other guide in its step; a Shift+click does
+        # nothing (Shift is smoothing); a brush's Ctrl+Shift click (a solo pick that adds) selects a
+        # guide and freezes the rest; a pick of nothing unfreezes all; a painted selection's end
+        # (selection_set solo) freezes the rest.
         spot = self.cam.pixel(crown_points(7)[5])
         self.stroke("place", [[spot[0], spot[1], 1.0]], settings={"soloNewGuides": True}, ref={"solo_new_guides": True})
         info = self.call("guides_info")
@@ -1143,16 +1145,23 @@ class ToolsTest(HelperTestCase):
         self.call("tool_set", tool="comb", settings=dict(BASE))
         self.call("stroke_begin", view=self.cam.view(), x=tip[0], y=tip[1], shift=True)
         end = self.call("stroke_end")
-        self.assertEqual(end["released"], "shift_click")
-        self.assertTrue(end["committed"])
-        self.assertEqual(self.call("undo_state")["undoLabel"], "solo")
-        self.assertEqual(self.call("guides_info")["frozen"], info["guides"] - 1)
+        self.assertEqual(end["released"], "none")
+        self.assertFalse(end["committed"])
+        r = self.call("select", view=self.cam.view(), lasso=[tip], mode="add", solo=True)
+        self.assertTrue(r["picked"])
+        self.assertEqual(self.call("undo_state")["undoLabel"], "solo selection")
+        self.assertEqual(self.call("guides_info")["frozen"], info["guides"] - len(r["selection"]))
         r = self.call("select", view=self.cam.view(), lasso=[[2.0, 2.0]], mode="replace", solo=True)
         self.assertTrue(r["froze"])
         self.assertEqual(self.call("guides_info")["frozen"], 0)
         r = self.call("select", view=self.cam.view(), lasso=[tip], mode="replace", solo=True)
         self.assertTrue(r["froze"])
         self.assertGreater(self.call("guides_info")["frozen"], 0)
+        self.call("select", view=self.cam.view(), lasso=[[2.0, 2.0]], mode="replace", solo=True)
+        self.call("selection_set", ids=[first], mode="add")
+        r = self.call("selection_set", mode="add", solo=True)
+        self.assertTrue(r["froze"])
+        self.assertEqual(self.call("guides_info")["frozen"], info["guides"] - 1)
         self.assert_matches_reference()
 
     def test_symmetry_in_the_hosts_axes(self):
@@ -1443,15 +1452,15 @@ class ToolsTest(HelperTestCase):
         self.call("undo")
         self.call("guides_edit", op="add_group", name="extra")
         self.assertFalse(self.call("undo_state")["canRedo"])
-        # Shift+click picks the level of the guide under the cursor.
+        # pick_level: the level of the guide under the cursor (a Shift+click alone does nothing).
         g = self.guides()
         px = self.cam.pixel(list(g.values())[0][-1])
         self.call("tool_set", tool="comb", settings={"level": 1})
         self.call("stroke_begin", view=self.cam.view(), x=px[0], y=px[1], shift=True)
-        end = self.call("stroke_end")
-        self.assertEqual(end["released"], "shift_click")
-        self.assertIn(end["level"], (0, 1))
-        self.assertIn(end["group"], ("primary", "primary_children"))
+        self.assertEqual(self.call("stroke_end")["released"], "none")
+        picked = self.call("pick_level", view=self.cam.view(), x=px[0], y=px[1])
+        self.assertIn(picked["level"], (0, 1))
+        self.assertIn(picked["group"], ("primary", "primary_children"))
 
     def test_guide_edits_and_hidden_groups(self):
         self.place_guides(4)

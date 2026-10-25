@@ -51,7 +51,7 @@ void appendColoredLine(DisplayGeometry& g, const std::vector<Vec3f>& points, con
 BrushSession::BrushSession() {
     tool_.settings.brush.radius = 0.25f;
     tool_.settings.screenRadius = 60.0f;
-    tool_.settings.place.soloNewGuides = false;  // off, as Maya's and Blender's Groom Tools start (Shift+click solos)
+    tool_.settings.place.soloNewGuides = false;  // off, as Maya's and Blender's Groom Tools start (Ctrl+Shift+click selects)
 }
 
 BrushSession::~BrushSession() = default;

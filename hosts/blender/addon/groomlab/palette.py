@@ -23,8 +23,8 @@ from .ui import _wrap
 
 NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 # Blender's keys (palette.json's gestures are Maya's: middle-drag, the hotkey set).
-GESTURES = ("B + drag: radius · M + drag: strength · Shift+click a guide: solo it (the rest frozen) and brush its "
-            "group · Shift+click off a guide: unfreeze all")
+GESTURES = ("B + drag: radius · M + drag: strength · Ctrl+Shift+drag: paint the selection (the rest frozen) · "
+            "Ctrl+Shift+click a guide: add it · Ctrl+Shift+click off a guide: deselect and unfreeze all")
 FLOW_HINTS = {"": defs.text("flowArrows"), "*": defs.text("flowSinks")}
 TABS = {"TOOLS": "tools", "PAINT": "paint", "CORRECTIVES": "correctives", "PHOTOS": "photos"}  # palette.json's ids
 STARTER = tuple((s["id"], s["label"], s["tip"]) for s in defs.get("palette/starter/steps"))
@@ -435,7 +435,7 @@ class VIEW3D_PT_groomlab_tools_tubes(GroomToolsSubpanel, bpy.types.Panel):
                 t.tube_targets, "" if t.tube_targets == 1 else "s", how, "it" if t.tube_targets == 1 else "them")
         else:
             text = ("No guides selected or soloed: the shape and values here go to the guides Place and Draw make. "
-                    "Select guides (Select tool), or Shift+click one with a brush, to set theirs.")
+                    "Select guides (Select tool, or Ctrl+Shift with a brush) to set theirs.")
         _wrap(layout, text, width=_chars(context))
         layout.prop(t, "tube_shape")
         library = t.tube_choice in [x.name for x in t.tube_shapes]

@@ -143,11 +143,9 @@ public:
     // step timed: debugStrokeTimes.
     bool simulateStroke(const std::vector<std::pair<short, short>>& points, bool ctrl = false, bool shift = false,
                         bool draw = false);
-    // A Shift+click at (x, y) through press and release, as the mouse gives it (-debugStroke
-    // "shiftclick x y"): the guide there soloed, its level picked. Returns the level, -2 for none.
-    int simulateShiftClick(short x, short y);
     // A Ctrl+Shift drag (or click, one point) through the given view points, as the mouse would:
-    // the selection painted (a click toggles). Returns how many guides are selected after it.
+    // the selection painted (a click adds the guide under it; on none, deselects and unfreezes
+    // all). Returns how many guides are selected after it.
     int simulateSelectPaint(const std::vector<std::pair<short, short>>& points);
     // The last drawn simulateStroke's steps in milliseconds, each to its redrawn frame: the press,
     // every point after it, the release (benchmarks: -debugStrokeTimes).
@@ -242,7 +240,8 @@ private:
 
     // Ctrl+Shift: selecting guides without leaving the brush. A drag paints the selection with
     // the brush ring (each guide it passes over added, shown live), the release one undo step
-    // with the rest frozen (as the Select tool's solo); a click toggles the guide under it.
+    // with the rest frozen (as the Select tool's solo); a click adds the guide under it, the rest
+    // frozen (on no guide: nothing selected, every guide unfrozen).
     bool painting_ = false, paintMoved_ = false;
     short paintX_ = 0, paintY_ = 0;
     std::vector<GuideId> paintBefore_;  // the selection at the press

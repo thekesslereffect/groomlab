@@ -169,7 +169,7 @@ The selected guides' tubes draw brighter.
   shape stays as it is (other brushes' Shift+drag smooths the guides, as ever).
 - **Tubes** (a section of its own in Groom Tools > Tools, opened by the Shape brush, Place and Draw, or from its header): each guide keeps its own tube, and the
   card edits **only its targets**: the selected guides (select them with **Select**), or with none
-  selected the soloed ones (**Shift+click** a guide with a brush). It follows every change of the
+  selected the soloed ones (left unfrozen while the rest are frozen). It follows every change of the
   selection or solo. Pick the **Shape** (the built-ins, then the library's; it shows **Mixed** while
   the targets' shapes differ), set the **Width** (the tubes scaled so the first one's widest section
   is that wide; their taper and painted detail kept), **Flatness** and **Twist** (the same from root
@@ -283,9 +283,9 @@ guides are drawn blue. Freezing does not affect the strands.
 
 - **Freeze** (a brush in the Guides category) paints the freeze mask; **Ctrl** unfreezes.
   **Unfreeze All**, next to it, clears the mask on every guide.
-- **Shift+click** a guide with any brush to solo it: it is unfrozen, every other guide is
-  frozen, and the brush switches to that guide's group. **Shift+click** off a guide (on bare
-  scalp or empty space) unfreezes all guides.
+- **Ctrl+Shift+click** a guide with any brush to add it to the selection: every guide not
+  selected freezes. **Ctrl+Shift+drag** paints guides into the selection with the brush ring.
+  **Ctrl+Shift+click** off a guide (on bare scalp or empty space) deselects and unfreezes all.
 - **Select** works the same way: the selected guides stay live, all others are frozen, and a
   click on nothing unfreezes all.
 - **Solo new guides** (Place and Draw settings, off by default): each guide you place stays live
@@ -307,8 +307,8 @@ A typical way to work from coarse to fine:
 2. Generate children (**Edit Guides > Children**), then make the child group active. Brushes now
    only affect the children, and the primaries stay as they are.
 3. Hide the primary group if its curves get in the way, or turn on **Isolate** to dim it.
-4. Solo areas while detailing: select or Shift+click the guides to work on, and everything else is
-   frozen. Shift+click on empty space to release them.
+4. Solo areas while detailing: Ctrl+Shift+drag over the guides to work on, and everything else is
+   frozen. Ctrl+Shift+click on empty space to release them.
 5. Editing a primary later still carries its children, with their detail, along with it.
 
 For more density than hand-placed children, interpolate dense guides procedurally with a
@@ -361,12 +361,10 @@ back without Ctrl.
 - **Shift+drag** smooths, with any brush.
 - **B** + drag sets the radius, **M** + drag the strength, after **GroomLab > Install GroomLab
   Hotkeys** (or middle-drag and Shift+middle-drag).
-- **Shift+click** a guide to solo it; **Shift+click** off a guide to unfreeze all (see
-  [Freeze and solo](#freeze-and-solo)).
 - **Ctrl+Shift+drag** paints the selection with the brush ring, without leaving the brush: every
-  guide the ring passes over is selected as you go (**Ctrl+Shift+click** toggles one guide). When
-  you let go, the guides not selected freeze, as with the Select tool, so the brush then works on
-  the selection.
+  guide the ring passes over is selected as you go, and when you let go the guides not selected
+  freeze, so the brush then works on the selection. **Ctrl+Shift+click** adds one guide;
+  **Ctrl+Shift+click** off a guide deselects and unfreezes all (see [Freeze and solo](#freeze-and-solo)).
 - **Page Up** and **Page Down** step the active group up or down a level.
 - **Y** + click opens a marking menu, after **GroomLab > Install GroomLab Hotkeys**.
 - Tablet **pen pressure** scales the strength.

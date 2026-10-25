@@ -687,59 +687,21 @@ TEST(BrushPack, PlaceSolosItsNewGuidesInTheSameStep) {
     EXPECT_EQ(frozen(after, after.guides().front().id), 1.0f);
 }
 
-TEST(BrushPack, ShiftClickSolosTheGuideAndPicksItsGroupAnywhereElseUnfreezes) {
+TEST(BrushPack, AShiftClickDoesNothingAShiftDragSmooths) {
+    // Shift is smoothing alone: a Shift+click (pressed and released in place) starts no stroke,
+    // commits nothing and leaves the brush's group as it was (selecting guides is the hosts'
+    // Ctrl+Shift).
     Session g;
     const ToolView view = frontView();
     BrushTool tool;
     tool.settings.setMode("comb");
     tool.settings.screenRadius = 40.0f;
     tool.settings.brush.group = "nothing";
-    // The guide whose middle is nearest the screen's middle.
-    const std::shared_ptr<const GuideHierarchy> shown = g.session->hierarchy();
-    const HierarchyGuide* target = nullptr;
-    float tx = 0, ty = 0, best = 1e9f;
-    for (const HierarchyGuide& guide : shown->guides()) {
-        float x = 0, y = 0;
-        if (!view.project(guide.points[guide.points.size() / 2], x, y)) continue;
-        const float d = std::hypot(x - 400.0f, y - 450.0f);
-        if (d < best) best = d, target = &guide, tx = x, ty = y;
-    }
-    ASSERT_NE(target, nullptr);
-    const GuideId id = target->id;
-    tool.press(*g.host, view, tx, ty, 1.0f, kStrokeShift);
+    tool.press(*g.host, view, 400.0f, 450.0f, 1.0f, kStrokeShift);
     EXPECT_FALSE(tool.stroking()) << "no stroke starts on the click";
-    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::ShiftClick);
-    ASSERT_EQ(g.host->edits().size(), 1u);
-    EXPECT_EQ(g.host->edits().back().mode, "solo");
-    EXPECT_EQ(tool.settings.brush.group, "primary") << "the guide's group is brushed";
-    const GuideHierarchy h = GuideHierarchy::fromJson(g.session->data().hierarchyJson);
-    std::size_t frozenCount = 0;
-    for (const HierarchyGuide& guide : h.guides()) {
-        const float v = frozen(h, guide.id);
-        EXPECT_EQ(v, guide.id == id ? 0.0f : 1.0f);
-        frozenCount += v > 0.5f;
-    }
-    EXPECT_EQ(frozenCount, h.guides().size() - 1);
-    // The bare scalp (a spot away from every guide): every guide unfrozen, one more step.
-    float sx = 0, sy = 0;
-    ASSERT_TRUE(view.project(Vec3f(0.0f, -0.2f, 1.0f).normalized(), sx, sy));
-    tool.press(*g.host, view, sx, sy, 1.0f, kStrokeShift);
-    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::ShiftClick);
-    ASSERT_EQ(g.host->edits().size(), 2u);
-    EXPECT_TRUE(GuideHierarchy::fromJson(g.session->data().hierarchyJson).attributeNames().empty());
-    // Off everything (no scalp under it) unfreezes all as well: solo the guide again, then click the void.
-    tool.press(*g.host, view, tx, ty, 1.0f, kStrokeShift);
-    tool.release(*g.host, view);
-    ASSERT_EQ(g.host->edits().size(), 3u);
-    EXPECT_FALSE(GuideHierarchy::fromJson(g.session->data().hierarchyJson).attributeNames().empty());
-    tool.press(*g.host, view, 2.0f, 2.0f, 1.0f, kStrokeShift);
-    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::ShiftClick);
-    ASSERT_EQ(g.host->edits().size(), 4u);
-    EXPECT_TRUE(GuideHierarchy::fromJson(g.session->data().hierarchyJson).attributeNames().empty());
-    // Nothing frozen: a click of the void changes nothing (no undo step).
-    tool.press(*g.host, view, 2.0f, 2.0f, 1.0f, kStrokeShift);
-    tool.release(*g.host, view);
-    EXPECT_EQ(g.host->edits().size(), 4u);
+    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::None);
+    EXPECT_TRUE(g.host->edits().empty());
+    EXPECT_EQ(tool.settings.brush.group, "nothing");
 }
 
 TEST(BrushPack, FreezeToSelectionFollowsTheSelection) {
@@ -772,10 +734,9 @@ TEST(BrushPack, SoloHonoursSymmetry) {
     EXPECT_EQ(withMirrorGuides(f.h, {a}, StrokeSymmetry::of(BrushSettings{}, f.scalp.get())), std::vector<GuideId>{a});
     EXPECT_EQ(mirrorGuide(f.h, a, StrokeSymmetry::of(BrushSettings{}, f.scalp.get())), kNoGuide);
 
-    // The turned head, topology: Shift+click a guide solos it and its twin.
+    // The turned head, topology: a guide selected (as the hosts' Ctrl+Shift picks, its mirror
+    // guide with it) and the rest frozen: it and its twin stay live.
     const TurnedHead head;
-    GroomData data;
-    data.scalp = head.posed;
     GuideHierarchy h;
     const GroupId g = h.addGroup("primary");
     const Vec3f local = Vec3f(0.3f, 0.75f, 0.6f).normalized(), other = Vec3f(-0.1f, 0.3f, 0.95f).normalized();
@@ -783,23 +744,15 @@ TEST(BrushPack, SoloHonoursSymmetry) {
         h.addGuide(g, test::straightCurve(head.pose(p), head.pose(p * 1.4f) - head.pose(p), 10));
     }
     h.evaluate(head.posed.get());
-    data.hierarchyJson = h.toJson();
-    GroomSession session(data);
-    SessionStrokeHost host(session);
-    const ToolView view = frontView();
-    BrushTool tool;
-    tool.settings.setMode("comb");
-    tool.settings.setSymmetry("topology");
-    tool.settings.screenRadius = 30.0f;
-    float sx = 0, sy = 0;
-    ASSERT_TRUE(view.project(head.pose(local * 1.2f), sx, sy));
-    tool.press(host, view, sx, sy, 1.0f, kStrokeShift);
-    ASSERT_EQ(tool.release(host, view), StrokeRelease::ShiftClick);
-    const GuideHierarchy soloed = GuideHierarchy::fromJson(session.data().hierarchyJson);
-    ASSERT_EQ(soloed.guides().size(), 3u);
-    EXPECT_EQ(frozen(soloed, soloed.guides()[0].id), 0.0f);
-    EXPECT_EQ(frozen(soloed, soloed.guides()[1].id), 0.0f) << "its mirror twin stays live too";
-    EXPECT_EQ(frozen(soloed, soloed.guides()[2].id), 1.0f);
+    BrushToolSettings topology;
+    topology.setSymmetry("topology");
+    const std::vector<GuideId> picked =
+        withMirrorGuides(h, {h.guides()[0].id}, StrokeSymmetry::of(topology.brush, head.posed.get()));
+    EXPECT_TRUE(freezeToSelection(h, picked));
+    ASSERT_EQ(h.guides().size(), 3u);
+    EXPECT_EQ(frozen(h, h.guides()[0].id), 0.0f);
+    EXPECT_EQ(frozen(h, h.guides()[1].id), 0.0f) << "its mirror twin stays live too";
+    EXPECT_EQ(frozen(h, h.guides()[2].id), 1.0f);
 }
 
 TEST(BrushPack, PlaceWithSymmetrySolosBothNewGuides) {

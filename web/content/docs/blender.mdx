@@ -82,8 +82,9 @@ build their menus and panels from one set of definitions):
 - **Tools**, **Paint**, **Correctives** and **Photos** tabs. The tools come by category, with Maya's icons:
   **Create** (Place, Draw, Part, Flow), **Shape** (Comb, Slide, Smooth, Straighten, Lift, Twist,
   Curl, Attract, Direction, Noise, Tube), **Trim** (Cut, Length, Erase), **Paint** (Paint) and
-  **Guides** (Select, Freeze, and Unfreeze All beside them). Shift+click a guide with
-  a brush to solo it (the rest freeze); Shift+click off a guide to unfreeze them all.
+  **Guides** (Select, Freeze, and Unfreeze All beside them). Ctrl+Shift+drag with a
+  brush paints guides into the selection (the rest freeze); Ctrl+Shift+click adds one, and off a
+  guide deselects and unfreezes them all.
 - The active tool's **card** shows what it does and exactly its settings, by Maya's names:
   **Radius** (pixels), **Strength** (±: tools that work both ways go negative), **Falloff**,
   **Falloff curve**, **Root to tip**, **Symmetry** (World X or Topology), **Selected only**, **Pen
@@ -121,8 +122,8 @@ it is applied as one undo step when you stop.
 
 ### Tubes
 
-The **Tubes** section edits the tubes of the selected guides (else the guides you soloed with
-Shift+click), and sets the tube Place and Draw give new guides:
+The **Tubes** section edits the tubes of the selected guides (else the guides left unfrozen while
+the rest are frozen), and sets the tube Place and Draw give new guides:
 
 - **Shape**: Round, Ribbon, Teardrop, Blade, then the groom's library of custom shapes (**Mixed**
   while the targets differ). Picking one gives it to the targets.

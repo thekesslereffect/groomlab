@@ -284,18 +284,16 @@ TEST(Stroke, CtrlInvertsAndShiftDragSmoothsForOneStroke) {
         (ctrl ? laid : lifted) = g.guides();
     }
     EXPECT_NE(lifted, laid);
-    // Shift: a click solos the guide there and picks its level (one step when it changed
-    // something), a drag smooths while the tool stays the Comb.
+    // Shift: a click does nothing (no stroke, no step), a drag smooths while the tool stays the Comb.
     Groom g(20, 3);
     BrushTool tool;
     tool.settings.setMode("comb");
     tool.settings.screenRadius = 150.0f;
     tool.press(*g.host, view, path[0][0], path[0][1], 1.0f, kStrokeShift);
     EXPECT_FALSE(tool.stroking());
-    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::ShiftClick);
+    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::None);
     const std::size_t clicked = g.host->edits().size();
-    EXPECT_LE(clicked, 1u);
-    if (clicked) EXPECT_EQ(g.host->edits().back().mode, "solo");
+    EXPECT_EQ(clicked, 0u);
     tool.press(*g.host, view, path[0][0], path[0][1], 1.0f, kStrokeShift);
     for (std::size_t i = 1; i < path.size(); ++i) tool.drag(*g.host, view, path[i][0], path[i][1], 1.0f);
     EXPECT_TRUE(tool.stroking());

@@ -957,7 +957,7 @@ void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, 
     inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
     if (modifiers & kStrokeShift) {
-        // Decided on drag (smooth) or release (pick the level under the cursor).
+        // A drag smooths (decided on drag); a release without one does nothing.
         shiftPending_ = true;
         pressX_ = x;
         pressY_ = y;
@@ -987,10 +987,8 @@ void BrushTool::drag(StrokeHost& host, const ToolView& view, float x, float y, f
 
 StrokeRelease BrushTool::release(StrokeHost& host, const ToolView& view) {
     if (shiftPending_) {
-        shiftPending_ = false;
-        // A brush's Shift+click: the guide under it soloed (the host then picks its level for its UI).
-        if (settings.tool == BrushToolSettings::Tool::Brush && !settings.paintsScalp()) soloAt(host, view, pressX_, pressY_);
-        return StrokeRelease::ShiftClick;
+        shiftPending_ = false;  // a Shift+click: nothing (no drag, no smoothing)
+        return StrokeRelease::None;
     }
     const bool stroked = stroking_;
     if (stroking_) end(host, view);
@@ -1034,46 +1032,6 @@ int BrushTool::pickLevel(StrokeHost& host, const ToolView& view, float x, float 
     settings.brush.level = level;
     settings.brush.group = group ? group->name : std::string();  // brush the picked guide's group
     return level;
-}
-
-bool BrushTool::soloAt(StrokeHost& host, const ToolView& view, float x, float y) {
-    if (!host.sculptNode().empty()) return false;  // a Sculpt node's guides are not the stored ones
-    if (!host.prepareStroke()) return false;
-    const std::shared_ptr<const GuideHierarchy> shown = host.shownHierarchy();
-    const std::shared_ptr<const GuideHierarchy> authored = host.authoredHierarchy();
-    const MeshPtr scalp = host.scalp();
-    if (!shown || !authored) return false;
-    Vec3f origin, dir;
-    if (!view.ray(x, y, origin, dir)) return false;
-    const std::string freeze = settings.brush.freeze.empty() ? std::string("freeze") : settings.brush.freeze;
-    GuideHierarchy h(*authored);
-    GuidePointHit hit;
-    bool changed = false;
-    if (nearestGuidePoint(*shown, view, x, y, std::clamp(settings.screenRadius, 8.0f, 60.0f), origin, dir, nullptr, &hit)) {
-        const GuideId id = hit.guide->id;
-        if (!h.guide(id)) return false;
-        const std::string before = h.toJson();
-        // With symmetry, its mirror guide too (the guide of its group at its root's mirror image).
-        soloGuides(h, withMirrorGuides(*shown, {id}, StrokeSymmetry::of(settings.brush, scalp.get())), freeze);
-        changed = h.toJson() != before;
-        settings.brush.level = shown->groupDepth(hit.guide->group);
-        const GuideGroup* group = shown->group(hit.guide->group);
-        settings.brush.group = group ? group->name : std::string();
-    } else {
-        // No guide under it (bare scalp, or nothing at all): every guide brushable again.
-        changed = unfreezeAll(h, freeze);
-    }
-    if (!changed) return false;
-    try {
-        StrokeEdit edit;
-        edit.mode = "solo";
-        edit.set(StrokeField::Guides, h.toJson());
-        host.commit(std::move(edit));
-    } catch (const std::exception& e) {
-        host.warn(std::string("GroomLab solo: ") + e.what());
-        return false;
-    }
-    return true;
 }
 
 std::vector<std::vector<Vec3f>> BrushTool::affectedLines(StrokeHost& host, const ToolView& view, float x, float y) {

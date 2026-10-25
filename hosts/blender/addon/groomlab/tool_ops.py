@@ -34,9 +34,8 @@ SHORTCUTS = (
     ("M + drag", "The brush strength"),
     ("Ctrl (stroke)", "The opposite effect (Ctrl+Length shrinks, Ctrl+Lift lays down...)"),
     ("Shift (stroke)", "Smooth instead"),
-    ("Shift + click", "Solo a guide and brush its group (off a guide: unfreeze all)"),
     ("S", "Select guides (Shift: toggle, Ctrl: deselect)"),
-    ("Ctrl+Shift + drag", "Paint guides into the selection with the brush ring (Ctrl+Shift + click: toggle one)"),
+    ("Ctrl+Shift + drag", "Paint guides into the selection, the rest frozen (Ctrl+Shift + click: add a guide; on nothing: deselect and unfreeze all)"),
     ("Page Up / Page Down", "The brush level (parents / children)"),
     ("Y", "The pie menu: every brush"),
     ("Esc / right-click", "Cancel the stroke; Esc again leaves the tool"),
@@ -326,8 +325,9 @@ class ToolSession(object):
             span = max(abs(p[0] - points[0][0]) + abs(p[1] - points[0][1]) for p in points)
             if mode == "brush":                          # a brush's Ctrl+Shift
                 try:
-                    if span < 4.0:                       # a click: the guide under it
-                        tools.select(lasso_scalp, view, points[:1], "toggle")
+                    if span < 4.0:                       # a click: the guide under it added, the rest frozen
+                        if not tools.select(lasso_scalp, view, points[:1], "add").get("picked"):
+                            tools.select(lasso_scalp, view, points[:1], "replace")  # on none: all deselected, unfrozen
                     else:                                # painted: the rest frozen, one undo step
                         tools.selection_set(lasso_scalp, mode="add", solo=True)
                 except HelperError as e:
@@ -513,7 +513,7 @@ class GROOMLAB_OT_tool_modal(bpy.types.Operator):
         tool = context.scene.groomlab_tools.tool
         info = tools.tool_info(tool)
         label = info["label"] if info else tool
-        text = ("GroomLab %s: drag over the groom · Ctrl the opposite · Shift smooth / Shift+click a guide solos it · "
+        text = ("GroomLab %s: drag over the groom · Ctrl the opposite · Shift smooth · Ctrl+Shift+click a guide selects it (the rest frozen) · "
                 "B/M + drag radius/strength · %s pie · S select · Ctrl+Shift+drag paint selection · Ctrl+Z undo · Esc or W leave" % (label, pie_key()))
         try:
             context.workspace.status_text_set(text)
@@ -1341,7 +1341,7 @@ class GROOMLAB_OT_tube_apply(TubeOperator):
         scalp = active(context)
         guides = tools.groom_tools(scalp).tube_guides
         if not guides:
-            self.report({"ERROR"}, "No guides selected or soloed: select guides (Select tool), or Shift+click one")
+            self.report({"ERROR"}, "No guides selected or soloed: select guides (Select tool), or Ctrl+Shift+click one")
             return {"CANCELLED"}
         try:
             tools.set_tube(scalp, guides=guides, shape=context.scene.groomlab_tools.tube_choice)
@@ -1361,7 +1361,7 @@ class GROOMLAB_OT_tube_smooth(TubeOperator):
         t = context.scene.groomlab_tools
         guides = tools.groom_tools(scalp).tube_guides
         if not guides:
-            self.report({"ERROR"}, "No guides selected or soloed: select guides (Select tool), or Shift+click one")
+            self.report({"ERROR"}, "No guides selected or soloed: select guides (Select tool), or Ctrl+Shift+click one")
             return {"CANCELLED"}
         try:
             tools.smooth_tube(scalp, channel=t.tube_channel if t.tube_smooth_what == "current" else "all", guides=guides)

@@ -852,9 +852,9 @@ void BrushContext::getClassName(MString& name) const { name = "groomLabBrush"; }
 
 void BrushContext::toolOnSetup(MEvent&) {
     setHelpString("Drag: brush the selected groom (Place: click one guide, drag for many; Draw: draw a guide "
-                  "from the scalp). Shift+click a guide: solo it (the rest frozen) and brush its group; Shift+click the "
-                  "bare scalp: unfreeze all; Shift+drag: smooth (Shape: the tubes' channel it paints). Ctrl: the opposite. "
-                  "Ctrl+Shift+drag: paint guides into the selection (Ctrl+Shift+click: toggle one). "
+                  "from the scalp). Shift+drag: smooth (Shape: the tubes' channel it paints). Ctrl: the opposite. "
+                  "Ctrl+Shift+drag: paint guides into the selection, the rest frozen; Ctrl+Shift+click: add a guide "
+                  "(on nothing: deselect and unfreeze all). "
                   "B/M or middle-drag: radius/strength. Double-click the tool for its settings.");
     installPenPressure();
     active_ = true;
@@ -966,13 +966,6 @@ std::string BrushContext::debugStrokeDraws() const {
     std::string out = "[";
     for (std::size_t i = 0; i < debugStrokeDraws_.size(); ++i) out += (i ? ", " : "") + debugStrokeDraws_[i];
     return out + "]";
-}
-
-int BrushContext::simulateShiftClick(short x, short y) {
-    const ToolView view = activeToolView();
-    tool_.press(*host_, view, x, y, 1.0f, kStrokeShift);
-    if (tool_.release(*host_, view) != StrokeRelease::ShiftClick) return -2;
-    return pickLevel(x, y);
 }
 
 int BrushContext::pickLevel(short x, short y) {
@@ -1147,7 +1140,10 @@ void BrushContext::finishPaintSelection() {
     pick.group = tool_.settings.brush.group;
     pick.symmetry = tool_.settings.symmetryName();
     if (!paintMoved_) {
-        selectGuidesInView({{float(paintX_), float(paintY_)}}, "toggle", pick);  // a click: the guide under it
+        // A click: the guide under it added, the rest frozen; on none, nothing selected and every
+        // guide unfrozen.
+        const std::vector<GuideId> picked = pickGuidesInView({{float(paintX_), float(paintY_)}}, pick);
+        applyGuideSelection(picked, picked.empty() ? "replace" : "add", true, true);
     } else {
         // The painted selection as one undo step (the rest frozen): back to the press's, then
         // that and what was painted.
@@ -1185,11 +1181,14 @@ void BrushContext::paintSelection(short x, short y) {
     for (const GuideId id : pickGuidesInView(ring, pick)) {
         if (paintedGuides_.insert(id).second) fresh.push_back(id);
     }
-    // Shown live, as no undo step (the release makes the one).
-    if (!fresh.empty()) applyGuideSelection(fresh, "add", false, false);
+    // Shown live, as no undo step (the release makes the one), drawn now (not when the camera
+    // next moves).
+    if (fresh.empty()) return;
+    applyGuideSelection(fresh, "add", false, false);
+    refreshDuringDrag();
 }
 
-MStatus BrushContext::release(MEvent& event) {
+MStatus BrushContext::release(MEvent&) {
     if (adjusting_) {
         adjusting_ = false;
         MToolsInfo::setDirtyFlag(*this);  // refresh the Tool Settings window
@@ -1203,11 +1202,7 @@ MStatus BrushContext::release(MEvent& event) {
     expectGpuCommit();
     const StrokeRelease released = tool_.release(*host_, activeToolView());
     unchainUnlessStroking();
-    if (released == StrokeRelease::ShiftClick) {
-        short x = 0, y = 0;
-        event.getPosition(x, y);
-        pickLevel(x, y);
-    } else if (released == StrokeRelease::Stroke && shape_) {
+    if (released == StrokeRelease::Stroke && shape_) {
         M3dView::active3dView().refresh(false, true);  // as endStroke: the commit's drawing now
     }
     return MS::kSuccess;
@@ -1377,14 +1372,10 @@ MStatus BrushContextCmd::doEditFlags() {
             MStringArray words;
             text.split(' ', words);
             // "x y x y ...", or "ctrl x y ..." / "shift x y ..." for a stroke with Ctrl (Shift) held.
-            // "draw x y ...": the viewport redrawn after each point, as a drag does. "shiftclick x y":
-            // a Shift+click (the guide there soloed; the result is the level picked, -2 none).
-            if (words.length() == 3 && words[0] == "shiftclick") {
-                setResult(context_->simulateShiftClick(static_cast<short>(words[1].asInt()), static_cast<short>(words[2].asInt())));
-                return MS::kSuccess;
-            }
+            // "draw x y ...": the viewport redrawn after each point, as a drag does.
             // "select x y ...": a Ctrl+Shift drag painting the selection (one point: a click
-            // toggling); the result is how many guides are selected after it.
+            // adding the guide under it, on none clearing); the result is how many guides are
+            // selected after it.
             if (words.length() >= 3 && words[0] == "select") {
                 std::vector<std::pair<short, short>> points;
                 for (unsigned i = 1; i + 1 < words.length(); i += 2) {

@@ -521,9 +521,6 @@ struct OverlayBinding {
 enum class StrokeRelease {
     None,        // nothing was pressed
     Stroke,      // a stroke ended (committed, or nothing changed)
-    // Shift was pressed and released without dragging: a brush soloed the guide under it (soloAt,
-    // committed); the host picks the level and group (pickLevel) for its UI.
-    ShiftClick,
 };
 
 // The interactive brush, Place, Draw, Part and Flow tools. Mouse events come in port pixels
@@ -533,9 +530,9 @@ enum class StrokeRelease {
 // plane through that point facing the camera, weighs everything with the screen circle's falloff
 // (nothing the scalp hides with maskByScalp), previews through the host and commits one
 // StrokeEdit when it ends. Ctrl held at the press: the opposite action (signed brushes flip, paint
-// goes to 1 - value, Cut grows, Part and Flow erase). Shift: a click (Brush tool) solos the guide
-// under the cursor and picks its level and group (soloAt; on bare scalp it unfreezes every guide);
-// a drag (Brush tool) smooths, the brush's mode coming back when it ends. The
+// goes to 1 - value, Cut grows, Part and Flow erase). Shift: a drag (Brush tool) smooths, the
+// brush's mode coming back when it ends; a click does nothing (selecting guides is Ctrl+Shift,
+// the hosts' own: a click adds the guide under it, a drag paints the selection). The
 // pen's pressure scales strength (settings.pressure) and map smoothing. Not thread-safe; kept
 // between strokes (what the scalp hides from the camera, hover's projected guides, a vertex map's
 // neighbors, the texture preview).
@@ -548,7 +545,7 @@ public:
 
     BrushToolSettings settings;
 
-    // Mouse events. press starts a stroke (or with Shift waits for a drag or a release); drag
+    // Mouse events. press starts a stroke (or with Shift waits for a drag: smoothing); drag
     // continues it; release ends and commits it.
     void press(StrokeHost& host, const ToolView& view, float x, float y, float pressure, unsigned modifiers);
     void drag(StrokeHost& host, const ToolView& view, float x, float y, float pressure);
@@ -577,15 +574,9 @@ public:
     // The mode the tool is set to: during a Shift+drag's smoothing still the tool's own mode.
     std::string toolModeName() const;
 
-    // Shift+click: the level (and group) of the guide nearest (x, y) on screen within the brush
-    // circle (8 to 60 pixels) becomes the brush's. Returns the level, -2 when no guide is there.
+    // The level (and group) of the guide nearest (x, y) on screen within the brush circle (8 to 60
+    // pixels) becomes the brush's. Returns the level, -2 when no guide is there.
     int pickLevel(StrokeHost& host, const ToolView& view, float x, float y);
-    // Shift+click with a brush: the guide nearest (x, y) as pickLevel finds it soloed (soloGuides:
-    // it unfrozen, with symmetry its mirror guide too, every other guide frozen) and its level
-    // and group made the brush's; over the
-    // scalp with no guide there, every guide unfrozen. One undo step (StrokeEdit of the guides);
-    // true when something was committed.
-    bool soloAt(StrokeHost& host, const ToolView& view, float x, float y);
     // Hovering at (x, y): the guides the brush would touch (its level or group, not hidden), as
     // drawn (smoothed), at most 4001.
     std::vector<std::vector<Vec3f>> affectedLines(StrokeHost& host, const ToolView& view, float x, float y);

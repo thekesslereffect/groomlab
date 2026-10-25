@@ -1547,8 +1547,8 @@ json tubeGet(ToolState& t, const json& args) {
     return {{"tube", tubeToHost(t.session.space, tubeToJson(g->tube, h->scale()))}};
 }
 
-// The guides the Tubes section edits: the selected ones, else the soloed ones (a brush's
-// Shift+click: those left unfrozen while others are frozen, not their children), else a groom's
+// The guides the Tubes section edits: the selected ones, else the soloed ones (those left
+// unfrozen while others are frozen, not their children), else a groom's
 // only guide; the first one's tube and the shapes among them.
 json tubeTargets(ToolState& t) {
     const HierarchyPtr h = t.session.groom->authoredHierarchy();
@@ -3324,15 +3324,8 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         const std::size_t before = t.host.edits().size();
         StrokeRelease released = StrokeRelease::None;
         if (t.hasView) guarded(t, "release", [&] { released = t.tool.release(t.host, t.view); });
-        result["released"] = released == StrokeRelease::Stroke ? "stroke" : released == StrokeRelease::ShiftClick ? "shift_click" : "none";
+        result["released"] = released == StrokeRelease::Stroke ? "stroke" : "none";
         result["committed"] = t.host.edits().size() != before;
-        if (released == StrokeRelease::ShiftClick) {
-            int level = -2;
-            guarded(t, "pick", [&] { level = t.tool.pickLevel(t.host, t.view, t.pressX, t.pressY); });
-            result["level"] = level;
-            result["group"] = t.tool.settings.brush.group;
-            result["settings"] = settingsJson(t);
-        }
         if (result["committed"].get<bool>()) {
             t.redoLabels.clear();
             t.redoMaps.clear();

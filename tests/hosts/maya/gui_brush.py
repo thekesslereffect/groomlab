@@ -281,9 +281,11 @@ def step_redo():
     check("one undo takes the painted selection and the freeze back", not gl.selected_guides(groom) and
           cmds.getAttr(groom + ".guideData") == data)
     cmds.redo()
-    gx, gy = to_view(cmds.groomLabGuides(groom, guidePoints=painted[0])[-3:])
-    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (gx, gy))
-    check("a Ctrl+Shift click toggles the guide under it", len(gl.selected_guides(groom)) == len(painted) - 1)
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select 5 5")
+    import json as jsonlib  # (this step imports json later: the name is its local)
+    still = [g for g in jsonlib.loads(cmds.getAttr(groom + ".guideData"))["guides"] if g.get("attributes", {}).get("freeze", 0.0) > 0.5]
+    check("a Ctrl+Shift click on nothing deselects and unfreezes every guide (%d selected, %d frozen)"
+          % (len(gl.selected_guides(groom)), len(still)), not gl.selected_guides(groom) and not still)
     gl.clear_guide_selection(groom)
     from groomlab.painting import unfreeze_all
     unfreeze_all(groom)  # (the strokes after it brush every guide)
@@ -721,15 +723,15 @@ def step_redo():
     hotkeys.drag_slider(None, "ModifyDisplacementRelease")
     check("M released", cmds.groomLabBrushCtx(ctx, query=True, dragSlider=True) == "none")
 
-    # Shift+click picks the level of the guide under the cursor.
+    # Picking a level (debugPick): the level of the guide under the cursor.
     tip = cmds.groomLabGuides(groom, guidePoints=cmds.groomLabGuides(groom, listGuides="primary")[-1])[-3:]
     cmds.groomLabBrushCtx(ctx, edit=True, level=3)
     px, py = to_view(tuple(tip))
-    check("Shift+click on a primary picks level 0",
+    check("a pick on a primary picks level 0",
           cmds.groomLabBrushCtx(ctx, edit=True, debugPick="%d %d" % (px, py)) == 0
           and cmds.groomLabBrushCtx(ctx, query=True, level=True) == 0)
     cmds.groomLabBrushCtx(ctx, edit=True, level=2)
-    check("Shift+click on nothing keeps the level",
+    check("a pick on nothing keeps the level",
           cmds.groomLabBrushCtx(ctx, edit=True, debugPick="2 2") == -2
           and cmds.groomLabBrushCtx(ctx, query=True, level=True) == 2)
 
@@ -958,8 +960,8 @@ def step_brush_pack():
     cmds.undo()
     check("one undo restores them", cmds.getAttr(groom + ".guideData") == data0)
 
-    # Solo: Place with Solo new guides freezes every other guide in its step; Shift+click a guide
-    # solos it (and picks its group); the Select tool freezes the guides not selected, a pick of
+    # Solo: Place with Solo new guides freezes every other guide in its step; Ctrl+Shift+click a guide
+    # selects it (the rest frozen); the Select tool freezes the guides not selected, a pick of
     # nothing unfreezes them; Unfreeze All frees them all.
     def frozen():
         guides = json.loads(cmds.getAttr(groom + ".guideData"))["guides"]
@@ -977,14 +979,15 @@ def step_brush_pack():
     xyz = cmds.groomLabGuides(groom, guidePoints=gid)
     mid = len(xyz) // 6 * 3
     mx, my = to_view(tuple(xyz[mid:mid + 3]))
-    level = cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="shiftclick %d %d" % (mx, my))
-    check("Shift+click a guide solos it (%r)" % (frozen(),), frozen() == (7, 8))
-    check("... and brushes its group", cmds.groomLabBrushCtx(ctx, query=True, group=True) == "primary")
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (mx, my))
+    check("Ctrl+Shift+click a guide selects it and freezes the rest (%r)" % (frozen(),), frozen() == (7, 8))
+    check("... the brush's group as it was", cmds.groomLabBrushCtx(ctx, query=True, group=True) == "")
     sx, sy = to_view((0.0, -0.3, 0.95))
-    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="shiftclick %d %d" % (sx, sy))
-    check("Shift+click the bare scalp unfreezes every guide", frozen() == (0, 8))
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (sx, sy))
+    check("Ctrl+Shift+click the bare scalp deselects and unfreezes every guide",
+          frozen() == (0, 8) and not groomlab.selected_guides(groom))
     cmds.undo()
-    check("each solo click is an undo step", frozen() == (7, 8))
+    check("each Ctrl+Shift click is an undo step", frozen() == (7, 8))
     # With symmetry, the guide's mirror guide stays live too (the ring's guides pair up across x).
     no_line = red_pixels("symmetry_off")
     groomlab.brush_tool("comb", radius=60, level=0, group="", symmetry="x")
@@ -997,8 +1000,8 @@ def step_brush_pack():
     gone = red_pixels("symmetry_none")
     check("symmetry off: the line goes (%d red pixels)" % gone, gone < no_line + 10)
     cmds.groomLabBrushCtx(ctx, edit=True, symmetry="x")
-    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="shiftclick %d %d" % (mx, my))
-    check("Shift+click with symmetry solos the guide and its mirror (%r)" % (frozen(),), frozen() == (6, 8))
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (mx, my))
+    check("Ctrl+Shift+click with symmetry selects the guide's mirror too (%r)" % (frozen(),), frozen() == (6, 8))
     groomlab.select_tool(symmetry="x")
     cmds.groomLabSelectCtx(groomlab.SELECT_CONTEXT, edit=True, debugLasso="%d %d" % (mx, my))
     check("the Select tool with symmetry picks the mirror guide too",
@@ -1068,7 +1071,7 @@ def step_brush_pack():
           all(t in tools.buttons for t in ("direction", "noise")) and not any(t in tools.buttons for t in ("width", "density")))
     check("the new tiles have icons", all(not tools.buttons[t].icon().isNull() for t in ("direction", "noise")))
     check("Unfreeze All sits beside the Freeze tile", "unfreeze" in tools.buttons and not tools.buttons["unfreeze"].isCheckable())
-    check("the hints name the Shift+click solo", "solo" in tools.gestures.text())
+    check("the hints name the Ctrl+Shift selection", "Ctrl+Shift+drag: paint the selection" in tools.gestures.text())
     tools.activate("paint")
     check("Paint picked in the Groom Tools is the context's mode",
           cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, mode=True) == "paint")

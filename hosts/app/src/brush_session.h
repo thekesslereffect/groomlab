@@ -78,9 +78,8 @@ public:
     bool stroking() const { return tool_.stroking(); }
     // A whole stroke through press, moves and release (tests, the CLI): true when it changed something.
     bool stroke(const std::vector<QPointF>& points, float pressure = 1.0f, unsigned modifiers = 0);
-    // Shift+click: the level (and group) of the guide under the cursor becomes the brush's; -2
-    // when no guide is there. (The release of a brush's Shift+click solos the guide first:
-    // BrushTool::soloAt.)
+    // The level (and group) of the guide under the cursor becomes the brush's; -2 when no guide
+    // is there.
     int pickLevel(const QPointF& at);
     // What went wrong in the last press, move or release ("" when nothing): the stroke was dropped.
     const std::string& lastError() const { return error_; }
