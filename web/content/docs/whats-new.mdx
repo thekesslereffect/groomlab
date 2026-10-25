@@ -13,6 +13,23 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.31.0 (October 24, 2026)
+
+- **Cards that don't pass through each other.** The Cards node's new **Separation** section pushes
+  cards that cross or nearly touch apart along their normals, so overlapping feathers lie on each
+  other instead of clipping. **Feather Separation** is on by default (0.05 of a card's width);
+  **Separation** does the same for hair cards (off by default). Roots stay put, each card bends
+  smoothly as a whole, and only the mesh moves: baked maps stay valid. (Requested by
+  Omar Hesham.)
+- **Small numbers show.** A value under 1 now keeps two significant digits in Maya and the app:
+  a feather preset's Scatter density on a centimeter-sized head reads 0.035 rather than 0 (it
+  always scattered correctly).
+- **App:** Alt+right-drag zooms the way Maya does (drag right to zoom in), and the app has the
+  GroomLab icon.
+- **Blender:** choosing one of Blender's tools (the toolbar, W) now leaves the GroomLab brush, so
+  objects can be selected again without pressing Esc first. Add Sample Mesh frames the view on the
+  sample, which comes in at its real size (a head is about 35 cm).
+
 ## 0.30.0 (October 24, 2026)
 
 - **GroomLab files in Maya's File Path Editor.** Every file a groom uses shows under **GroomLab**:
