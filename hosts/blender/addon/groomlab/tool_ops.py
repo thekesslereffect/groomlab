@@ -101,6 +101,27 @@ def locate(context, event):
     return None
 
 
+def blender_tool(context):
+    """The id of Blender's own active tool in the 3D view (builtin.select_box...), None without one."""
+    try:
+        return context.workspace.tools.from_space_view3d_mode(context.mode, create=False).idname
+    except Exception:  # noqa: BLE001 - no workspace (background), or no tool for the mode
+        return None
+
+
+def over_toolbar(context, event):
+    """Whether the mouse is over a 3D view's toolbar (Blender's tools)."""
+    window = context.window
+    if window is None:
+        return False
+    for area in window.screen.areas:
+        if area.type == "VIEW_3D":
+            for region in area.regions:
+                if region.type == "TOOLS" and region.width > 1 and _inside(region, event.mouse_x, event.mouse_y):
+                    return True
+    return False
+
+
 # ---- The tool, event by event --------------------------------------------------------------------
 
 class ToolSession(object):
@@ -116,6 +137,7 @@ class ToolSession(object):
         self.hovering = None      # the scalp hovered last
         self.view = None
         self.cursor = False       # the crosshair set over a viewport
+        self.blender_tool = None  # Blender's active tool when ours started
 
     def tool(self, context):
         return context.scene.groomlab_tools.tool
@@ -137,6 +159,18 @@ class ToolSession(object):
             self.leave(context)
             return {"FINISHED"}
         kind, value = event.type, event.value
+        # Blender's tools again: one picked (the toolbar, W, Shift+Space...) leaves ours, the event
+        # Blender's (a click on the tool already active included).
+        current = blender_tool(context)
+        if self.blender_tool is None:
+            self.blender_tool = current
+        idle = self.stroking is None and self.lasso is None and self.slider is None
+        if current != self.blender_tool or (idle and value == "PRESS" and (
+                (kind == "LEFTMOUSE" and over_toolbar(context, event)) or
+                (kind == "W" and not (event.ctrl or event.alt or event.shift or event.oskey)
+                 and locate_fn(context, event) is not None))):
+            self.leave(context, clear_tool=True)
+            return {"FINISHED", "PASS_THROUGH"}
         if kind in NAV_PASS or kind.startswith("NDOF") or kind.startswith("NUMPAD"):
             return {"PASS_THROUGH"}
         if kind in ("MOUSEMOVE", "INBETWEEN_MOUSEMOVE"):
@@ -438,7 +472,7 @@ class GROOMLAB_OT_tool_modal(bpy.types.Operator):
         info = tools.tool_info(tool)
         label = info["label"] if info else tool
         text = ("GroomLab %s: drag over the groom · Ctrl the opposite · Shift smooth / Shift+click a guide solos it · "
-                "B/M + drag radius/strength · %s pie · S select · Ctrl+Z undo · Esc leave" % (label, pie_key()))
+                "B/M + drag radius/strength · %s pie · S select · Ctrl+Z undo · Esc or W leave" % (label, pie_key()))
         try:
             context.workspace.status_text_set(text)
         except Exception:
@@ -456,7 +490,8 @@ class GROOMLAB_OT_tool_modal(bpy.types.Operator):
             print("GroomLab tool: %r" % e)
             return self._end(context)
         if "FINISHED" in result:
-            return self._end(context)
+            self._end(context)
+            return result  # (with PASS_THROUGH: the event is Blender's too)
         if getattr(self, "_shown", None) != context.scene.groomlab_tools.tool:
             self._status(context)
         return result

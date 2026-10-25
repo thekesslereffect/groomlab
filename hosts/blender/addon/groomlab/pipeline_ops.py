@@ -548,6 +548,24 @@ class GROOMLAB_OT_add_collider(_Tipped, GroomOperator):
         return {"FINISHED"}
 
 
+def _frame_selected(context):
+    """The 3D views framed on the selection: a sample comes in at its real size (a head 35 cm, a
+    third of Blender's 1 m grid), so it fills the view rather than sitting small in it."""
+    if bpy.app.background or context.window is None:
+        return
+    for area in context.window.screen.areas:
+        if area.type != "VIEW_3D":
+            continue
+        region = next((r for r in area.regions if r.type == "WINDOW"), None)
+        if region is None:
+            continue
+        try:
+            with context.temp_override(window=context.window, area=area, region=region):
+                bpy.ops.view3d.view_selected(use_all_regions=False)
+        except RuntimeError:
+            pass
+
+
 class GROOMLAB_OT_add_sample(_Tipped, bpy.types.Operator):
     """A sample mesh at the origin and selected: then Create Groom from Selection"""
     bl_idname = "groomlab.add_sample"
@@ -564,6 +582,7 @@ class GROOMLAB_OT_add_sample(_Tipped, bpy.types.Operator):
             part = pipeline.add_sample(context, self.sample)
         except HelperError as e:
             return _fail(self, e)
+        _frame_selected(context)
         _say(self, "added %s (selected): Create Groom from Selection grows hair on it" % part.name)
         return {"FINISHED"}
 
