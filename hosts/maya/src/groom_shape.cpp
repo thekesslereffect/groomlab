@@ -2496,6 +2496,14 @@ void GroomShape::invalidateSimulation(const std::string& node) {
     tick.setInt(tick.asInt() + 1);
 }
 
+void GroomShape::setLiveDrag(bool on) {
+    if (session_.liveDrag() == on) return;
+    settleCommit("setLiveDrag");
+    session_.setLiveDrag(on);
+    MPlug tick(thisMObject(), aBrushTick);  // (the input the tools bump to evaluate the groom again)
+    tick.setInt(tick.asInt() + 1);
+}
+
 std::vector<SimStatus> GroomShape::simulationStatus() {
     ensureEvaluated();
     return session_.simulationStatus();

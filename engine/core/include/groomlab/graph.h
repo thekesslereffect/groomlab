@@ -553,6 +553,10 @@ struct EvalContext {
     // bypassed, and viewportOnly ones run. False (renders, exports, the CLI, the procedural):
     // the other way round (EvaluationMode).
     bool viewport = false;
+    // A host's live param drag (GroomSession::setLiveDrag), in the viewport: the nodes that only
+    // refine the look for it (Subdivide) hand their input on, so the GPU's preview runs the nodes
+    // before them; the release evaluates them again. The nodes reading it salt their keys with it.
+    bool liveDrag = false;
     const ExternalInputs* externals = nullptr;
     const PathResolver* paths = nullptr;  // relative file paths (maps, caches); see paths.h
     bool buildCards = false;  // Cards nodes build their cards (else they pass strands through)

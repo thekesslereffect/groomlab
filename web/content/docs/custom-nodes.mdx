@@ -18,6 +18,11 @@ A **compound node** is a compound you saved to your node library. It shows in **
 **Tab** search like a built-in node, under the category you gave it, with the parameters you chose
 to show. You make one from nodes you already have: no code, nothing to compile.
 
+A compound is a grouping, like Unreal's collapsed graphs and Blender's node groups: when the groom
+evaluates, its nodes run as if they sat in the graph itself. So it costs what its nodes cost, and
+dragging one of its parameters previews on the GPU whenever its nodes do (a compound set to
+**Repeat** runs as one node, on the CPU).
+
 <Callout title="In the app and in Blender">
   **App:** right-click a Compound in the Graph Editor > **Save as Node...** (it keeps the params the
   compound shows; choosing inner params to show is in Maya for now); the search lists your nodes;

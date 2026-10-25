@@ -284,18 +284,16 @@ TEST(Stroke, CtrlInvertsAndShiftDragSmoothsForOneStroke) {
         (ctrl ? laid : lifted) = g.guides();
     }
     EXPECT_NE(lifted, laid);
-    // Shift: a click solos the guide there and picks its level (one step when it changed
-    // something), a drag smooths while the tool stays the Comb.
+    // Shift: a click does nothing (no stroke, no step), a drag smooths while the tool stays the Comb.
     Groom g(20, 3);
     BrushTool tool;
     tool.settings.setMode("comb");
     tool.settings.screenRadius = 150.0f;
     tool.press(*g.host, view, path[0][0], path[0][1], 1.0f, kStrokeShift);
     EXPECT_FALSE(tool.stroking());
-    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::ShiftClick);
+    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::None);
     const std::size_t clicked = g.host->edits().size();
-    EXPECT_LE(clicked, 1u);
-    if (clicked) EXPECT_EQ(g.host->edits().back().mode, "solo");
+    EXPECT_EQ(clicked, 0u);
     tool.press(*g.host, view, path[0][0], path[0][1], 1.0f, kStrokeShift);
     for (std::size_t i = 1; i < path.size(); ++i) tool.drag(*g.host, view, path[i][0], path[i][1], 1.0f);
     EXPECT_TRUE(tool.stroking());
@@ -508,6 +506,34 @@ TEST(GuidePicking, LassoBoundsAndClicks) {
     EXPECT_TRUE(pickGuides(h, all, project, {{-500, -500}}, false, 12.0f).empty());
     // Hidden groups are not candidates.
     EXPECT_EQ(guidesAt(h, -1, "", {"children"}), guidesAt(h, 0));
+}
+
+TEST(GuidePicking, OnlyWhatTheViewShows) {
+    // A guide on the front of the head and one on its back, seen from the front: through
+    // visibleProjector a lasso over the whole view (or a click on the back guide's root) picks
+    // only the front one; the scalp hides the other.
+    const auto scalp = sphereWithUVs();
+    GuideHierarchy h;
+    const GroupId g = h.addGroup("primary");
+    for (const Vec3f& n : {Vec3f(0.0f, 0.5f, 1.0f).normalized(), Vec3f(0.0f, 0.5f, -1.0f).normalized()}) {
+        std::vector<Vec3f> pts;
+        for (int k = 0; k <= 6; ++k) pts.push_back(n * (1.0f + 0.04f * static_cast<float>(k)));
+        h.addGuide(g, pts);
+    }
+    h.evaluate(scalp.get());
+    const GuideId front = h.guides()[0].id, back = h.guides()[1].id;
+    const std::array<double, 16> matrix = test::lookAtProjection({0, 1.2f, 4}, {0, 0.6f, 0}, 40.0, 1.0);
+    const ViewProjection view(matrix, 800, 800);
+    const ToolView tool = ToolView::fromMatrix(matrix, 800, 800);
+    const std::vector<std::array<float, 2>> everything{{1, 1}, {799, 1}, {799, 799}, {1, 799}};
+    const std::vector<GuideId> all = guidesAt(h, -1);
+    EXPECT_EQ(pickGuides(h, all, pixelProjector(view), everything, false, 12.0f), (std::vector<GuideId>{front, back}));
+    const ViewProjector visible = visibleProjector(pixelProjector(view), scalpVisibility(scalp, tool));
+    EXPECT_EQ(pickGuides(h, all, visible, everything, false, 12.0f, &view), std::vector<GuideId>{front});
+    std::array<float, 2> at{};
+    ASSERT_TRUE(pixelProjector(view)(h.guides()[1].points.front(), &at));
+    EXPECT_TRUE(pickGuides(h, {back}, visible, {at}, false, 12.0f).empty()) << "a click on the hidden guide picks nothing";
+    EXPECT_EQ(visibleProjector(pixelProjector(view), nullptr)(h.guides()[1].points.front(), &at), true) << "no scalp: as before";
 }
 
 TEST(GuidePicking, SelectionModes) {

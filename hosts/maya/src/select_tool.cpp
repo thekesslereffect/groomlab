@@ -94,20 +94,35 @@ MStatus GuideSelectContext::doRelease(MEvent&, MHWRender::MUIDrawManager&, const
 }
 
 int GuideSelectContext::select(const std::vector<std::array<float, 2>>& lasso, const std::string& mode) {
+    GuidePick pick;
+    pick.level = level;
+    pick.group = group;
+    pick.rootsOnly = rootsOnly;
+    pick.clickPixels = clickPixels;
+    pick.solo = soloSelection;
+    pick.symmetry = symmetry;
+    return selectGuidesInView(lasso, mode, pick);
+}
+
+std::vector<GuideId> pickGuidesInView(const std::vector<std::array<float, 2>>& lasso, const GuidePick& pick) {
+    const int level = pick.level;
+    const std::string& group = pick.group;
+    const bool rootsOnly = pick.rootsOnly;
+    const float clickPixels = pick.clickPixels;
+    const std::string& symmetry = pick.symmetry;
     MDagPath groom;
-    if (!activeGroom(groom)) {  // the pinned groom, else the selected one
-        MGlobal::displayWarning("GroomLab select: select a groom (groomLabShape) first");
-        return 0;
-    }
+    if (!activeGroom(groom)) return {};  // the pinned groom, else the selected one
     auto* shape = dynamic_cast<GroomShape*>(MFnDagNode(groom).userNode());
     const HierarchyPtr h = shape ? shape->evaluatedHierarchy() : nullptr;
-    if (!h) return 0;
+    if (!h) return {};
 
     // Guides are world space (the groom draws in world space, its transform locked).
     // Hidden groups can't be picked.
     const std::vector<GuideId> candidates = guidesAt(*h, level, group, readHiddenGuideGroups(groom.node()));
     const SelectionProjector view = selectionProjector(M3dView::active3dView());
-    std::vector<GuideId> picked = pickGuides(*h, candidates, view.project, lasso, rootsOnly, clickPixels,
+    // Only what the view shows: guide points behind the scalp are not picked.
+    const ViewProjector visible = visibleProjector(view.project, scalpVisibility(shape->evaluatedScalp(), activeToolView()));
+    std::vector<GuideId> picked = pickGuides(*h, candidates, visible, lasso, rootsOnly, clickPixels,
                                              view.matrix.valid() ? &view.matrix : nullptr);
     if (symmetry != "none" && !picked.empty()) {  // each picked guide's mirror guide too
         BrushToolSettings mirror;
@@ -118,17 +133,36 @@ int GuideSelectContext::select(const std::vector<std::array<float, 2>>& lasso, c
         const MeshPtr scalp = shape->evaluatedScalp();
         picked = withMirrorGuides(*h, picked, StrokeSymmetry::of(mirror.brush, scalp.get()));
     }
+    return picked;
+}
 
-    if (picked.empty() && mode != "replace") return 0;
+bool applyGuideSelection(const std::vector<GuideId>& ids, const std::string& mode, bool solo, bool undoable) {
+    MDagPath groom;
+    if (!activeGroom(groom)) {  // the pinned groom, else the selected one
+        MGlobal::displayWarning("GroomLab select: select a groom (groomLabShape) first");
+        return false;
+    }
+    if (ids.empty() && mode != "replace") return false;
     MString cmd = "groomLabGuides -select";
     if (mode == "add") cmd += " -append";
     if (mode == "toggle") cmd += " -toggle";
     if (mode == "deselect") cmd += " -deselect";
-    if (picked.empty()) cmd = "groomLabGuides -clearSelection";
-    if (soloSelection) cmd += " -freezeOthers";  // the rest frozen (nothing picked: all unfrozen)
-    for (const GuideId id : picked) cmd += MString(" -guide \"") + std::to_string(id).c_str() + "\"";
+    if (ids.empty()) cmd = "groomLabGuides -clearSelection";
+    if (solo) cmd += " -freezeOthers";  // the rest frozen (nothing picked: all unfrozen)
+    for (const GuideId id : ids) cmd += MString(" -guide \"") + std::to_string(id).c_str() + "\"";
     cmd += MString(" \"") + groom.fullPathName() + "\"";
-    MGlobal::executeCommand(cmd, false, true);
+    MGlobal::executeCommand(cmd, false, undoable);
+    return true;
+}
+
+int selectGuidesInView(const std::vector<std::array<float, 2>>& lasso, const std::string& mode, const GuidePick& pick) {
+    MDagPath groom;
+    if (!activeGroom(groom)) {
+        MGlobal::displayWarning("GroomLab select: select a groom (groomLabShape) first");
+        return 0;
+    }
+    const std::vector<GuideId> picked = pickGuidesInView(lasso, pick);
+    applyGuideSelection(picked, mode, pick.solo, true);
     return static_cast<int>(picked.size());
 }
 

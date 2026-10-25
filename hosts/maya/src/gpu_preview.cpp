@@ -820,6 +820,7 @@ MStatus GpuPreviewCmd::doIt(const MArgList& args) {
             return MS::kSuccess;
         }
         if (db.isFlagSet("-endDrag")) {
+            shape->setLiveDrag(false);  // the release refines the strands again (a Subdivide's)
             if (GpuPreviewRequest* request = gpuPreviewRequest(shape)) {
                 if (request->active()) {
                     // The viewport draws the drag's last values from the GPU: the commit that follows
@@ -872,12 +873,29 @@ MStatus GpuPreviewCmd::doIt(const MArgList& args) {
         gpu::Overrides overrides = request->overrides;
         overrides[node.asChar()][param.asChar()] = value;
         std::string why;
-        const GraphDocument* doc = shape->session().viewDocument();
-        bool takes = false;
-        if (doc && readable) {
-            const auto it = doc->nodesByName.find(node.asChar());
-            takes = it != doc->nodesByName.end() && gpu::previewableParam(doc->graph.node(it->second).typeName(), param.asChar()) &&
-                    preview->accepts(*shape, overrides, &why);
+        // (A compound's exposed param: the inner node's param it sets, the compound held inline.)
+        const auto [inner, innerParam] = shape->session().flatCompounds().param(node.asChar(), param.asChar());
+        auto check = [&] {
+            const GraphDocument* doc = shape->session().viewDocument();
+            if (!doc || !readable) return false;
+            const auto it = doc->nodesByName.find(inner);
+            return it != doc->nodesByName.end() && gpu::previewableParam(doc->graph.node(it->second).typeName(), innerParam) &&
+                   preview->accepts(*shape, overrides, &why);
+        };
+        bool takes = check();
+        // A Subdivide refining the output for the viewport ends the GPU's run: for the drag the
+        // view hands the strands on unrefined (GroomSession::setLiveDrag) and the GPU runs the
+        // nodes before it; the release (-endDrag) refines them again. Not for a drag of the
+        // Subdivide itself (its levels are what the drag shows).
+        if (!takes && readable && !shape->session().liveDrag() && shape->session().viewRefinesStrands()) {
+            const GraphDocument* doc = shape->session().viewDocument();
+            const auto it = doc ? doc->nodesByName.find(inner) : std::map<std::string, NodeId>::const_iterator{};
+            if (doc && it != doc->nodesByName.end() && doc->graph.node(it->second).typeName() != "Subdivide") {
+                shape->setLiveDrag(true);
+                shape->frame();  // the view without the refinement, evaluated now
+                takes = check();
+                if (!takes) shape->setLiveDrag(false);
+            }
         }
         if (takes) {
             request->overrides = std::move(overrides);

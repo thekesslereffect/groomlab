@@ -51,7 +51,7 @@ void appendColoredLine(DisplayGeometry& g, const std::vector<Vec3f>& points, con
 BrushSession::BrushSession() {
     tool_.settings.brush.radius = 0.25f;
     tool_.settings.screenRadius = 60.0f;
-    tool_.settings.place.soloNewGuides = false;  // off, as Maya's and Blender's Groom Tools start (Shift+click solos)
+    tool_.settings.place.soloNewGuides = false;  // off, as Maya's and Blender's Groom Tools start (Ctrl+Shift+click selects)
 }
 
 BrushSession::~BrushSession() = default;
@@ -318,7 +318,8 @@ std::size_t BrushSession::select(const std::vector<QPointF>& lasso, SelectMode m
         for (const QPointF& p : lasso) polygon.push_back(port(p));
     }
     std::vector<GuideId> picked =
-        pickGuides(*h, candidates, pixelProjector(view_.projection), polygon, false, 12.0f, &view_.projection);
+        pickGuides(*h, candidates, visibleProjector(pixelProjector(view_.projection), scalpVisibility(host_->scalp(), view_)), polygon,
+                   false, 12.0f, &view_.projection);  // (only what the view shows: nothing behind the scalp)
     // With symmetry, each picked guide's mirror guide too.
     const MeshPtr scalp = host_->scalp();
     picked = withMirrorGuides(*h, picked, StrokeSymmetry::of(s.brush, scalp.get()));
@@ -334,6 +335,26 @@ std::size_t BrushSession::select(const std::vector<QPointF>& lasso, SelectMode m
         }
     }
     return picked.size();
+}
+
+std::size_t BrushSession::paintSelection(const QPointF& at) {
+    std::vector<QPointF> ring;
+    const double r = tool_.settings.screenRadius;
+    for (int k = 0; k < 24; ++k) {
+        const double a = 6.283185307 * k / 24.0;
+        ring.push_back(at + QPointF(r * std::cos(a), r * std::sin(a)));
+    }
+    return select(ring, SelectMode::Add, false);
+}
+
+void BrushSession::soloSelection() {
+    if (!document_) return;
+    const std::vector<GuideId> selection = document_->selection();
+    const std::shared_ptr<const GuideHierarchy> authored = document_->session().authoredHierarchy();
+    GuideHierarchy probe = authored ? *authored : GuideHierarchy{};
+    if (freezeToSelection(probe, selection)) {
+        document_->editGuides("solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
+    }
 }
 
 void BrushSession::warm(const ViewRequest& request) {

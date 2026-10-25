@@ -198,8 +198,9 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
       sets it to its shape and Width, Flatness and Twist); placement_tube() reads it back.
     - `solo_new_guides` (place, draw): each stroke's new guides stay unfrozen and every other
       guide is frozen, so the brushes after work on them alone (the Groom Tools turn it on).
-    - Shift+click a guide with a brush: that guide is soloed (unfrozen, every other frozen, one
-      undo step) and its group brushed; Shift+click off a guide (bare scalp or empty space) unfreezes every guide.
+    - Ctrl+Shift with a brush selects guides: a drag paints them into the selection with the
+      ring, a click adds the guide under it; every guide not selected freezes (one undo step).
+      Ctrl+Shift+click off a guide deselects and unfreezes every guide.
     """
     _check_mode(mode)
     ensure_plugin()

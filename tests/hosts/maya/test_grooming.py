@@ -472,7 +472,7 @@ class GroomingTest(unittest.TestCase):
         tube = groomlab.get_tube(self.groom, placed[0])
         self.assertEqual(tube["shape"], "spiky")
         self.assertAlmostEqual(max(tube["width"]), 0.3, places=3)  # blended from the blades around it
-        # The Tubes panel's targets: the selection, else the soloed guides (a brush's Shift+click).
+        # The Tubes panel's targets: the selection, else the soloed guides (left unfrozen).
         groomlab.clear_guide_selection(self.groom)
         self.assertEqual(groomlab.tube_targets(self.groom)["source"], "none")
         groomlab.set_guide_attribute(self.groom, "freeze", 1.0, group="primary")

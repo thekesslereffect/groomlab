@@ -201,7 +201,7 @@ class TubePanel(QtWidgets.QWidget):
     editor, the shape new guides take, and the groom's Fill Tubes and Tube Blend (its Interpolate
     nodes' fillTubes and tubeBlend). Follows the groom through refresh().
 
-    The targets: the selected guides, else the soloed ones (a brush's Shift+click on a guide:
+    The targets: the selected guides, else the soloed ones (those left unfrozen:
     groomlab.tube_targets). The shape picker lists the built-ins and the library; its choice (and
     Width, Flatness and Twist as shown) is also what Place and Draw give new guides (the brush's
     placement tube: the shape always, the sections where no guides are near to blend them from).
@@ -416,7 +416,7 @@ class TubePanel(QtWidgets.QWidget):
             w.setEnabled(tube is not None)
         if tube is None:
             self.targets.setText("No guides selected or soloed: the shape and values here go to the guides Place and "
-                                 "Draw make. Select guides (Select tool), or Shift+click one with a brush, to set theirs.")
+                                 "Draw make. Select guides (Select tool, or Ctrl+Shift with a brush) to set theirs.")
             self.show_mixed(False)
         else:
             count = len(self._selection)
@@ -1518,7 +1518,7 @@ class ToolPalette(QtWidgets.QWidget):
         b.setMinimumSize(theme.px(64), theme.px(56))
         b.setProperty("role", "tool")
         b.setToolTip("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again "
-                     "(Shift+click off a guide with a brush does the same)")
+                     "(Ctrl+Shift+click off a guide with a brush does the same)")
         b.clicked.connect(lambda: self.paint_tab.unfreeze_all())
         self.buttons.setdefault("unfreeze", b)  # its icon follows the theme
         return b

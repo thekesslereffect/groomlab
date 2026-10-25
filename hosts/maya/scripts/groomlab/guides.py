@@ -455,8 +455,8 @@ def preview_tube_shape(groom, name, points, smooth=True):
 def tube_targets(groom):
     """The guides the Groom Tools' Tubes panel edits: {"source": "selection" | "solo" | "none",
     "guides": [IDs], "tube": the first one's tube (get_tube's dict) or None, "shapes": the shapes
-    among them}. The selected guides; with none selected, the soloed ones (a brush's Shift+click
-    on a guide: those left unfrozen while the rest are frozen)."""
+    among them}. The selected guides; with none selected, the soloed ones (those left unfrozen
+    while the rest are frozen)."""
     return json.loads(cmds.groomLabGuides(groom, tubeTargets=True))
 
 

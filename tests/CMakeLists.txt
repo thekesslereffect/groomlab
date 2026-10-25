@@ -248,6 +248,9 @@ if(TARGET groomlab_gpu AND WIN32)
     target_link_libraries(groomlab_gpu_tests PRIVATE groomlab::gpu groomlab::core groomlab::warnings GTest::gtest_main
                           nlohmann_json::nlohmann_json)
     target_compile_definitions(groomlab_gpu_tests PRIVATE "GROOMLAB_SHIPPED_PRESETS=${_shipped_presets}")  # hair_basics
+    if(MSVC)
+        target_compile_options(groomlab_gpu_tests PRIVATE /bigobj)  # (test_look_engine.cpp: past the default's sections)
+    endif()
     if(GROOMLAB_TBB_RUNTIME)
         add_custom_command(TARGET groomlab_gpu_tests POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

@@ -413,18 +413,10 @@ def evaluate_live(scalp):
 
 def stroke_end(scalp):
     """Commits the stroke (one undo step in the helper), evaluates every strand again, refreshes
-    the palette (a Shift+click solos a guide and picks its level)."""
+    the palette."""
     scene = groom.scene_of(scalp)
     r = call(scalp, "stroke_end")
     groom_tools(scalp).last_end = r
-    if r.get("released") == "shift_click" and r.get("level") is not None and r.get("level", -2) >= -1:
-        group = r.get("group") or ""
-        refresh_info(scalp, scene)
-        with props.quiet():
-            t = scene.groomlab_tools
-            if group and any(g.name == group for g in t.groups):
-                t.group = group
-        push_quiet(scalp, scene)
     after_edit(scalp, scene, r.get("undo"), refresh=r.get("committed", False))
     warn = r.get("warnings") or []
     status(scene, "; ".join(warn) if warn else "")
@@ -446,10 +438,11 @@ def stroke_cancel(scalp):
     return r
 
 
-def select(scalp, view, points, mode="replace"):
-    """Selects the guides in a lasso (3+ points), a box (2 corners) or under a click (1 point)."""
+def select(scalp, view, points, mode="replace", solo=True):
+    """Selects the guides in a lasso (3+ points), a box (2 corners) or under a click (1 point);
+    `solo`: the guides not selected frozen (an undo step when that changes anything)."""
     from . import display
-    r = call(scalp, "select", view=view, lasso=[[float(p[0]), float(p[1])] for p in points], mode=mode, solo=True)
+    r = call(scalp, "select", view=view, lasso=[[float(p[0]), float(p[1])] for p in points], mode=mode, solo=solo)
     if r.get("froze"):  # the guides not selected frozen (or all unfrozen): an undo step
         after_edit(scalp, groom.scene_of(scalp), call(scalp, "undo_state"))
     display.mark(scalp)
@@ -460,6 +453,8 @@ def select(scalp, view, points, mode="replace"):
 def selection_set(scalp, **args):
     from . import display
     r = call(scalp, "selection_set", **args)
+    if r.get("froze"):  # solo: the guides not selected frozen, an undo step
+        after_edit(scalp, groom.scene_of(scalp), call(scalp, "undo_state"))
     display.mark(scalp)
     refresh_info(scalp)
     return r

@@ -1547,8 +1547,8 @@ json tubeGet(ToolState& t, const json& args) {
     return {{"tube", tubeToHost(t.session.space, tubeToJson(g->tube, h->scale()))}};
 }
 
-// The guides the Tubes section edits: the selected ones, else the soloed ones (a brush's
-// Shift+click: those left unfrozen while others are frozen, not their children), else a groom's
+// The guides the Tubes section edits: the selected ones, else the soloed ones (those left
+// unfrozen while others are frozen, not their children), else a groom's
 // only guide; the first one's tube and the shapes among them.
 json tubeTargets(ToolState& t) {
     const HierarchyPtr h = t.session.groom->authoredHierarchy();
@@ -3324,15 +3324,8 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         const std::size_t before = t.host.edits().size();
         StrokeRelease released = StrokeRelease::None;
         if (t.hasView) guarded(t, "release", [&] { released = t.tool.release(t.host, t.view); });
-        result["released"] = released == StrokeRelease::Stroke ? "stroke" : released == StrokeRelease::ShiftClick ? "shift_click" : "none";
+        result["released"] = released == StrokeRelease::Stroke ? "stroke" : "none";
         result["committed"] = t.host.edits().size() != before;
-        if (released == StrokeRelease::ShiftClick) {
-            int level = -2;
-            guarded(t, "pick", [&] { level = t.tool.pickLevel(t.host, t.view, t.pressX, t.pressY); });
-            result["level"] = level;
-            result["group"] = t.tool.settings.brush.group;
-            result["settings"] = settingsJson(t);
-        }
         if (result["committed"].get<bool>()) {
             t.redoLabels.clear();
             t.redoMaps.clear();
@@ -3385,7 +3378,9 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
             } else {
                 for (const Pixel& p : lasso) polygon.push_back({p.x, p.y});
             }
-            picked = pickGuides(*h, candidates, pixelProjector(t.view.projection), polygon, optBool(args, "rootsOnly", false),
+            // Only what the view shows: guide points behind the scalp are not picked.
+            const ViewProjector visible = visibleProjector(pixelProjector(t.view.projection), scalpVisibility(s.groom->scalp(), t.view));
+            picked = pickGuides(*h, candidates, visible, polygon, optBool(args, "rootsOnly", false),
                                 static_cast<float>(optNumber(args, "clickPixels", 12.0)), &t.view.projection);
             // With symmetry (the tool's), each picked guide's mirror guide too.
             const MeshPtr scalp = s.groom->scalp();
@@ -3444,7 +3439,20 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
             ids.clear();
         }
         setSelection(t, combineSelection(t.selection, ids, mode));
+        // "solo" (a brush's Ctrl+Shift painting, when it ends): every guide not selected frozen,
+        // one undo step when that changed anything.
+        bool froze = false;
+        if (optBool(args, "solo", false)) {
+            const std::shared_ptr<const GuideHierarchy> stored = s.groom->authoredHierarchy();
+            GuideHierarchy probe = stored ? *stored : GuideHierarchy{};
+            const std::vector<GuideId> selection = t.selection;
+            if (freezeToSelection(probe, selection)) {
+                editGuides(t, "solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
+                froze = true;
+            }
+        }
         result = selectionJson(t);
+        result["froze"] = froze;
         return true;
     }
     if (cmd == "pick_level") {

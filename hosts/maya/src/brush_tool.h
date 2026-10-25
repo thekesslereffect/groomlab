@@ -11,6 +11,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -142,9 +143,10 @@ public:
     // step timed: debugStrokeTimes.
     bool simulateStroke(const std::vector<std::pair<short, short>>& points, bool ctrl = false, bool shift = false,
                         bool draw = false);
-    // A Shift+click at (x, y) through press and release, as the mouse gives it (-debugStroke
-    // "shiftclick x y"): the guide there soloed, its level picked. Returns the level, -2 for none.
-    int simulateShiftClick(short x, short y);
+    // A Ctrl+Shift drag (or click, one point) through the given view points, as the mouse would:
+    // the selection painted (a click adds the guide under it; on none, deselects and unfreezes
+    // all). Returns how many guides are selected after it.
+    int simulateSelectPaint(const std::vector<std::pair<short, short>>& points);
     // The last drawn simulateStroke's steps in milliseconds, each to its redrawn frame: the press,
     // every point after it, the release (benchmarks: -debugStrokeTimes).
     const std::vector<double>& debugStrokeTimes() const { return debugStrokeTimes_; }
@@ -235,6 +237,19 @@ private:
     bool adjustStrength_ = false;
     short adjustX_ = 0, adjustY_ = 0;
     float adjustRadius_ = 0.0f, adjustValue_ = 0.0f;
+
+    // Ctrl+Shift: selecting guides without leaving the brush. A drag paints the selection with
+    // the brush ring (each guide it passes over added, shown live), the release one undo step
+    // with the rest frozen (as the Select tool's solo); a click adds the guide under it, the rest
+    // frozen (on no guide: nothing selected, every guide unfrozen).
+    bool painting_ = false, paintMoved_ = false;
+    short paintX_ = 0, paintY_ = 0;
+    std::vector<GuideId> paintBefore_;  // the selection at the press
+    std::set<GuideId> paintedGuides_;  // the guides the ring passed over
+    void paintSelection(short x, short y);
+    void beginPaintSelection(short x, short y);
+    void movePaintSelection(short x, short y);
+    void finishPaintSelection();
 };
 
 // groomLabBrushCtx: creates and edits brush contexts.

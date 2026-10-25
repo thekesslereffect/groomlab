@@ -4271,6 +4271,88 @@ TEST_P(LookEngineTest, ASculptStrengthDragRunsDownstreamOnTheGpu) {
     }
 }
 
+TEST_P(LookEngineTest, ACompoundsNodesRunOnTheGpu) {
+    // A Noise grouped into a compound (its amplitude exposed as "amount"): the session holds the
+    // compound as its nodes inline, so a drag of the compound's param runs its Noise on the GPU,
+    // as the CPU evaluates the graph holding the value.
+    nlohmann::json g = nlohmann::json::parse(withoutClearance(chainGraph({{"Noise", R"("params": {"amplitude": 0.1, "frequency": 2.0})"}})));
+    for (auto& n : g["nodes"]) {
+        if (n["name"] != "n0") continue;
+        n = nlohmann::json::parse(R"j({"name": "n0", "type": "Compound", "params": {"amount": 0.1, "definition": {
+              "graph": {"version": 1, "output": "noise",
+                "nodes": [{"name": "in", "type": "Input", "params": {"name": "strands", "type": "Strands"}},
+                          {"name": "noise", "type": "Noise", "params": {"amplitude": 0.1, "frequency": 2.0}}],
+                "connections": [{"from": "in", "to": "noise", "input": "strands"}]},
+              "inputs": [{"name": "strands", "type": "Strands"}],
+              "expose": {"amount": "noise.amplitude"}}}})j");
+    }
+    const std::string graph = g.dump();
+    GroomSession dragged(groom(graph));
+    ASSERT_TRUE(dragged.evaluate(ViewRequest{}).strands);
+    const StrandsPtr before = dragged.last().strands;
+    gpu::LookPreview preview;
+    const gpu::LookPreview::Shown shown = [&] { return dragged.last().strands; };
+    gpu::LookPlan plan;
+    std::string why;
+    ASSERT_TRUE(preview.plan(dragged, shown, {{"n0", {{"amount", 0.3}}}}, {}, &plan, &why)) << why;
+    ASSERT_FALSE(plan.chain.stages.empty());
+    EXPECT_EQ(dragged.viewDocument()->nameOf(plan.chain.stages.front().node), "n0/noise");
+    auto engine = backend_->engine();
+    preview.upload(*engine, plan, dragged.last().scalp.get(), false);
+    engine->run(plan.run, true);
+    const std::vector<Vec3f> points = engine->readPositions();
+    GroomSession committed(groom(withParam(graph, "n0", "amount", 0.3)));
+    ASSERT_TRUE(committed.evaluate(ViewRequest{}).strands);
+    const gpu::PointError e = gpu::compareVectors(points, committed.last().strands->positions());
+    std::printf("[ %-8s ] a compound's Noise dragged: %zu points vs the CPU's: max %.3g mean %.3g\n", GetParam().c_str(), points.size(),
+                e.max, e.mean);
+    EXPECT_GT(e.count, 1000u);
+    EXPECT_LT(e.max, kPointTolerance);
+    EXPECT_GT(gpu::compareVectors(before->positions(), committed.last().strands->positions()).max, 0.01) << "the value changes the hair";
+}
+
+TEST_P(LookEngineTest, ASubdivideAtTheEndHandsTheStrandsOnForADrag) {
+    // A Subdivide refining the output for the viewport ends the GPU's run: a drag of the Noise
+    // before it is the CPU's. During a live drag (GroomSession::setLiveDrag) the view hands the
+    // strands on unrefined and the GPU runs the Noise, as the CPU evaluates the graph holding the
+    // value under the same drag.
+    nlohmann::json g = nlohmann::json::parse(withoutClearance(chainGraph({{"Noise", R"("params": {"amplitude": 0.1, "frequency": 2.0})"}})));
+    g["nodes"].push_back(nlohmann::json::parse(R"({"name": "subdivide", "type": "Subdivide", "params": {"viewportLevels": 1}})"));
+    for (auto& c : g["connections"]) {
+        if (c["to"] == "output") c["to"] = "subdivide";
+    }
+    g["connections"].push_back(nlohmann::json::parse(R"({"from": "subdivide", "to": "output", "input": "strands"})"));
+    const std::string graph = g.dump();
+    ViewRequest view;
+    view.viewport = true;
+    GroomSession dragged(groom(graph));
+    ASSERT_TRUE(dragged.evaluate(view).strands);
+    EXPECT_TRUE(dragged.viewRefinesStrands());
+    gpu::LookPreview preview;
+    const gpu::LookPreview::Shown shown = [&] { return dragged.last().strands; };
+    gpu::LookPlan plan;
+    std::string why;
+    EXPECT_FALSE(preview.plan(dragged, shown, {{"n0", {{"amplitude", 0.3}}}}, {}, &plan, &why));
+    dragged.setLiveDrag(true);
+    ASSERT_TRUE(dragged.evaluate(view).strands);
+    ASSERT_TRUE(preview.plan(dragged, shown, {{"n0", {{"amplitude", 0.3}}}}, {}, &plan, &why)) << why;
+    auto engine = backend_->engine();
+    preview.upload(*engine, plan, dragged.last().scalp.get(), false);
+    engine->run(plan.run, true);
+    const std::vector<Vec3f> points = engine->readPositions();
+    GroomSession committed(groom(withParam(graph, "n0", "amplitude", 0.3)));
+    committed.setLiveDrag(true);
+    ASSERT_TRUE(committed.evaluate(view).strands);
+    const gpu::PointError e = gpu::compareVectors(points, committed.last().strands->positions());
+    std::printf("[ %-8s ] a Noise before a Subdivide dragged: %zu points vs the CPU's: max %.3g mean %.3g\n", GetParam().c_str(),
+                points.size(), e.max, e.mean);
+    EXPECT_GT(e.count, 1000u);
+    EXPECT_LT(e.max, kPointTolerance);
+    // The release: refined again.
+    committed.setLiveDrag(false);
+    EXPECT_GT(committed.evaluate(view).strands->pointCount(), points.size());
+}
+
 TEST(GpuPreview, SculptsGuidesThroughNodesTheGpuDoesNotRunAreTheCpus) {
     // A Sculpt node's strength drags on the GPU where its guides feed the look's Interpolate as it
     // makes them; through another node (a Noise of the guides) the guides Interpolate takes are not

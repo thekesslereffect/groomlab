@@ -4274,7 +4274,7 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertNotIn("leaf", [s["name"] for s in groomlab.tube_shapes(self.groom)])
             self.assertEqual(groomlab.get_tube(self.groom, guides[0])["shape"], "round")
             self.assertEqual(panel.delete_shape.text(), "Delete")
-            # The panel follows a brush's Shift+click solo (no selection): the soloed guide's tube.
+            # The panel follows a solo (no selection, the rest frozen): the soloed guide's tube.
             groomlab.set_tube(self.groom, guides=[guides[1]], shape="blade")
             groomlab.clear_guide_selection(self.groom)
             groomlab.set_guide_attribute(self.groom, "freeze", 1.0, guides=guides)

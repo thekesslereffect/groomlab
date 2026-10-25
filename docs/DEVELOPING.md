@@ -2604,7 +2604,15 @@ keys on that input alone (its params, salts and externals do not count). A Compo
 keeps a cache of its own as well (`compound.cpp`): each compound input reaches it as an external
 hashed by the value's identity (the compound holds the last evaluation's inputs, so an address
 names one object), so an exposed param tweak or an upstream change re-runs only the inner nodes
-it reaches; a clone or an adopted cache carries the inner cache along (`adoptKeptWork`).
+it reaches; a clone or an adopted cache carries the inner cache along (`adoptKeptWork`). The
+session, though, holds most compounds as their nodes inline (`GraphEdit::flattenCompounds`, as
+Unreal's collapsed graphs and Blender's node groups run): each inner node named by its path
+("compound/inner", the key Cards, Sculpt and Simulate already use), so the CPU, the caches and the
+GPU's preview see one graph and a compound's Noise drags on the GPU like any Noise. What hosts ask
+by a compound's name maps through `GroomSession::flatCompounds` (a view or evaluation of it: its
+output node; a drag of an exposed param: the inner node's param; its time and notes: its nodes'
+summed and joined). A compound that repeats, reads its pass (`iteration`), is bypassed, runs
+viewport- or render-only or has a control keyed on a param stays one Compound, evaluated as above.
 `Graph::lastEvaluationTimes` gives each node's milliseconds in the last evaluation (0 for a cache
 hit: what the graph stats show per evaluation), `lastRunTimes` what each cost when it last ran. A brush stamp bumps
 `brushTick`, which dirties the shape; nodes whose inputs did not change are cache hits.

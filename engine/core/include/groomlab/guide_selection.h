@@ -36,6 +36,12 @@ std::vector<GuideId> guidesInLasso(const GuideHierarchy& h, const std::vector<Gu
 // Projects world points to whole view pixels as a selection tool reads them
 // (ViewProjection::projectPixel: inside the view volume only, truncated, as Maya's worldToView).
 ViewProjector pixelProjector(const ViewProjection& view);
+// What a selection in `view` sees of `scalp` (ScalpVisibility from the view's camera); null
+// without a scalp or a camera.
+std::shared_ptr<const ScalpVisibility> scalpVisibility(const std::shared_ptr<const ScalpMesh>& scalp, const ToolView& view);
+// `project` refusing the points the scalp hides (`occlusion` null: `project` as it is): a pick
+// through it takes only what the view shows, never a guide (or the part of one) behind the head.
+ViewProjector visibleProjector(ViewProjector project, std::shared_ptr<const ScalpVisibility> occlusion);
 
 // The selection tool's pick in a view: with a lasso (3 points or more, spanning more than 3
 // pixels), the candidates with a point inside it (the root only with `rootsOnly`); otherwise a

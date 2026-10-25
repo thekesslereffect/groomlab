@@ -154,8 +154,8 @@ MainWindow::MainWindow() {
         selectMode_->setChecked(mode == Viewport::ToolMode::Select);
         refreshTool();
         if (mode == Viewport::ToolMode::Brush) {
-            notify(tr("Brush: drag to stroke, Ctrl the opposite, Shift smooths, Shift+click a guide solos it (off a guide: "
-                      "unfreeze all); "
+            notify(tr("Brush: drag to stroke, Ctrl the opposite, Shift smooths, Ctrl+Shift+drag paints the "
+                      "selection (Ctrl+Shift+click adds a guide; off a guide: deselect and unfreeze all); "
                       "B+drag (or middle-drag) sets the radius, M+drag the strength; Alt+Shift+X symmetry; Y+click the "
                       "marking menu; Alt orbits; Esc leaves"));
             if (document_) reevaluate();  // warms the stroke document

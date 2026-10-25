@@ -346,9 +346,9 @@ void bindStroke(py::module_& m) {
                     py::gil_scoped_release release;
                     r = t.release(host, view);
                 }
-                return std::string(r == StrokeRelease::Stroke ? "stroke" : r == StrokeRelease::ShiftClick ? "shift_click" : "none");
+                return std::string(r == StrokeRelease::Stroke ? "stroke" : "none");
             },
-            py::arg("host"), py::arg("view"), "'stroke', 'shift_click' (pick_level is the host's next step) or 'none'.")
+            py::arg("host"), py::arg("view"), "'stroke' or 'none'.")
         .def(
             "stroke",
             [](BrushTool& t, SessionStrokeHost& host, const ToolView& view, py::handle points, float pressure, bool ctrl, bool shift) {

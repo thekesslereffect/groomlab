@@ -236,6 +236,14 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
             bDragged_ = bHeld_;
             return;
         }
+        if (event->button() == Qt::LeftButton && event->modifiers().testFlag(Qt::ControlModifier) &&
+            event->modifiers().testFlag(Qt::ShiftModifier)) {
+            // Ctrl+Shift: selecting guides without leaving the brush (a drag paints them in with the
+            // ring, a click toggles one).
+            drag_ = Drag::Paint;
+            paintMoved_ = false;
+            return;
+        }
         if (event->button() == Qt::LeftButton) {
             drag_ = Drag::Stroke;
             if (!session_->press(event->position(), pressure(), strokeModifiers(event))) {
@@ -324,6 +332,21 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
             session_->showBox(pressAt_, event->position());
             refreshOverlay();
             break;
+        case Drag::Paint: {
+            if (!session_) break;
+            syncView();
+            // Once it moves it paints (from the press on): the guides under the ring join the selection.
+            std::size_t painted = 0;
+            if (!paintMoved_ && (event->position() - pressAt_).manhattanLength() >= 4.0) {
+                paintMoved_ = true;
+                painted += session_->paintSelection(pressAt_);
+            }
+            if (paintMoved_) painted += session_->paintSelection(event->position());
+            session_->hover(event->position());
+            refreshOverlay();
+            if (painted) emit selectionChanged();  // the guides drawn as selected now
+            break;
+        }
         case Drag::None:
         case Drag::Menu:
             break;
@@ -347,9 +370,6 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
             emit strokeReleasing();
             const StrokeRelease released = session_->release();
             if (!session_->lastError().empty()) emit message(QString::fromStdString(session_->lastError()));
-            if (released == StrokeRelease::ShiftClick) {
-                if (session_->pickLevel(event->position()) != -2) emit brushSettingsChanged();
-            }
             for (const std::string& warning : session_->takeWarnings()) emit message(QString::fromStdString(warning));
             session_->hover(event->position());
             refreshOverlay();
@@ -367,6 +387,19 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
             emit selectionChanged();
             break;
         }
+        case Drag::Paint:
+            syncView();
+            if (paintMoved_) {
+                session_->soloSelection();  // the rest frozen, one undo step (the Select tool's solo)
+            } else if (session_->select({event->position()}, SelectMode::Add, true) == 0) {
+                // A click: the guide under it added, the rest frozen; on none, nothing selected and
+                // every guide unfrozen.
+                session_->select({event->position()}, SelectMode::Replace, true);
+            }
+            session_->hover(event->position());
+            refreshOverlay();
+            emit selectionChanged();
+            break;
         case Drag::Radius:
         case Drag::Strength:
             emit brushSettingsChanged();

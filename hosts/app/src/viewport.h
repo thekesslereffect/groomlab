@@ -12,7 +12,7 @@
 // held: a left drag sets the strength (brush mode too), Y held: a left press opens the marking
 // menu (markingMenuPressed; the drag and the release go to it), S select mode, Escape the camera. Alt with any button is always the camera (Maya's); without
 // Alt the plain buttons orbit, pan and dolly in camera mode. In brush mode a left drag strokes
-// (Ctrl: the opposite, Shift: smooth, Shift+click: solo the guide and pick its level), the middle button sets the
+// (Ctrl: the opposite, Shift: smooth, Ctrl+Shift: paint the selection, a click adding a guide), the middle button sets the
 // radius (Shift: the strength), the right orbits; in select mode a left click or box picks
 // (Shift: toggle, Ctrl: deselect, Ctrl+Shift: add). A pen's pressure (QTabletEvent) scales the
 // stroke.
@@ -83,9 +83,8 @@ signals:
     void strokeReleasing();
     // A stroke's press or drag changed the session's preview: the host evaluates and redraws.
     void strokeDabbed();
-    // A stroke ended (committed when it changed something, which the host shows); a level was
-    // picked (Shift+click: the brush's level and group changed); the radius or strength was
-    // dragged; the selection changed.
+    // A stroke ended (committed when it changed something, which the host shows); the brush's
+    // settings changed (the radius or strength dragged); the selection changed.
     void strokeEnded();
     void brushSettingsChanged();
     void selectionChanged();
@@ -114,7 +113,7 @@ protected:
     void leaveEvent(QEvent* event) override;
 
 private:
-    enum class Drag { None, Orbit, Pan, Dolly, Stroke, Radius, Strength, Box, Menu };
+    enum class Drag { None, Orbit, Pan, Dolly, Stroke, Radius, Strength, Box, Paint, Menu };
     void cameraMoved();
     bool cameraPress(QMouseEvent* event, bool alt);  // the camera's buttons; false: not a camera drag
     float pressure() const;
@@ -125,6 +124,7 @@ private:
     Drag drag_ = Drag::None;
     QPoint last_;
     QPointF pressAt_;
+    bool paintMoved_ = false;  // a brush's Ctrl+Shift drag (Drag::Paint) moved: it paints (else a click)
     float dragStart_ = 0.0f;  // the radius or strength when its drag started
     bool bHeld_ = false;      // B is down: a left drag sizes the brush
     bool bDragged_ = false;   // ... and did, so releasing B keeps the mode

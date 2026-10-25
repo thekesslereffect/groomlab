@@ -13,6 +13,23 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.32.0 (October 25, 2026)
+
+- **Select guides without leaving the brush.** **Ctrl+Shift+drag** paints guides into the
+  selection with the brush ring, live, and when you let go every guide not selected freezes, so
+  the brush works on just your selection (one undo step). **Ctrl+Shift+click** adds one guide;
+  **Ctrl+Shift+click** off a guide deselects and unfreezes all. Selection only takes guides you
+  can see: nothing behind the head.
+- **Changed: Shift+click no longer solos.** Shift is smoothing alone (Shift+drag); selecting is
+  Ctrl+Shift in every host, as above.
+- **Compounds preview on the GPU.** A compound is a grouping, as in Unreal and Blender: its nodes
+  now run as if they sat in the graph, so dragging a compound's parameters (Soft Frizz,
+  Windswept Ends, Grey Streaks, your own) previews on the GPU, and so do the nodes above it.
+  Saved grooms and the Graph Editor are unchanged.
+- **Drags stay on the GPU past a Subdivide.** With Subdivide at the end of the graph, a drag
+  previews unsmoothed on the GPU and the release smooths again (before, every drag fell back to
+  the CPU).
+
 ## 0.31.2 (October 25, 2026)
 
 - **Fixed: stair-stepped strands in card bakes.** On wide cards that bend, baked strands ran in

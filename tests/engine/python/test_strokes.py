@@ -117,14 +117,15 @@ class ScreenStrokeTest(unittest.TestCase):
         view = front_view()
         tool = gl.BrushTool(mode="comb", screen_radius=60.0, level=-1)
         hierarchy = session.hierarchy()
-        # The tip of a child guide: hovering there lights guides; Shift+click picks its level.
+        # The tip of a child guide: hovering there lights guides; pick_level picks its level (a
+        # Shift+click alone does nothing).
         children = hierarchy.find_group("children")
         tip = hierarchy.guide_points(hierarchy.guides_in_group(children)[0])[-1]
         x, y = view.project(tip)
         self.assertTrue(tool.affected_lines(host, view, x, y))
         self.assertEqual(tool.affected_lines(host, view, 2, 2), [])
         tool.press(host, view, x, y, shift=True)
-        self.assertEqual(tool.release(host, view), "shift_click")
+        self.assertEqual(tool.release(host, view), "none")
         self.assertIn(tool.pick_level(host, view, x, y), (0, 1))
         self.assertEqual(tool.settings.level, hierarchy.group_depth(hierarchy.find_group(tool.settings.group)))
         self.assertEqual(tool.pick_level(host, view, 2, 2), -2)

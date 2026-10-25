@@ -214,14 +214,14 @@ std::string GroomStats::toJson() const {
 // ---- Construction and stored inputs -------------------------------------------------------------
 
 GroomSession::GroomSession() {
-    parsed_ = std::make_unique<GraphDocument>(loadGraphJson(data_.graphJson));
+    parsed_ = parseScaled(data_.graphJson, &flat_);
     doc_ = std::make_unique<GraphDocument>(parsed_->clone());
     graphSet_ = true;
 }
 
 GroomSession::GroomSession(GroomData data) : data_(std::move(data)) {
     // Every text parses or the session is not made (the parsers' own messages).
-    parsed_ = std::make_unique<GraphDocument>(loadGraphJson(data_.graphJson));  // as stored: its errors are its own
+    parsed_ = parseScaled(data_.graphJson, &flat_);  // as stored: its errors are its own
     doc_ = std::make_unique<GraphDocument>(parsed_->clone());
     graphSet_ = true;
     if (!blank(data_.hierarchyJson)) {
@@ -264,15 +264,63 @@ void GroomSession::setScalpFingerprint(std::uint64_t fingerprint) {
     fingerprintKey_ = 0;
 }
 
-std::unique_ptr<GraphDocument> GroomSession::parseScaled(const std::string& graphJson) const {
-    if (groomScale_ == 1.0) return std::make_unique<GraphDocument>(loadGraphJson(graphJson));
+namespace {
+
+// A graph's text with its compounds as their nodes inline (GraphEdit::flattenCompounds); the text
+// as it is when none flattens or it does not edit (it then loads, or fails to, as stored).
+std::string flattened(const std::string& graphJson, GraphEdit::FlatCompounds* flat) {
+    *flat = {};
+    try {
+        GraphEdit edit(graphJson);
+        GraphEdit::FlatCompounds made = edit.flattenCompounds();
+        if (made.output.empty()) return graphJson;
+        std::string text = edit.toJson();
+        loadGraphJson(text);  // (it loads, or the graph is taken as it is)
+        *flat = std::move(made);
+        return text;
+    } catch (const std::exception&) {
+        return graphJson;
+    }
+}
+
+// Its compounds' entries as hosts know them (each compound one node, its nodes inline): each its
+// nodes' times summed (a compound inside it counted by its nodes), their notes joined.
+void foldCompoundTimes(const GraphEdit::FlatCompounds& flat, std::map<std::string, double>& times) {
+    std::map<std::string, double> sums;
+    for (const auto& [compound, output] : flat.output) {
+        const std::string prefix = compound + "/";
+        for (const auto& [name, ms] : times) {
+            if (name.rfind(prefix, 0) == 0 && !flat.output.count(name)) sums[compound] += ms;
+        }
+    }
+    for (const auto& [compound, ms] : sums) times[compound] = ms;
+}
+void foldCompoundNotes(const GraphEdit::FlatCompounds& flat, std::map<std::string, std::string>& notes) {
+    std::map<std::string, std::string> joined;
+    for (const auto& [compound, output] : flat.output) {
+        const std::string prefix = compound + "/";
+        for (const auto& [name, note] : notes) {
+            if (name.rfind(prefix, 0) != 0 || flat.output.count(name)) continue;
+            std::string& j = joined[compound];
+            j += (j.empty() ? "" : "\n") + name.substr(prefix.size()) + ": " + note;
+        }
+    }
+    for (const auto& [compound, note] : joined) notes[compound] = note;
+}
+
+}  // namespace
+
+std::unique_ptr<GraphDocument> GroomSession::parseScaled(const std::string& graphJson, GraphEdit::FlatCompounds* flat) const {
+    if (groomScale_ == 1.0) return std::make_unique<GraphDocument>(loadGraphJson(flattened(graphJson, flat)));
     loadGraphJson(graphJson);  // a graph that does not load says why as it is stored, not scaled
-    return std::make_unique<GraphDocument>(loadGraphJson(scaleGraphJson(graphJson, groomScale_)));
+    return std::make_unique<GraphDocument>(loadGraphJson(flattened(scaleGraphJson(graphJson, groomScale_), flat)));
 }
 
 void GroomSession::setGraphJson(const std::string& graphJson) {
     if (graphSet_ && graphJson == data_.graphJson) return;
-    installGraph(parseScaled(graphJson));  // throws before anything changes
+    GraphEdit::FlatCompounds flat;
+    installGraph(parseScaled(graphJson, &flat));  // throws before anything changes
+    flat_ = std::move(flat);
     controlFactors_ = controlScaleFactors(graphJson, groomScale_);
     data_.graphJson = graphJson;
     graphSet_ = true;
@@ -394,7 +442,9 @@ void GroomSession::refreshScale() {
     controlFactors_ = controlScaleFactors(data_.graphJson, k);
     if (parsed_ && graphError_.empty()) {
         try {
-            installGraph(parseScaled(data_.graphJson));
+            GraphEdit::FlatCompounds flat;
+            installGraph(parseScaled(data_.graphJson, &flat));
+            flat_ = std::move(flat);
         } catch (const std::exception&) {
             // It loaded at the last k: the scaled text loads too (only numbers change).
         }
@@ -1477,6 +1527,7 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
     ctx.framesPerSecond = fps_;
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
+    ctx.liveDrag = liveDrag_;
     ctx.externals = &externals;
     ctx.paths = paths();
     ctx.buildCards = request.buildCards;
@@ -1499,7 +1550,7 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
     out.follow.reset();
     NodeId stopAt = 0;
     if (viewed && !request.stopAt.empty()) {
-        const auto it = viewed->nodesByName.find(request.stopAt);
+        const auto it = viewed->nodesByName.find(flat_.result(request.stopAt));
         if (it != viewed->nodesByName.end()) stopAt = it->second;
     }
     if (stopAt) {
@@ -1525,7 +1576,7 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
             out.viewedNode.clear();
             out.viewedRoots = false;
             NodeId centersOf = 0;  // a Clump viewed: its centers draw as dots
-            const auto it = viewed->nodesByName.find(request.viewNode);
+            const auto it = viewed->nodesByName.find(flat_.result(request.viewNode));
             if (!request.viewNode.empty() && it != viewed->nodesByName.end() &&
                 viewed->graph.outputType(it->second) == PortType::Strands) {  // as connected (shaping nodes)
                 shown = it->second;
@@ -1828,7 +1879,7 @@ Value GroomSession::evaluateNode(const std::string& name, float density, double 
     // evaluation makes never evicts them.
     GraphDocument scratch = parsed_->clone();  // the graph as parsed (no second parse)
     scratch.graph.adoptCache(doc_->graph);
-    const NodeId id = name.empty() ? scratch.output : scratch.node(name);  // throws GraphError when there is no such node
+    const NodeId id = name.empty() ? scratch.output : scratch.node(flat_.result(name));  // throws GraphError when there is no such node
     ExternalInputs externals;
     fillExternals(externals);
     EvalContext ctx;
@@ -1960,11 +2011,12 @@ bool GroomSession::warmStroke(const ViewRequest& request) {
     ctx.framesPerSecond = fps_;
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
+    ctx.liveDrag = liveDrag_;
     ctx.externals = &externals;
     ctx.paths = paths();
     // The node a stroke would show (the view's node, as evaluate picks it).
     NodeId shown = sculptDoc_->output;
-    const auto it = sculptDoc_->nodesByName.find(request.viewNode);
+    const auto it = sculptDoc_->nodesByName.find(flat_.result(request.viewNode));
     if (!request.viewNode.empty() && it != sculptDoc_->nodesByName.end() &&
         sculptDoc_->graph.outputType(it->second) == PortType::Strands) {
         shown = it->second;
@@ -1998,11 +2050,12 @@ std::shared_ptr<DetachedEvaluation> GroomSession::detachWarm(const ViewRequest& 
     ctx.framesPerSecond = fps_;
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
+    ctx.liveDrag = liveDrag_;
     ctx.externals = &job->externals_;
     ctx.paths = job->paths_.get();
-    const auto it = sculptDoc_->nodesByName.find(request.viewNode);
+    const auto it = sculptDoc_->nodesByName.find(flat_.result(request.viewNode));
     if (!request.viewNode.empty() && it != sculptDoc_->nodesByName.end() && sculptDoc_->graph.outputType(it->second) == PortType::Strands) {
-        job->shown_ = request.viewNode;
+        job->shown_ = flat_.result(request.viewNode);
     }
     job->request_ = request;
     job->doc_ = std::make_unique<GraphDocument>(sculptDoc_->clone());
@@ -2063,12 +2116,13 @@ std::shared_ptr<DetachedEvaluation> GroomSession::detachStroke(const ViewRequest
     ctx.framesPerSecond = fps_;
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
+    ctx.liveDrag = liveDrag_;
     ctx.externals = &job->externals_;
     ctx.paths = job->paths_.get();
     ctx.buildCards = request.buildCards;
-    const auto it = sculptDoc_->nodesByName.find(request.viewNode);
+    const auto it = sculptDoc_->nodesByName.find(flat_.result(request.viewNode));
     if (!request.viewNode.empty() && it != sculptDoc_->nodesByName.end() && sculptDoc_->graph.outputType(it->second) == PortType::Strands) {
-        job->shown_ = request.viewNode;
+        job->shown_ = flat_.result(request.viewNode);
     }
     job->request_ = request;
     job->doc_ = std::move(sculptDoc_);  // lent, not copied: nothing else evaluates it until adopted
@@ -2112,13 +2166,14 @@ std::shared_ptr<DetachedEvaluation> GroomSession::detach(const ViewRequest& requ
     ctx.framesPerSecond = fps_;
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.viewport = request.viewport;
+    ctx.liveDrag = liveDrag_;
     ctx.externals = &job->externals_;
     ctx.paths = job->paths_.get();
     ctx.buildCards = request.buildCards;
     // The node shown, as evaluate picks it.
-    const auto it = doc_->nodesByName.find(request.viewNode);
+    const auto it = doc_->nodesByName.find(flat_.result(request.viewNode));
     if (!request.viewNode.empty() && it != doc_->nodesByName.end() && doc_->graph.outputType(it->second) == PortType::Strands) {
-        job->shown_ = request.viewNode;
+        job->shown_ = flat_.result(request.viewNode);
     }
     job->request_ = request;
     if (after) {
@@ -2178,7 +2233,7 @@ int GroomSession::scalpHistoryFrames(const std::string& viewNode) const {
     if (!doc_) return 0;
     int frames = groomlab::scalpHistoryFrames(doc_->graph, doc_->output);
     if (!viewNode.empty()) {
-        const auto viewed = doc_->nodesByName.find(viewNode);
+        const auto viewed = doc_->nodesByName.find(flat_.result(viewNode));
         if (viewed != doc_->nodesByName.end()) frames = std::max(frames, groomlab::scalpHistoryFrames(doc_->graph, viewed->second));
     }
     return frames;
@@ -2190,7 +2245,7 @@ std::vector<double> GroomSession::scalpHistoryLoopFrames(double now, const std::
     const int plain = scalpHistoryFrames(viewNode);
     std::vector<double> frames = groomlab::scalpHistoryLoopFrames(doc_->graph, doc_->output, now);
     if (!viewNode.empty()) {
-        const auto viewed = doc_->nodesByName.find(viewNode);
+        const auto viewed = doc_->nodesByName.find(flat_.result(viewNode));
         if (viewed != doc_->nodesByName.end()) {
             const std::vector<double> more = groomlab::scalpHistoryLoopFrames(doc_->graph, viewed->second, now);
             frames.insert(frames.end(), more.begin(), more.end());
@@ -2455,6 +2510,17 @@ GroomStats GroomSession::stats() const {
             std::vector<std::string> names;
             if (doc.graph.cachedChannels(id, &names)) out.channels[name] = std::move(names);
         }
+        // Each compound as the one node hosts show (its nodes inline): their times summed, how
+        // the last of them ran, their notes, its output node's channels.
+        foldCompoundTimes(flat_, out.times);
+        foldCompoundNotes(flat_, out.notes);
+        for (const auto& [compound, output] : flat_.output) {
+            const std::string prefix = compound + "/";
+            for (const auto& [name, run] : std::map<std::string, std::string>(out.runs)) {
+                if (name.rfind(prefix, 0) == 0 && (!out.runs.count(compound) || run != "cached")) out.runs[compound] = run;
+            }
+            if (const auto c = out.channels.find(flat_.result(compound)); c != out.channels.end()) out.channels[compound] = c->second;
+        }
     }
     out.scalpHistoryFrames = scalpHistoryFrames(v.viewedNode);
     // The instances whose strand the view has (what resolve would place), counted without placing them.
@@ -2481,14 +2547,27 @@ GroomStats GroomSession::stats() const {
     return out;
 }
 
+bool GroomSession::viewRefinesStrands() const {
+    if (!doc_) return false;
+    bool refines = false;
+    doc_->graph.forEachActiveUpstream(doc_->output, [&](const std::string&, const Operator& op) {
+        refines = refines || (op.typeName() == op::kSubdivide && op.params().getInt("viewportLevels") > 0);
+        return !refines;
+    });
+    return refines;
+}
+
 std::vector<std::pair<std::string, double>> GroomSession::nodeTimes() const {
     std::vector<std::pair<std::string, double>> out;
     if (!doc_) return out;
     const auto& times = viewDoc()->graph.lastEvaluationTimes();
+    std::map<std::string, double> byName;
     for (const auto& [name, id] : doc_->nodesByName) {
         auto it = times.find(id);
-        if (it != times.end()) out.emplace_back(name, it->second);
+        if (it != times.end()) byName[name] = it->second;
     }
+    foldCompoundTimes(flat_, byName);
+    out.assign(byName.begin(), byName.end());
     return out;
 }
 
@@ -2496,10 +2575,13 @@ std::vector<std::pair<std::string, std::string>> GroomSession::nodeNotes() const
     std::vector<std::pair<std::string, std::string>> out;
     if (!doc_) return out;
     const auto& notes = viewDoc()->graph.lastNotes();
+    std::map<std::string, std::string> byName;
     for (const auto& [name, id] : doc_->nodesByName) {
         auto it = notes.find(id);
-        if (it != notes.end()) out.emplace_back(name, it->second);
+        if (it != notes.end()) byName[name] = it->second;
     }
+    foldCompoundNotes(flat_, byName);
+    out.assign(byName.begin(), byName.end());
     return out;
 }
 
@@ -2583,7 +2665,7 @@ std::vector<std::pair<std::string, NodeId>> GroomSession::simulateNodeIds(const 
         return reached;
     };
     std::set<NodeId> reached = upstream(doc_->output);
-    const auto viewed = doc_->nodesByName.find(viewNode);
+    const auto viewed = doc_->nodesByName.find(flat_.result(viewNode));
     if (!viewNode.empty() && viewed != doc_->nodesByName.end()) {
         const std::set<NodeId> more = upstream(viewed->second);
         reached.insert(more.begin(), more.end());

@@ -1983,6 +1983,14 @@ TEST(Subdivide, SmoothStrandsThroughTheirPointsAtTheRendersLevels) {
     EvalContext viewport;
     viewport.viewport = true;
     EXPECT_EQ(valueAs<StrandsPtr>(op->evaluate(viewport, {StrandsPtr(s)}))->strandPointCount(0), 9u);
+    // A host's live drag in the viewport: handed on as they came (the GPU runs the nodes before),
+    // keyed apart from the refined result; a render refines all the same.
+    EvalContext dragging = viewport;
+    dragging.liveDrag = true;
+    EXPECT_EQ(valueAs<StrandsPtr>(op->evaluate(dragging, {StrandsPtr(s)})), StrandsPtr(s));
+    EXPECT_NE(op->contextSalt(dragging), op->contextSalt(viewport));
+    render.liveDrag = true;
+    EXPECT_EQ(valueAs<StrandsPtr>(op->evaluate(render, {StrandsPtr(s)}))->strandPointCount(0), 17u);
     op->params().set("viewportLevels", std::int64_t{0});
     EXPECT_EQ(valueAs<StrandsPtr>(op->evaluate(viewport, {StrandsPtr(s)})), StrandsPtr(s));
 }
