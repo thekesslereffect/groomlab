@@ -148,6 +148,28 @@ public:
     // that is not a Compound or a definition that cannot be expanded (an unknown type, no output
     // node inside, a link that fits nothing).
     std::vector<std::string> expand(const std::string& compound);
+    // Where a flattened compound's parts went (flattenCompounds): its output node's path, and each
+    // exposed param's inner node and param, by the compound's path (a compound inside another
+    // by its path too: "outer/inner").
+    struct FlatCompounds {
+        std::map<std::string, std::string> output;                              // compound -> its output node
+        std::map<std::string, std::map<std::string, std::pair<std::string, std::string>>> exposed;  // compound -> param -> (node, param)
+        // The node and param a compound's exposed param sets (followed into compounds inside),
+        // else the node and param given.
+        std::pair<std::string, std::string> param(const std::string& node, const std::string& name) const;
+        // The node whose result a compound gives, else the node given.
+        std::string result(const std::string& node) const;
+    };
+    // Every compound evaluated as the nodes it holds, inline (GroomSession: the CPU, the GPU's
+    // preview and the caches see one graph, as Unreal's collapsed graphs and Blender's node groups
+    // run): each Compound replaced by its nodes as expand does, each named by its path
+    // ("compound/inner", the path compounds give their nodes: Cards, Sculpt and Simulate key by
+    // it), compounds inside them too. Left as they are: a compound running its nodes more than
+    // once (repeat) or reading its pass (an Input named "iteration"), one bypassed (it hands its
+    // input on, as its nodes would not), one with a
+    // control keyed on a param, and one that cannot be expanded (a library node's copy that cannot
+    // run). Returns where the flattened compounds' parts went.
+    FlatCompounds flattenCompounds();
 
     // The node paths this edit's renames, groups and ungroups moved, in order (old -> new; a node
     // inside a compound by its path, "compound/inner"): a rename moves the node, Group moves each

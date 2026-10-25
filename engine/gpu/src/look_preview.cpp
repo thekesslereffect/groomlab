@@ -52,9 +52,19 @@ bool strokeShapesGuides(const GroomSession& session) {
     return session.previewHierarchy() != nullptr || (session.hasPreviewSculpt() && !session.hasPreviewOverlays());
 }
 
-bool LookPreview::plan(const GroomSession& session, const Shown& shown, const Overrides& overrides, const LookStart& start,
+bool LookPreview::plan(const GroomSession& session, const Shown& shown, const Overrides& asked, const LookStart& start,
                        LookPlan* out, std::string* why) {
     const bool stroke = start.from == LookStart::From::Interpolate;
+    // A compound's exposed params dragged: the inner nodes' params they set (the session holds a
+    // compound as its nodes inline, GraphEdit::flattenCompounds).
+    const GraphEdit::FlatCompounds& flat = session.flatCompounds();
+    Overrides overrides;
+    for (const auto& [node, params] : asked) {
+        for (const auto& [param, value] : params) {
+            const auto [inner, innerParam] = flat.param(node, param);
+            overrides[inner][innerParam] = value;
+        }
+    }
     if (!stroke && session.hasPreview()) {
         *why = "a brush stroke is live";
         return false;
@@ -107,6 +117,12 @@ bool LookPreview::plan(const GroomSession& session, const Shown& shown, const Ov
         } else {
             const auto it = doc->nodesByName.find(start.node);
             first = it == doc->nodesByName.end() ? kNoStage : full.indexOf(it->second);
+            if (first == kNoStage && flat.output.count(start.node)) {  // a compound: from its first node the GPU runs
+                const std::string prefix = start.node + "/";
+                for (std::size_t k = 0; k < full.stages.size() && first == kNoStage; ++k) {
+                    if (doc->nameOf(full.stages[k].node).rfind(prefix, 0) == 0) first = k;
+                }
+            }
         }
     } else {
         first = firstOverridden(*doc, full, own);

@@ -299,4 +299,89 @@ std::vector<std::string> GraphEdit::expand(const std::string& compound) {
     return made;
 }
 
+std::pair<std::string, std::string> GraphEdit::FlatCompounds::param(const std::string& node, const std::string& name) const {
+    std::pair<std::string, std::string> at{node, name};
+    for (int guard = 0; guard < 16; ++guard) {  // (a compound inside a compound: its exposed param in turn)
+        const auto c = exposed.find(at.first);
+        if (c == exposed.end()) break;
+        const auto p = c->second.find(at.second);
+        if (p == c->second.end()) break;
+        at = p->second;
+    }
+    return at;
+}
+
+std::string GraphEdit::FlatCompounds::result(const std::string& node) const {
+    std::string at = node;
+    for (int guard = 0; guard < 16; ++guard) {
+        const auto o = output.find(at);
+        if (o == output.end()) break;
+        at = o->second;
+    }
+    return at;
+}
+
+GraphEdit::FlatCompounds GraphEdit::flattenCompounds() {
+    FlatCompounds flat;
+    std::set<std::string> kept;  // compounds left as they are
+    for (int guard = 0; guard < 4096; ++guard) {
+        // The next compound to flatten (the outer ones first: those inside come out with them).
+        const json graph = json::parse(toJson());
+        const json* next = nullptr;
+        for (const json& n : arrayOf(graph, "nodes")) {
+            if (!n.is_object() || str(n, "type") != "Compound" || kept.count(str(n, "name"))) continue;
+            const json params = n.value("params", json::object());
+            const bool repeats = params.is_object() && params.contains("repeat") && params["repeat"].is_number() &&
+                                 params["repeat"].get<double>() != 1.0;
+            const bool sometimes = n.contains("evaluation") && n["evaluation"] != "always";
+            // (Its pass, read through an Input named "iteration": the compound's to give.)
+            bool counts = false;
+            const json innerGraph = definitionOf(n).value("graph", json::object());
+            for (const json& i : arrayOf(innerGraph, "nodes")) {
+                const json ip = i.value("params", json::object());
+                counts = counts || (str(i, "type") == "Input" && ip.is_object() && ip.value("name", std::string()) == "iteration");
+            }
+            if (repeats || sometimes || counts || n.value("bypass", false) || n.contains("paramControls")) {
+                kept.insert(str(n, "name"));
+                continue;
+            }
+            next = &n;
+            break;
+        }
+        if (!next) break;
+        const std::string compound = str(*next, "name");
+        const json definition = definitionOf(*next);
+        const json inner = definition.value("graph", json::object());
+        std::vector<std::string> names;  // the inner nodes Ungroup makes, in its order
+        for (const json& n : arrayOf(inner, "nodes")) {
+            if (str(n, "type") != "Input") names.push_back(str(n, "name"));
+        }
+        std::vector<std::string> made;
+        try {
+            made = expand(compound);
+        } catch (const GraphError&) {
+            kept.insert(compound);  // (a library node's copy that cannot run: it hands its input on, as itself)
+            continue;
+        }
+        if (made.size() != names.size()) throw GraphError("flattening " + compound + ": its nodes came out " + std::to_string(made.size()));
+        // Each by its path, as the compound named it.
+        for (std::size_t i = 0; i < made.size(); ++i) {
+            const std::string path = compound + "/" + names[i];
+            if (made[i] != path) renameNode(made[i], path);
+        }
+        flat.output[compound] = compound + "/" + str(inner, "output");
+        const json expose = definition.value("expose", json::object());
+        if (expose.is_object()) {
+            for (const auto& [name, target] : expose.items()) {
+                if (!target.is_string()) continue;
+                const std::string t = target.get<std::string>();
+                const std::size_t dot = t.find('.');
+                if (dot == std::string::npos) continue;
+                flat.exposed[compound][name] = {compound + "/" + t.substr(0, dot), t.substr(dot + 1)};
+            }
+        }
+    }
+    return flat;
+}
+
 }  // namespace groomlab

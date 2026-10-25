@@ -126,13 +126,29 @@ const Fixtures& fixtures() {
                 groom.evaluate(kDensity, 0.0);
                 const GraphDocument* doc = groom.viewDocument();
                 if (!doc) continue;
+                // The preset's own nodes, by name: its compounds' nodes (held inline by their
+                // paths) are the compounds' business, not fixtures here; what a compound gives is
+                // pooled, under the compound's name.
+                std::map<std::string, std::pair<std::string, NodeId>> nodes;  // name as the graph has it -> (name, node)
                 for (const auto& [name, id] : doc->nodesByName) {
+                    if (name.find('/') == std::string::npos) nodes[name] = {name, id};
+                }
+                for (const auto& [compound, inner] : groom.flatCompounds().output) {
+                    if (compound.find('/') == std::string::npos && doc->nodesByName.count(groom.flatCompounds().result(compound))) {
+                        const std::string result = groom.flatCompounds().result(compound);
+                        nodes[compound] = {result, doc->nodesByName.at(result)};
+                    }
+                }
+                for (const auto& [shown, at] : nodes) {
+                    const auto& [name, id] = at;
+                    const bool inner = name.find('/') != std::string::npos;
                     const Operator& op = doc->graph.node(id);
                     const std::vector<PortSpec> outs = op.outputs();
                     for (std::size_t o = 0; o < outs.size(); ++o) {
                         const Value v = doc->graph.cachedValue(id, o);
                         if (v.index() != 0) out.pool[outs[o].type].push_back(v);
                     }
+                    if (inner) continue;
                     std::vector<Instance>& list = out.byType[op.typeName()];
                     if (list.size() >= kInstancesPerType) continue;
                     Instance inst{p.name + "/" + name, doc->graph.storedParams(id), op.nodeVersion(), op.nodePath(), {}};
@@ -145,6 +161,29 @@ const Fixtures& fixtures() {
                             continue;
                         }
                         inst.inputs.push_back(doc->graph.cachedValue(src, output));
+                        complete = complete && inst.inputs.back().index() != 0;
+                    }
+                    if (complete) list.push_back(std::move(inst));
+                }
+                // The compounds, which the session holds as their nodes inline: each as the
+                // graph stores it, taking what feeds it there (the graph's own nodes keep their names).
+                const GraphDocument stored = loadGraphJson(data.graphJson);
+                for (const auto& [name, id] : stored.nodesByName) {
+                    const Operator& op = stored.graph.node(id);
+                    if (op.typeName() != op::kCompound) continue;
+                    std::vector<Instance>& list = out.byType[op.typeName()];
+                    if (list.size() >= kInstancesPerType) continue;
+                    Instance inst{p.name + "/" + name, stored.graph.storedParams(id), op.nodeVersion(), op.nodePath(), {}};
+                    bool complete = true;
+                    for (std::size_t slot = 0; slot < op.inputs().size(); ++slot) {
+                        NodeId src = 0;
+                        std::size_t output = 0;
+                        if (!stored.graph.inputSource(id, slot, &src, &output)) {
+                            inst.inputs.emplace_back();
+                            continue;
+                        }
+                        const auto from = doc->nodesByName.find(groom.flatCompounds().result(stored.nameOf(src)));
+                        inst.inputs.push_back(from == doc->nodesByName.end() ? Value{} : doc->graph.cachedValue(from->second, output));
                         complete = complete && inst.inputs.back().index() != 0;
                     }
                     if (complete) list.push_back(std::move(inst));

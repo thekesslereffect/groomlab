@@ -374,6 +374,58 @@ TEST(Compound, KeysOnTheContextItsInnerNodesRead) {
 // Group and Ungroup as every host's editor does them (GraphEdit::collapse, expand): links from
 // outside become the compound's inputs (strands, a Field into an exposed param, a Value into one),
 // the same groom evaluates, and expanding gives every node, field and link back.
+TEST(Compound, TheSessionHoldsACompoundAsItsNodesInline) {
+    // Flattened: the compound's nodes by their paths, its exposed values on them; where its
+    // output and exposed params went (a compound inside another followed through).
+    GraphEdit edit(compoundGraph({{"amount", 0.2}}).dump());
+    const GraphEdit::FlatCompounds flat = edit.flattenCompounds();
+    const json g = json::parse(edit.toJson());
+    std::map<std::string, json> nodes;
+    for (const json& n : g["nodes"]) nodes[n["name"].get<std::string>()] = n;
+    EXPECT_FALSE(nodes.count("frizzy"));
+    ASSERT_TRUE(nodes.count("frizzy/noise") && nodes.count("frizzy/curl"));
+    EXPECT_DOUBLE_EQ(nodes["frizzy/noise"]["params"]["amplitude"].get<double>(), 0.2);
+    EXPECT_EQ(flat.result("frizzy"), "frizzy/curl");
+    EXPECT_EQ(flat.param("frizzy", "amount"), std::make_pair(std::string("frizzy/noise"), std::string("amplitude")));
+    EXPECT_EQ(flat.param("scatter", "density"), std::make_pair(std::string("scatter"), std::string("density")));
+    json outer = baseGraph();
+    json inner = compoundGraph(json::object());
+    json wrapped = json::parse(R"j({"graph": {"version": 1, "output": "frizzy",
+        "nodes": [{"name": "in", "type": "Input", "params": {"name": "strands", "type": "Strands"}}],
+        "connections": [{"from": "in", "to": "frizzy", "input": "strands"}]},
+      "inputs": [{"name": "strands", "type": "Strands"}], "expose": {"amt": "frizzy.amount"}})j");
+    wrapped["graph"]["nodes"].push_back({{"name", "frizzy"}, {"type", "Compound"}, {"params", {{"definition", frizzyDefinition()}}}});
+    outer["nodes"].push_back({{"name", "outer"}, {"type", "Compound"}, {"params", {{"definition", wrapped}, {"amt", 0.3}}}});
+    outer["connections"].push_back({{"from", "scatter"}, {"to", "outer"}, {"input", "strands"}});
+    outer["connections"].push_back({{"from", "outer"}, {"to", "out"}, {"input", "strands"}});
+    GraphEdit nested(outer.dump());
+    const GraphEdit::FlatCompounds two = nested.flattenCompounds();
+    EXPECT_EQ(two.result("outer"), "outer/frizzy/curl");
+    EXPECT_EQ(two.param("outer", "amt"), std::make_pair(std::string("outer/frizzy/noise"), std::string("amplitude")));
+    EXPECT_EQ(eval(outer.dump())->positions(), eval(compoundGraph({{"amount", 0.3}}).dump())->positions());
+    // A compound running its nodes again (repeat) stays one.
+    GraphEdit repeated(compoundGraph({{"repeat", 2}}).dump());
+    EXPECT_TRUE(repeated.flattenCompounds().output.empty());
+    EXPECT_TRUE(repeated.hasNode("frizzy"));
+
+    // The session: what it is asked of the compound by name (its result, its time, a view of
+    // it), answered by its nodes.
+    GroomData d;
+    d.scalp = test::makeSphere(12, 24, 1.0f);
+    d.graphJson = compoundGraph({{"amount", 0.2}}).dump();
+    GroomSession session(d);
+    const StrandsPtr out = session.evaluate(1.0f, 0.0);
+    EXPECT_EQ(session.flatCompounds().result("frizzy"), "frizzy/curl");
+    EXPECT_EQ(valueAs<StrandsPtr>(session.evaluateNode("frizzy", 1.0f, 0.0))->positions(), out->positions());
+    std::map<std::string, double> times;
+    for (const auto& [name, ms] : session.nodeTimes()) times[name] = ms;
+    ASSERT_TRUE(times.count("frizzy") && times.count("frizzy/noise") && times.count("frizzy/curl"));
+    EXPECT_DOUBLE_EQ(times["frizzy"], times["frizzy/noise"] + times["frizzy/curl"]);
+    ViewRequest viewed;
+    viewed.viewNode = "frizzy";
+    EXPECT_EQ(session.evaluate(viewed).viewedNode, "frizzy");
+}
+
 TEST(Compound, CollapseAndExpandRoundTrip) {
     GraphEdit edit(baseGraph().dump());
     edit.addNode("Noise", "noise", R"({"amplitude": 0.05})", 300.0, 40.0);

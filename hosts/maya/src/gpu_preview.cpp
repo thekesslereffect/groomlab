@@ -875,8 +875,10 @@ MStatus GpuPreviewCmd::doIt(const MArgList& args) {
         const GraphDocument* doc = shape->session().viewDocument();
         bool takes = false;
         if (doc && readable) {
-            const auto it = doc->nodesByName.find(node.asChar());
-            takes = it != doc->nodesByName.end() && gpu::previewableParam(doc->graph.node(it->second).typeName(), param.asChar()) &&
+            // (A compound's exposed param: the inner node's param it sets, the compound held inline.)
+            const auto [inner, innerParam] = shape->session().flatCompounds().param(node.asChar(), param.asChar());
+            const auto it = doc->nodesByName.find(inner);
+            takes = it != doc->nodesByName.end() && gpu::previewableParam(doc->graph.node(it->second).typeName(), innerParam) &&
                     preview->accepts(*shape, overrides, &why);
         }
         if (takes) {
