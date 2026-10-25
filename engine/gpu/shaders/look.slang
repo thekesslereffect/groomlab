@@ -6572,3 +6572,36 @@ void MeshCutCS(uint3 id : SV_DispatchThreadID) {
     ArcWalk w = arcWalkStart(begin);
     for (uint i = 0; i < n; ++i) storePoint(gOut, begin + i, arcWalkAt(w, begin, n, step * float(i)));
 }
+
+// ---- Cull, Split, Mirror (look_chain.h GatherInputs: a run's first stage) ------------------------
+//
+// Each strand of the node's result from the strand it copies among the points the run up its input
+// made (gIn; gAux0, 8 words a strand: that strand's first point there, its flags (1: mirrored across
+// the plane where coordinate gFlag.x is gValue.x, math.h mirrorPoint; 2: then moved by onto, onto the
+// scalp as MirrorOp moved it), 0, 0, onto xyz, 0), and with gFlag.y its widths from that run's
+// (gAux1) into gOut2.
+
+float3 mirrorPoint(float3 p, uint axis, float center) {
+    float3 out = p;
+    if (axis == 0u) out.x = 2.0f * center - p.x;
+    if (axis == 1u) out.y = 2.0f * center - p.y;
+    if (axis == 2u) out.z = 2.0f * center - p.z;
+    return out;
+}
+
+[shader("compute")]
+[numthreads(GROUP_SIZE, 1, 1)]
+void LayoutCS(uint3 id : SV_DispatchThreadID) {
+    const uint s = threadIndex(id, GROUP_SIZE);
+    if (s >= gStrandCount) return;
+    const uint begin = strandBegin(s), n = strandCountOf(s);
+    const uint4 head = gAux0.Load4(s * 32);
+    const float3 onto = asfloat(gAux0.Load3(s * 32 + 16));
+    for (uint i = 0; i < n; ++i) {
+        float3 v = loadPoint(head.x + i);
+        if ((head.y & 1u) != 0u) v = mirrorPoint(v, gFlag.x, gValue.x);
+        if ((head.y & 2u) != 0u) v = v + onto;
+        storePoint(gOut, begin + i, v);
+        if (gFlag.y != 0u) gOut2.Store((begin + i) * 4, gAux1.Load((head.x + i) * 4));
+    }
+}

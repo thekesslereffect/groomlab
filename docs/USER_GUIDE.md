@@ -341,9 +341,11 @@ groom, so hundreds of thousands of strands stay interactive. A node masked by it
 a painted map, an expression, a Tie's `tail`) stays on the GPU too, its result mixed back by the
 mask as it is when you let go. (A direction given per strand by an expression, or a Direction with
 its inclination, roll and strength all mapped, evaluates as usual, as does a Jiggle's history
-dragged past the frames Maya sampled for it, and a Curl that adds points. Mirror always does: it
-adds and removes strands. So do sliders that pick which strands a node reads: BlendNeighbors'
-neighbors, Tangle's fraction, radius and seed.)
+dragged past the frames Maya sampled for it, and a Curl that adds points. So do sliders that pick
+which strands a node reads: BlendNeighbors' neighbors, Tangle's fraction, radius and seed.) A Cull,
+a Split (its output a) or a Mirror after the look keeps the drag on the GPU too: the nodes before it
+run there and their strands are kept or mirrored as it last kept or mirrored them; its own sliders,
+and a Cull or Split keeping by anything but a number, a texture or a color set, evaluate as usual.
 Brushing does too, SelfCollide and Static included, masked nodes as well. Letting go evaluates as
 usual, so renders and exports don't change. (SelfCollide, Static and Flow can tip one way or the other on the tiniest
 difference in the hair they take, so after a brush stroke or a drag of a node before them a few

@@ -5235,11 +5235,12 @@ TEST_P(LookEngineTest, ShapersAtAHundredThousandStrands) {
     }
 }
 
-TEST(GpuPreview, ShapersAreTheGpusAndMirrorTheCpus) {
+TEST(GpuPreview, ShapersAreTheGpusAndMirrorStartsARun) {
     // Bend, Direction, Transform, Displace and Twist are stages, their numbers, vectors, seeds and
     // profiles previewable; a direction per strand (an expression) and a Direction mapping all three
     // of its params are the CPU's, saying why. Mirror adds and drops strands (new IDs, roots found
-    // again on the scalp): the run starts after it.
+    // again on the scalp): a run's first stage, its result the base (the nodes up its input a run of
+    // their own: CullSplitAndMirrorRunADragUpTheirInputAsTheCpuDoes).
     std::string why;
     for (const char* type : {"Bend", "Direction", "Transform", "Displace", "Twist"}) {
         SCOPED_TRACE(type);
@@ -5279,7 +5280,9 @@ TEST(GpuPreview, ShapersAreTheGpusAndMirrorTheCpus) {
         gpu::LookChain chain;
         ASSERT_TRUE(gpu::findLookChain(*session.viewDocument(), &chain, &why)) << why;
         EXPECT_EQ(session.viewDocument()->nameOf(chain.base), "n0");
-        EXPECT_EQ(chain.stages.front().kind, gpu::StageKind::Noise);
+        EXPECT_EQ(chain.stages.front().kind, gpu::StageKind::Mirror);
+        ASSERT_GE(chain.stages.size(), 2u);
+        EXPECT_EQ(chain.stages[1].kind, gpu::StageKind::Noise);
     }
 }
 
@@ -5902,6 +5905,174 @@ TEST_P(LookEngineTest, MeshCutAtAHundredThousandStrands) {
     std::sort(ms.begin(), ms.end());
     std::printf("[ %-8s ] MeshCut at %zu strands, %zu points: %.3f ms on the GPU (median of 5)\n", GetParam().c_str(), p.base->strandCount(),
                 p.base->pointCount(), ms[2]);
+}
+
+// A Cull, Split (its output a) or Mirror after Interpolate, a Noise and a Width, a Noise after it.
+std::string gatherGraph(const std::string& type, const std::string& params) {
+    return R"({"nodes": [
+        {"name": "scalp", "type": "Scalp"}, {"name": "scatter", "type": "Scatter", "params": {"density": 40.0, "length": 3.0}},
+        {"name": "guides", "type": "Guides"}, {"name": "interpolate", "type": "Interpolate", "params": {"keepClearance": false}},
+        {"name": "noise", "type": "Noise", "params": {"amplitude": 0.3, "frequency": 1.0}},
+        {"name": "width", "type": "Width", "params": {"width": 0.01, "randomness": 0.2}},
+        {"name": "picked", "type": ")" + type + R"(", "params": )" + params + R"(},
+        {"name": "after", "type": "Noise", "params": {"amplitude": 0.1, "seed": 9}},
+        {"name": "output", "type": "Output"}],
+      "connections": [
+        {"from": "scalp", "to": "scatter", "input": "scalp"}, {"from": "scatter", "to": "interpolate", "input": "strands"},
+        {"from": "guides", "to": "interpolate", "input": "guides"}, {"from": "scalp", "to": "interpolate", "input": "scalp"},
+        {"from": "interpolate", "to": "noise", "input": "strands"}, {"from": "noise", "to": "width", "input": "strands"},
+        {"from": "width", "to": "picked", "input": "strands"},
+        {"from": "picked", "to": "after", "input": "strands"}, {"from": "after", "to": "output", "input": "strands"}],
+      "output": "output"})";
+}
+
+TEST_P(LookEngineTest, CullSplitAndMirrorRunADragUpTheirInputAsTheCpuDoes) {
+    // A drag of a node before a Cull, Split or Mirror (the Noise, the Width): the GPU runs from it,
+    // the nodes up its input a run of their own on a sibling, their strands laid out as its last
+    // evaluation laid them out (kept, or mirrored and moved onto the scalp), then the Noise after it:
+    // as the CPU evaluates the dragged value. A drag after it: from there, as before.
+    struct Case {
+        const char* name;
+        const char* type;
+        const char* params;
+    };
+    const Case cases[] = {{"Cull", "Cull", R"({"keep": 0.6, "seed": 3})"},
+                          {"Split", "Split", R"({"weightA": 1.0, "weightB": 1.0})"},
+                          {"Mirror (replace)", "Mirror", R"({"axis": "x", "mode": "replace"})"},
+                          {"Mirror (add)", "Mirror", R"({"axis": "x", "mode": "add"})"}};
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.name);
+        const std::string graph = gatherGraph(c.type, c.params);
+        GroomSession session(groom(graph));
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        const GraphDocument& doc = *session.viewDocument();
+        const NodeId picked = doc.nodesByName.at("picked");
+        const StrandsPtr in = valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("width")));
+        const StrandsPtr made = valueAs<StrandsPtr>(doc.graph.cachedValue(picked));
+        ASSERT_TRUE(in && made);
+        EXPECT_NE(in->strandCount(), made->strandCount()) << "the test's premise: it keeps or adds strands";
+        gpu::LookChain chain;
+        std::string why;
+        ASSERT_TRUE(gpu::findLookChain(doc, &chain, &why)) << why;
+        ASSERT_EQ(chain.stages.size(), 2u);
+        EXPECT_EQ(chain.stages.front().node, picked);
+        EXPECT_TRUE(gpu::gathers(chain.stages.front().kind));
+        EXPECT_EQ(chain.base, picked) << "its result the base";
+        EXPECT_EQ(chain.stages[1].from, 0u) << "the Noise after it takes its result";
+        for (const auto& [node, value] : {std::pair<const char*, double>{"noise", 0.55}, {"width", 0.016}}) {
+            SCOPED_TRACE(node);
+            const std::string param = std::string(node) == "noise" ? "amplitude" : "width";
+            const gpu::Overrides drag{{node, {{param, value}}}};
+            Prepared p;
+            ASSERT_TRUE(prepareRun(session, drag, "", &p)) << "the GPU previews it: " << p.why;
+            EXPECT_EQ(p.chain.stages.front().node, picked);
+            ASSERT_TRUE(p.run.params.stages.front().branch) << "the run up its input";
+            ASSERT_TRUE(p.run.inputs.front().merged && p.run.inputs.front().gather);
+            EXPECT_EQ(doc.nameOf(p.run.params.stages.front().branch->chain.stages.front().node), node);
+            GroomSession committed(groom(withParam(graph, node, param, value)));
+            ASSERT_TRUE(committed.evaluate(ViewRequest{}).strands);
+            expectClose(runAndCompare(session, drag, committed));
+        }
+        {  // after it: its result as cached
+            GroomSession committed(groom(withParam(graph, "after", "amplitude", 0.25)));
+            ASSERT_TRUE(committed.evaluate(ViewRequest{}).strands);
+            const gpu::Overrides drag{{"after", {{"amplitude", 0.25}}}};
+            const Prepared p = prepare(session, drag);
+            EXPECT_EQ(doc.nameOf(p.chain.stages.front().node), "after");
+            expectPointsClose(runAndCompare(session, drag, committed));
+        }
+        {  // a preview holding hidden core strands (preview_core.h): the run up its input holds them too
+            ViewRequest half;
+            half.density = 0.5f;
+            GroomSession thinned(groom(graph));
+            ASSERT_TRUE(thinned.evaluate(half).strands);
+            GroomSession thinnedCommitted(groom(withParam(graph, "noise", "amplitude", 0.55)));
+            ASSERT_TRUE(thinnedCommitted.evaluate(half).strands);
+            expectClose(runAndCompare(thinned, {{"noise", {{"amplitude", 0.55}}}}, thinnedCommitted));
+        }
+    }
+    // A Cull keeping by an expression the run could change: the CPU's (the run ends after it).
+    {
+        nlohmann::json g = nlohmann::json::parse(gatherGraph("Cull", R"({"seed": 3})"));
+        for (auto& n : g["nodes"]) {
+            if (n["name"] == "picked") n["params"]["keep"] = {{"expression", "0.2 * length"}, {"min", 0.0}, {"max", 1.0}};
+        }
+        GroomSession session(groom(g.dump()));
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        const GraphDocument& doc = *session.viewDocument();
+        gpu::LookChain chain;
+        std::string why;
+        ASSERT_TRUE(gpu::findLookChain(doc, &chain, &why)) << why;
+        EXPECT_EQ(chain.indexOf(doc.nodesByName.at("picked")), gpu::kNoStage);
+        EXPECT_EQ(chain.base, doc.nodesByName.at("picked"));
+        EXPECT_EQ(gpu::firstOverridden(doc, chain, {{"noise", {{"amplitude", 0.55}}}}), gpu::kNoStage);
+    }
+}
+
+TEST_P(LookEngineTest, ASculptStrokeThroughACullRunsOnTheGpu) {
+    // A comb on a Sculpt node's guides with a Cull after the look: the stroke armed from the look's
+    // Interpolate (the run up the Cull's input, its stopAt), the Cull laying its strands out as it
+    // kept them: as the CPU evaluates each dab.
+    nlohmann::json g = nlohmann::json::parse(withoutClearance(sculptGraph()));
+    for (auto& c : g["connections"]) {
+        if (c["to"] == "output") c["to"] = "thin";
+    }
+    g["nodes"].push_back({{"name", "thin"}, {"type", "Cull"}, {"params", {{"keep", 0.6}, {"seed", 2}}}});
+    g["connections"].push_back({{"from", "thin"}, {"to", "output"}, {"input", "strands"}});
+    GroomSession session(groom(g.dump()));
+    SessionStrokeHost host(session);
+    session.setSculptTarget("sculpt");
+    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+    const SculptInput in = session.sculptInput("sculpt");
+    const Guide* top = &in.guides->guides()[0];
+    for (const Guide& guide : in.guides->guides()) {
+        if (guide.points[0].y > top->points[0].y) top = &guide;
+    }
+    const ToolView view = ToolView::fromMatrix(test::lookAtProjection({0.0f, 14.0f, 10.0f}, {0.0f, 4.0f, 0.0f}, 40.0, 1.0), 800, 800);
+    float cx = 0.0f, cy = 0.0f;
+    ASSERT_TRUE(view.project(top->points[top->points.size() / 2], cx, cy));
+    std::vector<std::array<float, 2>> line;
+    for (int k = 0; k < 10; ++k) line.push_back({cx - 90.0f + 20.0f * static_cast<float>(k), cy + 4.0f * static_cast<float>(k)});
+    BrushTool tool;
+    tool.settings.setMode("comb");
+    tool.settings.screenRadius = 90.0f;
+    tool.settings.brush.strength = 1.0f;
+    gpu::LookPreview preview;
+    const gpu::LookPreview::Shown shown = [&] { return session.last().strands; };
+    auto engine = backend_->engine();
+    bool armed = false;
+    int gpuDabs = 0;
+    double worst = 0.0, moved = 0.0;
+    ASSERT_TRUE(tool.stroke(host, view, line, 1.0f, 0, [&] {
+        if (!armed) {
+            ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+            std::string why;
+            armed = preview.armStroke(session, shown, &why);
+            ASSERT_TRUE(armed) << why;
+            EXPECT_EQ(preview.stopAt(), "interpolate");
+            return;
+        }
+        const StrandsPtr before = session.last().strands;
+        ViewRequest dab;
+        dab.stopAt = preview.stopAt();
+        EXPECT_EQ(session.evaluate(dab).strands, before);
+        std::string why;
+        ASSERT_TRUE(preview.strokeHolds(session, shown, &why)) << why;
+        const gpu::LookPlan& plan = *preview.strokePlan();
+        EXPECT_EQ(plan.chain.stages.front().kind, gpu::StageKind::Cull);
+        ASSERT_TRUE(plan.run.params.stages.front().branch);
+        preview.upload(*engine, plan, session.last().scalp.get());
+        engine->run(plan.run, true);
+        ++gpuDabs;
+        const std::vector<Vec3f> got = engine->readPositions();
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        worst = std::max(worst, gpu::compareVectors(got, session.last().strands->positions()).max);
+        moved = std::max(moved, gpu::compareVectors(before->positions(), session.last().strands->positions()).max);
+    }));
+    preview.endStroke();
+    EXPECT_GE(gpuDabs, 4);
+    EXPECT_LT(worst, kPointTolerance);
+    EXPECT_GT(moved, 0.05) << "the dabs reshaped the hair";
 }
 
 }  // namespace

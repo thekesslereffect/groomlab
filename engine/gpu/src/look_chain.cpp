@@ -22,6 +22,7 @@
 #include "groomlab/field.h"
 #include "groomlab/flow.h"
 #include "groomlab/map_ref.h"
+#include "groomlab/math.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/point_index.h"
@@ -226,6 +227,22 @@ bool dryWet(const Graph& graph, NodeId id) {
     return graph.node(id).typeName() == op::kWet && !(graph.node(id).params().getDouble("wetness") > 0.0);
 }
 
+// A Cull's keep or a Split's select (mode map) the run cannot change: a number, a texture or a color
+// set read at the roots (the strands it keeps stay the ones its last evaluation kept); a Mirror's
+// sides go by the roots on the rest scalp. Anything else (a channel, an expression, a guide map, a
+// field plugged in) may read what the run moves: the CPU's.
+bool picksHold(const Graph& graph, NodeId id) {
+    const Operator& node = graph.node(id);
+    const ParamSet& p = node.params();
+    std::string param;
+    if (node.typeName() == op::kCull) param = "keep";
+    if (node.typeName() == op::kSplit && p.getString("mode") == "map") param = "select";
+    if (param.empty()) return true;
+    if (p.field(param)) return false;
+    const auto* map = std::get_if<MapRef>(&p.get(param));
+    return !map || map->source == MapRef::Source::Texture || map->source == MapRef::Source::ColorSet;
+}
+
 // A stage node's stages, its last first (findLookChainTo gathers them from the output up): a
 // Wet's levels, each a Clump stage, the smallest last.
 void pushStages(const Graph& graph, NodeId id, StageKind kind, std::vector<LookStage>* stages) {
@@ -399,6 +416,13 @@ Role roleOf(const GraphDocument& doc, NodeId id, StageKind* kind, std::string* w
         const ParamSet& p = graph.node(id).params();
         if (p.getDouble("blend") > 0.0 && p.getDouble("match") > 0.0) return Role::End;
     }
+    if (type == op::kCull || type == op::kSplit || type == op::kMirror) {
+        // Every strand kept, none added: its input handed on as it came. Strands kept by what the run
+        // may change: the CPU's.
+        const StrandsPtr out = cachedStrands(graph, id), in = cachedStrands(graph, upstream(graph, id));
+        if (out && in && out == in) return Role::PassOn;
+        if (!picksHold(graph, id)) return Role::End;
+    }
     if (stageOf(type, kind) && (*kind != StageKind::Interpolate || upstream(graph, id, 1)) &&
         (*kind != StageKind::Collide || !collidesWithADeformedMesh(graph, id)) && (*kind != StageKind::Curl || !curlAddsPoints(graph, id))) {
         return Role::Stage;
@@ -435,6 +459,10 @@ bool blendLooks(const GraphDocument& doc, NodeId blend, std::vector<NodeId>* a, 
         for (const std::vector<NodeId>* look : {a, b}) {
             for (const NodeId id : *look) {
                 if (graph.node(id).typeName() == op::kWidth && !graph.bypassedFor(id, true)) return false;
+                // (A Cull, Split or Mirror lays a look out unlike the other: a run's first stage alone.)
+                StageKind kind;
+                std::string ignored;
+                if (roleOf(doc, id, &kind, &ignored) == Role::Stage && gathers(kind)) return false;
             }
         }
         return true;
@@ -447,13 +475,14 @@ bool blendLooks(const GraphDocument& doc, NodeId blend, std::vector<NodeId>* a, 
 void linkStages(const Graph& graph, LookChain* c) {
     const std::set<NodeId> passOn(c->passOn.begin(), c->passOn.end());
     auto stageAbove = [&](NodeId id) {
-        for (int guard = 0; id && id != c->base && guard < 256; ++guard) {
+        for (int guard = 0; id && guard < 256; ++guard) {
             std::size_t k = c->indexOf(id);
             if (k != kNoStage) {
                 while (k + 1 < c->stages.size() && c->stages[k + 1].node == id) ++k;  // its last (a Wet's smallest level)
                 return k;
             }
-            if (!passOn.count(id)) break;
+            // (The base: a Cull, Split or Mirror is one and the first stage too, its result the base's.)
+            if (id == c->base || !passOn.count(id)) break;
             id = handedFrom(graph, id);
         }
         return kNoStage;
@@ -492,6 +521,8 @@ bool findLookChainTo(const GraphDocument& doc, NodeId end, LookChain* chain, std
             if (merged != kNoStage) role = Role::End;  // one Merge a run
             else merged = stages.size();
         }
+        // Up a Merge's input a, a Cull, Split or Mirror (a run of its own up its input) ends the run.
+        if (role == Role::Stage && gathers(kind) && merged != kNoStage) role = Role::End;
         if (role == Role::End) {
             c.base = id;
             break;
@@ -521,6 +552,10 @@ bool findLookChainTo(const GraphDocument& doc, NodeId end, LookChain* chain, std
             continue;
         } else {
             pushStages(graph, id, kind, &stages);
+            if (gathers(kind)) {  // the first stage, its result the base; the nodes up its input a branch of their own
+                c.base = id;
+                break;
+            }
         }
         const NodeId next = handedFrom(graph, id);
         if (!next) {
@@ -657,8 +692,9 @@ std::size_t firstOverridden(const GraphDocument& doc, const LookChain& chain, co
     for (std::size_t k = 0; k < chain.stages.size(); ++k) {
         const LookStage& s = chain.stages[k];
         if (dragged.count(s.node)) return k;
-        // A Merge whose input b the drag moves: b's own run (mergedBranch) before it.
-        const NodeId b = s.kind == StageKind::Merge ? upstream(doc.graph, s.node, 1) : 0;
+        // A Merge whose input b the drag moves: b's own run (mergedBranch) before it. A Cull, Split or
+        // Mirror whose input the drag moves: the run up it (gatheredBranch).
+        const NodeId b = s.kind == StageKind::Merge ? upstream(doc.graph, s.node, 1) : gathers(s.kind) ? upstream(doc.graph, s.node) : 0;
         if (b && madeFrom(doc.graph, b, dragged)) return k;
     }
     return kNoStage;
@@ -699,7 +735,49 @@ bool mergedBranch(const GraphDocument& doc, NodeId merge, const Overrides& overr
     return true;
 }
 
+// A Cull's, Split's or Mirror's input where the drag moves it: the run up it, from the first of its
+// stages the drag sets (null: none, its result as cached). False with *why where the GPU does not
+// run the dragged node up there.
+bool gatheredBranch(const GraphDocument& doc, NodeId gather, const Overrides& overrides, std::shared_ptr<const LookBranch>* out,
+                    std::string* why) {
+    out->reset();
+    const NodeId in = upstream(doc.graph, gather);
+    if (!in || !madeFrom(doc.graph, in, draggedNodes(doc, overrides))) return true;
+    LookChain full;
+    if (!gatherInputChain(doc, gather, &full, why)) return false;
+    const std::size_t first = firstOverridden(doc, full, overrides);
+    if (first == kNoStage) {
+        *why = doc.nameOf(gather) + "'s input is made from the dragged node through nodes the GPU does not run (" + doc.nameOf(full.base) + ")";
+        return false;
+    }
+    return gatherBranch(doc, full, first, overrides, out, why);
+}
+
 }  // namespace
+
+bool gatherInputChain(const GraphDocument& doc, NodeId gather, LookChain* chain, std::string* why) {
+    const NodeId in = upstream(doc.graph, gather);
+    std::string whyNot;
+    if (!in || !findLookChainTo(doc, in, chain, &whyNot)) {
+        *why = doc.nameOf(gather) + "'s input: " + (in ? whyNot : "none");
+        return false;
+    }
+    return true;
+}
+
+bool gatherBranch(const GraphDocument& doc, const LookChain& inputChain, std::size_t first, const Overrides& overrides,
+                  std::shared_ptr<const LookBranch>* out, std::string* why) {
+    auto branch = std::make_shared<LookBranch>();
+    branch->chain = chainFrom(doc, inputChain, first);
+    if (madeFrom(doc.graph, branch->chain.base, draggedNodes(doc, overrides))) {
+        *why = "the strands the run up " + doc.nameOf(inputChain.output) + " starts from (" + doc.nameOf(branch->chain.base) +
+               ") are made from a dragged node (the CPU's)";
+        return false;
+    }
+    if (!readLookParams(doc, branch->chain, overrides, &branch->params, why)) return false;
+    *out = std::move(branch);
+    return true;
+}
 
 bool runsWidth(const LookParams& params) {
     for (const StageParams& s : params.stages) {
@@ -1272,6 +1350,21 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                 if (!mergedBranch(doc, id, overrides, &s.branch, why)) return false;
                 break;
             }
+            case StageKind::Cull:
+            case StageKind::Split:
+            case StageKind::Mirror: {
+                if (&stage != &chain.stages.front()) {
+                    *why = doc.nameOf(id) + " is not the run's first node";
+                    return false;
+                }
+                if (stage.kind == StageKind::Mirror) {
+                    const std::string axis = params.getString("axis");
+                    s.flag[0] = axis == "y" ? 1 : axis == "z" ? 2 : 0;
+                    s.value[0] = static_cast<float>(params.getDouble("offset"));
+                }
+                if (!gatheredBranch(doc, id, overrides, &s.branch, why)) return false;
+                break;
+            }
         }
         // ---- Affect masks ----
         // Restricted by its affect (or one dragged): its result mixed back by it after its last stage
@@ -1793,7 +1886,10 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
             case StageKind::Flow: ok = read("lift", false, &v[0]); break;
             case StageKind::Jiggle: ok = read("strength", false, &v[0]); break;
             case StageKind::MeshCut:
-            case StageKind::Merge: break;
+            case StageKind::Merge:
+            case StageKind::Cull:
+            case StageKind::Split:
+            case StageKind::Mirror: break;
         }
         if (!ok) return false;
     }
@@ -1866,6 +1962,8 @@ bool lookFieldsHold(const GraphDocument& doc, const LookChain& chain, const Look
         if (stage.kind == StageKind::Interpolate) interpolateBefore = true;
         if (stage.kind == StageKind::Width) widthBefore = true;
         if (stage.kind == StageKind::Flyaway || stage.kind == StageKind::Blend) channelsBefore = true;
+        // A Cull, Split or Mirror: any of those may run up its input.
+        if (gathers(stage.kind)) interpolateBefore = widthBefore = channelsBefore = true;
     }
     return true;
 }
@@ -2030,11 +2128,12 @@ bool LookInputs::centersRun(const GraphDocument& doc, NodeId clump, NodeId end, 
     return true;
 }
 
-bool LookInputs::branchRun(const GraphDocument& doc, NodeId merge, const LookBranch& branch, const PartLines* parts, const ScalpMesh* scalp,
+bool LookInputs::branchRun(const GraphDocument& doc, NodeId node, const LookBranch& branch, const PartLines* parts, const ScalpMesh* scalp,
                            const std::set<NodeId>& changed, const std::map<NodeId, GuidesPtr>& standIn,
                            std::shared_ptr<const LookCentersRun>* out, std::string* why) {
     const Graph& graph = doc.graph;
-    const std::string name = doc.nameOf(merge) + "'s input b";
+    const bool merging = graph.node(node).typeName() == op::kMerge;
+    const std::string name = doc.nameOf(node) + (merging ? "'s input b" : "'s input");
     auto run = std::make_shared<LookCentersRun>();
     run->chain = branch.chain;
     run->params = branch.params;
@@ -2045,14 +2144,23 @@ bool LookInputs::branchRun(const GraphDocument& doc, NodeId merge, const LookBra
         *why = name + ": " + whyNot;
         return false;
     }
-    // b's strands after a's in the Merge's result, as its run's strands are laid out (MergeOp appends them).
-    const StrandsPtr merged = cachedStrands(graph, merge), a = cachedStrands(graph, upstream(graph, merge, 0));
-    if (!merged || !a || merged->strandCount() != a->strandCount() + run->base->strandCount() ||
-        merged->pointCount() != a->pointCount() + run->base->pointCount()) {
-        *why = name + ": its strands are not laid out after a's in " + doc.nameOf(merge) + "'s result";
-        return false;
+    if (merging) {
+        // b's strands after a's in the Merge's result, as its run's strands are laid out (MergeOp appends them).
+        const StrandsPtr merged = cachedStrands(graph, node), a = cachedStrands(graph, upstream(graph, node, 0));
+        if (!merged || !a || merged->strandCount() != a->strandCount() + run->base->strandCount() ||
+            merged->pointCount() != a->pointCount() + run->base->pointCount()) {
+            *why = name + ": its strands are not laid out after a's in " + doc.nameOf(node) + "'s result";
+            return false;
+        }
+    } else {
+        // Laid out as the strands the node took (as made: readGather's layout is from them).
+        const StrandsPtr in = cachedStrands(graph, upstream(graph, node));
+        if (!in || in->strandCount() != run->base->strandCount() || in->pointCount() != run->base->pointCount()) {
+            *why = name + ": its run's strands are laid out unlike the strands " + doc.nameOf(node) + " took";
+            return false;
+        }
     }
-    CentersMemo& memo = branches_[merge];
+    CentersMemo& memo = branches_[node];
     if (!memo.inputs) memo.inputs = std::make_shared<LookInputs>();
     if (!sameStages(memo.fieldsChain, run->chain) || !sameLookFields(doc, run->chain, memo.fields)) {
         LookFields read;
@@ -2103,6 +2211,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
         jiggle_.clear();
         meshCut_.clear();
         branches_.clear();
+        gather_.clear();
         doc_ = &doc;
     }
     scalpMesh_ = scalpMesh;
@@ -2816,6 +2925,27 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             !branchRun(doc, id, *params.stages[k].branch, parts, groomScalp, changed, standIn, &out[k].merged, why)) {
             return false;
         }
+        // ---- A Cull, Split or Mirror: its layout, and the run up its input ----
+        if (gathers(stage.kind)) {
+            if (!readGather(doc, id, groomScalp, &out[k], why)) return false;
+            const LookBranch* branch = k < params.stages.size() ? params.stages[k].branch.get() : nullptr;
+            if (branch) {
+                if (!branchRun(doc, id, *branch, parts, groomScalp, changed, standIn, &out[k].merged, why)) return false;
+                // The channels its run's Interpolate blends anew are copied as cached: a value read
+                // from them after it would not hold.
+                if (branch->chain.node(StageKind::Interpolate) && fields) {
+                    for (std::size_t j = 0; j < fields->stages.size(); ++j) {
+                        const StageFields& f = fields->stages[j];
+                        for (const FieldValues* v : {&f.field[0], &f.field[1], &f.affect}) {
+                            if (v->binding || (v->program && v->program->influence)) {
+                                *why = doc.nameOf(chain.stages[j].node) + " reads what Interpolate blends before " + name + " (the CPU's)";
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         before.insert(id);
     }
     // Mapped params reading channels Interpolate blends from its binding: they hold while it is
@@ -3292,6 +3422,95 @@ bool LookInputs::readMeshCut(const GraphDocument& doc, NodeId id, StageInputs* o
     return true;
 }
 
+// ---- Cull, Split, Mirror: their layout ----------------------------------------------------------
+
+bool LookInputs::readGather(const GraphDocument& doc, NodeId id, const ScalpMesh* groomScalp, StageInputs* out, std::string* why) {
+    const Graph& graph = doc.graph;
+    const std::string name = doc.nameOf(id);
+    // (As made: hidden core strands in both, preview_core.h, as in the strands the runs hold.)
+    const StrandsPtr in = cachedStrands(graph, upstream(graph, id)), made = cachedStrands(graph, id);
+    if (!in || !made) {
+        *why = "not evaluated";
+        return false;
+    }
+    const bool mirror = graph.node(id).typeName() == op::kMirror;
+    GatherMemo& memo = gather_[id];
+    if (memo.inputs && memo.in == in && memo.out == made && (!mirror || memo.scalp == groomScalp)) {
+        out->gather = memo.inputs;
+        return true;
+    }
+    auto inputs = std::make_shared<GatherInputs>();
+    auto words = std::make_shared<std::vector<std::uint32_t>>(made->strandCount() * 8, 0u);
+    // Result strand `to` copied from strand `from` of the input, as it came or mirrored (its first
+    // point checked against the result's).
+    auto put = [&](std::size_t to, std::size_t from, bool mirrored, bool moved, const Vec3f& onto) {
+        const std::size_t n = in->strandPointCount(from);
+        if (n != made->strandPointCount(to)) return false;
+        Vec3f first = n ? in->strandPoints(from)[0] : Vec3f{};
+        if (mirrored) first = mirrorPoint(first, inputs->axis, inputs->offset);
+        if (moved) first += onto;
+        if (n && std::memcmp(&first, &made->strandPoints(to)[0], sizeof(Vec3f)) != 0) return false;
+        std::uint32_t* w = &(*words)[to * 8];
+        w[0] = static_cast<std::uint32_t>(in->strandBegin(from));
+        w[1] = (mirrored ? 1u : 0u) | (moved ? 2u : 0u);
+        std::memcpy(&w[4], &onto, sizeof(Vec3f));
+        return true;
+    };
+    // The strands it kept, the first of its result in the input's order (by ID: Cull and Split keep
+    // their order, Mirror its kept side's before the mirrored ones).
+    std::unordered_map<StrandId, std::uint32_t> at;
+    at.reserve(in->strandCount());
+    for (std::size_t s = 0; s < in->strandCount(); ++s) at.emplace(in->ids()[s], static_cast<std::uint32_t>(s));
+    std::vector<std::uint32_t> kept;
+    std::size_t j = 0;
+    bool laidOut = true;
+    for (; j < made->strandCount() && laidOut; ++j) {
+        const auto found = at.find(made->ids()[j]);
+        if (found == at.end() || (!kept.empty() && found->second <= kept.back())) break;
+        kept.push_back(found->second);
+        laidOut = put(j, found->second, false, false, {});
+    }
+    if (mirror && laidOut) {
+        // Then a mirrored copy of each kept strand off the plane, in their order, under an ID
+        // derived from its own (MirrorOp: hashCombine with its salt; one made again for a clash with
+        // another is not found here: the CPU's), moved onto the scalp where its root lands.
+        const ParamSet& p = graph.node(id).params();
+        const std::string axis = p.getString("axis");
+        inputs->axis = axis == "y" ? 1 : axis == "z" ? 2 : 0;
+        inputs->offset = static_cast<float>(p.getDouble("offset"));
+        const bool reattach = p.getBool("reattach") && groomScalp && groomScalp->triangleCount() > 0;
+        const std::uint64_t salt = 0x4D1AAC0Full + static_cast<std::uint64_t>(inputs->axis);
+        for (const std::uint32_t s : kept) {
+            if (j >= made->strandCount() || !laidOut) break;
+            if (made->ids()[j] != hashCombine(in->ids()[s], salt)) continue;  // on the plane, or no points: kept once
+            Vec3f onto;
+            bool moved = false;
+            if (reattach) {
+                const Vec3f root = mirrorPoint(in->strandPoints(s)[0], inputs->axis, inputs->offset);
+                const SurfacePoint lands = groomScalp->closestPoint(root);
+                if (lands.root.face >= 0) {
+                    onto = lands.position - root;
+                    moved = true;
+                    inputs->reach = std::max(inputs->reach, onto.length());
+                }
+            }
+            laidOut = put(j, s, true, moved, onto);
+            ++j;
+        }
+    }
+    if (!laidOut || j != made->strandCount()) {
+        *why = name + "'s result holds strands it did not take as they came (the CPU's)";
+        return false;
+    }
+    inputs->strands = std::move(words);
+    memo.in = in;
+    memo.out = made;
+    memo.scalp = groomScalp;
+    memo.inputs = inputs;
+    out->gather = std::move(inputs);
+    return true;
+}
+
 // ---- What the shapers reading their neighbours or a reference take -----------------------------
 
 bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, std::size_t k, const std::set<NodeId>& before, bool rebound,
@@ -3640,6 +3859,26 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
             }
             case StageKind::Length:
             case StageKind::MeshCut: break;  // trimmed: within the strand
+            case StageKind::Cull:
+            case StageKind::Split:
+            case StageKind::Mirror: {
+                // The strands of the run up its input: within its box, and Mirror's mirrored across
+                // the plane and moved onto the scalp (by its longest move).
+                const LookCentersRun* run = k < inputs.size() ? inputs[k].merged.get() : nullptr;
+                const GatherInputs* in = k < inputs.size() ? inputs[k].gather.get() : nullptr;
+                const LookBounds made = run && run->base ? lookBounds(run->params, run->fields, run->inputs, *run->base, slack) : LookBounds{};
+                if (!made.valid) break;
+                Vec3f mlo = made.lo, mhi = made.hi;
+                if (s.stage.kind == StageKind::Mirror && in) {
+                    const Vec3f a = mirrorPoint(made.lo, in->axis, in->offset), c = mirrorPoint(made.hi, in->axis, in->offset);
+                    const float r = in->reach * slack;
+                    mlo = {std::min({mlo.x, a.x - r, c.x - r}), std::min({mlo.y, a.y - r, c.y - r}), std::min({mlo.z, a.z - r, c.z - r})};
+                    mhi = {std::max({mhi.x, a.x + r, c.x + r}), std::max({mhi.y, a.y + r, c.y + r}), std::max({mhi.z, a.z + r, c.z + r})};
+                }
+                lo = {std::min(lo.x, mlo.x), std::min(lo.y, mlo.y), std::min(lo.z, mlo.z)};
+                hi = {std::max(hi.x, mhi.x), std::max(hi.y, mhi.y), std::max(hi.z, mhi.z)};
+                break;
+            }
             case StageKind::Merge: {
                 // b's strands as cached: within the base's box; made by b's own run, within its box.
                 const LookCentersRun* run = k < inputs.size() ? inputs[k].merged.get() : nullptr;

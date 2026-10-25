@@ -40,6 +40,7 @@ struct GpuTimes {
     double bendMs = 0, directionMs = 0, transformMs = 0, displaceMs = 0, twistMs = 0;
     double smoothMs = 0, restoreLengthMs = 0, blendNeighborsMs = 0, tangleMs = 0, flowMs = 0;  // the shapers reading their neighbours or a reference
     double jiggleMs = 0, meshCutMs = 0;
+    double layoutMs = 0;  // Cull, Split, Mirror: the strands of the run up their input copied into their layout
     double linesMs = 0, copyMs = 0, textureMs = 0, totalMs = 0;
 };
 
@@ -356,6 +357,9 @@ private:
     // A Merge's input b's run (stage k; b's strands after the first `strandsA`): its points (aux 0)
     // and, where it makes widths, its widths (aux 1) borrowed for the Merge.
     void runMerged(std::size_t k, std::size_t strandsA, const LookCentersRun& run);
+    // The run up a Cull's, Split's or Mirror's input (stage k): its points (aux 0) and, where it makes
+    // widths, its widths (aux 1) borrowed for the stage, which lays them out (aux 2: GatherInputs).
+    void runGathered(std::size_t k, const LookCentersRun& run, const GatherInputs& layout);
     int allPoints_ = -1;
     std::vector<float> ramps_;
     // The last run, for timings and read-backs.

@@ -104,9 +104,14 @@ bool LookPreview::plan(const GroomSession& session, const Shown& shown, const Ov
     LookChain full;
     if (!findLookChain(*doc, &full, why)) return false;
     std::size_t first = kNoStage;
+    // A Cull, Split or Mirror first in the chain: the run up its input a branch of its own.
+    const bool gatherFirst = gathers(full.stages.front().kind);
+    LookChain up;
+    std::string upWhy;
+    const bool hasUp = gatherFirst && gatherInputChain(*doc, full.stages.front().node, &up, &upWhy);
     if (stroke) {
         const NodeId interpolate = full.node(StageKind::Interpolate);
-        first = interpolate ? full.indexOf(interpolate) : kNoStage;
+        first = interpolate ? full.indexOf(interpolate) : hasUp && up.node(StageKind::Interpolate) ? 0 : kNoStage;
         if (first == kNoStage) {
             *why = "the guides do not shape the strands through an Interpolate the GPU runs";
             return false;
@@ -135,14 +140,33 @@ bool LookPreview::plan(const GroomSession& session, const Shown& shown, const Ov
     LookPlan p;
     p.doc = doc;
     p.chain = chainFrom(*doc, full, first);
-    if (!sculpts.empty() && madeFrom(doc->graph, p.chain.base, sculpts)) {  // (made from them before the GPU's run: not made anew)
-        *why = "the strands the GPU starts from (" + doc->nameOf(p.chain.base) + ") are made from the dragged Sculpt node's guides";
+    if (!readLookParams(*doc, p.chain, own, &p.run.params, why)) return false;
+    // From a Cull, Split or Mirror where no drag of a stage up its input makes the run up it: a
+    // stroke's from its Interpolate, a dragged Sculpt node's from the first stage its guides make,
+    // "*" from its first; else its result as cached.
+    StageParams& front = p.run.params.stages.front();
+    if (gathers(front.stage.kind) && !front.branch) {
+        std::size_t f = kNoStage;
+        if (stroke) {
+            f = hasUp && up.node(StageKind::Interpolate) ? up.indexOf(up.node(StageKind::Interpolate)) : kNoStage;
+        } else if (start.from == LookStart::From::Node && start.node == "*") {
+            f = 0;
+        } else if (!sculpts.empty()) {
+            f = hasUp ? firstMadeFrom(*doc, up, sculpts) : kNoStage;
+        }
+        if ((stroke || !sculpts.empty()) && f == kNoStage) {
+            *why = doc->nameOf(front.stage.node) + "'s input: " + (hasUp ? "made through nodes the GPU does not run" : upWhy);
+            return false;
+        }
+        if (f != kNoStage && !gatherBranch(*doc, up, f, own, &front.branch, why)) return false;
+    }
+    const LookChain& starting = front.branch ? front.branch->chain : p.chain;
+    p.start = starting.stages.front().node;
+    if (!sculpts.empty() && madeFrom(doc->graph, starting.base, sculpts)) {  // (made from them before the GPU's run: not made anew)
+        *why = "the strands the GPU starts from (" + doc->nameOf(starting.base) + ") are made from the dragged Sculpt node's guides";
         return false;
     }
-    if (!readLookParams(*doc, p.chain, own, &p.run.params, why) ||
-        !lookStrands(*doc, p.chain, &p.base, &p.output, why)) {
-        return false;
-    }
+    if (!lookStrands(*doc, p.chain, &p.base, &p.output, why)) return false;
     if (strands != p.output) {  // carried to the scalp, instances pinned, a node viewed
         *why = "the viewport shows other strands than the graph's output";
         return false;
@@ -168,7 +192,7 @@ bool LookPreview::plan(const GroomSession& session, const Shown& shown, const Ov
     // Sculpt node's.
     std::set<NodeId> changed = sculpts;
     NodeId guides = 0;
-    if (stroke && doc->graph.inputSource(p.chain.stages.front().node, 1, &guides)) changed.insert(guides);
+    if (stroke && doc->graph.inputSource(p.start, 1, &guides)) changed.insert(guides);
     if (stroke && session.hasPreviewSculpt()) {
         const auto found = doc->nodesByName.find(session.previewSculptNode());
         if (found != doc->nodesByName.end()) changed.insert(found->second);
@@ -198,7 +222,7 @@ bool LookPreview::armStroke(const GroomSession& session, const Shown& shown, std
     }
     strokeArmed_ = true;
     strokeParts_ = session.last().parts.get();
-    stopAt_ = p->doc->nameOf(p->chain.stages.front().node);
+    stopAt_ = p->doc->nameOf(p->start);
     strokePlan_ = std::move(p);
     return true;
 }

@@ -84,6 +84,8 @@ GROOMLAB_KERNEL(Flow)
 GROOMLAB_KERNEL(Affect)
 GROOMLAB_KERNEL(Jiggle)
 GROOMLAB_KERNEL(MeshCut)
+// Cull, Split and Mirror: the strands of the run up their input copied into their layout.
+GROOMLAB_KERNEL(Layout)
 
 #ifdef GROOMLAB_KERNEL_DEFAULTED
 #undef GROOMLAB_KERNEL

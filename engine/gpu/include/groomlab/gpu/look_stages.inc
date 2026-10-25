@@ -86,6 +86,13 @@ GROOMLAB_STAGE(MeshCut, "meshCut", "", "", "", "", "affect offset")
 // A Merge without a seam to blend (look_ops.cpp MergeOp): the run goes up its input a; b's
 // strands, as cached, follow a's in the base and are handed on (LookStage::prefix).
 GROOMLAB_STAGE(Merge, "merge", "", "", "", "", "")
+// The nodes keeping or adding strands (extra_ops.cpp CullOp, feather_ops.cpp SplitOp's output a,
+// mirror_op.cpp MirrorOp): a run through one starts with it, the nodes before it a run of their own
+// (LookBranch), their strands copied into its result as its last evaluation laid that out (look_chain.cpp
+// gathers). Their own params pick the strands: the CPU's.
+GROOMLAB_STAGE(Cull, "cull", "", "", "", "", "")
+GROOMLAB_STAGE(Split, "split", "", "", "", "", "")
+GROOMLAB_STAGE(Mirror, "mirror", "", "", "", "", "")
 
 // (Wet's other params pick its levels' centers: the CPU's.)
 GROOMLAB_STAGE_NODE(Wet, Clump, "", "", "affect wetness")

@@ -96,6 +96,9 @@ KernelSet kernelsOf(const LookRun& run) {
             case StageKind::Flow: set |= bit(K::Flow); break;
             case StageKind::Jiggle: set |= bit(K::Jiggle); break;
             case StageKind::MeshCut: set |= bit(K::MeshCut); break;
+            case StageKind::Cull:
+            case StageKind::Split:
+            case StageKind::Mirror: set |= bit(K::Layout); [[fallthrough]];  // (and the run up its input's)
             case StageKind::Merge:  // (copies; b's own run's kernels where the drag moves b)
                 if (in && in->merged) {
                     LookRun branch;
@@ -534,7 +537,10 @@ void LookEngine::putStrandData(const LookRun& run) {
                     break;
                 case StageKind::Jiggle:
                 case StageKind::MeshCut:
-                case StageKind::Merge: break;
+                case StageKind::Merge:
+                case StageKind::Cull:
+                case StageKind::Split:
+                case StageKind::Mirror: break;
             }
         }
     }, 4096);
@@ -648,6 +654,23 @@ void LookEngine::runMerged(std::size_t k, std::size_t strandsA, const LookCenter
     if (engine.widthsRun_) borrow(auxBuffer(k, 1), engine, kWidths);
 }
 
+void LookEngine::runGathered(std::size_t k, const LookCentersRun& run, const GatherInputs& layout) {
+    LookEngine& engine = runSibling(k, run);
+    // Each strand of the base (the node's result) from one of the run's, point for point.
+    if (!layout.strands || layout.strands->size() != strandCount_ * 8) {
+        throw std::runtime_error("GPU preview: a Cull's, Split's or Mirror's layout is for other strands");
+    }
+    borrow(auxBuffer(k, 0), engine, engine.allPointsBuffer());
+    if (engine.widthsRun_) borrow(auxBuffer(k, 1), engine, kWidths);
+    StageHeld& held = held_[k];
+    if (held.a != layout.strands.get() || !has(auxBuffer(k, 2))) {
+        write(auxBuffer(k, 2), layout.strands->data(), layout.strands->size() * 4, false);
+        held.keep = layout.strands;
+        held.a = layout.strands.get();
+        runUploadMegabytes_ += static_cast<double>(layout.strands->size() * 4) / 1e6;
+    }
+}
+
 void LookEngine::putStageInputs(const LookRun& run) {
     const std::vector<StageParams>& stages = run.params.stages;
     lastWalk_ = WalkStats{};
@@ -662,10 +685,17 @@ void LookEngine::putStageInputs(const LookRun& run) {
             for (int b = 0; b < kAuxPerStage; ++b) release(auxBuffer(k, b));
         }
         const ClumpInputs* clump = stages[k].stage.kind == StageKind::Clump && k < run.inputs.size() ? run.inputs[k].clump.get() : nullptr;
-        const LookCentersRun* merged = stages[k].stage.kind == StageKind::Merge && k < run.inputs.size() ? run.inputs[k].merged.get() : nullptr;
+        const bool gathering = gathers(stages[k].stage.kind);
+        const LookCentersRun* merged =
+            (stages[k].stage.kind == StageKind::Merge || gathering) && k < run.inputs.size() ? run.inputs[k].merged.get() : nullptr;
         if ((!clump || !clump->centersRun) && !merged) centers_[k].reset();
         const StageInputs* in = k < run.inputs.size() ? &run.inputs[k] : nullptr;
-        if (merged) runMerged(k, static_cast<std::size_t>(std::max(stages[k].flag[0], 0)), *merged);
+        if (merged && gathering) {
+            if (!in->gather) throw std::runtime_error("GPU preview: a Cull's, Split's or Mirror's layout missing");
+            runGathered(k, *merged, *in->gather);
+        } else if (merged) {
+            runMerged(k, static_cast<std::size_t>(std::max(stages[k].flag[0], 0)), *merged);
+        }
         if (stages[k].stage.kind == StageKind::Interpolate) {
             const InterpolateInputs* data = in ? in->interpolate.get() : nullptr;
             if (!data || !data->binding || !data->rows) throw std::runtime_error("GPU preview: Interpolate's binding and guides missing");
@@ -1779,6 +1809,40 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             resultOf[k] = current = input;
             continue;
         }
+        if (gathers(p.stage.kind)) {
+            // The run up its input (on the sibling: its points aux 0, its widths aux 1 where it made
+            // them) laid out as the node's result (aux 2: LayoutCS), into a buffer of the run's (the
+            // output when nothing after it moves points). Without that run: its result as cached.
+            const bool branch = k < r.inputs.size() && r.inputs[k].merged;
+            int out = branch || k == lastMover ? (k == lastMover ? finalOut : freeBuffer(k, input, -1)) : static_cast<int>(kBasePoints);
+            if (out != kOut0 && out != kBasePoints) allocate(out, bytes);
+            if (!branch) {
+                if (out != kBasePoints) {
+                    Step copy{Kernel::Count, Binding{}, 0, true, -3};
+                    copy.copyFrom = kBasePoints;
+                    copy.copyTo = out;
+                    copy.copyBytes = bytes;
+                    steps.push_back(copy);
+                }
+                resultOf[k] = current = out;
+                continue;
+            }
+            Binding b;
+            b.in = auxBuffer(k, 0);
+            b.out[0] = out;
+            b.aux[0] = auxBuffer(k, 2);
+            if (runsWidth(r.inputs[k].merged->params)) {
+                allocate(kWidths, pointCount_ * 4);
+                widthsMade = true;
+                b.aux[1] = auxBuffer(k, 1);
+                b.out[1] = kWidths;
+                c.flag[1] = 1u;
+            }
+            slots.push_back(c);
+            steps.push_back({Kernel::Layout, b, strandGroups, false, static_cast<int>(p.stage.kind)});
+            resultOf[k] = current = out;
+            continue;
+        }
         if (p.stage.kind == StageKind::Merge) {
             // b's strands follow a's: their points (and their widths, where a Width up a made a's in
             // kWidths) from the base, after a's result, in place (into the output when nothing after
@@ -2283,6 +2347,9 @@ GpuTimes LookEngine::times(bool wait) {
             case static_cast<int>(StageKind::Flow): g.flowMs += t; break;
             case static_cast<int>(StageKind::Jiggle): g.jiggleMs += t; break;
             case static_cast<int>(StageKind::MeshCut): g.meshCutMs += t; break;
+            case static_cast<int>(StageKind::Cull):
+            case static_cast<int>(StageKind::Split):
+            case static_cast<int>(StageKind::Mirror): g.layoutMs += t; break;
             case -1: g.linesMs += t; break;
             case -2: g.copyMs += t; break;
             case -4: g.textureMs += t; break;
@@ -2324,6 +2391,7 @@ GpuTimes LookEngine::times(bool wait) {
         g.flowMs += c.flowMs;
         g.jiggleMs += c.jiggleMs;
         g.meshCutMs += c.meshCutMs;
+        g.layoutMs += c.layoutMs;
         g.copyMs += c.copyMs;
         g.totalMs += c.totalMs;
     }

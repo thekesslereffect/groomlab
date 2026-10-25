@@ -68,7 +68,12 @@
 // Flow (the field and scalp its last evaluation traced along, FlowState: the field baked at the
 // vertices, its pins and sinks asked where it asks the field itself; each step's closest point down
 // the scalp's mesh as Tie's routes find them; not over a scalp deformed away from its rest pose), in
-// any order. (Mirror adds and drops strands, new IDs rooted again: the CPU's.) A Merge without a
+// any order. Cull, Split (its output a) and Mirror, which keep or add strands: a run through one
+// starts with it (its result the base, its node the chain's base too), the nodes before it a run of
+// their own up its input (LookBranch, made on a sibling engine first, as a Merge's input b's), whose
+// strands it copies into its result's layout as its last evaluation laid it out (GatherInputs: each
+// strand from the one it kept, or mirrored across the plane and moved onto the scalp as the CPU
+// moved it); its own params, which pick the strands, the CPU's. A Merge without a
 // seam to blend: the run goes on up its input a, its stages on a's strands alone (the first of the
 // base's: the Merge's cached result with a's points as the first stage up there takes them), b's
 // strands handed on as the Merge last made them; one Merge a run. A drag up its input b (a node
@@ -135,6 +140,9 @@ constexpr int kStageKinds = 0
     ;
 const char* stageName(StageKind kind);
 constexpr std::size_t kNoStage = static_cast<std::size_t>(-1);
+// Cull, Split and Mirror: stages that copy the strands a run of their own hands them into their
+// result's layout (a run's first stage alone).
+inline bool gathers(StageKind kind) { return kind == StageKind::Cull || kind == StageKind::Split || kind == StageKind::Mirror; }
 
 // `from`: the stage whose result it takes (kNoStage: the base's strands); a Blend's look b `from2`,
 // a RestoreLength's reference `from2` where a stage of the chain makes it (kNoStage: the reference
@@ -245,6 +253,8 @@ std::size_t firstOverridden(const GraphDocument& doc, const LookChain& chain, co
 //   MeshCut: value[0] offset; flag[0] 1 keep inside (the mesh a hull), 0 outside (an obstacle).
 //   Merge: flag[0] the strands of its input a (the base's first; b's after them, handed on as cached,
 //          or as b's own run makes them: branch).
+//   Cull, Split, Mirror: the run of the nodes before it (branch; null: its result as cached);
+//          Mirror: flag[0] the axis (0-2), value[0] the plane's offset.
 // The shapers reading their neighbours or a reference:
 //   Smooth: value[0] strength (mapped, per strand), [1] scale (0-1); flag[0] its cells (smoothCells);
 //           ramp: the profile.
@@ -280,6 +290,7 @@ struct StageParams {
     float affect = 1.0f;
     bool mixWidths = false;
     // A Merge whose input b the drag moves: b's own run (null: b's strands as the Merge last made them).
+    // A Cull, Split or Mirror: the run up its input (null: its result as cached).
     std::shared_ptr<const LookBranch> branch;
 };
 struct LookParams {
@@ -296,6 +307,12 @@ struct LookBranch {
 };
 // Whether a run of `params` makes widths: a Width runs, or one of a Merge's input b's run.
 bool runsWidth(const LookParams& params);
+// A Cull's, Split's or Mirror's run up its input (StageParams::branch, its stage a run's first): the
+// chain ending at the node feeding it (findLookChainTo), and its branch: that chain from stage
+// `first` (chainFrom), its params read with `overrides`. False with *why.
+bool gatherInputChain(const GraphDocument& doc, NodeId gather, LookChain* chain, std::string* why);
+bool gatherBranch(const GraphDocument& doc, const LookChain& inputChain, std::size_t first, const Overrides& overrides,
+                  std::shared_ptr<const LookBranch>* out, std::string* why);
 // The chain's params (the nodes' own, with `overrides` on top; a plugged curve is the ramp the
 // node's last evaluation took). False with *why for anything the kernels do not do.
 bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Overrides& overrides, LookParams* params,
@@ -538,6 +555,17 @@ struct JiggleInputs {
 struct MeshCutInputs {
     std::shared_ptr<const std::vector<std::uint32_t>> tree;
 };
+// Cull, Split, Mirror: their result's layout as their last evaluation laid it out, from what it took
+// (its input as made, laid out as the strands its branch hands it): per strand of the result 8 words,
+// the first point of the strand it copies there, its flags (1: mirrored across the plane where
+// coordinate `axis` is `offset`; 2: then moved by `onto`, onto the scalp as MirrorOp moved it), 0, 0,
+// onto's float bits xyz, 0.
+struct GatherInputs {
+    std::shared_ptr<const std::vector<std::uint32_t>> strands;
+    int axis = 0;
+    float offset = 0.0f;
+    float reach = 0.0f;  // the longest onto (lookBounds)
+};
 // RestoreLength (segments, scale) with a reference the run does not make (LookStage::from2
 // kNoStage): per point the reference's segment lengths at the strand's point count, resampled as the
 // node resamples it (at the strand's first point: the reference's whole length, -1 for none: the
@@ -582,7 +610,9 @@ struct StageInputs {
     std::shared_ptr<const FlowInputs> flow;
     std::shared_ptr<const JiggleInputs> jiggle;
     std::shared_ptr<const MeshCutInputs> meshCut;
+    std::shared_ptr<const GatherInputs> gather;  // Cull, Split, Mirror
     // Merge: its input b's own run (StageParams::branch), made on a sibling engine before the Merge.
+    // Cull, Split, Mirror: the run up its input, so.
     std::shared_ptr<const LookCentersRun> merged;
     // Gravity, Flyaway, Collide, Wind, SelfCollide, Static, Tie, Bend, Direction, Transform, Jiggle and
     // the shapers reading their neighbours or a reference: the longest strand the node took (the CPU's
@@ -764,6 +794,14 @@ private:
     };
     std::map<NodeId, MeshCutMemo> meshCut_;
     bool readMeshCut(const GraphDocument& doc, NodeId id, StageInputs* out, std::string* why);
+    // Cull, Split, Mirror: their layout, once per input and result.
+    struct GatherMemo {
+        StrandsPtr in, out;
+        const ScalpMesh* scalp = nullptr;
+        std::shared_ptr<const GatherInputs> inputs;
+    };
+    std::map<NodeId, GatherMemo> gather_;
+    bool readGather(const GraphDocument& doc, NodeId id, const ScalpMesh* groomScalp, StageInputs* out, std::string* why);
     MeshPtr scalpMesh_;  // the last read's (a Clump's centers' branch reads with it)
     // A Clump's centers made by a branch the run moves (LookCentersRun): what that branch's run
     // takes, kept as a chain's is (its own reader; its mapped values, read once per evaluation).
@@ -779,12 +817,13 @@ private:
                     const ScalpMesh* scalp, std::shared_ptr<const LookCentersRun>* run, std::string* why,
                     const std::map<NodeId, GuidesPtr>& standIn);
     std::map<NodeId, CentersMemo> centers_;
-    // A Merge's input b moved by a drag (`branch`: b's chain and params): its run, its strands, mapped
-    // values and inputs read as centersRun reads a branch's; false with *why.
-    bool branchRun(const GraphDocument& doc, NodeId merge, const LookBranch& branch, const PartLines* parts, const ScalpMesh* scalp,
+    // A Merge's input b moved by a drag (`branch`: b's chain and params), or the run up a Cull's,
+    // Split's or Mirror's input (node `node`'s): its run, its strands, mapped values and inputs read
+    // as centersRun reads a branch's; false with *why.
+    bool branchRun(const GraphDocument& doc, NodeId node, const LookBranch& branch, const PartLines* parts, const ScalpMesh* scalp,
                    const std::set<NodeId>& changed, const std::map<NodeId, GuidesPtr>& standIn,
                    std::shared_ptr<const LookCentersRun>* run, std::string* why);
-    std::map<NodeId, CentersMemo> branches_;  // by Merge
+    std::map<NodeId, CentersMemo> branches_;  // by Merge (or Cull, Split, Mirror)
     std::map<NodeId, CollideMemo> collide_;
     std::map<NodeId, ReachMemo> reach_;
     std::map<NodeId, InterpolateMemo> interpolate_;
