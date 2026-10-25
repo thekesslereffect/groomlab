@@ -86,6 +86,80 @@ TEST(Cards, OneCardPerClumpWithAtlasUVs) {
     EXPECT_LE(fallback.cards.size(), 20u);
 }
 
+TEST(Cards, ATipNeverFlaresBackOutToItsRootsWidth) {
+    // One clump gathering from a wide spread on the scalp into a narrow lock whose ends splay out
+    // over the last stretch (frizzed ends, a few strands running on): the card keeps to the lock,
+    // its last quarter no wider than its body, not flared back out toward the root's width (the
+    // splayed ends bake along its edge).
+    const auto scalp = test::makePlane(16);
+    auto s = std::make_shared<StrandSet>();
+    for (int i = 0; i < 30; ++i) {
+        const float a = 0.2094f * static_cast<float>(i), r = 0.05f * static_cast<float>(1 + i % 3);
+        const Vec3f root{r * std::cos(a), 0.0f, r * std::sin(a)};
+        std::vector<Vec3f> pts;
+        for (int k = 0; k <= 16; ++k) {
+            const float h = static_cast<float>(k) / 16.0f;
+            const float gather = std::max(0.2f, 1.0f - h / 0.4f);  // to a fifth of the spread by 0.4
+            Vec3f p{root.x * gather, h, root.z * gather};
+            if (h > 0.85f) p += Vec3f{std::cos(a), 0.0f, std::sin(a)} * (1.5f * (h - 0.85f));  // splaying out
+            pts.push_back(p);
+        }
+        s->addStrand(static_cast<StrandId>(i + 1), pts, std::vector<float>(pts.size(), 0.004f), scalp->closestPoint(root).root);
+    }
+    s->addStrandChannel("clumpId", 0.0f);
+    CardSettings settings;
+    settings.crossStyle = CardSettings::CrossStyle::Single;  // (a round tuft standing up: crossed by default)
+    const CardMesh mesh = buildCards(*s, scalp.get(), settings);
+    ASSERT_EQ(mesh.cards.size(), 1u);
+    const CardMesh::Card& card = mesh.cards.front();
+    const std::size_t n = card.refWidth.size();
+    const float body = card.refWidth[3 * n / 4];
+    for (std::size_t k = 3 * n / 4 + 1; k < n; ++k) EXPECT_LE(card.refWidth[k], body + 1e-6f) << "station " << k;
+    EXPECT_LT(card.refWidth.back(), 0.5f * card.refWidth.front()) << "the tip as wide as the root";
+}
+
+TEST(Cards, AFlyawayNodesStraysGetCardsOfTheirOwn) {
+    // Two clumps standing off the plane, three of their strands flagged by a Flyaway node: each
+    // of those gets a thin card of its own (one strand), within the flyaway cards' budget, and
+    // none is part of a clump's card; with no budget they make no card.
+    const auto scalp = test::makePlane(16);
+    auto s = std::make_shared<StrandSet>();
+    std::vector<float> clump, flag;
+    for (int c = 0; c < 2; ++c) {
+        for (int i = 0; i < 20; ++i) {
+            const float a = 0.314f * static_cast<float>(i);
+            const Vec3f root{1.0f * c + 0.04f * std::cos(a), 0.0f, 0.04f * std::sin(a)};
+            const bool stray = c == 0 ? (i == 3 || i == 11) : i == 7;
+            const Vec3f tip = stray ? Vec3f{0.4f * std::cos(a), 0.8f, 0.4f * std::sin(a)} : Vec3f{0.0f, 1.0f, 0.0f};
+            s->addStrand(static_cast<StrandId>(c * 100 + i + 1), test::straightCurve(root, tip, 8), {}, scalp->closestPoint(root).root);
+            clump.push_back(static_cast<float>(c));
+            flag.push_back(stray ? 1.0f : 0.0f);
+        }
+    }
+    s->addStrandChannel("clumpId", 0.0f) = clump;
+    s->addStrandChannel("flyaway", 0.0f) = flag;
+    CardSettings settings;
+    settings.crossStyle = CardSettings::CrossStyle::Single;
+    settings.flyawayCards = 5;
+    const CardMesh mesh = buildCards(*s, scalp.get(), settings);
+    std::size_t flyaways = 0;
+    for (const CardMesh::Card& card : mesh.cards) {
+        if (card.flyaway) {
+            ++flyaways;
+            ASSERT_EQ(card.strands.size(), 1u);
+            EXPECT_EQ(flag[card.strands.front()], 1.0f);
+        } else {
+            for (const std::size_t i : card.strands) EXPECT_EQ(flag[i], 0.0f) << "a flagged stray in a clump's card";
+        }
+    }
+    EXPECT_EQ(flyaways, 3u);
+    settings.flyawayCards = 0;
+    for (const CardMesh::Card& card : buildCards(*s, scalp.get(), settings).cards) {
+        EXPECT_FALSE(card.flyaway);
+        for (const std::size_t i : card.strands) EXPECT_EQ(flag[i], 0.0f);
+    }
+}
+
 TEST(Cards, ShapeControls) {
     const StrandsPtr s = clumpedFur();
     const auto plane = test::makePlane(16);

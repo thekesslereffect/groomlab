@@ -129,11 +129,11 @@ TEST(CardMaps, TheOldBakeIsTheSameBytes) {
     CardBakeSettings bake;
     bake.size = 256;
     bake.scalp = plane.get();
-    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0xb8b1be84ce605f48ull);
+    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0x125d253404b32ef7ull);
     bake.size = 128;
     bake.dilate = 0;
     bake.occlusion = 0.0f;
-    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0x7354d8da2b721af0ull);
+    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0x9e886fefa24a88d7ull);
 }
 
 TEST(CardMaps, TheUnrealPresetWritesTheBakesOwnFiles) {

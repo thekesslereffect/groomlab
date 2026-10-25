@@ -936,17 +936,34 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
             card.refNormal.push_back(f.normal * pm::cos(a) + f.binormal * pm::sin(a));
             card.refSide.push_back(f.binormal * pm::cos(a) - f.normal * pm::sin(a));
         }
-        // Width: most of the strands (kFitShare of their offsets across it in its plane, here
-        // and at the neighbouring stations; a group too small for that, every one) fit across
+        // Width: most of the strands (kFitShare of them, each by its farthest point across it in its
+        // plane here and at the neighbouring stations; a group too small for that, every one) fit across
         // it, with a margin each side kept clear of them; shaped by the profile. The few beyond
         // bake along its edge: a card as wide as its farthest strand balloons past the groom.
         std::vector<float> spread(kRefStations, 0.0f);
         {
             std::vector<std::vector<float>> across(kRefStations);
-            for (const Offset& o : offsets) {
-                const float x = std::abs(o.d.dot(card.refSide[o.station]));
-                for (std::size_t k = o.station > 0 ? o.station - 1 : 0; k <= std::min(o.station + 1, kRefStations - 1); ++k) {
-                    across[k].push_back(x);
+            // A point past either end (a longer strand running on past the card's tip, measured
+            // from the end station) is no measure of how wide the card is there: its way along
+            // would read as across and flare the tip.
+            const Vec3f startDir = (center[1] - center[0]).normalized();
+            const Vec3f endDir = (center[kRefStations - 1] - center[kRefStations - 2]).normalized();
+            // Each strand counts once at a station (its farthest point there): one strand drifting
+            // off the group is one strand of many, however many of its points land there.
+            const std::size_t samples = offsets.size() / members.size();
+            std::vector<float> farthest(kRefStations);
+            for (std::size_t m = 0; m < members.size(); ++m) {
+                std::fill(farthest.begin(), farthest.end(), -1.0f);
+                for (std::size_t j = 0; j < samples; ++j) {
+                    const Offset& o = offsets[m * samples + j];
+                    if ((o.station == kRefStations - 1 && o.d.dot(endDir) > 0.0f) || (o.station == 0 && o.d.dot(startDir) < 0.0f)) continue;
+                    const float x = std::abs(o.d.dot(card.refSide[o.station]));
+                    for (std::size_t k = o.station > 0 ? o.station - 1 : 0; k <= std::min(o.station + 1, kRefStations - 1); ++k) {
+                        farthest[k] = std::max(farthest[k], x);
+                    }
+                }
+                for (std::size_t k = 0; k < kRefStations; ++k) {
+                    if (farthest[k] >= 0.0f) across[k].push_back(farthest[k]);
                 }
             }
             for (std::size_t k = 0; k < kRefStations; ++k) {
@@ -985,7 +1002,9 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
             const std::size_t tipFrom = 3 * kRefStations / 4;
             float widest = 0.0f;
             for (std::size_t k = 0; k <= tipFrom; ++k) widest = std::max(widest, spread[k]);
-            for (std::size_t k = tipFrom + 1; k < kRefStations; ++k) spread[k] = std::min(spread[k], widest);
+            // (Nor wider than the station before it: the few strands reaching the end, off its
+            // middle, would flare it back out to the root's width.)
+            for (std::size_t k = tipFrom + 1; k < kRefStations; ++k) spread[k] = std::min({spread[k], widest, spread[k - 1]});
             const float maxDrop = 4.0f * widest / static_cast<float>(kRefStations);  // a full taper takes a quarter of the card
             for (std::size_t k = 1; k < kRefStations; ++k) spread[k] = std::max(spread[k], spread[k - 1] - maxDrop);
         }
@@ -1183,9 +1202,17 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
     for (const int c : cluster) clusterCount = std::max(clusterCount, c + 1);
     std::vector<std::vector<std::size_t>> members(static_cast<std::size_t>(clusterCount));
     std::vector<std::size_t> pool;  // strands no card holds (yet)
+    // A Flyaway node's strays (its "flyaway" flag) are no part of their clump's card (they would
+    // widen it): each gets a thin card of its own, first of the flyaway cards' budget.
+    const std::vector<float>* flyawayFlag = s.strandChannel("flyaway");
+    if (flyawayFlag && flyawayFlag->size() != s.strandCount()) flyawayFlag = nullptr;
+    std::vector<char> isFlyaway(s.strandCount(), 0);
     for (std::size_t i = 0; i < s.strandCount(); ++i) {
         if (braided[i] || s.strandPointCount(i) < 2 || arcLength(s.strandPoints(i), s.strandPointCount(i)) <= 0.0f) continue;
-        if (cluster[i] >= 0) {
+        if (flyawayFlag && (*flyawayFlag)[i] > 0.5f) {
+            isFlyaway[i] = 1;
+            pool.push_back(i);
+        } else if (cluster[i] >= 0) {
             members[static_cast<std::size_t>(cluster[i])].push_back(i);
         } else {
             pool.push_back(i);
@@ -1266,6 +1293,9 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
         for (const std::size_t i : perClumpStrays[c]) isStray[i] = 1;
         pool.insert(pool.end(), perClumpStrays[c].begin(), perClumpStrays[c].end());
     }
+    for (std::size_t i = 0; i < s.strandCount(); ++i) {
+        if (isFlyaway[i]) isStray[i] = 1;  // (never joining a card either)
+    }
     // Over budget with crossed cards: the smallest groups give up their extra cards first
     // (the braids' crosses last).
     if (hairMax > 0 && out.size() > static_cast<std::size_t>(hairMax)) {
@@ -1326,9 +1356,18 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
                 l.card = -1, l.distance = std::numeric_limits<float>::max();
             }
         }
+        // The Flyaway node's strays first (the longest, the most seen, first), then the farthest
+        // from any card.
+        std::vector<float> flyawayLength(pool.size(), 0.0f);
+        for (std::size_t p = 0; p < pool.size(); ++p) {
+            if (isFlyaway[pool[p]]) flyawayLength[p] = arcLength(s.strandPoints(pool[p]), s.strandPointCount(pool[p]));
+        }
         std::vector<std::size_t> order(pool.size());
         for (std::size_t p = 0; p < pool.size(); ++p) order[p] = p;
-        std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) { return loose[a].distance > loose[b].distance; });
+        std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+            if (flyawayLength[a] != flyawayLength[b]) return flyawayLength[a] > flyawayLength[b];
+            return loose[a].distance > loose[b].distance;
+        });
         std::vector<char> taken(pool.size(), 0);
         std::vector<Vec3f> poolRoots(pool.size());
         for (std::size_t p = 0; p < pool.size(); ++p) poolRoots[p] = s.strandPoints(pool[p])[0];
@@ -1339,10 +1378,15 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
         for (const std::size_t p : order) {
             if (static_cast<int>(flyaways.size()) >= budget || loose[p].card >= 0) break;  // the rest can join a card
             if (taken[p]) continue;
-            // It and the loose strands rooted beside it, on one thin card.
+            // It and the loose strands rooted beside it, on one thin card; a Flyaway node's stray
+            // alone (one strand's texture).
             std::vector<std::size_t> group;
-            for (const std::size_t q : poolGrid.within(poolRoots[p], 0.5f * typical)) {
-                if (!taken[q]) taken[q] = 1, group.push_back(pool[q]);
+            if (isFlyaway[pool[p]]) {
+                taken[p] = 1, group.push_back(pool[p]);
+            } else {
+                for (const std::size_t q : poolGrid.within(poolRoots[p], 0.5f * typical)) {
+                    if (!taken[q] && !isFlyaway[pool[q]]) taken[q] = 1, group.push_back(pool[q]);
+                }
             }
             std::sort(group.begin(), group.end());
             flyaways.push_back(std::move(group));
