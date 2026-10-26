@@ -26,7 +26,7 @@ struct ID3D11Buffer;
 
 namespace groomlab::gpu {
 
-enum class GpuApi { D3D11, OpenGL };
+enum class GpuApi { D3D11, OpenGL, Cpu };
 const char* apiName(GpuApi api);
 
 // Milliseconds on the GPU (timestamp queries) of the last run, per kind of node (summed over
@@ -391,6 +391,11 @@ std::unique_ptr<LookEngine> makeD3D11LookEngine(ID3D11Device* device);
 // Throws std::runtime_error.
 ID3D11Buffer* createD3D11DisplayBuffer(ID3D11Device* device, std::size_t bytes);
 
+// The engine on the CPU: look.slang's kernels compiled to C++ (the GPU's own source), its buffers in
+// memory, each dispatch's groups across the core's threads; targets are float3 arrays in memory,
+// copied into after a run. A run dispatching a kernel with no CPU form (one synchronizing a group or
+// using atomics: engine/gpu/CMakeLists.txt) throws std::runtime_error.
+std::unique_ptr<LookEngine> makeCpuLookEngine();
 // The engine on the OpenGL context current on the calling thread: OpenGL 4.5 (the kernels are
 // GLSL 4.50 compute, compiled by the driver: see prepareGLLookKernels). Its targets are buffer
 // names, written in place. Throws std::runtime_error (no context, an older one).

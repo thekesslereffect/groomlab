@@ -222,9 +222,31 @@ private:
     void(APIENTRY* bufferSubData_)(GLenum, std::ptrdiff_t, std::ptrdiff_t, const void*) = nullptr;
 };
 
+// The CPU engine (look.slang's kernels compiled to C++): its targets are float3 arrays in memory.
+class CpuBackend final : public Backend {
+public:
+    bool available() const override { return true; }
+    std::unique_ptr<gpu::LookEngine> engine() override { return gpu::makeCpuLookEngine(); }
+    void* displayBuffer(std::size_t bytes) override { return new float[(bytes + 3) / 4](); }
+    void* plainBuffer(std::size_t) override { return nullptr; }
+    std::vector<Vec3f> read(void* buffer, std::size_t count) override {
+        std::vector<Vec3f> out(count);
+        std::memcpy(out.data(), buffer, count * 12);
+        return out;
+    }
+    std::vector<float> readFloats(void* buffer, std::size_t count) override {
+        std::vector<float> out(count);
+        std::memcpy(out.data(), buffer, count * 4);
+        return out;
+    }
+    void fill(void* buffer, const void* data, std::size_t bytes) override { std::memcpy(buffer, data, bytes); }
+    void release(void* buffer) override { delete[] static_cast<float*>(buffer); }
+};
+
 std::unique_ptr<Backend> makeBackend(const std::string& name) {
     if (name == "DirectX11") return std::make_unique<D3D11Backend>();
     if (name == "OpenGL") return std::make_unique<GLBackend>();
+    if (name == "CPU") return std::make_unique<CpuBackend>();
     return nullptr;
 }
 
@@ -3767,7 +3789,7 @@ TEST_P(LookEngineTest, MergeRunsADragUpItsInputBAsTheCpuDoes) {
                     GetParam().c_str(), p.base->strandCount(), gpuMs[2], cpuMs[2]);
     }
 }
-INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, ::testing::Values(std::string("DirectX11"), std::string("OpenGL")),
+INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, ::testing::Values(std::string("DirectX11"), std::string("OpenGL"), std::string("CPU")),
                          [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
 
 TEST(GpuPreview, MaskedNodesAreStagesAndRenderOnlyOnesAreHandedOn) {
