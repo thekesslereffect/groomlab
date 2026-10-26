@@ -6,6 +6,7 @@
 // and commits each stroke's StrokeEdit through groomLabBrushStroke (one undo step); its host
 // reads the groom's plugs, previews through the shape and keeps texture maps' files.
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -143,10 +144,11 @@ public:
     // step timed: debugStrokeTimes.
     bool simulateStroke(const std::vector<std::pair<short, short>>& points, bool ctrl = false, bool shift = false,
                         bool draw = false);
-    // A Ctrl+Shift drag (or click, one point) through the given view points, as the mouse would:
-    // the selection painted (a click adds the guide under it; on none, deselects and unfreezes
-    // all). Returns how many guides are selected after it.
-    int simulateSelectPaint(const std::vector<std::pair<short, short>>& points);
+    // A Ctrl drag (or click, one point) through the given view points, as the mouse would: the
+    // selection painted (a click adds the guides in the ring; on none, deselects and unfreezes
+    // all); `lasso`: a Ctrl+Shift drag, the guides inside the path added. Returns how many guides
+    // are selected after it.
+    int simulateSelectPaint(const std::vector<std::pair<short, short>>& points, bool lasso = false);
     // The last drawn simulateStroke's steps in milliseconds, each to its redrawn frame: the press,
     // every point after it, the release (benchmarks: -debugStrokeTimes).
     const std::vector<double>& debugStrokeTimes() const { return debugStrokeTimes_; }
@@ -238,16 +240,19 @@ private:
     short adjustX_ = 0, adjustY_ = 0;
     float adjustRadius_ = 0.0f, adjustValue_ = 0.0f;
 
-    // Ctrl+Shift: selecting guides without leaving the brush. A drag paints the selection with
-    // the brush ring (each guide it passes over added, shown live), the release one undo step
-    // with the rest frozen (as the Select tool's solo); a click adds the guide under it, the rest
-    // frozen (on no guide: nothing selected, every guide unfrozen).
-    bool painting_ = false, paintMoved_ = false;
+    // Ctrl (a guide brush: BrushToolSettings::ctrlSelects): selecting guides without leaving the
+    // brush. A drag paints the selection with the brush ring (each guide it passes over added,
+    // shown live), the release one undo step with the rest frozen (as the Select tool's solo); a
+    // click adds the guides in the ring, the rest frozen (on none: nothing selected, every guide
+    // unfrozen). Ctrl+Shift: a drag lassos (drawn as it goes; the guides inside added on release).
+    bool painting_ = false, paintMoved_ = false, lasso_ = false;
     short paintX_ = 0, paintY_ = 0;
     std::vector<GuideId> paintBefore_;  // the selection at the press
     std::set<GuideId> paintedGuides_;  // the guides the ring passed over
+    std::vector<std::array<float, 2>> lassoPath_;
     void paintSelection(short x, short y);
-    void beginPaintSelection(short x, short y);
+    void drawLasso(MHWRender::MUIDrawManager& draw) const;
+    void beginPaintSelection(short x, short y, bool lasso);
     void movePaintSelection(short x, short y);
     void finishPaintSelection();
 };

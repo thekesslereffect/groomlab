@@ -193,14 +193,15 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
       color map (Ctrl: toward 1 - the color in those channels; Shift+drag smooths them).
     - `strength_profile` and `falloff_profile`: the brush's curves, as in brush_stroke.
     - `tube_channel` (shape): what the Shape brush paints on the tubes near it: "width",
-      "flatness" or "twist" (Ctrl does the opposite).
+      "flatness" or "twist" (a negative strength does the opposite).
     - `tube` (place, draw): the new guides' tube, as in brush_stroke (the Groom Tools' Tubes panel
       sets it to its shape and Width, Flatness and Twist); placement_tube() reads it back.
     - `solo_new_guides` (place, draw): each stroke's new guides stay unfrozen and every other
       guide is frozen, so the brushes after work on them alone (the Groom Tools turn it on).
-    - Ctrl+Shift with a brush selects guides: a drag paints them into the selection with the
-      ring, a click adds the guide under it; every guide not selected freezes (one undo step).
-      Ctrl+Shift+click off a guide deselects and unfreezes every guide.
+    - Ctrl with a guide brush selects guides: a drag paints them into the selection with the
+      ring, Ctrl+Shift+drag lassos them, a click adds the guides in the ring; every guide not
+      selected freezes (one undo step). A Ctrl+click where no guide is deselects and unfreezes
+      every guide. Painting (maps, Freeze), Ctrl is the opposite.
     """
     _check_mode(mode)
     ensure_plugin()

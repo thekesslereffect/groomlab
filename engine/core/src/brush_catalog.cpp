@@ -67,7 +67,7 @@ std::vector<BrushEntry> makeCatalog() {
          "paints along the guides. Children and Fill Tubes strands follow.",
          with(without(kShaping, {"collide"}), {"tubeChannel", "tube"})},
         // Trim.
-        {"cut", "Cut", C::Trim, 0, "cut", 1.0f, false, "Trim guides where the brush touches them (Ctrl grows).",
+        {"cut", "Cut", C::Trim, 0, "cut", 1.0f, false, "Trim guides where the brush touches them.",
          with(kBrushCommon, {"targets"})},
         {"length", "Length", C::Trim, 0, "length", 1.0f, true, "Grow guides evenly (negative: shorten).",
          with(kBrushCommon, {"targets"})},
@@ -154,7 +154,7 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
         {"newGuides", "New guides", "Match nearby guides' shape and maps, or the length and segments of a standing guide"},
         {"spacing", "Spacing", "The distance between the guides a drag places"},
         {"soloNewGuides", "Solo new guides", "New guides stay unfrozen and every other guide is frozen, so the brushes "
-                                             "work on the new ones at once (Shift+click a guide to solo it, "
+                                             "work on the new ones at once (Ctrl+click guides with a brush to solo them, "
                                              "Unfreeze All to free them all)"},
         {"parts", "Parts", "The next part's name, and the parts drawn so far"},
         {"flow", "Flow", "What a click or drag lays: arrows, or a sink (brush-sized) hair turns around"},
@@ -163,7 +163,7 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
         {"selection", "Selection", "How the lasso adds to or replaces the selection, and the soft radius"},
         {"freezeMask", "Freeze mask", "The frozen guides draw blue; Unfreeze All clears the mask"},
         {"tubeChannel", "Paints", "What the Shape brush paints on the tubes near it: their width, their flatness (toward "
-                                  "a flat ribbon) or their twist about the guide; Ctrl does the opposite"},
+                                  "a flat ribbon) or their twist about the guide; a negative strength does the opposite"},
         {"tube", "Tube", "The selected (or soloed) guides' tubes as a whole: their shape, width, flatness and twist, "
                          "the groom's shape library (custom outlines, drawn in the shape editor), the shape new guides "
                          "take (Place, Draw), and the groom's Fill Tubes (strands fill the tubes) and Tube Blend (the "

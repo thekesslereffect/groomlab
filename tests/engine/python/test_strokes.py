@@ -129,7 +129,7 @@ class ScreenStrokeTest(unittest.TestCase):
         self.assertIn(tool.pick_level(host, view, x, y), (0, 1))
         self.assertEqual(tool.settings.level, hierarchy.group_depth(hierarchy.find_group(tool.settings.group)))
         self.assertEqual(tool.pick_level(host, view, 2, 2), -2)
-        # Ctrl: Lift lays the guides down instead.
+        # Ctrl with a guide brush is the hosts' selection: Lift's stroke is the plain one.
         points = screen_line(view, (-0.4, 1.05, 0.45), (0.4, 1.05, 0.45), 10)
         results = []
         for ctrl in (False, True):
@@ -137,7 +137,7 @@ class ScreenStrokeTest(unittest.TestCase):
             h = gl.StrokeHost(s)
             self.assertTrue(gl.BrushTool(mode="lift", screen_radius=150.0).stroke(h, view, points, ctrl=ctrl))
             results.append(s.data.hierarchy_json)
-        self.assertNotEqual(results[0], results[1])
+        self.assertEqual(results[0], results[1])
 
     def test_lasso_click_and_selection_modes(self):
         session = session_of_fixture()

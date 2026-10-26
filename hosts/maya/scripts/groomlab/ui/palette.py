@@ -59,7 +59,7 @@ def _options(name):
     return [(c["value"], c["label"], c.get("tip", "")) for c in definitions.choices(name)]
 
 
-# The Shape brush's channels: (name, label, tooltip); Ctrl does the opposite of each.
+# The Shape brush's channels: (name, label, tooltip); a negative strength does the opposite of each.
 TUBE_CHANNELS = _options("tubeChannel")
 TUBE_SHAPES = _options("tubeShape")
 
@@ -1518,7 +1518,7 @@ class ToolPalette(QtWidgets.QWidget):
         b.setMinimumSize(theme.px(64), theme.px(56))
         b.setProperty("role", "tool")
         b.setToolTip("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again "
-                     "(Ctrl+Shift+click off a guide with a brush does the same)")
+                     "(a brush's Ctrl+click where no guide is does the same)")
         b.clicked.connect(lambda: self.paint_tab.unfreeze_all())
         self.buttons.setdefault("unfreeze", b)  # its icon follows the theme
         return b

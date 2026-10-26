@@ -181,6 +181,37 @@ TEST(FeatherCards, AFeatherGrowingFromTheSkinHasItsCardsBaseOnIt) {
     for (const CardMesh::Card& card : buildCards(*lying, scene.scalp.get(), featherSettings()).cards) EXPECT_TRUE(card.base.empty());
 }
 
+TEST(FeatherCards, BarbsCurlingBackNearTheTipDoNotFlipTheCard) {
+    // The barbs near a feather's tip curled back on themselves (a tightly curled Propagate): each
+    // ends a little across the shaft the other way. They neither flip the vane's side there nor
+    // shear the card: it lies in the vane plane from root to tip.
+    FeatherScene scene;
+    const StrandsPtr flat = scene.feathers(scene.shafts({{1.0f, 1.0f}}), 0.0f, "both", 30);
+    auto curled = std::make_shared<StrandSet>(*flat);
+    const std::vector<float>& side = *curled->strandChannel("side");
+    const std::vector<float>& shaftU = *curled->strandChannel("shaftU");
+    int bent = 0;
+    for (std::size_t i = 0; i < curled->strandCount(); ++i) {
+        if (std::abs(side[i]) < 0.5f || shaftU[i] < 0.75f) continue;
+        Vec3f* p = curled->strandPoints(i);
+        const std::size_t n = curled->strandPointCount(i);
+        for (std::size_t k = 1; k < n; ++k) {
+            const float t = static_cast<float>(k) / static_cast<float>(n - 1);
+            p[k] = p[0] + Vec3f{0.12f * t, 0.0f, -side[i] * 0.05f * t};
+        }
+        ++bent;
+    }
+    ASSERT_GT(bent, 4);
+    const CardMesh mesh = buildCards(*curled, scene.scalp.get(), featherSettings(true));
+    ASSERT_EQ(mesh.cards.size(), 1u);
+    const CardMesh::Card& card = mesh.cards.front();
+    for (std::size_t k = 0; k < card.side.size(); ++k) {
+        SCOPED_TRACE("station " + std::to_string(k));
+        EXPECT_GT(card.side[k].dot(card.side.front()), 0.9f) << "the vane's side the same way all along";
+        EXPECT_GT(card.normal[k].y, 0.9f) << "facing out of the vane's top";
+    }
+}
+
 TEST(FeatherCards, TheTangentMapFollowsTheBarbsNotTheCard) {
     // Barbs at 45 degrees: the bake's tangent is each barb's own direction in card space, so
     // the vanes show (+-0.71, 0.71, 0), and coordU runs along each barb out from the shaft.

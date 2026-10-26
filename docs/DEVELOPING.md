@@ -1680,8 +1680,9 @@ position plus a pixel offset per vertex, so they need no rebuild when the camera
 `GroomDocument::editGuides` runs any edit of the authored hierarchy (groups, children,
 deleting guides) as an undoable step the same way. The `Viewport` has camera, brush and select
 modes (B, S, Escape; the Tools menu and tool bar): Alt with any button is always the camera;
-in brush mode a left drag strokes (Ctrl the opposite, Shift smooths, Shift+click solos the
-guide and picks its level, Shift+click off a guide unfreezes them all), B held or the middle button drags the radius (Shift: the strength), the right orbits,
+in brush mode a left drag strokes (Shift smooths; with a guide brush Ctrl+drag paints the
+selection, Ctrl+Shift+drag lassos it, Ctrl+click adds the guides in the ring, on none unfreezes
+them all; painting, Ctrl is the opposite), B held or the middle button drags the radius (Shift: the strength), the right orbits,
 a pen's pressure comes from `QTabletEvent`; in select mode a click or box picks guides and the
 rest freeze (Shift toggles, Ctrl deselects, Ctrl+Shift adds; nothing picked unfreezes all; Delete removes them). The brush rail and
 the brush bar (`overlay.h`) pick the brush and its main settings; the full brush panel

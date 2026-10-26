@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The Groom Tools' operators: picking a tool (a tile, the pie menu, a key), the tool itself in
 the 3D viewport (a modal operator: the brush ring under the cursor, strokes with the pen's
-pressure, Ctrl the opposite action and Shift smoothing or picking a guide's level, lasso, box and
+pressure, Shift smoothing or picking a guide's level, Ctrl selecting guides with a guide brush (a
+drag paints them in, Ctrl+Shift lassos; painting, Ctrl is the opposite action), lasso, box and
 click selection, B / M held + drag for the radius / strength, Page Up / Down for the level, S for
 Select, Y for the pie menu, Ctrl+Z / Ctrl+Shift+Z the helper's undo and redo, Esc to leave),
 guide group and map edits, and the pie menu standing in for Maya's marking menu (the same radial
@@ -32,10 +33,11 @@ SHORTCUTS = (
     ("Ctrl+Z / Ctrl+Shift+Z", "Undo / redo the groom's edits"),
     ("B + drag", "The brush radius"),
     ("M + drag", "The brush strength"),
-    ("Ctrl (stroke)", "The opposite effect (Ctrl+Length shrinks, Ctrl+Lift lays down...)"),
+    ("Ctrl (painting)", "Painting maps or guide attributes: the opposite (toward 0, unfreeze, erase)"),
     ("Shift (stroke)", "Smooth instead"),
     ("S", "Select guides (Shift: toggle, Ctrl: deselect)"),
-    ("Ctrl+Shift + drag", "Paint guides into the selection, the rest frozen (Ctrl+Shift + click: add a guide; on nothing: deselect and unfreeze all)"),
+    ("Ctrl + drag", "Paint guides into the selection, the rest frozen (Ctrl + click: add the guides in the ring; on none: deselect and unfreeze all)"),
+    ("Ctrl+Shift + drag", "Lasso guides into the selection, the rest frozen"),
     ("Page Up / Page Down", "The brush level (parents / children)"),
     ("Y", "The pie menu: every brush"),
     ("Esc / right-click", "Cancel the stroke; Esc again leaves the tool"),
@@ -101,6 +103,31 @@ def locate(context, event):
     return None
 
 
+_lasso_draw = [None]  # the draw handler while a brush's Ctrl+Shift lasso is shown
+
+
+def _draw_lasso(points, region):
+    if bpy.context.region != region or len(points) < 2:
+        return
+    import gpu
+    from gpu_extras.batch import batch_for_shader
+    shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+    batch = batch_for_shader(shader, "LINE_LOOP", {"pos": [(p[0], p[1]) for p in points]})
+    shader.bind()
+    shader.uniform_float("color", (0.9, 0.9, 0.9, 1.0))
+    batch.draw(shader)
+
+
+def show_lasso(points=None, region=None):
+    """A brush's Ctrl+Shift lasso drawn over `region` as it grows (the list itself, read each
+    redraw); None: no more."""
+    if _lasso_draw[0] is not None:
+        bpy.types.SpaceView3D.draw_handler_remove(_lasso_draw[0], "WINDOW")
+        _lasso_draw[0] = None
+    if points is not None and region is not None:
+        _lasso_draw[0] = bpy.types.SpaceView3D.draw_handler_add(_draw_lasso, (points, region), "WINDOW", "POST_PIXEL")
+
+
 def blender_tool(context):
     """The id of Blender's own active tool in the 3D view (builtin.select_box...), None without one."""
     try:
@@ -131,7 +158,7 @@ class ToolSession(object):
     def __init__(self):
         self.stroking = None      # the scalp while a stroke is live
         self.points = []          # mouse samples not sent yet
-        self.lasso = None         # (scalp, view, points, mode) while selecting ("brush": a brush's Ctrl+Shift painting)
+        self.lasso = None         # (scalp, view, points, mode) while selecting ("brush": a brush's Ctrl painting, "lasso": its Ctrl+Shift)
         self.painted_at = None    # where the painting last picked
         self.slider = None        # (setting, x at the press, value at the press, (view, x, y) of the ring)
         self.held = set()         # B / M / F held
@@ -243,6 +270,8 @@ class ToolSession(object):
                 points.append([where[1], where[2]])
                 if self.lasso[3] == "brush":
                     self.paint_selection(context, scalp, where)
+                elif self.lasso[3] == "lasso":
+                    display.redraw(viewport_only=True)
             return {"RUNNING_MODAL"}
         self.set_cursor(context, where is not None)
         if where is None:
@@ -275,11 +304,15 @@ class ToolSession(object):
             mode = "toggle" if event.shift else "deselect" if event.ctrl else "replace"
             self.lasso = (scalp, view, [[x, y]], mode)
             return {"RUNNING_MODAL"}
-        if event.ctrl and event.shift:
-            # Ctrl+Shift in a brush: selecting guides without leaving it (a drag paints them in with
-            # the ring, a click toggles one: release).
-            self.lasso = (scalp, view, [[x, y]], "brush")
+        info = tools.tool_info(self.tool(context))
+        if event.ctrl and info is not None and info.get("ctrlSelects"):
+            # Ctrl on a guide brush: selecting guides without leaving it (a drag paints them in with
+            # the ring, a click adds the guides in it: release); with Shift a drag lassos them.
+            self.lasso = (scalp, view, [[x, y]], "lasso" if event.shift else "brush")
             self.painted_at = None
+            if event.shift:
+                hit = locate_fn(context, event)
+                show_lasso(self.lasso[2], hit[0] if hit else None)
             return {"RUNNING_MODAL"}
         pressure = float(getattr(event, "pressure", 1.0) or 1.0)
         try:
@@ -323,15 +356,21 @@ class ToolSession(object):
             self.lasso = None
             shape = context.scene.groomlab_tools.select_shape
             span = max(abs(p[0] - points[0][0]) + abs(p[1] - points[0][1]) for p in points)
-            if mode == "brush":                          # a brush's Ctrl+Shift
+            if mode in ("brush", "lasso"):              # a brush's Ctrl (Ctrl+Shift: a lasso)
+                show_lasso(None)
                 try:
-                    if span < 4.0:                       # a click: the guide under it added, the rest frozen
-                        if not tools.select(lasso_scalp, view, points[:1], "add").get("picked"):
-                            tools.select(lasso_scalp, view, points[:1], "replace")  # on none: all deselected, unfrozen
+                    if span < 4.0:                       # a click: the guides in the ring added, the rest frozen
+                        ring = self.ring(context, points[0])
+                        if not tools.select(lasso_scalp, view, ring, "add").get("picked"):
+                            tools.select(lasso_scalp, view, ring, "replace")  # on none: all deselected, unfrozen
+                    elif mode == "lasso":                # the guides inside added, the rest frozen
+                        if len(points) >= 3:
+                            tools.select(lasso_scalp, view, points, "add")
                     else:                                # painted: the rest frozen, one undo step
                         tools.selection_set(lasso_scalp, mode="add", solo=True)
                 except HelperError as e:
                     tools.status(context.scene, e.message)
+                display.redraw(viewport_only=True)
                 return {"RUNNING_MODAL"}
             if span < 4.0:
                 points = points[:1]                      # a click
@@ -347,8 +386,15 @@ class ToolSession(object):
             return {"RUNNING_MODAL"}
         return {"PASS_THROUGH"}
 
+    @staticmethod
+    def ring(context, at):
+        """The brush ring around `at` (view pixels) as a 24-point lasso."""
+        import math
+        r = max(1.0, float(context.scene.groomlab_tools.radius))
+        return [[at[0] + r * math.cos(2 * math.pi * k / 24), at[1] + r * math.sin(2 * math.pi * k / 24)] for k in range(24)]
+
     def paint_selection(self, context, scalp, where):
-        """A brush's Ctrl+Shift drag: once it has moved, the guides under the ring join the selection
+        """A brush's Ctrl drag: once it has moved, the guides under the ring join the selection
         (no undo step: the release makes the one), a dab every quarter of the radius."""
         view, x, y = where
         points = self.lasso[2]
@@ -360,8 +406,7 @@ class ToolSession(object):
         if self.painted_at is not None and abs(x - at[0]) + abs(y - at[1]) < 0.25 * t.radius:
             return
         self.painted_at = (x, y)
-        import math
-        ring = [[x + t.radius * math.cos(2 * math.pi * k / 24), y + t.radius * math.sin(2 * math.pi * k / 24)] for k in range(24)]
+        ring = self.ring(context, (x, y))
         try:
             tools.select(scalp, view, ring, "add", solo=False)
             tools.hover(scalp, view, x, y)  # the ring where the cursor is
@@ -400,6 +445,7 @@ class ToolSession(object):
                 tools.status(context.scene, e.message)
             display.apply_strand_visibility(stroked)
         self.lasso = None
+        show_lasso(None)
         if self.slider is not None:
             setting, _x0, v0, _ring = self.slider
             t = context.scene.groomlab_tools
@@ -513,8 +559,9 @@ class GROOMLAB_OT_tool_modal(bpy.types.Operator):
         tool = context.scene.groomlab_tools.tool
         info = tools.tool_info(tool)
         label = info["label"] if info else tool
-        text = ("GroomLab %s: drag over the groom · Ctrl the opposite · Shift smooth · Ctrl+Shift+click a guide selects it (the rest frozen) · "
-                "B/M + drag radius/strength · %s pie · S select · Ctrl+Shift+drag paint selection · Ctrl+Z undo · Esc or W leave" % (label, pie_key()))
+        text = ("GroomLab %s: drag over the groom · Shift smooth · Ctrl+click selects the guides in the ring (the rest frozen) · "
+                "Ctrl+drag paint selection · Ctrl+Shift+drag lasso · B/M + drag radius/strength · %s pie · S select · Ctrl+Z undo · "
+                "Esc or W leave" % (label, pie_key()))
         try:
             context.workspace.status_text_set(text)
         except Exception:
@@ -1341,7 +1388,7 @@ class GROOMLAB_OT_tube_apply(TubeOperator):
         scalp = active(context)
         guides = tools.groom_tools(scalp).tube_guides
         if not guides:
-            self.report({"ERROR"}, "No guides selected or soloed: select guides (Select tool), or Ctrl+Shift+click one")
+            self.report({"ERROR"}, "No guides selected or soloed: select guides (Select tool), or Ctrl+click one with a brush")
             return {"CANCELLED"}
         try:
             tools.set_tube(scalp, guides=guides, shape=context.scene.groomlab_tools.tube_choice)
@@ -1361,7 +1408,7 @@ class GROOMLAB_OT_tube_smooth(TubeOperator):
         t = context.scene.groomlab_tools
         guides = tools.groom_tools(scalp).tube_guides
         if not guides:
-            self.report({"ERROR"}, "No guides selected or soloed: select guides (Select tool), or Ctrl+Shift+click one")
+            self.report({"ERROR"}, "No guides selected or soloed: select guides (Select tool), or Ctrl+click one with a brush")
             return {"CANCELLED"}
         try:
             tools.smooth_tube(scalp, channel=t.tube_channel if t.tube_smooth_what == "current" else "all", guides=guides)

@@ -347,7 +347,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     freezeBox_ = box(settingLabel("freezeMask"), &column);
     auto* unfreeze = new QPushButton(tr("Unfreeze All"), freezeBox_);
     unfreeze->setObjectName(QStringLiteral("unfreezeAll"));
-    unfreeze->setToolTip(tr("Clear the freeze mask: every guide can be brushed again (Shift+click off a guide with a brush does the same)"));
+    unfreeze->setToolTip(tr("Clear the freeze mask: every guide can be brushed again (a brush's Ctrl+click where no guide is does the same)"));
     connect(unfreeze, &QPushButton::clicked, this, [this] {
         if (!session_ || !session_->document()) return;
         session_->document()->editGuides("unfreeze all", [](GuideHierarchy& h) { unfreezeAll(h); });

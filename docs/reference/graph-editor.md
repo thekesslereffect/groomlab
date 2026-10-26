@@ -98,7 +98,7 @@ file, as curves, a turntable), **Transfer...** and **Import** (the GroomLab menu
   or a child of another (`groomlab.add_guide_group(groom, name, parent=None)`); a **Guides**
   node in the Graph Editor reads it by name.
 - **Staying in sync:** radius, strength and group changed in the viewport (middle-drag,
-  B/M-drag, Shift+click a guide to solo it and take its group) show up here.
+  B/M-drag) show up here.
 - **Icons:** the SVG icons live in the module's `icons` folder, on Maya's icon path for shelves
   too.
 
