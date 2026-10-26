@@ -860,24 +860,14 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                 if (!readStageParams(stage.kind, reader, &s, why)) return false;
                 break;
             case StageKind::Interpolate: {
-                if (params.getString("take") != "shape") {
-                    *why = doc.nameOf(id) + " takes the guides' length alone: the CPU's";
-                    return false;
-                }
-                if (params.getBool("fillTubes")) {
-                    *why = doc.nameOf(id) + " fills the guides' tubes (fillTubes): the CPU's";
-                    return false;
-                }
+                if (!readStageParams(stage.kind, reader, &s, why)) return false;
                 const StrandsPtr in = inputStrands(graph, id);
                 const std::size_t samples = in ? interpolateSamples(*in) : 0;
                 if (samples > kMaxInterpolateSamples) {
                     *why = doc.nameOf(id) + ": strands of more than " + std::to_string(kMaxInterpolateSamples) + " points are the CPU's";
                     return false;
                 }
-                s.value[0] = static_cast<float>(number("limitDistance"));
                 s.flag[0] = static_cast<int>(samples);
-                s.flag[1] = params.getBool("preserveLength") ? 1 : 0;
-                s.ramp = ramp("falloff");
                 break;
             }
             case StageKind::Clump: {

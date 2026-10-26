@@ -1743,6 +1743,14 @@ private:
             if (influenceWritten) influenceChannel = &out->addStrandChannel(influenceName, 0.0f);
         }
 
+        // How much the guides take a strand nearest2 from its nearest guide: all of it, or by distance
+        // within the radius (the ramp's value, brought to 0 at the radius whatever its last key, over
+        // its last twentieth: a ramp ending above 0 would pop there).
+        auto influenceAt = [&](float nearest2) {
+            if (!(radius > 0.0f)) return 1.0f;
+            const float t = std::sqrt(nearest2) / radius;
+            return t >= 1.0f ? 0.0f : std::clamp(falloff(t), 0.0f, 1.0f) * std::min((1.0f - t) * 20.0f, 1.0f);
+        };
         // One strand: its channels, then its points from its guides. `scratch` is the thread's.
         auto blendStrand = [&](std::size_t s, Scratch& scratch) {
             const std::size_t n = out->strandPointCount(s);
@@ -1777,13 +1785,7 @@ private:
             // fillTubes: the tube it rides (-1: none, it blends).
             const std::int32_t tubeOf = fill ? fill->tubeOf[s] : -1;
             // How much the guides take this strand: all of it, or by distance within the radius.
-            float influence = 1.0f;
-            if (radius > 0.0f && tubeOf < 0) {
-                const float t = std::sqrt(nearest2) / radius;
-                // The ramp's value, brought to 0 at the radius whatever its last key (a ramp
-                // ending above 0 would pop there), over its last twentieth.
-                influence = t >= 1.0f ? 0.0f : std::clamp(falloff(t), 0.0f, 1.0f) * std::min((1.0f - t) * 20.0f, 1.0f);
-            }
+            const float influence = tubeOf < 0 ? influenceAt(nearest2) : 1.0f;
             if (influenceChannel) (*influenceChannel)[s] = influence;
 
             // The layers blend like the shape, then each strand point reads the

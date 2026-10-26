@@ -6257,19 +6257,39 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
                                 "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
         {"Clump", R"("params": {"count": 40, "strength": -0.3, "repelRadius": 0.2, "flatten": "random", "flatness": 0.7})"},
+        {"Interpolate", R"("params": {"keepClearance": true})", false, true},
+        {"Interpolate", R"("params": {"keepClearance": false, "limitDistance": 0.6, "preserveLength": true})", false, true},
+        {"Interpolate", R"("params": {"keepClearance": true, "limitDistance": 1.5, "smoothGuides": true})", true, true},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
     };
     std::size_t differing = 0, compared = 0;
     for (const Case& c : cases) {
         SCOPED_TRACE(c.type + " " + c.params);
-        const std::string json = shaperGraph(c.type, c.params, true);
+        // (Interpolate: the graph's own, its params these.)
+        const bool interpolate = c.type == "Interpolate";
+        std::string json = shaperGraph(interpolate ? "Bend" : c.type, interpolate ? R"("params": {"angle": 10.0})" : c.params, true);
+        if (interpolate) {
+            nlohmann::json j = nlohmann::json::parse(json);
+            const nlohmann::json own = nlohmann::json::parse("{" + c.params + "}")["params"];
+            for (auto& n : j["nodes"]) {
+                if (n["type"] == "Interpolate") n["params"].update(own);
+            }
+            json = j.dump();
+        }
         GroomData data = c.uvs ? paintedGroom(json) : groom(json);
         data.partsJson = meridianParts(*data.scalp);
         GroomSession session(data);
         ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
         const GraphDocument& doc = *session.viewDocument();
-        const NodeId id = doc.nodesByName.at(shaperName(true));
+        NodeId id = 0;
+        if (interpolate) {
+            for (const auto& [name, node] : doc.nodesByName) {
+                if (doc.graph.node(node).typeName() == "Interpolate") id = node;
+            }
+        } else {
+            id = doc.nodesByName.at(shaperName(true));
+        }
         ExternalInputs ext;
         setGroomExternals(ext, session.last().scalp, data.guides, session.last().hierarchy, session.last().parts, session.last().flow);
         EvalContext ctx;
@@ -6291,7 +6311,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"BlendNeighbors", gpu::StageKind::BlendNeighbors},
                                                              {"Length", gpu::StageKind::Length},       {"Wind", gpu::StageKind::Wind},
                                                              {"Noise", gpu::StageKind::Noise},         {"Collide", gpu::StageKind::Collide},
-                                                             {"Clump", gpu::StageKind::Clump}};
+                                                             {"Clump", gpu::StageKind::Clump},         {"Interpolate", gpu::StageKind::Interpolate}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;
@@ -6340,6 +6360,26 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         gpu::setCpuEngineOn(false);
         made[0] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
         gpu::setCpuEngineOn(true);
+        if (interpolate) {
+            gpu::setCpuEngineOn(false);
+            const StrandsPtr cpu = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
+            gpu::setCpuEngineOn(true);
+            const StrandsPtr now = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
+            ASSERT_TRUE(cpu && now);
+            ASSERT_EQ(cpu->pointCount(), now->pointCount());
+            std::size_t bits = 0;
+            for (std::size_t i = 0; i < cpu->pointCount(); ++i) bits += std::memcmp(&cpu->positions()[i], &now->positions()[i], sizeof(Vec3f)) != 0;
+            for (const std::string name : {"guideInfluence", "region"}) {
+                const std::vector<float>* a = cpu->strandChannel(name);
+                const std::vector<float>* b = now->strandChannel(name);
+                EXPECT_EQ(a == nullptr, b == nullptr) << name;
+                if (a && b) EXPECT_TRUE(*a == *b) << name;
+            }
+            EXPECT_EQ(bits, 0u) << "the operator now";
+            differing += bits;
+            compared += cpu->pointCount();
+            continue;
+        }
         gpu::StageParamReader reader(op.params(), "");
         reader.time = ctx.time;
         reader.framesPerSecond = ctx.framesPerSecond;

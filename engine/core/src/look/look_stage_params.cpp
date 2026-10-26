@@ -37,6 +37,7 @@ bool StageParamReader::mappable(const std::string& param, float* value, std::str
 
 bool readsStageParams(StageKind kind) {
     switch (kind) {
+        case StageKind::Interpolate:
         case StageKind::Length:
         case StageKind::Clump:
         case StageKind::Noise:
@@ -71,6 +72,20 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->value[3] = std::max(a, b);
             return true;
         }
+        case StageKind::Interpolate:
+            if (params.getString("take") != "shape") {
+                *why = r.name() + " takes the guides' length alone: the CPU's";
+                return false;
+            }
+            if (params.getBool("fillTubes")) {
+                *why = r.name() + " fills the guides' tubes (fillTubes): the CPU's";
+                return false;
+            }
+            s->value[0] = static_cast<float>(number("limitDistance"));
+            s->flag[0] = static_cast<int>(r.samples);
+            s->flag[1] = params.getBool("preserveLength") ? 1 : 0;
+            s->ramp = r.ramp("falloff");
+            return true;
         case StageKind::Clump: {
             // Its strength and volumize mapped; the rest numbers and choices (clumpShape).
             if (!mappable("strength", &s->value[0]) || !mappable("volumize", &s->value[1])) return false;
