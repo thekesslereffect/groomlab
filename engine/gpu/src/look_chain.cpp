@@ -851,6 +851,10 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
             case StageKind::Displace:
             case StageKind::Transform:
             case StageKind::Twist:
+            case StageKind::Smooth:
+            case StageKind::BlendNeighbors:
+            case StageKind::Tangle:
+            case StageKind::Flow:
                 if (!readStageParams(stage.kind, reader, &s, why)) return false;
                 break;
             case StageKind::Interpolate: {
@@ -1135,40 +1139,12 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                 break;
             }
             // ---- The shapers reading their neighbours or a reference ----
-            case StageKind::Smooth: {
-                if (!mappable("strength", &s.value[0])) return false;
-                const float scale = std::clamp(static_cast<float>(number("scale")), 0.0f, 1.0f);
-                s.value[1] = scale;
-                // extra_ops.cpp smoothCells: four cells to the deviation, 8 to 128.
-                s.flag[0] = static_cast<int>(std::clamp(std::ceil(4.0f / std::max(scale, 1e-3f)), 8.0f, 128.0f));
-                s.ramp = ramp("profile");
-                s.tabled = true;
-                break;
-            }
             case StageKind::RestoreLength: {
                 const std::string mode = params.getString("mode");
                 s.flag[0] = mode == "scale" ? 1 : mode == "even" ? 2 : 0;
                 s.flag[1] = stage.from2 != kNoStage ? 1 : 0;  // the reference a stage of the run makes
                 break;
             }
-            case StageKind::BlendNeighbors:
-                if (!mappable("strength", &s.value[0])) return false;
-                s.flag[0] = params.getBool("preserveLength") ? 1 : 0;
-                s.ramp = ramp("profile");
-                s.tabled = true;
-                break;
-            case StageKind::Tangle:
-                if (!mappable("strength", &s.value[0])) return false;
-                s.value[1] = static_cast<float>(number("start"));
-                s.value[2] = static_cast<float>(number("span"));
-                s.value[3] = static_cast<float>(number("reach"));
-                break;
-            case StageKind::Flow:
-                // FlowOp's numbers: the lift in degrees (its multiplier), its jitter in radians.
-                if (!mappable("lift", &s.value[0])) return false;
-                s.value[1] = static_cast<float>(number("bend"));
-                s.value[2] = static_cast<float>(number("rollRandom")) * 0.0174532925f;
-                break;
             // ---- Jiggle and MeshCut ----
             case StageKind::Jiggle: {
                 // Its springs over the scalp and history its last evaluation read (operator_state.h
@@ -3408,23 +3384,7 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
                 }
             }
             if (memo.in != in || memo.made != state.get() || !memo.tangle) {
-                const std::size_t count = in->strandCount();
-                auto words = std::make_shared<std::vector<std::uint32_t>>(count * 4, 0u);
-                for (std::size_t s = 0; s < count; ++s) {
-                    std::uint32_t* w = words->data() + s * 4;
-                    const std::uint32_t p = state->partners[s];
-                    w[0] = p < count ? p : kNoTanglePartner;
-                    if (w[0] == kNoTanglePartner) continue;
-                    // TangleOp: a pair that picked each other meets in the middle over the span of
-                    // its lower ID; a strand whose partner picked another moves all the way onto it.
-                    const bool mutual = state->partners[p] == s;
-                    const float draw = mutual && in->ids()[p] < in->ids()[s] ? state->draws[p] : state->draws[s];
-                    const float share = mutual ? 0.5f : 1.0f;
-                    std::memcpy(&w[1], &draw, 4);
-                    std::memcpy(&w[2], &share, 4);
-                }
-                auto made = std::make_shared<TangleInputs>();
-                made->strands = std::move(words);
+                std::shared_ptr<const TangleInputs> made = tangleInputs(*in, *state);
                 memo.in = in;
                 memo.made = state.get();
                 memo.keep = state;

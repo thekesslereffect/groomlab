@@ -43,8 +43,8 @@ private:
 
 // Whether readStageParams reads a stage of `kind`'s params.
 bool readsStageParams(StageKind kind);
-// A stage of `kind`'s params (Length, Width, Part, Gravity, Flyaway and the shapers working on each
-// strand alone) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).
+// A stage of `kind`'s params (Length, Width, Part, Gravity, Flyaway, the shapers working on each
+// strand alone, Smooth, BlendNeighbors, Tangle, Flow) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).
 // False with *why where the kernel does not run it so (the CPU's). (Width's feathers' shafts with a
 // rachis, an auto Part's lines: the caller's to refuse.)
 bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, std::string* why);
@@ -75,6 +75,9 @@ std::shared_ptr<const RootInputs> rootInputs(const StrandSet& in, const ScalpMes
 // strands, preview_core.h). Null with *why where the strands carry no such channel.
 std::shared_ptr<TwistInputs> twistInputs(const StrandSet& in, const GuideSet* axes, const std::string& channel, bool nearestByKernel,
                                          std::string* why);
+// Tangle's partners as the kernel takes them (TangleInputs) from its operator's (operator_state.h
+// TangleState, on `in`).
+std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleState& state);
 // Part's sides (PartInputs, its reach 0: the caller's): each strand's side of `lines` (only the part
 // `only` where named) from its root on the rest scalp, the way away from it and how far; none `within`
 // or farther (an operator's own width: the strands it leaves; the preview's every one, a width dragged).

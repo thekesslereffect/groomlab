@@ -6235,6 +6235,10 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Flyaway", R"("params": {"stray": {"expression": "0.05 + 0.1 * rand", "min": 0.0, "max": 1.0}, "fraction": {"expression": "rand", "min": 0.0, "max": 0.6}})"},
         {"Twist", R"("params": {"turns": 0.6})"},
         {"Twist", R"("params": {"turns": {"expression": "0.3 + rand", "min": -2.0, "max": 2.0}, "profile": [[0, 0], [1, 1]]})"},
+        {"Tangle", R"("params": {"strength": 0.6, "fraction": 0.5})"},
+        {"Tangle", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "fraction": 0.7, "sameClump": false, "reach": 0.0})"},
+        {"BlendNeighbors", R"("params": {"strength": 0.6})"},
+        {"BlendNeighbors", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "preserveLength": true, "neighbors": 5})"},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
     };
@@ -6264,11 +6268,27 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"Direction", gpu::StageKind::Direction}, {"Transform", gpu::StageKind::Transform},
                                                              {"Displace", gpu::StageKind::Displace},   {"Gravity", gpu::StageKind::Gravity},
                                                              {"Part", gpu::StageKind::Part},           {"Flyaway", gpu::StageKind::Flyaway},
-                                                             {"Twist", gpu::StageKind::Twist}};
+                                                             {"Twist", gpu::StageKind::Twist},         {"Tangle", gpu::StageKind::Tangle},
+                                                             {"BlendNeighbors", gpu::StageKind::BlendNeighbors}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;
         if (kind == gpu::StageKind::Twist) stageInputs.twist = gpu::twistInputs(*valueAs<StrandsPtr>(inputs[0]), valueAs<GuidesPtr>(inputs[1]).get(), "clumpId", false, &whyNot);
+        // (Tangle's partners and BlendNeighbors' neighbours: their operators' own, as their C++ just made them.)
+        if (kind == gpu::StageKind::Tangle || kind == gpu::StageKind::BlendNeighbors) {
+            gpu::setCpuEngineOn(false);
+            const Value cpu = op.evaluate(ctx, inputs);
+            gpu::setCpuEngineOn(true);
+            if (kind == gpu::StageKind::Tangle) {
+                std::shared_ptr<const TangleState> state;
+                ASSERT_TRUE(tangleState(op, valueAs<StrandsPtr>(cpu), &state));
+                stageInputs.tangle = gpu::tangleInputs(*valueAs<StrandsPtr>(inputs[0]), *state);
+            } else {
+                std::shared_ptr<const BlendNeighborsState> state;
+                ASSERT_TRUE(blendNeighborsState(op, valueAs<StrandsPtr>(cpu), &state));
+                stageInputs.neighbors = state;
+            }
+        }
         if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
         // Its C++ (the engine off), the stage on the engine, the operator as it runs now.
         StrandsPtr made[3];

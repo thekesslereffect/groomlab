@@ -308,6 +308,14 @@ public:
         }
         state->draws = std::move(drawOf);
 
+        if (gpu::cpuEngineOn()) {  // look.slang's TangleCS, the GPU preview's own (look_cpu.h)
+            gpu::StageInputs partners;
+            partners.tangle = gpu::tangleInputs(*in, *state);
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Tangle, params(), in, scalpOf(ctx), std::move(partners))) {
+                remember(made, std::move(state));
+                return made;
+            }
+        }
         out->mutablePositions();  // cloned once here, not by whichever thread writes first
         parallelFor(0, count, [&](std::size_t s) {
             const std::size_t other = partnerOf[s];
