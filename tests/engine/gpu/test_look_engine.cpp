@@ -6195,5 +6195,50 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     std::printf("[ CPU bits ] floats differing in all: %zu\n", differing);
     EXPECT_EQ(differing, 0u);
 }
+
+TEST(CpuEngine, SpeedAgainstTheOperators) {
+    // Each stage of a dense groom (hair_basics at 400 strands a unit, Noise and Curl, Width): the CPU
+    // engine's run of it against its operator's evaluation of the same input (ms, best of 3). A report.
+    nlohmann::json g = nlohmann::json::parse(graph(0.3));
+    for (auto& n : g["nodes"]) {
+        if (n["type"] == "Scatter") n["params"]["density"] = 400.0;
+    }
+    GroomSession session(groom(g.dump()));
+    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+    Prepared p;
+    ASSERT_TRUE(prepareRun(session, {}, "noise", &p)) << p.why;
+    const GraphDocument& doc = *session.viewDocument();
+    auto engine = gpu::makeCpuLookEngine();
+    engine->setBase(p.base, session.last().scalp.get());
+    StrandsPtr input = p.base;
+    for (std::size_t k = 0; k < p.chain.stages.size(); ++k) {
+        const gpu::LookStage& stage = p.chain.stages[k];
+        gpu::LookRun run = p.run;
+        run.params.stages = {p.run.params.stages[k]};
+        run.params.stages[0].stage.from = gpu::kNoStage;
+        run.fields.stages = {p.run.fields.stages[k]};
+        run.inputs = {p.run.inputs[k]};
+        engine->setBase(input, session.last().scalp.get());
+        double engineMs = 1e30, opMs = 1e30;
+        for (int r = 0; r < 3; ++r) {
+            const auto t0 = std::chrono::steady_clock::now();
+            engine->run(run, false);
+            const std::vector<Vec3f> got = engine->readPositions();
+            engineMs = std::min(engineMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        }
+        const Operator& op = doc.graph.node(stage.node);
+        EvalContext ctx;
+        for (int r = 0; r < 3; ++r) {
+            const auto t0 = std::chrono::steady_clock::now();
+            const Value out = op.evaluate(ctx, {Value(input)});
+            opMs = std::min(opMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        }
+        const gpu::GpuTimes t = engine->times(true);
+        std::printf("[ CPU speed ] %s on %zu strands, %zu points: engine %.2f ms (its run %.2f: kernel %.2f), operator %.2f ms (x%.2f)\n",
+                    gpu::stageName(stage.kind), input->strandCount(), input->pointCount(), engineMs, t.totalMs,
+                    t.noiseMs + t.curlMs + t.widthMs, opMs, engineMs / opMs);
+        input = valueAs<StrandsPtr>(doc.graph.cachedValue(stage.node));
+    }
+}
 }  // namespace
 }  // namespace groomlab

@@ -72,7 +72,9 @@ Words hostWords(void* memory, std::size_t bytes) {
 
 class CpuLookEngine final : public LookEngine {
 public:
-    CpuLookEngine() = default;
+    // A thread a strand (the per-point kernels walk each strand's arc to every point: the GPU's
+    // width is the CPU's waste).
+    CpuLookEngine() { setPointThreads(false); }
 
     GpuApi api() const override { return GpuApi::Cpu; }
     void* device() const override { return nullptr; }
@@ -189,7 +191,7 @@ protected:
             v.startGroupID = {static_cast<uint32_t>(i % groupsX), static_cast<uint32_t>(i / groupsX), 0};
             v.endGroupID = {v.startGroupID.x + 1, v.startGroupID.y + 1, 1};
             fn(&v, nullptr, &g);
-        });
+        }, 1);  // (a group is 64 or 256 threads' work: each its own task)
     }
     void beginRun() override { stampTimes_.clear(); }
     void stamp(std::size_t index) override {

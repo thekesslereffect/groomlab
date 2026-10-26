@@ -1501,16 +1501,24 @@ uint walkPush(FieldTables t, bool deformed, float3 p, float offset, float maxDep
 groupshared float sWalkPoints[3 * CLEAR_POINTS];  // xyz, point by point (no padding)
 
 // Point `at` of the walk's points: in the window (groupshared), else gOut.
+// (The CPU's form walks in gOut alone: no window, no groupshared memory.)
 float3 walkPoint(bool staged, uint at) {
-    return staged ? float3(sWalkPoints[at * 3], sWalkPoints[at * 3 + 1], sWalkPoints[at * 3 + 2]) : loadOut(at);
+    __target_switch {
+    case cpp: return loadOut(at);
+    default: return staged ? float3(sWalkPoints[at * 3], sWalkPoints[at * 3 + 1], sWalkPoints[at * 3 + 2]) : loadOut(at);
+    }
 }
 void walkStore(bool staged, uint at, float3 p) {
-    if (staged) {
-        sWalkPoints[at * 3] = p.x;
-        sWalkPoints[at * 3 + 1] = p.y;
-        sWalkPoints[at * 3 + 2] = p.z;
-    } else {
-        storePoint(gOut, at, p);
+    __target_switch {
+    case cpp: storePoint(gOut, at, p);
+    default:
+        if (staged) {
+            sWalkPoints[at * 3] = p.x;
+            sWalkPoints[at * 3 + 1] = p.y;
+            sWalkPoints[at * 3 + 2] = p.z;
+        } else {
+            storePoint(gOut, at, p);
+        }
     }
 }
 
@@ -2188,6 +2196,122 @@ float3 noiseAt(uint s, uint i, uint n, uint p, float3 v) {
     return v + vectorNoise(q, spacing) * a;
 }
 
+// Kinky in world space: knots from the noise at the root, by the arc length (as it came).
+void noiseKinkyWorld(uint s, uint begin, uint n) {
+    float3 previous = loadPoint(begin);
+    const float3 base = previous * gValue.y;
+    float arc = 0.0f;
+    for (uint i = 1; i < n; ++i) {
+        const float3 v = loadPoint(begin + i);
+        arc += len3(v - previous);
+        previous = v;
+        const float a = noiseAmplitude(s, i, n, begin + i);
+        storePoint(gOut, begin + i, a == 0.0f ? v : v + kinkAt(base, arc * gValue.y) * a);
+    }
+}
+
+// The CPU's noise along a strand (noise.cpp VectorNoise: each octave's lattice cell's gradients
+// kept while the points stay in it, their x and y terms while a point's x and y do): vectorNoise's
+// value, bit for bit, at a fraction of its hashes.
+struct NoiseCache {
+    int3 cell[8];
+    bool valid[8];
+    float g[8 * 72];  // per octave [channel][axis][corner]
+    float2 xyAt[8];
+    bool xyValid[8];
+    float2 uv[8];
+    float xy[8 * 24];  // per octave [channel][corner]
+}
+float3 cachedNoise(inout NoiseCache c, float3 p, float spacing) {
+    float3 sum = float3(0.0f, 0.0f, 0.0f);
+    float amplitude = 1.0f, norm = 0.0f;
+    float cells = spacing;
+    float3 q = p;
+    for (uint o = 0; o < gFlag.x; ++o) {
+        const float weight = spacing > 0.0f ? octaveWeightAt(cells) : 1.0f;
+        cells *= 2.0f;
+        if (weight == 0.0f) {  // faded out: adds nothing
+            norm += amplitude;
+            amplitude *= 0.5f;
+            q = q * 2.0f;
+            continue;
+        }
+        const uint G = o * 72u, X = o * 24u;
+        const float fx = floor(q.x), fy = floor(q.y), fz = floor(q.z);
+        const int3 at = int3(int(fx), int(fy), int(fz));
+        if (!c.valid[o] || at.x != c.cell[o].x || at.y != c.cell[o].y || at.z != c.cell[o].z) {
+            const uint2 seed = octaveSeed(o);
+            for (uint k8 = 0; k8 < 8u; ++k8) {
+                const u64 h = cornerHash(at.x + int(k8 & 1u), at.y + int((k8 >> 1) & 1u), at.z + int((k8 >> 2) & 1u), seed);
+                for (uint k = 0; k < 3u; ++k) {
+                    const float3 gr = gradientOf(h, k);
+                    c.g[G + k * 24u + k8] = gr.x;
+                    c.g[G + k * 24u + 8u + k8] = gr.y;
+                    c.g[G + k * 24u + 16u + k8] = gr.z;
+                }
+            }
+            c.cell[o] = at;
+            c.valid[o] = true;
+            c.xyValid[o] = false;
+        }
+        if (!c.xyValid[o] || q.x != c.xyAt[o].x || q.y != c.xyAt[o].y) {
+            const float dx = q.x - fx, dy = q.y - fy;
+            c.uv[o] = float2(fade(dx), fade(dy));
+            for (uint k = 0; k < 3u; ++k) {
+                for (uint k8 = 0; k8 < 8u; ++k8) {
+                    c.xy[X + k * 8u + k8] = c.g[G + k * 24u + k8] * (dx - float(k8 & 1u)) + c.g[G + k * 24u + 8u + k8] * (dy - float((k8 >> 1) & 1u));
+                }
+            }
+            c.xyAt[o] = float2(q.x, q.y);
+            c.xyValid[o] = true;
+        }
+        const float dz = q.z - fz;
+        const float w = fade(dz);
+        const float dz1 = dz - 1.0f;
+        const float u = c.uv[o].x, v = c.uv[o].y;
+        float3 val;
+        for (uint k = 0; k < 3u; ++k) {
+            float corner[8];
+            for (uint k8 = 0; k8 < 8u; ++k8) corner[k8] = c.xy[X + k * 8u + k8] + c.g[G + k * 24u + 16u + k8] * (k8 < 4u ? dz : dz1);
+            const float x00 = mix1(corner[0], corner[1], u);
+            const float x10 = mix1(corner[2], corner[3], u);
+            const float x01 = mix1(corner[4], corner[5], u);
+            const float x11 = mix1(corner[6], corner[7], u);
+            val[k] = mix1(mix1(x00, x10, v), mix1(x01, x11, v), w);
+        }
+        sum += val * (amplitude * weight);
+        norm += amplitude;
+        amplitude *= 0.5f;
+        q = q * 2.0f;
+    }
+    return sum / norm;
+}
+
+// The CPU's NoiseCS: smooth noise in strand space through the strand's cache (NoiseOp's own).
+void noiseStrandAlone(uint s, uint begin, uint n) {
+    if (gFlag.z != 0u || gFlag.y != 0u || n < 2) {  // kinky or world space: as the GPU's
+        for (uint i = 1; i < n; ++i) storePoint(gOut, begin + i, noiseAt(s, i, n, begin + i, loadPoint(begin + i)));
+        return;
+    }
+    NoiseCache cache;
+    for (uint o = 0; o < 8u; ++o) {
+        cache.valid[o] = false;
+        cache.xyValid[o] = false;
+    }
+    const float spacing = gValue.y / float(n - 1);
+    const float3 offset = strandData(s).xyz;
+    for (uint i = 1; i < n; ++i) {
+        const float3 v = loadPoint(begin + i);
+        const float a = noiseAmplitude(s, i, n, begin + i);
+        if (a == 0.0f) {
+            storePoint(gOut, begin + i, v);
+            continue;
+        }
+        const float3 q = offset + float3(0, 0, paramAt(i, n) * gValue.y);
+        storePoint(gOut, begin + i, v + cachedNoise(cache, q, spacing) * a);
+    }
+}
+
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
 void NoiseCS(uint3 id : SV_DispatchThreadID) {
@@ -2197,20 +2321,15 @@ void NoiseCS(uint3 id : SV_DispatchThreadID) {
     // [branch]: fxc (behind Slang's DXBC) fails on this store flattened into Slang's loop form.
     [branch] if (n > 0) storePoint(gOut, begin, loadPoint(begin));
     if (gFlag.z != 0u && gFlag.y != 0u) {
-        // Kinky in world space: knots from the noise at the root, by the arc length (as it came).
-        float3 previous = loadPoint(begin);
-        const float3 base = previous * gValue.y;
-        float arc = 0.0f;
-        for (uint i = 1; i < n; ++i) {
-            const float3 v = loadPoint(begin + i);
-            arc += len3(v - previous);
-            previous = v;
-            const float a = noiseAmplitude(s, i, n, begin + i);
-            storePoint(gOut, begin + i, a == 0.0f ? v : v + kinkAt(base, arc * gValue.y) * a);
-        }
+        noiseKinkyWorld(s, begin, n);
         return;
     }
-    for (uint i = 1; i < n; ++i) storePoint(gOut, begin + i, noiseAt(s, i, n, begin + i, loadPoint(begin + i)));
+    __target_switch {
+    case cpp:
+        noiseStrandAlone(s, begin, n);
+    default:
+        for (uint i = 1; i < n; ++i) storePoint(gOut, begin + i, noiseAt(s, i, n, begin + i, loadPoint(begin + i)));
+    }
 }
 
 [shader("compute")]
