@@ -6115,6 +6115,7 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     // core's portable ones, cmake/portable_cpu_kernels.cmake).
     struct Graph {
         std::string name, json, from;
+        std::function<GroomData(const std::string&)> make = nullptr;  // (null: groom)
     };
     std::vector<Graph> graphs = {{"noise curl width", graph(0.3), "noise"}, {"hair_basics", startingGraph("hairBasics"), ""},
                                  {"default", startingGraph("default"), ""}};
@@ -6142,10 +6143,19 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     graphs.push_back({"Wet", withoutClearance(chainGraph({{"Wet", wetParams(3, 0.6)}})), ""});
     graphs.push_back({"Blend", blendGraph(R"("params": {"mix": 0.6, "profile": [[0, 0.2], [1, 1]]})"), ""});
     graphs.push_back({"Jiggle", jiggleGraph(), ""});
-    graphs.push_back({"MeshCut", meshCutGraph(R"("params": {"offset": 0.02})"), ""});
+    graphs.push_back({"MeshCut", meshCutGraph(R"("params": {"offset": 0.02})"), "",
+                      [](const std::string& j) { return meshCutGroom(j, Vec3f(0.0f, 4.6f, 0.0f), 1.6f); }});
+    graphs.push_back({"Jiggle moving", jiggleGraph(), "", [](const std::string& j) { return jiggleGroom(j, 4); }});
+    graphs.push_back({"Jiggle settling", jiggleGraph(), "", [](const std::string& j) { return jiggleGroom(j, 13); }});
+    for (const char* mode : {"segments", "scale", "even"}) {
+        graphs.push_back({std::string("RestoreLength ") + mode,
+                          withReference(neighbourGraph("RestoreLength", std::string(R"("params": {"mode": ")") + mode + R"("})"), "n1", "interpolate"), ""});
+    }
+    graphs.push_back({"Flow", withoutClearance(chainGraph({{"Flow", R"("params": {"lift": 12.0, "bend": 0.6, "rollRandom": 6.0})"}, {"Noise", kKinks}})), "",
+                      [](const std::string& j) { return flowGroom(j, true); }});
     std::size_t differing = 0;
     for (const Graph& g : graphs) {
-        GroomData data = groom(g.json);
+        GroomData data = g.make ? g.make(g.json) : groom(g.json);
         test::paintRequiredMaps(g.json, data);
         data.partsJson = meridianParts(*data.scalp);
         GroomSession session(data);
@@ -6159,13 +6169,17 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
         auto engine = gpu::makeCpuLookEngine();
         engine->setBase(p.base, session.last().scalp.get());
         std::string line;
-        // Static and Tie are not the operators' arithmetic yet (their CPU solves and exact products):
-        // they and the stages after them are reported, not counted.
+        // Static and Tie are not the operators' arithmetic yet (their CPU solves and exact products),
+        // nor Flow and Jiggle (within a rounding of the CPU's): they and the stages after them are
+        // reported, not counted.
         bool counted = true;
         for (std::size_t k = 1; k <= p.chain.stages.size(); ++k) {
             if (k < p.chain.stages.size() && p.chain.stages[k].node == p.chain.stages[k - 1].node) continue;  // (a Wet's levels)
             const gpu::LookStage& stage = p.chain.stages[k - 1];
-            if (stage.kind == gpu::StageKind::Static || stage.kind == gpu::StageKind::Tie) counted = false;
+            if (stage.kind == gpu::StageKind::Static || stage.kind == gpu::StageKind::Tie || stage.kind == gpu::StageKind::Flow ||
+                stage.kind == gpu::StageKind::Jiggle) {
+                counted = false;
+            }
             const StrandsPtr want = valueAs<StrandsPtr>(doc.graph.cachedValue(stage.node));
             gpu::LookRun run = p.run;
             run.params.stages.resize(k);

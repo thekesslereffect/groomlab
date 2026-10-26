@@ -1509,6 +1509,24 @@ private:
             made_.centerRegions = std::move(centerRegions);
             made_.regionsFromStrands = regionsFromStrands;
         };
+        if (!last && !tubeIds && strandRandom <= 0.0f && gpu::cpuEngineOn()) {
+            // look.slang's ClumpCS, the GPU preview's own (look_cpu.h), on the centers chosen here.
+            std::vector<StrandId> ids(used.size());
+            for (std::size_t c = 0; c < used.size(); ++c) ids[c] = used[c]->id;
+            gpu::StageInputs centers;
+            centers.clump = gpu::clumpInputs(assigned, curves, centerNormals, ids, seed);
+            if (gpu::runStageInto(gpu::StageKind::Clump, params(), in, scalp, *out, std::move(centers))) {
+                if (clumpIds) {
+                    parallelFor(0, assigned->size(), [&](std::size_t s) {
+                        const std::uint32_t c = (*assigned)[s];
+                        if (c != kNoCenter) (*clumpIds)[s] = numbers[c];
+                    }, 4096);
+                }
+                keep();
+                *result = StrandsPtr(out);
+                return true;
+            }
+        }
         std::vector<Frame> frames;
         if (radius > 0.0f || shaped) {
             frames.resize(curves.size());
