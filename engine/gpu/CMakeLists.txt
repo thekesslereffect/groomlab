@@ -205,8 +205,10 @@ file(CONFIGURE OUTPUT "${_gen}/look_kernels_cpu.inc" CONTENT
 @_cpu_list@" @ONLY)
 add_custom_command(OUTPUT "${_gen}/look_kernels_cpu.cpp"
     COMMAND "${_slangc}" "${_source}" -I "${CMAKE_CURRENT_SOURCE_DIR}/../core/include" ${_cpu_entries} -target cpp
-            -o "${_gen}/look_kernels_cpu.cpp"
-    DEPENDS "${_source}" "${_shared_math}"
+            -o "${_gen}/look_kernels_cpu.raw.cpp"
+    COMMAND "${CMAKE_COMMAND}" -DIN=${_gen}/look_kernels_cpu.raw.cpp -DOUT=${_gen}/look_kernels_cpu.cpp
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/portable_cpu_kernels.cmake"
+    DEPENDS "${_source}" "${_shared_math}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/portable_cpu_kernels.cmake"
     COMMENT "slangc: the look kernels for the CPU (C++)"
     VERBATIM)
 get_filename_component(_slang_root "${_slangc}" DIRECTORY)

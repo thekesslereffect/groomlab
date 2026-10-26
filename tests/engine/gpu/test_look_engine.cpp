@@ -6104,5 +6104,65 @@ TEST_P(LookEngineTest, ASculptStrokeThroughACullRunsOnTheGpu) {
     EXPECT_GT(moved, 0.05) << "the dabs reshaped the hair";
 }
 
+
+TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
+    // The CPU engine (look.slang's kernels as C++) run stage by stage from each chain's first node,
+    // each stage's points against its node's cached result: how many floats differ in their bits
+    // (the goal: none, the CPU operators and the kernels one source). A report, not a gate yet.
+    struct Graph {
+        std::string name, json, from;
+    };
+    std::vector<Graph> graphs = {{"noise curl width", graph(0.3), "noise"}, {"hair_basics", startingGraph("hairBasics"), ""},
+                                 {"default", startingGraph("default"), ""}};
+    for (const char* preset : {"curly", "parted_style", "gravity", "flyaways", "cinematic_hair", "everyday_sim", "wind_and_jiggle"}) {
+        graphs.push_back({preset, presetGraph(preset), ""});
+    }
+    std::size_t differing = 0;
+    for (const Graph& g : graphs) {
+        GroomData data = groom(g.json);
+        test::paintRequiredMaps(g.json, data);
+        data.partsJson = meridianParts(*data.scalp);
+        GroomSession session(data);
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands) << g.name;
+        Prepared p;
+        ASSERT_TRUE(prepareRun(session, {}, g.from, &p)) << g.name << ": " << p.why;
+        const GraphDocument& doc = *session.viewDocument();
+        auto engine = gpu::makeCpuLookEngine();
+        engine->setBase(p.base, session.last().scalp.get());
+        std::string line;
+        for (std::size_t k = 1; k <= p.chain.stages.size(); ++k) {
+            if (k < p.chain.stages.size() && p.chain.stages[k].node == p.chain.stages[k - 1].node) continue;  // (a Wet's levels)
+            const gpu::LookStage& stage = p.chain.stages[k - 1];
+            const StrandsPtr want = valueAs<StrandsPtr>(doc.graph.cachedValue(stage.node));
+            gpu::LookRun run = p.run;
+            run.params.stages.resize(k);
+            run.fields.stages.resize(k);
+            run.inputs.resize(k);
+            engine->run(run, false);
+            const std::vector<Vec3f> got = engine->readPositions();
+            if (!want || got.size() != want->pointCount()) {
+                line += " " + doc.nameOf(stage.node) + "(?)";
+                continue;
+            }
+            std::size_t bits = 0;
+            double most = 0.0;
+            for (std::size_t i = 0; i < got.size(); ++i) {
+                for (int a = 0; a < 3; ++a) {
+                    const float x = (&got[i].x)[a], y = (&want->positions()[i].x)[a];
+                    if (std::memcmp(&x, &y, 4) != 0) {
+                        ++bits;
+                        most = std::max(most, static_cast<double>(std::abs(x - y)));
+                    }
+                }
+            }
+            differing += bits;
+            char part[160];
+            std::snprintf(part, sizeof part, " %s %zu/%zu (%.2g)", gpu::stageName(stage.kind), bits, got.size() * 3, most);
+            line += part;
+        }
+        std::printf("[ CPU bits ] %s:%s\n", g.name.c_str(), line.c_str());
+    }
+    std::printf("[ CPU bits ] floats differing in all: %zu\n", differing);
+}
 }  // namespace
 }  // namespace groomlab

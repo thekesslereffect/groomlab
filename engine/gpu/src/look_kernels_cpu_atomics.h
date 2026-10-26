@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// The atomics shaders/look.slang's kernels use on a buffer's word, for their C++ form (slangc's
-// look_kernels_cpu.cpp, which includes this first: its cpuAtomic* helpers expand to these). Each on
-// the 32-bit word at byte `at` of buffer `b` (slangc's RWByteAddressBuffer: its `data`), returning
-// the word before, as the GPU's Interlocked* do.
+// What shaders/look.slang's kernels take from the core in their C++ form (slangc's
+// look_kernels_cpu.cpp, which includes this first): the atomics they use on a buffer's word (its
+// cpuAtomic* helpers expand to these), each on the 32-bit word at byte `at` of buffer `b` (slangc's
+// RWByteAddressBuffer: its `data`), returning the word before, as the GPU's Interlocked* do; and the
+// core's portable float transcendentals (groomlab_pm_*: cmake/portable_cpu_kernels.cmake puts them
+// in place of the prelude's F32_sin...), so the kernels round as the operators do.
 
 #include <cstdint>
+
+#include "groomlab/portable_math.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -77,3 +81,25 @@ template <class Buffer>
 inline std::uint32_t glAtomicCompareExchange(Buffer b, std::uint32_t at, std::uint32_t compare, std::uint32_t v) {
     return groomlab::gpu::cpu_atomics::compareExchange(groomlab::gpu::cpu_atomics::wordAt(b.data, at), compare, v);
 }
+
+#define GROOMLAB_PM_KERNEL1(name)     inline float groomlab_pm_##name(float x) { return groomlab::pm::name(x); }
+#define GROOMLAB_PM_KERNEL2(name)     inline float groomlab_pm_##name(float a, float b) { return groomlab::pm::name(a, b); }
+GROOMLAB_PM_KERNEL1(sin)
+GROOMLAB_PM_KERNEL1(cos)
+GROOMLAB_PM_KERNEL1(tan)
+GROOMLAB_PM_KERNEL1(asin)
+GROOMLAB_PM_KERNEL1(acos)
+GROOMLAB_PM_KERNEL1(atan)
+GROOMLAB_PM_KERNEL1(sinh)
+GROOMLAB_PM_KERNEL1(cosh)
+GROOMLAB_PM_KERNEL1(tanh)
+GROOMLAB_PM_KERNEL1(exp)
+GROOMLAB_PM_KERNEL1(exp2)
+GROOMLAB_PM_KERNEL1(log)
+GROOMLAB_PM_KERNEL1(log2)
+GROOMLAB_PM_KERNEL1(log10)
+GROOMLAB_PM_KERNEL1(cbrt)
+GROOMLAB_PM_KERNEL2(atan2)
+GROOMLAB_PM_KERNEL2(pow)
+#undef GROOMLAB_PM_KERNEL1
+#undef GROOMLAB_PM_KERNEL2
