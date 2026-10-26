@@ -33,13 +33,23 @@
 typedef uint2 u64;
 typedef int lint;
 
+// (The C++ form, the CPU engine's: native 64-bit products, the same words.)
 uint mulHi(uint a, uint b) {
-    const uint a0 = a & 0xffff, a1 = a >> 16, b0 = b & 0xffff, b1 = b >> 16;
-    const uint p00 = a0 * b0, p01 = a0 * b1, p10 = a1 * b0, p11 = a1 * b1;
-    const uint mid = (p00 >> 16) + (p01 & 0xffff) + (p10 & 0xffff);
-    return p11 + (p01 >> 16) + (p10 >> 16) + (mid >> 16);
+    __target_switch {
+    case cpp: __intrinsic_asm "uint32_t((uint64_t($0) * uint64_t($1)) >> 32)";
+    default:
+        const uint a0 = a & 0xffff, a1 = a >> 16, b0 = b & 0xffff, b1 = b >> 16;
+        const uint p00 = a0 * b0, p01 = a0 * b1, p10 = a1 * b0, p11 = a1 * b1;
+        const uint mid = (p00 >> 16) + (p01 & 0xffff) + (p10 & 0xffff);
+        return p11 + (p01 >> 16) + (p10 >> 16) + (mid >> 16);
+    }
 }
-u64 mul64(u64 a, u64 b) { return uint2(a.x * b.x, mulHi(a.x, b.x) + a.x * b.y + a.y * b.x); }
+u64 mul64(u64 a, u64 b) {
+    __target_switch {
+    case cpp: __intrinsic_asm "groomlab_mul64($0, $1)";
+    default: return uint2(a.x * b.x, mulHi(a.x, b.x) + a.x * b.y + a.y * b.x);
+    }
+}
 u64 shr64(u64 a, uint n) {  // 0 < n < 64
     return n < 32 ? uint2((a.x >> n) | (a.y << (32 - n)), a.y >> n) : uint2(a.y >> (n - 32), 0);
 }

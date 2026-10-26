@@ -103,3 +103,14 @@ GROOMLAB_PM_KERNEL2(atan2)
 GROOMLAB_PM_KERNEL2(pow)
 #undef GROOMLAB_PM_KERNEL1
 #undef GROOMLAB_PM_KERNEL2
+
+// groom_math.h's mul64 on a 64-bit value held as two words (low, high): the native product's.
+template <class V>
+inline V groomlab_mul64(V a, V b) {
+    const std::uint64_t x = (static_cast<std::uint64_t>(a.y) << 32) | a.x, y = (static_cast<std::uint64_t>(b.y) << 32) | b.x;
+    const std::uint64_t r = x * y;
+    V out;
+    out.x = static_cast<std::uint32_t>(r);
+    out.y = static_cast<std::uint32_t>(r >> 32);
+    return out;
+}
