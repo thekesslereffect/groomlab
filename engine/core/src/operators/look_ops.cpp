@@ -1959,10 +1959,12 @@ private:
             }
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                shape(s);
-            });
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Noise, params(), in, changes->strands, scalpOf(ctx), *out))) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    shape(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), [&](std::size_t s) {

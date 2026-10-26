@@ -244,10 +244,12 @@ private:
             resampleByArcLengthInto(original.data(), n, pts, n, std::min(keep, 1.0f));
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                shape(s);
-            });
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Length, params(), in, changes->strands, scalpOf(ctx), *out))) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    shape(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), shape);
@@ -355,7 +357,9 @@ private:
             }
         };
         if (last) {
-            forEachListed(changes->strands, shape);
+            if (!(!isShaft && gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Width, params(), in, changes->strands, scalpOf(ctx), *out))) {
+                forEachListed(changes->strands, shape);
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), shape);

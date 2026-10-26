@@ -216,14 +216,17 @@ private:
             }
         }
 
-        if (!incremental && gpu::cpuEngineOn() && meshes.size() <= 2) {
-            // look.slang's CollideCS, the GPU preview's own (look_cpu.h), on its surfaces' fields.
+        // look.slang's CollideCS, the GPU preview's own (look_cpu.h), on its surfaces' fields (in full,
+        // or the strands an incremental evaluation makes again, below).
+        gpu::StageInputs surfaces;
+        if (gpu::cpuEngineOn() && meshes.size() <= 2) {
             std::uint32_t colliderBits = 0;
             for (std::size_t m = 0; m < colliders.size(); ++m) colliderBits |= colliders[m] ? 1u << m : 0u;
             std::string whyNot;
-            gpu::StageInputs surfaces;
             surfaces.collide = gpu::collideInputs(meshes, colliderBits, fields, offset, softness, &whyNot);
-            if (surfaces.collide) {
+        }
+        if (!incremental && surfaces.collide) {
+            {
                 if (StrandsPtr made = gpu::runStage(gpu::StageKind::Collide, params(), in, nullptr, std::move(surfaces))) {
                     *result = made;
                     return true;
@@ -428,10 +431,12 @@ private:
             carry(bent.data(), false);
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                collide(s);
-            });
+            if (!(surfaces.collide && gpu::runStageOnStrands(gpu::StageKind::Collide, params(), in, changes->strands, nullptr, *out, surfaces))) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    collide(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), [&](std::size_t s) {
@@ -597,10 +602,14 @@ private:
             turnToward(pts, n, away, amount, along);
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                part(s);
-            });
+            gpu::StageInputs sides;  // (on the CPU engine: these strands' sides)
+            if (gpu::cpuEngineOn()) sides.part = gpu::partInputs(*in, parts.get(), scalp, only, width, &changes->strands);
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Part, params(), in, changes->strands, scalp, *out, std::move(sides)))) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    part(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), part);
@@ -757,10 +766,12 @@ private:
             }
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                hang(s);
-            });
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Gravity, params(), in, changes->strands, scalp, *out))) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    hang(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), hang);
@@ -861,10 +872,12 @@ private:
             }
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                displace(s);
-            });
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Displace, params(), in, changes->strands, scalp, *out))) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    displace(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), displace);

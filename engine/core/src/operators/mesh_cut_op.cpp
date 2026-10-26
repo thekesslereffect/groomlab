@@ -135,10 +135,14 @@ private:
             resampleByArcLengthInto(source.data(), n, pts, n, std::min(kept / total, 1.0f));
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                cut(s);
-            });
+            gpu::StageInputs tree;  // (on the CPU engine: its ray tree)
+            if (gpu::cpuEngineOn()) tree.meshCut = gpu::meshCutInputs(mesh);
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::MeshCut, params(), in, changes->strands, nullptr, *out, std::move(tree)))) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    cut(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), cut);

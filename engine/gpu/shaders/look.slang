@@ -102,8 +102,13 @@
 float3 loadPoint(uint p) { return asfloat(gIn.Load3(p * 12)); }
 void storePoint(RWByteAddressBuffer b, uint p, float3 v) { b.Store3(p * 12, asuint(v)); }
 float4 strandData(uint s) { return asfloat(gStrandData.Load4((gDataBlock + s) * 16)); }
-uint strandBegin(uint s) { return gOffsets.Load(s * 4); }
-uint strandCountOf(uint s) { return gOffsets.Load(s * 4 + 4) - gOffsets.Load(s * 4); }
+// A view of some of the strands (gTable2.w 1: the CPU engine's for an operator's incremental
+// evaluation, LookEngine::setBaseView): each strand's first point and end, two words, in the whole
+// set's points.
+uint strandBegin(uint s) { return gTable2.w != 0u ? gOffsets.Load(s * 8) : gOffsets.Load(s * 4); }
+uint strandCountOf(uint s) {
+    return gTable2.w != 0u ? gOffsets.Load(s * 8 + 4) - gOffsets.Load(s * 8) : gOffsets.Load(s * 4 + 4) - gOffsets.Load(s * 4);
+}
 
 // The thread's index in the dispatch: rows of gDispatch.x groups of `groupSize` threads.
 uint threadIndex(uint3 id, uint groupSize) { return id.y * gDispatch.x * groupSize + id.x; }

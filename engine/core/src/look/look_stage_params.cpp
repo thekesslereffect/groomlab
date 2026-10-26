@@ -511,11 +511,11 @@ Vec3f scalpUvTangent(const ScalpMesh& scalp, std::int32_t face) {
 
 }  // namespace
 
-void writeRootFrames(const StrandSet& in, const ScalpMesh* scalp, float* frames) {
+void writeRootFrames(const StrandSet& in, const ScalpMesh* scalp, float* frames, const std::vector<std::uint32_t>* which) {
     const bool uvs = scalp && scalp->hasUVs();
-    parallelFor(0, in.strandCount(), [&](std::size_t s) {
+    parallelFor(0, which ? which->size() : in.strandCount(), [&](std::size_t s) {
         float* to = frames + s * 8;
-        const StrandRoot& root = in.roots()[s];
+        const StrandRoot& root = in.roots()[which ? (*which)[s] : s];
         if (!scalp || !scalp->contains(root)) {
             std::fill_n(to, 8, 0.0f);
             return;
@@ -786,17 +786,18 @@ std::vector<SmoothEnd> smoothEnds(float scale, std::size_t cells) {
     return ends;
 }
 
-std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* scalp, std::shared_ptr<const FlowField> flow) {
+std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* scalp, std::shared_ptr<const FlowField> flow,
+                                       const std::vector<std::uint32_t>* which) {
     auto made = std::make_shared<FlowInputs>();
     const FlowField* field = flow.get();
     made->arrows = field != nullptr;
     // Each strand's root on the scalp, its normal and the field there (FlowOp's first heading), as
     // the CPU reads them.
-    const std::size_t count = in.strandCount();
+    const std::size_t count = which ? which->size() : in.strandCount();
     auto strands = std::make_shared<std::vector<float>>(count * 12, 0.0f);
     parallelFor(0, count, [&](std::size_t s) {
         float* to = strands->data() + s * 12;
-        const StrandRoot& root = in.roots()[s];
+        const StrandRoot& root = in.roots()[which ? (*which)[s] : s];
         const bool onScalp = scalp && scalp->contains(root);
         const std::uint32_t face = onScalp ? static_cast<std::uint32_t>(root.face) : 0xFFFFFFFFu;
         std::memcpy(&to[0], &face, 4);
@@ -1001,12 +1002,14 @@ std::shared_ptr<MeshCutInputs> meshCutInputs(const MeshPtr& mesh) {
 }
 
 std::shared_ptr<PartInputs> partInputs(const StrandSet& in, const PartLines* lines, const ScalpMesh* scalp, const std::string& only,
-                                       float within) {
-    auto sides = std::make_shared<std::vector<float>>(in.strandCount() * 4, 0.0f);
+                                       float within, const std::vector<std::uint32_t>* which) {
+    const std::size_t count = which ? which->size() : in.strandCount();
+    auto sides = std::make_shared<std::vector<float>>(count * 4, 0.0f);
     const bool open = lines && !lines->empty() && scalp;
-    parallelFor(0, in.strandCount(), [&](std::size_t s) {
-        float* to = sides->data() + s * 4;
+    parallelFor(0, count, [&](std::size_t k) {
+        float* to = sides->data() + k * 4;
         to[3] = -1.0f;
+        const std::size_t s = which ? (*which)[k] : k;
         const StrandRoot& root = in.roots()[s];
         if (!open || in.strandPointCount(s) < 2 || !scalp->contains(root)) return;
         const PartLines::Side side = lines->sideOf(scalp->restPositionOr(root, in.strandPoints(s)[0]), only);

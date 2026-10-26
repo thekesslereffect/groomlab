@@ -92,10 +92,17 @@ float signedRandom(StrandId id, std::uint64_t seed, std::uint64_t salt, std::uin
 // The run every shaper here shares: in full, or (with `incremental`) only the strands the input
 // changed in, into the last result's copy; false when that cannot be done. `identity`: the strands
 // pass through as they came (nothing to do). `local`: every mapped value reads each strand alone.
-// shape(out, s) reshapes strand s of `out` (its incoming points there already).
+// shape(out, s) reshapes strand s of `out` (its incoming points there already). `engine`: the
+// operator's own stage, run on the CPU engine (look_cpu.h) for the strands an incremental evaluation
+// makes again (a full one runs it before).
+struct EngineStage {
+    gpu::StageKind kind;
+    const ParamSet& params;
+    const ScalpMesh* scalp;
+};
 template <class Shape>
 bool reshapeEach(const StrandsPtr& in, bool identity, bool local, const IncrementalInputs* incremental, bool otherInputsSame,
-                 Value* result, StrandChanges* changed, const Shape& shape) {
+                 Value* result, StrandChanges* changed, const Shape& shape, const EngineStage* engine = nullptr) {
     if (identity || in->empty()) {
         if (incremental) return false;  // the input handed on: the graph passes its changes on
         *result = in;
@@ -120,10 +127,12 @@ bool reshapeEach(const StrandsPtr& in, bool identity, bool local, const Incremen
         out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
     }
     if (last) {
-        forEachListed(changes->strands, [&](std::size_t s) {
-            copyStrandPoints(*out, *in, s);
-            shape(*out, s);
-        });
+        if (!(engine && gpu::cpuEngineOn() && gpu::runStageOnStrands(engine->kind, engine->params, in, changes->strands, engine->scalp, *out))) {
+            forEachListed(changes->strands, [&](std::size_t s) {
+                copyStrandPoints(*out, *in, s);
+                shape(*out, s);
+            });
+        }
         *changed = *changes;
     } else {
         parallelFor(0, out->strandCount(), [&](std::size_t s) { shape(*out, s); });
@@ -257,7 +266,8 @@ private:
                 return true;
             }
         }
-        return reshapeEach(in, identity, scale.strandLocal(), incremental, true, result, changed, shape);
+        const EngineStage engine{gpu::StageKind::Transform, params(), scalp};
+        return reshapeEach(in, identity, scale.strandLocal(), incremental, true, result, changed, shape, &engine);
     }
 };
 
@@ -388,8 +398,9 @@ private:
                 return true;
             }
         }
+        const EngineStage engine{gpu::StageKind::Bend, params(), scalp};
         return reshapeEach(in, identity, angle.strandLocal() && direction.strandLocal(), incremental, true, result, changed,
-                           shape);
+                           shape, &engine);
     }
 };
 
@@ -492,8 +503,9 @@ private:
                 return true;
             }
         }
+        const EngineStage engine{gpu::StageKind::Direction, params(), scalp};
         return reshapeEach(in, identity, inclination.strandLocal() && roll.strandLocal() && strength.strandLocal(), incremental, true,
-                           result, changed, shape);
+                           result, changed, shape, &engine);
     }
 };
 

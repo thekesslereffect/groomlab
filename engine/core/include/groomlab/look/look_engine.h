@@ -118,6 +118,11 @@ public:
     // layout, IDs and roots are the ones held, the points are compared strand by strand to find
     // them. Returns true when it uploaded.
     bool setBase(const StrandsPtr& base, const ScalpMesh* scalp, const StrandChanges* changed = nullptr);
+    // The strands `which` of `base` alone (a sharing engine's: an operator's incremental evaluation
+    // of a stage whose strands each read only themselves): a run's strand k is base's which[k], its
+    // points where base holds them, its result written there in the targets (the rest left as they
+    // are). The next setBase leaves the view.
+    void setBaseView(const StrandsPtr& base, const ScalpMesh* scalp, std::shared_ptr<const std::vector<std::uint32_t>> which);
     const StrandsPtr& base() const { return base_; }
     // Whether the last upload sent only the changed strands, and how many strands it sent.
     bool lastUploadPartial() const { return uploadPartial_; }
@@ -293,6 +298,8 @@ protected:
     }
 
     StrandsPtr base_;
+    std::shared_ptr<const std::vector<std::uint32_t>> view_;  // setBaseView's strands (null: all of base_)
+    std::size_t baseStrand(std::size_t i) const { return view_ ? (*view_)[i] : i; }
     std::size_t strandCount_ = 0, pointCount_ = 0, uniformCount_ = 0;  // uniformCount_: points per strand, 0 when they differ
     // The base's shown points' places among its points when it holds hidden strands (else empty),
     // and the points a run's results hold (the shown ones, else all).

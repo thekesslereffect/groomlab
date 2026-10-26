@@ -104,7 +104,7 @@ bool movesPointByPoint(StageKind kind);
 // The frames Bend, Direction, Transform and Displace take (RootInputs): each strand's scalp normal
 // and U direction at its root (none off the scalp), 8 floats a strand into `to` (every one written).
 // The CPU engine writes them into its own memory where a run gives none (look_engine.cpp).
-void writeRootFrames(const StrandSet& in, const ScalpMesh* scalp, float* to);
+void writeRootFrames(const StrandSet& in, const ScalpMesh* scalp, float* to, const std::vector<std::uint32_t>* which = nullptr);  // which: those strands alone, in that order
 std::shared_ptr<const RootInputs> rootInputs(const StrandSet& in, const ScalpMesh* scalp);
 // Twist's axes (TwistInputs, as TwistOp makes them): around the curves of `axes` (two points or more,
 // resampled by arc length) each strand's nearest by its root (`nearestByKernel`: left to TwistCS, its
@@ -140,7 +140,8 @@ double smoothWidth(float scale, std::size_t cells);
 std::vector<SmoothEnd> smoothEnds(float scale, std::size_t cells);
 // Flow's field and roots as the kernel takes them (FlowInputs, its tables the caller's) for the
 // strands `in` traced over `scalp` (null: none) along `field` (null: no arrows), as FlowOp reads them.
-std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* scalp, std::shared_ptr<const FlowField> field);
+std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* scalp, std::shared_ptr<const FlowField> field,
+                                       const std::vector<std::uint32_t>* which = nullptr);  // which: those strands alone, in that order
 // Jiggle's lags as the kernel takes them (JiggleInputs) from its operator's (operator_state.h
 // jiggleLags, over `scalp`) for the strands `in`.
 std::shared_ptr<JiggleInputs> jiggleInputs(const StrandSet& in, const ScalpMesh& scalp, const JiggleLags& lags);
@@ -159,6 +160,7 @@ std::shared_ptr<MeshCutInputs> meshCutInputs(const MeshPtr& mesh);
 // `only` where named) from its root on the rest scalp, the way away from it and how far; none `within`
 // or farther (an operator's own width: the strands it leaves; the preview's every one, a width dragged).
 std::shared_ptr<PartInputs> partInputs(const StrandSet& in, const PartLines* lines, const ScalpMesh* scalp, const std::string& only,
-                                       float within = std::numeric_limits<float>::infinity());
+                                       float within = std::numeric_limits<float>::infinity(),
+                                       const std::vector<std::uint32_t>* which = nullptr);  // which: those strands alone, in that order
 
 }  // namespace groomlab::gpu

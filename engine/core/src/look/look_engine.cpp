@@ -228,8 +228,44 @@ void tieConstants(const StageParams& p, const TieInputs* in, StageConstants* c) 
 
 }  // namespace
 
+void LookEngine::setBaseView(const StrandsPtr& base, const ScalpMesh* scalp, std::shared_ptr<const std::vector<std::uint32_t>> which) {
+    if (!sharesBase()) throw std::runtime_error("look engine: a view of the strands is a sharing engine's");
+    const StrandSet& s = *base;
+    const std::vector<std::uint32_t>& list = *which;
+    auto* offsets = static_cast<std::uint32_t*>(writable(kOffsets, std::max<std::size_t>(list.size(), 1) * 8));
+    for (std::size_t k = 0; k < list.size(); ++k) {
+        offsets[2 * k] = static_cast<std::uint32_t>(s.strandBegin(list[k]));
+        offsets[2 * k + 1] = static_cast<std::uint32_t>(s.offsets()[list[k] + 1]);
+    }
+    normalsScalp_ = scalp;
+    rootNormals_.clear();
+    rootsOnScalp_.clear();
+    strandCount_ = list.size();
+    pointCount_ = s.pointCount();
+    uniformCount_ = 0;  // (each strand's points by its two words)
+    share(kBasePoints, s.positions().data(), pointCount_ * 12);
+    if (s.widths().size() == pointCount_) {
+        share(kBaseWidths, s.widths().data(), pointCount_ * 4);
+    } else if (float* to = static_cast<float*>(writable(kBaseWidths, std::max<std::size_t>(pointCount_, 1) * 4))) {
+        std::fill(to, to + pointCount_, 0.01f);
+    }
+    for (const int b : {kPointsA, kPointsB, kPointsC, kWidths, kOut0, kOut1, kOut2, kOut3, kFull0, kFull1, kFull2, kFull3}) release(b);
+    ++baseSerial_;
+    dataKey_.clear();
+    fieldSerial_ = 0;
+    resultBuffer_ = -1;
+    base_ = base;
+    view_ = std::move(which);
+    shownPoints_.clear();
+    shownKey_ = 0;
+}
+
 bool LookEngine::setBase(const StrandsPtr& base, const ScalpMesh* scalp, const StrandChanges* changed) {
     if (!base) return false;
+    if (view_) {  // (leaving a view: all of it again)
+        view_.reset();
+        base_.reset();
+    }
     if (base == base_ && (!sharesBase() || scalp == normalsScalp_)) return false;
     const auto start = std::chrono::steady_clock::now();
     const StrandSet& s = *base;
@@ -325,12 +361,12 @@ bool LookEngine::setBase(const StrandsPtr& base, const ScalpMesh* scalp, const S
 }
 
 void LookEngine::makeRootNormals(const StrandSet& s, const ScalpMesh* scalp) {
-    const std::size_t strands = s.strandCount();
+    const std::size_t strands = view_ ? view_->size() : s.strandCount();
     rootNormals_.resize(strands);
     rootsOnScalp_.resize(strands);
     // The root normal each strand's lit lines lean by (display.cpp rootNormal: up when unrooted).
     parallelFor(0, strands, [&](std::size_t i) {
-        const StrandRoot& root = s.roots()[i];
+        const StrandRoot& root = s.roots()[baseStrand(i)];
         const bool rooted = scalp && root.face >= 0 && static_cast<std::size_t>(root.face) < scalp->triangleCount();
         rootNormals_[i] = rooted ? scalp->normal(root) : Vec3f{0, 1, 0};
         rootsOnScalp_[i] = rooted ? 1 : 0;
@@ -461,7 +497,7 @@ void LookEngine::putStrandData(const LookRun& run, bool frames) {
             up[2] = rootNormals_[i].z;
             up[3] = rootsOnScalp_[i] ? 1.0f : 0.0f;  // the skin's normal (Clump's repel keeps off the skin)
         }
-        const StrandId id = s.ids()[i];
+        const StrandId id = s.ids()[baseStrand(i)];
         for (std::size_t k = 0; k < stages.size(); ++k) {
             if (!dataBlocks_[k]) continue;
             float* d = data + (dataBlocks_[k] * n + i) * 4;
@@ -1200,7 +1236,8 @@ void LookEngine::putStageInputs(const LookRun& run) {
             const RootInputs* data = in ? in->roots.get() : nullptr;
             if (!data && sharesBase() && stageN == strandCount_) {
                 if (held.madeFrames != baseSerial_ || held.a || !has(auxBuffer(k, 0))) {
-                    writeRootFrames(*base_, normalsScalp_, static_cast<float*>(writable(auxBuffer(k, 0), std::max<std::size_t>(stageN, 1) * 32)));
+                    writeRootFrames(*base_, normalsScalp_, static_cast<float*>(writable(auxBuffer(k, 0), std::max<std::size_t>(stageN, 1) * 32)),
+                                    view_.get());
                     held.madeFrames = baseSerial_;
                     held.a = nullptr;
                     held.keep.reset();
@@ -2459,6 +2496,9 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     }
     if (nextSlot != slots.size()) throw std::runtime_error("GPU preview: the dispatches' constants are out of step");
 
+    if (view_) {
+        for (StageConstants& c : slots) c.table2[3] = 1u;  // (look.slang strandBegin: a view's two words a strand)
+    }
     beginRun();
     setConstants(slots.data(), slots.size(), sizeof(StageConstants));
     stamped_.clear();

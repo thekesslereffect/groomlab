@@ -270,10 +270,15 @@ private:
             }
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                blow(s, amountOf(s));
-            });
+            gpu::StageParamReader own(params(), "");  // (on the CPU engine at the evaluation's time)
+            own.time = ctx.time;
+            own.framesPerSecond = ctx.framesPerSecond;
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Wind, own, in, changes->strands, scalp, *out))) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    blow(s, amountOf(s));
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, count, [&](std::size_t s) { blow(s, amounts[s]); });

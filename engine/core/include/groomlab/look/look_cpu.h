@@ -24,6 +24,10 @@ void setCpuEngineOn(bool on);
 // strand (at the root, ScalarField::at). Binds the field to `in` (ScalarField::validate: throws
 // GraphError as the operator would).
 void readFieldValues(const ScalarField& field, const StrandSet& in, bool pointsAllowed, FieldValues* out);
+// The same for the strands `which` of `in` alone, as a set of them in that order holds them (read on
+// `in` itself: an expression of `index` reads each strand's place there).
+void readFieldValues(const ScalarField& field, const StrandSet& in, const std::vector<std::uint32_t>& which, bool pointsAllowed,
+                     FieldValues* out);
 
 // `run` (its stages from `in`) on the calling thread's CPU engine (made once, kept), into `out` (`in`
 // copied): a run moving points writes every one into out's own (StrandSet::overwritePositions), and
@@ -45,5 +49,14 @@ bool runStageInto(StageKind kind, const ParamSet& params, const StrandsPtr& in, 
                   StageInputs inputs = {});
 bool runStageInto(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out,
                   StageInputs inputs = {});
+// The stage on the strands `which` of `in` alone (an incremental evaluation's changed strands, of a
+// stage whose strands each read only themselves: its fields strand-local, its inputs none or no
+// strand's), on a view of them (LookEngine::setBaseView), their points (a Width: their widths)
+// written into `out` in place (`in`'s layout: the last result's copy, the rest left as they are).
+// False, `out` untouched, where the kernel does not run it so.
+bool runStageOnStrands(StageKind kind, const ParamSet& params, const StrandsPtr& in, const std::vector<std::uint32_t>& which,
+                       const ScalpMesh* scalp, StrandSet& out, StageInputs inputs = {});
+bool runStageOnStrands(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const std::vector<std::uint32_t>& which,
+                       const ScalpMesh* scalp, StrandSet& out, StageInputs inputs = {});
 
 }  // namespace groomlab::gpu

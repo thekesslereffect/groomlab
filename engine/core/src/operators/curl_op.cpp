@@ -1548,18 +1548,20 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
             // Laid out as the input (no points added).
             auto out = std::make_shared<StrandSet>(*in);
             positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-            forEachListed(list, [&](std::size_t s) {
-                thread_local Curve curve;
-                thread_local Axis own;
-                thread_local std::vector<Place> places;
-                if (in->strandPointCount(s) < 2) {
-                    copyStrandPoints(*out, *in, s);
-                    return;
-                }
-                const Axis& axis = prepare(s, curve, own);
-                plan(s, axis, places);
-                curl(s, curve, axis, places, out->strandPoints(s));
-            });
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Curl, params(), in, list, scalp, *out))) {
+                forEachListed(list, [&](std::size_t s) {
+                    thread_local Curve curve;
+                    thread_local Axis own;
+                    thread_local std::vector<Place> places;
+                    if (in->strandPointCount(s) < 2) {
+                        copyStrandPoints(*out, *in, s);
+                        return;
+                    }
+                    const Axis& axis = prepare(s, curve, own);
+                    plan(s, axis, places);
+                    curl(s, curve, axis, places, out->strandPoints(s));
+                });
+            }
             *result = StrandsPtr(out);
         } else {
             // With the points Curl added: the changed strands made apart, written over the last result's.

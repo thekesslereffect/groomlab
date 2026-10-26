@@ -162,11 +162,26 @@ private:
             }
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
+            // On the CPU engine (look.slang's FlyawayCS): each strand's flag by the gate it draws, on
+            // the points it took.
+            std::vector<std::uint8_t> strays(changes->strands.size(), 0);
+            for (std::size_t k = 0; k < changes->strands.size(); ++k) {
+                const std::size_t s = changes->strands[k];
                 copyStrandPoints(*out, *in, s);
-                flag[s] = had ? (*had)[s] : 0.0f;
-                stray(s);
-            });
+                strays[k] = unitFloat(hashCombine(out->ids()[s], seed ^ 0xF1A7)) < fractionField.at(*out, s) && out->strandPointCount(s) >= 2;
+            }
+            if (gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Flyaway, params(), in, changes->strands, scalp, *out)) {
+                for (std::size_t k = 0; k < changes->strands.size(); ++k) {
+                    const std::size_t s = changes->strands[k];
+                    flag[s] = strays[k] ? 1.0f : had ? (*had)[s] : 0.0f;
+                }
+            } else {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    flag[s] = had ? (*had)[s] : 0.0f;
+                    stray(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), stray);
@@ -550,10 +565,14 @@ private:
             }
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                lay(s);
-            });
+            gpu::StageInputs traced;  // (on the CPU engine: these strands' roots traced)
+            if (gpu::cpuEngineOn()) traced.flow = gpu::flowInputs(*in, scalp, arrows ? flow : nullptr, &changes->strands);
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Flow, params(), in, changes->strands, scalp, *out, std::move(traced)))) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    lay(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), lay);
