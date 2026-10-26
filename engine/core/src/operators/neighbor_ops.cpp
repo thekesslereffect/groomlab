@@ -20,6 +20,7 @@
 #include "groomlab/field.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -198,6 +199,14 @@ public:
         }
         state->normals = normals;
 
+        if (gpu::cpuEngineOn()) {  // look.slang's BlendNeighborsCS, the GPU preview's own (look_cpu.h)
+            gpu::StageInputs neighbours;
+            neighbours.neighbors = state;
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::BlendNeighbors, params(), in, scalp, std::move(neighbours))) {
+                remember(made, std::move(state));
+                return made;
+            }
+        }
         auto out = std::make_shared<StrandSet>(*in);
         const RampAlong along(profile, *in);
         parallelFor(0, count, [&](std::size_t s) {

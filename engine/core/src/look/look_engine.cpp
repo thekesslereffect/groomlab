@@ -414,7 +414,9 @@ void LookEngine::walkOnlyChanged(std::size_t k, const StageParams& params, const
 void LookEngine::putStrandData(const LookRun& run, bool frames) {
     const std::vector<StageParams>& stages = run.params.stages;
     bool normals = frames;
-    for (const StageParams& p : stages) normals = normals || p.stage.kind == StageKind::Clump || p.stage.kind == StageKind::Curl;
+    for (const StageParams& p : stages) {
+        normals = normals || p.stage.kind == StageKind::Clump || p.stage.kind == StageKind::Curl || p.stage.kind == StageKind::BlendNeighbors;
+    }
     if (normals && rootNormals_.size() != strandCount_) makeRootNormals(*base_, normalsScalp_);
     normals = normals || !rootNormals_.empty();
     // What the numbers come from: the strands (each full upload), the root normals, each stage's
@@ -1264,8 +1266,9 @@ void LookEngine::putShaperInputs(std::size_t k, const StageParams& stage, const 
             runUploadMegabytes_ += static_cast<double>((data->lengths->size() + data->firsts->size()) * 4) / 1e6;
         }
     } else if (stage.stage.kind == StageKind::BlendNeighbors) {
-        // Its neighbours (look.slang BlendNeighborsCS): aux 0 per strand its records' start and count,
-        // then the records (a neighbour, its share's bits); aux 1 per strand its root's normal (xyz, 0).
+        // Its neighbours as its operator keeps them (look.slang BlendNeighborsCS): aux 0 the offsets,
+        // aux 1 the neighbours, aux 2 their shares (on the CPU the very arrays, kept alive while held);
+        // its root normals the root normals' (putStrandData).
         const BlendNeighborsState* data = in ? in->neighbors.get() : nullptr;
         if (!data || data->offsets.size() != stageN + 1 || data->normals.size() != stageN ||
             data->neighbors.size() != data->weights.size() || data->offsets.back() != data->neighbors.size()) {
@@ -1273,24 +1276,23 @@ void LookEngine::putShaperInputs(std::size_t k, const StageParams& stage, const 
         }
         if (held.a != data || !has(auxBuffer(k, 0))) {
             const std::size_t n = stageN;
-            std::vector<std::uint32_t> words(2 * n + 2 * data->neighbors.size() + 1, 0u);
-            for (std::size_t s = 0; s < n; ++s) {
-                words[2 * s] = static_cast<std::uint32_t>(2 * n + 2 * data->offsets[s]);
-                words[2 * s + 1] = data->offsets[s + 1] - data->offsets[s];
+            if (std::any_of(data->neighbors.begin(), data->neighbors.end(), [&](std::uint32_t g) { return g >= n; })) {
+                throw std::runtime_error("GPU preview: BlendNeighbors' neighbours are other strands");
             }
-            for (std::size_t r = 0; r < data->neighbors.size(); ++r) {
-                const std::uint32_t g = data->neighbors[r];
-                if (g >= n) throw std::runtime_error("GPU preview: BlendNeighbors' neighbours are other strands");
-                words[2 * n + 2 * r] = g;
-                std::memcpy(&words[2 * n + 2 * r + 1], &data->weights[r], 4);
-            }
-            std::vector<float> normals(std::max<std::size_t>(n, 1) * 4, 0.0f);
-            for (std::size_t s = 0; s < n; ++s) std::memcpy(&normals[s * 4], &data->normals[s], 12);
-            write(auxBuffer(k, 0), words.data(), words.size() * 4, false);
-            write(auxBuffer(k, 1), normals.data(), normals.size() * 4, false);
+            auto put = [&](int buffer, const void* from, std::size_t bytes) {
+                if (bytes) {
+                    share(buffer, from, bytes);
+                } else {
+                    const std::uint32_t none = 0;
+                    write(buffer, &none, 4, false);
+                }
+            };
+            put(auxBuffer(k, 0), data->offsets.data(), data->offsets.size() * 4);
+            put(auxBuffer(k, 1), data->neighbors.data(), data->neighbors.size() * 4);
+            put(auxBuffer(k, 2), data->weights.data(), data->weights.size() * 4);
             held.a = data;
             held.keep = in->neighbors;
-            runUploadMegabytes_ += static_cast<double>((words.size() + normals.size()) * 4) / 1e6;
+            runUploadMegabytes_ += static_cast<double>((data->offsets.size() + 2 * data->neighbors.size()) * 4) / 1e6;
         }
     } else if (stage.stage.kind == StageKind::Tangle) {
         // Its partners (look.slang TangleCS): aux 0, 4 words a strand (TangleInputs).
@@ -1352,6 +1354,7 @@ LookEngine::Kernel LookEngine::shaperKernel(std::size_t k, const StageParams& st
         case StageKind::BlendNeighbors:
             b->aux[0] = auxBuffer(k, 0);
             b->aux[1] = auxBuffer(k, 1);
+            b->aux[2] = auxBuffer(k, 2);
             return Kernel::BlendNeighbors;
         case StageKind::Tangle: b->aux[0] = auxBuffer(k, 0); return Kernel::Tangle;
         case StageKind::Flow: {

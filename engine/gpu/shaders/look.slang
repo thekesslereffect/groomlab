@@ -6653,35 +6653,45 @@ void RestoreLengthCS(uint3 id : SV_DispatchThreadID) {
 // ---- BlendNeighbors: a thread a strand ---------------------------------------------------------
 //
 // gValue.x: strength (field 0, per strand); gFlag.x: preserveLength; the profile by point index.
-// gAux0: per strand its neighbours' first record (words) and count, each record a
-// neighbour and its share's bits; gAux1: per strand its root's normal (xyz; zero: none). The mean of
+// Its operator's neighbours as it keeps them (operator_state.h BlendNeighborsState): gAux0 per
+// strand its first neighbour (count + 1 offsets), gAux1 the neighbours, gAux2 their shares; each
+// strand's root normal the root normals' (zero off the scalp, as the CPU's). The mean of
 // the neighbours' shapes (each resampled to the strand's count where it differs, turned from its
-// root's normal to the strand's) summed into gOut neighbour by neighbour as the CPU sums them; the
-// strand blended toward it and (preserveLength) scaled back to its own length about its root.
+// root's normal to the strand's) summed neighbour by neighbour as the CPU sums them (into gOut; on
+// the CPU into the thread's own array, strands of up to NEIGHBOUR_POINTS points); the strand blended
+// toward it and (preserveLength) scaled back to its own length about its root.
 
-float3 neighbourNormal(uint s) { return asfloat(gAux1.Load4(s * 16).xyz); }
+float3 neighbourNormal(uint s) {
+    const float4 root = asfloat(gStrandData.Load4((gTable.y + s) * 16));
+    return root.w != 0.0f ? root.xyz : float3(0.0f, 0.0f, 0.0f);
+}
 
-[shader("compute")]
-[numthreads(GROUP_SIZE, 1, 1)]
-void BlendNeighborsCS(uint3 id : SV_DispatchThreadID) {
-    const uint s = threadIndex(id, GROUP_SIZE);
-    if (s >= gStrandCount) return;
-    const uint begin = strandBegin(s), n = strandCountOf(s);
-    const uint2 header = gAux0.Load2(s * 8);
-    const float a = n >= 2 ? clamp(fieldAt(0, gValue.x, s, 0), 0.0f, 1.0f) : 0.0f;
-    if (n < 2 || !(a > 0.0f) || header.y == 0) {
-        copyStrand(begin, n);
-        return;
-    }
+// Where the neighbours' mean is summed, point j of the strand's n.
+interface INeighbourMean {
+    float3 get(uint j);
+    [mutating] void set(uint j, float3 p);
+}
+struct OutMean : INeighbourMean {
+    uint begin;
+    float3 get(uint j) { return loadOut(begin + j); }
+    [mutating] void set(uint j, float3 p) { storePoint(gOut, begin + j, p); }
+}
+#define NEIGHBOUR_POINTS 128
+struct OwnMean : INeighbourMean {
+    float3 points[NEIGHBOUR_POINTS];
+    float3 get(uint j) { return points[j]; }
+    [mutating] void set(uint j, float3 p) { points[j] = p; }
+}
+
+// Strand s (begin, n points, blended by a, its records `header`) toward its neighbours' mean.
+void blendTowardNeighbours<M : INeighbourMean>(inout M mean, uint s, uint begin, uint n, float a, uint2 header) {
     const float3 root = loadPoint(begin);
-    storePoint(gOut, begin, root);
-    for (uint j = 1; j < n; ++j) storePoint(gOut, begin + j, float3(0.0f, 0.0f, 0.0f));
+    for (uint j = 1; j < n; ++j) mean.set(j, float3(0.0f, 0.0f, 0.0f));
     const float3 to = neighbourNormal(s);
     const bool haveNormal = len3(to) > 0.0f;
     for (uint r = 0; r < header.y; ++r) {
-        const uint2 record = gAux0.Load2((header.x + 2 * r) * 4);
-        const uint g = record.x;
-        const float w = asfloat(record.y);
+        const uint g = gAux1.Load((header.x + r) * 4);
+        const float w = asfloat(gAux2.Load((header.x + r) * 4));
         const uint gb = strandBegin(g), gn = strandCountOf(g);
         const float3 groot = loadPoint(gb);
         // Rotation(its root's normal, the strand's) where both have one: its cosine rounded as the
@@ -6709,9 +6719,10 @@ void BlendNeighborsCS(uint3 id : SV_DispatchThreadID) {
         ArcWalk walk = arcWalkStart(gb);
         for (uint j = 1; j < n; ++j) {
             const float3 p = resampled ? arcWalkAt(walk, gb, gn, step * float(j)) : loadPoint(gb + j);
-            storePoint(gOut, begin + j, loadOut(begin + j) + turnBy(kind, axis, c, invTurn, p - groot) * w);
+            mean.set(j, mean.get(j) + turnBy(kind, axis, c, invTurn, p - groot) * w);
         }
     }
+    storePoint(gOut, begin, root);
     float target = 0.0f, blended = 0.0f;
     float3 before = root;
     for (uint j = 1; j < n; ++j) {
@@ -6719,7 +6730,7 @@ void BlendNeighborsCS(uint3 id : SV_DispatchThreadID) {
         target += len3(own - loadPoint(begin + j - 1));
         const float3 offset = own - root;
         const float t = a * clamp(rampAlong(j, n), 0.0f, 1.0f);
-        const float3 dst = root + offset + (loadOut(begin + j) - offset) * t;
+        const float3 dst = root + offset + (mean.get(j) - offset) * t;
         storePoint(gOut, begin + j, dst);
         blended += len3(dst - before);
         before = dst;
@@ -6727,6 +6738,34 @@ void BlendNeighborsCS(uint3 id : SV_DispatchThreadID) {
     if (gFlag.x != 0 && target > 1e-8f && blended > 1e-6f * target) {
         const float scale = target / blended;
         for (uint j = 1; j < n; ++j) storePoint(gOut, begin + j, root + (loadOut(begin + j) - root) * scale);
+    }
+}
+
+[shader("compute")]
+[numthreads(GROUP_SIZE, 1, 1)]
+void BlendNeighborsCS(uint3 id : SV_DispatchThreadID) {
+    const uint s = threadIndex(id, GROUP_SIZE);
+    if (s >= gStrandCount) return;
+    const uint begin = strandBegin(s), n = strandCountOf(s);
+    const uint first = gAux0.Load(s * 4);
+    const uint2 header = uint2(first, gAux0.Load((s + 1) * 4) - first);
+    const float a = n >= 2 ? clamp(fieldAt(0, gValue.x, s, 0), 0.0f, 1.0f) : 0.0f;
+    if (n < 2 || !(a > 0.0f) || header.y == 0) {
+        copyStrand(begin, n);
+        return;
+    }
+    OutMean out;
+    out.begin = begin;
+    __target_switch {
+    case cpp:
+        if (n <= NEIGHBOUR_POINTS) {
+            OwnMean own;
+            blendTowardNeighbours(own, s, begin, n, a, header);
+        } else {
+            blendTowardNeighbours(out, s, begin, n, a, header);
+        }
+    default:
+        blendTowardNeighbours(out, s, begin, n, a, header);
     }
 }
 
