@@ -25,6 +25,7 @@ Contents:
   6. Intel(R) Threading Building Blocks (TBB) 2020.2
   7. Figtree (font)
   8. JetBrains Mono (font)
+  9. Slang C++ prelude 2026.19
 
 ==============================================================================
 1. Alembic 1.8.8
@@ -644,3 +645,18 @@ INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
 DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
+
+==============================================================================
+9. Slang C++ prelude 2026.19
+https://github.com/shader-slang/slang
+==============================================================================
+
+The headers the look kernels' C++ form (slangc's output, the CPU engine) compiles against
+(slang-cpp-prelude.h, slang-cpp-types.h, slang-cpp-types-core.h, slang-cpp-scalar-intrinsics.h).
+
+Licensed under the Apache License, Version 2.0 with LLVM Exceptions (Apache-2.0 WITH
+LLVM-exception); the license text is in third_party/slang/LICENSE of GroomLab's source and at
+https://www.apache.org/licenses/LICENSE-2.0. As an exception, if, as a result of your compiling
+your source code, portions of this Software are embedded into an Object form of such source code,
+you may redistribute such embedded portions in such Object form without complying with the
+conditions of Sections 4(a), 4(b) and 4(d) of the License.

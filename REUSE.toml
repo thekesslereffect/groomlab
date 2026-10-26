@@ -43,6 +43,14 @@ precedence = "closest"
 SPDX-FileCopyrightText = "2026 Nick Rutlinh"
 SPDX-License-Identifier = "MIT"
 
+# Slang's C++ prelude headers (the CPU engine's kernels, slangc's C++, compile against them),
+# vendored: Apache-2.0 WITH LLVM-exception.
+[[annotations]]
+path = ["third_party/slang/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Slang authors"
+SPDX-License-Identifier = "Apache-2.0 WITH LLVM-exception"
+
 # stb_image (Sean Barrett), vendored: MIT or public domain, at your choice.
 [[annotations]]
 path = ["third_party/stb/**"]

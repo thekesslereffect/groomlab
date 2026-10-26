@@ -2,7 +2,7 @@
 #pragma once
 
 // What shaders/look.slang's kernels take from the core in their C++ form (slangc's
-// look_kernels_cpu.cpp, which includes this first): the atomics they use on a buffer's word (its
+// generated/look_kernels_cpu.cpp, which includes this first): the atomics they use on a buffer's word (its
 // cpuAtomic* helpers expand to these), each on the 32-bit word at byte `at` of buffer `b` (slangc's
 // RWByteAddressBuffer: its `data`), returning the word before, as the GPU's Interlocked* do; and the
 // core's portable float transcendentals (groomlab_pm_*: cmake/portable_cpu_kernels.cmake puts them

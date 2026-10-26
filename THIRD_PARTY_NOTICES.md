@@ -29,7 +29,8 @@ CMake's FetchContent downloads these, pinned by tag or SHA-256 (`cmake/GroomLabD
 | nlohmann/json | 3.11.3 | MIT | Graph and groom JSON (header-only) | yes: notice in THIRD_PARTY_NOTICES.txt |
 | pybind11 | 2.13.6 | BSD-3-Clause | The `groomlab_core` Python module | yes: notice in THIRD_PARTY_NOTICES.txt |
 | GoogleTest | 1.15.2 | BSD-3-Clause | Unit tests only | no |
-| Slang (`slangc`) | 2026.19 | Apache-2.0 WITH LLVM-exception | Build tool: compiles the GPU kernels to DXBC/GLSL | no (only its output) |
+| Slang (`slangc`) | 2026.19 | Apache-2.0 WITH LLVM-exception | Build tool: compiles the look kernels to DXBC/GLSL and C++ | no (only its output) |
+| Slang C++ prelude (`third_party/slang`) | 2026.19 | Apache-2.0 WITH LLVM-exception | The headers the kernels' C++ (the CPU engine) compiles against | yes (compiled in): notice in THIRD_PARTY_NOTICES.txt |
 
 ## Found on your machine (never in the repository)
 

@@ -54,6 +54,10 @@ add_library(groomlab_core_objects OBJECT
     src/node_catalog.cpp
     src/node_library.cpp
     src/noise.cpp
+    src/look/look_run.cpp
+    src/look/look_engine.cpp
+    src/look/look_engine_cpu.cpp
+    src/look/generated/look_kernels_cpu.cpp
     src/node_common.cpp
     src/parts.cpp
     src/transfer.cpp
@@ -146,6 +150,13 @@ target_compile_definitions(groomlab_core_headers INTERFACE "GROOMLAB_PORTABLE_MA
 target_link_libraries(groomlab_core_objects PUBLIC groomlab_core_headers)
 # stb_image (public domain, vendored): texture maps.
 target_include_directories(groomlab_core_objects SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/third_party/stb")
+# The look kernels' C++ (slangc's, src/look/generated): Slang's prelude (third_party/slang), its own
+# style (warnings off for it), the support header beside it.
+target_include_directories(groomlab_core_objects SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/third_party/slang/include")
+target_include_directories(groomlab_core_objects PRIVATE src/look)
+set_source_files_properties(src/look/generated/look_kernels_cpu.cpp PROPERTIES
+    SKIP_PRECOMPILE_HEADERS ON
+    COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/W0;/bigobj,-w>")
 target_link_libraries(groomlab_core_objects PRIVATE nlohmann_json::nlohmann_json groomlab::warnings)
 groomlab_precompile(groomlab_core_objects <nlohmann/json.hpp>)
 

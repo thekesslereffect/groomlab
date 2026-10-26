@@ -1877,7 +1877,7 @@ TEST(GpuPreview, StageTableNamesRealTypesAndParams) {
     check(#Type, vectors, "vectors", {"vec3"});         \
     check(#Type, nums, "numbers", numbers);
 #define GROOMLAB_PASS_THROUGH(Type) check(#Type, "", "pass-through", {});
-#include "groomlab/gpu/look_stages.inc"
+#include "groomlab/look/look_stages.inc"
 #undef GROOMLAB_STAGE
 #undef GROOMLAB_STAGE_NODE
 #undef GROOMLAB_GPU_PARAMS

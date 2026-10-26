@@ -8,7 +8,7 @@
 #include "groomlab/parallel.h"
 #include "groomlab/preview_core.h"
 #include "groomlab/random.h"
-#include "look_engine_internal.h"
+#include "groomlab/look/look_engine_internal.h"
 
 namespace groomlab::gpu {
 
@@ -19,7 +19,7 @@ LookEngine::~LookEngine() = default;
 const char* kernelName(LookEngine::Kernel kernel) {
     static const char* const names[] = {
 #define GROOMLAB_KERNEL(Name) #Name,
-#include "groomlab/gpu/look_kernels.inc"
+#include "groomlab/look/look_kernels.inc"
 #undef GROOMLAB_KERNEL
     };
     static_assert(sizeof names / sizeof names[0] == static_cast<std::size_t>(LookEngine::Kernel::Count), "a name a kernel");

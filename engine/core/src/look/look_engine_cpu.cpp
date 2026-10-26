@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// The look engine on the CPU: the kernels of shaders/look.slang compiled to C++ by slangc (the
-// generated look_kernels_cpu.cpp: the very source the GPU runs), its buffers in memory, a dispatch
-// its groups across the core's threads. A kernel that synchronizes a group or uses atomics has no
-// CPU form yet (engine/gpu/CMakeLists.txt): a run dispatching one throws.
+// The look engine on the CPU: the kernels of engine/gpu/shaders/look.slang compiled to C++ by slangc
+// (generated/look_kernels_cpu.cpp, kept in the repository: the very source the GPU runs, the core's
+// operators' bits), its buffers in memory, a dispatch its groups across the core's threads.
 
 #include <algorithm>
 #include <chrono>
@@ -13,7 +12,7 @@
 #include <vector>
 
 #include "groomlab/parallel.h"
-#include "look_engine_internal.h"
+#include "groomlab/look/look_engine_internal.h"
 #include "slang-cpp-prelude.h"
 
 #ifdef SLANG_PRELUDE_NAMESPACE
@@ -21,9 +20,9 @@ using namespace SLANG_PRELUDE_NAMESPACE;
 #endif
 
 using CpuKernelFn = void (*)(ComputeVaryingInput*, void*, void*);
-#define GROOMLAB_CPU_KERNEL(Name) extern "C" void Name##CS(ComputeVaryingInput*, void*, void*);
-#include "look_kernels_cpu.inc"
-#undef GROOMLAB_CPU_KERNEL
+#define GROOMLAB_KERNEL(Name) extern "C" void Name##CS(ComputeVaryingInput*, void*, void*);
+#include "groomlab/look/look_kernels.inc"
+#undef GROOMLAB_KERNEL
 
 namespace groomlab::gpu {
 
@@ -41,9 +40,9 @@ struct CpuGlobals {
 const CpuKernelFn* cpuKernels() {
     static const auto table = [] {
         std::vector<CpuKernelFn> t(static_cast<std::size_t>(LookEngine::Kernel::Count), nullptr);
-#define GROOMLAB_CPU_KERNEL(Name) t[static_cast<std::size_t>(LookEngine::Kernel::Name)] = &Name##CS;
-#include "look_kernels_cpu.inc"
-#undef GROOMLAB_CPU_KERNEL
+#define GROOMLAB_KERNEL(Name) t[static_cast<std::size_t>(LookEngine::Kernel::Name)] = &Name##CS;
+#include "groomlab/look/look_kernels.inc"
+#undef GROOMLAB_KERNEL
         return t;
     }();
     return table.data();
