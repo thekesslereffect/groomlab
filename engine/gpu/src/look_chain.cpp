@@ -1039,7 +1039,6 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                     *why = doc.nameOf(id) + " keeps no time for its result";
                     return false;
                 }
-                if (!mappable("strength", &s.value[0])) return false;
                 // A plain 0 of its own blows nowhere and stays cached whatever the time (WindOp's
                 // contextSalt): the time kept may be an earlier one than a drag of it would blow at.
                 const ParamSet& own = graph.node(id).params();
@@ -1048,38 +1047,10 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                     *why = doc.nameOf(id) + " blows nowhere at its own strength, so its time is not kept (the CPU's)";
                     return false;
                 }
-                const auto frequency = static_cast<float>(number("frequency"));
-                const double speed = number("speed");
-                s.value[1] = static_cast<float>(number("gust"));
-                s.value[2] = frequency;
-                s.value[3] = static_cast<float>(number("turbulence"));
-                const Vec3f direction = params.getVec3("direction");
-                const Vec3f dir = direction.length() < 1e-6f ? Vec3f{} : direction.normalized();
-                const WindPhase phase = windPhase(dir, frequency, speed, time, fps, params.getBool("loop"),
-                                                  static_cast<double>(params.getInt("loopStart")),
-                                                  static_cast<double>(params.getInt("loopEnd")));
-                auto bits = [](int* to, float v) { std::memcpy(to, &v, sizeof(float)); };  // the kernel reads them as floats
-                if (!(direction.length() < 1e-6f)) {
-                    s.value2[0] = dir.x;
-                    s.value2[1] = dir.y;
-                    s.value2[2] = dir.z;
-                    if (phase.looped) {
-                        bits(&s.flag[0], phase.angle);
-                        bits(&s.flag[1], phase.turnsPer);
-                        s.flag[3] = 1;
-                        bits(&s.flag2[0], phase.across1.x);
-                        bits(&s.flag2[1], phase.across1.y);
-                        bits(&s.flag2[2], phase.across1.z);
-                        bits(&s.flag2[3], phase.radius);
-                    } else {
-                        bits(&s.flag[0], phase.shift.x);
-                        bits(&s.flag[1], phase.shift.y);
-                        bits(&s.flag[2], phase.shift.z);
-                    }
-                }
-                s.value2[3] = phase.flutterPhase;
-                s.ramp = ramp("profile");
-                s.tabled = true;
+                PreviewParamReader timed = reader;
+                timed.time = time;
+                timed.framesPerSecond = fps;
+                if (!readStageParams(stage.kind, timed, &s, why)) return false;
                 break;
             }
             case StageKind::Blend: {

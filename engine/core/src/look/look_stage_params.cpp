@@ -41,6 +41,7 @@ bool readsStageParams(StageKind kind) {
         case StageKind::Part:
         case StageKind::Gravity:
         case StageKind::Flyaway:
+        case StageKind::Wind:
         case StageKind::Bend:
         case StageKind::Direction:
         case StageKind::Transform:
@@ -113,6 +114,44 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->value2[0] = static_cast<float>(number("standOut"));
             s->value2[1] = static_cast<float>(number("lengthen"));
             s->flag[0] = 1;  // the stray's noise: one octave
+            return true;
+        }
+        case StageKind::Wind: {
+            // At the reader's time, as WindOp works it out: how far the gusts travelled along the
+            // direction and the flutter's phase (in double, as the CPU's, then rounded to floats as
+            // it rounds them).
+            if (!mappable("strength", &s->value[0])) return false;
+            const auto frequency = static_cast<float>(number("frequency"));
+            const double speed = number("speed");
+            s->value[1] = static_cast<float>(number("gust"));
+            s->value[2] = frequency;
+            s->value[3] = static_cast<float>(number("turbulence"));
+            const Vec3f direction = params.getVec3("direction");
+            const Vec3f dir = direction.length() < 1e-6f ? Vec3f{} : direction.normalized();
+            const WindPhase phase = windPhase(dir, frequency, speed, r.time, r.framesPerSecond, params.getBool("loop"),
+                                              static_cast<double>(params.getInt("loopStart")), static_cast<double>(params.getInt("loopEnd")));
+            auto bits = [](int* to, float v) { std::memcpy(to, &v, sizeof(float)); };  // the kernel reads them as floats
+            if (!(direction.length() < 1e-6f)) {
+                s->value2[0] = dir.x;
+                s->value2[1] = dir.y;
+                s->value2[2] = dir.z;
+                if (phase.looped) {
+                    bits(&s->flag[0], phase.angle);
+                    bits(&s->flag[1], phase.turnsPer);
+                    s->flag[3] = 1;
+                    bits(&s->flag2[0], phase.across1.x);
+                    bits(&s->flag2[1], phase.across1.y);
+                    bits(&s->flag2[2], phase.across1.z);
+                    bits(&s->flag2[3], phase.radius);
+                } else {
+                    bits(&s->flag[0], phase.shift.x);
+                    bits(&s->flag[1], phase.shift.y);
+                    bits(&s->flag[2], phase.shift.z);
+                }
+            }
+            s->value2[3] = phase.flutterPhase;
+            s->ramp = r.ramp("profile");
+            s->tabled = true;
             return true;
         }
         // ---- The shapers working on each strand alone ----

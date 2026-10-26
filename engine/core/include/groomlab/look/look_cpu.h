@@ -36,9 +36,13 @@ void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* s
 // engine's own), the result `in` copied with the points (a Width: the widths) the kernel makes. Null
 // where the kernel does not run it so (the operator's C++ then).
 StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs = {});
+// The same with the params as `reader` reads them (an operator's own at its time: Wind).
+StrandsPtr runStage(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs = {});
 // The same into `out` (`in` copied, its points its own: the operator's, carrying what else it adds):
 // false, `out` untouched, where the kernel does not run it so.
 bool runStageInto(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out,
+                  StageInputs inputs = {});
+bool runStageInto(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out,
                   StageInputs inputs = {});
 
 }  // namespace groomlab::gpu

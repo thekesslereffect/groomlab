@@ -6239,6 +6239,10 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Tangle", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "fraction": 0.7, "sameClump": false, "reach": 0.0})"},
         {"BlendNeighbors", R"("params": {"strength": 0.6})"},
         {"BlendNeighbors", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "preserveLength": true, "neighbors": 5})"},
+        {"Length", R"("params": {"keep": 0.8, "fraction": 0.5, "trimMin": 0.1, "trimMax": 0.4, "seed": 2})"},
+        {"Length", R"("params": {"keep": {"expression": "0.5 + 0.5 * rand", "min": 0.0, "max": 1.0}})"},
+        {"Wind", R"("params": {"strength": 0.5, "gust": 0.6, "turbulence": 0.3, "direction": [1.0, 0.0, 0.3]})"},
+        {"Wind", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "loop": true, "loopStart": 1, "loopEnd": 25})"},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
     };
@@ -6256,6 +6260,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         setGroomExternals(ext, session.last().scalp, data.guides, session.last().hierarchy, session.last().parts, session.last().flow);
         EvalContext ctx;
         ctx.externals = &ext;
+        ctx.time = 1.25;  // (Wind's gusts somewhere along)
         const Operator& op = doc.graph.node(id);
         std::vector<Value> inputs(op.inputs().size());
         for (std::size_t i = 0; i < inputs.size(); ++i) {
@@ -6269,7 +6274,8 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"Displace", gpu::StageKind::Displace},   {"Gravity", gpu::StageKind::Gravity},
                                                              {"Part", gpu::StageKind::Part},           {"Flyaway", gpu::StageKind::Flyaway},
                                                              {"Twist", gpu::StageKind::Twist},         {"Tangle", gpu::StageKind::Tangle},
-                                                             {"BlendNeighbors", gpu::StageKind::BlendNeighbors}};
+                                                             {"BlendNeighbors", gpu::StageKind::BlendNeighbors},
+                                                             {"Length", gpu::StageKind::Length},       {"Wind", gpu::StageKind::Wind}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;
@@ -6295,7 +6301,10 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         gpu::setCpuEngineOn(false);
         made[0] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
         gpu::setCpuEngineOn(true);
-        made[1] = gpu::runStage(kind, op.params(), valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), stageInputs);
+        gpu::StageParamReader reader(op.params(), "");
+        reader.time = ctx.time;
+        reader.framesPerSecond = ctx.framesPerSecond;
+        made[1] = gpu::runStage(kind, reader, valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), stageInputs);
         EXPECT_EQ(made[1] != nullptr, !c.cpus);
         made[2] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
         for (int m = 1; m < 3; ++m) {

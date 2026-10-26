@@ -17,6 +17,7 @@
 #include "groomlab/field.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/noise.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
@@ -201,6 +202,16 @@ private:
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;
+                return true;
+            }
+        }
+        if (!last && !(strength.isConstant() && strength.maximum() <= 0.0f) && gpu::cpuEngineOn()) {
+            // look.slang's WindCS, the GPU preview's own (look_cpu.h), at the evaluation's time.
+            gpu::StageParamReader own(params(), "");
+            own.time = ctx.time;
+            own.framesPerSecond = ctx.framesPerSecond;
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Wind, own, in, scalp)) {
+                *result = made;
                 return true;
             }
         }

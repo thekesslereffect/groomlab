@@ -35,6 +35,10 @@ public:
     // own reads its values whole (readFieldValues: 1 where mapped). False with *why where the
     // kernel cannot take it.
     virtual bool mappable(const std::string& param, float* value, std::string* why) const;
+    // The time the stage runs at (seconds) and its frame rate: Wind's (an operator's evaluation's,
+    // the preview's the one its cached result was made at).
+    double time = 0.0;
+    double framesPerSecond = 24.0;
 
 private:
     const ParamSet& params_;
@@ -43,8 +47,8 @@ private:
 
 // Whether readStageParams reads a stage of `kind`'s params.
 bool readsStageParams(StageKind kind);
-// A stage of `kind`'s params (Length, Width, Part, Gravity, Flyaway, the shapers working on each
-// strand alone, Smooth, BlendNeighbors, Tangle, Flow) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).
+// A stage of `kind`'s params (Length, Width, Part, Gravity, Flyaway, Wind, the shapers working on
+// each strand alone, Smooth, BlendNeighbors, Tangle, Flow) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).
 // False with *why where the kernel does not run it so (the CPU's). (Width's feathers' shafts with a
 // rachis, an auto Part's lines: the caller's to refuse.)
 bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, std::string* why);

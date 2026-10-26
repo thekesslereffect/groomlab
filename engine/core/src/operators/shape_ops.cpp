@@ -212,6 +212,12 @@ private:
                 return true;
             }
         }
+        if (!last && gpu::cpuEngineOn()) {  // look.slang's LengthCS, the GPU preview's own (look_cpu.h)
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Length, params(), in, scalpOf(ctx))) {
+                *result = made;
+                return true;
+            }
+        }
         auto out = std::make_shared<StrandSet>(*in);
         if (last) {
             positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made

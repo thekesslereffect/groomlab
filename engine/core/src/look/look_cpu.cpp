@@ -67,20 +67,30 @@ void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* s
 }
 
 StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs) {
+    return runStage(kind, StageParamReader(params, ""), in, scalp, std::move(inputs));
+}
+
+StrandsPtr runStage(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs) {
     if (!in || in->empty()) return nullptr;
     auto out = std::make_shared<StrandSet>(*in);
-    return runStageInto(kind, params, in, scalp, *out, std::move(inputs)) ? out : nullptr;
+    return runStageInto(kind, reader, in, scalp, *out, std::move(inputs)) ? out : nullptr;
 }
 
 bool runStageInto(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out,
                   StageInputs inputs) {
+    return runStageInto(kind, StageParamReader(params, ""), in, scalp, out, std::move(inputs));
+}
+
+bool runStageInto(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out,
+                  StageInputs inputs) {
     if (!in || in->empty()) return false;
+    const ParamSet& params = reader.params();
     LookRun run;
     StageParams& s = run.params.stages.emplace_back();
     s.stage.kind = kind;
     if (params.has("seed")) s.seed = static_cast<std::uint64_t>(params.getInt("seed"));
     std::string why;
-    if (!readStageParams(kind, StageParamReader(params, ""), &s, &why)) return false;
+    if (!readStageParams(kind, reader, &s, &why)) return false;
     run.fields.stages.resize(1);
     run.inputs.push_back(std::move(inputs));
     const std::array<std::string, 2> mapped = mappedParams(kind, params);
