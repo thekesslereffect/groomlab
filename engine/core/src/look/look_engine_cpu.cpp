@@ -253,6 +253,9 @@ protected:
             fn(&v, nullptr, &g);
         }, 1);  // (a group is 64 or 256 threads' work: each its own task)
     }
+    bool runsIf(int id, std::uint32_t least) override {
+        return has(id) && buffers_.at(id)->size() > 0 && buffers_.at(id)->data()[0] >= least;
+    }
     void beginRun() override { stampTimes_.clear(); }
     void stamp(std::size_t index) override {
         if (stampTimes_.size() <= index) stampTimes_.resize(index + 1);

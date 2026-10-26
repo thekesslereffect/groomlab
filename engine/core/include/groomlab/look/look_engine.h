@@ -258,6 +258,9 @@ protected:
     virtual void dispatch(Kernel kernel, std::size_t slot, const Binding& binding, std::size_t groupsX, std::size_t groupsY) = 0;
     // `count` dispatches of one kernel and binding, their constants slot `slot` then `slot + 1` in
     // turn (a red-black solve's colours), each reading what the one before wrote.
+    // Whether a dispatch asked to run only where `buffer`'s first word is at least `least` runs: true
+    // where the engine cannot tell without waiting (the GPU's: the kernels find the same either way).
+    virtual bool runsIf(int /*buffer*/, std::uint32_t /*least*/) { return true; }
     virtual void dispatchAlternating(Kernel kernel, std::size_t slot, const Binding& binding, std::size_t groupsX, std::size_t groupsY,
                                      std::size_t count) {
         for (std::size_t i = 0; i < count; ++i) dispatch(kernel, slot + (i & 1), binding, groupsX, groupsY);

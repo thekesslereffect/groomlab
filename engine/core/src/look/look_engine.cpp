@@ -1529,6 +1529,8 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         int copyFrom = kBasePoints, copyTo = kOut0;  // `copy`: what into what (copyBytes; 0: the points)
         std::size_t copyBytes = 0, copyOffset = 0;    // (from that byte of both)
         std::size_t copyFromOffset = kSameOffset;     // (from that byte of copyFrom instead)
+        int onlyIf = -1;                 // >= 0: dispatched only where that buffer's first word is onlyIfValue or more (runsIf)
+        std::uint32_t onlyIfValue = 0;
     };
     std::vector<Step> steps;
     std::vector<StageConstants> slots;
@@ -1672,7 +1674,9 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         const int segments = auxBuffer(k, 0), grid = auxBuffer(k, 1), sums = auxBuffer(k, 2), nodes = auxBuffer(k, 3), floor = auxBuffer(k, 4);
         const int unknowns = auxBuffer(k, 5);  // the solve's unknowns, a list a colour (look.slang GridUnknownsCS)
         const int moves = auxBuffer(k, 6);     // each point's move, for the walk (look.slang GridWalkCS)
+        const int moved = auxBuffer(k, 7);     // SelfCollide: the last pass that moved hair, + 1 (SelfCollidePushCS)
         allocate(grid, (32 + cells + blocks) * 4);
+        if (!isStatic) allocate(moved, 4);
         allocate(moves, bytes);
         allocate(unknowns, std::max<std::size_t>(blocks * 64 * 8 * 4, 4));
         allocate(sums, std::max<std::size_t>(blocks * 64 * sumWords * 4, 4));
@@ -1714,11 +1718,17 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         grid4[12] = sumWords;
         for (int w = 13; w < 16; ++w) grid4[w] = 0;
         const std::size_t segmentGroups = std::max<std::size_t>((segmentCount + 63) / 64, 1), cellGroups = (32 + cells + 63) / 64;
+        // A pass after one moving no hair would find the same (its grid, so no push): skipped where
+        // the engine can tell (runsIf; self_collide_op.cpp stops there).
+        int onlyIf = -1;
+        std::uint32_t onlyIfValue = 0;
         auto add = [&](Kernel kernel, const Binding& b, std::size_t groups, std::uint32_t which, bool last = false) {
             StageConstants c = g;
             c.flag[3] = which;
             slots.push_back(c);
             steps.push_back({kernel, b, groups, false, last ? static_cast<int>(p.stage.kind) : -3});
+            steps.back().onlyIf = onlyIf;
+            steps.back().onlyIfValue = onlyIfValue;
         };
         auto solve = [&](const Binding& b, int sweeps) {  // red-black: colour 0, then 1, each sweep
             StageConstants c = g;
@@ -1728,14 +1738,22 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             slots.push_back(c);
             Step s{Kernel::GridSor, b, blocks, false, -3};
             s.repeat = static_cast<std::size_t>(2 * sweeps);
+            s.onlyIf = onlyIf;
+            s.onlyIfValue = onlyIfValue;
             steps.push_back(s);
         };
         const int passes = isStatic ? 1 : 3;  // (self_collide_op.cpp kPasses)
         for (int pass = 0; pass < passes; ++pass) {
             const int points = pass == 0 ? input : to;  // (later passes splat the strands the one before moved)
+            if (pass > 0) {
+                onlyIf = moved;
+                onlyIfValue = static_cast<std::uint32_t>(pass);
+            }
             Binding b;
             b.out[0] = grid;
-            add(Kernel::GridClear, b, cellGroups, 0);
+            Binding cleared = b;
+            if (!isStatic) cleared.out[1] = moved;
+            add(Kernel::GridClear, cleared, cellGroups, static_cast<std::uint32_t>(pass));
             Binding sampled;
             sampled.in = points;
             sampled.aux[0] = segments;
@@ -1782,6 +1800,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             push.aux[2] = floor;
             push.out[0] = to;
             push.out[1] = moves;
+            if (!isStatic) push.out[2] = moved;
             Binding walk;  // (the strand from its first point moved, kept above the floor)
             walk.in = input;
             walk.aux[0] = moves;
@@ -2416,7 +2435,9 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                  s.copyOffset);
             continue;
         }
-        if (s.repeat) {
+        if (s.onlyIf >= 0 && !runsIf(s.onlyIf, s.onlyIfValue)) {
+            // (skipped)
+        } else if (s.repeat) {
             dispatchAlternating(s.kernel, slotOf[i], s.binding, shapes[i].x, shapes[i].y, s.repeat);
         } else {
             dispatch(s.kernel, slotOf[i], s.binding, shapes[i].x, shapes[i].y);

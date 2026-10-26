@@ -4333,11 +4333,13 @@ float3 gridSample(GridSegment g, uint j, out float t) {
     return q;
 }
 
-// A thread a word: the header's bounds empty, its counts 0, the block table's marks 0.
+// A thread a word: the header's bounds empty, its counts 0, the block table's marks 0; SelfCollide's
+// first pass, the passes' word of which moved hair (gOut2: SelfCollidePushCS's) 0.
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
 void GridClearCS(uint3 id : SV_DispatchThreadID) {
     const uint w = threadIndex(id, GROUP_SIZE);
+    if (w == 0u && gFlag.w == 0u && (gFlag.x & GRID_STATIC) == 0u) gOut2.Store(0, 0u);
     if (w >= GRID_HEADER + gridCells()) return;
     gOut.Store(w * 4, w < GRID_HI ? 0xFFFFFFFFu : 0u);
 }
@@ -4847,7 +4849,8 @@ float3 collideMove(GridHead head, uint i, uint n, float3 p, float amount, float 
 
 // A thread a strand: pass gFlag.w's moves (the first copies the strands in first; each later pass
 // moves them where they are, in gOut), into gOut2 for GridWalkCS (its root's word: the first
-// point moved, n for none).
+// point moved, n for none); a strand moved, the pass's number + 1 into gOut3's word (a pass after
+// one moving none would find the same: the CPU's passes stop there, look_engine.cpp).
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
 void SelfCollidePushCS(uint3 id : SV_DispatchThreadID) {
@@ -4874,6 +4877,7 @@ void SelfCollidePushCS(uint3 id : SV_DispatchThreadID) {
         if (from != n) storePoint(gOut2, begin + i, move);  // (the walk reads them from there on)
     }
     gOut2.Store(begin * 12, from);
+    if (from != n) gOut3.Store(0, gFlag.w + 1u);  // (every writer the same number)
 }
 
 // ---- Static (static_op.cpp StaticOp::evaluate) -----------------------------------------------------
