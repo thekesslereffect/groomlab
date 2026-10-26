@@ -62,6 +62,11 @@ struct LookTargets {
     void* pointTexture = nullptr;
     std::uint32_t textureWidth = 0;
     void* uvs = nullptr;
+    // (The CPU engine: arrays in memory, written in place; `widths` a float a point, where a Width
+    // runs; `baseAsOutput`: the host holds the base's points itself (an operator's own run), so a
+    // run moving none leaves its output the base, no copy made.)
+    void* widths = nullptr;
+    bool baseAsOutput = false;
 };
 
 // Everything a run takes beyond the base: the chain's params, its mapped params' values and what
@@ -221,6 +226,11 @@ protected:
     virtual void writeRange(int buffer, std::size_t offset, const void* data, std::size_t bytes) = 0;
     // A buffer the kernels write, at least `bytes` long (its contents undefined).
     virtual void allocate(int buffer, std::size_t bytes) = 0;
+    // The base's arrays (points, widths), which the engine holds the base's strands alive for: a
+    // copy (write), or on the CPU the very memory (sharesBase: never written, every base shared
+    // whole).
+    virtual void share(int buffer, const void* data, std::size_t bytes) { write(buffer, data, bytes, false); }
+    virtual bool sharesBase() const { return false; }
     virtual bool has(int buffer) const = 0;
     virtual void release(int buffer) = 0;
     // The run's outputs: kOut0 (positions) and, with `frames`, kOut1-3 resolved to the targets

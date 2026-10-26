@@ -34263,12 +34263,12 @@ void _LayoutCS(void* _S2977, void* entryPointParams_64, void* globalParams_65)
     return;
 }
 
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void InterpolateCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _InterpolateCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void InterpolateCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34279,7 +34279,7 @@ void InterpolateCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPara
         _InterpolateCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void InterpolateCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34298,12 +34298,12 @@ void InterpolateCS(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void ClearanceCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _ClearanceCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void ClearanceCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34314,7 +34314,7 @@ void ClearanceCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams
         _ClearanceCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void ClearanceCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34333,12 +34333,12 @@ void ClearanceCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LengthCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _LengthCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LengthCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34349,7 +34349,7 @@ void LengthCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, v
         _LengthCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LengthCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34368,12 +34368,12 @@ void LengthCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* g
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CentersCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _CentersCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CentersCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34384,7 +34384,7 @@ void CentersCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, 
         _CentersCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CentersCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34403,12 +34403,12 @@ void CentersCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void ClumpCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _ClumpCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void ClumpCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34419,7 +34419,7 @@ void ClumpCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         _ClumpCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void ClumpCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34438,12 +34438,12 @@ void ClumpCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* gl
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void NoiseCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _NoiseCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void NoiseCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34454,7 +34454,7 @@ void NoiseCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         _NoiseCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void NoiseCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34473,12 +34473,12 @@ void NoiseCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* gl
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void NoisePointsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _NoisePointsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void NoisePointsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34489,7 +34489,7 @@ void NoisePointsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPara
         _NoisePointsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void NoisePointsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34508,12 +34508,12 @@ void NoisePointsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CurlCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _CurlCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CurlCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34524,7 +34524,7 @@ void CurlCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, voi
         _CurlCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CurlCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34543,12 +34543,12 @@ void CurlCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* glo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void WidthCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _WidthCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void WidthCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34559,7 +34559,7 @@ void WidthCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         _WidthCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void WidthCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34578,12 +34578,12 @@ void WidthCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* gl
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LinesCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _LinesCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LinesCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34594,7 +34594,7 @@ void LinesCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         _LinesCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LinesCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34613,12 +34613,12 @@ void LinesCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* gl
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LinesPointsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _LinesPointsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LinesPointsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34629,7 +34629,7 @@ void LinesPointsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPara
         _LinesPointsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LinesPointsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34648,12 +34648,12 @@ void LinesPointsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PointsTextureCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _PointsTextureCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PointsTextureCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34664,7 +34664,7 @@ void PointsTextureCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPa
         _PointsTextureCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PointsTextureCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34683,12 +34683,12 @@ void PointsTextureCS(ComputeVaryingInput* varyingInput, void* entryPointParams, 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PointsTexturePointsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _PointsTexturePointsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PointsTexturePointsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34699,7 +34699,7 @@ void PointsTexturePointsCS_Group(ComputeVaryingInput* varyingInput, void* entryP
         _PointsTexturePointsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PointsTexturePointsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34718,12 +34718,12 @@ void PointsTexturePointsCS(ComputeVaryingInput* varyingInput, void* entryPointPa
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GatherCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GatherCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GatherCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34734,7 +34734,7 @@ void GatherCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, v
         _GatherCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GatherCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34753,12 +34753,12 @@ void GatherCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* g
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void UvWidthsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _UvWidthsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void UvWidthsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34769,7 +34769,7 @@ void UvWidthsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams,
         _UvWidthsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void UvWidthsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34788,12 +34788,12 @@ void UvWidthsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void*
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PointStrandsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _PointStrandsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PointStrandsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34804,7 +34804,7 @@ void PointStrandsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPar
         _PointStrandsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PointStrandsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34823,12 +34823,12 @@ void PointStrandsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, v
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void WidthPointsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _WidthPointsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void WidthPointsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34839,7 +34839,7 @@ void WidthPointsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPara
         _WidthPointsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void WidthPointsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34858,12 +34858,12 @@ void WidthPointsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void ShareCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _ShareCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void ShareCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34874,7 +34874,7 @@ void ShareCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         _ShareCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void ShareCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34893,12 +34893,12 @@ void ShareCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* gl
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CurlAxesCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _CurlAxesCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CurlAxesCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34909,7 +34909,7 @@ void CurlAxesCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams,
         _CurlAxesCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CurlAxesCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34928,12 +34928,12 @@ void CurlAxesCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void*
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PartCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _PartCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PartCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34944,7 +34944,7 @@ void PartCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, voi
         _PartCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void PartCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34963,12 +34963,12 @@ void PartCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* glo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LongestCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _LongestCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LongestCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -34979,7 +34979,7 @@ void LongestCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, 
         _LongestCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LongestCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -34998,12 +34998,12 @@ void LongestCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void FieldCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _FieldCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void FieldCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35014,7 +35014,7 @@ void FieldCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         _FieldCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void FieldCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35033,12 +35033,12 @@ void FieldCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* gl
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GravityCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GravityCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GravityCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35049,7 +35049,7 @@ void GravityCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, 
         _GravityCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GravityCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35068,12 +35068,12 @@ void GravityCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void FlyawayCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _FlyawayCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void FlyawayCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35084,7 +35084,7 @@ void FlyawayCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, 
         _FlyawayCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void FlyawayCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35103,12 +35103,12 @@ void FlyawayCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CollideCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _CollideCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CollideCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35119,7 +35119,7 @@ void CollideCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, 
         _CollideCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void CollideCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35138,12 +35138,12 @@ void CollideCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void WindCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _WindCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void WindCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35154,7 +35154,7 @@ void WindCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, voi
         _WindCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void WindCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35173,12 +35173,12 @@ void WindCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* glo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BlendCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _BlendCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BlendCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35189,7 +35189,7 @@ void BlendCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         _BlendCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BlendCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35208,12 +35208,12 @@ void BlendCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* gl
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BlendPointsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _BlendPointsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BlendPointsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35224,7 +35224,7 @@ void BlendPointsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPara
         _BlendPointsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BlendPointsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35243,12 +35243,12 @@ void BlendPointsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridClearCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridClearCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridClearCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35259,7 +35259,7 @@ void GridClearCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams
         _GridClearCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridClearCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35278,12 +35278,12 @@ void GridClearCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridBoundsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridBoundsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridBoundsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35294,7 +35294,7 @@ void GridBoundsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParam
         _GridBoundsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridBoundsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35313,19 +35313,19 @@ void GridBoundsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, voi
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridLayCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridLayCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridLayCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
     threadInput.groupID = varyingInput->startGroupID;
     _GridLayCS(&threadInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridLayCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35344,12 +35344,12 @@ void GridLayCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridMarkCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridMarkCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridMarkCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35360,7 +35360,7 @@ void GridMarkCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams,
         _GridMarkCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridMarkCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35379,12 +35379,12 @@ void GridMarkCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void*
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridDilateCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridDilateCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridDilateCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35395,7 +35395,7 @@ void GridDilateCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParam
         _GridDilateCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridDilateCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35414,12 +35414,12 @@ void GridDilateCS(ComputeVaryingInput* varyingInput, void* entryPointParams, voi
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridCompactCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridCompactCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridCompactCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35430,7 +35430,7 @@ void GridCompactCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPara
         _GridCompactCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridCompactCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35449,12 +35449,12 @@ void GridCompactCS(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridZeroCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridZeroCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridZeroCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35465,7 +35465,7 @@ void GridZeroCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams,
         _GridZeroCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridZeroCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35484,12 +35484,12 @@ void GridZeroCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void*
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridSplatCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridSplatCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridSplatCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35500,7 +35500,7 @@ void GridSplatCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams
         _GridSplatCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridSplatCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35519,12 +35519,12 @@ void GridSplatCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridUnknownsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridUnknownsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridUnknownsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35535,7 +35535,7 @@ void GridUnknownsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPar
         _GridUnknownsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridUnknownsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35554,12 +35554,12 @@ void GridUnknownsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, v
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridSorCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridSorCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridSorCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35570,7 +35570,7 @@ void GridSorCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, 
         _GridSorCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridSorCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35589,12 +35589,12 @@ void GridSorCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridWalkCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _GridWalkCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridWalkCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35605,7 +35605,7 @@ void GridWalkCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams,
         _GridWalkCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void GridWalkCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35624,12 +35624,12 @@ void GridWalkCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void*
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SelfCollideNodeCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _SelfCollideNodeCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SelfCollideNodeCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35640,7 +35640,7 @@ void SelfCollideNodeCS_Group(ComputeVaryingInput* varyingInput, void* entryPoint
         _SelfCollideNodeCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SelfCollideNodeCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35659,12 +35659,12 @@ void SelfCollideNodeCS(ComputeVaryingInput* varyingInput, void* entryPointParams
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SelfCollideGradientCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _SelfCollideGradientCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SelfCollideGradientCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35675,7 +35675,7 @@ void SelfCollideGradientCS_Group(ComputeVaryingInput* varyingInput, void* entryP
         _SelfCollideGradientCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SelfCollideGradientCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35694,12 +35694,12 @@ void SelfCollideGradientCS(ComputeVaryingInput* varyingInput, void* entryPointPa
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SelfCollidePushCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _SelfCollidePushCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SelfCollidePushCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35710,7 +35710,7 @@ void SelfCollidePushCS_Group(ComputeVaryingInput* varyingInput, void* entryPoint
         _SelfCollidePushCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SelfCollidePushCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35729,12 +35729,12 @@ void SelfCollidePushCS(ComputeVaryingInput* varyingInput, void* entryPointParams
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticReachCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _StaticReachCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticReachCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35745,7 +35745,7 @@ void StaticReachCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPara
         _StaticReachCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticReachCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35764,12 +35764,12 @@ void StaticReachCS(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticMomentsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _StaticMomentsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticMomentsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35780,7 +35780,7 @@ void StaticMomentsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPa
         _StaticMomentsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticMomentsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35799,12 +35799,12 @@ void StaticMomentsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticNodeCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _StaticNodeCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticNodeCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35815,7 +35815,7 @@ void StaticNodeCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParam
         _StaticNodeCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticNodeCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35834,12 +35834,12 @@ void StaticNodeCS(ComputeVaryingInput* varyingInput, void* entryPointParams, voi
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticFieldCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _StaticFieldCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticFieldCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35850,7 +35850,7 @@ void StaticFieldCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPara
         _StaticFieldCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticFieldCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35869,12 +35869,12 @@ void StaticFieldCS(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticPushCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _StaticPushCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticPushCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35885,7 +35885,7 @@ void StaticPushCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParam
         _StaticPushCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void StaticPushCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35904,12 +35904,12 @@ void StaticPushCS(ComputeVaryingInput* varyingInput, void* entryPointParams, voi
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TieFrameCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _TieFrameCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TieFrameCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35920,7 +35920,7 @@ void TieFrameCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams,
         _TieFrameCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TieFrameCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35939,12 +35939,12 @@ void TieFrameCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void*
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TieRouteCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _TieRouteCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TieRouteCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35955,7 +35955,7 @@ void TieRouteCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams,
         _TieRouteCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TieRouteCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -35974,12 +35974,12 @@ void TieRouteCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void*
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TieLayCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _TieLayCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TieLayCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -35990,7 +35990,7 @@ void TieLayCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, v
         _TieLayCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TieLayCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36009,12 +36009,12 @@ void TieLayCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* g
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BendCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _BendCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BendCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36025,7 +36025,7 @@ void BendCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, voi
         _BendCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BendCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36044,12 +36044,12 @@ void BendCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* glo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void DirectionCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _DirectionCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void DirectionCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36060,7 +36060,7 @@ void DirectionCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams
         _DirectionCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void DirectionCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36079,12 +36079,12 @@ void DirectionCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TransformCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _TransformCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TransformCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36095,7 +36095,7 @@ void TransformCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams
         _TransformCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TransformCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36114,12 +36114,12 @@ void TransformCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void DisplaceCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _DisplaceCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void DisplaceCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36130,7 +36130,7 @@ void DisplaceCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams,
         _DisplaceCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void DisplaceCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36149,12 +36149,12 @@ void DisplaceCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void*
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TwistCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _TwistCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TwistCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36165,7 +36165,7 @@ void TwistCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, vo
         _TwistCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TwistCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36184,12 +36184,12 @@ void TwistCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* gl
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TwistAxesCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _TwistAxesCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TwistAxesCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36200,7 +36200,7 @@ void TwistAxesCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams
         _TwistAxesCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TwistAxesCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36219,12 +36219,12 @@ void TwistAxesCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SmoothCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _SmoothCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SmoothCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36235,7 +36235,7 @@ void SmoothCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, v
         _SmoothCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void SmoothCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36254,12 +36254,12 @@ void SmoothCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* g
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void RestoreLengthCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _RestoreLengthCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void RestoreLengthCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36270,7 +36270,7 @@ void RestoreLengthCS_Group(ComputeVaryingInput* varyingInput, void* entryPointPa
         _RestoreLengthCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void RestoreLengthCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36289,12 +36289,12 @@ void RestoreLengthCS(ComputeVaryingInput* varyingInput, void* entryPointParams, 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BlendNeighborsCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _BlendNeighborsCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BlendNeighborsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36305,7 +36305,7 @@ void BlendNeighborsCS_Group(ComputeVaryingInput* varyingInput, void* entryPointP
         _BlendNeighborsCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void BlendNeighborsCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36324,12 +36324,12 @@ void BlendNeighborsCS(ComputeVaryingInput* varyingInput, void* entryPointParams,
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TangleCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _TangleCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TangleCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36340,7 +36340,7 @@ void TangleCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, v
         _TangleCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void TangleCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36359,12 +36359,12 @@ void TangleCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* g
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void FlowCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _FlowCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void FlowCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36375,7 +36375,7 @@ void FlowCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, voi
         _FlowCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void FlowCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36394,12 +36394,12 @@ void FlowCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* glo
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void AffectCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _AffectCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void AffectCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36410,7 +36410,7 @@ void AffectCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, v
         _AffectCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void AffectCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36429,12 +36429,12 @@ void AffectCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* g
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void JiggleCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _JiggleCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void JiggleCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36445,7 +36445,7 @@ void JiggleCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, v
         _JiggleCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void JiggleCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36464,12 +36464,12 @@ void JiggleCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* g
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void MeshCutCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _MeshCutCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void MeshCutCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36480,7 +36480,7 @@ void MeshCutCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, 
         _MeshCutCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void MeshCutCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;
@@ -36499,12 +36499,12 @@ void MeshCutCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* 
         }
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LayoutCS_Thread(ComputeThreadVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     _LayoutCS(varyingInput, entryPointParams, globalParams);
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LayoutCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeThreadVaryingInput threadInput = {};
@@ -36515,7 +36515,7 @@ void LayoutCS_Group(ComputeVaryingInput* varyingInput, void* entryPointParams, v
         _LayoutCS(&threadInput, entryPointParams, globalParams);
     }
 }
-SLANG_PRELUDE_EXPORT
+SLANG_PRELUDE_EXTERN_C
 void LayoutCS(ComputeVaryingInput* varyingInput, void* entryPointParams, void* globalParams)
 {
     ComputeVaryingInput vi = *varyingInput;

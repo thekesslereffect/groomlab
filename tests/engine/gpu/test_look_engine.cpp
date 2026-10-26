@@ -36,6 +36,7 @@
 #include "groomlab/frames.h"
 #include "groomlab/gpu/look_engine.h"
 #include "groomlab/gpu/look_preview.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/groom.h"
 #include "groomlab/presets.h"
 #include "groomlab/graph_io.h"
@@ -2447,6 +2448,8 @@ TEST(GpuPreview, NoiseStaysUnderItsReach) {
 TEST_P(LookEngineTest, AStrokeUploadsOnlyItsStrands) {
     // The base changed in a few strands (a brush stroke's incremental evaluation says which): only
     // their points go up, and the run gives what a full upload of the new base gives, to the bit.
+    // (The CPU engine uploads nothing: it shares the base's own arrays, LookEngine::sharesBase.)
+    if (GetParam() == "CPU") GTEST_SKIP() << "the CPU engine shares the base";
     GroomSession session(groom(graph(0.3)));
     ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
     const Prepared p = prepare(session, {}, "noise");
@@ -6226,17 +6229,24 @@ TEST(CpuEngine, SpeedAgainstTheOperators) {
             const std::vector<Vec3f> got = engine->readPositions();
             engineMs = std::min(engineMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
         }
+        const gpu::GpuTimes t = engine->times(true);
+        // The operator itself: its own C++ (the engine off) and as it runs now (on the engine where
+        // it is switched).
         const Operator& op = doc.graph.node(stage.node);
         EvalContext ctx;
-        for (int r = 0; r < 3; ++r) {
-            const auto t0 = std::chrono::steady_clock::now();
-            const Value out = op.evaluate(ctx, {Value(input)});
-            opMs = std::min(opMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        double onMs = 1e30;
+        for (const bool on : {false, true}) {
+            gpu::setCpuEngineOn(on);
+            for (int r = 0; r < 3; ++r) {
+                const auto t0 = std::chrono::steady_clock::now();
+                const Value out = op.evaluate(ctx, {Value(input)});
+                (on ? onMs : opMs) = std::min(on ? onMs : opMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+            }
         }
-        const gpu::GpuTimes t = engine->times(true);
-        std::printf("[ CPU speed ] %s on %zu strands, %zu points: engine %.2f ms (its run %.2f: kernel %.2f), operator %.2f ms (x%.2f)\n",
+        std::printf("[ CPU speed ] %s on %zu strands, %zu points: engine %.2f ms (its run %.2f: kernel %.2f), operator's C++ %.2f ms "
+                    "(x%.2f), operator now %.2f ms\n",
                     gpu::stageName(stage.kind), input->strandCount(), input->pointCount(), engineMs, t.totalMs,
-                    t.noiseMs + t.curlMs + t.widthMs, opMs, engineMs / opMs);
+                    t.noiseMs + t.curlMs + t.widthMs, opMs, engineMs / opMs, onMs);
         input = valueAs<StrandsPtr>(doc.graph.cachedValue(stage.node));
     }
 }

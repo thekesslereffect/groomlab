@@ -51,16 +51,18 @@ const CpuKernelFn* cpuKernels() {
 // A buffer: words of its own, or a host's memory it is written in place (a target); shared so a
 // sibling's can be borrowed.
 struct Buffer {
-    std::vector<std::uint32_t> own;
+    std::unique_ptr<std::uint32_t[]> own;  // (uninitialized: a buffer the kernels write is undefined till then)
+    std::size_t ownWords = 0;
     std::uint32_t* host = nullptr;
     std::size_t hostWords = 0;
-    std::uint32_t* data() { return host ? host : own.data(); }
-    std::size_t size() const { return host ? hostWords : own.size(); }
+    std::uint32_t* data() { return host ? host : own.get(); }
+    std::size_t size() const { return host ? hostWords : ownWords; }
 };
 using Words = std::shared_ptr<Buffer>;
 Words ownWords(std::size_t bytes) {
     auto w = std::make_shared<Buffer>();
-    w->own.assign((bytes + 3) / 4, 0u);
+    w->ownWords = std::max<std::size_t>((bytes + 3) / 4, 1);
+    w->own.reset(new std::uint32_t[w->ownWords]);
     return w;
 }
 Words hostWords(void* memory, std::size_t bytes) {
@@ -108,6 +110,9 @@ protected:
         Words& w = buffers_[id];
         if (!w || w->size() * 4 < bytes) w = ownWords(bytes);
     }
+    // The base's points and widths: the strands' own arrays (the engine holds them; never written).
+    void share(int id, const void* data, std::size_t bytes) override { buffers_[id] = hostWords(const_cast<void*>(data), bytes); }
+    bool sharesBase() const override { return true; }
     bool has(int id) const override { return buffers_.count(id) != 0; }
     void release(int id) override { buffers_.erase(id); }
 
@@ -115,9 +120,10 @@ protected:
     // outputs it gives none of are the engine's own.
     bool bindTargets(const LookTargets& targets, bool frames, std::size_t bytes, std::size_t uvBytes) override {
         if (targets.pointTexture) throw std::runtime_error("CPU look engine: no point texture");
+        if (targets.widths) buffers_[kWidths] = hostWords(targets.widths, bytes / 3);
         void* const want[4] = {targets.positions, targets.normals, targets.tangents, targets.bitangents};
         for (int i = 0; i < 4; ++i) {
-            if (i > 0 && !frames) {
+            if ((i > 0 && !frames) || (i == 0 && !want[0] && targets.baseAsOutput)) {
                 buffers_.erase(kOut0 + i);
                 continue;
             }

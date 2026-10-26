@@ -21,6 +21,7 @@
 #include "groomlab/feathers.h"
 #include "groomlab/field.h"
 #include "groomlab/flow.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/map_ref.h"
 #include "groomlab/math.h"
 #include "groomlab/operators.h"
@@ -1459,24 +1460,9 @@ std::vector<StrandsPtr> fieldSources(const GraphDocument& doc, const LookChain& 
     return sources;
 }
 
-// One mapped param's values on `in` (the strands its node takes), as `field` reads them there:
-// per point where it varies along the strands and the operator reads it so (`perPoint`), else
-// per strand (at the root, ScalarField::at).
+// One mapped param's values on `in`: the core's (look_cpu.h), as the operators read them.
 void readValues(const ScalarField& field, const StrandSet& in, bool pointsAllowed, FieldValues* out) {
-    field.validate(in);  // binds channels and expressions to the set; throws GraphError as the operator would
-    out->readsPositions = field.readsPositions();
-    if (pointsAllowed && field.perPoint()) {
-        out->mode = FieldValues::kPerPoint;
-        out->values.assign(in.pointCount(), 0.0f);
-        parallelFor(0, in.strandCount(), [&](std::size_t s) {
-            const std::size_t begin = in.strandBegin(s), n = in.strandPointCount(s);
-            for (std::size_t i = 0; i < n; ++i) out->values[begin + i] = field.atPoint(in, s, i);
-        }, 1024);
-    } else {
-        out->mode = FieldValues::kPerStrand;
-        out->values.assign(in.strandCount(), 0.0f);
-        parallelFor(0, in.strandCount(), [&](std::size_t s) { out->values[s] = field.at(in, s); }, 1024);
-    }
+    readFieldValues(field, in, pointsAllowed, out);
 }
 
 // The stages that move each point after reading a value for it from the points before it moved.

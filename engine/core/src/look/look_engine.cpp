@@ -228,13 +228,13 @@ bool LookEngine::setBase(const StrandsPtr& base, const ScalpMesh* scalp, const S
     // The graph cannot say how the base changed (results came in between: a stroke's previews, a
     // new document): when its layout, IDs and roots are the ones held, compare the points.
     StrandChanges diffed;
-    if ((!changed || changed->all) && base_) {
+    if ((!changed || changed->all) && base_ && !sharesBase()) {
         diffed = diffStrands(*base_, s);
         if (!diffed.all && diffed.strands.size() * 2 < s.strandCount()) changed = &diffed;
     }
     // Only some strands' points moved (StrandChanges: the same IDs, roots and point counts, so the
     // per-strand numbers and offsets held still hold): those points go up, in runs.
-    if (changed && !changed->all && base_ && s.strandCount() == strandCount_ && s.pointCount() == pointCount_) {
+    if (changed && !changed->all && base_ && !sharesBase() && s.strandCount() == strandCount_ && s.pointCount() == pointCount_) {
         const std::vector<std::uint32_t>& list = changed->strands;
         std::size_t points = 0;
         for (std::size_t k = 0; k < list.size();) {
@@ -274,11 +274,11 @@ bool LookEngine::setBase(const StrandsPtr& base, const ScalpMesh* scalp, const S
     pointCount_ = points;
     uniformCount_ = s.uniformPointCount();
     write(kOffsets, offsets.data(), offsets.size() * 4, false);
-    write(kBasePoints, s.positions().data(), points * 12, false);
+    share(kBasePoints, s.positions().data(), points * 12);
     // The base's widths, for the point texture where no Width runs (a set without widths: the
     // default the app draws them at, as buildHairBuffers does).
     if (s.widths().size() == points) {
-        write(kBaseWidths, s.widths().data(), points * 4, false);
+        share(kBaseWidths, s.widths().data(), points * 4);
     } else {
         const std::vector<float> defaults(std::max<std::size_t>(points, 1), 0.01f);
         write(kBaseWidths, defaults.data(), defaults.size() * 4, false);
@@ -1338,7 +1338,8 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     if (!base_) throw std::runtime_error("GPU preview: no strands uploaded");
     // Hidden core strands (preview_core.h): every strand runs into kFull0-3, the shown ones are
     // gathered into the outputs after.
-    const bool gather = !shownPoints_.empty();
+    // (An operator's own run, baseAsOutput: every strand its strand, none hidden.)
+    const bool gather = !shownPoints_.empty() && !targets.baseAsOutput;
     if (gather && targets.pointTexture) throw std::runtime_error("GPU preview: a point texture of strands with hidden ones");
     // The kernels it may dispatch, waited for where they compile (a host asks kernelsReady first).
     const KernelSet need = kernelsOf(r);
@@ -2161,7 +2162,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         resultOf[k] = current = to;
     }
     inPlace_ = bindTargets(targets, frames, outBytes, outPoints_ * 8);
-    if (current == kBasePoints && !gather) {  // no stage moves the points: the output is the base
+    if (current == kBasePoints && !gather && !targets.baseAsOutput) {  // no stage moves the points: the output is the base
         Step copy{Kernel::Count, Binding{}, 0, true, -3};
         steps.push_back(copy);
         current = kOut0;

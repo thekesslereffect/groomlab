@@ -11,6 +11,7 @@
 #include "groomlab/feathers.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
@@ -310,11 +311,27 @@ private:
             }
         }
         auto out = std::make_shared<StrandSet>(*in);
-        // Every strand's widths are written (the strands left alone keep the last result's).
-        std::vector<float>& widths = last ? widthsOfLast(*out, last, *incremental) : out->mutableWidths();
         // Feathers' shafts with a rachis (Propagate's shaftWidth: kRachisChannel) are as wide as
         // it: they keep their widths (a barb width set after the feathers is the barbs').
         const std::vector<float>* isShaft = in->strandChannel(kRachisChannel);
+        if (!last && !isShaft && gpu::cpuEngineOn()) {
+            // look.slang's WidthCS, the GPU preview's own (look_cpu.h).
+            gpu::LookRun look;
+            gpu::StageParams& s = look.params.stages.emplace_back();
+            s.stage.kind = gpu::StageKind::Width;
+            s.value[0] = widthField.isConstant() ? widthField.maximum() : 1.0f;
+            s.value[1] = randomness;
+            s.seed = seed;
+            s.ramp = profile;
+            look.fields.stages.resize(1);
+            look.inputs.resize(1);
+            if (!widthField.isConstant()) gpu::readFieldValues(widthField, *in, true, &look.fields.stages[0].field[0]);
+            gpu::runOnCpuEngine(look, in, scalpOf(ctx), *out, true);
+            *result = StrandsPtr(out);
+            return true;
+        }
+        // Every strand's widths are written (the strands left alone keep the last result's).
+        std::vector<float>& widths = last ? widthsOfLast(*out, last, *incremental) : out->mutableWidths();
         const bool inWidths = in->widths().size() == in->pointCount();
         auto shape = [&](std::size_t s) {
             const std::size_t n = in->strandPointCount(s);
