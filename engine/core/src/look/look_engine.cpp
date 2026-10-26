@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <stdexcept>
 
 #include "groomlab/parallel.h"

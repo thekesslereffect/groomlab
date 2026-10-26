@@ -6200,9 +6200,10 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
 }
 
 TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
-    // The operators that run their stage on the CPU engine (look_cpu.h runStage): each one's result
-    // there against its own C++ (the engine off), on the strands it took, bit for bit, points and
-    // widths; mapped params, per point and per strand, root frames with UVs and without.
+    // The stages the CPU engine runs for their operators (look_cpu.h runStage), and the operators as
+    // they run now (on it where they switched: Part's sides are the core's, its turns still its C++):
+    // each against the operator's own C++ (the engine off), on the strands it took, bit for bit,
+    // points and widths; mapped params, per point and per strand, root frames with UVs and without.
     struct Case {
         std::string type, params;
         bool uvs = false;
@@ -6228,6 +6229,8 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Displace", R"("params": {"distance": {"expression": "0.05 * t", "min": 0.0, "max": 1.0}, "along": "direction", "direction": [0.0, 1.0, 0.0]})",
          false, true},
         {"Displace", R"("params": {"distance": {"expression": "0.02 + 0.06 * rand", "min": 0.0, "max": 1.0}})"},
+        {"Part", R"("params": {"strength": 0.8, "width": 0.3})"},
+        {"Part", R"("params": {"strength": {"expression": "0.4 + 0.6 * rand", "min": 0.0, "max": 1.0}, "width": 0.5, "profile": [[0, 0], [1, 1]]})"},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
     };
@@ -6236,6 +6239,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         SCOPED_TRACE(c.type + " " + c.params);
         const std::string json = shaperGraph(c.type, c.params, true);
         GroomData data = c.uvs ? paintedGroom(json) : groom(json);
+        data.partsJson = meridianParts(*data.scalp);
         GroomSession session(data);
         ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
         const GraphDocument& doc = *session.viewDocument();
@@ -6254,28 +6258,35 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         // (Run there, not handed to its C++.)
         const std::map<std::string, gpu::StageKind> kinds = {{"Width", gpu::StageKind::Width},         {"Bend", gpu::StageKind::Bend},
                                                              {"Direction", gpu::StageKind::Direction}, {"Transform", gpu::StageKind::Transform},
-                                                             {"Displace", gpu::StageKind::Displace},   {"Gravity", gpu::StageKind::Gravity}};
+                                                             {"Displace", gpu::StageKind::Displace},   {"Gravity", gpu::StageKind::Gravity},
+                                                             {"Part", gpu::StageKind::Part}};
         const gpu::StageKind kind = kinds.at(c.type);
-        EXPECT_EQ(gpu::runStage(kind, op.params(), valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get()) != nullptr, !c.cpus);
-        StrandsPtr made[2];
-        for (const bool on : {false, true}) {
-            gpu::setCpuEngineOn(on);
-            made[on] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
-        }
+        gpu::StageInputs stageInputs;
+        if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
+        // Its C++ (the engine off), the stage on the engine, the operator as it runs now.
+        StrandsPtr made[3];
+        gpu::setCpuEngineOn(false);
+        made[0] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
         gpu::setCpuEngineOn(true);
-        ASSERT_TRUE(made[0] && made[1]);
-        ASSERT_EQ(made[0]->pointCount(), made[1]->pointCount());
-        ASSERT_EQ(made[0]->widths().size(), made[1]->widths().size());
-        std::size_t bits = 0;
-        for (std::size_t i = 0; i < made[0]->pointCount(); ++i) {
-            bits += std::memcmp(&made[0]->positions()[i], &made[1]->positions()[i], sizeof(Vec3f)) != 0;
+        made[1] = gpu::runStage(kind, op.params(), valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), stageInputs);
+        EXPECT_EQ(made[1] != nullptr, !c.cpus);
+        made[2] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
+        for (int m = 1; m < 3; ++m) {
+            if (!made[m]) continue;
+            ASSERT_TRUE(made[0]);
+            ASSERT_EQ(made[0]->pointCount(), made[m]->pointCount());
+            ASSERT_EQ(made[0]->widths().size(), made[m]->widths().size());
+            std::size_t bits = 0;
+            for (std::size_t i = 0; i < made[0]->pointCount(); ++i) {
+                bits += std::memcmp(&made[0]->positions()[i], &made[m]->positions()[i], sizeof(Vec3f)) != 0;
+            }
+            for (std::size_t i = 0; i < made[0]->widths().size(); ++i) {
+                bits += std::memcmp(&made[0]->widths()[i], &made[m]->widths()[i], sizeof(float)) != 0;
+            }
+            EXPECT_EQ(bits, 0u) << (m == 1 ? "the stage on the engine" : "the operator now");
+            differing += bits;
+            compared += made[0]->pointCount();
         }
-        for (std::size_t i = 0; i < made[0]->widths().size(); ++i) {
-            bits += std::memcmp(&made[0]->widths()[i], &made[1]->widths()[i], sizeof(float)) != 0;
-        }
-        EXPECT_EQ(bits, 0u);
-        differing += bits;
-        compared += made[0]->pointCount();
     }
     std::printf("[ CPU ops ] points differing: %zu of %zu\n", differing, compared);
 }

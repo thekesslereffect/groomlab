@@ -2567,24 +2567,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             const PartLines* lines = flow ? found.get() : parts;
             PartMemo& memo = part_[id];
             if (memo.in != in || memo.parts != lines || memo.found != found || memo.scalp != groomScalp || !memo.inputs) {
-                auto sides = std::make_shared<std::vector<float>>(in->strandCount() * 4, 0.0f);
-                const std::string only = flow ? std::string() : own.getString("part");
-                const bool open = lines && !lines->empty() && groomScalp;
-                parallelFor(0, in->strandCount(), [&](std::size_t s) {
-                    float* to = sides->data() + s * 4;
-                    to[3] = -1.0f;
-                    const StrandRoot& root = in->roots()[s];
-                    if (!open || in->strandPointCount(s) < 2 || !groomScalp->contains(root)) return;
-                    const PartLines::Side side = lines->sideOf(groomScalp->restPositionOr(root, in->strandPoints(s)[0]), only);
-                    if (side.side == 0) return;
-                    const Vec3f away = lines->awayFrom(side, groomScalp->normal(root));
-                    to[0] = away.x;
-                    to[1] = away.y;
-                    to[2] = away.z;
-                    to[3] = side.distance;
-                }, 1024);
-                auto made = std::make_shared<PartInputs>();
-                made->sides = std::move(sides);
+                const std::shared_ptr<PartInputs> made = partInputs(*in, lines, groomScalp, flow ? std::string() : own.getString("part"));
                 for (std::size_t s = 0; s < in->strandCount(); ++s) {
                     made->reach = std::max(made->reach, arcLength(in->strandPoints(s), in->strandPointCount(s)));
                 }

@@ -6,6 +6,7 @@
 // (engine/gpu look_chain.cpp readLookParams: a drag's values in place of the node's own).
 
 #include <array>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -68,5 +69,10 @@ bool movesPointByPoint(StageKind kind);
 // The CPU engine writes them into its own memory where a run gives none (look_engine.cpp).
 void writeRootFrames(const StrandSet& in, const ScalpMesh* scalp, float* to);
 std::shared_ptr<const RootInputs> rootInputs(const StrandSet& in, const ScalpMesh* scalp);
+// Part's sides (PartInputs, its reach 0: the caller's): each strand's side of `lines` (only the part
+// `only` where named) from its root on the rest scalp, the way away from it and how far; none `within`
+// or farther (an operator's own width: the strands it leaves; the preview's every one, a width dragged).
+std::shared_ptr<PartInputs> partInputs(const StrandSet& in, const PartLines* lines, const ScalpMesh* scalp, const std::string& only,
+                                       float within = std::numeric_limits<float>::infinity());
 
 }  // namespace groomlab::gpu

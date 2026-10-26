@@ -9,6 +9,7 @@
 #include "groomlab/field.h"
 #include "groomlab/map_ref.h"
 #include "groomlab/parallel.h"
+#include "groomlab/parts.h"
 
 namespace groomlab::gpu {
 
@@ -276,6 +277,28 @@ std::shared_ptr<const RootInputs> rootInputs(const StrandSet& in, const ScalpMes
     writeRootFrames(in, scalp, frames->data());
     auto made = std::make_shared<RootInputs>();
     made->frames = std::move(frames);
+    return made;
+}
+
+std::shared_ptr<PartInputs> partInputs(const StrandSet& in, const PartLines* lines, const ScalpMesh* scalp, const std::string& only,
+                                       float within) {
+    auto sides = std::make_shared<std::vector<float>>(in.strandCount() * 4, 0.0f);
+    const bool open = lines && !lines->empty() && scalp;
+    parallelFor(0, in.strandCount(), [&](std::size_t s) {
+        float* to = sides->data() + s * 4;
+        to[3] = -1.0f;
+        const StrandRoot& root = in.roots()[s];
+        if (!open || in.strandPointCount(s) < 2 || !scalp->contains(root)) return;
+        const PartLines::Side side = lines->sideOf(scalp->restPositionOr(root, in.strandPoints(s)[0]), only);
+        if (side.side == 0 || side.distance >= within) return;
+        const Vec3f away = lines->awayFrom(side, scalp->normal(root));
+        to[0] = away.x;
+        to[1] = away.y;
+        to[2] = away.z;
+        to[3] = side.distance;
+    }, 1024);
+    auto made = std::make_shared<PartInputs>();
+    made->sides = std::move(sides);
     return made;
 }
 

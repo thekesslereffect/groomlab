@@ -30,10 +30,10 @@ void readFieldValues(const ScalarField& field, const StrandSet& in, bool pointsA
 // widths a Width makes (out's widths, one a point). Throws std::runtime_error as the engine does.
 void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out, bool widths = false);
 
-// An operator's own stage of `kind` (readStageParams' kinds taking no inputs but their root frames,
-// look_stage_params.h) on `in`: its params, its mapped params' values on `in` and its root frames
-// read here, the result `in` copied with the points (a Width: the widths) the kernel makes. Null
+// An operator's own stage of `kind` (readStageParams' kinds, look_stage_params.h) on `in`: its
+// params and its mapped params' values on `in` read here, its inputs `inputs` (the root frames the
+// engine's own), the result `in` copied with the points (a Width: the widths) the kernel makes. Null
 // where the kernel does not run it so (the operator's C++ then).
-StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp);
+StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs = {});
 
 }  // namespace groomlab::gpu

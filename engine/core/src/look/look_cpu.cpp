@@ -65,7 +65,7 @@ void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* s
     engine->dropTargets();
 }
 
-StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp) {
+StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs) {
     if (!in || in->empty()) return nullptr;
     LookRun run;
     StageParams& s = run.params.stages.emplace_back();
@@ -74,7 +74,7 @@ StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in
     std::string why;
     if (!readStageParams(kind, StageParamReader(params, ""), &s, &why)) return nullptr;
     run.fields.stages.resize(1);
-    run.inputs.resize(1);
+    run.inputs.push_back(std::move(inputs));
     const std::array<std::string, 2> mapped = mappedParams(kind, params);
     for (int i = 0; i < 2; ++i) {
         if (mapped[i].empty() || !mappedParam(params, mapped[i])) continue;
