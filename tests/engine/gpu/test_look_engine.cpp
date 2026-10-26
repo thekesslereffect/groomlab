@@ -6199,56 +6199,183 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     EXPECT_EQ(differing, 0u);
 }
 
-TEST(CpuEngine, SpeedAgainstTheOperators) {
-    // Each stage of a dense groom (hair_basics at 400 strands a unit, Noise and Curl, Width): the CPU
-    // engine's run of it against its operator's evaluation of the same input (ms, best of 3). A report.
-    nlohmann::json g = nlohmann::json::parse(graph(0.3));
-    for (auto& n : g["nodes"]) {
-        if (n["type"] == "Scatter") n["params"]["density"] = 400.0;
-    }
-    GroomSession session(groom(g.dump()));
-    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-    Prepared p;
-    ASSERT_TRUE(prepareRun(session, {}, "noise", &p)) << p.why;
-    const GraphDocument& doc = *session.viewDocument();
-    auto engine = gpu::makeCpuLookEngine();
-    engine->setBase(p.base, session.last().scalp.get());
-    StrandsPtr input = p.base;
-    for (std::size_t k = 0; k < p.chain.stages.size(); ++k) {
-        const gpu::LookStage& stage = p.chain.stages[k];
-        gpu::LookRun run = p.run;
-        run.params.stages = {p.run.params.stages[k]};
-        run.params.stages[0].stage.from = gpu::kNoStage;
-        run.fields.stages = {p.run.fields.stages[k]};
-        run.inputs = {p.run.inputs[k]};
-        engine->setBase(input, session.last().scalp.get());
-        double engineMs = 1e30, opMs = 1e30;
-        for (int r = 0; r < 3; ++r) {
-            const auto t0 = std::chrono::steady_clock::now();
-            engine->run(run, false);
-            const std::vector<Vec3f> got = engine->readPositions();
-            engineMs = std::min(engineMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
-        }
-        const gpu::GpuTimes t = engine->times(true);
-        // The operator itself: its own C++ (the engine off) and as it runs now (on the engine where
-        // it is switched).
-        const Operator& op = doc.graph.node(stage.node);
+TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
+    // The operators that run their stage on the CPU engine (look_cpu.h runStage): each one's result
+    // there against its own C++ (the engine off), on the strands it took, bit for bit, points and
+    // widths; mapped params, per point and per strand, root frames with UVs and without.
+    struct Case {
+        std::string type, params;
+        bool uvs = false;
+        bool cpus = false;  // the operator's own C++ (a per-point value read after the points before it moved)
+    };
+    const Case cases[] = {
+        {"Width", R"("params": {"width": 0.02, "randomness": 0.3, "profile": [[0, 1], [1, 0.2]]})"},
+        {"Width", R"("params": {"width": {"expression": "0.02 - 0.015 * t", "min": 0.0, "max": 1.0}})"},
+        {"Width", R"("params": {"width": {"expression": "0.01 + 0.01 * rand", "min": 0.0, "max": 1.0}})"},
+        {"Bend", R"("params": {"angle": 40.0, "start": 0.2, "end": 0.8, "randomness": 0.3, "seed": 3})"},
+        {"Bend", R"("params": {"angle": 180.0, "end": 0.0, "along": "direction", "direction": [0.0, -1.0, 0.3]})"},
+        {"Bend", R"("params": {"angle": {"expression": "rand", "min": -60.0, "max": 60.0}, "along": "direction", "direction": [1.0, -1.0, 0.3], "end": 0.6})"},
+        {"Bend", R"("params": {"angle": 70.0, "along": "tangent", "direction": [0.0, 0.0, 1.0], "start": 0.1})", true},
+        {"Direction", R"("params": {"inclination": 60.0, "roll": 30.0, "rollRandom": 20.0, "inclinationRandom": 5.0, "seed": 2, "along": "direction"})"},
+        {"Direction", R"("params": {"inclination": {"expression": "rand", "min": 20.0, "max": 80.0}, "strength": {"expression": "rand", "min": 0.2, "max": 1.0},
+                                    "roll": 45.0, "along": "direction", "direction": [1.0, 0.0, 0.0]})"},
+        {"Direction", R"("params": {"inclination": 70.0, "roll": {"expression": "rand", "min": -90.0, "max": 90.0}, "strength": 0.6})", true},
+        {"Transform", R"("params": {"scale": 1.2, "translate": [0.0, 0.05, 0.0], "rotate": [10.0, 0.0, 5.0]})"},
+        {"Transform", R"("params": {"scale": {"expression": "0.8 + 0.4 * rand", "min": 0.0, "max": 2.0}, "scaleRandom": 0.2,
+                                    "translateRandom": [0.02, 0.0, 0.01], "rotateRandom": [5.0, 0.0, 5.0], "seed": 4})"},
+        {"Transform", R"("params": {"space": "world", "pivot": [0.0, 1.0, 0.0], "rotate": [0.0, 20.0, 0.0], "scale": 0.9})"},
+        {"Displace", R"("params": {"distance": 0.1, "profile": [[0, 0], [1, 1]]})"},
+        {"Displace", R"("params": {"distance": {"expression": "0.05 * t", "min": 0.0, "max": 1.0}, "along": "direction", "direction": [0.0, 1.0, 0.0]})",
+         false, true},
+        {"Displace", R"("params": {"distance": {"expression": "0.02 + 0.06 * rand", "min": 0.0, "max": 1.0}})"},
+        {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
+        {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
+    };
+    std::size_t differing = 0, compared = 0;
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.type + " " + c.params);
+        const std::string json = shaperGraph(c.type, c.params, true);
+        GroomData data = c.uvs ? paintedGroom(json) : groom(json);
+        GroomSession session(data);
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        const GraphDocument& doc = *session.viewDocument();
+        const NodeId id = doc.nodesByName.at(shaperName(true));
+        ExternalInputs ext;
+        setGroomExternals(ext, session.last().scalp, data.guides, session.last().hierarchy, session.last().parts, session.last().flow);
         EvalContext ctx;
-        double onMs = 1e30;
+        ctx.externals = &ext;
+        const Operator& op = doc.graph.node(id);
+        std::vector<Value> inputs(op.inputs().size());
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            NodeId src = 0;
+            std::size_t output = 0;
+            if (doc.graph.inputSource(id, i, &src, &output)) inputs[i] = doc.graph.cachedValue(src, output);
+        }
+        // (Run there, not handed to its C++.)
+        const std::map<std::string, gpu::StageKind> kinds = {{"Width", gpu::StageKind::Width},         {"Bend", gpu::StageKind::Bend},
+                                                             {"Direction", gpu::StageKind::Direction}, {"Transform", gpu::StageKind::Transform},
+                                                             {"Displace", gpu::StageKind::Displace},   {"Gravity", gpu::StageKind::Gravity}};
+        const gpu::StageKind kind = kinds.at(c.type);
+        EXPECT_EQ(gpu::runStage(kind, op.params(), valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get()) != nullptr, !c.cpus);
+        StrandsPtr made[2];
         for (const bool on : {false, true}) {
             gpu::setCpuEngineOn(on);
-            for (int r = 0; r < 3; ++r) {
-                const auto t0 = std::chrono::steady_clock::now();
-                const Value out = op.evaluate(ctx, {Value(input)});
-                (on ? onMs : opMs) = std::min(on ? onMs : opMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
-            }
+            made[on] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
         }
-        std::printf("[ CPU speed ] %s on %zu strands, %zu points: engine %.2f ms (its run %.2f: kernel %.2f), operator's C++ %.2f ms "
-                    "(x%.2f), operator now %.2f ms\n",
-                    gpu::stageName(stage.kind), input->strandCount(), input->pointCount(), engineMs, t.totalMs,
-                    t.noiseMs + t.curlMs + t.widthMs, opMs, engineMs / opMs, onMs);
-        input = valueAs<StrandsPtr>(doc.graph.cachedValue(stage.node));
+        gpu::setCpuEngineOn(true);
+        ASSERT_TRUE(made[0] && made[1]);
+        ASSERT_EQ(made[0]->pointCount(), made[1]->pointCount());
+        ASSERT_EQ(made[0]->widths().size(), made[1]->widths().size());
+        std::size_t bits = 0;
+        for (std::size_t i = 0; i < made[0]->pointCount(); ++i) {
+            bits += std::memcmp(&made[0]->positions()[i], &made[1]->positions()[i], sizeof(Vec3f)) != 0;
+        }
+        for (std::size_t i = 0; i < made[0]->widths().size(); ++i) {
+            bits += std::memcmp(&made[0]->widths()[i], &made[1]->widths()[i], sizeof(float)) != 0;
+        }
+        EXPECT_EQ(bits, 0u);
+        differing += bits;
+        compared += made[0]->pointCount();
     }
+    std::printf("[ CPU ops ] points differing: %zu of %zu\n", differing, compared);
+}
+
+TEST(CpuEngine, SpeedAgainstTheOperators) {
+    // Each stage of dense grooms (400 strands a unit): the CPU engine's run of it against its
+    // operator's evaluation of the same input, its own C++ (the engine off) and as it runs now (ms,
+    // best of 3). A report: which kernels are at their operators' speed, which want tuning.
+    struct Graph {
+        std::string name, json;
+    };
+    std::vector<Graph> graphs = {{"look", graph(0.3)}, {"hair_basics", startingGraph("hairBasics")}};
+    for (const char* preset : {"parted_style", "gravity", "flyaways", "cinematic_hair", "wind_and_jiggle"}) graphs.push_back({preset, presetGraph(preset)});
+    const std::pair<const char*, const char*> shapers[] = {
+        {"Bend", R"("params": {"angle": 35.0, "randomness": 0.3})"},
+        {"Direction", R"("params": {"inclination": 30.0, "strength": 0.7, "roll": 20.0})"},
+        {"Transform", R"("params": {"scale": 1.2, "translate": [0.0, 0.05, 0.0], "rotate": [10.0, 0.0, 5.0]})"},
+        {"Displace", R"("params": {"distance": 0.1})"},
+        {"Twist", R"("params": {"turns": 0.6})"}};
+    for (const auto& [type, params] : shapers) graphs.push_back({type, shaperGraph(type, params, true)});
+    for (const auto& [type, params] : {std::pair<const char*, const char*>{"Smooth", R"("params": {"strength": 0.8, "scale": 0.3})"},
+                                       {"BlendNeighbors", R"("params": {"strength": 0.6})"},
+                                       {"Tangle", R"("params": {"strength": 0.6, "fraction": 0.5})"}}) {
+        graphs.push_back({type, neighbourGraph(type, params)});
+    }
+    graphs.push_back({"Collide", withoutClearance(chainGraph({{"Collide", R"("params": {"offset": 0.12})"}}, true, true))});
+    graphs.push_back({"SelfCollide", withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.6})"}, {"SelfCollide", ""}}))});
+    std::set<std::string> seen;
+    for (const Graph& g : graphs) {
+        nlohmann::json j = nlohmann::json::parse(g.json);
+        for (auto& n : j["nodes"]) {
+            if (n["type"] == "Scatter") n["params"]["density"] = 400.0;
+        }
+        GroomData data = groom(j.dump());
+        test::paintRequiredMaps(g.json, data);
+        data.partsJson = meridianParts(*data.scalp);
+        GroomSession session(data);
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands) << g.name;
+        Prepared p;
+        if (!prepareRun(session, {}, "", &p)) continue;
+        const GraphDocument& doc = *session.viewDocument();
+        ExternalInputs ext;
+        setGroomExternals(ext, session.last().scalp, data.guides, session.last().hierarchy, session.last().parts, session.last().flow);
+        setMapExternals(ext, data.maps);
+        EvalContext ctx;
+        ctx.externals = &ext;
+        auto engine = gpu::makeCpuLookEngine();
+        for (std::size_t k = 0; k < p.chain.stages.size(); ++k) {
+            const gpu::LookStage& stage = p.chain.stages[k];
+            const std::string kind = gpu::stageName(stage.kind);
+            if (stage.level >= 0 || !seen.insert(kind).second) continue;  // (a Wet's levels; each kind once)
+            NodeId src = 0;
+            std::size_t output = 0;
+            if (!doc.graph.inputSource(stage.node, 0, &src, &output)) continue;
+            const StrandsPtr input = valueAs<StrandsPtr>(doc.graph.cachedValue(src, output));
+            if (!input) continue;
+            gpu::LookRun run = p.run;
+            run.params.stages = {p.run.params.stages[k]};
+            run.params.stages[0].stage.from = gpu::kNoStage;
+            run.params.stages[0].stage.from2 = gpu::kNoStage;
+            run.fields.stages = k < p.run.fields.stages.size() ? std::vector<gpu::StageFields>{p.run.fields.stages[k]} : std::vector<gpu::StageFields>{};
+            run.inputs = k < p.run.inputs.size() ? std::vector<gpu::StageInputs>{p.run.inputs[k]} : std::vector<gpu::StageInputs>{};
+            engine->setBase(input, session.last().scalp.get());
+            std::vector<Vec3f> out(input->pointCount());
+            gpu::LookTargets targets;
+            targets.positions = out.data();
+            double engineMs = 1e30, opMs = 1e30, onMs = 1e30;
+            try {
+                for (int r = 0; r < 3; ++r) {
+                    const auto t0 = std::chrono::steady_clock::now();
+                    engine->run(run, false, targets);
+                    engineMs = std::min(engineMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+                }
+            } catch (const std::exception& e) {
+                std::printf("[ CPU speed ] %s: not run alone (%s)\n", kind.c_str(), e.what());
+                continue;
+            }
+            engine->dropTargets();
+            const Operator& op = doc.graph.node(stage.node);
+            std::vector<Value> inputs(op.inputs().size());
+            for (std::size_t i = 0; i < inputs.size(); ++i) {
+                if (doc.graph.inputSource(stage.node, i, &src, &output)) inputs[i] = doc.graph.cachedValue(src, output);
+            }
+            for (const bool on : {false, true}) {
+                gpu::setCpuEngineOn(on);
+                for (int r = 0; r < 3; ++r) {
+                    // (Another set each time, as a graph's evaluations hand it: the engine takes it anew.)
+                    std::vector<Value> fresh = inputs;
+                    fresh[0] = Value(StrandsPtr(std::make_shared<StrandSet>(*input)));
+                    const auto t0 = std::chrono::steady_clock::now();
+                    const Value made = op.evaluate(ctx, fresh);
+                    double& best = on ? onMs : opMs;
+                    best = std::min(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+                }
+            }
+            std::printf("[ CPU speed ] %-15s %8zu strands %9zu points: engine %8.2f ms, operator's C++ %8.2f ms (x%5.2f), operator now %8.2f ms\n",
+                        kind.c_str(), input->strandCount(), input->pointCount(), engineMs, opMs, engineMs / opMs, onMs);
+        }
+    }
+    gpu::setCpuEngineOn(true);
 }
 }  // namespace
 }  // namespace groomlab

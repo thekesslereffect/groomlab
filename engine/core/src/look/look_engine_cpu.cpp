@@ -113,6 +113,11 @@ protected:
     // The base's points and widths: the strands' own arrays (the engine holds them; never written).
     void share(int id, const void* data, std::size_t bytes) override { buffers_[id] = hostWords(const_cast<void*>(data), bytes); }
     bool sharesBase() const override { return true; }
+    void* writable(int id, std::size_t bytes) override {
+        Words& w = buffers_[id];
+        if (!w || w->host || w->ownWords < (bytes + 3) / 4) w = ownWords(bytes);
+        return w->data();
+    }
     bool has(int id) const override { return buffers_.count(id) != 0; }
     void release(int id) override { buffers_.erase(id); }
 

@@ -7,6 +7,7 @@
 
 #include "groomlab/field.h"
 #include "groomlab/look/look_engine.h"
+#include "groomlab/look/look_stage_params.h"
 #include "groomlab/scalp_mesh.h"
 #include "groomlab/strand_set.h"
 
@@ -28,5 +29,11 @@ void readFieldValues(const ScalarField& field, const StrandSet& in, bool pointsA
 // copied, its arrays its own): the points the run moves written in place, and with `widths` the
 // widths a Width makes (out's widths, one a point). Throws std::runtime_error as the engine does.
 void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out, bool widths = false);
+
+// An operator's own stage of `kind` (readStageParams' kinds taking no inputs but their root frames,
+// look_stage_params.h) on `in`: its params, its mapped params' values on `in` and its root frames
+// read here, the result `in` copied with the points (a Width: the widths) the kernel makes. Null
+// where the kernel does not run it so (the operator's C++ then).
+StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp);
 
 }  // namespace groomlab::gpu

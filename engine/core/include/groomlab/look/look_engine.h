@@ -231,6 +231,9 @@ protected:
     // whole).
     virtual void share(int buffer, const void* data, std::size_t bytes) { write(buffer, data, bytes, false); }
     virtual bool sharesBase() const { return false; }
+    // Room for `bytes` in a buffer, filled by the caller before the run (its old contents gone): on
+    // the CPU the buffer's own memory; null where the data goes up by write.
+    virtual void* writable(int /*buffer*/, std::size_t /*bytes*/) { return nullptr; }
     virtual bool has(int buffer) const = 0;
     virtual void release(int buffer) = 0;
     // The run's outputs: kOut0 (positions) and, with `frames`, kOut1-3 resolved to the targets
@@ -282,8 +285,9 @@ protected:
     bool uvsWritten_ = false;
 
 private:
-    void prepare(const LookRun& run);
-    void putStrandData(const LookRun& run);
+    void prepare(const LookRun& run, bool frames);
+    // `frames`: the run makes the lines' frames (they read the root normals).
+    void putStrandData(const LookRun& run, bool frames);
     void putFields(const LookFields& fields, const std::vector<StageParams>& stages);
     void putStageInputs(const LookRun& run);
     // The shapers reading their neighbours or a reference: their inputs up, and their dispatch's
@@ -296,9 +300,12 @@ private:
     // guides it changed (StageHeld::walkPartial), each guide's flag written beside its row.
     void walkOnlyChanged(std::size_t k, const StageParams& params, const InterpolateInputs& data);
 
-    std::uint64_t baseSerial_ = 0;  // each full upload of the base
+    std::uint64_t baseSerial_ = 0;  // each upload of other strands (not their points alone: setBase)
     std::uint64_t shownKey_ = 0;    // what kShown holds (0: nothing)
     void findShownPoints();
+    // The base's root normals on its scalp (empty until made: makeRootNormals).
+    void makeRootNormals(const StrandSet& s, const ScalpMesh* scalp);
+    const ScalpMesh* normalsScalp_ = nullptr;
     std::vector<Vec3f> rootNormals_;
     std::vector<std::uint8_t> rootsOnScalp_;  // whether each root is on the scalp (its normal the skin's)
     // What the buffers hold: the per-strand numbers' key, the fields' serial, each stage's inputs.
@@ -327,6 +334,7 @@ private:
         const void* d = nullptr;  // Clump: its neighbors
         std::uint32_t aux[4] = {};
         bool framesMade = false;
+        std::uint64_t madeFrames = 0;  // a sharing engine's own root frames: for the strands of this baseSerial_ (0: none)
         std::vector<const void*> chunks;  // Interpolate: the binding's chunks its buffer holds
         // Interpolate: where each chunk's records are (words) and the room there, where the records
         // end and the buffer's room for them (a chunk bound again that outgrows its room goes last).

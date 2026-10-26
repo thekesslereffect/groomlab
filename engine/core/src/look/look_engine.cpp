@@ -9,6 +9,7 @@
 #include "groomlab/preview_core.h"
 #include "groomlab/random.h"
 #include "groomlab/look/look_engine_internal.h"
+#include "groomlab/look/look_stage_params.h"
 
 namespace groomlab::gpu {
 
@@ -222,7 +223,7 @@ void tieConstants(const StageParams& p, const TieInputs* in, StageConstants* c) 
 
 bool LookEngine::setBase(const StrandsPtr& base, const ScalpMesh* scalp, const StrandChanges* changed) {
     if (!base) return false;
-    if (base == base_) return false;
+    if (base == base_ && (!sharesBase() || scalp == normalsScalp_)) return false;
     const auto start = std::chrono::steady_clock::now();
     const StrandSet& s = *base;
     // The graph cannot say how the base changed (results came in between: a stroke's previews, a
@@ -258,45 +259,75 @@ bool LookEngine::setBase(const StrandsPtr& base, const ScalpMesh* scalp, const S
         return true;
     }
     const std::size_t strands = s.strandCount(), points = s.pointCount();
-    std::vector<std::uint32_t> offsets(strands + 1);
-    rootNormals_.assign(strands, Vec3f{});
-    rootsOnScalp_.assign(strands, 0);
-    // The root normal each strand's lit lines lean by (display.cpp rootNormal: up when unrooted).
-    parallelFor(0, strands, [&](std::size_t i) {
-        const StrandRoot& root = s.roots()[i];
-        const bool rooted = scalp && root.face >= 0 && static_cast<std::size_t>(root.face) < scalp->triangleCount();
-        rootNormals_[i] = rooted ? scalp->normal(root) : Vec3f{0, 1, 0};
-        rootsOnScalp_[i] = rooted ? 1 : 0;
-        offsets[i] = static_cast<std::uint32_t>(s.offsets()[i]);
-    }, 4096);
-    offsets[strands] = static_cast<std::uint32_t>(points);
+    // The strands held, their points alone new (their layout, IDs and roots the very arrays: as the
+    // operators hand them on), on the same scalp: what is made of those holds (the offsets, the
+    // per-strand numbers and root normals, the root frames a sharing engine makes; baseSerial_).
+    const bool sameStrands = base_ && strands == strandCount_ && points == pointCount_ && scalp == normalsScalp_ &&
+                             base_->offsets().data() == s.offsets().data() && base_->ids().data() == s.ids().data() &&
+                             base_->roots().data() == s.roots().data();
+    std::vector<std::uint32_t> staged;
+    if (!sameStrands) {
+        // (In place where the engine holds it in memory: the CPU's.)
+        auto* offsets = static_cast<std::uint32_t*>(writable(kOffsets, (strands + 1) * 4));
+        if (!offsets) {
+            staged.resize(strands + 1);
+            offsets = staged.data();
+        }
+        parallelFor(0, strands, [&](std::size_t i) { offsets[i] = static_cast<std::uint32_t>(s.offsets()[i]); }, 16384);
+        offsets[strands] = static_cast<std::uint32_t>(points);
+        // A sharing engine (the CPU's: the caller's strands and scalp, run while it holds them)
+        // makes its root normals when a run reads them (putStrandData); the GPU's here, with the upload.
+        normalsScalp_ = scalp;
+        rootNormals_.clear();
+        rootsOnScalp_.clear();
+        if (!sharesBase()) makeRootNormals(s, scalp);
+    }
     strandCount_ = strands;
     pointCount_ = points;
     uniformCount_ = s.uniformPointCount();
-    write(kOffsets, offsets.data(), offsets.size() * 4, false);
+    if (!staged.empty()) write(kOffsets, staged.data(), staged.size() * 4, false);
     share(kBasePoints, s.positions().data(), points * 12);
     // The base's widths, for the point texture where no Width runs (a set without widths: the
     // default the app draws them at, as buildHairBuffers does).
     if (s.widths().size() == points) {
         share(kBaseWidths, s.widths().data(), points * 4);
+    } else if (float* to = static_cast<float*>(writable(kBaseWidths, std::max<std::size_t>(points, 1) * 4))) {
+        parallelFor(0, (points + 65535) / 65536, [&](std::size_t c) {
+            std::fill(to + c * 65536, to + std::min(points, (c + 1) * 65536), 0.01f);
+        }, 1);
     } else {
         const std::vector<float> defaults(std::max<std::size_t>(points, 1), 0.01f);
         write(kBaseWidths, defaults.data(), defaults.size() * 4, false);
     }
     // The outputs of another size go; what the run made of the old strands is made again.
     for (const int b : {kPointsA, kPointsB, kPointsC, kWidths, kOut0, kOut1, kOut2, kOut3, kFull0, kFull1, kFull2, kFull3}) release(b);
-    ++baseSerial_;
-    dataKey_.clear();
+    if (!sameStrands) {
+        ++baseSerial_;
+        dataKey_.clear();
+    }
     fieldSerial_ = 0;
     resultBuffer_ = -1;
     base_ = base;
     findShownPoints();
     uploadMs_ = since(start);
-    uploadMegabytes_ = static_cast<double>(offsets.size() * 4 + points * 12) / 1e6;
+    uploadMegabytes_ = static_cast<double>((strands + 1) * 4 + points * 12) / 1e6;
     uploadPartial_ = false;
     uploadStrands_ = strands;
     ++uploads_;
     return true;
+}
+
+void LookEngine::makeRootNormals(const StrandSet& s, const ScalpMesh* scalp) {
+    const std::size_t strands = s.strandCount();
+    rootNormals_.resize(strands);
+    rootsOnScalp_.resize(strands);
+    // The root normal each strand's lit lines lean by (display.cpp rootNormal: up when unrooted).
+    parallelFor(0, strands, [&](std::size_t i) {
+        const StrandRoot& root = s.roots()[i];
+        const bool rooted = scalp && root.face >= 0 && static_cast<std::size_t>(root.face) < scalp->triangleCount();
+        rootNormals_[i] = rooted ? scalp->normal(root) : Vec3f{0, 1, 0};
+        rootsOnScalp_[i] = rooted ? 1 : 0;
+    }, 4096);
 }
 
 void LookEngine::findShownPoints() {
@@ -378,11 +409,15 @@ void LookEngine::walkOnlyChanged(std::size_t k, const StageParams& params, const
     held.walkPoints = pointCount_;
 }
 
-void LookEngine::putStrandData(const LookRun& run) {
+void LookEngine::putStrandData(const LookRun& run, bool frames) {
     const std::vector<StageParams>& stages = run.params.stages;
-    // What the numbers come from: the strands (each full upload), each stage's kind and seed, and
-    // Interpolate's normals.
-    std::vector<std::uint64_t> key{baseSerial_};
+    bool normals = frames;
+    for (const StageParams& p : stages) normals = normals || p.stage.kind == StageKind::Clump || p.stage.kind == StageKind::Curl;
+    if (normals && rootNormals_.size() != strandCount_) makeRootNormals(*base_, normalsScalp_);
+    normals = normals || !rootNormals_.empty();
+    // What the numbers come from: the strands (each full upload), the root normals, each stage's
+    // kind and seed, and Interpolate's normals.
+    std::vector<std::uint64_t> key{baseSerial_, normals ? 1u : 0u};
     for (std::size_t k = 0; k < stages.size(); ++k) {
         key.push_back(static_cast<std::uint64_t>(stages[k].stage.kind));
         key.push_back(stages[k].seed);
@@ -399,17 +434,28 @@ void LookEngine::putStrandData(const LookRun& run) {
         dataBlocks_[k] = blocks;
         blocks += strandDataBlocks(stages[k].stage.kind);
     }
-    std::vector<float> data(blocks * n * 4, 0.0f);
+    // Written in place where the engine holds it in memory (the CPU's), else up from here; each
+    // strand's numbers zero but what its stages set.
+    const std::size_t words = blocks * n * 4;
+    std::unique_ptr<float[]> staged;
+    float* data = static_cast<float*>(writable(kStrandData, words * 4));
+    if (!data) {
+        staged.reset(new float[std::max<std::size_t>(words, 1)]);
+        data = staged.get();
+    }
     parallelFor(0, n, [&](std::size_t i) {
-        float* up = data.data() + i * 4;
-        up[0] = rootNormals_[i].x;
-        up[1] = rootNormals_[i].y;
-        up[2] = rootNormals_[i].z;
-        up[3] = rootsOnScalp_[i] ? 1.0f : 0.0f;  // the skin's normal (Clump's repel keeps off the skin)
+        for (std::size_t b = 0; b < blocks; ++b) std::fill_n(data + (b * n + i) * 4, 4, 0.0f);
+        if (normals) {
+            float* up = data + i * 4;
+            up[0] = rootNormals_[i].x;
+            up[1] = rootNormals_[i].y;
+            up[2] = rootNormals_[i].z;
+            up[3] = rootsOnScalp_[i] ? 1.0f : 0.0f;  // the skin's normal (Clump's repel keeps off the skin)
+        }
         const StrandId id = s.ids()[i];
         for (std::size_t k = 0; k < stages.size(); ++k) {
             if (!dataBlocks_[k]) continue;
-            float* d = data.data() + (dataBlocks_[k] * n + i) * 4;
+            float* d = data + (dataBlocks_[k] * n + i) * 4;
             const std::uint64_t seed = stages[k].seed;
             switch (stages[k].stage.kind) {
                 case StageKind::Interpolate: {
@@ -475,7 +521,7 @@ void LookEngine::putStrandData(const LookRun& run) {
                     d[1] = offset.y;
                     d[2] = offset.z;
                     d[3] = unitFloat(h);
-                    float* more = data.data() + ((dataBlocks_[k] + 1) * n + i) * 4;
+                    float* more = data + ((dataBlocks_[k] + 1) * n + i) * 4;
                     more[0] = rng.uniform(0.5f, 1.0f);
                     break;
                 }
@@ -513,7 +559,7 @@ void LookEngine::putStrandData(const LookRun& run) {
                 case StageKind::Transform: {
                     // Its seven: the move's three, the turn's three, the scale's (the next block from the fifth).
                     constexpr std::uint64_t kSalt = 0x7A45F0ull;
-                    float* more = data.data() + ((dataBlocks_[k] + 1) * n + i) * 4;
+                    float* more = data + ((dataBlocks_[k] + 1) * n + i) * 4;
                     for (std::uint64_t r = 0; r < 7; ++r) {
                         const float v = 2.0f * unitFloat(hashCombine(hashCombine(id, seed ^ kSalt), r)) - 1.0f;
                         (r < 4 ? d[r] : more[r - 4]) = v;
@@ -544,8 +590,8 @@ void LookEngine::putStrandData(const LookRun& run) {
             }
         }
     }, 4096);
-    write(kStrandData, data.data(), data.size() * 4, false);
-    runUploadMegabytes_ += static_cast<double>(data.size() * 4) / 1e6;
+    if (staged) write(kStrandData, data, std::max<std::size_t>(words, 1) * 4, false);
+    runUploadMegabytes_ += static_cast<double>(words * 4) / 1e6;
     dataKey_ = std::move(key);
 }
 
@@ -1103,15 +1149,29 @@ void LookEngine::putStageInputs(const LookRun& run) {
         // ---- The shapers working on each strand alone ----
         const StageKind kind = stages[k].stage.kind;
         if (kind == StageKind::Bend || kind == StageKind::Direction || kind == StageKind::Transform || kind == StageKind::Displace) {
-            // Each strand's root on the scalp (look.slang rootFrameOf), once per roots and scalp.
+            // Each strand's root on the scalp (look.slang rootFrameOf), once per roots and scalp. A
+            // sharing engine given none makes them from its base and scalp, in its own memory.
             const RootInputs* data = in ? in->roots.get() : nullptr;
-            if (!data || !data->frames || data->frames->size() != stageN * 8) {
+            if (!data && sharesBase() && stageN == strandCount_) {
+                if (held.madeFrames != baseSerial_ || held.a || !has(auxBuffer(k, 0))) {
+                    writeRootFrames(*base_, normalsScalp_, static_cast<float*>(writable(auxBuffer(k, 0), std::max<std::size_t>(stageN, 1) * 32)));
+                    held.madeFrames = baseSerial_;
+                    held.a = nullptr;
+                    held.keep.reset();
+                }
+            } else if (!data || !data->frames || data->frames->size() != stageN * 8) {
                 throw std::runtime_error("GPU preview: a shaper's roots are for other strands");
-            }
-            if (held.a != data->frames.get() || !has(auxBuffer(k, 0))) {
-                write(auxBuffer(k, 0), data->frames->data(), std::max<std::size_t>(data->frames->size(), 1) * 4, false);
+            } else if (held.a != data->frames.get() || !has(auxBuffer(k, 0))) {
+                // (On the CPU the very memory: never written, kept alive while held.)
+                if (data->frames->empty()) {
+                    const float none = 0.0f;
+                    write(auxBuffer(k, 0), &none, 4, false);
+                } else {
+                    share(auxBuffer(k, 0), data->frames->data(), data->frames->size() * 4);
+                }
                 held.a = data->frames.get();
                 held.keep = data->frames;  // (kept alive: compared by address)
+                held.madeFrames = 0;
                 runUploadMegabytes_ += static_cast<double>(data->frames->size() * 4) / 1e6;
             }
         } else if (kind == StageKind::Twist) {
@@ -1307,14 +1367,14 @@ LookEngine::Kernel LookEngine::shaperKernel(std::size_t k, const StageParams& st
     throw std::runtime_error("GPU preview: a node this engine does not run");
 }
 
-void LookEngine::prepare(const LookRun& run) {
+void LookEngine::prepare(const LookRun& run, bool frames) {
     const auto start = std::chrono::steady_clock::now();
     runUploadMegabytes_ = 0;
     if (run.params.stages.size() > kMaxStages) throw std::runtime_error("GPU preview: more nodes than it runs");
     if (!run.fields.stages.empty() && run.fields.stages.size() != run.params.stages.size()) {
         throw std::runtime_error("GPU preview: mapped values read for another chain");
     }
-    putStrandData(run);
+    putStrandData(run, frames);
     prepareParts_[0] = since(start);
     if (run.fields.stages.empty()) {
         if (fieldLayout_.size() != run.params.stages.size() * kFieldSlots * 2 || fieldSerial_ != 0) {
@@ -1346,7 +1406,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     for (int k = 0; k < static_cast<int>(Kernel::Count); ++k) {
         if (need.test(static_cast<std::size_t>(k))) kernelReady(static_cast<Kernel>(k), true);
     }
-    prepare(r);
+    prepare(r, frames);
     const std::vector<StageParams>& stages = r.params.stages;
     const std::size_t bytes = pointCount_ * 12;
     outPoints_ = gather ? shownPoints_.size() : pointCount_;

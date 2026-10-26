@@ -623,23 +623,9 @@ const double* overriddenNumber(const GraphDocument& doc, const Overrides& overri
     return v ? std::get_if<double>(v) : nullptr;
 }
 
-// A param that holds a map of its own (not a number; a plugged field leaves the number in place).
-bool ownMap(const ParamSet& params, const std::string& name) {
-    return params.has(name) && std::get_if<MapRef>(&params.get(name)) != nullptr;
-}
 
-// A param holding a map or with a field plugged in (as its node's last evaluation read it).
 bool mappedParam(const ParamSet& params, const std::string& name) { return ownMap(params, name) || params.field(name); }
 
-// Direction's mapped params, the first two of inclination, roll and strength (StageParams: the
-// fields holding their values, in this order).
-std::vector<std::string> directionMapped(const ParamSet& params) {
-    std::vector<std::string> names;
-    for (const char* name : {"inclination", "roll", "strength"}) {
-        if (mappedParam(params, name)) names.push_back(name);
-    }
-    return names;
-}
 
 // A vector param that is one world vector for every strand (a VectorField without an expression),
 // a drag's in place of the node's own; false for one per strand.
@@ -661,6 +647,55 @@ bool constantVector(const GraphDocument& doc, const Overrides& overrides, NodeId
         return false;
     }
 }
+
+// A node's params as the preview reads them (look_stage_params.h): a drag's values in place of its
+// own, within the spec's hard limits (ParamSet clamps a number); a ramp as the operator reads it
+// (getRamp: a plugged curve still wins, as on the CPU).
+class PreviewParamReader : public StageParamReader {
+public:
+    PreviewParamReader(const GraphDocument& doc, const Overrides& overrides, NodeId id, const ParamSet& params)
+        : StageParamReader(params, doc.nameOf(id)), doc_(doc), overrides_(overrides), id_(id) {}
+    double number(const std::string& param) const override {
+        const ParamSet& own = doc_.graph.node(id_).params();
+        if (const double* v = overriddenNumber(doc_, overrides_, id_, param)) return own.clamped(param, *v);
+        return own.getDouble(param);
+    }
+    Ramp ramp(const std::string& param) const override {
+        const OverrideValue* v = overridden(doc_, overrides_, id_, param);
+        const Ramp* dragged = v ? std::get_if<Ramp>(v) : nullptr;
+        if (!dragged) return params().getRamp(param);
+        ParamSet with = params();
+        with.set(param, *dragged);
+        return with.getRamp(param);
+    }
+    Vec3f vector(const std::string& param) const override {
+        const OverrideValue* v = overridden(doc_, overrides_, id_, param);
+        const Vec3f* dragged = v ? std::get_if<Vec3f>(v) : nullptr;
+        return dragged ? *dragged : params().getVec3(param);
+    }
+    bool constantVector(const std::string& param, Vec3f* out) const override {
+        return groomlab::gpu::constantVector(doc_, overrides_, id_, params(), param, out);
+    }
+    // A plugged field's own number, 1 for a map that is the param's own value (dragging that as a
+    // number replaces the map: the CPU's).
+    bool mappable(const std::string& param, float* value, std::string* why) const override {
+        if (ownMap(doc_.graph.node(id_).params(), param)) {
+            if (overridden(doc_, overrides_, id_, param)) {
+                *why = name() + "." + param + " holds a map: a number dragged over it is the CPU's";
+                return false;
+            }
+            *value = 1.0f;
+            return true;
+        }
+        *value = static_cast<float>(number(param));
+        return true;
+    }
+
+private:
+    const GraphDocument& doc_;
+    const Overrides& overrides_;
+    NodeId id_;
+};
 
 // The nodes a drag sets values of.
 std::set<NodeId> draggedNodes(const GraphDocument& doc, const Overrides& overrides) {
@@ -787,36 +822,10 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
         StageParams s;
         s.stage = stage;
         if (stage.prefix) s.strands = mergedA;
-        // Within the spec's hard limits, a dragged number as the stored one (ParamSet clamps it).
-        auto number = [&](const std::string& name) {
-            if (const double* v = overriddenNumber(doc, overrides, id, name)) return graph.node(id).params().clamped(name, *v);
-            return graph.node(id).params().getDouble(name);
-        };
-        // A ramp as the operator reads it (getRamp: a plugged curve still wins, as on the CPU), a
-        // dragged one in place of the node's own.
-        auto ramp = [&](const std::string& name) {
-            const OverrideValue* v = overridden(doc, overrides, id, name);
-            const Ramp* dragged = v ? std::get_if<Ramp>(v) : nullptr;
-            if (!dragged) return params.getRamp(name);
-            ParamSet with = params;
-            with.set(name, *dragged);
-            return with.getRamp(name);
-        };
-        // A mappable param: its number, the multiplier of its values (StageFields): a plugged
-        // field's own number, 1 for a map that is the param's own value (dragging that as a number
-        // replaces the map: the CPU's).
-        auto mappable = [&](const std::string& name, float* value) {
-            if (ownMap(graph.node(id).params(), name)) {
-                if (overridden(doc, overrides, id, name)) {
-                    *why = doc.nameOf(id) + "." + name + " holds a map: a number dragged over it is the CPU's";
-                    return false;
-                }
-                *value = 1.0f;
-                return true;
-            }
-            *value = static_cast<float>(number(name));
-            return true;
-        };
+        const PreviewParamReader reader(doc, overrides, id, params);
+        auto number = [&](const std::string& name) { return reader.number(name); };
+        auto ramp = [&](const std::string& name) { return reader.ramp(name); };
+        auto mappable = [&](const std::string& name, float* value) { return reader.mappable(name, value, why); };
         s.seed = static_cast<std::uint64_t>(params.getInt("seed"));
         if (const double* v = overriddenNumber(doc, overrides, id, "seed")) {
             // An integer param: a dragged number truncated as a graph loads one (graph_io.cpp).
@@ -833,6 +842,17 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
             s.seed = seed;
         }
         switch (stage.kind) {
+            // (look_stage_params.h: the operators' own reading.)
+            case StageKind::Length:
+            case StageKind::Gravity:
+            case StageKind::Flyaway:
+            case StageKind::Bend:
+            case StageKind::Direction:
+            case StageKind::Displace:
+            case StageKind::Transform:
+            case StageKind::Twist:
+                if (!readStageParams(stage.kind, reader, &s, why)) return false;
+                break;
             case StageKind::Interpolate: {
                 if (params.getString("take") != "shape") {
                     *why = doc.nameOf(id) + " takes the guides' length alone: the CPU's";
@@ -852,13 +872,6 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                 s.flag[0] = static_cast<int>(samples);
                 s.flag[1] = params.getBool("preserveLength") ? 1 : 0;
                 s.ramp = ramp("falloff");
-                break;
-            }
-            case StageKind::Length: {
-                if (!mappable("keep", &s.value[0]) || !mappable("fraction", &s.value[1])) return false;
-                const auto a = static_cast<float>(number("trimMin")), b = static_cast<float>(number("trimMax"));
-                s.value[2] = std::min(a, b);
-                s.value[3] = std::max(a, b);
                 break;
             }
             case StageKind::Clump: {
@@ -982,9 +995,7 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                     *why = doc.nameOf(id) + " leaves the feathers' shafts as wide as their rachis (the CPU's)";
                     return false;
                 }
-                if (!mappable("width", &s.value[0])) return false;
-                s.value[1] = static_cast<float>(number("randomness"));
-                s.ramp = ramp("profile");
+                if (!readStageParams(stage.kind, reader, &s, why)) return false;
                 break;
             }
             case StageKind::Part: {
@@ -996,46 +1007,7 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                     *why = doc.nameOf(id) + " keeps no parts found in the hair's flow for its result";
                     return false;
                 }
-                if (!mappable("strength", &s.value[0])) return false;
-                s.value[1] = static_cast<float>(number("width"));
-                s.ramp = ramp("profile");
-                s.tabled = true;
-                break;
-            }
-            case StageKind::Gravity: {
-                // The direction a world vector (as every strand takes it, normalized as the CPU
-                // does); one per strand (an expression, a painted color set) is the CPU's.
-                bool constant = false;
-                Vec3f down;
-                try {
-                    const VectorField direction(params, "direction", nullptr);
-                    constant = direction.isConstant();
-                    down = direction.constant();
-                } catch (const std::exception&) {
-                    constant = false;
-                }
-                if (!constant || !params.getString("directionColorSet").empty()) {
-                    *why = doc.nameOf(id) + " takes its direction per strand (the CPU's)";
-                    return false;
-                }
-                if (!mappable("strength", &s.value[0])) return false;
-                s.value[1] = static_cast<float>(number("stiffness"));
-                if (!(down.length() < 1e-6f)) {
-                    const Vec3f unit = down.normalized();
-                    s.value2[0] = unit.x;
-                    s.value2[1] = unit.y;
-                    s.value2[2] = unit.z;
-                }
-                s.ramp = ramp("stiffnessProfile");  // by the arc's share (its keys)
-                break;
-            }
-            case StageKind::Flyaway: {
-                if (!mappable("stray", &s.value[0]) || !mappable("fraction", &s.value[1])) return false;
-                s.value[2] = static_cast<float>(number("frequency"));
-                s.value[3] = static_cast<float>(number("start"));
-                s.value2[0] = static_cast<float>(number("standOut"));
-                s.value2[1] = static_cast<float>(number("lengthen"));
-                s.flag[0] = 1;  // the stray's noise: one octave
+                if (!readStageParams(stage.kind, reader, &s, why)) return false;
                 break;
             }
             case StageKind::Collide: {
@@ -1127,95 +1099,6 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
             case StageKind::Static: {
                 if (!mappable("strength", &s.value[0])) return false;
                 s.value[1] = static_cast<float>(std::clamp(number("randomness"), 0.0, 1.0));
-                s.ramp = ramp("profile");
-                s.tabled = true;
-                break;
-            }
-            // ---- The shapers working on each strand alone ----
-            case StageKind::Bend:
-            case StageKind::Direction:
-            case StageKind::Displace: {
-                // The direction one world vector (as every strand takes it); one per strand (an
-                // expression) is the CPU's.
-                Vec3f direction;
-                if (!constantVector(doc, overrides, id, params, "direction", &direction)) {
-                    *why = doc.nameOf(id) + " takes its direction per strand (the CPU's)";
-                    return false;
-                }
-                if (stage.kind == StageKind::Bend) {
-                    if (!mappable("angle", &s.value[0])) return false;
-                    s.value[1] = static_cast<float>(number("start"));
-                    s.value[2] = static_cast<float>(number("end"));
-                    s.value[3] = static_cast<float>(number("randomness"));
-                    const std::string along = params.getString("along");
-                    s.flag[0] = along == "normal" ? 0 : along == "direction" ? 2 : 1;
-                    s.value2[0] = direction.x;
-                    s.value2[1] = direction.y;
-                    s.value2[2] = direction.z;
-                } else if (stage.kind == StageKind::Direction) {
-                    // Its mapped params' fields: the first two mapped (readLookFields), a third the CPU's.
-                    const std::vector<std::string> fields = directionMapped(params);
-                    if (fields.size() > 2) {
-                        *why = doc.nameOf(id) + " maps its inclination, roll and strength all three (the CPU's)";
-                        return false;
-                    }
-                    const char* const names[3] = {"inclination", "roll", "strength"};
-                    for (int i = 0; i < 3; ++i) {
-                        if (!mappable(names[i], &s.value[i])) return false;
-                        const auto at = std::find(fields.begin(), fields.end(), names[i]);
-                        s.flag[1 + i] = at == fields.end() ? 2 : static_cast<int>(at - fields.begin());
-                    }
-                    s.value[3] = static_cast<float>(number("inclinationRandom"));
-                    s.value2[0] = direction.x;
-                    s.value2[1] = direction.y;
-                    s.value2[2] = direction.z;
-                    s.value2[3] = static_cast<float>(number("rollRandom"));
-                    s.flag[0] = params.getString("along") == "tangent" ? 1 : 0;
-                } else {
-                    if (!mappable("distance", &s.value[0])) return false;
-                    s.flag[0] = params.getString("along") != "direction" ? 1 : 0;
-                    const Vec3f unit = direction.length() > 1e-6f ? direction.normalized() : Vec3f{};  // (DisplaceOp's `unit`)
-                    s.value2[0] = unit.x;
-                    s.value2[1] = unit.y;
-                    s.value2[2] = unit.z;
-                    s.ramp = ramp("profile");
-                    s.tabled = true;
-                }
-                break;
-            }
-            case StageKind::Transform: {
-                auto vec = [&](const std::string& name) {
-                    const OverrideValue* v = overridden(doc, overrides, id, name);
-                    const Vec3f* dragged = v ? std::get_if<Vec3f>(v) : nullptr;
-                    return dragged ? *dragged : params.getVec3(name);
-                };
-                if (!mappable("scale", &s.value[0])) return false;
-                const Vec3f translate = vec("translate"), rotate = vec("rotate"), pivot = vec("pivot");
-                const Vec3f translateRandom = vec("translateRandom"), rotateRandom = vec("rotateRandom");
-                const float scaleRandom = static_cast<float>(number("scaleRandom"));
-                s.value[1] = scaleRandom;
-                const Vec3f zero;
-                s.flag[0] = params.getString("space") == "world" ? 1 : 0;
-                s.flag[2] = translateRandom != zero ? 1 : 0;
-                s.flag[3] = rotateRandom != zero ? 1 : 0;
-                // Nothing to do (TransformOp's `identity`: its input handed on as it came).
-                s.flag[1] = translate == zero && rotate == zero && !s.flag[2] && !s.flag[3] && scaleRandom <= 0.0f &&
-                                    !mappedParam(params, "scale") && s.value[0] == 1.0f
-                                ? 1
-                                : 0;
-                const Vec3f* rows[4] = {&rotate, &pivot, &translateRandom, &rotateRandom};
-                for (int r = 0; r < 4; ++r) {
-                    s.more[r * 4] = rows[r]->x;
-                    s.more[r * 4 + 1] = rows[r]->y;
-                    s.more[r * 4 + 2] = rows[r]->z;
-                }
-                s.value2[0] = translate.x;
-                s.value2[1] = translate.y;
-                s.value2[2] = translate.z;
-                break;
-            }
-            case StageKind::Twist: {
-                if (!mappable("turns", &s.value[0])) return false;
                 s.ramp = ramp("profile");
                 s.tabled = true;
                 break;
@@ -1465,10 +1348,6 @@ void readValues(const ScalarField& field, const StrandSet& in, bool pointsAllowe
     readFieldValues(field, in, pointsAllowed, out);
 }
 
-// The stages that move each point after reading a value for it from the points before it moved.
-bool movesPointByPoint(StageKind kind) {
-    return kind == StageKind::Clump || kind == StageKind::Noise || kind == StageKind::Curl || kind == StageKind::Displace;
-}
 
 // What a mapped param reads, against what a run of `chain` from its first stage changes before
 // stage k: channels the stages before it write (their cached result's channel is not the very
@@ -3135,27 +3014,6 @@ bool LookInputs::readTie(const GraphDocument& doc, const LookChain& chain, std::
 
 // ---- What the shapers working on each strand alone take ----------------------------------------
 
-namespace {
-
-// transform_ops.cpp uvTangent: the direction U grows in across face `face` of a scalp with UVs
-// (zero where the UVs give none).
-Vec3f scalpUvTangent(const ScalpMesh& scalp, std::int32_t face) {
-    const auto& tri = scalp.triangles()[static_cast<std::size_t>(face)];
-    const auto& uv = scalp.cornerUVs();
-    const std::size_t c = static_cast<std::size_t>(face) * 3;
-    if (c + 2 >= uv.size()) return {};
-    const Vec3f a = scalp.points()[static_cast<std::size_t>(tri[0])];
-    const Vec3f e1 = scalp.points()[static_cast<std::size_t>(tri[1])] - a;
-    const Vec3f e2 = scalp.points()[static_cast<std::size_t>(tri[2])] - a;
-    const float du1 = uv[c + 1][0] - uv[c][0], dv1 = uv[c + 1][1] - uv[c][1];
-    const float du2 = uv[c + 2][0] - uv[c][0], dv2 = uv[c + 2][1] - uv[c][1];
-    const float det = du1 * dv2 - du2 * dv1;
-    if (!(std::fabs(det) > 1e-12f)) return {};
-    return (e1 * dv2 - e2 * dv1) / det;
-}
-
-}  // namespace
-
 bool LookInputs::shaperRoots(const GraphDocument& doc, NodeId id, const ScalpMesh* scalp, StageInputs* out, std::string* why) {
     const StrandsPtr in = inputStrands(doc.graph, id);
     if (!in) {
@@ -3169,27 +3027,7 @@ bool LookInputs::shaperRoots(const GraphDocument& doc, NodeId id, const ScalpMes
         for (const auto& [node, m] : roots_) {
             if (m.inputs && m.in && m.scalp == scalp && &m.in->roots() == &in->roots()) same = m.inputs;
         }
-        if (!same) {
-            auto frames = std::make_shared<std::vector<float>>(in->strandCount() * 8, 0.0f);
-            const bool uvs = scalp && scalp->hasUVs();
-            parallelFor(0, in->strandCount(), [&](std::size_t s) {
-                const StrandRoot& root = in->roots()[s];
-                if (!scalp || !scalp->contains(root)) return;
-                float* to = frames->data() + s * 8;
-                const Vec3f n = scalp->normal(root);
-                const Vec3f u = uvs ? scalpUvTangent(*scalp, root.face) : Vec3f{};
-                to[0] = n.x;
-                to[1] = n.y;
-                to[2] = n.z;
-                to[3] = 1.0f;
-                to[4] = u.x;
-                to[5] = u.y;
-                to[6] = u.z;
-            }, 4096);
-            auto made = std::make_shared<RootInputs>();
-            made->frames = std::move(frames);
-            same = std::move(made);
-        }
+        if (!same) same = rootInputs(*in, scalp);
         memo.in = in;
         memo.scalp = scalp;
         memo.inputs = std::move(same);

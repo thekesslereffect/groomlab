@@ -13,6 +13,7 @@
 #include "groomlab/distance_field.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -671,6 +672,12 @@ private:
                 return true;
             }
         }
+        if (!last && gpu::cpuEngineOn()) {  // look.slang's, the GPU preview's own (look_cpu.h)
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Gravity, params(), in, scalp)) {
+                *result = made;
+                return true;
+            }
+        }
         auto out = std::make_shared<StrandSet>(*in);
         if (last) {
             positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
@@ -801,6 +808,12 @@ private:
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;
+                return true;
+            }
+        }
+        if (!last && gpu::cpuEngineOn()) {  // look.slang's, the GPU preview's own (look_cpu.h)
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Displace, params(), in, scalp)) {
+                *result = made;
                 return true;
             }
         }

@@ -58,6 +58,7 @@ add_library(groomlab_core_objects OBJECT
     src/look/look_engine.cpp
     src/look/look_engine_cpu.cpp
     src/look/look_cpu.cpp
+    src/look/look_stage_params.cpp
     src/look/generated/look_kernels_cpu.cpp
     src/node_common.cpp
     src/parts.cpp

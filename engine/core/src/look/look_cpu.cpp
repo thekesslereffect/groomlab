@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/look/look_cpu.h"
 
+#include <array>
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -62,6 +63,30 @@ void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* s
     }
     engine->run(run, false, targets);
     engine->dropTargets();
+}
+
+StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp) {
+    if (!in || in->empty()) return nullptr;
+    LookRun run;
+    StageParams& s = run.params.stages.emplace_back();
+    s.stage.kind = kind;
+    if (params.has("seed")) s.seed = static_cast<std::uint64_t>(params.getInt("seed"));
+    std::string why;
+    if (!readStageParams(kind, StageParamReader(params, ""), &s, &why)) return nullptr;
+    run.fields.stages.resize(1);
+    run.inputs.resize(1);
+    const std::array<std::string, 2> mapped = mappedParams(kind, params);
+    for (int i = 0; i < 2; ++i) {
+        if (mapped[i].empty() || !mappedParam(params, mapped[i])) continue;
+        FieldValues& values = run.fields.stages[0].field[i];
+        readFieldValues(ScalarField(params, mapped[i], scalp), *in, mappedPerPoint(kind, i), &values);
+        // Read at each point after the ones before it moved: the CPU's.
+        if (values.readsPositions && values.mode == FieldValues::kPerPoint && movesPointByPoint(kind)) return nullptr;
+    }
+    // (Bend's, Direction's, Transform's and Displace's root frames: the engine's own, LookEngine::putStageInputs.)
+    auto out = std::make_shared<StrandSet>(*in);
+    runOnCpuEngine(run, in, scalp, *out, kind == StageKind::Width);
+    return out;
 }
 
 }  // namespace groomlab::gpu

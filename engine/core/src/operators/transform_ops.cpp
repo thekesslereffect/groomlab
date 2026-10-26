@@ -17,6 +17,7 @@
 #include "groomlab/field.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
@@ -250,6 +251,12 @@ private:
                 pts[i] = origin + m((pts[i] - origin) * k) + offset;
             }
         };
+        if (!incremental && !identity && gpu::cpuEngineOn()) {  // look.slang's, the GPU preview's own (look_cpu.h)
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Transform, params(), in, scalp)) {
+                *result = made;
+                return true;
+            }
+        }
         return reshapeEach(in, identity, scale.strandLocal(), incremental, true, result, changed, shape);
     }
 };
@@ -375,6 +382,12 @@ private:
                 pts[i] = bent;
             }
         };
+        if (!incremental && !identity && gpu::cpuEngineOn()) {  // look.slang's, the GPU preview's own (look_cpu.h)
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Bend, params(), in, scalp)) {
+                *result = made;
+                return true;
+            }
+        }
         return reshapeEach(in, identity, angle.strandLocal() && direction.strandLocal(), incremental, true, result, changed,
                            shape);
     }
@@ -473,6 +486,12 @@ private:
             const float angle = pm::acos(c) * w;
             for (std::size_t k = 1; k < n; ++k) pts[k] = pts[0] + rotateAxisAngle(pts[k] - pts[0], axis, angle);
         };
+        if (!incremental && !identity && gpu::cpuEngineOn()) {  // look.slang's, the GPU preview's own (look_cpu.h)
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Direction, params(), in, scalp)) {
+                *result = made;
+                return true;
+            }
+        }
         return reshapeEach(in, identity, inclination.strandLocal() && roll.strandLocal() && strength.strandLocal(), incremental, true,
                            result, changed, shape);
     }
