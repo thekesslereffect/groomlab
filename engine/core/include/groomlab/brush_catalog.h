@@ -40,7 +40,7 @@ struct BrushEntry {
     int order;              // the position in the catalog (0 first)
     std::string icon;       // the icon's stem: groomLab_<icon>.svg in every host
     float defaultStrength;  // what the strength starts at when the tool is picked
-    bool signedStrength;    // the strength runs -1..1 (Ctrl reverses it)
+    bool signedStrength;    // the strength runs -1..1 (negative: the other way)
     std::string hint;       // one line: what the tool does, shown under its name
     std::vector<std::string> settings;  // the settings its card shows (BrushSettingSpec ids)
     bool hasSetting(const std::string& setting) const;

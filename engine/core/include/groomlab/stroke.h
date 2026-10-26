@@ -98,6 +98,11 @@ struct BrushToolSettings {
     bool paintsScalp() const {
         return (brush.mode == BrushMode::Attribute || brush.mode == BrushMode::Smooth) && paintKind != "guides";
     }
+    // Whether Ctrl selects guides rather than inverting the stroke: the guide brushes (comb,
+    // length, cut...). Painting (maps, a guide attribute such as freeze) keeps Ctrl's opposite
+    // action, as do Part and Flow (erase). Hosts: Ctrl+click or drag paints the selection within
+    // the ring, Ctrl+Shift+drag lassos it (the rest frozen either way).
+    bool ctrlSelects() const { return tool == Tool::Brush && brush.mode != BrushMode::Attribute && !paintsScalp(); }
 
     // comb, smooth... (brush.h), clump, place, draw, part, flow.
     std::string modeName() const;

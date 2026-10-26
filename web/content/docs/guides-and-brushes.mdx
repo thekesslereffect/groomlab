@@ -159,8 +159,8 @@ The selected guides' tubes draw brighter.
 
 - **Paints: Width, Flatness, Twist.** Drag over guides to paint their tubes near the brush, each
   section by the brush's falloff (and the **Root to tip** curve) at its guide point. **Width**
-  grows the tubes (**Ctrl** shrinks them), **Flatness** flattens them toward a ribbon (**Ctrl**
-  rounds them back), **Twist** turns them about the guide (**Ctrl** the other way). The first
+  grows the tubes (a negative strength shrinks them), **Flatness** flattens them toward a ribbon
+  (negative: rounds them back), **Twist** turns them about the guide (negative: the other way). The first
   stroke on a tube gives it one section per guide point, so you shape it point by point.
   Symmetry, Selected only, frozen and soloed guides work as with every brush; each stroke is one
   undo step.
@@ -283,9 +283,10 @@ guides are drawn blue. Freezing does not affect the strands.
 
 - **Freeze** (a brush in the Guides category) paints the freeze mask; **Ctrl** unfreezes.
   **Unfreeze All**, next to it, clears the mask on every guide.
-- **Ctrl+Shift+click** a guide with any brush to add it to the selection: every guide not
-  selected freezes. **Ctrl+Shift+drag** paints guides into the selection with the brush ring.
-  **Ctrl+Shift+click** off a guide (on bare scalp or empty space) deselects and unfreezes all.
+- **Ctrl+click** with any guide brush adds the guides inside the brush ring to the selection:
+  every guide not selected freezes. **Ctrl+drag** paints guides into the selection with the ring,
+  **Ctrl+Shift+drag** lassos them. **Ctrl+click** where the ring holds no guide deselects and
+  unfreezes all.
 - **Select** works the same way: the selected guides stay live, all others are frozen, and a
   click on nothing unfreezes all.
 - **Solo new guides** (Place and Draw settings, off by default): each guide you place stays live
@@ -307,8 +308,8 @@ A typical way to work from coarse to fine:
 2. Generate children (**Edit Guides > Children**), then make the child group active. Brushes now
    only affect the children, and the primaries stay as they are.
 3. Hide the primary group if its curves get in the way, or turn on **Isolate** to dim it.
-4. Solo areas while detailing: Ctrl+Shift+drag over the guides to work on, and everything else is
-   frozen. Ctrl+Shift+click on empty space to release them.
+4. Solo areas while detailing: Ctrl+drag over the guides to work on (or Ctrl+Shift+drag a lasso
+   round them), and everything else is frozen. Ctrl+click on empty space to release them.
 5. Editing a primary later still carries its children, with their detail, along with it.
 
 For more density than hand-placed children, interpolate dense guides procedurally with a
@@ -333,8 +334,8 @@ and each drag is one undo step. The brushes are the same, in the same order, in 
 | | **Lift**, **Twist**, **Curl** | Raise guides off the scalp, rotate them around their root, curl them toward the tip. |
 | | **Attract** | Pulls tips together (negative strength pushes them apart). |
 | | **Direction** | Rotates guides about their roots toward the stroke direction, keeping lengths. |
-| | **Noise** | Adds smooth random displacement that builds up with each stroke (Ctrl smooths it out). |
-| | **Shape** | Paints guides' [tubes](#tube-guides) near the brush: **Width**, **Flatness** or **Twist** (Ctrl: the opposite), and sets the selected guides' tube shape, Fill Tubes and Tube Blend. |
+| | **Noise** | Adds smooth random displacement that builds up with each stroke (a negative strength smooths it out). |
+| | **Shape** | Paints guides' [tubes](#tube-guides) near the brush: **Width**, **Flatness** or **Twist** (a negative strength: the opposite), and sets the selected guides' tube shape, Fill Tubes and Tube Blend. |
 | Trim | **Cut**, **Length**, **Erase** | Cut guides where the brush touches; lengthen or shorten them uniformly; delete guides, part lines or flow arrows (not the scattered hair: see below). |
 | Paint (in the Paint tab) | **Paint** | Paints the map picked in the Paint tab, including the maps that drive settings such as density and width (see below, and [Painting maps](/docs/painting-maps)). |
 | Guides | **Select**, **Freeze** | Select guides; paint the freeze mask. **Unfreeze All** is next to them. |
@@ -355,16 +356,18 @@ back without Ctrl.
 
 ### Keys
 
-- **Ctrl** reverses a brush (Ctrl+Length shortens, Ctrl+Lift lays guides down, Ctrl+Paint on the
-  density map removes hair).
+- **Ctrl** selects guides with the guide brushes (below). Painting maps or the freeze mask it
+  does the opposite (Ctrl+Paint on the density map removes hair, Ctrl+Freeze unfreezes). A guide
+  brush's opposite is its negative strength (Length shortens, Lift lays guides down).
 - **Alt+Shift+X** turns symmetry on or off, after **GroomLab > Install GroomLab Hotkeys**.
 - **Shift+drag** smooths, with any brush.
 - **B** + drag sets the radius, **M** + drag the strength, after **GroomLab > Install GroomLab
   Hotkeys** (or middle-drag and Shift+middle-drag).
-- **Ctrl+Shift+drag** paints the selection with the brush ring, without leaving the brush: every
-  guide the ring passes over is selected as you go, and when you let go the guides not selected
-  freeze, so the brush then works on the selection. **Ctrl+Shift+click** adds one guide;
-  **Ctrl+Shift+click** off a guide deselects and unfreezes all (see [Freeze and solo](#freeze-and-solo)).
+- **Ctrl+drag** paints the selection with the brush ring, without leaving the brush: every guide
+  the ring passes over is selected as you go, and when you let go the guides not selected freeze,
+  so the brush then works on the selection. **Ctrl+Shift+drag** lassos the selection instead.
+  **Ctrl+click** adds the guides inside the ring; on none it deselects and unfreezes all (see
+  [Freeze and solo](#freeze-and-solo)).
 - **Page Up** and **Page Down** step the active group up or down a level.
 - **Y** + click opens a marking menu, after **GroomLab > Install GroomLab Hotkeys**.
 - Tablet **pen pressure** scales the strength.

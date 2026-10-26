@@ -310,7 +310,7 @@ BrushSettings BrushTool::pressed() const {
     }
     if (settings.pressure) b.strength *= pressure_;
     if (inverted_) {
-        // Ctrl: the opposite action. Signed brushes flip; a gray map is painted toward 0 (unfreeze,
+        // Ctrl (where it does not select: settings.ctrlSelects): the opposite action. Signed brushes flip; a gray map is painted toward 0 (unfreeze,
         // erase a layer, no hair on a density map, thinner on a width map), or toward 1 when the
         // value is 0 (grayCtrlTarget; a color map's inverse color is MapDab's); Cut grows instead.
         switch (b.mode) {
@@ -458,7 +458,7 @@ void BrushTool::stampOverlays(const ToolView& view, const Vec3f& center, const V
 }
 
 bool BrushTool::begin(StrokeHost& host, const ToolView& view, float x, float y, float pressure, unsigned modifiers) {
-    inverted_ = (modifiers & kStrokeCtrl) != 0;
+    inverted_ = (modifiers & kStrokeCtrl) != 0 && !settings.ctrlSelects();
     pressure_ = pressure;
     return startStroke(host, view, x, y);
 }
@@ -954,7 +954,7 @@ void BrushTool::cancel(StrokeHost* host) {
 }
 
 void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, float pressure, unsigned modifiers) {
-    inverted_ = (modifiers & kStrokeCtrl) != 0;
+    inverted_ = (modifiers & kStrokeCtrl) != 0 && !settings.ctrlSelects();  // (a guide brush's Ctrl selects: the host's)
     pressure_ = pressure;
     if (modifiers & kStrokeShift) {
         // A drag smooths (decided on drag); a release without one does nothing.
@@ -1001,7 +1001,7 @@ StrokeRelease BrushTool::release(StrokeHost& host, const ToolView& view) {
 
 bool BrushTool::stroke(StrokeHost& host, const ToolView& view, const std::vector<std::array<float, 2>>& points, float pressure,
                        unsigned modifiers, const std::function<void()>& afterDab) {
-    inverted_ = (modifiers & kStrokeCtrl) != 0;
+    inverted_ = (modifiers & kStrokeCtrl) != 0 && !settings.ctrlSelects();
     pressure_ = pressure;
     const BrushMode saved = settings.brush.mode;
     if (modifiers & kStrokeShift) useShiftSmoothing(settings.brush);  // as a Shift+drag does

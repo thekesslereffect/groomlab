@@ -314,7 +314,8 @@ void bindStroke(py::module_& m) {
     py::class_<BrushTool>(m, "BrushTool",
                           "The interactive brush, Place, Draw, Part and Flow tools driven by mouse events in a "
                           "ToolView's pixels: press, drag, release (or stroke() for a whole one). Ctrl: the opposite "
-                          "action; Shift: a click picks a level, a drag smooths. One edit per stroke.")
+                          "action where it does not select guides (painting, Part, Flow: ctrlSelects off); Shift: a "
+                          "click picks a level, a drag smooths. One edit per stroke.")
         .def(py::init([](py::kwargs kwargs) {
             auto tool = std::make_unique<BrushTool>();
             applySettings(tool->settings, kwargs);

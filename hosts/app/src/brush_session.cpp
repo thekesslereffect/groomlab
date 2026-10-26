@@ -51,7 +51,7 @@ void appendColoredLine(DisplayGeometry& g, const std::vector<Vec3f>& points, con
 BrushSession::BrushSession() {
     tool_.settings.brush.radius = 0.25f;
     tool_.settings.screenRadius = 60.0f;
-    tool_.settings.place.soloNewGuides = false;  // off, as Maya's and Blender's Groom Tools start (Ctrl+Shift+click selects)
+    tool_.settings.place.soloNewGuides = false;  // off, as Maya's and Blender's Groom Tools start (Ctrl+click selects)
 }
 
 BrushSession::~BrushSession() = default;
@@ -221,6 +221,22 @@ void BrushSession::showBox(const QPointF& a, const QPointF& b) {
     ++overlayVersion_;
 }
 
+void BrushSession::showLasso(const std::vector<QPointF>& points) {
+    overlay_ = DisplayGeometry();
+    overlay_.overlay = true;
+    ringValid_ = false;
+    std::vector<Vec3f> line;
+    for (const QPointF& p : points) {
+        Vec3f at;
+        if (atTargetDepth(port(p), at)) line.push_back(at);
+    }
+    if (line.size() > 1) {
+        line.push_back(line.front());  // closed back to the press
+        appendColoredLine(overlay_, line, {0.9f, 0.9f, 0.9f});
+    }
+    ++overlayVersion_;
+}
+
 void BrushSession::rebuildOverlay(const QPointF& at, bool withLines) {
     overlay_ = DisplayGeometry();
     overlay_.overlay = true;
@@ -337,14 +353,14 @@ std::size_t BrushSession::select(const std::vector<QPointF>& lasso, SelectMode m
     return picked.size();
 }
 
-std::size_t BrushSession::paintSelection(const QPointF& at) {
+std::size_t BrushSession::paintSelection(const QPointF& at, SelectMode mode, bool solo) {
     std::vector<QPointF> ring;
-    const double r = tool_.settings.screenRadius;
+    const double r = std::max<double>(tool_.settings.screenRadius, 1.0);
     for (int k = 0; k < 24; ++k) {
         const double a = 6.283185307 * k / 24.0;
         ring.push_back(at + QPointF(r * std::cos(a), r * std::sin(a)));
     }
-    return select(ring, SelectMode::Add, false);
+    return select(ring, mode, solo);
 }
 
 void BrushSession::soloSelection() {

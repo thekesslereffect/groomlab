@@ -357,8 +357,8 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                               "maps. Off: they stand straight up, with no maps")
     solo_new_guides: BoolProperty(name="Solo new guides", default=False, update=_push(),
                                   description="New guides stay unfrozen and every other guide is frozen, so the brushes "
-                                              "work on the new ones at once (Ctrl+Shift+click guides to select "
-                                              "them, Unfreeze All to free them all)")
+                                              "work on the new ones at once (Ctrl+click guides with a brush to "
+                                              "select them, Unfreeze All to free them all)")
     length: FloatProperty(name="Length", default=0.005, min=1e-6, soft_max=1.0, subtype="DISTANCE", unit="LENGTH",
                           precision=4, update=_push(), description="A standing new guide's length")
     segments: IntProperty(name="Segments", default=12, min=1, max=256, soft_max=32, update=_push(),

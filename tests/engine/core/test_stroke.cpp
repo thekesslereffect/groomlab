@@ -270,20 +270,48 @@ TEST(Stroke, ScriptedCombIsTheCoreStroke) {
     EXPECT_NE(g.guides(), direct.toJson());
 }
 
-TEST(Stroke, CtrlInvertsAndShiftDragSmoothsForOneStroke) {
+TEST(Stroke, CtrlSelectsWithGuideBrushesInvertsPaintingAndShiftDragSmooths) {
     const ToolView view = frontView();
     const auto path = screenLine(view, {-0.3f, 1.1f, 0.6f}, {0.3f, 1.1f, 0.6f}, 12);
-    // Ctrl: Lift lays the guides down instead.
+    // Ctrl is the hosts' selection with a guide brush: a stroke the core is handed with it is the
+    // plain one (Lift stands the guides up all the same). Painting a guide attribute (Freeze),
+    // Ctrl is still the opposite (it unfreezes), as on maps, Part and Flow.
     std::string lifted, laid;
     for (const bool ctrl : {false, true}) {
         Groom g;
         BrushTool tool;
         tool.settings.setMode("lift");
         tool.settings.screenRadius = 150.0f;
+        EXPECT_TRUE(tool.settings.ctrlSelects());
         ASSERT_TRUE(tool.stroke(*g.host, view, path, 1.0f, ctrl ? kStrokeCtrl : 0u));
         (ctrl ? laid : lifted) = g.guides();
     }
-    EXPECT_NE(lifted, laid);
+    EXPECT_EQ(lifted, laid);
+    for (const char* mode : {"comb", "smooth", "length", "cut", "erase", "shape", "noise"}) {
+        BrushToolSettings s;
+        s.setMode(mode);
+        EXPECT_TRUE(s.ctrlSelects()) << mode;
+    }
+    for (const char* mode : {"paint", "part", "flow", "place", "draw"}) {
+        BrushToolSettings s;
+        s.setMode(mode);
+        EXPECT_FALSE(s.ctrlSelects()) << mode;
+    }
+    std::string frozen, thawed;
+    for (const bool ctrl : {false, true}) {
+        Groom g;
+        BrushTool tool;
+        tool.settings.setMode("paint");  // the Freeze tool: Paint on the guides' freeze mask
+        tool.settings.brush.attribute = "freeze";
+        tool.settings.brush.value = 1.0f;
+        tool.settings.paintKind = "guides";
+        tool.settings.screenRadius = 150.0f;
+        EXPECT_FALSE(tool.settings.ctrlSelects());
+        if (ctrl) ASSERT_TRUE(tool.stroke(*g.host, view, path, 1.0f, 0u));  // frozen first, then Ctrl unfreezes
+        ASSERT_TRUE(tool.stroke(*g.host, view, path, 1.0f, ctrl ? kStrokeCtrl : 0u));
+        (ctrl ? thawed : frozen) = g.guides();
+    }
+    EXPECT_NE(frozen, thawed);
     // Shift: a click does nothing (no stroke, no step), a drag smooths while the tool stays the Comb.
     Groom g(20, 3);
     BrushTool tool;

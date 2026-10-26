@@ -236,12 +236,12 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
             bDragged_ = bHeld_;
             return;
         }
-        if (event->button() == Qt::LeftButton && event->modifiers().testFlag(Qt::ControlModifier) &&
-            event->modifiers().testFlag(Qt::ShiftModifier)) {
-            // Ctrl+Shift: selecting guides without leaving the brush (a drag paints them in with the
-            // ring, a click toggles one).
-            drag_ = Drag::Paint;
+        if (event->button() == Qt::LeftButton && event->modifiers().testFlag(Qt::ControlModifier) && session_->settings().ctrlSelects()) {
+            // Ctrl on a guide brush: selecting guides without leaving the brush (a drag paints them
+            // in with the ring, a click adds the guides in it); with Shift a drag lassos them.
+            drag_ = event->modifiers().testFlag(Qt::ShiftModifier) ? Drag::Lasso : Drag::Paint;
             paintMoved_ = false;
+            lasso_ = {event->position()};
             return;
         }
         if (event->button() == Qt::LeftButton) {
@@ -347,6 +347,15 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
             if (painted) emit selectionChanged();  // the guides drawn as selected now
             break;
         }
+        case Drag::Lasso: {
+            if (!session_) break;
+            syncView();
+            if ((event->position() - pressAt_).manhattanLength() >= 4.0) paintMoved_ = true;
+            if ((event->position() - lasso_.back()).manhattanLength() >= 2.0) lasso_.push_back(event->position());
+            session_->showLasso(lasso_);
+            refreshOverlay();
+            break;
+        }
         case Drag::None:
         case Drag::Menu:
             break;
@@ -388,14 +397,18 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
             break;
         }
         case Drag::Paint:
+        case Drag::Lasso:
             syncView();
-            if (paintMoved_) {
+            if (paintMoved_ && drag == Drag::Lasso && lasso_.size() >= 3) {
+                session_->select(lasso_, SelectMode::Add, true);  // the guides inside added, the rest frozen
+            } else if (paintMoved_ && drag == Drag::Paint) {
                 session_->soloSelection();  // the rest frozen, one undo step (the Select tool's solo)
-            } else if (session_->select({event->position()}, SelectMode::Add, true) == 0) {
-                // A click: the guide under it added, the rest frozen; on none, nothing selected and
-                // every guide unfrozen.
-                session_->select({event->position()}, SelectMode::Replace, true);
+            } else if (session_->paintSelection(pressAt_, SelectMode::Add, true) == 0) {
+                // A click: the guides in the ring added, the rest frozen; on none, nothing selected
+                // and every guide unfrozen.
+                session_->paintSelection(pressAt_, SelectMode::Replace, true);
             }
+            lasso_.clear();
             session_->hover(event->position());
             refreshOverlay();
             emit selectionChanged();

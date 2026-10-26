@@ -160,7 +160,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | Flow box: arrows / whorl / gather / part out, clear | the card | present *new* (the sink kind in the brush panel; Clear flow in the guides panel) |
 | Stretch (Comb), Erases, Acts on (guides/parts/flow) | the card | present |
 | Display while sculpting (as they are / dimmed / guides only, full density) | the card | partial: the dimmed strands at the sculpt density |
-| Gestures: middle-drag radius, Shift+middle strength, Shift+click a guide solos it (its level), Ctrl reverse, Shift smooth | the viewport | present |
+| Gestures: middle-drag radius, Shift+middle strength, Ctrl+click / drag selects the guides in the ring (Ctrl+Shift+drag: lasso; painting: Ctrl the opposite), Shift smooth | the viewport | present |
 | Hover highlight of the guides to be touched | the viewport | present |
 | Brush level (Page Up / Down) | hotkeys | present *new* |
 | Isolate a group | the palette | present |

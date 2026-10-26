@@ -110,12 +110,12 @@ The tools are the same in Maya, the standalone app and Blender, in the same orde
 - **Comb** drags guides along the stroke (**Stretch** lets them lengthen or shorten). **Slide**
   moves roots and keeps the shape. **Smooth**, **Straighten**, **Lift**, **Twist**, **Curl** and
   **Attract** refine; a negative strength reverses the ones that work both ways. **Shape** paints
-  guides' tubes near the brush: their width, their flatness or their twist (Ctrl: the opposite).
-- **Direction** turns guides about their roots toward the way you stroke (Ctrl: away), keeping
+  guides' tubes near the brush: their width, their flatness or their twist (negative: the opposite).
+- **Direction** turns guides about their roots toward the way you stroke (negative: away), keeping
   their lean and length.
-- **Noise** adds smooth random jitter along guides. Each stroke builds up the same pattern; Ctrl
-  (or a negative strength) smooths it out.
-- **Cut** trims where the brush touches (Ctrl grows), **Length** grows or shortens evenly, and
+- **Noise** adds smooth random jitter along guides. Each stroke builds up the same pattern; a
+  negative strength smooths it out.
+- **Cut** trims where the brush touches, **Length** grows or shortens evenly, and
   **Erase** removes guides (with their children), parts or flow arrows.
 - **Width** paints how thick the hair is and **Density** where it grows. Each paints the map its
   node reads (the Width node's `width`, the Scatter node's `density`). The first stroke makes that
@@ -138,17 +138,18 @@ They sit below the tabs and change with the tool.
   Right-click the curve for presets.
 - **Front facing only:** what the head hides gets no stroke. **Keep off scalp:** guides never dip
   into the skin.
-- **Shift+drag** smooths, with any brush; **Ctrl** does the opposite of a plain stroke.
+- **Shift+drag** smooths, with any brush. **Ctrl** selects guides with the guide brushes (below);
+  painting maps or Freeze it does the opposite.
 
 ### Solo and freeze: work on one guide at a time
 
 Frozen guides draw blue and brushes leave them alone.
 - **Solo new guides** (Place and Draw, off by default): turn it on and each guide you place stays
   live while all the others freeze, so the next stroke shapes only the new one.
-- **Shift+click a guide** with a brush to solo it: it unfreezes, the rest freeze, and **Group**
-  switches to its group.
-- **Shift+click off a guide** (bare scalp or empty space) to unfreeze them all, or click **Unfreeze
-  All** beside the Freeze tool.
+- **Ctrl+click** with a guide brush to solo the guides inside its ring: they join the selection
+  and the rest freeze. **Ctrl+drag** paints guides in with the ring; **Ctrl+Shift+drag** lassos them.
+- **Ctrl+click** where the ring holds no guide (bare scalp or empty space) to unfreeze them all,
+  or click **Unfreeze All** beside the Freeze tool.
 - **Freeze** paints frozen guides by hand (Ctrl unfreezes).
 - Each of these is one undo step. With **Symmetry** on, the mirror guides stay live too.
 
@@ -702,7 +703,7 @@ Simulate has no loop.
 | No strands | `groomlab.errors(groom)` says why. Also check the scalp is connected (`inMesh`) and the graph has an Output. |
 | A node shows a grey **i** | It does nothing as set: a Part with no parts drawn, a Flow with no arrows, a Clump in an input mode with nothing connected, Interpolate without guides. Its note says why. Not an error. |
 | Strands pop on a deforming scalp | No rest mesh: **Set** on the Rest row of the Attribute Editor's Inputs. |
-| Brush does nothing | Select the groom first. Check **Group** at the top of the Groom Tools, frozen guides (blue: Shift+click off a guide to unfreeze them all), and **Selected only** with an empty selection. |
+| Brush does nothing | Select the groom first. Check **Group** at the top of the Groom Tools, frozen guides (blue: Ctrl+click where no guide is to unfreeze them all), and **Selected only** with an empty selection. |
 | Cached Playback leaves a groom out | Its graph has a Simulate node without a bake over the playback range, or a Jiggle node. Bake the simulation to have it cached. |
 | A texture map does nothing | The scalp needs UVs, and the path must resolve: `groomlab.resolve_path("sourceimages/map.png")`. |
 | A map says "no map named" or "does not fit this scalp" | The Map node names a map the Paint tab doesn't list (make or rename it there), or a vertex map from a scalp with another vertex count (convert it to a guide layer or a texture on the old scalp first). |

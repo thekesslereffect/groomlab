@@ -476,6 +476,21 @@ class ToolsTest(unittest.TestCase):
         self.drag(ts, [[lo[0], lo[1], 1.0], [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, 1.0], [hi[0], hi[1], 1.0]])
         self.assertEqual(t.selected_count, 5)
         t.select_shape = "LASSO"
+        # A guide brush selects with Ctrl: a click where its ring holds no guide deselects and
+        # unfreezes all, Ctrl+Shift+drag lassos (the rest frozen), a Ctrl click adds the ring's.
+        bpy.ops.groomlab.tool(tool="comb")
+        radius = t.radius
+        t.radius = 10
+        self.click(ts, lo[0], lo[1], ctrl=True)
+        self.assertEqual(t.selected_count, 0)
+        self.drag(ts, lasso + [lasso[0]], ctrl=True, shift=True)
+        self.assertEqual(t.selected_count, 5)
+        self.click(ts, lo[0], lo[1], ctrl=True)
+        t.radius = 2000
+        self.click(ts, tip[0], tip[1], ctrl=True)
+        self.assertEqual(t.selected_count, 5)
+        t.radius = radius
+        bpy.ops.groomlab.tool(tool="select")
         # Away from the 3D view: Blender's events.
         self.vp.inside = False
         self.assertEqual(self.send(ts, Event("LEFTMOUSE", "PRESS", 5.0, 5.0)), {"PASS_THROUGH"})

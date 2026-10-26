@@ -267,12 +267,13 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   `freeze_guides` and `unfreeze_all` do it by script.
 - **Solo:** Place and Draw's **Solo new guides** (`solo_new_guides=True`; off by default) keep
   the guides a stroke makes unfrozen and freeze every other, in the same undo step, so the next
-  brush works on the new guide at once. **Shift+click** a guide with any brush solos
-  it the same way and switches to its group; Shift+click off a guide unfreezes them all. The **Select**
+  brush works on the new guide at once. **Ctrl+click** with a guide brush solos the
+  guides in its ring the same way (Ctrl+drag paints them in, Ctrl+Shift+drag lassos them); a
+  Ctrl+click where the ring holds none unfreezes them all. The **Select**
   tool solos its selection (the guides not selected freeze, a pick of nothing unfreezes all;
   `select_tool(solo=False)` turns it off), one undo step with the selection. With symmetry on
   (world X or topology) the mirror guides stay live too: a guide placed with its mirror image, a
-  Shift+clicked guide's mirror guide, the mirror guides of a selection (`select_tool(symmetry=...)`,
+  Ctrl+clicked guide's mirror guide, the mirror guides of a selection (`select_tool(symmetry=...)`,
   picked as well). In C++: `soloGuides`, `unfreezeAll`, `freezeToSelection` and
   `withMirrorGuides` (`brush.h`).
 - **Hotkeys:** GroomLab > Install GroomLab Hotkeys makes a GroomLab hotkey set, then shows a small
@@ -286,9 +287,10 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   - **B / M (hold) + drag:** the brush radius / strength, as in Maya's sculpt tools. Outside
     GroomLab brushes B and M do what they do in Maya. Middle-drag (Shift: strength) works
     without the hotkey set.
-- **Shift in a brush:** Shift+click a guide to solo it (it unfreezes, every other guide
-  freezes) and switch to its group (the Groom Tools follow); Shift+click off a guide to unfreeze
-  them all. Shift+drag smooths, whatever the brush.
+- **Shift and Ctrl in a brush:** Shift+drag smooths, whatever the brush. With a guide brush,
+  Ctrl selects: Ctrl+click adds the guides in the ring (the rest freeze; on none: unfreeze all),
+  Ctrl+drag paints them in, Ctrl+Shift+drag lassos them. Painting maps or Freeze, Ctrl is the
+  opposite.
   - **Your own keys:** every tool also has a runtime command (category GroomLab) you can bind.
 
 - **Which guides:** `level` (or `group`) picks the guides a brush edits. Children still follow
