@@ -13,6 +13,18 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.32.1 (October 25, 2026)
+
+- **Changed: Ctrl selects guides.** With a guide brush (Comb, Smooth, Lift, Length, Cut...),
+  **Ctrl+click** selects every guide inside the brush ring (no more aiming right at one), and
+  **Ctrl+drag** paints guides into the selection; **Ctrl+Shift+drag** draws a lasso around the
+  guides you want. Every guide not selected freezes, one undo step; Ctrl+click where the ring holds
+  no guide deselects and unfreezes all. Ctrl no longer reverses a guide brush: use a negative
+  strength (Lift, Length, Twist, Shape). Painting maps and Freeze keep Ctrl as the opposite
+  (Ctrl+Paint on density removes hair, Ctrl+Freeze unfreezes).
+- **Fixed: feather cards shearing at the tip.** On tightly curled feathers the barbs near the tip
+  could flip a card's side and shear it. Cards now lie flat in the vane to the tip.
+
 ## 0.32.0 (October 25, 2026)
 
 - **Select guides without leaving the brush.** **Ctrl+Shift+drag** paints guides into the
