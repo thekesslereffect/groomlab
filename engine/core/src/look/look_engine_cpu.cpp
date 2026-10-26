@@ -48,6 +48,26 @@ void flowAtRoot(std::uint64_t host, std::uint32_t face, float u, float v, const 
     put(h.flow->atRoot(*h.scalp, StrandRoot{static_cast<std::int32_t>(face), u, v}, Vec3f(normal[0], normal[1], normal[2])), out);
 }
 
+bool tieClosest(std::uint64_t host, const float p[3], float reach, float at[3], float normal[3]) {
+    const TieHost& h = *reinterpret_cast<const TieHost*>(static_cast<std::uintptr_t>(host));
+    const SurfacePoint hit = h.scalp->closestPoint(Vec3f(p[0], p[1], p[2]), reach);
+    if (hit.root.face < 0) return false;
+    put(hit.position, at);
+    put(hit.normal, normal);
+    return true;
+}
+
+void tiePush(std::uint64_t host, float p[3]) {
+    const TieHost& h = *reinterpret_cast<const TieHost*>(static_cast<std::uintptr_t>(host));
+    if (!h.surface) return;
+    Vec3f q(p[0], p[1], p[2]);
+    RestPoseCollision::Cursor cursor;  // (a scalp at its rest pose: none needed)
+    MeshDistanceField::Probe probe;
+    probe.beside = 4.0f * h.clearance;  // (tie_op.cpp's)
+    h.surface.pushOut(q, h.clearance, h.depth, h.searchRadius, cursor, &probe);
+    put(q, p);
+}
+
 bool flowClosest(std::uint64_t host, const float p[3], float reach, std::uint32_t* face, float uv[2], float at[3], float normal[3]) {
     const SurfacePoint hit = flowHost(host).scalp->closestPoint(Vec3f(p[0], p[1], p[2]), reach);
     if (hit.root.face < 0) return false;
@@ -252,6 +272,11 @@ protected:
             v.endGroupID = {v.startGroupID.x + 1, v.startGroupID.y + 1, 1};
             fn(&v, nullptr, &g);
         }, 1);  // (a group is 64 or 256 threads' work: each its own task)
+    }
+    std::size_t countedGroups(int id, std::uint32_t word, std::uint32_t per, std::size_t groups) override {
+        if (!has(id) || buffers_.at(id)->size() <= word) return groups;
+        const std::size_t count = buffers_.at(id)->data()[word];
+        return std::min(groups, (count + per - 1) / per);
     }
     bool runsIf(int id, std::uint32_t least) override {
         return has(id) && buffers_.at(id)->size() > 0 && buffers_.at(id)->data()[0] >= least;

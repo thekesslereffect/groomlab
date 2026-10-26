@@ -6174,15 +6174,13 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
         auto engine = gpu::makeCpuLookEngine();
         engine->setBase(p.base, session.last().scalp.get());
         std::string line;
-        // Static and Tie are not the operators' arithmetic yet (their CPU solves and exact products):
-        // they and the stages after them are reported, not counted.
+        // Tie is not its operator's arithmetic yet: it and the stages after it are reported, not
+        // counted.
         bool counted = true;
         for (std::size_t k = 1; k <= p.chain.stages.size(); ++k) {
             if (k < p.chain.stages.size() && p.chain.stages[k].node == p.chain.stages[k - 1].node) continue;  // (a Wet's levels)
             const gpu::LookStage& stage = p.chain.stages[k - 1];
-            if (stage.kind == gpu::StageKind::Static || stage.kind == gpu::StageKind::Tie) {
-                counted = false;
-            }
+            if (stage.kind == gpu::StageKind::Tie) counted = false;
             const StrandsPtr want = valueAs<StrandsPtr>(doc.graph.cachedValue(stage.node));
             gpu::LookRun run = p.run;
             run.params.stages.resize(k);
@@ -6295,6 +6293,12 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Curl", R"("params": {"radius": {"expression": "0.05 + 0.1 * rand", "min": 0.0, "max": 1.0}, "frequency": 1.0, "phase": 0.3, "tolerance": 0.0})"},
         {"Curl", R"("params": {"shape": "coil", "coilWidths": 3.0, "frequency": 2.0, "tolerance": 0.0})", false, false, false,
          {"Width", R"("params": {"width": 0.02, "randomness": 0.4})"}},
+        {"SelfCollide", R"("params": {"packing": 0.02})", false, false, false, {"Width", R"("params": {"width": 0.02, "randomness": 0.4})"}},
+        {"SelfCollide", R"("params": {"packing": 0.03, "strength": {"expression": "0.5 + 0.5 * rand", "min": 0.0, "max": 1.0}, "profile": [[0, 0], [1, 1]]})",
+         false, false, false, {"Width", R"("params": {"width": 0.04})"}},
+        {"SelfCollide", R"("params": {"packing": 0.01})"},
+        {"Static", R"("params": {"strength": 0.5})"},
+        {"Static", R"("params": {"strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "randomness": 0.8, "profile": [[0, 0.2], [1, 1]]})"},
     };
     std::size_t differing = 0, compared = 0;
     for (const Case& c : cases) {
@@ -6345,7 +6349,8 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"Length", gpu::StageKind::Length},       {"Wind", gpu::StageKind::Wind},
                                                              {"Noise", gpu::StageKind::Noise},         {"Collide", gpu::StageKind::Collide},
                                                              {"Clump", gpu::StageKind::Clump},         {"Interpolate", gpu::StageKind::Interpolate},
-                                                             {"Smooth", gpu::StageKind::Smooth},       {"Curl", gpu::StageKind::Curl}};
+                                                             {"Smooth", gpu::StageKind::Smooth},       {"Curl", gpu::StageKind::Curl},
+                                                             {"SelfCollide", gpu::StageKind::SelfCollide}, {"Static", gpu::StageKind::Static}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;
@@ -6392,6 +6397,14 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
             stageInputs.curl = gpu::curlInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), "clumpId",
                                                static_cast<std::uint64_t>(op.params().getInt("seed")));
         }
+        if (kind == gpu::StageKind::SelfCollide || kind == gpu::StageKind::Static) {
+            auto layout = std::make_shared<HairGridLayout>();
+            ASSERT_TRUE(hairGridLayout(op.typeName(), *valueAs<StrandsPtr>(inputs[0]), session.last().scalp, layout.get(), &whyNot)) << whyNot;
+            auto grid = std::make_shared<gpu::HairGridInputs>();
+            grid->walls = hairGridWalls(*session.last().scalp, layout->h, layout->wallReach);
+            grid->layout = layout;
+            stageInputs.grid = grid;
+        }
         if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
         // Its C++ (the engine off), the stage on the engine, the operator as it runs now.
         StrandsPtr made[3];
@@ -6399,6 +6412,9 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         made[0] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
         gpu::setCpuEngineOn(true);
         if (c.adds) EXPECT_GT(made[0]->pointCount(), valueAs<StrandsPtr>(inputs[0])->pointCount());
+        if (kind == gpu::StageKind::SelfCollide || kind == gpu::StageKind::Static) {
+            EXPECT_TRUE(made[0] != valueAs<StrandsPtr>(inputs[0])) << "pushes nothing";  // (its input: none moved)
+        }
         if (interpolate) {
             gpu::setCpuEngineOn(false);
             const StrandsPtr cpu = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
@@ -6476,6 +6492,7 @@ TEST(CpuEngine, SpeedAgainstTheOperators) {
     }
     graphs.push_back({"Collide", withoutClearance(chainGraph({{"Collide", R"("params": {"offset": 0.12})"}}, true, true))});
     graphs.push_back({"SelfCollide", withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.6})"}, {"SelfCollide", ""}}))});
+    graphs.push_back({"Static", withoutClearance(chainGraph({{"Static", R"("params": {"strength": 0.5})"}}))});
     graphs.push_back({"RestoreLength", withReference(neighbourGraph("RestoreLength", R"("params": {"mode": "segments"})"), "n1", "interpolate")});
     graphs.push_back({"MeshCut", meshCutGraph(R"("params": {"offset": 0.02})"),
                       [](const std::string& j) { return meshCutGroom(j, Vec3f(0.0f, 4.6f, 0.0f), 1.6f); }});

@@ -21,11 +21,15 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "groomlab/distance_field.h"
 #include "groomlab/field.h"
+#include "groomlab/graph.h"
+#include "groomlab/look/look_run.h"
 #include "groomlab/math.h"
 #include "groomlab/parallel.h"
 #include "groomlab/preview_core.h"
@@ -253,6 +257,25 @@ void walkStrand(const StrandSet& s, std::size_t strand, Vec3f* pts, const Vec3f*
         }
     }
 }
+
+// The scalp near a grid's nodes as the CPU engine takes it (hairGridWalls), kept while the scalp
+// and the cell are (the engine uploads it again only for another).
+class EngineWalls {
+public:
+    std::shared_ptr<const std::vector<std::uint32_t>> of(const MeshPtr& scalp, double h, double reach);
+
+private:
+    std::mutex lock_;
+    MeshPtr scalp_;
+    double h_ = 0.0, reach_ = 0.0;
+    std::shared_ptr<const std::vector<std::uint32_t>> walls_;
+};
+// Node `type` (SelfCollide or Static, its stage `kind`, its params) on the CPU engine (look.slang's
+// hair grid: one source with the GPU preview's): its grid laid on `in` (the engine's room; not where
+// hair spread far wider than the scalp takes coarser cells) and the scalp near its nodes. Nothing
+// moved: `in` itself. Null where the engine cannot run it (the operator's C++ then).
+StrandsPtr onEngine(gpu::StageKind kind, const std::string& type, const ParamSet& params, const EvalContext& ctx, const StrandsPtr& in,
+                    const MeshPtr& scalp, EngineWalls& walls);
 
 }  // namespace hair_grid
 }  // namespace groomlab

@@ -5,7 +5,9 @@
 #include "hair_grid.h"
 
 #include <cstring>
+#include <exception>
 
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
 #include "groomlab/portable_math.h"
@@ -309,10 +311,40 @@ bool mayTouchScalp(const Grid& g, const std::vector<Wall>& walls, double reach, 
     return height < margin;
 }
 
+std::shared_ptr<const std::vector<std::uint32_t>> EngineWalls::of(const MeshPtr& scalp, double h, double reach) {
+    const std::lock_guard<std::mutex> guard(lock_);
+    if (!walls_ || scalp_ != scalp || h_ != h || reach_ != reach) {
+        walls_ = hairGridWalls(*scalp, h, reach);
+        scalp_ = scalp;
+        h_ = h;
+        reach_ = reach;
+    }
+    return walls_;
+}
+
+StrandsPtr onEngine(gpu::StageKind kind, const std::string& type, const ParamSet& params, const EvalContext& ctx, const StrandsPtr& in,
+                    const MeshPtr& scalp, EngineWalls& walls) {
+    try {
+        auto layout = std::make_shared<HairGridLayout>();
+        std::string why;
+        if (!hairGridLayout(type, *in, scalp, layout.get(), &why, ctx.scale) || layout->coarsened) return nullptr;
+        auto grid = std::make_shared<gpu::HairGridInputs>();
+        if (scalp && !(grid->walls = walls.of(scalp, layout->h, layout->wallReach))) return nullptr;
+        grid->layout = std::move(layout);
+        gpu::StageInputs stage;
+        stage.grid = std::move(grid);
+        const StrandsPtr made = gpu::runStage(kind, params, in, scalp.get(), std::move(stage));
+        if (!made) return nullptr;
+        return std::memcmp(made->positions().data(), in->positions().data(), in->pointCount() * sizeof(Vec3f)) == 0 ? in : made;
+    } catch (const std::exception&) {
+        return nullptr;  // (a grid the engine cannot hold)
+    }
+}
+
 }  // namespace hair_grid
 
 bool hairGridLayout(const std::string& type, const StrandSet& in, const std::shared_ptr<const ScalpMesh>& scalp, HairGridLayout* out,
-                    std::string* why) {
+                    std::string* why, double scale) {
     using namespace hair_grid;
     const bool isStatic = type == op::kStatic;
     if (!isStatic && type != op::kSelfCollide) {
@@ -321,7 +353,7 @@ bool hairGridLayout(const std::string& type, const StrandSet& in, const std::sha
     }
     const GridSpec& spec = isStatic ? kStaticGrid : kSelfCollideGrid;
     Layout layout;
-    if (!layoutOf(in, scalp.get(), spec.most, spec.thinSalt, &layout)) {
+    if (!layoutOf(in, scalp.get(), spec.most, spec.thinSalt, &layout, scale)) {
         *why = "nothing to splat";
         return false;
     }

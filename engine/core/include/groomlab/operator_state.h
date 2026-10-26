@@ -284,7 +284,7 @@ struct HairGridLayout {
 // splat) or its scalp's floor cannot be read as tables (deformed away from its rest pose: the walk
 // asks the rest pose's field vertex by vertex; too big for the field's grid).
 bool hairGridLayout(const std::string& type, const StrandSet& in, const std::shared_ptr<const ScalpMesh>& scalp, HairGridLayout* out,
-                    std::string* why);
+                    std::string* why, double scale = 1.0);  // scale: EvalContext::scale, the lattices' anchor
 // The scalp near the world's grid nodes (the whole multiples of h): what wallsOf finds for each
 // node of a grid of that cell (its closest point within `reachCells` cells: the node's height over
 // it and its normal), for every node of the box that can be that near. Words: the box's first node

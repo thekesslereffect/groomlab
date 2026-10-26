@@ -261,6 +261,9 @@ protected:
     // Whether a dispatch asked to run only where `buffer`'s first word is at least `least` runs: true
     // where the engine cannot tell without waiting (the GPU's: the kernels find the same either way).
     virtual bool runsIf(int /*buffer*/, std::uint32_t /*least*/) { return true; }
+    // A dispatch of `groups` groups whose kernel leaves past `buffer`'s word `word` over `per`: the
+    // groups it needs where the engine can tell without waiting (the GPU's: all of them).
+    virtual std::size_t countedGroups(int /*buffer*/, std::uint32_t /*word*/, std::uint32_t /*per*/, std::size_t groups) { return groups; }
     virtual void dispatchAlternating(Kernel kernel, std::size_t slot, const Binding& binding, std::size_t groupsX, std::size_t groupsY,
                                      std::size_t count) {
         for (std::size_t i = 0; i < count; ++i) dispatch(kernel, slot + (i & 1), binding, groupsX, groupsY);

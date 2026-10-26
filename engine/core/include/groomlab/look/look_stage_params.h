@@ -147,6 +147,11 @@ std::shared_ptr<JiggleInputs> jiggleInputs(const StrandSet& in, const ScalpMesh&
 // Curl's clumps as the kernel takes them (CurlInputs, coherence clump), found on the strands `in` by
 // the channel `channel` as CurlOp finds them, their frames from `scalp`'s normals (null: none), their
 // draws by `seed`; null without the channel.
+// Tie's inputs (TieInputs but its tables and channelFrom: the caller's) for the strands `in` over
+// `scalp` (null or no triangles: none) with its tail channel `channel`, as TieOp takes them: the
+// scalp's box, its push's clearance, depth and search radius, each strand's seed face, the core
+// strands, the channel as `in` carries it, and the host (the CPU engine's).
+std::shared_ptr<TieInputs> tieInputs(const StrandsPtr& in, const MeshPtr& scalp, const std::string& channel);
 std::shared_ptr<CurlInputs> curlInputs(const StrandSet& in, const ScalpMesh* scalp, const std::string& channel, std::uint64_t seed);
 // MeshCut's mesh as the kernel takes it (its ray tree; none for no mesh).
 std::shared_ptr<MeshCutInputs> meshCutInputs(const MeshPtr& mesh);

@@ -45,7 +45,9 @@
 // The grid's cell is about kCellSpacings root spacings of the strands splatted (their share of the
 // scalp's area), between 1/128 and 1/16 of the scalp's size, rounded on a decimal lattice: the
 // same strands at any scale. Strands no push reaches come out bit for bit as they came. The grid,
-// the splat, the scalp's walls, the solve and the walk are hair_grid.h's, shared with Static.
+// the splat, the scalp's walls, the solve and the walk are hair_grid.h's, shared with Static. It
+// runs on the CPU engine (look.slang's hair grid, one source with the GPU preview's, its doubles the
+// C++ here's to the bit: hair_grid::onEngine); the C++ here where the engine cannot.
 
 #include <algorithm>
 #include <array>
@@ -56,6 +58,7 @@
 #include <vector>
 
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/math.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -137,6 +140,8 @@ struct Spread {
 };
 
 class SelfCollideOp : public Operator {
+    mutable EngineWalls walls_;
+
 public:
     std::string typeName() const override { return op::kSelfCollide; }
     std::string category() const override { return "shape"; }
@@ -162,6 +167,9 @@ public:
         const ScalarField strength(params(), "strength", scalp.get());
         strength.validate(*in);
         if (in->empty() || (strength.isConstant() && !(strength.maximum() > 0.0f))) return in;
+        if (gpu::cpuEngineOn()) {
+            if (StrandsPtr made = onEngine(gpu::StageKind::SelfCollide, op::kSelfCollide, params(), ctx, in, scalp, walls_)) return made;
+        }
         const double packing = std::max(params().getDouble("packing"), 1e-3);
         const RampAlong profile(params().getRamp("profile"), *in);
         const std::size_t count = in->strandCount();

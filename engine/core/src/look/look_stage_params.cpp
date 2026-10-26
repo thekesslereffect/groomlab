@@ -59,6 +59,9 @@ bool readsStageParams(StageKind kind) {
         case StageKind::BlendNeighbors:
         case StageKind::Tangle:
         case StageKind::Flow:
+        case StageKind::SelfCollide:
+        case StageKind::Static:
+        case StageKind::Tie:
         case StageKind::RestoreLength:
         case StageKind::MeshCut:
         case StageKind::Jiggle: return true;
@@ -380,6 +383,45 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             }
             return true;
         }
+        case StageKind::SelfCollide: {
+            if (!mappable("strength", &s->value[0])) return false;
+            const double packing = std::max(number("packing"), 1e-3);  // (as SelfCollideOp reads it)
+            s->value[1] = static_cast<float>(packing);
+            std::memcpy(&s->more[0], &packing, sizeof packing);  // (the CPU's kernels take it in double)
+            // Overpacked past it: the hair's fixed point (2^32 a unit) above ceil(packing 2^32).
+            const auto limit = static_cast<std::uint64_t>(std::ceil(packing * 4294967296.0));
+            s->flag2[0] = static_cast<int>(static_cast<std::uint32_t>(limit));
+            s->flag2[1] = static_cast<int>(static_cast<std::uint32_t>(limit >> 32));
+            s->ramp = r.ramp("profile");
+            s->tabled = true;
+            return true;
+        }
+        case StageKind::Tie: {
+            // TieOp::evaluate's numbers, as it clamps them (the affect a mask: the caller's, flag[1-2]).
+            auto bits = [](int* to, float v) { std::memcpy(to, &v, sizeof(float)); };  // the kernels read them as floats
+            s->value[0] = std::max(0.0f, static_cast<float>(number("radius")));
+            s->value[1] = std::clamp(static_cast<float>(number("tightness")), 0.0f, 1.0f);
+            s->value[2] = std::clamp(static_cast<float>(number("spread")), 0.0f, 80.0f) * 3.14159265358979f / 180.0f;
+            s->value[3] = static_cast<float>(number("twist"));
+            s->value2[0] = std::max(0.0f, static_cast<float>(number("ease")));
+            const Vec3f direction = r.vector("direction"), center = r.vector("center");
+            s->value2[1] = direction.x;
+            s->value2[2] = direction.y;
+            s->value2[3] = direction.z;
+            bits(&s->flag2[0], center.x);
+            bits(&s->flag2[1], center.y);
+            bits(&s->flag2[2], center.z);
+            s->flag[0] = params.getString("tailChannel").empty() ? 0 : 1;
+            bits(&s->flag[1], 1.0f);
+            s->flag[2] = 0;
+            return true;
+        }
+        case StageKind::Static:
+            if (!mappable("strength", &s->value[0])) return false;
+            s->value[1] = static_cast<float>(std::clamp(number("randomness"), 0.0, 1.0));
+            s->ramp = r.ramp("profile");
+            s->tabled = true;
+            return true;
         case StageKind::Flow:
             // FlowOp's numbers: the lift in degrees (its multiplier), its jitter in radians.
             if (!mappable("lift", &s->value[0])) return false;
@@ -797,6 +839,69 @@ std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* sca
     made->field = std::move(words);
     made->host.flow = std::move(flow);
     made->host.scalp = scalp;
+    return made;
+}
+
+std::shared_ptr<TieInputs> tieInputs(const StrandsPtr& in, const MeshPtr& scalpMesh, const std::string& channel) {
+    auto made = std::make_shared<TieInputs>();
+    const MeshPtr scalp = scalpMesh && scalpMesh->triangleCount() > 0 ? scalpMesh : nullptr;
+    if (scalp) {
+        // TieOp's scalp: its box's center and size, the clearance, depth and search radius of its push.
+        Vec3f lo = scalp->points().front(), hi = lo;
+        for (const Vec3f& q : scalp->points()) {
+            lo = {std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)};
+            hi = {std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)};
+        }
+        made->hasScalp = true;
+        made->scalpSize = std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z});
+        made->scalpCenter = (lo + hi) * 0.5f;
+        made->clearance = made->scalpSize * (1.0f / 400.0f);  // (tie_op.cpp kClearanceShare, kDepthShare)
+        made->depth = made->scalpSize * (1.0f / 8.0f);
+        made->searchRadius = std::max(made->clearance, made->depth) * 1.001f + 1e-6f;
+        auto host = std::make_shared<TieHost>();
+        host->scalp = scalp;
+        host->clearance = made->clearance;
+        host->depth = made->depth;
+        host->searchRadius = made->searchRadius;
+        if (made->clearance > 0.0f) host->surface = CollisionSurface::of(scalp, made->clearance, made->depth, made->searchRadius);
+        made->host = std::move(host);
+    }
+    // Each strand's start as TieOp finds it (after an earlier Tie's tail start), and the face nearest
+    // it: its root's where it is rooted on the scalp, else the scalp's closest point's.
+    const std::vector<float>* earlier = channel.empty() ? nullptr : in->pointChannel(channel);
+    if (earlier && earlier->size() != in->pointCount()) earlier = nullptr;
+    auto seeds = std::make_shared<std::vector<std::uint32_t>>(in->strandCount(), 0xFFFFFFFFu);
+    if (scalp) {
+        parallelFor(0, in->strandCount(), [&](std::size_t s) {
+            const std::size_t n = in->strandPointCount(s);
+            if (n < 2) return;
+            std::size_t start = 0;
+            if (earlier) {
+                const float* t = earlier->data() + in->strandBegin(s);
+                for (std::size_t i = 1; i < n; ++i) {
+                    if (t[i] >= 0.5f) {
+                        start = i;
+                        break;
+                    }
+                }
+            }
+            const StrandRoot& root = in->roots()[s];
+            if (start == 0 && scalp->contains(root)) {
+                (*seeds)[s] = static_cast<std::uint32_t>(root.face);
+                return;
+            }
+            const SurfacePoint sp = scalp->closestPoint(in->strandPoints(s)[start]);
+            if (sp.root.face >= 0) (*seeds)[s] = static_cast<std::uint32_t>(sp.root.face);
+        }, 1024);
+    }
+    made->seeds = std::move(seeds);
+    auto core = std::make_shared<std::vector<std::uint32_t>>();
+    const PreviewCore preview(*in);
+    for (std::size_t s = 0; s < in->strandCount(); ++s) {
+        if (preview.core(s)) core->push_back(static_cast<std::uint32_t>(s));
+    }
+    made->core = std::move(core);
+    if (earlier) made->channel = std::shared_ptr<const std::vector<float>>(in, earlier);  // (holding the strands)
     return made;
 }
 

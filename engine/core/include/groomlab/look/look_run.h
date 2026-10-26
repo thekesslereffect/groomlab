@@ -330,6 +330,14 @@ struct HairGridInputs {
 // walk down the mesh to the closest points under its route starts; the core strands (the ring's
 // bins read them). Its tail channel's values as it takes them: written by an earlier Tie of the
 // run (`channelFrom`, that stage), else as the strands it took carry them (null: none).
+// Tie's scalp as TieOp asks it, the CPU engine's alone (look.slang's Tie asks the core's queries
+// there, their ties and rounding the operator's): the routes' closest points, and the push out of it
+// (its collision surface at the clearance, depth and search radius).
+struct TieHost {
+    std::shared_ptr<const ScalpMesh> scalp;
+    CollisionSurface surface;  // (none: no push)
+    float clearance = 0.0f, depth = 0.0f, searchRadius = 0.0f;
+};
 struct TieInputs {
     bool hasScalp = false;
     Vec3f scalpCenter;
@@ -339,6 +347,7 @@ struct TieInputs {
     std::shared_ptr<const std::vector<std::uint32_t>> core;
     std::size_t channelFrom = static_cast<std::size_t>(-1);
     std::shared_ptr<const std::vector<float>> channel;
+    std::shared_ptr<const TieHost> host;  // (with a scalp)
 };
 // Bend, Direction, Transform and Displace: each strand's root on the scalp (the groom's, as the
 // operators take it), read on the strands the node took (fixed while the scalp and the roots are),

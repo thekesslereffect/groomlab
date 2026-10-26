@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #include "groomlab/parallel.h"
+#include "groomlab/portable_math.h"
 #include "groomlab/preview_core.h"
 #include "groomlab/random.h"
 #include "groomlab/look/look_engine_internal.h"
@@ -219,6 +220,10 @@ void tieConstants(const StageParams& p, const TieInputs* in, StageConstants* c) 
     c->octaveSeeds[4] = bits(center.y);
     c->octaveSeeds[5] = bits(center.z);
     for (int i = 6; i < 16; ++i) c->octaveSeeds[i] = 0;
+    // The CPU engine's: its scalp's queries (look.slang tieHost, the address in two words).
+    const auto host = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(in ? in->host.get() : nullptr));
+    c->octaveSeeds[6] = static_cast<std::uint32_t>(host);
+    c->octaveSeeds[7] = static_cast<std::uint32_t>(host >> 32);
 }
 
 }  // namespace
@@ -546,8 +551,8 @@ void LookEngine::putStrandData(const LookRun& run, bool frames) {
                     const float z = 2.0f * unitFloat(h) - 1.0f;
                     const float a = 6.28318531f * unitFloat(hash64(h));
                     const float r = std::sqrt(std::max(0.0f, 1.0f - z * z));
-                    d[0] = r * std::cos(a);
-                    d[1] = r * std::sin(a);
+                    d[0] = r * pm::cos(a);
+                    d[1] = r * pm::sin(a);
                     d[2] = z;
                     d[3] = unitFloat(hash64(static_cast<std::uint64_t>(id) ^ 0xC4A26E5A17ull));
                     break;
@@ -1531,6 +1536,10 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         std::size_t copyFromOffset = kSameOffset;     // (from that byte of copyFrom instead)
         int onlyIf = -1;                 // >= 0: dispatched only where that buffer's first word is onlyIfValue or more (runsIf)
         std::uint32_t onlyIfValue = 0;
+        // >= 0: its groups at most that buffer's word countWord (+ 1 every other repeat) over
+        // countPer, where the engine can tell (countedGroups); the kernel leaves past it either way.
+        int countBuffer = -1;
+        std::uint32_t countWord = 0, countPer = 1;
     };
     std::vector<Step> steps;
     std::vector<StageConstants> slots;
@@ -1678,7 +1687,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         allocate(grid, (32 + cells + blocks) * 4);
         if (!isStatic) allocate(moved, 4);
         allocate(moves, bytes);
-        allocate(unknowns, std::max<std::size_t>(blocks * 64 * 8 * 4, 4));
+        allocate(unknowns, std::max<std::size_t>(blocks * 64 * 10 * 4, 4));  // (look.slang UNKNOWN_WORDS)
         allocate(sums, std::max<std::size_t>(blocks * 64 * sumWords * 4, 4));
         allocate(nodes, std::max<std::size_t>(blocks * 64 * 12 * 4, 4));
         const double h = l.h;
@@ -1717,6 +1726,12 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         grid4[11] = bits(static_cast<float>(l.wallReach * h));
         grid4[12] = sumWords;
         for (int w = 13; w < 16; ++w) grid4[w] = 0;
+        // The ops' numbers in double (the CPU's kernels: look.slang gridWeightD, gridNominalD, and
+        // SelfCollide's gridPackingD, as readStageParams put it in `more`).
+        const double section = isStatic ? l.section : l.nominal;
+        std::memcpy(&g.ramp2[0], &l.weight, sizeof(double));
+        std::memcpy(&g.ramp2[2], &section, sizeof(double));
+        if (!isStatic) std::memcpy(&g.table2[0], &p.more[0], sizeof(double));
         const std::size_t segmentGroups = std::max<std::size_t>((segmentCount + 63) / 64, 1), cellGroups = (32 + cells + 63) / 64;
         // A pass after one moving no hair would find the same (its grid, so no push): skipped where
         // the engine can tell (runsIf; self_collide_op.cpp stops there).
@@ -1730,6 +1745,13 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             steps.back().onlyIf = onlyIf;
             steps.back().onlyIfValue = onlyIfValue;
         };
+        // A kernel a thread a node of the blocks laid: its groups (a block each) as many as laid
+        // (look.slang GRID_COUNT), where the engine can tell.
+        auto blocksCounted = [&] {
+            steps.back().countBuffer = grid;
+            steps.back().countWord = 15;
+            steps.back().countPer = 1;
+        };
         auto solve = [&](const Binding& b, int sweeps) {  // red-black: colour 0, then 1, each sweep
             StageConstants c = g;
             c.flag[3] = 0;
@@ -1740,6 +1762,9 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             s.repeat = static_cast<std::size_t>(2 * sweeps);
             s.onlyIf = onlyIf;
             s.onlyIfValue = onlyIfValue;
+            s.countBuffer = grid;  // (each colour's unknowns, look.slang GRID_UNKNOWNS: a thread each)
+            s.countWord = 26;
+            s.countPer = 64;
             steps.push_back(s);
         };
         const int passes = isStatic ? 1 : 3;  // (self_collide_op.cpp kPasses)
@@ -1768,6 +1793,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             zero.out[0] = sums;
             zero.out[1] = nodes;
             add(Kernel::GridZero, zero, blocks, 0);
+            blocksCounted();
             Binding splat;
             splat.in = points;
             splat.aux[0] = segments;
@@ -1809,24 +1835,34 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             walk.out[0] = to;
             if (!isStatic) {
                 add(Kernel::SelfCollideNode, node, blocks, 0);
+                blocksCounted();
                 add(Kernel::GridUnknowns, listed, blocks, 0);
+                blocksCounted();
                 solve(sor, 48);  // (self_collide_op.cpp kSweeps)
                 Binding gradient;
                 gradient.aux[1] = grid;
                 gradient.out[0] = nodes;
                 add(Kernel::SelfCollideGradient, gradient, blocks, 0);
+                blocksCounted();
                 add(Kernel::SelfCollidePush, push, strandGroups, static_cast<std::uint32_t>(pass));
                 add(Kernel::GridWalk, walk, strandGroups, 0, pass + 1 == passes);
             } else {
-                for (std::uint32_t axis = 0; axis < 3; ++axis) add(Kernel::StaticReach, solved, blocks, axis);
+                for (std::uint32_t axis = 0; axis < 3; ++axis) {
+                    add(Kernel::StaticReach, solved, blocks, axis);
+                    blocksCounted();
+                }
                 Binding moments;
                 moments.aux[0] = sums;
                 moments.out[0] = grid;
                 add(Kernel::StaticMoments, moments, blocks, 0);
+                blocksCounted();
                 add(Kernel::StaticNode, node, blocks, 0);
+                blocksCounted();
                 add(Kernel::GridUnknowns, listed, blocks, 0);
+                blocksCounted();
                 solve(sor, 64);  // (static_op.cpp kSweeps)
                 add(Kernel::StaticField, solved, blocks, 0);
+                blocksCounted();
                 add(Kernel::StaticPush, push, strandGroups, 0);
                 add(Kernel::GridWalk, walk, strandGroups, 0, true);
             }
@@ -2437,6 +2473,15 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         }
         if (s.onlyIf >= 0 && !runsIf(s.onlyIf, s.onlyIfValue)) {
             // (skipped)
+        } else if (s.countBuffer >= 0) {
+            // As few groups as the count asks (rows of the dispatch's own width, its gDispatch.x).
+            for (std::size_t r = 0; r < std::max<std::size_t>(s.repeat, 1); ++r) {
+                const std::size_t odd = s.repeat ? (r & 1) : 0;
+                const std::size_t groups = countedGroups(s.countBuffer, s.countWord + static_cast<std::uint32_t>(odd), s.countPer, s.groups);
+                if (!groups) continue;
+                const std::size_t x = std::min(groups, shapes[i].x);
+                dispatch(s.kernel, slotOf[i] + odd, s.binding, x, (groups + x - 1) / x);
+            }
         } else if (s.repeat) {
             dispatchAlternating(s.kernel, slotOf[i], s.binding, shapes[i].x, shapes[i].y, s.repeat);
         } else {

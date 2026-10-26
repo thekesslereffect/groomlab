@@ -51,6 +51,7 @@
 #include <vector>
 
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/math.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -100,6 +101,8 @@ Vec3f splayOf(StrandId id) {
 }
 
 class StaticOp : public Operator {
+    mutable EngineWalls walls_;  // (the CPU engine's: hair_grid::onEngine)
+
 public:
     std::string typeName() const override { return op::kStatic; }
     std::string category() const override { return "look"; }
@@ -125,6 +128,10 @@ public:
         const ScalarField strength(params(), "strength", scalp.get());
         strength.validate(*in);
         if (in->empty() || (strength.isConstant() && !(strength.maximum() > 0.0f))) return in;
+        // On the CPU engine (look.slang's hair grid, its doubles the C++ below's to the bit).
+        if (gpu::cpuEngineOn()) {
+            if (StrandsPtr made = onEngine(gpu::StageKind::Static, op::kStatic, params(), ctx, in, scalp, walls_)) return made;
+        }
         const auto randomness = static_cast<float>(std::clamp(params().getDouble("randomness"), 0.0, 1.0));
         const RampAlong profile(params().getRamp("profile"), *in);
         const std::size_t count = in->strandCount();

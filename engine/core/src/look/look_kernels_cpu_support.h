@@ -178,6 +178,10 @@ namespace groomlab::gpu::cpu_host {
 void flowAt(std::uint64_t host, const float p[3], const float normal[3], float out[3]);
 void flowAtRoot(std::uint64_t host, std::uint32_t face, float u, float v, const float normal[3], float out[3]);
 bool flowClosest(std::uint64_t host, const float p[3], float reach, std::uint32_t* face, float uv[2], float at[3], float normal[3]);
+// look.slang's Tie on the CPU (tieHost*): ScalpMesh::closestPoint and CollisionSurface::pushOut on
+// the engine's look_run.h TieHost.
+bool tieClosest(std::uint64_t host, const float p[3], float reach, float at[3], float normal[3]);
+void tiePush(std::uint64_t host, float p[3]);
 template <class T>
 inline T& ref(T& x) { return x; }
 template <class T>
@@ -186,6 +190,30 @@ template <class W>
 inline std::uint64_t address(const W& words) { return (static_cast<std::uint64_t>(words.y) << 32) | words.x; }
 }  // namespace groomlab::gpu::cpu_host
 
+template <class W, class V, class A, class N>
+inline bool groomlab_tie_closest(const W& host, const V& p, float reach, A&& at, N&& normal) {
+    using groomlab::gpu::cpu_host::ref;
+    const float q[3] = {p.x, p.y, p.z};
+    float a[3], n[3];
+    if (!groomlab::gpu::cpu_host::tieClosest(groomlab::gpu::cpu_host::address(host), q, reach, a, n)) return false;
+    ref(at).x = a[0];
+    ref(at).y = a[1];
+    ref(at).z = a[2];
+    ref(normal).x = n[0];
+    ref(normal).y = n[1];
+    ref(normal).z = n[2];
+    return true;
+}
+template <class W, class V>
+inline V groomlab_tie_push(const W& host, const V& p) {
+    float q[3] = {p.x, p.y, p.z};
+    groomlab::gpu::cpu_host::tiePush(groomlab::gpu::cpu_host::address(host), q);
+    V out;
+    out.x = q[0];
+    out.y = q[1];
+    out.z = q[2];
+    return out;
+}
 template <class W, class V>
 inline V groomlab_flow_at(const W& host, const V& p, const V& normal) {
     const float at[3] = {p.x, p.y, p.z}, n[3] = {normal.x, normal.y, normal.z};

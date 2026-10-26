@@ -4216,6 +4216,52 @@ float cornerWeight(float3 f, uint d) {
 }
 int3 cornerOf(uint d) { return int3(int(d & 1u), int((d >> 1) & 1u), int((d >> 2) & 1u)); }
 
+// The CPU's grid arithmetic where hair_grid.cpp and self_collide_op.cpp work in double (each
+// kernel's `case cpp`: their numbers to the bit; the GPU's floats come close): Grid::cellOf's double
+// quotient and place in the cell, a corner's weight in double, the 64-bit sums as doubles, llround.
+int3 cellOfGridD(float3 p, int3 origin, out double3 f) {
+    const double h = double(gValue.y);  // (h is a float: hair_grid.cpp layoutOf rounds it so)
+    const double3 q = double3(double(p.x) / h - double(origin.x), double(p.y) / h - double(origin.y), double(p.z) / h - double(origin.z));
+    const double3 low = floor(q);
+    f = q - low;
+    return int3(int(low.x), int(low.y), int(low.z));
+}
+double cornerWeightD(double3 f, uint d) {
+    return ((d & 1u) != 0 ? f.x : 1.0 - f.x) * ((d & 2u) != 0 ? f.y : 1.0 - f.y) * ((d & 4u) != 0 ? f.z : 1.0 - f.z);
+}
+double double64(uint2 a) { return double(int64_t((uint64_t(a.y) << 32) | uint64_t(a.x))); }
+uint2 fixedOfD(double m) {  // std::llround of m, 0 where that is not above 0
+    if (!(m > 0.0)) return uint2(0u, 0u);
+    const uint64_t r = uint64_t(round(m));
+    return uint2(uint(r & 0xFFFFFFFFull), uint(r >> 32));
+}
+// The grid's numbers in double, as SelfCollideOp and StaticOp take them: the strands of a render
+// each splatted one stands for, a strand's cross-section (SelfCollide's without widths, Static's
+// charge's) (gRamp2), SelfCollide's packing (gTable2.xy).
+double gridWeightD() { return asdouble(gRamp2.x, gRamp2.y); }
+double gridNominalD() { return asdouble(gRamp2.z, gRamp2.w); }
+double gridPackingD() { return asdouble(gTable2.x, gTable2.y); }
+static const double kFixedPointD = 4294967296.0;
+static const double kPiD = 3.14159265358979323846L;  // (L: a double; Slang reads a bare literal as a float)
+// p's cell (cellOfGrid) and its 8 corners' trilinear weights (the CPU's in double, rounded to float,
+// as hair_grid.cpp and self_collide_op.cpp weigh them).
+int3 cellWeights(float3 p, int3 origin, out float w[8]) {
+    __target_switch {
+    case cpp: {
+        double3 f;
+        const int3 c = cellOfGridD(p, origin, f);
+        [ForceUnroll] for (uint d = 0; d < 8; ++d) w[d] = float(cornerWeightD(f, d));
+        return c;
+    }
+    default: {
+        float3 f;
+        const int3 c = cellOfGrid(p, origin, f);
+        [ForceUnroll] for (uint d = 0; d < 8; ++d) w[d] = cornerWeight(f, d);
+        return c;
+    }
+    }
+}
+
 // The grid (A), bound for writing (gOut) or reading (gAux1).
 uint gridWord(bool rw, uint w) { return rw ? gOut.Load(w * 4) : gAux1.Load(w * 4); }
 struct GridHead {
@@ -4470,10 +4516,105 @@ void GridZeroCS(uint3 id : SV_DispatchThreadID) {
     for (uint w = 0; w < NODE_WORDS; ++w) gOut2.Store((at * NODE_WORDS + w) * 4, 0u);
 }
 
-// A thread a segment: each sample's amount spread trilinearly over its cell's 8 nodes, and its
-// cell's sums (splat): SelfCollide's hair (its strand's cross-section: pi w^2 / 4 by its widths in
-// gAux2, else gValue2.y; its width), Static's charge (its strand's: 1 + randomness (3 u^2 - 1), u
-// its per-strand number, times the profile between the segment's ends).
+// Sample q (at t along its segment g) spread trilinearly over its cell's 8 nodes, and its cell's
+// sums (splat): SelfCollide's hair (its strand's cross-section: pi w^2 / 4 by its widths w0 to w1,
+// else gValue2.y; its width), Static's charge (`charge` times the profile q0 to q1).
+void splatSample(GridHead head, GridSegment g, float3 q, float t, bool isStatic, bool widths, float w0, float w1, float charge,
+                 float q0, float q1, float share, uint sums) {
+    const float h = gValue.y, perVolume = gValue2.x, weight = gValue2.z;
+    float volume, wide = 0.0f;
+    if (isStatic) {
+        volume = gValue2.y * weight * share * (charge * (q0 * (1.0f - t) + q1 * t));
+    } else {
+        float width = asfloat(gGrid1.w), section = gValue2.y;
+        if (widths) {
+            width = w0 + (w1 - w0) * t;
+            section = 0.785398163f * width * width;
+        }
+        volume = section * weight * share;
+        wide = width / h;
+    }
+    float3 f;
+    const int3 c = cellOfGrid(q, head.origin, f);
+    const float v = volume * perVolume;
+    for (uint d = 0; d < 8; ++d) {
+        const uint2 add = fixedOf(cornerWeight(f, d) * v);
+        if (zero64(add)) continue;
+        const uint node = gridNode(false, head, c + cornerOf(d));
+        if (node == GRID_NO_NODE) continue;
+        atomicAdd64(node * gGrid3.x * 4, add);
+    }
+    const uint node = gridNode(false, head, c);
+    if (node == GRID_NO_NODE) return;
+    for (uint e = 0; e < sums; ++e) {
+        float a;
+        switch (e) {
+            case 0: a = v; break;
+            case 1: a = v * f.x; break;
+            case 2: a = v * f.y; break;
+            case 3: a = v * f.z; break;
+            case 4: a = v * f.x * f.x; break;
+            case 5: a = v * f.y * f.y; break;
+            case 6: a = v * f.z * f.z; break;
+            case 7: a = v * f.x * f.y; break;
+            case 8: a = v * f.x * f.z; break;
+            case 9: a = v * f.y * f.z; break;
+            default: a = v * wide; break;
+        }
+        const uint2 add = fixedOf(a);
+        if (!zero64(add)) atomicAdd64((node * gGrid3.x + 2 + e * 2) * 4, add);
+    }
+}
+// The CPU's (hair_grid.cpp splat, self_collide_op.cpp's amounts): in double.
+void splatSampleD(GridHead head, GridSegment g, float3 q, float t, bool isStatic, bool widths, float w0, float w1, float charge,
+                  float q0, float q1, float share, uint sums) {
+    const double h = double(gValue.y);
+    float volume, width = 0.0f;
+    if (isStatic) {
+        volume = float(gridNominalD() * gridWeightD() * double(g.len) / double(g.m) * double(charge * (q0 * (1.0f - t) + q1 * t)));
+    } else {
+        double section = gridNominalD(), across = sqrt(4.0 * gridNominalD() / kPiD);
+        if (widths) {
+            across = double(w0 + (w1 - w0) * t);
+            section = 0.25 * kPiD * across * across;
+        }
+        volume = float(section * gridWeightD() * double(g.len) / double(g.m));
+        width = float(across);
+    }
+    const double v = double(volume) * (kFixedPointD / (h * h * h)), wide = double(width) / h;
+    double3 f;
+    const int3 c = cellOfGridD(q, head.origin, f);
+    for (uint d = 0; d < 8; ++d) {
+        const uint2 add = fixedOfD(cornerWeightD(f, d) * v);
+        if (zero64(add)) continue;
+        const uint node = gridNode(false, head, c + cornerOf(d));
+        if (node == GRID_NO_NODE) continue;
+        atomicAdd64(node * gGrid3.x * 4, add);
+    }
+    const uint node = gridNode(false, head, c);
+    if (node == GRID_NO_NODE) return;
+    for (uint e = 0; e < sums; ++e) {
+        double a;
+        switch (e) {
+            case 0: a = v; break;
+            case 1: a = v * f.x; break;
+            case 2: a = v * f.y; break;
+            case 3: a = v * f.z; break;
+            case 4: a = v * f.x * f.x; break;
+            case 5: a = v * f.y * f.y; break;
+            case 6: a = v * f.z * f.z; break;
+            case 7: a = v * f.x * f.y; break;
+            case 8: a = v * f.x * f.z; break;
+            case 9: a = v * f.y * f.z; break;
+            default: a = v * wide; break;
+        }
+        const uint2 add = fixedOfD(a);
+        if (!zero64(add)) atomicAdd64((node * gGrid3.x + 2 + e * 2) * 4, add);
+    }
+}
+
+// A thread a segment: each sample splatted (splatSample); Static's charge: its strand's (1 +
+// randomness (3 u^2 - 1), u its per-strand number), the profile at the segment's ends.
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
 void GridSplatCS(uint3 id : SV_DispatchThreadID) {
@@ -4485,8 +4626,6 @@ void GridSplatCS(uint3 id : SV_DispatchThreadID) {
     if (g.m == 0u) return;
     const bool isStatic = (gFlag.x & GRID_STATIC) != 0u;
     const uint sums = isStatic ? 4u : 11u;
-    const float h = gValue.y, perVolume = gValue2.x, weight = gValue2.z;
-    // Static: its strand's charge, the profile at the segment's ends.
     float charge = 0.0f, q0 = 0.0f, q1 = 0.0f;
     if (isStatic) {
         const float u = strandData(g.s).w;
@@ -4505,57 +4644,21 @@ void GridSplatCS(uint3 id : SV_DispatchThreadID) {
     for (uint j = 0; j < g.m; ++j) {
         float t;
         const float3 q = gridSample(g, j, t);
-        float volume, wide = 0.0f;
-        if (isStatic) {
-            volume = gValue2.y * weight * share * (charge * (q0 * (1.0f - t) + q1 * t));
-        } else {
-            float width = asfloat(gGrid1.w), section = gValue2.y;
-            if (widths) {
-                width = w0 + (w1 - w0) * t;
-                section = 0.785398163f * width * width;
-            }
-            volume = section * weight * share;
-            wide = width / h;
-        }
-        float3 f;
-        const int3 c = cellOfGrid(q, head.origin, f);
-        const float v = volume * perVolume;
-        for (uint d = 0; d < 8; ++d) {
-            const uint2 add = fixedOf(cornerWeight(f, d) * v);
-            if (zero64(add)) continue;
-            const uint node = gridNode(false, head, c + cornerOf(d));
-            if (node == GRID_NO_NODE) continue;
-            atomicAdd64(node * gGrid3.x * 4, add);
-        }
-        const uint node = gridNode(false, head, c);
-        if (node == GRID_NO_NODE) continue;
-        for (uint e = 0; e < sums; ++e) {
-            float a;
-            switch (e) {
-                case 0: a = v; break;
-                case 1: a = v * f.x; break;
-                case 2: a = v * f.y; break;
-                case 3: a = v * f.z; break;
-                case 4: a = v * f.x * f.x; break;
-                case 5: a = v * f.y * f.y; break;
-                case 6: a = v * f.z * f.z; break;
-                case 7: a = v * f.x * f.y; break;
-                case 8: a = v * f.x * f.z; break;
-                case 9: a = v * f.y * f.z; break;
-                default: a = v * wide; break;
-            }
-            const uint2 add = fixedOf(a);
-            if (!zero64(add)) atomicAdd64((node * gGrid3.x + 2 + e * 2) * 4, add);
+        __target_switch {
+        case cpp:
+            splatSampleD(head, g, q, t, isStatic, widths, w0, w1, charge, q0, q1, share, sums);
+        default:
+            splatSample(head, g, q, t, isStatic, widths, w0, w1, charge, q0, q1, share, sums);
         }
     }
 }
 
 // The solve's unknowns (solve's Unknown), listed once a grid: a thread a node, an unknown's entry
 // (UNKNOWN_WORDS: its node, its 6 neighbours' (GRID_NO_NODE none: 0; UNKNOWN_SOLID: its own
-// value), its source) in its colour's list (gOut2: colour 0's from the first entry up, colour 1's
+// value), its source; the CPU's source in double, two words) in its colour's list (gOut2: colour 0's from the first entry up, colour 1's
 // from the last down, counted in A's GRID_UNKNOWNS), its source SelfCollide's h^2 (rho - packing) /
 // rho of its hair (gAux0 the sums), Static's its own word 2. (gOut: A; gAux1: the nodes, C.)
-#define UNKNOWN_WORDS 8u
+#define UNKNOWN_WORDS 10u
 #define UNKNOWN_SOLID 0xFFFFFFFEu
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
@@ -4586,6 +4689,42 @@ void GridUnknownsCS(uint3 id : SV_DispatchThreadID) {
     const uint w = entry * UNKNOWN_WORDS;
     gOut2.Store4(w * 4, uint4(at, around[0], around[1], around[2]));
     gOut2.Store4((w + 4) * 4, uint4(around[3], around[4], around[5], asuint(source)));
+    __target_switch {
+    case cpp: {
+        // SelfCollideOp's h^2 (rho - packing) / rho in double. StaticOp's h^2 rho, and from far away
+        // beyond the unknowns: a neighbour neither unknown nor solid is none (its phi 0 in the sum),
+        // its potential from far away in the source instead.
+        double exact;
+        const double h = double(gValue.y);
+        if ((gFlag.x & GRID_STATIC) == 0u) {
+            const double rho = double64(sumIn(at, 0)) / kFixedPointD;
+            exact = h * h * (rho - gridPackingD()) / rho;
+        } else {
+            const FarChargeD far = farChargeD(true, head);
+            exact = h * h * double64(sumIn(at, 0)) / kFixedPointD;
+            uint own[6];
+            for (uint e = 0; e < 6; ++e) {
+                const int3 step = int3(e == 0 ? -1 : e == 1 ? 1 : 0, e == 2 ? -1 : e == 3 ? 1 : 0, e == 4 ? -1 : e == 5 ? 1 : 0);
+                const uint o = gridNode(true, head, c + step);
+                const uint flags = o != GRID_NO_NODE ? gAux1.Load((o * NODE_WORDS + 1) * 4) : 0u;
+                if ((flags & NODE_UNKNOWN) != 0u) {
+                    own[e] = o;
+                } else if ((flags & NODE_SOLID) != 0u) {
+                    own[e] = UNKNOWN_SOLID;
+                } else {
+                    own[e] = GRID_NO_NODE;
+                    exact += double(farAtD(far, gridPosition(world + step)));
+                }
+            }
+            gOut2.Store4(w * 4, uint4(at, own[0], own[1], own[2]));
+            gOut2.Store3((w + 4) * 4, uint3(own[3], own[4], own[5]));
+        }
+        uint lo, hi;
+        asuint(exact, lo, hi);
+        gOut2.Store2((w + 8) * 4, uint2(lo, hi));
+    }
+    default: break;
+    }
 }
 
 // A thread an unknown of colour gFlag.w (its world node's parity, in gAux0's list): one SOR step
@@ -4600,14 +4739,29 @@ void GridSorCS(uint3 id : SV_DispatchThreadID) {
     const uint at = a.x;
     const float here = nodeFloat(at, 0);
     const uint around[6] = {a.y, a.z, a.w, b.x, b.y, b.z};
-    float sum = 0.0f;
-    for (uint e = 0; e < 6; ++e) {
-        const uint o = around[e];
-        if (o == GRID_NO_NODE) continue;
-        sum += o == UNKNOWN_SOLID ? here : nodeFloat(o, 0);
+    __target_switch {
+    case cpp: {
+        // hair_grid.cpp solve's step: its neighbours summed in double, its source and omega double.
+        double sum = 0.0;
+        for (uint e = 0; e < 6; ++e) {
+            const uint o = around[e];
+            sum += o == GRID_NO_NODE ? 0.0 : o == UNKNOWN_SOLID ? double(here) : double(nodeFloat(o, 0));
+        }
+        const uint2 exact = gAux0.Load2((w + 8) * 4);
+        const double omega = (gFlag.x & GRID_STATIC) != 0u ? 1.8L : 1.7L;  // (static_op.cpp, self_collide_op.cpp kOmega)
+        storeNode(at, 0, float(double(here) + omega * ((sum + asdouble(exact.x, exact.y)) / 6.0 - double(here))));
     }
-    const float omega = asfloat(gGrid0.z);
-    storeNode(at, 0, here + omega * ((sum + asfloat(b.w)) / 6.0f - here));
+    default: {
+        float sum = 0.0f;
+        for (uint e = 0; e < 6; ++e) {
+            const uint o = around[e];
+            if (o == GRID_NO_NODE) continue;
+            sum += o == UNKNOWN_SOLID ? here : nodeFloat(o, 0);
+        }
+        const float omega = asfloat(gGrid0.z);
+        storeNode(at, 0, here + omega * ((sum + asfloat(b.w)) / 6.0f - here));
+    }
+    }
 }
 
 // ---- SelfCollide (self_collide_op.cpp SelfCollideOp::evaluate) -------------------------------------
@@ -4654,6 +4808,83 @@ void leastAxis(float c[6], out float least, out float middle, out float3 axis) {
     if (bestLength > 0.0f) axis = best / sqrt(bestLength);
 }
 
+// leastAxis in double, as self_collide_op.cpp works it out (the CPU's).
+void leastAxisD(double c[6], out double least, out double middle, out float3 axis) {
+    const double a = c[0], b = c[1], d = c[2], xy = c[3], xz = c[4], yz = c[5];
+    const double off = xy * xy + xz * xz + yz * yz;
+    const double q = (a + b + d) / 3.0;
+    const double p2 = (a - q) * (a - q) + (b - q) * (b - q) + (d - q) * (d - q) + 2.0 * off;
+    axis = float3(0.0f, 0.0f, 0.0f);
+    if (!(p2 > 1e-30L)) {
+        least = q;
+        middle = q;
+        return;
+    }
+    const double p = sqrt(p2 / 6.0);
+    const double ba = (a - q) / p, bb = (b - q) / p, bd = (d - q) / p, bxy = xy / p, bxz = xz / p, byz = yz / p;
+    const double det = ba * (bb * bd - byz * byz) - bxy * (bxy * bd - byz * bxz) + bxz * (bxy * byz - bb * bxz);
+    const double phi = acos(clamp(det / 2.0, -1.0, 1.0)) / 3.0;
+    const double high = q + 2.0 * p * cos(phi);
+    const double low = q + 2.0 * p * cos(phi + 2.0 * kPiD / 3.0);
+    least = low;
+    middle = 3.0 * q - high - low;
+    const double3 r0 = double3(a - low, xy, xz), r1 = double3(xy, b - low, yz), r2 = double3(xz, yz, d - low);
+    double3 best = double3(0.0, 0.0, 0.0);
+    double bestLength = 0.0;
+    [ForceUnroll] for (uint k = 0; k < 3; ++k) {
+        const double3 u = k == 2 ? r1 : r0, v = k == 0 ? r1 : r2;
+        const double3 w = double3(u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x);
+        const double l = w.x * w.x + w.y * w.y + w.z * w.z;
+        if (l > bestLength) {
+            bestLength = l;
+            best = w;
+        }
+    }
+    if (!(bestLength > 0.0)) return;
+    const double l = sqrt(bestLength);
+    axis = float3(float(best.x / l), float(best.y / l), float(best.z / l));
+}
+// Node `at`'s spread of a slab from its hair `here` and its 8 cells' sums `sum` (exact integers), in
+// double as self_collide_op.cpp works it out (the CPU's); `world` its world node, the scalp's wall
+// there if `near`.
+void collideSpreadD(uint at, int3 world, bool near, float wallHeight, float3 wallNormal, uint2 here, uint2 sum[11]) {
+    const double rho = double64(here) / kFixedPointD;
+    double s[11];
+    [ForceUnroll] for (uint e = 0; e < 11; ++e) s[e] = double64(sum[e]);
+    const double m = s[0];
+    if (!(m > 0.0)) return;
+    const double packing = gridPackingD();
+    const double jitter = 0.15L, slab = 0.6L, mostStep = 1.0L;  // (self_collide_op.cpp kJitter, kSlab, kMostStep)
+    const double wide = s[10] / m;
+    if (!(rho / (0.5 * packing) > wide + jitter)) return;
+    double mean[3], cov[6];
+    [ForceUnroll] for (uint e = 0; e < 3; ++e) mean[e] = s[1 + e] / m;
+    [ForceUnroll] for (uint e = 0; e < 6; ++e) {
+        const uint a = e < 3 ? e : e == 5 ? 1u : 0u, b = e < 3 ? e : e == 3 ? 1u : 2u;
+        cov[e] = s[4 + e] / m - mean[a] * mean[b];
+    }
+    double least, middle;
+    float3 axis;
+    leastAxisD(cov, least, middle, axis);
+    if (!(len3(axis) > 0.5f) || !(least < slab * middle)) return;  // not a slab
+    least = max(least, 0.0) + jitter * jitter / 12.0;
+    const double offAxis = abs(mean[0] * double(axis.x) + mean[1] * double(axis.y) + mean[2] * double(axis.z));
+    const double perArea = rho / max(1.0 - offAxis, 0.5);
+    const double between = sqrt(12.0 * least);
+    const double needed = perArea / packing;
+    if (!(needed > between + wide) || !(between > 0.0)) return;
+    const double k = min(needed - wide, between + mostStep) / between;
+    const float h = gValue.y;
+    float3 from = gridPosition(world) + float3(float(mean[0]), float(mean[1]), float(mean[2])) * h;
+    if (near && wallHeight > -h) {  // on the scalp: from the slab's bottom, away from it
+        if (dot(axis, wallNormal) < 0.0f) axis = -axis;
+        from = from - axis * float(0.5 * between * double(h));
+    }
+    gOut.Store3((at * NODE_WORDS + 2) * 4, asuint(axis));
+    gOut.Store3((at * NODE_WORDS + 5) * 4, asuint(from));
+    storeNode(at, 8, float(k - 1.0));
+}
+
 // A thread a node: its unknown (overpacked, not solid), and its spread of a slab (thinner than its
 // hair needs), from its hair and the sums of the 8 cells around it (gAux0), the scalp's walls in gAux2.
 [shader("compute")]
@@ -4694,6 +4925,12 @@ void SelfCollideNodeCS(uint3 id : SV_DispatchThreadID) {
             if (off[a] != 0 && off[b] != 0) s = add64(s, v[0]);
             sum[4 + e] = add64(sum[4 + e], s);
         }
+    }
+    __target_switch {
+    case cpp:
+        collideSpreadD(at, world, near, wallHeight, wallNormal, here, sum);
+        return;
+    default: break;
     }
     const float m = float64(sum[0]);
     if (!(m > 0.0f)) return;
@@ -4752,13 +4989,13 @@ void SelfCollideGradientCS(uint3 id : SV_DispatchThreadID) {
 
 // hair_grid.cpp mayTouchScalp: whether p may be under the floor (C bound as gAux0, A as gAux1).
 bool gridMayTouchScalp(GridHead head, float3 p, float margin) {
-    float3 f;
-    const int3 c = cellOfGrid(p, head.origin, f);
+    float weights[8];
+    const int3 c = cellWeights(p, head.origin, weights);
     float height = 0.0f;
     for (uint d = 0; d < 8; ++d) {
         const int3 at = c + cornerOf(d);
         if (gridNode(false, head, at) == GRID_NO_NODE) return true;
-        const float w = cornerWeight(f, d);
+        const float w = weights[d];
         float wallHeight;
         float3 wallNormal;
         if (!gridWall(at + head.origin, wallHeight, wallNormal)) {
@@ -4777,7 +5014,12 @@ float3 gridWalkStep(GridHead head, FieldTables tables, float3 previous, float3 p
     p = keepLength(previous, p, wanted);
     if ((gFlag.x & GRID_FLOOR) == 0u) return p;
     const float floorAt = asfloat(gGrid1.x), depth = asfloat(gGrid1.y), searchRadius = asfloat(gGrid1.z);
-    if (!gridMayTouchScalp(head, p, 0.25f * gValue.y + floorAt)) return p;
+    float margin = 0.25f * gValue.y + floorAt;
+    __target_switch {
+    case cpp: margin = float(0.25 * double(gValue.y) + double(floorAt));  // (in double: hair_grid.cpp's margin)
+    default: break;
+    }
+    if (!gridMayTouchScalp(head, p, margin)) return p;
     for (uint push = 0; push < 2; ++push) {
         Probe probe;
         learnt(probe, -infinity(), 0.0f);
@@ -4820,8 +5062,8 @@ void GridWalkCS(uint3 id : SV_DispatchThreadID) {
 float3 collideMove(GridHead head, uint i, uint n, float3 p, float amount, float own) {
     const float along = amount * clamp(rampAlong(i, n), 0.0f, 1.0f);
     if (!(along > 0.0f)) return float3(0.0f, 0.0f, 0.0f);
-    float3 f;
-    const int3 c = cellOfGrid(p, head.origin, f);
+    float weights[8];
+    const int3 c = cellWeights(p, head.origin, weights);
     float3 move = float3(0.0f, 0.0f, 0.0f);
     bool any = false;
     for (uint d = 0; d < 8; ++d) {
@@ -4831,7 +5073,7 @@ float3 collideMove(GridHead head, uint i, uint n, float3 p, float amount, float 
         const float spread = nodeIn(o, 8);
         const bool pushed = gn.x != 0.0f || gn.y != 0.0f || gn.z != 0.0f;
         if (!pushed && !(spread > 0.0f)) continue;
-        const float w = cornerWeight(f, d);
+        const float w = weights[d];
         if (pushed) move = move - gn * w;
         if (spread > 0.0f) {
             const float3 axis = nodeIn3(o, 2);
@@ -5003,6 +5245,29 @@ float farAt(FarCharge c, float3 x) {
     return c.total / (12.566370614f * sqrt(dot(d, d) + asfloat(gGrid2.z)));
 }
 
+// The far charge in double, as StaticOp works it out (the CPU's): from the grid's moments (A: gOut
+// where `rw`, else gAux1), its total and middle; its potential at x rounded to float.
+struct FarChargeD {
+    double total;
+    float3 centre;
+};
+FarChargeD farChargeD(bool rw, GridHead head) {
+    FarChargeD c;
+    const double q = double64(uint2(gridWord(rw, GRID_MOMENTS), gridWord(rw, GRID_MOMENTS + 1))), h = double(gValue.y);
+    c.total = q / kFixedPointD * h * h * h;
+    c.centre = float3(0.0f, 0.0f, 0.0f);
+    [ForceUnroll] for (uint a = 0; a < 3; ++a) {
+        const double m = double64(uint2(gridWord(rw, GRID_MOMENTS + 2 + a * 2), gridWord(rw, GRID_MOMENTS + 3 + a * 2)));
+        c.centre[a] = float((m / q + double(head.origin[a])) * h);
+    }
+    return c;
+}
+float farAtD(FarChargeD c, float3 x) {
+    const float3 d = x - c.centre;
+    const double h = double(gValue.y);
+    return float(c.total / (4.0L * kPiD * sqrt(double(dot(d, d)) + 2.0L * 2.0L * h * h)));  // (static_op.cpp kSoften cells)
+}
+
 // A thread a node: its unknown (near charge, not solid), phi from far away (not solid), its
 // source (h^2 rho, and from far away beyond the nodes there are not).
 [shader("compute")]
@@ -5017,7 +5282,10 @@ void StaticNodeCS(uint3 id : SV_DispatchThreadID) {
     const bool unknown = gOut.Load((at * NODE_WORDS + 4) * 4) <= STATIC_REACH && !solid;
     gOut.Store((at * NODE_WORDS + 1) * 4, (solid ? NODE_SOLID : 0u) | (unknown ? NODE_UNKNOWN : 0u));
     const FarCharge far = farCharge(head);
-    storeNode(at, 0, solid ? 0.0f : farAt(far, gridPosition(world)));
+    __target_switch {
+    case cpp: storeNode(at, 0, solid ? 0.0f : farAtD(farChargeD(false, head), gridPosition(world)));
+    default: storeNode(at, 0, solid ? 0.0f : farAt(far, gridPosition(world)));
+    }
     if (!unknown) return;
     float source = asfloat(gGrid2.y) * (float64(sumIn(at, 0)) / kFixedPoint);
     for (uint e = 0; e < 6; ++e) {
@@ -5038,6 +5306,12 @@ void StaticFieldCS(uint3 id : SV_DispatchThreadID) {
     if ((nodeFlags(at) & NODE_SOLID) != 0u) return;
     const int3 c = gridCoordinates(false, at);
     const int3 world = c + head.origin;
+    __target_switch {
+    case cpp:
+        staticFieldD(at, head, c, world);
+        return;
+    default: break;
+    }
     const FarCharge far = farCharge(head);
     const float here = nodeFloat(at, 0);
     float phi[6];
@@ -5070,6 +5344,37 @@ void StaticFieldCS(uint3 id : SV_DispatchThreadID) {
     storeNode(at, 11, float64(q) / kFixedPoint);
 }
 
+// StaticFieldCS's node in double where StaticOp works in double (the CPU's): the far charge, its
+// charge's middle and density.
+void staticFieldD(uint at, GridHead head, int3 c, int3 world) {
+    const FarChargeD far = farChargeD(false, head);
+    const float here = nodeFloat(at, 0);
+    float phi[6];
+    for (uint e = 0; e < 6; ++e) {
+        const int3 step = int3(e == 0 ? -1 : e == 1 ? 1 : 0, e == 2 ? -1 : e == 3 ? 1 : 0, e == 4 ? -1 : e == 5 ? 1 : 0);
+        const uint o = gridNode(false, head, c + step);
+        phi[e] = o == GRID_NO_NODE ? farAtD(far, gridPosition(world + step)) : (nodeFlags(o) & NODE_SOLID) != 0u ? here : nodeFloat(o, 0);
+    }
+    const float inv2h = asfloat(gGrid2.x);
+    gOut.Store3((at * NODE_WORDS + 5) * 4, asuint(float3(phi[0] - phi[1], phi[2] - phi[3], phi[4] - phi[5]) * inv2h));
+    const uint2 q = sumIn(at, 0);
+    if (zero64(q)) return;
+    double sum[4] = {0.0, 0.0, 0.0, 0.0};
+    for (uint d = 0; d < 8; ++d) {
+        const int3 off = cornerOf(d);
+        const uint o = gridNode(false, head, c - off);
+        if (o == GRID_NO_NODE) continue;
+        const double m = double64(sumIn(o, 1));
+        if (!(m > 0.0)) continue;
+        sum[0] += m;
+        [ForceUnroll] for (uint a = 0; a < 3; ++a) sum[1 + a] += double64(sumIn(o, 2 + a)) - m * double(off[a]);
+    }
+    if (!(sum[0] > 0.0)) return;
+    const float3 middle = gridPosition(world) + float3(float(sum[1] / sum[0]), float(sum[2] / sum[0]), float(sum[3] / sum[0])) * gValue.y;
+    gOut.Store3((at * NODE_WORDS + 8) * 4, asuint(middle));
+    storeNode(at, 11, float(double64(q) / kFixedPointD));
+}
+
 // Static's push of point i at p (heading from the point before): the field and the local ball's
 // blended trilinearly, the ball's part across the strand and the field, without its part into the
 // scalp near it, times q, eased to at most `most` (C bound as gAux0).
@@ -5078,14 +5383,14 @@ float3 staticMove(GridHead head, float3 p, float3 before, float q, float3 own, f
     const float hl = len3(heading);
     heading = hl > 0.0f ? heading / hl : float3(0.0f, 0.0f, 0.0f);
     const float3 across = (own - heading * dot(own, heading)) * (STATIC_SPLAY * gValue.y);
-    float3 f;
-    const int3 c = cellOfGrid(p, head.origin, f);
+    float weights[8];
+    const int3 c = cellWeights(p, head.origin, weights);
     float3 push = float3(0.0f, 0.0f, 0.0f), local = push, normal = push;
     for (uint d = 0; d < 8; ++d) {
         const int3 corner = c + cornerOf(d);
         const uint o = gridNode(false, head, corner);
         if (o == GRID_NO_NODE) continue;
-        const float w = cornerWeight(f, d);
+        const float w = weights[d];
         push = push + nodeIn3(o, 5) * w;
         const float density = nodeIn(o, 11);
         if (density > 0.0f) local = local + (p - nodeIn3(o, 8) + across) * (w * density * (STATIC_LOCAL / 3.0f));
@@ -5117,6 +5422,80 @@ float3 staticMove(GridHead head, float3 p, float3 before, float q, float3 own, f
 // the pushes beyond it: their sums less those before it), each point's move to its bent place from
 // the first segment turned into gOut2 for GridWalkCS (its root's word: that point, n for none),
 // the strand copied into gOut.
+// StaticOp's bend on the CPU (its sums in double, as the C++ adds them): point j's push times its
+// share of the length (fw, from gOut2) and its moment about the root, as doubles.
+void staticBeyondAdd(uint begin, uint n, uint j, float length, inout double sum[6]) {
+    const float3 p = loadPoint(begin + j);
+    float next = 0.0f;
+    if (j + 1 < n) next = lengthExact(loadPoint(begin + j + 1) - p);
+    const float share = 0.5f * (lengthExact(p - loadPoint(begin + j - 1)) + next) / length;
+    const float3 fw = asfloat(gOut2.Load3((begin + j) * 12)) * share, t = cross(p - loadPoint(begin), fw);
+    sum[0] = sum[0] + double(fw.x);
+    sum[1] = sum[1] + double(fw.y);
+    sum[2] = sum[2] + double(fw.z);
+    sum[3] = sum[3] + double(t.x);
+    sum[4] = sum[4] + double(t.y);
+    sum[5] = sum[5] + double(t.z);
+}
+// The pushes beyond each point are summed from the tip (beyond[j] = beyond[j + 1] + point j's): kept
+// every STATIC_CHUNK points (strands of up to STATIC_CHUNK x STATIC_CHUNKS points; past that a
+// chunk's start summed again from the tip), each chunk's own again from there as the bend reaches it.
+#define STATIC_CHUNK 32u
+#define STATIC_CHUNKS 128u
+void staticBendD(uint begin, uint n, float length) {
+    double kept[STATIC_CHUNKS][6];
+    double sum[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};  // beyond[n]
+    const uint chunks = (n + STATIC_CHUNK - 1u) / STATIC_CHUNK;
+    for (uint j = n; j-- > 1u;) {
+        if ((j + 1u) % STATIC_CHUNK == 0u && (j + 1u) / STATIC_CHUNK < STATIC_CHUNKS) {
+            [ForceUnroll] for (uint e = 0; e < 6; ++e) kept[(j + 1u) / STATIC_CHUNK][e] = sum[e];  // beyond[j + 1]
+        }
+        staticBeyondAdd(begin, n, j, length, sum);
+    }
+    const float3 root = loadPoint(begin);
+    const double cube = double(length) * double(length) * double(length);
+    float4 carried = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    float3 bent = root;
+    uint first = n;
+    double beyond[STATIC_CHUNK][6];
+    for (uint k = 0; k < chunks; ++k) {
+        // This chunk's sums: from the one after it, back to its start.
+        const uint lo = max(k * STATIC_CHUNK, 1u), hi = min((k + 1u) * STATIC_CHUNK, n);
+        double run[6];
+        if (k + 1u < STATIC_CHUNKS || hi == n) {
+            [ForceUnroll] for (uint e = 0; e < 6; ++e) run[e] = hi == n ? 0.0 : kept[k + 1u][e];
+        } else {
+            [ForceUnroll] for (uint e = 0; e < 6; ++e) run[e] = 0.0;
+            for (uint j = n; j-- > hi;) staticBeyondAdd(begin, n, j, length, run);
+        }
+        for (uint j = hi; j-- > lo;) {
+            staticBeyondAdd(begin, n, j, length, run);
+            [ForceUnroll] for (uint e = 0; e < 6; ++e) beyond[j - k * STATIC_CHUNK][e] = run[e];
+        }
+        for (uint i = lo; i < hi; ++i) {
+            const float3 p = loadPoint(begin + i), last = loadPoint(begin + i - 1);
+            const float3 segment = p - last;
+            const float len = lengthExact(segment);
+            if (len > 0.0f) {
+                const uint at = i - k * STATIC_CHUNK;
+                const float3 start = last - root;
+                const float3 moment = float3(float(beyond[at][3]), float(beyond[at][4]), float(beyond[at][5])) -
+                                      cross(start, float3(float(beyond[at][0]), float(beyond[at][1]), float(beyond[at][2])));
+                const float m = len3(moment);
+                const float cap = float(3.14159265L * double(len) / double(length));  // (static_op.cpp kMostTurn)
+                const float raw = float(8.0L * double(m) * double(len) / cube);         // (kBend)
+                if (raw > 0.0f && finiteFloat(raw)) {
+                    carried = turnThen(carried, turnAboutAxis(moment / m, cap * tanh(raw / cap)));
+                    first = min(first, i);
+                }
+                bent = bent + turnApplied(carried, segment / len) * len;
+            }
+            storePoint(gOut2, begin + i, i >= first ? bent - p : float3(0.0f, 0.0f, 0.0f));
+        }
+    }
+    gOut2.Store(begin * 12, first);
+}
+
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
 void StaticPushCS(uint3 id : SV_DispatchThreadID) {
@@ -5139,6 +5518,22 @@ void StaticPushCS(uint3 id : SV_DispatchThreadID) {
     for (uint i = 1; i < n; ++i) length += lengthExact(loadPoint(begin + i) - loadPoint(begin + i - 1));
     const float most = STATIC_MOST_SHARE * length;
     if (!(amount > 0.0f) || !finite || !(most > 0.0f) || head.count == 0u) return;
+    __target_switch {
+    case cpp: {
+        // StaticOp's order: every push first, then the bend (staticBendD).
+        uint moved = n;
+        for (uint i = 1; i < n; ++i) {
+            const float q = amount * max(rampAlong(i, n), 0.0f);
+            float3 move = float3(0.0f, 0.0f, 0.0f);
+            if (q > 0.0f) move = staticMove(head, loadPoint(begin + i), loadPoint(begin + i - 1), q, data.xyz, most);
+            if (move.x != 0.0f || move.y != 0.0f || move.z != 0.0f) moved = min(moved, i);
+            storePoint(gOut2, begin + i, move);
+        }
+        if (moved != n) staticBendD(begin, n, length);
+        return;
+    }
+    default: break;
+    }
     // The pushes (into gOut2), and the sums of f w and (p - p0) x f w over them.
     const float3 root = loadPoint(begin);
     uint from = n;
