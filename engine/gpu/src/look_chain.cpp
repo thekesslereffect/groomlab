@@ -2959,35 +2959,7 @@ bool LookInputs::readJiggle(const GraphDocument& doc, NodeId id, const StagePara
         }
         JiggleLags lags;
         jiggleLags(params, state, used, &lags);
-        auto strands = std::make_shared<std::vector<float>>(in->strandCount() * 4, 0.0f);
-        parallelFor(0, in->strandCount(), [&](std::size_t s) {
-            float* to = strands->data() + s * 4;
-            std::uint32_t face = 0xFFFFFFFFu;
-            const StrandRoot& root = in->roots()[s];
-            if (in->strandPointCount(s) >= 2 && scalp.contains(root) && !lags.vertexLag.empty()) {
-                const auto& t = tris[static_cast<std::size_t>(root.face)];
-                const float wa = 1.0f - root.u - root.v;
-                const auto a = static_cast<std::size_t>(t[0]), b = static_cast<std::size_t>(t[1]), c = static_cast<std::size_t>(t[2]);
-                const Vec3f lag = lags.vertexLag[a] * wa + lags.vertexLag[b] * root.u + lags.vertexLag[c] * root.v;  // (as JiggleOp blends it)
-                to[0] = lag.x;
-                to[1] = lag.y;
-                to[2] = lag.z;
-                face = static_cast<std::uint32_t>(root.face);
-            }
-            std::memcpy(&to[3], &face, sizeof face);
-        }, 4096);
-        auto faces = std::make_shared<std::vector<float>>(std::max<std::size_t>(tris.size(), 1) * 12, 0.0f);
-        for (std::size_t f = 0; f < tris.size() && f < lags.faceTurned.size(); ++f) {
-            if (!lags.faceTurned[f]) continue;
-            float* to = faces->data() + f * 12;
-            for (int r = 0; r < 3; ++r) {
-                for (int col = 0; col < 3; ++col) to[r * 4 + col] = static_cast<float>(lags.faceTurn[f][static_cast<std::size_t>(r * 3 + col)]);
-            }
-            to[3] = 1.0f;
-        }
-        auto made = std::make_shared<JiggleInputs>();
-        made->strands = std::move(strands);
-        made->faces = std::move(faces);
+        auto made = jiggleInputs(*in, scalp, lags);
         memo.in = in;
         memo.scalp = state.scalp;
         memo.history = state.history;
@@ -3259,8 +3231,7 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
                 return false;
             }
             if (memo.in != in || memo.made != field || memo.tablesScalp != (traced ? scalpMesh : nullptr) || !memo.flow) {
-                auto made = std::make_shared<FlowInputs>();
-                made->arrows = field != nullptr;
+                std::shared_ptr<FlowInputs> made = flowInputs(*in, traced, state.flow);
                 if (traced) {
                     // Tie's tables of this scalp (readTie: its box's size, the clearance and search
                     // radius of its push): their mesh is what the closest points are found down.
@@ -3284,53 +3255,6 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
                     }
                     made->tables = memo.tables;
                 }
-                // Each strand's root on the scalp, its normal and the field there (FlowOp's first
-                // heading), as the CPU reads them.
-                const std::size_t count = in->strandCount();
-                auto strands = std::make_shared<std::vector<float>>(count * 12, 0.0f);
-                parallelFor(0, count, [&](std::size_t s) {
-                    float* to = strands->data() + s * 12;
-                    const StrandRoot& root = in->roots()[s];
-                    const bool onScalp = traced && traced->contains(root);
-                    const std::uint32_t face = onScalp ? static_cast<std::uint32_t>(root.face) : 0xFFFFFFFFu;
-                    std::memcpy(&to[0], &face, 4);
-                    if (!onScalp) return;
-                    to[1] = root.u;
-                    to[2] = root.v;
-                    const Vec3f normal = traced->normal(root);
-                    to[4] = normal.x;
-                    to[5] = normal.y;
-                    to[6] = normal.z;
-                    if (field) {
-                        const Vec3f d = field->atRoot(*traced, root, normal);
-                        to[8] = d.x;
-                        to[9] = d.y;
-                        to[10] = d.z;
-                    }
-                }, 1024);
-                made->strands = std::move(strands);
-                auto words = std::make_shared<std::vector<float>>();
-                if (field) {
-                    const std::vector<Vec3f>& baked = field->vertexDirections();
-                    if (traced && baked.size() == traced->pointCount()) {
-                        for (const Vec3f& d : baked) words->insert(words->end(), {d.x, d.y, d.z, 0.0f});
-                        made->vertices = static_cast<std::uint32_t>(baked.size());
-                    }
-                    for (std::size_t p = 0; p < field->positions().size(); ++p) {
-                        const Vec3f& at = field->positions()[p];
-                        const Vec3f& d = field->directions()[p];
-                        words->insert(words->end(), {at.x, at.y, at.z, 0.0f, d.x, d.y, d.z, 0.0f});
-                    }
-                    made->pins = static_cast<std::uint32_t>(field->positions().size());
-                    for (std::size_t k = 0; k < field->sinkPositions().size(); ++k) {
-                        const Vec3f& at = field->sinkPositions()[k];
-                        const Vec3f& n = field->sinkNormals()[k];
-                        words->insert(words->end(), {at.x, at.y, at.z, field->sinkRadii()[k], n.x, n.y, n.z, field->sinkAngles()[k]});
-                    }
-                    made->sinks = static_cast<std::uint32_t>(field->sinkPositions().size());
-                }
-                if (words->empty()) words->push_back(0.0f);
-                made->field = std::move(words);
                 memo.in = in;
                 memo.made = field;
                 memo.keep = state.flow;

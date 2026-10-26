@@ -541,9 +541,10 @@ private:
 
         // Worked out once for the faces and vertices strands grow from, in full; each strand made
         // again works out its own.
-        std::vector<Vec3f> vertexLag;
-        std::vector<Mat3> faceTurn;
-        std::vector<char> faceTurned;
+        JiggleLags lags;
+        std::vector<Vec3f>& vertexLag = lags.vertexLag;
+        std::vector<Mat3>& faceTurn = lags.faceTurn;
+        std::vector<char>& faceTurned = lags.faceTurned;
         if (!last) {
             std::vector<char> usedFace(tris.size(), 0), usedVertex(now.size(), 0);
             for (const StrandRoot& root : in->roots()) {
@@ -568,6 +569,17 @@ private:
                 const std::size_t f = faces[i];
                 faceTurned[f] = turnOfFace(f, &faceTurn[f]) ? 1 : 0;
             });
+            lags.frames = frames;
+            if (gpu::cpuEngineOn()) {
+                // look.slang's JiggleCS, the GPU preview's own (look_cpu.h), on these lags.
+                gpu::StageInputs lagged;
+                lagged.jiggle = gpu::jiggleInputs(*in, scalp, lags);
+                if (StrandsPtr made = gpu::runStage(gpu::StageKind::Jiggle, params(), in, &scalp, std::move(lagged))) {
+                    *result = made;
+                    remember(made, {scalpPtr, history, nowFrame, fps});
+                    return true;
+                }
+            }
         }
 
         auto out = std::make_shared<StrandSet>(*in);

@@ -367,9 +367,11 @@ struct TwistInputs {
 // jiggleState), fixed while the roots are: per strand 4 floats, its root's lag (its face's
 // vertices' lags blended as JiggleOp blends them) xyz and its face (a word's bits; 0xffffffff: it
 // stays, rooted off the scalp or of fewer than 2 points); per face 12 floats, its turn's drag by rows
-// (xyz; the first row's w 1 where it turned).
+// (xyz; the first row's w 1 where it turned). `faceTurns`: the same turns in double, 9 a face (the
+// CPU engine's: JiggleOp drags a strand by them).
 struct JiggleInputs {
     std::shared_ptr<const std::vector<float>> strands, faces;
+    std::shared_ptr<const std::vector<double>> faceTurns;
 };
 // MeshCut: its mesh as ScalpMesh::rayTree lays it out (its points, normals, triangles and the tree
 // intersectRay and closestPoint search), each strand cut against it alone. Null: no mesh (the
@@ -409,12 +411,19 @@ struct TangleInputs {
 // `field`: the field baked at the scalp's vertices (4 floats each, `vertices` of them: none where
 // the field has none), then each pin (position xyz, 0, direction xyz, 0), then each sink (center
 // xyz, radius, normal xyz, angle in radians). `tables`: the scalp's (its closest points found down
-// its mesh, as Tie's routes find them); null without a scalp.
+// its mesh, as Tie's routes find them); null without a scalp. `host`: the field and the scalp
+// themselves, the CPU engine's alone (look.slang FlowCS asks the core's queries there: their ties
+// the operator's), no tables needed.
+struct FlowHost {
+    std::shared_ptr<const FlowField> flow;  // null: no arrows
+    const ScalpMesh* scalp = nullptr;
+};
 struct FlowInputs {
     bool arrows = false;
     std::shared_ptr<const std::vector<float>> strands, field;
     std::uint32_t vertices = 0, pins = 0, sinks = 0;
     MeshDistanceField::Tables tables;
+    FlowHost host;
 };
 struct StageInputs {
     std::shared_ptr<const InterpolateInputs> interpolate;

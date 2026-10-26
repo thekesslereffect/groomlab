@@ -127,6 +127,12 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
 // whether there is any (null: not asked).
 std::shared_ptr<RestoreInputs> restoreInputs(const StrandSet& in, const StrandSet* refStrands, const GuideSet* refGuides, float* longest,
                                              bool* found = nullptr);
+// Flow's field and roots as the kernel takes them (FlowInputs, its tables the caller's) for the
+// strands `in` traced over `scalp` (null: none) along `field` (null: no arrows), as FlowOp reads them.
+std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* scalp, std::shared_ptr<const FlowField> field);
+// Jiggle's lags as the kernel takes them (JiggleInputs) from its operator's (operator_state.h
+// jiggleLags, over `scalp`) for the strands `in`.
+std::shared_ptr<JiggleInputs> jiggleInputs(const StrandSet& in, const ScalpMesh& scalp, const JiggleLags& lags);
 // MeshCut's mesh as the kernel takes it (its ray tree; none for no mesh).
 std::shared_ptr<MeshCutInputs> meshCutInputs(const MeshPtr& mesh);
 // Part's sides (PartInputs, its reach 0: the caller's): each strand's side of `lines` (only the part

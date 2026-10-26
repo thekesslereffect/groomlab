@@ -6112,7 +6112,12 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     // The CPU engine (look.slang's kernels as C++) run stage by stage from each chain's first node,
     // each stage's points against its node's cached result: how many floats differ in their bits
     // (none: the CPU operators and the kernels give the same bits, the kernels' transcendentals the
-    // core's portable ones, cmake/portable_cpu_kernels.cmake).
+    // core's portable ones, cmake/portable_cpu_kernels.cmake). The operators run their own C++ (the
+    // engine off for them: else those switched to it make what they are compared against).
+    gpu::setCpuEngineOn(false);
+    struct EngineBack {
+        ~EngineBack() { gpu::setCpuEngineOn(true); }
+    } engineBack;
     struct Graph {
         std::string name, json, from;
         std::function<GroomData(const std::string&)> make = nullptr;  // (null: groom)
@@ -6169,15 +6174,13 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
         auto engine = gpu::makeCpuLookEngine();
         engine->setBase(p.base, session.last().scalp.get());
         std::string line;
-        // Static and Tie are not the operators' arithmetic yet (their CPU solves and exact products),
-        // nor Flow and Jiggle (within a rounding of the CPU's): they and the stages after them are
-        // reported, not counted.
+        // Static and Tie are not the operators' arithmetic yet (their CPU solves and exact products):
+        // they and the stages after them are reported, not counted.
         bool counted = true;
         for (std::size_t k = 1; k <= p.chain.stages.size(); ++k) {
             if (k < p.chain.stages.size() && p.chain.stages[k].node == p.chain.stages[k - 1].node) continue;  // (a Wet's levels)
             const gpu::LookStage& stage = p.chain.stages[k - 1];
-            if (stage.kind == gpu::StageKind::Static || stage.kind == gpu::StageKind::Tie || stage.kind == gpu::StageKind::Flow ||
-                stage.kind == gpu::StageKind::Jiggle) {
+            if (stage.kind == gpu::StageKind::Static || stage.kind == gpu::StageKind::Tie) {
                 counted = false;
             }
             const StrandsPtr want = valueAs<StrandsPtr>(doc.graph.cachedValue(stage.node));

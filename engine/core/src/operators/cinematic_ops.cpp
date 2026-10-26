@@ -453,15 +453,25 @@ private:
                 return true;
             }
         }
+        const bool arrows = flow && !flow->empty();
+        if (!arrows) ctx.note("no flow arrows: lay some with the Flow tool (Groom Tools > Create > Flow); strands lie along their own "
+                                "direction");
+        if (!last && gpu::cpuEngineOn()) {
+            // look.slang's FlowCS, the GPU preview's own (look_cpu.h), on the core's field and scalp.
+            gpu::StageInputs traced;
+            traced.flow = gpu::flowInputs(*in, scalp, arrows ? flow : nullptr);
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Flow, params(), in, scalp, std::move(traced))) {
+                *result = made;
+                remember(made, arrows ? flow : nullptr, scalp);
+                return true;
+            }
+        }
         auto out = std::make_shared<StrandSet>(*in);
         if (last) {
             positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
         } else {
             out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
         }
-        const bool arrows = flow && !flow->empty();
-        if (!arrows) ctx.note("no flow arrows: lay some with the Flow tool (Groom Tools > Create > Flow); strands lie along their own "
-                                "direction");
         auto lay = [&](std::size_t s) {
             const std::size_t n = out->strandPointCount(s);
             if (n < 2) return;

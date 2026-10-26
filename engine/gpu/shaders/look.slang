@@ -6974,6 +6974,47 @@ FlowSkin flowClosest(float3 p, inout uint face) {
     return skin;
 }
 
+// FlowCS's queries on the CPU: the core's own (look_kernels_cpu_support.h groomlab_flow_*:
+// FlowField::at and atRoot, ScalpMesh::closestPoint) on the field and scalp the engine hands over
+// (look_run.h FlowHost, its address in gFlag2.zw), their ties and rounding the operator's; no tables
+// read. CPU alone.
+float3 hostFlowAt(uint2 host, float3 p, float3 normal) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_flow_at($0, $1, $2)"; }
+}
+float3 hostFlowAtRoot(uint2 host, uint face, float2 uv, float3 normal) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_flow_at_root($0, $1, $2, $3)"; }
+}
+bool hostFlowClosest(uint2 host, float3 p, float reach, out uint face, out float2 uv, out float3 at, out float3 normal) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_flow_closest($0, $1, $2, $3, $4, $5, $6)"; }
+}
+
+// The field at a point off the scalp (FlowField::at) and at a scalp point (FlowField::atRoot).
+float3 flowFieldAt(float3 p, float3 normal) {
+    __target_switch {
+    case cpp: return hostFlowAt(gFlag2.zw, p, normal);
+    default: return flowAt(p, normal);
+    }
+}
+float3 flowFieldAtRoot(uint face, float2 uv, float3 normal) {
+    __target_switch {
+    case cpp: return hostFlowAtRoot(gFlag2.zw, face, uv, normal);
+    default: return flowAtRoot(face, uv, normal);
+    }
+}
+// The scalp's closest point to p within `reach` (ScalpMesh::closestPoint), searched from `face`
+// (its face then), its place `uv`, position and normal; false where none is.
+bool flowSnap(float3 p, float reach, inout uint face, out float2 uv, out float3 at, out float3 normal) {
+    __target_switch {
+    case cpp: return hostFlowClosest(gFlag2.zw, p, reach, face, uv, at, normal);
+    default:
+        const FlowSkin hit = flowClosest(p, face);
+        uv = hit.uv;
+        at = hit.at;
+        normal = hit.normal;
+        return hit.d2 < reach * reach;
+    }
+}
+
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
 void FlowCS(uint3 id : SV_DispatchThreadID) {
@@ -6998,7 +7039,7 @@ void FlowCS(uint3 id : SV_DispatchThreadID) {
     const float3 rootNormal = normal;
     float3 skin = p0;
     // The first heading: the field at the root (the CPU's), else the strand's own way.
-    const float3 first = onScalp ? w2.xyz : arrows ? flowAt(skin, normal) : float3(0.0f, 0.0f, 0.0f);
+    const float3 first = onScalp ? w2.xyz : arrows ? flowFieldAt(skin, normal) : float3(0.0f, 0.0f, 0.0f);
     float3 dir = flowHeading(first, rootNormal, normal, loadPoint(begin + n - 1) - p0, spin);
     if (len3(dir) < 0.5f) dir = anyPerpendicular(normal);  // straight up, no arrows: any way
     float height = 0.0f;
@@ -7011,7 +7052,7 @@ void FlowCS(uint3 id : SV_DispatchThreadID) {
         const float3 own = original - previous;
         const float len = len3(own);
         previous = original;
-        const float3 field = arrows ? (onScalp ? flowAtRoot(over, overUv, normal) : flowAt(skin, normal)) : float3(0.0f, 0.0f, 0.0f);
+        const float3 field = arrows ? (onScalp ? flowFieldAtRoot(over, overUv, normal) : flowFieldAt(skin, normal)) : float3(0.0f, 0.0f, 0.0f);
         float3 want = flowHeading(field, rootNormal, normal, own, spin);
         if (len3(want) < 0.5f) want = dir;  // nothing new here: carry on
         const float follow = 1.0f - exp(-len / max(FLOW_TURN * length, 1e-6f));
@@ -7022,19 +7063,19 @@ void FlowCS(uint3 id : SV_DispatchThreadID) {
         height += len * sin(a);
         if (onScalp) {
             uint face = over;
-            const FlowSkin hit = flowClosest(next, face);
-            const float within = 2.0f * len + 1e-6f;
-            if (hit.d2 < within * within) {
+            float2 hitUv;
+            float3 hitAt, hitNormal;
+            if (flowSnap(next, 2.0f * len + 1e-6f, face, hitUv, hitAt, hitNormal)) {
                 // Snapped back mostly along the step: past an open edge it carries on in the
                 // tangent plane rather than stalling at the border.
-                const float3 back = next - hit.at;
+                const float3 back = next - hitAt;
                 const float backLen = len3(back);
                 const bool pastEdge = backLen > 1e-3f * len && abs(dot(back, dir)) > 0.5f * backLen;
                 if (!pastEdge) {
-                    next = hit.at;
-                    normal = hit.normal;
+                    next = hitAt;
+                    normal = hitNormal;
                     over = face;
-                    overUv = hit.uv;
+                    overUv = hitUv;
                     dir = dir - normal * dot(dir, normal);
                     dir = len3(dir) > 1e-6f ? normalized(dir) : want;
                 }
@@ -7095,6 +7136,16 @@ void AffectCS(uint3 id : SV_DispatchThreadID) {
 // times gValue.x); only its part across the chord turns the strand, about its root, by
 // atan2(across, chord) times the profile along it (RampAlong), each segment keeping its length.
 
+// A row of a face's turn in double times the chord, as JiggleOp works it out (the CPU's alone).
+double jiggleTurnAt(uint face, uint i) {
+    const uint w = (face * 9 + i) * 8;
+    return asdouble(gAux2.Load(w), gAux2.Load(w + 4));
+}
+float jiggleTurnRow(uint face, uint row, float3 chord) {
+    return float(jiggleTurnAt(face, row * 3) * double(chord.x) + jiggleTurnAt(face, row * 3 + 1) * double(chord.y) +
+                 jiggleTurnAt(face, row * 3 + 2) * double(chord.z));
+}
+
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
 void JiggleCS(uint3 id : SV_DispatchThreadID) {
@@ -7112,8 +7163,14 @@ void JiggleCS(uint3 id : SV_DispatchThreadID) {
         float3 lag = root.xyz;
         const float4 r0 = asfloat(gAux1.Load4(face * 48));
         if (r0.w != 0.0f) {
-            const float4 r1 = asfloat(gAux1.Load4(face * 48 + 16)), r2 = asfloat(gAux1.Load4(face * 48 + 32));
-            lag += float3(dot(r0.xyz, chord), dot(r1.xyz, chord), dot(r2.xyz, chord));
+            __target_switch {
+            case cpp:
+                // (In double, as JiggleOp drags by them: gAux2 the turns, 9 doubles a face.)
+                lag += float3(jiggleTurnRow(face, 0, chord), jiggleTurnRow(face, 1, chord), jiggleTurnRow(face, 2, chord));
+            default:
+                const float4 r1 = asfloat(gAux1.Load4(face * 48 + 16)), r2 = asfloat(gAux1.Load4(face * 48 + 32));
+                lag += float3(dot(r0.xyz, chord), dot(r1.xyz, chord), dot(r2.xyz, chord));
+            }
         }
         turns = !(lag.x == 0.0f && lag.y == 0.0f && lag.z == 0.0f);
         lag = lag * fieldAt(0, gValue.x, s, begin);

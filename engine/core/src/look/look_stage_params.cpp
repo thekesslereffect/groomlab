@@ -11,6 +11,7 @@
 
 #include "groomlab/curve.h"
 #include "groomlab/field.h"
+#include "groomlab/flow.h"
 #include "groomlab/guide_set.h"
 #include "groomlab/map_ref.h"
 #include "groomlab/parallel.h"
@@ -58,7 +59,8 @@ bool readsStageParams(StageKind kind) {
         case StageKind::Tangle:
         case StageKind::Flow:
         case StageKind::RestoreLength:
-        case StageKind::MeshCut: return true;
+        case StageKind::MeshCut:
+        case StageKind::Jiggle: return true;
         default: return false;
     }
 }
@@ -327,6 +329,20 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->value[0] = static_cast<float>(number("offset"));
             s->flag[0] = params.getString("keep") == "inside" ? 1 : 0;
             return true;
+        case StageKind::Jiggle: {
+            // Its lags the caller's (JiggleInputs); the springs' numbers in double too, as JiggleOp
+            // weighs the frames by them (more[0-1], [2-3]).
+            if (!mappable("strength", &s->value[0])) return false;
+            const double frequency = number("frequency"), damping = number("damping");
+            s->value[1] = static_cast<float>(frequency);
+            s->value[2] = static_cast<float>(damping);
+            std::memcpy(&s->more[0], &frequency, sizeof frequency);
+            std::memcpy(&s->more[2], &damping, sizeof damping);
+            s->flag[0] = static_cast<int>(params.getInt("history"));
+            s->ramp = r.ramp("profile");
+            s->tabled = true;
+            return true;
+        }
         case StageKind::Flow:
             // FlowOp's numbers: the lift in degrees (its multiplier), its jitter in radians.
             if (!mappable("lift", &s->value[0])) return false;
@@ -664,6 +680,100 @@ std::shared_ptr<RestoreInputs> restoreInputs(const StrandSet& in, const StrandSe
     auto made = std::make_shared<RestoreInputs>();
     made->lengths = std::move(lengths);
     made->firsts = std::move(firsts);
+    return made;
+}
+
+std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* scalp, std::shared_ptr<const FlowField> flow) {
+    auto made = std::make_shared<FlowInputs>();
+    const FlowField* field = flow.get();
+    made->arrows = field != nullptr;
+    // Each strand's root on the scalp, its normal and the field there (FlowOp's first heading), as
+    // the CPU reads them.
+    const std::size_t count = in.strandCount();
+    auto strands = std::make_shared<std::vector<float>>(count * 12, 0.0f);
+    parallelFor(0, count, [&](std::size_t s) {
+        float* to = strands->data() + s * 12;
+        const StrandRoot& root = in.roots()[s];
+        const bool onScalp = scalp && scalp->contains(root);
+        const std::uint32_t face = onScalp ? static_cast<std::uint32_t>(root.face) : 0xFFFFFFFFu;
+        std::memcpy(&to[0], &face, 4);
+        if (!onScalp) return;
+        to[1] = root.u;
+        to[2] = root.v;
+        const Vec3f normal = scalp->normal(root);
+        to[4] = normal.x;
+        to[5] = normal.y;
+        to[6] = normal.z;
+        if (field) {
+            const Vec3f d = field->atRoot(*scalp, root, normal);
+            to[8] = d.x;
+            to[9] = d.y;
+            to[10] = d.z;
+        }
+    }, 1024);
+    made->strands = std::move(strands);
+    auto words = std::make_shared<std::vector<float>>();
+    if (field) {
+        const std::vector<Vec3f>& baked = field->vertexDirections();
+        if (scalp && baked.size() == scalp->pointCount()) {
+            for (const Vec3f& d : baked) words->insert(words->end(), {d.x, d.y, d.z, 0.0f});
+            made->vertices = static_cast<std::uint32_t>(baked.size());
+        }
+        for (std::size_t p = 0; p < field->positions().size(); ++p) {
+            const Vec3f& at = field->positions()[p];
+            const Vec3f& d = field->directions()[p];
+            words->insert(words->end(), {at.x, at.y, at.z, 0.0f, d.x, d.y, d.z, 0.0f});
+        }
+        made->pins = static_cast<std::uint32_t>(field->positions().size());
+        for (std::size_t k = 0; k < field->sinkPositions().size(); ++k) {
+            const Vec3f& at = field->sinkPositions()[k];
+            const Vec3f& n = field->sinkNormals()[k];
+            words->insert(words->end(), {at.x, at.y, at.z, field->sinkRadii()[k], n.x, n.y, n.z, field->sinkAngles()[k]});
+        }
+        made->sinks = static_cast<std::uint32_t>(field->sinkPositions().size());
+    }
+    if (words->empty()) words->push_back(0.0f);
+    made->field = std::move(words);
+    made->host.flow = std::move(flow);
+    made->host.scalp = scalp;
+    return made;
+}
+
+std::shared_ptr<JiggleInputs> jiggleInputs(const StrandSet& in, const ScalpMesh& scalp, const JiggleLags& lags) {
+    const auto& tris = scalp.triangles();
+    auto strands = std::make_shared<std::vector<float>>(in.strandCount() * 4, 0.0f);
+    parallelFor(0, in.strandCount(), [&](std::size_t s) {
+        float* to = strands->data() + s * 4;
+        std::uint32_t face = 0xFFFFFFFFu;
+        const StrandRoot& root = in.roots()[s];
+        if (in.strandPointCount(s) >= 2 && scalp.contains(root) && !lags.vertexLag.empty()) {
+            const auto& t = tris[static_cast<std::size_t>(root.face)];
+            const float wa = 1.0f - root.u - root.v;
+            const auto a = static_cast<std::size_t>(t[0]), b = static_cast<std::size_t>(t[1]), c = static_cast<std::size_t>(t[2]);
+            const Vec3f lag = lags.vertexLag[a] * wa + lags.vertexLag[b] * root.u + lags.vertexLag[c] * root.v;  // (as JiggleOp blends it)
+            to[0] = lag.x;
+            to[1] = lag.y;
+            to[2] = lag.z;
+            face = static_cast<std::uint32_t>(root.face);
+        }
+        std::memcpy(&to[3], &face, sizeof face);
+    }, 4096);
+    const std::size_t faceCount = std::max<std::size_t>(tris.size(), 1);
+    auto faces = std::make_shared<std::vector<float>>(faceCount * 12, 0.0f);
+    auto turns = std::make_shared<std::vector<double>>(faceCount * 9, 0.0);
+    for (std::size_t f = 0; f < tris.size() && f < lags.faceTurned.size(); ++f) {
+        if (!lags.faceTurned[f]) continue;
+        float* to = faces->data() + f * 12;
+        for (int r = 0; r < 3; ++r) {
+            for (int col = 0; col < 3; ++col) to[r * 4 + col] = static_cast<float>(lags.faceTurn[f][static_cast<std::size_t>(r * 3 + col)]);
+        }
+        to[3] = 1.0f;
+        std::copy(lags.faceTurn[f].begin(), lags.faceTurn[f].end(), turns->begin() + static_cast<std::ptrdiff_t>(f * 9));
+    }
+    auto made = std::make_shared<JiggleInputs>();
+    made->strands = std::move(strands);
+    made->faces = std::move(faces);
+    made->faceTurns = std::move(turns);
     return made;
 }
 

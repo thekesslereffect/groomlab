@@ -11,8 +11,10 @@
 #include <stdexcept>
 #include <vector>
 
+#include "groomlab/flow.h"
 #include "groomlab/parallel.h"
 #include "groomlab/look/look_engine_internal.h"
+#include "look_kernels_cpu_support.h"
 #include "slang-cpp-prelude.h"
 
 #ifdef SLANG_PRELUDE_NAMESPACE
@@ -25,6 +27,39 @@ using CpuKernelFn = void (*)(ComputeVaryingInput*, void*, void*);
 #undef GROOMLAB_KERNEL
 
 namespace groomlab::gpu {
+
+namespace cpu_host {
+
+namespace {
+const FlowHost& flowHost(std::uint64_t host) { return *reinterpret_cast<const FlowHost*>(static_cast<std::uintptr_t>(host)); }
+void put(const Vec3f& v, float out[3]) {
+    out[0] = v.x;
+    out[1] = v.y;
+    out[2] = v.z;
+}
+}  // namespace
+
+void flowAt(std::uint64_t host, const float p[3], const float normal[3], float out[3]) {
+    put(flowHost(host).flow->at(Vec3f(p[0], p[1], p[2]), Vec3f(normal[0], normal[1], normal[2])), out);
+}
+
+void flowAtRoot(std::uint64_t host, std::uint32_t face, float u, float v, const float normal[3], float out[3]) {
+    const FlowHost& h = flowHost(host);
+    put(h.flow->atRoot(*h.scalp, StrandRoot{static_cast<std::int32_t>(face), u, v}, Vec3f(normal[0], normal[1], normal[2])), out);
+}
+
+bool flowClosest(std::uint64_t host, const float p[3], float reach, std::uint32_t* face, float uv[2], float at[3], float normal[3]) {
+    const SurfacePoint hit = flowHost(host).scalp->closestPoint(Vec3f(p[0], p[1], p[2]), reach);
+    if (hit.root.face < 0) return false;
+    *face = static_cast<std::uint32_t>(hit.root.face);
+    uv[0] = hit.root.u;
+    uv[1] = hit.root.v;
+    put(hit.position, at);
+    put(hit.normal, normal);
+    return true;
+}
+
+}  // namespace cpu_host
 
 namespace {
 

@@ -1259,6 +1259,8 @@ void LookEngine::putStageInputs(const LookRun& run) {
             if (held.a != data || !has(auxBuffer(k, 0)) || !has(auxBuffer(k, 1))) {
                 write(auxBuffer(k, 0), data->strands->data(), std::max<std::size_t>(data->strands->size(), 4) * 4, false);
                 write(auxBuffer(k, 1), data->faces->data(), data->faces->size() * 4, false);
+                // (The turns in double the CPU's alone: JiggleCS drags by them there.)
+                if (sharesBase() && data->faceTurns) share(auxBuffer(k, 2), data->faceTurns->data(), data->faceTurns->size() * 8);
                 held.a = data;
                 held.keep = in->jiggle;  // (kept alive: compared by address)
                 runUploadMegabytes_ += static_cast<double>((data->strands->size() + data->faces->size()) * 4) / 1e6;
@@ -1403,6 +1405,13 @@ LookEngine::Kernel LookEngine::shaperKernel(std::size_t k, const StageParams& st
             c->flag[2] = flow->pins;
             c->flag2[0] = flow->sinks;
             c->flag2[1] = flow->tables ? 1u : 0u;
+            if (sharesBase()) {
+                // (On the CPU the field and scalp themselves, asked by address: look.slang hostFlow*.)
+                const auto host = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&flow->host));
+                c->flag2[1] = flow->host.scalp ? 1u : 0u;
+                c->flag2[2] = static_cast<std::uint32_t>(host);
+                c->flag2[3] = static_cast<std::uint32_t>(host >> 32);
+            }
             b->aux[0] = auxBuffer(k, 0);
             b->aux[1] = auxBuffer(k, 1);
             b->aux[2] = auxBuffer(k, 2);
@@ -2228,6 +2237,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                 kernel = Kernel::Jiggle;
                 b.aux[0] = auxBuffer(k, 0);
                 b.aux[1] = auxBuffer(k, 1);
+                if (sharesBase()) b.aux[2] = auxBuffer(k, 2);  // (the turns in double)
                 break;
             case StageKind::MeshCut:
                 // Aux 0: its mesh's tree (ScalpMesh::rayTree; none: the strands pass through).
