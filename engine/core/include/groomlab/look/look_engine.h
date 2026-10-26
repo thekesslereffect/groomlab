@@ -77,6 +77,9 @@ struct LookRun {
     LookParams params;
     LookFields fields;
     std::vector<StageInputs> inputs;
+    // Each Tie's tail channel written whether or not a stage after it reads it (readTail: an
+    // operator running its own stage).
+    bool tailsOut = false;
 };
 
 // The compute engine on a device: the base strands' buffers, the kernels, the outputs. Runs on the
@@ -171,6 +174,9 @@ public:
     // where it wrote them.
     std::vector<Vec3f> readPositions();
     std::vector<float> readWidths();
+    // Tie stage k's tail channel as the last run wrote it, a value a point (LookRun::tailsOut; empty
+    // where it wrote none).
+    std::vector<float> readTail(std::size_t k);
     void readFrames(std::vector<Vec3f>* normals, std::vector<Vec3f>* tangents, std::vector<Vec3f>* bitangents);
 
     // The kernels: one a line of look_kernels.inc (its entry point NameCS in shaders/look.slang).

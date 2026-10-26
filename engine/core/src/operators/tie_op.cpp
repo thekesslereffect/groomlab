@@ -50,11 +50,14 @@
 //
 // Reads other strands (the core's radial measures per azimuth): evaluates in full. The GPU preview
 // runs it too (look.slang TieFrameCS, TieRouteCS, TieLayCS): the bins from the core strands it is
-// handed, the routes' closest points down the scalp's field's mesh, the push through its tables.
+// handed, the routes' closest points down the scalp's field's mesh, the push through its tables. So
+// does the CPU engine, there the core's queries themselves (look_run.h TieHost): the bits of the C++
+// below, which runs a masked Tie and a scalp deformed away from its rest pose.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -62,6 +65,7 @@
 #include "groomlab/distance_field.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
@@ -173,6 +177,15 @@ public:
         if (in->empty()) return in;
         const std::size_t strands = in->strandCount();
         const MeshPtr scalp = valueAs<MeshPtr>(ctx.external("scalp"));
+        if (gpu::cpuEngineOn() && affectOf(*this) != AffectKind::Mask &&
+            !(scalp && scalp->hasRest() && scalp->restPoints() != scalp->points())) {
+            gpu::StageInputs stage;
+            stage.tie = gpu::tieInputs(in, scalp, params().getString("tailChannel"));
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Tie, params(), in, scalp.get(), std::move(stage))) {
+                // (Nothing tied: the strands as they came.)
+                return std::memcmp(made->positions().data(), in->positions().data(), in->pointCount() * sizeof(Vec3f)) == 0 ? in : made;
+            }
+        }
         const bool hasScalp = scalp && scalp->triangleCount() > 0;
 
         const Vec3f center = params().getVec3("center");

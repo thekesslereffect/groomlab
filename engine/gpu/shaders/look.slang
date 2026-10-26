@@ -5764,11 +5764,10 @@ struct TieFrame {
     float3 origin, pole, u1, u2;
     uint flags;
 };
-TieFrame tieFrameOf(uint readers, uint chainedCount, float3 sum) {
+TieFrame tieFrameOf(uint readers, uint chainedCount, float3 mean) {
     // The source frame: from the readers' mean for a second Tie down a tail (most start past an
     // earlier Tie's tail start), else from the scalp's center; the pole through the center.
     const bool any = readers > 0u;
-    const float3 mean = any ? sum / float(readers) : float3(0.0f, 0.0f, 0.0f);
     const bool chain = 2u * chainedCount > readers;
     float3 origin = mean;
     if ((gFlag.x & TIE_SCALP) != 0 && !chain) origin = tieScalpCenter();
@@ -5803,16 +5802,18 @@ uint tieBinOf(float3 p, TieFrame f, out float radial) {
     return uint(bin + TIE_BINS) % TIE_BINS;  // (bin from 0 to TIE_BINS; GLSL's % of a negative is undefined)
 }
 
-// The CPU's TieFrameCS: on one thread, the readers summed in strand order (as TieOp sums them).
+// The CPU's TieFrameCS: on one thread, the readers summed in strand order in double (as TieOp sums
+// them).
 void tieFrameAlone() {
-    float3 sum = float3(0.0f, 0.0f, 0.0f);
+    double3 sum = double3(0.0, 0.0, 0.0);
     uint count = 0, chained = 0;
     for (uint j = 0; j < gAux.z; ++j) {
         uint begin, k;
         if (!tieTiedAux1(gAux0.Load((gAux.y + j) * 4), begin, k)) continue;
         ++count;
         chained += k > 0 ? 1u : 0u;
-        sum += loadPoint(begin + k);
+        const float3 p = loadPoint(begin + k);
+        sum = sum + double3(double(p.x), double(p.y), double(p.z));
     }
     const bool everyone = count == 0u;
     if (everyone) {
@@ -5821,10 +5822,13 @@ void tieFrameAlone() {
             if (!tieTiedAux1(s, begin, k)) continue;
             ++count;
             chained += k > 0 ? 1u : 0u;
-            sum += loadPoint(begin + k);
+            const float3 p = loadPoint(begin + k);
+            sum = sum + double3(double(p.x), double(p.y), double(p.z));
         }
     }
-    const TieFrame f = tieFrameOf(count, chained, sum);
+    const double readers = double(count);
+    const float3 mean = count > 0u ? float3(float(sum.x / readers), float(sum.y / readers), float(sum.z / readers)) : float3(0.0f, 0.0f, 0.0f);
+    const TieFrame f = tieFrameOf(count, chained, mean);
     float most[TIE_BINS];
     bool filled[TIE_BINS];
     for (uint b = 0; b < TIE_BINS; ++b) {
@@ -5914,7 +5918,7 @@ void tieFrameGroup(uint t) {
         groupSync();
     }
     if (t == 0) {
-        const TieFrame f = tieFrameOf(sTieCount, sTieChained, sTieSum[0]);
+        const TieFrame f = tieFrameOf(sTieCount, sTieChained, sTieCount > 0u ? sTieSum[0] / float(sTieCount) : float3(0.0f, 0.0f, 0.0f));
         sTieFrame[0] = f.origin;
         sTieFrame[1] = f.pole;
         sTieFrame[2] = f.u1;
@@ -5972,6 +5976,28 @@ struct TieSkin {
     float d2;
     float3 at, normal;
 };
+// The CPU's: the core's ScalpMesh::closestPoint and CollisionSurface::pushOut on the engine's
+// TieHost (look_run.h; its address in gOctaveSeeds[1].zw), as TieOp asks them.
+uint2 tieHost() { return gOctaveSeeds[1].zw; }
+bool hostTieClosest(uint2 host, float3 p, float reach, out float3 at, out float3 normal) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_tie_closest($0, $1, $2, $3, $4)"; }
+}
+float3 hostTiePush(uint2 host, float3 p) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_tie_push($0, $1)"; }
+}
+// The scalp's closest point to p within `reach` (its point and normal), false for none; on the GPU
+// down the mesh of the field's tables from `face`.
+bool tieSkinAt(float3 p, float reach, inout uint face, out float3 at, out float3 normal) {
+    __target_switch {
+    case cpp: return hostTieClosest(tieHost(), p, reach, at, normal);
+    default: {
+        const TieSkin sp = tieClosest(p, face);
+        at = sp.at;
+        normal = sp.normal;
+        return sp.d2 < reach * reach;
+    }
+    }
+}
 TieSkin tieClosest(float3 p, inout uint face) {
     Nearest nearest;
     nearest.best = 3.402823466e38f;
@@ -6075,10 +6101,9 @@ void TieRouteCS(uint3 id : SV_DispatchThreadID) {
                     const float angle = alpha * fj;
                     const float3 dir = ua * cos(angle) + w * sin(angle);
                     const float r = la + (lb - la) * fj;
-                    const TieSkin sp = tieClosest(C + dir * r, face);
-                    const float bound = 0.5f * r;
-                    if (!(sp.d2 < bound * bound)) continue;
-                    const float3 p = sp.at + sp.normal * gValue2.z;
+                    float3 skinAt, skinNormal;
+                    if (!tieSkinAt(C + dir * r, 0.5f * r, face, skinAt, skinNormal)) continue;
+                    const float3 p = skinAt + skinNormal * gValue2.z;
                     const float3 v = p - C;
                     const float at = tieAtan2(dot(v, w), dot(v, ua));
                     if (!(at > 0.0f && at < alpha)) continue;
@@ -6238,6 +6263,13 @@ bool tieNext(inout TieGen g, uint s, uint routeCount, uint first, uint inputCoun
 // A path point pushed out of the scalp to the clearance (CollisionSurface::pushOut: the field's
 // answer alone, Probe::fieldOnly, as the clearance walk asks it).
 float3 tiePush(FieldTables tables, float3 p) {
+    __target_switch {
+    case cpp: {
+        const uint2 host = tieHost();
+        return host.x != 0u || host.y != 0u ? hostTiePush(host, p) : p;
+    }
+    default: break;
+    }
     if ((gFlag.x & TIE_PUSH) == 0) return p;
     Probe probe;
     learnt(probe, -infinity(), 0.0f);
@@ -6258,6 +6290,30 @@ void tieStoreTail(uint p, float v, float m) {
 void tieStorePoint(uint p, float3 v, float m) {
     const float3 was = loadPoint(p);
     storePoint(gOut, p, m >= 1.0f ? v : was + (v - was) * m);
+}
+
+// The first crossing past `from` along d (from the segment's start, q its offset from the last
+// point) of the sphere of radius L about the last point (|q + u d| = L, the larger root, u clamped
+// to [from, 1]); false where d is a point.
+bool tieCrossing(float3 d, float3 q, float L, float from, out float u) {
+    u = 0.0f;
+    const float A = dot(d, d), B = 2.0f * dot(d, q), C = dot(q, q) - L * L;
+    if (!(A > 0.0f)) return false;
+    const float disc = max(0.0f, B * B - 4.0f * A * C);
+    u = clamp((-B + sqrt(disc)) / (2.0f * A), from, 1.0f);
+    return true;
+}
+// The CPU's, in double as TieOp works it out: `from` the last crossing on this segment where
+// `sameSegment` (alongBits: its double, kept), else 0.
+bool tieCrossingD(float3 d, float3 q, float L, bool sameSegment, inout uint2 alongBits, out float u) {
+    u = 0.0f;
+    const double A = double(dot(d, d)), B = 2.0L * double(dot(d, q)), C = double(dot(q, q)) - double(L) * double(L);
+    if (!(A > 0.0L)) return false;
+    const double disc = max(0.0L, B * B - 4.0L * A * C);
+    const double at = clamp((-B + sqrt(disc)) / (2.0L * A), sameSegment ? asdouble(alongBits.x, alongBits.y) : 0.0L, 1.0L);
+    asuint(at, alongBits.x, alongBits.y);
+    u = float(at);
+    return true;
 }
 
 [shader("compute")]
@@ -6349,6 +6405,7 @@ void TieLayCS(uint3 id : SV_DispatchThreadID) {
     // the tail.
     float3 P0 = S, P1 = S;
     float A0 = 0.0f, A1 = 0.0f, ringArc = 0.0f, along = 0.0f;
+    uint2 alongBits = uint2(0u, 0u);  // (the CPU's: `along` in double, as TieOp keeps it)
     bool ringKnown = false, has1 = false, ended = false, extending = false, needPoint = true;
     uint cur = 0, seg = 0, at = k + 1;
     float3 last = S, before = S;
@@ -6392,10 +6449,13 @@ void TieLayCS(uint3 id : SV_DispatchThreadID) {
                 // |P0 + u d - last| = L, the larger root (leaving the sphere), u in [from, 1].
                 const float3 d = P1 - P0;
                 const float3 q = P0 - last;
-                const float A = dot(d, d), B = 2.0f * dot(d, q), C = dot(q, q) - L * L;
-                if (A > 0.0f) {
-                    const float disc = max(0.0f, B * B - 4.0f * A * C);
-                    const float u = clamp((-B + sqrt(disc)) / (2.0f * A), cur == seg ? along : 0.0f, 1.0f);
+                float u;
+                bool crossing;
+                __target_switch {
+                case cpp: crossing = tieCrossingD(d, q, L, cur == seg, alongBits, u);
+                default: crossing = tieCrossing(d, q, L, cur == seg ? along : 0.0f, u);
+                }
+                if (crossing) {
                     seg = cur;
                     along = u;
                     last = P0 + d * u;
@@ -6410,8 +6470,18 @@ void TieLayCS(uint3 id : SV_DispatchThreadID) {
             float3 dir = normalized(P1 - P0);
             if (len3(dir) < 0.5f) dir = axis;
             const float3 q = P1 - last;
-            const float B = 2.0f * dot(dir, q), C = dot(q, q) - L * L;
-            const float u = max((-B + sqrt(max(0.0f, B * B - 4.0f * C))) / 2.0f, 0.0f);
+            float u;
+            __target_switch {
+            case cpp: {
+                const double B = 2.0L * double(dot(dir, q)), C = double(dot(q, q)) - double(L) * double(L);
+                u = float(max((-B + sqrt(max(0.0L, B * B - 4.0L * C))) / 2.0L, 0.0L));
+                asuint(1.0L, alongBits.x, alongBits.y);
+            }
+            default: {
+                const float B = 2.0f * dot(dir, q), C = dot(q, q) - L * L;
+                u = max((-B + sqrt(max(0.0f, B * B - 4.0f * C))) / 2.0f, 0.0f);
+            }
+            }
             P0 = P1;
             A0 = A1;
             P1 = P1 + dir * u;

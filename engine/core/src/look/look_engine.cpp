@@ -2102,7 +2102,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                                 r.inputs[j].tie->channelFrom == k);
                 read = read || (j < r.fields.stages.size() && r.fields.stages[j].affect.channelFrom == k);  // (an affect mapped to it)
             }
-            const bool writes = p.flag[0] != 0 && read;
+            const bool writes = p.flag[0] != 0 && (read || r.tailsOut);
             if (!writes) c.flag[0] &= ~kTieWritesTail;
             allocate(auxBuffer(k, 2), kTieFrameWords * 4);
             allocate(auxBuffer(k, 3), std::max<std::size_t>(n * kTieSlots * 16, 16));
@@ -2595,6 +2595,16 @@ GpuTimes LookEngine::times(bool wait) {
         g.totalMs += c.totalMs;
     }
     return times_ = g;
+}
+
+std::vector<float> LookEngine::readTail(std::size_t k) {
+    std::vector<float> out;
+    const int id = auxBuffer(k, 4);
+    if (!has(id)) return out;
+    const std::vector<std::uint8_t> bytes = readBack(id, pointCount_ * 4);
+    out.resize(pointCount_);
+    if (!out.empty() && bytes.size() == pointCount_ * 4) std::memcpy(out.data(), bytes.data(), bytes.size());
+    return out;
 }
 
 std::vector<Vec3f> LookEngine::readPositions() {

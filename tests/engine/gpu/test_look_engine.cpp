@@ -6174,13 +6174,10 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
         auto engine = gpu::makeCpuLookEngine();
         engine->setBase(p.base, session.last().scalp.get());
         std::string line;
-        // Tie is not its operator's arithmetic yet: it and the stages after it are reported, not
-        // counted.
-        bool counted = true;
+        const bool counted = true;
         for (std::size_t k = 1; k <= p.chain.stages.size(); ++k) {
             if (k < p.chain.stages.size() && p.chain.stages[k].node == p.chain.stages[k - 1].node) continue;  // (a Wet's levels)
             const gpu::LookStage& stage = p.chain.stages[k - 1];
-            if (stage.kind == gpu::StageKind::Tie) counted = false;
             const StrandsPtr want = valueAs<StrandsPtr>(doc.graph.cachedValue(stage.node));
             gpu::LookRun run = p.run;
             run.params.stages.resize(k);
@@ -6299,6 +6296,9 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"SelfCollide", R"("params": {"packing": 0.01})"},
         {"Static", R"("params": {"strength": 0.5})"},
         {"Static", R"("params": {"strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "randomness": 0.8, "profile": [[0, 0.2], [1, 1]]})"},
+        {"Tie", tieParams()},
+        {"Tie", tieParams(R"(, "spread": 30.0, "tightness": 0.4, "ease": 0.0, "tailChannel": "")", "[1.0, 2.0, -5.0]", 0.9)},
+        {"Tie", tieParams(R"(, "direction": [0.0, -1.0, -0.3], "twist": -0.2, "ease": 1.0)")},
     };
     std::size_t differing = 0, compared = 0;
     for (const Case& c : cases) {
@@ -6350,7 +6350,8 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"Noise", gpu::StageKind::Noise},         {"Collide", gpu::StageKind::Collide},
                                                              {"Clump", gpu::StageKind::Clump},         {"Interpolate", gpu::StageKind::Interpolate},
                                                              {"Smooth", gpu::StageKind::Smooth},       {"Curl", gpu::StageKind::Curl},
-                                                             {"SelfCollide", gpu::StageKind::SelfCollide}, {"Static", gpu::StageKind::Static}};
+                                                             {"SelfCollide", gpu::StageKind::SelfCollide}, {"Static", gpu::StageKind::Static},
+                                                             {"Tie", gpu::StageKind::Tie}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;
@@ -6405,6 +6406,9 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
             grid->layout = layout;
             stageInputs.grid = grid;
         }
+        if (kind == gpu::StageKind::Tie) {
+            stageInputs.tie = gpu::tieInputs(valueAs<StrandsPtr>(inputs[0]), session.last().scalp, op.params().getString("tailChannel"));
+        }
         if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
         // Its C++ (the engine off), the stage on the engine, the operator as it runs now.
         StrandsPtr made[3];
@@ -6455,6 +6459,12 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
             for (std::size_t i = 0; i < made[0]->widths().size(); ++i) {
                 bits += std::memcmp(&made[0]->widths()[i], &made[m]->widths()[i], sizeof(float)) != 0;
             }
+            // (Tie's tail channel as its C++ writes it.)
+            if (kind == gpu::StageKind::Tie && !op.params().getString("tailChannel").empty()) {
+                const std::vector<float>* want = made[0]->pointChannel(op.params().getString("tailChannel"));
+                const std::vector<float>* got = made[m]->pointChannel(op.params().getString("tailChannel"));
+                EXPECT_TRUE(want && got && std::memcmp(want->data(), got->data(), want->size() * 4) == 0) << "the tail channel";
+            }
             // (Flyaway's strays flagged as its C++ flags them.)
             if (m == 2 && made[0]->strandChannel("flyaway")) {
                 const std::vector<float>* got = made[m]->strandChannel("flyaway");
@@ -6493,6 +6503,7 @@ TEST(CpuEngine, SpeedAgainstTheOperators) {
     graphs.push_back({"Collide", withoutClearance(chainGraph({{"Collide", R"("params": {"offset": 0.12})"}}, true, true))});
     graphs.push_back({"SelfCollide", withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.6})"}, {"SelfCollide", ""}}))});
     graphs.push_back({"Static", withoutClearance(chainGraph({{"Static", R"("params": {"strength": 0.5})"}}))});
+    graphs.push_back({"Tie", withoutClearance(chainGraph({{"Tie", tieParams()}}))});
     graphs.push_back({"RestoreLength", withReference(neighbourGraph("RestoreLength", R"("params": {"mode": "segments"})"), "n1", "interpolate")});
     graphs.push_back({"MeshCut", meshCutGraph(R"("params": {"offset": 0.02})"),
                       [](const std::string& j) { return meshCutGroom(j, Vec3f(0.0f, 4.6f, 0.0f), 1.6f); }});

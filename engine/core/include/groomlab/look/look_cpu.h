@@ -29,7 +29,8 @@ void readFieldValues(const ScalarField& field, const StrandSet& in, bool pointsA
 // copied): a run moving points writes every one into out's own (StrandSet::overwritePositions), and
 // with `widths` the widths a Width makes (out's widths, one a point). Throws std::runtime_error as
 // the engine does.
-void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out, bool widths = false);
+void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out, bool widths = false,
+                    const std::string& tail = "");  // tail: a Tie's channel (LookRun::tailsOut) into out's point channel
 
 // An operator's own stage of `kind` (readStageParams' kinds, look_stage_params.h) on `in`: its
 // params and its mapped params' values on `in` read here, its inputs `inputs` (the root frames the
