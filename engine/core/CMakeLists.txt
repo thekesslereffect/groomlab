@@ -181,6 +181,9 @@ if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         set(_kernels_dep "${CMAKE_CURRENT_BINARY_DIR}/look_kernels_cpu_clang_$<CONFIG>.d")
         set(_includes "$<TARGET_PROPERTY:groomlab_core_objects,INCLUDE_DIRECTORIES>")
         set(_defines "$<TARGET_PROPERTY:groomlab_core_objects,COMPILE_DEFINITIONS>")
+        # engine/gpu makes the C++ again from look.slang (its stamp: the file itself is written aside,
+        # so a build would see it unchanged and compile the stale one): built after it, again with it.
+        set(_kernels_stamp "${CMAKE_BINARY_DIR}/engine/gpu/generated/look_kernels_cpu.stamp")
         add_custom_command(
             OUTPUT "${_kernels_obj}"
             COMMAND "${GROOMLAB_CLANG_CL}" /nologo /c /TP -std:c++17 /EHsc /utf-8 -w -Z7
@@ -189,7 +192,7 @@ if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
                     "$<$<BOOL:${_includes}>:/I$<JOIN:${_includes},;/I>>"
                     "$<$<BOOL:${_defines}>:/D$<JOIN:${_defines},;/D>>"
                     /clang:-MD "/clang:-MF${_kernels_dep}" "/Fo${_kernels_obj}" "${_kernels_cpp}"
-            DEPENDS "${_kernels_cpp}"
+            DEPENDS "${_kernels_cpp}" "${_kernels_stamp}"
             DEPFILE "${_kernels_dep}"
             COMMENT "Building the look kernels with clang-cl"
             COMMAND_EXPAND_LISTS

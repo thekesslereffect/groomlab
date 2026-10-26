@@ -1289,6 +1289,15 @@ void LookEngine::putStageInputs(const LookRun& run) {
 void LookEngine::putShaperInputs(std::size_t k, const StageParams& stage, const StageInputs* in) {
     const std::size_t stageN = stageStrands(stage), stageP = stagePoints(stage);
     StageHeld& held = held_[k];
+    if (stage.stage.kind == StageKind::Smooth) {
+        // On the CPU its boxes' window ends, worked out once (look_stage_params.h smoothEnds:
+        // look.slang SmoothCS's cpu form reads them from aux 0).
+        if (!sharesBase()) return;
+        const std::vector<SmoothEnd> ends = smoothEnds(stage.value[1], static_cast<std::size_t>(std::max(stage.flag[0], 0)));
+        void* to = writable(auxBuffer(k, 0), std::max<std::size_t>(ends.size(), 1) * sizeof(SmoothEnd));
+        if (!ends.empty()) std::memcpy(to, ends.data(), ends.size() * sizeof(SmoothEnd));
+        return;
+    }
     if (stage.stage.kind == StageKind::RestoreLength) {
         // A reference the run does not make (look.slang RestoreLengthCS): aux 0 its segments' lengths
         // per point, aux 1 its first segments per strand. (One the run makes: that stage's points.)
@@ -1381,7 +1390,10 @@ LookEngine::Kernel LookEngine::shaperKernel(std::size_t k, const StageParams& st
     const std::size_t stageN = stageStrands(stage);
     switch (stage.stage.kind) {
         case StageKind::Smooth:
-            *groups = stageN;  // (a group a strand: look.slang SmoothCS)
+            // A group a strand (look.slang SmoothCS); on the CPU a thread a strand, SMOOTH_GROUP (64)
+            // strands a group, reading its window ends.
+            *groups = sharesBase() ? (stageN + 63) / 64 : stageN;
+            if (sharesBase()) b->aux[0] = auxBuffer(k, 0);
             return Kernel::Smooth;
         case StageKind::RestoreLength:
             if (stage.flag[0] != 2) {
@@ -2078,8 +2090,8 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             case StageKind::Interpolate:
                 kernel = Kernel::Interpolate;
                 // Four strands a group, two where the guides have more than 32 samples (look.slang
-                // InterpolateCS).
-                groups = p.flag[0] > 32 ? (n + 1) / 2 : (n + 3) / 4;
+                // InterpolateCS); on the CPU a thread a strand, INTERP_GROUP (64) strands a group.
+                groups = sharesBase() ? (n + 63) / 64 : p.flag[0] > 32 ? (n + 1) / 2 : (n + 3) / 4;
                 b.aux[0] = auxBuffer(k, 0);
                 b.aux[1] = auxBuffer(k, 1);
                 b.aux[2] = r.inputs[k].interpolate && r.inputs[k].interpolate->clearance ? auxBuffer(k, 2) : -1;

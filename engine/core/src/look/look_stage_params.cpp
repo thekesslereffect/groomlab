@@ -683,6 +683,30 @@ std::shared_ptr<RestoreInputs> restoreInputs(const StrandSet& in, const StrandSe
     return made;
 }
 
+double smoothWidth(float scale, std::size_t cells) {
+    return std::min(2.0 * static_cast<double>(scale) * static_cast<double>(cells), static_cast<double>(2 * cells));
+}
+
+std::vector<SmoothEnd> smoothEnds(float scale, std::size_t cells) {
+    const std::size_t wrap = 2 * cells;
+    const double width = smoothWidth(scale, cells);
+    auto end = [&](double x) {
+        SmoothEnd e;
+        e.turns = std::floor(x / static_cast<double>(wrap));
+        const double r = x - e.turns * static_cast<double>(wrap);
+        e.cell = static_cast<std::uint32_t>(std::min(static_cast<std::size_t>(r), wrap - 1));
+        e.into = r - static_cast<double>(e.cell);
+        return e;
+    };
+    std::vector<SmoothEnd> ends(2 * wrap);
+    for (std::size_t k = 0; k < wrap; ++k) {
+        const double center = static_cast<double>(k) + 0.5;
+        ends[k] = end(center + 0.5 * width);
+        ends[wrap + k] = end(center - 0.5 * width);
+    }
+    return ends;
+}
+
 std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* scalp, std::shared_ptr<const FlowField> flow) {
     auto made = std::make_shared<FlowInputs>();
     const FlowField* field = flow.get();

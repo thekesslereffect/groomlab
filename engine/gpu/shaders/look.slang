@@ -1120,10 +1120,14 @@ void interpolateStrandAlone(uint s) {
     const float3 root = loadPoint(begin);
     float4 blendAt[MAX_SAMPLES];
     float arcAt[MAX_SAMPLES];
-    for (uint j = 0; j < samples; ++j) {
-        float3 b = root;
-        for (uint i = 0; i < found; ++i) b = addTurned(b, guide[i].c.z, j, guide[i].c.w, guide[i].a, guide[i].b, asfloat(guide[i].c.x), asfloat(guide[i].c.y));
-        blendAt[j] = float4(b, 0.0f);
+    // (A guide at a time over the samples: each sample's sum still taken guide by guide, in order,
+    // the guide's kind of turn the same along.)
+    for (uint j = 0; j < samples; ++j) blendAt[j] = float4(root, 0.0f);
+    for (uint i = 0; i < found; ++i) {
+        const InterpGuide gd = guide[i];
+        const uint g = gd.c.z, kind = gd.c.w;
+        const float c2z = asfloat(gd.c.x), w = asfloat(gd.c.y);
+        for (uint j = 0; j < samples; ++j) blendAt[j].xyz = addTurned(blendAt[j].xyz, g, j, kind, gd.a, gd.b, c2z, w);
     }
     for (uint j = 1; j < samples; ++j) blendAt[j].w = lengthExact(blendAt[j].xyz - blendAt[j - 1].xyz);
     float scale = 0.0f;
@@ -1327,9 +1331,8 @@ void interpolateGroup(uint3 id, uint3 local) {
 void InterpolateCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) {
     __target_switch {
     case cpp:
-        const uint perGroup = gFlag.x > 32 ? 2 : 4;
-        const uint s = threadIndex(id, INTERP_GROUP) / INTERP_GROUP * perGroup + local.x / STRAND_LANES;
-        if (local.x % STRAND_LANES == 0 && local.x / STRAND_LANES < perGroup && s < gStrandCount) interpolateStrandAlone(s);
+        // A strand a thread: the CPU engine dispatches INTERP_GROUP strands a group.
+        if (threadIndex(id, INTERP_GROUP) < gStrandCount) interpolateStrandAlone(threadIndex(id, INTERP_GROUP));
     default:
         interpolateGroup(id, local);
     }
@@ -6353,12 +6356,14 @@ struct SmoothEnd {
     uint cell;
     double into;
 };
-SmoothEnd smoothEndAt(double x, uint wrap) {
+// Window end i (look_stage_params.h smoothEnds, SmoothOp's SmoothFilter: the same for every strand,
+// worked out once): gAux0, 24 bytes each, each cell's upper end, then each one's lower.
+SmoothEnd smoothEndOf(uint i) {
     SmoothEnd e;
-    e.turns = floor(x / double(wrap));
-    const double r = x - e.turns * double(wrap);
-    e.cell = min(uint(r), wrap - 1);
-    e.into = r - double(e.cell);
+    const uint at = i * 24;
+    e.turns = asdouble(gAux0.Load(at), gAux0.Load(at + 4));
+    e.into = asdouble(gAux0.Load(at + 8), gAux0.Load(at + 12));
+    e.cell = gAux0.Load(at + 16);
     return e;
 }
 // The input polyline at arc length a (smoothShape's pointAt): `seg` and the arc lengths to its
@@ -6420,13 +6425,6 @@ void smoothAlone(uint s) {
         // Three box filters `width` cells wide over the period, each from its running sums.
         const double width = min(2.0 * double(scale) * double(m), double(wrap));
         if (width > 0.0) {
-            // Each cell's window ends, the same every pass (SmoothFilter's upper and lower).
-            SmoothEnd upperEnds[2 * SMOOTH_CELLS], lowerEnds[2 * SMOOTH_CELLS];
-            for (uint c = 0; c < wrap; ++c) {
-                const double center = double(c) + 0.5;
-                upperEnds[c] = smoothEndAt(center + 0.5 * width, wrap);
-                lowerEnds[c] = smoothEndAt(center - 0.5 * width, wrap);
-            }
             for (uint pass = 0; pass < 3; ++pass) {
                 sums[0] = double3(0.0, 0.0, 0.0);
                 double3 running = double3(0.0, 0.0, 0.0);
@@ -6436,7 +6434,7 @@ void smoothAlone(uint s) {
                 }
                 const double3 total = running;
                 for (uint c = 0; c < wrap; ++c) {
-                    const SmoothEnd hi = upperEnds[c], lo = lowerEnds[c];
+                    const SmoothEnd hi = smoothEndOf(c), lo = smoothEndOf(wrap + c);
                     const double3 upper = total * hi.turns + sums[hi.cell] + period[hi.cell] * hi.into;
                     const double3 lower = total * lo.turns + sums[lo.cell] + period[lo.cell] * lo.into;
                     boxed[c] = (upper - lower) * (1.0 / width);
@@ -6488,13 +6486,13 @@ void smoothAlone(uint s) {
 [shader("compute")]
 [numthreads(SMOOTH_GROUP, 1, 1)]
 void SmoothCS(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID) {
-    const uint s = group.y * gDispatch.x + group.x;  // (the same for the whole group)
-    if (s >= gStrandCount) return;
+    const uint g = group.y * gDispatch.x + group.x;
     __target_switch {
     case cpp:
-        if (local.x == 0) smoothAlone(s);
+        // A strand a thread: the CPU engine dispatches SMOOTH_GROUP strands a group.
+        if (g * SMOOTH_GROUP + local.x < gStrandCount) smoothAlone(g * SMOOTH_GROUP + local.x);
     default:
-        smoothGroup(s, local.x);
+        if (g < gStrandCount) smoothGroup(g, local.x);  // (a group a strand)
     }
 }
 

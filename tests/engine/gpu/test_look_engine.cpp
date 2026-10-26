@@ -6277,6 +6277,9 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Interpolate", R"("params": {"keepClearance": true})", false, true},
         {"Interpolate", R"("params": {"keepClearance": false, "limitDistance": 0.6, "preserveLength": true})", false, true},
         {"Interpolate", R"("params": {"keepClearance": true, "limitDistance": 1.5, "smoothGuides": true})", true, true},
+        {"Smooth", R"("params": {"strength": 0.8, "scale": 0.3})"},
+        {"Smooth", R"("params": {"strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "scale": 0.1, "profile": [[0, 0], [1, 1]]})"},
+        {"Smooth", R"("params": {"strength": 1.0, "scale": 1.0})"},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
     };
@@ -6328,7 +6331,8 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"BlendNeighbors", gpu::StageKind::BlendNeighbors},
                                                              {"Length", gpu::StageKind::Length},       {"Wind", gpu::StageKind::Wind},
                                                              {"Noise", gpu::StageKind::Noise},         {"Collide", gpu::StageKind::Collide},
-                                                             {"Clump", gpu::StageKind::Clump},         {"Interpolate", gpu::StageKind::Interpolate}};
+                                                             {"Clump", gpu::StageKind::Clump},         {"Interpolate", gpu::StageKind::Interpolate},
+                                                             {"Smooth", gpu::StageKind::Smooth}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;

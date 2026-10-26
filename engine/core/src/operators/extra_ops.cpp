@@ -245,34 +245,17 @@ std::size_t smoothCells(float scale) {
 // The filters' window ends fall at the same places in every strand's cells (they depend on the
 // scale and the cell count alone): SmoothFilter finds them once for a whole evaluation.
 struct SmoothFilter {
-    // Where a window end falls in the period: whole periods before it, its cell and how far into it.
-    struct End {
-        double turns = 0.0;
-        std::size_t cell = 0;
-        double into = 0.0;
-    };
+    using End = gpu::SmoothEnd;
     std::size_t cells = 0;
     double width = 0.0;  // the boxes' width, in cells
-    std::vector<End> lower, upper;  // each cell's window, its ends
+    std::vector<End> ends;  // each cell's window's upper end, then each one's lower (look_stage_params.h smoothEnds)
+    const End* upper = nullptr;
+    const End* lower = nullptr;
 
-    SmoothFilter(float scale, std::size_t cellCount) : cells(cellCount) {
-        const std::size_t wrap = 2 * cells;
-        width = std::min(2.0 * static_cast<double>(scale) * static_cast<double>(cells), static_cast<double>(wrap));
-        auto end = [&](double x) {
-            End e;
-            e.turns = std::floor(x / static_cast<double>(wrap));
-            const double r = x - e.turns * static_cast<double>(wrap);
-            e.cell = std::min(static_cast<std::size_t>(r), wrap - 1);
-            e.into = r - static_cast<double>(e.cell);
-            return e;
-        };
-        lower.resize(wrap);
-        upper.resize(wrap);
-        for (std::size_t k = 0; k < wrap; ++k) {
-            const double center = static_cast<double>(k) + 0.5;
-            upper[k] = end(center + 0.5 * width);
-            lower[k] = end(center - 0.5 * width);
-        }
+    SmoothFilter(float scale, std::size_t cellCount)
+        : cells(cellCount), width(gpu::smoothWidth(scale, cellCount)), ends(gpu::smoothEnds(scale, cellCount)) {
+        upper = ends.data();
+        lower = ends.data() + 2 * cells;
     }
 };
 
@@ -324,8 +307,8 @@ void smoothShape(const Vec3f* pts, std::size_t n, const SmoothFilter& filter, st
     // Three box filters `width` cells wide over the period, each from its running sums: the
     // integral up to a window's end (in cells, any real number) of the cells as steps.
     const double width = filter.width;
-    const SmoothFilter::End* const upperEnds = filter.upper.data();
-    const SmoothFilter::End* const lowerEnds = filter.lower.data();
+    const SmoothFilter::End* const upperEnds = filter.upper;
+    const SmoothFilter::End* const lowerEnds = filter.lower;
     if (width > 0.0) {
         for (int pass = 0; pass < 3; ++pass) {
             sums[0] = D3{};
@@ -427,6 +410,13 @@ private:
             if (incremental) return false;  // the input handed on: the graph passes its changes on
             *result = in;
             return true;
+        }
+        if (!incremental && gpu::cpuEngineOn()) {
+            // look.slang's SmoothCS, the GPU preview's own (look_cpu.h).
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Smooth, params(), in, scalpOf(ctx))) {
+                *result = made;
+                return true;
+            }
         }
         const SmoothFilter filter(scale, smoothCells(scale));
 

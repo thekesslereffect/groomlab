@@ -127,6 +127,17 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
 // whether there is any (null: not asked).
 std::shared_ptr<RestoreInputs> restoreInputs(const StrandSet& in, const StrandSet* refStrands, const GuideSet* refGuides, float* longest,
                                              bool* found = nullptr);
+// Smooth's window ends (SmoothOp's, the same for every strand: its three boxes `smoothWidth` cells
+// wide over the reflected period of 2 x `cells` cells), each cell's upper end, then each one's
+// lower: whole periods before it, how far into its cell, and the cell (24 bytes each: the CPU
+// engine hands them to look.slang SmoothCS as they are).
+struct SmoothEnd {
+    double turns = 0.0;
+    double into = 0.0;
+    std::uint32_t cell = 0, unused = 0;
+};
+double smoothWidth(float scale, std::size_t cells);
+std::vector<SmoothEnd> smoothEnds(float scale, std::size_t cells);
 // Flow's field and roots as the kernel takes them (FlowInputs, its tables the caller's) for the
 // strands `in` traced over `scalp` (null: none) along `field` (null: no arrows), as FlowOp reads them.
 std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* scalp, std::shared_ptr<const FlowField> field);
