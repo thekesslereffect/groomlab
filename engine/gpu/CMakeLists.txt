@@ -188,12 +188,10 @@ foreach(_target dxbc glsl)
 endforeach()
 
 # The same kernels compiled to C++ for the CPU engine (look_engine_cpu.cpp: the GPU's stages run on
-# the CPU from this one source). Those synchronizing a group (barriers, groupshared memory) or using
-# atomics have no CPU form yet: the CPU engine refuses a run that dispatches them.
-set(_gpu_only_kernels InterpolateCS ClearanceCS CurlAxesCS LongestCS GridBoundsCS GridDilateCS GridCompactCS GridSplatCS
-    GridUnknownsCS StaticMomentsCS TieFrameCS TwistAxesCS SmoothCS)
+# the CPU from this one source). Where a kernel's group works as one (barriers, groupshared memory),
+# its C++ form runs each strand or clump whole on a thread (look.slang's __target_switch cpp cases),
+# and its atomics are the core's (src/look_kernels_cpu_atomics.h, included first).
 set(_cpu_kernels ${_kernels})
-list(REMOVE_ITEM _cpu_kernels ${_gpu_only_kernels})
 set(_cpu_entries "")
 set(_cpu_list "")
 foreach(_k IN LISTS _cpu_kernels)
@@ -233,7 +231,7 @@ set_source_files_properties(shaders/look.slang shaders/lines.slang shaders/follo
 target_include_directories(groomlab_gpu PUBLIC include PRIVATE "${_gen}" "${_slang_root}/include")
 # (slangc's C++: its own style.)
 set_source_files_properties("${_gen}/look_kernels_cpu.cpp" PROPERTIES GENERATED TRUE
-    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/W0;/bigobj>")
+    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/W0;/bigobj;/FI${CMAKE_CURRENT_SOURCE_DIR}/src/look_kernels_cpu_atomics.h>")
 target_link_libraries(groomlab_gpu PUBLIC groomlab::core d3d11 opengl32 PRIVATE groomlab::warnings)
 add_library(groomlab::gpu ALIAS groomlab_gpu)
 

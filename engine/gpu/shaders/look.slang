@@ -999,53 +999,55 @@ float3 addTurned(float3 sum, uint g, uint j, uint kind, float4 a, float4 b, floa
 // The lane's sample m of four held apart (no array: some drivers keep one in memory).
 float3 pick(float3 b0, float3 b1, float3 b2, float3 b3, uint m) { return m == 0 ? b0 : m == 1 ? b1 : m == 2 ? b2 : b3; }
 
-[shader("compute")]
-[numthreads(INTERP_GROUP, 1, 1)]
-void InterpolateCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) {
-    const uint samples = gFlag.x;
-    const bool wide = samples > 32;            // two strands a group, 64 samples each
-    const uint perGroup = wide ? 2 : 4;
-    const uint lane = local.x % STRAND_LANES;
-    const uint slot = local.x / STRAND_LANES;  // the strand's place in the group
-    const uint s = threadIndex(id, INTERP_GROUP) / INTERP_GROUP * perGroup + slot;
-    const uint base = slot * (wide ? 64 : 32);  // its samples in sBlend and sArc
-    const uint guides = slot * BIND_SLOTS;      // its guides in sGuideA...
-    // The strand's record (every lane reads it: the same words).
-    bool live = false, blend = false;
-    uint begin = 0, n = 0, found = 0, recordsAt = 0, twisted = 0;
-    float influence = 1.0f;
-    if (slot < perGroup && s < gStrandCount) {
-        live = true;
-        begin = strandBegin(s);
-        n = strandCountOf(s);
-        float nearest2;
-        const uint3 header = bindHeader(s, nearest2);
-        if (header.y != 0) {  // else no points, or no guide: left as it is
-            recordsAt = header.x;
-            found = min(header.y, BIND_SLOTS);
-            twisted = header.z;
-            // How much the guides take this strand: all of it, or by distance within the radius.
-            if (gValue.x > 0.0f) {
-                const float t = divExact(sqrtExact(nearest2), gValue.x);
-                // The ramp, brought to 0 at the radius over its last twentieth (as the CPU does).
-                influence = t >= 1.0f ? 0.0f : clamp(rampAt(t), 0.0f, 1.0f) * min((1.0f - t) * 20.0f, 1.0f);
-            }
-            blend = influence > 0.0f && n >= 2;
+// A strand's record (InterpolateCS): its points, the guides it blends (`found`, their records at
+// `recordsAt`, twisted or not), how much they take it, whether it blends at all (else left as it
+// came) and whether it is bound.
+struct InterpStrand {
+    uint begin, n, found, recordsAt, twisted;
+    float influence;
+    bool blend, bound;
+};
+InterpStrand interpStrand(uint s) {
+    InterpStrand st;
+    st.begin = strandBegin(s);
+    st.n = strandCountOf(s);
+    st.found = 0;
+    st.recordsAt = 0;
+    st.twisted = 0;
+    st.influence = 1.0f;
+    st.blend = false;
+    float nearest2;
+    const uint3 header = bindHeader(s, nearest2);
+    st.bound = header.y != 0;
+    if (st.bound) {  // else no points, or no guide: left as it is
+        st.recordsAt = header.x;
+        st.found = min(header.y, BIND_SLOTS);
+        st.twisted = header.z;
+        // How much the guides take this strand: all of it, or by distance within the radius.
+        if (gValue.x > 0.0f) {
+            const float t = divExact(sqrtExact(nearest2), gValue.x);
+            // The ramp, brought to 0 at the radius over its last twentieth (as the CPU does).
+            st.influence = t >= 1.0f ? 0.0f : clamp(rampAt(t), 0.0f, 1.0f) * min((1.0f - t) * 20.0f, 1.0f);
         }
-        // The guides' influence for the fields that read it after (FieldCS: gOut3, a float a
-        // strand; 0 where the strand is not bound, as the CPU's channel).
-        if (gFlag2.x != 0 && lane == 0) gOut3.Store(s * 4, asuint(header.y != 0 ? influence : 0.0f));
+        st.blend = st.influence > 0.0f && st.n >= 2;
     }
-    if (live && !blend) {  // left as it came
-        for (uint i = lane; i < n; i += STRAND_LANES) storePoint(gOut, begin + i, loadPoint(begin + i));
-    }
-    // A lane a guide (BIND_SLOTS of them at most: STRAND_LANES): its index, weight, length share
-    // and turn (Rotation's constructor: made once, then applied to every sample) from its root's
-    // normal to this strand's (and on by its path's twist where that bends round a fold).
-    float3 root = float3(0.0f, 0.0f, 0.0f);
-    if (blend) {
-        root = loadPoint(begin);
-        if (lane < found) {
+    return st;
+}
+
+// Guide `i` of a strand's binding: its index, weight, length share and turn (Rotation's
+// constructor: made once, then applied to every sample) from its root's normal to the strand's
+// (and on by its path's twist where that bends round a fold), packed as the group holds it
+// (sGuideA, sGuideB, sGuideC, sLength).
+struct InterpGuide {
+    float4 a, b;
+    uint4 c;
+    float length;
+};
+InterpGuide interpGuide(uint s, InterpStrand st, uint lane) {
+    const uint recordsAt = st.recordsAt, found = st.found, twisted = st.twisted;
+    InterpGuide out;
+    {
+        {
             // Its record: the guide, the weight (its code's, exact), the twist.
             uint g, code;
             if (gAux.x == 2) {
@@ -1090,10 +1092,129 @@ void InterpolateCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadI
                 c0 = k;
                 c1 = float3(c, invTurn, 0.0f);
             }
-            sGuideA[guides + lane] = float4(c0, c1.x);
-            sGuideB[guides + lane] = float4(c1.yz, c2.xy);
-            sGuideC[guides + lane] = uint4(asuint(c2.z), asuint(w), g, kind);
-            sLength[guides + lane] = guideLength(g) * w;
+            out.a = float4(c0, c1.x);
+            out.b = float4(c1.yz, c2.xy);
+            out.c = uint4(asuint(c2.z), asuint(w), g, kind);
+            out.length = guideLength(g) * w;
+        }
+    }
+    return out;
+}
+
+// The CPU's InterpolateCS (its threads run one after another: no group to share samples with): a
+// strand whole on the thread of its first lane, sample by sample with the very arithmetic the
+// group's lanes do, in the same order (the strand's samples and guides in arrays of its own).
+void interpolateStrandAlone(uint s) {
+    const InterpStrand st = interpStrand(s);
+    if (gFlag2.x != 0) gOut3.Store(s * 4, asuint(st.bound ? st.influence : 0.0f));
+    const uint begin = st.begin, n = st.n, found = st.found;
+    if (!st.blend) {
+        for (uint i = 0; i < n; ++i) storePoint(gOut, begin + i, loadPoint(begin + i));
+        return;
+    }
+    const uint samples = gFlag.x;
+    InterpGuide guide[BIND_SLOTS];
+    for (uint i = 0; i < found; ++i) guide[i] = interpGuide(s, st, i);
+    const float3 root = loadPoint(begin);
+    float4 blendAt[MAX_SAMPLES];
+    float arcAt[MAX_SAMPLES];
+    for (uint j = 0; j < samples; ++j) {
+        float3 b = root;
+        for (uint i = 0; i < found; ++i) b = addTurned(b, guide[i].c.z, j, guide[i].c.w, guide[i].a, guide[i].b, asfloat(guide[i].c.x), asfloat(guide[i].c.y));
+        blendAt[j] = float4(b, 0.0f);
+    }
+    for (uint j = 1; j < samples; ++j) blendAt[j].w = lengthExact(blendAt[j].xyz - blendAt[j - 1].xyz);
+    float scale = 0.0f;
+    if (gFlag.y != 0) {
+        float own = 0.0f, guideLen = 0.0f;
+        for (uint j = 1; j < samples; ++j) own += blendAt[j].w;
+        for (uint i = 0; i < found; ++i) guideLen += guide[i].length;
+        if (own > 1e-8f && guideLen > 0.0f) scale = min(divExact(guideLen, own), 2.0f);
+    }
+    if (scale > 0.0f) {
+        const float3 first = blendAt[0].xyz;
+        for (uint j = 1; j < samples; ++j) {
+            PRECISE float3 away = blendAt[j].xyz - first;
+            PRECISE float3 scaledAway = away * scale;
+            PRECISE float3 moved = first + scaledAway;
+            blendAt[j].xyz = moved;
+        }
+        for (uint j = 1; j < samples; ++j) blendAt[j].w = lengthExact(blendAt[j].xyz - blendAt[j - 1].xyz);
+    }
+    float arc = 0.0f;
+    arcAt[0] = 0.0f;
+    for (uint j = 1; j < samples; ++j) {
+        arc += blendAt[j].w;
+        arcAt[j] = arc;
+    }
+    const float step = divExact(arcAt[samples - 1], float(n - 1));
+    for (uint i = 0; i < n; ++i) {
+        PRECISE float target = step * float(i);
+        uint lo = 1, hi = samples - 1;
+        while (lo < hi) {
+            const uint mid = (lo + hi) >> 1;
+            if (arcAt[mid] < target) lo = mid + 1;
+            else hi = mid;
+        }
+        const uint seg = lo - 1;
+        const float4 to = blendAt[lo];
+        PRECISE float along0 = target - arcAt[seg];
+        const float t = to.w > 0.0f ? clamp(divExact(along0, to.w), 0.0f, 1.0f) : 0.0f;
+        const float3 a = blendAt[seg].xyz;
+        PRECISE float3 along = to.xyz - a;
+        PRECISE float3 part = along * t;
+        PRECISE float3 p = a + part;
+        if (st.influence < 1.0f) {
+            const float3 incoming = loadPoint(begin + i);
+            PRECISE float3 kept = incoming * (1.0f - st.influence);
+            PRECISE float3 taken = p * st.influence;
+            PRECISE float3 mixed = kept + taken;
+            p = i == 0 ? incoming : mixed;
+        }
+        storePoint(gOut, begin + i, p);
+    }
+}
+
+// The group's InterpolateCS (STRAND_LANES lanes a strand, above).
+void interpolateGroup(uint3 id, uint3 local) {
+    const uint samples = gFlag.x;
+    const bool wide = samples > 32;            // two strands a group, 64 samples each
+    const uint perGroup = wide ? 2 : 4;
+    const uint lane = local.x % STRAND_LANES;
+    const uint slot = local.x / STRAND_LANES;  // the strand's place in the group
+    const uint s = threadIndex(id, INTERP_GROUP) / INTERP_GROUP * perGroup + slot;
+    const uint base = slot * (wide ? 64 : 32);  // its samples in sBlend and sArc
+    const uint guides = slot * BIND_SLOTS;      // its guides in sGuideA...
+    // The strand's record (every lane reads it: the same words).
+    bool live = false, blend = false;
+    uint begin = 0, n = 0, found = 0;
+    float influence = 1.0f;
+    InterpStrand st = {};
+    if (slot < perGroup && s < gStrandCount) {
+        live = true;
+        st = interpStrand(s);
+        begin = st.begin;
+        n = st.n;
+        found = st.found;
+        influence = st.influence;
+        blend = st.blend;
+        // The guides' influence for the fields that read it after (FieldCS: gOut3, a float a
+        // strand; 0 where the strand is not bound, as the CPU's channel).
+        if (gFlag2.x != 0 && lane == 0) gOut3.Store(s * 4, asuint(st.bound ? influence : 0.0f));
+    }
+    if (live && !blend) {  // left as it came
+        for (uint i = lane; i < n; i += STRAND_LANES) storePoint(gOut, begin + i, loadPoint(begin + i));
+    }
+    // A lane a guide (BIND_SLOTS of them at most: STRAND_LANES).
+    float3 root = float3(0.0f, 0.0f, 0.0f);
+    if (blend) {
+        root = loadPoint(begin);
+        if (lane < found) {
+            const InterpGuide g = interpGuide(s, st, lane);
+            sGuideA[guides + lane] = g.a;
+            sGuideB[guides + lane] = g.b;
+            sGuideC[guides + lane] = g.c;
+            sLength[guides + lane] = g.length;
         }
     }
     groupSync();
@@ -1196,6 +1317,19 @@ void InterpolateCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadI
             p = i == 0 ? incoming : mixed;
         }
         storePoint(gOut, begin + i, p);
+    }
+}
+
+[shader("compute")]
+[numthreads(INTERP_GROUP, 1, 1)]
+void InterpolateCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) {
+    __target_switch {
+    case cpp:
+        const uint perGroup = gFlag.x > 32 ? 2 : 4;
+        const uint s = threadIndex(id, INTERP_GROUP) / INTERP_GROUP * perGroup + local.x / STRAND_LANES;
+        if (local.x % STRAND_LANES == 0 && local.x / STRAND_LANES < perGroup && s < gStrandCount) interpolateStrandAlone(s);
+    default:
+        interpolateGroup(id, local);
     }
 }
 
@@ -1530,9 +1664,69 @@ bool guidesChanged(uint3 header) {
     return changed;
 }
 
+// Strand s's walk (ClearanceCS): whether it walks, whether the walk kept from the last run stands,
+// its points, the clearance it keeps (the least, by its influence) and the vertex it starts at.
+struct ClearStrand {
+    bool walks, kept;
+    uint begin, n, startVertex;
+    float target;
+};
+ClearStrand clearStrand(uint s) {
+    ClearStrand c;
+    c.walks = false;
+    c.kept = false;
+    c.begin = 0;
+    c.n = 0;
+    c.startVertex = TABLE_NONE;
+    c.target = 0.0f;
+    if (s >= gStrandCount) return c;
+    c.begin = strandBegin(s);
+    c.n = strandCountOf(s);
+    float nearest2;
+    const uint3 header = bindHeader(s, nearest2);
+    if (header.y != 0) {
+        float influence = 1.0f;  // (as InterpolateCS)
+        if (gValue.x > 0.0f) {
+            const float t = divExact(sqrtExact(nearest2), gValue.x);
+            influence = t >= 1.0f ? 0.0f : clamp(rampAt(t), 0.0f, 1.0f) * min((1.0f - t) * 20.0f, 1.0f);
+        }
+        const float4 data = strandData(s);
+        c.walks = influence > 0.0f && c.n >= 2 && len3(data.xyz) > 0.0f;
+        PRECISE float byInfluence = gValue.y * influence;
+        c.target = byInfluence;
+        c.startVertex = asuint(data.w);
+        c.kept = c.walks && gFlag2.y != 0 && !guidesChanged(header);
+    }
+    return c;
+}
+
+// The CPU's ClearanceCS (no group to stage points with): each strand walked in gOut itself.
+void clearanceAlone(uint s) {
+    sRelaxedCrease = true;  // (Probe::relaxed: the walk's soft target)
+    const ClearStrand c = clearStrand(s);
+    if (!c.walks) return;
+    if (c.kept) {
+        for (uint i = 0; i < c.n; ++i) storePoint(gOut, c.begin + i, loadKept(c.begin + i));
+        return;
+    }
+    const FieldTables tables = fieldTables();
+    clearanceWalk(false, c.begin, c.n, c.target, tables, c.startVertex);
+    for (uint i = 0; i < c.n; ++i) storePoint(gOut3, c.begin + i, loadOut(c.begin + i));
+}
+
 [shader("compute")]
 [numthreads(CLEAR_GROUP, 1, 1)]
 void ClearanceCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID, uint3 group : SV_GroupID) {
+    __target_switch {
+    case cpp:
+        clearanceAlone(threadIndex(id, CLEAR_GROUP));
+    default:
+        clearanceGroup(id, local, group);
+    }
+}
+
+// The group's ClearanceCS: its strands' points staged in groupshared memory a window at a time.
+void clearanceGroup(uint3 id, uint3 local, uint3 group) {
     sRelaxedCrease = true;  // (Probe::relaxed: the walk's soft target)
     const uint s = threadIndex(id, CLEAR_GROUP);
     // The group's strands' points: [first, last) (from the group's index: the same in every thread).
@@ -1543,28 +1737,10 @@ void ClearanceCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID,
     if (groupFirst >= gStrandCount) return;
     const uint first = strandBegin(groupFirst), last = strandBegin(min(groupFirst + CLEAR_GROUP, gStrandCount));
     // Whether this strand walks, and whether its walk is the one kept.
-    bool walks = false, kept = false;
-    uint begin = 0, n = 0, startVertex = TABLE_NONE;
-    float target = 0.0f;  // the clearance it keeps: the least, by its influence
-    if (s < gStrandCount) {
-        begin = strandBegin(s);
-        n = strandCountOf(s);
-        float nearest2;
-        const uint3 header = bindHeader(s, nearest2);
-        if (header.y != 0) {
-            float influence = 1.0f;  // (as InterpolateCS)
-            if (gValue.x > 0.0f) {
-                const float t = divExact(sqrtExact(nearest2), gValue.x);
-                influence = t >= 1.0f ? 0.0f : clamp(rampAt(t), 0.0f, 1.0f) * min((1.0f - t) * 20.0f, 1.0f);
-            }
-            const float4 data = strandData(s);
-            walks = influence > 0.0f && n >= 2 && len3(data.xyz) > 0.0f;
-            PRECISE float byInfluence = gValue.y * influence;
-            target = byInfluence;
-            startVertex = asuint(data.w);
-            kept = walks && gFlag2.y != 0 && !guidesChanged(header);
-        }
-    }
+    const ClearStrand c = clearStrand(s);
+    const bool walks = c.walks, kept = c.kept;
+    const uint begin = c.begin, n = c.n, startVertex = c.startVertex;
+    const float target = c.target;  // the clearance it keeps: the least, by its influence
     const FieldTables tables = fieldTables();
     // Its window (the one holding its first point), and whether it ends there too.
     const uint window = (begin - first) / CLEAR_POINTS;
@@ -2433,39 +2609,48 @@ float axisWalkAt(AxisWalk w, float u, out Frame frame, out float parc, float2 st
 groupshared float3 sAxis[GROUP_SIZE];
 groupshared float3 sAxisSlope[GROUP_SIZE];
 
-[shader("compute")]
-[numthreads(GROUP_SIZE, 1, 1)]
-void CurlAxesCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) {
-    const uint k = local.x % CENTER_SAMPLES, slot = local.x / CENTER_SAMPLES;
-    const uint c = threadIndex(id, GROUP_SIZE) / GROUP_SIZE * AXES_CLUMPS + slot;
-    const bool live = c < gFlag.x;
-    const uint at = slot * CENTER_SAMPLES;  // the clump's samples in sAxis
+// A clump's axis samples and slopes where its kernel holds them: the group's shared memory (the
+// GPU), or arrays of its own (the CPU, a clump a thread).
+interface IAxisSamples {
+    float3 at(uint j);
+    float3 slope(uint j);
+}
+struct SharedAxis : IAxisSamples {
+    uint base;
+    float3 at(uint j) { return sAxis[base + j]; }
+    float3 slope(uint j) { return sAxisSlope[base + j]; }
+}
+struct OwnAxis : IAxisSamples {
+    float3 p[CENTER_SAMPLES];
+    float3 d[CENTER_SAMPLES];
+    float3 at(uint j) { return p[j]; }
+    float3 slope(uint j) { return d[j]; }
+}
+
+// Clump c's axis at sample k: the mean of its core strands at that share, on their curves.
+float3 curlAxisSample(uint c, uint k) {
     float3 sum = float3(0.0f, 0.0f, 0.0f);
-    if (live) {
-        const uint first = gAux0.Load(c * 4), last = gAux0.Load(c * 4 + 4);
-        const float t = divExact(float(k), float(CENTER_SAMPLES - 1));
-        for (uint m = first; m < last; ++m) {
-            const uint s = gAux0.Load((gFlag.x + 1 + m) * 4);
-            const uint begin = strandBegin(s), n = strandCountOf(s);
-            if (n > 0u) sum = add3Exact(sum, curvePointAtExact(begin, n, t));
-        }
-        sum = div3Exact(sum, float(last - first));
+    const uint first = gAux0.Load(c * 4), last = gAux0.Load(c * 4 + 4);
+    const float t = divExact(float(k), float(CENTER_SAMPLES - 1));
+    for (uint m = first; m < last; ++m) {
+        const uint s = gAux0.Load((gFlag.x + 1 + m) * 4);
+        const uint begin = strandBegin(s), n = strandCountOf(s);
+        if (n > 0u) sum = add3Exact(sum, curvePointAtExact(begin, n, t));
     }
-    sAxis[local.x] = sum;
-    groupSync();
+    return div3Exact(sum, float(last - first));
+}
+// Its slope at sample k, from the samples around it.
+float3 curlAxisSlope<A : IAxisSamples>(A axis, uint k) {
     const uint a = k == 0u ? 0u : k + 1u == CENTER_SAMPLES ? CENTER_SAMPLES - 3u : k - 1u;
     const uint which = k == 0u ? 0u : k + 1u == CENTER_SAMPLES ? 2u : 1u;
-    const float3 d = slopeOf3Exact(sAxis[at + a], sAxis[at + a + 1], sAxis[at + a + 2], which);
-    sAxisSlope[local.x] = d;
-    groupSync();
-    if (!live) return;
-    const uint base = c * CLUMP_AXIS_FLOATS, slopes = base + CENTER_SAMPLES * 3, frames = base + CENTER_SAMPLES * 6,
-               arcs = base + CENTER_SAMPLES * 15, parcs = base + CENTER_SAMPLES * 16, stretches = base + CENTER_SAMPLES * 17;
-    gOut.Store3((base + k * 3) * 4, asuint(sum));
-    gOut.Store3((slopes + k * 3) * 4, asuint(d));
-    if (k != 0u) return;
-    const float3 t0 = tangentOfExact(sAxisSlope[at], float3(0.0f, 0.0f, 1.0f));
-    Frame f = curlFirstFrame(asfloat(gAux1.Load3(c * 32)), t0, tangentOfExact(sub3Exact(sAxis[at + 1], sAxis[at]), t0));
+    return slopeOf3Exact(axis.at(a), axis.at(a + 1), axis.at(a + 2), which);
+}
+// Its frames, arc lengths, profiled arcs and (weighted) stretches along its samples, into gOut.
+void curlAxisAlong<A : IAxisSamples>(uint c, A axis) {
+    const uint base = c * CLUMP_AXIS_FLOATS, frames = base + CENTER_SAMPLES * 6, arcs = base + CENTER_SAMPLES * 15,
+               parcs = base + CENTER_SAMPLES * 16, stretches = base + CENTER_SAMPLES * 17;
+    const float3 t0 = tangentOfExact(axis.slope(0), float3(0.0f, 0.0f, 1.0f));
+    Frame f = curlFirstFrame(asfloat(gAux1.Load3(c * 32)), t0, tangentOfExact(sub3Exact(axis.at(1), axis.at(0)), t0));
     // Weighted: the clump's draw (CurlCS's), its hang and unweighted turns at each sample.
     const bool weighed = curlWeighed();
     const float4 draw = asfloat(gAux1.Load4((c * 8 + 4) * 4));
@@ -2477,12 +2662,12 @@ void CurlAxesCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) 
     float arc = 0.0f, parc = 0.0f;
     for (uint j = 0; j < CENTER_SAMPLES; ++j) {
         if (j > 0u) {
-            const float3 x0 = sAxis[at + j - 1], x1 = sAxis[at + j];
+            const float3 x0 = axis.at(j - 1), x1 = axis.at(j);
             float h;
             secantOf(x0, x1, h);
-            arc = arc + segmentArc(x0, x1, sAxisSlope[at + j - 1], sAxisSlope[at + j], h, 1.0f);
-            if (curlProfiled()) parc = parc + profiledSegmentArc(x0, x1, sAxisSlope[at + j - 1], sAxisSlope[at + j], h, 1.0f, j - 1u, CENTER_SAMPLES, kNoStretch);
-            f = reflectFrame(x0, f, x1, tangentOf(sAxisSlope[at + j], f.t));
+            arc = arc + segmentArc(x0, x1, axis.slope(j - 1), axis.slope(j), h, 1.0f);
+            if (curlProfiled()) parc = parc + profiledSegmentArc(x0, x1, axis.slope(j - 1), axis.slope(j), h, 1.0f, j - 1u, CENTER_SAMPLES, kNoStretch);
+            f = reflectFrame(x0, f, x1, tangentOf(axis.slope(j), f.t));
         }
         gOut.Store3((frames + j * 9) * 4, asuint(f.t));
         gOut.Store3((frames + j * 9 + 3) * 4, asuint(f.n));
@@ -2501,13 +2686,61 @@ void CurlAxesCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) 
     gOut.Store(parcs * 4, asuint(parc));
     gOut.Store(stretches * 4, asuint(stretch[0]));
     for (uint j = 1; j < CENTER_SAMPLES; ++j) {
-        const float3 x0 = sAxis[at + j - 1], x1 = sAxis[at + j];
+        const float3 x0 = axis.at(j - 1), x1 = axis.at(j);
         float h;
         secantOf(x0, x1, h);
-        parc = parc + profiledSegmentArc(x0, x1, sAxisSlope[at + j - 1], sAxisSlope[at + j], h, 1.0f, j - 1u, CENTER_SAMPLES,
+        parc = parc + profiledSegmentArc(x0, x1, axis.slope(j - 1), axis.slope(j), h, 1.0f, j - 1u, CENTER_SAMPLES,
                                          float2(stretch[j - 1], stretch[j]));
         gOut.Store((parcs + j) * 4, asuint(parc));
         gOut.Store((stretches + j) * 4, asuint(stretch[j]));
+    }
+}
+
+// The group's CurlAxesCS: two clumps a group, a thread a sample (its sum over the members, its
+// slope), then a thread a clump the frames and arc lengths along its samples.
+void curlAxesGroup(uint3 id, uint3 local) {
+    const uint k = local.x % CENTER_SAMPLES, slot = local.x / CENTER_SAMPLES;
+    const uint c = threadIndex(id, GROUP_SIZE) / GROUP_SIZE * AXES_CLUMPS + slot;
+    const bool live = c < gFlag.x;
+    SharedAxis axis;
+    axis.base = slot * CENTER_SAMPLES;  // the clump's samples in sAxis
+    const float3 sum = live ? curlAxisSample(c, k) : float3(0.0f, 0.0f, 0.0f);
+    sAxis[local.x] = sum;
+    groupSync();
+    const float3 d = curlAxisSlope(axis, k);
+    sAxisSlope[local.x] = d;
+    groupSync();
+    if (!live) return;
+    const uint base = c * CLUMP_AXIS_FLOATS, slopes = base + CENTER_SAMPLES * 3;
+    gOut.Store3((base + k * 3) * 4, asuint(sum));
+    gOut.Store3((slopes + k * 3) * 4, asuint(d));
+    if (k == 0u) curlAxisAlong(c, axis);
+}
+
+// The CPU's: a clump whole on the thread of its first sample.
+void curlAxesAlone(uint3 id, uint3 local) {
+    const uint k = local.x % CENTER_SAMPLES, slot = local.x / CENTER_SAMPLES;
+    const uint c = threadIndex(id, GROUP_SIZE) / GROUP_SIZE * AXES_CLUMPS + slot;
+    if (k != 0u || c >= gFlag.x) return;
+    OwnAxis axis;
+    for (uint j = 0; j < CENTER_SAMPLES; ++j) axis.p[j] = curlAxisSample(c, j);
+    for (uint j = 0; j < CENTER_SAMPLES; ++j) axis.d[j] = curlAxisSlope(axis, j);
+    const uint base = c * CLUMP_AXIS_FLOATS, slopes = base + CENTER_SAMPLES * 3;
+    for (uint j = 0; j < CENTER_SAMPLES; ++j) {
+        gOut.Store3((base + j * 3) * 4, asuint(axis.p[j]));
+        gOut.Store3((slopes + j * 3) * 4, asuint(axis.d[j]));
+    }
+    curlAxisAlong(c, axis);
+}
+
+[shader("compute")]
+[numthreads(GROUP_SIZE, 1, 1)]
+void CurlAxesCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) {
+    __target_switch {
+    case cpp:
+        curlAxesAlone(id, local);
+    default:
+        curlAxesGroup(id, local);
     }
 }
 
@@ -2746,6 +2979,23 @@ groupshared float sLongest[LONGEST_GROUP];
 [shader("compute")]
 [numthreads(LONGEST_GROUP, 1, 1)]
 void LongestCS(uint3 local : SV_GroupThreadID) {
+    __target_switch {
+    case cpp:
+        // (A maximum: the same in any order, on one thread.)
+        if (local.x == 0) {
+            float most = 0.0f;
+            for (uint j = 0; j < gAux.y; ++j) {
+                const uint s = gAux0.Load((gAux.x + j) * 4);
+                most = max(most, strandLength(strandBegin(s), strandCountOf(s)));
+            }
+            gOut.Store(0, asuint(most));
+        }
+    default:
+        longestGroup(local);
+    }
+}
+
+void longestGroup(uint3 local) {
     float longest = 0.0f;
     for (uint j = local.x; j < gAux.y; j += LONGEST_GROUP) {
         const uint s = gAux0.Load((gAux.x + j) * 4);
@@ -3586,12 +3836,67 @@ uint2 fixedOf(float m) {
     const float hi = floor(r / kFixedPoint);
     return uint2(uint(r - hi * kFixedPoint), uint(hi));
 }
+// The CPU's atomics on a buffer's word at byte `at` (look_kernels_cpu_atomics.h).
+uint cpuAtomicAdd(RWByteAddressBuffer b, uint at, uint v) { __target_switch { case cpp: __intrinsic_asm "glAtomicAdd($0, $1, $2)"; } }
+uint cpuAtomicMin(RWByteAddressBuffer b, uint at, uint v) { __target_switch { case cpp: __intrinsic_asm "glAtomicMin($0, $1, $2)"; } }
+uint cpuAtomicMax(RWByteAddressBuffer b, uint at, uint v) { __target_switch { case cpp: __intrinsic_asm "glAtomicMax($0, $1, $2)"; } }
+uint cpuAtomicOr(RWByteAddressBuffer b, uint at, uint v) { __target_switch { case cpp: __intrinsic_asm "glAtomicOr($0, $1, $2)"; } }
+uint cpuAtomicCompareExchange(RWByteAddressBuffer b, uint at, uint compare, uint v) {
+    __target_switch { case cpp: __intrinsic_asm "glAtomicCompareExchange($0, $1, $2, $3)"; }
+}
+// gOut's atomics, each returning the word before: the GPU's own, on the CPU the core's
+// (look_kernels_cpu_atomics.h, slangc's C++ including it).
+uint atomicAddOut(uint at, uint v) {
+    __target_switch {
+    case cpp: return cpuAtomicAdd(gOut, at, v);
+    default:
+        uint before;
+        gOut.InterlockedAdd(at, v, before);
+        return before;
+    }
+}
+uint atomicMinOut(uint at, uint v) {
+    __target_switch {
+    case cpp: return cpuAtomicMin(gOut, at, v);
+    default:
+        uint before;
+        gOut.InterlockedMin(at, v, before);
+        return before;
+    }
+}
+uint atomicMaxOut(uint at, uint v) {
+    __target_switch {
+    case cpp: return cpuAtomicMax(gOut, at, v);
+    default:
+        uint before;
+        gOut.InterlockedMax(at, v, before);
+        return before;
+    }
+}
+uint atomicOrOut(uint at, uint v) {
+    __target_switch {
+    case cpp: return cpuAtomicOr(gOut, at, v);
+    default:
+        uint before;
+        gOut.InterlockedOr(at, v, before);
+        return before;
+    }
+}
+uint atomicCompareExchangeOut(uint at, uint compare, uint v) {
+    __target_switch {
+    case cpp: return cpuAtomicCompareExchange(gOut, at, compare, v);
+    default:
+        uint before;
+        gOut.InterlockedCompareExchange(at, compare, v, before);
+        return before;
+    }
+}
+
 // Adds v to the 64-bit sum at byte `at` of gOut: the low word's add carrying into the high word.
 void atomicAdd64(uint at, uint2 v) {
-    uint before;
-    gOut.InterlockedAdd(at, v.x, before);
+    const uint before = atomicAddOut(at, v.x);
     const uint hi = v.y + (before + v.x < before ? 1u : 0u);
-    if (hi != 0u) gOut.InterlockedAdd(at + 4, hi, before);
+    if (hi != 0u) atomicAddOut(at + 4, hi);
 }
 
 // floor(p / h) as the CPU's double quotient floors it (the remainder p - k h decides), and where
@@ -3773,13 +4078,12 @@ void GridBoundsCS(uint3 id : SV_DispatchThreadID) {
         lo = min(lo, o);
         hi = max(hi, o);
     }
-    uint before;
-    gOut.InterlockedMin(GRID_LO * 4, lo.x, before);
-    gOut.InterlockedMin(GRID_LO * 4 + 4, lo.y, before);
-    gOut.InterlockedMin(GRID_LO * 4 + 8, lo.z, before);
-    gOut.InterlockedMax(GRID_HI * 4, hi.x, before);
-    gOut.InterlockedMax(GRID_HI * 4 + 4, hi.y, before);
-    gOut.InterlockedMax(GRID_HI * 4 + 8, hi.z, before);
+    atomicMinOut(GRID_LO * 4, lo.x);
+    atomicMinOut(GRID_LO * 4 + 4, lo.y);
+    atomicMinOut(GRID_LO * 4 + 8, lo.z);
+    atomicMaxOut(GRID_HI * 4, hi.x);
+    atomicMaxOut(GRID_HI * 4 + 4, hi.y);
+    atomicMaxOut(GRID_HI * 4 + 8, hi.z);
 }
 
 // One thread: the grid laid on the bounds (layGrid), within the room held.
@@ -3849,8 +4153,7 @@ void GridDilateCS(uint3 id : SV_DispatchThreadID) {
     for (uint k = 0; k < 27; ++k) {
         const int3 n = b + int3(int(k % 3u) - 1, int((k / 3u) % 3u) - 1, int(k / 9u) - 1);
         if (any(n < int3(0, 0, 0)) || any(n >= blocks)) continue;
-        uint before;
-        gOut.InterlockedCompareExchange((GRID_HEADER + gridCellOf(uint3(n))) * 4, 0u, 2u, before);
+        atomicCompareExchangeOut((GRID_HEADER + gridCellOf(uint3(n))) * 4, 0u, 2u);
     }
 }
 
@@ -3863,12 +4166,10 @@ void GridCompactCS(uint3 id : SV_DispatchThreadID) {
     if (cell >= gridCells()) return;
     const uint at = (GRID_HEADER + cell) * 4;
     if (gOut.Load(at) == 0u) return;
-    uint block;
-    gOut.InterlockedAdd(GRID_COUNT * 4, 1u, block);
+    const uint block = atomicAddOut(GRID_COUNT * 4, 1u);
     if (block >= gFlag2.w) {
         gOut.Store(at, 0u);
-        uint before;
-        gOut.InterlockedOr(GRID_OVERFLOW * 4, 1u, before);
+        atomicOrOut(GRID_OVERFLOW * 4, 1u);
         return;
     }
     gOut.Store(at, block + 1u);
@@ -3997,8 +4298,7 @@ void GridUnknownsCS(uint3 id : SV_DispatchThreadID) {
         const float rho = float64(sumIn(at, 0)) / kFixedPoint;
         source = asfloat(gGrid2.y) * (rho - gValue2.w) / rho;
     }
-    uint slot;
-    gOut.InterlockedAdd((GRID_UNKNOWNS + colour) * 4, 1u, slot);
+    const uint slot = atomicAddOut((GRID_UNKNOWNS + colour) * 4, 1u);
     const uint entry = colour == 0u ? slot : room - 1u - slot;
     const uint w = entry * UNKNOWN_WORDS;
     gOut2.Store4(w * 4, uint4(at, around[0], around[1], around[2]));
@@ -4340,6 +4640,27 @@ groupshared uint sMomentsHi[4 * GROUP_SIZE];
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
 void StaticMomentsCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) {
+    __target_switch {
+    case cpp:
+        staticMomentsAlone(id);
+    default:
+        staticMomentsGroup(id, local);
+    }
+}
+// The CPU's: each block's charge and moments added to A's on its own (the sums exact in any order).
+void staticMomentsAlone(uint3 id) {
+    const uint at = threadIndex(id, GROUP_SIZE);
+    const uint count = min(gridWord(true, GRID_COUNT), gFlag2.w);
+    if ((at >> 6) >= count) return;
+    const uint2 q = sumIn(at, 0);
+    if (zero64(q)) return;
+    const int3 c = gridCoordinates(true, at);
+    [ForceUnroll] for (uint e = 0; e < 4; ++e) {
+        const uint2 m = e == 0 ? q : mul64(q, uint2(uint(e == 1 ? c.x : e == 2 ? c.y : c.z), 0u));
+        if (!zero64(m)) atomicAdd64((GRID_MOMENTS + e * 2) * 4, m);
+    }
+}
+void staticMomentsGroup(uint3 id, uint3 local) {
     const uint at = threadIndex(id, GROUP_SIZE);
     const uint count = min(gridWord(true, GRID_COUNT), gFlag2.w);
     uint2 q = uint2(0u, 0u);
@@ -4753,10 +5074,118 @@ groupshared uint sTieFlags;
 groupshared float3 sTieSum[TIE_GROUP];
 groupshared float3 sTieFrame[4];  // origin, pole, u1, u2
 
+// The source frame from the readers (their count, how many start past an earlier Tie's tail, their
+// points' sum), into gOut; the origin, pole, u1, u2 (TieOp's) and the flags back.
+struct TieFrame {
+    float3 origin, pole, u1, u2;
+    uint flags;
+};
+TieFrame tieFrameOf(uint readers, uint chainedCount, float3 sum) {
+    // The source frame: from the readers' mean for a second Tie down a tail (most start past an
+    // earlier Tie's tail start), else from the scalp's center; the pole through the center.
+    const bool any = readers > 0u;
+    const float3 mean = any ? sum / float(readers) : float3(0.0f, 0.0f, 0.0f);
+    const bool chain = 2u * chainedCount > readers;
+    float3 origin = mean;
+    if ((gFlag.x & TIE_SCALP) != 0 && !chain) origin = tieScalpCenter();
+    float3 pole = normalized(tieCenter() - origin);
+    float3 axis = normalized(tieDirection());
+    if (len3(pole) < 0.5f) pole = len3(axis) > 0.5f ? axis : float3(0.0f, -1.0f, 0.0f);
+    if (len3(axis) < 0.5f) axis = pole;  // auto: from the origin through the center
+    float3 u1, u2;
+    tieBasis(pole, u1, u2);
+    const float3 e1 = tieTurnOnto(u1, pole, axis), e2 = tieTurnOnto(u2, pole, axis);
+    const uint flags = (any ? TIE_ANY : 0u) | (chain ? TIE_CHAIN : 0u);
+    gOut.Store4(TIE_FRAME_ORIGIN * 4, uint4(asuint(origin), flags));
+    gOut.Store4(TIE_FRAME_POLE * 4, uint4(asuint(pole), 0u));
+    gOut.Store4(TIE_FRAME_AXIS * 4, uint4(asuint(axis), 0u));
+    gOut.Store4(TIE_FRAME_U1 * 4, uint4(asuint(u1), 0u));
+    gOut.Store4(TIE_FRAME_U2 * 4, uint4(asuint(u2), 0u));
+    gOut.Store4(TIE_FRAME_E1 * 4, uint4(asuint(e1), 0u));
+    gOut.Store4(TIE_FRAME_E2 * 4, uint4(asuint(e2), 0u));
+    TieFrame f;
+    f.origin = origin;
+    f.pole = pole;
+    f.u1 = u1;
+    f.u2 = u2;
+    f.flags = flags;
+    return f;
+}
+// A reader's azimuth bin and radial measure about the frame.
+uint tieBinOf(float3 p, TieFrame f, out float radial) {
+    const float2 m = tieMeasure(p, f.origin, f.pole, f.u1, f.u2, (f.flags & TIE_CHAIN) != 0);
+    radial = m.y;
+    const int bin = int(floor((m.x + TIE_PI) / (2.0f * TIE_PI) * float(TIE_BINS)));
+    return uint(bin + TIE_BINS) % TIE_BINS;  // (bin from 0 to TIE_BINS; GLSL's % of a negative is undefined)
+}
+
+// The CPU's TieFrameCS: on one thread, the readers summed in strand order (as TieOp sums them).
+void tieFrameAlone() {
+    float3 sum = float3(0.0f, 0.0f, 0.0f);
+    uint count = 0, chained = 0;
+    for (uint j = 0; j < gAux.z; ++j) {
+        uint begin, k;
+        if (!tieTiedAux1(gAux0.Load((gAux.y + j) * 4), begin, k)) continue;
+        ++count;
+        chained += k > 0 ? 1u : 0u;
+        sum += loadPoint(begin + k);
+    }
+    const bool everyone = count == 0u;
+    if (everyone) {
+        for (uint s = 0; s < gStrandCount; ++s) {
+            uint begin, k;
+            if (!tieTiedAux1(s, begin, k)) continue;
+            ++count;
+            chained += k > 0 ? 1u : 0u;
+            sum += loadPoint(begin + k);
+        }
+    }
+    const TieFrame f = tieFrameOf(count, chained, sum);
+    float most[TIE_BINS];
+    bool filled[TIE_BINS];
+    for (uint b = 0; b < TIE_BINS; ++b) {
+        most[b] = 0.0f;
+        filled[b] = false;
+    }
+    const uint total = everyone ? gStrandCount : gAux.z;
+    for (uint j = 0; j < total; ++j) {
+        uint begin, k;
+        if (!tieTiedAux1(everyone ? j : gAux0.Load((gAux.y + j) * 4), begin, k)) continue;
+        float radial;
+        const uint b = tieBinOf(loadPoint(begin + k), f, radial);
+        most[b] = max(most[b], radial);
+        filled[b] = true;
+    }
+    float nearest[TIE_BINS];
+    for (uint t = 0; t < TIE_BINS; ++t) {
+        nearest[t] = most[t];
+        if (!filled[t]) {
+            for (uint d = 1; d <= TIE_BINS / 2; ++d) {
+                const uint a = (t + d) % TIE_BINS, b = (t + TIE_BINS - d) % TIE_BINS;
+                if (!filled[a] && !filled[b]) continue;
+                nearest[t] = max(filled[a] ? most[a] : 0.0f, filled[b] ? most[b] : 0.0f);
+                break;
+            }
+        }
+    }
+    for (uint t = 0; t < TIE_BINS; ++t) {
+        const float reach = max(max(nearest[(t + TIE_BINS - 1) % TIE_BINS], nearest[t]), nearest[(t + 1) % TIE_BINS]);
+        gOut.Store((TIE_FRAME_REACH + t) * 4, asuint(reach));
+    }
+}
+
 [shader("compute")]
 [numthreads(TIE_GROUP, 1, 1)]
 void TieFrameCS(uint3 local : SV_GroupThreadID) {
-    const uint t = local.x;
+    __target_switch {
+    case cpp:
+        if (local.x == 0) tieFrameAlone();
+    default:
+        tieFrameGroup(local.x);
+    }
+}
+
+void tieFrameGroup(uint t) {
     if (t < TIE_BINS) {
         sTieMost[t] = 0u;
         sTieFilled[t] = 0u;
@@ -4801,47 +5230,28 @@ void TieFrameCS(uint3 local : SV_GroupThreadID) {
         groupSync();
     }
     if (t == 0) {
-        // The source frame: from the readers' mean for a second Tie down a tail (most start past an
-        // earlier Tie's tail start), else from the scalp's center; the pole through the center.
-        const uint readers = sTieCount;
-        const bool any = readers > 0u;
-        const float3 mean = any ? sTieSum[0] / float(readers) : float3(0.0f, 0.0f, 0.0f);
-        const bool chain = 2u * sTieChained > readers;
-        float3 origin = mean;
-        if ((gFlag.x & TIE_SCALP) != 0 && !chain) origin = tieScalpCenter();
-        float3 pole = normalized(tieCenter() - origin);
-        float3 axis = normalized(tieDirection());
-        if (len3(pole) < 0.5f) pole = len3(axis) > 0.5f ? axis : float3(0.0f, -1.0f, 0.0f);
-        if (len3(axis) < 0.5f) axis = pole;  // auto: from the origin through the center
-        float3 u1, u2;
-        tieBasis(pole, u1, u2);
-        const float3 e1 = tieTurnOnto(u1, pole, axis), e2 = tieTurnOnto(u2, pole, axis);
-        const uint flags = (any ? TIE_ANY : 0u) | (chain ? TIE_CHAIN : 0u);
-        gOut.Store4(TIE_FRAME_ORIGIN * 4, uint4(asuint(origin), flags));
-        gOut.Store4(TIE_FRAME_POLE * 4, uint4(asuint(pole), 0u));
-        gOut.Store4(TIE_FRAME_AXIS * 4, uint4(asuint(axis), 0u));
-        gOut.Store4(TIE_FRAME_U1 * 4, uint4(asuint(u1), 0u));
-        gOut.Store4(TIE_FRAME_U2 * 4, uint4(asuint(u2), 0u));
-        gOut.Store4(TIE_FRAME_E1 * 4, uint4(asuint(e1), 0u));
-        gOut.Store4(TIE_FRAME_E2 * 4, uint4(asuint(e2), 0u));
-        sTieFrame[0] = origin;
-        sTieFrame[1] = pole;
-        sTieFrame[2] = u1;
-        sTieFrame[3] = u2;
-        sTieFlags = flags;
+        const TieFrame f = tieFrameOf(sTieCount, sTieChained, sTieSum[0]);
+        sTieFrame[0] = f.origin;
+        sTieFrame[1] = f.pole;
+        sTieFrame[2] = f.u1;
+        sTieFrame[3] = f.u2;
+        sTieFlags = f.flags;
     }
     groupSync();
     // The readers' largest radial measure per azimuth bin.
-    const bool chained2 = (sTieFlags & TIE_CHAIN) != 0;
-    const float3 o = sTieFrame[0], pole2 = sTieFrame[1], v1 = sTieFrame[2], v2 = sTieFrame[3];
+    TieFrame f;
+    f.origin = sTieFrame[0];
+    f.pole = sTieFrame[1];
+    f.u1 = sTieFrame[2];
+    f.u2 = sTieFrame[3];
+    f.flags = sTieFlags;
     const uint total = everyone ? gStrandCount : gAux.z;
     for (uint j = t; j < total; j += TIE_GROUP) {
         uint begin, k;
         if (!tieTiedAux1(everyone ? j : gAux0.Load((gAux.y + j) * 4), begin, k)) continue;
-        const float2 m = tieMeasure(loadPoint(begin + k), o, pole2, v1, v2, chained2);
-        const int bin = int(floor((m.x + TIE_PI) / (2.0f * TIE_PI) * float(TIE_BINS)));
-        const uint b = uint(bin + TIE_BINS) % TIE_BINS;  // (bin from 0 to TIE_BINS; GLSL's % of a negative is undefined)
-        InterlockedMax(sTieMost[b], asuint(m.y));
+        float radial;
+        const uint b = tieBinOf(loadPoint(begin + k), f, radial);
+        InterlockedMax(sTieMost[b], asuint(radial));
         sTieFilled[b] = 1u;
     }
     groupSync();
@@ -5674,24 +6084,27 @@ void TwistCS(uint3 id : SV_DispatchThreadID) {
 #define TWIST_CLUMPS (GROUP_SIZE / TWIST_SAMPLES)
 groupshared float3 sTwistAxis[GROUP_SIZE];
 
-[shader("compute")]
-[numthreads(GROUP_SIZE, 1, 1)]
-void TwistAxesCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) {
+// Clump c's middle at sample k: its core strands' mean at that share of their points.
+float3 twistAxisSample(uint c, uint k) {
+    float3 sum = float3(0.0f, 0.0f, 0.0f);
+    const uint first = gAux0.Load(c * 4), last = gAux0.Load(c * 4 + 4);
+    const float t = divExact(float(k), float(TWIST_SAMPLES - 1));
+    for (uint m = first; m < last; ++m) {
+        const uint strand = gAux0.Load((gFlag.y + 1 + m) * 4);
+        const uint begin = strandBegin(strand), n = strandCountOf(strand);
+        if (n == 1u) sum = sum + loadPoint(begin);
+        if (n >= 2u) sum = sum + pointAlongIn(begin, n, t);
+    }
+    if (last > first) sum = div3Exact(sum, float(last - first));
+    return sum;
+}
+
+// The group's TwistAxesCS: two clumps a group, a thread a sample; the first of a clump's sums its length.
+void twistAxesGroup(uint3 id, uint3 local) {
     const uint k = local.x % TWIST_SAMPLES, slot = local.x / TWIST_SAMPLES;
     const uint c = threadIndex(id, GROUP_SIZE) / GROUP_SIZE * TWIST_CLUMPS + slot;
     const bool live = c < gFlag.y;
-    float3 sum = float3(0.0f, 0.0f, 0.0f);
-    if (live) {
-        const uint first = gAux0.Load(c * 4), last = gAux0.Load(c * 4 + 4);
-        const float t = divExact(float(k), float(TWIST_SAMPLES - 1));
-        for (uint m = first; m < last; ++m) {
-            const uint strand = gAux0.Load((gFlag.y + 1 + m) * 4);
-            const uint begin = strandBegin(strand), n = strandCountOf(strand);
-            if (n == 1u) sum = sum + loadPoint(begin);
-            if (n >= 2u) sum = sum + pointAlongIn(begin, n, t);
-        }
-        if (last > first) sum = div3Exact(sum, float(last - first));
-    }
+    const float3 sum = live ? twistAxisSample(c, k) : float3(0.0f, 0.0f, 0.0f);
     sTwistAxis[local.x] = sum;
     groupSync();
     if (!live) return;
@@ -5701,6 +6114,32 @@ void TwistAxesCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID)
     float length = 0.0f;
     for (uint j = 1; j < TWIST_SAMPLES; ++j) length += len3(sTwistAxis[at + j] - sTwistAxis[at + j - 1]);
     gOut.Store((gFlag.y * TWIST_AXIS_FLOATS + c) * 4, asuint(length));
+}
+
+// The CPU's: a clump whole on the thread of its first sample.
+void twistAxesAlone(uint3 id, uint3 local) {
+    const uint k = local.x % TWIST_SAMPLES, slot = local.x / TWIST_SAMPLES;
+    const uint c = threadIndex(id, GROUP_SIZE) / GROUP_SIZE * TWIST_CLUMPS + slot;
+    if (k != 0u || c >= gFlag.y) return;
+    float3 axis[TWIST_SAMPLES];
+    for (uint j = 0; j < TWIST_SAMPLES; ++j) {
+        axis[j] = twistAxisSample(c, j);
+        gOut.Store3((c * TWIST_AXIS_FLOATS + j * 3) * 4, asuint(axis[j]));
+    }
+    float length = 0.0f;
+    for (uint j = 1; j < TWIST_SAMPLES; ++j) length += len3(axis[j] - axis[j - 1]);
+    gOut.Store((gFlag.y * TWIST_AXIS_FLOATS + c) * 4, asuint(length));
+}
+
+[shader("compute")]
+[numthreads(GROUP_SIZE, 1, 1)]
+void TwistAxesCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) {
+    __target_switch {
+    case cpp:
+        twistAxesAlone(id, local);
+    default:
+        twistAxesGroup(id, local);
+    }
 }
 
 // ---- The shapers reading their neighbours or a reference --------------------------------------------
@@ -5728,12 +6167,149 @@ groupshared float3 sSmoothPeriod[2 * SMOOTH_CELLS];
 groupshared float3 sSmoothBoxed[2 * SMOOTH_CELLS];
 groupshared float3 sSmoothSums[2 * SMOOTH_CELLS + 1];
 
-// The integral up to x (in cells, any real number) of the period's cells as steps (smoothShape's).
+// The integral up to x (in cells, any real number) of the period's cells as steps (smoothShape's):
+// sums[wrap] * turns + sums[j] + period[j] * frac.
+struct SmoothAt {
+    float turns;
+    uint j;
+    float frac;
+};
+SmoothAt smoothAt(float x, uint wrap) {
+    SmoothAt q;
+    q.turns = floor(x / float(wrap));
+    const float r = x - q.turns * float(wrap);
+    q.j = min(uint(r), wrap - 1);
+    q.frac = r - float(q.j);
+    return q;
+}
 float3 smoothIntegral(float x, uint wrap) {
-    const float turns = floor(x / float(wrap));
-    const float r = x - turns * float(wrap);
-    const uint j = min(uint(r), wrap - 1);
-    return sSmoothSums[wrap] * turns + sSmoothSums[j] + sSmoothPeriod[j] * (r - float(j));
+    const SmoothAt q = smoothAt(x, wrap);
+    return sSmoothSums[wrap] * q.turns + sSmoothSums[q.j] + sSmoothPeriod[q.j] * q.frac;
+}
+
+// The smoothed increments' running sums and the increments where the kernel holds them: the group's
+// shared memory (the GPU), or arrays of its own (the CPU, a strand a thread).
+interface ISmoothCells {
+    float3 sum(uint c);
+    float3 period(uint c);
+}
+struct SharedSmooth : ISmoothCells {
+    float3 sum(uint c) { return sSmoothSums[c]; }
+    float3 period(uint c) { return sSmoothPeriod[c]; }
+}
+struct OwnSmooth : ISmoothCells {
+    float3 sums[2 * SMOOTH_CELLS + 1];
+    float3 periods[2 * SMOOTH_CELLS];
+    float3 sum(uint c) { return sums[c]; }
+    float3 period(uint c) { return periods[c]; }
+}
+
+// Point by point: the smoothed shape's point (each segment along the smoothed increments over its
+// arc, at its own length), the point blended toward it, its segment's length put back.
+void smoothPoints<A : ISmoothCells>(uint begin, uint n, uint m, float cell, float k, A cells) {
+    float3 previous = loadPoint(begin);  // the result's point before
+    float3 targetBefore = previous;      // the smoothed shape's
+    storePoint(gOut, begin, previous);
+    float3 behind = cells.sum(0);
+    float arc = 0.0f;
+    for (uint i = 1; i < n; ++i) {
+        const float3 p = loadPoint(begin + i);
+        const float3 old = p - loadPoint(begin + i - 1);
+        const float segment = len3(old);
+        arc += segment;
+        const float x = clamp(arc / cell, 0.0f, float(m));
+        const uint j = min(uint(x), m - 1);
+        const float3 ahead = cells.sum(j) + cells.period(j) * (x - float(j));
+        const float3 d = ahead - behind;
+        behind = ahead;
+        // A segment whose smoothed directions cancel (a loop straightened) keeps its own.
+        const float3 unit = len3(d) > 1e-6f * segment ? normalized(d) : segment > 0.0f ? old / segment : float3(0.0f, 0.0f, 0.0f);
+        const float3 target = targetBefore + unit * segment;
+        const float w = k * clamp(rampAlong(i, n), 0.0f, 1.0f);
+        const float3 blended = p + (target - p) * w;
+        const float3 dd = blended - previous;
+        const float l = len3(dd);
+        const float3 moved = l > 1e-6f * segment ? previous + dd * (segment / l) : previous + (target - targetBefore);
+        storePoint(gOut, begin + i, moved);
+        previous = moved;
+        targetBefore = target;
+    }
+}
+
+// Strand s's numbers (SmoothCS): whether it is smoothed at all (else copied), its cells and their
+// length, its strength.
+struct SmoothStrand {
+    uint begin, n, m;
+    float cell, k;
+    bool smoothed;
+};
+SmoothStrand smoothStrand(uint s) {
+    SmoothStrand st;
+    st.begin = strandBegin(s);
+    st.n = strandCountOf(s);
+    st.m = gFlag.x;
+    const float scale = gValue.y;
+    st.k = st.n >= 3 ? clamp(fieldAt(0, gValue.x, s, 0), 0.0f, 1.0f) : 0.0f;
+    const float length = st.n >= 3 ? strandLength(st.begin, st.n) : 0.0f;
+    st.smoothed = scale > 0.0f && st.n >= 3 && st.k > 0.0f && length > 0.0f && st.m != 0 && st.m <= SMOOTH_CELLS;
+    st.cell = st.smoothed ? length / float(st.m) : 0.0f;
+    return st;
+}
+
+// The CPU's SmoothCS: a strand whole on a thread, cell by cell with the group's arithmetic.
+void smoothAlone(uint s) {
+    const SmoothStrand st = smoothStrand(s);
+    const uint begin = st.begin, n = st.n, m = st.m, wrap = 2 * m;
+    if (!st.smoothed) {
+        copyStrand(begin, n);
+        return;
+    }
+    const float cell = st.cell;
+    OwnSmooth own;
+    float3 boxed[2 * SMOOTH_CELLS];
+    {
+        uint seg = 1;
+        float arcLo = 0.0f, arcHi = len3(loadPoint(begin + 1) - loadPoint(begin));
+        for (uint c = 0; c <= m; ++c) {
+            if (c == m) {
+                boxed[c] = loadPoint(begin + n - 1);
+                continue;
+            }
+            const float a = cell * float(c);
+            while (seg + 1 < n && arcHi < a) {
+                ++seg;
+                arcLo = arcHi;
+                arcHi = arcLo + len3(loadPoint(begin + seg) - loadPoint(begin + seg - 1));
+            }
+            const float span = arcHi - arcLo;
+            const float f = span > 0.0f ? clamp((a - arcLo) / span, 0.0f, 1.0f) : 1.0f;
+            const float3 p = loadPoint(begin + seg - 1);
+            boxed[c] = p + (loadPoint(begin + seg) - p) * f;
+        }
+    }
+    for (uint c = 0; c < m; ++c) {
+        const float3 d = boxed[c + 1] - boxed[c];
+        own.periods[c] = d;
+        own.periods[wrap - 1 - c] = d;
+    }
+    const float width = min(2.0f * gValue.y * float(m), float(wrap));
+    if (width > 0.0f) {
+        for (uint pass = 0; pass < 3; ++pass) {
+            own.sums[0] = float3(0.0f, 0.0f, 0.0f);
+            for (uint c = 0; c < wrap; ++c) own.sums[c + 1] = own.sums[c] + own.periods[c];
+            for (uint c = 0; c < wrap; ++c) {
+                const float center = float(c) + 0.5f;
+                const SmoothAt hi = smoothAt(center + 0.5f * width, wrap), lo = smoothAt(center - 0.5f * width, wrap);
+                const float3 above = own.sums[wrap] * hi.turns + own.sums[hi.j] + own.periods[hi.j] * hi.frac;
+                const float3 below = own.sums[wrap] * lo.turns + own.sums[lo.j] + own.periods[lo.j] * lo.frac;
+                boxed[c] = (above - below) * (1.0f / width);
+            }
+            for (uint c = 0; c < wrap; ++c) own.periods[c] = boxed[c];
+        }
+    }
+    own.sums[0] = float3(0.0f, 0.0f, 0.0f);
+    for (uint c = 0; c < m; ++c) own.sums[c + 1] = own.sums[c] + own.periods[c];
+    smoothPoints(begin, n, m, cell, st.k, own);
 }
 
 [shader("compute")]
@@ -5741,19 +6317,27 @@ float3 smoothIntegral(float x, uint wrap) {
 void SmoothCS(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID) {
     const uint s = group.y * gDispatch.x + group.x;  // (the same for the whole group)
     if (s >= gStrandCount) return;
-    const uint t = local.x;
-    const uint begin = strandBegin(s), n = strandCountOf(s);
-    const uint m = gFlag.x, wrap = 2 * m;
+    __target_switch {
+    case cpp:
+        if (local.x == 0) smoothAlone(s);
+    default:
+        smoothGroup(s, local.x);
+    }
+}
+
+// The group's SmoothCS: a group a strand.
+void smoothGroup(uint s, uint t) {
+    const SmoothStrand st = smoothStrand(s);
+    const uint begin = st.begin, n = st.n, m = st.m, wrap = 2 * m;
     const float scale = gValue.y;
-    const float k = n >= 3 ? clamp(fieldAt(0, gValue.x, s, 0), 0.0f, 1.0f) : 0.0f;
-    const float length = n >= 3 ? strandLength(begin, n) : 0.0f;
-    if (!(scale > 0.0f) || n < 3 || !(k > 0.0f) || !(length > 0.0f) || m == 0 || m > SMOOTH_CELLS) {
+    const float k = st.k;
+    if (!st.smoothed) {
         if (t == 0) {
             copyStrand(begin, n);
         }
         return;
     }
-    const float cell = length / float(m);
+    const float cell = st.cell;
     // The polyline at the cells' ends (each thread its own, walking from the root), into the boxed
     // buffer for now.
     {
@@ -5803,35 +6387,8 @@ void SmoothCS(uint3 group : SV_GroupID, uint3 local : SV_GroupThreadID) {
     if (t != 0) return;
     sSmoothSums[0] = float3(0.0f, 0.0f, 0.0f);
     for (uint c = 0; c < m; ++c) sSmoothSums[c + 1] = sSmoothSums[c] + sSmoothPeriod[c];
-    // Point by point: the smoothed shape's point (each segment along the smoothed increments over
-    // its arc, at its own length), the point blended toward it, its segment's length put back.
-    float3 previous = loadPoint(begin);  // the result's point before
-    float3 targetBefore = previous;      // the smoothed shape's
-    storePoint(gOut, begin, previous);
-    float3 behind = sSmoothSums[0];
-    float arc = 0.0f;
-    for (uint i = 1; i < n; ++i) {
-        const float3 p = loadPoint(begin + i);
-        const float3 old = p - loadPoint(begin + i - 1);
-        const float segment = len3(old);
-        arc += segment;
-        const float x = clamp(arc / cell, 0.0f, float(m));
-        const uint j = min(uint(x), m - 1);
-        const float3 ahead = sSmoothSums[j] + sSmoothPeriod[j] * (x - float(j));
-        const float3 d = ahead - behind;
-        behind = ahead;
-        // A segment whose smoothed directions cancel (a loop straightened) keeps its own.
-        const float3 unit = len3(d) > 1e-6f * segment ? normalized(d) : segment > 0.0f ? old / segment : float3(0.0f, 0.0f, 0.0f);
-        const float3 target = targetBefore + unit * segment;
-        const float w = k * clamp(rampAlong(i, n), 0.0f, 1.0f);
-        const float3 blended = p + (target - p) * w;
-        const float3 dd = blended - previous;
-        const float l = len3(dd);
-        const float3 moved = l > 1e-6f * segment ? previous + dd * (segment / l) : previous + (target - targetBefore);
-        storePoint(gOut, begin + i, moved);
-        previous = moved;
-        targetBefore = target;
-    }
+    SharedSmooth shared;
+    smoothPoints(begin, n, m, cell, k, shared);
 }
 
 // ---- RestoreLength: a thread a strand ---------------------------------------------------------

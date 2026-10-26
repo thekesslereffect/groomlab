@@ -49,8 +49,27 @@ const CpuKernelFn* cpuKernels() {
     return table.data();
 }
 
-// A buffer: words, shared so a sibling's can be borrowed.
-using Words = std::shared_ptr<std::vector<std::uint32_t>>;
+// A buffer: words of its own, or a host's memory it is written in place (a target); shared so a
+// sibling's can be borrowed.
+struct Buffer {
+    std::vector<std::uint32_t> own;
+    std::uint32_t* host = nullptr;
+    std::size_t hostWords = 0;
+    std::uint32_t* data() { return host ? host : own.data(); }
+    std::size_t size() const { return host ? hostWords : own.size(); }
+};
+using Words = std::shared_ptr<Buffer>;
+Words ownWords(std::size_t bytes) {
+    auto w = std::make_shared<Buffer>();
+    w->own.assign((bytes + 3) / 4, 0u);
+    return w;
+}
+Words hostWords(void* memory, std::size_t bytes) {
+    auto w = std::make_shared<Buffer>();
+    w->host = static_cast<std::uint32_t*>(memory);
+    w->hostWords = bytes / 4;
+    return w;
+}
 
 class CpuLookEngine final : public LookEngine {
 public:
@@ -66,14 +85,17 @@ public:
     }
     std::size_t videoBytes() const override { return 0; }
     void dropTargets() override {
-        for (float*& t : targets_) t = nullptr;
+        for (int i = 0; i < 4; ++i) {
+            if (buffers_.count(kOut0 + i) && buffers_[kOut0 + i]->host) buffers_.erase(kOut0 + i);
+        }
+        buffers_.erase(kOutUvs);
     }
     void finish() override {}
 
 protected:
     void write(int id, const void* data, std::size_t bytes, bool) override {
         Words& w = buffers_[id];
-        w = std::make_shared<std::vector<std::uint32_t>>((bytes + 3) / 4, 0u);
+        w = ownWords(bytes);
         if (bytes) std::memcpy(w->data(), data, bytes);
     }
     void writeRange(int id, std::size_t offset, const void* data, std::size_t bytes) override {
@@ -83,27 +105,36 @@ protected:
     }
     void allocate(int id, std::size_t bytes) override {
         Words& w = buffers_[id];
-        if (!w || w->size() * 4 < bytes) w = std::make_shared<std::vector<std::uint32_t>>((bytes + 3) / 4, 0u);
+        if (!w || w->size() * 4 < bytes) w = ownWords(bytes);
     }
     bool has(int id) const override { return buffers_.count(id) != 0; }
     void release(int id) override { buffers_.erase(id); }
 
-    // The run's outputs are the engine's own; a host's targets (float3 per point in memory) are
-    // copied into after the run.
-    bool bindTargets(const LookTargets& targets, bool frames, std::size_t bytes, std::size_t) override {
+    // A host's targets (float3 per point, the uvs' float2, in memory) are written in place; the
+    // outputs it gives none of are the engine's own.
+    bool bindTargets(const LookTargets& targets, bool frames, std::size_t bytes, std::size_t uvBytes) override {
         if (targets.pointTexture) throw std::runtime_error("CPU look engine: no point texture");
         void* const want[4] = {targets.positions, targets.normals, targets.tangents, targets.bitangents};
         for (int i = 0; i < 4; ++i) {
-            targets_[i] = i == 0 || frames ? static_cast<float*>(want[i]) : nullptr;
-            if (i == 0 || frames) allocate(kOut0 + i, bytes);
+            if (i > 0 && !frames) {
+                buffers_.erase(kOut0 + i);
+                continue;
+            }
+            if (want[i]) {
+                buffers_[kOut0 + i] = hostWords(want[i], bytes);
+            } else {
+                if (buffers_.count(kOut0 + i) && buffers_[kOut0 + i]->host) buffers_.erase(kOut0 + i);
+                allocate(kOut0 + i, bytes);
+            }
         }
-        return false;
-    }
-    void copyToTargets(bool frames, std::size_t bytes) override {
-        for (int i = 0; i < (frames ? 4 : 1); ++i) {
-            if (targets_[i] && has(kOut0 + i)) std::memcpy(targets_[i], words(kOut0 + i)->data(), bytes);
+        if (targets.uvs) {
+            buffers_[kOutUvs] = hostWords(targets.uvs, uvBytes);
+        } else {
+            buffers_.erase(kOutUvs);
         }
+        return targets.positions != nullptr;
     }
+    void copyToTargets(bool, std::size_t) override {}
     void copy(int from, int to, std::size_t bytes, std::size_t fromOffset, std::size_t toOffset) override {
         if (!bytes) return;
         const Words src = words(from), dst = words(to);
@@ -196,7 +227,6 @@ private:
 
     std::map<int, Words> buffers_;
     std::vector<StageConstants> constants_;
-    float* targets_[4] = {};
     std::vector<std::uint64_t> stampTimes_;
     bool ticksPending_ = false;
 };
