@@ -94,8 +94,18 @@ bool runStageInto(StageKind kind, const StageParamReader& reader, const StrandsP
     run.fields.stages.resize(1);
     run.inputs.push_back(std::move(inputs));
     const std::array<std::string, 2> mapped = mappedParams(kind, params);
+    const bool coil = kind == StageKind::Curl && params.getString("shape") == "coil";
+    if (coil) {
+        // A coil's radius by the strands' widths at each point (times coilWidths), as they carry them.
+        if (in->widths().size() != in->pointCount()) return false;
+        FieldValues& values = run.fields.stages[0].field[0];
+        values.mode = FieldValues::kPerPoint;
+        values.values = in->widths();
+        values.fixed = true;
+        values.widths = true;
+    }
     for (int i = 0; i < 2; ++i) {
-        if (mapped[i].empty() || !mappedParam(params, mapped[i])) continue;
+        if (mapped[i].empty() || !mappedParam(params, mapped[i]) || (coil && i == 0)) continue;
         FieldValues& values = run.fields.stages[0].field[i];
         readFieldValues(ScalarField(params, mapped[i], scalp), *in, mappedPerPoint(kind, i), &values);
         // Read at each point after the ones before it moved: the CPU's.

@@ -43,6 +43,7 @@ bool readsStageParams(StageKind kind) {
         case StageKind::Length:
         case StageKind::Clump:
         case StageKind::Noise:
+        case StageKind::Curl:
         case StageKind::Width:
         case StageKind::Part:
         case StageKind::Gravity:
@@ -341,6 +342,42 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->flag[0] = static_cast<int>(params.getInt("history"));
             s->ramp = r.ramp("profile");
             s->tabled = true;
+            return true;
+        }
+        case StageKind::Curl: {
+            const std::string shape = params.getString("shape");
+            s->flag[2] = params.getString("coherence") == "clump" ? 1 : 0;  // each clump as one (CurlInputs)
+            if (shape == "coil") {
+                // A coil's radius: coilWidths strand widths at each point (its values: the widths).
+                s->value[0] = static_cast<float>(number("coilWidths"));
+            } else if (!mappable("radius", &s->value[0])) {
+                return false;
+            }
+            s->value[1] = static_cast<float>(number("frequency"));
+            s->value[2] = static_cast<float>(number("randomness"));
+            s->value[3] = static_cast<float>(number("phase"));
+            s->flag[0] = shape == "wave" ? 1 : shape == "zigzag" ? 2 : shape == "coil" ? 3 : 0;
+            const float phaseRandom = static_cast<float>(number("phaseRandom"));
+            std::memcpy(&s->flag[1], &phaseRandom, sizeof(float));  // the kernel reads its bits as a float
+            s->ramp = r.ramp("profile");
+            s->tabled = true;
+            // The spacing: spacingRandom, and a frequencyProfile other than 1 everywhere (the angle
+            // by the profiled arc: CurlOp's `profiled`).
+            s->value2[0] = std::clamp(static_cast<float>(number("spacingRandom")), 0.0f, 1.0f);
+            s->ramp2 = r.ramp("frequencyProfile");
+            s->flag2[0] = std::any_of(s->ramp2.keys.begin(), s->ramp2.keys.end(), [](const auto& k) { return k.second != 1.0f; }) ? 1 : 0;
+            s->hasRamp2 = s->flag2[0] != 0;
+            // Weighted curls (CurlOp's weight: the turns spread where hair hangs below them): the
+            // weight over kWeightTurns and the unit weightDirection, as CurlOp::run takes them (none
+            // without a direction).
+            const Vec3f weightDirection = r.vector("weightDirection");
+            if (weightDirection.length() > 0.0f) {
+                const Vec3f down = weightDirection.normalized();
+                s->value2[1] = std::max(0.0f, static_cast<float>(number("weight"))) / 10.0f;  // (curl_op.cpp kWeightTurns)
+                std::memcpy(&s->flag2[1], &down.x, sizeof(float));  // the kernel reads their bits as floats
+                std::memcpy(&s->flag2[2], &down.y, sizeof(float));
+                std::memcpy(&s->flag2[3], &down.z, sizeof(float));
+            }
             return true;
         }
         case StageKind::Flow:
@@ -760,6 +797,57 @@ std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* sca
     made->field = std::move(words);
     made->host.flow = std::move(flow);
     made->host.scalp = scalp;
+    return made;
+}
+
+std::shared_ptr<CurlInputs> curlInputs(const StrandSet& in, const ScalpMesh* scalp, const std::string& channel, std::uint64_t seed) {
+    const std::vector<float>* groups = in.strandChannel(channel);
+    if (!groups) return nullptr;
+    const std::size_t strands = in.strandCount();
+    auto clumpOf = std::make_shared<std::vector<std::uint32_t>>(strands, 0xffffffffu);
+    std::map<long long, std::size_t> slot;
+    std::vector<long long> keys;
+    std::vector<std::vector<std::uint32_t>> members;
+    const PreviewCore core(in);
+    for (std::size_t s = 0; s < strands; ++s) {
+        const long long key = std::llround((*groups)[s]);
+        if (key < 0 || in.strandPointCount(s) < 2) continue;
+        auto it = slot.find(key);
+        if (it == slot.end()) {
+            it = slot.emplace(key, members.size()).first;
+            members.emplace_back();
+            keys.push_back(key);
+        }
+        (*clumpOf)[s] = static_cast<std::uint32_t>(it->second);
+        if (core.core(s)) members[it->second].push_back(static_cast<std::uint32_t>(s));
+    }
+    for (std::uint32_t& c : *clumpOf) {
+        if (c != 0xffffffffu && members[c].empty()) c = 0xffffffffu;  // no core strand: alone
+    }
+    auto list = std::make_shared<std::vector<std::uint32_t>>(members.size() + 1, 0u);
+    for (std::size_t c = 0; c < members.size(); ++c) (*list)[c + 1] = (*list)[c] + static_cast<std::uint32_t>(members[c].size());
+    for (const auto& m : members) list->insert(list->end(), m.begin(), m.end());
+    auto clumps = std::make_shared<std::vector<float>>(members.size() * 8, 0.0f);
+    parallelFor(0, members.size(), [&](std::size_t c) {
+        float* to = clumps->data() + c * 8;
+        Vec3f normal;
+        for (const std::uint32_t s : members[c]) {
+            const StrandRoot& root = in.roots()[s];
+            normal += scalp && scalp->contains(root) ? scalp->normal(root) : Vec3f{};
+        }
+        normal = normal.normalized();
+        to[0] = normal.x;
+        to[1] = normal.y;
+        to[2] = normal.z;
+        // CurlOp::drawFor's four draws, from the clump's key.
+        Rng rng(hashCombine(hashCombine(hash64(static_cast<std::uint64_t>(keys[c])), 0xC1D0C0E5ull), seed ^ 0xC041));
+        for (int d = 0; d < 4; ++d) to[4 + d] = rng.nextFloat();
+    }, 16);
+    auto made = std::make_shared<CurlInputs>();
+    made->clumpOf = std::move(clumpOf);
+    made->members = std::move(list);
+    made->clumps = std::move(clumps);
+    made->count = members.size();
     return made;
 }
 

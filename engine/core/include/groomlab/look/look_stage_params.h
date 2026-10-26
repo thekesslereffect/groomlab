@@ -50,7 +50,7 @@ private:
 
 // Whether readStageParams reads a stage of `kind`'s params.
 bool readsStageParams(StageKind kind);
-// A stage of `kind`'s params (Interpolate (its samples, flag[0], the caller's), Length, Clump (not a Wet's level), Noise, Width, Part, Gravity, Flyaway, Wind, Collide, the shapers working on
+// A stage of `kind`'s params (Interpolate (its samples, flag[0], the caller's), Length, Clump (not a Wet's level), Noise, Curl, Width, Part, Gravity, Flyaway, Wind, Collide, the shapers working on
 // each strand alone, Smooth, BlendNeighbors, Tangle, Flow, RestoreLength (its reference's place the
 // preview's: flag[1]), MeshCut) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).
 // False with *why where the kernel does not run it so (the CPU's). (Width's feathers' shafts with a
@@ -144,6 +144,10 @@ std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* sca
 // Jiggle's lags as the kernel takes them (JiggleInputs) from its operator's (operator_state.h
 // jiggleLags, over `scalp`) for the strands `in`.
 std::shared_ptr<JiggleInputs> jiggleInputs(const StrandSet& in, const ScalpMesh& scalp, const JiggleLags& lags);
+// Curl's clumps as the kernel takes them (CurlInputs, coherence clump), found on the strands `in` by
+// the channel `channel` as CurlOp finds them, their frames from `scalp`'s normals (null: none), their
+// draws by `seed`; null without the channel.
+std::shared_ptr<CurlInputs> curlInputs(const StrandSet& in, const ScalpMesh* scalp, const std::string& channel, std::uint64_t seed);
 // MeshCut's mesh as the kernel takes it (its ray tree; none for no mesh).
 std::shared_ptr<MeshCutInputs> meshCutInputs(const MeshPtr& mesh);
 // Part's sides (PartInputs, its reach 0: the caller's): each strand's side of `lines` (only the part

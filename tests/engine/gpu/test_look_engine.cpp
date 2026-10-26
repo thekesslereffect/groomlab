@@ -6225,6 +6225,8 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         std::string type, params;
         bool uvs = false;
         bool cpus = false;  // the operator's own C++ (a per-point value read after the points before it moved)
+        bool adds = false;  // adds points (Curl): the operator's own C++, its stage alone not compared
+        std::pair<std::string, std::string> before = {};  // a node before it (after the Clump)
     };
     const Case cases[] = {
         {"Width", R"("params": {"width": 0.02, "randomness": 0.3, "profile": [[0, 1], [1, 0.2]]})"},
@@ -6282,13 +6284,24 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Smooth", R"("params": {"strength": 1.0, "scale": 1.0})"},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
+        {"Curl", R"("params": {"radius": 0.1, "frequency": 1.0, "tolerance": 0.0})"},
+        {"Curl", R"("params": {"radius": 0.05, "frequency": 0.3})"},
+        {"Curl", R"("params": {"radius": 0.05, "frequency": 3.0, "tolerance": 0.1})", false, false, true},
+        {"Curl", R"("params": {"radius": 0.08, "frequency": 1.5, "shape": "zigzag", "tolerance": 0.2})", false, false, true},
+        {"Curl", R"("params": {"radius": 0.08, "frequency": 1.2, "shape": "wave", "randomness": 0.6, "spacingRandom": 0.5, "tolerance": 0.0})"},
+        {"Curl", R"("params": {"radius": 0.08, "frequency": 1.2, "shape": "zigzag", "frequencyProfile": [[0, 0.5], [1, 1]], "tolerance": 0.0})"},
+        {"Curl", R"("params": {"radius": 0.1, "frequency": 0.8, "coherence": "clump", "tolerance": 0.0})"},
+        {"Curl", R"("params": {"radius": 0.1, "frequency": 0.8, "weight": 1.0, "tolerance": 0.0})"},
+        {"Curl", R"("params": {"radius": {"expression": "0.05 + 0.1 * rand", "min": 0.0, "max": 1.0}, "frequency": 1.0, "phase": 0.3, "tolerance": 0.0})"},
+        {"Curl", R"("params": {"shape": "coil", "coilWidths": 3.0, "frequency": 2.0, "tolerance": 0.0})", false, false, false,
+         {"Width", R"("params": {"width": 0.02, "randomness": 0.4})"}},
     };
     std::size_t differing = 0, compared = 0;
     for (const Case& c : cases) {
         SCOPED_TRACE(c.type + " " + c.params);
         // (Interpolate: the graph's own, its params these.)
         const bool interpolate = c.type == "Interpolate";
-        std::string json = shaperGraph(interpolate ? "Bend" : c.type, interpolate ? R"("params": {"angle": 10.0})" : c.params, true);
+        std::string json = shaperGraph(interpolate ? "Bend" : c.type, interpolate ? R"("params": {"angle": 10.0})" : c.params, true, c.before);
         if (interpolate) {
             nlohmann::json j = nlohmann::json::parse(json);
             const nlohmann::json own = nlohmann::json::parse("{" + c.params + "}")["params"];
@@ -6308,7 +6321,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                 if (doc.graph.node(node).typeName() == "Interpolate") id = node;
             }
         } else {
-            id = doc.nodesByName.at(shaperName(true));
+            id = doc.nodesByName.at(c.before.first.empty() ? shaperName(true) : "n2");
         }
         ExternalInputs ext;
         setGroomExternals(ext, session.last().scalp, data.guides, session.last().hierarchy, session.last().parts, session.last().flow);
@@ -6332,7 +6345,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"Length", gpu::StageKind::Length},       {"Wind", gpu::StageKind::Wind},
                                                              {"Noise", gpu::StageKind::Noise},         {"Collide", gpu::StageKind::Collide},
                                                              {"Clump", gpu::StageKind::Clump},         {"Interpolate", gpu::StageKind::Interpolate},
-                                                             {"Smooth", gpu::StageKind::Smooth}};
+                                                             {"Smooth", gpu::StageKind::Smooth},       {"Curl", gpu::StageKind::Curl}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;
@@ -6375,12 +6388,17 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
             }
             stageInputs.collide = gpu::collideInputs(meshes, 0u, fields, offset, softness, &whyNot);
         }
+        if (kind == gpu::StageKind::Curl && op.params().getString("coherence") == "clump") {
+            stageInputs.curl = gpu::curlInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), "clumpId",
+                                               static_cast<std::uint64_t>(op.params().getInt("seed")));
+        }
         if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
         // Its C++ (the engine off), the stage on the engine, the operator as it runs now.
         StrandsPtr made[3];
         gpu::setCpuEngineOn(false);
         made[0] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
         gpu::setCpuEngineOn(true);
+        if (c.adds) EXPECT_GT(made[0]->pointCount(), valueAs<StrandsPtr>(inputs[0])->pointCount());
         if (interpolate) {
             gpu::setCpuEngineOn(false);
             const StrandsPtr cpu = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
@@ -6404,8 +6422,10 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         gpu::StageParamReader reader(op.params(), "");
         reader.time = ctx.time;
         reader.framesPerSecond = ctx.framesPerSecond;
-        made[1] = gpu::runStage(kind, reader, valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), stageInputs);
-        EXPECT_EQ(made[1] != nullptr, !c.cpus);
+        if (!c.adds) {
+            made[1] = gpu::runStage(kind, reader, valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), stageInputs);
+            EXPECT_EQ(made[1] != nullptr, !c.cpus);
+        }
         made[2] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
         for (int m = 1; m < 3; ++m) {
             if (!made[m]) continue;

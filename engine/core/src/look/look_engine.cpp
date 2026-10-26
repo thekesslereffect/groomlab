@@ -2183,6 +2183,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             }
             case StageKind::Curl: {
                 kernel = Kernel::Curl;
+                if (sharesBase()) groups = (n + 255) / 256;  // (the CPU's: four strands a thread, look.slang curlFour)
                 const CurlInputs* in = p.flag[2] != 0 && k < r.inputs.size() ? r.inputs[k].curl.get() : nullptr;
                 if (p.flag[2] != 0 && !in) throw std::runtime_error("GPU preview: Curl's clumps missing");
                 if (p.flag[0] == 3 && widthsMade) {

@@ -2881,10 +2881,8 @@ float3 curlOffset(uint s, uint begin, uint i, uint n, Frame fr, float w, float p
     return across * (r * (gFlag.x == 1u ? sin(angle) : zigzagWave(angle)));
 }
 
-[shader("compute")]
-[numthreads(GROUP_SIZE, 1, 1)]
-void CurlCS(uint3 id : SV_DispatchThreadID) {
-    const uint s = threadIndex(id, GROUP_SIZE);
+// Strand s curled (CurlCS: a strand a thread).
+void curlStrand(uint s) {
     if (s >= gStrandCount) return;
     const uint begin = strandBegin(s), n = strandCountOf(s);
     if (n == 0) return;
@@ -2965,6 +2963,203 @@ void CurlCS(uint3 id : SV_DispatchThreadID) {
         }
         storePoint(gOut, begin + i,
                    loadPoint(begin + i) + curlOffset(s, begin, i, n, fr, parc, phase, vary, frequency, plane, key, strandRadius, pointStretch));
+    }
+}
+
+// ---- Curl on the CPU: four strands a thread, side by side ----------------------------------------
+//
+// Four strands of as many points (3 to CENTER_SAMPLES), each curling alone about its own points
+// (no clumps, no frequencyProfile, unweighted), have their axes' slopes, arc lengths and frames
+// made side by side in float4 lanes, a strand a lane (curl_op.cpp makeFour: each lane the scalar
+// arithmetic in its order, so each strand's floats are curlStrand's), then each point curled as
+// curlStrand curls it. Any other four, one by one.
+struct Lanes3 {
+    float4 x, y, z;
+};
+struct FrameLanes {
+    Lanes3 t, n, b;
+};
+Lanes3 lanes3(float3 a, float3 b, float3 c, float3 d) {
+    Lanes3 r;
+    r.x = float4(a.x, b.x, c.x, d.x);
+    r.y = float4(a.y, b.y, c.y, d.y);
+    r.z = float4(a.z, b.z, c.z, d.z);
+    return r;
+}
+Lanes3 lanes3(float3 v[4]) { return lanes3(v[0], v[1], v[2], v[3]); }
+float3 laneOf(Lanes3 v, uint l) { return float3(v.x[l], v.y[l], v.z[l]); }
+Lanes3 addLanes(Lanes3 a, Lanes3 b) {
+    Lanes3 r;
+    r.x = a.x + b.x;
+    r.y = a.y + b.y;
+    r.z = a.z + b.z;
+    return r;
+}
+Lanes3 subLanes(Lanes3 a, Lanes3 b) {
+    Lanes3 r;
+    r.x = a.x - b.x;
+    r.y = a.y - b.y;
+    r.z = a.z - b.z;
+    return r;
+}
+Lanes3 scaleLanes(Lanes3 a, float4 s) {
+    Lanes3 r;
+    r.x = a.x * s;
+    r.y = a.y * s;
+    r.z = a.z * s;
+    return r;
+}
+float4 dotLanes(Lanes3 a, Lanes3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+Lanes3 crossLanes(Lanes3 a, Lanes3 b) {
+    Lanes3 r;
+    r.x = a.y * b.z - a.z * b.y;
+    r.y = a.z * b.x - a.x * b.z;
+    r.z = a.x * b.y - a.y * b.x;
+    return r;
+}
+Lanes3 pickLanes(bool4 m, Lanes3 a, Lanes3 b) {
+    Lanes3 r;
+    r.x = select(m, a.x, b.x);
+    r.y = select(m, a.y, b.y);
+    r.z = select(m, a.z, b.z);
+    return r;
+}
+// secantOf's and tangentOf's: v over its length `l` where that is above 0, else `other`.
+Lanes3 unitLanesOr(Lanes3 v, float4 l, Lanes3 other) { return pickLanes(l > 0.0f, scaleLanes(v, 1.0f / l), other); }
+// slopeFrom, a lane each.
+Lanes3 slopeLanes(Lanes3 s0, float4 h0, Lanes3 s1, float4 h1, uint which) {
+    const float4 w = h0 + h1;
+    const bool4 spaced = w > 0.0f;
+    if (which == 1u) return pickLanes(spaced, scaleLanes(addLanes(scaleLanes(s0, h1), scaleLanes(s1, h0)), 1.0f / w), lanes3(float3(0.0f), float3(0.0f), float3(0.0f), float3(0.0f)));
+    if (which == 0u) return pickLanes(spaced, addLanes(s0, scaleLanes(subLanes(s0, s1), h0 / w)), s0);
+    return pickLanes(spaced, addLanes(s1, scaleLanes(subLanes(s1, s0), h1 / w)), s1);
+}
+// segmentArc over a whole segment (u 1), a lane each.
+float4 hermiteSpeedLanes(Lanes3 dd, Lanes3 a, Lanes3 b, float v) {
+    const Lanes3 d = addLanes(addLanes(scaleLanes(dd, float4(6.0f * v * (1.0f - v))), scaleLanes(a, float4((1.0f - v) * (1.0f - 3.0f * v)))),
+                              scaleLanes(b, float4(v * (3.0f * v - 2.0f))));
+    return sqrt(dotLanes(d, d));
+}
+float4 wholeArcLanes(Lanes3 p0, Lanes3 p1, Lanes3 d0, Lanes3 d1, float4 h) {
+    const Lanes3 dd = subLanes(p1, p0), a = scaleLanes(d0, h), b = scaleLanes(d1, h);
+    const float u = 1.0f;
+    return 0.5f * u * (hermiteSpeedLanes(dd, a, b, u * CURL_GAUSS0) + hermiteSpeedLanes(dd, a, b, u * CURL_GAUSS1));
+}
+// reflectFrameBy, a frame a lane.
+FrameLanes reflectLanes(FrameLanes f, Lanes3 v1, Lanes3 t1) {
+    const float4 c1 = dotLanes(v1, v1);
+    const float4 k1 = 2.0f / c1;
+    const Lanes3 rL = subLanes(f.n, scaleLanes(v1, k1 * dotLanes(v1, f.n)));
+    const Lanes3 tL = subLanes(f.t, scaleLanes(v1, k1 * dotLanes(v1, f.t)));
+    const Lanes3 v2 = subLanes(t1, tL);
+    const float4 c2 = dotLanes(v2, v2);
+    const Lanes3 r = pickLanes(c2 < 1e-12f, rL, subLanes(rL, scaleLanes(v2, 2.0f / c2 * dotLanes(v2, rL))));
+    const Lanes3 m = subLanes(r, scaleLanes(t1, dotLanes(r, t1)));
+    const float4 l = sqrt(dotLanes(m, m));
+    Lanes3 n = scaleLanes(m, 1.0f / l);
+    for (uint lane = 0; lane < 4u; ++lane) {
+        if (!(l[lane] > 0.0f)) {
+            const float3 p = anyPerpendicular(laneOf(t1, lane));
+            n.x[lane] = p.x;
+            n.y[lane] = p.y;
+            n.z[lane] = p.z;
+        }
+    }
+    const bool4 keep = c1 < 1e-12f;  // a repeated point keeps the frame
+    FrameLanes o;
+    o.t = pickLanes(keep, f.t, t1);
+    o.n = pickLanes(keep, f.n, n);
+    o.b = pickLanes(keep, f.b, crossLanes(t1, n));
+    return o;
+}
+
+// Strands first to first + 3 curled side by side, or false (left to curlStrand) where they can't be.
+bool curlFour(uint first) {
+    if (first + 4u > gStrandCount || gFlag.z != 0u || curlSpaced()) return false;
+    const uint n = strandCountOf(first);
+    if (n < 3u || n > uint(CENTER_SAMPLES)) return false;
+    uint begin[4];
+    for (uint l = 0; l < 4u; ++l) {
+        if (strandCountOf(first + l) != n) return false;
+        begin[l] = strandBegin(first + l);
+    }
+    // Each strand's draw (curlStrand's) and its frame at the root (ownAxisStart's).
+    float phase[4], vary[4], frequency[4], plane[4], strandRadius[4];
+    uint key[4];
+    float3 t0[4], n0[4], b0[4];
+    for (uint l = 0; l < 4u; ++l) {
+        const uint s = first + l;
+        storePoint(gOut, begin[l], loadPoint(begin[l]));  // the root stays
+        strandRadius[l] = fieldPerPoint(0) ? 0.0f : fieldAt(0, gValue.x, s, 0);
+        const float4 u = strandData(s);
+        phase[l] = kTwoPi * (gValue.w + asfloat(gFlag.y) * u.x);
+        vary[l] = 1.0f + gValue.z * (-1.0f + 2.0f * u.y);
+        frequency[l] = gValue.y * (1.0f + 0.5f * gValue.z * (-1.0f + 2.0f * u.z));
+        plane[l] = kTwoPi * u.w;
+        key[l] = curlSpacingKey(u);
+        const float4 root = asfloat(gStrandData.Load4((gTable.y + s) * 16));
+        const Frame f = ownAxisStart(begin[l], n, root.w != 0.0f ? root.xyz : float3(0.0f, 0.0f, 0.0f)).f;
+        t0[l] = f.t;
+        n0[l] = f.n;
+        b0[l] = f.b;
+    }
+    // The axes (the strands' own points): their secants and slopes (walkSlope's), then the arcs and
+    // frames along them (ownAxisStep's).
+    Lanes3 p[CENTER_SAMPLES], s[CENTER_SAMPLES], d[CENTER_SAMPLES];
+    float4 h[CENTER_SAMPLES];
+    for (uint k = 0; k < n; ++k) p[k] = lanes3(loadPoint(begin[0] + k), loadPoint(begin[1] + k), loadPoint(begin[2] + k), loadPoint(begin[3] + k));
+    const Lanes3 none = lanes3(float3(0.0f), float3(0.0f), float3(0.0f), float3(0.0f));
+    for (uint j = 0; j + 1u < n; ++j) {
+        const Lanes3 v = subLanes(p[j + 1u], p[j]);
+        h[j] = sqrt(dotLanes(v, v));
+        s[j] = unitLanesOr(v, h[j], none);
+    }
+    for (uint k = 0; k < n; ++k) {
+        const uint a = k == 0u ? 0u : k + 1u == n ? n - 3u : k - 1u;
+        const uint which = k == 0u ? 0u : k + 1u == n ? 2u : 1u;
+        d[k] = slopeLanes(s[a], h[a], s[a + 1u], h[a + 1u], which);
+    }
+    FrameLanes f;
+    f.t = lanes3(t0);
+    f.n = lanes3(n0);
+    f.b = lanes3(b0);
+    FrameLanes frames[CENTER_SAMPLES];
+    float4 arcs[CENTER_SAMPLES];
+    float4 arc = float4(0.0f);
+    for (uint k = 1; k < n; ++k) {
+        arc = arc + wholeArcLanes(p[k - 1u], p[k], d[k - 1u], d[k], h[k - 1u]);
+        f = reflectLanes(f, subLanes(p[k], p[k - 1u]), unitLanesOr(d[k], sqrt(dotLanes(d[k], d[k])), f.t));
+        frames[k] = f;
+        arcs[k] = arc;
+    }
+    // Each point curled.
+    for (uint l = 0; l < 4u; ++l) {
+        for (uint i = 1; i < n; ++i) {
+            Frame fr;
+            fr.t = laneOf(frames[i].t, l);
+            fr.n = laneOf(frames[i].n, l);
+            fr.b = laneOf(frames[i].b, l);
+            storePoint(gOut, begin[l] + i,
+                       loadPoint(begin[l] + i) +
+                           curlOffset(first + l, begin[l], i, n, fr, arcs[i][l], phase[l], vary[l], frequency[l], plane[l], key[l], strandRadius[l], 0.0f));
+        }
+    }
+    return true;
+}
+// The CPU's CurlCS: strands 4t to 4t + 3.
+void curlFourOrEach(uint first) {
+    if (curlFour(first)) return;
+    for (uint l = 0; l < 4u; ++l) curlStrand(first + l);
+}
+
+[shader("compute")]
+[numthreads(GROUP_SIZE, 1, 1)]
+void CurlCS(uint3 id : SV_DispatchThreadID) {
+    __target_switch {
+    case cpp:
+        curlFourOrEach(threadIndex(id, GROUP_SIZE) * 4u);
+    default:
+        curlStrand(threadIndex(id, GROUP_SIZE));
     }
 }
 

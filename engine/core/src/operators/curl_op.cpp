@@ -43,7 +43,9 @@
 // 0). Weight 0 leaves all of it out (the curl as before).
 //
 // look.slang (CurlCS, CurlAxesCS) repeats this arithmetic in its order for the GPU preview, for
-// strands Curl adds no points to (weighted: its own axis walked to the tip first for the stretch).
+// strands Curl adds no points to (weighted: its own axis walked to the tip first for the stretch);
+// a full evaluation adding none runs it on the CPU engine (look_cpu.h runStage), the C++ here the
+// incremental evaluations' and the points it adds.
 
 #include <algorithm>
 #include <array>
@@ -58,6 +60,7 @@
 #include "groomlab/curl_phase.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
@@ -1077,6 +1080,18 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
         }
     }
     const std::size_t strandCount = in->strandCount();
+    // On the CPU engine (look.slang CurlCS: one source with the GPU preview's) where Curl adds no
+    // points: at tolerance 0 here, else once the strands' counts say it adds none (below).
+    auto onEngine = [&] {
+        gpu::StageInputs inputs;
+        if (byClump && !(inputs.curl = gpu::curlInputs(*in, scalp, params().getString("clumpChannel"), set.seed))) return false;
+        StrandsPtr made = gpu::runStage(gpu::StageKind::Curl, params(), in, scalp, std::move(inputs));
+        if (!made) return false;
+        added_.store(0, std::memory_order_relaxed);
+        *result = std::move(made);
+        return true;
+    };
+    if (!incremental && set.perTurn == 0 && gpu::cpuEngineOn() && onEngine()) return true;
     const Clumps clumps = byClump ? findClumps(*in, set, scalp) : Clumps{};
     const RampAlong along(profile, *in);
     const float* widths = coil && in->widths().size() == in->pointCount() ? in->widths().data() : nullptr;
@@ -1559,6 +1574,29 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
 
     // Each strand curled at its own points, as long as Curl adds none to any; each strand's count.
     std::vector<std::size_t> counts(strandCount);
+    if (set.perTurn > 0 && !byClump && gpu::cpuEngineOn()) {
+        // The counts first (the arcs alone): none added, the engine's; else the strands laid out anew.
+        parallelFor(0, (strandCount + 3) / 4, [&](std::size_t g) {
+            thread_local std::array<Curve, 4> curves;
+            thread_local std::array<Axis, 4> owns;
+            thread_local std::vector<Place> places;
+            const Axis* axes[4];
+            const std::size_t first = 4 * g;
+            prepareFour(first, curves.data(), owns.data(), axes, false);
+            for (std::size_t s = first; s < std::min(first + 4, strandCount); ++s) {
+                const std::size_t n = in->strandPointCount(s);
+                counts[s] = n < 2 ? n : plan(s, *axes[s - first], places, false);
+            }
+        }, 16);
+        std::size_t added = 0;
+        for (std::size_t s = 0; s < strandCount; ++s) added += counts[s] != in->strandPointCount(s);
+        if (added > 0) {
+            added_.store(added, std::memory_order_relaxed);
+            *result = StrandsPtr(build(nullptr, counts));
+            return true;
+        }
+        if (onEngine()) return true;
+    }
     std::atomic<bool> adds{false};
     {
         auto out = std::make_shared<StrandSet>(*in);
