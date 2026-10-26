@@ -166,6 +166,7 @@
 #include "groomlab/distance_field.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -1751,6 +1752,80 @@ private:
             const float t = std::sqrt(nearest2) / radius;
             return t >= 1.0f ? 0.0f : std::clamp(falloff(t), 0.0f, 1.0f) * std::min((1.0f - t) * 20.0f, 1.0f);
         };
+        if (!last && !lengthOnly && !fill && !reference && layerNames.empty() && samples <= 64 && gpu::cpuEngineOn() &&
+            (!clearance || clearance.surface.field)) {
+            // look.slang's InterpolateCS (and ClearanceCS keeping clearance), the GPU preview's own
+            // (look_cpu.h), on this binding and these guides; the channels here. (Strands blending
+            // more guides than the kernel's slots, layers, tubes, a deformed scalp: its C++.)
+            bool fits = true;
+            for (std::size_t s = 0; s < strandCount && fits; ++s) fits = bindings.record(s).count <= gpu::kInterpolateSlots;
+            std::shared_ptr<const InterpolateClearance> field;
+            std::string whyNot;
+            if (fits && clearance) {
+                field = interpolateClearance(params(), scalp, &whyNot);
+                fits = field && !field->rest;
+            }
+            if (fits) {
+                gpu::StageInputs blend;
+                auto data = std::make_shared<gpu::InterpolateInputs>();
+                {
+                    const std::lock_guard<std::mutex> lock(madeMutex_);
+                    if (!engineState_ || engineState_->binding != binding || engineState_->strands != strands) {
+                        auto state = std::make_shared<InterpolateState>();
+                        state->binding = binding;
+                        state->baseKey = baseKey;
+                        state->strandCount = strandCount;
+                        state->roots = roots;
+                        state->guides = guides;
+                        state->strands = strands;
+                        state->channels = !attrNames.empty();
+                        engineState_ = std::move(state);
+                    }
+                    data->binding = engineState_;
+                }
+                auto rows = std::make_shared<InterpolateGuideRows>();
+                rows->samples = samples;
+                rows->roots = roots;
+                rows->normals = normals;
+                rows->lengths = guideLengths;
+                rows->offsets.resize(kept.size() * samples);
+                for (std::size_t g = 0; g < kept.size(); ++g) {
+                    const float* o = offsets.data() + g * 3 * stride;
+                    for (std::size_t j = 0; j < samples; ++j) rows->offsets[g * samples + j] = Vec3f(o[j], o[stride + j], o[2 * stride + j]);
+                }
+                data->rows = std::move(rows);
+                auto strandNormals = std::make_shared<std::vector<Vec3f>>(strandCount);
+                parallelFor(0, strandCount, [&](std::size_t s) {
+                    const StrandRoot& root = strands->roots()[s];
+                    (*strandNormals)[s] = align && scalp->contains(root) ? scalp->normal(root) : Vec3f{};
+                }, 4096);
+                data->strandNormals = std::move(strandNormals);
+                data->clearance = std::move(field);
+                blend.interpolate = std::move(data);
+                gpu::StageParamReader reader(params(), "");
+                reader.samples = samples;
+                if (gpu::runStageInto(gpu::StageKind::Interpolate, reader, strands, scalp.get(), *out, std::move(blend))) {
+                    parallelFor(0, strandCount, [&](std::size_t s) {
+                        const Binding::Record record = bindings.record(s);
+                        if (!record.bound) return;
+                        for (std::size_t a = 0; a < attrChannels.size(); ++a) {
+                            float v = 0.0f;
+                            for (std::uint32_t i = 0; i < record.count; ++i) v += attrValues[a][record.guide(i)] * record.weight(i);
+                            (*attrChannels[a])[s] = v;
+                        }
+                        if (influenceChannel) (*influenceChannel)[s] = influenceAt(record.nearest2);
+                    }, 1024);
+                    if (regionWritten) {
+                        std::vector<float>& channel = out->addStrandChannel(regionName, -1.0f);
+                        const std::vector<std::int32_t>& strandRegions = *regions->strands;
+                        parallelFor(0, channel.size(), [&](std::size_t s) { channel[s] = static_cast<float>(strandRegions[s]); }, 4096);
+                    }
+                    remember(StrandsPtr(out), strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey, regionSource, regions);
+                    *result = StrandsPtr(out);
+                    return true;
+                }
+            }
+        }
         // One strand: its channels, then its points from its guides. `scratch` is the thread's.
         auto blendStrand = [&](std::size_t s, Scratch& scratch) {
             const std::size_t n = out->strandPointCount(s);
@@ -2733,6 +2808,9 @@ private:
     mutable std::vector<std::pair<std::uint64_t, std::shared_ptr<const Binding>>> memo_;  // newest first
     mutable std::mutex madeMutex_;
     mutable Made made_;
+    // The binding as the CPU engine takes it (InterpolateState), kept while the binding is: its
+    // records stay uploaded (look_engine.cpp compares them by address).
+    mutable std::shared_ptr<const InterpolateState> engineState_;
 };
 
 }  // namespace

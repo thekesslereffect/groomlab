@@ -567,6 +567,15 @@ private:
                 return true;
             }
         }
+        if (!last && gpu::cpuEngineOn()) {  // look.slang's PartCS, the GPU preview's own (look_cpu.h)
+            gpu::StageInputs sides;
+            sides.part = gpu::partInputs(*in, parts.get(), scalp, only, width);
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Part, params(), in, scalp, std::move(sides))) {
+                *result = made;
+                remember(*result, flow, parts);
+                return true;
+            }
+        }
         auto out = std::make_shared<StrandSet>(*in);
         if (last) {
             positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made

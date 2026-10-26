@@ -778,7 +778,8 @@ void LookEngine::putStageInputs(const LookRun& run) {
             const std::size_t per = interpolateChunkStrands();
             const std::uint32_t recordWords = binding.roots.size() > 65535 ? 2u : 1u;
             const std::size_t headerWords = 2 * stageN;
-            bool whole = !has(auxBuffer(k, 0)) || held.chunks.size() != chunks.size() || held.aux[0] != recordWords;
+            bool whole = !has(auxBuffer(k, 0)) || held.chunks.size() != chunks.size() || held.aux[0] != recordWords ||
+                         (sharesBase() && held.a != data->binding.get());
             std::vector<std::size_t> changed;
             for (std::size_t c = 0; c < chunks.size(); ++c) {
                 if (whole || held.chunks[c] != chunks[c]) changed.push_back(c);
