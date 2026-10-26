@@ -729,9 +729,25 @@ void LookEngine::putStageInputs(const LookRun& run) {
     for (std::size_t k = 0; k < stages.size(); ++k) {
         StageHeld& held = held_[k];
         const std::size_t stageN = stageStrands(stages[k]), stageP = stagePoints(stages[k]);  // (up a Merge's input a: its strands)
-        if (held.kind != static_cast<int>(stages[k].stage.kind)) {
+        const int kindNow = static_cast<int>(stages[k].stage.kind);
+        if (held.kind != kindNow && sharesBase()) {
+            // (Parked for its kind's next turn; the new kind's taken back where it was parked.)
+            if (held.kind >= 0) {
+                Parked& parked = parked_[{k, held.kind}];
+                parked.held = std::move(held);
+                for (int b = 0; b < kAuxPerStage; ++b) parked.buffers[b] = parkBuffer(auxBuffer(k, b));
+            }
             held = StageHeld{};
-            held.kind = static_cast<int>(stages[k].stage.kind);
+            held.kind = kindNow;
+            const auto back = parked_.find({k, kindNow});
+            if (back != parked_.end()) {
+                held = std::move(back->second.held);
+                for (int b = 0; b < kAuxPerStage; ++b) unparkBuffer(auxBuffer(k, b), std::move(back->second.buffers[b]));
+                parked_.erase(back);
+            }
+        } else if (held.kind != kindNow) {
+            held = StageHeld{};
+            held.kind = kindNow;
             for (int b = 0; b < kAuxPerStage; ++b) release(auxBuffer(k, b));
         }
         const ClumpInputs* clump = stages[k].stage.kind == StageKind::Clump && k < run.inputs.size() ? run.inputs[k].clump.get() : nullptr;
@@ -901,6 +917,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 if (!rows.offsets.empty()) std::memcpy(words.data() + count * 8, rows.offsets.data(), rows.offsets.size() * 12);
                 write(auxBuffer(k, 1), words.data(), words.size() * 4, false);
                 held.b = data->rows.get();
+                held.alive[1] = data->rows;
                 held.aux[3] = static_cast<std::uint32_t>(count * 8);
                 runUploadMegabytes_ += static_cast<double>(words.size() * 4) / 1e6;
             }
@@ -971,6 +988,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 }
                 if (!data->variation->empty()) std::memcpy(words.data() + variationAt, data->variation->data(), data->variation->size() * 4);
                 held.c = data->variation.get();
+                held.alive[2] = data->variation;
             };
             if (data->curves) {
                 if (held.b != data->curves.get() || !has(auxBuffer(k, 1))) {
@@ -982,6 +1000,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     withNormals(words);
                     write(auxBuffer(k, 1), words.data(), bytes, true);
                     held.b = data->curves.get();
+                    held.alive[1] = data->curves;
                     held.framesMade = false;
                     runUploadMegabytes_ += static_cast<double>(bytes) / 1e6;
                 }
@@ -993,6 +1012,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     write(auxBuffer(k, 1), words.data(), bytes, true);
                     write(auxBuffer(k, 2), data->chosen->data(), data->chosen->size() * 4, false);
                     held.b = data->chosen.get();
+                    held.alive[1] = data->chosen;
                     held.framesMade = false;
                     runUploadMegabytes_ += static_cast<double>(bytes) / 1e6;
                 }
@@ -1004,12 +1024,14 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     write(auxBuffer(k, 4), data->neighbors->data(), data->neighbors->size() * 4, false);
                     allocate(auxBuffer(k, 5), std::max<std::size_t>(data->centers * kCenterFloats * 4, 4));
                     held.d = data->neighbors.get();
+                    held.alive[3] = data->neighbors;
                 }
             }
             // A seed dragged: the variation drawn again (the curves and frames as they are).
             if (held.c != data->variation.get()) {
                 if (!data->variation->empty()) writeRange(auxBuffer(k, 1), variationAt * 4, data->variation->data(), data->variation->size() * 4);
                 held.c = data->variation.get();
+                held.alive[2] = data->variation;
             }
         } else if (stages[k].stage.kind == StageKind::Curl && stages[k].flag[2] != 0) {
             const CurlInputs* data = in ? in->curl.get() : nullptr;
@@ -1019,18 +1041,21 @@ void LookEngine::putStageInputs(const LookRun& run) {
             if (held.a != data->clumpOf.get()) {
                 write(auxBuffer(k, 0), data->clumpOf->data(), data->clumpOf->size() * 4, false);
                 held.a = data->clumpOf.get();
+                held.alive[0] = data->clumpOf;
                 runUploadMegabytes_ += static_cast<double>(data->clumpOf->size() * 4) / 1e6;
             }
             if (held.b != data->members.get()) {
                 write(auxBuffer(k, 1), data->members->data(), data->members->size() * 4, false);
                 allocate(auxBuffer(k, 3), std::max<std::size_t>(data->count * kClumpCenterSamples * 18 * 4, 4));  // (look.slang CLUMP_AXIS_FLOATS)
                 held.b = data->members.get();
+                held.alive[1] = data->members;
             }
             if (held.c != data->clumps.get()) {
                 std::vector<float> clumps = *data->clumps;
                 if (clumps.empty()) clumps.push_back(0.0f);
                 write(auxBuffer(k, 2), clumps.data(), clumps.size() * 4, false);
                 held.c = data->clumps.get();
+                held.alive[2] = data->clumps;
             }
         } else if (stages[k].stage.kind == StageKind::Part) {
             const PartInputs* data = in ? in->part.get() : nullptr;
@@ -1040,6 +1065,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
             if (held.a != data->sides.get()) {
                 write(auxBuffer(k, 0), data->sides->data(), data->sides->size() * 4, false);
                 held.a = data->sides.get();
+                held.alive[0] = data->sides;
                 runUploadMegabytes_ += static_cast<double>(data->sides->size() * 4) / 1e6;
             }
         } else if (stages[k].stage.kind == StageKind::Collide) {

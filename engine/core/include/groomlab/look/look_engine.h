@@ -10,8 +10,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "groomlab/look/look_run.h"
@@ -236,6 +238,9 @@ protected:
     virtual void* writable(int /*buffer*/, std::size_t /*bytes*/) { return nullptr; }
     virtual bool has(int buffer) const = 0;
     virtual void release(int buffer) = 0;
+    // A sharing engine's buffer taken out as it is (null: none), and put back.
+    virtual std::shared_ptr<void> parkBuffer(int /*buffer*/) { return nullptr; }
+    virtual void unparkBuffer(int /*buffer*/, std::shared_ptr<void> /*parked*/) {}
     // The run's outputs: kOut0 (positions) and, with `frames`, kOut1-3 resolved to the targets
     // where the kernels can write them, else to own buffers `bytes` long; the point texture, when
     // one is given, as the image the texture kernel writes (Binding::texture); the uvs target as
@@ -333,6 +338,7 @@ private:
         const void* c = nullptr;  // Clump: its variation; Curl: its clumps' numbers
         const void* d = nullptr;  // Clump: its neighbors
         std::uint32_t aux[4] = {};
+        std::shared_ptr<const void> alive[4];  // what a, b, c and d are of where nothing else keeps it (compared by address)
         bool framesMade = false;
         std::uint64_t madeFrames = 0;  // a sharing engine's own root frames: for the strands of this baseSerial_ (0: none)
         std::vector<const void*> chunks;  // Interpolate: the binding's chunks its buffer holds
@@ -357,6 +363,14 @@ private:
         std::uint32_t wallsAt = 0xFFFFFFFFu;
     };
     std::vector<StageHeld> held_;
+    // A sharing engine (the CPU's, whose runs are an operator's one stage each) keeps what a stage
+    // slot held for each kind that took it: another kind's turn parks it (its held state, its aux
+    // buffers as they are), the kind's next takes it back (parkBuffer, unparkBuffer: no copy).
+    struct Parked {
+        StageHeld held;
+        std::shared_ptr<void> buffers[kAuxPerStage];
+    };
+    std::map<std::pair<std::size_t, int>, Parked> parked_;
     // Per stage: the sibling running a Clump's centers' branch or a Merge's input b's run (null: none),
     // and the last runs'.
     std::vector<std::unique_ptr<LookEngine>> centers_;

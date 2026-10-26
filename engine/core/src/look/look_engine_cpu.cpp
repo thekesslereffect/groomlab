@@ -120,6 +120,20 @@ protected:
     }
     bool has(int id) const override { return buffers_.count(id) != 0; }
     void release(int id) override { buffers_.erase(id); }
+    std::shared_ptr<void> parkBuffer(int id) override {
+        const auto it = buffers_.find(id);
+        if (it == buffers_.end()) return nullptr;
+        std::shared_ptr<void> parked = it->second;
+        buffers_.erase(it);
+        return parked;
+    }
+    void unparkBuffer(int id, std::shared_ptr<void> parked) override {
+        if (parked) {
+            buffers_[id] = std::static_pointer_cast<Words::element_type>(std::move(parked));
+        } else {
+            buffers_.erase(id);
+        }
+    }
 
     // A host's targets (float3 per point, the uvs' float2, in memory) are written in place; the
     // outputs it gives none of are the engine's own.
