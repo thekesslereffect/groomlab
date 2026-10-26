@@ -6431,6 +6431,7 @@ TEST(CpuEngine, SpeedAgainstTheOperators) {
     // best of 3). A report: which kernels are at their operators' speed, which want tuning.
     struct Graph {
         std::string name, json;
+        std::function<GroomData(const std::string&)> make = nullptr;  // (null: groom)
     };
     std::vector<Graph> graphs = {{"look", graph(0.3)}, {"hair_basics", startingGraph("hairBasics")}};
     for (const char* preset : {"parted_style", "gravity", "flyaways", "cinematic_hair", "wind_and_jiggle"}) graphs.push_back({preset, presetGraph(preset)});
@@ -6448,13 +6449,16 @@ TEST(CpuEngine, SpeedAgainstTheOperators) {
     }
     graphs.push_back({"Collide", withoutClearance(chainGraph({{"Collide", R"("params": {"offset": 0.12})"}}, true, true))});
     graphs.push_back({"SelfCollide", withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.6})"}, {"SelfCollide", ""}}))});
+    graphs.push_back({"RestoreLength", withReference(neighbourGraph("RestoreLength", R"("params": {"mode": "segments"})"), "n1", "interpolate")});
+    graphs.push_back({"MeshCut", meshCutGraph(R"("params": {"offset": 0.02})"),
+                      [](const std::string& j) { return meshCutGroom(j, Vec3f(0.0f, 4.6f, 0.0f), 1.6f); }});
     std::set<std::string> seen;
     for (const Graph& g : graphs) {
         nlohmann::json j = nlohmann::json::parse(g.json);
         for (auto& n : j["nodes"]) {
             if (n["type"] == "Scatter") n["params"]["density"] = 400.0;
         }
-        GroomData data = groom(j.dump());
+        GroomData data = g.make ? g.make(j.dump()) : groom(j.dump());
         test::paintRequiredMaps(g.json, data);
         data.partsJson = meridianParts(*data.scalp);
         GroomSession session(data);

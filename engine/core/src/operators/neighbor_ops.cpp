@@ -21,6 +21,7 @@
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
 #include "groomlab/look/look_cpu.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -351,6 +352,21 @@ private:
             }
         }
 
+        if (!last && gpu::cpuEngineOn()) {
+            // look.slang's RestoreLengthCS, the GPU preview's own (look_cpu.h), on its reference.
+            gpu::StageInputs ref;
+            if (!even) {
+                const StrandsPtr strandsRef = inputs.size() > 1 ? valueAs<StrandsPtr>(inputs[1]) : nullptr;
+                const GuidesPtr guidesRef = inputs.size() > 1 ? valueAs<GuidesPtr>(inputs[1]) : nullptr;
+                bool found = false;
+                ref.restore = gpu::restoreInputs(*in, strandsRef.get(), guidesRef.get(), nullptr, &found);
+                if (!found) return handOn();  // nothing to restore from
+            }
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::RestoreLength, params(), in, nullptr, std::move(ref))) {
+                *result = made;
+                return true;
+            }
+        }
         // The reference curves by ID: strands, or guides fed to the Curves input.
         struct Ref {
             const Vec3f* points;

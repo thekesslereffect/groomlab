@@ -51,7 +51,8 @@ private:
 // Whether readStageParams reads a stage of `kind`'s params.
 bool readsStageParams(StageKind kind);
 // A stage of `kind`'s params (Interpolate (its samples, flag[0], the caller's), Length, Clump (not a Wet's level), Noise, Width, Part, Gravity, Flyaway, Wind, Collide, the shapers working on
-// each strand alone, Smooth, BlendNeighbors, Tangle, Flow) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).
+// each strand alone, Smooth, BlendNeighbors, Tangle, Flow, RestoreLength (its reference's place the
+// preview's: flag[1]), MeshCut) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).
 // False with *why where the kernel does not run it so (the CPU's). (Width's feathers' shafts with a
 // rachis, an auto Part's lines: the caller's to refuse.)
 bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, std::string* why);
@@ -120,6 +121,14 @@ std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleStat
 // Null with *why where a surface has no field or tables the kernel reads (the CPU's).
 std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes, std::uint32_t colliders,
                                              const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why);
+// RestoreLength's reference (RestoreInputs) for the strands `in`: each strand's reference curve by
+// its ID (`refStrands`', else `refGuides`'), resampled to its point count, its segments' lengths and
+// first segment (a strand without one: -1, left as it is); `longest` the longest reference, `found`
+// whether there is any (null: not asked).
+std::shared_ptr<RestoreInputs> restoreInputs(const StrandSet& in, const StrandSet* refStrands, const GuideSet* refGuides, float* longest,
+                                             bool* found = nullptr);
+// MeshCut's mesh as the kernel takes it (its ray tree; none for no mesh).
+std::shared_ptr<MeshCutInputs> meshCutInputs(const MeshPtr& mesh);
 // Part's sides (PartInputs, its reach 0: the caller's): each strand's side of `lines` (only the part
 // `only` where named) from its root on the rest scalp, the way away from it and how far; none `within`
 // or farther (an operator's own width: the strands it leaves; the preview's every one, a width dragged).

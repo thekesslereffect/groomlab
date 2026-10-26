@@ -1055,8 +1055,7 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
             }
             // ---- The shapers reading their neighbours or a reference ----
             case StageKind::RestoreLength: {
-                const std::string mode = params.getString("mode");
-                s.flag[0] = mode == "scale" ? 1 : mode == "even" ? 2 : 0;
+                if (!readStageParams(stage.kind, reader, &s, why)) return false;
                 s.flag[1] = stage.from2 != kNoStage ? 1 : 0;  // the reference a stage of the run makes
                 break;
             }
@@ -1094,11 +1093,9 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                 s.tabled = true;
                 break;
             }
-            case StageKind::MeshCut: {
-                s.value[0] = static_cast<float>(number("offset"));
-                s.flag[0] = params.getString("keep") == "inside" ? 1 : 0;
+            case StageKind::MeshCut:
+                if (!readStageParams(stage.kind, reader, &s, why)) return false;
                 break;
-            }
             case StageKind::Merge: {
                 s.flag[0] = static_cast<int>(mergedA);
                 if (!mergedBranch(doc, id, overrides, &s.branch, why)) return false;
@@ -3012,10 +3009,8 @@ bool LookInputs::readMeshCut(const GraphDocument& doc, NodeId id, StageInputs* o
     const MeshPtr mesh = graph.inputSource(id, 1, &src, &output) ? valueAs<MeshPtr>(graph.cachedValue(src, output)) : nullptr;
     MeshCutMemo& memo = meshCut_[id];
     if (memo.mesh != mesh || !memo.inputs) {
-        auto made = std::make_shared<MeshCutInputs>();
-        if (mesh && mesh->triangleCount() > 0) made->tree = mesh->rayTree();
         memo.mesh = mesh;
-        memo.inputs = std::move(made);
+        memo.inputs = meshCutInputs(mesh);
     }
     out->meshCut = memo.inputs;
     return true;
@@ -3174,55 +3169,8 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
                 return false;
             }
             if (memo.in != in || memo.made != made || !memo.restore) {
-                // The reference curves by ID (RestoreLengthOp: strands, or guides), each at the
-                // strand's point count as the node resamples it.
-                struct Ref {
-                    const Vec3f* points;
-                    std::size_t count;
-                };
-                std::unordered_map<StrandId, Ref> reference;
                 float longest = 0.0f;
-                if (refStrands) {
-                    for (std::size_t s = 0; s < refStrands->strandCount(); ++s) {
-                        if (refStrands->strandPointCount(s) >= 2) reference[refStrands->ids()[s]] = {refStrands->strandPoints(s), refStrands->strandPointCount(s)};
-                    }
-                } else {
-                    for (const Guide& g : refGuides->guides()) {
-                        if (g.points.size() >= 2) reference[g.id] = {g.points.data(), g.points.size()};
-                    }
-                }
-                auto lengths = std::make_shared<std::vector<float>>(in->pointCount(), 0.0f);
-                auto firsts = std::make_shared<std::vector<float>>(in->strandCount() * 4, 0.0f);
-                std::vector<float> reaches(in->strandCount(), 0.0f);
-                parallelFor(0, in->strandCount(), [&](std::size_t s) {
-                    const std::size_t n = in->strandPointCount(s), begin = in->strandBegin(s);
-                    if (n == 0) return;
-                    (*lengths)[begin] = -1.0f;
-                    if (n < 2) return;
-                    const auto it = reference.find(in->ids()[s]);
-                    if (it == reference.end()) return;
-                    const Ref& ref = it->second;
-                    thread_local std::vector<Vec3f> sampled;
-                    const Vec3f* pts = ref.points;
-                    if (ref.count != n) {
-                        sampled.resize(n);
-                        resampleByArcLengthInto(ref.points, ref.count, sampled.data(), n);
-                        pts = sampled.data();
-                    }
-                    const float whole = arcLength(ref.points, ref.count);
-                    (*lengths)[begin] = whole;
-                    reaches[s] = whole;
-                    for (std::size_t i = 1; i < n; ++i) (*lengths)[begin + i] = (pts[i] - pts[i - 1]).length();
-                    const Vec3f first = pts[1] - pts[0];
-                    float* f = firsts->data() + s * 4;
-                    f[0] = first.x;
-                    f[1] = first.y;
-                    f[2] = first.z;
-                }, 1024);
-                for (const float r : reaches) longest = std::max(longest, r);
-                auto made2 = std::make_shared<RestoreInputs>();
-                made2->lengths = std::move(lengths);
-                made2->firsts = std::move(firsts);
+                std::shared_ptr<const RestoreInputs> made2 = restoreInputs(*in, refStrands.get(), refGuides.get(), &longest);
                 memo.in = in;
                 memo.made = made;
                 memo.keep = refStrands ? std::shared_ptr<const void>(refStrands) : std::shared_ptr<const void>(refGuides);

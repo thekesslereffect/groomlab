@@ -6,6 +6,7 @@
 #include <cstring>
 #include <exception>
 #include <map>
+#include <unordered_map>
 #include <variant>
 
 #include "groomlab/curve.h"
@@ -55,7 +56,9 @@ bool readsStageParams(StageKind kind) {
         case StageKind::Smooth:
         case StageKind::BlendNeighbors:
         case StageKind::Tangle:
-        case StageKind::Flow: return true;
+        case StageKind::Flow:
+        case StageKind::RestoreLength:
+        case StageKind::MeshCut: return true;
         default: return false;
     }
 }
@@ -313,6 +316,16 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->value[1] = static_cast<float>(number("start"));
             s->value[2] = static_cast<float>(number("span"));
             s->value[3] = static_cast<float>(number("reach"));
+            return true;
+        case StageKind::RestoreLength: {
+            // Its mode; a reference a stage of the run makes (flag[1]): the preview's to say.
+            const std::string mode = params.getString("mode");
+            s->flag[0] = mode == "scale" ? 1 : mode == "even" ? 2 : 0;
+            return true;
+        }
+        case StageKind::MeshCut:
+            s->value[0] = static_cast<float>(number("offset"));
+            s->flag[0] = params.getString("keep") == "inside" ? 1 : 0;
             return true;
         case StageKind::Flow:
             // FlowOp's numbers: the lift in degrees (its multiplier), its jitter in radians.
@@ -593,6 +606,70 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
         made->boxes.push_back(lo);
         made->boxes.push_back(hi);
     }
+    return made;
+}
+
+std::shared_ptr<RestoreInputs> restoreInputs(const StrandSet& in, const StrandSet* refStrands, const GuideSet* refGuides, float* longest,
+                                             bool* found) {
+    // The reference curves by ID (RestoreLengthOp: strands, or guides), each at the strand's point
+    // count as the node resamples it.
+    struct Ref {
+        const Vec3f* points;
+        std::size_t count;
+    };
+    std::unordered_map<StrandId, Ref> reference;
+    if (refStrands) {
+        reference.reserve(refStrands->strandCount());
+        for (std::size_t s = 0; s < refStrands->strandCount(); ++s) {
+            if (refStrands->strandPointCount(s) >= 2) reference[refStrands->ids()[s]] = {refStrands->strandPoints(s), refStrands->strandPointCount(s)};
+        }
+    } else if (refGuides) {
+        for (const Guide& g : refGuides->guides()) {
+            if (g.points.size() >= 2) reference[g.id] = {g.points.data(), g.points.size()};
+        }
+    }
+    if (found) *found = !reference.empty();
+    auto lengths = std::make_shared<std::vector<float>>(in.pointCount(), 0.0f);
+    auto firsts = std::make_shared<std::vector<float>>(in.strandCount() * 4, 0.0f);
+    std::vector<float> reaches(in.strandCount(), 0.0f);
+    parallelFor(0, in.strandCount(), [&](std::size_t s) {
+        const std::size_t n = in.strandPointCount(s), begin = in.strandBegin(s);
+        if (n == 0) return;
+        (*lengths)[begin] = -1.0f;
+        if (n < 2) return;
+        const auto it = reference.find(in.ids()[s]);
+        if (it == reference.end()) return;
+        const Ref& ref = it->second;
+        thread_local std::vector<Vec3f> sampled;
+        const Vec3f* pts = ref.points;
+        if (ref.count != n) {
+            sampled.resize(n);
+            resampleByArcLengthInto(ref.points, ref.count, sampled.data(), n);
+            pts = sampled.data();
+        }
+        const float whole = arcLength(ref.points, ref.count);
+        (*lengths)[begin] = whole;
+        reaches[s] = whole;
+        for (std::size_t i = 1; i < n; ++i) (*lengths)[begin + i] = (pts[i] - pts[i - 1]).length();
+        const Vec3f first = pts[1] - pts[0];
+        float* f = firsts->data() + s * 4;
+        f[0] = first.x;
+        f[1] = first.y;
+        f[2] = first.z;
+    }, 1024);
+    if (longest) {
+        *longest = 0.0f;
+        for (const float r : reaches) *longest = std::max(*longest, r);
+    }
+    auto made = std::make_shared<RestoreInputs>();
+    made->lengths = std::move(lengths);
+    made->firsts = std::move(firsts);
+    return made;
+}
+
+std::shared_ptr<MeshCutInputs> meshCutInputs(const MeshPtr& mesh) {
+    auto made = std::make_shared<MeshCutInputs>();
+    if (mesh && mesh->triangleCount() > 0) made->tree = mesh->rayTree();
     return made;
 }
 

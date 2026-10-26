@@ -17,6 +17,7 @@
 
 #include "groomlab/curve.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "incremental.h"
@@ -77,6 +78,14 @@ private:
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;
+                return true;
+            }
+        }
+        if (!last && gpu::cpuEngineOn()) {  // look.slang's MeshCutCS, the GPU preview's own (look_cpu.h)
+            gpu::StageInputs tree;
+            tree.meshCut = gpu::meshCutInputs(mesh);
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::MeshCut, params(), in, nullptr, std::move(tree))) {
+                *result = made;
                 return true;
             }
         }
