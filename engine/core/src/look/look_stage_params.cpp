@@ -16,6 +16,7 @@
 #include "groomlab/parts.h"
 #include "groomlab/point_index.h"
 #include "groomlab/preview_core.h"
+#include "groomlab/random.h"
 
 namespace groomlab::gpu {
 
@@ -37,6 +38,7 @@ bool StageParamReader::mappable(const std::string& param, float* value, std::str
 bool readsStageParams(StageKind kind) {
     switch (kind) {
         case StageKind::Length:
+        case StageKind::Clump:
         case StageKind::Noise:
         case StageKind::Width:
         case StageKind::Part:
@@ -67,6 +69,14 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             const auto a = static_cast<float>(number("trimMin")), b = static_cast<float>(number("trimMax"));
             s->value[2] = std::min(a, b);
             s->value[3] = std::max(a, b);
+            return true;
+        }
+        case StageKind::Clump: {
+            // Its strength and volumize mapped; the rest numbers and choices (clumpShape).
+            if (!mappable("strength", &s->value[0]) || !mappable("volumize", &s->value[1])) return false;
+            clumpShape(params, [&](const char* name) { return number(name); }, s);
+            s->ramp = r.ramp("profile");
+            s->ramp2 = r.ramp("volumizeProfile");
             return true;
         }
         case StageKind::Noise: {
@@ -297,6 +307,28 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             return true;
         default: *why = r.name() + ": not a stage read here"; return false;
     }
+}
+
+std::shared_ptr<ClumpInputs> clumpInputs(std::shared_ptr<const std::vector<std::uint32_t>> assigned, std::vector<Vec3f> curves,
+                                         std::vector<Vec3f> normals, const std::vector<StrandId>& ids, std::uint64_t seed) {
+    auto made = std::make_shared<ClumpInputs>();
+    made->assigned = std::move(assigned);
+    made->centers = ids.size();
+    made->curves = std::make_shared<const std::vector<Vec3f>>(std::move(curves));
+    made->normals = std::make_shared<const std::vector<Vec3f>>(std::move(normals));
+    made->variation = clumpVariation(ids, seed);
+    return made;
+}
+
+std::shared_ptr<const std::vector<float>> clumpVariation(const std::vector<StrandId>& ids, std::uint64_t seed) {
+    auto variation = std::make_shared<std::vector<float>>(ids.size() * 4, 0.0f);
+    for (std::size_t c = 0; c < ids.size(); ++c) {
+        float* v = variation->data() + c * 4;
+        v[0] = unitFloat(hashCombine(ids[c], seed ^ 0x57E4Aull));
+        v[1] = unitFloat(hashCombine(ids[c], seed ^ 0x2AD1Bull));
+        v[2] = unitFloat(hashCombine(ids[c], seed ^ 0xF1A7));
+    }
+    return variation;
 }
 
 bool ownMap(const ParamSet& params, const std::string& name) {

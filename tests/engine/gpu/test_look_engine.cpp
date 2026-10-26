@@ -6250,6 +6250,13 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "space": "world", "frequency": 3.0})"},
         {"Collide", R"("params": {"offset": 0.12})"},
         {"Collide", R"("params": {"offset": 0.08, "softness": 0.1, "smoothing": 0.2, "iterations": 3})"},
+        {"Clump", R"("params": {"count": 80, "strength": 0.7})"},
+        {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * t", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
+                                "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})",
+         false, true},
+        {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
+                                "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
+        {"Clump", R"("params": {"count": 40, "strength": -0.3, "repelRadius": 0.2, "flatten": "random", "flatness": 0.7})"},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
     };
@@ -6283,12 +6290,22 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"Twist", gpu::StageKind::Twist},         {"Tangle", gpu::StageKind::Tangle},
                                                              {"BlendNeighbors", gpu::StageKind::BlendNeighbors},
                                                              {"Length", gpu::StageKind::Length},       {"Wind", gpu::StageKind::Wind},
-                                                             {"Noise", gpu::StageKind::Noise},         {"Collide", gpu::StageKind::Collide}};
+                                                             {"Noise", gpu::StageKind::Noise},         {"Collide", gpu::StageKind::Collide},
+                                                             {"Clump", gpu::StageKind::Clump}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;
         if (kind == gpu::StageKind::Twist) stageInputs.twist = gpu::twistInputs(*valueAs<StrandsPtr>(inputs[0]), valueAs<GuidesPtr>(inputs[1]).get(), "clumpId", false, &whyNot);
-        // (Tangle's partners and BlendNeighbors' neighbours: their operators' own, as their C++ just made them.)
+        // (Tangle's partners, BlendNeighbors' neighbours and Clump's centers: their operators' own, as their C++ just made them.)
+        if (kind == gpu::StageKind::Clump) {
+            gpu::setCpuEngineOn(false);
+            const Value cpu = op.evaluate(ctx, inputs);
+            gpu::setCpuEngineOn(true);
+            ClumpState state;
+            ASSERT_TRUE(clumpState(op, valueAs<StrandsPtr>(cpu), &state));
+            stageInputs.clump = gpu::clumpInputs(state.assigned, state.curves, state.centerNormals, state.centerIds,
+                                                 static_cast<std::uint64_t>(op.params().getInt("seed")));
+        }
         if (kind == gpu::StageKind::Tangle || kind == gpu::StageKind::BlendNeighbors) {
             gpu::setCpuEngineOn(false);
             const Value cpu = op.evaluate(ctx, inputs);

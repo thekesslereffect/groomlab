@@ -1890,6 +1890,15 @@ void CentersCS(uint3 id : SV_DispatchThreadID) {
         }
         for (uint i = 0; i < CENTER_SAMPLES; ++i) storePoint(gOut, base + i, pts[i]);
     }
+    if (gFlag.w != 0) {
+        // Its cumulative arc lengths at its samples (look_ops.cpp cumulativeArcLength), at word gAux.w.
+        float arc = 0.0f;
+        gOut.Store((gAux.w + base) * 4, asuint(arc));
+        for (uint i = 1; i < CENTER_SAMPLES; ++i) {
+            arc = arc + len3(pts[i] - pts[i - 1]);
+            gOut.Store((gAux.w + base + i) * 4, asuint(arc));
+        }
+    }
     if (gFlag.y == 0) return;
     // The normals follow the frames in the buffer, a float4 a center.
     const float3 rootNormal = asfloat(gOut.Load3((gAux.y + gFlag.x * CENTER_SAMPLES * 9 + c * 4) * 4));
@@ -2063,9 +2072,9 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
     // The center's cumulative arc length at its samples (cumulativeArcLength): each point of the
     // strand is pulled toward the center's point as far from the root as the point is along its
     // strand (past the center's tip, the tip, or with extend on past it).
+    // (CentersCS made them, at word gAux.w.)
     float arcs[CENTER_SAMPLES];
-    arcs[0] = 0.0f;
-    for (uint a = 1; a < CENTER_SAMPLES; ++a) arcs[a] = arcs[a - 1] + len3(centerPoint(c, a) - centerPoint(c, a - 1));
+    for (uint a = 0; a < CENTER_SAMPLES; ++a) arcs[a] = asfloat(gAux1.Load((gAux.w + c * CENTER_SAMPLES + a) * 4));
     const float centerLength = arcs[CENTER_SAMPLES - 1];
     const float3 rootOffset = loadPoint(begin) - centerPoint(c, 0);
     // pastTip extend: past the center's tip, on along its last segment's way.

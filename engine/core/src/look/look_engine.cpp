@@ -933,17 +933,27 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 throw std::runtime_error("GPU preview: Clump's centers are for other strands");
             }
             if (held.a != data->assigned.get()) {
-                write(auxBuffer(k, 0), data->assigned->data(), data->assigned->size() * 4, false);
+                // (On the CPU the very memory: read alone, kept alive while held.)
+                if (data->assigned->empty()) {
+                    const std::uint32_t none = 0xffffffffu;
+                    write(auxBuffer(k, 0), &none, 4, false);
+                } else {
+                    share(auxBuffer(k, 0), data->assigned->data(), data->assigned->size() * 4);
+                }
                 held.a = data->assigned.get();
+                held.keep = data->assigned;
                 runUploadMegabytes_ += static_cast<double>(data->assigned->size() * 4) / 1e6;
             }
             // The centers' curves, then their frames (kernels write the frames, and the curves
             // where they make them), then their root normals (a float4 each: what the frames
             // start from), then their variation (a float4 each).
+            // Then each center's cumulative arc lengths at its samples (CentersCS writes them).
             const std::size_t variationAt = data->centers * (kCenterFloats + kFrameFloats + kNormalFloats);
-            const std::size_t bytes = (variationAt + data->centers * 4) * 4;
+            const std::size_t arcsAt = variationAt + data->centers * 4;
+            const std::size_t bytes = (arcsAt + data->centers * kClumpCenterSamples) * 4;
             held.aux[1] = static_cast<std::uint32_t>(data->centers * kCenterFloats);
             held.aux[2] = static_cast<std::uint32_t>(variationAt);
+            held.aux[3] = static_cast<std::uint32_t>(arcsAt);
             if (!data->normals || data->normals->size() != data->centers) {
                 throw std::runtime_error("GPU preview: Clump's centers' normals missing");
             }
@@ -2049,13 +2059,15 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                 // copyAmount on centers made here: resampled into a buffer of their own, then shared.
                 const bool share = made && in.neighbors && p.value2[2] > 0.0f && in.centers > 1;
                 const std::size_t centerGroups = (in.centers + 63) / 64;
-                if (in.centers > 0 && (made || (framed && !held_[k].framesMade))) {
+                if (in.centers > 0 && (made || !held_[k].framesMade)) {
                     // The centers' curves made from the points so far (the Clump's own strands), and
-                    // with a lock radius or a flatness their frames.
+                    // with a lock radius or a flatness their frames; their arc lengths where the
+                    // curves are final (not shared after).
                     StageConstants centers = c;
                     centers.flag[0] = static_cast<std::uint32_t>(in.centers);
                     centers.flag[1] = framed && !share ? 1u : 0u;
                     centers.flag[2] = made ? 0u : 1u;  // 1: the curves are there, the frames alone
+                    centers.flag[3] = share ? 0u : 1u;  // the arcs
                     Binding cb;
                     cb.in = input;
                     if (made && in.centersRun) {  // the curves of the centers' branch, as its run left them
@@ -2077,11 +2089,12 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                     sb.out[0] = auxBuffer(k, 1);
                     slots.push_back(shared);
                     steps.push_back({Kernel::Share, sb, centerGroups, false, -3});
-                    if (framed) {
-                        StageConstants framesOnly = c;
+                    {
+                        StageConstants framesOnly = c;  // (and the arcs, on the shared curves)
                         framesOnly.flag[0] = static_cast<std::uint32_t>(in.centers);
-                        framesOnly.flag[1] = 1u;
+                        framesOnly.flag[1] = framed ? 1u : 0u;
                         framesOnly.flag[2] = 1u;
+                        framesOnly.flag[3] = 1u;
                         Binding fb;
                         fb.out[0] = auxBuffer(k, 1);
                         slots.push_back(framesOnly);

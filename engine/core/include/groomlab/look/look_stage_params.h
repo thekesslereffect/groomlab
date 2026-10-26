@@ -6,6 +6,7 @@
 // (engine/gpu look_chain.cpp readLookParams: a drag's values in place of the node's own).
 
 #include <array>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <string>
@@ -47,11 +48,40 @@ private:
 
 // Whether readStageParams reads a stage of `kind`'s params.
 bool readsStageParams(StageKind kind);
-// A stage of `kind`'s params (Length, Noise, Width, Part, Gravity, Flyaway, Wind, Collide, the shapers working on
+// A stage of `kind`'s params (Length, Clump (not a Wet's level), Noise, Width, Part, Gravity, Flyaway, Wind, Collide, the shapers working on
 // each strand alone, Smooth, BlendNeighbors, Tangle, Flow) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).
 // False with *why where the kernel does not run it so (the CPU's). (Width's feathers' shafts with a
 // rachis, an auto Part's lines: the caller's to refuse.)
 bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, std::string* why);
+
+// A Clump's (or a Wet's level's) numbers and choices but its strength, volumize and profiles into
+// *s, `get` reading a number of `clump` (the preview's: a drag's).
+template <class Get>
+void clumpShape(const ParamSet& clump, const Get& get, StageParams* s) {
+    s->value[2] = static_cast<float>(get("flatness"));
+    s->value[3] = static_cast<float>(get("lockRadius"));
+    const float repelRadius = static_cast<float>(get("repelRadius"));
+    std::memcpy(&s->flag[0], &repelRadius, sizeof(float));  // the kernel reads its bits as a float
+    s->flag[1] = clump.getString("pastTip") == "extend" ? 1 : 0;
+    const std::string flatten = clump.getString("flatten");
+    s->flag[2] = flatten == "random" ? 1 : flatten == "direction" ? 2 : 0;
+    // The per-clump variation (by each center's ID: ClumpInputs::variation) and copy.
+    s->value2[0] = static_cast<float>(get("strengthRandom"));
+    s->value2[1] = static_cast<float>(get("lockRadiusRandom"));
+    s->value2[2] = static_cast<float>(get("copyAmount"));
+    const Vec3f direction = clump.getVec3("flattenDirection");
+    std::memcpy(&s->flag2[0], &direction.x, sizeof(float));
+    std::memcpy(&s->flag2[1], &direction.y, sizeof(float));
+    std::memcpy(&s->flag2[2], &direction.z, sizeof(float));
+    s->tabled = true;
+    s->hasRamp2 = true;
+}
+// Clump's centers as the kernel takes them (ClumpInputs) from its operator's: each strand's center,
+// the centers' curves as made (their copy shared), their roots' normals, their variation by `ids`
+// and `seed` (clumpVariation: the strength's, the lock radius's and a random flatten's draws).
+std::shared_ptr<ClumpInputs> clumpInputs(std::shared_ptr<const std::vector<std::uint32_t>> assigned, std::vector<Vec3f> curves,
+                                         std::vector<Vec3f> normals, const std::vector<StrandId>& ids, std::uint64_t seed);
+std::shared_ptr<const std::vector<float>> clumpVariation(const std::vector<StrandId>& ids, std::uint64_t seed);
 
 // A param holding a map of its own, or that or a field plugged in (as its node's evaluation reads it).
 bool ownMap(const ParamSet& params, const std::string& name);

@@ -897,26 +897,7 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                     *why = doc.nameOf(id) + " varies each strand's pull (strandStrengthRandom): the CPU's";
                     return false;
                 }
-                // A Clump's params but its strength, volumize and profiles, `get` reading a number.
-                auto shape = [&](const ParamSet& clump, const auto& get) {
-                    s.value[2] = static_cast<float>(get("flatness"));
-                    s.value[3] = static_cast<float>(get("lockRadius"));
-                    const float repelRadius = static_cast<float>(get("repelRadius"));
-                    std::memcpy(&s.flag[0], &repelRadius, sizeof(float));  // the kernel reads its bits as a float
-                    s.flag[1] = clump.getString("pastTip") == "extend" ? 1 : 0;
-                    const std::string flatten = clump.getString("flatten");
-                    s.flag[2] = flatten == "random" ? 1 : flatten == "direction" ? 2 : 0;
-                    // The per-clump variation (by each center's ID: ClumpInputs::variation) and copy.
-                    s.value2[0] = static_cast<float>(get("strengthRandom"));
-                    s.value2[1] = static_cast<float>(get("lockRadiusRandom"));
-                    s.value2[2] = static_cast<float>(get("copyAmount"));
-                    const Vec3f direction = clump.getVec3("flattenDirection");
-                    std::memcpy(&s.flag2[0], &direction.x, sizeof(float));
-                    std::memcpy(&s.flag2[1], &direction.y, sizeof(float));
-                    std::memcpy(&s.flag2[2], &direction.z, sizeof(float));
-                    s.tabled = true;
-                    s.hasRamp2 = true;
-                };
+                auto shape = [&](const ParamSet& clump, const auto& get) { clumpShape(clump, get, &s); };
                 if (stage.level >= 0) {
                     // A Wet's level: its Clump's params as Wet set them for its last result
                     // (WetState), its profile at the wetness (a drag's: the levels' centers stay).
@@ -941,10 +922,7 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                     s.ramp2 = level.getRamp("volumizeProfile");
                     break;
                 }
-                if (!mappable("strength", &s.value[0]) || !mappable("volumize", &s.value[1])) return false;
-                shape(params, number);
-                s.ramp = ramp("profile");
-                s.ramp2 = ramp("volumizeProfile");
+                if (!readStageParams(stage.kind, reader, &s, why)) return false;
                 break;
             }
             case StageKind::Curl: {
@@ -2390,15 +2368,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             // The per-clump variation: drawn from the centers' IDs and the seed (a seed dragged
             // draws again).
             if (memo.seed != seed || !memo.variation) {
-                auto variation = std::make_shared<std::vector<float>>(memo.ids->size() * 4, 0.0f);
-                for (std::size_t c = 0; c < memo.ids->size(); ++c) {
-                    const StrandId cid = (*memo.ids)[c];
-                    float* v = variation->data() + c * 4;
-                    v[0] = unitFloat(hashCombine(cid, seed ^ 0x57E4Aull));
-                    v[1] = unitFloat(hashCombine(cid, seed ^ 0x2AD1Bull));
-                    v[2] = unitFloat(hashCombine(cid, seed ^ 0xF1A7));
-                }
-                memo.variation = std::move(variation);
+                memo.variation = clumpVariation(*memo.ids, seed);
                 memo.seed = seed;
             }
             auto with = std::make_shared<ClumpInputs>(*out[k].clump);

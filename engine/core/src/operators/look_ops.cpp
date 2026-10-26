@@ -1489,6 +1489,26 @@ private:
         // its root (frameSeed), so the locks turn with the scalp.
         std::vector<Vec3f> centerNormals(roots.size());
         for (std::size_t c = 0; c < roots.size(); ++c) centerNormals[c] = rootNormalOr(scalp, used[c]->root);
+        // What it keeps for the GPU preview (operator_state.h clumpState).
+        auto keep = [&] {
+            const std::lock_guard<std::mutex> lock(madeMutex_);
+            made_.output = out;
+            made_.roots = std::move(roots);
+            made_.curves = std::move(curves);
+            made_.centerNormals = std::move(centerNormals);
+            made_.assigned = std::move(assigned);
+            made_.centerGuides = std::move(centerGuides);
+            made_.chosen = std::move(chosen);
+            made_.axes = std::move(axes);
+            made_.ids.resize(used.size());
+            for (std::size_t c = 0; c < used.size(); ++c) made_.ids[c] = used[c]->id;
+            made_.picked = std::move(picked);
+            made_.queries = std::move(queries);
+            made_.partsKey = partsKey;
+            made_.regionHash = regionHash;
+            made_.centerRegions = std::move(centerRegions);
+            made_.regionsFromStrands = regionsFromStrands;
+        };
         std::vector<Frame> frames;
         if (radius > 0.0f || shaped) {
             frames.resize(curves.size());
@@ -1644,25 +1664,7 @@ private:
                 clumpStrand(s);
             });
         }
-        {
-            const std::lock_guard<std::mutex> lock(madeMutex_);
-            made_.output = out;
-            made_.roots = std::move(roots);
-            made_.curves = std::move(curves);
-            made_.centerNormals = std::move(centerNormals);
-            made_.assigned = std::move(assigned);
-            made_.centerGuides = std::move(centerGuides);
-            made_.chosen = std::move(chosen);
-            made_.axes = std::move(axes);
-            made_.ids.resize(used.size());
-            for (std::size_t c = 0; c < used.size(); ++c) made_.ids[c] = used[c]->id;
-            made_.picked = std::move(picked);
-            made_.queries = std::move(queries);
-            made_.partsKey = partsKey;
-            made_.regionHash = regionHash;
-            made_.centerRegions = std::move(centerRegions);
-            made_.regionsFromStrands = regionsFromStrands;
-        }
+        keep();
         *result = StrandsPtr(out);
         return true;
     }
