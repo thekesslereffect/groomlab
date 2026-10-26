@@ -844,6 +844,7 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
         switch (stage.kind) {
             // (look_stage_params.h: the operators' own reading.)
             case StageKind::Length:
+            case StageKind::Noise:
             case StageKind::Gravity:
             case StageKind::Flyaway:
             case StageKind::Bend:
@@ -943,16 +944,6 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                 shape(params, number);
                 s.ramp = ramp("profile");
                 s.ramp2 = ramp("volumizeProfile");
-                break;
-            }
-            case StageKind::Noise: {
-                if (!mappable("amplitude", &s.value[0]) || !mappable("fraction", &s.value[2])) return false;
-                s.value[1] = static_cast<float>(number("frequency"));
-                s.flag[0] = static_cast<int>(std::floor(number("octaves")));
-                s.flag[1] = params.getString("space") == "world" ? 1 : 0;
-                s.flag[2] = params.getString("mode") == "kinky" ? 1 : 0;
-                s.ramp = ramp("profile");  // a plugged curve too
-                s.tabled = true;
                 break;
             }
             case StageKind::Curl: {

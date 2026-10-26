@@ -47,7 +47,7 @@ private:
 
 // Whether readStageParams reads a stage of `kind`'s params.
 bool readsStageParams(StageKind kind);
-// A stage of `kind`'s params (Length, Width, Part, Gravity, Flyaway, Wind, the shapers working on
+// A stage of `kind`'s params (Length, Noise, Width, Part, Gravity, Flyaway, Wind, the shapers working on
 // each strand alone, Smooth, BlendNeighbors, Tangle, Flow) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).
 // False with *why where the kernel does not run it so (the CPU's). (Width's feathers' shafts with a
 // rachis, an auto Part's lines: the caller's to refuse.)

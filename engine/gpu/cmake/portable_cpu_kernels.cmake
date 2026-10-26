@@ -8,6 +8,8 @@
 # (the core rebuilds it then alone).
 file(READ "${IN}" text)
 string(REGEX REPLACE "F32_(sin|cos|tan|asin|acos|atan2|atan|sinh|cosh|tanh|exp2|exp|log2|log10|log|pow|cbrt)\\(" "groomlab_pm_\\1(" text "${text}")
+# floor, min and max inline, not the runtime's (look_kernels_cpu_support.h groomlab_floor).
+string(REGEX REPLACE "F32_(floor|min|max)\\(" "groomlab_\\1(" text "${text}")
 string(REGEX REPLACE "#include \"[^\"]*slang-cpp-prelude\\.h\"" "#include \"slang-cpp-prelude.h\"" text "${text}")
 string(REGEX REPLACE "\n#line [^\n]*" "" text "${text}")
 # (Not exported from a shared library: the kernels are the CPU engine's alone.)

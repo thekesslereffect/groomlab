@@ -37,6 +37,7 @@ bool StageParamReader::mappable(const std::string& param, float* value, std::str
 bool readsStageParams(StageKind kind) {
     switch (kind) {
         case StageKind::Length:
+        case StageKind::Noise:
         case StageKind::Width:
         case StageKind::Part:
         case StageKind::Gravity:
@@ -65,6 +66,16 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             const auto a = static_cast<float>(number("trimMin")), b = static_cast<float>(number("trimMax"));
             s->value[2] = std::min(a, b);
             s->value[3] = std::max(a, b);
+            return true;
+        }
+        case StageKind::Noise: {
+            if (!mappable("amplitude", &s->value[0]) || !mappable("fraction", &s->value[2])) return false;
+            s->value[1] = static_cast<float>(number("frequency"));
+            s->flag[0] = static_cast<int>(std::floor(number("octaves")));
+            s->flag[1] = params.getString("space") == "world" ? 1 : 0;
+            s->flag[2] = params.getString("mode") == "kinky" ? 1 : 0;
+            s->ramp = r.ramp("profile");  // a plugged curve too
+            s->tabled = true;
             return true;
         }
         case StageKind::Width: {

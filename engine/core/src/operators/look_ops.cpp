@@ -26,6 +26,7 @@
 #include "groomlab/field.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/noise.h"
 #include "groomlab/operator_state.h"
@@ -1877,6 +1878,10 @@ private:
                 ctx.note("frequency " + std::to_string(frequency) + " is finer than the strands' " + std::to_string(uniform - 1) +
                          " segments draw: the noise fades out; raise Resample's segments or lower the frequency");
             }
+        }
+        if (!last && gpu::cpuEngineOn() && gpu::runStageInto(gpu::StageKind::Noise, params(), in, scalpOf(ctx), *out)) {
+            *result = StrandsPtr(out);  // look.slang's NoiseCS, the GPU preview's own (look_cpu.h)
+            return true;
         }
         auto shape = [&](std::size_t s) {  // strand s's points: the incoming ones, shaped
             const float fraction = fractionField.at(*out, s);

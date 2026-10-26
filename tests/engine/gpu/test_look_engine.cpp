@@ -6243,6 +6243,11 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Length", R"("params": {"keep": {"expression": "0.5 + 0.5 * rand", "min": 0.0, "max": 1.0}})"},
         {"Wind", R"("params": {"strength": 0.5, "gust": 0.6, "turbulence": 0.3, "direction": [1.0, 0.0, 0.3]})"},
         {"Wind", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "loop": true, "loopStart": 1, "loopEnd": 25})"},
+        {"Noise", R"("params": {"amplitude": 0.15, "frequency": 1.3})"},
+        {"Noise", R"("params": {"amplitude": 0.1, "frequency": 4.0, "octaves": 4, "fraction": 0.6, "seed": 3})"},
+        {"Noise", R"("params": {"amplitude": {"expression": "0.05 + 0.1 * rand", "min": 0.0, "max": 1.0}, "space": "world", "frequency": 2.0})"},
+        {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "frequency": 3.0})"},
+        {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "space": "world", "frequency": 3.0})"},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
     };
@@ -6275,7 +6280,8 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"Part", gpu::StageKind::Part},           {"Flyaway", gpu::StageKind::Flyaway},
                                                              {"Twist", gpu::StageKind::Twist},         {"Tangle", gpu::StageKind::Tangle},
                                                              {"BlendNeighbors", gpu::StageKind::BlendNeighbors},
-                                                             {"Length", gpu::StageKind::Length},       {"Wind", gpu::StageKind::Wind}};
+                                                             {"Length", gpu::StageKind::Length},       {"Wind", gpu::StageKind::Wind},
+                                                             {"Noise", gpu::StageKind::Noise}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;

@@ -8,8 +8,13 @@
 // core's portable float transcendentals (groomlab_pm_*: cmake/portable_cpu_kernels.cmake puts them
 // in place of the prelude's F32_sin...), so the kernels round as the operators do.
 
+#include <cmath>
 #include <cstdint>
+#include <memory>
+#include <new>
+#include <type_traits>
 
+#include "groomlab/noise.h"
 #include "groomlab/portable_math.h"
 
 #if defined(_MSC_VER)
@@ -103,6 +108,52 @@ GROOMLAB_PM_KERNEL2(atan2)
 GROOMLAB_PM_KERNEL2(pow)
 #undef GROOMLAB_PM_KERNEL1
 #undef GROOMLAB_PM_KERNEL2
+
+// The prelude's F32_floor, F32_min and F32_max without their library calls (floorf, fminf, fmaxf:
+// calls in the kernels' loops, through the runtime's imports): floor's result exactly (signed zero,
+// NaN and the integral range as they come), min and max as the core's std::min and std::max compare
+// (the same as fminf and fmaxf where only the first is NaN: clamp's x).
+inline float groomlab_floor(float x) {
+    if (!(std::fabs(x) < 8388608.0f) || x == 0.0f) return x;  // integral already (or NaN, infinite, a signed zero)
+    const float t = static_cast<float>(static_cast<std::int32_t>(x));  // toward zero
+    return t > x ? t - 1.0f : t;
+}
+inline float groomlab_min(float a, float b) { return b < a ? b : a; }
+inline float groomlab_max(float a, float b) { return a < b ? b : a; }
+
+// look.slang's NoiseCache on the CPU: the core's VectorNoise (noise.cpp: its lattice, hashes and
+// gradients groom_math.h's, as vectorNoise's on the GPU; each octave's cell kept along a strand)
+// in the kernel's own words. `C` the cache (a pointer or a reference, as slangc passes an inout).
+template <class C>
+inline groomlab::VectorNoise& groomlab_noise_of(C& cache) {
+    using Words = std::remove_pointer_t<std::remove_reference_t<C>>;
+    static_assert(sizeof(Words) >= sizeof(groomlab::VectorNoise) + alignof(groomlab::VectorNoise), "look.slang NOISE_CACHE_WORDS: too few");
+    void* at = std::is_pointer_v<std::remove_reference_t<C>> ? static_cast<void*>(cache) : static_cast<void*>(&cache);
+    std::size_t room = sizeof(Words);
+    return *static_cast<groomlab::VectorNoise*>(std::align(alignof(groomlab::VectorNoise), sizeof(groomlab::VectorNoise), at, room));
+}
+template <class C, class Seeds, class Weights>
+inline void groomlab_noise_start(C&& cache, std::uint32_t octaves, const Seeds& seeds, const Weights& weights) {
+    static_assert(std::is_trivially_destructible_v<groomlab::VectorNoise>);
+    std::uint64_t s[groomlab::VectorNoise::kMaxOctaves];
+    float w[groomlab::VectorNoise::kMaxOctaves];
+    const int count = static_cast<int>(octaves < groomlab::VectorNoise::kMaxOctaves ? octaves : groomlab::VectorNoise::kMaxOctaves);
+    for (int o = 0; o < count; ++o) {
+        s[o] = (static_cast<std::uint64_t>(seeds[o].y) << 32) | seeds[o].x;
+        w[o] = weights[o];
+    }
+    groomlab::VectorNoise& noise = groomlab_noise_of(cache);
+    new (&noise) groomlab::VectorNoise(s, count, w);
+}
+template <class C, class V>
+inline V groomlab_noise_at(C&& cache, const V& p) {
+    const groomlab::Vec3f n = groomlab_noise_of(cache)(groomlab::Vec3f(p.x, p.y, p.z));
+    V out;
+    out.x = n.x;
+    out.y = n.y;
+    out.z = n.z;
+    return out;
+}
 
 // groom_math.h's mul64 on a 64-bit value held as two words (low, high): the native product's.
 template <class V>
