@@ -2631,9 +2631,15 @@ AxisWalk ownAxisStart(uint begin, uint n, float3 normal) {
 AxisWalk ownAxisStep(AxisWalk w, uint begin, uint n, float2 stretch) {
     float h;
     secantOf(w.x0, w.x1, h);
-    w.arc = w.arc + segmentArc(w.x0, w.x1, w.d0, w.d1, h, 1.0f);
-    if (curlSpacedBy(stretch)) w.parc = w.parc + profiledSegmentArc(w.x0, w.x1, w.d0, w.d1, h, 1.0f, w.k, w.samples, stretch);
-    w.f = reflectFrame(w.x0, w.f, w.x1, tangentOf(w.d1, w.f.t));
+    const float arc = w.arc + segmentArc(w.x0, w.x1, w.d0, w.d1, h, 1.0f);
+    const float parc = curlSpacedBy(stretch) ? w.parc + profiledSegmentArc(w.x0, w.x1, w.d0, w.d1, h, 1.0f, w.k, w.samples, stretch) : w.parc;
+    return ownAxisShift(w, begin, n, reflectFrame(w.x0, w.f, w.x1, tangentOf(w.d1, w.f.t)), arc, parc);
+}
+// The walk moved on to sample k + 1, its frame and arcs there `f`, `arc` and `parc` (ownAxisStep's).
+AxisWalk ownAxisShift(AxisWalk w, uint begin, uint n, Frame f, float arc, float parc) {
+    w.arc = arc;
+    w.parc = parc;
+    w.f = f;
     w.k = w.k + 1u;
     w.xm = w.x0;
     w.x0 = w.x1;
@@ -2921,14 +2927,17 @@ void CurlCS(uint3 id : SV_DispatchThreadID) {
         Frame fr;
         float parc;
         if (w.samples == n) {
-            // Its own points: sample i, one past the walk's (Axis::make's next frame and arcs).
+            // Its own points: sample i, one past the walk's (Axis::make's next frame and arcs), the
+            // walk then moved on to it with them (ownAxisStep's, not made again).
             while (w.k + 1u < i) w = ownAxisStep(w, begin, n, weighed ? float2(stretch[w.k], stretch[w.k + 1u]) : kNoStretch);
             const float2 st = weighed ? float2(stretch[w.k], stretch[w.k + 1u]) : kNoStretch;
             float h;
             secantOf(w.x0, w.x1, h);
             const float arc = w.arc + segmentArc(w.x0, w.x1, w.d0, w.d1, h, 1.0f);
-            parc = curlSpacedBy(st) ? w.parc + profiledSegmentArc(w.x0, w.x1, w.d0, w.d1, h, 1.0f, w.k, w.samples, st) : arc;
+            const float spaced = curlSpacedBy(st) ? w.parc + profiledSegmentArc(w.x0, w.x1, w.d0, w.d1, h, 1.0f, w.k, w.samples, st) : w.parc;
+            parc = curlSpacedBy(st) ? spaced : arc;
             fr = reflectFrame(w.x0, w.f, w.x1, tangentOf(w.d1, w.f.t));
+            if (i + 1u < n) w = ownAxisShift(w, begin, n, fr, arc, spaced);
         } else {
             const float xs = paramAt(i, n) * float(w.samples - 1);
             const uint k = min(uint(max(xs, 0.0f)), w.samples - 2u);
