@@ -6231,6 +6231,8 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Displace", R"("params": {"distance": {"expression": "0.02 + 0.06 * rand", "min": 0.0, "max": 1.0}})"},
         {"Part", R"("params": {"strength": 0.8, "width": 0.3})"},
         {"Part", R"("params": {"strength": {"expression": "0.4 + 0.6 * rand", "min": 0.0, "max": 1.0}, "width": 0.5, "profile": [[0, 0], [1, 1]]})"},
+        {"Flyaway", R"("params": {"stray": 0.1, "fraction": 0.3, "frequency": 3.0, "start": 0.2, "standOut": 0.3, "lengthen": 0.2, "seed": 5})"},
+        {"Flyaway", R"("params": {"stray": {"expression": "0.05 + 0.1 * rand", "min": 0.0, "max": 1.0}, "fraction": {"expression": "rand", "min": 0.0, "max": 0.6}})"},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
     };
@@ -6259,7 +6261,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         const std::map<std::string, gpu::StageKind> kinds = {{"Width", gpu::StageKind::Width},         {"Bend", gpu::StageKind::Bend},
                                                              {"Direction", gpu::StageKind::Direction}, {"Transform", gpu::StageKind::Transform},
                                                              {"Displace", gpu::StageKind::Displace},   {"Gravity", gpu::StageKind::Gravity},
-                                                             {"Part", gpu::StageKind::Part}};
+                                                             {"Part", gpu::StageKind::Part},           {"Flyaway", gpu::StageKind::Flyaway}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
@@ -6282,6 +6284,11 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
             }
             for (std::size_t i = 0; i < made[0]->widths().size(); ++i) {
                 bits += std::memcmp(&made[0]->widths()[i], &made[m]->widths()[i], sizeof(float)) != 0;
+            }
+            // (Flyaway's strays flagged as its C++ flags them.)
+            if (m == 2 && made[0]->strandChannel("flyaway")) {
+                const std::vector<float>* got = made[m]->strandChannel("flyaway");
+                EXPECT_TRUE(got && *got == *made[0]->strandChannel("flyaway"));
             }
             EXPECT_EQ(bits, 0u) << (m == 1 ? "the stage on the engine" : "the operator now");
             differing += bits;

@@ -26,8 +26,9 @@ void setCpuEngineOn(bool on);
 void readFieldValues(const ScalarField& field, const StrandSet& in, bool pointsAllowed, FieldValues* out);
 
 // `run` (its stages from `in`) on the calling thread's CPU engine (made once, kept), into `out` (`in`
-// copied, its arrays its own): the points the run moves written in place, and with `widths` the
-// widths a Width makes (out's widths, one a point). Throws std::runtime_error as the engine does.
+// copied): a run moving points writes every one into out's own (StrandSet::overwritePositions), and
+// with `widths` the widths a Width makes (out's widths, one a point). Throws std::runtime_error as
+// the engine does.
 void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out, bool widths = false);
 
 // An operator's own stage of `kind` (readStageParams' kinds, look_stage_params.h) on `in`: its
@@ -35,5 +36,9 @@ void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* s
 // engine's own), the result `in` copied with the points (a Width: the widths) the kernel makes. Null
 // where the kernel does not run it so (the operator's C++ then).
 StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs = {});
+// The same into `out` (`in` copied, its points its own: the operator's, carrying what else it adds):
+// false, `out` untouched, where the kernel does not run it so.
+bool runStageInto(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out,
+                  StageInputs inputs = {});
 
 }  // namespace groomlab::gpu

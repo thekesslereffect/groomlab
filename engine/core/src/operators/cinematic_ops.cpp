@@ -18,6 +18,7 @@
 #include "groomlab/flow.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/noise.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
@@ -103,11 +104,6 @@ private:
             }
         }
         auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
         // An earlier Flyaway's strays stay flagged: this node only adds its own. (Incrementally the
         // last result's flags, and each strand made again starts from its earlier flag.)
         const std::vector<float>* had = in->strandChannel("flyaway");
@@ -121,6 +117,26 @@ private:
             if (earlier.size() == flags->size()) *flags = std::move(earlier);
         }
         std::vector<float>& flag = *flags;
+        if (!last && gpu::cpuEngineOn()) {
+            // look.slang's FlyawayCS, the GPU preview's own (look_cpu.h): its strays flagged here by
+            // the gate it draws (the strand data's), on the points it took.
+            std::vector<std::uint8_t> strays(out->strandCount(), 0);
+            parallelFor(0, out->strandCount(), [&](std::size_t s) {
+                strays[s] = unitFloat(hashCombine(out->ids()[s], seed ^ 0xF1A7)) < fractionField.at(*out, s) && out->strandPointCount(s) >= 2;
+            });
+            if (gpu::runStageInto(gpu::StageKind::Flyaway, params(), in, scalp, *out)) {
+                for (std::size_t s = 0; s < strays.size(); ++s) {
+                    if (strays[s]) flag[s] = 1.0f;
+                }
+                *result = StrandsPtr(out);
+                return true;
+            }
+        }
+        if (last) {
+            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        } else {
+            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
+        }
         auto stray = [&](std::size_t s) {
             const std::uint64_t h = hashCombine(out->ids()[s], seed ^ 0xF1A7);
             if (unitFloat(h) >= fractionField.at(*out, s)) return;

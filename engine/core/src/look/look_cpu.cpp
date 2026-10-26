@@ -55,7 +55,8 @@ void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* s
     targets.baseAsOutput = true;
     bool moves = false;
     for (const StageParams& s : run.params.stages) moves = moves || s.stage.kind != StageKind::Width;
-    if (moves) targets.positions = out.mutablePositions().data();
+    // (A stage moving points writes every one, as on the GPU: no copy of the base's first.)
+    if (moves) targets.positions = out.overwritePositions().data();
     if (widths) {
         std::vector<float>& w = out.mutableWidths();
         w.resize(out.pointCount());
@@ -67,12 +68,19 @@ void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* s
 
 StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs) {
     if (!in || in->empty()) return nullptr;
+    auto out = std::make_shared<StrandSet>(*in);
+    return runStageInto(kind, params, in, scalp, *out, std::move(inputs)) ? out : nullptr;
+}
+
+bool runStageInto(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out,
+                  StageInputs inputs) {
+    if (!in || in->empty()) return false;
     LookRun run;
     StageParams& s = run.params.stages.emplace_back();
     s.stage.kind = kind;
     if (params.has("seed")) s.seed = static_cast<std::uint64_t>(params.getInt("seed"));
     std::string why;
-    if (!readStageParams(kind, StageParamReader(params, ""), &s, &why)) return nullptr;
+    if (!readStageParams(kind, StageParamReader(params, ""), &s, &why)) return false;
     run.fields.stages.resize(1);
     run.inputs.push_back(std::move(inputs));
     const std::array<std::string, 2> mapped = mappedParams(kind, params);
@@ -81,12 +89,11 @@ StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in
         FieldValues& values = run.fields.stages[0].field[i];
         readFieldValues(ScalarField(params, mapped[i], scalp), *in, mappedPerPoint(kind, i), &values);
         // Read at each point after the ones before it moved: the CPU's.
-        if (values.readsPositions && values.mode == FieldValues::kPerPoint && movesPointByPoint(kind)) return nullptr;
+        if (values.readsPositions && values.mode == FieldValues::kPerPoint && movesPointByPoint(kind)) return false;
     }
     // (Bend's, Direction's, Transform's and Displace's root frames: the engine's own, LookEngine::putStageInputs.)
-    auto out = std::make_shared<StrandSet>(*in);
-    runOnCpuEngine(run, in, scalp, *out, kind == StageKind::Width);
-    return out;
+    runOnCpuEngine(run, in, scalp, out, kind == StageKind::Width);
+    return true;
 }
 
 }  // namespace groomlab::gpu
