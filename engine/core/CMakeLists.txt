@@ -158,18 +158,56 @@ target_include_directories(groomlab_core_objects SYSTEM PRIVATE "${PROJECT_SOURC
 # 20% off Twist and Wind), no float result changed (/fp:precise).
 target_include_directories(groomlab_core_objects SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/third_party/slang/include")
 target_include_directories(groomlab_core_objects PRIVATE src/look)
-set_source_files_properties(src/look/generated/look_kernels_cpu.cpp PROPERTIES
+set(_kernels_cpp "${CMAKE_CURRENT_SOURCE_DIR}/src/look/generated/look_kernels_cpu.cpp")
+set_source_files_properties("${_kernels_cpp}" PROPERTIES
     SKIP_PRECOMPILE_HEADERS ON
     COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/W0;/bigobj;/Ob3,-w>")
+# With MSVC, the kernels built by clang-cl where Visual Studio has it (its LLVM tools; else MSVC's):
+# about twice as fast for the heavier ones (Interpolate, Wind, SelfCollide, Collide), the same
+# floats (x64's SSE2, nothing contracted into fused multiply-adds, no strict aliasing: the prelude
+# reads a value through another type's pointer). Its object joins the core's libraries
+# (GROOMLAB_KERNEL_OBJECTS).
+set(GROOMLAB_KERNEL_OBJECTS "")
+if(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    option(GROOMLAB_KERNELS_CLANG "Build the look kernels' C++ with clang-cl (MSVC builds)" ON)
+    if(GROOMLAB_KERNELS_CLANG)
+        get_filename_component(_cl_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        find_program(GROOMLAB_CLANG_CL clang-cl HINTS "${_cl_dir}/../../../../../Llvm/x64/bin" "$ENV{VCINSTALLDIR}Tools/Llvm/x64/bin"
+                     NO_DEFAULT_PATH)
+    endif()
+    if(GROOMLAB_KERNELS_CLANG AND GROOMLAB_CLANG_CL)
+        message(STATUS "GroomLab: look kernels built by ${GROOMLAB_CLANG_CL}")
+        set(_kernels_obj "${CMAKE_CURRENT_BINARY_DIR}/look_kernels_cpu_clang_$<CONFIG>.obj")
+        set(_kernels_dep "${CMAKE_CURRENT_BINARY_DIR}/look_kernels_cpu_clang_$<CONFIG>.d")
+        set(_includes "$<TARGET_PROPERTY:groomlab_core_objects,INCLUDE_DIRECTORIES>")
+        set(_defines "$<TARGET_PROPERTY:groomlab_core_objects,COMPILE_DEFINITIONS>")
+        add_custom_command(
+            OUTPUT "${_kernels_obj}"
+            COMMAND "${GROOMLAB_CLANG_CL}" /nologo /c /TP -std:c++17 /EHsc /utf-8 -w -Z7
+                    "$<IF:$<CONFIG:Debug>,/Od;/MDd;/D_DEBUG,/O2;/MD;/DNDEBUG>"
+                    /clang:-fno-strict-aliasing /clang:-ffp-contract=off
+                    "$<$<BOOL:${_includes}>:/I$<JOIN:${_includes},;/I>>"
+                    "$<$<BOOL:${_defines}>:/D$<JOIN:${_defines},;/D>>"
+                    /clang:-MD "/clang:-MF${_kernels_dep}" "/Fo${_kernels_obj}" "${_kernels_cpp}"
+            DEPENDS "${_kernels_cpp}"
+            DEPFILE "${_kernels_dep}"
+            COMMENT "Building the look kernels with clang-cl"
+            COMMAND_EXPAND_LISTS
+            VERBATIM)
+        set_source_files_properties("${_kernels_cpp}" PROPERTIES HEADER_FILE_ONLY ON)
+        set_source_files_properties("${_kernels_obj}" PROPERTIES EXTERNAL_OBJECT ON GENERATED ON)
+        set(GROOMLAB_KERNEL_OBJECTS "${_kernels_obj}")
+    endif()
+endif()
 target_link_libraries(groomlab_core_objects PRIVATE nlohmann_json::nlohmann_json groomlab::warnings)
 groomlab_precompile(groomlab_core_objects <nlohmann/json.hpp>)
 
 if(GROOMLAB_HAS_TBB)
-    add_library(groomlab_core STATIC $<TARGET_OBJECTS:groomlab_core_objects> src/parallel_tbb.cpp)
+    add_library(groomlab_core STATIC $<TARGET_OBJECTS:groomlab_core_objects> ${GROOMLAB_KERNEL_OBJECTS} src/parallel_tbb.cpp)
     target_link_libraries(groomlab_core PUBLIC groomlab::tbb)
     target_compile_definitions(groomlab_core PUBLIC GROOMLAB_HAS_TBB=1)
 else()
-    add_library(groomlab_core STATIC $<TARGET_OBJECTS:groomlab_core_objects> src/parallel_serial.cpp)
+    add_library(groomlab_core STATIC $<TARGET_OBJECTS:groomlab_core_objects> ${GROOMLAB_KERNEL_OBJECTS} src/parallel_serial.cpp)
     target_compile_definitions(groomlab_core PUBLIC GROOMLAB_HAS_TBB=0)
 endif()
 add_library(groomlab::core ALIAS groomlab_core)
@@ -177,6 +215,6 @@ target_link_libraries(groomlab_core PUBLIC groomlab_core_headers PRIVATE groomla
 
 if(GROOMLAB_BUILD_CAPI)
     find_package(Threads REQUIRED)
-    add_library(groomlab_core_private STATIC $<TARGET_OBJECTS:groomlab_core_objects> src/parallel_pool.cpp)
+    add_library(groomlab_core_private STATIC $<TARGET_OBJECTS:groomlab_core_objects> ${GROOMLAB_KERNEL_OBJECTS} src/parallel_pool.cpp)
     target_link_libraries(groomlab_core_private PUBLIC groomlab_core_headers Threads::Threads PRIVATE groomlab::warnings)
 endif()
