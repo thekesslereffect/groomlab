@@ -42,6 +42,7 @@ bool readsStageParams(StageKind kind) {
         case StageKind::Part:
         case StageKind::Gravity:
         case StageKind::Flyaway:
+        case StageKind::Collide:
         case StageKind::Wind:
         case StageKind::Bend:
         case StageKind::Direction:
@@ -125,6 +126,22 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->value2[0] = static_cast<float>(number("standOut"));
             s->value2[1] = static_cast<float>(number("lengthen"));
             s->flag[0] = 1;  // the stray's noise: one octave
+            return true;
+        }
+        case StageKind::Collide: {
+            if (params.getString("method") != "field") {
+                *why = r.name() + " asks the mesh at every point (method exact: the CPU's)";
+                return false;
+            }
+            const auto offset = static_cast<float>(number("offset"));
+            const auto maxDepth = static_cast<float>(params.getDouble("maxDepth"));
+            const auto softness = static_cast<float>(params.getDouble("softness"));
+            s->value[0] = offset;
+            s->value[1] = maxDepth;
+            s->value[2] = std::max(offset + softness, maxDepth) * 1.001f + 1e-6f;  // CollideOp's search radius
+            s->flag[0] = static_cast<int>(params.getInt("iterations"));
+            s->value2[0] = softness;
+            s->value2[1] = static_cast<float>(params.getDouble("smoothing"));
             return true;
         }
         case StageKind::Wind: {
@@ -488,6 +505,47 @@ std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleStat
     }, 4096);
     auto made = std::make_shared<TangleInputs>();
     made->strands = std::move(words);
+    return made;
+}
+
+std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes, std::uint32_t colliders,
+                                             const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why) {
+    if (meshes.size() > 2 || fields.size() != meshes.size()) {
+        *why = "more surfaces than the kernel reads (the CPU's)";
+        return nullptr;
+    }
+    for (const DistanceFieldPtr& field : fields) {
+        if (!field) {
+            *why = "a surface has no field the GPU can read (deformed: the CPU's)";
+            return nullptr;
+        }
+    }
+    auto made = std::make_shared<CollideInputs>();
+    made->colliders = colliders;
+    for (std::size_t m = 0; m < meshes.size(); ++m) {
+        // cellSizeFor rounds the offset's log2 to the nearest whole number: the offsets of a cell
+        // are under sqrt 2 times it (any past the largest cell it takes are the largest's), and
+        // those of a reach are within it.
+        const MeshDistanceField& field = *fields[m];
+        float upTo = field.reach();
+        if (MeshDistanceField::cellSizeFor(*meshes[m], std::numeric_limits<float>::max()) > field.cellSize()) {
+            upTo = std::min(upTo, field.cellSize() * 1.4143f + softness);
+        }
+        MeshDistanceField::Tables tables = field.tables(std::max(offset + softness, upTo), field.reach());
+        if (!tables) {
+            *why = "a surface has no field the GPU can read (too big for its grid: the CPU's)";
+            return nullptr;
+        }
+        made->tables.push_back(std::move(tables));
+        const MeshPtr& mesh = meshes[m];
+        Vec3f lo = mesh->points().empty() ? Vec3f{} : mesh->points().front(), hi = lo;
+        for (const Vec3f& q : mesh->points()) {
+            lo = {std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)};
+            hi = {std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)};
+        }
+        made->boxes.push_back(lo);
+        made->boxes.push_back(hi);
+    }
     return made;
 }
 

@@ -844,6 +844,7 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
         switch (stage.kind) {
             // (look_stage_params.h: the operators' own reading.)
             case StageKind::Length:
+            case StageKind::Collide:
             case StageKind::Noise:
             case StageKind::Gravity:
             case StageKind::Flyaway:
@@ -1003,22 +1004,6 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                     return false;
                 }
                 if (!readStageParams(stage.kind, reader, &s, why)) return false;
-                break;
-            }
-            case StageKind::Collide: {
-                if (params.getString("method") != "field") {
-                    *why = doc.nameOf(id) + " asks the mesh at every point (method exact: the CPU's)";
-                    return false;
-                }
-                const auto offset = static_cast<float>(number("offset"));
-                const auto maxDepth = static_cast<float>(params.getDouble("maxDepth"));
-                const auto softness = static_cast<float>(params.getDouble("softness"));
-                s.value[0] = offset;
-                s.value[1] = maxDepth;
-                s.value[2] = std::max(offset + softness, maxDepth) * 1.001f + 1e-6f;  // CollideOp's search radius
-                s.flag[0] = static_cast<int>(params.getInt("iterations"));
-                s.value2[0] = softness;
-                s.value2[1] = static_cast<float>(params.getDouble("smoothing"));
                 break;
             }
             case StageKind::Wind: {
@@ -2620,12 +2605,11 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                        (!surfaceFields[m] || offset + softness <= memo.most[m]);
             }
             if (!same) {
-                auto made = std::make_shared<CollideInputs>();
                 float most[2] = {0.0f, 0.0f};
+                std::string whyNot;
+                std::vector<DistanceFieldPtr> fields;
                 for (std::size_t m = 0; m < meshes.size() && m < 2; ++m) {
-                    // cellSizeFor rounds the offset's log2 to the nearest whole number: the offsets of
-                    // a cell are under sqrt 2 times it (any past the largest cell it takes are the
-                    // largest's), and those of a reach are within it.
+                    fields.push_back(surfaceFields[m]);
                     const MeshDistanceField& field = *surfaceFields[m];
                     float upTo = field.reach();
                     if (MeshDistanceField::cellSizeFor(*meshes[m], std::numeric_limits<float>::max()) > field.cellSize()) {
@@ -2633,22 +2617,10 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                     }
                     most[m] = std::max(offset + softness, upTo);
                 }
-                for (std::size_t m = 0; m < meshes.size() && m < 2; ++m) {
-                    const MeshPtr& mesh = meshes[m];
-                    MeshDistanceField::Tables tables = surfaceFields[m]->tables(most[m], surfaceFields[m]->reach());
-                    if (!tables) {
-                        *why = name + ": a surface has no field the GPU can read (too big for its grid: the CPU's)";
-                        return false;
-                    }
-                    made->tables.push_back(std::move(tables));
-                    made->colliders = colliders;
-                    Vec3f lo = mesh->points().empty() ? Vec3f{} : mesh->points().front(), hi = lo;
-                    for (const Vec3f& q : mesh->points()) {
-                        lo = {std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)};
-                        hi = {std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)};
-                    }
-                    made->boxes.push_back(lo);
-                    made->boxes.push_back(hi);
+                std::shared_ptr<const CollideInputs> made = collideInputs(meshes, colliders, fields, offset, softness, &whyNot);
+                if (!made) {
+                    *why = name + ": " + whyNot;
+                    return false;
                 }
                 memo = CollideMemo{};
                 for (std::size_t m = 0; m < meshes.size() && m < 2; ++m) {

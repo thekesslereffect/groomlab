@@ -1049,7 +1049,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     const std::uint32_t none = 0;
                     write(auxBuffer(k, 0), &none, 4, false);
                 } else if (data->tables.size() == 1) {
-                    write(auxBuffer(k, 0), data->tables[0]->data(), data->tables[0]->size() * 4, false);
+                    share(auxBuffer(k, 0), data->tables[0]->data(), data->tables[0]->size() * 4);  // (read alone, kept alive)
                     runUploadMegabytes_ += static_cast<double>(data->tables[0]->size() * 4) / 1e6;
                 } else {
                     std::vector<std::uint32_t> both(*data->tables[0]);

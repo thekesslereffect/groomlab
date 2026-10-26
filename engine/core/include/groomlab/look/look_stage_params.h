@@ -47,7 +47,7 @@ private:
 
 // Whether readStageParams reads a stage of `kind`'s params.
 bool readsStageParams(StageKind kind);
-// A stage of `kind`'s params (Length, Noise, Width, Part, Gravity, Flyaway, Wind, the shapers working on
+// A stage of `kind`'s params (Length, Noise, Width, Part, Gravity, Flyaway, Wind, Collide, the shapers working on
 // each strand alone, Smooth, BlendNeighbors, Tangle, Flow) into *s: its numbers, flags and ramps, not its stage, seed or mask (the reader's).
 // False with *why where the kernel does not run it so (the CPU's). (Width's feathers' shafts with a
 // rachis, an auto Part's lines: the caller's to refuse.)
@@ -82,6 +82,12 @@ std::shared_ptr<TwistInputs> twistInputs(const StrandSet& in, const GuideSet* ax
 // Tangle's partners as the kernel takes them (TangleInputs) from its operator's (operator_state.h
 // TangleState, on `in`).
 std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleState& state);
+// Collide's surfaces' fields as tables (CollideInputs): `meshes` (the scalp, then the collider: two at
+// most), their fields at the offset (collisionField), `colliders` a bit each for the collider input's;
+// tables for offsets up to the most the fields' cells settle (a dragged offset the kernel's number).
+// Null with *why where a surface has no field or tables the kernel reads (the CPU's).
+std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes, std::uint32_t colliders,
+                                             const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why);
 // Part's sides (PartInputs, its reach 0: the caller's): each strand's side of `lines` (only the part
 // `only` where named) from its root on the rest scalp, the way away from it and how far; none `within`
 // or farther (an operator's own width: the strands it leaves; the preview's every one, a width dragged).

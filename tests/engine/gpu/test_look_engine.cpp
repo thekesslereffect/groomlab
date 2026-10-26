@@ -6248,6 +6248,8 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Noise", R"("params": {"amplitude": {"expression": "0.05 + 0.1 * rand", "min": 0.0, "max": 1.0}, "space": "world", "frequency": 2.0})"},
         {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "frequency": 3.0})"},
         {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "space": "world", "frequency": 3.0})"},
+        {"Collide", R"("params": {"offset": 0.12})"},
+        {"Collide", R"("params": {"offset": 0.08, "softness": 0.1, "smoothing": 0.2, "iterations": 3})"},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
     };
@@ -6281,7 +6283,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"Twist", gpu::StageKind::Twist},         {"Tangle", gpu::StageKind::Tangle},
                                                              {"BlendNeighbors", gpu::StageKind::BlendNeighbors},
                                                              {"Length", gpu::StageKind::Length},       {"Wind", gpu::StageKind::Wind},
-                                                             {"Noise", gpu::StageKind::Noise}};
+                                                             {"Noise", gpu::StageKind::Noise},         {"Collide", gpu::StageKind::Collide}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;
@@ -6300,6 +6302,20 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                 ASSERT_TRUE(blendNeighborsState(op, valueAs<StrandsPtr>(cpu), &state));
                 stageInputs.neighbors = state;
             }
+        }
+        if (kind == gpu::StageKind::Collide) {
+            // Its surfaces' fields as CollideOp asks them (collisionField at its offset and search radius).
+            std::vector<MeshPtr> meshes;
+            std::vector<DistanceFieldPtr> fields;
+            const float offset = static_cast<float>(op.params().getDouble("offset")), softness = static_cast<float>(op.params().getDouble("softness"));
+            const float radius = std::max(offset + softness, static_cast<float>(op.params().getDouble("maxDepth"))) * 1.001f + 1e-6f;
+            for (std::size_t slot = 1; slot < inputs.size(); ++slot) {
+                if (const MeshPtr mesh = valueAs<MeshPtr>(inputs[slot])) {
+                    meshes.push_back(mesh);
+                    fields.push_back(collisionField(mesh, offset, radius));
+                }
+            }
+            stageInputs.collide = gpu::collideInputs(meshes, 0u, fields, offset, softness, &whyNot);
         }
         if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
         // Its C++ (the engine off), the stage on the engine, the operator as it runs now.
