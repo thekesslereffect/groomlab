@@ -20,6 +20,7 @@
 #include "groomlab/curve.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/point_index.h"
@@ -107,6 +108,19 @@ private:
             }
         }
 
+        if (!last && gpu::cpuEngineOn()) {
+            // look.slang's TwistCS (around clumps: TwistAxesCS making their middles first), the GPU
+            // preview's own (look_cpu.h).
+            std::string whyNot;
+            gpu::StageInputs axesOf;
+            axesOf.twist = gpu::twistInputs(*in, axesIn.get(), params().getString("clumpChannel"), false, &whyNot);
+            if (axesOf.twist && (!aroundAxes || axesOf.twist->count > 0)) {
+                if (StrandsPtr made = gpu::runStage(gpu::StageKind::Twist, params(), in, scalpOf(ctx), std::move(axesOf))) {
+                    *result = made;
+                    return true;
+                }
+            }
+        }
         // Axis curves, kAxisSamples points each, and which one each strand turns around (made
         // again: only the changed strands' axes, each found as in full).
         std::vector<Vec3f> axes;

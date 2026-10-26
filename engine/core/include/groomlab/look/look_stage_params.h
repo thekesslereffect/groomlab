@@ -69,6 +69,12 @@ bool movesPointByPoint(StageKind kind);
 // The CPU engine writes them into its own memory where a run gives none (look_engine.cpp).
 void writeRootFrames(const StrandSet& in, const ScalpMesh* scalp, float* to);
 std::shared_ptr<const RootInputs> rootInputs(const StrandSet& in, const ScalpMesh* scalp);
+// Twist's axes (TwistInputs, as TwistOp makes them): around the curves of `axes` (two points or more,
+// resampled by arc length) each strand's nearest by its root (`nearestByKernel`: left to TwistCS, its
+// root words other than any root); else around each clump's middle (by `channel`: its core
+// strands, preview_core.h). Null with *why where the strands carry no such channel.
+std::shared_ptr<TwistInputs> twistInputs(const StrandSet& in, const GuideSet* axes, const std::string& channel, bool nearestByKernel,
+                                         std::string* why);
 // Part's sides (PartInputs, its reach 0: the caller's): each strand's side of `lines` (only the part
 // `only` where named) from its root on the rest scalp, the way away from it and how far; none `within`
 // or farther (an operator's own width: the strands it leaves; the preview's every one, a width dragged).

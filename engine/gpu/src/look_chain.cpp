@@ -3045,70 +3045,12 @@ bool LookInputs::twistAxes(const GraphDocument& doc, NodeId id, const std::set<N
     const bool axesAlone = memo.inputs && memo.in == in && memo.channel == channel && memo.axes != axesIn && aroundAxes &&
                            memo.inputs->axes;
     if (memo.in != in || memo.axes != axesIn || memo.channel != channel || !memo.inputs) {
-        const std::size_t strands = in->strandCount();
-        auto words = std::make_shared<std::vector<std::uint32_t>>(strands * 4, 0u);
-        auto made = std::make_shared<TwistInputs>();
-        auto rootBits = [&](std::size_t s) {
-            if (in->strandPointCount(s) == 0) return;
-            std::memcpy(words->data() + s * 4 + 1, &in->strandPoints(s)[0], 12);
-        };
-        if (aroundAxes) {
-            // TwistOp: each guide of two points or more resampled by arc length, and each strand's
-            // nearest by its root.
-            auto axes = std::make_shared<std::vector<float>>();
-            std::vector<Vec3f> roots;
-            for (const Guide& g : axesIn->guides()) {
-                if (g.points.size() < 2) continue;
-                const std::vector<Vec3f> pts = resampleByArcLength(g.points.data(), g.points.size(), kTwistAxisSamples);
-                roots.push_back(pts.front());
-                for (const Vec3f& q : pts) axes->insert(axes->end(), {q.x, q.y, q.z});
-            }
-            made->count = roots.size();
-            for (std::size_t a = 0; a < roots.size(); ++a) {
-                axes->push_back(arcLength(reinterpret_cast<const Vec3f*>(axes->data() + a * kTwistAxisSamples * 3), kTwistAxisSamples));
-            }
-            if (axesAlone) {
-                std::fill(words->begin(), words->end(), 0xffffffffu);  // (no root's bits: TwistCS finds each nearest)
-            } else if (!roots.empty()) {
-                const PointIndex index(roots);
-                parallelFor(0, strands, [&](std::size_t s) {
-                    (*words)[s * 4] = in->strandPointCount(s) == 0 ? 0xffffffffu
-                                                                   : static_cast<std::uint32_t>(index.nearest(in->strandPoints(s)[0]));
-                    rootBits(s);
-                }, 1024);
-            }
-            if (axes->empty()) axes->push_back(0.0f);
-            made->axes = std::move(axes);
-        } else {
-            // Around each clump's middle: its core strands' mean (by the channel, any key).
-            const std::vector<float>* groups = in->strandChannel(channel);
-            if (!groups) {
-                *why = name + ": no axes, and no '" + channel + "' channel to find the clumps (the CPU's)";
-                return false;
-            }
-            const PreviewCore core(*in);
-            std::map<long long, std::size_t> slot;
-            std::vector<std::vector<std::uint32_t>> members;
-            for (std::size_t s = 0; s < strands; ++s) {
-                const auto key = std::llround((*groups)[s]);
-                auto it = slot.find(key);
-                if (it == slot.end()) {
-                    it = slot.emplace(key, members.size()).first;
-                    members.emplace_back();
-                }
-                (*words)[s * 4] = static_cast<std::uint32_t>(it->second);
-                if (core.core(s)) members[it->second].push_back(static_cast<std::uint32_t>(s));
-            }
-            for (std::size_t s = 0; s < strands; ++s) {
-                if (members[(*words)[s * 4]].empty()) (*words)[s * 4] = 0xffffffffu;  // no core strand: it does not turn
-            }
-            auto list = std::make_shared<std::vector<std::uint32_t>>(members.size() + 1, 0u);
-            for (std::size_t c = 0; c < members.size(); ++c) (*list)[c + 1] = (*list)[c] + static_cast<std::uint32_t>(members[c].size());
-            for (const auto& m : members) list->insert(list->end(), m.begin(), m.end());
-            made->members = std::move(list);
-            made->count = members.size();
+        std::string whyNot;
+        std::shared_ptr<TwistInputs> made = twistInputs(*in, axesIn.get(), channel, axesAlone, &whyNot);
+        if (!made) {
+            *why = name + ": " + whyNot;
+            return false;
         }
-        made->strands = std::move(words);
         memo.in = in;
         memo.axes = axesIn;
         memo.channel = channel;

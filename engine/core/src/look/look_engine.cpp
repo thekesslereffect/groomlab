@@ -1184,9 +1184,13 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 throw std::runtime_error("GPU preview: Twist's axes are for other strands");
             }
             if (held.a != data->strands.get() || !has(auxBuffer(k, 0))) {
+                // (On the CPU the very memory, as the inputs below: read alone, kept alive while held.)
                 const std::uint32_t none[4] = {0xffffffffu, 0u, 0u, 0u};
-                write(auxBuffer(k, 0), data->strands->empty() ? none : data->strands->data(), std::max<std::size_t>(data->strands->size(), 4) * 4,
-                      false);
+                if (data->strands->empty()) {
+                    write(auxBuffer(k, 0), none, sizeof(none), false);
+                } else {
+                    share(auxBuffer(k, 0), data->strands->data(), data->strands->size() * 4);
+                }
                 held.a = data->strands.get();
                 held.keep = data->strands;
                 runUploadMegabytes_ += static_cast<double>(data->strands->size() * 4) / 1e6;
@@ -1194,13 +1198,13 @@ void LookEngine::putStageInputs(const LookRun& run) {
             const void* axes = data->axes ? static_cast<const void*>(data->axes.get()) : static_cast<const void*>(data->members.get());
             if (held.b != axes || !has(auxBuffer(k, 1))) {
                 if (data->axes) {
-                    write(auxBuffer(k, 1), data->axes->data(), data->axes->size() * 4, false);
+                    share(auxBuffer(k, 1), data->axes->data(), data->axes->size() * 4);
                     release(auxBuffer(k, 2));
                     held.tables = data->axes;
                 } else {
                     // (look.slang TWIST_AXIS_FLOATS a clump, then its length.)
                     allocate(auxBuffer(k, 1), std::max<std::size_t>(data->count * (kTwistAxisSamples * 3 + 1) * 4, 4));
-                    write(auxBuffer(k, 2), data->members->data(), data->members->size() * 4, false);
+                    share(auxBuffer(k, 2), data->members->data(), data->members->size() * 4);
                     held.tables = data->members;
                 }
                 held.b = axes;

@@ -6233,6 +6233,8 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Part", R"("params": {"strength": {"expression": "0.4 + 0.6 * rand", "min": 0.0, "max": 1.0}, "width": 0.5, "profile": [[0, 0], [1, 1]]})"},
         {"Flyaway", R"("params": {"stray": 0.1, "fraction": 0.3, "frequency": 3.0, "start": 0.2, "standOut": 0.3, "lengthen": 0.2, "seed": 5})"},
         {"Flyaway", R"("params": {"stray": {"expression": "0.05 + 0.1 * rand", "min": 0.0, "max": 1.0}, "fraction": {"expression": "rand", "min": 0.0, "max": 0.6}})"},
+        {"Twist", R"("params": {"turns": 0.6})"},
+        {"Twist", R"("params": {"turns": {"expression": "0.3 + rand", "min": -2.0, "max": 2.0}, "profile": [[0, 0], [1, 1]]})"},
         {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
         {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
     };
@@ -6261,9 +6263,12 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         const std::map<std::string, gpu::StageKind> kinds = {{"Width", gpu::StageKind::Width},         {"Bend", gpu::StageKind::Bend},
                                                              {"Direction", gpu::StageKind::Direction}, {"Transform", gpu::StageKind::Transform},
                                                              {"Displace", gpu::StageKind::Displace},   {"Gravity", gpu::StageKind::Gravity},
-                                                             {"Part", gpu::StageKind::Part},           {"Flyaway", gpu::StageKind::Flyaway}};
+                                                             {"Part", gpu::StageKind::Part},           {"Flyaway", gpu::StageKind::Flyaway},
+                                                             {"Twist", gpu::StageKind::Twist}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
+        std::string whyNot;
+        if (kind == gpu::StageKind::Twist) stageInputs.twist = gpu::twistInputs(*valueAs<StrandsPtr>(inputs[0]), valueAs<GuidesPtr>(inputs[1]).get(), "clumpId", false, &whyNot);
         if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
         // Its C++ (the engine off), the stage on the engine, the operator as it runs now.
         StrandsPtr made[3];

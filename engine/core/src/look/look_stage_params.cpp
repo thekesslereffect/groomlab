@@ -3,13 +3,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <exception>
+#include <map>
 #include <variant>
 
+#include "groomlab/curve.h"
 #include "groomlab/field.h"
+#include "groomlab/guide_set.h"
 #include "groomlab/map_ref.h"
 #include "groomlab/parallel.h"
 #include "groomlab/parts.h"
+#include "groomlab/point_index.h"
+#include "groomlab/preview_core.h"
 
 namespace groomlab::gpu {
 
@@ -277,6 +283,106 @@ std::shared_ptr<const RootInputs> rootInputs(const StrandSet& in, const ScalpMes
     writeRootFrames(in, scalp, frames->data());
     auto made = std::make_shared<RootInputs>();
     made->frames = std::move(frames);
+    return made;
+}
+
+std::shared_ptr<TwistInputs> twistInputs(const StrandSet& in, const GuideSet* axesIn, const std::string& channel, bool nearestByKernel,
+                                         std::string* why) {
+    const std::size_t strands = in.strandCount();
+    auto words = std::make_shared<std::vector<std::uint32_t>>(strands * 4, 0u);
+    auto made = std::make_shared<TwistInputs>();
+    auto rootBits = [&](std::size_t s) {
+        if (in.strandPointCount(s) == 0) return;
+        std::memcpy(words->data() + s * 4 + 1, &in.strandPoints(s)[0], 12);
+    };
+    if (axesIn && !axesIn->empty()) {
+        // TwistOp: each guide of two points or more resampled by arc length, and each strand's
+        // nearest by its root.
+        auto axes = std::make_shared<std::vector<float>>();
+        std::vector<Vec3f> roots;
+        for (const Guide& g : axesIn->guides()) {
+            if (g.points.size() < 2) continue;
+            const std::vector<Vec3f> pts = resampleByArcLength(g.points.data(), g.points.size(), kTwistAxisSamples);
+            roots.push_back(pts.front());
+            for (const Vec3f& q : pts) axes->insert(axes->end(), {q.x, q.y, q.z});
+        }
+        made->count = roots.size();
+        for (std::size_t a = 0; a < roots.size(); ++a) {
+            axes->push_back(arcLength(reinterpret_cast<const Vec3f*>(axes->data() + a * kTwistAxisSamples * 3), kTwistAxisSamples));
+        }
+        if (nearestByKernel) {
+            std::fill(words->begin(), words->end(), 0xffffffffu);  // (no root's bits: TwistCS finds each nearest)
+        } else if (!roots.empty()) {
+            const PointIndex index(roots);
+            parallelFor(0, strands, [&](std::size_t s) {
+                (*words)[s * 4] = in.strandPointCount(s) == 0 ? 0xffffffffu : static_cast<std::uint32_t>(index.nearest(in.strandPoints(s)[0]));
+                rootBits(s);
+            }, 1024);
+        }
+        if (axes->empty()) axes->push_back(0.0f);
+        made->axes = std::move(axes);
+    } else {
+        // Around each clump's middle: its core strands' mean (by the channel, any key).
+        const std::vector<float>* groups = in.strandChannel(channel);
+        if (!groups) {
+            *why = "no axes, and no '" + channel + "' channel to find the clumps (the CPU's)";
+            return nullptr;
+        }
+        // Each key's slot in the order the keys first come (small whole numbers, as a Clump numbers
+        // its clumps, by a table; others by a map).
+        const PreviewCore core(in);
+        std::vector<long long> keys(strands);
+        std::vector<std::uint8_t> cores(strands);
+        parallelFor(0, strands, [&](std::size_t s) {
+            keys[s] = std::llround((*groups)[s]);
+            cores[s] = core.core(s) ? 1 : 0;
+        }, 4096);
+        long long lowest = 0, highest = -1;
+        if (strands > 0) {
+            const auto [lo, hi] = std::minmax_element(keys.begin(), keys.end());
+            lowest = *lo;
+            highest = *hi;
+        }
+        const bool tabled = strands > 0 && lowest >= 0 && highest < static_cast<long long>(4 * strands + 1024);
+        std::vector<std::uint32_t> table(tabled ? static_cast<std::size_t>(highest) + 1 : 0, 0xffffffffu);
+        std::map<long long, std::uint32_t> slot;
+        std::vector<std::uint32_t> slotOf(strands), counts;
+        for (std::size_t s = 0; s < strands; ++s) {
+            std::uint32_t at = 0;
+            if (tabled) {
+                std::uint32_t& t = table[static_cast<std::size_t>(keys[s])];
+                if (t == 0xffffffffu) {
+                    t = static_cast<std::uint32_t>(counts.size());
+                    counts.push_back(0);
+                }
+                at = t;
+            } else {
+                auto it = slot.find(keys[s]);
+                if (it == slot.end()) {
+                    it = slot.emplace(keys[s], static_cast<std::uint32_t>(counts.size())).first;
+                    counts.push_back(0);
+                }
+                at = it->second;
+            }
+            slotOf[s] = at;
+            counts[at] += cores[s];
+        }
+        // The clumps' core strands (count + 1 offsets, then each clump's in strand order).
+        const std::size_t clumps = counts.size();
+        auto list = std::make_shared<std::vector<std::uint32_t>>(clumps + 1, 0u);
+        for (std::size_t c = 0; c < clumps; ++c) (*list)[c + 1] = (*list)[c] + counts[c];
+        list->resize(clumps + 1 + (*list)[clumps]);
+        std::vector<std::uint32_t> next(list->begin(), list->begin() + static_cast<std::ptrdiff_t>(clumps));
+        for (std::size_t s = 0; s < strands; ++s) {
+            if (cores[s]) (*list)[clumps + 1 + next[slotOf[s]]++] = static_cast<std::uint32_t>(s);
+        }
+        parallelFor(0, strands, [&](std::size_t s) {
+            (*words)[s * 4] = counts[slotOf[s]] ? slotOf[s] : 0xffffffffu;  // no core strand: it does not turn
+        }, 4096);
+        made->members = std::move(list);
+        made->count = clumps;
+    }
+    made->strands = std::move(words);
     return made;
 }
 
