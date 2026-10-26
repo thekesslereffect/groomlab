@@ -216,6 +216,20 @@ private:
             }
         }
 
+        if (!incremental && gpu::cpuEngineOn() && meshes.size() <= 2) {
+            // look.slang's CollideCS, the GPU preview's own (look_cpu.h), on its surfaces' fields.
+            std::uint32_t colliderBits = 0;
+            for (std::size_t m = 0; m < colliders.size(); ++m) colliderBits |= colliders[m] ? 1u << m : 0u;
+            std::string whyNot;
+            gpu::StageInputs surfaces;
+            surfaces.collide = gpu::collideInputs(meshes, colliderBits, fields, offset, softness, &whyNot);
+            if (surfaces.collide) {
+                if (StrandsPtr made = gpu::runStage(gpu::StageKind::Collide, params(), in, nullptr, std::move(surfaces))) {
+                    *result = made;
+                    return true;
+                }
+            }
+        }
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
         if (incremental) {

@@ -11,6 +11,7 @@
 #include "groomlab/curve.h"
 #include "groomlab/graph.h"
 #include "groomlab/groom.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operators.h"
 #include "groomlab/parts.h"
 #include "groomlab/random.h"
@@ -291,7 +292,12 @@ TEST(Collide, SkipsASurfaceAStrandIsFarFromAsIfAskedAtEveryPoint) {
     // strands far above a floor skip it, those reaching it and those a scalp push moves toward it
     // ask it at their points. The strands come out as when every surface is asked at every point,
     // bit for bit: hard, soft, smoothed, with the scalp too, and with the deep search Collide takes
-    // for a large maxDepth (the wolf's: every point within reach of both surfaces).
+    // for a large maxDepth (the wolf's: every point within reach of both surfaces). (CollideOp's own
+    // C++, which incremental evaluations and what the CPU engine refuses run: the engine off.)
+    gpu::setCpuEngineOn(false);
+    struct EngineBack {
+        ~EngineBack() { gpu::setCpuEngineOn(true); }
+    } engineBack;
     FloorScene scene;
     const auto plane = test::makePlane(8, 8.0f);  // a floor 3 below the scalp
     std::vector<Vec3f> points = plane->points();
