@@ -6382,9 +6382,16 @@ void smoothAlone(uint s) {
     // smoothShape: the arc length, each cell's increment reflected (a period of 2m cells).
     double length = 0.0;
     for (uint i = 1; i < n; ++i) length = length + double(len3(loadPoint(begin + i) - loadPoint(begin + i - 1)));
-    double3 period[2 * SMOOTH_CELLS] = {};
-    double3 boxed[2 * SMOOTH_CELLS] = {};
-    double3 sums[2 * SMOOTH_CELLS + 1] = {};
+    // (The arrays the most cells' size: the cells this strand has cleared alone.)
+    double3 period[2 * SMOOTH_CELLS];
+    double3 boxed[2 * SMOOTH_CELLS];
+    double3 sums[2 * SMOOTH_CELLS + 1];
+    for (uint c = 0; c < wrap; ++c) {
+        period[c] = double3(0.0, 0.0, 0.0);
+        boxed[c] = double3(0.0, 0.0, 0.0);
+        sums[c] = double3(0.0, 0.0, 0.0);
+    }
+    sums[wrap] = double3(0.0, 0.0, 0.0);
     const bool shaped = length > 0.0;
     const double cell = shaped ? length / double(m) : 0.0;
     if (shaped) {
@@ -6404,6 +6411,13 @@ void smoothAlone(uint s) {
         // Three box filters `width` cells wide over the period, each from its running sums.
         const double width = min(2.0 * double(scale) * double(m), double(wrap));
         if (width > 0.0) {
+            // Each cell's window ends, the same every pass (SmoothFilter's upper and lower).
+            SmoothEnd upperEnds[2 * SMOOTH_CELLS], lowerEnds[2 * SMOOTH_CELLS];
+            for (uint c = 0; c < wrap; ++c) {
+                const double center = double(c) + 0.5;
+                upperEnds[c] = smoothEndAt(center + 0.5 * width, wrap);
+                lowerEnds[c] = smoothEndAt(center - 0.5 * width, wrap);
+            }
             for (uint pass = 0; pass < 3; ++pass) {
                 sums[0] = double3(0.0, 0.0, 0.0);
                 double3 running = double3(0.0, 0.0, 0.0);
@@ -6413,8 +6427,7 @@ void smoothAlone(uint s) {
                 }
                 const double3 total = running;
                 for (uint c = 0; c < wrap; ++c) {
-                    const double center = double(c) + 0.5;
-                    const SmoothEnd hi = smoothEndAt(center + 0.5 * width, wrap), lo = smoothEndAt(center - 0.5 * width, wrap);
+                    const SmoothEnd hi = upperEnds[c], lo = lowerEnds[c];
                     const double3 upper = total * hi.turns + sums[hi.cell] + period[hi.cell] * hi.into;
                     const double3 lower = total * lo.turns + sums[lo.cell] + period[lo.cell] * lo.into;
                     boxed[c] = (upper - lower) * (1.0 / width);

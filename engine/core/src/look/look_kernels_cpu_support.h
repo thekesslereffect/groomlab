@@ -109,7 +109,7 @@ GROOMLAB_PM_KERNEL2(pow)
 #undef GROOMLAB_PM_KERNEL1
 #undef GROOMLAB_PM_KERNEL2
 
-// The prelude's F32_floor, F32_min and F32_max without their library calls (floorf, fminf, fmaxf:
+// The prelude's F32_floor (F64_floor), F32_min and F32_max without their library calls (floorf, fminf, fmaxf:
 // calls in the kernels' loops, through the runtime's imports): floor's result exactly (signed zero,
 // NaN and the integral range as they come), min and max as the core's std::min and std::max compare
 // (the same as fminf and fmaxf where only the first is NaN: clamp's x).
@@ -117,6 +117,11 @@ inline float groomlab_floor(float x) {
     if (!(std::fabs(x) < 8388608.0f) || x == 0.0f) return x;  // integral already (or NaN, infinite, a signed zero)
     const float t = static_cast<float>(static_cast<std::int32_t>(x));  // toward zero
     return t > x ? t - 1.0f : t;
+}
+inline double groomlab_floor64(double x) {
+    if (!(std::fabs(x) < 4503599627370496.0) || x == 0.0) return x;  // integral already (or NaN, infinite, a signed zero)
+    const double t = static_cast<double>(static_cast<std::int64_t>(x));  // toward zero
+    return t > x ? t - 1.0 : t;
 }
 inline float groomlab_min(float a, float b) { return b < a ? b : a; }
 inline float groomlab_max(float a, float b) { return a < b ? b : a; }
