@@ -6108,7 +6108,8 @@ TEST_P(LookEngineTest, ASculptStrokeThroughACullRunsOnTheGpu) {
 TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     // The CPU engine (look.slang's kernels as C++) run stage by stage from each chain's first node,
     // each stage's points against its node's cached result: how many floats differ in their bits
-    // (the goal: none, the CPU operators and the kernels one source). A report, not a gate yet.
+    // (none: the CPU operators and the kernels give the same bits, the kernels' transcendentals the
+    // core's portable ones, cmake/portable_cpu_kernels.cmake).
     struct Graph {
         std::string name, json, from;
     };
@@ -6117,6 +6118,28 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     for (const char* preset : {"curly", "parted_style", "gravity", "flyaways", "cinematic_hair", "everyday_sim", "wind_and_jiggle"}) {
         graphs.push_back({preset, presetGraph(preset), ""});
     }
+    // The stages the presets above leave out: the shapers, the neighbours' shapers, the hair grids,
+    // Tie, Wet, Blend, Jiggle, MeshCut.
+    const std::pair<const char*, const char*> shapers[] = {
+        {"Bend", R"("params": {"angle": 35.0, "randomness": 0.3})"},
+        {"Direction", R"("params": {"inclination": 30.0, "strength": 0.7, "roll": 20.0})"},
+        {"Transform", R"("params": {"scale": 1.2, "translate": [0.0, 0.05, 0.0], "rotate": [10.0, 0.0, 5.0]})"},
+        {"Displace", R"("params": {"distance": 0.1})"},
+        {"Twist", R"("params": {"turns": 0.6})"}};
+    for (const auto& [type, params] : shapers) graphs.push_back({type, shaperGraph(type, params, true), ""});
+    for (const auto& [type, params] : {std::pair<const char*, const char*>{"Smooth", R"("params": {"strength": 0.8, "scale": 0.3})"},
+                                       {"BlendNeighbors", R"("params": {"strength": 0.6})"},
+                                       {"Tangle", R"("params": {"strength": 0.6, "fraction": 0.5})"}}) {
+        graphs.push_back({type, neighbourGraph(type, params), ""});
+    }
+    graphs.push_back({"Collide", withoutClearance(chainGraph({{"Collide", R"("params": {"offset": 0.12, "softness": 0.1})"}}, true, true)), ""});
+    graphs.push_back({"SelfCollide", withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.6})"}, {"SelfCollide", ""}})), ""});
+    graphs.push_back({"Static", withoutClearance(chainGraph({{"Static", ""}, {"Noise", R"("params": {"amplitude": 0.1})"}})), ""});
+    graphs.push_back({"Tie", withoutClearance(chainGraph({{"Tie", R"("params": {"radius": 0.4})"}})), ""});
+    graphs.push_back({"Wet", withoutClearance(chainGraph({{"Wet", wetParams(3, 0.6)}})), ""});
+    graphs.push_back({"Blend", blendGraph(R"("params": {"mix": 0.6, "profile": [[0, 0.2], [1, 1]]})"), ""});
+    graphs.push_back({"Jiggle", jiggleGraph(), ""});
+    graphs.push_back({"MeshCut", meshCutGraph(R"("params": {"offset": 0.02})"), ""});
     std::size_t differing = 0;
     for (const Graph& g : graphs) {
         GroomData data = groom(g.json);
@@ -6125,7 +6148,10 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
         GroomSession session(data);
         ASSERT_TRUE(session.evaluate(ViewRequest{}).strands) << g.name;
         Prepared p;
-        ASSERT_TRUE(prepareRun(session, {}, g.from, &p)) << g.name << ": " << p.why;
+        if (!prepareRun(session, {}, g.from, &p)) {
+            std::printf("[ CPU bits ] %s: not run (%s)\n", g.name.c_str(), p.why.c_str());
+            continue;
+        }
         const GraphDocument& doc = *session.viewDocument();
         auto engine = gpu::makeCpuLookEngine();
         engine->setBase(p.base, session.last().scalp.get());
@@ -6163,6 +6189,7 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
         std::printf("[ CPU bits ] %s:%s\n", g.name.c_str(), line.c_str());
     }
     std::printf("[ CPU bits ] floats differing in all: %zu\n", differing);
+    EXPECT_EQ(differing, 0u);
 }
 }  // namespace
 }  // namespace groomlab

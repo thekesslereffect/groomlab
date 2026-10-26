@@ -5004,6 +5004,7 @@ bool tieTiedAux1(uint s, out uint begin, out uint k) {
 // std::acos: the GPU's own (fxc's expansions: acos off by up to about 7e-5) would flip the CPU's
 // decisions on them (the route's sample count, a ceiling of its angle; which bin, which side).
 float tieAtan(float x) {
+    __target_switch { case cpp: return atan(x); default: break; }  // (the CPU: the core's, pm::)
     const float sign = x < 0.0f ? -1.0f : 1.0f;
     float a = abs(x), y = 0.0f;
     if (a > 2.414213562373095f) {
@@ -5018,16 +5019,19 @@ float tieAtan(float x) {
     return sign * y;
 }
 float tieAtan2(float y, float x) {
+    __target_switch { case cpp: return atan2(y, x); default: break; }  // (the CPU: the core's, pm::)
     if (x == 0.0f) return y > 0.0f ? 0.5f * TIE_PI : y < 0.0f ? -0.5f * TIE_PI : 0.0f;
     const float a = tieAtan(y / x);
     if (x > 0.0f) return a;
     return y < 0.0f ? a - TIE_PI : a + TIE_PI;
 }
 float tieAsinSmall(float x) {  // |x| <= 0.5
+    __target_switch { case cpp: return asin(x); default: break; }  // (the CPU: the core's, pm::)
     const float z = x * x;
     return ((((4.2163199048e-2f * z + 2.4181311049e-2f) * z + 4.5470025998e-2f) * z + 7.4953002686e-2f) * z + 1.6666752422e-1f) * z * x + x;
 }
 float tieAcos(float x) {
+    __target_switch { case cpp: return acos(x); default: break; }  // (the CPU: the core's, pm::)
     if (x < -0.5f) return TIE_PI - 2.0f * tieAsinSmall(sqrt(0.5f * (1.0f + x)));
     if (x > 0.5f) return 2.0f * tieAsinSmall(sqrt(0.5f * (1.0f - x)));
     return 0.5f * TIE_PI - tieAsinSmall(x);
@@ -5773,6 +5777,7 @@ float4 rootFrameOf(uint s, uint part) { return asfloat(gAux0.Load4(s * 32 + part
 // 7e-5 on DirectX 11: a strand turned by it moves its tip by that times its length): Cephes' atanf
 // (its reduction to |x| <= tan(pi / 8) and its polynomial), as atan2 of the sine and the cosine.
 float atanAccurate(float v) {  // v >= 0
+    __target_switch { case cpp: return atan(v); default: break; }  // (the CPU: the core's, pm::)
     float x = v, y = 0.0f;
     if (x > 2.414213562373095f) {
         y = 1.5707963267948966f;
@@ -5785,6 +5790,7 @@ float atanAccurate(float v) {  // v >= 0
     return y + ((((8.05374449538e-2f * z - 1.38776856032e-1f) * z + 1.99777106478e-1f) * z - 3.33329491539e-1f) * z * x + x);
 }
 float acosAccurate(float c) {
+    __target_switch { case cpp: return acos(clamp(c, -1.0f, 1.0f)); default: break; }  // (the CPU: the core's, pm::)
     c = clamp(c, -1.0f, 1.0f);
     const float sine = sqrt((1.0f - c) * (1.0f + c)), ac = abs(c);
     float r = 0.0f;
@@ -6256,60 +6262,131 @@ SmoothStrand smoothStrand(uint s) {
     return st;
 }
 
-// The CPU's SmoothCS: a strand whole on a thread, cell by cell with the group's arithmetic.
+// The CPU's SmoothCS: SmoothOp's own arithmetic (extra_ops.cpp smoothShape, its sums in double,
+// SmoothFilter's window ends), a strand whole on a thread: the operator's bits. (The GPU's group
+// form sums in float: a rounding apart.)
+struct SmoothEnd {
+    double turns;
+    uint cell;
+    double into;
+};
+SmoothEnd smoothEndAt(double x, uint wrap) {
+    SmoothEnd e;
+    e.turns = floor(x / double(wrap));
+    const double r = x - e.turns * double(wrap);
+    e.cell = min(uint(r), wrap - 1);
+    e.into = r - double(e.cell);
+    return e;
+}
+// The input polyline at arc length a (smoothShape's pointAt): `seg` and the arc lengths to its
+// ends walk forward with a.
+struct SmoothWalk {
+    uint seg;
+    double arcLo, arcHi;
+};
+double3 smoothPointAt(inout SmoothWalk w, uint begin, uint n, double a) {
+    while (w.seg + 1 < n && w.arcHi < a) {
+        ++w.seg;
+        w.arcLo = w.arcHi;
+        w.arcHi = w.arcLo + double(len3(loadPoint(begin + w.seg) - loadPoint(begin + w.seg - 1)));
+    }
+    const double span = w.arcHi - w.arcLo;
+    const double t = span > 0.0 ? clamp((a - w.arcLo) / span, 0.0, 1.0) : 1.0;
+    const float3 p = loadPoint(begin + w.seg - 1), q = loadPoint(begin + w.seg);
+    const float3 pq = q - p;
+    return double3(double(p.x) + double(pq.x) * t, double(p.y) + double(pq.y) * t, double(p.z) + double(pq.z) * t);
+}
 void smoothAlone(uint s) {
-    const SmoothStrand st = smoothStrand(s);
-    const uint begin = st.begin, n = st.n, m = st.m, wrap = 2 * m;
-    if (!st.smoothed) {
-        copyStrand(begin, n);
-        return;
-    }
-    const float cell = st.cell;
-    OwnSmooth own;
-    float3 boxed[2 * SMOOTH_CELLS];
-    {
-        uint seg = 1;
-        float arcLo = 0.0f, arcHi = len3(loadPoint(begin + 1) - loadPoint(begin));
-        for (uint c = 0; c <= m; ++c) {
-            if (c == m) {
-                boxed[c] = loadPoint(begin + n - 1);
-                continue;
+    const uint begin = strandBegin(s), n = strandCountOf(s);
+    copyStrand(begin, n);
+    const float scale = gValue.y;
+    if (!(scale > 0.0f) || n < 3) return;
+    const float k = clamp(fieldAt(0, gValue.x, s, 0), 0.0f, 1.0f);
+    if (k <= 0.0f) return;
+    const uint m = gFlag.x, wrap = 2 * m;
+    if (m == 0 || m > SMOOTH_CELLS) return;
+    // smoothShape: the arc length, each cell's increment reflected (a period of 2m cells).
+    double length = 0.0;
+    for (uint i = 1; i < n; ++i) length = length + double(len3(loadPoint(begin + i) - loadPoint(begin + i - 1)));
+    double3 period[2 * SMOOTH_CELLS] = {};
+    double3 boxed[2 * SMOOTH_CELLS] = {};
+    double3 sums[2 * SMOOTH_CELLS + 1] = {};
+    const bool shaped = length > 0.0;
+    const double cell = shaped ? length / double(m) : 0.0;
+    if (shaped) {
+        SmoothWalk w;
+        w.seg = 1;
+        w.arcLo = 0.0;
+        w.arcHi = double(len3(loadPoint(begin + 1) - loadPoint(begin)));
+        double3 previous = smoothPointAt(w, begin, n, 0.0);
+        for (uint c = 0; c < m; ++c) {
+            const float3 last = loadPoint(begin + n - 1);
+            const double3 next = c + 1 == m ? double3(double(last.x), double(last.y), double(last.z)) : smoothPointAt(w, begin, n, cell * double(c + 1));
+            const double3 step = next - previous;
+            period[c] = step;
+            period[wrap - 1 - c] = step;
+            previous = next;
+        }
+        // Three box filters `width` cells wide over the period, each from its running sums.
+        const double width = min(2.0 * double(scale) * double(m), double(wrap));
+        if (width > 0.0) {
+            for (uint pass = 0; pass < 3; ++pass) {
+                sums[0] = double3(0.0, 0.0, 0.0);
+                double3 running = double3(0.0, 0.0, 0.0);
+                for (uint c = 0; c < wrap; ++c) {
+                    running = running + period[c];
+                    sums[c + 1] = running;
+                }
+                const double3 total = running;
+                for (uint c = 0; c < wrap; ++c) {
+                    const double center = double(c) + 0.5;
+                    const SmoothEnd hi = smoothEndAt(center + 0.5 * width, wrap), lo = smoothEndAt(center - 0.5 * width, wrap);
+                    const double3 upper = total * hi.turns + sums[hi.cell] + period[hi.cell] * hi.into;
+                    const double3 lower = total * lo.turns + sums[lo.cell] + period[lo.cell] * lo.into;
+                    boxed[c] = (upper - lower) * (1.0 / width);
+                }
+                for (uint c = 0; c < wrap; ++c) period[c] = boxed[c];
             }
-            const float a = cell * float(c);
-            while (seg + 1 < n && arcHi < a) {
-                ++seg;
-                arcLo = arcHi;
-                arcHi = arcLo + len3(loadPoint(begin + seg) - loadPoint(begin + seg - 1));
-            }
-            const float span = arcHi - arcLo;
-            const float f = span > 0.0f ? clamp((a - arcLo) / span, 0.0f, 1.0f) : 1.0f;
-            const float3 p = loadPoint(begin + seg - 1);
-            boxed[c] = p + (loadPoint(begin + seg) - p) * f;
+        }
+        sums[0] = double3(0.0, 0.0, 0.0);
+        double3 running = double3(0.0, 0.0, 0.0);
+        for (uint c = 0; c < m; ++c) {
+            running = running + period[c];
+            sums[c + 1] = running;
         }
     }
-    for (uint c = 0; c < m; ++c) {
-        const float3 d = boxed[c + 1] - boxed[c];
-        own.periods[c] = d;
-        own.periods[wrap - 1 - c] = d;
-    }
-    const float width = min(2.0f * gValue.y * float(m), float(wrap));
-    if (width > 0.0f) {
-        for (uint pass = 0; pass < 3; ++pass) {
-            own.sums[0] = float3(0.0f, 0.0f, 0.0f);
-            for (uint c = 0; c < wrap; ++c) own.sums[c + 1] = own.sums[c] + own.periods[c];
-            for (uint c = 0; c < wrap; ++c) {
-                const float center = float(c) + 0.5f;
-                const SmoothAt hi = smoothAt(center + 0.5f * width, wrap), lo = smoothAt(center - 0.5f * width, wrap);
-                const float3 above = own.sums[wrap] * hi.turns + own.sums[hi.j] + own.periods[hi.j] * hi.frac;
-                const float3 below = own.sums[wrap] * lo.turns + own.sums[lo.j] + own.periods[lo.j] * lo.frac;
-                boxed[c] = (above - below) * (1.0f / width);
-            }
-            for (uint c = 0; c < wrap; ++c) own.periods[c] = boxed[c];
+    // Each segment along the smoothed increments over its arc, its own length kept (the target);
+    // each point blended toward it by strength x profile; the lengths back from the root out.
+    float3 target = loadPoint(begin), previous = target;
+    double behindArc = 0.0;
+    double3 behind = double3(0.0, 0.0, 0.0);
+    if (shaped) behind = sums[0] + period[0] * 0.0;  // (upTo(0): as the operator sums it)
+    for (uint i = 1; i < n; ++i) {
+        const float3 p = loadPoint(begin + i), old = p - loadPoint(begin + i - 1);
+        const float own = len3(old);
+        const double arc = behindArc + double(own);
+        float3 next = p;
+        if (shaped) {
+            const double x = clamp(arc / cell, 0.0, double(m));
+            const uint j = min(uint(x), m - 1);
+            const double3 ahead = sums[j] + period[j] * (x - double(j));
+            const double3 d = ahead - behind;
+            behind = ahead;
+            const float segment = float(arc - behindArc);
+            const float3 way = float3(float(d.x), float(d.y), float(d.z));
+            const float3 unit = len3(way) > 1e-6f * segment ? normalized(way) : segment > 0.0f ? old / segment : float3(0.0f, 0.0f, 0.0f);
+            next = target + unit * segment;
         }
+        behindArc = arc;
+        const float wgt = k * clamp(rampAlong(i, n), 0.0f, 1.0f);
+        const float3 blended = p + (next - p) * wgt;
+        const float3 d = blended - previous;
+        const float l = len3(d);
+        const float3 moved = l > 1e-6f * own ? previous + d * (own / l) : previous + (next - target);
+        storePoint(gOut, begin + i, moved);
+        previous = moved;
+        target = next;
     }
-    own.sums[0] = float3(0.0f, 0.0f, 0.0f);
-    for (uint c = 0; c < m; ++c) own.sums[c + 1] = own.sums[c] + own.periods[c];
-    smoothPoints(begin, n, m, cell, st.k, own);
 }
 
 [shader("compute")]
