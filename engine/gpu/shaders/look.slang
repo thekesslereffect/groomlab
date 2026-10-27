@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// GroomLab GPU look preview: the graph's last nodes as compute kernels (Interpolate, Length,
-// Clump, Noise, Curl, Width, Part, Gravity, Flyaway, Collide, Wind, Blend, SelfCollide, Static,
-// Bend, Direction, Transform, Displace, Twist, Smooth, RestoreLength, BlendNeighbors, Tangle, Flow,
-// in whatever order the graph has them), then the lit strand lines' frames.
+// GroomLab's look stages as compute kernels (Interpolate, Length, Clump, Noise, Curl, Width, Part,
+// Gravity, Flyaway, Collide, Wind, Blend, SelfCollide, Static, Bend, Direction, Transform,
+// Displace, Twist, Smooth, RestoreLength, BlendNeighbors, Tangle, Flow, Jiggle, MeshCut, in whatever
+// order the graph has them), then the lit strand lines' frames: the one source of those nodes'
+// arithmetic, for the GPU preview and for the core's own evaluation (the CPU engine, below).
 //
 // Slang, one source for every GPU API, compiled by slangc when the module builds
 // (engine/gpu/CMakeLists.txt) and embedded: DXBC (cs_5_0) for DirectX 11, GLSL 4.50 compute for OpenGL;
@@ -10,16 +11,14 @@
 // compiling for the hosts to come. Each resource names its DirectX register and its binding
 // elsewhere (vk::binding: OpenGL's shader storage and uniform block bindings, Vulkan's set 0).
 //
-// The CPU operators are the reference (engine/core/src/operators/interpolate.cpp InterpolateOp,
-// shape_ops.cpp LengthOp and WidthOp, look_ops.cpp ClumpOp and NoiseOp, curl_op.cpp CurlOp, deform_ops.cpp
-// PartOp, GravityOp and CollideOp, cinematic_ops.cpp FlyawayOp, motion_ops.cpp WindOp, look_ops.cpp BlendOp,
-// self_collide_op.cpp SelfCollideOp, static_op.cpp StaticOp and hair_grid.cpp their grid,
-// transform_ops.cpp BendOp, DirectionOp and TransformOp, deform_ops.cpp DisplaceOp, extra_ops.cpp TwistOp,
-// engine/core/src/noise.cpp VectorNoise, engine/core/src/frames.cpp rotationMinimizingFramesInto
-// and Rotation, engine/core/src/curve.cpp resampleByArcLengthInto, display.cpp strandFrame):
-// each kernel does their arithmetic in their order, so results differ by float rounding alone
-// (the compiler may fuse multiply-adds, and sqrt, division, sin and cos are not IEEE-exact
-// here). The per-strand random numbers (Rng from
+// The core's operators (engine/core/src/operators) read their params, lay out what each stage
+// takes and run their stage here: slangc compiles these kernels to C++ too (the CPU engine,
+// look_engine.h makeCpuLookEngine), each kernel's `case cpp` the exact form (doubles, correctly
+// rounded square roots and divisions: the core's results, bit for bit, on any thread count). The
+// core's shared helpers it keeps in step with (engine/core/src/noise.cpp VectorNoise, frames.cpp
+// rotationMinimizingFramesInto and Rotation, curve.cpp resampleByArcLengthInto, display.cpp
+// strandFrame) it does in their order. On a GPU results differ by float rounding alone (the
+// compiler may fuse multiply-adds, and sqrt, division, sin and cos are not IEEE-exact there). The per-strand random numbers (Rng from
 // the strand ID), the root normals, Interpolate's binding (each strand's guides and weights) and
 // guide shapes, and Clump's center choice come from the CPU; the lattice hashes of the noise are
 // 64-bit (cornerHash, shared/groom_math.h: in 32-bit halves here, as cs_5_0 has none). Mapped
@@ -268,7 +267,7 @@ float strandLength(uint begin, uint n) {
     return total;
 }
 
-// ---- Interpolate (InterpolateOp::run, blendStrand: the rows path) --------------------------------
+// ---- Interpolate: each strand blended from its guides' rows --------------------------------------
 //
 // gAux0: the binding (operator_state.h InterpolateRecords), packed (look_engine.cpp): per strand
 // two words, its header (where its records start in gAux0, in words, times 64; 32 when it has
@@ -282,7 +281,7 @@ float strandLength(uint begin, uint n) {
 // per-strand number. Keeping clearance (gFlag.w), ClearanceCS walks the strands after it with the
 // scalp's field in gAux2.
 
-#define BIND_SLOTS 16  // look_chain.h kInterpolateSlots
+#define BIND_SLOTS 16  // look_run.h kInterpolateSlots
 
 // Strand s's header: x its records' start, y its count (0: not bound), z whether it has twists;
 // and its nearest guide's distance squared.
@@ -1176,7 +1175,7 @@ float3 tubeAt(uint tube, float t, float u, float v) {
     PRECISE float3 r = a + b;
     return r;
 }
-// interpolate.cpp rideTube: point j of n riding the tube at (u, v), its root kept where it grows and
+// Point j of n riding the tube at (u, v), its root kept where it grows and
 // the difference faded out by (1 - t / join)^2.
 float3 rideTubeAt(uint tube, float u, float v, float3 root, uint j, uint n) {
     if (j == 0) return root;
@@ -1263,7 +1262,7 @@ void interpolateStrandAlone(uint s) {
     const float3 root = loadPoint(begin);
     float4 blendAt[CPU_MAX_SAMPLES];
     float arcAt[CPU_MAX_SAMPLES];
-    // (Four samples side by side, as the C++ rows take them, every guide added onto their sums in
+    // (Four samples side by side, as the guides' rows hold them, every guide added onto their sums in
     // turn: each sample's sum taken guide by guide, in order.)
     const uint quads = (samples + 3) / 4;
     for (uint q = 0; q < quads; ++q) {
@@ -1757,7 +1756,7 @@ uint walkPush(FieldTables t, bool deformed, float3 p, float offset, float maxDep
     return push;
 }
 
-// ---- Interpolate keeping clearance: the walk (InterpolateOp::run, blendStrand's last part) ------
+// ---- Interpolate keeping clearance: the walk ----------------------------------------------------
 //
 // After InterpolateCS, on the points it wrote (gOut, read and written in place), with its
 // constants and gAux0, and the scalp's field in gAux2: from the root out, a point below the
@@ -1776,7 +1775,7 @@ uint walkPush(FieldTables t, bool deformed, float3 p, float offset, float maxDep
 #define CLEAR_GROUP 64
 #define CLEAR_POINTS 1024
 #define CLEAR_ASKED 16  // operator_state.h kClearanceAsked
-#define CLEAR_PUSHES 4  // interpolate.cpp kClearancePushes
+#define CLEAR_PUSHES 4  // a point's pushes at most (each after the first with its length kept)
 #ifdef GROOMLAB_SLANG_GL
 #define CLEAR_TAIL_ROUND 1  // (ClearanceCS)
 #else
@@ -2084,7 +2083,7 @@ void clearanceGroup(uint3 id, uint3 local, uint3 group) {
     }
 #endif
 }
-// ---- Length (LengthOp::run) ----------------------------------------------------------------------
+// ---- Length --------------------------------------------------------------------------------------
 //
 // gValue: keep (mapped: field 0, per strand), fraction (field 1, per strand), trimMin, trimMax
 // (low to high). The strand's numbers: .x its trim's draw, .w its pick's (under the fraction:
@@ -2179,7 +2178,7 @@ void CentersCS(uint3 id : SV_DispatchThreadID) {
         for (uint i = 0; i < CENTER_SAMPLES; ++i) storePoint(gOut, base + i, pts[i]);
     }
     if (gFlag.w != 0) {
-        // Its cumulative arc lengths at its samples (look_ops.cpp cumulativeArcLength), at word gAux.w.
+        // Its cumulative arc lengths at its samples, at word gAux.w.
         float arc = 0.0f;
         gOut.Store((gAux.w + base) * 4, asuint(arc));
         for (uint i = 1; i < CENTER_SAMPLES; ++i) {
@@ -2224,7 +2223,7 @@ void ShareCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
-// ---- Clump (ClumpOp::run, clumpStrand) -----------------------------------------------------------
+// ---- Clump: each strand toward its center --------------------------------------------------------
 //
 // gAux0: each strand's center (0xffffffff: not clumped); gAux1: the centers' curves
 // (CENTER_SAMPLES points each), their frames at word gAux.y (9 a sample; made with a lock radius
@@ -2249,7 +2248,7 @@ float3 centerAlong(uint c, float t) {
     return centerPoint(c, i) * (1.0f - f) + centerPoint(c, i + 1) * f;
 }
 
-// look_ops.cpp centerSampleAt: where arc length `arc` lies on center c, its cumulative arc lengths
+// Where arc length `arc` lies on center c, its cumulative arc lengths
 // `arcs`: the sample k at or before it (walked on from the last) and the share f to the next.
 void centerSampleAt(float arcs[CENTER_SAMPLES], float arc, inout uint k, out float f) {
     while (k + 2 < CENTER_SAMPLES && arcs[k + 1] < arc) ++k;
@@ -2295,7 +2294,7 @@ float3 repelled(float3 p, uint c, float centerLength, float arc, float amount, f
     return p + way * push;
 }
 
-// ClumpOp's shape: a clumped point's offset from its center's point `center` (its frame there
+// Clump's shape: a clumped point's offset from its center's point `center` (its frame there
 // `fr`) squashed across `thinWay` by the flatness, as much as the point clumps (w).
 float3 flattened(float3 p, float3 center, Frame fr, float3 thinWay, float w) {
     float3 offset = p - center;
@@ -2455,12 +2454,12 @@ float3 vectorNoise(float3 p, float spacing) {
 // shared/groom_math.h latticeNoise4 at a float4.
 float3 latticeNoise4(float4 q, uint2 seed, uint channels) { return latticeNoise4(q.xyz, q.w, seed, channels); }
 
-// ---- Noise (NoiseOp::run, `shape`) -------------------------------------------------------------
+// ---- Noise -------------------------------------------------------------------------------------
 //
 // gValue: amplitude (field 0, per point allowed), frequency, fraction (field 1, at the root);
 // gFlag: octaves, world space, kinky. The strand's numbers: its noise offset, its fraction draw.
 
-// Kinky: knot k's offset (NoiseOp's `knot`), and the offset at u knots along, straight between
+// Kinky: knot k's offset, and the offset at u knots along, straight between
 // the knots around it.
 static const float kKinkSpacing = 1.618034f;
 float3 kinkKnot(float3 base, float k) { return vectorNoise(base + float3(0.0f, 0.0f, k * kKinkSpacing), 0.0f); }
@@ -2483,7 +2482,7 @@ float noiseAmplitude(uint s, uint i, uint n, uint p) {
 // Kinky in strand space: between knots by the share of the length (in world space, by the arc
 // length: NoiseCS).
 // Smooth noise is read at the strand's points: the octaves finer than they draw fade out
-// (NoiseOp's spacingOf: the point spacing in the noise's space, in strand space `frequency` over
+// (The point spacing in the noise's space, in strand space `frequency` over
 // the segments, in world space the strand's length times that).
 float3 noiseAt(uint s, uint i, uint n, uint p, float3 v) {
     const float a = noiseAmplitude(s, i, n, p);
@@ -2525,7 +2524,7 @@ float3 cachedNoise(inout NoiseCache c, float3 p) {
     __target_switch { case cpp: __intrinsic_asm "groomlab_noise_at($0, $1)"; }
 }
 
-// The CPU's NoiseCS: smooth noise in strand space through the strand's cache (NoiseOp's own).
+// The CPU's NoiseCS: smooth noise in strand space through the strand's cache.
 void noiseStrandAlone(uint s, uint begin, uint n) {
     if (gFlag.z != 0u || gFlag.y != 0u || n < 2) {  // kinky or world space: as the GPU's
         for (uint i = 1; i < n; ++i) storePoint(gOut, begin + i, noiseAt(s, i, n, begin + i, loadPoint(begin + i)));
@@ -2641,7 +2640,7 @@ void NoisePointsCS(uint3 id : SV_DispatchThreadID) {
 // angle by the profiled arc: curl_phase.h); weighted curls: gValue2.y the weight over
 // kWeightTurns (0: none), gFlag2.yzw the unit weightDirection's bits (the stretch at each axis
 // sample, from the hang and the unweighted turns below it, divides the profiled arc's weight and
-// narrows the radius: curl_op.cpp Axis::weigh, stretchedShare). The
+// narrows the radius: curlStretchOf, curlStretchedShare). The
 // strand's numbers: its Rng's four draws (phase, radius and frequency variation, the plane of a
 // wave or zigzag; their bits the spacing noise's key). By clump: gAux0 each strand's clump (0xffffffff: alone), gAux1 the clumps'
 // axes as CurlAxesCS made them, gAux2 the clumps' numbers (8 floats: the normal, then the draw's
@@ -2653,7 +2652,7 @@ void NoisePointsCS(uint3 id : SV_DispatchThreadID) {
 #define CURL_GAUSS0 0.211324865f  // two-point Gauss on [0, 1]
 #define CURL_GAUSS1 0.788675135f
 
-// CurlOp::zigzag: a triangle wave with sin's period, peaks and zeros.
+// Zigzag: a triangle wave with sin's period, peaks and zeros.
 float zigzagWave(float angle) {
     const float u = angle * (1.0f / kTwoPi) + 0.25f;
     return 1.0f - 4.0f * abs(u - floor(u) - 0.5f);
@@ -2679,7 +2678,7 @@ float3 slopeOf3(float3 a, float3 b, float3 c, uint which) {
     const float3 s0 = secantOf(a, b, h0), s1 = secantOf(b, c, h1);
     return slopeFrom(s0, h0, s1, h1, which);
 }
-// curl_op.cpp hermiteAt, hermiteDerivative, segmentArc: the segment p0 (slope d0) to p1 (slope d1),
+// The segment p0 (slope d0) to p1 (slope d1),
 // h long, at u.
 float3 hermiteAt(float3 p0, float3 p1, float3 d0, float3 d1, float h, float u) {
     const float3 dd = p1 - p0, a = d0 * h, b = d1 * h;
@@ -2697,7 +2696,7 @@ float segmentArc(float3 p0, float3 p1, float3 d0, float3 d1, float h, float u) {
     const float3 dd = p1 - p0, a = d0 * h, b = d1 * h;
     return 0.5f * u * (hermiteSpeed(dd, a, b, u * CURL_GAUSS0) + hermiteSpeed(dd, a, b, u * CURL_GAUSS1));
 }
-// curl_op.cpp tangentOf: a unit tangent along d, or `previous` where d is zero.
+// A unit tangent along d, or `previous` where d is zero.
 float3 tangentOf(float3 d, float3 previous) {
     const float l = len3(d);
     return l > 0.0f ? d * (1.0f / l) : previous;
@@ -2748,7 +2747,7 @@ float3 tangentOfExact(float3 d, float3 previous) {
     const float l = sqrtExact(exactDot(d, d));
     return l > 0.0f ? scale3Exact(d, divExact(1.0f, l)) : previous;
 }
-// curl_op.cpp firstFrame: the scalp's normal (zero: none) across the way the strand leaves
+// The first frame: the scalp's normal (zero: none) across the way the strand leaves
 // (`leave`, unit), squared to the tangent at the root; else any perpendicular of it.
 // (Ill-conditioned where the strand leaves close along the normal: made with the exact helpers,
 // from ways made so, as the CPU rounds them.)
@@ -2791,13 +2790,13 @@ float3 curvePointAtExact(uint begin, uint n, float t) {
     secantOfExact(p0, p1, h);
     return hermiteAtExact(p0, p1, strandSlopeExact(begin, n, i), strandSlopeExact(begin, n, i + 1), h, u);
 }
-// curl_op.cpp hermiteStep: the segment's point at u less its start.
+// The segment's point at u less its start.
 float3 hermiteStep(float3 p0, float3 p1, float3 d0, float3 d1, float h, float u) {
     const float3 dd = p1 - p0, a = d0 * h, b = d1 * h;
     const float u2 = u * u;
     return dd * (u2 * (3.0f - 2.0f * u)) + a * (u * (1.0f - u) * (1.0f - u)) + b * (u2 * (u - 1.0f));
 }
-// curl_op.cpp reflectFrameBy: frame f carried along v1, to where the tangent is t1.
+// Frame f carried along v1, to where the tangent is t1.
 Frame reflectFrameBy(Frame f, float3 v1, float3 t1) {
     const float c1 = dot(v1, v1);
     if (c1 < 1e-12f) return f;
@@ -2815,9 +2814,9 @@ Frame reflectFrameBy(Frame f, float3 v1, float3 t1) {
     o.b = cross(t1, o.n);
     return o;
 }
-// curl_op.cpp reflectFrame: frame f at x0 carried to x1.
+// Frame f at x0 carried to x1.
 Frame reflectFrame(float3 x0, Frame f, float3 x1, float3 t1) { return reflectFrameBy(f, x1 - x0, t1); }
-// curl_op.cpp curlEase: eased in from the root over the first quarter turn, or the first quarter
+// Eased in from the root over the first quarter turn, or the first quarter
 // of the strand where that comes first.
 float curlEase(float arc, float t, float frequency) {
     const float x = min(1.0f, max(4.0f * abs(frequency) * arc, 4.0f * t));
@@ -2832,9 +2831,9 @@ uint curlSpacingKey(float4 r) { return curlSpacingKey(r.x, r.y, r.z, r.w); }
 bool curlProfiled() { return gFlag2.x != 0u; }
 // Weighted curls (gValue2.y: the weight over kWeightTurns; 0: none).
 bool curlWeighed() { return gValue2.y > 0.0f; }
-// Whether the profiled arc is other than the arc (curl_op.cpp Axis::spaced).
+// Whether the profiled arc is other than the arc.
 bool curlSpaced() { return curlProfiled() || curlWeighed(); }
-// curl_op.cpp stretchedShare: the share of its radius r a curl keeps where its pitch stretches
+// The share of its radius r a curl keeps where its pitch stretches
 // q-fold at local frequency f, keeping a turn's wire length (eased to 0 below u = 1/4).
 float curlStretchedShare(float r, float q, float f) {
     if (!(q > 1.0f) || r == 0.0f) return 1.0f;
@@ -2846,7 +2845,7 @@ float curlStretchedShare(float r, float q, float f) {
     const float x = 4.0f * u;
     return x * x * (1.25f - 0.75f * x);
 }
-// curl_op.cpp Axis::weigh: the stretch at each of an axis's `samples` samples, into `hang` (each
+// The stretch at each of an axis's `samples` samples, into `hang` (each
 // sample's max(0, tangent . weightDirection) on the way in), from `turns` (its unweighted turns
 // from the root): the hang smoothed by two passes of 1-2-1, times the turns below.
 void curlStretchOf(inout float hang[CENTER_SAMPLES], float turns[CENTER_SAMPLES], uint samples) {
@@ -2862,7 +2861,7 @@ void curlStretchOf(inout float hang[CENTER_SAMPLES], float turns[CENTER_SAMPLES]
     const float total = turns[last];
     for (uint k = 0; k < samples; ++k) hang[k] = 1.0f + gValue2.y * hang[k] * abs(total - turns[k]);
 }
-// curl_op.cpp profiledSegmentArc: the segment's speed times frequencyProfile (0 or more; 1
+// The segment's speed times frequencyProfile (0 or more; 1
 // without one) from 0 to u, two-point Gauss on each piece between the ramp's keys (segment k of
 // `samples`); weighted (`stretch`: at the segment's ends, linear between them; x 0: none), over
 // the stretch too.
@@ -2917,7 +2916,7 @@ float3 curvePointAt(uint begin, uint n, float t) {
     return hermiteAt(p0, p1, strandSlope(begin, n, i), strandSlope(begin, n, i + 1), len3(p1 - p0), u);
 }
 
-// The axis a strand curls about, walked from its root (curl_op.cpp Axis, made sample by sample):
+// The axis a strand curls about, walked from its root (made sample by sample):
 // samples k - 1 to k + 2 (`xm`, `x0`, `x1`, `x2`), the slopes at k and k + 1, the frame, arc and
 // profiled arc at k.
 struct AxisWalk {
@@ -2961,7 +2960,7 @@ AxisWalk ownAxisStart(uint begin, uint n, float3 normal) {
         w.d0 = slopeOf3Exact(w.x0, w.x1, w.x2, 0u);
     }
     w.d1 = walkSlope(w, 1u);
-    // The way it leaves: to its point a 31st along (curl_op.cpp prepare).
+    // The way it leaves: to its point a 31st along.
     const float3 t0 = tangentOfExact(w.d0, float3(0.0f, 0.0f, 1.0f));
     const float3 leaveTo = curvePointAtExact(begin, n, divExact(1.0f, float(CENTER_SAMPLES - 1)));
     w.f = curlFirstFrame(normal, t0, tangentOfExact(sub3Exact(leaveTo, w.x0), t0));
@@ -3012,7 +3011,7 @@ float axisWalkAt(AxisWalk w, float u, out Frame frame, out float parc, float2 st
 // (weighted curls).
 #define CLUMP_AXIS_FLOATS (CENTER_SAMPLES * 18)
 
-// A clump's axis (curl_op.cpp findClumps, Axis::make): the mean of its core strands (gAux0:
+// A clump's axis: the mean of its core strands (gAux0:
 // gFlag.x + 1 offsets, then the strands) at CENTER_SAMPLES shares of their points, on their
 // curves, summed in strand order; its slopes; its rotation-minimizing frames from its members'
 // root normals (gAux1 at 8c, summed and normalized on the CPU); its arc lengths; weighted, the
@@ -3158,8 +3157,8 @@ void CurlAxesCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID) 
     }
 }
 
-// Clump c's axis at share t (curl_op.cpp Axis::arcAt): its frame there, its arc length and its
-// profiled arc; weighted, its stretch there (Axis::stretchAt; else 0).
+// Clump c's axis at share t: its frame there, its arc length and its profiled arc; weighted, its
+// stretch there (else 0).
 float clumpAxisAt(uint c, float t, out Frame frame, out float parc, out float stretch) {
     const uint base = c * CLUMP_AXIS_FLOATS, slopes = base + CENTER_SAMPLES * 3, frames = base + CENTER_SAMPLES * 6,
                arcs = base + CENTER_SAMPLES * 15, parcs = base + CENTER_SAMPLES * 16, stretches = base + CENTER_SAMPLES * 17;
@@ -3191,7 +3190,7 @@ float clumpAxisAt(uint c, float t, out Frame frame, out float parc, out float st
 
 // Point i of n of strand s moved by the curl: its frame and profiled arc on the axis (the arc
 // without a frequencyProfile or weight), its share t, the draw's numbers and spacing key, and
-// weighted, the axis's stretch there (0: none) (curl_op.cpp run's `curl`).
+// weighted, the axis's stretch there (0: none).
 float3 curlOffset(uint s, uint begin, uint i, uint n, Frame fr, float w, float phase, float vary, float frequency, float plane,
                   uint key, float strandRadius, float stretch) {
     const float t = paramAt(i, n);
@@ -3207,7 +3206,7 @@ float3 curlOffset(uint s, uint begin, uint i, uint n, Frame fr, float w, float p
     }
     const float angle = curlAngle(frequency, w, phase, gValue2.x, key);
     if (gFlag.x == 0u || gFlag.x == 3u) return fr.n * (r * cos(angle)) + fr.b * (r * sin(angle));
-    // A wave or zigzag in the plane at the strand's angle about it (CurlOp::offsetAt).
+    // A wave or zigzag in the plane at the strand's angle about it.
     const float3 across = fr.n * cos(plane) + fr.b * sin(plane);
     return across * (r * (gFlag.x == 1u ? sin(angle) : zigzagWave(angle)));
 }
@@ -3301,8 +3300,7 @@ void curlStrand(uint s) {
 //
 // Four strands of as many points (3 to CENTER_SAMPLES), each curling alone about its own points
 // (no clumps, no frequencyProfile, unweighted), have their axes' slopes, arc lengths and frames
-// made side by side in float4 lanes, a strand a lane (curl_op.cpp makeFour: each lane the scalar
-// arithmetic in its order, so each strand's floats are curlStrand's), then each point curled as
+// made side by side in float4 lanes, a strand a lane (each lane the scalar arithmetic in its order, so each strand's floats are curlStrand's), then each point curled as
 // curlStrand curls it. Any other four, one by one.
 struct Lanes3 {
     float4 x, y, z;
@@ -3533,7 +3531,7 @@ void CurlCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
-// ---- Width (WidthOp::run: the profile by arc length) -------------------------------------------
+// ---- Width: the profile by arc length ----------------------------------------------------------
 //
 // gValue.x: width (field 0, per point allowed), gValue.y: randomness; the profile by its keys. The
 // strand's number: its Rng's uniform(-1, 1). Writes the widths (gOut), the points stay as they came.
@@ -3575,7 +3573,7 @@ void WidthPointsCS(uint3 id : SV_DispatchThreadID) {
     gOut.Store(p * 4, asuint(w * rampAt(t)));
 }
 
-// ---- Part (PartOp::run, turnToward) ---------------------------------------------------------------
+// ---- Part: each segment turned away from its part -------------------------------------------------
 //
 // gAux0: each strand's side of the parts, a float4 (the way away from its part, the distance to it;
 // -1: none), from its root (the CPU's). gValue: strength (field 0, per strand), width; the profile.
@@ -3619,7 +3617,7 @@ void PartCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
-// ---- Mapped params the GPU makes per strand (look_chain.h FieldProgram) ---------------------------
+// ---- Mapped params the GPU makes per strand (look_run.h FieldProgram) ---------------------------
 //
 // LongestCS: the longest of the core strands (gAux0 at word gAux.x, gAux.y of them) of the points in
 // (Expression::bind's `longest`), one group, into gOut (a float).
@@ -3948,7 +3946,7 @@ void PointsTextureCS(uint3 id : SV_DispatchThreadID) {
     for (uint k = 0; k < n; ++k) pointTexels(s, begin, n, k);
 }
 
-// ---- Gravity (deform_ops.cpp GravityOp::run, `hang`) ------------------------------------------------
+// ---- Gravity ----------------------------------------------------------------------------------------
 //
 // gValue: strength (field 0, per strand), stiffness; gValue2.xyz: the direction (normalized as the
 // CPU normalizes it; zero: none); the profile: stiffnessProfile, by the arc's share of the strand.
@@ -4013,7 +4011,7 @@ void GravityCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
-// ---- Flyaway (cinematic_ops.cpp FlyawayOp::run, `stray`) --------------------------------------------
+// ---- Flyaway ----------------------------------------------------------------------------------------
 //
 // gValue: stray (field 0, per strand), fraction (field 1, per strand), frequency, start; gValue2.x:
 // standOut, .y: lengthen; gFlag.x: 1 (the noise's octaves), the octave's seed in gOctaveSeeds. The
@@ -4055,7 +4053,7 @@ void FlyawayCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
-// ---- Collide (deform_ops.cpp CollideOp::run, `collide`) ----------------------------------------------
+// ---- Collide -----------------------------------------------------------------------------------------
 //
 // gValue: offset, maxDepth, the search radius (gValue.w 0: no point is beside a surface); gFlag.x:
 // iterations; gAux.y: the surfaces (0-2), their fields' tables in gAux2 (the scalp's from word 0,
@@ -4254,7 +4252,7 @@ void CollideCS(uint3 id : SV_DispatchThreadID) {
     const float smoothing = gValue2.y;
     const bool carried = soft || smoothing > 0.0f;
     if (second) smoothStrand(begin, n, smoothing);
-    // Each surface's field asked once for the whole strand (deform_ops.cpp CollideOp: bounds at its
+    // Each surface's field asked once for the whole strand (bounds at its
     // root out to its farthest point and the push's reach): settled there, it is skipped at the
     // points that stay that near the root.
     const float3 root = loadOut(begin);
@@ -4296,7 +4294,7 @@ void CollideCS(uint3 id : SV_DispatchThreadID) {
     if (!second && smoothing > 0.0f) gOut2.Store(s * 4, touched ? 1u : 0u);
 }
 
-// deform_ops.cpp smoothCorrections on the strand at `begin`: point i's correction (gOut less gIn)
+// Collide's smoothing on the strand at `begin`: point i's correction (gOut less gIn)
 // the mean of its own and each later point's within `smoothing` along the strand, each weighed by
 // smoothstep (its own 1); written as its spot (gIn plus it) once read (a point reads only those
 // after it). Then the strand bent so from the root, each segment turned toward its spot, its
@@ -4352,7 +4350,7 @@ void smoothStrand(uint begin, uint n, float smoothing) {
     }
 }
 
-// ---- Wind (motion_ops.cpp WindOp::run, `blow`) ------------------------------------------------------
+// ---- Wind -------------------------------------------------------------------------------------------
 //
 // gValue: strength (field 0, per strand), gust, frequency, turbulence; gValue2.xyz: the direction
 // (normalized as the CPU normalizes it; zero: none), .w: the flutter's phase at the evaluation's
@@ -4361,7 +4359,7 @@ void smoothStrand(uint begin, uint n, float smoothing) {
 // flutter's. The strand's number: its flutter's phase along it. From the root's spot in the
 // travelling noise: the strand's wind (strength times the gust), its direction swayed by the
 // gusts, and a flutter running up it; each segment turns toward the wind by that times the
-// profile, keeping its length (turnSegment). Looped (gFlag.w, operator_state.h WindPhase): the
+// profile, keeping its length. Looped (gFlag.w, operator_state.h WindPhase): the
 // noises are the four-dimensional ones at the root's point on the loop's circle (gFlag.x its
 // angle, .y its turns per noise unit, gFlag2.xyz the first direction across the wind, .w its
 // radius, as float bits).
@@ -4448,7 +4446,7 @@ void WindCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
-// ---- Blend (look_ops.cpp BlendOp::run, `blendStrand`) -----------------------------------------------
+// ---- Blend ------------------------------------------------------------------------------------------
 //
 // gIn: look a's points, gAux0: look b's (the same strands, laid out alike: both made on the GPU
 // from where they part); gValue.x: mix (field 0, per point allowed); the profile by point index.
@@ -4663,8 +4661,8 @@ float cornerWeight(float3 f, uint d) {
 }
 int3 cornerOf(uint d) { return int3(int(d & 1u), int((d >> 1) & 1u), int((d >> 2) & 1u)); }
 
-// The CPU's grid arithmetic where hair_grid.cpp and self_collide_op.cpp work in double (each
-// kernel's `case cpp`: their numbers to the bit; the GPU's floats come close): Grid::cellOf's double
+// The CPU's grid arithmetic in double (each kernel's `case cpp`: the core's numbers to the bit; the
+// GPU's floats come close): hair_grid.h Grid::cellOf's double
 // quotient and place in the cell, a corner's weight in double, the 64-bit sums as doubles, llround.
 int3 cellOfGridD(float3 p, int3 origin, out double3 f) {
     const double h = double(gValue.y);  // (h is a float: hair_grid.cpp layoutOf rounds it so)
@@ -4691,7 +4689,7 @@ double gridPackingD() { return asdouble(gTable2.x, gTable2.y); }
 static const double kFixedPointD = 4294967296.0;
 static const double kPiD = 3.14159265358979323846L;  // (L: a double; Slang reads a bare literal as a float)
 // p's cell (cellOfGrid) and its 8 corners' trilinear weights (the CPU's in double, rounded to float,
-// as hair_grid.cpp and self_collide_op.cpp weigh them).
+// on the CPU).
 int3 cellWeights(float3 p, int3 origin, out float w[8]) {
     __target_switch {
     case cpp: {
@@ -5012,7 +5010,7 @@ void splatSample(GridHead head, GridSegment g, float3 q, float t, bool isStatic,
         if (!zero64(add)) atomicAdd64((node * gGrid3.x + 2 + e * 2) * 4, add);
     }
 }
-// The CPU's (hair_grid.cpp splat, self_collide_op.cpp's amounts): in double.
+// The CPU's: in double.
 void splatSampleD(GridHead head, GridSegment g, float3 q, float t, bool isStatic, bool widths, float w0, float w1, float charge,
                   float q0, float q1, float share, uint sums) {
     const double h = double(gValue.y);
@@ -5138,7 +5136,7 @@ void GridUnknownsCS(uint3 id : SV_DispatchThreadID) {
     gOut2.Store4((w + 4) * 4, uint4(around[3], around[4], around[5], asuint(source)));
     __target_switch {
     case cpp: {
-        // SelfCollideOp's h^2 (rho - packing) / rho in double. StaticOp's h^2 rho, and from far away
+        // SelfCollide's h^2 (rho - packing) / rho in double. Static's h^2 rho, and from far away
         // beyond the unknowns: a neighbour neither unknown nor solid is none (its phi 0 in the sum),
         // its potential from far away in the source instead.
         double exact;
@@ -5188,14 +5186,14 @@ void GridSorCS(uint3 id : SV_DispatchThreadID) {
     const uint around[6] = {a.y, a.z, a.w, b.x, b.y, b.z};
     __target_switch {
     case cpp: {
-        // hair_grid.cpp solve's step: its neighbours summed in double, its source and omega double.
+        // The CPU's step: its neighbours summed in double, its source and omega double.
         double sum = 0.0;
         for (uint e = 0; e < 6; ++e) {
             const uint o = around[e];
             sum += o == GRID_NO_NODE ? 0.0 : o == UNKNOWN_SOLID ? double(here) : double(nodeFloat(o, 0));
         }
         const uint2 exact = gAux0.Load2((w + 8) * 4);
-        const double omega = (gFlag.x & GRID_STATIC) != 0u ? 1.8L : 1.7L;  // (static_op.cpp, self_collide_op.cpp kOmega)
+        const double omega = (gFlag.x & GRID_STATIC) != 0u ? 1.8L : 1.7L;  // (Static's, SelfCollide's over-relaxation)
         storeNode(at, 0, float(double(here) + omega * ((sum + asdouble(exact.x, exact.y)) / 6.0 - double(here))));
     }
     default: {
@@ -5211,14 +5209,62 @@ void GridSorCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
-// ---- SelfCollide (self_collide_op.cpp SelfCollideOp::evaluate) -------------------------------------
+// ---- SelfCollide -----------------------------------------------------------------------------------
+//
+// SelfCollide: hair that no longer passes through itself. Static, not a simulation: the strands are
+// taken as an incompressible material, as a fluid's pressure projection takes water, and where hair
+// is packed tighter than it can be it is pushed apart, so layers rest on one another and hair piles
+// up (behind the ears, over a collar, at the crown) instead of overlapping. Hair that is not
+// overpacked does not move.
+//
+// Each of three passes:
+//  1. Splat. The strands' segments, sampled about half a cell apart on the Catmull-Rom curve through
+//     their points, are added into a sparse grid of cubes `h` wide (blocks of 4 x 4 x 4 nodes where
+//     hair is), each sample its strand's cross-section times its share of the segment, spread
+//     trilinearly over its cell's 8 nodes: the share of space hair fills there, rho. The
+//     cross-section is pi w^2 / 4 for strands with widths (a Width before it), else a nominal one,
+//     a nominal share of the scalp's area per strand (a strand stands for the hair around it). Each
+//     cell also sums where its samples are in it (their mass, offsets and products of offsets) and
+//     how wide their strands are. Only the core strands are splatted (preview_core.h: those every
+//     preview holds, each standing for the strands of a render it is a share of), at most about
+//     hair_grid.h kSelfCollideGrid.most of them (a share of those by ID): the field is the same at every preview
+//     density, and costs no more for a million strands than for a few thousand. The sums are fixed
+//     point, so the same on any number of threads.
+//  2. The scalp near each node (its closest point within the walls' reach (hair_grid.h) in cells): the node's height over
+//     it and its normal. Nodes under it are solid.
+//  3. Solve, at the grid's scale. Where rho is above `packing`, the hair must spread by its excess:
+//     a displacement d = -grad p with div d = (rho - packing) / rho there, p = 0 everywhere else
+//     (hair that is not overpacked pushes back nothing: it moves aside) and no flow into a solid
+//     node. 48 sweeps of red-black SOR over the overpacked nodes alone.
+//  4. Below the grid's scale. A layer much thinner than a cell (hair combed flat, two sheets
+//     passing through each other) fills its cell by less than it fills itself, and a field smooth
+//     over cells moves its strands alike: it cannot part them. So where a node's samples (those of
+//     the 8 cells around it) lie in a slab (their covariance's least axis n under COLLIDE_SLAB of the
+//     next), the slab's thickness is taken from them: sqrt(12 var_n) between the strands' middles,
+//     plus their width. Packed to `packing`, its hair would take its mass per area over `packing`
+//     (rho h, where the slab sits off the node: over the node's share of it); thinner, it spreads
+//     along n about its middle, each strand's offset along n scaled by k (spaced as they were, now
+//     as thick as the hair needs, at most a cell thicker a pass: the strands' order kept, so sheets
+//     that crossed come apart in the order they lay). A strand's own offset across the slab (by its
+//     ID, up to COLLIDE_JITTER / 2 of a cell either way) tells apart strands lying exactly together, so
+//     they stack, in the same order wherever they meet. A slab within the walls' reach (hair_grid.h) in cells of the scalp
+//     spreads away from it, from its bottom up.
+//  5. Push. Every point moves by the two (the nodes' blended trilinearly) times `strength` and
+//     `profile` along the strand, at most a cell a pass; the root stays and each strand is walked
+//     from it keeping its segments' lengths (follow the leader), each point kept out of the scalp
+//     (its field, as Interpolate's keepClearance asks it: pushed above a floor of a hair's width,
+//     asked where the nodes' heights say the point may be that near).
+// The grid's cell is a few root spacings of the strands splatted (their share of the
+// scalp's area), between 1/128 and 1/16 of the scalp's size, rounded on a decimal lattice: the
+// same strands at any scale. Strands no push reaches come out bit for bit as they came. The grid,
+// the splat, the scalp's walls, the solve and the walk are shared with Static.
 //
 // C: p, flags, the slab's spread (axis xyz, from xyz, spread), the pressure's gradient (xyz). Three
 // passes of the grid made, solved and pushed, as the CPU's.
 
-#define COLLIDE_JITTER 0.15f    // self_collide_op.cpp kJitter
-#define COLLIDE_SLAB 0.6f       // kSlab
-#define COLLIDE_MOST_STEP 1.0f  // kMostStep
+#define COLLIDE_JITTER 0.15f    // a strand's own offset (by its ID) for telling it apart, in cells
+#define COLLIDE_SLAB 0.6f       // a slab: its least variance under this share of the next
+#define COLLIDE_MOST_STEP 1.0f  // the farthest a point moves in a pass, in cells
 
 // leastAxis: the least eigenvalue of the symmetric c (xx yy zz xy xz yz) and its unit eigenvector,
 // and the middle eigenvalue (Smith's closed form, the eigenvector from c - lambda I's rows).
@@ -5255,7 +5301,7 @@ void leastAxis(float c[6], out float least, out float middle, out float3 axis) {
     if (bestLength > 0.0f) axis = best / sqrt(bestLength);
 }
 
-// leastAxis in double, as self_collide_op.cpp works it out (the CPU's).
+// The least axis in double (the CPU's).
 void leastAxisD(double c[6], out double least, out double middle, out float3 axis) {
     const double a = c[0], b = c[1], d = c[2], xy = c[3], xz = c[4], yz = c[5];
     const double off = xy * xy + xz * xz + yz * yz;
@@ -5292,7 +5338,7 @@ void leastAxisD(double c[6], out double least, out double middle, out float3 axi
     axis = float3(float(best.x / l), float(best.y / l), float(best.z / l));
 }
 // Node `at`'s spread of a slab from its hair `here` and its 8 cells' sums `sum` (exact integers), in
-// double as self_collide_op.cpp works it out (the CPU's); `world` its world node, the scalp's wall
+// double (the CPU's); `world` its world node, the scalp's wall
 // there if `near`.
 void collideSpreadD(uint at, int3 world, bool near, float wallHeight, float3 wallNormal, uint2 here, uint2 sum[11]) {
     const double rho = double64(here) / kFixedPointD;
@@ -5301,7 +5347,7 @@ void collideSpreadD(uint at, int3 world, bool near, float wallHeight, float3 wal
     const double m = s[0];
     if (!(m > 0.0)) return;
     const double packing = gridPackingD();
-    const double jitter = 0.15L, slab = 0.6L, mostStep = 1.0L;  // (self_collide_op.cpp kJitter, kSlab, kMostStep)
+    const double jitter = 0.15L, slab = 0.6L, mostStep = 1.0L;  // (COLLIDE_JITTER, the slab's share, COLLIDE_MOST_STEP)
     const double wide = s[10] / m;
     if (!(rho / (0.5 * packing) > wide + jitter)) return;
     double mean[3], cov[6];
@@ -5434,7 +5480,7 @@ void SelfCollideGradientCS(uint3 id : SV_DispatchThreadID) {
     gOut.Store3((at * NODE_WORDS + 9) * 4, asuint(float3(g[1] - g[0], g[3] - g[2], g[5] - g[4]) * inv2h));
 }
 
-// hair_grid.cpp mayTouchScalp: whether p may be under the floor (C bound as gAux0, A as gAux1).
+// Whether p may be under the floor (C bound as gAux0, A as gAux1).
 bool gridMayTouchScalp(GridHead head, float3 p, float margin) {
     float weights[8];
     const int3 c = cellWeights(p, head.origin, weights);
@@ -5614,19 +5660,62 @@ void SelfCollidePushCS(uint3 id : SV_DispatchThreadID) {
     if (from != n) gOut3.Store(0, gFlag.w + 1u);  // (every writer the same number)
 }
 
-// ---- Static (static_op.cpp StaticOp::evaluate) -----------------------------------------------------
+// ---- Static ----------------------------------------------------------------------------------------
+//
+// Static: hair charged with static electricity repels itself, like dry winter hair. Strands spread
+// apart, the outer layer puffs out, charged tips lift away and a clumped lock frays into its
+// strands. A closed form plus one solve, not a simulation: every strand carries charge (more
+// toward its tips, where dry ends carry most: `profile`; some strands more than others:
+// `randomness`), the charge's electric field is solved on a grid, and each strand bends from its
+// root under the field's push on its own charge.
+//
+//  1. Charge. The core strands' segments (those every preview holds, at most about
+//     hair_grid.h kStaticGrid.most of them) are sampled half a cell apart and splatted into the hair grid, each
+//     sample carrying its strand's charge cross-section (a nominal share of the scalp's area per
+//     strand of a render: charge rides on how much hair there is, not on how thick it is, so a
+//     Width before it changes nothing) times its share of the segment times its charge there,
+//     q = profile x the strand's own charge (1 + randomness (3 u^2 - 1), u by its ID: mean 1, a few
+//     strands up to 1 + 2 randomness). rho at a node: the charge per unit volume. Each cell also
+//     sums where its charge is in it.
+//  2. Solve. The electric potential, -lap phi = rho, by red-black SOR over every node within
+//     STATIC_REACH nodes of charge (by Chebyshev distance: the boundary as far from hair everywhere).
+//     Beyond them phi is the potential of all the charge seen from far away (a point charge at its
+//     middle, softened over two cells): the grid's padding is not far away, and phi = 0 there
+//     would balance a hollow of hair (the hanging part under the head) with as much field inside it
+//     as outside, pushing it nowhere. The scalp lets no field into it (a node under it takes its
+//     neighbour's phi, as SelfCollide's no flow): a grounded conductor would draw the charged hair
+//     onto it (its image charge cancelling the hair's own field outside), so hair is pushed off
+//     the head instead, the outer layer most.
+//  3. The field. E = -grad phi at every node (central differences).
+//  4. Below the grid's scale. The grid's field moves strands a cell apart almost alike: it puffs a
+//     lock out but cannot part its strands. So each node also takes its own charge as a uniformly
+//     charged ball about the charge's middle there (the 8 cells around it), whose field is rho r / 3
+//     (r from the middle), plus a strand's own offset (by its ID, STATIC_SPLAY of a cell in a direction
+//     across the strand) for strands lying exactly together: each strand pushed from the local mean
+//     of its neighbours, by the same charge. Only across the strand and across the grid's field
+//     (which spreads the hair along itself already), so a lock fans out sideways into strands.
+//  5. Push. Each point is pushed by STATIC_GAIN x strength x q x (E + STATIC_LOCAL x the ball's field) (the
+//     nodes' blended trilinearly; within the walls' reach in cells of the scalp, without its part into the
+//     scalp), eased to at most 0.4 of the strand's length (most tanh(push / most)). The
+//     strand bends under those pushes as a cantilever from its root: each segment turns by the
+//     moment of the pushes beyond it times STATIC_BEND len / L^3, eased to at most pi len / L,
+//     the turns above carried down the strand (as Gravity carries them). Curvature follows the
+//     moment, which changes smoothly along the strand: no kinks, and the segments keep their
+//     lengths. Points are kept out of the scalp (the walk's floor, as SelfCollide's).
+// rho is a share of space, phi a length squared and E a length: the same strands at any scale (the
+// cell and the charge are shares of the scalp). Strength 0 hands the strands on as they came.
 //
 // C: phi, flags, its source, its distance to charge (two words: the axis passes take turns), the
 // field (xyz), its charge's middle (xyz), its density. The charge is the strands' own (per-strand
 // numbers: their splay direction xyz, u), the field solved from it once, then each strand bent.
 
-#define STATIC_REACH 4u         // static_op.cpp kReach
-#define STATIC_GAIN 48.0f       // kGain
-#define STATIC_LOCAL 3.0f       // kLocal
-#define STATIC_SPLAY 0.25f      // kSplay
-#define STATIC_BEND 8.0f        // kBend
-#define STATIC_MOST_TURN 3.14159265f  // kMostTurn
-#define STATIC_MOST_SHARE 0.4f  // kMostShare
+#define STATIC_REACH 4u         // the potential solved within this many nodes of charge (hair_grid.h kStaticGrid: its margin)
+#define STATIC_GAIN 48.0f       // a point's push: this times strength x q x E
+#define STATIC_LOCAL 3.0f       // the ball's field below the grid's scale, against the grid's
+#define STATIC_SPLAY 0.25f      // a strand's own offset across itself (by its ID), in cells
+#define STATIC_BEND 8.0f        // a segment's turn: this x the moment beyond it x len / L^3
+#define STATIC_MOST_TURN 3.14159265f  // a strand turns at most this far over its length (eased)
+#define STATIC_MOST_SHARE 0.4f  // a point's push at most, a share of its strand's length (eased)
 
 // A thread a node: its distance to charge along axis gFlag.w (Chebyshev, in nodes, up to 5), from
 // the axis before's (the first from the charge: gAux0 the sums).
@@ -5757,7 +5846,7 @@ FarChargeD farChargeD(bool rw, GridHead head) {
 float farAtD(FarChargeD c, float3 x) {
     const float3 d = x - c.centre;
     const double h = double(gValue.y);
-    return float(c.total / (4.0L * kPiD * sqrt(double(dot(d, d)) + 2.0L * 2.0L * h * h)));  // (static_op.cpp kSoften cells)
+    return float(c.total / (4.0L * kPiD * sqrt(double(dot(d, d)) + 2.0L * 2.0L * h * h)));  // (softened over two cells)
 }
 
 // A thread a node: its unknown (near charge, not solid), phi from far away (not solid), its
@@ -5914,7 +6003,7 @@ float3 staticMove(GridHead head, float3 p, float3 before, float q, float3 own, f
 // the pushes beyond it: their sums less those before it), each point's move to its bent place from
 // the first segment turned into gOut2 for GridWalkCS (its root's word: that point, n for none),
 // the strand copied into gOut.
-// StaticOp's bend on the CPU (its sums in double, as the C++ adds them): point j's push times its
+// Static's bend on the CPU (its sums in double): point j's push times its
 // share of the length (fw, from gOut2) and its moment about the root, as doubles.
 void staticBeyondAdd(uint begin, uint n, uint j, float length, inout double sum[6]) {
     const float3 p = loadPoint(begin + j);
@@ -5974,8 +6063,8 @@ void staticBendD(uint begin, uint n, float length) {
                 const float3 moment = float3(float(beyond[at][3]), float(beyond[at][4]), float(beyond[at][5])) -
                                       cross(start, float3(float(beyond[at][0]), float(beyond[at][1]), float(beyond[at][2])));
                 const float m = len3(moment);
-                const float cap = float(3.14159265L * double(len) / double(length));  // (static_op.cpp kMostTurn)
-                const float raw = float(8.0L * double(m) * double(len) / cube);         // (kBend)
+                const float cap = float(3.14159265L * double(len) / double(length));  // (STATIC_MOST_TURN)
+                const float raw = float(8.0L * double(m) * double(len) / cube);         // (STATIC_BEND)
                 if (raw > 0.0f && finiteFloat(raw)) {
                     carried = turnThen(carried, turnAboutAxis(moment / m, cap * tanh(raw / cap)));
                     first = min(first, i);
@@ -6012,7 +6101,7 @@ void StaticPushCS(uint3 id : SV_DispatchThreadID) {
     if (!(amount > 0.0f) || !finite || !(most > 0.0f) || head.count == 0u) return;
     __target_switch {
     case cpp: {
-        // StaticOp's order: every push first, then the bend (staticBendD).
+        // Every push first, then the bend (staticBendD).
         uint moved = n;
         for (uint i = 1; i < n; ++i) {
             const float q = amount * max(rampAlong(i, n), 0.0f);
@@ -6090,10 +6179,10 @@ void StaticPushCS(uint3 id : SV_DispatchThreadID) {
 //
 // A thread a strand. Bend, Direction, Transform and Displace read each strand's root on the scalp
 // from gAux0 (look_chain.h RootInputs: 8 floats a strand, the scalp's normal and whether it is rooted
-// there, the scalp's U direction from its UVs), the frame at the root made from it as rootAxes makes
-// it. Their random numbers per strand (transform_ops.cpp signedRandom) are the strand's numbers.
+// there, the scalp's U direction from its UVs), the frame at the root made from it (rootAxesOf).
+// Their random numbers per strand (each a draw in [-1, 1) of its ID) are the strand's numbers.
 
-#define SHAPER_RADIANS (3.14159265358979f / 180.0f)  // transform_ops.cpp kRadians
+#define SHAPER_RADIANS (3.14159265358979f / 180.0f)  // a degree
 
 float4 rootFrameOf(uint s, uint part) { return asfloat(gAux0.Load4(s * 32 + part * 16)); }
 
@@ -6126,7 +6215,7 @@ float acosAccurate(float c) {
     return c < 0.0f ? 3.14159265358979f - r : r;
 }
 
-// transform_ops.cpp firstDirection: the strand's first segment with any length, unit (zero: none).
+// The strand's first segment with any length, unit (zero: none).
 float3 firstDirectionIn(uint begin, uint n) {
     const float3 p0 = loadPoint(begin);
     for (uint i = 1; i < n; ++i) {
@@ -6136,7 +6225,7 @@ float3 firstDirectionIn(uint begin, uint n) {
     return float3(0.0f, 0.0f, 0.0f);
 }
 
-// transform_ops.cpp rootAxes: the scalp's normal at the root (else the first segment), a tangent
+// The scalp's normal at the root (else the first segment), a tangent
 // (the scalp's U direction when `byUV`, else `reference` laid onto the tangent plane, else any
 // perpendicular) and the bitangent across them.
 struct RootAxes {
@@ -6158,7 +6247,7 @@ RootAxes rootAxesOf(uint s, uint begin, uint n, float3 reference, bool byUV) {
     return a;
 }
 
-// Bend (BendOp::run, `shape`). gValue: angle (field 0, per strand), start, end, randomness; gFlag.x:
+// Bend. gValue: angle (field 0, per strand), start, end, randomness; gFlag.x:
 // along (0 the normal, 1 the tangent, 2 the direction); gValue2.xyz: the direction; the strand's
 // number .x: its randomness draw. Each segment, from the root out, turned toward the target by the
 // bend reached at its end point, never past it.
@@ -6224,7 +6313,7 @@ void BendCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
-// Direction (DirectionOp::run, `shape`). gValue: inclination, roll, strength (each its number, or
+// Direction. gValue: inclination, roll, strength (each its number, or
 // field gFlag.y, .z, .w: 0 or 1, 2 none, 3 the strand's own: all three mapped, look_run.h
 // StageInputs::directions, component c), inclinationRandom; gValue2.xyz: the direction roll 0 points
 // along, .w: rollRandom; gFlag.x: by the scalp's UVs; the strand's numbers .xy: its draws. Each strand
@@ -6270,13 +6359,13 @@ void DirectionCS(uint3 id : SV_DispatchThreadID) {
     for (uint k = 1; k < n; ++k) storePoint(gOut, begin + k, p0 + twistAbout(axis, loadPoint(begin + k) - p0, angle));
 }
 
-// Transform (TransformOp::run, `shape`). gValue: scale (field 0, per strand), scaleRandom; gFlag.x:
+// Transform. gValue: scale (field 0, per strand), scaleRandom; gFlag.x:
 // world (about the pivot), .y: nothing to do, .z: a random move, .w: a random turn; gValue2.xyz:
 // translate; the octave seeds' rows (look_chain.h StageParams::more): rotate, pivot,
 // translateRandom, rotateRandom; the strand's numbers: its seven draws (two blocks).
 float3 moreRow(uint r) { return asfloat(gOctaveSeeds[r].xyz); }
 
-// transform_ops.cpp turnsAbout's columns: v turned by `degrees` about a, b and c in turn.
+// v turned by `degrees` about a, b and c in turn (each about the fixed axis, not a turned one).
 float3 turnedBy(float3 v, float3 degrees, float3 a, float3 b, float3 c) {
     if (degrees.x != 0.0f) v = twistAbout(a, v, degrees.x * SHAPER_RADIANS);
     if (degrees.y != 0.0f) v = twistAbout(b, v, degrees.y * SHAPER_RADIANS);
@@ -6320,7 +6409,7 @@ void TransformCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
-// Displace (DisplaceOp::run, `displace`). gValue.x: distance (field 0, per strand or per point);
+// Displace. gValue.x: distance (field 0, per strand or per point);
 // gFlag.x: along the scalp's normal at the root (where rooted); gValue2.xyz: the direction (unit);
 // the profile by point index. Each point but the root moved along the way by its distance there.
 [shader("compute")]
@@ -6341,14 +6430,14 @@ void DisplaceCS(uint3 id : SV_DispatchThreadID) {
     }
 }
 
-// Twist (TwistOp::run, `twist`). gValue.x: turns (field 0, per strand); the profile by point index;
+// Twist. gValue.x: turns (field 0, per strand); the profile by point index;
 // gFlag.x: around the axes input's curves (else the clumps' middles), .y: how many; gValue2.x: a
 // sample's share (1 / 31). gAux0: per strand its axis (0xffffffff: none) and the root's bits it was
 // found for (around axes: a root the run moved finds its nearest again); gAux1: the axes,
 // TWIST_SAMPLES points each, then each one's arc length. Each point turned about the axis's point at
 // its share of the length (about its tangent there) by 2 pi turns times the axis's length, its share
 // and the profile.
-#define TWIST_SAMPLES 32  // look_chain.h kTwistAxisSamples
+#define TWIST_SAMPLES 32  // look_run.h kTwistAxisSamples
 #define TWIST_AXIS_FLOATS (TWIST_SAMPLES * 3)
 
 float3 twistSample(uint a, uint k) { return asfloat(gAux1.Load3((a * TWIST_AXIS_FLOATS + k * 3) * 4)); }
@@ -6478,9 +6567,8 @@ void TwistAxesCS(uint3 id : SV_DispatchThreadID, uint3 local : SV_GroupThreadID)
 
 // ---- The shapers reading their neighbours or a reference --------------------------------------------
 //
-// Smooth (extra_ops.cpp SmoothOp, smoothShape), RestoreLength and BlendNeighbors (neighbor_ops.cpp)
-// and Tangle (cinematic_ops.cpp TangleOp), in their arithmetic and order (floats where smoothShape
-// sums in double). Whom a strand reads (BlendNeighbors' neighbours, Tangle's partner) is the CPU's
+// Smooth, RestoreLength, BlendNeighbors and Tangle (the CPU's sums in double where the GPU's are
+// floats). Whom a strand reads (BlendNeighbors' neighbours, Tangle's partner) is the CPU's
 // last evaluation's choice (operator_state.h), a RestoreLength's reference as cached or a stage's
 // result of the run; every neighbour's points as the node takes them (gIn). Where its affect is a
 // mask, its result is mixed back after it as any stage's is (AffectCS).
@@ -6590,15 +6678,14 @@ SmoothStrand smoothStrand(uint s) {
     return st;
 }
 
-// The CPU's SmoothCS: SmoothOp's own arithmetic (extra_ops.cpp smoothShape, its sums in double,
-// SmoothFilter's window ends), a strand whole on a thread: the operator's bits. (The GPU's group
-// form sums in float: a rounding apart.)
+// The CPU's SmoothCS: its sums in double (look_stage_params.h smoothEnds: the window ends), a strand
+// whole on a thread. (The GPU's group form sums in float: a rounding apart.)
 struct SmoothEnd {
     double turns;
     uint cell;
     double into;
 };
-// Window end i (look_stage_params.h smoothEnds, SmoothOp's SmoothFilter: the same for every strand,
+// Window end i (look_stage_params.h smoothEnds: the same for every strand,
 // worked out once): gAux0, 24 bytes each, each cell's upper end, then each one's lower.
 SmoothEnd smoothEndOf(uint i) {
     SmoothEnd e;
@@ -7152,7 +7239,7 @@ float3 flowAtRoot(uint face, float2 uv, float3 normal) {
     return len3(tangent) < 0.5f ? flowAt(flowPosition(face, uv), normal) : normalized(tangent);
 }
 
-// The heading along the skin (FlowOp's `heading`): `field` the flow there (zero: none), else the
+// The heading along the skin: `field` the flow there (zero: none), else the
 // strand's own segment laid on the skin; turned by the strand's spin.
 float3 flowHeading(float3 field, float3 rootNormal, float3 nrm, float3 own, float spin) {
     float3 d = field;

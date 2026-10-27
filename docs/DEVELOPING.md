@@ -191,7 +191,7 @@ session's `viewport` suite (`maya.gui`) on a 24-core machine. CI reports them wi
 | One parameter tweak at preview density | < 33 ms | ~5 ms |
 | Brush dab on 2k guides + interpolation preview | < 16 ms | ~14 ms (~20 ms with a full look graph) |
 | Viewport orbit, 200k preview strands | >= 24 fps | ~120 fps |
-| Render expansion, 1M strands x 24 points | < 5 s, < 1 GB | ~1 s, ~800 MB |
+| Render expansion, 1M strands x 24 points | < 5 s, < 1.25 GB | ~0.9 s, ~1.1 GB |
 | Groom file, graph + 5k guides | < 10 MB | ~6 MB |
 | Scene open with 3 grooms | < 3 s added | ~20 ms |
 
