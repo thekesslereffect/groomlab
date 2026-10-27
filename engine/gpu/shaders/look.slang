@@ -1133,8 +1133,12 @@ InterpGuide interpGuide(uint s, InterpStrand st, uint lane) {
 // blend directions (gValue2.z 1): the blended path rebuilt segment by segment from the root, each
 // segment along the guides' segments there turned and weighed (the difference of two samples of the
 // offsets' blend: a turn is linear), at the guides' weighted length over the segments (`walkStep`), so
-// guides pointing different ways no longer pull the strand in. A segment whose guides cancel out
-// keeps the one before's way (the first: the root normal's, else +y).
+// guides pointing different ways no longer pull the strand in. Where they nearly cancel out (the
+// blend's segment under DIRECTIONS_FULL of theirs: guides more than about 120 degrees apart) the
+// segment eases down to none, as offsets' does, so the way it points never flips between two
+// neighbouring strands (the blend's way turns round where it passes through nothing). A segment of
+// none keeps the way before (the first: the root normal's, else +y).
+#define DIRECTIONS_FULL 0.5f
 struct DirectionWalk {
     float3 raw, at, dir;
 };
@@ -1152,7 +1156,13 @@ float3 directionStep(inout DirectionWalk w, float3 raw, float walkStep) {
     w.raw = raw;
     const float l = lengthExact(d);
     if (l > 0.0f) w.dir = float3(divExact(d.x, l), divExact(d.y, l), divExact(d.z, l));
-    PRECISE float3 moved = w.dir * walkStep;
+    // Its length: all of the step, eased (s (2 - s): no corner where it reaches the step) to none
+    // as the guides cancel out.
+    PRECISE float full = DIRECTIONS_FULL * walkStep;
+    const float share = full > 0.0f ? min(divExact(l, full), 1.0f) : 1.0f;
+    PRECISE float eased = share * (2.0f - share);
+    PRECISE float length = walkStep * eased;
+    PRECISE float3 moved = w.dir * length;
     PRECISE float3 at = w.at + moved;
     w.at = at;
     return at;
@@ -1886,9 +1896,10 @@ void clearanceWalk(bool staged, uint base, uint n, float target, FieldTables tab
     float3 anchor = float3(0.0f, 0.0f, 0.0f);
     bool knows = false;
     bool moved = false;  // whether a point was lifted yet (until then every point is as it came)
-    // The walk asks every step-th point and the tip (operator_state.h interpolateClearanceStep: at
-    // most CLEAR_ASKED; every point of a strand of up to CLEAR_ASKED + 1).
-    const uint step = n > CLEAR_ASKED + 1 ? (n - 1 + CLEAR_ASKED - 1) / CLEAR_ASKED : 1u;
+    // The walk asks every point (clearanceEveryPoint: gValue2.w), else every step-th point and the
+    // tip (operator_state.h interpolateClearanceStep: at most CLEAR_ASKED; every point of a strand
+    // of up to CLEAR_ASKED + 1).
+    const uint step = gValue2.w == 0.0f && n > CLEAR_ASKED + 1 ? (n - 1 + CLEAR_ASKED - 1) / CLEAR_ASKED : 1u;
     // The point the walk settled last (`at`: the root first): where it is, where it came and
     // whether the field lifted it.
     uint at = 0;

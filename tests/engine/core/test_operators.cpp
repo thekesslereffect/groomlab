@@ -686,28 +686,36 @@ TEST(Interpolate, WeightsAreContinuousWhereTheNeighborSetChanges) {
     const NodeId interp = g.graph.addNode(op::kInterpolate);
     g.graph.connect(g.scatter, interp, 0);
     g.graph.connect(guideNode, interp, 1);
-    const auto out = g.eval(interp);
-    ASSERT_TRUE(out);
-    ASSERT_GT(out->strandCount(), 1000u);
-
-    // Tips of strands rooted close together stay close together.
-    float worst = 0.0f;
-    const std::size_t n = out->strandCount();
-    for (std::size_t a = 0; a < n; ++a) {
-        const Vec3f* pa = out->strandPoints(a);
-        const std::size_t na = out->strandPointCount(a);
-        for (std::size_t b = a + 1; b < n; ++b) {
-            const Vec3f* pb = out->strandPoints(b);
-            const float roots = (pa[0] - pb[0]).length();
-            if (roots > 0.02f) continue;
-            const float tips = ((pa[na - 1] - pa[0]) - (pb[out->strandPointCount(b) - 1] - pb[0])).length();
-            worst = std::max(worst, tips);
+    // Tips of strands rooted close together stay close together, with either blend.
+    auto worstFor = [&](const char* blend) {
+        g.graph.node(interp).params().set("blend", std::string(blend));
+        const auto out = g.eval(interp);
+        EXPECT_TRUE(out && out->strandCount() > 1000u);
+        float worst = 0.0f;
+        const std::size_t n = out ? out->strandCount() : 0;
+        for (std::size_t a = 0; a < n; ++a) {
+            const Vec3f* pa = out->strandPoints(a);
+            const std::size_t na = out->strandPointCount(a);
+            for (std::size_t b = a + 1; b < n; ++b) {
+                const Vec3f* pb = out->strandPoints(b);
+                const float roots = (pa[0] - pb[0]).length();
+                if (roots > 0.02f) continue;
+                const float tips = ((pa[na - 1] - pa[0]) - (pb[out->strandPointCount(b) - 1] - pb[0])).length();
+                worst = std::max(worst, tips);
+            }
         }
-    }
+        return worst;
+    };
     // A pop (the old hard cutoff) swaps whole guides: about 2 here. Smooth
     // weights leave the gradient of this deliberately harsh layout (unit hair
     // on guides pointing against each other, a third of their length apart).
-    EXPECT_LT(worst, 0.5f) << "neighbouring strands differ by " << worst << " at the tip";
+    const float offsets = worstFor("offsets");
+    EXPECT_LT(offsets, 0.5f) << "neighbouring strands differ by " << offsets << " at the tip";
+    // Blend directions turns strands between guides pointing apart where offsets shrinks them, so
+    // its gradient is steeper there; where the guides cancel out it eases to no length, so no strand
+    // flips (a flip: about 2 here).
+    const float directions = worstFor("directions");
+    EXPECT_LT(directions, 1.0f) << "neighbouring strands differ by " << directions << " at the tip (blend directions)";
 }
 
 TEST(Interpolate, AStrandRootedOnAGuideRootStaysFiniteAtAnyPower) {
@@ -762,6 +770,11 @@ TEST(Interpolate, TheShapeIsContinuousAcrossTheGuidesFringe) {
     const NodeId interp = g.graph.addNode(op::kInterpolate);
     g.graph.connect(g.scatter, interp, 0);
     g.graph.connect(guideNode, interp, 1);
+    // (With either blend: directions turns strands between guides pointing apart where offsets
+    // shrinks them, a steeper gradient there, but no flip, a pop's size.)
+    for (const auto& [blend, bound] : {std::pair<const char*, float>{"offsets", 0.8f}, {"directions", 1.2f}}) {
+    SCOPED_TRACE(blend);
+    g.graph.node(interp).params().set("blend", std::string(blend));
     const auto out = g.eval(interp);
     ASSERT_TRUE(out);
     const std::size_t n = out->strandCount();
@@ -792,8 +805,9 @@ TEST(Interpolate, TheShapeIsContinuousAcrossTheGuidesFringe) {
             }
         }
     }
-    EXPECT_LT(worst, 0.8f) << "neighbouring strands across the fringe differ by " << worst << " at the tip, rooted at "
-                           << worstAt.x << " " << worstAt.z;
+    EXPECT_LT(worst, bound) << "neighbouring strands across the fringe differ by " << worst << " at the tip, rooted at "
+                            << worstAt.x << " " << worstAt.z;
+    }
 }
 
 TEST(Interpolate, PreserveLengthKeepsTheGuidesLength) {
@@ -807,6 +821,7 @@ TEST(Interpolate, PreserveLengthKeepsTheGuidesLength) {
     const NodeId guideNode = g.graph.addNode(op::kGuides);
     const NodeId interp = g.graph.addNode(op::kInterpolate);
     g.graph.node(interp).params().set("neighbors", std::int64_t{2});
+    g.graph.node(interp).params().set("blend", std::string("offsets"));  // (directions keeps it already)
     g.graph.connect(g.scatter, interp, 0);
     g.graph.connect(guideNode, interp, 1);
     auto middleLength = [&](bool preserve) {

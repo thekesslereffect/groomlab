@@ -124,9 +124,14 @@ void completeNode(json& node, int depth = 0) {
     if (!node.contains("version")) node["version"] = spec.value("version", 1);
     if (!node.contains("params") || !node["params"].is_object()) node["params"] = json::object();
     json& params = node["params"];
+    const int version = storedVersion(node, spec);
     for (const json& p : spec.value("params", json::array())) {
         const std::string name = p.value("name", std::string());
-        if (!name.empty() && !params.contains(name)) params[name] = p.value("default", json());
+        if (name.empty() || params.contains(name)) continue;
+        // (A default changed since the node's version: the one it was saved with.)
+        const json former = p.value("formerDefault", json());
+        const bool older = former.is_object() && version < former.value("since", 0);
+        params[name] = older ? former.at("value") : p.value("default", json());
     }
     if (type == "Script") {  // its header's params too (a definition that cannot be read: none)
         try {
@@ -594,7 +599,19 @@ bool GraphEdit::upgradeNode(const std::string& name) {
         if (!n.is_object() || n.value("name", std::string()) != name) continue;
         const nlohmann::json& spec = operatorSpec(n.value("type", std::string()));
         const int newest = spec.value("version", 1);
-        if (storedVersion(n, spec) >= newest) return false;
+        const int stored = storedVersion(n, spec);
+        if (stored >= newest) return false;
+        // A param whose default changed since, still at the former one, takes the new default (as a
+        // new node has it); one set to anything else stays.
+        if (n.contains("params") && n["params"].is_object()) {
+            nlohmann::json& params = n["params"];
+            for (const nlohmann::json& p : spec.value("params", nlohmann::json::array())) {
+                const nlohmann::json former = p.value("formerDefault", nlohmann::json());
+                const std::string name = p.value("name", std::string());
+                if (!former.is_object() || stored >= former.value("since", 0) || !params.contains(name)) continue;
+                if (params[name] == former.at("value")) params[name] = p.value("default", nlohmann::json());
+            }
+        }
         n["version"] = newest;
         completeNode(n);  // params the newer version added
         return true;

@@ -860,6 +860,48 @@ TEST(NodeVersions, OldNodesKeepTheirBehaviourUntilUpgraded) {
                  GraphError);
 }
 
+TEST(NodeVersions, AChangedDefaultKeepsTheFormerOneForNodesSavedBefore) {
+    // Interpolate 2 made blend directions and clearanceEveryPoint the defaults (ParamSpec::
+    // formerDefault): a node saved at 1 that leaves them out keeps offsets and every few points,
+    // loaded or completed by an editor; one set otherwise keeps its value; a new node takes the
+    // new defaults; an Upgrade moves a param still at its former default to the new one.
+    const std::string saved =
+        R"({"nodes": [{"name": "old", "type": "Interpolate", "version": 1, "params": {}},
+                      {"name": "chose", "type": "Interpolate", "version": 1, "params": {"blend": "directions"}},
+                      {"name": "new", "type": "Interpolate", "params": {}}], "output": "old"})";
+    GraphDocument doc = loadGraphJson(saved);
+    auto blendOf = [&](const char* name) { return doc.graph.node(doc.node(name)).params().getString("blend"); };
+    EXPECT_EQ(blendOf("old"), "offsets");
+    EXPECT_FALSE(doc.graph.node(doc.node("old")).params().getBool("clearanceEveryPoint"));
+    EXPECT_EQ(blendOf("chose"), "directions");
+    EXPECT_EQ(blendOf("new"), "directions");
+    EXPECT_TRUE(doc.graph.node(doc.node("new")).params().getBool("clearanceEveryPoint"));
+    // Saved again: the old node's values written down, its version kept.
+    const nlohmann::json written = nlohmann::json::parse(saveGraphJson(doc));
+    for (const nlohmann::json& n : written["nodes"]) {
+        EXPECT_EQ(n["params"]["blend"].get<std::string>(), n["name"] == "old" ? "offsets" : "directions") << n["name"];
+        EXPECT_EQ(n["version"].get<int>(), n["name"] == "new" ? 2 : 1) << n["name"];
+    }
+    // An editor completing the params (what a host saves) gives the same.
+    GraphEdit edit(saved);
+    edit.completeParams();
+    auto editedBlend = [&](const char* name) {
+        const nlohmann::json graph = nlohmann::json::parse(edit.toJson());
+        for (const nlohmann::json& n : graph["nodes"]) {
+            if (n["name"] == name) return n["params"]["blend"].get<std::string>();
+        }
+        return std::string();
+    };
+    EXPECT_EQ(editedBlend("old"), "offsets");
+    EXPECT_EQ(editedBlend("new"), "directions");
+    // Upgraded: the new defaults.
+    EXPECT_TRUE(edit.upgradeNode("old"));
+    EXPECT_EQ(editedBlend("old"), "directions");
+    GraphDocument upgraded = loadGraphJson(edit.toJson());
+    EXPECT_EQ(upgraded.graph.node(upgraded.node("old")).params().getString("blend"), "directions");
+    EXPECT_TRUE(upgraded.graph.node(upgraded.node("old")).params().getBool("clearanceEveryPoint"));
+}
+
 TEST(Graph, EachScatterGrowsWithTheResampleOfItsOwnBranch) {
     // Two branches merged, each with its own Resample: each Scatter grows its strands with the most
     // segments a Resample after it asks for, not the most any Resample in the graph does.

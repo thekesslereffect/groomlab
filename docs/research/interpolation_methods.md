@@ -182,7 +182,54 @@ Once A and B have two methods each, the binding is the natural interface:
 - **Budgets:** smooth weights add a solve when guide roots change. The InterpolateHalfMillion
   budget's bind times would get a line for it.
 
-## 5. Order and size
+## 5. What other tools and studios do (2026-10-27 survey)
+
+No single method is "the best"; productions pair a weighting with a blend and artist controls.
+
+| Who | Weights | Blend and controls |
+| --- | --- | --- |
+| XGen | each guide's area from boundaries between guides, weights normalized | a weighted average of the guides' points ("relative interpolation"); a Blend control from the nearest wire alone to smooth; the docs ask for dense guides and little curvature between them ([XGen guides interpolation](https://help.autodesk.com/cloudhelp/2017/ENU/Maya/files/GUID-49B8C299-71DD-4341-8638-97437D9A328F.htm)) |
+| DreamWorks, Houdini | barycentric over a triangle of guides | DreamWorks lets artists change the weights afterwards against clumping and interpenetration ([Somasundaram 2015](https://history.siggraph.org/wp-content/uploads/2022/10/2015-Talks-Somasundaram_Dynamically-Controlling-Hair-Interpolation.pdf)); Houdini 18.5 added barycentric weights ([notes](https://www.sidefx.com/docs/houdini/news/18_5/groom.html)) |
+| Pixar, Turning Red | kernel interpolation from nearby guides | coarse "style guides" artists sculpt, driving the thousands of guides ([Hair Emoting](https://graphics.pixar.com/library/HairEmoting)) |
+| Animal Logic (2024) | smooth fields solved on the scalp mesh | section 2 |
+| "Real-Time Physically Guided Hair Interpolation" (SIGGRAPH 2024) | the simulated guides' forces interpolated, not their positions | the render hair keeps its own physics: no collapse or interpenetration in simulation ([project](https://graphics.cs.utah.edu/research/projects/physically-guided-hair-interpolation/)) |
+| "Groom Styles Interpolation with Features Preservation" (2022) | | blends between groom shapes keeping curvature and segment lengths: what blend directions starts, taken further |
+
+GroomLab already has most of this: smooth reach-based weights with no popping, distances and
+shapes carried along the skin, parts, regions, clearance, tubes, a guide hierarchy (Pixar's style
+guides) and now the directions blend. The gaps: smooth surface weights for sparse guides, keeping
+curl where guides disagree, and per-guide artist control of the weights.
+
+## 6. A simpler, better Interpolate (the plan, 2026-10-27)
+
+The node's main controls become `weights` (later), `smoothness` and `blend`; limit distance,
+parts, regions, clearance and tubes stay.
+
+1. **Directions the default for new nodes** (done on branch interp-simpler): Interpolate's
+   version 2 (`ParamSpec::formerDefault`: nodes saved at 1 keep `offsets`, loaded or completed by
+   an editor; Upgrade moves a param still at its former default to the new one). Found on the way:
+   - guides cancelling out flipped directions' strands (neighbours' tips 2 apart): the segment now
+     eases to nothing below half of the guides' step (guides about 120 degrees apart), so the flip
+     happens at no length; directions' gradient there stays steeper than offsets' (0.6-0.9 against
+     0.5-0.8 in the continuity tests), inherent to turning rather than shrinking;
+   - the clearance walk asked every few points and let a point between two clear ones dip into the
+     skin (the ear test: 431 points inside with directions): `clearanceEveryPoint`, on for version
+     2 nodes, asks every point (the ear: none inside, and closer to the shaped path below it).
+   Still to do before it ships: judge the presets' contact sheets with both blends (the GPU), then
+   record the goldens, preset digests and display buffers again.
+2. **`smoothness`** (done on the branch): one 0-1 slider scaling `reach` (2/3 to 2) and `power`
+   (3 to 1/2) about 0.5, where they are as set; `neighbors`, `reach` and `power` advanced. No
+   version needed: 0.5 changes nothing, and scripts and importers setting the three still work.
+3. **A `curvature` blend:** each segment's turn from the one before blended, so curly guides
+   with their curls out of phase do not cancel into straight hair (both offsets and directions
+   flatten them today). A few days in the same kernel.
+4. **A `weights` choice:** `smooth` (today's), `triangle` (barycentric over the guide roots, the
+   Houdini and DreamWorks look) and `surface` (section 3 A's smooth weights).
+5. **Per-guide influence:** a guide attribute or painted map scaling its weight (DreamWorks'
+   artist control): cheap, and the fix studios reach for against stray blending.
+6. **Later, for Simulate:** the 2024 force interpolation for simulated render hair.
+
+## 7. Order and size
 
 1. **directions blend**: a few days (InterpolateCS mode, params, tests: bits on CPU and GPU, a
    golden of two diverging guides showing no shrinkage).
@@ -193,7 +240,7 @@ Once A and B have two methods each, the binding is the natural interface:
 4. **weights from an input**: a few days once the record contract is written down.
 5. **Field Interpolate node**: weeks; only if the above leave real gaps.
 
-## 6. Tests
+## 8. Tests
 
 - Each method at rest: guides alone (no strands between them) give back the guides' shapes
   exactly at their roots.

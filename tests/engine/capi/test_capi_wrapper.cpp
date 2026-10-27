@@ -481,13 +481,19 @@ TEST(CApi, ErrorsCarryTheirCodeAndMessage) {
     EXPECT_GT(strands.strandCount(), 0u);
 }
 
-// Every node of a groom has its operator's newest version (no built-in has a second yet): an
-// upgrade changes nothing. test_capi_upgrade.cpp upgrades a node that is outdated.
+// A node at its operator's newest version: an upgrade changes nothing. (The compat groom's nodes
+// are all current but its Interpolate, saved at version 1, before blend directions became the
+// default.) test_capi_upgrade.cpp upgrades a node that is outdated.
 TEST(CApi, UpgradingACurrentNodeChangesNothing) {
     api::Session session = api::Session::fromFile(kCompatGroom);
     const std::string graph = session.graphJson();
     for (const std::string& node : session.nodeNames()) {
-        EXPECT_FALSE(json::parse(session.nodeSpecJson(node)).at("outdated").get<bool>()) << node;
+        const json spec = json::parse(session.nodeSpecJson(node));
+        if (spec.value("type", std::string()) == "Interpolate") {
+            EXPECT_TRUE(spec.at("outdated").get<bool>()) << node;
+            continue;
+        }
+        EXPECT_FALSE(spec.at("outdated").get<bool>()) << node;
         EXPECT_FALSE(session.upgradeNode(node)) << node;
     }
     EXPECT_EQ(session.graphJson(), graph);
