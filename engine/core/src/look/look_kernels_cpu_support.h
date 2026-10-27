@@ -21,6 +21,18 @@
 #include <intrin.h>
 #endif
 
+// slang-cpp-prelude.h (included after this) knows no WebAssembly target: for Emscripten the
+// platform is taken as Linux's (its libc is POSIX), and <float.h> is read here first, without
+// __STDC_WANT_IEC_60559_TYPES_EXT__, so the prelude's half stays its own struct (wasm32 has no
+// _Float16).
+#if defined(__EMSCRIPTEN__)
+#include <float.h>
+#ifndef SLANG_PLATFORM
+#define SLANG_PLATFORM
+#define SLANG_LINUX 1
+#endif
+#endif
+
 namespace groomlab::gpu::cpu_atomics {
 
 inline volatile std::uint32_t* wordAt(std::uint32_t* data, std::uint32_t at) { return data + (at >> 2); }
