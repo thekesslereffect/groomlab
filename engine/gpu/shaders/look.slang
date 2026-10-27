@@ -1125,14 +1125,16 @@ void interpolateStrandAlone(uint s) {
     const float3 root = loadPoint(begin);
     float4 blendAt[MAX_SAMPLES];
     float arcAt[MAX_SAMPLES];
-    // (A guide at a time over the samples: each sample's sum still taken guide by guide, in order,
-    // the guide's kind of turn the same along.)
-    for (uint j = 0; j < samples; ++j) blendAt[j] = float4(root, 0.0f);
-    for (uint i = 0; i < found; ++i) {
-        const InterpGuide gd = guide[i];
-        const uint g = gd.c.z, kind = gd.c.w;
-        const float c2z = asfloat(gd.c.x), w = asfloat(gd.c.y);
-        for (uint j = 0; j < samples; ++j) blendAt[j].xyz = addTurned(blendAt[j].xyz, g, j, kind, gd.a, gd.b, c2z, w);
+    // (Four samples side by side, as the C++ rows take them, every guide added onto their sums in
+    // turn: each sample's sum taken guide by guide, in order.)
+    const uint quads = (samples + 3) / 4;
+    for (uint q = 0; q < quads; ++q) {
+        Lanes3 sum = lanes3(root, root, root, root);
+        for (uint i = 0; i < found; ++i) {
+            const InterpGuide gd = guide[i];
+            sum = addTurnedLanes(sum, gd.c.z, 4 * q, samples, gd.c.w, gd.a, gd.b, asfloat(gd.c.x), asfloat(gd.c.y));
+        }
+        for (uint l = 0; l < 4 && 4 * q + l < samples; ++l) blendAt[4 * q + l] = float4(laneOf(sum, l), 0.0f);
     }
     for (uint j = 1; j < samples; ++j) blendAt[j].w = lengthExact(blendAt[j].xyz - blendAt[j - 1].xyz);
     float scale = 0.0f;
@@ -1159,14 +1161,12 @@ void interpolateStrandAlone(uint s) {
         arcAt[j] = arc;
     }
     const float step = divExact(arcAt[samples - 1], float(n - 1));
+    // (The first sample past 0 whose arc reaches each point's, at most the last: a walk on from the
+    // last point's, the points' arcs rising.)
+    uint lo = 1;
     for (uint i = 0; i < n; ++i) {
         PRECISE float target = step * float(i);
-        uint lo = 1, hi = samples - 1;
-        while (lo < hi) {
-            const uint mid = (lo + hi) >> 1;
-            if (arcAt[mid] < target) lo = mid + 1;
-            else hi = mid;
-        }
+        while (lo < samples - 1 && arcAt[lo] < target) ++lo;
         const uint seg = lo - 1;
         const float4 to = blendAt[lo];
         PRECISE float along0 = target - arcAt[seg];
@@ -3028,6 +3028,44 @@ Lanes3 pickLanes(bool4 m, Lanes3 a, Lanes3 b) {
     r.y = select(m, a.y, b.y);
     r.z = select(m, a.z, b.z);
     return r;
+}
+// addTurned for four samples of a guide side by side (j0 to j0 + 3, a multiple of 4; the last
+// sample standing in past the end), a lane each with addTurned's arithmetic: the CPU's InterpolateCS.
+Lanes3 addTurnedLanes(Lanes3 sum, uint g, uint j0, uint samples, uint kind, float4 a, float4 b, float c2z, float w) {
+    // (The CPU engine's offsets by fours: x, y and z rows of four samples, look_engine.cpp.)
+    const uint at = (gAux.w + (g * ((samples + 3) / 4) + j0 / 4) * 12) * 4;
+    Lanes3 o;
+    o.x = asfloat(gAux1.Load4(at));
+    o.y = asfloat(gAux1.Load4(at + 16));
+    o.z = asfloat(gAux1.Load4(at + 32));
+    Lanes3 r;
+    if (kind == 3) {  // TwistedTurn's columns: (x + y) + z, a component each
+        r.x = (a.x * o.x + a.w * o.y) + b.z * o.z;
+        r.y = (a.y * o.x + b.x * o.y) + b.w * o.z;
+        r.z = (a.z * o.x + b.y * o.y) + c2z * o.z;
+    } else if (kind == 0) {
+        r = o;
+    } else {
+        const float3 k = a.xyz;
+        const float4 d = (k.x * o.x + k.y * o.y) + k.z * o.z;  // exactDot
+        if (kind == 1) {
+            const float4 twice = 2.0f * d;
+            r.x = k.x * twice - o.x;
+            r.y = k.y * twice - o.y;
+            r.z = k.z * twice - o.z;
+        } else {
+            const float c = a.w, invTurn = b.x;
+            const float4 di = d * invTurn;
+            r.x = (o.x * c + (k.y * o.z - k.z * o.y)) + k.x * di;
+            r.y = (o.y * c + (k.z * o.x - k.x * o.z)) + k.y * di;
+            r.z = (o.z * c + (k.x * o.y - k.y * o.x)) + k.z * di;
+        }
+    }
+    Lanes3 added;
+    added.x = sum.x + r.x * w;
+    added.y = sum.y + r.y * w;
+    added.z = sum.z + r.z * w;
+    return added;
 }
 // secantOf's and tangentOf's: v over its length `l` where that is above 0, else `other`.
 Lanes3 unitLanesOr(Lanes3 v, float4 l, Lanes3 other) { return pickLanes(l > 0.0f, scaleLanes(v, 1.0f / l), other); }

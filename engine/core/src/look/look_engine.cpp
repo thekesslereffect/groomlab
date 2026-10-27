@@ -819,8 +819,15 @@ void LookEngine::putStageInputs(const LookRun& run) {
             const std::size_t per = interpolateChunkStrands();
             const std::uint32_t recordWords = binding.roots.size() > 65535 ? 2u : 1u;
             const std::size_t headerWords = 2 * stageN;
-            bool whole = !has(auxBuffer(k, 0)) || held.chunks.size() != chunks.size() || held.aux[0] != recordWords ||
-                         (sharesBase() && held.a != data->binding.get());
+            bool whole = !has(auxBuffer(k, 0)) || held.chunks.size() != chunks.size() || held.aux[0] != recordWords;
+            if (!whole && sharesBase() && held.a != data->binding.get()) {
+                // On the CPU, another binding goes up by chunks only when it is the held one bound
+                // again (sharing a chunk with it: the held chunks are alive, held.keep, so an address
+                // is theirs); another operator's of as many strands goes up whole.
+                bool shares = false;
+                for (std::size_t c = 0; c < chunks.size() && !shares; ++c) shares = held.chunks[c] == chunks[c];
+                whole = !shares;
+            }
             std::vector<std::size_t> changed;
             for (std::size_t c = 0; c < chunks.size(); ++c) {
                 if (whole || held.chunks[c] != chunks[c]) changed.push_back(c);
@@ -956,7 +963,25 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     std::memcpy(&h[3], &turns, 4);
                     h[4] = rows.lengths[gi];
                 }
-                if (!rows.offsets.empty()) std::memcpy(words.data() + count * 8, rows.offsets.data(), rows.offsets.size() * 12);
+                if (sharesBase()) {
+                    // On the CPU each guide's offsets by fours, x y z rows of four samples each (the
+                    // last standing in past the end): look.slang addTurnedLanes.
+                    const std::size_t n = rows.samples, quads = (n + 3) / 4;
+                    words.resize(count * 8 + count * quads * 12, 0.0f);  // (the 8 words a guide kept)
+                    for (std::size_t gi = 0; gi < count && n > 0; ++gi) {
+                        for (std::size_t q = 0; q < quads; ++q) {
+                            float* to = words.data() + count * 8 + (gi * quads + q) * 12;
+                            for (std::size_t l = 0; l < 4; ++l) {
+                                const Vec3f& o = rows.offsets[gi * n + std::min(4 * q + l, n - 1)];
+                                to[l] = o.x;
+                                to[4 + l] = o.y;
+                                to[8 + l] = o.z;
+                            }
+                        }
+                    }
+                } else if (!rows.offsets.empty()) {
+                    std::memcpy(words.data() + count * 8, rows.offsets.data(), rows.offsets.size() * 12);
+                }
                 write(auxBuffer(k, 1), words.data(), words.size() * 4, false);
                 held.b = data->rows.get();
                 held.alive[1] = data->rows;

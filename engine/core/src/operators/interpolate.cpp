@@ -1773,14 +1773,14 @@ private:
             auto data = std::make_shared<gpu::InterpolateInputs>();
             {
                 const std::lock_guard<std::mutex> lock(madeMutex_);
-                if (!engineState_ || engineState_->binding != binding || engineState_->strands != strands) {
+                // (The binding alone: kept while it is, whatever strands and guides come with it,
+                // so its records stay uploaded while the strands deform.)
+                if (!engineState_ || engineState_->binding != binding || engineState_->strandCount != strandCount) {
                     auto state = std::make_shared<InterpolateState>();
                     state->binding = binding;
                     state->baseKey = baseKey;
                     state->strandCount = strandCount;
                     state->roots = roots;
-                    state->guides = guides;
-                    state->strands = strands;
                     state->channels = !attrNames.empty();
                     engineState_ = std::move(state);
                 }
