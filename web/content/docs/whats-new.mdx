@@ -13,6 +13,25 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.33.0 (October 27, 2026)
+
+- **Faster grooming on dense grooms.** Combing guides on a 181,000-strand wolf takes about 14 ms
+  a dab (it took 44), and opening it evaluates in under a second (it took three). Every look node
+  now runs one set of math on the CPU and in the GPU preview, so the two always agree. Instances
+  that a dab leaves alone are no longer rebuilt, and combing no longer nudges guide roots.
+- **Faster previews of Cull, Split and Mirror.** Dragging a param before them stays in the GPU
+  preview.
+- **Braid: a paths output, looser box braids.** Braid's new `paths` output hands on the paths it
+  braids along as guides for the nodes after it. Box braids weave at 0.3 crossings, and a braid
+  stays round however few points its strands bring.
+- **Changed: Curl adds its points first.** Where a strand has too few points for its curls, Curl
+  now adds them along the strand's smooth curve before it curls. Tight curls on sparse strands can
+  look slightly different.
+- **Removed: the Tie node.** Make a ponytail with **Braid** instead: draw the path from the
+  ponytail's base and give it a large `region` (0.45, say), with `alongScalp` on so hair from
+  afar sweeps over the scalp into it. A groom saved with a Tie node no longer loads: delete its Tie
+  nodes in 0.32 before you update.
+
 ## 0.32.1 (October 25, 2026)
 
 - **Changed: Ctrl selects guides.** With a guide brush (Comb, Smooth, Lift, Length, Cut...),
