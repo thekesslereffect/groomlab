@@ -1136,33 +1136,37 @@ InterpGuide interpGuide(uint s, InterpStrand st, uint lane) {
 // guides pointing different ways no longer pull the strand in. Where they nearly cancel out (the
 // blend's segment under DIRECTIONS_FULL of theirs: guides more than about 120 degrees apart) the
 // segment eases down to none, as offsets' does, so the way it points never flips between two
-// neighbouring strands (the blend's way turns round where it passes through nothing). A segment of
-// none keeps the way before (the first: the root normal's, else +y).
+// neighbouring strands (the blend's way turns round where it passes through nothing; a segment of
+// none goes nowhere).
 #define DIRECTIONS_FULL 0.5f
 struct DirectionWalk {
-    float3 raw, at, dir;
+    float3 raw, at;
+    float walkStep, invFull;  // the step, and 1 over DIRECTIONS_FULL of it (0: no step)
 };
 bool blendsDirections() { return gValue2.z != 0.0f; }
-DirectionWalk directionWalk(float3 root, float3 normal) {
+DirectionWalk directionWalk(float3 root, float walkStep) {
     DirectionWalk w;
     w.raw = root;
     w.at = root;
-    w.dir = len3(normal) > 0.0f ? normal : float3(0.0f, 1.0f, 0.0f);
+    w.walkStep = walkStep;
+    PRECISE float full = DIRECTIONS_FULL * walkStep;
+    w.invFull = full > 0.0f ? divExact(1.0f, full) : 0.0f;
     return w;
 }
 // The next sample of the walk from the offsets' blend's next sample `raw`.
-float3 directionStep(inout DirectionWalk w, float3 raw, float walkStep) {
+float3 directionStep(inout DirectionWalk w, float3 raw) {
     PRECISE float3 d = raw - w.raw;
     w.raw = raw;
     const float l = lengthExact(d);
-    if (l > 0.0f) w.dir = float3(divExact(d.x, l), divExact(d.y, l), divExact(d.z, l));
+    if (!(l > 0.0f)) return w.at;
     // Its length: all of the step, eased (s (2 - s): no corner where it reaches the step) to none
-    // as the guides cancel out.
-    PRECISE float full = DIRECTIONS_FULL * walkStep;
-    const float share = full > 0.0f ? min(divExact(l, full), 1.0f) : 1.0f;
+    // as the guides cancel out; along d (one division).
+    PRECISE float over = l * w.invFull;
+    const float share = min(over, 1.0f);
     PRECISE float eased = share * (2.0f - share);
-    PRECISE float length = walkStep * eased;
-    PRECISE float3 moved = w.dir * length;
+    PRECISE float length = w.walkStep * eased;
+    const float scale = divExact(length, l);
+    PRECISE float3 moved = d * scale;
     PRECISE float3 at = w.at + moved;
     w.at = at;
     return at;
@@ -1316,8 +1320,8 @@ void interpolateStrandAlone(uint s) {
         PRECISE float guideLen = 0.0f;
         for (uint i = 0; i < found; ++i) guideLen += guide[i].length;
         const float walkStep = divExact(guideLen, float(samples - 1));
-        DirectionWalk walk = directionWalk(root, strandData(s).xyz);
-        for (uint j = 1; j < samples; ++j) blendAt[j].xyz = directionStep(walk, blendAt[j].xyz, walkStep);
+        DirectionWalk walk = directionWalk(root, walkStep);
+        for (uint j = 1; j < samples; ++j) blendAt[j].xyz = directionStep(walk, blendAt[j].xyz);
     }
     for (uint j = 1; j < samples; ++j) blendAt[j].w = lengthExact(blendAt[j].xyz - blendAt[j - 1].xyz);
     float scale = 0.0f;
@@ -1421,7 +1425,7 @@ void interpolateStreamedOf(uint s) {
 // The path's sample j (blend directions: the walk's, j one past the last it gave).
 float3 pathSample(uint s, InterpStrand st, inout InterpGuide guide[BIND_SLOTS], uint found, float3 root, uint samples, uint j,
                   float scale, float3 first, inout SampleStream ss, inout DirectionWalk walk, float walkStep) {
-    if (walkStep > 0.0f) return directionStep(walk, streamedRaw(s, st, guide, found, root, samples, j, ss), walkStep);
+    if (walkStep > 0.0f) return directionStep(walk, streamedRaw(s, st, guide, found, root, samples, j, ss));
     return streamedSample(s, st, guide, found, root, samples, j, scale, first, ss);
 }
 void interpolateStreamed(uint s, InterpStrand st, TubeOf tb, inout InterpGuide guide[BIND_SLOTS], uint found, float3 root, uint samples,
@@ -1436,7 +1440,6 @@ void interpolateStreamed(uint s, InterpStrand st, TubeOf tb, inout InterpGuide g
         for (uint i = 0; i < found; ++i) guideLen += heldGuide(s, st, guide, i).length;
         walkStep = divExact(guideLen, float(samples - 1));
     }
-    const float3 normal = strandData(s).xyz;
     float scale = 0.0f;
     if (gFlag.y != 0 && !(walkStep > 0.0f)) {
         float own = 0.0f, guideLen = 0.0f;
@@ -1451,7 +1454,7 @@ void interpolateStreamed(uint s, InterpStrand st, TubeOf tb, inout InterpGuide g
     }
     float arc = 0.0f;
     {
-        DirectionWalk walk = directionWalk(root, normal);
+        DirectionWalk walk = directionWalk(root, walkStep);
         float3 before = first;
         for (uint j = 1; j < samples; ++j) {
             const float3 b = pathSample(s, st, guide, found, root, samples, j, scale, first, ss, walk, walkStep);
@@ -1462,7 +1465,7 @@ void interpolateStreamed(uint s, InterpStrand st, TubeOf tb, inout InterpGuide g
     const float step = divExact(arc, float(n - 1));
     uint lo = 1;
     float3 seg = first;
-    DirectionWalk walk = directionWalk(root, normal);
+    DirectionWalk walk = directionWalk(root, walkStep);
     float4 to = float4(pathSample(s, st, guide, found, root, samples, 1, scale, first, ss, walk, walkStep), 0.0f);
     to.w = lengthExact(to.xyz - seg);
     float arcSeg = 0.0f, arcLo = arcSeg + to.w;
@@ -1550,8 +1553,8 @@ void interpolateGroup(uint3 id, uint3 local) {
         PRECISE float guideLen = 0.0f;
         for (uint i = 0; i < found; ++i) guideLen += sLength[guides + i];
         const float walkStep = divExact(guideLen, float(samples - 1));
-        DirectionWalk walk = directionWalk(root, strandData(s).xyz);
-        for (uint j = 1; j < samples; ++j) sBlend[base + j].xyz = directionStep(walk, sBlend[base + j].xyz, walkStep);
+        DirectionWalk walk = directionWalk(root, walkStep);
+        for (uint j = 1; j < samples; ++j) sBlend[base + j].xyz = directionStep(walk, sBlend[base + j].xyz);
     }
     groupSync();
     [ForceUnroll] for (uint m = 0; m < LANE_SAMPLES; ++m) {

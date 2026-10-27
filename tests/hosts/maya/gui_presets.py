@@ -25,6 +25,8 @@ Environment (all optional):
   GROOMLAB_PRESET_SHEET_TAG      a prefix for the sheets' names (before, after)
   GROOMLAB_PRESET_SHEET_SIZE     each picture's size in pixels (default 420)
   GROOMLAB_PRESET_SHEET_DENSITY  the grooms' previewDensity (default: the groom's own, 0.1)
+  GROOMLAB_PRESET_SHEET_PARAMS   params set on every node of a type once a preset is applied,
+                                 Type.param=value;... (a value as JSON: Interpolate.blend="offsets")
 """
 
 import math
@@ -255,6 +257,24 @@ def shoot(path, size):
     return path
 
 
+def override_params(groom):
+    """GROOMLAB_PRESET_SHEET_PARAMS: each Type.param=value set on every node of that type."""
+    spec = os.environ.get("GROOMLAB_PRESET_SHEET_PARAMS", "").strip()
+    if not spec:
+        return
+    import json
+
+    import groomlab
+    graph = groomlab.get_graph(groom)
+    for item in filter(None, (part.strip() for part in spec.split(";"))):
+        target, value = item.split("=", 1)
+        node_type, param = target.split(".", 1)
+        for n in graph["nodes"]:
+            if n.get("type") == node_type:
+                n.setdefault("params", {})[param] = json.loads(value)
+    groomlab.set_graph(groom, graph)
+
+
 def contact_sheet(cells, path, title, size):
     """A grid of the pictures, each labelled with the preset's name, category and its stats."""
     from PySide2 import QtCore, QtGui
@@ -352,6 +372,7 @@ def run():
             started = time.time()
             guides = give_guides(groom, preset, scalp_size, colliders)
             presets.apply_preset(groom, name)
+            override_params(groom)
             strands = cmds.getAttr(groom + ".outStrandCount")
             errors = "; ".join(groomlab.errors(groom))
             frame(angles, [scalp, cmds.listRelatives(groom, parent=True)[0]] +

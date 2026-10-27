@@ -635,6 +635,16 @@ std::string withoutClearance(const std::string& graphJson) {
     return graph.dump();
 }
 
+// The graph with its Interpolates blending offsets (the version 1 default: the shape a test was
+// tuned on, where it measures a later stage's own rounding on the strands' edge cases).
+std::string blendingOffsets(const std::string& graphJson) {
+    nlohmann::json graph = nlohmann::json::parse(graphJson);
+    for (nlohmann::json& n : graph["nodes"]) {
+        if (n["type"] == "Interpolate") n["params"]["blend"] = "offsets";
+    }
+    return graph.dump();
+}
+
 GroomData deformedGroom(const std::string& graphJson, float bend = 0.6f);
 
 TEST(GpuPreview, EngagesOnTheGraphsGroomsStartFrom) {
@@ -2996,7 +3006,10 @@ TEST_P(LookEngineTest, CollideKeepsStrandsOutAsTheCpuDoes) {
                           {"hung into the scalp and through a ball", {{"Gravity", hang}, {"Collide", shallow}}, true}};
     for (const Case& k : cases) {
         SCOPED_TRACE(k.name);
-        GroomData data = groom(withoutClearance(chainGraph(k.nodes, true, k.collider)));
+        // (Blending offsets: hung by Gravity, a point on the edge of one of Collide's decisions,
+        // which OpenGL's rounding of Gravity tips, is the measure here; the strands blend
+        // directions alike on every backend: InterpolateGivesWhatTheCpuBlends.)
+        GroomData data = groom(blendingOffsets(withoutClearance(chainGraph(k.nodes, true, k.collider))));
         if (k.collider) {
             const MeshPtr sphere = test::makeSphere(16, 32, 1.2f);
             std::vector<Vec3f> points = sphere->points();

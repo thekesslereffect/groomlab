@@ -237,9 +237,10 @@ class AddonTest(unittest.TestCase):
         self.assertEqual(groom.runtime(head).error, "")
         self.assertEqual(process.generation(), generation + 1)
         after = bu.hair_arrays(head.groomlab.hair)
-        # The same strands; the guides sent again are rooted again (float rounding: a micron or two at
-        # the tips of curly strands).
-        np.testing.assert_allclose(after[0], before[0], atol=2e-6)
+        # The same strands; the guides sent again are rooted again (float rounding: a few microns at
+        # the tips of curly strands, a little more with blend directions, which turns a segment where
+        # offsets would shorten it).
+        np.testing.assert_allclose(after[0], before[0], atol=4e-6)
         np.testing.assert_allclose(after[2], before[2], rtol=1e-4)
         np.testing.assert_array_equal(after[1], before[1])
         np.testing.assert_array_equal(after[3], before[3])
