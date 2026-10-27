@@ -1669,12 +1669,28 @@ private:
             }
         };
         if (last) {
-            // Each from its incoming points and no clump ID, as in a full run.
-            forEachListed(dirty, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                if (clumpIds) (*clumpIds)[s] = -1.0f;
-                clumpStrand(s);
-            });
+            // Each from its incoming points and no clump ID, as in a full run: on the CPU engine (its
+            // ClumpCS on a view of them, their centers the ones chosen here) or below.
+            bool viewed = false;
+            if (!tubeIds && strandRandom <= 0.0f && gpu::cpuEngineOn()) {
+                auto theirs = std::make_shared<std::vector<std::uint32_t>>(dirty.size());
+                for (std::size_t k = 0; k < dirty.size(); ++k) (*theirs)[k] = (*assigned)[dirty[k]];
+                std::vector<StrandId> ids(used.size());
+                for (std::size_t c = 0; c < used.size(); ++c) ids[c] = used[c]->id;
+                gpu::StageInputs centers;
+                centers.clump = gpu::clumpInputs(theirs, curves, centerNormals, ids, seed);
+                viewed = gpu::runStageOnStrands(gpu::StageKind::Clump, params(), in, dirty, scalp, *out, std::move(centers));
+                if (viewed && clumpIds) {
+                    for (const std::uint32_t s : dirty) (*clumpIds)[s] = (*assigned)[s] != kNoCenter ? numbers[(*assigned)[s]] : -1.0f;
+                }
+            }
+            if (!viewed) {
+                forEachListed(dirty, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    if (clumpIds) (*clumpIds)[s] = -1.0f;
+                    clumpStrand(s);
+                });
+            }
             *changed = StrandChanges::listed(std::move(dirty));
         } else {
             parallelFor(0, out->strandCount(), [&](std::size_t s) {

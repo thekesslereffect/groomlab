@@ -135,6 +135,7 @@ bool runStageOnStrands(StageKind kind, const StageParamReader& reader, const Str
         case StageKind::Smooth:
         case StageKind::Collide:
         case StageKind::MeshCut:
+        case StageKind::Clump:  // (their centers the caller's, for these strands)
         case StageKind::Part:  // (their sides the caller's, for these strands)
         case StageKind::Flow:  // (their roots traced the caller's)
         case StageKind::Curl: break;  // (alone: by clump it reads its clumps)
