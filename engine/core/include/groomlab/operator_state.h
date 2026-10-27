@@ -221,12 +221,16 @@ struct CollideRestState {
     Vec3f anchor;
     float bound = -1.0f;
 };
-// CollideOp's push of point p out of deformed mesh `mesh` through `rest` (its rest field, the mesh
-// itself where that cannot tell) to `to` above it (the offset, or with `soft` the offset plus the
-// softness, the push then eased: softPush), within maxDepth below and the search radius: true
-// when it moved p. The CPU engine's Collide asks the same (look.slang hostCollidePush).
-bool collideRestPush(const RestPoseCollision& rest, const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth,
+// CollideOp's push of point p out of `mesh` to `to` above it (the offset, or with `soft` the offset
+// plus the softness, the push then eased: softPush), within maxDepth below and the search radius:
+// through `rest` for a mesh deformed away from its rest pose (its rest field, the mesh itself where
+// that cannot tell), else (method exact) the mesh itself. True when it moved p. The CPU engine's
+// Collide asks the same (look.slang hostCollidePush).
+bool collideRestPush(const RestPoseCollision* rest, const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth,
                      float searchRadius, CollideRestState& state);
+// Its last step: the mesh's own closest point (the bound of the last query skipping what it settles).
+bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth, float searchRadius,
+                     CollideRestState& state);
 
 // ---- Part ---------------------------------------------------------------------------------------
 

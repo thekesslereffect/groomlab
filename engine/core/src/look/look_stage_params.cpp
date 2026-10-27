@@ -168,7 +168,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             return true;
         }
         case StageKind::Collide: {
-            if (params.getString("method") != "field") {
+            if (params.getString("method") != "field" && !r.exactHost) {
                 *why = r.name() + " asks the mesh at every point (method exact: the CPU's)";
                 return false;
             }
@@ -658,7 +658,7 @@ std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleStat
 std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes, std::uint32_t colliders,
                                              const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why,
                                              const std::vector<std::shared_ptr<const RestPoseCollision>>& rests, float maxDepth,
-                                             float searchRadius) {
+                                             float searchRadius, bool exact) {
     if (meshes.size() > 2 || fields.size() != meshes.size()) {
         *why = "more surfaces than the kernel reads (the CPU's)";
         return nullptr;
@@ -667,7 +667,7 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
     made->colliders = colliders;
     for (std::size_t m = 0; m < meshes.size(); ++m) {
         if (fields[m]) continue;
-        if (m >= rests.size() || !rests[m]) {
+        if (!exact && (m >= rests.size() || !rests[m])) {
             *why = "a surface has no field the GPU can read (deformed: the CPU's)";
             return nullptr;
         }
@@ -676,6 +676,7 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
     if (made->rests) {
         auto host = std::make_shared<CollideHost>();
         host->rests = rests;
+        host->rests.resize(meshes.size());  // (method exact: null, the mesh itself)
         host->meshes = meshes;
         host->maxDepth = maxDepth;
         host->searchRadius = searchRadius;

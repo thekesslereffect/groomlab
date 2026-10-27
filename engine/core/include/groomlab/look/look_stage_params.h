@@ -51,6 +51,9 @@ public:
     // Gravity, Bend and Displace given their direction per strand (StageInputs::directions): the
     // caller's; else one varying is the CPU's.
     bool directions = false;
+    // Collide's method exact asked through the host (CollideHost, null rests: the mesh itself): the
+    // caller's, on the CPU engine; else the CPU's.
+    bool exactHost = false;
 
 private:
     const ParamSet& params_;
@@ -132,11 +135,12 @@ std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleStat
 // Null with *why where a surface has no field or tables the kernel reads (the CPU's). `rests` (the
 // CPU engine's: per mesh, RestPoseCollision for a deformed one, its field null; empty: none) with
 // `maxDepth` and `searchRadius`: those asked through the host (CollideHost; its roots: the caller's,
-// collideHostRoots).
+// collideHostRoots); with `exact` (method exact) every mesh without a field or rest pose too, asked
+// of the mesh itself.
 std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes, std::uint32_t colliders,
                                              const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why,
                                              const std::vector<std::shared_ptr<const RestPoseCollision>>& rests = {}, float maxDepth = 0.0f,
-                                             float searchRadius = 0.0f);
+                                             float searchRadius = 0.0f, bool exact = false);
 // `inputs` with its host's roots: the strands `in`'s (`which`: those alone, in that order).
 std::shared_ptr<CollideInputs> collideHostRoots(const CollideInputs& inputs, const StrandSet& in,
                                                 const std::vector<std::uint32_t>* which = nullptr);

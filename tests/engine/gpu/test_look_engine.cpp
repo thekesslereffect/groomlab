@@ -5991,9 +5991,12 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
 TEST(CpuEngine, CollideOverADeformedScalpGivesItsCppsBits) {
     // Collide over a scalp deformed away from its rest pose (each strand walked through the rest
     // pose's field from its cursor, the deformed mesh asked where that cannot tell: collideRestPush
-    // through the host): on the CPU engine against its own C++, bit for bit; hard, soft, smoothed.
+    // through the host): on the CPU engine against its own C++, bit for bit; hard, soft, smoothed;
+    // and method exact (the mesh itself at every point, through the same host).
     for (const char* params : {R"("params": {"offset": 0.12})", R"("params": {"offset": 0.12, "softness": 0.1})",
-                               R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3})"}) {
+                               R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3})",
+                               R"("params": {"offset": 0.12, "method": "exact"})",
+                               R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3, "method": "exact"})"}) {
         SCOPED_TRACE(params);
         const GroomData data = deformedGroom(withoutClearance(chainGraph({{"Collide", params}})));
         auto collided = [&](GroomSession& session) {
@@ -6101,6 +6104,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "space": "world", "frequency": 3.0})"},
         {"Collide", R"("params": {"offset": 0.12})"},
         {"Collide", R"("params": {"offset": 0.08, "softness": 0.1, "smoothing": 0.2, "iterations": 3})"},
+        {"Collide", R"("params": {"offset": 0.12, "softness": 0.05, "method": "exact"})", false, true},
         {"Clump", R"("params": {"count": 80, "strength": 0.7})"},
         {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * t", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
                                 "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})",

@@ -228,17 +228,21 @@ private:
         // look.slang's CollideCS, the GPU preview's own (look_cpu.h), on its surfaces' fields (in full,
         // or the strands an incremental evaluation makes again, below).
         gpu::StageInputs surfaces;
+        const bool exact = params().getString("method") == "exact";
+        gpu::StageParamReader reader(params(), "");
+        reader.exactHost = exact;
         if (gpu::cpuEngineOn() && meshes.size() <= 2) {
             std::uint32_t colliderBits = 0;
             for (std::size_t m = 0; m < colliders.size(); ++m) colliderBits |= colliders[m] ? 1u << m : 0u;
             std::string whyNot;
-            // (A deformed mesh: through the host, its rest pose's walk: collideRestPush.)
-            surfaces.collide = gpu::collideInputs(meshes, colliderBits, fields, offset, softness, &whyNot, rests, maxDepth, searchRadius);
+            // (A deformed mesh: through the host, its rest pose's walk; method exact: the mesh
+            // itself; collideRestPush.)
+            surfaces.collide = gpu::collideInputs(meshes, colliderBits, fields, offset, softness, &whyNot, rests, maxDepth, searchRadius, exact);
         }
         if (!incremental && surfaces.collide) {
             gpu::StageInputs all;
             all.collide = gpu::collideHostRoots(*surfaces.collide, *in);
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Collide, params(), in, nullptr, std::move(all))) {
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Collide, reader, in, nullptr, std::move(all))) {
                 *result = made;
                 return true;
             }
@@ -310,9 +314,10 @@ private:
             auto pushOut = [&](std::size_t m, std::size_t i, bool soft) {
                 if (skipWithin[m] >= 0.0f && (pts[i] - pts[0]).length() <= skipWithin[m]) return false;  // settled for the strand
                 const float to = soft ? reach : offset;
-                // Through a rest pose: collideRestPush (the CPU engine's Collide asks the same).
-                if (rests[m]) return collideRestPush(*rests[m], *meshes[m], pts[i], to, soft, softness, maxDepth, searchRadius, states[m]);
-                if (fields[m]) {
+                // Through a rest pose, or the mesh itself (method exact): collideRestPush (the CPU
+                // engine's Collide asks the same).
+                if (!fields[m]) return collideRestPush(rests[m].get(), *meshes[m], pts[i], to, soft, softness, maxDepth, searchRadius, states[m]);
+                {
                     Vec3f delta;
                     // A still mesh's field answers alone (never Ask, but for a field without a grid:
                     // the mesh's), as the GPU's Collide does from its tables.
@@ -328,19 +333,7 @@ private:
                         case MeshDistanceField::Push::Ask: break;  // the mesh's answer, below
                     }
                 }
-                const ScalpMesh& mesh = *meshes[m];
-                if (beyondBound(m, pts[i])) return false;
-                float lowerBound = 0.0f;
-                const SurfacePoint sp = mesh.closestPointBounded(pts[i], searchRadius, &lowerBound);
-                states[m].anchor = pts[i];
-                states[m].bound = lowerBound;
-                if (sp.root.face < 0) return false;
-                const float height = (pts[i] - sp.position).dot(sp.normal);
-                if (height >= to || height <= -maxDepth) return false;
-                Vec3f delta = sp.normal * (to - height);
-                if (soft) delta = softPush(delta, softness);
-                pts[i] += delta;
-                return true;
+                return collideMeshPush(*meshes[m], pts[i], to, soft, softness, maxDepth, searchRadius, states[m]);
             };
             const StrandRoot root = s < out->roots().size() ? out->roots()[s] : StrandRoot{-1, 0.0f, 0.0f};
             if (!(softness > 0.0f) && !(smoothing > 0.0f)) {
@@ -430,7 +423,7 @@ private:
         if (last) {
             gpu::StageInputs listed;  // (each strand's root: those listed, in that order)
             if (surfaces.collide) listed.collide = gpu::collideHostRoots(*surfaces.collide, *in, &changes->strands);
-            if (!(listed.collide && gpu::runStageOnStrands(gpu::StageKind::Collide, params(), in, changes->strands, nullptr, *out, listed))) {
+            if (!(listed.collide && gpu::runStageOnStrands(gpu::StageKind::Collide, reader, in, changes->strands, nullptr, *out, listed))) {
                 forEachListed(changes->strands, [&](std::size_t s) {
                     copyStrandPoints(*out, *in, s);
                     collide(s);
@@ -968,23 +961,31 @@ void registerDisplaceOperator(OperatorRegistry& registry) {
 void setCollideStrandBounds(bool on) { collideStrandBounds = on; }
 std::size_t collideSkippedSurfaces() { return collideSkipped.load(); }
 
-bool collideRestPush(const RestPoseCollision& rest, const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth,
+bool collideRestPush(const RestPoseCollision* rest, const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth,
                      float searchRadius, CollideRestState& state) {
-    // The mesh's bound first: it costs less than the walk to the point's vertex, and the answer (a
-    // miss) is the mesh's own.
+    if (rest) {
+        // The mesh's bound first: it costs less than the walk to the point's vertex, and the answer
+        // (a miss) is the mesh's own.
+        if (collideBeyondBound(state, p, searchRadius)) return false;
+        Vec3f delta;
+        switch (rest->push(p, to, maxDepth, searchRadius, &delta, state.cursor)) {
+            case MeshDistanceField::Push::Kept: return false;
+            case MeshDistanceField::Push::Moved:
+                if (soft) delta = softPush(delta, softness);
+                p += delta;
+                return true;
+            case MeshDistanceField::Push::Ask: break;  // the deformed mesh's own answer, below
+        }
+    }
+    // Where the rest field cannot tell: the deformed mesh itself (which the rest field alone would
+    // miss by how the mesh bends); method exact: always.
+    return collideMeshPush(mesh, p, to, soft, softness, maxDepth, searchRadius, state);
+}
+
+bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth, float searchRadius,
+                     CollideRestState& state) {
     if (collideBeyondBound(state, p, searchRadius)) return false;
     Vec3f delta;
-    switch (rest.push(p, to, maxDepth, searchRadius, &delta, state.cursor)) {
-        case MeshDistanceField::Push::Kept: return false;
-        case MeshDistanceField::Push::Moved:
-            if (soft) delta = softPush(delta, softness);
-            p += delta;
-            return true;
-        case MeshDistanceField::Push::Ask: break;  // the deformed mesh's own answer, below
-    }
-    // Where the rest field cannot tell: the deformed mesh itself (which the rest field alone
-    // would miss by how the mesh bends).
-    if (collideBeyondBound(state, p, searchRadius)) return false;
     float lowerBound = 0.0f;
     const SurfacePoint sp = mesh.closestPointBounded(p, searchRadius, &lowerBound);
     state.anchor = p;

@@ -77,6 +77,7 @@ void flowAtRoot(std::uint64_t host, std::uint32_t face, float u, float v, const 
 
 void collideCursor(std::uint64_t host, std::uint32_t mesh, std::uint32_t strand, const float p[3], float state[9]) {
     const CollideHost& h = collideHost(host);
+    if (!h.rests[mesh]) return;  // (method exact: no rest pose to walk)
     CollideRestState st = restState(state);
     const StrandRoot root = h.roots && strand < h.roots->size() ? (*h.roots)[strand] : StrandRoot{-1, 0.0f, 0.0f};
     st.cursor = h.rests[mesh]->cursor(root, Vec3f(p[0], p[1], p[2]));
@@ -87,7 +88,7 @@ bool collidePush(std::uint64_t host, std::uint32_t mesh, float p[3], float to, b
     const CollideHost& h = collideHost(host);
     CollideRestState st = restState(state);
     Vec3f q(p[0], p[1], p[2]);
-    const bool moved = collideRestPush(*h.rests[mesh], *h.meshes[mesh], q, to, soft, h.softness, h.maxDepth, h.searchRadius, st);
+    const bool moved = collideRestPush(h.rests[mesh].get(), *h.meshes[mesh], q, to, soft, h.softness, h.maxDepth, h.searchRadius, st);
     put(q, p);
     putState(st, state);
     return moved;

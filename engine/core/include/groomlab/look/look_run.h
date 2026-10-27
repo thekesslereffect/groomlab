@@ -310,9 +310,10 @@ struct PartInputs {
 // mesh's tree), the scalp's then the collider's, and their boxes (lookBounds). Fixed per field.
 // A mesh deformed away from its rest pose (`rests`, a bit each; the CPU engine's alone: its tables
 // a placeholder) is asked through the host (CollideHost, look.slang hostCollidePush): the
-// operator's own push, collideRestPush, on its rest pose's walk.
+// operator's own push, collideRestPush, on its rest pose's walk; with method exact, every mesh, of
+// the mesh itself (its rest null).
 struct CollideHost {
-    std::vector<std::shared_ptr<const RestPoseCollision>> rests;  // per mesh (null: a still one)
+    std::vector<std::shared_ptr<const RestPoseCollision>> rests;  // per mesh (null: a still one, or method exact)
     std::vector<MeshPtr> meshes;
     float maxDepth = 0.0f, searchRadius = 0.0f, softness = 0.0f;
     std::shared_ptr<const std::vector<StrandRoot>> roots;  // per strand of the run (its walk starts at its root)
