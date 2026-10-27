@@ -126,9 +126,17 @@ std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleStat
 // Collide's surfaces' fields as tables (CollideInputs): `meshes` (the scalp, then the collider: two at
 // most), their fields at the offset (collisionField), `colliders` a bit each for the collider input's;
 // tables for offsets up to the most the fields' cells settle (a dragged offset the kernel's number).
-// Null with *why where a surface has no field or tables the kernel reads (the CPU's).
+// Null with *why where a surface has no field or tables the kernel reads (the CPU's). `rests` (the
+// CPU engine's: per mesh, RestPoseCollision for a deformed one, its field null; empty: none) with
+// `maxDepth` and `searchRadius`: those asked through the host (CollideHost; its roots: the caller's,
+// collideHostRoots).
 std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes, std::uint32_t colliders,
-                                             const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why);
+                                             const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why,
+                                             const std::vector<std::shared_ptr<const RestPoseCollision>>& rests = {}, float maxDepth = 0.0f,
+                                             float searchRadius = 0.0f);
+// `inputs` with its host's roots: the strands `in`'s (`which`: those alone, in that order).
+std::shared_ptr<CollideInputs> collideHostRoots(const CollideInputs& inputs, const StrandSet& in,
+                                                const std::vector<std::uint32_t>* which = nullptr);
 // RestoreLength's reference (RestoreInputs) for the strands `in`: each strand's reference curve by
 // its ID (`refStrands`', else `refGuides`'), resampled to its point count, its segments' lengths and
 // first segment (a strand without one: -1, left as it is); `longest` the longest reference, `found`
@@ -158,11 +166,6 @@ std::shared_ptr<JiggleInputs> jiggleInputs(const StrandSet& in, const ScalpMesh&
 // Curl's clumps as the kernel takes them (CurlInputs, coherence clump), found on the strands `in` by
 // the channel `channel` as CurlOp finds them, their frames from `scalp`'s normals (null: none), their
 // draws by `seed`; null without the channel.
-// Tie's inputs (TieInputs but its tables and channelFrom: the caller's) for the strands `in` over
-// `scalp` (null or no triangles: none) with its tail channel `channel`, as TieOp takes them: the
-// scalp's box, its push's clearance, depth and search radius, each strand's seed face, the core
-// strands, the channel as `in` carries it, and the host (the CPU engine's).
-std::shared_ptr<TieInputs> tieInputs(const StrandsPtr& in, const MeshPtr& scalp, const std::string& channel);
 std::shared_ptr<CurlInputs> curlInputs(const StrandSet& in, const ScalpMesh* scalp, const std::string& channel, std::uint64_t seed);
 // MeshCut's mesh as the kernel takes it (its ray tree; none for no mesh).
 std::shared_ptr<MeshCutInputs> meshCutInputs(const MeshPtr& mesh);

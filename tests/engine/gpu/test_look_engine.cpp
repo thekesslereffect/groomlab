@@ -572,10 +572,10 @@ protected:
         for (const gpu::LookStage& s : p.chain.stages) stages += std::string(stages.empty() ? "" : " ") + gpu::stageName(s.kind);
         std::printf("[ %-8s ] %s: %zu strands, %zu points: positions max %.3g mean %.3g (%zu over 1e-4), normals max %.3g, tangents max %.3g, "
                     "bitangents max %.3g, widths max %.3g; GPU ms interpolate %.3f (clearance %.3f) clump %.3f length %.3f noise %.3f curl %.3f "
-                    "width %.3f selfCollide %.3f static %.3f tie %.3f lines %.3f; engine made in %.1f ms\n",
+                    "width %.3f selfCollide %.3f static %.3f lines %.3f; engine made in %.1f ms\n",
                     GetParam().c_str(), stages.c_str(), want->strandCount(), n, c.positions.max, c.positions.mean, over, c.normals.max,
                     c.tangents.max, c.bitangents.max, c.widthMax, times.interpolateMs, times.clearanceMs, times.clumpMs, times.lengthMs, times.noiseMs,
-                    times.curlMs, times.widthMs, times.selfCollideMs, times.staticMs, times.tieMs, times.linesMs, makeMs);
+                    times.curlMs, times.widthMs, times.selfCollideMs, times.staticMs, times.linesMs, makeMs);
         return c;
     }
 
@@ -4432,43 +4432,6 @@ TEST(GpuPreview, TheHairGridsLayoutIsTheCpus) {
     }
 }
 
-// ---- Tie -----------------------------------------------------------------------------------------
-
-// A Tie's params: its ring behind the test's head (a sphere of radius 4 about the origin, strands
-// about 3 long: those rooted near the back pass the ring, the rest stop on the way), then `extra`
-// (JSON object items, a leading comma).
-std::string tieParams(const std::string& extra = R"(, "spread": 15.0, "twist": 0.3, "ease": 0.3)",
-                      const std::string& center = "[0.0, 1.0, -5.0]", double radius = 0.5) {
-    return R"("params": {"center": )" + center + R"(, "radius": )" + std::to_string(radius) + extra + "}";
-}
-
-// The GPU's Tie against the CPU's: within the kernels' rounding (their sin, cos and tan, a strand's
-// point found on its path in float where the CPU solves in double, the field's answers where the
-// CPU's push asks the mesh), a few thousandths at most on a head 8 across, but where a route's
-// closest point under its arc ties between two faces across the test sphere's seam: its split
-// vertices' normals are each their own side's, so the skin point lifted off it is lifted one way or
-// the other as the CPU's tree or the GPU's walk down the mesh meets the faces first, and the route
-// over it moves by a few hundredths (a strand or two of a groom). Few points apart at all, a mean
-// of millionths.
-constexpr double kTiePointTolerance = 2e-2, kTieMeanTolerance = 1e-5;
-void expectTieClose(const Compared& c, bool widths = true) {
-    EXPECT_GT(c.positions.count, 1000u);
-    EXPECT_LT(c.positions.max, kTiePointTolerance);
-    EXPECT_LT(c.positions.mean, kTieMeanTolerance);
-    EXPECT_LT(c.over, c.positions.count / 100);  // (more than 1e-4 apart)
-    EXPECT_LT(c.normals.max, 5e-2);
-    EXPECT_LT(c.tangents.max, 5e-2);
-    if (widths) EXPECT_LT(c.widthMax, 1e-5);
-}
-#define EXPECT_GPU_TIES(graphJson, overrides, committedJson)                           \
-    do {                                                                               \
-        GroomSession dragged(groom(graphJson));                                        \
-        ASSERT_TRUE(dragged.evaluate(ViewRequest{}).strands);                          \
-        GroomSession committed(groom(committedJson));                                  \
-        ASSERT_TRUE(committed.evaluate(ViewRequest{}).strands);                        \
-        expectTieClose(runAndCompare(dragged, overrides, committed));                  \
-    } while (0)
-
 // How many of a node's points its last evaluation moved more than `by` from what it took.
 std::size_t movedBy(GroomSession& session, const std::string& name, float by = 1e-3f) {
     const GraphDocument& doc = *session.viewDocument();
@@ -4480,195 +4443,6 @@ std::size_t movedBy(GroomSession& session, const std::string& name, float by = 1
     std::size_t moved = 0;
     for (std::size_t i = 0; i < taken->pointCount(); ++i) moved += (taken->positions()[i] - made->positions()[i]).length() > by;
     return moved;
-}
-
-TEST_P(LookEngineTest, TieTiesAsTheCpuDoes) {
-    // Tie on the GPU: its frame and ring's bins from the core strands, each strand's route over the
-    // scalp to the ring, its path pushed out of the scalp and the strand laid along it (strands too
-    // short stopping on the way): alone and after Interpolate (a run from it), with its tail channel
-    // and without, tightly and loosely, with its direction its own, against the CPU's.
-    const std::string extras[] = {R"(, "spread": 15.0, "twist": 0.3, "ease": 0.3)",
-                                  R"(, "spread": 30.0, "tightness": 0.4, "ease": 0.0, "tailChannel": "")",
-                                  R"(, "direction": [0.3, -1.0, -0.6], "twist": -0.5, "ease": 1.0)"};
-    for (const std::string& extra : extras) {
-        SCOPED_TRACE(extra);
-        GroomSession session(groom(withoutClearance(chainGraph({{"Tie", tieParams(extra)}}))));
-        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-        EXPECT_GT(movedBy(session, "n0"), 20000u);
-        const Prepared p = prepare(session, {}, "interpolate");
-        ASSERT_EQ(p.chain.stages.size(), 3u);
-        EXPECT_EQ(p.chain.stages[1].kind, gpu::StageKind::Tie);
-        expectTieClose(runAndCompare(session, {}, session, "n0"));
-        expectTieClose(runAndCompare(session, {}, session, "interpolate"));
-    }
-}
-
-TEST_P(LookEngineTest, TieDragsGiveWhatTheCpuTies) {
-    // Drags of each of its numbers and of its center and direction (the ring's bins made again from
-    // the core strands), against a CPU evaluation of the graph holding the value.
-    const std::string graph = withoutClearance(chainGraph({{"Tie", tieParams()}}));
-    const std::pair<const char*, double> drags[] = {{"radius", 0.8}, {"spread", 35.0}, {"twist", -0.6}, {"tightness", 0.5}, {"ease", 0.8}};
-    for (const auto& [param, value] : drags) {
-        SCOPED_TRACE(param);
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n0", {{param, value}}}}), withParam(graph, "n0", param, value));
-    }
-    {
-        SCOPED_TRACE("center");
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n0", {{"center", Vec3f(1.5f, 2.0f, -4.75f)}}}}),
-                        withParam(graph, "n0", "center", nlohmann::json::array({1.5, 2.0, -4.75})));
-    }
-    {
-        SCOPED_TRACE("direction");
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n0", {{"direction", Vec3f(0.25f, -1.0f, -0.5f)}}}}),
-                        withParam(graph, "n0", "direction", nlohmann::json::array({0.25, -1.0, -0.5})));
-    }
-}
-
-TEST_P(LookEngineTest, ADabUpstreamOfTieGivesWhatTheCpuTies) {
-    // A brush dab on the guides: Interpolate's strands blended again, then tied on the GPU (its bins
-    // from the strands the dab moved).
-    GroomData data = groom(withoutClearance(chainGraph({{"Tie", tieParams()}})));
-    GroomSession dabbed(data);
-    ASSERT_TRUE(dabbed.evaluate(ViewRequest{}).strands);
-    const StrandsPtr before = dabbed.last().strands;
-    const GuidesPtr bent = guideSet(*data.scalp, 1.4f);
-    dabbed.setGuides(bent);
-    ViewRequest dab;
-    dab.stopAt = "interpolate";
-    ASSERT_EQ(dabbed.evaluate(dab).strands, before);
-    GroomData after = data;
-    after.guides = bent;
-    GroomSession fresh(after);
-    ASSERT_TRUE(fresh.evaluate(ViewRequest{}).strands);
-    expectTieClose(runAndCompare(dabbed, {}, fresh, "interpolate"));
-}
-
-TEST_P(LookEngineTest, ACurlByTheTailAfterTieAsTheCpuDoes) {
-    // A Curl masked by the tail (its affect mapped to it, per point) runs on the GPU, mixed by it:
-    // from the Curl (the tail as the CPU wrote it), from the Tie and from Interpolate (the tail as the
-    // Tie writes it on the GPU, read after it); drags of the Tie's radius and the Curl's, a dab. A
-    // Curl whose radius is mapped to the tail runs on the GPU, the tail as the CPU wrote it, where the
-    // run starts after the Tie; a run of the Tie (which writes the tail the Curl reads) is the CPU's.
-    const std::string curl = R"("params": {"radius": 0.08, "frequency": 1.5)";
-    {
-        const std::string graph = withoutClearance(chainGraph({{"Tie", tieParams()}, {"Curl", curl + R"(, "affect": {"attribute": "tail"}})"}}));
-        GroomData data = groom(graph);
-        GroomSession session(data);
-        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-        EXPECT_GT(movedBy(session, "n1"), 2000u);
-        const Prepared p = prepare(session, {}, "n0");
-        ASSERT_EQ(p.chain.stages.size(), 3u);
-        EXPECT_TRUE(p.run.params.stages[1].masked);
-        EXPECT_EQ(p.run.fields.stages[1].affect.channelFrom, 0u);  // (the Tie's tail, written on the GPU)
-        expectTieClose(runAndCompare(session, {}, session, "n1"));
-        expectTieClose(runAndCompare(session, {}, session, "n0"));
-        expectTieClose(runAndCompare(session, {}, session, "interpolate"));
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n0", {{"radius", 0.8}}}}), withParam(graph, "n0", "radius", 0.8));
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n1", {{"radius", 0.12}}}}), withParam(graph, "n1", "radius", 0.12));
-        GroomSession dabbed(data);
-        ASSERT_TRUE(dabbed.evaluate(ViewRequest{}).strands);
-        const StrandsPtr before = dabbed.last().strands;
-        const GuidesPtr bent = guideSet(*data.scalp, 1.4f);
-        dabbed.setGuides(bent);
-        ViewRequest dab;
-        dab.stopAt = "interpolate";
-        ASSERT_EQ(dabbed.evaluate(dab).strands, before);
-        GroomData after = data;
-        after.guides = bent;
-        GroomSession fresh(after);
-        ASSERT_TRUE(fresh.evaluate(ViewRequest{}).strands);
-        expectTieClose(runAndCompare(dabbed, {}, fresh, "interpolate"));
-    }
-    GroomSession session(groom(withoutClearance(chainGraph({{"Tie", tieParams()}, {"Curl", curl + R"(, "radius": {"attribute": "tail"}})"}}))));
-    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-    EXPECT_GT(movedBy(session, "n1"), 2000u);
-    expectTieClose(runAndCompare(session, {}, session, "n1"));
-    Prepared refused;
-    EXPECT_FALSE(prepareRun(session, {}, "n0", &refused));
-    EXPECT_NE(refused.why.find("tail"), std::string::npos) << refused.why;
-}
-
-TEST_P(LookEngineTest, TwoTiesAsTheCpuDoes) {
-    // A double ponytail (the left half of the head to a tie on the left, the right half to one on the
-    // right: each Tie's affect a mask by the roots, read per strand), and a second Tie down the
-    // first's tail (it starts where the first's tail does: the tail the first writes on the GPU when
-    // both run). From the second, from the first, from Interpolate; drags of each one's radius.
-    const std::string left = tieParams(R"(, "spread": 10.0, "affect": {"expression": "x < 0 ? 1 : 0"})", "[-5.0, 1.0, -1.5]");
-    const std::string right = tieParams(R"(, "spread": 10.0, "twist": 0.2, "affect": {"expression": "x < 0 ? 0 : 1"})", "[5.0, 1.0, -1.5]");
-    const std::string first = tieParams(R"(, "spread": 5.0)"), second = tieParams(R"(, "spread": 20.0)", "[0.0, 1.0, -6.0]", 0.3);
-    const std::pair<const char*, std::string> graphs[] = {{"a double ponytail", withoutClearance(chainGraph({{"Tie", left}, {"Tie", right}}))},
-                                                          {"a second Tie down the tail", withoutClearance(chainGraph({{"Tie", first}, {"Tie", second}}))}};
-    for (const auto& [name, graph] : graphs) {
-        SCOPED_TRACE(name);
-        GroomSession session(groom(graph));
-        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-        EXPECT_GT(movedBy(session, "n0"), 5000u);
-        EXPECT_GT(movedBy(session, "n1"), 2000u);
-        const Prepared p = prepare(session, {}, "n0");
-        ASSERT_EQ(p.chain.stages.size(), 3u);
-        ASSERT_TRUE(p.run.inputs[1].tie);
-        EXPECT_EQ(p.run.inputs[1].tie->channelFrom, 0u);  // (the first's tail, written on the GPU)
-        expectTieClose(runAndCompare(session, {}, session, "n1"));
-        expectTieClose(runAndCompare(session, {}, session, "n0"));
-        expectTieClose(runAndCompare(session, {}, session, "interpolate"));
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n1", {{"radius", 0.4}}}}), withParam(graph, "n1", "radius", 0.4));
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n0", {{"radius", 0.7}}}}), withParam(graph, "n0", "radius", 0.7));
-    }
-}
-
-TEST_P(LookEngineTest, TieAtAHundredThousandStrands) {
-    // About 100k strands: the GPU's Tie against the CPU's, and its time on the GPU (the median of 5
-    // runs after one; noisy where something else uses the GPU).
-    LookGraph g;
-    g.scatter = R"("params": {"density": 500.0, "length": 3.0})";
-    g.after = "Tie";
-    g.afterParams = tieParams();
-    GroomSession session(groom(g.json()));
-    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-    EXPECT_GT(session.last().strands->strandCount(), 90000u);
-    expectTieClose(runAndCompare(session, {}, session, "after"), false);
-    const Prepared p = prepare(session, {}, "after");
-    auto engine = backend_->engine();
-    engine->setBase(p.base, session.last().scalp.get());
-    engine->run(p.run, true);
-    engine->times(true);
-    std::vector<double> ms;
-    for (int run = 0; run < 5; ++run) {
-        engine->run(p.run, true);
-        ms.push_back(engine->times(true).tieMs);
-    }
-    std::sort(ms.begin(), ms.end());
-    std::printf("[ %-8s ] Tie at %zu strands, %zu points: %.3f ms on the GPU (median of 5)\n", GetParam().c_str(), p.base->strandCount(),
-                p.base->pointCount(), ms[2]);
-}
-
-TEST(GpuPreview, CurlAddingPointsIsTheCpus) {
-    // A Curl whose strands have too few points a turn for its tolerance adds points (curl_op.cpp):
-    // its result is laid out unlike its input, which a run keeps, so the GPU's run starts after it.
-    // At the points it was given (tolerance 0) it runs on the GPU.
-    for (const double tolerance : {0.3, 0.0}) {
-        LookGraph g;
-        g.curl = R"("params": {"radius": 0.1, "frequency": 3.0, "tolerance": )" + std::to_string(tolerance) + "}";  // 1.7 points a turn
-        GroomSession session(groom(g.json()));
-        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-        const GraphDocument& doc = *session.viewDocument();
-        const NodeId curl = doc.nodesByName.at("curl");
-        const StrandsPtr in = valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("noise")));
-        const StrandsPtr out = valueAs<StrandsPtr>(doc.graph.cachedValue(curl));
-        ASSERT_TRUE(in && out);
-        std::string why;
-        gpu::LookChain chain;
-        ASSERT_TRUE(gpu::findLookChain(doc, &chain, &why)) << why;
-        if (tolerance > 0.0) {
-            EXPECT_GT(out->pointCount(), in->pointCount() * 2);
-            EXPECT_EQ(chain.base, curl);
-            EXPECT_EQ(chain.node(gpu::StageKind::Curl), 0u);
-            EXPECT_NE(chain.node(gpu::StageKind::Width), 0u);
-        } else {
-            EXPECT_EQ(out->pointCount(), in->pointCount());
-            EXPECT_EQ(chain.node(gpu::StageKind::Curl), curl);
-        }
-    }
 }
 
 // ---- Wet -----------------------------------------------------------------------------------------
@@ -6130,7 +5904,7 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
         graphs.push_back({preset, presetGraph(preset), ""});
     }
     // The stages the presets above leave out: the shapers, the neighbours' shapers, the hair grids,
-    // Tie, Wet, Blend, Jiggle, MeshCut.
+    // Wet, Blend, Jiggle, MeshCut.
     const std::pair<const char*, const char*> shapers[] = {
         {"Bend", R"("params": {"angle": 35.0, "randomness": 0.3})"},
         {"Direction", R"("params": {"inclination": 30.0, "strength": 0.7, "roll": 20.0})"},
@@ -6148,7 +5922,6 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     graphs.push_back({"Clump strandStrengthRandom",
                       withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.8, "strandStrengthRandom": 0.6, "strengthRandom": 0.3})"}})), ""});
     graphs.push_back({"Static", withoutClearance(chainGraph({{"Static", ""}, {"Noise", R"("params": {"amplitude": 0.1})"}})), ""});
-    graphs.push_back({"Tie", withoutClearance(chainGraph({{"Tie", R"("params": {"radius": 0.4})"}})), ""});
     graphs.push_back({"Wet", withoutClearance(chainGraph({{"Wet", wetParams(3, 0.6)}})), ""});
     graphs.push_back({"Blend", blendGraph(R"("params": {"mix": 0.6, "profile": [[0, 0.2], [1, 1]]})"), ""});
     graphs.push_back({"Jiggle", jiggleGraph(), ""});
@@ -6213,6 +5986,37 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     }
     std::printf("[ CPU bits ] floats differing in all: %zu\n", differing);
     EXPECT_EQ(differing, 0u);
+}
+
+TEST(CpuEngine, CollideOverADeformedScalpGivesItsCppsBits) {
+    // Collide over a scalp deformed away from its rest pose (each strand walked through the rest
+    // pose's field from its cursor, the deformed mesh asked where that cannot tell: collideRestPush
+    // through the host): on the CPU engine against its own C++, bit for bit; hard, soft, smoothed.
+    for (const char* params : {R"("params": {"offset": 0.12})", R"("params": {"offset": 0.12, "softness": 0.1})",
+                               R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3})"}) {
+        SCOPED_TRACE(params);
+        const GroomData data = deformedGroom(withoutClearance(chainGraph({{"Collide", params}})));
+        auto collided = [&](GroomSession& session) {
+            if (!session.evaluate(ViewRequest{}).strands) return StrandsPtr();
+            const GraphDocument& doc = *session.viewDocument();
+            return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("n0")));
+        };
+        GroomSession on(data);
+        const StrandsPtr engine = collided(on);
+        gpu::setCpuEngineOn(false);
+        GroomSession off(data);
+        const StrandsPtr cpp = collided(off);
+        gpu::setCpuEngineOn(true);
+        ASSERT_TRUE(engine && cpp);
+        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
+        EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(engine->contentHash(), cpp->contentHash());
+        // (Something to push: strands that the deformed scalp moved.)
+        NodeId source = 0;
+        const GraphDocument& doc = *off.viewDocument();
+        ASSERT_TRUE(doc.graph.inputSource(doc.nodesByName.at("n0"), 0, &source));
+        EXPECT_NE(valueAs<StrandsPtr>(doc.graph.cachedValue(source))->contentHash(), cpp->contentHash()) << "pushes nothing";
+    }
 }
 
 TEST(CpuEngine, InterpolateOverADeformedScalpGivesItsCppsBits) {
@@ -6324,9 +6128,6 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"SelfCollide", R"("params": {"packing": 0.01})"},
         {"Static", R"("params": {"strength": 0.5})"},
         {"Static", R"("params": {"strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "randomness": 0.8, "profile": [[0, 0.2], [1, 1]]})"},
-        {"Tie", tieParams()},
-        {"Tie", tieParams(R"(, "spread": 30.0, "tightness": 0.4, "ease": 0.0, "tailChannel": "")", "[1.0, 2.0, -5.0]", 0.9)},
-        {"Tie", tieParams(R"(, "direction": [0.0, -1.0, -0.3], "twist": -0.2, "ease": 1.0)")},
     };
     std::size_t differing = 0, compared = 0;
     for (const Case& c : cases) {
@@ -6378,8 +6179,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                                                              {"Noise", gpu::StageKind::Noise},         {"Collide", gpu::StageKind::Collide},
                                                              {"Clump", gpu::StageKind::Clump},         {"Interpolate", gpu::StageKind::Interpolate},
                                                              {"Smooth", gpu::StageKind::Smooth},       {"Curl", gpu::StageKind::Curl},
-                                                             {"SelfCollide", gpu::StageKind::SelfCollide}, {"Static", gpu::StageKind::Static},
-                                                             {"Tie", gpu::StageKind::Tie}};
+                                                             {"SelfCollide", gpu::StageKind::SelfCollide}, {"Static", gpu::StageKind::Static}};
         const gpu::StageKind kind = kinds.at(c.type);
         gpu::StageInputs stageInputs;
         std::string whyNot;
@@ -6434,9 +6234,6 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
             grid->layout = layout;
             stageInputs.grid = grid;
         }
-        if (kind == gpu::StageKind::Tie) {
-            stageInputs.tie = gpu::tieInputs(valueAs<StrandsPtr>(inputs[0]), session.last().scalp, op.params().getString("tailChannel"));
-        }
         if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
         // Its C++ (the engine off), the stage on the engine, the operator as it runs now.
         StrandsPtr made[3];
@@ -6487,12 +6284,6 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
             for (std::size_t i = 0; i < made[0]->widths().size(); ++i) {
                 bits += std::memcmp(&made[0]->widths()[i], &made[m]->widths()[i], sizeof(float)) != 0;
             }
-            // (Tie's tail channel as its C++ writes it.)
-            if (kind == gpu::StageKind::Tie && !op.params().getString("tailChannel").empty()) {
-                const std::vector<float>* want = made[0]->pointChannel(op.params().getString("tailChannel"));
-                const std::vector<float>* got = made[m]->pointChannel(op.params().getString("tailChannel"));
-                EXPECT_TRUE(want && got && std::memcmp(want->data(), got->data(), want->size() * 4) == 0) << "the tail channel";
-            }
             // (Flyaway's strays flagged as its C++ flags them.)
             if (m == 2 && made[0]->strandChannel("flyaway")) {
                 const std::vector<float>* got = made[m]->strandChannel("flyaway");
@@ -6531,7 +6322,6 @@ TEST(CpuEngine, SpeedAgainstTheOperators) {
     graphs.push_back({"Collide", withoutClearance(chainGraph({{"Collide", R"("params": {"offset": 0.12})"}}, true, true))});
     graphs.push_back({"SelfCollide", withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.6})"}, {"SelfCollide", ""}}))});
     graphs.push_back({"Static", withoutClearance(chainGraph({{"Static", R"("params": {"strength": 0.5})"}}))});
-    graphs.push_back({"Tie", withoutClearance(chainGraph({{"Tie", tieParams()}}))});
     graphs.push_back({"RestoreLength", withReference(neighbourGraph("RestoreLength", R"("params": {"mode": "segments"})"), "n1", "interpolate")});
     graphs.push_back({"MeshCut", meshCutGraph(R"("params": {"offset": 0.02})"),
                       [](const std::string& j) { return meshCutGroom(j, Vec3f(0.0f, 4.6f, 0.0f), 1.6f); }});

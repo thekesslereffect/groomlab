@@ -107,7 +107,7 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   type. The categories follow the order a groom is built in (the Add Node menu, the same in the app
   and Blender, from the core's `node_catalog.h` and each node's own registration): Sources (Scalp, Guides, ColliderMesh, ImportCurves,
   Linked Groom), Grow (Scatter, Interpolate, Cull), Shape (Length, Width, Resample, Direction, Flow,
-  Part, Smooth, Mirror, Restore Length, Sculpt), Deform (Bend, Transform, Tie, Blend Neighbors,
+  Part, Smooth, Mirror, Restore Length, Sculpt), Deform (Bend, Transform, Blend Neighbors,
   Gravity, Displace), Collide (Collide, Self Collide, Mesh Cut), Look (Clump, Twist, Braid, Noise,
   Curl, Flyaway, Static, Tangle, Wet, Instance, Scales), Motion (Wind, Jiggle, Simulate), Feathers
   (Propagate, Plume, Split), Color (Hair Color, Bands, Feather Color, Render Data), Convert (To Guides,

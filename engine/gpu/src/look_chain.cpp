@@ -341,9 +341,7 @@ namespace {
 
 // ---- Affect masks ----
 // Every stage restricted by its affect is mixed back by it one way, after it (StageParams::masked,
-// look.slang AffectCS), but Tie: its affect also picks which strands it ties and mixes its tail
-// channel, so its kernels read it themselves (StageParams flag[1-2]).
-bool mixesByItsAffect(StageKind kind) { return kind == StageKind::Tie; }
+// look.slang AffectCS).
 // The shapers reading their neighbours or a reference.
 bool readsNeighbours(StageKind kind) {
     return kind == StageKind::Smooth || kind == StageKind::RestoreLength || kind == StageKind::BlendNeighbors || kind == StageKind::Tangle ||
@@ -360,13 +358,12 @@ Role roleOf(const GraphDocument& doc, NodeId id, StageKind* kind, std::string* w
     // Off in the viewport (bypassed, or set to run in renders only): it hands its input on.
     const bool off = graph.bypassedFor(id, true);
     // Restricted by its affect (a mask, or a field plugged into it): a stage all the same, its result
-    // mixed back by it (StageParams::masked; mixesByItsAffect: its own kernels). Of none: its input
+    // mixed back by it (StageParams::masked). Of none: its input
     // handed on.
     const AffectKind affect = graph.node(id).params().has(kAffectParam) ? affectOf(graph.node(id)) : AffectKind::All;
     const bool affectPlugged = affectPluggedIn(graph, id);
-    // (A Tie reads its mask itself: which strands it ties, the result mixed by it per strand; the
-    // shapers reading their neighbours or a reference mix their results by it as the graph does; any
-    // other stage is mixed after it: AffectCS.)
+    // (The shapers reading their neighbours or a reference mix their results by it as the graph does;
+    // any other stage is mixed after it: AffectCS.)
     // A RestoreLength with nothing to restore from hands its input on (RestoreLengthOp).
     if (type == op::kRestoreLength && graph.node(id).params().getString("mode") != "even" && !graph.inputSource(id, 1, nullptr)) {
         return Role::PassOn;
@@ -963,20 +960,6 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                 s.tabled = true;
                 break;
             }
-            case StageKind::Tie: {
-                // TieOp::evaluate's numbers (look_stage_params.cpp, its vectors dragged or its own).
-                if (!readStageParams(stage.kind, reader, &s, why)) return false;
-                auto bits = [](int* to, float v) { std::memcpy(to, &v, sizeof(float)); };  // the kernels read them as floats
-                // Its affect a mask (a map, a field plugged in, a number under 1): which strands it
-                // ties (field 0, per strand) and how much of its result each keeps.
-                const bool masked = maskedNode(graph, id) || params.field(kAffectParam) != nullptr ||
-                                    overridden(doc, overrides, id, kAffectParam) != nullptr;
-                float affect = 1.0f;
-                if (masked && !mappable(kAffectParam, &affect)) return false;
-                bits(&s.flag[1], affect);
-                s.flag[2] = masked ? 1 : 0;
-                break;
-            }
             // ---- The shapers reading their neighbours or a reference ----
             case StageKind::RestoreLength: {
                 if (!readStageParams(stage.kind, reader, &s, why)) return false;
@@ -1042,10 +1025,8 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
             }
         }
         // ---- Affect masks ----
-        // Restricted by its affect (or one dragged): its result mixed back by it after its last stage
-        // (but Tie's: mixesByItsAffect).
-        if (!mixesByItsAffect(stage.kind) &&
-            (maskedNode(graph, id) || params.field(kAffectParam) != nullptr || overridden(doc, overrides, id, kAffectParam))) {
+        // Restricted by its affect (or one dragged): its result mixed back by it after its last stage.
+        if (maskedNode(graph, id) || params.field(kAffectParam) != nullptr || overridden(doc, overrides, id, kAffectParam)) {
             if (!mappable(kAffectParam, &s.affect)) return false;
             s.masked = true;
             const StrandsPtr in = inputStrands(graph, id);
@@ -1176,9 +1157,7 @@ struct FieldRead {
     bool binding = false;                // a strand channel Interpolate blends from its binding
     bool layer = false;                  // a point channel Interpolate writes along the strands
     bool wet = false;                    // the wetness a Wet writes (a drag of it changes it)
-    bool tie = false;                    // the tail a Tie writes (on the GPU for a Tie after it, an affect mapped to it)
-    std::size_t tieStage = kNoStage;     // the last Tie writing it
-    bool otherUnknown = false;           // unknown for another reason than a Tie's tail
+    bool otherUnknown = false;           // unknown (a channel the GPU does not make)
 };
 FieldRead whatItReads(const Graph& graph, const LookChain& chain, std::size_t k, const ScalarField& top) {
     FieldRead r;
@@ -1208,13 +1187,6 @@ FieldRead whatItReads(const Graph& graph, const LookChain& chain, std::size_t k,
                 // Flyaway's strays' flags (the GPU draws the strays, not the flags), Blend's mix
                 // and its look's mixed channels: not made on the GPU.
                 r.unknown = r.otherUnknown = true;
-                continue;
-            }
-            if (point && chain.stages[j].kind == StageKind::Tie) {
-                // A Tie's tail (the GPU's run writes it for the Ties after it, and an affect mapped to it).
-                r.unknown = true;
-                r.tie = true;
-                r.tieStage = j;
                 continue;
             }
             if (point && chain.stages[j].level >= 0) {
@@ -1413,8 +1385,7 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
         const LookStage& stage = chain.stages[k];
         const NodeId id = stage.node;
         const StrandsPtr in = inputStrands(graph, id);
-        // (`tieChannel`: a Tie's tail it maps read on the GPU where the Tie writes it: an affect's.)
-        auto read = [&](const char* name, bool pointsAllowed, FieldValues* values, bool tieChannel = false) {
+        auto read = [&](const char* name, bool pointsAllowed, FieldValues* values) {
             const ParamSet params = evaluatedParams(graph, id);
             const bool mapped = ownMap(params, name) || params.field(name);
             if (!mapped) return true;
@@ -1449,19 +1420,6 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
                     *why = doc.nameOf(id) + "." + name + " reads the wetness a Wet before it writes (the CPU's)";
                     return false;
                 }
-                if (r.tie) {
-                    // An affect mapped to it alone (an attribute map, per point): read where the
-                    // Tie writes it on the GPU, remapped as the map remaps it.
-                    if (tieChannel && r.map && r.map->source == MapRef::Source::Attribute && !r.otherUnknown && !r.layer &&
-                        !r.binding && !r.influence && r.tieStage != kNoStage && values->mode == FieldValues::kPerPoint) {
-                        values->channelFrom = r.tieStage;
-                        values->low = r.map->min;
-                        values->high = r.map->max;
-                        return true;
-                    }
-                    *why = doc.nameOf(id) + "." + name + " reads the tail a Tie before it writes (the CPU's)";
-                    return false;
-                }
                 const bool known = !r.unknown && !r.layer;
                 // A Control plugged in: a number the host sets, the same everywhere.
                 values->fixed = (known && !r.positions && !r.influence && !r.binding) || pluggedControl(graph, id, name);
@@ -1480,8 +1438,8 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
         bool ok = true;
         // ---- Affect masks ----
         // A masked node's affect, at its first stage (a Wet's largest level), on what that takes, per
-        // strand or per point (a Tie mixes by its own: field 0).
-        if (!mixesByItsAffect(stage.kind) && (k == 0 || chain.stages[k - 1].node != id) && !read(kAffectParam, true, &f.stages[k].affect, true)) {
+        // strand or per point.
+        if ((k == 0 || chain.stages[k - 1].node != id) && !read(kAffectParam, true, &f.stages[k].affect)) {
             return false;
         }
         if (stage.level >= 0) continue;  // a Wet's level: its pull a number of its own
@@ -1515,15 +1473,6 @@ bool readLookFields(const GraphDocument& doc, const LookChain& chain, const Scal
             case StageKind::Collide: break;
             case StageKind::SelfCollide:
             case StageKind::Static: ok = read("strength", false, &v[0]); break;
-            case StageKind::Tie:
-                // Its affect: which strands it ties and how much each keeps of its result (the
-                // graph mixes it by the strand's value; one varying along the strands: the CPU's).
-                ok = read(kAffectParam, true, &v[0]);
-                if (ok && v[0].mode == FieldValues::kPerPoint) {
-                    *why = doc.nameOf(id) + "'s affect varies along its strands (the CPU's)";
-                    return false;
-                }
-                break;
             case StageKind::Bend: ok = read("angle", false, &v[0]); break;
             case StageKind::Direction: {
                 // The first two of its mapped params (readLookParams refuses a third).
@@ -1574,10 +1523,10 @@ bool lookFieldsHold(const GraphDocument& doc, const LookChain& chain, const Look
     for (std::size_t k = 0; k < chain.stages.size(); ++k) {
         const LookStage& stage = chain.stages[k];
         // Its mapped params, then its affect (i 2: read on what it takes, mixing what it made after:
-        // no point read after the ones before it moved; a Tie's tail read where the run writes it).
+        // no point read after the ones before it moved).
         for (int i = 0; i < 3; ++i) {
             const FieldValues& v = i < 2 ? fields.stages[k].field[i] : fields.stages[k].affect;
-            if (!v.mode || v.channelFrom != kNoStage) continue;
+            if (!v.mode) continue;
             std::string param = i < 2 ? kNames[static_cast<int>(stage.kind)][i] : kAffectParam;
             if (i < 2 && stage.kind == StageKind::Direction) {
                 const std::vector<std::string> mapped = directionMapped(evaluatedParams(doc.graph, stage.node));
@@ -1861,7 +1810,6 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
         reach_.clear();
         centers_.clear();
         grid_.clear();
-        tie_.clear();
         roots_.clear();
         twist_.clear();
         shaper_.clear();
@@ -2311,7 +2259,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
         }
         if (stage.kind == StageKind::Gravity || stage.kind == StageKind::Flyaway || stage.kind == StageKind::Collide ||
             stage.kind == StageKind::Wind || stage.kind == StageKind::SelfCollide || stage.kind == StageKind::Static ||
-            stage.kind == StageKind::Tie || stage.kind == StageKind::Bend || stage.kind == StageKind::Direction ||
+            stage.kind == StageKind::Bend || stage.kind == StageKind::Direction ||
             stage.kind == StageKind::Transform || stage.kind == StageKind::Jiggle || readsNeighbours(stage.kind)) {
             // How far from its root a point the node moves can go: the longest strand it took.
             const StrandsPtr in = inputStrands(graph, id);
@@ -2440,7 +2388,6 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             }
             out[k].collide = memo.inputs;
         }
-        if (stage.kind == StageKind::Tie && !readTie(doc, chain, k, groomScalp, scalpMesh, &out[k], why)) return false;
         // ---- The shapers working on each strand alone ----
         if (stage.kind == StageKind::Bend || stage.kind == StageKind::Direction || stage.kind == StageKind::Transform ||
             stage.kind == StageKind::Displace) {
@@ -2511,7 +2458,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
     return true;
 }
 
-// ---- What Tie takes ------------------------------------------------------------------------------
+// ---- The scalp's tables a walk down its mesh reads (Flow's closest points) ------------------------
 
 namespace {
 
@@ -2586,83 +2533,6 @@ MeshDistanceField::Tables weldedRings(const MeshDistanceField::Tables& tables, c
 
 }  // namespace
 
-bool LookInputs::readTie(const GraphDocument& doc, const LookChain& chain, std::size_t k, const ScalpMesh* groomScalp,
-                         const MeshPtr& scalpMesh, StageInputs* out, std::string* why) {
-    const Graph& graph = doc.graph;
-    const NodeId id = chain.stages[k].node;
-    const std::string name = doc.nameOf(id);
-    const StrandsPtr in = inputStrands(graph, id);
-    if (!in) {
-        *why = "not evaluated";
-        return false;
-    }
-    if (groomScalp && (!scalpMesh || scalpMesh.get() != groomScalp)) {
-        *why = name + ": the groom's scalp is not at hand";
-        return false;
-    }
-    // The scalp TieOp takes (the "scalp" external). Deformed away from its rest pose, its push
-    // asks the rest pose's field through each vertex's frame (RestPoseCollision): the CPU's.
-    const MeshPtr scalp = scalpMesh && scalpMesh->triangleCount() > 0 ? scalpMesh : nullptr;
-    if (scalp && scalp->hasRest() && scalp->restPoints() != scalp->points()) {
-        *why = name + ": its scalp is deformed away from its rest pose (the CPU's)";
-        return false;
-    }
-    const std::string channel = graph.node(id).params().getString("tailChannel");
-    TieMemo& memo = tie_[id];
-    if (memo.in != in || memo.scalp != scalp || memo.channel != channel || !memo.inputs) {
-        auto made = tieInputs(in, scalp, channel);
-        if (scalp) {
-            // The field it pushes through as tables (CollisionSurface::of: collisionField).
-            if (made->clearance > 0.0f && (memo.tablesScalp != scalp || !memo.tables)) {
-                const DistanceFieldPtr field = collisionField(scalp, made->clearance, made->searchRadius);
-                memo.tables = field ? field->tables(made->clearance, made->searchRadius) : nullptr;
-                if (memo.tables) memo.tables = weldedRings(memo.tables, *scalp);
-                memo.tablesScalp = scalp;
-            }
-            if (made->clearance > 0.0f) made->tables = memo.tables;
-            // The routes' closest points are found down the mesh the tables hold.
-            if (!made->tables) {
-                *why = name + ": its scalp has no field the GPU can read (too big for its grid: the CPU's)";
-                return false;
-            }
-        }
-        memo.in = in;
-        memo.scalp = scalp;
-        memo.channel = channel;
-        memo.inputs = std::move(made);
-    }
-    // The tail channel it takes: an earlier Tie of the run writing it (its GPU's), else as the
-    // strands it took carry it; another node of the run writing it: the CPU's.
-    std::size_t from = kNoStage;
-    if (!channel.empty()) {
-        for (std::size_t j = 0; j < k; ++j) {
-            const NodeId jd = chain.stages[j].node;
-            const StrandsPtr jin = inputStrands(graph, jd), jout = cachedStrands(graph, jd);
-            if (!jin || !jout) {
-                *why = "not evaluated";
-                return false;
-            }
-            if (jout->pointChannel(channel) == jin->pointChannel(channel)) continue;
-            if (chain.stages[j].kind != StageKind::Tie || graph.node(jd).params().getString("tailChannel") != channel) {
-                *why = name + " reads the '" + channel + "' channel " + doc.nameOf(jd) + " before it writes (the CPU's)";
-                return false;
-            }
-            from = j;
-        }
-        if (from != kNoStage && in->pointChannel(channel) != stageResult(graph, chain, from)->pointChannel(channel)) {
-            *why = name + " reads a '" + channel + "' channel a node after " + doc.nameOf(chain.stages[from].node) + " writes (the CPU's)";
-            return false;
-        }
-    }
-    if (from == memo.inputs->channelFrom) {
-        out->tie = memo.inputs;
-    } else {
-        auto with = std::make_shared<TieInputs>(*memo.inputs);
-        with->channelFrom = from;
-        out->tie = std::move(with);
-    }
-    return true;
-}
 
 // ---- What the shapers working on each strand alone take ----------------------------------------
 
@@ -3015,8 +2885,8 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
                 *why = name + " keeps no flow for its result";
                 return false;
             }
-            // The scalp it traced the strands over (its "scalp" external, the groom's), as Tie
-            // finds closest points on it: still in its rest pose.
+            // The scalp it traced the strands over (its "scalp" external, the groom's): still in its
+            // rest pose.
             const ScalpMesh* traced = state.scalp && state.scalp->triangleCount() > 0 ? state.scalp : nullptr;
             if (traced && (!scalpMesh || scalpMesh.get() != traced)) {
                 *why = name + ": the scalp it lays its strands over is not at hand";
@@ -3035,8 +2905,8 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
             if (memo.in != in || memo.made != field || memo.tablesScalp != (traced ? scalpMesh : nullptr) || !memo.flow) {
                 std::shared_ptr<FlowInputs> made = flowInputs(*in, traced, state.flow);
                 if (traced) {
-                    // Tie's tables of this scalp (readTie: its box's size, the clearance and search
-                    // radius of its push): their mesh is what the closest points are found down.
+                    // The scalp's tables (at its box's size's clearance and search radius): their mesh
+                    // is what the closest points are found down.
                     if (memo.tablesScalp != scalpMesh || !memo.tables) {
                         Vec3f lo = traced->points().front(), hi = lo;
                         for (const Vec3f& q : traced->points()) {
@@ -3266,7 +3136,6 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
             case StageKind::Wind:
             case StageKind::SelfCollide:
             case StageKind::Static:
-            case StageKind::Tie:
             case StageKind::Smooth:
             case StageKind::RestoreLength:
             case StageKind::BlendNeighbors:
@@ -3274,7 +3143,7 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
             case StageKind::Flow:
             case StageKind::Jiggle: {
                 // Each segment turned (Part, Gravity, Wind, Static, Jiggle) or pushed and walked from the root
-                // (SelfCollide), or laid along a path from its start (Tie), its length kept: a point stays within its
+                // (SelfCollide), its length kept: a point stays within its
                 // strand's length of its root (the longest strand it took; after a running
                 // Interpolate, its guides' too). Collide keeps lengths from points it pushed out to
                 // its offset above its surfaces: within that of their boxes. Flyaway's strays carry

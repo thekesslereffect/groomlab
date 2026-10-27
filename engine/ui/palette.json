@@ -47,7 +47,7 @@
         {"id": "look", "label": "Give it a look", "tip": "Graph Editor: add Clump, Noise or Curl after Interpolate."}
       ],
       "lookTypes": ["Clump", "Noise", "Curl", "Flyaway", "Tangle", "Wet", "Twist", "Braid", "Gravity", "Displace",
-                    "HairColor", "Bend", "Direction", "Transform", "SelfCollide", "Static", "Tie"]
+                    "HairColor", "Bend", "Direction", "Transform", "SelfCollide", "Static"]
     },
     "texts": {
       "gestures": "Middle-drag: radius · Shift+middle-drag: strength · Shift+drag: smooth · Ctrl+drag: paint the selection (the rest frozen) · Ctrl+Shift+drag: lasso the selection · Ctrl+click: add the guides in the ring (on none: deselect and unfreeze all) · painting maps or Freeze, Ctrl: the opposite · with the GroomLab hotkey set: B / M + drag radius / strength, Page Up / Down the level, Alt+Shift+X symmetry",

@@ -176,8 +176,7 @@ TEST(PreviewInvariance, EveryPresetShowsTheRendersStrandsThinnedById) {
 // 100k strands (a core of a sixteenth): relaxed roots (randomness 0.6), a Clump's own centers and a Clump
 // centered on another Scatter's strands (centersFrom inputPoints: each axis a strand), a Twist and a
 // Curl by clump, BlendNeighbors, a Tangle, Resample by length, Bands' guards by length, a
-// SelfCollide (its grid of the core's hair), a Static (its charge, the core's), a Tie (its ring by the
-// core's farthest roots at each azimuth), an expression of
+// SelfCollide (its grid of the core's hair), a Static (its charge, the core's), an expression of
 // the longest strand, ToGuides as a Clump's centers, Merge's seam: every strand a preview shows is
 // the render's strand of that ID, bit for bit, and the shown ones are thinned by ID.
 TEST(PreviewInvariance, EveryNodeReadingOtherStrands) {
@@ -207,7 +206,6 @@ TEST(PreviewInvariance, EveryNodeReadingOtherStrands) {
         {"name": "bands", "type": "Bands", "params": {"guards": 0.4, "guardsBy": "longest"}},
         {"name": "selfCollide", "type": "SelfCollide", "params": {"packing": 0.05}},
         {"name": "static", "type": "Static", "params": {"strength": 0.8}},
-        {"name": "tie", "type": "Tie", "params": {"center": [0.0, 0.3, -1.3], "radius": 0.15, "twist": 0.5}},
         {"name": "scatterB", "type": "Scatter", "params": {"density": 6000.0, "seed": 3}},
         {"name": "interpB", "type": "Interpolate"},
         {"name": "centers", "type": "Scatter", "params": {"density": 600.0, "seed": 5}},
@@ -243,8 +241,7 @@ TEST(PreviewInvariance, EveryNodeReadingOtherStrands) {
         {"from": "toGuides", "to": "clumpC", "input": "centers"},
         {"from": "bands", "to": "selfCollide", "input": "strands"},
         {"from": "selfCollide", "to": "static", "input": "strands"},
-        {"from": "static", "to": "tie", "input": "strands"},
-        {"from": "tie", "to": "merge", "input": "a"},
+        {"from": "static", "to": "merge", "input": "a"},
         {"from": "clumpC", "to": "merge", "input": "b"},
         {"from": "merge", "to": "out", "input": "strands"}]})";
     auto evaluate = [&](float density) {

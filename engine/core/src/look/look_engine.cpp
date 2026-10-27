@@ -87,7 +87,6 @@ KernelSet kernelsOf(const LookRun& run) {
                     set |= bit(K::StaticReach) | bit(K::StaticMoments) | bit(K::StaticNode) | bit(K::StaticField) | bit(K::StaticPush);
                 }
                 break;
-            case StageKind::Tie: set |= bit(K::TieFrame) | bit(K::TieRoute) | bit(K::TieLay); break;
             case StageKind::Bend: set |= bit(K::Bend); break;
             case StageKind::Direction: set |= bit(K::Direction); break;
             case StageKind::Transform: set |= bit(K::Transform); break;
@@ -175,56 +174,6 @@ constexpr int kClearanceStamp = -5;  // a run's span kind: Interpolate's walk ke
 constexpr int kPointStrandsStamp = -6;  // ... each point's strand made (counted in the total alone)
 constexpr std::size_t kSameOffset = static_cast<std::size_t>(-1);  // a copy's source offset: its target's
 
-// ---- Tie -----------------------------------------------------------------------------------------
-
-constexpr std::size_t kTieSlots = 34;       // a strand's route's float4 slots (look.slang TIE_SLOTS)
-constexpr std::size_t kTieFrameWords = 96;  // the frame and the ring's bins (look.slang TIE_FRAME_*)
-// Tie's switches (look.slang TIE_*): the tail channel read, written, its affect a mask, a scalp
-// (routes over it), its field (the path pushed out of it).
-constexpr std::uint32_t kTieChannelIn = 1u, kTieWritesTail = 2u, kTieMasked = 4u, kTieScalp = 8u, kTiePush = 16u;
-
-// Tie's dispatches' constants (look.slang's Tie section): gValue radius, tightness, spread and
-// beside (clearancePush's: 4 clearances), gValue2 ease, twist, clearance and depth, gFlag its
-// switches, its affect's number's bits and the search radius's, gFlag2 center and the scalp's
-// size, gOctaveSeeds' first six words the direction and the scalp's center (bits).
-void tieConstants(const StageParams& p, const TieInputs* in, StageConstants* c) {
-    auto bits = [](float v) {
-        std::uint32_t b;
-        std::memcpy(&b, &v, 4);
-        return b;
-    };
-    const bool push = in && in->tables;
-    c->value[0] = p.value[0];
-    c->value[1] = p.value[1];
-    c->value[2] = p.value[2];
-    c->value[3] = push ? 4.0f * in->clearance : 0.0f;
-    c->value2[0] = p.value2[0];
-    c->value2[1] = p.value[3];
-    c->value2[2] = in ? in->clearance : 0.0f;
-    c->value2[3] = in ? in->depth : 0.0f;
-    std::uint32_t flags = 0;
-    if (in && (in->channelFrom != kNoStage || in->channel)) flags |= kTieChannelIn;
-    if (p.flag[0] != 0) flags |= kTieWritesTail;
-    if (p.flag[2] != 0) flags |= kTieMasked;
-    if (in && in->hasScalp) flags |= kTieScalp;
-    if (push) flags |= kTiePush;
-    c->flag[0] = flags;
-    c->flag[1] = static_cast<std::uint32_t>(p.flag[1]);
-    c->flag[2] = bits(in ? in->searchRadius : 0.0f);
-    c->flag[3] = 0;
-    for (int i = 0; i < 3; ++i) c->flag2[i] = static_cast<std::uint32_t>(p.flag2[i]);
-    c->flag2[3] = bits(in ? in->scalpSize : 0.0f);
-    for (int i = 0; i < 3; ++i) c->octaveSeeds[i] = bits(p.value2[1 + i]);
-    const Vec3f center = in ? in->scalpCenter : Vec3f{};
-    c->octaveSeeds[3] = bits(center.x);
-    c->octaveSeeds[4] = bits(center.y);
-    c->octaveSeeds[5] = bits(center.z);
-    for (int i = 6; i < 16; ++i) c->octaveSeeds[i] = 0;
-    // The CPU engine's: its scalp's queries (look.slang tieHost, the address in two words).
-    const auto host = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(in ? in->host.get() : nullptr));
-    c->octaveSeeds[6] = static_cast<std::uint32_t>(host);
-    c->octaveSeeds[7] = static_cast<std::uint32_t>(host >> 32);
-}
 
 }  // namespace
 
@@ -624,8 +573,7 @@ void LookEngine::putStrandData(const LookRun& run, bool frames) {
                 }
                 case StageKind::Gravity:
                 case StageKind::Collide:
-                case StageKind::Blend:
-                case StageKind::Tie: break;
+                case StageKind::Blend: break;
                 case StageKind::Displace:
                 case StageKind::Twist: break;
                 // (The shapers' numbers: their inputs, StageInputs.)
@@ -669,8 +617,7 @@ void LookEngine::putFields(const LookFields& fields, const std::vector<StagePara
             if (f.values.size() != want) throw std::runtime_error("GPU preview: mapped values read from other strands than the base");
             layout[(k * kFieldSlots + i) * 2] = static_cast<std::uint32_t>(f.mode);
             layout[(k * kFieldSlots + i) * 2 + 1] = static_cast<std::uint32_t>(values.size());
-            // (A Tie's tail: read where the Tie writes it, AffectCS.)
-            if (f.channelFrom == kNoStage) values.insert(values.end(), f.values.begin(), f.values.end());
+            values.insert(values.end(), f.values.begin(), f.values.end());
             if (const FieldProgram* p = f.program.get()) {
                 if (f.mode != FieldValues::kPerStrand || p->statics.size() != strands * p->slotCount) {
                     throw std::runtime_error("GPU preview: a mapped param's program read from other strands than the base");
@@ -1160,6 +1107,9 @@ void LookEngine::putStageInputs(const LookRun& run) {
             // aux[0] (look.slang CollideCS), once per surface.
             const CollideInputs* data = in ? in->collide.get() : nullptr;
             if (!data || data->tables.size() > 2) throw std::runtime_error("GPU preview: Collide's fields missing");
+            if (data->rests && (!sharesBase() || !data->host || !data->host->roots || data->host->roots->size() != stageN)) {
+                throw std::runtime_error("GPU preview: Collide's deformed surfaces are the CPU engine's, with each strand's root");
+            }
             for (const MeshDistanceField::Tables& t : data->tables) {
                 if (!t || t->empty()) throw std::runtime_error("GPU preview: Collide's fields missing");
             }
@@ -1231,45 +1181,6 @@ void LookEngine::putStageInputs(const LookRun& run) {
             if (cells > (std::uint64_t{1} << 26) || sumBytes > (std::uint64_t{1} << 30)) {
                 throw std::runtime_error("GPU preview: the hair grid is too large for the GPU");
             }
-        } else if (stages[k].stage.kind == StageKind::Tie) {
-            // Tie (look.slang TieFrameCS, TieRouteCS, TieLayCS): aux 0 the scalp's field's tables;
-            // 1 each strand's seed face, then the core strands (from word aux[1], aux[2] of them);
-            // 5 the tail channel as the strands it takes carry it (when no Tie of the run writes it).
-            const TieInputs* data = in ? in->tie.get() : nullptr;
-            if (!data || !data->seeds || data->seeds->size() != stageN || !data->core) {
-                throw std::runtime_error("GPU preview: Tie's inputs are for other strands");
-            }
-            if (data->channel && data->channel->size() != stageP) throw std::runtime_error("GPU preview: Tie's channel is for other strands");
-            if (data->channelFrom != kNoStage && (data->channelFrom >= k || stages[data->channelFrom].stage.kind != StageKind::Tie)) {
-                throw std::runtime_error("GPU preview: Tie's channel from a node that is no Tie before it");
-            }
-            if (held.a != data->tables.get() || !has(auxBuffer(k, 0))) {
-                const std::uint32_t none = 0;
-                if (data->tables) {
-                    write(auxBuffer(k, 0), data->tables->data(), data->tables->size() * 4, false);
-                    runUploadMegabytes_ += static_cast<double>(data->tables->size() * 4) / 1e6;
-                } else {
-                    write(auxBuffer(k, 0), &none, 4, false);
-                }
-                held.a = data->tables.get();
-            }
-            if (held.b != data->seeds.get() || held.c != data->core.get()) {
-                std::vector<std::uint32_t> words(*data->seeds);
-                words.insert(words.end(), data->core->begin(), data->core->end());
-                if (words.empty()) words.push_back(0u);
-                write(auxBuffer(k, 1), words.data(), words.size() * 4, false);
-                held.b = data->seeds.get();
-                held.c = data->core.get();
-                held.aux[1] = static_cast<std::uint32_t>(stageN);
-                held.aux[2] = static_cast<std::uint32_t>(data->core->size());
-                runUploadMegabytes_ += static_cast<double>(words.size() * 4) / 1e6;
-            }
-            if (data->channelFrom == kNoStage && data->channel && held.d != data->channel.get()) {
-                write(auxBuffer(k, 5), data->channel->data(), data->channel->size() * 4, true);  // (read as a writable view)
-                held.d = data->channel.get();
-                runUploadMegabytes_ += static_cast<double>(data->channel->size() * 4) / 1e6;
-            }
-            held.keep = in->tie;  // (what the pointers compared above are of, alive till the next run compares them)
         } else {
             putShaperInputs(k, stages[k], in);
         }
@@ -1720,7 +1631,6 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             const ClumpInputs* in = k < r.inputs.size() ? r.inputs[k].clump.get() : nullptr;
             c.flag[3] = in ? static_cast<std::uint32_t>(in->centers) : 0u;  // (its root normals follow its frames)
         }
-        if (p.stage.kind == StageKind::Tie) tieConstants(p, k < r.inputs.size() ? r.inputs[k].tie.get() : nullptr, &c);
         if (p.stage.kind == StageKind::Transform) std::memcpy(c.octaveSeeds, p.more, sizeof c.octaveSeeds);  // (look.slang gMore)
         return c;
     };
@@ -1999,7 +1909,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     for (std::size_t k = 0; k < stages.size(); ++k) {
         firstOfNode[k] = k > 0 && stages[k - 1].stage.node == stages[k].stage.node ? firstOfNode[k - 1] : k;
         const std::size_t from = stages[firstOfNode[k]].stage.from;
-        if (stages[k].masked && stages[k].stage.kind != StageKind::Tie && lastOfNode(k) && from != kNoStage) {
+        if (stages[k].masked && lastOfNode(k) && from != kNoStage) {
             lastTaker[from] = std::max(lastTaker[from], k);
         }
     }
@@ -2017,15 +1927,14 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     // ---- Affect masks ----
     // Stage k's node's result (its points in `to`; a Width's widths in kWidths, `widthsIn` those it
     // took) mixed back toward what its first stage took by its affect (look.slang AffectCS): the
-    // field the node's first stage holds (or a Tie's tail where the run writes it), times its number.
+    // field the node's first stage holds, times its number.
     // Its time the node's: the stamp closing it moves after the mix.
     auto mixAffect = [&](std::size_t k, int to, int widthsIn) {
         const StageParams& p = stages[k];
-        if (!p.masked || p.stage.kind == StageKind::Tie || !lastOfNode(k)) return;
+        if (!p.masked || !lastOfNode(k)) return;
         const bool width = p.stage.kind == StageKind::Width;
         if (width && !p.mixWidths) return;  // (strands without widths: the CPU keeps the Width's)
         const std::size_t first = firstOfNode[k];
-        const FieldValues* affect = first < r.fields.stages.size() ? &r.fields.stages[first].affect : nullptr;
         StageConstants c{};
         c.strandCount = static_cast<std::uint32_t>(stageStrands(p));
         c.uniformCount = static_cast<std::uint32_t>(uniformCount_);
@@ -2036,15 +1945,6 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         c.field[1] = at + 1 < fieldLayout_.size() ? fieldLayout_[at + 1] : 0u;
         Binding b;
         b.in = taken(stages[first].stage.from);
-        if (affect && affect->channelFrom != kNoStage) {
-            if (affect->channelFrom >= k || stages[affect->channelFrom].stage.kind != StageKind::Tie) {
-                throw std::runtime_error("GPU preview: an affect read from a node that is no Tie before it");
-            }
-            c.flag[0] = 1u;
-            c.value[1] = affect->low;
-            c.value[2] = affect->high;
-            b.aux[0] = auxBuffer(affect->channelFrom, 4);
-        }
         if (width) {
             c.flag[1] = 1u;
             b.aux[1] = widthsIn;
@@ -2183,55 +2083,6 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             resultOf[k] = current = to;
             continue;
         }
-        if (p.stage.kind == StageKind::Tie) {
-            // Its frame and ring's bins (one group), each strand's route over the scalp, then each
-            // strand laid along its path (look.slang TieFrameCS, TieRouteCS, TieLayCS). Aux 2: the
-            // frame; 3: the routes; 4: the tail it writes (a Tie after it reads it there).
-            if (k >= r.inputs.size() || !r.inputs[k].tie) throw std::runtime_error("GPU preview: Tie's inputs missing");
-            const TieInputs& tie = *r.inputs[k].tie;
-            const int channelIn = tie.channelFrom != kNoStage ? auxBuffer(tie.channelFrom, 4) : tie.channel ? auxBuffer(k, 5) : -1;
-            // Its tail written where a Tie after it in the run reads it (nothing else here does:
-            // the drawing reads none; a stage mapping a param to it is the CPU's).
-            bool read = false;
-            for (std::size_t j = k + 1; j < stages.size(); ++j) {
-                read = read || (stages[j].stage.kind == StageKind::Tie && j < r.inputs.size() && r.inputs[j].tie &&
-                                r.inputs[j].tie->channelFrom == k);
-                read = read || (j < r.fields.stages.size() && r.fields.stages[j].affect.channelFrom == k);  // (an affect mapped to it)
-            }
-            const bool writes = p.flag[0] != 0 && (read || r.tailsOut);
-            if (!writes) c.flag[0] &= ~kTieWritesTail;
-            allocate(auxBuffer(k, 2), kTieFrameWords * 4);
-            allocate(auxBuffer(k, 3), std::max<std::size_t>(n * kTieSlots * 16, 16));
-            if (writes) allocate(auxBuffer(k, 4), std::max<std::size_t>(pointCount_ * 4, 4));
-            Binding frame;
-            frame.in = input;
-            frame.aux[0] = auxBuffer(k, 1);
-            frame.aux[1] = channelIn;
-            frame.out[0] = auxBuffer(k, 2);
-            slots.push_back(c);
-            steps.push_back({Kernel::TieFrame, frame, 1, false, -3});
-            Binding route;
-            route.in = input;
-            route.aux[0] = auxBuffer(k, 1);
-            route.aux[1] = auxBuffer(k, 2);
-            route.aux[2] = auxBuffer(k, 0);
-            route.out[0] = auxBuffer(k, 3);
-            route.out[1] = channelIn;  // (read alone)
-            slots.push_back(c);
-            steps.push_back({Kernel::TieRoute, route, strandGroups, false, -3});
-            Binding lay;
-            lay.in = input;
-            lay.aux[0] = auxBuffer(k, 3);
-            lay.aux[1] = auxBuffer(k, 2);
-            lay.aux[2] = auxBuffer(k, 0);
-            lay.out[0] = to;
-            lay.out[1] = writes ? auxBuffer(k, 4) : -1;
-            lay.out[2] = channelIn;  // (read alone)
-            slots.push_back(c);
-            steps.push_back({Kernel::TieLay, lay, strandGroups, false, static_cast<int>(StageKind::Tie)});
-            resultOf[k] = current = to;
-            continue;
-        }
         Binding b;
         b.in = input;
         b.out[0] = to;
@@ -2319,6 +2170,13 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             case StageKind::Collide:
                 kernel = Kernel::Collide;
                 c.flag[2] = r.inputs[k].collide ? r.inputs[k].collide->colliders : 0u;  // (look.slang collideWalk)
+                if (const CollideInputs* in = r.inputs[k].collide.get(); in && in->rests) {
+                    // Deformed surfaces (a bit each) asked through the host, its address in flag2.zw.
+                    c.flag[3] = in->rests;
+                    const auto host = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(in->host.get()));
+                    c.flag2[2] = static_cast<std::uint32_t>(host);
+                    c.flag2[3] = static_cast<std::uint32_t>(host >> 32);
+                }
                 if (p.value2[1] > 0.0f) {  // smoothing: whether the collider moved each strand, for the second dispatch
                     b.out[1] = auxBuffer(k, 1);
                     allocate(b.out[1], std::max<std::size_t>(n * 4, 4));
@@ -2389,7 +2247,6 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             case StageKind::Width:
             case StageKind::SelfCollide:
             case StageKind::Static:
-            case StageKind::Tie: break;  // (made above)
             case StageKind::Smooth:
             case StageKind::RestoreLength:
             case StageKind::BlendNeighbors:
@@ -2413,7 +2270,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         slots.push_back(c);
         // Collide smoothing (value2 1): a second dispatch on the first's points (look.slang CollideCS,
         // flag 1), the stage's time stamped after it.
-        const bool collideTwice = kernel == Kernel::Collide && p.value2[1] > 0.0f;
+        const bool collideTwice = kernel == Kernel::Collide && p.value2[1] > 0.0f && !sharesBase();  // (the CPU: one, look.slang CollideCS)
         steps.push_back({kernel, b, groups, false, collideTwice ? -3 : static_cast<int>(p.stage.kind)});
         if (collideTwice) {
             StageConstants second = c;
@@ -2635,7 +2492,6 @@ GpuTimes LookEngine::times(bool wait) {
             case static_cast<int>(StageKind::Blend): g.blendMs += t; break;
             case static_cast<int>(StageKind::SelfCollide): g.selfCollideMs += t; break;
             case static_cast<int>(StageKind::Static): g.staticMs += t; break;
-            case static_cast<int>(StageKind::Tie): g.tieMs += t; break;
             case static_cast<int>(StageKind::Bend): g.bendMs += t; break;
             case static_cast<int>(StageKind::Direction): g.directionMs += t; break;
             case static_cast<int>(StageKind::Transform): g.transformMs += t; break;
@@ -2679,7 +2535,6 @@ GpuTimes LookEngine::times(bool wait) {
         g.blendMs += c.blendMs;
         g.selfCollideMs += c.selfCollideMs;
         g.staticMs += c.staticMs;
-        g.tieMs += c.tieMs;
         g.bendMs += c.bendMs;
         g.directionMs += c.directionMs;
         g.transformMs += c.transformMs;
@@ -2697,16 +2552,6 @@ GpuTimes LookEngine::times(bool wait) {
         g.totalMs += c.totalMs;
     }
     return times_ = g;
-}
-
-std::vector<float> LookEngine::readTail(std::size_t k) {
-    std::vector<float> out;
-    const int id = auxBuffer(k, 4);
-    if (!has(id)) return out;
-    const std::vector<std::uint8_t> bytes = readBack(id, pointCount_ * 4);
-    out.resize(pointCount_);
-    if (!out.empty() && bytes.size() == pointCount_ * 4) std::memcpy(out.data(), bytes.data(), bytes.size());
-    return out;
 }
 
 std::vector<Vec3f> LookEngine::readPositions() {

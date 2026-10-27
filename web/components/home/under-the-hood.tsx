@@ -13,7 +13,7 @@ const categories: { name: string; cat: Category; nodes: string[] }[] = [
   {
     name: 'Shape',
     cat: 'Shape',
-    nodes: ['Length', 'Width', 'Resample', 'Sculpt', 'Direction', 'Bend', 'Transform', 'Flow', 'Part', 'Tie', 'Smooth', 'BlendNeighbors', 'Gravity', 'Displace', 'Mirror', 'Collide', 'SelfCollide', 'MeshCut', 'RestoreLength'],
+    nodes: ['Length', 'Width', 'Resample', 'Sculpt', 'Direction', 'Bend', 'Transform', 'Flow', 'Part', 'Smooth', 'BlendNeighbors', 'Gravity', 'Displace', 'Mirror', 'Collide', 'SelfCollide', 'MeshCut', 'RestoreLength'],
   },
   { name: 'Look', cat: 'Look', nodes: ['Clump', 'Wet', 'Twist', 'Braid', 'Noise', 'Curl', 'Flyaway', 'Static', 'Tangle', 'Instance', 'Scales'] },
   { name: 'Motion', cat: 'Motion', nodes: ['Wind', 'Jiggle', 'Simulate'] },

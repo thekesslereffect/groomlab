@@ -95,7 +95,6 @@ add_executable(groomlab_tests
     engine/core/test_subdivision.cpp
     engine/core/test_self_collide.cpp
     engine/core/test_static.cpp
-    engine/core/test_tie.cpp
     engine/core/test_usd_layout.cpp
     engine/core/test_vrscene_writer.cpp
     engine/core/test_wet.cpp

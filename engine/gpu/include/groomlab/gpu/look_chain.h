@@ -45,14 +45,7 @@
 // hairGridWalls; the red-black SOR solve a dispatch a colour; SelfCollide's slab spreads; Static's
 // cantilever bend; the walk keeping the strands off the scalp through the floor's field as tables;
 // not over a scalp deformed away from its rest pose, nor without a scalp where the run moves the
-// strands it takes), Tie (three kernels, look.slang: its frame and the ring's 64 bins of the
-// largest radial measure, from the core strands the run hands it, in one group; each strand's
-// ring point and route, the scalp's closest points under its arc found down the mesh of the
-// scalp's field's tables from the face its start was nearest on the CPU, their outer hull; then
-// its path pushed out of the scalp through the field's tables and the strand laid along it at
-// its segments' lengths; its affect per strand, read as a mapped param, mixing it as the graph
-// does; its tail channel written for a Tie after it in the run, a stage reading it the CPU's;
-// not over a scalp deformed away from its rest pose), the shapers working on each strand alone: Bend, Direction, Transform and
+// strands it takes), the shapers working on each strand alone: Bend, Direction, Transform and
 // Displace (each strand's root frame from the scalp's normal and UVs at its root, RootInputs; a
 // direction one world vector, not one per strand; Direction two of its three params mapped at most)
 // and Twist (around its axes input's curves as cached, each strand's nearest found again on the GPU
@@ -67,7 +60,7 @@
 // a fraction reading what the run moves, or clumps or regions the run writes anew: the CPU's) and
 // Flow (the field and scalp its last evaluation traced along, FlowState: the field baked at the
 // vertices, its pins and sinks asked where it asks the field itself; each step's closest point down
-// the scalp's mesh as Tie's routes find them; not over a scalp deformed away from its rest pose), in
+// the scalp's mesh; not over a scalp deformed away from its rest pose), in
 // any order. Cull, Split (any output: LookChain::baseOutput) and Mirror, which keep or add strands: a run through one
 // starts with it (its result the base, its node the chain's base too), the nodes before it a run of
 // their own up its input (LookBranch, made on a sibling engine first, as a Merge's input b's), whose
@@ -89,8 +82,7 @@
 // affect (a mask: a map, a plugged field, a number between 0 and 1, or a dragged affect) runs too,
 // its result mixed back toward what it took after it (look.slang AffectCS, as applyAffect mixes it:
 // per strand or per point, a Width's widths, a Wet after its last level), the affect read as the
-// mapped params are, or where a Tie of the run writes its tail (Tie mixes by its own: its affect
-// picks the strands it ties). (A Curl adding points still ends the run.) A graph
+// mapped params are. (A Curl adding points still ends the run.) A graph
 // takes the GPU from the first of them after its last node the GPU cannot run (or does not run
 // with these params) to the output, through nodes that hand their input on as it came (Output, a
 // bypass, a Switch (the input it picks), an even Resample with nothing to do, a Jiggle with no
@@ -296,16 +288,6 @@ private:
         std::shared_ptr<const HairGridInputs> inputs;
     };
     std::map<NodeId, GridMemo> grid_;
-    // Tie: what it reads of the strands it took and the scalp (kept while they are).
-    struct TieMemo {
-        StrandsPtr in;
-        MeshPtr scalp;
-        std::string channel;
-        std::shared_ptr<const TieInputs> inputs;
-        MeshPtr tablesScalp;  // the scalp the tables (their rings welded) were made for
-        MeshDistanceField::Tables tables;
-    };
-    std::map<NodeId, TieMemo> tie_;
     // RestoreLength, BlendNeighbors and Tangle: what they read of the strands they took, their
     // reference and the CPU's last evaluation (kept while those are the same).
     struct ShaperMemo {
@@ -325,9 +307,6 @@ private:
     // False with *why.
     bool readShaper(const GraphDocument& doc, const LookChain& chain, std::size_t k, const std::set<NodeId>& before, bool rebound,
                     const ScalpMesh* groomScalp, const MeshPtr& scalpMesh, StageInputs* out, std::string* why);
-    // Tie, stage k of `chain`: what its kernels take (out->tie); false with *why.
-    bool readTie(const GraphDocument& doc, const LookChain& chain, std::size_t k, const ScalpMesh* groomScalp, const MeshPtr& scalpMesh,
-                 StageInputs* out, std::string* why);
     // Bend, Direction, Transform, Displace: the roots on the scalp, for the strands they took.
     struct RootMemo {
         StrandsPtr in;

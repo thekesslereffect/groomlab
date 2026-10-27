@@ -178,10 +178,11 @@ namespace groomlab::gpu::cpu_host {
 void flowAt(std::uint64_t host, const float p[3], const float normal[3], float out[3]);
 void flowAtRoot(std::uint64_t host, std::uint32_t face, float u, float v, const float normal[3], float out[3]);
 bool flowClosest(std::uint64_t host, const float p[3], float reach, std::uint32_t* face, float uv[2], float at[3], float normal[3]);
-// look.slang's Tie on the CPU (tieHost*): ScalpMesh::closestPoint and CollisionSurface::pushOut on
-// the engine's look_run.h TieHost.
-bool tieClosest(std::uint64_t host, const float p[3], float reach, float at[3], float normal[3]);
-void tiePush(std::uint64_t host, float p[3]);
+// look.slang's Collide on the CPU over a deformed surface (hostCollide*): RestPoseCollision::cursor
+// and operator_state.h collideRestPush on the engine's look_run.h CollideHost, a strand's walk state
+// in 9 words (look_engine_cpu.cpp restState).
+void collideCursor(std::uint64_t host, std::uint32_t mesh, std::uint32_t strand, const float p[3], float state[9]);
+bool collidePush(std::uint64_t host, std::uint32_t mesh, float p[3], float to, bool soft, float state[9]);
 template <class T>
 inline T& ref(T& x) { return x; }
 template <class T>
@@ -190,30 +191,6 @@ template <class W>
 inline std::uint64_t address(const W& words) { return (static_cast<std::uint64_t>(words.y) << 32) | words.x; }
 }  // namespace groomlab::gpu::cpu_host
 
-template <class W, class V, class A, class N>
-inline bool groomlab_tie_closest(const W& host, const V& p, float reach, A&& at, N&& normal) {
-    using groomlab::gpu::cpu_host::ref;
-    const float q[3] = {p.x, p.y, p.z};
-    float a[3], n[3];
-    if (!groomlab::gpu::cpu_host::tieClosest(groomlab::gpu::cpu_host::address(host), q, reach, a, n)) return false;
-    ref(at).x = a[0];
-    ref(at).y = a[1];
-    ref(at).z = a[2];
-    ref(normal).x = n[0];
-    ref(normal).y = n[1];
-    ref(normal).z = n[2];
-    return true;
-}
-template <class W, class V>
-inline V groomlab_tie_push(const W& host, const V& p) {
-    float q[3] = {p.x, p.y, p.z};
-    groomlab::gpu::cpu_host::tiePush(groomlab::gpu::cpu_host::address(host), q);
-    V out;
-    out.x = q[0];
-    out.y = q[1];
-    out.z = q[2];
-    return out;
-}
 template <class W, class V>
 inline V groomlab_flow_at(const W& host, const V& p, const V& normal) {
     const float at[3] = {p.x, p.y, p.z}, n[3] = {normal.x, normal.y, normal.z};
@@ -253,4 +230,51 @@ inline bool groomlab_flow_closest(const W& host, const V& p, float reach, F&& fa
     ref(normal).y = n[1];
     ref(normal).z = n[2];
     return true;
+}
+template <class A, class B, class C>
+inline void groomlab_collide_state_out(const A& a, const B& b, const C& c, float w[9]) {
+    using groomlab::gpu::cpu_host::ref;
+    w[0] = ref(a).x;
+    w[1] = ref(a).y;
+    w[2] = ref(a).z;
+    w[3] = ref(a).w;
+    w[4] = ref(b).x;
+    w[5] = ref(b).y;
+    w[6] = ref(b).z;
+    w[7] = ref(b).w;
+    w[8] = ref(c);
+}
+template <class A, class B, class C>
+inline void groomlab_collide_state_in(A&& a, B&& b, C&& c, const float w[9]) {
+    using groomlab::gpu::cpu_host::ref;
+    ref(a).x = w[0];
+    ref(a).y = w[1];
+    ref(a).z = w[2];
+    ref(a).w = w[3];
+    ref(b).x = w[4];
+    ref(b).y = w[5];
+    ref(b).z = w[6];
+    ref(b).w = w[7];
+    ref(c) = w[8];
+}
+template <class W, class V, class A, class B, class C>
+inline void groomlab_collide_cursor(const W& host, std::uint32_t mesh, std::uint32_t strand, const V& p, A&& a, B&& b, C&& c) {
+    float w[9];
+    groomlab_collide_state_out(a, b, c, w);
+    const float q[3] = {p.x, p.y, p.z};
+    groomlab::gpu::cpu_host::collideCursor(groomlab::gpu::cpu_host::address(host), mesh, strand, q, w);
+    groomlab_collide_state_in(a, b, c, w);
+}
+template <class W, class V, class A, class B, class C>
+inline bool groomlab_collide_push(const W& host, std::uint32_t mesh, V&& p, float to, bool soft, A&& a, B&& b, C&& c) {
+    using groomlab::gpu::cpu_host::ref;
+    float w[9];
+    groomlab_collide_state_out(a, b, c, w);
+    float q[3] = {ref(p).x, ref(p).y, ref(p).z};
+    const bool moved = groomlab::gpu::cpu_host::collidePush(groomlab::gpu::cpu_host::address(host), mesh, q, to, soft, w);
+    ref(p).x = q[0];
+    ref(p).y = q[1];
+    ref(p).z = q[2];
+    groomlab_collide_state_in(a, b, c, w);
+    return moved;
 }

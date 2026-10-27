@@ -2300,32 +2300,13 @@ drag or stroke spreading the hair past that loses the grid's far side until the 
 deformed away from its rest pose (the walk asks the rest pose's field vertex by vertex) refuses, as
 does a node without a scalp whose strands the run moves (its cell goes by their size). Their params
 (strength, packing, randomness, profile) change values on the grid alone: each drags on the GPU.
-Tie runs as three kernels (look.slang's Tie section): `TieFrameCS` (one group) finds the strands it
-ties, the core's start points' mean, the frame and the ring's 64 bins from the strands the run hands
-it (so a drag of `center` and a dab upstream bin again, as the CPU would); `TieRouteCS` makes each
-strand's ring point and route: the scalp's closest points under the arc found down the mesh of its
-collision field's tables (`TieInputs`: Tie's own copy, each vertex's ring welded with those of the
-vertices at its position, so the walk crosses a seam as the CPU's tree does; each strand's walk
-starts from the face its start was nearest on the CPU), then their hull, into a buffer of 34 float4 a
-strand; `TieLayCS` makes the path a point at a time, pushes each out of the scalp through the tables
-(the field's answers alone, where the CPU's push asks the mesh) and lays the strand along it (one
-push and one path step in its code: about 10 s of d3dcompiler). Its affect (a mask by strand) is
-field 0, mixing its result as the graph does; one varying along the strands refuses. Its angles take
-Cephes' atan and acos (fxc's acos is off by up to about 7e-5, which flipped the CPU's sample count).
-Its tail channel is written where a Tie after it in the run reads it (a second Tie down the tail, a
-node masked by the tail); a mapped param after it reading the tail refuses (the CPU's).
-Within a few thousandths of the CPU on the test's head (8 across), but where a route's closest point
-ties across a seam whose split vertices' normals differ (a few hundredths); about 8 ms at 100k
-strands. A scalp deformed away from its rest pose refuses.
 A stage masked by its affect (a map, a plugged field, a number between 0 and 1, a dragged affect) runs
 as ever, then `AffectCS` mixes its result back toward what the node's first stage took, per strand
 or per point, as `applyAffect` does (`StageParams::masked`; the engine keeps the node's input alive
 till then, a Wet's past its levels; a Width's widths, those it took copied aside after another
 Width). Its affect is the node's first stage's third field (`StageFields::affect`, read on what it
-takes like the mapped params: fixed, or made per strand by `FieldCS`); an attribute map of a Tie's
-tail written in the same run is read where that Tie writes it (`FieldValues::channelFrom`). This is
-the one way every stage is mixed, the shapers reading their neighbours included; only Tie reads its
-affect itself (it picks the strands it ties, and its tail is mixed too: `mixesByItsAffect`).
+takes like the mapped params: fixed, or made per strand by `FieldCS`). This is the one way every
+stage is mixed, the shapers reading their neighbours included.
 Operators a host reads state from by their result (Clump, Wet, Wind, an auto Part, BlendNeighbors,
 Tangle, Flow, Jiggle) follow the graph's mixed result (`Operator::resultMixed`). Noise masked by a Group costs about 0.15 ms more at 100k.
 Jiggle with motion runs too: `JiggleOp` keeps the scalp, history and frame its result read
@@ -2681,7 +2662,7 @@ strand is braided by its own root) and Split (`Operator::evaluateOutputsIncremen
 kept per output, so each output's readers get the changed strands it holds, in its own indices;
 an output a changed strand left or joined, its select read from what changed, is cut again and
 says `all`, as Cull falls back when its kept strands change). Everything else evaluates in full:
-Tangle, BlendNeighbors, Wet, SelfCollide, Static and Tie read other strands, Mirror changes the layout (on guides, the
+Tangle, BlendNeighbors, Wet, SelfCollide and Static read other strands, Mirror changes the layout (on guides, the
 Interpolate after it diffs them itself), Curl by clump reads whole clumps. A node with several
 outputs that evaluates in full diffs each output against its last. A node that evaluates in full while its own key stayed and its inputs changed in
 only some strands (one of those, or an incremental operator that fell back) then compares its

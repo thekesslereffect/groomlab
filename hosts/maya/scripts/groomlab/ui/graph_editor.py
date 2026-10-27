@@ -2866,7 +2866,7 @@ class ParamPanel(QtWidgets.QScrollArea):
         return result
 
     def pick_position(self, name, param):
-        """A position field's Pick (Tie's center): where the selected vertices, locator or transform
+        """A position field's Pick (Transform's pivot): where the selected vertices, locator or transform
         are (pick.selected_position, world space as groom data), set as any edit of the field is.
         Returns the position, or None when nothing selected has one (said in the status line)."""
         from groomlab.ui import pick
@@ -3697,7 +3697,7 @@ class ParamPanel(QtWidgets.QScrollArea):
             for b in boxes:
                 b.editingFinished.connect(typed)
             if spec.get("worldDirection") and spec.get("unit") == "length" and on_change is None:
-                # A world position (Tie's center, Transform's pivot): Pick takes the selection's.
+                # A world position (Transform's pivot): Pick takes the selection's.
                 picker = QtWidgets.QToolButton()
                 picker.setObjectName("positionPick")
                 picker.setText("Pick")

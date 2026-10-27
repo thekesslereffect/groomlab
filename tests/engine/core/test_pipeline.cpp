@@ -975,7 +975,7 @@ TEST(GroomFile, TurnsWorldDirectionsWithItsPoints) {
     EXPECT_EQ(flagged, (std::set<std::string>{"Displace.direction", "Gravity.direction", "Clump.flattenDirection",
                                               "Mirror.axis", "Simulate.currentDirection", "Simulate.gravityDirection",
                                               "Simulate.windDirection", "Wind.direction", "Bend.direction", "Direction.direction", "Plume.direction",
-                                              "Transform.pivot", "Curl.weightDirection", "Tie.center", "Tie.direction"}));
+                                              "Transform.pivot", "Curl.weightDirection"}));
 
     auto scalp = std::make_shared<ScalpMesh>(sphere()->withPoints(sphere()->points()));
     GroomFile z;

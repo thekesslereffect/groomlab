@@ -845,12 +845,14 @@ class GraphEditorTest(unittest.TestCase):
         wait(50)
         self.assertEqual(self.editor.model.param(gravity, "direction"), [0.0, -1.0, 0.0])
 
-    def test_tie_center_picks_the_selection(self):
-        # Tie's center is a world position: Pick beside it takes the selected locator's (the editor
-        # stays on its groom while the locator is selected). Its direction is no position: no Pick.
+    def test_pivot_picks_the_selection(self):
+        # A world Transform's pivot is a world position: Pick beside it takes the selected locator's
+        # (the editor stays on its groom while the locator is selected). Its translate is no world
+        # position: no Pick.
         from PySide2 import QtWidgets
-        tie = self.editor.add_node("Tie")
+        tie = self.editor.add_node("Transform")
         self.editor.link("width", tie, "strands")
+        self.editor.model.set_param(tie, "space", "world")
         self._select_node(tie)
         wait(30)
         pickers = [w for w in self.editor.params.findChildren(QtWidgets.QToolButton) if w.objectName() == "positionPick"]
@@ -862,7 +864,7 @@ class GraphEditorTest(unittest.TestCase):
             wait(30)
             pickers[0].click()
             wait(50)
-            self.assertEqual([round(c, 4) for c in self.editor.model.param(tie, "center")], [0.5, 1.0, -2.0])
+            self.assertEqual([round(c, 4) for c in self.editor.model.param(tie, "pivot")], [0.5, 1.0, -2.0])
             self.assertEqual(self.editor.node_errors, {})
         finally:
             cmds.delete(locator)

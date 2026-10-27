@@ -211,6 +211,23 @@ inline std::size_t interpolateClearanceStep(std::size_t points) {
     return points > kClearanceAsked + 1 ? (points - 1 + kClearanceAsked - 1) / kClearanceAsked : 1;
 }
 
+// ---- Collide ------------------------------------------------------------------------------------
+
+// What a strand's walk knows of a mesh deformed away from its rest pose (CollideOp asks it through
+// the rest pose's field, RestPoseCollision): where its walk is, and a point the mesh's own closest
+// point query left with how near the mesh can be to it (bound below 0: none yet).
+struct CollideRestState {
+    RestPoseCollision::Cursor cursor;
+    Vec3f anchor;
+    float bound = -1.0f;
+};
+// CollideOp's push of point p out of deformed mesh `mesh` through `rest` (its rest field, the mesh
+// itself where that cannot tell) to `to` above it (the offset, or with `soft` the offset plus the
+// softness, the push then eased: softPush), within maxDepth below and the search radius: true
+// when it moved p. The CPU engine's Collide asks the same (look.slang hostCollidePush).
+bool collideRestPush(const RestPoseCollision& rest, const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth,
+                     float searchRadius, CollideRestState& state);
+
 // ---- Part ---------------------------------------------------------------------------------------
 
 // The part lines a Part node with params `part` opens on `strands` (the strands it takes) on

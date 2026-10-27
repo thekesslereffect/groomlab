@@ -62,8 +62,6 @@ GROOMLAB_STAGE(Blend, "blend", "mix", "", "profile", "", "mix")
 // (The hair grid's layout is the core strands' and the scalp's: none of these change it.)
 GROOMLAB_STAGE(SelfCollide, "selfCollide", "strength", "", "profile", "", "affect strength packing")
 GROOMLAB_STAGE(Static, "static", "strength", "", "profile", "", "affect strength randomness")
-// (Its ring's bins are made on the GPU from the core strands: a center dragged too.)
-GROOMLAB_STAGE(Tie, "tie", "affect", "", "", "center direction", "affect radius tightness spread twist ease")
 // The shapers working on each strand alone (transform_ops.cpp, deform_ops.cpp DisplaceOp,
 // extra_ops.cpp TwistOp). Direction's mapped fields are the ones it maps (directionMapped).
 GROOMLAB_STAGE(Bend, "bend", "angle", "", "", "direction", "affect angle start end randomness seed")

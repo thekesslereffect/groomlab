@@ -106,10 +106,6 @@ struct LookChain {
 //                limit past which hair is overpacked (ceil(packing 2^32), low and high words); ramp:
 //                the profile.
 //   Static: value[0] strength (mapped, per strand), [1] randomness (0-1); ramp: the profile.
-//   Tie: value[0] radius, [1] tightness (0-1), [2] spread (radians, 0-80 degrees), [3] twist;
-//        value2[0] ease, [1-3] direction; flag[0] 1 when it writes a tail channel, [1] its affect's
-//        number's float bits (the mapped affect's multiplier; 1 unmasked), [2] 1 when masked (its
-//        affect a mask: the result mixed by it per strand, field 0); flag2[0-2] center's float bits.
 //   Bend: value[0] angle (mapped, per strand), [1] start, [2] end, [3] randomness; flag[0] along (0
 //         normal, 1 tangent, 2 direction); value2[0-2] the direction (as given: a world vector); seed.
 //   Direction: value[0] inclination, [1] roll, [2] strength (each mapped, per strand: flag[1-3] which
@@ -141,7 +137,7 @@ struct LookChain {
 //                   profile.
 //   Tangle: value[0] strength (mapped, per strand), [1] start, [2] span, [3] reach.
 //   Flow: value[0] lift (degrees; mapped, per strand), [1] bend, [2] rollRandom (radians); seed.
-// Any stage but Tie restricted by its affect: masked, affect, mixWidths below (one way for all).
+// Any stage restricted by its affect: masked, affect, mixWidths below (one way for all).
 struct LookBranch;
 struct StageParams {
     LookStage stage;
@@ -158,7 +154,7 @@ struct StageParams {
     bool tabled = false;  // the ramp by point index (RampAlong; Width's and Interpolate's are not)
     Ramp ramp2;           // a second profile (Clump's volumizeProfile), by point index
     bool hasRamp2 = false;
-    // Affect masks (not Tie's: its affect picks the strands it ties, flag[1-2]). Masked (its affect a map, a field plugged
+    // Affect masks. Masked (its affect a map, a field plugged
     // in, a number between 0 and 1, or dragged): the node's result mixed back toward what its first
     // stage took by its affect (StageFields::affect at that stage, times `affect`: the mapped
     // multiplier, or the number), as the graph mixes it (applyAffect), after the node's last stage
@@ -220,11 +216,6 @@ struct FieldValues {
     std::vector<float> values;
     // Evaluated on the GPU per strand (`values` the CPU's, as read): it holds whatever moves.
     std::shared_ptr<const FieldProgram> program;
-    // A point channel a Tie of the run writes (its tail; an affect mapped to it alone): that stage's
-    // index, the values read on the GPU where it wrote them, remapped low + (high - low) v as the
-    // map remaps them (`values` the CPU's, as read). kNoStage: none.
-    std::size_t channelFrom = kNoStage;
-    float low = 0.0f, high = 1.0f;
 };
 // Each stage's mapped params (StageParams says which are mapped: [0] and, Noise's fraction,
 // Clump's volumize and Flyaway's fraction, [1]); a masked node's affect at its first stage
@@ -317,7 +308,18 @@ struct PartInputs {
 // asks at its offset, made for every offset those fields serve: a dragged offset is the kernel's
 // number; read as Interpolate's clearance walk reads them: the field's answers alone, never the
 // mesh's tree), the scalp's then the collider's, and their boxes (lookBounds). Fixed per field.
+// A mesh deformed away from its rest pose (`rests`, a bit each; the CPU engine's alone: its tables
+// a placeholder) is asked through the host (CollideHost, look.slang hostCollidePush): the
+// operator's own push, collideRestPush, on its rest pose's walk.
+struct CollideHost {
+    std::vector<std::shared_ptr<const RestPoseCollision>> rests;  // per mesh (null: a still one)
+    std::vector<MeshPtr> meshes;
+    float maxDepth = 0.0f, searchRadius = 0.0f, softness = 0.0f;
+    std::shared_ptr<const std::vector<StrandRoot>> roots;  // per strand of the run (its walk starts at its root)
+};
 struct CollideInputs {
+    std::uint32_t rests = 0;
+    std::shared_ptr<const CollideHost> host;  // (with rests)
     std::vector<MeshDistanceField::Tables> tables;
     std::vector<Vec3f> boxes;  // per mesh: lo, hi
     std::uint32_t colliders = 0;  // which are the collider input's, a bit each (softness and smoothing act on it)
@@ -330,32 +332,6 @@ struct CollideInputs {
 struct HairGridInputs {
     std::shared_ptr<const HairGridLayout> layout;
     std::shared_ptr<const std::vector<std::uint32_t>> walls;  // null: no scalp
-};
-// Tie: the scalp (the "scalp" external) as the CPU's Tie takes it: its box's center and size, the
-// clearance, depth and search radius of its push, and its collision field as tables (their mesh
-// part also what the routes' closest points are found down); per strand the face its start (its
-// root, or an earlier Tie's tail start) was nearest on the strands the node took, where a strand's
-// walk down the mesh to the closest points under its route starts; the core strands (the ring's
-// bins read them). Its tail channel's values as it takes them: written by an earlier Tie of the
-// run (`channelFrom`, that stage), else as the strands it took carry them (null: none).
-// Tie's scalp as TieOp asks it, the CPU engine's alone (look.slang's Tie asks the core's queries
-// there, their ties and rounding the operator's): the routes' closest points, and the push out of it
-// (its collision surface at the clearance, depth and search radius).
-struct TieHost {
-    std::shared_ptr<const ScalpMesh> scalp;
-    CollisionSurface surface;  // (none: no push)
-    float clearance = 0.0f, depth = 0.0f, searchRadius = 0.0f;
-};
-struct TieInputs {
-    bool hasScalp = false;
-    Vec3f scalpCenter;
-    float scalpSize = 0.0f, clearance = 0.0f, depth = 0.0f, searchRadius = 0.0f;
-    MeshDistanceField::Tables tables;
-    std::shared_ptr<const std::vector<std::uint32_t>> seeds;
-    std::shared_ptr<const std::vector<std::uint32_t>> core;
-    std::size_t channelFrom = static_cast<std::size_t>(-1);
-    std::shared_ptr<const std::vector<float>> channel;
-    std::shared_ptr<const TieHost> host;  // (with a scalp)
 };
 // Bend, Direction, Transform and Displace: each strand's root on the scalp (the groom's, as the
 // operators take it), read on the strands the node took (fixed while the scalp and the roots are),
@@ -428,7 +404,7 @@ struct TangleInputs {
 // `field`: the field baked at the scalp's vertices (4 floats each, `vertices` of them: none where
 // the field has none), then each pin (position xyz, 0, direction xyz, 0), then each sink (center
 // xyz, radius, normal xyz, angle in radians). `tables`: the scalp's (its closest points found down
-// its mesh, as Tie's routes find them); null without a scalp. `host`: the field and the scalp
+// its mesh); null without a scalp. `host`: the field and the scalp
 // themselves, the CPU engine's alone (look.slang FlowCS asks the core's queries there: their ties
 // the operator's), no tables needed.
 struct FlowHost {
@@ -449,7 +425,6 @@ struct StageInputs {
     std::shared_ptr<const PartInputs> part;
     std::shared_ptr<const CollideInputs> collide;
     std::shared_ptr<const HairGridInputs> grid;
-    std::shared_ptr<const TieInputs> tie;
     std::shared_ptr<const RootInputs> roots;   // Bend, Direction, Transform, Displace
     std::shared_ptr<const TwistInputs> twist;
     std::shared_ptr<const RestoreInputs> restore;
@@ -462,7 +437,7 @@ struct StageInputs {
     // Merge: its input b's own run (StageParams::branch), made on a sibling engine before the Merge.
     // Cull, Split, Mirror: the run up its input, so.
     std::shared_ptr<const LookCentersRun> merged;
-    // Gravity, Flyaway, Collide, Wind, SelfCollide, Static, Tie, Bend, Direction, Transform, Jiggle and
+    // Gravity, Flyaway, Collide, Wind, SelfCollide, Static, Bend, Direction, Transform, Jiggle and
     // the shapers reading their neighbours or a reference: the longest strand the node took (the CPU's
     // last run; a RestoreLength's reference's too), how far from its root a point it moves can go
     // (lookBounds).

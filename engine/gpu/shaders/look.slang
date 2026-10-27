@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // GroomLab GPU look preview: the graph's last nodes as compute kernels (Interpolate, Length,
-// Clump, Noise, Curl, Width, Part, Gravity, Flyaway, Collide, Wind, Blend, SelfCollide, Static, Tie,
+// Clump, Noise, Curl, Width, Part, Gravity, Flyaway, Collide, Wind, Blend, SelfCollide, Static,
 // Bend, Direction, Transform, Displace, Twist, Smooth, RestoreLength, BlendNeighbors, Tangle, Flow,
 // in whatever order the graph has them), then the lit strand lines' frames.
 //
@@ -3881,6 +3881,46 @@ float3 softPush(float3 delta, float s) {
     return eased;
 }
 
+// Collide over a mesh deformed away from its rest pose (gFlag.w: a bit each; the CPU engine's
+// alone): the operator's own push through the host (look_run.h CollideHost, its address in
+// gFlag2.zw: operator_state.h collideRestPush), each strand's walk state per mesh in two float4 and
+// a float (look_engine_cpu.cpp restState: the cursor's vertex bits, its anchor and clear, the
+// bound's anchor and the bound).
+bool collideRest(uint m) { return ((gFlag.w >> m) & 1u) != 0; }
+void hostCollideCursor(uint2 host, uint mesh, uint strand, float3 p, inout float4 a, inout float4 b, inout float c) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_collide_cursor($0, $1, $2, $3, $4, $5, $6)"; }
+}
+bool hostCollidePush(uint2 host, uint mesh, inout float3 p, float to, bool soft, inout float4 a, inout float4 b, inout float c) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_collide_push($0, $1, $2, $3, $4, $5, $6, $7)"; }
+}
+// A strand's walk state over each deformed mesh (the cursor restarted each pass; the bound kept).
+struct CollideRestStates {
+    float4 a[2], b[2];
+    float c[2];
+};
+CollideRestStates collideRestStates() {
+    CollideRestStates st;
+    st.a[0] = st.a[1] = float4(asfloat(0xFFFFFFFFu), 0.0f, 0.0f, 0.0f);
+    st.b[0] = st.b[1] = float4(-1.0f, 0.0f, 0.0f, 0.0f);
+    st.c[0] = st.c[1] = -1.0f;
+    return st;
+}
+// A strand's walk over deformed mesh m restarted at its root (`root`: its first point). (Its state
+// indexed on the CPU alone: the GPU's compilers unroll a loop indexing a local array.)
+void collideRestCursor(uint s, uint m, float3 root, inout CollideRestStates rest) {
+    __target_switch {
+    case cpp: hostCollideCursor(gFlag2.zw, m, s, root, rest.a[m], rest.b[m], rest.c[m]); return;
+    default: return;
+    }
+}
+// Point p pushed out of deformed mesh m to `to` (`soft`: eased): true when it moved.
+bool collideRestPush(uint m, inout float3 p, float to, bool soft, inout CollideRestStates rest) {
+    __target_switch {
+    case cpp: return hostCollidePush(gFlag2.zw, m, p, to, soft, rest.a[m], rest.b[m], rest.c[m]);
+    default: return false;
+    }
+}
+
 // The passes over the strand at `begin` (n points, in gOut), as the CPU walks it. `carried` (with
 // softness or smoothing): each point the point before plus its own segment of the strand walked
 // (gIn, or with `fromIn` false gOut itself, the strand smoothing bent; the passes after the first:
@@ -3888,8 +3928,8 @@ float3 softPush(float3 delta, float s) {
 // eased by the softness); else each point follows the one before (its length kept), then pushed.
 // Softness and smoothing act on the collider alone (gFlag.z: which surfaces are the collider
 // input's, a bit each): a strand it never moves walks as without them. Returns whether it moved one.
-bool collideWalk(uint begin, uint n, uint meshes, FieldTables scalpTables, FieldTables colliderTables, bool carried, bool ease, bool fromIn,
-                 float3 root, float2 skipWithin) {
+bool collideWalk(uint s, uint begin, uint n, uint meshes, FieldTables scalpTables, FieldTables colliderTables, bool carried, bool ease, bool fromIn,
+                 float3 root, float2 skipWithin, inout CollideRestStates rest) {
     const float offset = gValue.x, maxDepth = gValue.y, searchRadius = gValue.z;
     PRECISE float reach = offset + gValue2.x;
     bool touched = false;
@@ -3899,6 +3939,9 @@ bool collideWalk(uint begin, uint n, uint meshes, FieldTables scalpTables, Field
         const bool eased = ease && pass == 0;
         const bool inWalked = fromIn && pass == 0;
         float3 last = inWalked ? loadPoint(begin) : loadOut(begin);  // the walked strand's point before
+        for (uint m = 0; m < meshes; ++m) {  // (each pass walks a deformed mesh from the root)
+            if (collideRest(m)) collideRestCursor(s, m, loadOut(begin), rest);
+        }
         for (uint i = 1; i < n; ++i) {
             const float wanted = apartExact(loadPoint(begin + i), loadPoint(begin + i - 1));
             float3 p;
@@ -3923,6 +3966,26 @@ bool collideWalk(uint begin, uint n, uint meshes, FieldTables scalpTables, Field
                 const FieldTables tables = m == 0 ? scalpTables : colliderTables;
                 const bool collider = ((gFlag.z >> m) & 1u) != 0;
                 const bool easedHere = eased && collider;
+                if (collideRest(m)) {
+                    // Through the host (the push and, once it moved the point, its length kept, a second).
+                    float3 q = p;
+                    const bool restMoved = collideRestPush(m, q, second || !easedHere ? offset : reach, !second && easedHere, rest);
+                    if (second) {
+                        if (restMoved) p = q;
+                        continue;
+                    }
+                    if (!restMoved) {
+                        ++step;  // (no second push)
+                        continue;
+                    }
+                    moved = true;
+                    if (collider) {
+                        shifted = true;
+                        touched = true;
+                    }
+                    p = keepLength(previous, q, wanted);
+                    continue;
+                }
                 // A surface settled for the whole strand (fieldBounds at its root, CollideCS) while the
                 // point is that near the root: its field would leave it alone.
                 const float within = m == 0 ? skipWithin.x : skipWithin.y;
@@ -4002,6 +4065,7 @@ void CollideCS(uint3 id : SV_DispatchThreadID) {
     PRECISE float within = widened + 1e-6f;
     float2 skipWithin = float2(-1.0f, -1.0f);
     for (uint m = 0; m < meshes; ++m) {
+        if (collideRest(m)) continue;  // (a deformed mesh: no tables, never settled for the strand)
         sTableBase = m == 0 ? 0u : gAux.x;
         const FieldTables t = m == 0 ? scalpTables : colliderTables;
         float heightLow, distanceLow;
@@ -4015,7 +4079,19 @@ void CollideCS(uint3 id : SV_DispatchThreadID) {
     // The walk; with smoothing, a second dispatch bends the strand by its corrections spread and
     // walks it again (two dispatches, not a loop here: a driver compiles a loop about the walk
     // several times slower).
-    const bool touched = collideWalk(begin, n, meshes, scalpTables, colliderTables, carried, soft && !second, !second, root, skipWithin);
+    CollideRestStates rest = collideRestStates();
+    const bool touched = collideWalk(s, begin, n, meshes, scalpTables, colliderTables, carried, soft && !second, !second, root, skipWithin, rest);
+    __target_switch {
+    case cpp:
+        // On the CPU the smoothing's walk follows in the same thread (no second dispatch: the
+        // engine's), each strand's walk state over a deformed mesh kept, as the CPU's.
+        if (smoothing > 0.0f && touched) {
+            smoothStrand(begin, n, smoothing);
+            collideWalk(s, begin, n, meshes, scalpTables, colliderTables, carried, false, false, root, skipWithin, rest);
+        }
+        return;
+    default: break;
+    }
     if (!second && smoothing > 0.0f) gOut2.Store(s * 4, touched ? 1u : 0u);
 }
 
@@ -5762,924 +5838,6 @@ void StaticPushCS(uint3 id : SV_DispatchThreadID) {
     gOut2.Store(begin * 12, first);
 }
 
-// ---- Tie (tie_op.cpp TieOp::evaluate) -------------------------------------------------------------
-//
-// Three kernels a Tie, in its arithmetic and order (the GPU's own rounding: its atan2, sin, cos and
-// acos, no exact products; the push alone as the clearance walk rounds it).
-// TieFrameCS (one group): which strands it ties (TieOp's tied[s]: two points or more, its affect
-// above 0 when masked, field 0 per strand times gFlag.y's number; its start, after an earlier Tie's
-// tail start, before its tip); the readers (the core's tied strands, else every tied strand: the
-// same at every preview density); their start points' mean and whether most start past an earlier
-// Tie's tail (a second Tie down a tail measures from their mean); the frame (origin, pole, axis, the
-// pole's basis u1 u2 and their turns e1 e2 onto the axis); the readers' radial measures' largest
-// per azimuth bin, empty bins from the nearest filled, each the largest of itself and its
-// neighbours: into gOut (TIE_FRAME_*).
-// TieRouteCS (a thread a strand): its ring point Q (its azimuth kept, its share of the bundle by the
-// bins), and its route about the scalp's center in the plane through it, its start S and Q: the
-// scalp's closest points under the arc (found down the mesh of the field's tables, gAux2, each from
-// the one before's face, the first from the face its start was nearest: gAux0 word s), lifted a
-// clearance, then the outer hull of S, those and Q: into gOut, TIE_SLOTS float4 a strand (slot 0:
-// the route's count, the start; a count of 0 untied; slots 1 on: the route).
-// TieLayCS (a thread a strand): the path made point by point (the route from gAux0, eased from the
-// strand's own shape, the bend through the ring, the tail) and pushed out of the scalp through the
-// field's tables (gAux2), the strand laid along it at its segments' lengths (each point the first
-// crossing past the last of the sphere about it), into gOut; the tail channel into gOut2 (0 before
-// the ring, 1 past it, a smooth step over a radius either side), as it came (gOut3) where untied;
-// the result mixed by the affect where masked, as the graph mixes it.
-//
-// Constants (look_engine.cpp tieConstants): gValue radius, tightness, spread (radians), beside
-// (clearancePush's: 4 clearances; 0 without the push); gValue2 ease, twist, clearance, depth;
-// gFlag.x TIE_* switches, .y the affect's number's bits, .z the search radius's bits; gFlag2.xyz
-// center, .w the scalp's size (bits); gOctaveSeeds[0].xyz the direction, [0].w [1].xy the scalp's
-// center (bits). gAux.y, .z: where the core strands start in TieFrameCS's gAux0 (after each strand's
-// seed face) and how many. The tail channel in: gAux1 (TieFrameCS), gOut2 (TieRouteCS), gOut3
-// (TieLayCS); the frame: gOut (TieFrameCS), gAux1 (the others).
-
-#define TIE_CHANNEL_IN 1u
-#define TIE_WRITES_TAIL 2u
-#define TIE_MASKED 4u
-#define TIE_SCALP 8u
-#define TIE_PUSH 16u
-#define TIE_PI 3.14159265358979f
-#define TIE_BINS 64             // tie_op.cpp kBins
-#define TIE_RING_FILL 0.75f     // kRingFill
-#define TIE_SKIN_SAMPLES 32.0f  // kSkinSamplesPerHalfTurn
-#define TIE_MAX_PATH 4096u      // kMaxPath
-#define TIE_SLOTS 34u           // a strand's route: its header, then S, 31 skin points at most, Q (look_engine.cpp kTieSlots)
-#define TIE_STEPS 64u           // steps down the mesh a closest point takes at most
-#define TIE_GROUP 256
-#define TIE_FRAME_ORIGIN 0      // xyz; w: TIE_ANY, TIE_CHAIN
-#define TIE_FRAME_POLE 4
-#define TIE_FRAME_AXIS 8
-#define TIE_FRAME_U1 12
-#define TIE_FRAME_U2 16
-#define TIE_FRAME_E1 20
-#define TIE_FRAME_E2 24
-#define TIE_FRAME_REACH 32      // the bins' reach, TIE_BINS floats (look_engine.cpp kTieFrameWords)
-#define TIE_ANY 1u              // a strand read: else it ties nothing (the strands as they came)
-#define TIE_CHAIN 2u            // measured from the readers' mean (a second Tie down a tail)
-
-float3 tieCenter() { return asfloat(gFlag2.xyz); }
-float3 tieDirection() { return asfloat(gOctaveSeeds[0].xyz); }
-float3 tieScalpCenter() { return asfloat(uint3(gOctaveSeeds[0].w, gOctaveSeeds[1].x, gOctaveSeeds[1].y)); }
-
-// A strand's start (TieOp's start[s]): its first point past the root whose tail channel is at least
-// 0.5 (an earlier Tie's tail start), else its root; the channel read from `buffer`.
-#define TIE_START_FROM(name, buffer)                                     \
-    uint name(uint begin, uint n) {                                      \
-        if ((gFlag.x & TIE_CHANNEL_IN) == 0) return 0;                   \
-        for (uint i = 1; i < n; ++i) {                                   \
-            if (asfloat(buffer.Load((begin + i) * 4)) >= 0.5f) return i; \
-        }                                                                \
-        return 0;                                                        \
-    }
-TIE_START_FROM(tieStartAux1, gAux1)
-TIE_START_FROM(tieStartOut2, gOut2)
-
-// Strand s's affect: field 0 at it times the number where masked, else 1.
-float tieAffect(uint s, uint begin) { return (gFlag.x & TIE_MASKED) != 0 ? fieldAt(0, asfloat(gFlag.y), s, begin) : 1.0f; }
-
-// Whether strand s is tied (TieOp's tied[s]) and its start k, the channel from gAux1 (TieFrameCS).
-bool tieTiedAux1(uint s, out uint begin, out uint k) {
-    begin = strandBegin(s);
-    k = 0;
-    const uint n = strandCountOf(s);
-    if (n < 2 || !(tieAffect(s, begin) > 0.0f)) return false;
-    k = tieStartAux1(begin, n);
-    return k + 1 < n;
-}
-
-// atan and acos to about an ulp (Cephes' atanf and asinf polynomials), as the CPU's std::atan2 and
-// std::acos: the GPU's own (fxc's expansions: acos off by up to about 7e-5) would flip the CPU's
-// decisions on them (the route's sample count, a ceiling of its angle; which bin, which side).
-float tieAtan(float x) {
-    __target_switch { case cpp: return atan(x); default: break; }  // (the CPU: the core's, pm::)
-    const float sign = x < 0.0f ? -1.0f : 1.0f;
-    float a = abs(x), y = 0.0f;
-    if (a > 2.414213562373095f) {
-        y = 0.5f * TIE_PI;
-        a = -1.0f / a;
-    } else if (a > 0.4142135623730950f) {
-        y = 0.25f * TIE_PI;
-        a = (a - 1.0f) / (a + 1.0f);
-    }
-    const float z = a * a;
-    y += (((8.05374449538e-2f * z - 1.38776856032e-1f) * z + 1.99777106478e-1f) * z - 3.33329491539e-1f) * z * a + a;
-    return sign * y;
-}
-float tieAtan2(float y, float x) {
-    __target_switch { case cpp: return atan2(y, x); default: break; }  // (the CPU: the core's, pm::)
-    if (x == 0.0f) return y > 0.0f ? 0.5f * TIE_PI : y < 0.0f ? -0.5f * TIE_PI : 0.0f;
-    const float a = tieAtan(y / x);
-    if (x > 0.0f) return a;
-    return y < 0.0f ? a - TIE_PI : a + TIE_PI;
-}
-float tieAsinSmall(float x) {  // |x| <= 0.5
-    __target_switch { case cpp: return asin(x); default: break; }  // (the CPU: the core's, pm::)
-    const float z = x * x;
-    return ((((4.2163199048e-2f * z + 2.4181311049e-2f) * z + 4.5470025998e-2f) * z + 7.4953002686e-2f) * z + 1.6666752422e-1f) * z * x + x;
-}
-float tieAcos(float x) {
-    __target_switch { case cpp: return acos(x); default: break; }  // (the CPU: the core's, pm::)
-    if (x < -0.5f) return TIE_PI - 2.0f * tieAsinSmall(sqrt(0.5f * (1.0f + x)));
-    if (x > 0.5f) return 2.0f * tieAsinSmall(sqrt(0.5f * (1.0f - x)));
-    return 0.5f * TIE_PI - tieAsinSmall(x);
-}
-
-// tie_op.cpp basisAbout: two unit vectors square to unit n and to each other.
-void tieBasis(float3 n, out float3 a, out float3 b) {
-    const float3 ref = abs(n.y) < 0.9f ? float3(0.0f, 1.0f, 0.0f) : float3(1.0f, 0.0f, 0.0f);
-    a = normalized(cross(ref, n));
-    b = cross(n, a);
-}
-// tie_op.cpp turnOnto: v by the shortest turn taking unit `from` onto unit `to`.
-float3 tieTurnOnto(float3 v, float3 from, float3 to) {
-    const float3 axis = cross(from, to);
-    const float s = len3(axis), c = clamp(dot(from, to), -1.0f, 1.0f);
-    if (s < 1e-7f) {
-        if (c > 0.0f) return v;
-        float3 a, b;
-        tieBasis(from, a, b);
-        return twistAbout(a, v, TIE_PI);
-    }
-    return twistAbout(axis / s, v, tieAtan2(s, c));
-}
-// A start point's azimuth about the source axis and its radial measure (TieOp's theta, radial).
-float2 tieMeasure(float3 p, float3 origin, float3 pole, float3 u1, float3 u2, bool chain) {
-    const float3 v = p - origin;
-    const float x = dot(v, u1), y = dot(v, u2);
-    float radial = 0.0f;
-    if (chain) {
-        radial = sqrt(x * x + y * y);
-    } else {
-        const float3 d = normalized(v);
-        radial = len3(d) > 0.5f ? len3(d - pole) : 0.0f;
-    }
-    return float2(tieAtan2(y, x), radial);
-}
-
-groupshared uint sTieMost[TIE_BINS];  // the largest radial measure a bin (its bits: they order as the floats, all >= 0)
-groupshared uint sTieFilled[TIE_BINS];
-groupshared float sTieNearest[TIE_BINS];
-groupshared uint sTieCount;
-groupshared uint sTieChained;
-groupshared uint sTieFlags;
-groupshared float3 sTieSum[TIE_GROUP];
-groupshared float3 sTieFrame[4];  // origin, pole, u1, u2
-
-// The source frame from the readers (their count, how many start past an earlier Tie's tail, their
-// points' sum), into gOut; the origin, pole, u1, u2 (TieOp's) and the flags back.
-struct TieFrame {
-    float3 origin, pole, u1, u2;
-    uint flags;
-};
-TieFrame tieFrameOf(uint readers, uint chainedCount, float3 mean) {
-    // The source frame: from the readers' mean for a second Tie down a tail (most start past an
-    // earlier Tie's tail start), else from the scalp's center; the pole through the center.
-    const bool any = readers > 0u;
-    const bool chain = 2u * chainedCount > readers;
-    float3 origin = mean;
-    if ((gFlag.x & TIE_SCALP) != 0 && !chain) origin = tieScalpCenter();
-    float3 pole = normalized(tieCenter() - origin);
-    float3 axis = normalized(tieDirection());
-    if (len3(pole) < 0.5f) pole = len3(axis) > 0.5f ? axis : float3(0.0f, -1.0f, 0.0f);
-    if (len3(axis) < 0.5f) axis = pole;  // auto: from the origin through the center
-    float3 u1, u2;
-    tieBasis(pole, u1, u2);
-    const float3 e1 = tieTurnOnto(u1, pole, axis), e2 = tieTurnOnto(u2, pole, axis);
-    const uint flags = (any ? TIE_ANY : 0u) | (chain ? TIE_CHAIN : 0u);
-    gOut.Store4(TIE_FRAME_ORIGIN * 4, uint4(asuint(origin), flags));
-    gOut.Store4(TIE_FRAME_POLE * 4, uint4(asuint(pole), 0u));
-    gOut.Store4(TIE_FRAME_AXIS * 4, uint4(asuint(axis), 0u));
-    gOut.Store4(TIE_FRAME_U1 * 4, uint4(asuint(u1), 0u));
-    gOut.Store4(TIE_FRAME_U2 * 4, uint4(asuint(u2), 0u));
-    gOut.Store4(TIE_FRAME_E1 * 4, uint4(asuint(e1), 0u));
-    gOut.Store4(TIE_FRAME_E2 * 4, uint4(asuint(e2), 0u));
-    TieFrame f;
-    f.origin = origin;
-    f.pole = pole;
-    f.u1 = u1;
-    f.u2 = u2;
-    f.flags = flags;
-    return f;
-}
-// A reader's azimuth bin and radial measure about the frame.
-uint tieBinOf(float3 p, TieFrame f, out float radial) {
-    const float2 m = tieMeasure(p, f.origin, f.pole, f.u1, f.u2, (f.flags & TIE_CHAIN) != 0);
-    radial = m.y;
-    const int bin = int(floor((m.x + TIE_PI) / (2.0f * TIE_PI) * float(TIE_BINS)));
-    return uint(bin + TIE_BINS) % TIE_BINS;  // (bin from 0 to TIE_BINS; GLSL's % of a negative is undefined)
-}
-
-// The CPU's TieFrameCS: on one thread, the readers summed in strand order in double (as TieOp sums
-// them).
-void tieFrameAlone() {
-    double3 sum = double3(0.0, 0.0, 0.0);
-    uint count = 0, chained = 0;
-    for (uint j = 0; j < gAux.z; ++j) {
-        uint begin, k;
-        if (!tieTiedAux1(gAux0.Load((gAux.y + j) * 4), begin, k)) continue;
-        ++count;
-        chained += k > 0 ? 1u : 0u;
-        const float3 p = loadPoint(begin + k);
-        sum = sum + double3(double(p.x), double(p.y), double(p.z));
-    }
-    const bool everyone = count == 0u;
-    if (everyone) {
-        for (uint s = 0; s < gStrandCount; ++s) {
-            uint begin, k;
-            if (!tieTiedAux1(s, begin, k)) continue;
-            ++count;
-            chained += k > 0 ? 1u : 0u;
-            const float3 p = loadPoint(begin + k);
-            sum = sum + double3(double(p.x), double(p.y), double(p.z));
-        }
-    }
-    const double readers = double(count);
-    const float3 mean = count > 0u ? float3(float(sum.x / readers), float(sum.y / readers), float(sum.z / readers)) : float3(0.0f, 0.0f, 0.0f);
-    const TieFrame f = tieFrameOf(count, chained, mean);
-    float most[TIE_BINS];
-    bool filled[TIE_BINS];
-    for (uint b = 0; b < TIE_BINS; ++b) {
-        most[b] = 0.0f;
-        filled[b] = false;
-    }
-    const uint total = everyone ? gStrandCount : gAux.z;
-    for (uint j = 0; j < total; ++j) {
-        uint begin, k;
-        if (!tieTiedAux1(everyone ? j : gAux0.Load((gAux.y + j) * 4), begin, k)) continue;
-        float radial;
-        const uint b = tieBinOf(loadPoint(begin + k), f, radial);
-        most[b] = max(most[b], radial);
-        filled[b] = true;
-    }
-    float nearest[TIE_BINS];
-    for (uint t = 0; t < TIE_BINS; ++t) {
-        nearest[t] = most[t];
-        if (!filled[t]) {
-            for (uint d = 1; d <= TIE_BINS / 2; ++d) {
-                const uint a = (t + d) % TIE_BINS, b = (t + TIE_BINS - d) % TIE_BINS;
-                if (!filled[a] && !filled[b]) continue;
-                nearest[t] = max(filled[a] ? most[a] : 0.0f, filled[b] ? most[b] : 0.0f);
-                break;
-            }
-        }
-    }
-    for (uint t = 0; t < TIE_BINS; ++t) {
-        const float reach = max(max(nearest[(t + TIE_BINS - 1) % TIE_BINS], nearest[t]), nearest[(t + 1) % TIE_BINS]);
-        gOut.Store((TIE_FRAME_REACH + t) * 4, asuint(reach));
-    }
-}
-
-[shader("compute")]
-[numthreads(TIE_GROUP, 1, 1)]
-void TieFrameCS(uint3 local : SV_GroupThreadID) {
-    __target_switch {
-    case cpp:
-        if (local.x == 0) tieFrameAlone();
-    default:
-        tieFrameGroup(local.x);
-    }
-}
-
-void tieFrameGroup(uint t) {
-    if (t < TIE_BINS) {
-        sTieMost[t] = 0u;
-        sTieFilled[t] = 0u;
-    }
-    if (t == 0) {
-        sTieCount = 0u;
-        sTieChained = 0u;
-    }
-    groupSync();
-    // The readers: the core's tied strands, else (none of them tied) every tied strand.
-    float3 sum = float3(0.0f, 0.0f, 0.0f);
-    uint count = 0, chained = 0;
-    for (uint j = t; j < gAux.z; j += TIE_GROUP) {
-        uint begin, k;
-        if (!tieTiedAux1(gAux0.Load((gAux.y + j) * 4), begin, k)) continue;
-        ++count;
-        chained += k > 0 ? 1u : 0u;
-        sum += loadPoint(begin + k);
-    }
-    InterlockedAdd(sTieCount, count);
-    groupSync();
-    const bool everyone = sTieCount == 0u;
-    groupSync();  // (all have read it before any adds again)
-    if (everyone) {
-        sum = float3(0.0f, 0.0f, 0.0f);
-        count = 0;
-        chained = 0;
-        for (uint s = t; s < gStrandCount; s += TIE_GROUP) {
-            uint begin, k;
-            if (!tieTiedAux1(s, begin, k)) continue;
-            ++count;
-            chained += k > 0 ? 1u : 0u;
-            sum += loadPoint(begin + k);
-        }
-        InterlockedAdd(sTieCount, count);
-    }
-    InterlockedAdd(sTieChained, chained);
-    sTieSum[t] = sum;
-    groupSync();
-    for (uint span = TIE_GROUP / 2; span > 0; span >>= 1) {
-        if (t < span) sTieSum[t] = sTieSum[t] + sTieSum[t + span];
-        groupSync();
-    }
-    if (t == 0) {
-        const TieFrame f = tieFrameOf(sTieCount, sTieChained, sTieCount > 0u ? sTieSum[0] / float(sTieCount) : float3(0.0f, 0.0f, 0.0f));
-        sTieFrame[0] = f.origin;
-        sTieFrame[1] = f.pole;
-        sTieFrame[2] = f.u1;
-        sTieFrame[3] = f.u2;
-        sTieFlags = f.flags;
-    }
-    groupSync();
-    // The readers' largest radial measure per azimuth bin.
-    TieFrame f;
-    f.origin = sTieFrame[0];
-    f.pole = sTieFrame[1];
-    f.u1 = sTieFrame[2];
-    f.u2 = sTieFrame[3];
-    f.flags = sTieFlags;
-    const uint total = everyone ? gStrandCount : gAux.z;
-    for (uint j = t; j < total; j += TIE_GROUP) {
-        uint begin, k;
-        if (!tieTiedAux1(everyone ? j : gAux0.Load((gAux.y + j) * 4), begin, k)) continue;
-        float radial;
-        const uint b = tieBinOf(loadPoint(begin + k), f, radial);
-        InterlockedMax(sTieMost[b], asuint(radial));
-        sTieFilled[b] = 1u;
-    }
-    groupSync();
-    // An empty bin: the nearest filled one's (the larger of two as near); then each bin the largest
-    // of itself and its neighbours.
-    if (t < TIE_BINS) {
-        float nearest = asfloat(sTieMost[t]);
-        if (sTieFilled[t] == 0u) {
-            for (uint d = 1; d <= TIE_BINS / 2; ++d) {
-                const uint a = (t + d) % TIE_BINS, b = (t + TIE_BINS - d) % TIE_BINS;
-                const bool fa = sTieFilled[a] != 0u, fb = sTieFilled[b] != 0u;
-                if (!fa && !fb) continue;
-                nearest = max(fa ? asfloat(sTieMost[a]) : 0.0f, fb ? asfloat(sTieMost[b]) : 0.0f);
-                break;
-            }
-        }
-        sTieNearest[t] = nearest;
-    }
-    groupSync();
-    if (t < TIE_BINS) {
-        const float reach = max(max(sTieNearest[(t + TIE_BINS - 1) % TIE_BINS], sTieNearest[t]), sTieNearest[(t + 1) % TIE_BINS]);
-        gOut.Store((TIE_FRAME_REACH + t) * 4, asuint(reach));
-    }
-}
-
-// (Four words a vector: a Store3 or Load3 at a constant offset a multiple of 12 becomes a uvec3 array in GLSL, its stride 16.)
-float3 tieFrameVec(uint w) { return asfloat(gAux1.Load4(w * 4).xyz); }
-
-// The scalp's closest point to p (ScalpMesh::closestPoint's) found down the mesh of the tables from
-// face `face` (MeshDistanceField::answerNear's walk from one seed: where the scalp is convex the
-// distance to it has one minimum), `face` then the nearest's: its squared distance (infinity: none),
-// the point and its smooth normal.
-struct TieSkin {
-    float d2;
-    float3 at, normal;
-};
-// The CPU's: the core's ScalpMesh::closestPoint and CollisionSurface::pushOut on the engine's
-// TieHost (look_run.h; its address in gOctaveSeeds[1].zw), as TieOp asks them.
-uint2 tieHost() { return gOctaveSeeds[1].zw; }
-bool hostTieClosest(uint2 host, float3 p, float reach, out float3 at, out float3 normal) {
-    __target_switch { case cpp: __intrinsic_asm "groomlab_tie_closest($0, $1, $2, $3, $4)"; }
-}
-float3 hostTiePush(uint2 host, float3 p) {
-    __target_switch { case cpp: __intrinsic_asm "groomlab_tie_push($0, $1)"; }
-}
-// The scalp's closest point to p within `reach` (its point and normal), false for none; on the GPU
-// down the mesh of the field's tables from `face`.
-bool tieSkinAt(float3 p, float reach, inout uint face, out float3 at, out float3 normal) {
-    __target_switch {
-    case cpp: return hostTieClosest(tieHost(), p, reach, at, normal);
-    default: {
-        const TieSkin sp = tieClosest(p, face);
-        at = sp.at;
-        normal = sp.normal;
-        return sp.d2 < reach * reach;
-    }
-    }
-}
-TieSkin tieClosest(float3 p, inout uint face) {
-    Nearest nearest;
-    nearest.best = 3.402823466e38f;
-    nearest.reach = 1.8446743e19f;
-    nearest.face = TABLE_NONE;
-    nearest.uv = float2(0.0f, 0.0f);
-    nearest.at = float3(0.0f, 0.0f, 0.0f);
-    [ForceUnroll] for (uint c = 0; c < SCANNED_CORNERS; ++c) nearest.scanned[c] = TABLE_NONE;
-    nearest.scannedCount = 0;
-    for (uint i = 0, steps = 0;; ++i) {
-        uint around = face;
-        if (i > 0) {
-            if (steps == TIE_STEPS || nearest.face == TABLE_NONE) break;
-            around = nearest.face;
-            ++steps;
-        } else if (around == TABLE_NONE) {
-            break;
-        }
-        if (!scanAround(p, around, nearest) && i > 0) break;
-    }
-    TieSkin skin;
-    skin.d2 = nearest.face == TABLE_NONE ? infinity() : nearest.best;
-    skin.at = nearest.at;
-    skin.normal = float3(0.0f, 0.0f, 0.0f);
-    if (nearest.face == TABLE_NONE) return skin;
-    face = nearest.face;
-    const uint corners = tableWord(TABLE_TRIANGLES) + nearest.face * TRIANGLE_WORDS + TRIANGLE_CORNERS;
-    const uint normals = tableWord(TABLE_NORMALS);
-    PRECISE float w = 1.0f - nearest.uv.x;
-    w = w - nearest.uv.y;
-    PRECISE float3 n0 = tableVec(normals + tableWord(corners) * 3) * w;
-    PRECISE float3 n1 = tableVec(normals + tableWord(corners + 1) * 3) * nearest.uv.x;
-    PRECISE float3 n2 = tableVec(normals + tableWord(corners + 2) * 3) * nearest.uv.y;
-    PRECISE float3 n01 = n0 + n1;
-    PRECISE float3 nSum = n01 + n2;
-    skin.normal = normalizedExact(nSum);  // ScalpMesh::normal
-    return skin;
-}
-
-uint tieSlotAt(uint s, uint j) { return (s * TIE_SLOTS + j) * 16; }
-
-[shader("compute")]
-[numthreads(GROUP_SIZE, 1, 1)]
-void TieRouteCS(uint3 id : SV_DispatchThreadID) {
-    const uint s = threadIndex(id, GROUP_SIZE);
-    if (s >= gStrandCount) return;
-    const uint begin = strandBegin(s), n = strandCountOf(s);
-    const uint frameFlags = gAux1.Load(TIE_FRAME_ORIGIN * 4 + 12);
-    uint k = 0;
-    bool tied = (frameFlags & TIE_ANY) != 0 && n >= 2 && tieAffect(s, begin) > 0.0f;
-    if (tied) {
-        k = tieStartOut2(begin, n);
-        tied = k + 1 < n;
-    }
-    if (!tied) {
-        gOut.Store4(tieSlotAt(s, 0), uint4(0u, 0u, 0u, 0u));
-        return;
-    }
-    const float3 S = loadPoint(begin + k);
-    const float3 u1 = tieFrameVec(TIE_FRAME_U1), u2 = tieFrameVec(TIE_FRAME_U2);
-    // Where it passes the ring: its azimuth kept, its share of the bundle by the bins' reach there.
-    const float2 m = tieMeasure(S, tieFrameVec(TIE_FRAME_ORIGIN), tieFrameVec(TIE_FRAME_POLE), u1, u2, (frameFlags & TIE_CHAIN) != 0);
-    const float theta = m.x;
-    const float f = (theta + TIE_PI) / (2.0f * TIE_PI) * float(TIE_BINS) - 0.5f;
-    const float fl = floor(f);
-    const uint k0 = uint(int(fl) + TIE_BINS) % TIE_BINS;  // (fl from -1 to TIE_BINS - 1)
-    const uint k1 = (k0 + 1) % TIE_BINS;
-    const float wf = f - fl;
-    const float most = asfloat(gAux1.Load((TIE_FRAME_REACH + k0) * 4)) * (1.0f - wf) +
-                       asfloat(gAux1.Load((TIE_FRAME_REACH + k1) * 4)) * wf;
-    const float share = most > 0.0f ? min(1.0f, m.y / most) : 0.0f;
-    const float bundle = TIE_RING_FILL * gValue.x * (2.0f - gValue.y);
-    const float3 outward = tieFrameVec(TIE_FRAME_E1) * cos(theta) + tieFrameVec(TIE_FRAME_E2) * sin(theta);
-    const float3 Q = tieCenter() + outward * (share * bundle);
-    // The route: the outer hull, about the scalp's center, of S, the scalp under the arc and Q.
-    gOut.Store4(tieSlotAt(s, 1), uint4(asuint(S), 0u));
-    uint count = 1;
-    if ((gFlag.x & TIE_SCALP) != 0) {
-        const float3 C = tieScalpCenter();
-        const float3 a = S - C, b = Q - C;
-        const float la = len3(a), lb = len3(b);
-        if (la > 1e-6f && lb > 1e-6f) {
-            const float3 ua = a / la, ub = b / lb;
-            const float cosA = clamp(dot(ua, ub), -1.0f, 1.0f);
-            const float alpha = tieAcos(cosA);
-            float3 w = ub - ua * cosA;
-            if (len3(w) < 1e-4f) {  // Q straight over or under S: the plane through the axis
-                const float3 r = u1 * cos(theta) + u2 * sin(theta);
-                w = r - ua * dot(ua, r);
-            }
-            w = normalized(w);
-            const int samples = int(ceil(alpha / (TIE_PI / TIE_SKIN_SAMPLES)));
-            // The skin's lifted closest points under the arc, by their angle (a stable insertion),
-            // in slots 2 on (each .xyz, its angle .w).
-            uint skin = 0;
-            if (len3(w) > 0.5f && alpha > 1e-4f) {
-                uint face = gAux0.Load(s * 4);
-                sTableBase = 0;
-                for (int j = 1; j < samples; ++j) {
-                    const float fj = float(j) / float(samples);
-                    const float angle = alpha * fj;
-                    const float3 dir = ua * cos(angle) + w * sin(angle);
-                    const float r = la + (lb - la) * fj;
-                    float3 skinAt, skinNormal;
-                    if (!tieSkinAt(C + dir * r, 0.5f * r, face, skinAt, skinNormal)) continue;
-                    const float3 p = skinAt + skinNormal * gValue2.z;
-                    const float3 v = p - C;
-                    const float at = tieAtan2(dot(v, w), dot(v, ua));
-                    if (!(at > 0.0f && at < alpha)) continue;
-                    uint i = skin;
-                    for (; i > 0; --i) {
-                        const float4 before = asfloat(gOut.Load4(tieSlotAt(s, 1 + i)));
-                        if (!(before.w > at)) break;
-                        gOut.Store4(tieSlotAt(s, 2 + i), asuint(before));
-                    }
-                    gOut.Store4(tieSlotAt(s, 2 + i), asuint(float4(p, at)));
-                    ++skin;
-                }
-            }
-            // The hull (a Graham scan from S, in place over the slots: entry h at slot 1 + h): a
-            // point is popped while the string does not bend over it.
-            uint h = 1;
-            for (uint i = 0; i <= skin; ++i) {
-                float3 np = Q;
-                float2 nxy = float2(lb * cos(alpha), lb * sin(alpha));
-                if (i < skin) {
-                    np = asfloat(gOut.Load3(tieSlotAt(s, 2 + i)));
-                    const float3 v = np - C;
-                    nxy = float2(dot(v, ua), dot(v, w));
-                }
-                while (h >= 2) {
-                    float2 p0 = float2(la, 0.0f);
-                    if (h > 2) {
-                        const float3 v0 = asfloat(gOut.Load3(tieSlotAt(s, h - 1))) - C;
-                        p0 = float2(dot(v0, ua), dot(v0, w));
-                    }
-                    const float3 v1 = asfloat(gOut.Load3(tieSlotAt(s, h))) - C;
-                    const float2 p1 = float2(dot(v1, ua), dot(v1, w));
-                    const float turn = (p1.x - p0.x) * (nxy.y - p1.y) - (p1.y - p0.y) * (nxy.x - p1.x);
-                    if (turn > 0.0f) break;  // p1 holds the string up: it bends over it
-                    --h;
-                }
-                gOut.Store4(tieSlotAt(s, 1 + h), uint4(asuint(np), 0u));
-                ++h;
-            }
-            count = h;
-        }
-    }
-    if (count == 1) {
-        gOut.Store4(tieSlotAt(s, 2), uint4(asuint(Q), 0u));
-        count = 2;
-    }
-    gOut.Store4(tieSlotAt(s, 0), uint4(count, k, 1u, 0u));
-}
-
-// A walk along a polyline by an arc length that only grows (tie_op.cpp alongPolyline): its segment
-// j (from point j - 1), the arc lengths at its ends and the ends.
-struct TieWalk {
-    uint j;
-    float a0, a1;
-    float3 p0, p1;
-};
-// ... of the route of strand s (slots 1 to count of gAux0).
-TieWalk tieRouteWalk(uint s) {
-    TieWalk w;
-    w.j = 1;
-    w.p0 = asfloat(gAux0.Load3(tieSlotAt(s, 1)));
-    w.p1 = asfloat(gAux0.Load3(tieSlotAt(s, 2)));
-    w.a0 = 0.0f;
-    w.a1 = len3(w.p1 - w.p0);
-    return w;
-}
-float3 tieRouteAt(inout TieWalk w, uint s, uint count, float a) {
-    while (w.j < count - 1 && w.a1 <= a) {
-        ++w.j;
-        w.p0 = w.p1;
-        w.a0 = w.a1;
-        w.p1 = asfloat(gAux0.Load3(tieSlotAt(s, 1 + w.j)));
-        w.a1 = w.a0 + len3(w.p1 - w.p0);
-    }
-    const float len = w.a1 - w.a0;
-    const float f = len > 0.0f ? (a - w.a0) / len : 0.0f;
-    return w.p0 + (w.p1 - w.p0) * f;
-}
-// ... of the strand's points as they came, from its start (`first`, `count` of them: two or more).
-TieWalk tieInputWalk(uint first) {
-    TieWalk w;
-    w.j = 1;
-    w.p0 = loadPoint(first);
-    w.p1 = loadPoint(first + 1);
-    w.a0 = 0.0f;
-    w.a1 = len3(w.p1 - w.p0);
-    return w;
-}
-float3 tieInputAt(inout TieWalk w, uint first, uint count, float a) {
-    while (w.j < count - 1 && w.a1 <= a) {
-        ++w.j;
-        w.p0 = w.p1;
-        w.a0 = w.a1;
-        w.p1 = loadPoint(first + w.j);
-        w.a1 = w.a0 + len3(w.p1 - w.p0);
-    }
-    const float len = w.a1 - w.a0;
-    const float f = len > 0.0f ? (a - w.a0) / len : 0.0f;
-    return w.p0 + (w.p1 - w.p0) * f;
-}
-
-// The tail by its distance t along the axis past the ring (TieOp's tailAt): its offset from the axis
-// growing by the spread and turned by the twist.
-float3 tieTailAt(float t, float3 offset, float3 axis, float bundle, float tanSpread, float twist) {
-    float3 off = bundle > 0.0f ? offset * (1.0f + t * tanSpread / bundle) : offset;
-    if (twist != 0.0f) off = twistAbout(axis, off, 2.0f * TIE_PI * twist * t);
-    return tieCenter() + axis * t + off;
-}
-
-// The path, a point at a time (TieOp's `path`, before the push).
-struct TieGen {
-    uint index;                  // the next point's
-    uint routeSteps, bendSteps;  // bendSteps 0 till the route is made
-    float routeEnd, step, tStep, t, laid, remaining;
-    float3 raw;                  // the last point made
-    float3 Q, bendStart, bendEnd, control;
-    TieWalk route, input;
-};
-// Its next point: the route (eased from the strand's own shape over `ease`), the bend through the
-// ring (a quadratic Bezier through Q at its middle), the tail (while it is not long enough for the
-// whole strand); false past its end.
-bool tieNext(inout TieGen g, uint s, uint routeCount, uint first, uint inputCount, float3 offset, float3 axis, float bundle,
-             float tanSpread, out float3 p) {
-    const uint idx = g.index;
-    const float ease = gValue2.x, twist = gValue2.y;
-    if (idx <= g.routeSteps) {
-        const float a = g.routeEnd * float(idx) / float(g.routeSteps);
-        p = tieRouteAt(g.route, s, routeCount, a);
-        if (ease > 0.0f && a < ease && idx > 0) {
-            const float keep = 1.0f - smoothstepStd(0.0f, ease, a);
-            p = p + (tieInputAt(g.input, first, inputCount, a) - p) * keep;
-        }
-    } else {
-        if (idx == g.routeSteps + 1) {  // the bend, from where the route ends
-            g.bendStart = g.raw;
-            const float bendLength = len3(g.Q - g.bendStart) + len3(g.bendEnd - g.Q);
-            g.bendSteps = 2u * uint(max(1, int(ceil(0.5f * bendLength / g.step))));
-            g.control = g.Q * 2.0f - (g.bendStart + g.bendEnd) * 0.5f;
-        }
-        if (idx <= g.routeSteps + g.bendSteps) {
-            const float f = float(idx - g.routeSteps) / float(g.bendSteps);
-            const float h = 1.0f - f;
-            p = g.bendStart * (h * h) + g.control * (2.0f * h * f) + g.bendEnd * (f * f);
-        } else {
-            p = g.raw;
-            if (!(g.laid < g.remaining + g.step) || idx >= TIE_MAX_PATH) return false;
-            g.t += g.tStep;
-            p = tieTailAt(g.t, offset, axis, bundle, tanSpread, twist);
-        }
-    }
-    if (idx > 0) g.laid += len3(p - g.raw);
-    g.raw = p;
-    g.index = idx + 1;
-    return true;
-}
-
-// A path point pushed out of the scalp to the clearance (CollisionSurface::pushOut: the field's
-// answer alone, Probe::fieldOnly, as the clearance walk asks it).
-float3 tiePush(FieldTables tables, float3 p) {
-    __target_switch {
-    case cpp: {
-        const uint2 host = tieHost();
-        return host.x != 0u || host.y != 0u ? hostTiePush(host, p) : p;
-    }
-    default: break;
-    }
-    if ((gFlag.x & TIE_PUSH) == 0) return p;
-    Probe probe;
-    learnt(probe, -infinity(), 0.0f);
-    float3 delta;
-    if (clearancePush(tables, p, gValue2.z, gValue2.w, asfloat(gFlag.z), probe, delta) != PUSH_MOVED) return p;
-    PRECISE float3 moved = p + delta;
-    return moved;
-}
-
-float tieFrom(uint p) { return (gFlag.x & TIE_CHANNEL_IN) != 0 ? asfloat(gOut3.Load(p * 4)) : 0.0f; }
-// The tail channel's value at point p mixed by the affect m from what it came with (applyAffect).
-void tieStoreTail(uint p, float v, float m) {
-    if ((gFlag.x & TIE_WRITES_TAIL) == 0) return;
-    const float from = tieFrom(p);
-    gOut2.Store(p * 4, asuint(m >= 1.0f ? v : from + (v - from) * m));
-}
-// A point mixed by the affect m from where it came (applyAffect).
-void tieStorePoint(uint p, float3 v, float m) {
-    const float3 was = loadPoint(p);
-    storePoint(gOut, p, m >= 1.0f ? v : was + (v - was) * m);
-}
-
-// The first crossing past `from` along d (from the segment's start, q its offset from the last
-// point) of the sphere of radius L about the last point (|q + u d| = L, the larger root, u clamped
-// to [from, 1]); false where d is a point.
-bool tieCrossing(float3 d, float3 q, float L, float from, out float u) {
-    u = 0.0f;
-    const float A = dot(d, d), B = 2.0f * dot(d, q), C = dot(q, q) - L * L;
-    if (!(A > 0.0f)) return false;
-    const float disc = max(0.0f, B * B - 4.0f * A * C);
-    u = clamp((-B + sqrt(disc)) / (2.0f * A), from, 1.0f);
-    return true;
-}
-// The CPU's, in double as TieOp works it out: `from` the last crossing on this segment where
-// `sameSegment` (alongBits: its double, kept), else 0.
-bool tieCrossingD(float3 d, float3 q, float L, bool sameSegment, inout uint2 alongBits, out float u) {
-    u = 0.0f;
-    const double A = double(dot(d, d)), B = 2.0L * double(dot(d, q)), C = double(dot(q, q)) - double(L) * double(L);
-    if (!(A > 0.0L)) return false;
-    const double disc = max(0.0L, B * B - 4.0L * A * C);
-    const double at = clamp((-B + sqrt(disc)) / (2.0L * A), sameSegment ? asdouble(alongBits.x, alongBits.y) : 0.0L, 1.0L);
-    asuint(at, alongBits.x, alongBits.y);
-    u = float(at);
-    return true;
-}
-
-[shader("compute")]
-[numthreads(GROUP_SIZE, 1, 1)]
-void TieLayCS(uint3 id : SV_DispatchThreadID) {
-    const uint s = threadIndex(id, GROUP_SIZE);
-    if (s >= gStrandCount) return;
-    const uint begin = strandBegin(s), n = strandCountOf(s);
-    const bool writes = (gFlag.x & TIE_WRITES_TAIL) != 0;
-    const uint4 header = gAux0.Load4(tieSlotAt(s, 0));
-    const uint routeCount = header.x, k = header.y;
-    copyStrand(begin, n);  // (the points up to its start stay; untied: all of them)
-    if (routeCount < 2) {
-        for (uint i = 0; writes && i < n; ++i) gOut2.Store((begin + i) * 4, asuint(tieFrom(begin + i)));
-        return;
-    }
-    const float m = (gFlag.x & TIE_MASKED) != 0 ? clamp01(tieAffect(s, begin)) : 1.0f;
-    for (uint i = 0; i <= k; ++i) tieStoreTail(begin + i, 0.0f, m);
-    float remaining = 0.0f;
-    for (uint i = k + 1; i < n; ++i) remaining += len3(loadPoint(begin + i) - loadPoint(begin + i - 1));
-    if (!(remaining > 0.0f)) {
-        for (uint i = k + 1; writes && i < n; ++i) gOut2.Store((begin + i) * 4, asuint(tieFrom(begin + i)));
-        return;
-    }
-    const float radius = gValue.x, twist = gValue2.y;
-    const float bundle = TIE_RING_FILL * radius * (2.0f - gValue.y);
-    const float tanSpread = tan(gValue.z);
-    const float corner = radius;  // (tie_op.cpp kCorner)
-    const float3 axis = tieFrameVec(TIE_FRAME_AXIS);
-    const float3 S = loadPoint(begin + k);
-    TieGen g;
-    g.Q = asfloat(gAux0.Load3(tieSlotAt(s, routeCount)));
-    float routeLength = 0.0f;
-    for (uint j = 1; j < routeCount; ++j) {
-        routeLength += len3(asfloat(gAux0.Load3(tieSlotAt(s, 1 + j))) - asfloat(gAux0.Load3(tieSlotAt(s, j))));
-    }
-    // The path's sampling: a third of the mean segment, of the radius, finer for a twist, within
-    // kMaxPath / 2 steps of the whole.
-    const float meanSegment = remaining / float(n - 1 - k);
-    const float total = max(routeLength, remaining) + 2.0f * radius;
-    float step = meanSegment / 3.0f;
-    if (radius > 0.0f) step = min(step, radius / 3.0f);
-    if (twist != 0.0f) step = min(step, 1.0f / (abs(twist) * 24.0f));
-    step = max(step, total / float(TIE_MAX_PATH / 2));
-    const float bendIn = min(corner, 0.5f * routeLength);
-    g.routeEnd = routeLength - bendIn;
-    g.routeSteps = uint(max(1, int(ceil(g.routeEnd / step))));
-    g.bendSteps = 0;
-    g.step = step;
-    g.tStep = 0.5f * step;
-    g.remaining = remaining;
-    g.laid = 0.0f;
-    g.index = 1;  // (path[0]: S, at arc 0 of the route, not pushed)
-    g.raw = S;
-    g.route = tieRouteWalk(s);
-    g.input = tieInputWalk(begin + k);
-    // Where the bend ends: kCorner x radius along the tail.
-    const float3 offset = g.Q - tieCenter();
-    float t = 0.0f, tailArc = 0.0f;
-    float3 previous = g.Q;
-    bool reached = false;
-    for (uint guard = 0; tailArc < corner && guard < 2u * TIE_MAX_PATH; ++guard) {
-        const float3 next = tieTailAt(t + g.tStep, offset, axis, bundle, tanSpread, twist);
-        const float len = len3(next - previous);
-        if (tailArc + len >= corner && len > 0.0f) {
-            const float f = (corner - tailArc) / len;
-            t += g.tStep * f;
-            tailArc = corner;
-            reached = true;
-            break;
-        }
-        tailArc += len;
-        t += g.tStep;
-        previous = next;
-    }
-    if (reached) previous = tieTailAt(t, offset, axis, bundle, tanSpread, twist);
-    g.bendEnd = corner > 0.0f ? previous : g.Q;
-    g.t = t;
-    g.bendStart = g.Q;
-    g.control = g.Q;
-    sTableBase = 0;
-    const FieldTables tables = fieldTables();
-
-    // The strand along the pushed path. The window: its segment `cur` from P0 to P1 (their arcs A0,
-    // A1); each point the first crossing past the last of the sphere about it of its segment's
-    // length (seg, along: where the last landed), past the path's end carried on along its last
-    // segment (extending), then exactly its length from the point before. One loop making the
-    // path's points (one push in the code) and laying the strand's, then on to the ring's point for
-    // the tail.
-    float3 P0 = S, P1 = S;
-    float A0 = 0.0f, A1 = 0.0f, ringArc = 0.0f, along = 0.0f;
-    uint2 alongBits = uint2(0u, 0u);  // (the CPU's: `along` in double, as TieOp keeps it)
-    bool ringKnown = false, has1 = false, ended = false, extending = false, needPoint = true;
-    uint cur = 0, seg = 0, at = k + 1;
-    float3 last = S, before = S;
-    for (uint guard = 0; guard < 2u * TIE_MAX_PATH + 4u * n; ++guard) {
-        if (needPoint) {
-            needPoint = false;
-            float3 raw = g.raw;
-            if (!ended && tieNext(g, s, routeCount, begin + k, n - k, offset, axis, bundle, tanSpread, raw)) {
-                const float3 q = tiePush(tables, raw);
-                const float A = (has1 ? A1 : A0) + len3(q - (has1 ? P1 : P0));
-                if (g.bendSteps != 0 && g.index - 1 == g.routeSteps + g.bendSteps / 2) {
-                    ringArc = A;
-                    ringKnown = true;
-                }
-                if (has1) {
-                    ++cur;
-                    P0 = P1;
-                    A0 = A1;
-                }
-                P1 = q;
-                A1 = A;
-                has1 = true;
-            } else {
-                ended = true;
-            }
-        }
-        if (at >= n) {  // laid: on to the ring's point (for the tail)
-            if (ringKnown || ended || !writes) break;
-            needPoint = true;
-            continue;
-        }
-        const float L = len3(loadPoint(begin + at) - loadPoint(begin + at - 1));
-        bool found = false;
-        if (!extending && has1) {
-            if (len3(P1 - last) < L) {
-                if (!ended) {
-                    needPoint = true;  // on to the next segment
-                    continue;
-                }
-            } else {
-                // |P0 + u d - last| = L, the larger root (leaving the sphere), u in [from, 1].
-                const float3 d = P1 - P0;
-                const float3 q = P0 - last;
-                float u;
-                bool crossing;
-                __target_switch {
-                case cpp: crossing = tieCrossingD(d, q, L, cur == seg, alongBits, u);
-                default: crossing = tieCrossing(d, q, L, cur == seg ? along : 0.0f, u);
-                }
-                if (crossing) {
-                    seg = cur;
-                    along = u;
-                    last = P0 + d * u;
-                    found = true;
-                } else if (!ended) {
-                    needPoint = true;
-                    continue;
-                }
-            }
-        }
-        if (!found) {  // past the path's end: on along its last segment
-            float3 dir = normalized(P1 - P0);
-            if (len3(dir) < 0.5f) dir = axis;
-            const float3 q = P1 - last;
-            float u;
-            __target_switch {
-            case cpp: {
-                const double B = 2.0L * double(dot(dir, q)), C = double(dot(q, q)) - double(L) * double(L);
-                u = float(max((-B + sqrt(max(0.0L, B * B - 4.0L * C))) / 2.0L, 0.0L));
-                asuint(1.0L, alongBits.x, alongBits.y);
-            }
-            default: {
-                const float B = 2.0f * dot(dir, q), C = dot(q, q) - L * L;
-                u = max((-B + sqrt(max(0.0f, B * B - 4.0f * C))) / 2.0f, 0.0f);
-            }
-            }
-            P0 = P1;
-            A0 = A1;
-            P1 = P1 + dir * u;
-            A1 = A0 + u;
-            cur = cur + 1;
-            seg = cur;
-            along = 1.0f;
-            last = P1;
-            extending = true;
-            ended = true;
-        }
-        // Exactly its length from the point before, along where it landed.
-        const float3 d = last - before;
-        const float len = len3(d);
-        const float3 placed = len > 0.0f ? before + d * (L / len) : last;
-        tieStorePoint(begin + at, placed, m);
-        last = placed;
-        before = placed;
-        if (writes) gOut2.Store((begin + at) * 4, asuint(A0 + along * (A1 - A0)));  // its arc along the path (the tail, below)
-        ++at;
-    }
-    // The tail channel: 0 before the ring, 1 past it, by each point's arc along the path.
-    for (uint j = k + 1; writes && j < n; ++j) {
-        const float arc = asfloat(gOut2.Load((begin + j) * 4));
-        const float v = radius > 0.0f ? smoothstepStd(ringArc - radius, ringArc + radius, arc) : (arc >= ringArc ? 1.0f : 0.0f);
-        tieStoreTail(begin + j, v, m);
-    }
-}
-
 // ---- The shapers working on each strand alone: Bend, Direction, Transform (transform_ops.cpp),
 // Displace (deform_ops.cpp DisplaceOp), Twist (extra_ops.cpp TwistOp) ------------------------------
 //
@@ -7642,7 +6800,7 @@ void TangleCS(uint3 id : SV_DispatchThreadID) {
 // lengths kept. gValue: lift (degrees: field 0 per strand times it), bend, the jitter (rollRandom in
 // radians; the strand's draw, -1 to 1, in its numbers); gFlag: x arrows, y the field's vertices
 // baked (0: none), z its pins; gFlag2: x its sinks, y a scalp (its tables in gAux2, the closest
-// points found down its mesh as Tie's routes find them). gAux0: 12 floats a
+// points found down its mesh). gAux0: 12 floats a
 // strand (look_chain.h FlowInputs: the root's face's bits, u, v; the normal there; the field there);
 // gAux1: the field (each vertex's direction, each pin's position and direction, each sink's center,
 // radius, normal and angle; flow.cpp FlowField, every pin asked where it asks the nearest).
@@ -7758,7 +6916,34 @@ float3 flowHeading(float3 field, float3 rootNormal, float3 nrm, float3 own, floa
     return d;
 }
 
-// The scalp's closest point to p found down the mesh from face `face` (tieClosest), with its
+#define CLOSEST_STEPS 64u  // steps down the mesh a closest point takes at most
+#define PRECISE_PI 3.14159265358979f
+// atan and atan2 to about an ulp (Cephes' atanf polynomial), as the CPU's std::atan2: the GPU's own
+// (fxc's expansion is coarser) would flip the CPU's decisions on them.
+float atanPrecise(float x) {
+    __target_switch { case cpp: return atan(x); default: break; }  // (the CPU: the core's, pm::)
+    const float sign = x < 0.0f ? -1.0f : 1.0f;
+    float a = abs(x), y = 0.0f;
+    if (a > 2.414213562373095f) {
+        y = 0.5f * PRECISE_PI;
+        a = -1.0f / a;
+    } else if (a > 0.4142135623730950f) {
+        y = 0.25f * PRECISE_PI;
+        a = (a - 1.0f) / (a + 1.0f);
+    }
+    const float z = a * a;
+    y += (((8.05374449538e-2f * z - 1.38776856032e-1f) * z + 1.99777106478e-1f) * z - 3.33329491539e-1f) * z * a + a;
+    return sign * y;
+}
+float atan2Precise(float y, float x) {
+    __target_switch { case cpp: return atan2(y, x); default: break; }  // (the CPU: the core's, pm::)
+    if (x == 0.0f) return y > 0.0f ? 0.5f * PRECISE_PI : y < 0.0f ? -0.5f * PRECISE_PI : 0.0f;
+    const float a = atanPrecise(y / x);
+    if (x > 0.0f) return a;
+    return y < 0.0f ? a - PRECISE_PI : a + PRECISE_PI;
+}
+
+// The scalp's closest point to p found down the mesh from face `face`, with its
 // barycentric place: `face` then the nearest's.
 struct FlowSkin {
     float d2;
@@ -7777,7 +6962,7 @@ FlowSkin flowClosest(float3 p, inout uint face) {
     for (uint i = 0, steps = 0;; ++i) {
         uint around = face;
         if (i > 0) {
-            if (steps == TIE_STEPS || nearest.face == TABLE_NONE) break;
+            if (steps == CLOSEST_STEPS || nearest.face == TABLE_NONE) break;
             around = nearest.face;
             ++steps;
         } else if (around == TABLE_NONE) {
@@ -7921,16 +7106,12 @@ void FlowCS(uint3 id : SV_DispatchThreadID) {
 //
 // AffectCS (a thread a strand): a masked node's result (gOut its points; gOut2 a Width's widths)
 // mixed back toward what the node took (gIn; gAux1 the widths it took) by its affect: the field
-// its first stage holds (gField.xy, fieldAt's param 0) times its number (gValue.x), or with gFlag.x a
-// channel a Tie of the run wrote (gAux0, per point) remapped gValue.y + (gValue.z - gValue.y) v times
-// the number; per point where the field is per point, else the strand's (its root's), clamped to
+// its first stage holds (gField.xy, fieldAt's param 0) times its number (gValue.x); per point where
+// the field is per point, else the strand's (its root's), clamped to
 // 0-1 (NaN: 0): 1 the result as it is, 0 what it took, between a mix of the two. gFlag.y: the
 // widths mixed; gFlag.z: the points.
 
-float affectAt(uint s, uint p) {
-    if (gFlag.x != 0u) return (gValue.y + (gValue.z - gValue.y) * asfloat(gAux0.Load(p * 4))) * gValue.x;
-    return fieldAt(0, gValue.x, s, p);
-}
+float affectAt(uint s, uint p) { return fieldAt(0, gValue.x, s, p); }
 
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
@@ -7938,7 +7119,7 @@ void AffectCS(uint3 id : SV_DispatchThreadID) {
     const uint s = threadIndex(id, GROUP_SIZE);
     if (s >= gStrandCount) return;
     const uint begin = strandBegin(s), n = strandCountOf(s);
-    const bool perPoint = gFlag.x != 0u || fieldPerPoint(0);
+    const bool perPoint = fieldPerPoint(0);
     const float strandWeight = clamp01(affectAt(s, begin));
     if (!perPoint && strandWeight >= 1.0f) return;
     for (uint i = 0; i < n; ++i) {
@@ -8012,7 +7193,7 @@ void JiggleCS(uint3 id : SV_DispatchThreadID) {
         turns = turns && side > 0.0f;
         axis = normalized(cross(chord, across));
         turns = turns && !(len3(axis) < 0.5f);
-        angle = tieAtan2(side, reach);  // (std::atan2 to about an ulp: fxc's is coarser)
+        angle = atan2Precise(side, reach);  // (std::atan2 to about an ulp: fxc's is coarser)
     }
     if (!turns) {
         copyStrand(begin, n);

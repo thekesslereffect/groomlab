@@ -63,10 +63,6 @@ GROOMLAB_KERNEL(StaticMoments)
 GROOMLAB_KERNEL(StaticNode)
 GROOMLAB_KERNEL(StaticField)
 GROOMLAB_KERNEL(StaticPush)
-// Tie: its frame and ring's bins, each strand's route, the strands laid.
-GROOMLAB_KERNEL(TieFrame)
-GROOMLAB_KERNEL(TieRoute)
-GROOMLAB_KERNEL(TieLay)
 // The shapers working on each strand alone (TwistAxes: a Twist's clumps' middles).
 GROOMLAB_KERNEL(Bend)
 GROOMLAB_KERNEL(Direction)

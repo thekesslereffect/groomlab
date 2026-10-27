@@ -76,7 +76,7 @@ LookEngine& cpuEngineOfThread() {
 }
 }  // namespace
 
-void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out, bool widths, const std::string& tail) {
+void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out, bool widths) {
     LookEngine* engine = &cpuEngineOfThread();
     engine->setBase(in, scalp);
     LookTargets targets;
@@ -92,19 +92,7 @@ void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* s
     }
     engine->run(run, false, targets);
     engine->dropTargets();
-    struct LetGo {  // (after the tail is read)
-        LookEngine* engine;
-        ~LetGo() { engine->letGoOfBase(); }
-    } letGo{engine};
-    if (!tail.empty()) {
-        std::vector<float> written = engine->readTail(0);
-        if (written.size() != out.pointCount()) throw std::runtime_error("CPU look engine: the tail channel not written");
-        if (std::vector<float>* had = out.mutablePointChannel(tail)) {
-            *had = std::move(written);
-        } else {
-            out.addPointChannel(tail, 0.0f) = std::move(written);
-        }
-    }
+    engine->letGoOfBase();
 }
 
 StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs) {
@@ -229,12 +217,7 @@ bool runStageInto(StageKind kind, const StageParamReader& reader, const StrandsP
         if (values.readsPositions && values.mode == FieldValues::kPerPoint && movesPointByPoint(kind)) return false;
     }
     // (Bend's, Direction's, Transform's and Displace's root frames: the engine's own, LookEngine::putStageInputs.)
-    std::string tail;
-    if (kind == StageKind::Tie) {
-        tail = params.getString("tailChannel");
-        run.tailsOut = !tail.empty();
-    }
-    runOnCpuEngine(run, in, scalp, out, kind == StageKind::Width, tail);
+    runOnCpuEngine(run, in, scalp, out, kind == StageKind::Width);
     return true;
 }
 

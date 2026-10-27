@@ -233,12 +233,9 @@ TEST(Budget, ColorAndUtilityOperatorsOnAHead) {
            }));
 }
 
-TEST(Budget, BraidAndTieOnAHead) {
+TEST(Budget, BraidOnAHead) {
     const HeadGroom& g = headGroom();
     const StrandsPtr& in = g.strands;
-    report("Tie (a ponytail at the back)", *in, timeOp(op::kTie, in, [](Operator& o) {
-               o.params().set("center", Vec3f(0.0f, 2.0f, -13.0f));
-           }));
     report("Braid (picked, region 3)", *in, timeOp(op::kBraid, in, [](Operator& o) { o.params().set("region", 3.0); }, {Value()}));
 }
 

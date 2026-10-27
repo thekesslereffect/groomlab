@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "groomlab/flow.h"
+#include "groomlab/operator_state.h"
 #include "groomlab/parallel.h"
 #include "groomlab/look/look_engine_internal.h"
 #include "look_kernels_cpu_support.h"
@@ -32,6 +33,32 @@ namespace cpu_host {
 
 namespace {
 const FlowHost& flowHost(std::uint64_t host) { return *reinterpret_cast<const FlowHost*>(static_cast<std::uintptr_t>(host)); }
+const CollideHost& collideHost(std::uint64_t host) { return *reinterpret_cast<const CollideHost*>(static_cast<std::uintptr_t>(host)); }
+// A strand's walk state as the kernel holds it (9 words: the cursor's vertex, 0xffffffff none, its
+// anchor xyz and clear; the bound's anchor xyz and the bound) and as collideRestPush takes it.
+CollideRestState restState(const float w[9]) {
+    CollideRestState st;
+    std::uint32_t vertex = 0;
+    std::memcpy(&vertex, &w[0], 4);
+    st.cursor.vertex = vertex == 0xFFFFFFFFu ? RestPoseCollision::Cursor::kNone : static_cast<std::size_t>(vertex);
+    st.cursor.anchor = Vec3f(w[1], w[2], w[3]);
+    st.cursor.clear = w[4];
+    st.anchor = Vec3f(w[5], w[6], w[7]);
+    st.bound = w[8];
+    return st;
+}
+void putState(const CollideRestState& st, float w[9]) {
+    const std::uint32_t vertex = st.cursor.vertex == RestPoseCollision::Cursor::kNone ? 0xFFFFFFFFu : static_cast<std::uint32_t>(st.cursor.vertex);
+    std::memcpy(&w[0], &vertex, 4);
+    w[1] = st.cursor.anchor.x;
+    w[2] = st.cursor.anchor.y;
+    w[3] = st.cursor.anchor.z;
+    w[4] = st.cursor.clear;
+    w[5] = st.anchor.x;
+    w[6] = st.anchor.y;
+    w[7] = st.anchor.z;
+    w[8] = st.bound;
+}
 void put(const Vec3f& v, float out[3]) {
     out[0] = v.x;
     out[1] = v.y;
@@ -48,24 +75,22 @@ void flowAtRoot(std::uint64_t host, std::uint32_t face, float u, float v, const 
     put(h.flow->atRoot(*h.scalp, StrandRoot{static_cast<std::int32_t>(face), u, v}, Vec3f(normal[0], normal[1], normal[2])), out);
 }
 
-bool tieClosest(std::uint64_t host, const float p[3], float reach, float at[3], float normal[3]) {
-    const TieHost& h = *reinterpret_cast<const TieHost*>(static_cast<std::uintptr_t>(host));
-    const SurfacePoint hit = h.scalp->closestPoint(Vec3f(p[0], p[1], p[2]), reach);
-    if (hit.root.face < 0) return false;
-    put(hit.position, at);
-    put(hit.normal, normal);
-    return true;
+void collideCursor(std::uint64_t host, std::uint32_t mesh, std::uint32_t strand, const float p[3], float state[9]) {
+    const CollideHost& h = collideHost(host);
+    CollideRestState st = restState(state);
+    const StrandRoot root = h.roots && strand < h.roots->size() ? (*h.roots)[strand] : StrandRoot{-1, 0.0f, 0.0f};
+    st.cursor = h.rests[mesh]->cursor(root, Vec3f(p[0], p[1], p[2]));
+    putState(st, state);
 }
 
-void tiePush(std::uint64_t host, float p[3]) {
-    const TieHost& h = *reinterpret_cast<const TieHost*>(static_cast<std::uintptr_t>(host));
-    if (!h.surface) return;
+bool collidePush(std::uint64_t host, std::uint32_t mesh, float p[3], float to, bool soft, float state[9]) {
+    const CollideHost& h = collideHost(host);
+    CollideRestState st = restState(state);
     Vec3f q(p[0], p[1], p[2]);
-    RestPoseCollision::Cursor cursor;  // (a scalp at its rest pose: none needed)
-    MeshDistanceField::Probe probe;
-    probe.beside = 4.0f * h.clearance;  // (tie_op.cpp's)
-    h.surface.pushOut(q, h.clearance, h.depth, h.searchRadius, cursor, &probe);
+    const bool moved = collideRestPush(*h.rests[mesh], *h.meshes[mesh], q, to, soft, h.softness, h.maxDepth, h.searchRadius, st);
     put(q, p);
+    putState(st, state);
+    return moved;
 }
 
 bool flowClosest(std::uint64_t host, const float p[3], float reach, std::uint32_t* face, float uv[2], float at[3], float normal[3]) {

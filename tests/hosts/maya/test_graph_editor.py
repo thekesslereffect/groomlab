@@ -1007,7 +1007,7 @@ class MeshPickTest(unittest.TestCase):
 
 
 class PositionPickTest(unittest.TestCase):
-    """Pick beside a world position param (Tie's center: groomlab.ui.pick.selected_position and
+    """Pick beside a world position param (a Transform's pivot: groomlab.ui.pick.selected_position and
     pick_position, what the Graph Editor's Pick button calls): the selection's position, in world
     space and centimeters as groom data is."""
 
@@ -1022,50 +1022,51 @@ class PositionPickTest(unittest.TestCase):
         self.scalp = cmds.polySphere(radius=10, subdivisionsX=20, subdivisionsY=10, name="head")[0]
         self.groom = groomlab.create_groom(self.scalp)
         model = gm.GraphModel.from_groom(self.groom)
-        model.add_node("Tie", name="tie")
+        model.add_node("Transform", name="tie")
+        model.set_param("tie", "space", "world")
         model.save(self.groom)
 
     def tearDown(self):
         cmds.currentUnit(linear="cm")
 
     def center(self):
-        return gm.GraphModel.from_groom(self.groom).param("tie", "center")
+        return gm.GraphModel.from_groom(self.groom).param("tie", "pivot")
 
     def assertClose(self, a, b):
         self.assertEqual(len(a), 3)
         for x, y in zip(a, b):
             self.assertAlmostEqual(x, y, places=4)
 
-    def test_pick_sets_tie_center_from_a_locator(self):
+    def test_pick_sets_pivot_from_a_locator(self):
         # What gives a param its Pick in the Graph Editor: a world position (a world vec3 of length).
         model = gm.GraphModel.from_groom(self.groom)
-        self.assertTrue(model.param_spec("tie", "center").get("worldDirection"))
-        self.assertEqual(model.param_spec("tie", "center").get("unit"), "length")
-        self.assertNotEqual(model.param_spec("tie", "direction").get("unit"), "length")
+        self.assertTrue(model.param_spec("tie", "pivot").get("worldDirection"))
+        self.assertEqual(model.param_spec("tie", "pivot").get("unit"), "length")
+        self.assertFalse(model.param_spec("tie", "translate").get("worldDirection"))
         locator = cmds.spaceLocator(name="tieHere")[0]
         cmds.xform(locator, worldSpace=True, translation=(1.5, 2.0, -12.0))
         cmds.select(locator)
-        message = self.pick.pick_position(self.groom, "tie", "center")
+        message = self.pick.pick_position(self.groom, "tie", "pivot")
         self.assertIn("tieHere", message)
         self.assertClose(self.center(), (1.5, 2.0, -12.0))
         # The groom selected too (the Graph Editor shows the selected groom) is passed over.
         cmds.select(self.groom, locator)
         cmds.xform(locator, worldSpace=True, translation=(-3.0, 1.0, -11.0))
-        self.pick.pick_position(self.groom, "tie", "center")
+        self.pick.pick_position(self.groom, "tie", "pivot")
         self.assertClose(self.center(), (-3.0, 1.0, -11.0))
         # A locator under a moved parent: its world position.
         parent = cmds.group(empty=True, name="rig")
         cmds.parent(locator, parent)
         cmds.xform(parent, worldSpace=True, translation=(0.0, 5.0, 0.0))
         cmds.select(locator)
-        self.pick.pick_position(self.groom, "tie", "center")
+        self.pick.pick_position(self.groom, "tie", "pivot")
         self.assertClose(self.center(), (-3.0, 6.0, -11.0))
         # The UI in meters: still centimeters, as groom data.
         cmds.currentUnit(linear="m")
         cmds.xform(parent, worldSpace=True, translation=(0.0, 0.0, 0.0))
         cmds.xform(locator, worldSpace=True, translation=(0.02, 0.03, -0.12))
         cmds.select(locator)
-        self.pick.pick_position(self.groom, "tie", "center")
+        self.pick.pick_position(self.groom, "tie", "pivot")
         cmds.currentUnit(linear="cm")
         self.assertClose(self.center(), (2.0, 3.0, -12.0))
 
@@ -1080,7 +1081,7 @@ class PositionPickTest(unittest.TestCase):
         before = self.center()
         cmds.select(clear=True)
         with self.assertRaises(ValueError):
-            self.pick.pick_position(self.groom, "tie", "center")
+            self.pick.pick_position(self.groom, "tie", "pivot")
         cmds.select(self.groom)
         with self.assertRaises(ValueError):
             self.pick.selected_position(self.groom)

@@ -30,7 +30,7 @@ const char* apiName(GpuApi api);
 struct GpuTimes {
     bool valid = false;
     double interpolateMs = 0, clearanceMs = 0, lengthMs = 0, clumpMs = 0, noiseMs = 0, curlMs = 0, widthMs = 0, partMs = 0;
-    double gravityMs = 0, flyawayMs = 0, collideMs = 0, windMs = 0, blendMs = 0, selfCollideMs = 0, staticMs = 0, tieMs = 0;
+    double gravityMs = 0, flyawayMs = 0, collideMs = 0, windMs = 0, blendMs = 0, selfCollideMs = 0, staticMs = 0;
     double bendMs = 0, directionMs = 0, transformMs = 0, displaceMs = 0, twistMs = 0;
     double smoothMs = 0, restoreLengthMs = 0, blendNeighborsMs = 0, tangleMs = 0, flowMs = 0;  // the shapers reading their neighbours or a reference
     double jiggleMs = 0, meshCutMs = 0;
@@ -77,9 +77,6 @@ struct LookRun {
     LookParams params;
     LookFields fields;
     std::vector<StageInputs> inputs;
-    // Each Tie's tail channel written whether or not a stage after it reads it (readTail: an
-    // operator running its own stage).
-    bool tailsOut = false;
 };
 
 // The compute engine on a device: the base strands' buffers, the kernels, the outputs. Runs on the
@@ -183,9 +180,6 @@ public:
     // where it wrote them.
     std::vector<Vec3f> readPositions();
     std::vector<float> readWidths();
-    // Tie stage k's tail channel as the last run wrote it, a value a point (LookRun::tailsOut; empty
-    // where it wrote none).
-    std::vector<float> readTail(std::size_t k);
     void readFrames(std::vector<Vec3f>* normals, std::vector<Vec3f>* tangents, std::vector<Vec3f>* bitangents);
 
     // The kernels: one a line of look_kernels.inc (its entry point NameCS in shaders/look.slang).
