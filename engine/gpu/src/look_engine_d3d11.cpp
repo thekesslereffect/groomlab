@@ -12,7 +12,7 @@
 #endif
 #include <d3d11.h>
 
-#include "look_engine_internal.h"
+#include "groomlab/look/look_engine_internal.h"
 
 // The kernels as DXBC (cs_5_0), compiled from shaders/look.slang by slangc when the module builds
 // (engine/gpu/CMakeLists.txt): kLookDxbcNoiseCS, kLookDxbcCurlCS...
@@ -187,7 +187,7 @@ public:
         };
         const Code kernels[] = {
 #define GROOMLAB_KERNEL(Name) {Kernel::Name, kLookDxbc##Name##CS, sizeof kLookDxbc##Name##CS, #Name "CS"},
-#include "groomlab/gpu/look_kernels.inc"
+#include "groomlab/look/look_kernels.inc"
 #undef GROOMLAB_KERNEL
         };
         for (const Code& k : kernels) {

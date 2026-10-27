@@ -279,7 +279,9 @@ TEST(SimulationCache, PlayingSimulateRangeAndTheBakeShowTheSameFrames) {
             cached.setBakedSimulation("sim", readSimulationCache(bake, "", cached.simulationStamp("sim")));
             for (int f = 1; f <= kLast; ++f) {
                 cached.updateScalpPoints(pointsAt(f));
-                EXPECT_LT(worstApart(*view(cached, f), *playedStrands[f]), 1e-6f) << "the bake's strands at frame " << f;
+                // (The bake's round trip moves the strands by about a millionth: 0.99e-6 before
+                // smoothPolyline began each span at its point exactly, 1.12e-6 since.)
+                EXPECT_LT(worstApart(*view(cached, f), *playedStrands[f]), 2e-6f) << "the bake's strands at frame " << f;
             }
             EXPECT_TRUE(cached.simulationStatus()[0].baked);
             EXPECT_EQ(cached.simulationStatus()[0].frames, 0u);

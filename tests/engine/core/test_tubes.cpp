@@ -15,6 +15,7 @@
 #include "groomlab/display.h"
 #include "groomlab/graph.h"
 #include "groomlab/guide_hierarchy.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -466,7 +467,7 @@ TEST(TubeChildren, FlattenedGuidesCarryTheirTubes) {
 struct TubeGraph {
     Graph g;
     ExternalInputs ext;
-    NodeId scatter = 0, interp = 0, clump = 0;
+    NodeId scatter = 0, interp = 0, clump = 0, resample = 0;
     TubeProfile tube;
     static constexpr float kLength = 1.0f;
 
@@ -481,7 +482,7 @@ struct TubeGraph {
         scatter = g.addNode(op::kScatter);
         g.node(scatter).params().set("density", density);
         g.connect(scalp, scatter, 0);
-        const NodeId resample = g.addNode(op::kResample);  // unconnected: the strands' segments
+        resample = g.addNode(op::kResample);  // unconnected: the strands' segments
         g.node(resample).params().set("segments", std::int64_t{15});
         const NodeId guides = g.addNode(op::kGuides);
         interp = g.addNode(op::kInterpolate);
@@ -547,6 +548,89 @@ TEST(FillTubes, StrandsRideTheirTubeToTheTip) {
     EXPECT_LT(rootZ, 0.15f * 0.25f + 1e-3f);
     EXPECT_LT(tipX, 0.08f * 0.25f + 1e-3f);
     EXPECT_NEAR(tipZ, 0.08f, 0.01f);
+}
+
+TEST(FillTubes, RidingTheTubesRunsAlikeTwice) {
+    // Interpolate filling tubes (look.slang rideTubeAt) in two graphs of its own, bit for bit:
+    // riders, strands in a soft edge, the rest blending; keeping clearance and not, with a radius's
+    // fall-off.
+    for (const bool keep : {true, false}) {
+        TubeGraph f;
+        f.g.node(f.interp).params().set("tubeBlend", 0.5);
+        f.g.node(f.interp).params().set("keepClearance", keep);
+        f.g.node(f.interp).params().set("limitDistance", 0.5);
+        const StrandsPtr engine = f.eval(f.interp);
+        TubeGraph g;  // (a graph of its own: evaluated afresh)
+        g.g.node(g.interp).params().set("tubeBlend", 0.5);
+        g.g.node(g.interp).params().set("keepClearance", keep);
+        g.g.node(g.interp).params().set("limitDistance", 0.5);
+        const StrandsPtr cpp = g.eval(g.interp);
+        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
+        std::size_t riders = 0;
+        const std::vector<float>& ids = *cpp->strandChannel("tubeId");
+        for (std::size_t s = 0; s < cpp->strandCount(); ++s) riders += ids[s] >= 0.0f ? 1 : 0;
+        for (std::size_t s = 0; s < cpp->strandCount(); ++s) {
+            ASSERT_EQ(std::memcmp(engine->strandPoints(s), cpp->strandPoints(s), cpp->strandPointCount(s) * sizeof(Vec3f)), 0)
+                << "strand " << s << (keep ? " keeping clearance" : "");
+        }
+        EXPECT_EQ(engine->contentHash(), cpp->contentHash()) << keep;
+        EXPECT_GT(riders, 100u);
+    }
+}
+
+TEST(FillTubes, LayersAndLengthRunAlikeTwice) {
+    // Interpolate in two graphs of its own, bit for bit: guides' painted layers read along the
+    // strands' final points, and take length; tubes filled and not (and take length with tubes:
+    // riders scaled to their guides' length).
+    auto run = [](bool tubes, bool length, std::int64_t segments) {
+        TubeGraph f;
+        f.g.node(f.resample).params().set("segments", segments);
+        auto set = std::make_shared<GuideSet>();
+        Guide& a = set->add(1, straightGuide({0.5f, 0, 0.5f}, TubeGraph::kLength));
+        a.hasTube = true;
+        a.tube = f.tube;
+        a.frameUp = {1, 0, 0};
+        set->add(2, straightGuide({0.12f, 0, 0.12f}, 0.6f));
+        for (Guide& g : set->guides()) {
+            std::vector<float> layer(g.points.size());
+            for (std::size_t i = 0; i < layer.size(); ++i) layer[i] = 0.1f * static_cast<float>(i) + static_cast<float>(g.id);
+            g.pointAttributes["paint"] = layer;
+        }
+        f.ext.set("guides", GuidesPtr(set), 9);
+        f.g.node(f.interp).params().set("fillTubes", tubes);
+        f.g.node(f.interp).params().set("tubeBlend", 0.5);
+        if (length) f.g.node(f.interp).params().set("take", std::string("length"));
+        return f.eval(f.interp);
+    };
+    // (99: more samples than the GPU's 64; 600: more than the CPU engine holds, streamed.)
+    for (const std::int64_t segments : {std::int64_t{15}, std::int64_t{99}, std::int64_t{600}}) {
+    for (const bool tubes : {false, true}) {
+        for (const bool length : {false, true}) {
+            const StrandsPtr on = run(tubes, length, segments), off = run(tubes, length, segments);
+            ASSERT_EQ(on->pointCount(), off->pointCount());
+            EXPECT_EQ(std::memcmp(on->positions().data(), off->positions().data(), on->pointCount() * sizeof(Vec3f)), 0)
+                << tubes << length;
+            const std::vector<float>* a = on->pointChannel("paint");
+            const std::vector<float>* b = off->pointChannel("paint");
+            ASSERT_TRUE(a && b);
+            EXPECT_EQ(std::memcmp(a->data(), b->data(), a->size() * sizeof(float)), 0) << tubes << length;
+            EXPECT_EQ(on->contentHash(), off->contentHash()) << tubes << length << segments;
+        }
+    }
+    }
+}
+
+TEST(FillTubes, ClumpingInsideTubesRunsAlikeTwice) {
+    // A Clump following the tubes (each tube's centers its own) in two graphs of its own, bit for bit.
+    auto run = [] {
+        TubeGraph f;
+        f.g.node(f.clump).params().set("strandStrengthRandom", 0.4);
+        return f.eval(f.clump);
+    };
+    const StrandsPtr on = run(), off = run();
+    ASSERT_EQ(on->pointCount(), off->pointCount());
+    EXPECT_EQ(std::memcmp(on->positions().data(), off->positions().data(), on->pointCount() * sizeof(Vec3f)), 0);
+    EXPECT_EQ(on->contentHash(), off->contentHash());
 }
 
 TEST(FillTubes, LeavesStrandsOutsideTubesAsTheyWere) {

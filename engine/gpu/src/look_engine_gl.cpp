@@ -48,7 +48,7 @@
 #include <GL/gl.h>
 
 #include "groomlab/parallel.h"
-#include "look_engine_internal.h"
+#include "groomlab/look/look_engine_internal.h"
 
 // The kernels as GLSL text, generated from shaders/look.slang by slangc (engine/gpu/CMakeLists.txt).
 #include "look_kernels_glsl.h"
@@ -348,7 +348,7 @@ const Code& codeOf(int kernel) {
     static const std::vector<Code> list = [] {
         const Code codes[] = {
 #define GROOMLAB_KERNEL(Name) {Kernel::Name, kLookGlsl##Name##CS, #Name "CS"},
-#include "groomlab/gpu/look_kernels.inc"
+#include "groomlab/look/look_kernels.inc"
 #undef GROOMLAB_KERNEL
         };
         std::vector<Code> byKernel(kKernels, Code{Kernel::Count, nullptr, nullptr});

@@ -21,11 +21,15 @@
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "groomlab/distance_field.h"
 #include "groomlab/field.h"
+#include "groomlab/graph.h"
+#include "groomlab/look/look_run.h"
 #include "groomlab/math.h"
 #include "groomlab/parallel.h"
 #include "groomlab/preview_core.h"
@@ -78,7 +82,6 @@ struct ScalpFloor {
 
     static ScalpFloor of(const std::shared_ptr<const ScalpMesh>& scalp, float size);
     explicit operator bool() const { return static_cast<bool>(surface); }
-    bool push(Vec3f& p, RestPoseCollision::Cursor& cursor) const;
 };
 
 // The strands a grid splats and how it is laid: `strands` (the core, thinned by ID), `weight` (the
@@ -191,68 +194,24 @@ std::vector<Sample> sampleStrands(const StrandSet& s, const std::vector<Vec3f>& 
 // when a sample is not finite.
 bool layGrid(const std::vector<Sample>& samples, std::int64_t margin, int dilate, Grid* g);
 
-// Each node's amount (fixed point, the samples' spread trilinearly, per unit of volume) and each
-// cell's first `sums` sums (kSums at most; each cell by its lowest node).
-struct Splat {
-    std::unique_ptr<std::atomic<std::int64_t>[]> mass, sums;
-    int count = 0;  // sums a cell
+// The scalp near a grid's nodes as the CPU engine takes it (hairGridWalls), kept while the scalp
+// and the cell are (the engine uploads it again only for another).
+class EngineWalls {
+public:
+    std::shared_ptr<const std::vector<std::uint32_t>> of(const MeshPtr& scalp, double h, double reach);
+
+private:
+    std::mutex lock_;
+    MeshPtr scalp_;
+    double h_ = 0.0, reach_ = 0.0;
+    std::shared_ptr<const std::vector<std::uint32_t>> walls_;
 };
-Splat splat(const Grid& g, const std::vector<Sample>& samples, int sums);
-
-// The scalp at a node: the node's height over it and its normal (`near`: within reach).
-struct Wall {
-    float height = 0.0f;
-    Vec3f normal;
-    bool near = false;
-};
-// The scalp near each node (its closest point within `reach` cells): none without a scalp.
-std::vector<Wall> wallsOf(const Grid& g, const ScalpMesh* scalp, float size, double reach);
-// Whether node `at` (-1: none) lies under the scalp.
-inline bool solid(const std::vector<Wall>& walls, std::int64_t at) {
-    return at >= 0 && !walls.empty() && walls[static_cast<std::size_t>(at)].near && walls[static_cast<std::size_t>(at)].height < 0.0f;
-}
-
-// An unknown of a solve: its node, its 6 neighbours' (-1: none, the value 0 there; -2: solid, its
-// own value there: no flow across) and its source (h^2 times the right-hand side).
-struct Unknown {
-    std::int64_t at;
-    std::array<std::int64_t, 6> around;
-    double source;
-};
-// `sweeps` sweeps of red-black SOR (over-relaxed by `omega`) of the Poisson equation -lap p =
-// source / h^2 over the unknowns, those of each colour (0, 1: the parity of their world node) in
-// parallel, into p (per node).
-void solve(const std::vector<Unknown>& unknown, const std::vector<std::uint8_t>& color, int sweeps, double omega, std::vector<float>* p);
-
-// Whether p may be under the scalp's floor: its height over the scalp from its cell's corners
-// (each one's, carried along its normal) under `margin` (a corner without the scalp within reach:
-// as far as `reach` cells; a corner without a node: yes).
-bool mayTouchScalp(const Grid& g, const std::vector<Wall>& walls, double reach, float margin, const Vec3f& p);
-
-// Moves strand s's points from `from` on by `moves`, walking from its root keeping each segment's
-// length in `rest` (follow the leader), each point kept out of the scalp where `nearScalp` says it
-// may be under its floor.
-template <class NearScalp>
-void walkStrand(const StrandSet& s, std::size_t strand, Vec3f* pts, const Vec3f* rest, std::size_t from, const Vec3f* moves,
-                const ScalpFloor& floor, const NearScalp& nearScalp) {
-    const std::size_t n = s.strandPointCount(strand);
-    RestPoseCollision::Cursor cursor;
-    if (floor) cursor = floor.surface.cursor(strand < s.roots().size() ? s.roots()[strand] : StrandRoot{-1, 0.0f, 0.0f}, pts[0]);
-    for (std::size_t i = from; i < n; ++i) {
-        const float length = (rest[i] - rest[i - 1]).length();
-        auto keepLength = [&] {
-            const Vec3f d = pts[i] - pts[i - 1];
-            const float l = d.length();
-            if (l > 0.0f) pts[i] = pts[i - 1] + d * (length / l);
-        };
-        pts[i] += moves[i];
-        keepLength();
-        if (floor && nearScalp(pts[i]) && floor.push(pts[i], cursor)) {
-            keepLength();
-            floor.push(pts[i], cursor);
-        }
-    }
-}
+// Node `type` (SelfCollide or Static, its stage `kind`, its params) on the CPU engine (look.slang's
+// hair grid: one source with the GPU preview's): its grid laid on `in` (the engine's room; not where
+// hair spread far wider than the scalp takes coarser cells) and the scalp near its nodes. Nothing
+// moved: `in` itself. Null where the engine cannot run it (the operator's C++ then).
+StrandsPtr onEngine(gpu::StageKind kind, const std::string& type, const ParamSet& params, const EvalContext& ctx, const StrandsPtr& in,
+                    const MeshPtr& scalp, EngineWalls& walls);
 
 }  // namespace hair_grid
 }  // namespace groomlab

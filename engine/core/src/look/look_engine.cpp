@@ -1,25 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <stdexcept>
 
 #include "groomlab/parallel.h"
+#include "groomlab/portable_math.h"
 #include "groomlab/preview_core.h"
 #include "groomlab/random.h"
-#include "look_engine_internal.h"
+#include "groomlab/look/look_engine_internal.h"
+#include "groomlab/look/look_stage_params.h"
 
 namespace groomlab::gpu {
 
-const char* apiName(GpuApi api) { return api == GpuApi::D3D11 ? "DirectX11" : "OpenGL"; }
+const char* apiName(GpuApi api) { return api == GpuApi::D3D11 ? "DirectX11" : api == GpuApi::Cpu ? "CPU" : "OpenGL"; }
 
 LookEngine::~LookEngine() = default;
 
 const char* kernelName(LookEngine::Kernel kernel) {
     static const char* const names[] = {
 #define GROOMLAB_KERNEL(Name) #Name,
-#include "groomlab/gpu/look_kernels.inc"
+#include "groomlab/look/look_kernels.inc"
 #undef GROOMLAB_KERNEL
     };
     static_assert(sizeof names / sizeof names[0] == static_cast<std::size_t>(LookEngine::Kernel::Count), "a name a kernel");
@@ -83,7 +87,6 @@ KernelSet kernelsOf(const LookRun& run) {
                     set |= bit(K::StaticReach) | bit(K::StaticMoments) | bit(K::StaticNode) | bit(K::StaticField) | bit(K::StaticPush);
                 }
                 break;
-            case StageKind::Tie: set |= bit(K::TieFrame) | bit(K::TieRoute) | bit(K::TieLay); break;
             case StageKind::Bend: set |= bit(K::Bend); break;
             case StageKind::Direction: set |= bit(K::Direction); break;
             case StageKind::Transform: set |= bit(K::Transform); break;
@@ -96,6 +99,9 @@ KernelSet kernelsOf(const LookRun& run) {
             case StageKind::Flow: set |= bit(K::Flow); break;
             case StageKind::Jiggle: set |= bit(K::Jiggle); break;
             case StageKind::MeshCut: set |= bit(K::MeshCut); break;
+            case StageKind::Cull:
+            case StageKind::Split:
+            case StageKind::Mirror: set |= bit(K::Layout); [[fallthrough]];  // (and the run up its input's)
             case StageKind::Merge:  // (copies; b's own run's kernels where the drag moves b)
                 if (in && in->merged) {
                     LookRun branch;
@@ -168,70 +174,70 @@ constexpr int kClearanceStamp = -5;  // a run's span kind: Interpolate's walk ke
 constexpr int kPointStrandsStamp = -6;  // ... each point's strand made (counted in the total alone)
 constexpr std::size_t kSameOffset = static_cast<std::size_t>(-1);  // a copy's source offset: its target's
 
-// ---- Tie -----------------------------------------------------------------------------------------
-
-constexpr std::size_t kTieSlots = 34;       // a strand's route's float4 slots (look.slang TIE_SLOTS)
-constexpr std::size_t kTieFrameWords = 96;  // the frame and the ring's bins (look.slang TIE_FRAME_*)
-// Tie's switches (look.slang TIE_*): the tail channel read, written, its affect a mask, a scalp
-// (routes over it), its field (the path pushed out of it).
-constexpr std::uint32_t kTieChannelIn = 1u, kTieWritesTail = 2u, kTieMasked = 4u, kTieScalp = 8u, kTiePush = 16u;
-
-// Tie's dispatches' constants (look.slang's Tie section): gValue radius, tightness, spread and
-// beside (clearancePush's: 4 clearances), gValue2 ease, twist, clearance and depth, gFlag its
-// switches, its affect's number's bits and the search radius's, gFlag2 center and the scalp's
-// size, gOctaveSeeds' first six words the direction and the scalp's center (bits).
-void tieConstants(const StageParams& p, const TieInputs* in, StageConstants* c) {
-    auto bits = [](float v) {
-        std::uint32_t b;
-        std::memcpy(&b, &v, 4);
-        return b;
-    };
-    const bool push = in && in->tables;
-    c->value[0] = p.value[0];
-    c->value[1] = p.value[1];
-    c->value[2] = p.value[2];
-    c->value[3] = push ? 4.0f * in->clearance : 0.0f;
-    c->value2[0] = p.value2[0];
-    c->value2[1] = p.value[3];
-    c->value2[2] = in ? in->clearance : 0.0f;
-    c->value2[3] = in ? in->depth : 0.0f;
-    std::uint32_t flags = 0;
-    if (in && (in->channelFrom != kNoStage || in->channel)) flags |= kTieChannelIn;
-    if (p.flag[0] != 0) flags |= kTieWritesTail;
-    if (p.flag[2] != 0) flags |= kTieMasked;
-    if (in && in->hasScalp) flags |= kTieScalp;
-    if (push) flags |= kTiePush;
-    c->flag[0] = flags;
-    c->flag[1] = static_cast<std::uint32_t>(p.flag[1]);
-    c->flag[2] = bits(in ? in->searchRadius : 0.0f);
-    c->flag[3] = 0;
-    for (int i = 0; i < 3; ++i) c->flag2[i] = static_cast<std::uint32_t>(p.flag2[i]);
-    c->flag2[3] = bits(in ? in->scalpSize : 0.0f);
-    for (int i = 0; i < 3; ++i) c->octaveSeeds[i] = bits(p.value2[1 + i]);
-    const Vec3f center = in ? in->scalpCenter : Vec3f{};
-    c->octaveSeeds[3] = bits(center.x);
-    c->octaveSeeds[4] = bits(center.y);
-    c->octaveSeeds[5] = bits(center.z);
-    for (int i = 6; i < 16; ++i) c->octaveSeeds[i] = 0;
-}
 
 }  // namespace
 
+void LookEngine::setBaseView(const StrandsPtr& base, const ScalpMesh* scalp, std::shared_ptr<const std::vector<std::uint32_t>> which) {
+    if (!sharesBase()) throw std::runtime_error("look engine: a view of the strands is a sharing engine's");
+    const StrandSet& s = *base;
+    const std::vector<std::uint32_t>& list = *which;
+    auto* offsets = static_cast<std::uint32_t*>(writable(kOffsets, std::max<std::size_t>(list.size(), 1) * 8));
+    for (std::size_t k = 0; k < list.size(); ++k) {
+        offsets[2 * k] = static_cast<std::uint32_t>(s.strandBegin(list[k]));
+        offsets[2 * k + 1] = static_cast<std::uint32_t>(s.offsets()[list[k] + 1]);
+    }
+    normalsScalp_ = scalp;
+    rootNormals_.clear();
+    rootsOnScalp_.clear();
+    strandCount_ = list.size();
+    pointCount_ = s.pointCount();
+    uniformCount_ = 0;  // (each strand's points by its two words)
+    share(kBasePoints, s.positions().data(), pointCount_ * 12);
+    if (s.widths().size() == pointCount_) {
+        share(kBaseWidths, s.widths().data(), pointCount_ * 4);
+    } else if (float* to = static_cast<float*>(writable(kBaseWidths, std::max<std::size_t>(pointCount_, 1) * 4))) {
+        std::fill(to, to + pointCount_, 0.01f);
+    }
+    for (const int b : {kPointsA, kPointsB, kPointsC, kWidths, kOut0, kOut1, kOut2, kOut3, kFull0, kFull1, kFull2, kFull3}) release(b);
+    ++baseSerial_;
+    dataKey_.clear();
+    fieldSerial_ = 0;
+    resultBuffer_ = -1;
+    base_ = base;
+    view_ = std::move(which);
+    shownPoints_.clear();
+    shownKey_ = 0;
+}
+
+void LookEngine::letGoOfBase() {
+    if (!sharesBase() || !base_) return;
+    heldBase_ = base_;
+    base_.reset();
+}
+
 bool LookEngine::setBase(const StrandsPtr& base, const ScalpMesh* scalp, const StrandChanges* changed) {
     if (!base) return false;
-    if (base == base_) return false;
+    if (view_) {  // (leaving a view: all of it again)
+        view_.reset();
+        base_.reset();
+        heldBase_.reset();
+    } else if (!base_) {
+        base_ = heldBase_.lock();  // (alive: its arrays too, so what is compared by address is its)
+    }
+    heldBase_.reset();
+    if (base == base_ && (!sharesBase() || scalp == normalsScalp_)) return false;
     const auto start = std::chrono::steady_clock::now();
     const StrandSet& s = *base;
     // The graph cannot say how the base changed (results came in between: a stroke's previews, a
     // new document): when its layout, IDs and roots are the ones held, compare the points.
     StrandChanges diffed;
-    if ((!changed || changed->all) && base_) {
+    if ((!changed || changed->all) && base_ && !sharesBase()) {
         diffed = diffStrands(*base_, s);
         if (!diffed.all && diffed.strands.size() * 2 < s.strandCount()) changed = &diffed;
     }
     // Only some strands' points moved (StrandChanges: the same IDs, roots and point counts, so the
     // per-strand numbers and offsets held still hold): those points go up, in runs.
-    if (changed && !changed->all && base_ && s.strandCount() == strandCount_ && s.pointCount() == pointCount_) {
+    if (changed && !changed->all && base_ && !sharesBase() && s.strandCount() == strandCount_ && s.pointCount() == pointCount_) {
         const std::vector<std::uint32_t>& list = changed->strands;
         std::size_t points = 0;
         for (std::size_t k = 0; k < list.size();) {
@@ -255,45 +261,75 @@ bool LookEngine::setBase(const StrandsPtr& base, const ScalpMesh* scalp, const S
         return true;
     }
     const std::size_t strands = s.strandCount(), points = s.pointCount();
-    std::vector<std::uint32_t> offsets(strands + 1);
-    rootNormals_.assign(strands, Vec3f{});
-    rootsOnScalp_.assign(strands, 0);
-    // The root normal each strand's lit lines lean by (display.cpp rootNormal: up when unrooted).
-    parallelFor(0, strands, [&](std::size_t i) {
-        const StrandRoot& root = s.roots()[i];
-        const bool rooted = scalp && root.face >= 0 && static_cast<std::size_t>(root.face) < scalp->triangleCount();
-        rootNormals_[i] = rooted ? scalp->normal(root) : Vec3f{0, 1, 0};
-        rootsOnScalp_[i] = rooted ? 1 : 0;
-        offsets[i] = static_cast<std::uint32_t>(s.offsets()[i]);
-    }, 4096);
-    offsets[strands] = static_cast<std::uint32_t>(points);
+    // The strands held, their points alone new (their layout, IDs and roots the very arrays: as the
+    // operators hand them on), on the same scalp: what is made of those holds (the offsets, the
+    // per-strand numbers and root normals, the root frames a sharing engine makes; baseSerial_).
+    const bool sameStrands = base_ && strands == strandCount_ && points == pointCount_ && scalp == normalsScalp_ &&
+                             base_->offsets().data() == s.offsets().data() && base_->ids().data() == s.ids().data() &&
+                             base_->roots().data() == s.roots().data();
+    std::vector<std::uint32_t> staged;
+    if (!sameStrands) {
+        // (In place where the engine holds it in memory: the CPU's.)
+        auto* offsets = static_cast<std::uint32_t*>(writable(kOffsets, (strands + 1) * 4));
+        if (!offsets) {
+            staged.resize(strands + 1);
+            offsets = staged.data();
+        }
+        parallelFor(0, strands, [&](std::size_t i) { offsets[i] = static_cast<std::uint32_t>(s.offsets()[i]); }, 16384);
+        offsets[strands] = static_cast<std::uint32_t>(points);
+        // A sharing engine (the CPU's: the caller's strands and scalp, run while it holds them)
+        // makes its root normals when a run reads them (putStrandData); the GPU's here, with the upload.
+        normalsScalp_ = scalp;
+        rootNormals_.clear();
+        rootsOnScalp_.clear();
+        if (!sharesBase()) makeRootNormals(s, scalp);
+    }
     strandCount_ = strands;
     pointCount_ = points;
     uniformCount_ = s.uniformPointCount();
-    write(kOffsets, offsets.data(), offsets.size() * 4, false);
-    write(kBasePoints, s.positions().data(), points * 12, false);
+    if (!staged.empty()) write(kOffsets, staged.data(), staged.size() * 4, false);
+    share(kBasePoints, s.positions().data(), points * 12);
     // The base's widths, for the point texture where no Width runs (a set without widths: the
     // default the app draws them at, as buildHairBuffers does).
     if (s.widths().size() == points) {
-        write(kBaseWidths, s.widths().data(), points * 4, false);
+        share(kBaseWidths, s.widths().data(), points * 4);
+    } else if (float* to = static_cast<float*>(writable(kBaseWidths, std::max<std::size_t>(points, 1) * 4))) {
+        parallelFor(0, (points + 65535) / 65536, [&](std::size_t c) {
+            std::fill(to + c * 65536, to + std::min(points, (c + 1) * 65536), 0.01f);
+        }, 1);
     } else {
         const std::vector<float> defaults(std::max<std::size_t>(points, 1), 0.01f);
         write(kBaseWidths, defaults.data(), defaults.size() * 4, false);
     }
     // The outputs of another size go; what the run made of the old strands is made again.
     for (const int b : {kPointsA, kPointsB, kPointsC, kWidths, kOut0, kOut1, kOut2, kOut3, kFull0, kFull1, kFull2, kFull3}) release(b);
-    ++baseSerial_;
-    dataKey_.clear();
+    if (!sameStrands) {
+        ++baseSerial_;
+        dataKey_.clear();
+    }
     fieldSerial_ = 0;
     resultBuffer_ = -1;
     base_ = base;
     findShownPoints();
     uploadMs_ = since(start);
-    uploadMegabytes_ = static_cast<double>(offsets.size() * 4 + points * 12) / 1e6;
+    uploadMegabytes_ = static_cast<double>((strands + 1) * 4 + points * 12) / 1e6;
     uploadPartial_ = false;
     uploadStrands_ = strands;
     ++uploads_;
     return true;
+}
+
+void LookEngine::makeRootNormals(const StrandSet& s, const ScalpMesh* scalp) {
+    const std::size_t strands = view_ ? view_->size() : s.strandCount();
+    rootNormals_.resize(strands);
+    rootsOnScalp_.resize(strands);
+    // The root normal each strand's lit lines lean by (display.cpp rootNormal: up when unrooted).
+    parallelFor(0, strands, [&](std::size_t i) {
+        const StrandRoot& root = s.roots()[baseStrand(i)];
+        const bool rooted = scalp && root.face >= 0 && static_cast<std::size_t>(root.face) < scalp->triangleCount();
+        rootNormals_[i] = rooted ? scalp->normal(root) : Vec3f{0, 1, 0};
+        rootsOnScalp_[i] = rooted ? 1 : 0;
+    }, 4096);
 }
 
 void LookEngine::findShownPoints() {
@@ -375,38 +411,68 @@ void LookEngine::walkOnlyChanged(std::size_t k, const StageParams& params, const
     held.walkPoints = pointCount_;
 }
 
-void LookEngine::putStrandData(const LookRun& run) {
+void LookEngine::putStrandData(const LookRun& run, bool frames) {
     const std::vector<StageParams>& stages = run.params.stages;
-    // What the numbers come from: the strands (each full upload), each stage's kind and seed, and
-    // Interpolate's normals.
-    std::vector<std::uint64_t> key{baseSerial_};
+    bool normals = frames;
+    for (const StageParams& p : stages) {
+        normals = normals || p.stage.kind == StageKind::Clump || p.stage.kind == StageKind::Curl || p.stage.kind == StageKind::BlendNeighbors;
+    }
+    if (normals && rootNormals_.size() != strandCount_) makeRootNormals(*base_, normalsScalp_);
+    normals = normals || !rootNormals_.empty();
+    // What the numbers come from: the strands (each full upload), the root normals, each stage's
+    // kind and seed, and Interpolate's normals.
+    std::vector<std::uint64_t> key{baseSerial_, normals ? 1u : 0u};
     for (std::size_t k = 0; k < stages.size(); ++k) {
         key.push_back(static_cast<std::uint64_t>(stages[k].stage.kind));
         key.push_back(stages[k].seed);
         const InterpolateInputs* in = k < run.inputs.size() ? run.inputs[k].interpolate.get() : nullptr;
         key.push_back(reinterpret_cast<std::uintptr_t>(in ? in->strandNormals.get() : nullptr));
         key.push_back(reinterpret_cast<std::uintptr_t>(in ? in->cursors.get() : nullptr));
+        key.push_back(reinterpret_cast<std::uintptr_t>(k < run.inputs.size() ? run.inputs[k].directions.get() : nullptr));
     }
     if (key == dataKey_) return;
     const StrandSet& s = *base_;
     const std::size_t n = strandCount_;
     dataBlocks_.assign(stages.size(), 0);
+    directionBlocks_.assign(stages.size(), 0);
     std::size_t blocks = 1;  // block 0: the root normals
     for (std::size_t k = 0; k < stages.size(); ++k) {
         dataBlocks_[k] = blocks;
         blocks += strandDataBlocks(stages[k].stage.kind);
+        if (k < run.inputs.size() && run.inputs[k].directions) {
+            if (run.inputs[k].directions->size() != n) throw std::runtime_error("GPU preview: a stage's directions are for other strands");
+            directionBlocks_[k] = blocks++;
+        }
     }
-    std::vector<float> data(blocks * n * 4, 0.0f);
+    // Written in place where the engine holds it in memory (the CPU's), else up from here; each
+    // strand's numbers zero but what its stages set.
+    const std::size_t words = blocks * n * 4;
+    std::unique_ptr<float[]> staged;
+    float* data = static_cast<float*>(writable(kStrandData, words * 4));
+    if (!data) {
+        staged.reset(new float[std::max<std::size_t>(words, 1)]);
+        data = staged.get();
+    }
     parallelFor(0, n, [&](std::size_t i) {
-        float* up = data.data() + i * 4;
-        up[0] = rootNormals_[i].x;
-        up[1] = rootNormals_[i].y;
-        up[2] = rootNormals_[i].z;
-        up[3] = rootsOnScalp_[i] ? 1.0f : 0.0f;  // the skin's normal (Clump's repel keeps off the skin)
-        const StrandId id = s.ids()[i];
+        for (std::size_t b = 0; b < blocks; ++b) std::fill_n(data + (b * n + i) * 4, 4, 0.0f);
+        if (normals) {
+            float* up = data + i * 4;
+            up[0] = rootNormals_[i].x;
+            up[1] = rootNormals_[i].y;
+            up[2] = rootNormals_[i].z;
+            up[3] = rootsOnScalp_[i] ? 1.0f : 0.0f;  // the skin's normal (Clump's repel keeps off the skin)
+        }
+        const StrandId id = s.ids()[baseStrand(i)];
         for (std::size_t k = 0; k < stages.size(); ++k) {
+            if (directionBlocks_[k]) {
+                const Vec3f& w = (*run.inputs[k].directions)[i];
+                float* d = data + (directionBlocks_[k] * n + i) * 4;
+                d[0] = w.x;
+                d[1] = w.y;
+                d[2] = w.z;
+            }
             if (!dataBlocks_[k]) continue;
-            float* d = data.data() + (dataBlocks_[k] * n + i) * 4;
+            float* d = data + (dataBlocks_[k] * n + i) * 4;
             const std::uint64_t seed = stages[k].seed;
             switch (stages[k].stage.kind) {
                 case StageKind::Interpolate: {
@@ -432,6 +498,7 @@ void LookEngine::putStrandData(const LookRun& run) {
                     const std::uint64_t h = hashCombine(id, seed ^ 0x10C4);
                     d[1] = unitFloat(h);
                     d[2] = std::sqrt(unitFloat(hash64(h)));
+                    d[3] = unitFloat(hashCombine(id, seed ^ 0x5E7A9ull));  // strandStrengthRandom's draw
                     break;
                 }
                 case StageKind::Noise: {
@@ -472,7 +539,7 @@ void LookEngine::putStrandData(const LookRun& run) {
                     d[1] = offset.y;
                     d[2] = offset.z;
                     d[3] = unitFloat(h);
-                    float* more = data.data() + ((dataBlocks_[k] + 1) * n + i) * 4;
+                    float* more = data + ((dataBlocks_[k] + 1) * n + i) * 4;
                     more[0] = rng.uniform(0.5f, 1.0f);
                     break;
                 }
@@ -493,8 +560,8 @@ void LookEngine::putStrandData(const LookRun& run) {
                     const float z = 2.0f * unitFloat(h) - 1.0f;
                     const float a = 6.28318531f * unitFloat(hash64(h));
                     const float r = std::sqrt(std::max(0.0f, 1.0f - z * z));
-                    d[0] = r * std::cos(a);
-                    d[1] = r * std::sin(a);
+                    d[0] = r * pm::cos(a);
+                    d[1] = r * pm::sin(a);
                     d[2] = z;
                     d[3] = unitFloat(hash64(static_cast<std::uint64_t>(id) ^ 0xC4A26E5A17ull));
                     break;
@@ -510,7 +577,7 @@ void LookEngine::putStrandData(const LookRun& run) {
                 case StageKind::Transform: {
                     // Its seven: the move's three, the turn's three, the scale's (the next block from the fifth).
                     constexpr std::uint64_t kSalt = 0x7A45F0ull;
-                    float* more = data.data() + ((dataBlocks_[k] + 1) * n + i) * 4;
+                    float* more = data + ((dataBlocks_[k] + 1) * n + i) * 4;
                     for (std::uint64_t r = 0; r < 7; ++r) {
                         const float v = 2.0f * unitFloat(hashCombine(hashCombine(id, seed ^ kSalt), r)) - 1.0f;
                         (r < 4 ? d[r] : more[r - 4]) = v;
@@ -519,8 +586,7 @@ void LookEngine::putStrandData(const LookRun& run) {
                 }
                 case StageKind::Gravity:
                 case StageKind::Collide:
-                case StageKind::Blend:
-                case StageKind::Tie: break;
+                case StageKind::Blend: break;
                 case StageKind::Displace:
                 case StageKind::Twist: break;
                 // (The shapers' numbers: their inputs, StageInputs.)
@@ -534,12 +600,15 @@ void LookEngine::putStrandData(const LookRun& run) {
                     break;
                 case StageKind::Jiggle:
                 case StageKind::MeshCut:
-                case StageKind::Merge: break;
+                case StageKind::Merge:
+                case StageKind::Cull:
+                case StageKind::Split:
+                case StageKind::Mirror: break;
             }
         }
     }, 4096);
-    write(kStrandData, data.data(), data.size() * 4, false);
-    runUploadMegabytes_ += static_cast<double>(data.size() * 4) / 1e6;
+    if (staged) write(kStrandData, data, std::max<std::size_t>(words, 1) * 4, false);
+    runUploadMegabytes_ += static_cast<double>(words * 4) / 1e6;
     dataKey_ = std::move(key);
 }
 
@@ -561,8 +630,7 @@ void LookEngine::putFields(const LookFields& fields, const std::vector<StagePara
             if (f.values.size() != want) throw std::runtime_error("GPU preview: mapped values read from other strands than the base");
             layout[(k * kFieldSlots + i) * 2] = static_cast<std::uint32_t>(f.mode);
             layout[(k * kFieldSlots + i) * 2 + 1] = static_cast<std::uint32_t>(values.size());
-            // (A Tie's tail: read where the Tie writes it, AffectCS.)
-            if (f.channelFrom == kNoStage) values.insert(values.end(), f.values.begin(), f.values.end());
+            values.insert(values.end(), f.values.begin(), f.values.end());
             if (const FieldProgram* p = f.program.get()) {
                 if (f.mode != FieldValues::kPerStrand || p->statics.size() != strands * p->slotCount) {
                     throw std::runtime_error("GPU preview: a mapped param's program read from other strands than the base");
@@ -648,6 +716,23 @@ void LookEngine::runMerged(std::size_t k, std::size_t strandsA, const LookCenter
     if (engine.widthsRun_) borrow(auxBuffer(k, 1), engine, kWidths);
 }
 
+void LookEngine::runGathered(std::size_t k, const LookCentersRun& run, const GatherInputs& layout) {
+    LookEngine& engine = runSibling(k, run);
+    // Each strand of the base (the node's result) from one of the run's, point for point.
+    if (!layout.strands || layout.strands->size() != strandCount_ * 8) {
+        throw std::runtime_error("GPU preview: a Cull's, Split's or Mirror's layout is for other strands");
+    }
+    borrow(auxBuffer(k, 0), engine, engine.allPointsBuffer());
+    if (engine.widthsRun_) borrow(auxBuffer(k, 1), engine, kWidths);
+    StageHeld& held = held_[k];
+    if (held.a != layout.strands.get() || !has(auxBuffer(k, 2))) {
+        write(auxBuffer(k, 2), layout.strands->data(), layout.strands->size() * 4, false);
+        held.keep = layout.strands;
+        held.a = layout.strands.get();
+        runUploadMegabytes_ += static_cast<double>(layout.strands->size() * 4) / 1e6;
+    }
+}
+
 void LookEngine::putStageInputs(const LookRun& run) {
     const std::vector<StageParams>& stages = run.params.stages;
     lastWalk_ = WalkStats{};
@@ -656,16 +741,39 @@ void LookEngine::putStageInputs(const LookRun& run) {
     for (std::size_t k = 0; k < stages.size(); ++k) {
         StageHeld& held = held_[k];
         const std::size_t stageN = stageStrands(stages[k]), stageP = stagePoints(stages[k]);  // (up a Merge's input a: its strands)
-        if (held.kind != static_cast<int>(stages[k].stage.kind)) {
+        const int kindNow = static_cast<int>(stages[k].stage.kind);
+        if (held.kind != kindNow && sharesBase()) {
+            // (Parked for its kind's next turn; the new kind's taken back where it was parked.)
+            if (held.kind >= 0) {
+                Parked& parked = parked_[{k, held.kind}];
+                parked.held = std::move(held);
+                for (int b = 0; b < kAuxPerStage; ++b) parked.buffers[b] = parkBuffer(auxBuffer(k, b));
+            }
             held = StageHeld{};
-            held.kind = static_cast<int>(stages[k].stage.kind);
+            held.kind = kindNow;
+            const auto back = parked_.find({k, kindNow});
+            if (back != parked_.end()) {
+                held = std::move(back->second.held);
+                for (int b = 0; b < kAuxPerStage; ++b) unparkBuffer(auxBuffer(k, b), std::move(back->second.buffers[b]));
+                parked_.erase(back);
+            }
+        } else if (held.kind != kindNow) {
+            held = StageHeld{};
+            held.kind = kindNow;
             for (int b = 0; b < kAuxPerStage; ++b) release(auxBuffer(k, b));
         }
         const ClumpInputs* clump = stages[k].stage.kind == StageKind::Clump && k < run.inputs.size() ? run.inputs[k].clump.get() : nullptr;
-        const LookCentersRun* merged = stages[k].stage.kind == StageKind::Merge && k < run.inputs.size() ? run.inputs[k].merged.get() : nullptr;
+        const bool gathering = gathers(stages[k].stage.kind);
+        const LookCentersRun* merged =
+            (stages[k].stage.kind == StageKind::Merge || gathering) && k < run.inputs.size() ? run.inputs[k].merged.get() : nullptr;
         if ((!clump || !clump->centersRun) && !merged) centers_[k].reset();
         const StageInputs* in = k < run.inputs.size() ? &run.inputs[k] : nullptr;
-        if (merged) runMerged(k, static_cast<std::size_t>(std::max(stages[k].flag[0], 0)), *merged);
+        if (merged && gathering) {
+            if (!in->gather) throw std::runtime_error("GPU preview: a Cull's, Split's or Mirror's layout missing");
+            runGathered(k, *merged, *in->gather);
+        } else if (merged) {
+            runMerged(k, static_cast<std::size_t>(std::max(stages[k].flag[0], 0)), *merged);
+        }
         if (stages[k].stage.kind == StageKind::Interpolate) {
             const InterpolateInputs* data = in ? in->interpolate.get() : nullptr;
             if (!data || !data->binding || !data->rows) throw std::runtime_error("GPU preview: Interpolate's binding and guides missing");
@@ -683,6 +791,14 @@ void LookEngine::putStageInputs(const LookRun& run) {
             const std::uint32_t recordWords = binding.roots.size() > 65535 ? 2u : 1u;
             const std::size_t headerWords = 2 * stageN;
             bool whole = !has(auxBuffer(k, 0)) || held.chunks.size() != chunks.size() || held.aux[0] != recordWords;
+            if (!whole && sharesBase() && held.a != data->binding.get()) {
+                // On the CPU, another binding goes up by chunks only when it is the held one bound
+                // again (sharing a chunk with it: the held chunks are alive, held.keep, so an address
+                // is theirs); another operator's of as many strands goes up whole.
+                bool shares = false;
+                for (std::size_t c = 0; c < chunks.size() && !shares; ++c) shares = held.chunks[c] == chunks[c];
+                whole = !shares;
+            }
             std::vector<std::size_t> changed;
             for (std::size_t c = 0; c < chunks.size(); ++c) {
                 if (whole || held.chunks[c] != chunks[c]) changed.push_back(c);
@@ -704,13 +820,16 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     for (std::size_t s = 0; s < n; ++s) {
                         const std::uint32_t first = r.offsets[s], count = r.offsets[s + 1] - first;
                         std::memcpy(&p.headers[2 * s + 1], &r.nearest2[s], 4);
-                        if (count > kInterpolateSlots) {
+                        if (count > kInterpolateSlots && !sharesBase()) {
                             overflow = true;
                             continue;
                         }
                         bool twisted = false;
                         for (std::uint32_t g = 0; g < count; ++g) twisted = twisted || r.twists[first + g] != 0.0f;
-                        p.headers[2 * s] = static_cast<std::uint32_t>(p.records.size() << 6) | (twisted ? 32u : 0u) | count;
+                        // (31 or more, the CPU engine's: 31, the count the word before the records.)
+                        const bool escaped = count >= 31;
+                        p.headers[2 * s] = static_cast<std::uint32_t>(p.records.size() << 6) | (twisted ? 32u : 0u) | (escaped ? 31u : count);
+                        if (escaped) p.records.push_back(count);
                         for (std::uint32_t g = 0; g < count; ++g) {
                             if (recordWords == 1) {
                                 p.records.push_back(r.guides[first + g] | (static_cast<std::uint32_t>(r.weights[first + g]) << 16));
@@ -804,7 +923,8 @@ void LookEngine::putStageInputs(const LookRun& run) {
             held.aux[0] = recordWords;
             held.a = data->binding.get();
             held.keep = data->binding;
-            if (held.b != data->rows.get()) {
+            if (data->tubes && !sharesBase()) throw std::runtime_error("GPU preview: Interpolate's tubes are the CPU engine's");
+            if (held.b != data->rows.get() || held.alive[2].get() != data->tubes.get()) {
                 // The guides: 8 words each (normal xyz, turns, length), then their offsets.
                 const InterpolateGuideRows& rows = *data->rows;
                 const std::size_t count = rows.roots.size();
@@ -818,9 +938,36 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     std::memcpy(&h[3], &turns, 4);
                     h[4] = rows.lengths[gi];
                 }
-                if (!rows.offsets.empty()) std::memcpy(words.data() + count * 8, rows.offsets.data(), rows.offsets.size() * 12);
+                if (sharesBase()) {
+                    // On the CPU each guide's offsets by fours, x y z rows of four samples each (the
+                    // last standing in past the end): look.slang addTurnedLanes.
+                    const std::size_t n = rows.samples, quads = (n + 3) / 4;
+                    words.resize(count * 8 + count * quads * 12, 0.0f);  // (the 8 words a guide kept)
+                    for (std::size_t gi = 0; gi < count && n > 0; ++gi) {
+                        for (std::size_t q = 0; q < quads; ++q) {
+                            float* to = words.data() + count * 8 + (gi * quads + q) * 12;
+                            for (std::size_t l = 0; l < 4; ++l) {
+                                const Vec3f& o = rows.offsets[gi * n + std::min(4 * q + l, n - 1)];
+                                to[l] = o.x;
+                                to[4 + l] = o.y;
+                                to[8 + l] = o.z;
+                            }
+                        }
+                    }
+                } else if (!rows.offsets.empty()) {
+                    std::memcpy(words.data() + count * 8, rows.offsets.data(), rows.offsets.size() * 12);
+                }
+                // fillTubes: the tubes and each strand's (look.slang tubeOf) after them, at word aux[2].
+                held.aux[2] = 0;
+                if (data->tubes && !data->tubes->empty()) {
+                    held.aux[2] = static_cast<std::uint32_t>(words.size());
+                    words.resize(words.size() + data->tubes->size());
+                    std::memcpy(words.data() + held.aux[2], data->tubes->data(), data->tubes->size() * 4);
+                }
                 write(auxBuffer(k, 1), words.data(), words.size() * 4, false);
                 held.b = data->rows.get();
+                held.alive[1] = data->rows;
+                held.alive[2] = data->tubes;
                 held.aux[3] = static_cast<std::uint32_t>(count * 8);
                 runUploadMegabytes_ += static_cast<double>(words.size() * 4) / 1e6;
             }
@@ -853,25 +1000,35 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 throw std::runtime_error("GPU preview: Clump's centers are for other strands");
             }
             if (held.a != data->assigned.get()) {
-                write(auxBuffer(k, 0), data->assigned->data(), data->assigned->size() * 4, false);
+                // (On the CPU the very memory: read alone, kept alive while held.)
+                if (data->assigned->empty()) {
+                    const std::uint32_t none = 0xffffffffu;
+                    write(auxBuffer(k, 0), &none, 4, false);
+                } else {
+                    share(auxBuffer(k, 0), data->assigned->data(), data->assigned->size() * 4);
+                }
                 held.a = data->assigned.get();
+                held.keep = data->assigned;
                 runUploadMegabytes_ += static_cast<double>(data->assigned->size() * 4) / 1e6;
             }
             // The centers' curves, then their frames (kernels write the frames, and the curves
             // where they make them), then their root normals (a float4 each: what the frames
             // start from), then their variation (a float4 each).
+            // Then each center's cumulative arc lengths at its samples (CentersCS writes them).
             const std::size_t variationAt = data->centers * (kCenterFloats + kFrameFloats + kNormalFloats);
-            const std::size_t bytes = (variationAt + data->centers * 4) * 4;
+            const std::size_t arcsAt = variationAt + data->centers * 4;
+            const std::size_t bytes = (arcsAt + data->centers * kClumpCenterSamples) * 4;
             held.aux[1] = static_cast<std::uint32_t>(data->centers * kCenterFloats);
             held.aux[2] = static_cast<std::uint32_t>(variationAt);
+            held.aux[3] = static_cast<std::uint32_t>(arcsAt);
             if (!data->normals || data->normals->size() != data->centers) {
                 throw std::runtime_error("GPU preview: Clump's centers' normals missing");
             }
             if (!data->variation || data->variation->size() != data->centers * 4) {
                 throw std::runtime_error("GPU preview: Clump's variation missing");
             }
-            auto withNormals = [&](std::vector<float>& words) {
-                float* at = words.data() + data->centers * (kCenterFloats + kFrameFloats);
+            auto withNormals = [&](float* words) {
+                float* at = words + data->centers * (kCenterFloats + kFrameFloats);
                 for (std::size_t c = 0; c < data->centers; ++c, at += kNormalFloats) {
                     const Vec3f& n = (*data->normals)[c];
                     at[0] = n.x;
@@ -879,19 +1036,27 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     at[2] = n.z;
                     at[3] = 0.0f;
                 }
-                if (!data->variation->empty()) std::memcpy(words.data() + variationAt, data->variation->data(), data->variation->size() * 4);
+                if (!data->variation->empty()) std::memcpy(words + variationAt, data->variation->data(), data->variation->size() * 4);
                 held.c = data->variation.get();
+                held.alive[2] = data->variation;
             };
             if (data->curves) {
                 if (held.b != data->curves.get() || !has(auxBuffer(k, 1))) {
                     if (data->curves->size() != data->centers * kClumpCenterSamples) {
                         throw std::runtime_error("GPU preview: Clump's centers do not match its curves");
                     }
-                    std::vector<float> words(bytes / 4, 0.0f);
-                    if (!data->curves->empty()) std::memcpy(words.data(), data->curves->data(), data->curves->size() * 12);
-                    withNormals(words);
-                    write(auxBuffer(k, 1), words.data(), bytes, true);
+                    // (On the CPU written in place: the frames and arcs the kernels write left as they are.)
+                    if (float* to = static_cast<float*>(writable(auxBuffer(k, 1), bytes))) {
+                        if (!data->curves->empty()) std::memcpy(to, data->curves->data(), data->curves->size() * 12);
+                        withNormals(to);
+                    } else {
+                        std::vector<float> words(bytes / 4, 0.0f);
+                        if (!data->curves->empty()) std::memcpy(words.data(), data->curves->data(), data->curves->size() * 12);
+                        withNormals(words.data());
+                        write(auxBuffer(k, 1), words.data(), bytes, true);
+                    }
                     held.b = data->curves.get();
+                    held.alive[1] = data->curves;
                     held.framesMade = false;
                     runUploadMegabytes_ += static_cast<double>(bytes) / 1e6;
                 }
@@ -899,10 +1064,11 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 if (!data->chosen || data->chosen->size() != data->centers) throw std::runtime_error("GPU preview: Clump's centers chosen missing");
                 if (held.b != data->chosen.get()) {
                     std::vector<float> words(bytes / 4, 0.0f);  // the curves and frames the kernels write
-                    withNormals(words);
+                    withNormals(words.data());
                     write(auxBuffer(k, 1), words.data(), bytes, true);
                     write(auxBuffer(k, 2), data->chosen->data(), data->chosen->size() * 4, false);
                     held.b = data->chosen.get();
+                    held.alive[1] = data->chosen;
                     held.framesMade = false;
                     runUploadMegabytes_ += static_cast<double>(bytes) / 1e6;
                 }
@@ -914,12 +1080,14 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     write(auxBuffer(k, 4), data->neighbors->data(), data->neighbors->size() * 4, false);
                     allocate(auxBuffer(k, 5), std::max<std::size_t>(data->centers * kCenterFloats * 4, 4));
                     held.d = data->neighbors.get();
+                    held.alive[3] = data->neighbors;
                 }
             }
             // A seed dragged: the variation drawn again (the curves and frames as they are).
             if (held.c != data->variation.get()) {
                 if (!data->variation->empty()) writeRange(auxBuffer(k, 1), variationAt * 4, data->variation->data(), data->variation->size() * 4);
                 held.c = data->variation.get();
+                held.alive[2] = data->variation;
             }
         } else if (stages[k].stage.kind == StageKind::Curl && stages[k].flag[2] != 0) {
             const CurlInputs* data = in ? in->curl.get() : nullptr;
@@ -929,18 +1097,21 @@ void LookEngine::putStageInputs(const LookRun& run) {
             if (held.a != data->clumpOf.get()) {
                 write(auxBuffer(k, 0), data->clumpOf->data(), data->clumpOf->size() * 4, false);
                 held.a = data->clumpOf.get();
+                held.alive[0] = data->clumpOf;
                 runUploadMegabytes_ += static_cast<double>(data->clumpOf->size() * 4) / 1e6;
             }
             if (held.b != data->members.get()) {
                 write(auxBuffer(k, 1), data->members->data(), data->members->size() * 4, false);
                 allocate(auxBuffer(k, 3), std::max<std::size_t>(data->count * kClumpCenterSamples * 18 * 4, 4));  // (look.slang CLUMP_AXIS_FLOATS)
                 held.b = data->members.get();
+                held.alive[1] = data->members;
             }
             if (held.c != data->clumps.get()) {
                 std::vector<float> clumps = *data->clumps;
                 if (clumps.empty()) clumps.push_back(0.0f);
                 write(auxBuffer(k, 2), clumps.data(), clumps.size() * 4, false);
                 held.c = data->clumps.get();
+                held.alive[2] = data->clumps;
             }
         } else if (stages[k].stage.kind == StageKind::Part) {
             const PartInputs* data = in ? in->part.get() : nullptr;
@@ -950,6 +1121,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
             if (held.a != data->sides.get()) {
                 write(auxBuffer(k, 0), data->sides->data(), data->sides->size() * 4, false);
                 held.a = data->sides.get();
+                held.alive[0] = data->sides;
                 runUploadMegabytes_ += static_cast<double>(data->sides->size() * 4) / 1e6;
             }
         } else if (stages[k].stage.kind == StageKind::Collide) {
@@ -957,6 +1129,9 @@ void LookEngine::putStageInputs(const LookRun& run) {
             // aux[0] (look.slang CollideCS), once per surface.
             const CollideInputs* data = in ? in->collide.get() : nullptr;
             if (!data || data->tables.size() > 2) throw std::runtime_error("GPU preview: Collide's fields missing");
+            if (data->rests && (!sharesBase() || !data->host || !data->host->roots || data->host->roots->size() != stageN)) {
+                throw std::runtime_error("GPU preview: Collide's deformed surfaces are the CPU engine's, with each strand's root");
+            }
             for (const MeshDistanceField::Tables& t : data->tables) {
                 if (!t || t->empty()) throw std::runtime_error("GPU preview: Collide's fields missing");
             }
@@ -969,7 +1144,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     const std::uint32_t none = 0;
                     write(auxBuffer(k, 0), &none, 4, false);
                 } else if (data->tables.size() == 1) {
-                    write(auxBuffer(k, 0), data->tables[0]->data(), data->tables[0]->size() * 4, false);
+                    share(auxBuffer(k, 0), data->tables[0]->data(), data->tables[0]->size() * 4);  // (read alone, kept alive)
                     runUploadMegabytes_ += static_cast<double>(data->tables[0]->size() * 4) / 1e6;
                 } else {
                     std::vector<std::uint32_t> both(*data->tables[0]);
@@ -1028,60 +1203,36 @@ void LookEngine::putStageInputs(const LookRun& run) {
             if (cells > (std::uint64_t{1} << 26) || sumBytes > (std::uint64_t{1} << 30)) {
                 throw std::runtime_error("GPU preview: the hair grid is too large for the GPU");
             }
-        } else if (stages[k].stage.kind == StageKind::Tie) {
-            // Tie (look.slang TieFrameCS, TieRouteCS, TieLayCS): aux 0 the scalp's field's tables;
-            // 1 each strand's seed face, then the core strands (from word aux[1], aux[2] of them);
-            // 5 the tail channel as the strands it takes carry it (when no Tie of the run writes it).
-            const TieInputs* data = in ? in->tie.get() : nullptr;
-            if (!data || !data->seeds || data->seeds->size() != stageN || !data->core) {
-                throw std::runtime_error("GPU preview: Tie's inputs are for other strands");
-            }
-            if (data->channel && data->channel->size() != stageP) throw std::runtime_error("GPU preview: Tie's channel is for other strands");
-            if (data->channelFrom != kNoStage && (data->channelFrom >= k || stages[data->channelFrom].stage.kind != StageKind::Tie)) {
-                throw std::runtime_error("GPU preview: Tie's channel from a node that is no Tie before it");
-            }
-            if (held.a != data->tables.get() || !has(auxBuffer(k, 0))) {
-                const std::uint32_t none = 0;
-                if (data->tables) {
-                    write(auxBuffer(k, 0), data->tables->data(), data->tables->size() * 4, false);
-                    runUploadMegabytes_ += static_cast<double>(data->tables->size() * 4) / 1e6;
-                } else {
-                    write(auxBuffer(k, 0), &none, 4, false);
-                }
-                held.a = data->tables.get();
-            }
-            if (held.b != data->seeds.get() || held.c != data->core.get()) {
-                std::vector<std::uint32_t> words(*data->seeds);
-                words.insert(words.end(), data->core->begin(), data->core->end());
-                if (words.empty()) words.push_back(0u);
-                write(auxBuffer(k, 1), words.data(), words.size() * 4, false);
-                held.b = data->seeds.get();
-                held.c = data->core.get();
-                held.aux[1] = static_cast<std::uint32_t>(stageN);
-                held.aux[2] = static_cast<std::uint32_t>(data->core->size());
-                runUploadMegabytes_ += static_cast<double>(words.size() * 4) / 1e6;
-            }
-            if (data->channelFrom == kNoStage && data->channel && held.d != data->channel.get()) {
-                write(auxBuffer(k, 5), data->channel->data(), data->channel->size() * 4, true);  // (read as a writable view)
-                held.d = data->channel.get();
-                runUploadMegabytes_ += static_cast<double>(data->channel->size() * 4) / 1e6;
-            }
-            held.keep = in->tie;  // (what the pointers compared above are of, alive till the next run compares them)
         } else {
             putShaperInputs(k, stages[k], in);
         }
         // ---- The shapers working on each strand alone ----
         const StageKind kind = stages[k].stage.kind;
         if (kind == StageKind::Bend || kind == StageKind::Direction || kind == StageKind::Transform || kind == StageKind::Displace) {
-            // Each strand's root on the scalp (look.slang rootFrameOf), once per roots and scalp.
+            // Each strand's root on the scalp (look.slang rootFrameOf), once per roots and scalp. A
+            // sharing engine given none makes them from its base and scalp, in its own memory.
             const RootInputs* data = in ? in->roots.get() : nullptr;
-            if (!data || !data->frames || data->frames->size() != stageN * 8) {
+            if (!data && sharesBase() && stageN == strandCount_) {
+                if (held.madeFrames != baseSerial_ || held.a || !has(auxBuffer(k, 0))) {
+                    writeRootFrames(*base_, normalsScalp_, static_cast<float*>(writable(auxBuffer(k, 0), std::max<std::size_t>(stageN, 1) * 32)),
+                                    view_.get());
+                    held.madeFrames = baseSerial_;
+                    held.a = nullptr;
+                    held.keep.reset();
+                }
+            } else if (!data || !data->frames || data->frames->size() != stageN * 8) {
                 throw std::runtime_error("GPU preview: a shaper's roots are for other strands");
-            }
-            if (held.a != data->frames.get() || !has(auxBuffer(k, 0))) {
-                write(auxBuffer(k, 0), data->frames->data(), std::max<std::size_t>(data->frames->size(), 1) * 4, false);
+            } else if (held.a != data->frames.get() || !has(auxBuffer(k, 0))) {
+                // (On the CPU the very memory: never written, kept alive while held.)
+                if (data->frames->empty()) {
+                    const float none = 0.0f;
+                    write(auxBuffer(k, 0), &none, 4, false);
+                } else {
+                    share(auxBuffer(k, 0), data->frames->data(), data->frames->size() * 4);
+                }
                 held.a = data->frames.get();
                 held.keep = data->frames;  // (kept alive: compared by address)
+                held.madeFrames = 0;
                 runUploadMegabytes_ += static_cast<double>(data->frames->size() * 4) / 1e6;
             }
         } else if (kind == StageKind::Twist) {
@@ -1092,9 +1243,13 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 throw std::runtime_error("GPU preview: Twist's axes are for other strands");
             }
             if (held.a != data->strands.get() || !has(auxBuffer(k, 0))) {
+                // (On the CPU the very memory, as the inputs below: read alone, kept alive while held.)
                 const std::uint32_t none[4] = {0xffffffffu, 0u, 0u, 0u};
-                write(auxBuffer(k, 0), data->strands->empty() ? none : data->strands->data(), std::max<std::size_t>(data->strands->size(), 4) * 4,
-                      false);
+                if (data->strands->empty()) {
+                    write(auxBuffer(k, 0), none, sizeof(none), false);
+                } else {
+                    share(auxBuffer(k, 0), data->strands->data(), data->strands->size() * 4);
+                }
                 held.a = data->strands.get();
                 held.keep = data->strands;
                 runUploadMegabytes_ += static_cast<double>(data->strands->size() * 4) / 1e6;
@@ -1102,13 +1257,13 @@ void LookEngine::putStageInputs(const LookRun& run) {
             const void* axes = data->axes ? static_cast<const void*>(data->axes.get()) : static_cast<const void*>(data->members.get());
             if (held.b != axes || !has(auxBuffer(k, 1))) {
                 if (data->axes) {
-                    write(auxBuffer(k, 1), data->axes->data(), data->axes->size() * 4, false);
+                    share(auxBuffer(k, 1), data->axes->data(), data->axes->size() * 4);
                     release(auxBuffer(k, 2));
                     held.tables = data->axes;
                 } else {
                     // (look.slang TWIST_AXIS_FLOATS a clump, then its length.)
                     allocate(auxBuffer(k, 1), std::max<std::size_t>(data->count * (kTwistAxisSamples * 3 + 1) * 4, 4));
-                    write(auxBuffer(k, 2), data->members->data(), data->members->size() * 4, false);
+                    share(auxBuffer(k, 2), data->members->data(), data->members->size() * 4);
                     held.tables = data->members;
                 }
                 held.b = axes;
@@ -1124,6 +1279,8 @@ void LookEngine::putStageInputs(const LookRun& run) {
             if (held.a != data || !has(auxBuffer(k, 0)) || !has(auxBuffer(k, 1))) {
                 write(auxBuffer(k, 0), data->strands->data(), std::max<std::size_t>(data->strands->size(), 4) * 4, false);
                 write(auxBuffer(k, 1), data->faces->data(), data->faces->size() * 4, false);
+                // (The turns in double the CPU's alone: JiggleCS drags by them there.)
+                if (sharesBase() && data->faceTurns) share(auxBuffer(k, 2), data->faceTurns->data(), data->faceTurns->size() * 8);
                 held.a = data;
                 held.keep = in->jiggle;  // (kept alive: compared by address)
                 runUploadMegabytes_ += static_cast<double>((data->strands->size() + data->faces->size()) * 4) / 1e6;
@@ -1152,6 +1309,27 @@ void LookEngine::putStageInputs(const LookRun& run) {
 void LookEngine::putShaperInputs(std::size_t k, const StageParams& stage, const StageInputs* in) {
     const std::size_t stageN = stageStrands(stage), stageP = stagePoints(stage);
     StageHeld& held = held_[k];
+    if (stage.stage.kind == StageKind::Blend) {
+        // Look b handed in (an operator's own Blend on the CPU, StageInputs::blendWith): its points
+        // in aux 0, the very memory (look.slang BlendCS's gAux0). (A run's Blend: its look b's stage.)
+        if (!in || !in->blendWith) return;
+        if (!sharesBase() || in->blendWith->pointCount() != pointCount_) throw std::runtime_error("GPU preview: Blend's look b is for other strands");
+        if (held.a != in->blendWith.get() || !has(auxBuffer(k, 0))) {
+            share(auxBuffer(k, 0), in->blendWith->positions().data(), std::max<std::size_t>(pointCount_, 1) * sizeof(Vec3f));
+            held.a = in->blendWith.get();
+            held.keep = in->blendWith;
+        }
+        return;
+    }
+    if (stage.stage.kind == StageKind::Smooth) {
+        // On the CPU its boxes' window ends, worked out once (look_stage_params.h smoothEnds:
+        // look.slang SmoothCS's cpu form reads them from aux 0).
+        if (!sharesBase()) return;
+        const std::vector<SmoothEnd> ends = smoothEnds(stage.value[1], static_cast<std::size_t>(std::max(stage.flag[0], 0)));
+        void* to = writable(auxBuffer(k, 0), std::max<std::size_t>(ends.size(), 1) * sizeof(SmoothEnd));
+        if (!ends.empty()) std::memcpy(to, ends.data(), ends.size() * sizeof(SmoothEnd));
+        return;
+    }
     if (stage.stage.kind == StageKind::RestoreLength) {
         // A reference the run does not make (look.slang RestoreLengthCS): aux 0 its segments' lengths
         // per point, aux 1 its first segments per strand. (One the run makes: that stage's points.)
@@ -1161,15 +1339,25 @@ void LookEngine::putShaperInputs(std::size_t k, const StageParams& stage, const 
             throw std::runtime_error("GPU preview: RestoreLength's reference is for other strands");
         }
         if (held.a != data->lengths.get() || !has(auxBuffer(k, 0))) {
-            write(auxBuffer(k, 0), data->lengths->empty() ? nullptr : data->lengths->data(), std::max<std::size_t>(data->lengths->size(), 1) * 4, false);
-            write(auxBuffer(k, 1), data->firsts->empty() ? nullptr : data->firsts->data(), std::max<std::size_t>(data->firsts->size(), 4) * 4, false);
+            // (On the CPU the very memory, kept alive while held.)
+            if (data->lengths->empty()) {
+                write(auxBuffer(k, 0), nullptr, 4, false);
+            } else {
+                share(auxBuffer(k, 0), data->lengths->data(), data->lengths->size() * 4);
+            }
+            if (data->firsts->empty()) {
+                write(auxBuffer(k, 1), nullptr, 16, false);
+            } else {
+                share(auxBuffer(k, 1), data->firsts->data(), data->firsts->size() * 4);
+            }
             held.a = data->lengths.get();
             held.keep = in->restore;
             runUploadMegabytes_ += static_cast<double>((data->lengths->size() + data->firsts->size()) * 4) / 1e6;
         }
     } else if (stage.stage.kind == StageKind::BlendNeighbors) {
-        // Its neighbours (look.slang BlendNeighborsCS): aux 0 per strand its records' start and count,
-        // then the records (a neighbour, its share's bits); aux 1 per strand its root's normal (xyz, 0).
+        // Its neighbours as its operator keeps them (look.slang BlendNeighborsCS): aux 0 the offsets,
+        // aux 1 the neighbours, aux 2 their shares (on the CPU the very arrays, kept alive while held);
+        // its root normals the root normals' (putStrandData).
         const BlendNeighborsState* data = in ? in->neighbors.get() : nullptr;
         if (!data || data->offsets.size() != stageN + 1 || data->normals.size() != stageN ||
             data->neighbors.size() != data->weights.size() || data->offsets.back() != data->neighbors.size()) {
@@ -1177,24 +1365,23 @@ void LookEngine::putShaperInputs(std::size_t k, const StageParams& stage, const 
         }
         if (held.a != data || !has(auxBuffer(k, 0))) {
             const std::size_t n = stageN;
-            std::vector<std::uint32_t> words(2 * n + 2 * data->neighbors.size() + 1, 0u);
-            for (std::size_t s = 0; s < n; ++s) {
-                words[2 * s] = static_cast<std::uint32_t>(2 * n + 2 * data->offsets[s]);
-                words[2 * s + 1] = data->offsets[s + 1] - data->offsets[s];
+            if (std::any_of(data->neighbors.begin(), data->neighbors.end(), [&](std::uint32_t g) { return g >= n; })) {
+                throw std::runtime_error("GPU preview: BlendNeighbors' neighbours are other strands");
             }
-            for (std::size_t r = 0; r < data->neighbors.size(); ++r) {
-                const std::uint32_t g = data->neighbors[r];
-                if (g >= n) throw std::runtime_error("GPU preview: BlendNeighbors' neighbours are other strands");
-                words[2 * n + 2 * r] = g;
-                std::memcpy(&words[2 * n + 2 * r + 1], &data->weights[r], 4);
-            }
-            std::vector<float> normals(std::max<std::size_t>(n, 1) * 4, 0.0f);
-            for (std::size_t s = 0; s < n; ++s) std::memcpy(&normals[s * 4], &data->normals[s], 12);
-            write(auxBuffer(k, 0), words.data(), words.size() * 4, false);
-            write(auxBuffer(k, 1), normals.data(), normals.size() * 4, false);
+            auto put = [&](int buffer, const void* from, std::size_t bytes) {
+                if (bytes) {
+                    share(buffer, from, bytes);
+                } else {
+                    const std::uint32_t none = 0;
+                    write(buffer, &none, 4, false);
+                }
+            };
+            put(auxBuffer(k, 0), data->offsets.data(), data->offsets.size() * 4);
+            put(auxBuffer(k, 1), data->neighbors.data(), data->neighbors.size() * 4);
+            put(auxBuffer(k, 2), data->weights.data(), data->weights.size() * 4);
             held.a = data;
             held.keep = in->neighbors;
-            runUploadMegabytes_ += static_cast<double>((words.size() + normals.size()) * 4) / 1e6;
+            runUploadMegabytes_ += static_cast<double>((data->offsets.size() + 2 * data->neighbors.size()) * 4) / 1e6;
         }
     } else if (stage.stage.kind == StageKind::Tangle) {
         // Its partners (look.slang TangleCS): aux 0, 4 words a strand (TangleInputs).
@@ -1244,7 +1431,10 @@ LookEngine::Kernel LookEngine::shaperKernel(std::size_t k, const StageParams& st
     const std::size_t stageN = stageStrands(stage);
     switch (stage.stage.kind) {
         case StageKind::Smooth:
-            *groups = stageN;  // (a group a strand: look.slang SmoothCS)
+            // A group a strand (look.slang SmoothCS); on the CPU a thread a strand, SMOOTH_GROUP (64)
+            // strands a group, reading its window ends.
+            *groups = sharesBase() ? (stageN + 63) / 64 : stageN;
+            if (sharesBase()) b->aux[0] = auxBuffer(k, 0);
             return Kernel::Smooth;
         case StageKind::RestoreLength:
             if (stage.flag[0] != 2) {
@@ -1256,6 +1446,7 @@ LookEngine::Kernel LookEngine::shaperKernel(std::size_t k, const StageParams& st
         case StageKind::BlendNeighbors:
             b->aux[0] = auxBuffer(k, 0);
             b->aux[1] = auxBuffer(k, 1);
+            b->aux[2] = auxBuffer(k, 2);
             return Kernel::BlendNeighbors;
         case StageKind::Tangle: b->aux[0] = auxBuffer(k, 0); return Kernel::Tangle;
         case StageKind::Flow: {
@@ -1267,6 +1458,13 @@ LookEngine::Kernel LookEngine::shaperKernel(std::size_t k, const StageParams& st
             c->flag[2] = flow->pins;
             c->flag2[0] = flow->sinks;
             c->flag2[1] = flow->tables ? 1u : 0u;
+            if (sharesBase()) {
+                // (On the CPU the field and scalp themselves, asked by address: look.slang hostFlow*.)
+                const auto host = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&flow->host));
+                c->flag2[1] = flow->host.scalp ? 1u : 0u;
+                c->flag2[2] = static_cast<std::uint32_t>(host);
+                c->flag2[3] = static_cast<std::uint32_t>(host >> 32);
+            }
             b->aux[0] = auxBuffer(k, 0);
             b->aux[1] = auxBuffer(k, 1);
             b->aux[2] = auxBuffer(k, 2);
@@ -1277,14 +1475,14 @@ LookEngine::Kernel LookEngine::shaperKernel(std::size_t k, const StageParams& st
     throw std::runtime_error("GPU preview: a node this engine does not run");
 }
 
-void LookEngine::prepare(const LookRun& run) {
+void LookEngine::prepare(const LookRun& run, bool frames) {
     const auto start = std::chrono::steady_clock::now();
     runUploadMegabytes_ = 0;
     if (run.params.stages.size() > kMaxStages) throw std::runtime_error("GPU preview: more nodes than it runs");
     if (!run.fields.stages.empty() && run.fields.stages.size() != run.params.stages.size()) {
         throw std::runtime_error("GPU preview: mapped values read for another chain");
     }
-    putStrandData(run);
+    putStrandData(run, frames);
     prepareParts_[0] = since(start);
     if (run.fields.stages.empty()) {
         if (fieldLayout_.size() != run.params.stages.size() * kFieldSlots * 2 || fieldSerial_ != 0) {
@@ -1308,14 +1506,15 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     if (!base_) throw std::runtime_error("GPU preview: no strands uploaded");
     // Hidden core strands (preview_core.h): every strand runs into kFull0-3, the shown ones are
     // gathered into the outputs after.
-    const bool gather = !shownPoints_.empty();
+    // (An operator's own run, baseAsOutput: every strand its strand, none hidden.)
+    const bool gather = !shownPoints_.empty() && !targets.baseAsOutput;
     if (gather && targets.pointTexture) throw std::runtime_error("GPU preview: a point texture of strands with hidden ones");
     // The kernels it may dispatch, waited for where they compile (a host asks kernelsReady first).
     const KernelSet need = kernelsOf(r);
     for (int k = 0; k < static_cast<int>(Kernel::Count); ++k) {
         if (need.test(static_cast<std::size_t>(k))) kernelReady(static_cast<Kernel>(k), true);
     }
-    prepare(r);
+    prepare(r, frames);
     const std::vector<StageParams>& stages = r.params.stages;
     const std::size_t bytes = pointCount_ * 12;
     outPoints_ = gather ? shownPoints_.size() : pointCount_;
@@ -1371,8 +1570,19 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         int copyFrom = kBasePoints, copyTo = kOut0;  // `copy`: what into what (copyBytes; 0: the points)
         std::size_t copyBytes = 0, copyOffset = 0;    // (from that byte of both)
         std::size_t copyFromOffset = kSameOffset;     // (from that byte of copyFrom instead)
+        int onlyIf = -1;                 // >= 0: dispatched only where that buffer's first word is onlyIfValue or more (runsIf)
+        std::uint32_t onlyIfValue = 0;
+        // >= 0: its groups at most that buffer's word countWord (+ 1 every other repeat) over
+        // countPer, where the engine can tell (countedGroups); the kernel leaves past it either way.
+        int countBuffer = -1;
+        std::uint32_t countWord = 0, countPer = 1;
     };
     std::vector<Step> steps;
+    // Room for the widths a Width makes: on the CPU, writing them into the run's target, that very
+    // memory (bindTargets), none of its own.
+    auto roomForWidths = [&] {
+        if (!(sharesBase() && targets.widths)) allocate(kWidths, pointCount_ * 4);
+    };
     std::vector<StageConstants> slots;
     std::size_t lastMover = kNoStage;
     for (std::size_t k = 0; k < stages.size(); ++k) {
@@ -1390,6 +1600,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         c.uniformCount = static_cast<std::uint32_t>(uniformCount_);
         c.pointCount = static_cast<std::uint32_t>(stagePoints(p));
         c.dataBlock = static_cast<std::uint32_t>(dataBlocks_[k] * n);
+        c.table[2] = k < directionBlocks_.size() ? static_cast<std::uint32_t>(directionBlocks_[k] * n) : 0u;  // (look.slang stageDirection)
         for (int i = 0; i < 4; ++i) {
             c.value[i] = p.value[i];
             c.flag[i] = static_cast<std::uint32_t>(p.flag[i]);
@@ -1403,6 +1614,17 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             const InterpolateInputs* in = k < r.inputs.size() ? r.inputs[k].interpolate.get() : nullptr;
             const InterpolateClearance* clearance = in ? in->clearance.get() : nullptr;
             c.flag[3] = clearance ? 1u : 0u;
+            if (clearance && clearance->host && !sharesBase()) {
+                throw std::runtime_error("GPU preview: Interpolate's clearance asked through the host is the CPU engine's");
+            }
+            if (clearance && (clearance->rest || clearance->host) && sharesBase()) {
+                // (Its walk reaching a degenerate face's vertex, or with `host` every push, asks
+                // the scalp through the host: look.slang gClearHost.)
+                const auto host = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(clearance));
+                c.octaveSeeds[12] = static_cast<std::uint32_t>(host);
+                c.octaveSeeds[13] = static_cast<std::uint32_t>(host >> 32);
+                c.octaveSeeds[14] = clearance->host ? 1u : 0u;
+            }
             if (clearance) {
                 c.value[1] = clearance->floor;
                 c.value[2] = clearance->depth;
@@ -1455,7 +1677,6 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             const ClumpInputs* in = k < r.inputs.size() ? r.inputs[k].clump.get() : nullptr;
             c.flag[3] = in ? static_cast<std::uint32_t>(in->centers) : 0u;  // (its root normals follow its frames)
         }
-        if (p.stage.kind == StageKind::Tie) tieConstants(p, k < r.inputs.size() ? r.inputs[k].tie.get() : nullptr, &c);
         if (p.stage.kind == StageKind::Transform) std::memcpy(c.octaveSeeds, p.more, sizeof c.octaveSeeds);  // (look.slang gMore)
         return c;
     };
@@ -1514,23 +1735,30 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         const int segments = auxBuffer(k, 0), grid = auxBuffer(k, 1), sums = auxBuffer(k, 2), nodes = auxBuffer(k, 3), floor = auxBuffer(k, 4);
         const int unknowns = auxBuffer(k, 5);  // the solve's unknowns, a list a colour (look.slang GridUnknownsCS)
         const int moves = auxBuffer(k, 6);     // each point's move, for the walk (look.slang GridWalkCS)
+        const int moved = auxBuffer(k, 7);     // SelfCollide: the last pass that moved hair, + 1 (SelfCollidePushCS)
         allocate(grid, (32 + cells + blocks) * 4);
+        if (!isStatic) allocate(moved, 4);
         allocate(moves, bytes);
-        allocate(unknowns, std::max<std::size_t>(blocks * 64 * 8 * 4, 4));
+        allocate(unknowns, std::max<std::size_t>(blocks * 64 * 10 * 4, 4));  // (look.slang UNKNOWN_WORDS)
         allocate(sums, std::max<std::size_t>(blocks * 64 * sumWords * 4, 4));
         allocate(nodes, std::max<std::size_t>(blocks * 64 * 12 * 4, 4));
-        const double h = l.h;
+        const double h = l.cell > 0.0 ? l.cell : l.h;  // (the grid's cell; the samples by l.h)
         StageConstants g = constantsOf(k);  // (its per-strand numbers, mapped strength, profile)
         g.value[0] = p.value[0];
         g.value[1] = static_cast<float>(h);
-        g.value[2] = static_cast<float>(0.5 * h);
+        g.value[2] = static_cast<float>(0.5 * l.h);
         g.value[3] = l.beside;
         g.value2[0] = static_cast<float>(4294967296.0 / (h * h * h));
         g.value2[1] = static_cast<float>(isStatic ? l.section : l.nominal);
         g.value2[2] = static_cast<float>(l.weight);
         g.value2[3] = p.value[1];
         const std::size_t segmentCount = l.segments.size() / 2;
-        g.flag[0] = (isStatic ? 1u : 0u) | (!isStatic && l.widths ? 2u : 0u) | (l.tables ? 4u : 0u);
+        // (8: the floor over a deformed scalp, asked through the host: look.slang hostGridFloorPush.)
+        const HairGridInputs& gridIn = *r.inputs[k].grid;
+        if (l.floorSurface && (!sharesBase() || !gridIn.roots || gridIn.roots->size() != n)) {
+            throw std::runtime_error("GPU preview: the hair grid's floor over a deformed scalp is the CPU engine's");
+        }
+        g.flag[0] = (isStatic ? 1u : 0u) | (!isStatic && l.widths ? 2u : 0u) | (l.tables ? 4u : 0u) | (l.floorSurface ? 8u : 0u);
         g.flag[1] = static_cast<std::uint32_t>(segmentCount);
         g.flag[2] = static_cast<std::uint32_t>(l.margin);
         g.flag[3] = 0;
@@ -1554,13 +1782,35 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         grid4[10] = bits(static_cast<float>(2.0 * 2.0 * h * h));  // (static_op.cpp kSoften cells, squared)
         grid4[11] = bits(static_cast<float>(l.wallReach * h));
         grid4[12] = sumWords;
-        for (int w = 13; w < 16; ++w) grid4[w] = 0;
+        const auto floorHost = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&gridIn));
+        grid4[13] = static_cast<std::uint32_t>(floorHost);  // (look.slang gGrid3.yz)
+        grid4[14] = static_cast<std::uint32_t>(floorHost >> 32);
+        grid4[15] = 0;
+        // The ops' numbers in double (the CPU's kernels: look.slang gridWeightD, gridNominalD, and
+        // SelfCollide's gridPackingD, as readStageParams put it in `more`).
+        const double section = isStatic ? l.section : l.nominal;
+        std::memcpy(&g.ramp2[0], &l.weight, sizeof(double));
+        std::memcpy(&g.ramp2[2], &section, sizeof(double));
+        if (!isStatic) std::memcpy(&g.table2[0], &p.more[0], sizeof(double));
         const std::size_t segmentGroups = std::max<std::size_t>((segmentCount + 63) / 64, 1), cellGroups = (32 + cells + 63) / 64;
+        // A pass after one moving no hair would find the same (its grid, so no push): skipped where
+        // the engine can tell (runsIf; self_collide_op.cpp stops there).
+        int onlyIf = -1;
+        std::uint32_t onlyIfValue = 0;
         auto add = [&](Kernel kernel, const Binding& b, std::size_t groups, std::uint32_t which, bool last = false) {
             StageConstants c = g;
             c.flag[3] = which;
             slots.push_back(c);
             steps.push_back({kernel, b, groups, false, last ? static_cast<int>(p.stage.kind) : -3});
+            steps.back().onlyIf = onlyIf;
+            steps.back().onlyIfValue = onlyIfValue;
+        };
+        // A kernel a thread a node of the blocks laid: its groups (a block each) as many as laid
+        // (look.slang GRID_COUNT), where the engine can tell.
+        auto blocksCounted = [&] {
+            steps.back().countBuffer = grid;
+            steps.back().countWord = 15;
+            steps.back().countPer = 1;
         };
         auto solve = [&](const Binding& b, int sweeps) {  // red-black: colour 0, then 1, each sweep
             StageConstants c = g;
@@ -1570,14 +1820,25 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             slots.push_back(c);
             Step s{Kernel::GridSor, b, blocks, false, -3};
             s.repeat = static_cast<std::size_t>(2 * sweeps);
+            s.onlyIf = onlyIf;
+            s.onlyIfValue = onlyIfValue;
+            s.countBuffer = grid;  // (each colour's unknowns, look.slang GRID_UNKNOWNS: a thread each)
+            s.countWord = 26;
+            s.countPer = 64;
             steps.push_back(s);
         };
         const int passes = isStatic ? 1 : 3;  // (self_collide_op.cpp kPasses)
         for (int pass = 0; pass < passes; ++pass) {
             const int points = pass == 0 ? input : to;  // (later passes splat the strands the one before moved)
+            if (pass > 0) {
+                onlyIf = moved;
+                onlyIfValue = static_cast<std::uint32_t>(pass);
+            }
             Binding b;
             b.out[0] = grid;
-            add(Kernel::GridClear, b, cellGroups, 0);
+            Binding cleared = b;
+            if (!isStatic) cleared.out[1] = moved;
+            add(Kernel::GridClear, cleared, cellGroups, static_cast<std::uint32_t>(pass));
             Binding sampled;
             sampled.in = points;
             sampled.aux[0] = segments;
@@ -1592,6 +1853,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             zero.out[0] = sums;
             zero.out[1] = nodes;
             add(Kernel::GridZero, zero, blocks, 0);
+            blocksCounted();
             Binding splat;
             splat.in = points;
             splat.aux[0] = segments;
@@ -1624,6 +1886,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             push.aux[2] = floor;
             push.out[0] = to;
             push.out[1] = moves;
+            if (!isStatic) push.out[2] = moved;
             Binding walk;  // (the strand from its first point moved, kept above the floor)
             walk.in = input;
             walk.aux[0] = moves;
@@ -1632,24 +1895,34 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             walk.out[0] = to;
             if (!isStatic) {
                 add(Kernel::SelfCollideNode, node, blocks, 0);
+                blocksCounted();
                 add(Kernel::GridUnknowns, listed, blocks, 0);
+                blocksCounted();
                 solve(sor, 48);  // (self_collide_op.cpp kSweeps)
                 Binding gradient;
                 gradient.aux[1] = grid;
                 gradient.out[0] = nodes;
                 add(Kernel::SelfCollideGradient, gradient, blocks, 0);
+                blocksCounted();
                 add(Kernel::SelfCollidePush, push, strandGroups, static_cast<std::uint32_t>(pass));
                 add(Kernel::GridWalk, walk, strandGroups, 0, pass + 1 == passes);
             } else {
-                for (std::uint32_t axis = 0; axis < 3; ++axis) add(Kernel::StaticReach, solved, blocks, axis);
+                for (std::uint32_t axis = 0; axis < 3; ++axis) {
+                    add(Kernel::StaticReach, solved, blocks, axis);
+                    blocksCounted();
+                }
                 Binding moments;
                 moments.aux[0] = sums;
                 moments.out[0] = grid;
                 add(Kernel::StaticMoments, moments, blocks, 0);
+                blocksCounted();
                 add(Kernel::StaticNode, node, blocks, 0);
+                blocksCounted();
                 add(Kernel::GridUnknowns, listed, blocks, 0);
+                blocksCounted();
                 solve(sor, 64);  // (static_op.cpp kSweeps)
                 add(Kernel::StaticField, solved, blocks, 0);
+                blocksCounted();
                 add(Kernel::StaticPush, push, strandGroups, 0);
                 add(Kernel::GridWalk, walk, strandGroups, 0, true);
             }
@@ -1690,7 +1963,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     for (std::size_t k = 0; k < stages.size(); ++k) {
         firstOfNode[k] = k > 0 && stages[k - 1].stage.node == stages[k].stage.node ? firstOfNode[k - 1] : k;
         const std::size_t from = stages[firstOfNode[k]].stage.from;
-        if (stages[k].masked && stages[k].stage.kind != StageKind::Tie && lastOfNode(k) && from != kNoStage) {
+        if (stages[k].masked && lastOfNode(k) && from != kNoStage) {
             lastTaker[from] = std::max(lastTaker[from], k);
         }
     }
@@ -1708,15 +1981,14 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     // ---- Affect masks ----
     // Stage k's node's result (its points in `to`; a Width's widths in kWidths, `widthsIn` those it
     // took) mixed back toward what its first stage took by its affect (look.slang AffectCS): the
-    // field the node's first stage holds (or a Tie's tail where the run writes it), times its number.
+    // field the node's first stage holds, times its number.
     // Its time the node's: the stamp closing it moves after the mix.
     auto mixAffect = [&](std::size_t k, int to, int widthsIn) {
         const StageParams& p = stages[k];
-        if (!p.masked || p.stage.kind == StageKind::Tie || !lastOfNode(k)) return;
+        if (!p.masked || !lastOfNode(k)) return;
         const bool width = p.stage.kind == StageKind::Width;
         if (width && !p.mixWidths) return;  // (strands without widths: the CPU keeps the Width's)
         const std::size_t first = firstOfNode[k];
-        const FieldValues* affect = first < r.fields.stages.size() ? &r.fields.stages[first].affect : nullptr;
         StageConstants c{};
         c.strandCount = static_cast<std::uint32_t>(stageStrands(p));
         c.uniformCount = static_cast<std::uint32_t>(uniformCount_);
@@ -1727,15 +1999,6 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         c.field[1] = at + 1 < fieldLayout_.size() ? fieldLayout_[at + 1] : 0u;
         Binding b;
         b.in = taken(stages[first].stage.from);
-        if (affect && affect->channelFrom != kNoStage) {
-            if (affect->channelFrom >= k || stages[affect->channelFrom].stage.kind != StageKind::Tie) {
-                throw std::runtime_error("GPU preview: an affect read from a node that is no Tie before it");
-            }
-            c.flag[0] = 1u;
-            c.value[1] = affect->low;
-            c.value[2] = affect->high;
-            b.aux[0] = auxBuffer(affect->channelFrom, 4);
-        }
         if (width) {
             c.flag[1] = 1u;
             b.aux[1] = widthsIn;
@@ -1768,7 +2031,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                 steps.push_back(keep);
             }
             widthsMade = true;
-            allocate(kWidths, pointCount_ * 4);
+            roomForWidths();
             Binding b;
             b.in = input;
             b.out[0] = kWidths;
@@ -1777,6 +2040,40 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                              static_cast<int>(p.stage.kind)});
             mixAffect(k, -1, widthsIn);
             resultOf[k] = current = input;
+            continue;
+        }
+        if (gathers(p.stage.kind)) {
+            // The run up its input (on the sibling: its points aux 0, its widths aux 1 where it made
+            // them) laid out as the node's result (aux 2: LayoutCS), into a buffer of the run's (the
+            // output when nothing after it moves points). Without that run: its result as cached.
+            const bool branch = k < r.inputs.size() && r.inputs[k].merged;
+            int out = branch || k == lastMover ? (k == lastMover ? finalOut : freeBuffer(k, input, -1)) : static_cast<int>(kBasePoints);
+            if (out != kOut0 && out != kBasePoints) allocate(out, bytes);
+            if (!branch) {
+                if (out != kBasePoints) {
+                    Step copy{Kernel::Count, Binding{}, 0, true, -3};
+                    copy.copyFrom = kBasePoints;
+                    copy.copyTo = out;
+                    copy.copyBytes = bytes;
+                    steps.push_back(copy);
+                }
+                resultOf[k] = current = out;
+                continue;
+            }
+            Binding b;
+            b.in = auxBuffer(k, 0);
+            b.out[0] = out;
+            b.aux[0] = auxBuffer(k, 2);
+            if (runsWidth(r.inputs[k].merged->params)) {
+                roomForWidths();
+                widthsMade = true;
+                b.aux[1] = auxBuffer(k, 1);
+                b.out[1] = kWidths;
+                c.flag[1] = 1u;
+            }
+            slots.push_back(c);
+            steps.push_back({Kernel::Layout, b, strandGroups, false, static_cast<int>(p.stage.kind)});
+            resultOf[k] = current = out;
             continue;
         }
         if (p.stage.kind == StageKind::Merge) {
@@ -1809,7 +2106,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                 steps.push_back(b);
             }
             if (branchWidths && !widthsMade) {
-                allocate(kWidths, pointCount_ * 4);
+                roomForWidths();
                 Step w{Kernel::Count, Binding{}, 0, true, -3};
                 w.copyFrom = kBaseWidths;
                 w.copyTo = kWidths;
@@ -1840,55 +2137,6 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             resultOf[k] = current = to;
             continue;
         }
-        if (p.stage.kind == StageKind::Tie) {
-            // Its frame and ring's bins (one group), each strand's route over the scalp, then each
-            // strand laid along its path (look.slang TieFrameCS, TieRouteCS, TieLayCS). Aux 2: the
-            // frame; 3: the routes; 4: the tail it writes (a Tie after it reads it there).
-            if (k >= r.inputs.size() || !r.inputs[k].tie) throw std::runtime_error("GPU preview: Tie's inputs missing");
-            const TieInputs& tie = *r.inputs[k].tie;
-            const int channelIn = tie.channelFrom != kNoStage ? auxBuffer(tie.channelFrom, 4) : tie.channel ? auxBuffer(k, 5) : -1;
-            // Its tail written where a Tie after it in the run reads it (nothing else here does:
-            // the drawing reads none; a stage mapping a param to it is the CPU's).
-            bool read = false;
-            for (std::size_t j = k + 1; j < stages.size(); ++j) {
-                read = read || (stages[j].stage.kind == StageKind::Tie && j < r.inputs.size() && r.inputs[j].tie &&
-                                r.inputs[j].tie->channelFrom == k);
-                read = read || (j < r.fields.stages.size() && r.fields.stages[j].affect.channelFrom == k);  // (an affect mapped to it)
-            }
-            const bool writes = p.flag[0] != 0 && read;
-            if (!writes) c.flag[0] &= ~kTieWritesTail;
-            allocate(auxBuffer(k, 2), kTieFrameWords * 4);
-            allocate(auxBuffer(k, 3), std::max<std::size_t>(n * kTieSlots * 16, 16));
-            if (writes) allocate(auxBuffer(k, 4), std::max<std::size_t>(pointCount_ * 4, 4));
-            Binding frame;
-            frame.in = input;
-            frame.aux[0] = auxBuffer(k, 1);
-            frame.aux[1] = channelIn;
-            frame.out[0] = auxBuffer(k, 2);
-            slots.push_back(c);
-            steps.push_back({Kernel::TieFrame, frame, 1, false, -3});
-            Binding route;
-            route.in = input;
-            route.aux[0] = auxBuffer(k, 1);
-            route.aux[1] = auxBuffer(k, 2);
-            route.aux[2] = auxBuffer(k, 0);
-            route.out[0] = auxBuffer(k, 3);
-            route.out[1] = channelIn;  // (read alone)
-            slots.push_back(c);
-            steps.push_back({Kernel::TieRoute, route, strandGroups, false, -3});
-            Binding lay;
-            lay.in = input;
-            lay.aux[0] = auxBuffer(k, 3);
-            lay.aux[1] = auxBuffer(k, 2);
-            lay.aux[2] = auxBuffer(k, 0);
-            lay.out[0] = to;
-            lay.out[1] = writes ? auxBuffer(k, 4) : -1;
-            lay.out[2] = channelIn;  // (read alone)
-            slots.push_back(c);
-            steps.push_back({Kernel::TieLay, lay, strandGroups, false, static_cast<int>(StageKind::Tie)});
-            resultOf[k] = current = to;
-            continue;
-        }
         Binding b;
         b.in = input;
         b.out[0] = to;
@@ -1898,8 +2146,8 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             case StageKind::Interpolate:
                 kernel = Kernel::Interpolate;
                 // Four strands a group, two where the guides have more than 32 samples (look.slang
-                // InterpolateCS).
-                groups = p.flag[0] > 32 ? (n + 1) / 2 : (n + 3) / 4;
+                // InterpolateCS); on the CPU a thread a strand, INTERP_GROUP (64) strands a group.
+                groups = sharesBase() ? (n + 63) / 64 : p.flag[0] > 32 ? (n + 1) / 2 : (n + 3) / 4;
                 b.aux[0] = auxBuffer(k, 0);
                 b.aux[1] = auxBuffer(k, 1);
                 b.aux[2] = r.inputs[k].interpolate && r.inputs[k].interpolate->clearance ? auxBuffer(k, 2) : -1;
@@ -1915,13 +2163,15 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                 // copyAmount on centers made here: resampled into a buffer of their own, then shared.
                 const bool share = made && in.neighbors && p.value2[2] > 0.0f && in.centers > 1;
                 const std::size_t centerGroups = (in.centers + 63) / 64;
-                if (in.centers > 0 && (made || (framed && !held_[k].framesMade))) {
+                if (in.centers > 0 && (made || !held_[k].framesMade)) {
                     // The centers' curves made from the points so far (the Clump's own strands), and
-                    // with a lock radius or a flatness their frames.
+                    // with a lock radius or a flatness their frames; their arc lengths where the
+                    // curves are final (not shared after).
                     StageConstants centers = c;
                     centers.flag[0] = static_cast<std::uint32_t>(in.centers);
                     centers.flag[1] = framed && !share ? 1u : 0u;
                     centers.flag[2] = made ? 0u : 1u;  // 1: the curves are there, the frames alone
+                    centers.flag[3] = share ? 0u : 1u;  // the arcs
                     Binding cb;
                     cb.in = input;
                     if (made && in.centersRun) {  // the curves of the centers' branch, as its run left them
@@ -1943,11 +2193,12 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                     sb.out[0] = auxBuffer(k, 1);
                     slots.push_back(shared);
                     steps.push_back({Kernel::Share, sb, centerGroups, false, -3});
-                    if (framed) {
-                        StageConstants framesOnly = c;
+                    {
+                        StageConstants framesOnly = c;  // (and the arcs, on the shared curves)
                         framesOnly.flag[0] = static_cast<std::uint32_t>(in.centers);
-                        framesOnly.flag[1] = 1u;
+                        framesOnly.flag[1] = framed ? 1u : 0u;
                         framesOnly.flag[2] = 1u;
+                        framesOnly.flag[3] = 1u;
                         Binding fb;
                         fb.out[0] = auxBuffer(k, 1);
                         slots.push_back(framesOnly);
@@ -1968,11 +2219,19 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             case StageKind::Blend:
                 kernel = perPoint() ? Kernel::BlendPoints : Kernel::Blend;
                 groups = perPoint() ? pointGroups : strandGroups;
-                b.aux[0] = input2;  // look b's points (look a's: its input)
+                // look b's points (look a's: its input; an operator's own: handed in, aux 0)
+                b.aux[0] = k < r.inputs.size() && r.inputs[k].blendWith ? auxBuffer(k, 0) : input2;
                 break;
             case StageKind::Collide:
                 kernel = Kernel::Collide;
                 c.flag[2] = r.inputs[k].collide ? r.inputs[k].collide->colliders : 0u;  // (look.slang collideWalk)
+                if (const CollideInputs* in = r.inputs[k].collide.get(); in && in->rests) {
+                    // Deformed surfaces (a bit each) asked through the host, its address in flag2.zw.
+                    c.flag[3] = in->rests;
+                    const auto host = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(in->host.get()));
+                    c.flag2[2] = static_cast<std::uint32_t>(host);
+                    c.flag2[3] = static_cast<std::uint32_t>(host >> 32);
+                }
                 if (p.value2[1] > 0.0f) {  // smoothing: whether the collider moved each strand, for the second dispatch
                     b.out[1] = auxBuffer(k, 1);
                     allocate(b.out[1], std::max<std::size_t>(n * 4, 4));
@@ -1988,6 +2247,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             }
             case StageKind::Curl: {
                 kernel = Kernel::Curl;
+                if (sharesBase()) groups = (n + 255) / 256;  // (the CPU's: four strands a thread, look.slang curlFour)
                 const CurlInputs* in = p.flag[2] != 0 && k < r.inputs.size() ? r.inputs[k].curl.get() : nullptr;
                 if (p.flag[2] != 0 && !in) throw std::runtime_error("GPU preview: Curl's clumps missing");
                 if (p.flag[0] == 3 && widthsMade) {
@@ -2042,7 +2302,6 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             case StageKind::Width:
             case StageKind::SelfCollide:
             case StageKind::Static:
-            case StageKind::Tie: break;  // (made above)
             case StageKind::Smooth:
             case StageKind::RestoreLength:
             case StageKind::BlendNeighbors:
@@ -2054,6 +2313,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                 kernel = Kernel::Jiggle;
                 b.aux[0] = auxBuffer(k, 0);
                 b.aux[1] = auxBuffer(k, 1);
+                if (sharesBase()) b.aux[2] = auxBuffer(k, 2);  // (the turns in double)
                 break;
             case StageKind::MeshCut:
                 // Aux 0: its mesh's tree (ScalpMesh::rayTree; none: the strands pass through).
@@ -2065,7 +2325,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         slots.push_back(c);
         // Collide smoothing (value2 1): a second dispatch on the first's points (look.slang CollideCS,
         // flag 1), the stage's time stamped after it.
-        const bool collideTwice = kernel == Kernel::Collide && p.value2[1] > 0.0f;
+        const bool collideTwice = kernel == Kernel::Collide && p.value2[1] > 0.0f && !sharesBase();  // (the CPU: one, look.slang CollideCS)
         steps.push_back({kernel, b, groups, false, collideTwice ? -3 : static_cast<int>(p.stage.kind)});
         if (collideTwice) {
             StageConstants second = c;
@@ -2080,16 +2340,19 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             // Keeping clearance: the walk, on the points Interpolate wrote (in place), with its
             // constants.
             // Every strand's walked points kept (aux 4) for the next run, which walks only the
-            // strands bound to the guides it changed (flags beside the guides' rows, aux 1).
+            // strands bound to the guides it changed (flags beside the guides' rows, aux 1). (Not
+            // for an operator's own run, each walking afresh: flag2.w 1, no room.)
+            const bool keeps = !targets.baseAsOutput;
             Binding walk;
             walk.out[0] = to;
             walk.out[2] = auxBuffer(k, 4);
-            allocate(walk.out[2], bytes);
+            allocate(walk.out[2], keeps ? bytes : 4);
             walk.aux[0] = b.aux[0];
             walk.aux[1] = b.aux[1];
             walk.aux[2] = b.aux[2];
-            c.flag2[1] = held_[k].walkPartial ? 1u : 0u;
-            walkedStages.push_back(k);
+            c.flag2[1] = keeps && held_[k].walkPartial ? 1u : 0u;
+            c.flag2[3] = keeps ? 0u : 1u;
+            if (keeps) walkedStages.push_back(k);
             slots.push_back(c);
             steps.push_back({Kernel::Clearance, walk, strandGroups, false, kClearanceStamp});
         }
@@ -2097,7 +2360,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         resultOf[k] = current = to;
     }
     inPlace_ = bindTargets(targets, frames, outBytes, outPoints_ * 8);
-    if (current == kBasePoints && !gather) {  // no stage moves the points: the output is the base
+    if (current == kBasePoints && !gather && !targets.baseAsOutput) {  // no stage moves the points: the output is the base
         Step copy{Kernel::Count, Binding{}, 0, true, -3};
         steps.push_back(copy);
         current = kOut0;
@@ -2207,6 +2470,9 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
     }
     if (nextSlot != slots.size()) throw std::runtime_error("GPU preview: the dispatches' constants are out of step");
 
+    if (view_) {
+        for (StageConstants& c : slots) c.table2[3] = 1u;  // (look.slang strandBegin: a view's two words a strand)
+    }
     beginRun();
     setConstants(slots.data(), slots.size(), sizeof(StageConstants));
     stamped_.clear();
@@ -2219,7 +2485,18 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                  s.copyOffset);
             continue;
         }
-        if (s.repeat) {
+        if (s.onlyIf >= 0 && !runsIf(s.onlyIf, s.onlyIfValue)) {
+            // (skipped)
+        } else if (s.countBuffer >= 0) {
+            // As few groups as the count asks (rows of the dispatch's own width, its gDispatch.x).
+            for (std::size_t r = 0; r < std::max<std::size_t>(s.repeat, 1); ++r) {
+                const std::size_t odd = s.repeat ? (r & 1) : 0;
+                const std::size_t groups = countedGroups(s.countBuffer, s.countWord + static_cast<std::uint32_t>(odd), s.countPer, s.groups);
+                if (!groups) continue;
+                const std::size_t x = std::min(groups, shapes[i].x);
+                dispatch(s.kernel, slotOf[i] + odd, s.binding, x, (groups + x - 1) / x);
+            }
+        } else if (s.repeat) {
             dispatchAlternating(s.kernel, slotOf[i], s.binding, shapes[i].x, shapes[i].y, s.repeat);
         } else {
             dispatch(s.kernel, slotOf[i], s.binding, shapes[i].x, shapes[i].y);
@@ -2270,7 +2547,6 @@ GpuTimes LookEngine::times(bool wait) {
             case static_cast<int>(StageKind::Blend): g.blendMs += t; break;
             case static_cast<int>(StageKind::SelfCollide): g.selfCollideMs += t; break;
             case static_cast<int>(StageKind::Static): g.staticMs += t; break;
-            case static_cast<int>(StageKind::Tie): g.tieMs += t; break;
             case static_cast<int>(StageKind::Bend): g.bendMs += t; break;
             case static_cast<int>(StageKind::Direction): g.directionMs += t; break;
             case static_cast<int>(StageKind::Transform): g.transformMs += t; break;
@@ -2283,6 +2559,9 @@ GpuTimes LookEngine::times(bool wait) {
             case static_cast<int>(StageKind::Flow): g.flowMs += t; break;
             case static_cast<int>(StageKind::Jiggle): g.jiggleMs += t; break;
             case static_cast<int>(StageKind::MeshCut): g.meshCutMs += t; break;
+            case static_cast<int>(StageKind::Cull):
+            case static_cast<int>(StageKind::Split):
+            case static_cast<int>(StageKind::Mirror): g.layoutMs += t; break;
             case -1: g.linesMs += t; break;
             case -2: g.copyMs += t; break;
             case -4: g.textureMs += t; break;
@@ -2311,7 +2590,6 @@ GpuTimes LookEngine::times(bool wait) {
         g.blendMs += c.blendMs;
         g.selfCollideMs += c.selfCollideMs;
         g.staticMs += c.staticMs;
-        g.tieMs += c.tieMs;
         g.bendMs += c.bendMs;
         g.directionMs += c.directionMs;
         g.transformMs += c.transformMs;
@@ -2324,6 +2602,7 @@ GpuTimes LookEngine::times(bool wait) {
         g.flowMs += c.flowMs;
         g.jiggleMs += c.jiggleMs;
         g.meshCutMs += c.meshCutMs;
+        g.layoutMs += c.layoutMs;
         g.copyMs += c.copyMs;
         g.totalMs += c.totalMs;
     }

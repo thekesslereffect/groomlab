@@ -11,6 +11,7 @@
 #include "groomlab/feathers.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
@@ -47,6 +48,8 @@ std::size_t curvaturePoints(const Vec3f* p, std::size_t n, float perSegment, int
     const float wanted = std::ceil(need / perSegment);
     return static_cast<std::size_t>(std::clamp(static_cast<int>(std::min(wanted, 1e6f)), least, most)) + 1;
 }
+
+}  // namespace
 
 // Strand s of `in` resampled into `out`'s points for it (as many as `out` has), widths
 // (`widths`: `in` has them) and point channels (`inPoint`, `outPoint`) following. Points are
@@ -112,8 +115,6 @@ void resampleStrand(const StrandSet& source, StrandSet& out, std::size_t s, bool
         }
     }
 }
-
-}  // namespace
 
 // Every strand resampled to points[s] points, widths and per-point channels following; IDs, roots
 // and per-strand channels stay (resampleStrand).
@@ -194,10 +195,6 @@ private:
         lengthField.validate(*in);
         const ScalarField fractionField(params(), "fraction", scalpOf(ctx));
         fractionField.validate(*in);
-        // The random trim's range (either way round).
-        const auto trimA = static_cast<float>(params().getDouble("trimMin")), trimB = static_cast<float>(params().getDouble("trimMax"));
-        const float trimLow = std::min(trimA, trimB), trimHigh = std::max(trimA, trimB);
-        const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
 
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
@@ -211,40 +208,16 @@ private:
                 return true;
             }
         }
+        // look.slang's LengthCS, the GPU preview's own (look_cpu.h): in full, or the strands the input
+        // changed in, into the last result's copy.
+        if (!last) {
+            *result = gpu::runStage(gpu::StageKind::Length, params(), in, scalpOf(ctx));
+            return true;
+        }
         auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
-        auto shape = [&](std::size_t s) {
-            float keep = lengthField.at(*out, s);
-            if (trimHigh > 0.0f) {
-                // Picked when its draw is under the fraction; its trim from a draw of its own.
-                const float fraction = fractionField.at(*out, s);
-                const StrandId id = out->ids()[s];
-                if (fraction >= 1.0f || unitFloat(hashCombine(id, seed ^ 0x1E46)) < fraction) {
-                    const float trim = trimLow + (trimHigh - trimLow) * unitFloat(hashCombine(id, seed ^ 0x7A11));
-                    keep *= 1.0f - trim;
-                }
-            }
-            keep = std::max(0.0f, keep);
-            const std::size_t n = out->strandPointCount(s);
-            Vec3f* pts = out->strandPoints(s);
-            if (n < 2) return;
-            thread_local std::vector<Vec3f> original;  // scratch, reused across strands
-            original.assign(pts, pts + n);
-            resampleByArcLengthInto(original.data(), n, pts, n, std::min(keep, 1.0f));
-        };
-        if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                shape(s);
-            });
-            *changed = *changes;
-        } else {
-            parallelFor(0, out->strandCount(), shape);
-        }
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        gpu::runStageOnStrands(gpu::StageKind::Length, params(), in, changes->strands, scalpOf(ctx), *out);
+        *changed = *changes;
         *result = StrandsPtr(out);
         return true;
     }
@@ -292,10 +265,6 @@ private:
         const StrandsPtr in = requireStrands(inputs, op::kWidth);
         const ScalarField widthField(params(), "width", scalpOf(ctx));
         widthField.validate(*in);
-        const bool perPoint = widthField.perPoint();
-        const Ramp profile = params().getRamp("profile");
-        const float randomness = static_cast<float>(params().getDouble("randomness"));
-        const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
 
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
@@ -310,46 +279,43 @@ private:
             }
         }
         auto out = std::make_shared<StrandSet>(*in);
-        // Every strand's widths are written (the strands left alone keep the last result's).
-        std::vector<float>& widths = last ? widthsOfLast(*out, last, *incremental) : out->mutableWidths();
         // Feathers' shafts with a rachis (Propagate's shaftWidth: kRachisChannel) are as wide as
         // it: they keep their widths (a barb width set after the feathers is the barbs').
         const std::vector<float>* isShaft = in->strandChannel(kRachisChannel);
         const bool inWidths = in->widths().size() == in->pointCount();
-        auto shape = [&](std::size_t s) {
-            const std::size_t n = in->strandPointCount(s);
-            if (n == 0) return;
-            if (isShaft && (*isShaft)[s] >= 0.5f) {
-                const std::size_t begin = in->strandBegin(s);
-                for (std::size_t k = 0; k < n; ++k) widths[begin + k] = inWidths ? in->widths()[begin + k] : 1.0f;
-                return;
-            }
-            // The strand's variation (none without randomness: the width as it is).
-            float vary = 1.0f;
-            if (randomness > 0.0f) {
-                Rng rng(hashCombine(out->ids()[s], seed ^ 0x3D17ull));
-                vary = 1.0f + randomness * rng.uniform(-1.0f, 1.0f);
-            }
-            const float width = perPoint ? 0.0f : widthField.at(*out, s) * vary;
-            float* w = widths.data() + in->strandBegin(s);
-            // t by arc length: the profile follows the hair, not the point spacing.
-            thread_local std::vector<float> along;  // scratch, reused across strands
-            along.resize(n);
-            arcParams(in->strandPoints(s), n, along.data());
-            for (std::size_t k = 0; k < n; ++k) {
-                w[k] = (perPoint ? widthField.atPoint(*out, s, k) * vary : width) * profile(along[k]);
-            }
+        // The shafts' widths as they came (after the engine's WidthCS, which widens every strand).
+        auto keepShaft = [&](std::size_t s) {
+            if (!isShaft || !((*isShaft)[s] >= 0.5f)) return;
+            const std::size_t begin = in->strandBegin(s), n = in->strandPointCount(s);
+            std::vector<float>& w = out->mutableWidths();
+            for (std::size_t k = 0; k < n; ++k) w[begin + k] = inWidths ? in->widths()[begin + k] : 1.0f;
         };
-        if (last) {
-            forEachListed(changes->strands, shape);
-            *changed = *changes;
+        // look.slang's WidthCS, the GPU preview's own (look_cpu.h): in full, or the strands the input
+        // changed in (the rest keep the last result's widths).
+        if (!last) {
+            gpu::runStageInto(gpu::StageKind::Width, params(), in, scalpOf(ctx), *out);
+            if (isShaft) parallelFor(0, out->strandCount(), keepShaft, 4096);
         } else {
-            parallelFor(0, out->strandCount(), shape);
+            widthsOfLast(*out, last, *incremental);
+            gpu::runStageOnStrands(gpu::StageKind::Width, params(), in, changes->strands, scalpOf(ctx), *out);
+            if (isShaft) forEachListed(changes->strands, keepShaft);
+            *changed = *changes;
         }
         *result = StrandsPtr(out);
         return true;
     }
 };
+
+// Braided strands (a braidId of 0 or more) keep the points their weave is drawn with (Braid adds
+// them, by its resolution): fewer would draw the weave as a few flat zigzags.
+std::size_t keptPoints(const std::vector<float>* braid, const StrandSet& in, std::size_t s, std::size_t points) {
+    return braid && (*braid)[s] >= 0.0f ? std::max(points, in.strandPointCount(s)) : points;
+}
+void keepBraids(const StrandSet& in, std::vector<std::size_t>& points) {
+    const std::vector<float>* braid = in.strandChannel("braidId");
+    if (!braid) return;
+    for (std::size_t s = 0; s < points.size(); ++s) points[s] = keptPoints(braid, in, s, points[s]);
+}
 
 // Sets the strands' resolution, best after Interpolate: strands (or guides)
 // through it are resampled to `segments`, and every Scatter before it grows its
@@ -367,6 +333,7 @@ private:
 //              `segments`), placed closer together where it bends and farther
 //              apart on straight runs. `segments` stays the working resolution
 //              (Scatter grows with it), so curls are shaped in full detail first
+// Braided strands keep the points their weave is drawn with (keptPoints).
 class ResampleOp : public Operator {
 public:
     std::string typeName() const override { return op::kResample; }
@@ -377,7 +344,8 @@ public:
         return {
             notAnimatable({"segments", std::int64_t{16}, "Segments per strand (points = segments + 1); every Scatter before it "
                                                         "grows its strands with them (the most any Resample after it, on "
-                                                        "the way to the Output, asks for). 0: keep each strand's"})
+                                                        "the way to the Output, asks for). 0: keep each strand's. Braided strands keep "
+                                                        "the points their weave is drawn with (Braid's resolution)"})
                 .range(0, 1024)
                 .soft(0, 64),
             {"mode", std::string("even"), "even: segments for every strand; curvature: fewer points for render and export, "
@@ -411,10 +379,13 @@ public:
             return false;
         }
         const std::size_t count = in->strandCount();
+        const std::vector<float>* braid = in->strandChannel("braidId");
         if (mode == "even") {
             // Every strand at its count already: a full evaluation hands the input on as it is.
             bool same = true;
-            for (std::size_t s = 0; s < count && same; ++s) same = in->strandPointCount(s) == static_cast<std::size_t>(segments) + 1;
+            for (std::size_t s = 0; s < count && same; ++s) {
+                same = in->strandPointCount(s) == keptPoints(braid, *in, s, static_cast<std::size_t>(segments) + 1);
+            }
             if (same) return false;
         } else {
             // Each changed strand's count by its turning, as a full evaluation finds it: the last
@@ -429,7 +400,8 @@ public:
             const float perSegment = static_cast<float>(params().getDouble("maxAngle")) * 0.0174532925f;
             std::atomic<bool> moved{false};
             forEachListed(changes->strands, [&](std::size_t s) {
-                if (curvaturePoints(in->strandPoints(s), in->strandPointCount(s), perSegment, least, most) != last->strandPointCount(s)) {
+                if (keptPoints(braid, *in, s, curvaturePoints(in->strandPoints(s), in->strandPointCount(s), perSegment, least, most)) !=
+                    last->strandPointCount(s)) {
                     moved = true;
                 }
             });
@@ -527,6 +499,7 @@ public:
                 }
             }
         }
+        keepBraids(*in, points);
         if (mode != "curvature") {  // curvature moves the points even at the same count
             bool same = true;
             for (std::size_t s = 0; s < count && same; ++s) same = in->strandPointCount(s) == points[s];

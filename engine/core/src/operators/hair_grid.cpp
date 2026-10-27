@@ -5,7 +5,11 @@
 #include "hair_grid.h"
 
 #include <cstring>
+#include <limits>
+#include <exception>
 
+#include "groomlab/curve.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
 #include "groomlab/portable_math.h"
@@ -72,13 +76,6 @@ ScalpFloor ScalpFloor::of(const std::shared_ptr<const ScalpMesh>& scalp, float s
     const int band = static_cast<int>(std::ceil(cap / cell)) + kFloorBandAboveCap;
     f.surface = CollisionSurface::of(scalp, f.floor, f.depth, f.searchRadius, FieldGrid{cell, band});
     return f;
-}
-
-bool ScalpFloor::push(Vec3f& p, RestPoseCollision::Cursor& cursor) const {
-    MeshDistanceField::Probe probe;
-    probe.beside = beside;
-    probe.fieldOnly = true;
-    return surface.pushOut(p, floor, depth, searchRadius, cursor, &probe);
 }
 
 bool layoutOf(const StrandSet& in, const ScalpMesh* scalp, std::size_t most, std::uint64_t thinSalt, Layout* out, double scale) {
@@ -222,97 +219,61 @@ bool layGrid(const std::vector<Sample>& samples, std::int64_t margin, int dilate
     return true;
 }
 
-Splat splat(const Grid& g, const std::vector<Sample>& samples, int sums) {
-    Splat s;
-    s.count = std::clamp(sums, 0, static_cast<int>(kSums));
-    const std::size_t nodes = g.nodes();
-    s.mass.reset(new std::atomic<std::int64_t>[nodes]());
-    if (s.count > 0) s.sums.reset(new std::atomic<std::int64_t>[nodes * static_cast<std::size_t>(s.count)]());
-    const double perVolume = kFixed / (g.h * g.h * g.h);
-    const int count = s.count;
-    parallelFor(0, samples.size(), [&](std::size_t k) {
-        const Sample& q = samples[k];
-        std::int64_t c[3];
-        double f[3];
-        g.cellOf(q.p, c, f);
-        const double v = static_cast<double>(q.volume) * perVolume, wide = static_cast<double>(q.width) / g.h;
-        for (int d = 0; d < 8; ++d) {
-            const int dx = d & 1, dy = (d >> 1) & 1, dz = (d >> 2) & 1;
-            const double m = (dx ? f[0] : 1.0 - f[0]) * (dy ? f[1] : 1.0 - f[1]) * (dz ? f[2] : 1.0 - f[2]) * v;
-            const auto add = std::llround(m);
-            if (add > 0) s.mass[static_cast<std::size_t>(g.node(c[0] + dx, c[1] + dy, c[2] + dz))].fetch_add(add, std::memory_order_relaxed);
-        }
-        if (count == 0) return;
-        std::atomic<std::int64_t>* at = s.sums.get() + static_cast<std::size_t>(g.node(c[0], c[1], c[2])) * static_cast<std::size_t>(count);
-        const double add[kSums] = {v, v * f[0], v * f[1], v * f[2], v * f[0] * f[0], v * f[1] * f[1], v * f[2] * f[2],
-                                   v * f[0] * f[1], v * f[0] * f[2], v * f[1] * f[2], v * wide};
-        for (int e = 0; e < count; ++e) at[e].fetch_add(std::llround(add[e]), std::memory_order_relaxed);
-    }, 4096);
-    return s;
+std::shared_ptr<const std::vector<std::uint32_t>> EngineWalls::of(const MeshPtr& scalp, double h, double reach) {
+    const std::lock_guard<std::mutex> guard(lock_);
+    if (!walls_ || scalp_ != scalp || h_ != h || reach_ != reach) {
+        walls_ = hairGridWalls(*scalp, h, reach);
+        scalp_ = scalp;
+        h_ = h;
+        reach_ = reach;
+    }
+    return walls_;
 }
 
-std::vector<Wall> wallsOf(const Grid& g, const ScalpMesh* scalp, float size, double reachCells) {
-    std::vector<Wall> walls(scalp && size > 0.0f ? g.nodes() : 0);
-    if (walls.empty()) return walls;
-    const auto reach = static_cast<float>(reachCells * g.h);
-    parallelFor(0, g.blockAt.size(), [&](std::size_t b) {
-        for (std::size_t at = b * kBlockNodes; at < (b + 1) * kBlockNodes; ++at) {
-            std::int64_t c[3];
-            g.coordinates(at, c);
-            const Vec3f node = g.position(c);
-            float bound = 0.0f;
-            const SurfacePoint sp = scalp->closestPointBounded(node, reach, &bound);
-            if (sp.root.face < 0) continue;
-            walls[at] = {(node - sp.position).dot(sp.normal), sp.normal, true};
-        }
-    }, 4);
-    return walls;
-}
-
-void solve(const std::vector<Unknown>& unknown, const std::vector<std::uint8_t>& color, int sweeps, double omega, std::vector<float>* field) {
-    std::vector<float>& p = *field;
-    std::array<std::vector<std::uint32_t>, 2> byColor;
-    for (std::size_t u = 0; u < unknown.size(); ++u) byColor[color[u]].push_back(static_cast<std::uint32_t>(u));
-    for (int sweep = 0; sweep < sweeps; ++sweep) {
-        for (const std::vector<std::uint32_t>& list : byColor) {
-            parallelFor(0, list.size(), [&](std::size_t q) {
-                const Unknown& u = unknown[list[q]];
-                float& here = p[static_cast<std::size_t>(u.at)];
-                double around = 0.0;
-                for (const std::int64_t o : u.around) {
-                    around += o >= 0 ? static_cast<double>(p[static_cast<std::size_t>(o)]) : o == -2 ? static_cast<double>(here) : 0.0;
+StrandsPtr onEngine(gpu::StageKind kind, const std::string& type, const ParamSet& params, const EvalContext& ctx, const StrandsPtr& in,
+                    const MeshPtr& scalp, EngineWalls& walls) {
+    {
+        auto layout = std::make_shared<HairGridLayout>();
+        std::string why;
+        if (!hairGridLayout(type, *in, scalp, layout.get(), &why, ctx.scale)) return in;  // (nothing to splat: as it came)
+        auto grid = std::make_shared<gpu::HairGridInputs>();
+        if (scalp && !(grid->walls = walls.of(scalp, layout->cell, layout->wallReach))) {
+            // A scalp too big for the walls' box at this cell: the part of it the grid can reach (the
+            // strands' box grown by the longest strand, the grid's margin and its dilated blocks).
+            const float big = std::numeric_limits<float>::max();
+            Vec3f box[2] = {Vec3f(big, big, big), Vec3f(-big, -big, -big)};
+            float longest = 0.0f;
+            for (std::size_t s = 0; s < in->strandCount(); ++s) {
+                const Vec3f* pts = in->strandPoints(s);
+                const std::size_t n = in->strandPointCount(s);
+                if (!finitePoints(pts, n)) continue;
+                for (std::size_t i = 0; i < n; ++i) {
+                    box[0] = {std::min(box[0].x, pts[i].x), std::min(box[0].y, pts[i].y), std::min(box[0].z, pts[i].z)};
+                    box[1] = {std::max(box[1].x, pts[i].x), std::max(box[1].y, pts[i].y), std::max(box[1].z, pts[i].z)};
                 }
-                here = static_cast<float>(here + omega * ((around + u.source) / 6.0 - here));
-            }, 1024);
+                longest = std::max(longest, arcLength(pts, n));
+            }
+            const auto grow = static_cast<float>(longest + (static_cast<double>(layout->margin) + 4.0 * (layout->dilate + 1) + 4.0) * layout->cell);
+            box[0] = box[0] - Vec3f(grow, grow, grow);
+            box[1] = box[1] + Vec3f(grow, grow, grow);
+            if (!(box[0].x <= box[1].x) || !(grid->walls = hairGridWalls(*scalp, layout->cell, layout->wallReach, box))) {
+                throw GraphError(type + ": its scalp is too large for its grid's cell");
+            }
         }
+        // (Over a deformed scalp's floor: each strand's root, its walk's start.)
+        if (layout->floorSurface) grid->roots = std::shared_ptr<const std::vector<StrandRoot>>(in, &in->roots());
+        grid->layout = std::move(layout);
+        gpu::StageInputs stage;
+        stage.grid = std::move(grid);
+        const StrandsPtr made = gpu::runStage(kind, params, in, scalp.get(), std::move(stage));
+        return std::memcmp(made->positions().data(), in->positions().data(), in->pointCount() * sizeof(Vec3f)) == 0 ? in : made;
     }
-}
-
-bool mayTouchScalp(const Grid& g, const std::vector<Wall>& walls, double reach, float margin, const Vec3f& p) {
-    std::int64_t c[3];
-    double f[3];
-    g.cellOf(p, c, f);
-    float height = 0.0f;
-    for (int d = 0; d < 8; ++d) {
-        const int dx = d & 1, dy = (d >> 1) & 1, dz = (d >> 2) & 1;
-        const std::int64_t o = g.node(c[0] + dx, c[1] + dy, c[2] + dz);
-        if (o < 0) return true;  // (beyond the hair: never asked about the scalp)
-        const Wall& wall = walls[static_cast<std::size_t>(o)];
-        const auto w = static_cast<float>((dx ? f[0] : 1.0 - f[0]) * (dy ? f[1] : 1.0 - f[1]) * (dz ? f[2] : 1.0 - f[2]));
-        if (!wall.near) {
-            height += w * static_cast<float>(reach * g.h);  // farther than that
-            continue;
-        }
-        std::int64_t at[3] = {c[0] + dx, c[1] + dy, c[2] + dz};
-        height += w * (wall.height + wall.normal.dot(p - g.position(at)));
-    }
-    return height < margin;
 }
 
 }  // namespace hair_grid
 
 bool hairGridLayout(const std::string& type, const StrandSet& in, const std::shared_ptr<const ScalpMesh>& scalp, HairGridLayout* out,
-                    std::string* why) {
+                    std::string* why, double scale) {
     using namespace hair_grid;
     const bool isStatic = type == op::kStatic;
     if (!isStatic && type != op::kSelfCollide) {
@@ -321,7 +282,7 @@ bool hairGridLayout(const std::string& type, const StrandSet& in, const std::sha
     }
     const GridSpec& spec = isStatic ? kStaticGrid : kSelfCollideGrid;
     Layout layout;
-    if (!layoutOf(in, scalp.get(), spec.most, spec.thinSalt, &layout)) {
+    if (!layoutOf(in, scalp.get(), spec.most, spec.thinSalt, &layout, scale)) {
         *why = "nothing to splat";
         return false;
     }
@@ -368,29 +329,37 @@ bool hairGridLayout(const std::string& type, const StrandSet& in, const std::sha
     l.blockCells[2] = g.bz;
     l.blocks = g.blockAt.size();
     l.coarsened = g.h != layout.h;
+    l.cell = g.h;
     if (scalp && layout.size > 0.0f) {
         const ScalpFloor floor = ScalpFloor::of(scalp, layout.size);
-        if (floor && !floor.surface.field) {
-            *why = "its scalp is deformed away from its rest pose (the walk asks the rest pose's field)";
-            return false;
-        }
         if (floor) {
             l.floor = floor.floor;
             l.depth = floor.depth;
             l.searchRadius = floor.searchRadius;
             l.beside = floor.beside;
-            l.tables = floor.surface.field->tables(floor.floor, floor.searchRadius);
-            if (!l.tables) {
-                *why = "its scalp is too big for the floor's field";
-                return false;
-            }
         }
+        // The floor's field as tables; deformed (asked through its rest pose) or too big for its
+        // field's grid: through the host (hairGridFloorPush, the CPU engine's).
+        if (floor && floor.surface.field) l.tables = floor.surface.field->tables(floor.floor, floor.searchRadius);
+        if (floor && !l.tables) l.floorSurface = floor.surface;
     }
     *out = std::move(l);
     return true;
 }
 
-std::shared_ptr<const std::vector<std::uint32_t>> hairGridWalls(const ScalpMesh& scalp, double h, double reachCells) {
+RestPoseCollision::Cursor hairGridFloorCursor(const HairGridLayout& layout, const StrandRoot& root, const Vec3f& rootPoint) {
+    return layout.floorSurface.cursor(root, rootPoint);
+}
+
+bool hairGridFloorPush(const HairGridLayout& layout, Vec3f& p, RestPoseCollision::Cursor& cursor) {
+    // (ScalpFloor::push.)
+    MeshDistanceField::Probe probe;
+    probe.beside = layout.beside;
+    probe.fieldOnly = true;
+    return layout.floorSurface.pushOut(p, layout.floor, layout.depth, layout.searchRadius, cursor, &probe);
+}
+
+std::shared_ptr<const std::vector<std::uint32_t>> hairGridWalls(const ScalpMesh& scalp, double h, double reachCells, const Vec3f* within) {
     if (scalp.triangleCount() == 0 || scalp.points().empty() || !(h > 0.0)) return nullptr;
     const auto reach = static_cast<float>(reachCells * h);  // (as wallsOf asks)
     // Every node within reach of a triangle: the scalp's box grown by the reach, a node more.
@@ -405,8 +374,16 @@ std::shared_ptr<const std::vector<std::uint32_t>> hairGridWalls(const ScalpMesh&
     const double l[3] = {lo.x, lo.y, lo.z}, u[3] = {hi.x, hi.y, hi.z};
     std::int64_t count = 1;
     for (int a = 0; a < 3; ++a) {
-        origin[a] = static_cast<std::int64_t>(std::floor((l[a] - r) / h)) - 1;
-        dims[a] = static_cast<std::int64_t>(std::ceil((u[a] + r) / h)) + 2 - origin[a];
+        // (Within the box `within` gives, where it gives one: a grid's nodes lie in it.)
+        double lower = l[a] - r, upper = u[a] + r;
+        if (within) {
+            lower = std::max(lower, static_cast<double>((&within[0].x)[a]));
+            upper = std::max(lower, std::min(upper, static_cast<double>((&within[1].x)[a])));
+        }
+        if (!(std::fabs(lower / h) < 1e15 && std::fabs(upper / h) < 1e15)) return nullptr;  // (a box no grid lays)
+        origin[a] = static_cast<std::int64_t>(std::floor(lower / h)) - 1;
+        dims[a] = static_cast<std::int64_t>(std::ceil(upper / h)) + 2 - origin[a];
+        if (dims[a] <= 0 || dims[a] > (std::int64_t{1} << 24)) return nullptr;
         count *= dims[a];
     }
     if (count <= 0 || count > (std::int64_t{1} << 24)) return nullptr;  // (a word a node: 64 MB at most)

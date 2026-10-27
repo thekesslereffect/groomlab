@@ -20,13 +20,28 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.15, crossings=
   the scalp). `dutch` raises the braid by crossing the lobes under.
 - **Which strands:** those rooted within `region` of a braid's root. They leave the scalp over
   the first `gather` of their length, and over the last `tail` the lobes let go and the ends
-  fan out.
+  fan out. The hair is parted into the sections as it lies: a strand goes into the section on
+  its side of the braid, so the sections leave the scalp without crossing each other.
+- **Resolution:** a braided strand gets `resolution` points per weave repeat (12 by default, at
+  most `maxSegments`), however few it came with, so the braid is drawn as a round, woven volume
+  instead of a few flat zigzags. A Resample later in the graph keeps those points on braided
+  strands (it resamples the rest); lower `resolution` for lighter exports (0: the strands' own
+  points).
+- **Seeing the weave:** `display` paths shows each braid's path and the center curve of each
+  of its sections in place of the hair (a `braidSection` channel tells them apart: -1 the path),
+  handy for tuning `crossings`, `width` and the feed; set it back to hair before rendering.
+- **Paths output:** the node's second output, `paths`, hands on the paths it braids along as
+  guides (the braids input's, evenly resampled, or those it picked for box braids), for nodes
+  downstream: a second Braid, a Twist's axes, cards.
 - **Feed** (`feed`, on for cornrows by default in `add_braid`): strands within `feedDistance`
   of anywhere along a path join it where they reach it (their own shape, e.g. guides combed
   toward the braid, or straight from the root) and run along it from there, as hair is picked
   up into cornrows and French braids; the root region (`region`) joins as well. `feedUntil`
   (0-1) picks up strands along that first share of the path only: past it the braid hangs free,
-  a French braid becoming a plain braid off the head (0: only the root region joins). With
+  a French braid becoming a plain braid off the head (0: only the root region joins). A strand
+  picked up along the path joins the outer section on its side, as a braider adds hair, and with
+  `feedGrowth` (1 by default) the braid thickens with the hair it has picked up: narrow where it
+  starts, its full `width` where it holds all its hair (0: `widthProfile` alone). With
   `endAtPath` (on by default) each strand is fitted to the path: however long it is and
   wherever it joined, it ends within the braid's last stretch (staggered over `tail`). Off,
   longer strands hang straight on past the path's end.

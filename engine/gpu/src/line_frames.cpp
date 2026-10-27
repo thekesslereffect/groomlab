@@ -22,7 +22,7 @@
 #endif
 
 #include "groomlab/parallel.h"
-#include "look_engine_internal.h"
+#include "groomlab/look/look_engine_internal.h"
 
 #ifdef _WIN32
 // FramesCS as DXBC (kLookDxbcFramesCS) and as GLSL (kLookGlslFramesCS), from shaders/lines.slang

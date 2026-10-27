@@ -1610,6 +1610,7 @@ struct BraidScene {
 };
 
 bool strandMoved(const StrandSet& before, const StrandSet& after, std::size_t s) {
+    if (after.strandPointCount(s) != before.strandPointCount(s)) return true;  // points added
     for (std::size_t i = 0; i < after.strandPointCount(s); ++i) {
         if (!(after.strandPoints(s)[i] == before.strandPoints(s)[i])) return true;
     }
@@ -1713,7 +1714,7 @@ TEST(Braid, FedStrandsEndWhereThePathEnds) {
         float tip = 0.0f;
         for (std::size_t s = 0; s < after->strandCount(); ++s) {
             const std::size_t n = after->strandPointCount(s);
-            if (after->strandPoints(s)[n - 1] == before->strandPoints(s)[n - 1]) continue;  // not in the row
+            if (!strandMoved(*before, *after, s)) continue;  // not in the row
             tip = std::max(tip, after->strandPoints(s)[n - 1].x);
         }
         return tip;
@@ -1952,6 +1953,168 @@ TEST(Braid, BraidIdIsMinusOneForLooseStrandsAndStrays) {
     EXPECT_GT(inRegion, 400u);
     EXPECT_GT(strays, inRegion * 3 / 10);
     EXPECT_LT(strays, inRegion * 7 / 10);
+}
+
+TEST(Braid, AddsPointsSoEveryWeaveRepeatIsDrawn) {
+    // A path 1 long at 2.5 crossings: 2.5 repeats of 12 points each, on strands of 24 segments.
+    BraidScene scene("three");
+    const StrandsPtr before = scene.lg.eval(scene.lg.scatter);
+    const StrandsPtr after = scene.lg.eval(scene.braid);
+    ASSERT_TRUE(after->validate());
+    const std::vector<float>* ids = after->strandChannel("braidId");
+    ASSERT_TRUE(ids);
+    std::size_t braided = 0;
+    for (std::size_t s = 0; s < after->strandCount(); ++s) {
+        const std::size_t n = after->strandPointCount(s);
+        if ((*ids)[s] < 0.0f) {
+            EXPECT_EQ(n, before->strandPointCount(s)) << s;  // loose: as it came
+            continue;
+        }
+        ++braided;
+        EXPECT_GE(n, 31u) << s;
+        EXPECT_LE(n, 32u) << s;
+        EXPECT_EQ(after->strandPoints(s)[0], before->strandPoints(s)[0]) << s;  // the root stays
+    }
+    EXPECT_GT(braided, 200u);
+    // resolution 0: the strands' own points; maxSegments caps what is added.
+    scene.setParam("resolution", 0.0);
+    EXPECT_EQ(scene.lg.eval(scene.braid)->pointCount(), before->pointCount());
+    scene.setParam("resolution", 100.0);
+    scene.setParam("maxSegments", std::int64_t{40});
+    const StrandsPtr capped = scene.lg.eval(scene.braid);
+    for (std::size_t s = 0; s < capped->strandCount(); ++s) {
+        if ((*capped->strandChannel("braidId"))[s] >= 0.0f) EXPECT_EQ(capped->strandPointCount(s), 41u) << s;
+    }
+}
+
+TEST(Braid, AResampleAfterItKeepsTheWeavesPoints) {
+    // The default graph's Resample (16 segments) after a Braid: the loose strands take its count,
+    // the braided keep theirs.
+    BraidScene scene("three");
+    const NodeId resample = scene.lg.add(op::kResample, scene.braid);
+    scene.lg.g.node(resample).params().set("segments", std::int64_t{8});
+    const StrandsPtr out = scene.lg.eval(resample);
+    const std::vector<float>* ids = out->strandChannel("braidId");
+    ASSERT_TRUE(ids);
+    std::size_t braided = 0;
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        if ((*ids)[s] >= 0.0f) {
+            ++braided;
+            EXPECT_GE(out->strandPointCount(s), 31u) << s;
+        } else {
+            EXPECT_EQ(out->strandPointCount(s), 9u) << s;
+        }
+    }
+    EXPECT_GT(braided, 200u);
+}
+
+TEST(Braid, SectionsArePartedByTheSideTheHairLiesOn) {
+    // A path along x over the plane: hair rooted to one side of it (z) goes into the section on that
+    // side, so the sections leave the scalp without crossing each other.
+    BraidScene scene("three", {{0.5f, 0.01f, 0.5f}, {1.5f, 0.01f, 0.5f}});
+    scene.setParam("crossings", 0.5);
+    scene.setParam("lobeFill", 0.2);
+    scene.setParam("fuzz", 0.0);
+    const StrandsPtr before = scene.lg.eval(scene.lg.scatter);
+    const StrandsPtr after = scene.lg.eval(scene.braid);
+    const std::vector<float>* ids = after->strandChannel("braidId");
+    ASSERT_TRUE(ids);
+    std::size_t sided = 0, agree = 0;
+    for (std::size_t s = 0; s < after->strandCount(); ++s) {
+        if ((*ids)[s] < 0.0f) continue;
+        const Vec3f d = before->strandPoints(s)[0] - Vec3f{0.5f, 0.01f, 0.5f};
+        if (std::abs(d.z) < 0.6f * d.length()) continue;  // in the middle section's wedges
+        const std::size_t n = after->strandPointCount(s);
+        const Vec3f joined = after->strandPoints(s)[(n - 1) / 6];  // just past the gather
+        ++sided;
+        agree += (joined.z - 0.5f) * d.z > 0.0f ? 1 : 0;
+    }
+    EXPECT_GT(sided, 50u);
+    EXPECT_GT(agree, sided * 95 / 100);
+}
+
+TEST(Braid, FeedThickensTheBraidWithTheHairItPicksUp) {
+    // The sections' center curves along a fed row: narrow where it has picked up little, wide
+    // where it holds most of its hair; without feedGrowth, as wide all along.
+    auto spread = [](double growth, float from, float to) {
+        BraidScene row = fedRow();
+        row.setParam("region", 0.05);
+        row.setParam("widthProfile", Ramp::constant(1.0f));
+        row.setParam("tail", 0.0);
+        row.setParam("feedGrowth", growth);
+        row.setParam("display", std::string("paths"));
+        const StrandsPtr curves = row.lg.eval(row.braid);
+        const std::vector<float>* section = curves->strandChannel("braidSection");
+        EXPECT_TRUE(section);
+        float most = 0.0f;
+        for (std::size_t s = 0; s < curves->strandCount(); ++s) {
+            if (!section || (*section)[s] < 0.0f) continue;
+            for (std::size_t i = 0; i < curves->strandPointCount(s); ++i) {
+                const Vec3f p = curves->strandPoints(s)[i];
+                if (p.x >= from && p.x <= to) most = std::max(most, std::abs(p.z - 0.5f));
+            }
+        }
+        return most;
+    };
+    EXPECT_LT(spread(1.0, 0.22f, 0.42f), 0.75f * spread(1.0, 0.58f, 0.78f));
+    EXPECT_NEAR(spread(0.0, 0.22f, 0.42f), spread(0.0, 0.58f, 0.78f), 0.1f * spread(0.0, 0.58f, 0.78f));
+}
+
+TEST(Braid, ThePathsOutputHandsOnThePathsItBraidsAlong) {
+    // Its braids input's paths, evenly resampled, in their order with their IDs.
+    BraidScene scene("three");
+    scene.addPath({{0.2f, 0, 0.2f}, {0.2f, 1.0f, 0.2f}});
+    EvalContext ctx;
+    ctx.externals = &scene.lg.ext;
+    const GuidesPtr paths = valueAs<GuidesPtr>(scene.lg.g.evaluateOutput(scene.braid, 1, ctx));
+    ASSERT_TRUE(paths);
+    ASSERT_EQ(paths->guides().size(), 2u);
+    for (std::size_t b = 0; b < 2; ++b) {
+        const Guide& g = paths->guides()[b];
+        EXPECT_EQ(g.id, b + 1);
+        ASSERT_GE(g.points.size(), 64u);
+        const Vec3f axis = b == 0 ? Vec3f{0.5f, 0.0f, 0.5f} : Vec3f{0.2f, 0.0f, 0.2f};
+        for (const Vec3f& p : g.points) EXPECT_LT(std::hypot(p.x - axis.x, p.z - axis.z), 1e-5f) << b;
+        EXPECT_NEAR(g.points.back().y, 1.0f, 1e-5f);
+    }
+    // Without a braids input: the paths it picked among the strands, each a strand's (its ID).
+    LookGraph lg{3000.0, 16};
+    const NodeId braid = lg.add(op::kBraid, lg.scatter);
+    lg.g.node(braid).params().set("region", 0.3);
+    EvalContext own;
+    own.externals = &lg.ext;
+    const GuidesPtr picked = valueAs<GuidesPtr>(lg.g.evaluateOutput(braid, 1, own));
+    const StrandsPtr strands = lg.eval(lg.scatter);
+    ASSERT_TRUE(picked);
+    EXPECT_GE(picked->guides().size(), 4u);
+    const std::set<StrandId> ids(strands->ids().begin(), strands->ids().end());
+    for (const Guide& g : picked->guides()) EXPECT_TRUE(ids.count(g.id)) << g.id;
+}
+
+TEST(Braid, DisplayPathsShowsEachPathAndItsSections) {
+    BraidScene scene("three");
+    scene.addPath({{0.2f, 0, 0.2f}, {0.2f, 1.0f, 0.2f}});
+    scene.setParam("display", std::string("paths"));
+    const StrandsPtr curves = scene.lg.eval(scene.braid);
+    ASSERT_EQ(curves->strandCount(), 8u);  // two paths, each with its three sections
+    ASSERT_TRUE(curves->validate());
+    const std::vector<float>* ids = curves->strandChannel("braidId");
+    const std::vector<float>* section = curves->strandChannel("braidSection");
+    ASSERT_TRUE(ids && section);
+    std::set<StrandId> distinct(curves->ids().begin(), curves->ids().end());
+    EXPECT_EQ(distinct.size(), 8u);
+    for (std::size_t s = 0; s < 8; ++s) {
+        const float braid = static_cast<float>(s / 4);
+        EXPECT_FLOAT_EQ((*ids)[s], braid) << s;
+        EXPECT_FLOAT_EQ((*section)[s], static_cast<float>(s % 4) - 1.0f) << s;
+        const Vec3f axis = s < 4 ? Vec3f{0.5f, 0.0f, 0.5f} : Vec3f{0.2f, 0.0f, 0.2f};
+        for (std::size_t i = 0; i < curves->strandPointCount(s); ++i) {
+            const Vec3f p = curves->strandPoints(s)[i];
+            const float off = std::hypot(p.x - axis.x, p.z - axis.z);
+            if (s % 4 == 0) EXPECT_LT(off, 1e-5f) << s;    // the path itself
+            else EXPECT_LT(off, 0.12f * 0.6f) << s;         // a section's center, within the braid
+        }
+    }
 }
 
 }  // namespace

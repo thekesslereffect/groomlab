@@ -17,6 +17,7 @@
 #include "groomlab/field.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/noise.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
@@ -32,23 +33,6 @@ namespace groomlab {
 namespace {
 
 constexpr double kTwoPi = 6.283185307179586;
-
-// Turns segment i of a strand toward `target` (unit) by weight w in [0, 1], keeping its length;
-// `prevOriginal` is the segment's start before this strand was touched (the walk reads each
-// original point before it overwrites it).
-inline void turnSegment(Vec3f* pts, std::size_t i, Vec3f& prevOriginal, const Vec3f& target, float w) {
-    const Vec3f original = pts[i];
-    const Vec3f seg = original - prevOriginal;
-    prevOriginal = original;
-    const float len = seg.length();
-    if (len <= 0.0f) {
-        pts[i] = pts[i - 1];
-        return;
-    }
-    Vec3f turned = seg / len * (1.0f - w) + target * w;
-    if (turned.length() < 1e-6f) turned = seg / len;  // straight against the wind: leave it
-    pts[i] = pts[i - 1] + turned.normalized() * len;
-}
 
 // ---------------------------------------------------------------------------
 // Wind
@@ -158,40 +142,6 @@ private:
             *result = in;
             return true;
         }
-        const Vec3f dir = direction.normalized();
-        const float gust = static_cast<float>(params().getDouble("gust"));
-        const auto frequency = static_cast<float>(params().getDouble("frequency"));
-        const double speed = params().getDouble("speed");
-        const float turbulence = static_cast<float>(params().getDouble("turbulence"));
-        const Ramp profile = params().getRamp("profile");
-        const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
-        const std::uint64_t gustSeed = hashCombine(seed, 0x6057), swaySeed = hashCombine(seed, 0x5A7),
-                            flutterSeed = hashCombine(seed, 0xF1E7);
-
-        // How far the field has travelled (in noise space) and the flutter's phase, or the loop's
-        // circle (windPhase).
-        const WindPhase phase = windPhase(dir, frequency, speed, ctx.time, ctx.framesPerSecond, params().getBool("loop"),
-                                          static_cast<double>(params().getInt("loopStart")),
-                                          static_cast<double>(params().getInt("loopEnd")));
-        const Vec3f shift = phase.shift;
-        const float flutterPhase = phase.flutterPhase;
-        // The gusts at a root's spot in noise space: the field travelled, or on the loop's circle.
-        auto gustAt = [&](const Vec3f& spot) {
-            if (!phase.looped) return fractalNoise(spot - shift, gustSeed, 2);
-            float w = 0.0f;
-            const Vec3f at = windLoopPoint(phase, dir, spot, &w);
-            return fractalNoise4(at, w, gustSeed, 2);
-        };
-
-        // Each strand's wind (strength x gust): nothing blows anywhere, the input goes back as it is.
-        const std::size_t count = in->strandCount();
-        auto amountOf = [&](std::size_t s) {
-            if (in->strandPointCount(s) < 2) return 0.0f;
-            const float base = strength.at(*in, s);
-            if (!(base > 0.0f)) return 0.0f;
-            const float g = gust > 0.0f ? gustAt(in->strandPoints(s)[0] * frequency) : 0.0f;
-            return base * std::max(0.0f, 1.0f + gust * 1.5f * g);
-        };
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
         if (incremental) {
@@ -204,69 +154,19 @@ private:
                 return true;
             }
         }
-        std::vector<float> amounts;
+        // look.slang's WindCS, the GPU preview's own (look_cpu.h), at the evaluation's time: in full
+        // (no strength anywhere: the input as it is), or the strands the input changed in.
+        gpu::StageParamReader own(params(), "");
+        own.time = ctx.time;
+        own.framesPerSecond = ctx.framesPerSecond;
         if (!last) {
-            amounts.assign(count, 0.0f);
-            parallelFor(0, count, [&](std::size_t s) { amounts[s] = amountOf(s); });
-            if (std::none_of(amounts.begin(), amounts.end(), [](float a) { return a > 0.0f; })) {
-                *result = in;
-                return true;
-            }
+            *result = strength.isConstant() && strength.maximum() <= 0.0f ? in : gpu::runStage(gpu::StageKind::Wind, own, in, scalp);
+            return true;
         }
-
         auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
-        const RampAlong along(profile, *out);
-        auto blow = [&](std::size_t s, float amount) {
-            if (!(amount > 0.0f)) return;
-            const std::size_t n = out->strandPointCount(s);
-            Vec3f* pts = out->strandPoints(s);
-            // The gusts sway the direction a little; the flutter is a wave running up the strand.
-            // Looped, both read the loop's four-dimensional noise at the root's point on it.
-            const Vec3f spot = pts[0] * frequency;
-            const Vec3f q = phase.looped ? Vec3f{} : spot - shift;
-            float qw = 0.0f;
-            const Vec3f q4 = phase.looped ? windLoopPoint(phase, dir, spot, &qw) : Vec3f{};
-            Vec3f windDir = dir;
-            if (gust > 0.0f) {
-                const Vec3f sway = phase.looped ? vectorNoise4(q4 + Vec3f{17.3f, -4.1f, 9.7f}, qw + 2.9f, swaySeed, 1)
-                                                : vectorNoise(q + Vec3f{17.3f, -4.1f, 9.7f}, swaySeed, 1);
-                const Vec3f swayed = dir + sway * (0.35f * gust);
-                if (swayed.length() > 1e-6f) windDir = swayed.normalized();
-            }
-            Vec3f flutter{};
-            float own = 0.0f;  // the strand's own flutter phase
-            if (turbulence > 0.0f) {
-                flutter = (phase.looped ? vectorNoise4(q4 * 4.0f + Vec3f{-3.7f, 11.9f, 5.3f}, qw * 4.0f - 7.1f, flutterSeed, 1)
-                                        : vectorNoise(q * 4.0f + Vec3f{-3.7f, 11.9f, 5.3f}, flutterSeed, 1)) *
-                          turbulence;
-                own = unitFloat(hash64(out->ids()[s] ^ flutterSeed)) * static_cast<float>(kTwoPi);
-            }
-            Vec3f prevOriginal = pts[0];
-            for (std::size_t i = 1; i < n; ++i) {
-                const float t = paramAt(i, n);
-                Vec3f target = windDir;
-                if (turbulence > 0.0f) {
-                    const float wave = pm::sin(static_cast<float>(kTwoPi) * 1.5f * t - flutterPhase + own);
-                    const Vec3f fluttered = windDir + flutter * (t * wave);
-                    if (fluttered.length() > 1e-6f) target = fluttered.normalized();
-                }
-                turnSegment(pts, i, prevOriginal, target, std::clamp(amount * along(i, n), 0.0f, 1.0f));
-            }
-        };
-        if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                blow(s, amountOf(s));
-            });
-            *changed = *changes;
-        } else {
-            parallelFor(0, count, [&](std::size_t s) { blow(s, amounts[s]); });
-        }
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        gpu::runStageOnStrands(gpu::StageKind::Wind, own, in, changes->strands, scalp, *out);
+        *changed = *changes;
         *result = StrandsPtr(out);
         return true;
     }
@@ -530,93 +430,54 @@ private:
 
         // Worked out once for the faces and vertices strands grow from, in full; each strand made
         // again works out its own.
-        std::vector<Vec3f> vertexLag;
-        std::vector<Mat3> faceTurn;
-        std::vector<char> faceTurned;
-        if (!last) {
-            std::vector<char> usedFace(tris.size(), 0), usedVertex(now.size(), 0);
-            for (const StrandRoot& root : in->roots()) {
-                if (!scalp.contains(root)) continue;
-                usedFace[static_cast<std::size_t>(root.face)] = 1;
-            }
-            std::vector<std::size_t> faces;
-            for (std::size_t f = 0; f < tris.size(); ++f) {
-                if (!usedFace[f]) continue;
-                faces.push_back(f);
-                for (const std::int32_t v : tris[f]) usedVertex[static_cast<std::size_t>(v)] = 1;
-            }
-            std::vector<std::size_t> vertices;
-            for (std::size_t v = 0; v < now.size(); ++v) {
-                if (usedVertex[v]) vertices.push_back(v);
-            }
-            vertexLag.assign(now.size(), Vec3f{});
-            parallelFor(0, vertices.size(), [&](std::size_t i) { vertexLag[vertices[i]] = lagOfVertex(vertices[i]); });
-            faceTurn.assign(tris.size(), Mat3{});
-            faceTurned.assign(tris.size(), 0);
-            parallelFor(0, faces.size(), [&](std::size_t i) {
-                const std::size_t f = faces[i];
-                faceTurned[f] = turnOfFace(f, &faceTurn[f]) ? 1 : 0;
-            });
-        }
-
-        auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
-        const Ramp profile = params().getRamp("profile");
-        const RampAlong along(profile, *out);
-        auto jiggle = [&](std::size_t s) {
-            const std::size_t n = out->strandPointCount(s);
-            const StrandRoot& root = out->roots()[s];
-            if (n < 2 || !scalp.contains(root)) return;
-            const auto face = static_cast<std::size_t>(root.face);
-            const auto& t = tris[face];
-            Vec3f* pts = out->strandPoints(s);
-            const Vec3f chord = pts[n - 1] - pts[0];
-            // The lag of the strand's tip: its root's (the vertices' blended) and its face's turn.
-            const float wa = 1.0f - root.u - root.v;
-            const auto a = static_cast<std::size_t>(t[0]), b = static_cast<std::size_t>(t[1]), c = static_cast<std::size_t>(t[2]);
-            Vec3f lag = last ? lagOfVertex(a) * wa + lagOfVertex(b) * root.u + lagOfVertex(c) * root.v
-                             : vertexLag[a] * wa + vertexLag[b] * root.u + vertexLag[c] * root.v;
-            Mat3 ownTurn{};
-            const bool turned = last ? turnOfFace(face, &ownTurn) : faceTurned[face] != 0;
-            if (turned) {
-                const Mat3& m = last ? ownTurn : faceTurn[face];
-                lag += Vec3f{static_cast<float>(m[0] * chord.x + m[1] * chord.y + m[2] * chord.z),
-                             static_cast<float>(m[3] * chord.x + m[4] * chord.y + m[5] * chord.z),
-                             static_cast<float>(m[6] * chord.x + m[7] * chord.y + m[8] * chord.z)};
-            }
-            if (lag == Vec3f{}) return;
-            lag *= amount.at(*out, s);
-            const float reach = chord.length();
-            if (!(reach > 1e-8f)) return;
-            // Only the lag across the strand turns it (along it, the strand would have to stretch).
-            const Vec3f across = lag - chord * (lag.dot(chord) / (reach * reach));
-            const float side = across.length();
-            if (!(side > 0.0f)) return;
-            const Vec3f axis = chord.cross(across).normalized();
-            if (axis.length() < 0.5f) return;
-            const float angle = pm::atan2(side, reach);
-            // Each segment turns by the angle x the profile there, from the root up: lengths kept.
-            Vec3f prevOriginal = pts[0];
-            for (std::size_t i = 1; i < n; ++i) {
-                const Vec3f original = pts[i];
-                const Vec3f seg = original - prevOriginal;
-                prevOriginal = original;
-                pts[i] = pts[i - 1] + rotateAxisAngle(seg, axis, angle * along(i, n));
-            }
+        JiggleLags lags;
+        std::vector<Vec3f>& vertexLag = lags.vertexLag;
+        std::vector<Mat3>& faceTurn = lags.faceTurn;
+        std::vector<char>& faceTurned = lags.faceTurned;
+        // The lags of the faces and vertices the strands it runs grow from (all, or those the input
+        // changed in), then look.slang's JiggleCS, the GPU preview's own (look_cpu.h), on them: in
+        // full, or on a view of those strands.
+        const std::vector<std::uint32_t>* which = last ? &changes->strands : nullptr;
+        std::vector<char> usedFace(tris.size(), 0), usedVertex(now.size(), 0);
+        auto use = [&](std::size_t s) {
+            const StrandRoot& root = in->roots()[s];
+            if (scalp.contains(root)) usedFace[static_cast<std::size_t>(root.face)] = 1;
         };
-        if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                jiggle(s);
-            });
-            *changed = *changes;
+        if (which) {
+            for (const std::uint32_t s : *which) use(s);
         } else {
-            parallelFor(0, out->strandCount(), jiggle);
+            for (std::size_t s = 0; s < in->strandCount(); ++s) use(s);
         }
+        std::vector<std::size_t> faces;
+        for (std::size_t f = 0; f < tris.size(); ++f) {
+            if (!usedFace[f]) continue;
+            faces.push_back(f);
+            for (const std::int32_t v : tris[f]) usedVertex[static_cast<std::size_t>(v)] = 1;
+        }
+        std::vector<std::size_t> vertices;
+        for (std::size_t v = 0; v < now.size(); ++v) {
+            if (usedVertex[v]) vertices.push_back(v);
+        }
+        vertexLag.assign(now.size(), Vec3f{});
+        parallelFor(0, vertices.size(), [&](std::size_t i) { vertexLag[vertices[i]] = lagOfVertex(vertices[i]); });
+        faceTurn.assign(tris.size(), Mat3{});
+        faceTurned.assign(tris.size(), 0);
+        parallelFor(0, faces.size(), [&](std::size_t i) {
+            const std::size_t f = faces[i];
+            faceTurned[f] = turnOfFace(f, &faceTurn[f]) ? 1 : 0;
+        });
+        lags.frames = frames;
+        gpu::StageInputs lagged;
+        lagged.jiggle = gpu::jiggleInputs(*in, scalp, lags, which);
+        if (!last) {
+            *result = gpu::runStage(gpu::StageKind::Jiggle, params(), in, &scalp, std::move(lagged));
+            remember(valueAs<StrandsPtr>(*result), {scalpPtr, history, nowFrame, fps});
+            return true;
+        }
+        auto out = std::make_shared<StrandSet>(*in);
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        gpu::runStageOnStrands(gpu::StageKind::Jiggle, params(), in, changes->strands, &scalp, *out, std::move(lagged));
+        *changed = *changes;
         *result = StrandsPtr(out);
         remember(StrandsPtr(out), {scalpPtr, history, nowFrame, fps});
         return true;

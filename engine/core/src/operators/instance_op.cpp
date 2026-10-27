@@ -14,7 +14,10 @@
 // meshes: tilted like roof tiles, bent onto the skin).
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <memory>
+#include <mutex>
 
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
@@ -191,8 +194,41 @@ public:
         return run(ctx, inputs, &incremental, out, changed);
     }
 
+    // Masked: the mixed result the graph keeps is what the next run splices into, when it holds
+    // the instances made.
+    void resultMixed(const StrandsPtr& made, const StrandsPtr& mixed) const override { carried(made, mixed); }
+
 private:
     bool scales_;  // a Scales node (else an Instance)
+    // The last instances made: a full evaluation making the same again hands those on (the same
+    // set, so the graph sees the strands' instances stayed and which strands changed:
+    // strandChangesBetween).
+    mutable std::mutex keptMutex_;
+    mutable std::shared_ptr<const InstanceSet> kept_;
+    mutable std::uint64_t keptHash_ = 0;
+    mutable bool keptHashKnown_ = true;  // (a splice making another set leaves it to the next full run)
+    // The arrays before last (their pages kept: a splice writes them again rather than faulting new
+    // ones in), taken when nothing else holds them.
+    mutable std::shared_ptr<const InstanceSet> spareSet_;
+    mutable std::shared_ptr<const std::vector<std::size_t>> spareFirst_;
+    // The last result made with no instances coming in, and per strand where its own begin in its
+    // instances (one more: the end): a dab draws again only the strands it changed. (keptMutex_.)
+    mutable std::weak_ptr<const StrandSet> keptOutput_;
+    mutable std::shared_ptr<const std::vector<std::size_t>> keptFirst_;
+    LongestKept longest_;  // the longest strand its maps read for the last result
+    // A strand's maps and how many instances it gets.
+    struct StrandDraw {
+        float chance = 0.0f, size = 0.0f, ratio = 1.0f, variant = 0.0f;
+        std::size_t count = 0;
+    };
+
+    // `made`'s place taken by `next`, a result holding its very instances (the same strands: its
+    // longest the same), as what the next run splices into.
+    void carried(const StrandsPtr& made, const StrandsPtr& next) const {
+        longest_.mixed(made, next);
+        const std::lock_guard<std::mutex> lock(keptMutex_);
+        if (keptOutput_.lock() == made) keptOutput_ = next && next->instances() == made->instances() ? next : StrandsPtr();
+    }
 
     // In full, or (with `incremental`) the input with the last result's instances; false when
     // that cannot be done.
@@ -228,19 +264,45 @@ private:
                 !(fitted && aspect.readsAttributes()) && !(byMap && variant.readsAttributes())) {
                 auto out = std::make_shared<StrandSet>(*in);
                 out->setInstances(last->instances());
+                carried(last, out);
                 *result = StrandsPtr(out);
                 *changed = *incremental->inputs[0];
                 return true;
             }
         }
+        // The fields read (one read twice for one that is not).
+        const ScalarField& probabilityRead = scales ? scale : probability;
+        const ScalarField& aspectRead = fitted ? aspect : scale;
+        const ScalarField& variantRead = byMap ? variant : scale;
+        // Incrementally with maps that read each strand alone (or with the longest strand, the
+        // same as for the last result): the strands the input changed in drawn again (spliced).
+        const StrandChanges* spliceChanges = nullptr;
+        StrandsPtr spliceLast;
+        std::shared_ptr<const std::vector<std::size_t>> spliceFirst;
+        bool spliced = false;
         if (incremental) {
             const StrandChanges* changes = someStrandsChanged(*incremental, 0);
             const StrandsPtr last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
             auto constant = [](const ScalarField& f) { return f.isConstant() && f.strandLocal(); };
-            if (!last || (!scales && !constant(probability)) || !constant(scale) || (fitted && !constant(aspect)) ||
+            if (!last) return false;
+            if ((!scales && !constant(probability)) || !constant(scale) || (fitted && !constant(aspect)) ||
                 (byMap && !constant(variant))) {
-                return false;
+                {
+                    const std::lock_guard<std::mutex> lock(keptMutex_);
+                    if (keptOutput_.lock() == last) spliceFirst = keptFirst_;
+                }
+                if (!spliceFirst || spliceFirst->size() != in->strandCount() + 1 || in->instances() || !last->instances() ||
+                    !longest_.local(last, {&probabilityRead, &scale, &aspectRead, &variantRead})) {
+                    return false;
+                }
+                spliceChanges = changes;
+                spliceLast = last;
+                spliced = true;
             }
+        }
+        if (incremental && !spliced) {
+            const StrandChanges* changes = someStrandsChanged(*incremental, 0);
+            const StrandsPtr last = previousStrandsFor(*incremental, *in);
             if (changes->none()) {
                 *result = last;
             } else {
@@ -303,45 +365,33 @@ private:
         std::vector<std::uint32_t> prototypes;
         for (const std::string& name : names) prototypes.push_back(instances->prototypeIndex(name));
         const std::int32_t materialIndex = scales && !material.empty() ? static_cast<std::int32_t>(instances->materialIndex(material)) : -1;
-        // Per strand in parallel: its maps and how many instances it gets; then where its
-        // instances go (after the existing ones, in strand order) and each written in place.
         const std::size_t strands = in->strandCount();
-        std::vector<float> chance(strands), sizes(strands), ratios(strands), variants(strands);
-        std::vector<std::size_t> first(strands + 1, 0);
         auto instanceId = [&](std::size_t s, std::size_t k) {
             return hashCombine(hashCombine(in->ids()[s], seed ^ 0x1257A9CEull), k);
         };
-        parallelFor(0, strands, [&](std::size_t s) {
-            const float p = scales ? 1.0f : probability.at(*in, s);
-            chance[s] = p;
-            if (p <= 0.0f) return;
-            sizes[s] = scale.at(*in, s);
-            ratios[s] = fitted ? std::max(aspect.at(*in, s), 0.0f) : 1.0f;
-            variants[s] = byMap ? variant.at(*in, s) : 0.0f;
-            std::size_t made = 0;
-            for (std::size_t k = 0; k < count; ++k) made += scales || unitFloat(hash64(instanceId(s, k))) < p ? 1 : 0;
-            first[s + 1] = made;
-        });
-        first[0] = instances->instances.size();
-        for (std::size_t s = 0; s < strands; ++s) first[s + 1] += first[s];
-        instances->instances.resize(first[strands]);
+        // A strand's maps and how many instances it gets, then its instances written from `at` on.
+        auto drawOf = [&](std::size_t s) {
+            StrandDraw d;
+            d.chance = scales ? 1.0f : probability.at(*in, s);
+            if (d.chance <= 0.0f) return d;
+            d.size = scale.at(*in, s);
+            d.ratio = fitted ? std::max(aspect.at(*in, s), 0.0f) : 1.0f;
+            d.variant = byMap ? variant.at(*in, s) : 0.0f;
+            for (std::size_t k = 0; k < count; ++k) d.count += scales || unitFloat(hash64(instanceId(s, k))) < d.chance ? 1 : 0;
+            return d;
+        };
         const std::size_t variantCount = prototypes.size();
-        parallelFor(0, strands, [&](std::size_t s) {
-            const float p = chance[s];
-            if (first[s + 1] == first[s]) return;
-            const float size = sizes[s];
-            const float ratio = ratios[s];
-            std::size_t at = first[s];
+        auto write = [&](std::size_t s, const StrandDraw& d, InstanceSet::Instance* at) {
             for (std::size_t k = 0; k < count; ++k) {
                 const std::uint64_t id = instanceId(s, k);
-                if (!scales && unitFloat(hash64(id)) >= p) continue;
+                if (!scales && unitFloat(hash64(id)) >= d.chance) continue;
                 Rng rng(id);
-                InstanceSet::Instance& inst = instances->instances[at++];  // default-made by the resize
+                InstanceSet::Instance& inst = *at++;  // default-made by the resize
                 // The variant: by the map over the list, else by the ID (its own hash: the draws
                 // below stay as they were for one prototype).
                 std::size_t which = 0;
                 if (variantCount > 1) {
-                    const float pick = byMap ? std::clamp(variants[s], 0.0f, 1.0f) : unitFloat(hash64(id ^ 0x7A21A47ull));
+                    const float pick = byMap ? std::clamp(d.variant, 0.0f, 1.0f) : unitFloat(hash64(id ^ 0x7A21A47ull));
                     which = std::min(static_cast<std::size_t>(pick * static_cast<float>(variantCount)), variantCount - 1);
                 }
                 inst.prototype = prototypes[which];
@@ -353,9 +403,9 @@ private:
                     inst.onSkin = true;
                     inst.t = 0.0f;
                     inst.spin = 0.5f * kTwoPi * spinRandom * (2.0f * rng.nextFloat() - 1.0f);
-                    inst.scale = size * (1.0f + scaleRandom * (2.0f * rng.nextFloat() - 1.0f));
+                    inst.scale = d.size * (1.0f + scaleRandom * (2.0f * rng.nextFloat() - 1.0f));
                     inst.fitStrand = false;
-                    inst.aspect = ratio;
+                    inst.aspect = d.ratio;
                     inst.offset = offset;
                     inst.scaleByWidth = false;
                     inst.conform = conform;
@@ -373,12 +423,12 @@ private:
                 inst.t = tMin + (tMax - tMin) * rng.nextFloat();
                 inst.orient = orient;
                 inst.spin = kTwoPi * spinRandom * rng.nextFloat();
-                inst.scale = size * (1.0f + scaleRandom * (2.0f * rng.nextFloat() - 1.0f));
+                inst.scale = d.size * (1.0f + scaleRandom * (2.0f * rng.nextFloat() - 1.0f));
                 inst.offset = offset;
                 inst.scaleByWidth = scaleByWidth;
                 inst.pinToRest = pinToRest;
                 inst.fitStrand = fitStrand;
-                inst.aspect = ratio;
+                inst.aspect = d.ratio;
                 if (deformed) {
                     inst.deform = true;
                     inst.deformAxis = axisCode;
@@ -391,10 +441,138 @@ private:
                     inst.direction = {r * pm::cos(a), r * pm::sin(a), z};
                 }
             }
-        });
+        };
+        // Per strand in parallel: its draw; then where its instances go (after the existing ones, in
+        // strand order) and each written in place. Incrementally (the input's instances none, each
+        // strand's maps its own, the last result's made here): the strands the input changed in drawn
+        // again, the others' instances the last result's.
+        std::shared_ptr<const InstanceSet> made;
+        std::shared_ptr<const std::vector<std::size_t>> firstMade;
+        const std::vector<std::uint32_t>* redrawn = nullptr;
+        if (spliced) {
+            const std::vector<std::uint32_t>& again = spliceChanges->strands;
+            redrawn = &again;
+            std::vector<StrandDraw> draws(again.size());
+            parallelFor(0, again.size(), [&](std::size_t k) { draws[k] = drawOf(again[k]); }, 256);
+            const std::vector<std::size_t>& before = *spliceFirst;
+            const std::vector<InstanceSet::Instance>& was = spliceLast->instances()->instances;
+            // Theirs on their own first: the same as the last result's (a dab seldom tips a strand's
+            // chance past one of its draws), the last instances stay.
+            std::vector<std::size_t> at(again.size() + 1, 0);
+            for (std::size_t k = 0; k < again.size(); ++k) at[k + 1] = at[k] + draws[k].count;
+            std::vector<InstanceSet::Instance> fresh(at.back());
+            std::atomic<bool> differ{false};
+            parallelFor(0, again.size(), [&](std::size_t k) {
+                const std::size_t s = again[k];
+                if (!draws[k].count) {
+                    if (before[s + 1] != before[s]) differ = true;
+                    return;
+                }
+                write(s, draws[k], fresh.data() + at[k]);
+                if (before[s + 1] - before[s] != draws[k].count) {
+                    differ = true;
+                    return;
+                }
+                for (std::size_t i = 0; i < draws[k].count; ++i) {
+                    if (InstanceSet::hashInstance(0, fresh[at[k] + i]) != InstanceSet::hashInstance(0, was[before[s] + i])) {
+                        differ = true;
+                        return;
+                    }
+                }
+            }, 256);
+            if (!differ) {
+                made = spliceLast->instances();
+                firstMade = spliceFirst;
+            } else {
+                std::shared_ptr<std::vector<std::size_t>> first;
+                {
+                    const std::lock_guard<std::mutex> lock(keptMutex_);
+                    if (spareSet_ && spareSet_.use_count() == 1) {
+                        instances->instances = std::move(const_cast<InstanceSet&>(*spareSet_).instances);
+                    }
+                    if (spareFirst_ && spareFirst_.use_count() == 1) {
+                        first = std::const_pointer_cast<std::vector<std::size_t>>(std::move(spareFirst_));
+                    }
+                    spareSet_.reset();
+                    spareFirst_.reset();
+                }
+                if (!first) first = std::make_shared<std::vector<std::size_t>>();
+                first->resize(strands + 1);
+                (*first)[0] = 0;
+                for (std::size_t s = 0; s < strands; ++s) (*first)[s + 1] = before[s + 1] - before[s];
+                for (std::size_t k = 0; k < again.size(); ++k) (*first)[again[k] + 1] = draws[k].count;
+                for (std::size_t s = 0; s < strands; ++s) (*first)[s + 1] += (*first)[s];
+                instances->instances.resize((*first)[strands]);  // (every one written below)
+                // The runs of strands left alone, copied side by side; then the strands drawn again.
+                std::vector<std::pair<std::size_t, std::size_t>> runs;  // [from, to) strands
+                std::size_t from = 0;
+                for (const std::uint32_t c : again) {
+                    if (c > from) runs.emplace_back(from, c);
+                    from = c + 1;
+                }
+                if (from < strands) runs.emplace_back(from, strands);
+                parallelFor(0, runs.size(), [&](std::size_t r) {
+                    const auto [lo, hi] = runs[r];
+                    std::copy(was.begin() + static_cast<std::ptrdiff_t>(before[lo]), was.begin() + static_cast<std::ptrdiff_t>(before[hi]),
+                              instances->instances.begin() + static_cast<std::ptrdiff_t>((*first)[lo]));
+                }, 16);
+                parallelFor(0, again.size(), [&](std::size_t k) {
+                    std::copy(fresh.begin() + static_cast<std::ptrdiff_t>(at[k]), fresh.begin() + static_cast<std::ptrdiff_t>(at[k + 1]),
+                              instances->instances.begin() + static_cast<std::ptrdiff_t>((*first)[again[k]]));
+                }, 256);
+                firstMade = std::move(first);
+                // Another set than the last (its hash left to the next full run that asks).
+                made = std::move(instances);
+                const std::lock_guard<std::mutex> lock(keptMutex_);
+                kept_ = made;
+                keptHashKnown_ = false;
+            }
+        } else {
+            auto first = std::make_shared<std::vector<std::size_t>>(strands + 1, 0);
+            std::vector<StrandDraw> draws(strands);
+            parallelFor(0, strands, [&](std::size_t s) {
+                draws[s] = drawOf(s);
+                (*first)[s + 1] = draws[s].count;
+            });
+            (*first)[0] = instances->instances.size();
+            for (std::size_t s = 0; s < strands; ++s) (*first)[s + 1] += (*first)[s];
+            instances->instances.resize((*first)[strands]);
+            parallelFor(0, strands, [&](std::size_t s) {
+                if (draws[s].count) write(s, draws[s], instances->instances.data() + (*first)[s]);
+            });
+            firstMade = std::move(first);
+        }
+        if (!made) {
+            made = std::move(instances);
+            const std::uint64_t hash = made->contentHash();
+            const std::lock_guard<std::mutex> lock(keptMutex_);
+            if (kept_ && !keptHashKnown_) {
+                keptHash_ = kept_->contentHash();
+                keptHashKnown_ = true;
+            }
+            if (kept_ && keptHash_ == hash && kept_->size() == made->size()) {
+                made = kept_;
+            } else {
+                kept_ = made;
+                keptHash_ = hash;
+            }
+        }
         auto out = std::make_shared<StrandSet>(*in);
-        out->setInstances(std::move(instances));
-        *result = StrandsPtr(out);
+        if (redrawn) {
+            *changed = StrandChanges::listed(*redrawn);
+            changed->instancesChanged = made != spliceLast->instances();
+        }
+        out->setInstances(std::move(made));
+        const StrandsPtr output = out;
+        {
+            const std::lock_guard<std::mutex> lock(keptMutex_);
+            keptOutput_ = in->instances() ? StrandsPtr() : output;
+            if (keptFirst_ != firstMade) spareFirst_ = std::move(keptFirst_);
+            keptFirst_ = std::move(firstMade);
+            if (spliceLast && spliceLast->instances() != output->instances()) spareSet_ = spliceLast->instances();
+        }
+        longest_.made(output, {&probabilityRead, &scale, &aspectRead, &variantRead});
+        *result = output;
         return true;
     }
 };

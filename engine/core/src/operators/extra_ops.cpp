@@ -20,6 +20,7 @@
 #include "groomlab/curve.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/point_index.h"
@@ -30,9 +31,6 @@
 namespace groomlab {
 
 namespace {
-
-constexpr std::size_t kAxisSamples = 32;
-constexpr float kTwoPi = 6.28318530718f;
 
 // Twist: each strand turns around an axis curve, `turns` times per unit of the
 // axis' length, building up along `profile`. The axis is the nearest curve of
@@ -91,7 +89,6 @@ private:
         const GuidesPtr axesIn = valueAs<GuidesPtr>(inputs.at(1));
         const ScalarField turns(params(), "turns", scalpOf(ctx));
         turns.validate(*in);
-        const Ramp profile = params().getRamp("profile");
         const bool aroundAxes = axesIn && !axesIn->empty();
 
         const StrandChanges* changes = nullptr;
@@ -107,267 +104,34 @@ private:
             }
         }
 
-        // Axis curves, kAxisSamples points each, and which one each strand turns around (made
-        // again: only the changed strands' axes, each found as in full).
-        std::vector<Vec3f> axes;
-        std::vector<std::size_t> axisOf(in->strandCount(), 0);
-        if (aroundAxes) {
-            std::vector<Vec3f> roots;
-            for (const Guide& g : axesIn->guides()) {
-                if (g.points.size() < 2) continue;
-                const auto pts = resampleByArcLength(g.points.data(), g.points.size(), kAxisSamples);
-                roots.push_back(pts.front());
-                axes.insert(axes.end(), pts.begin(), pts.end());
-            }
-            if (roots.empty()) return handOn();
-            const PointIndex index(roots);
-            auto find = [&](std::size_t s) { axisOf[s] = index.nearest(in->strandPoints(s)[0]); };
-            if (last) {
-                forEachListed(changes->strands, find);
-            } else {
-                parallelFor(0, in->strandCount(), find);
-            }
-        } else {
-            const std::string channel = params().getString("clumpChannel");
-            const std::vector<float>* groups = in->strandChannel(channel);
-            if (!groups) {
-                throw GraphError("Twist: connect axes (guides), or put a Clump before it (no '" + channel +
-                                 "' channel to find the clumps)");
-            }
-            // Each group's mean curve, sampled at the same share of every strand's length, over its
-            // core strands (preview_core.h: the same at every preview density; a group without
-            // one does not turn). The groups' members in strand order, then the groups in
-            // parallel, each summing its members in that order (the same sums as one pass over the
-            // strands).
-            const PreviewCore core(*in);
-            std::map<long long, std::size_t> slot;
-            std::vector<std::vector<std::size_t>> members;
-            for (std::size_t s = 0; s < in->strandCount(); ++s) {
-                const auto key = std::llround((*groups)[s]);
-                auto it = slot.find(key);
-                if (it == slot.end()) {
-                    it = slot.emplace(key, members.size()).first;
-                    members.emplace_back();
-                }
-                axisOf[s] = it->second;
-                if (core.core(s)) members[it->second].push_back(s);
-            }
-            for (std::size_t s = 0; s < in->strandCount(); ++s) {
-                if (members[axisOf[s]].empty()) axisOf[s] = SIZE_MAX;
-            }
-            axes.assign(members.size() * kAxisSamples, Vec3f{});
-            parallelFor(0, members.size(), [&](std::size_t a) {
-                if (members[a].empty()) return;
-                Vec3f* axis = axes.data() + a * kAxisSamples;
-                for (const std::size_t s : members[a]) {
-                    const Vec3f* pts = in->strandPoints(s);
-                    const std::size_t n = in->strandPointCount(s);
-                    for (std::size_t k = 0; k < kAxisSamples; ++k) {
-                        axis[k] += pointAlong(pts, n, static_cast<float>(k) / (kAxisSamples - 1));
-                    }
-                }
-                for (std::size_t k = 0; k < kAxisSamples; ++k) axis[k] = axis[k] / static_cast<float>(members[a].size());
-            }, 4);
+        // look.slang's TwistCS (around clumps: TwistAxesCS making their middles first), the GPU
+        // preview's own (look_cpu.h): in full, or the strands the input changed in (their axes).
+        const std::string channel = params().getString("clumpChannel");
+        if (!aroundAxes && !in->strandChannel(channel)) {
+            throw GraphError("Twist: connect axes (guides), or put a Clump before it (no '" + channel + "' channel to find the clumps)");
         }
-        std::vector<float> axisLength(axes.size() / kAxisSamples);
-        for (std::size_t a = 0; a < axisLength.size(); ++a) axisLength[a] = arcLength(axes.data() + a * kAxisSamples, kAxisSamples);
-
+        std::string whyNot;
+        gpu::StageInputs axesOf;
+        axesOf.twist = gpu::twistInputs(*in, axesIn.get(), channel, false, &whyNot, last ? &changes->strands : nullptr);
+        if (!axesOf.twist) throw GraphError("Twist: " + whyNot);
+        if (aroundAxes && axesOf.twist->count == 0) return handOn();  // (no axis of two points)
+        if (!last) {
+            *result = gpu::runStage(gpu::StageKind::Twist, params(), in, scalpOf(ctx), std::move(axesOf));
+            return true;
+        }
         auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
-        const RampAlong along(profile, *out);
-        auto twist = [&](std::size_t s) {
-            const std::size_t n = out->strandPointCount(s);
-            if (n < 2 || axisOf[s] == SIZE_MAX) return;
-            Vec3f* pts = out->strandPoints(s);
-            const Vec3f* axis = axes.data() + axisOf[s] * kAxisSamples;
-            const float rate = kTwoPi * turns.at(*out, s) * axisLength[axisOf[s]];
-            if (rate == 0.0f) return;
-            for (std::size_t i = 1; i < n; ++i) {
-                const float t = paramAt(i, n);
-                const Vec3f center = pointAlong(axis, kAxisSamples, t);
-                const float dt = 1.0f / (kAxisSamples - 1);
-                Vec3f tangent = pointAlong(axis, kAxisSamples, std::min(t + dt, 1.0f)) -
-                                pointAlong(axis, kAxisSamples, std::max(t - dt, 0.0f));
-                const float l = tangent.length();
-                if (l < 1e-8f) continue;
-                tangent = tangent / l;
-                pts[i] = center + rotateAxisAngle(pts[i] - center, tangent, rate * t * along(i, n));
-            }
-        };
-        if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                twist(s);
-            });
-            *changed = *changes;
-        } else {
-            parallelFor(0, out->strandCount(), twist);
-        }
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        gpu::runStageOnStrands(gpu::StageKind::Twist, params(), in, changes->strands, scalpOf(ctx), *out, std::move(axesOf));
+        *changed = *changes;
         *result = StrandsPtr(out);
         return true;
     }
 };
 
-// Smooth's grid: cells along a strand's length, four to the deviation (scale x its length), from 8
-// to 128 of them; one count for every strand (it depends on the scale alone), so a strand smooths
-// alike at any point count.
-std::size_t smoothCells(float scale) {
-    return static_cast<std::size_t>(std::clamp(std::ceil(4.0f / std::max(scale, 1e-3f)), 8.0f, 128.0f));
-}
-
-// A strand's shape with its bumps up to `scale` of its length taken out (into `smoothed`, n
-// points from the root, each segment its old length). Its direction along its length, by arc
-// length (so any resampling of the same curve smooths alike), is averaged by three box filters
-// 2 x scale of its length wide, as a Gaussian of deviation scale x its length would, over the
-// direction reflected at both ends (a period of twice the strand): at scale 1 the first box spans
-// the whole period, so every segment points along the strand's mean direction, the line from the
-// root to the tip. Directions are summed in `cells` cells of the length (their increments, the
-// polyline sampled at even arc lengths), so the filters run the same on any resampling.
-//
-// The filters' window ends fall at the same places in every strand's cells (they depend on the
-// scale and the cell count alone): SmoothFilter finds them once for a whole evaluation.
-struct SmoothFilter {
-    // Where a window end falls in the period: whole periods before it, its cell and how far into it.
-    struct End {
-        double turns = 0.0;
-        std::size_t cell = 0;
-        double into = 0.0;
-    };
-    std::size_t cells = 0;
-    double width = 0.0;  // the boxes' width, in cells
-    std::vector<End> lower, upper;  // each cell's window, its ends
-
-    SmoothFilter(float scale, std::size_t cellCount) : cells(cellCount) {
-        const std::size_t wrap = 2 * cells;
-        width = std::min(2.0 * static_cast<double>(scale) * static_cast<double>(cells), static_cast<double>(wrap));
-        auto end = [&](double x) {
-            End e;
-            e.turns = std::floor(x / static_cast<double>(wrap));
-            const double r = x - e.turns * static_cast<double>(wrap);
-            e.cell = std::min(static_cast<std::size_t>(r), wrap - 1);
-            e.into = r - static_cast<double>(e.cell);
-            return e;
-        };
-        lower.resize(wrap);
-        upper.resize(wrap);
-        for (std::size_t k = 0; k < wrap; ++k) {
-            const double center = static_cast<double>(k) + 0.5;
-            upper[k] = end(center + 0.5 * width);
-            lower[k] = end(center - 0.5 * width);
-        }
-    }
-};
-
-void smoothShape(const Vec3f* pts, std::size_t n, const SmoothFilter& filter, std::vector<Vec3f>& smoothed) {
-    struct D3 {
-        double x = 0.0, y = 0.0, z = 0.0;
-        D3 operator+(const D3& o) const { return {x + o.x, y + o.y, z + o.z}; }
-        D3 operator-(const D3& o) const { return {x - o.x, y - o.y, z - o.z}; }
-        D3 operator*(double k) const { return {x * k, y * k, z * k}; }
-    };
-    // Scratch, reused across strands, read and written through plain pointers (the compiler
-    // reloads a vector's storage after every store it cannot tell apart from it).
-    thread_local std::vector<double> arcs;
-    thread_local std::vector<D3> periods, boxes, sumsOf;
-    smoothed.assign(pts, pts + n);
-    arcs.resize(n);
-    double* const arc = arcs.data();
-    arc[0] = 0.0;
-    for (std::size_t i = 1; i < n; ++i) arc[i] = arc[i - 1] + static_cast<double>((pts[i] - pts[i - 1]).length());
-    const double length = arc[n - 1];
-    if (!(length > 0.0)) return;
-    const std::size_t m = filter.cells, wrap = 2 * m;
-    const double cell = length / static_cast<double>(m);
-    periods.resize(wrap);
-    boxes.resize(wrap);
-    sumsOf.resize(wrap + 1);
-    D3* period = periods.data();
-    D3* boxed = boxes.data();
-    D3* const sums = sumsOf.data();
-    // The polyline at arc length a (a in [0, length]); `seg` walks forward with a.
-    std::size_t seg = 1;
-    auto pointAt = [&](double a) {
-        while (seg + 1 < n && arc[seg] < a) ++seg;
-        const double span = arc[seg] - arc[seg - 1];
-        const double t = span > 0.0 ? std::clamp((a - arc[seg - 1]) / span, 0.0, 1.0) : 1.0;
-        const Vec3f& p = pts[seg - 1];
-        const Vec3f& q = pts[seg];
-        return D3{p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t, p.z + (q.z - p.z) * t};
-    };
-    // Each cell's increment, then the same reflected: a period of 2m cells.
-    D3 previous = pointAt(0.0);
-    for (std::size_t k = 0; k < m; ++k) {
-        const D3 next = k + 1 == m ? D3{pts[n - 1].x, pts[n - 1].y, pts[n - 1].z} : pointAt(cell * static_cast<double>(k + 1));
-        const D3 step = next - previous;
-        period[k] = step;
-        period[wrap - 1 - k] = step;
-        previous = next;
-    }
-    // Three box filters `width` cells wide over the period, each from its running sums: the
-    // integral up to a window's end (in cells, any real number) of the cells as steps.
-    const double width = filter.width;
-    const SmoothFilter::End* const upperEnds = filter.upper.data();
-    const SmoothFilter::End* const lowerEnds = filter.lower.data();
-    if (width > 0.0) {
-        for (int pass = 0; pass < 3; ++pass) {
-            sums[0] = D3{};
-            D3 running;  // (in a register: each sum waits on the one before)
-            for (std::size_t k = 0; k < wrap; ++k) sums[k + 1] = running = running + period[k];
-            const D3 total = running;  // sums[wrap]
-#if GROOMLAB_SMOOTH_SSE2
-            // x and y side by side in SSE2 lanes, z alone: each value by the same operations in the
-            // same order as the scalar loop's, so the same bits.
-            const __m128d totalXY = _mm_loadu_pd(&total.x), inverseXY = _mm_set1_pd(1.0 / width);
-            for (std::size_t k = 0; k < wrap; ++k) {
-                const SmoothFilter::End& hi = upperEnds[k];
-                const SmoothFilter::End& lo = lowerEnds[k];
-                const D3 &sumHi = sums[hi.cell], &stepHi = period[hi.cell], &sumLo = sums[lo.cell], &stepLo = period[lo.cell];
-                const __m128d upper = _mm_add_pd(_mm_add_pd(_mm_mul_pd(totalXY, _mm_set1_pd(hi.turns)), _mm_loadu_pd(&sumHi.x)),
-                                                 _mm_mul_pd(_mm_loadu_pd(&stepHi.x), _mm_set1_pd(hi.into)));
-                const __m128d lower = _mm_add_pd(_mm_add_pd(_mm_mul_pd(totalXY, _mm_set1_pd(lo.turns)), _mm_loadu_pd(&sumLo.x)),
-                                                 _mm_mul_pd(_mm_loadu_pd(&stepLo.x), _mm_set1_pd(lo.into)));
-                const double z = ((total.z * hi.turns + sumHi.z + stepHi.z * hi.into) - (total.z * lo.turns + sumLo.z + stepLo.z * lo.into)) *
-                                 (1.0 / width);
-                _mm_storeu_pd(&boxed[k].x, _mm_mul_pd(_mm_sub_pd(upper, lower), inverseXY));
-                boxed[k].z = z;
-            }
-#else
-            auto integral = [&](const SmoothFilter::End& e) { return total * e.turns + sums[e.cell] + period[e.cell] * e.into; };
-            for (std::size_t k = 0; k < wrap; ++k) boxed[k] = (integral(upperEnds[k]) - integral(lowerEnds[k])) * (1.0 / width);
-#endif
-            std::swap(period, boxed);
-        }
-    }
-    // Each segment along the smoothed increments over its arc, its own length kept.
-    sums[0] = D3{};
-    D3 running;
-    for (std::size_t k = 0; k < m; ++k) sums[k + 1] = running = running + period[k];
-    auto upTo = [&](double a) {  // the smoothed increments summed up to arc length a
-        const double x = std::clamp(a / cell, 0.0, static_cast<double>(m));
-        const std::size_t j = std::min(static_cast<std::size_t>(x), m - 1);
-        return sums[j] + period[j] * (x - static_cast<double>(j));
-    };
-    Vec3f* const out = smoothed.data();
-    D3 behind = upTo(0.0);
-    for (std::size_t i = 1; i < n; ++i) {
-        const D3 ahead = upTo(arc[i]);
-        const D3 d = ahead - behind;
-        behind = ahead;
-        const auto segment = static_cast<float>(arc[i] - arc[i - 1]);
-        const Vec3f way{static_cast<float>(d.x), static_cast<float>(d.y), static_cast<float>(d.z)};
-        const Vec3f old = pts[i] - pts[i - 1];
-        // A segment whose smoothed directions cancel (a loop straightened) keeps its own.
-        const Vec3f unit = way.length() > 1e-6f * segment ? way.normalized() : segment > 0.0f ? old / segment : Vec3f{};
-        out[i] = out[i - 1] + unit * segment;
-    }
-}
-
-// Smooth: each strand toward its shape with the bumps up to `scale` of its length taken out
-// (smoothShape): small scales take out kinks from noise, interpolation or sculpting, 1 straightens
+// Smooth: each strand toward its shape with the bumps up to `scale` of its length taken out (its
+// direction along its length, by arc length, averaged by three box filters 2 x scale of its length
+// wide, as a Gaussian of deviation scale x its length would, over the direction reflected at both
+// ends: look.slang SmoothCS, look_stage_params.h smoothEnds): small scales take out kinks from noise, interpolation or sculpting, 1 straightens
 // it along the line from its root to its tip. `strength` (with `profile` along the length) blends
 // each point toward that shape, then the segment lengths are put back from the root out; the root
 // never moves.
@@ -408,67 +172,29 @@ private:
         const ScalarField strength(params(), "strength", scalpOf(ctx));
         strength.validate(*in);
         const auto scale = std::clamp(static_cast<float>(params().getDouble("scale")), 0.0f, 1.0f);
-        const Ramp profile = params().getRamp("profile");
         if (!(scale > 0.0f) || in->empty()) {
             if (incremental) return false;  // the input handed on: the graph passes its changes on
             *result = in;
             return true;
         }
-        const SmoothFilter filter(scale, smoothCells(scale));
-
-        const StrandChanges* changes = nullptr;
-        StrandsPtr last;  // the last result, to make again only the strands the input changed in
-        if (incremental) {
-            changes = someStrandsChanged(*incremental, 0);
-            last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !strength.strandLocal()) return false;
-            if (changes->none()) {  // the same strands in: the same result
-                *result = last;
-                *changed = *changes;
-                return true;
-            }
+        // look.slang's SmoothCS, the GPU preview's own (look_cpu.h): in full, or the strands the input
+        // changed in, into the last result's copy.
+        if (!incremental) {
+            *result = gpu::runStage(gpu::StageKind::Smooth, params(), in, scalpOf(ctx));
+            return true;
+        }
+        const StrandChanges* changes = someStrandsChanged(*incremental, 0);
+        const StrandsPtr last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
+        if (!last || !strength.strandLocal()) return false;
+        if (changes->none()) {  // the same strands in: the same result
+            *result = last;
+            *changed = *changes;
+            return true;
         }
         auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
-        const RampAlong along(profile, *out);
-        auto smooth = [&](std::size_t s) {
-            const std::size_t n = out->strandPointCount(s);
-            if (n < 3) return;
-            Vec3f* pts = out->strandPoints(s);
-            const float k = std::clamp(strength.at(*out, s), 0.0f, 1.0f);
-            if (k <= 0.0f) return;
-            thread_local std::vector<float> lengths;
-            thread_local std::vector<Vec3f> target;
-            lengths.resize(n);
-            for (std::size_t i = 1; i < n; ++i) lengths[i] = (pts[i] - pts[i - 1]).length();
-            smoothShape(pts, n, filter, target);
-            for (std::size_t i = 1; i < n; ++i) {
-                const float w = k * std::clamp(along(i, n), 0.0f, 1.0f);
-                pts[i] = pts[i] + (target[i] - pts[i]) * w;
-            }
-            // Lengths back, from the root out, along the blended directions.
-            Vec3f previous = pts[0];
-            for (std::size_t i = 1; i < n; ++i) {
-                const Vec3f d = pts[i] - previous;
-                const float l = d.length();
-                const Vec3f moved = l > 1e-6f * lengths[i] ? previous + d * (lengths[i] / l) : previous + (target[i] - target[i - 1]);
-                previous = moved;
-                pts[i] = moved;
-            }
-        };
-        if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                smooth(s);
-            });
-            *changed = *changes;
-        } else {
-            parallelFor(0, out->strandCount(), smooth);
-        }
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        gpu::runStageOnStrands(gpu::StageKind::Smooth, params(), in, changes->strands, scalpOf(ctx), *out);
+        *changed = *changes;
         *result = StrandsPtr(out);
         return true;
     }

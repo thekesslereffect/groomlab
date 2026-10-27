@@ -3,9 +3,10 @@
 #include "groomlab/portable_math.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
-#include <unordered_map>
+#include <memory>
 
 #include "groomlab/color_patterns.h"
 #include "groomlab/curve.h"
@@ -16,6 +17,46 @@
 #include "groomlab/strand_set.h"
 
 namespace groomlab {
+
+namespace {
+
+// Strand IDs to slots 0, 1, ... in the order first added: open addressing (twice the IDs' room,
+// rounded up to a power of two; linear probing). Finding never writes: safe in parallel.
+class IdSlots {
+public:
+    static constexpr std::size_t kNone = ~std::size_t{0};
+    explicit IdSlots(std::size_t most) {
+        std::size_t room = 16;
+        while (room < 2 * most) room *= 2;
+        mask_ = room - 1;
+        ids_.resize(room);
+        slots_.assign(room, kNone);
+    }
+    // Its slot, given the next one when new.
+    std::size_t add(std::uint64_t id) {
+        for (std::size_t at = hash64(id) & mask_;; at = (at + 1) & mask_) {
+            if (slots_[at] == kNone) {
+                ids_[at] = id;
+                return slots_[at] = count_++;
+            }
+            if (ids_[at] == id) return slots_[at];
+        }
+    }
+    std::size_t find(std::uint64_t id) const {
+        for (std::size_t at = hash64(id) & mask_;; at = (at + 1) & mask_) {
+            if (slots_[at] == kNone) return kNone;
+            if (ids_[at] == id) return slots_[at];
+        }
+    }
+    std::size_t size() const { return count_; }
+
+private:
+    std::vector<std::uint64_t> ids_;
+    std::vector<std::size_t> slots_;
+    std::size_t mask_ = 0, count_ = 0;
+};
+
+}  // namespace
 
 std::vector<std::string> instancePrototypeNames(const std::string& text) {
     std::string spaced = text;
@@ -64,6 +105,28 @@ void InstanceSet::append(const InstanceSet& other) {
     }
 }
 
+std::uint64_t InstanceSet::hashInstance(std::uint64_t h, const Instance& i) {
+    float f[10] = {i.t,     i.direction.x, i.direction.y,  i.direction.z, i.spin,
+                   i.scale, i.offset,      i.restDistance, i.aspect,      i.restLength};
+    h = hashCombine(hashCombine(hashCombine(h, i.prototype), i.strand), i.id);
+    h = hashCombine(h, static_cast<std::uint64_t>(i.orient) | (i.scaleByWidth ? 0x100u : 0u) |
+                           (i.pinToRest ? 0x200u : 0u) | (i.fitStrand ? 0x400u : 0u));
+    for (const float v : f) {
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &v, sizeof bits);
+        h = hashCombine(h, bits);
+    }
+    if (i.deform) h = hashCombine(h, 0xDEF0u + i.deformAxis);  // (undeformed ones hash as they always did)
+    if (i.onSkin) {  // (instances on strands hash as they always did)
+        h = hashCombine(h, static_cast<std::uint64_t>(i.variant) | (static_cast<std::uint64_t>(i.preview) << 16) |
+                               (i.conform ? 1ull << 24 : 0ull) | (i.aimRoot ? 1ull << 25 : 0ull) |
+                               (i.followStrand ? 1ull << 26 : 0ull) |
+                               (static_cast<std::uint64_t>(static_cast<std::uint32_t>(i.material)) << 32));
+        h = hashFloat(hashFloat(hashFloat(h, i.lift), i.tile), i.stack);
+    }
+    return h;
+}
+
 std::uint64_t InstanceSet::contentHash() const {
     std::uint64_t h = hash64(0x1A57);
     for (const std::string& name : prototypes) {
@@ -71,26 +134,7 @@ std::uint64_t InstanceSet::contentHash() const {
     }
     for (const std::string& name : materials) h = hashString(h, name);
     if (hidesStrands) h = hashCombine(h, 0x41DEu);
-    for (const Instance& i : instances) {
-        float f[10] = {i.t,     i.direction.x, i.direction.y,  i.direction.z, i.spin,
-                       i.scale, i.offset,      i.restDistance, i.aspect,      i.restLength};
-        h = hashCombine(hashCombine(hashCombine(h, i.prototype), i.strand), i.id);
-        h = hashCombine(h, static_cast<std::uint64_t>(i.orient) | (i.scaleByWidth ? 0x100u : 0u) |
-                               (i.pinToRest ? 0x200u : 0u) | (i.fitStrand ? 0x400u : 0u));
-        for (const float v : f) {
-            std::uint32_t bits = 0;
-            std::memcpy(&bits, &v, sizeof bits);
-            h = hashCombine(h, bits);
-        }
-        if (i.deform) h = hashCombine(h, 0xDEF0u + i.deformAxis);  // (undeformed ones hash as they always did)
-        if (i.onSkin) {  // (instances on strands hash as they always did)
-            h = hashCombine(h, static_cast<std::uint64_t>(i.variant) | (static_cast<std::uint64_t>(i.preview) << 16) |
-                                   (i.conform ? 1ull << 24 : 0ull) | (i.aimRoot ? 1ull << 25 : 0ull) |
-                                   (i.followStrand ? 1ull << 26 : 0ull) |
-                                   (static_cast<std::uint64_t>(static_cast<std::uint32_t>(i.material)) << 32));
-            h = hashFloat(hashFloat(hashFloat(h, i.lift), i.tile), i.stack);
-        }
-    }
+    for (const Instance& i : instances) h = hashInstance(h, i);
     return h;
 }
 
@@ -202,14 +246,21 @@ std::vector<InstanceSet::Placed> InstanceSet::resolve(const StrandSet& strands, 
     if (instances.empty()) return out;
     // Each instance's strand (the first holding its ID), found through the IDs the instances name
     // (fewer than the strands), then every instance placed in parallel and kept in order.
+    // (Each ID's slot, then the strands looked up in parallel blocks, each slot taking its least
+    // strand.)
     constexpr std::size_t kUnfound = ~std::size_t{0};
-    std::unordered_map<std::uint64_t, std::size_t> index;
-    index.reserve(instances.size());
-    for (const Instance& i : instances) index.emplace(i.strand, kUnfound);
-    for (std::size_t s = 0; s < strands.strandCount(); ++s) {
-        const auto it = index.find(strands.ids()[s]);
-        if (it != index.end() && it->second == kUnfound) it->second = s;
-    }
+    IdSlots slotOf(instances.size());
+    for (const Instance& i : instances) slotOf.add(i.strand);
+    std::unique_ptr<std::atomic<std::size_t>[]> firstOf(new std::atomic<std::size_t>[slotOf.size()]);
+    for (std::size_t k = 0; k < slotOf.size(); ++k) firstOf[k].store(kUnfound, std::memory_order_relaxed);
+    parallelFor(0, strands.strandCount(), [&](std::size_t s) {
+        const std::size_t slot = slotOf.find(strands.ids()[s]);
+        if (slot == IdSlots::kNone) return;
+        std::atomic<std::size_t>& first = firstOf[slot];
+        std::size_t seen = first.load(std::memory_order_relaxed);
+        while (s < seen && !first.compare_exchange_weak(seen, s, std::memory_order_relaxed)) {
+        }
+    }, 4096);
     std::vector<Placed> all(instances.size());
     std::vector<char> placedOne(instances.size(), 0);
     const std::vector<float>& widths = strands.widths();
@@ -225,7 +276,7 @@ std::vector<InstanceSet::Placed> InstanceSet::resolve(const StrandSet& strands, 
     }
     parallelFor(0, instances.size(), [&](std::size_t k) {
         const Instance& i = instances[k];
-        const std::size_t s = index.find(i.strand)->second;
+        const std::size_t s = firstOf[slotOf.find(i.strand)].load(std::memory_order_relaxed);
         if (s == kUnfound) return;
         const Vec3f* pts = strands.strandPoints(s);
         const std::size_t n = strands.strandPointCount(s);

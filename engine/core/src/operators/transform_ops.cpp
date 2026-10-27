@@ -12,11 +12,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <memory>
 
 #include "groomlab/field.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
@@ -28,128 +30,57 @@ namespace groomlab {
 
 namespace {
 
-constexpr float kRadians = 3.14159265358979f / 180.0f;
-
-// The frame at a strand's root: the scalp's normal there (else the strand's first segment), a
-// tangent (the scalp's U direction from its UVs when `byUV`, else `reference` laid onto the
-// tangent plane, else any perpendicular) and the bitangent across them (tangent x normal).
-struct RootAxes {
-    Vec3f tangent{1.0f, 0.0f, 0.0f}, normal{0.0f, 1.0f, 0.0f}, bitangent{0.0f, 0.0f, 1.0f};
-    bool onScalp = false;
+// The operator's own stage on the CPU engine (look_cpu.h; look.slang's, the GPU preview's own).
+struct EngineStage {
+    gpu::StageKind kind;
+    const ParamSet& params;
+    const ScalpMesh* scalp;
+    // Each strand's direction (StageInputs::directions) of strand s, where the node takes one per
+    // strand (Bend's vector field; Direction's three mapped params); null: the params'.
+    std::function<Vec3f(std::size_t)> direction = nullptr;
+    // Its stage for the strands `which` of `in`, into `out` (all of them: null, the result made).
+    StrandsPtr run(const StrandsPtr& in, const std::vector<std::uint32_t>* which, StrandSet* out) const {
+        gpu::StageParamReader reader(params, "");
+        gpu::StageInputs inputs;
+        if (direction) {
+            reader.directions = true;
+            auto ways = std::make_shared<std::vector<Vec3f>>(which ? which->size() : in->strandCount());
+            parallelFor(0, ways->size(), [&](std::size_t k) { (*ways)[k] = direction(which ? (*which)[k] : k); }, 4096);
+            inputs.directions = std::move(ways);
+        }
+        if (!which) return gpu::runStage(kind, reader, in, scalp, std::move(inputs));
+        gpu::runStageOnStrands(kind, reader, in, *which, scalp, *out, std::move(inputs));
+        return nullptr;
+    }
 };
-
-// The direction U grows in across face `face` of a scalp with UVs (zero where the UVs give none).
-Vec3f uvTangent(const ScalpMesh& scalp, std::int32_t face) {
-    const auto& tri = scalp.triangles()[static_cast<std::size_t>(face)];
-    const auto& uv = scalp.cornerUVs();
-    const std::size_t c = static_cast<std::size_t>(face) * 3;
-    if (c + 2 >= uv.size()) return {};
-    const Vec3f a = scalp.points()[static_cast<std::size_t>(tri[0])];
-    const Vec3f e1 = scalp.points()[static_cast<std::size_t>(tri[1])] - a;
-    const Vec3f e2 = scalp.points()[static_cast<std::size_t>(tri[2])] - a;
-    const float du1 = uv[c + 1][0] - uv[c][0], dv1 = uv[c + 1][1] - uv[c][1];
-    const float du2 = uv[c + 2][0] - uv[c][0], dv2 = uv[c + 2][1] - uv[c][1];
-    const float det = du1 * dv2 - du2 * dv1;
-    if (!(std::fabs(det) > 1e-12f)) return {};
-    return (e1 * dv2 - e2 * dv1) / det;
-}
-
-// The first segment of a strand with any length, as a unit vector (zero for none).
-Vec3f firstDirection(const Vec3f* pts, std::size_t n) {
-    for (std::size_t i = 1; i < n; ++i) {
-        const Vec3f d = pts[i] - pts[0];
-        if (d.length() > 1e-12f) return d.normalized();
-    }
-    return {};
-}
-
-RootAxes rootAxes(const ScalpMesh* scalp, const StrandRoot& root, const Vec3f* pts, std::size_t n, const Vec3f& reference,
-                  bool byUV) {
-    RootAxes a;
-    if (scalp && scalp->contains(root)) {
-        a.normal = scalp->normal(root).normalized();
-        a.onScalp = true;
-    } else {
-        a.normal = firstDirection(pts, n);
-    }
-    if (a.normal.length() < 0.5f) a.normal = {0.0f, 1.0f, 0.0f};
-    auto laid = [&](const Vec3f& v) { return v - a.normal * v.dot(a.normal); };
-    Vec3f t;
-    if (byUV && a.onScalp && scalp->hasUVs()) t = laid(uvTangent(*scalp, root.face));
-    if (!(t.length() > 1e-6f)) t = laid(reference);
-    if (!(t.length() > 1e-6f)) t = anyPerpendicular(a.normal);
-    a.tangent = t.normalized();
-    a.bitangent = a.tangent.cross(a.normal);
-    return a;
-}
-
-// A value in [-1, 1) of strand `id`, draw `k`, per seed and node kind.
-float signedRandom(StrandId id, std::uint64_t seed, std::uint64_t salt, std::uint64_t k) {
-    return 2.0f * unitFloat(hashCombine(hashCombine(id, seed ^ salt), k)) - 1.0f;
-}
-
 // The run every shaper here shares: in full, or (with `incremental`) only the strands the input
 // changed in, into the last result's copy; false when that cannot be done. `identity`: the strands
 // pass through as they came (nothing to do). `local`: every mapped value reads each strand alone.
-// shape(out, s) reshapes strand s of `out` (its incoming points there already).
-template <class Shape>
 bool reshapeEach(const StrandsPtr& in, bool identity, bool local, const IncrementalInputs* incremental, bool otherInputsSame,
-                 Value* result, StrandChanges* changed, const Shape& shape) {
+                 Value* result, StrandChanges* changed, const EngineStage& engine) {
     if (identity || in->empty()) {
         if (incremental) return false;  // the input handed on: the graph passes its changes on
         *result = in;
         return true;
     }
-    const StrandChanges* changes = nullptr;
-    StrandsPtr last;  // the last result, to make again only the strands the input changed in
-    if (incremental) {
-        changes = someStrandsChanged(*incremental, 0);
-        last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-        if (!last || !local || !otherInputsSame) return false;
-        if (changes->none()) {  // the same strands in: the same result
-            *result = last;
-            *changed = *changes;
-            return true;
-        }
+    if (!incremental) {
+        *result = engine.run(in, nullptr, nullptr);
+        return true;
+    }
+    const StrandChanges* changes = someStrandsChanged(*incremental, 0);
+    const StrandsPtr last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
+    if (!last || !local || !otherInputsSame) return false;
+    if (changes->none()) {  // the same strands in: the same result
+        *result = last;
+        *changed = *changes;
+        return true;
     }
     auto out = std::make_shared<StrandSet>(*in);
-    if (last) {
-        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-    } else {
-        out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-    }
-    if (last) {
-        forEachListed(changes->strands, [&](std::size_t s) {
-            copyStrandPoints(*out, *in, s);
-            shape(*out, s);
-        });
-        *changed = *changes;
-    } else {
-        parallelFor(0, out->strandCount(), [&](std::size_t s) { shape(*out, s); });
-    }
+    positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+    engine.run(in, &changes->strands, out.get());
+    *changed = *changes;
     *result = StrandsPtr(out);
     return true;
-}
-
-// A 3x3 linear map as its three columns: the images of x, y and z.
-struct Linear {
-    Vec3f x{1.0f, 0.0f, 0.0f}, y{0.0f, 1.0f, 0.0f}, z{0.0f, 0.0f, 1.0f};
-    Vec3f operator()(const Vec3f& v) const { return x * v.x + y * v.y + z * v.z; }
-};
-
-// Turns of `degrees` about axes a, b and c in that order (each about the fixed axis, not a turned one).
-Linear turnsAbout(const Vec3f& degrees, const Vec3f& a, const Vec3f& b, const Vec3f& c) {
-    auto turn = [&](Vec3f v) {
-        if (degrees.x != 0.0f) v = rotateAxisAngle(v, a, degrees.x * kRadians);
-        if (degrees.y != 0.0f) v = rotateAxisAngle(v, b, degrees.y * kRadians);
-        if (degrees.z != 0.0f) v = rotateAxisAngle(v, c, degrees.z * kRadians);
-        return v;
-    };
-    Linear m;
-    m.x = turn({1.0f, 0.0f, 0.0f});
-    m.y = turn({0.0f, 1.0f, 0.0f});
-    m.z = turn({0.0f, 0.0f, 1.0f});
-    return m;
 }
 
 // Transform: each strand moved, turned and scaled about its root, in its root's frame (x along
@@ -204,53 +135,17 @@ private:
         const ScalpMesh* scalp = scalpOf(ctx);
         const ScalarField scale(params(), "scale", scalp);
         scale.validate(*in);
-        const bool world = params().getString("space") == "world";
         const Vec3f translate = params().getVec3("translate");
         const Vec3f rotate = params().getVec3("rotate");
-        const Vec3f pivot = params().getVec3("pivot");
         const Vec3f translateRandom = params().getVec3("translateRandom");
         const Vec3f rotateRandom = params().getVec3("rotateRandom");
         const auto scaleRandom = static_cast<float>(params().getDouble("scaleRandom"));
-        const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const Vec3f zero;
         const bool randomMove = translateRandom != zero, randomTurn = rotateRandom != zero;
         const bool identity = translate == zero && rotate == zero && !randomMove && !randomTurn && scaleRandom <= 0.0f &&
                               scale.isConstant() && scale.maximum() == 1.0f;
-        // One map for every strand when nothing varies per strand (the whole set, no randomness).
-        const Linear fixedTurn = turnsAbout(rotate, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f});
-
-        auto shape = [&](StrandSet& out, std::size_t s) {
-            const std::size_t n = out.strandPointCount(s);
-            if (n == 0) return;
-            float k = scale.at(out, s);
-            const StrandId id = out.ids()[s];
-            constexpr std::uint64_t kSalt = 0x7A45F0ull;
-            Vec3f move = translate, turn = rotate;
-            if (randomMove) {
-                move += Vec3f{translateRandom.x * signedRandom(id, seed, kSalt, 0), translateRandom.y * signedRandom(id, seed, kSalt, 1),
-                              translateRandom.z * signedRandom(id, seed, kSalt, 2)};
-            }
-            if (randomTurn) {
-                turn += Vec3f{rotateRandom.x * signedRandom(id, seed, kSalt, 3), rotateRandom.y * signedRandom(id, seed, kSalt, 4),
-                              rotateRandom.z * signedRandom(id, seed, kSalt, 5)};
-            }
-            if (scaleRandom > 0.0f) k *= std::max(0.0f, 1.0f + scaleRandom * signedRandom(id, seed, kSalt, 6));
-            Vec3f* pts = out.strandPoints(s);
-            Vec3f origin = pivot, offset = move;
-            Linear m = fixedTurn;
-            if (world) {
-                if (randomTurn) m = turnsAbout(turn, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f});
-            } else {
-                const RootAxes a = rootAxes(scalp, out.roots()[s], pts, n, {0.0f, -1.0f, 0.0f}, true);
-                origin = pts[0];
-                offset = a.tangent * move.x + a.normal * move.y + a.bitangent * move.z;
-                m = turnsAbout(turn, a.tangent, a.normal, a.bitangent);
-            }
-            for (std::size_t i = 0; i < n; ++i) {
-                pts[i] = origin + m((pts[i] - origin) * k) + offset;
-            }
-        };
-        return reshapeEach(in, identity, scale.strandLocal(), incremental, true, result, changed, shape);
+        const EngineStage engine{gpu::StageKind::Transform, params(), scalp};
+        return reshapeEach(in, identity, scale.strandLocal(), incremental, true, result, changed, engine);
     }
 };
 
@@ -316,67 +211,11 @@ private:
         angle.validate(*in);
         const VectorField direction(params(), "direction", scalp);
         direction.validate(*in);
-        const auto start = static_cast<float>(params().getDouble("start"));
-        const auto end = static_cast<float>(params().getDouble("end"));
-        const std::string along = params().getString("along");
-        const bool alongNormal = along == "normal", alongDirection = along == "direction";
-        const auto randomness = static_cast<float>(params().getDouble("randomness"));
-        const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const bool identity = angle.isConstant() && angle.maximum() == 0.0f;
-        // The share of the bend made by t: 0 before start, 1 past end, even between.
-        auto share = [&](float t) {
-            if (end > start) return std::clamp((t - start) / (end - start), 0.0f, 1.0f);
-            return t >= start ? 1.0f : 0.0f;
-        };
-
-        auto shape = [&](StrandSet& out, std::size_t s) {
-            const std::size_t n = out.strandPointCount(s);
-            if (n < 2) return;
-            float degrees = angle.at(out, s);
-            if (randomness > 0.0f) degrees *= 1.0f - randomness * unitFloat(hashCombine(out.ids()[s], seed ^ 0xBE4Dull));
-            if (degrees == 0.0f) return;
-            const Vec3f way = direction.at(out, s);
-            Vec3f* pts = out.strandPoints(s);
-            const Vec3f chord = (pts[n - 1] - pts[0]).normalized();
-            if (chord.length() < 0.5f) return;
-            const RootAxes a = rootAxes(scalp, out.roots()[s], pts, n, way, true);
-            Vec3f target = a.normal;
-            if (alongDirection) {
-                // Laid onto the scalp at the root (as given off it); none when it stands along the normal.
-                target = a.onScalp ? way - a.normal * way.dot(a.normal) : way;
-                if (!(target.length() > 1e-6f * way.length())) return;
-                target = target.normalized();
-            } else if (!alongNormal) {
-                target = a.tangent;
-            }
-            if (target.length() < 0.5f) return;
-            Vec3f axis = chord.cross(target);
-            if (axis.length() < 1e-5f) {
-                if (!alongNormal || chord.dot(target) < 0.0f) return;  // along it already
-                // Standing straight up, it can only bend over: along the root frame's x (the
-                // scalp's U), by the angle's size whatever its sign.
-                axis = a.bitangent;
-                degrees = -std::fabs(degrees);
-            }
-            axis = axis.normalized();
-            // Up to pointing along the target (the chord's angle from it), and away no further than
-            // its opposite (or, along the normal, the scalp's tangent plane: that angle less 90
-            // degrees, when above it).
-            const float current = pm::acos(std::clamp(chord.dot(target), -1.0f, 1.0f)) / kRadians;
-            degrees = std::clamp(degrees, alongNormal ? std::min(0.0f, current - 90.0f) : current - 180.0f, current);
-            if (degrees == 0.0f) return;
-            // Each segment, from the root out, turned by the bend reached at its end point.
-            Vec3f previous = pts[0], bent = pts[0];
-            for (std::size_t i = 1; i < n; ++i) {
-                const Vec3f segment = pts[i] - previous;
-                previous = pts[i];
-                const float turn = degrees * kRadians * share(paramAt(i, n));
-                bent = bent + (turn == 0.0f ? segment : rotateAxisAngle(segment, axis, turn));
-                pts[i] = bent;
-            }
-        };
-        return reshapeEach(in, identity, angle.strandLocal() && direction.strandLocal(), incremental, true, result, changed,
-                           shape);
+        // (A direction per strand: each strand's.)
+        EngineStage engine{gpu::StageKind::Bend, params(), scalp};
+        if (!direction.isConstant()) engine.direction = [&](std::size_t s) { return direction.at(*in, s); };
+        return reshapeEach(in, identity, angle.strandLocal() && direction.strandLocal(), incremental, true, result, changed, engine);
     }
 };
 
@@ -440,41 +279,15 @@ private:
         inclination.validate(*in);
         roll.validate(*in);
         strength.validate(*in);
-        const bool byUV = params().getString("along") == "tangent";
-        const Vec3f direction = params().getVec3("direction");
-        const auto inclinationRandom = static_cast<float>(params().getDouble("inclinationRandom"));
-        const auto rollRandom = static_cast<float>(params().getDouble("rollRandom"));
-        const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const bool identity = strength.isConstant() && strength.maximum() <= 0.0f;
 
-        auto shape = [&](StrandSet& out, std::size_t s) {
-            const std::size_t n = out.strandPointCount(s);
-            if (n < 2 || !(scalp && scalp->contains(out.roots()[s]))) return;
-            const float w = std::min(strength.at(out, s), 1.0f);
-            if (!(w > 0.0f)) return;
-            Vec3f* pts = out.strandPoints(s);
-            const Vec3f current = firstDirection(pts, n);
-            if (current.length() < 0.5f) return;
-            const StrandId id = out.ids()[s];
-            constexpr std::uint64_t kSalt = 0xD12EC7ull;
-            float incline = inclination.at(out, s), turn = roll.at(out, s);
-            if (inclinationRandom > 0.0f) incline += inclinationRandom * signedRandom(id, seed, kSalt, 0);
-            if (rollRandom > 0.0f) turn += rollRandom * signedRandom(id, seed, kSalt, 1);
-            const RootAxes a = rootAxes(scalp, out.roots()[s], pts, n, direction, byUV);
-            const float i = incline * kRadians, r = turn * kRadians;
-            const Vec3f target = a.normal * pm::cos(i) + (a.tangent * pm::cos(r) + a.bitangent * pm::sin(r)) * pm::sin(i);
-            const float c = std::clamp(current.dot(target), -1.0f, 1.0f);
-            Vec3f axis = current.cross(target);
-            if (axis.length() < 1e-6f) {
-                if (c > 0.0f) return;  // already there
-                axis = anyPerpendicular(current);
-            }
-            axis = axis.normalized();
-            const float angle = pm::acos(c) * w;
-            for (std::size_t k = 1; k < n; ++k) pts[k] = pts[0] + rotateAxisAngle(pts[k] - pts[0], axis, angle);
-        };
+        // (All three mapped: each strand's three.)
+        EngineStage engine{gpu::StageKind::Direction, params(), scalp};
+        if (gpu::directionMapped(params()).size() > 2) {
+            engine.direction = [&](std::size_t s) { return Vec3f(inclination.at(*in, s), roll.at(*in, s), strength.at(*in, s)); };
+        }
         return reshapeEach(in, identity, inclination.strandLocal() && roll.strandLocal() && strength.strandLocal(), incremental, true,
-                           result, changed, shape);
+                           result, changed, engine);
     }
 };
 

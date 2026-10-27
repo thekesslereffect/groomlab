@@ -284,7 +284,7 @@ Add a **Clump**. By default it picks its own clump centers among the strands (`c
   lets them bunch and open a little. `weight` stretches the turns where hair hangs below them
   (along `weightDirection`): ringlets loose at the root and tight at the tip, more on long hair,
   hardly at all on hair lying flat or pointing up. Curl adds points where a strand has too few for a round turn
-  (`tolerance`), so it never aliases.
+  (`tolerance`): each segment cut evenly along the smooth strand, so it never aliases.
 - **Bend** bends hair up off the scalp or down onto it (`along` `normal`), or combs it toward a
   `direction` laid onto the scalp (`along` `direction`; `angle` 180 with `start` and `end` 0 lays
   it all the way, never past). **Gravity** lets it hang from the root (a Collide after it drapes it
@@ -310,21 +310,6 @@ Add a **Clump**. By default it picks its own clump centers among the strands (`c
   Hair with room does not move. Lower `packing` for more volume; `strength` and `profile` (along
   the strand) scale the push. It reads every strand, so it evaluates whole when you brush before
   it (the GPU preview keeps that interactive); put it after the shaping nodes and before the look.
-- **Tie** makes a ponytail (or a hair tie, a clip) in one node. Put its `center` where the hair is
-  gathered, a little off the head: in the Graph Editor, select a vertex, a locator or a transform
-  and press **Pick** beside it. The strands run along the scalp to the tie, pass through it in the
-  order they came from (none crosses another) and continue as a straight tail along `direction`
-  (by default straight out from the head's center through the tie: set it pointing down for a tail
-  that hangs). `radius` and `tightness` set how tightly the tie gathers them, `spread` how much the
-  tail fans out, `twist` turns the whole tail; `ease` lets each root leave the scalp its own way
-  before it lies down. Every strand keeps its length: strands too short to reach the tie lie along
-  the scalp toward it, as loose wisps. Which hair it ties is its `affect`: map it to a Group (or a
-  painted map, an expression) for a ponytail of only some of the hair, or two Ties with the left and
-  right halves for a double ponytail. Tie writes a `tail` attribute, 0 before the tie and 1 after,
-  so Curl, Noise or Clump after it can style the tail alone: map their `affect` to the attribute
-  `tail` (for Curl, set `tolerance` to 0, or give the strands more points before the Tie: a Curl
-  that adds points can't follow a per-point affect). A second Tie further down the tail gathers it
-  again (a bubble ponytail); the `tail` attribute then marks what lies past the second.
 - **Mirror** between the Guides node and Interpolate grooms one half and mirrors it; after the look
   it mirrors the finished hair. `mode` `add` keeps both sides.
 
@@ -338,12 +323,14 @@ strength, scale and profile; BlendNeighbors' strength and profile; Tangle's stre
 and reach; Flow's lift, bend, rollRandom and seed; Jiggle's strength, frequency, damping and
 history; MeshCut's offset; any of these nodes' `affect`) draws on the GPU without evaluating the
 groom, so hundreds of thousands of strands stay interactive. A node masked by its `affect` (a Group,
-a painted map, an expression, a Tie's `tail`) stays on the GPU too, its result mixed back by the
+a painted map, an expression) stays on the GPU too, its result mixed back by the
 mask as it is when you let go. (A direction given per strand by an expression, or a Direction with
 its inclination, roll and strength all mapped, evaluates as usual, as does a Jiggle's history
-dragged past the frames Maya sampled for it, and a Curl that adds points. Mirror always does: it
-adds and removes strands. So do sliders that pick which strands a node reads: BlendNeighbors'
-neighbors, Tangle's fraction, radius and seed.)
+dragged past the frames Maya sampled for it, and a Curl that adds points. So do sliders that pick
+which strands a node reads: BlendNeighbors' neighbors, Tangle's fraction, radius and seed.) A Cull,
+a Split (any of its outputs) or a Mirror after the look keeps the drag on the GPU too: the nodes before it
+run there and their strands are kept or mirrored as it last kept or mirrored them; its own sliders,
+and a Cull or Split keeping by anything but a number, a texture or a color set, evaluate as usual.
 Brushing does too, SelfCollide and Static included, masked nodes as well. Letting go evaluates as
 usual, so renders and exports don't change. (SelfCollide, Static and Flow can tip one way or the other on the tiniest
 difference in the hair they take, so after a brush stroke or a drag of a node before them a few

@@ -159,9 +159,9 @@ def add_to_docs(plan, name, title):
 GPU_STEPS = """
 Porting it to the GPU preview (its own change, after the CPU node is in: docs/EXTENDING.md "Making it GPU"):
   1. engine/gpu/shaders/look.slang: [shader("compute")] {name}CS, matching the CPU's result.
-  2. engine/gpu/include/groomlab/gpu/look_kernels.inc: GROOMLAB_KERNEL({name}) (the enum, both
+  2. engine/gpu/include/groomlab/look/look_kernels.inc: GROOMLAB_KERNEL({name}) (the enum, both
      backends' tables and the CMake build follow).
-  3. engine/gpu/include/groomlab/gpu/look_stages.inc: a GROOMLAB_STAGE({name}, "{lower}", ...) row with
+  3. engine/gpu/include/groomlab/look/look_stages.inc: a GROOMLAB_STAGE({name}, "{lower}", ...) row with
      the params the kernel matches the CPU on (StageKind, its name and the drags follow).
   4. engine/gpu/src/look_chain.cpp: readLookParams' case (its constants, its fields), the inputs it
      uploads; engine/gpu/src/look_engine.cpp: kernelsOf's case and its dispatch.

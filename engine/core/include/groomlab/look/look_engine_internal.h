@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <string>
 
-#include "groomlab/gpu/look_engine.h"
+#include "groomlab/look/look_engine.h"
 
 namespace groomlab::gpu {
 

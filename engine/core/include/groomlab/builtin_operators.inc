@@ -49,7 +49,6 @@ GROOMLAB_OPERATOR(Subdivide)             // Curves -> Curves (segments doubled p
 // [deform]
 GROOMLAB_OPERATOR(Bend)                  // Curves -> Curves (bent toward a direction between a start and an end)
 GROOMLAB_OPERATOR(Transform)             // Curves -> Curves (moved, turned, scaled about each root or a pivot)
-GROOMLAB_OPERATOR(Tie)                   // Strands -> Strands (ponytails: along the scalp to a ring, through it in order, fanned into a tail)
 GROOMLAB_OPERATOR(BlendNeighbors)        // Curves -> Curves (each strand toward its neighbours' mean shape)
 GROOMLAB_OPERATOR(Gravity)               // Curves -> Curves (bent from the root under their weight)
 GROOMLAB_OPERATOR(Displace)              // Curves -> Curves (offset along the scalp's normal or a direction)

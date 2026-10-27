@@ -13,6 +13,7 @@
 #include "groomlab/distance_field.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -24,31 +25,6 @@
 namespace groomlab {
 
 namespace {
-
-// Tests: setCollideStrandBounds, collideSkippedSurfaces.
-std::atomic<bool> collideStrandBounds{true};
-std::atomic<std::size_t> collideSkipped{0};
-
-// Turns each segment of a strand toward `dir` by amount x the profile there,
-// keeping segment lengths (Part's opening); the root stays. Reads each original point before
-// overwriting it, so no copy of the strand is needed.
-void turnToward(Vec3f* pts, std::size_t n, const Vec3f& dir, float amount, const RampAlong& profile) {
-    Vec3f prevOriginal = pts[0];
-    for (std::size_t i = 1; i < n; ++i) {
-        const Vec3f original = pts[i];
-        const Vec3f seg = original - prevOriginal;
-        prevOriginal = original;
-        const float len = seg.length();
-        if (len <= 0.0f) {
-            pts[i] = pts[i - 1];
-            continue;
-        }
-        const float w = std::clamp(amount * profile(i, n), 0.0f, 1.0f);
-        Vec3f turned = seg / len * (1.0f - w) + dir * w;
-        if (turned.length() < 1e-6f) turned = seg / len;  // opposite directions: leave it
-        pts[i] = pts[i - 1] + turned.normalized() * len;
-    }
-}
 
 // The parts found in `strands`' flow with a Part node's params (findAutoParts, parts.h); null
 // when none.
@@ -71,26 +47,13 @@ Vec3f softPush(const Vec3f& delta, float s) {
     return delta * f;
 }
 
-// Collide's smoothing: each point's correction `c` (what the walk moved it by) spread toward the
-// root over `length` of the strand (its segments' `lengths`, [0] unused): point i takes the mean
-// of its own and each later point's within that length, each weighed by smoothstep of how far
-// along that point is (1 - 3x^2 + 2x^3 of the share of `length`; its own 1). In place (a point
-// reads only those after it). (look.slang smoothStrand, the same arithmetic.)
-void smoothCorrections(Vec3f* c, const float* lengths, std::size_t n, float length) {
-    for (std::size_t i = 1; i < n; ++i) {
-        Vec3f sum = c[i];
-        float weight = 1.0f;
-        float apart = 0.0f;
-        for (std::size_t j = i + 1; j < n; ++j) {
-            apart += lengths[j];
-            if (!(apart < length)) break;
-            const float x = apart / length;
-            const float w = 1.0f - x * x * (3.0f - 2.0f * x);
-            sum += c[j] * w;
-            weight += w;
-        }
-        c[i] = Vec3f(sum.x / weight, sum.y / weight, sum.z / weight);
-    }
+// Whether p is too far from the point the mesh's closest point query was last asked at (the
+// distance to a mesh changes no faster than the point moves): its answer, a miss, the same.
+bool collideBeyondBound(const CollideRestState& state, const Vec3f& p, float searchRadius) {
+    if (!(state.bound > searchRadius)) return false;
+    const float scale = std::max({std::fabs(p.x), std::fabs(p.y), std::fabs(p.z)});
+    const float room = 1e-4f * (searchRadius + state.bound + scale) + 1e-6f;
+    return state.bound - (p - state.anchor).length() > searchRadius + room;
 }
 
 // Walks each strand from the root: keeps the segment length from the
@@ -192,9 +155,7 @@ private:
         }
         const auto offset = static_cast<float>(params().getDouble("offset"));
         const auto maxDepth = static_cast<float>(params().getDouble("maxDepth"));
-        const auto iterations = static_cast<int>(params().getInt("iterations"));
         const auto softness = static_cast<float>(params().getDouble("softness"));
-        const auto smoothing = static_cast<float>(params().getDouble("smoothing"));
         // A soft push asks how far below `reach` (the offset plus the softness) a point is.
         const float reach = offset + softness;
         // Only points this close to the surface can need a push; the bound keeps far points cheap.
@@ -215,215 +176,38 @@ private:
             }
         }
 
-        const StrandChanges* changes = nullptr;
-        StrandsPtr last;  // the last result, to make again only the strands the input changed in
-        if (incremental) {
-            changes = someStrandsChanged(*incremental, 0);
-            last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !inputUnchanged(*incremental, 1) || !inputUnchanged(*incremental, 2)) return false;
-            if (changes->none()) {  // the same strands in: the same result
-                *result = last;
-                *changed = *changes;
-                return true;
-            }
+        // look.slang's CollideCS, the GPU preview's own (look_cpu.h), on its surfaces' fields (a
+        // deformed mesh through the host, its rest pose's walk; method exact or a field without a grid:
+        // the mesh itself; collideRestPush): in full, or the strands the input changed in.
+        const bool exact = params().getString("method") == "exact";
+        gpu::StageParamReader reader(params(), "");
+        reader.exactHost = exact;
+        std::uint32_t colliderBits = 0;
+        for (std::size_t m = 0; m < colliders.size(); ++m) colliderBits |= colliders[m] ? 1u << m : 0u;
+        std::string whyNot;
+        const std::shared_ptr<gpu::CollideInputs> surfaces =
+            gpu::collideInputs(meshes, colliderBits, fields, offset, softness, &whyNot, rests, maxDepth, searchRadius, exact);
+        if (!surfaces) throw GraphError("Collide: " + whyNot);
+        if (!incremental) {
+            gpu::StageInputs all;
+            all.collide = gpu::collideHostRoots(*surfaces, *in);
+            *result = gpu::runStage(gpu::StageKind::Collide, reader, in, nullptr, std::move(all));
+            return true;
+        }
+        const StrandChanges* changes = someStrandsChanged(*incremental, 0);
+        const StrandsPtr last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
+        if (!last || !inputUnchanged(*incremental, 1) || !inputUnchanged(*incremental, 2)) return false;
+        if (changes->none()) {  // the same strands in: the same result
+            *result = last;
+            *changed = *changes;
+            return true;
         }
         auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->overwritePositions();  // made its own here, each strand copied in by the thread walking it
-        }
-        // Per field: the margin its blend may answer below a point's height by (two of its cells'
-        // diagonals), for the per-strand test below.
-        std::vector<float> fieldMargins(meshes.size(), 0.0f);
-        for (std::size_t m = 0; m < meshes.size(); ++m) {
-            if (fields[m]) fieldMargins[m] = 2.0f * 1.7320508f * fields[m]->cellSize();
-        }
-        // Each still mesh's field asked once for a whole strand first (MeshDistanceField::bounds at
-        // its root, out to its farthest point and the push's reach): a mesh those bounds settle every
-        // push for (the strand well above it, or beyond the search: its field would leave each of
-        // those points alone) is not asked at the strand's points while they stay that near the root
-        // (one a push of the other mesh moved farther is asked). look.slang CollideCS does the same.
-        auto collide = [&](std::size_t s) {
-            const std::size_t n = out->strandPointCount(s);
-            if (n < 2) return;
-            Vec3f* pts = out->strandPoints(s);
-            std::array<float, 2> skipWithin{-1.0f, -1.0f};  // per mesh: skipped while points are this near the root
-            if (collideStrandBounds.load(std::memory_order_relaxed)) {
-                float farthest = 0.0f;
-                for (std::size_t i = 1; i < n; ++i) farthest = std::max(farthest, (pts[i] - pts[0]).length());
-                const float within = farthest * 1.001f + reach + 1e-6f;
-                for (std::size_t m = 0; m < meshes.size(); ++m) {
-                    float heightLow = 0.0f, distanceLow = 0.0f;
-                    if (fields[m] && fields[m]->bounds(pts[0], within, &heightLow, &distanceLow) &&
-                        (heightLow >= reach + fieldMargins[m] || distanceLow > searchRadius + fieldMargins[m])) {
-                        skipWithin[m] = within;
-                        collideSkipped.fetch_add(1, std::memory_order_relaxed);
-                    }
-                }
-            }
-            thread_local std::vector<float> lengths;  // scratch, reused across strands
-            lengths.assign(n, 0.0f);
-            for (std::size_t i = 1; i < n; ++i) lengths[i] = (pts[i] - pts[i - 1]).length();
-
-            auto keepLength = [&](std::size_t i) {
-                const Vec3f d = pts[i] - pts[i - 1];
-                const float len = d.length();
-                if (len > 0.0f) pts[i] = pts[i - 1] + d * (lengths[i] / len);
-            };
-            // Per mesh: a point queried on this strand and how near the mesh can be to it. The
-            // distance to a mesh changes no faster than the point moves, so a point farther from
-            // that one's bound than the search radius (with room for rounding) cannot be found
-            // near the mesh: its query is skipped, the answer (a miss) the same.
-            std::array<Vec3f, 2> anchor{};
-            std::array<float, 2> bound{-1.0f, -1.0f};
-            // Per deformed mesh asked through its rest pose: where the strand's walk is.
-            std::array<RestPoseCollision::Cursor, 2> cursors{};
-            auto beyondBound = [&](std::size_t m, const Vec3f& p) {
-                if (!(bound[m] > searchRadius)) return false;
-                const float scale = std::max({std::fabs(p.x), std::fabs(p.y), std::fabs(p.z)});
-                const float room = 1e-4f * (searchRadius + bound[m] + scale) + 1e-6f;
-                return bound[m] - (p - anchor[m]).length() > searchRadius + room;
-            };
-            // `soft`: the push eased by the softness (softPush), asked to `reach`; else to the offset.
-            auto pushOut = [&](std::size_t m, std::size_t i, bool soft) {
-                if (skipWithin[m] >= 0.0f && (pts[i] - pts[0]).length() <= skipWithin[m]) return false;  // settled for the strand
-                const float to = soft ? reach : offset;
-                // Through a rest pose, the mesh's bound first: it costs less than the walk to the
-                // point's vertex, and the answer (a miss) is the mesh's own.
-                if (rests[m] && beyondBound(m, pts[i])) return false;
-                if (fields[m] || rests[m]) {
-                    Vec3f delta;
-                    // A still mesh's field answers alone (never Ask, but for a field without a grid:
-                    // the mesh's), as the GPU's Collide does from its tables. Through a rest pose the
-                    // deformed mesh answers where the rest field cannot tell (its own answer, which
-                    // the rest field's alone would miss by how the mesh bends; the GPU leaves that
-                    // Collide to the CPU).
-                    MeshDistanceField::Probe alone;
-                    alone.fieldOnly = true;
-                    const MeshDistanceField::Push push =
-                        fields[m] ? fields[m]->push(pts[i], to, maxDepth, searchRadius, &delta, &alone)
-                                  : rests[m]->push(pts[i], to, maxDepth, searchRadius, &delta, cursors[m]);
-                    switch (push) {
-                        case MeshDistanceField::Push::Kept: return false;
-                        case MeshDistanceField::Push::Moved:
-                            if (soft) delta = softPush(delta, softness);
-                            pts[i] += delta;
-                            return true;
-                        case MeshDistanceField::Push::Ask: break;  // the mesh's answer, below
-                    }
-                }
-                const ScalpMesh& mesh = *meshes[m];
-                if (beyondBound(m, pts[i])) return false;
-                float lowerBound = 0.0f;
-                const SurfacePoint sp = mesh.closestPointBounded(pts[i], searchRadius, &lowerBound);
-                anchor[m] = pts[i];
-                bound[m] = lowerBound;
-                if (sp.root.face < 0) return false;
-                const float height = (pts[i] - sp.position).dot(sp.normal);
-                if (height >= to || height <= -maxDepth) return false;
-                Vec3f delta = sp.normal * (to - height);
-                if (soft) delta = softPush(delta, softness);
-                pts[i] += delta;
-                return true;
-            };
-            const StrandRoot root = s < out->roots().size() ? out->roots()[s] : StrandRoot{-1, 0.0f, 0.0f};
-            if (!(softness > 0.0f) && !(smoothing > 0.0f)) {
-                // Root-to-tip passes: each point follows the one before (its length kept), then is
-                // pushed out of each mesh in turn (if it moved, its length kept and pushed again).
-                for (int pass = 0; pass < iterations; ++pass) {
-                    bool moved = false;
-                    for (std::size_t m = 0; m < meshes.size(); ++m) {  // each pass walks from the root
-                        if (rests[m]) cursors[m] = rests[m]->cursor(root, pts[0]);
-                    }
-                    for (std::size_t i = 1; i < n; ++i) {
-                        keepLength(i);  // follow the leader
-                        for (std::size_t m = 0; m < meshes.size(); ++m) {
-                            if (pushOut(m, i, false)) {
-                                moved = true;
-                                keepLength(i);
-                                pushOut(m, i, false);
-                            }
-                        }
-                    }
-                    if (!moved) break;
-                }
-                return;
-            }
-            // Softness and smoothing act on the collider (a floor, a shoulder): the scalp, which the
-            // strands grow from (each root within any band above it), keeps its hard push. A strand
-            // the collider never moves walks as above. Once the collider moved a point, the walk
-            // carries each later segment as the strand it walks has it (its heading kept) from the
-            // point before, so a strand meeting the collider slides along it rather than folding
-            // back on itself; its first push of a point in the first pass is eased by the softness
-            // (softPush). Passes after the first walk the last one's strand, to the offset alone
-            // (an ease asked again of the point it made would lift it again). `from`: the strand
-            // walked first; true when the collider moved a point.
-            thread_local std::vector<Vec3f> came, corrections;
-            came.assign(pts, pts + n);
-            auto carry = [&](const Vec3f* from, bool ease) {
-                bool touched = false;
-                for (int pass = 0; pass < iterations; ++pass) {
-                    const Vec3f* walked = pass == 0 ? from : pts;
-                    bool moved = false, shifted = false;
-                    for (std::size_t m = 0; m < meshes.size(); ++m) {
-                        if (rests[m]) cursors[m] = rests[m]->cursor(root, pts[0]);
-                    }
-                    Vec3f last = walked[0];  // the walked strand's point before (as it was)
-                    for (std::size_t i = 1; i < n; ++i) {
-                        const Vec3f here = walked[i];
-                        if (shifted) {
-                            pts[i] = pts[i - 1] + (here - last);
-                        } else {
-                            pts[i] = here;
-                            keepLength(i);  // follow the leader
-                        }
-                        last = here;
-                        for (std::size_t m = 0; m < meshes.size(); ++m) {
-                            if (pushOut(m, i, ease && pass == 0 && colliders[m])) {
-                                moved = true;
-                                if (colliders[m]) shifted = touched = true;
-                                keepLength(i);
-                                pushOut(m, i, false);
-                            }
-                        }
-                    }
-                    if (!moved) break;
-                }
-                return touched;
-            };
-            if (!carry(came.data(), softness > 0.0f) || !(smoothing > 0.0f)) return;
-            // Smoothing: each point's correction (from the strand as it came) spread toward the
-            // root (smoothCorrections), each segment turned to the smoothed strand's (came plus
-            // the spread corrections), its length kept, from the root; then walked again (to the
-            // offset: no point is left inside).
-            corrections.resize(n);
-            for (std::size_t i = 0; i < n; ++i) corrections[i] = pts[i] - came[i];
-            smoothCorrections(corrections.data(), lengths.data(), n, smoothing);
-            Vec3f lastSpot = came[0];
-            for (std::size_t i = 1; i < n; ++i) {
-                const Vec3f spot = came[i] + corrections[i];
-                const Vec3f d = spot - lastSpot;
-                const float len = d.length();
-                pts[i] = pts[i - 1] + (len > 0.0f ? d * (lengths[i] / len) : came[i] - came[i - 1]);
-                lastSpot = spot;
-            }
-            thread_local std::vector<Vec3f> bent;
-            bent.assign(pts, pts + n);
-            carry(bent.data(), false);
-        };
-        if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                collide(s);
-            });
-            *changed = *changes;
-        } else {
-            parallelFor(0, out->strandCount(), [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                collide(s);
-            });
-        }
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        gpu::StageInputs listed;  // (each strand's root: those listed, in that order)
+        listed.collide = gpu::collideHostRoots(*surfaces, *in, &changes->strands);
+        gpu::runStageOnStrands(gpu::StageKind::Collide, reader, in, changes->strands, nullptr, *out, std::move(listed));
+        *changed = *changes;
         *result = StrandsPtr(out);
         return true;
     }
@@ -536,7 +320,6 @@ private:
         const float width = static_cast<float>(params().getDouble("width"));
         const ScalarField strength(params(), "strength", scalp);
         strength.validate(*in);
-        const Ramp profile = params().getRamp("profile");
         const std::string only = flow ? std::string() : params().getString("part");
 
         const StrandChanges* changes = nullptr;
@@ -552,35 +335,20 @@ private:
                 return true;
             }
         }
+        // look.slang's PartCS, the GPU preview's own (look_cpu.h), on each strand's side of the parts:
+        // in full, or the strands the input changed in, into the last result's copy.
+        gpu::StageInputs sides;
+        if (!last) {
+            sides.part = gpu::partInputs(*in, parts.get(), scalp, only, width);
+            *result = gpu::runStage(gpu::StageKind::Part, params(), in, scalp, std::move(sides));
+            remember(*result, flow, parts);
+            return true;
+        }
         auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
-        const RampAlong along(profile, *out);
-        auto part =[&](std::size_t s) {
-            const std::size_t n = out->strandPointCount(s);
-            const StrandRoot& root = out->roots()[s];
-            if (n < 2 || !(scalp && scalp->contains(root))) return;
-            Vec3f* pts = out->strandPoints(s);
-            const PartLines::Side side = parts->sideOf(scalp->restPositionOr(root, pts[0]), only);
-            if (side.side == 0 || side.distance >= width) return;
-            const float falloff = (1.0f - side.distance / width) * (1.0f - side.distance / width);
-            const float amount = std::clamp(strength.at(*out, s), 0.0f, 1.0f) * falloff;
-            const Vec3f away = parts->awayFrom(side, scalp->normal(root));
-            if (amount <= 0.0f || away.length() == 0.0f) return;
-            turnToward(pts, n, away, amount, along);
-        };
-        if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                part(s);
-            });
-            *changed = *changes;
-        } else {
-            parallelFor(0, out->strandCount(), part);
-        }
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        sides.part = gpu::partInputs(*in, parts.get(), scalp, only, width, &changes->strands);
+        gpu::runStageOnStrands(gpu::StageKind::Part, params(), in, changes->strands, scalp, *out, std::move(sides));
+        *changed = *changes;
         *result = StrandsPtr(out);
         remember(*result, flow, parts);
         return true;
@@ -588,10 +356,6 @@ private:
 };
 
 
-// How fast strands bend toward gravity where they bend most (strength 1, no stiffness, all the
-// strand still to hang): over a whole strand at that rate, its direction comes within about 2%
-// of gravity's (exp(-8 x the mean load, 0.5)).
-constexpr float kGravityBend = 8.0f;
 
 // Strands bend from the root under their weight, toward `direction` (world -Y, or painted per
 // root in a color set). Walking from the root, each segment keeps its own shape relative to the
@@ -656,8 +420,6 @@ private:
         worldDirection.validate(*in);
         const std::string colorSet = params().getString("directionColorSet");
         const bool painted = !colorSet.empty() && scalp && scalp->hasColorSet(colorSet);
-        const float stiffness = static_cast<float>(params().getDouble("stiffness"));
-        const Ramp stiffnessProfile = params().getRamp("stiffnessProfile");
 
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
@@ -671,70 +433,43 @@ private:
                 return true;
             }
         }
-        auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
-        auto hang = [&](std::size_t s) {
-            const std::size_t n = out->strandPointCount(s);
-            if (n < 2) return;
-            const float amount = strength.at(*out, s);
-            if (amount <= 0.0f) return;
-            const StrandRoot& root = out->roots()[s];
+        // Each strand's way down (its field's, a painted color set's over it): unit, or zero.
+        auto downOf = [&](std::size_t s) {
             Vec3f down = worldDirection.at(*in, s);
+            const StrandRoot& root = in->roots()[s];
             if (painted && scalp->contains(root)) {
                 const ScalpMesh::Color c = scalp->colorAt(colorSet, root);
                 const Vec3f p{c[0] * 2.0f - 1.0f, c[1] * 2.0f - 1.0f, c[2] * 2.0f - 1.0f};
                 if (p.length() > 1e-3f) down = p;
             }
-            if (down.length() < 1e-6f) return;
-            down = down.normalized();
-            Vec3f* pts = out->strandPoints(s);
-            // The strand's own segments (read before they move) and its length.
-            thread_local std::vector<Vec3f> segments;
-            segments.resize(n);
-            float total = 0.0f;
-            for (std::size_t i = 1; i < n; ++i) {
-                segments[i] = pts[i] - pts[i - 1];
-                total += segments[i].length();
-            }
-            if (total <= 0.0f) return;
-            const float strandLength = total;
-            Turn carried;  // the turns of the segments above
-            float arc = 0.0f;
-            for (std::size_t i = 1; i < n; ++i) {
-                const float len = segments[i].length();
-                if (len <= 0.0f) {
-                    pts[i] = pts[i - 1];
-                    continue;
-                }
-                const Vec3f dir = carried(segments[i] / len);
-                const float load = std::max(0.0f, strandLength - (arc + 0.5f * len)) / strandLength;
-                const float stiff = std::clamp(stiffness * stiffnessProfile(arc / strandLength), 0.0f, 1.0f);
-                arc += len;
-                const float share = 1.0f - pm::exp(-amount * kGravityBend * (1.0f - stiff) * load * len / strandLength);
-                // The turn toward gravity (straight against it: about any way across).
-                const float c = std::clamp(dir.dot(down), -1.0f, 1.0f);
-                Vec3f axis = dir.cross(down);
-                const float sine = axis.length();
-                axis = sine > 1e-6f ? axis / sine : anyPerpendicular(dir);
-                const float angle = pm::atan2(sine, c) * share;
-                const Turn turn = angle > 0.0f ? Turn::about(axis, angle) : Turn{};
-                pts[i] = pts[i - 1] + turn(dir) * len;
-                carried = carried.then(turn);
-            }
+            return down.length() < 1e-6f ? Vec3f{} : down.normalized();
         };
-        if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                hang(s);
-            });
-            *changed = *changes;
-        } else {
-            parallelFor(0, out->strandCount(), hang);
+        // On the CPU engine (look.slang GravityCS): one way down, or each strand's
+        // (StageInputs::directions; `which`: those strands alone, in that order).
+        const bool perStrand = !worldDirection.isConstant() || !colorSet.empty();
+        auto engineRun = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* inputs) {
+            gpu::StageParamReader reader(params(), "");
+            reader.directions = perStrand;
+            if (perStrand) {
+                auto downs = std::make_shared<std::vector<Vec3f>>(which ? which->size() : in->strandCount());
+                parallelFor(0, downs->size(), [&](std::size_t k) { (*downs)[k] = downOf(which ? (*which)[k] : k); }, 4096);
+                inputs->directions = std::move(downs);
+            }
+            return reader;
+        };
+        // look.slang's GravityCS, the GPU preview's own (look_cpu.h): in full, or the strands the
+        // input changed in, into the last result's copy.
+        gpu::StageInputs stage;
+        if (!last) {
+            const gpu::StageParamReader reader = engineRun(nullptr, &stage);
+            *result = gpu::runStage(gpu::StageKind::Gravity, reader, in, scalp, std::move(stage));
+            return true;
         }
+        auto out = std::make_shared<StrandSet>(*in);
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        const gpu::StageParamReader reader = engineRun(&changes->strands, &stage);
+        gpu::runStageOnStrands(gpu::StageKind::Gravity, reader, in, changes->strands, scalp, *out, std::move(stage));
+        *changed = *changes;
         *result = StrandsPtr(out);
         return true;
     }
@@ -784,13 +519,9 @@ private:
         const ScalpMesh* scalp = scalpOf(ctx);
         const ScalarField amount(params(), "distance", scalp);
         amount.validate(*in);
-        const bool perPoint = amount.perPoint();
-        const Ramp profile = params().getRamp("profile");
-        const bool alongNormal = params().getString("along") != "direction";
         const VectorField directionField(params(), "direction", scalp);
         directionField.validate(*in);
         auto unit = [](Vec3f d) { return d.length() > 1e-6f ? d.normalized() : Vec3f{}; };
-        const Vec3f direction = unit(directionField.constant());
 
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
@@ -804,35 +535,31 @@ private:
                 return true;
             }
         }
-        auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
-        const RampAlong along(profile, *out);
-        auto displace = [&](std::size_t s) {
-            const std::size_t n = out->strandPointCount(s);
-            const StrandRoot& root = out->roots()[s];
-            const Vec3f way = alongNormal && scalp && scalp->contains(root)
-                                  ? scalp->normal(root)
-                                  : (directionField.isConstant() ? direction : unit(directionField.at(*in, s)));
-            const float strandAmount = perPoint ? 0.0f : amount.at(*out, s);
-            Vec3f* pts = out->strandPoints(s);
-            for (std::size_t i = 1; i < n; ++i) {
-                // Per point: read before the point moves (the field sees the incoming shape).
-                pts[i] += way * ((perPoint ? amount.atPoint(*out, s, i) : strandAmount) * along(i, n));
+        // On the CPU engine (look.slang DisplaceCS): one direction, or each strand's unit one
+        // (StageInputs::directions; `which`: those strands alone, in that order).
+        auto engineRun = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* inputs) {
+            gpu::StageParamReader reader(params(), "");
+            reader.directions = !directionField.isConstant();
+            if (reader.directions) {
+                auto ways = std::make_shared<std::vector<Vec3f>>(which ? which->size() : in->strandCount());
+                parallelFor(0, ways->size(), [&](std::size_t k) { (*ways)[k] = unit(directionField.at(*in, which ? (*which)[k] : k)); }, 4096);
+                inputs->directions = std::move(ways);
             }
+            return reader;
         };
-        if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                displace(s);
-            });
-            *changed = *changes;
-        } else {
-            parallelFor(0, out->strandCount(), displace);
+        // look.slang's DisplaceCS, the GPU preview's own (look_cpu.h): in full, or the strands the
+        // input changed in, into the last result's copy.
+        gpu::StageInputs stage;
+        if (!last) {
+            const gpu::StageParamReader reader = engineRun(nullptr, &stage);
+            *result = gpu::runStage(gpu::StageKind::Displace, reader, in, scalp, std::move(stage));
+            return true;
         }
+        auto out = std::make_shared<StrandSet>(*in);
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        const gpu::StageParamReader reader = engineRun(&changes->strands, &stage);
+        gpu::runStageOnStrands(gpu::StageKind::Displace, reader, in, changes->strands, scalp, *out, std::move(stage));
+        *changed = *changes;
         *result = StrandsPtr(out);
         return true;
     }
@@ -880,7 +607,57 @@ void registerDisplaceOperator(OperatorRegistry& registry) {
                           [] { return std::make_unique<DisplaceOp>(); });
 }
 
-void setCollideStrandBounds(bool on) { collideStrandBounds = on; }
-std::size_t collideSkippedSurfaces() { return collideSkipped.load(); }
+bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* field, const ScalpMesh& mesh, Vec3f& p, float to, bool soft,
+                     float softness, float maxDepth, float searchRadius, CollideRestState& state) {
+    if (!rest && field) {
+        // A still mesh's field answers alone (never Ask, but for a field without a grid: the
+        // mesh's), as the GPU's Collide does from its tables.
+        Vec3f delta;
+        MeshDistanceField::Probe alone;
+        alone.fieldOnly = true;
+        switch (field->push(p, to, maxDepth, searchRadius, &delta, &alone)) {
+            case MeshDistanceField::Push::Kept: return false;
+            case MeshDistanceField::Push::Moved:
+                if (soft) delta = softPush(delta, softness);
+                p += delta;
+                return true;
+            case MeshDistanceField::Push::Ask: break;  // the mesh's answer, below
+        }
+    }
+    if (rest) {
+        // The mesh's bound first: it costs less than the walk to the point's vertex, and the answer
+        // (a miss) is the mesh's own.
+        if (collideBeyondBound(state, p, searchRadius)) return false;
+        Vec3f delta;
+        switch (rest->push(p, to, maxDepth, searchRadius, &delta, state.cursor)) {
+            case MeshDistanceField::Push::Kept: return false;
+            case MeshDistanceField::Push::Moved:
+                if (soft) delta = softPush(delta, softness);
+                p += delta;
+                return true;
+            case MeshDistanceField::Push::Ask: break;  // the deformed mesh's own answer, below
+        }
+    }
+    // Where the rest field cannot tell: the deformed mesh itself (which the rest field alone would
+    // miss by how the mesh bends); method exact: always.
+    return collideMeshPush(mesh, p, to, soft, softness, maxDepth, searchRadius, state);
+}
+
+bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth, float searchRadius,
+                     CollideRestState& state) {
+    if (collideBeyondBound(state, p, searchRadius)) return false;
+    Vec3f delta;
+    float lowerBound = 0.0f;
+    const SurfacePoint sp = mesh.closestPointBounded(p, searchRadius, &lowerBound);
+    state.anchor = p;
+    state.bound = lowerBound;
+    if (sp.root.face < 0) return false;
+    const float height = (p - sp.position).dot(sp.normal);
+    if (height >= to || height <= -maxDepth) return false;
+    delta = sp.normal * (to - height);
+    if (soft) delta = softPush(delta, softness);
+    p += delta;
+    return true;
+}
 
 }  // namespace groomlab

@@ -62,8 +62,6 @@ GROOMLAB_STAGE(Blend, "blend", "mix", "", "profile", "", "mix")
 // (The hair grid's layout is the core strands' and the scalp's: none of these change it.)
 GROOMLAB_STAGE(SelfCollide, "selfCollide", "strength", "", "profile", "", "affect strength packing")
 GROOMLAB_STAGE(Static, "static", "strength", "", "profile", "", "affect strength randomness")
-// (Its ring's bins are made on the GPU from the core strands: a center dragged too.)
-GROOMLAB_STAGE(Tie, "tie", "affect", "", "", "center direction", "affect radius tightness spread twist ease")
 // The shapers working on each strand alone (transform_ops.cpp, deform_ops.cpp DisplaceOp,
 // extra_ops.cpp TwistOp). Direction's mapped fields are the ones it maps (directionMapped).
 GROOMLAB_STAGE(Bend, "bend", "angle", "", "", "direction", "affect angle start end randomness seed")
@@ -86,6 +84,13 @@ GROOMLAB_STAGE(MeshCut, "meshCut", "", "", "", "", "affect offset")
 // A Merge without a seam to blend (look_ops.cpp MergeOp): the run goes up its input a; b's
 // strands, as cached, follow a's in the base and are handed on (LookStage::prefix).
 GROOMLAB_STAGE(Merge, "merge", "", "", "", "", "")
+// The nodes keeping or adding strands (extra_ops.cpp CullOp, feather_ops.cpp SplitOp's outputs,
+// mirror_op.cpp MirrorOp): a run through one starts with it, the nodes before it a run of their own
+// (LookBranch), their strands copied into its result as its last evaluation laid that out (look_chain.cpp
+// gathers). Their own params pick the strands: the CPU's.
+GROOMLAB_STAGE(Cull, "cull", "", "", "", "", "")
+GROOMLAB_STAGE(Split, "split", "", "", "", "", "")
+GROOMLAB_STAGE(Mirror, "mirror", "", "", "", "", "")
 
 // (Wet's other params pick its levels' centers: the CPU's.)
 GROOMLAB_STAGE_NODE(Wet, Clump, "", "", "affect wetness")

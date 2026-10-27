@@ -7,12 +7,16 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "groomlab/field.h"
 #include "groomlab/graph.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
@@ -122,9 +126,8 @@ private:
 StrandsPtr guidesAsStrands(const GuideSet& guides);
 // Strands as guides (graph.cpp, as a Curves node hands guides back): IDs, roots, points, strand
 // channels as attributes and point channels as per-point layers. For an input taking either kind
-// whose operator reads guides (Clump's centers). `coreOnly`: only the preview core's strands
-// (preview_core.h), the same at every preview density. The roles' channel never comes along.
-GuidesPtr strandsAsGuides(const StrandSet& strands, bool coreOnly = false);
+// whose operator reads guides. The roles' channel (preview_core.h) never comes along.
+GuidesPtr strandsAsGuides(const StrandSet& strands);
 
 // Numbers b's groups after a's highest (look_ops.cpp): its clumpId, braidId and featherId (each
 // channel both have) offset by groupNumberBase of the largest of a's core strands (strand_set.h,
@@ -177,6 +180,12 @@ StrandsPtr applyAffect(const StrandSet& in, const StrandsPtr& out, const ScalarF
 // Every strand resampled by arc length to points[s] points, widths and per-point channels
 // following; IDs, roots and per-strand channels stay (shape_ops.cpp: Resample's).
 StrandsPtr resampleStrands(const StrandSet& source, const std::vector<std::size_t>& points, bool byCurvature = false);
+// Strand s of `source` resampled into `out`'s points for it (as many as `out` has; evenly by arc
+// length, or closer together where it bends with `byCurvature`), widths (`widths`: `source` has
+// them) and point channels (`inPoint` into `outPoint`) following: what resampleStrands does for each.
+void resampleStrand(const StrandSet& source, StrandSet& out, std::size_t s, bool byCurvature, bool widths,
+                    const std::vector<const std::vector<float>*>& inPoint, const std::vector<std::vector<float>*>& outPoint,
+                    std::vector<float>& outWidths);
 
 // Points binned in a world-aligned grid of cubes `cell` wide (at least the farthest a query
 // reaches): a query visits the points of a point's cell and its 26 neighbours. What a query finds
@@ -270,6 +279,52 @@ inline float roundToPercentStep(float value, double scale = 1.0) {
     if (scale == 1.0 || !(scale > 0.0) || !std::isfinite(scale)) return roundToDecadeStep(value, 230);
     return static_cast<float>(roundToDecadeStep(static_cast<float>(value / scale), 230) * scale);
 }
+
+// For an operator making again only the strands its input changed in (Operator::evaluateIncremental)
+// whose fields may read `longest` (the longest strand's length: an expression of $length / $longest):
+// the longest its last result was made with. With the longest the same, each strand's value is still
+// the strand's own, and a dab that changes some strands needs only theirs made again.
+class LongestKept {
+public:
+    // Whether `fields` (validated on the strands at hand) read each strand alone, or with all they
+    // read of the rest `longest` and that what it was for `last` (the node's last result).
+    bool local(const StrandsPtr& last, std::initializer_list<const ScalarField*> fields) const {
+        const float longest = read(fields);
+        if (longest == kNotLocal) return false;
+        if (longest < 0.0f) return true;
+        const std::lock_guard<std::mutex> lock(mutex_);
+        return last && output_.lock() == last && longest_ == longest;
+    }
+    // `output` made with `fields` (validated on its input).
+    void made(const StrandsPtr& output, std::initializer_list<const ScalarField*> fields) const {
+        const float longest = read(fields);
+        const std::lock_guard<std::mutex> lock(mutex_);
+        output_ = longest >= 0.0f ? output : StrandsPtr();
+        longest_ = longest;
+    }
+    // Masked: it answers for the mixed result the graph keeps (Operator::resultMixed).
+    void mixed(const StrandsPtr& made, const StrandsPtr& mixed) const {
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (made && output_.lock() == made) output_ = mixed;
+    }
+
+private:
+    static constexpr float kNotLocal = -2.0f;
+    // The longest the fields read (negative: none reads it), or kNotLocal.
+    static float read(std::initializer_list<const ScalarField*> fields) {
+        float longest = -1.0f;
+        for (const ScalarField* f : fields) {
+            if (f->strandLocal()) continue;
+            const float l = f->longestRead();
+            if (l < 0.0f) return kNotLocal;
+            longest = std::max(longest, l);
+        }
+        return longest;
+    }
+    mutable std::mutex mutex_;
+    mutable std::weak_ptr<const StrandSet> output_;
+    mutable float longest_ = -1.0f;
+};
 
 // Strands of `in` spread over the scalp about `spacing` apart (look_ops.cpp: a Clump's own pick of
 // its centers by size, at its randomness default, every core strand allowed: preview_core.h), in

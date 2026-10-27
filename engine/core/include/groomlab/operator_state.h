@@ -142,6 +142,9 @@ void interpolateRecords(const InterpolateState& state, std::size_t first, std::s
 // holding equal records (a host updates only the others).
 std::size_t interpolateChunkStrands();
 std::vector<const void*> interpolateChunks(const InterpolateState& state);
+// `state` for its strands `which` alone, in that order (each one's records as they are): what the
+// CPU engine binds a view of them by (LookEngine::setBaseView).
+std::shared_ptr<const InterpolateState> interpolateStateOf(const InterpolateState& state, const std::vector<std::uint32_t>& which);
 // The bytes the binding's records hold (guides, weights, twists, per strand its offset, nearest
 // distance and whether it is bound; not what binding again reads).
 std::size_t interpolateRecordBytes(const InterpolateState& state);
@@ -191,8 +194,26 @@ struct InterpolateClearance {
     MeshDistanceField::Tables tables;
     std::shared_ptr<const RestPoseCollision> rest;
     std::shared_ptr<const std::vector<std::uint32_t>> walk;
+    // The scalp: over a deformed one, what the walk asks where it reaches a degenerate face's vertex
+    // (meshPushOf; the CPU engine's alone, through the host: look.slang hostClearanceMeshPush).
+    MeshPtr mesh;
+    // The CPU engine's: every push asked of `surface` through the host (`host`: look.slang
+    // hostClearanceSurfacePush; its field makes only the bricks the strands come near, where tables
+    // are made whole), the tables a placeholder.
+    CollisionSurface surface;
+    bool host = false;
 };
-std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet& params, const MeshPtr& scalp, std::string* why);
+// `host` (the CPU engine's caller): every push asked of the scalp's surface through the host
+// (InterpolateClearance::host), no tables made.
+std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet& params, const MeshPtr& scalp, std::string* why,
+                                                                 bool host = false);
+// Over a deformed scalp (clearance.rest): each strand's walk's first vertex, its root face's vertex
+// nearest its first point (RestPoseCollision::cursor; 0xffffffff: none), for the kernel's walk. Null
+// with *why where a walk could reach a degenerate face's vertex (no motion: the mesh asked, the CPU
+// engine's alone: `meshAsked` true for it) within the strands' reach (`longestGuide` the longest
+// guide's length).
+std::shared_ptr<const std::vector<std::uint32_t>> interpolateRestCursors(const InterpolateClearance& clearance, const StrandSet& strands,
+                                                                         float longestGuide, std::string* why, bool meshAsked = false);
 // Which points of a strand of `points` points the walk asks of the field: every step-th and the
 // tip, at most 16 asked (a strand of up to 17 points: every point); the points between move by the
 // moves of the two asked around them, blended by index, or are walked one by one where either of
@@ -201,6 +222,28 @@ constexpr std::size_t kClearanceAsked = 16;
 inline std::size_t interpolateClearanceStep(std::size_t points) {
     return points > kClearanceAsked + 1 ? (points - 1 + kClearanceAsked - 1) / kClearanceAsked : 1;
 }
+
+// ---- Collide ------------------------------------------------------------------------------------
+
+// What a strand's walk knows of a mesh deformed away from its rest pose (CollideOp asks it through
+// the rest pose's field, RestPoseCollision): where its walk is, and a point the mesh's own closest
+// point query left with how near the mesh can be to it (bound below 0: none yet).
+struct CollideRestState {
+    RestPoseCollision::Cursor cursor;
+    Vec3f anchor;
+    float bound = -1.0f;
+};
+// CollideOp's push of point p out of `mesh` to `to` above it (the offset, or with `soft` the offset
+// plus the softness, the push then eased: softPush), within maxDepth below and the search radius:
+// through `rest` for a mesh deformed away from its rest pose (its rest field, the mesh itself where
+// that cannot tell), else through `field` (a still mesh's: its answers alone, the mesh's where it
+// has no grid), else (method exact) the mesh itself. True when it moved p. The CPU engine's Collide
+// asks the same (look.slang hostCollidePush; the GPU's reads the field as tables).
+bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* field, const ScalpMesh& mesh, Vec3f& p, float to, bool soft,
+                     float softness, float maxDepth, float searchRadius, CollideRestState& state);
+// Its last step: the mesh's own closest point (the bound of the last query skipping what it settles).
+bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth, float searchRadius,
+                     CollideRestState& state);
 
 // ---- Part ---------------------------------------------------------------------------------------
 
@@ -262,7 +305,8 @@ inline Vec3f windLoopPoint(const WindPhase& phase, const Vec3f& direction, const
 struct HairGridLayout {
     std::vector<std::uint32_t> segments;  // 2 words a segment of a splatted strand: its first point's index, its strand
     std::size_t strands = 0;              // how many strands are splatted
-    double h = 0.0;                       // the cell
+    double h = 0.0;                       // the cell the strands are sampled by
+    double cell = 0.0;                    // the grid's cell: h, or coarser where hair spreads far wider than the scalp
     double wallReach = 0.0;               // how far a node looks for the scalp, in cells (hairGridWalls)
     std::int64_t margin = 0;              // nodes laid past the samples each way
     int dilate = 0;                       // rings of blocks laid around those holding samples
@@ -278,20 +322,31 @@ struct HairGridLayout {
     // The floor (none without a scalp: no tables).
     float floor = 0.0f, depth = 0.0f, searchRadius = 0.0f, beside = 0.0f;
     MeshDistanceField::Tables tables;
+    // Over a scalp deformed away from its rest pose: the floor asked through its rest pose (no
+    // tables; the CPU engine's alone, its walk asking the host: hairGridFloorPush).
+    CollisionSurface floorSurface;
 };
 // The layout of node type `type` (op::kSelfCollide or op::kStatic) on `in`, the strands it takes,
 // over `scalp` (its "scalp" external; null: none). False with *why when it lays none (nothing to
-// splat) or its scalp's floor cannot be read as tables (deformed away from its rest pose: the walk
-// asks the rest pose's field vertex by vertex; too big for the field's grid).
+// splat) or its scalp's floor cannot be read as tables (too big for the field's grid). Over a scalp
+// deformed away from its rest pose: floorSurface, no tables (the walk asks the rest pose's field
+// vertex by vertex: hairGridFloorCursor, hairGridFloorPush).
 bool hairGridLayout(const std::string& type, const StrandSet& in, const std::shared_ptr<const ScalpMesh>& scalp, HairGridLayout* out,
-                    std::string* why);
+                    std::string* why, double scale = 1.0);  // scale: EvalContext::scale, the lattices' anchor
 // The scalp near the world's grid nodes (the whole multiples of h): what wallsOf finds for each
 // node of a grid of that cell (its closest point within `reachCells` cells: the node's height over
 // it and its normal), for every node of the box that can be that near. Words: the box's first node
 // (3, signed), its nodes along each axis (3), how many walls, 0; then a word a node of the box (x
 // fastest: its wall, 0xffffffff for none near); then 4 words a wall (height, normal xyz, as
 // floats). Null when the box would be too large.
-std::shared_ptr<const std::vector<std::uint32_t>> hairGridWalls(const ScalpMesh& scalp, double h, double reachCells);
+// `within` (lo, hi; null: none): only the nodes inside that box (the rest none near).
+std::shared_ptr<const std::vector<std::uint32_t>> hairGridWalls(const ScalpMesh& scalp, double h, double reachCells,
+                                                                const Vec3f* within = nullptr);
+// The walk's floor over a deformed scalp (layout.floorSurface), as the nodes' own walk asks it
+// (hair_grid.h ScalpFloor): a strand's cursor from its root, and p pushed above the floor (true
+// when it moved).
+RestPoseCollision::Cursor hairGridFloorCursor(const HairGridLayout& layout, const StrandRoot& root, const Vec3f& rootPoint);
+bool hairGridFloorPush(const HairGridLayout& layout, Vec3f& p, RestPoseCollision::Cursor& cursor);
 
 // ---- BlendNeighbors, Tangle and Flow: what each strand reads beside its own points ----------------
 

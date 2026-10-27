@@ -503,24 +503,27 @@ StrandsPtr guidesAsStrands(const GuideSet& guides) {
     return out;
 }
 
-GuidesPtr strandsAsGuides(const StrandSet& strands, bool coreOnly) {
+GuidesPtr strandsAsGuides(const StrandSet& strands) {
     auto out = std::make_shared<GuideSet>();
     std::vector<std::string> names = strands.strandChannelNames();
     names.erase(std::remove(names.begin(), names.end(), std::string(kPreviewChannel)), names.end());
     const std::vector<std::string> layers = strands.pointChannelNames();
-    const PreviewCore core(strands);
-    for (std::size_t s = 0; s < strands.strandCount(); ++s) {
-        if (coreOnly && !core.core(s)) continue;
+    // Each guide made on its own (in strand order, as GuideSet::add appends them).
+    std::vector<Guide>& guides = out->guides();
+    guides.resize(strands.strandCount());
+    parallelFor(0, guides.size(), [&](std::size_t s) {
         const Vec3f* pts = strands.strandPoints(s);
         const std::size_t n = strands.strandPointCount(s), begin = strands.strandBegin(s);
-        Guide& g = out->add(strands.ids()[s], std::vector<Vec3f>(pts, pts + n));
+        Guide& g = guides[s];
+        g.id = strands.ids()[s];
+        g.points.assign(pts, pts + n);
         g.root = strands.roots()[s];
         for (const std::string& name : names) g.attributes[name] = (*strands.strandChannel(name))[s];
         for (const std::string& name : layers) {
             const float* values = strands.pointChannel(name)->data() + begin;
             g.pointAttributes[name].assign(values, values + n);
         }
-    }
+    }, 64);
     return out;
 }
 
@@ -1140,10 +1143,11 @@ ChangesPtr strandChangesBetween(const StrandsPtr& p, const StrandsPtr& n) {
     if (!p || !n) return nullptr;
     if (p == n) return noChanges();
     const std::size_t count = n->strandCount();
-    if (p->strandCount() != count || p->pointCount() != n->pointCount() || p->instances() != n->instances() ||
-        p->cardLayers() != n->cardLayers() || p->featherLayers() != n->featherLayers()) {
+    if (p->strandCount() != count || p->pointCount() != n->pointCount() || p->cardLayers() != n->cardLayers() ||
+        p->featherLayers() != n->featherLayers()) {
         return nullptr;
     }
+    const bool instancesChanged = p->instances() != n->instances();
     const std::vector<std::string> strandNames = n->strandChannelNames(), pointNames = n->pointChannelNames();
     if (p->strandChannelNames() != strandNames || p->pointChannelNames() != pointNames) return nullptr;
     for (const std::string& name : strandNames) {
@@ -1202,7 +1206,9 @@ ChangesPtr strandChangesBetween(const StrandsPtr& p, const StrandsPtr& n) {
     }, 1);
     std::vector<std::uint32_t> changed;
     for (const auto& list : found) changed.insert(changed.end(), list.begin(), list.end());
-    return std::make_shared<const StrandChanges>(StrandChanges::listed(std::move(changed)));
+    StrandChanges made = StrandChanges::listed(std::move(changed));
+    made.instancesChanged = instancesChanged;
+    return std::make_shared<const StrandChanges>(std::move(made));
 }
 
 namespace {
@@ -1288,7 +1294,9 @@ ChangesPtr Graph::changesSince(NodeId id, std::uint64_t since, bool asMade) cons
     for (const std::uint32_t s : changes->strands) {
         if (s < node.shownAt->size() && (*node.shownAt)[s] != UINT32_MAX) shown.push_back((*node.shownAt)[s]);
     }
-    return std::make_shared<const StrandChanges>(StrandChanges::listed(std::move(shown)));
+    StrandChanges made = StrandChanges::listed(std::move(shown));
+    made.instancesChanged = changes->instancesChanged;
+    return std::make_shared<const StrandChanges>(std::move(made));
 }
 
 ChangesPtr Graph::inputChanges(const Node& node, std::size_t slot, const Node& source) const {
@@ -1427,7 +1435,12 @@ std::vector<Value> Graph::evaluateWithKeys(NodeId id, const EvalContext& graphCt
                 passedOn = true;
             } else {
                 bool done = false;
-                if (incremental && !masked) {  // masked: in full, then mixed (its changes found below)
+                // An input's instances another set: in full (its result compared with its last, below).
+                bool instancesChanged = false;
+                for (std::size_t slot = 0; slot < own; ++slot) {
+                    instancesChanged = instancesChanged || (changed[slot] && changed[slot]->instancesChanged);
+                }
+                if (incremental && !masked && !instancesChanged) {  // masked: in full, then mixed (its changes found below)
                     IncrementalInputs in;
                     // The node lets go of its last result while the operator runs (it is put back
                     // after), holding it only through `in`: an operator holding it too and nobody

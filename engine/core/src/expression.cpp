@@ -18,6 +18,7 @@
 
 #include "groomlab/color.h"
 #include "groomlab/noise.h"
+#include "groomlab/parallel.h"
 #include "groomlab/random.h"
 
 // The interpreter's per-operation helpers, inlined into its loop (a call per operation costs a
@@ -2610,10 +2611,19 @@ Expression::Bound Expression::bind(const StrandSet& strands) const {
     static std::atomic<std::uint64_t> binds{0};
     bound.serial = ++binds;
     if (readsLongest_) {  // of the core strands (preview_core.h): the same at every preview density
+        // (In blocks side by side, each its longest, then theirs: the longest of all, in any order.)
         const PreviewCore core(strands);
-        for (std::size_t s = 0; s < strands.strandCount(); ++s) {
-            if (core.core(s)) bound.longest = std::max(bound.longest, arcOf(strands.strandPoints(s), strands.strandPointCount(s)));
-        }
+        constexpr std::size_t kBlock = 2048;
+        const std::size_t count = strands.strandCount(), blocks = (count + kBlock - 1) / kBlock;
+        std::vector<float> longest(blocks, 0.0f);
+        parallelFor(0, blocks, [&](std::size_t b) {
+            float most = 0.0f;
+            for (std::size_t s = b * kBlock; s < std::min(count, (b + 1) * kBlock); ++s) {
+                if (core.core(s)) most = std::max(most, arcOf(strands.strandPoints(s), strands.strandPointCount(s)));
+            }
+            longest[b] = most;
+        }, 1);
+        for (const float l : longest) bound.longest = std::max(bound.longest, l);
     }
     return bound;
 }

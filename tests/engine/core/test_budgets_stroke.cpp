@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -36,6 +37,7 @@
 #include <vector>
 
 #include "groomlab/display.h"
+#include "groomlab/groom_file.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/stroke.h"
@@ -209,9 +211,11 @@ private:
 // Each node's time as it last ran, for the report.
 std::string nodeTimes(const GroomSession& session) {
     std::string out;
+    const GroomStats st = session.stats();
     for (const auto& [name, ms] : session.nodeTimes()) {
-        char one[96];
-        std::snprintf(one, sizeof(one), "%s%s %.1f", out.empty() ? "" : ", ", name.c_str(), ms);
+        char one[160];
+        const auto r = st.runs.find(name);
+        std::snprintf(one, sizeof(one), "%s%s %.1f [%s]", out.empty() ? "" : ", ", name.c_str(), ms, r == st.runs.end() ? "?" : r->second.c_str());
         out += one;
     }
     return out;
@@ -242,6 +246,9 @@ struct StrokeTimes {
 struct Bench {
     GroomData data;
     Vec3f strokeAt{0.0f, 10.5f, 5.0f};
+    // The camera, looking at strokeAt from `eye` (aimed; else the benchmark's own, below).
+    bool aimed = false;
+    Vec3f eye;
 };
 
 // The bench sphere (radius 10) with benchGraph's nodes at `count` strands and 500 lattice guides.
@@ -381,7 +388,9 @@ StrokeTimes strokeLatency(Bench bench, float sculptDensity, int strokes, int dab
     const Vec3f eye{0.0f, 22.0f, 62.0f};
     const double verticalFov = 2.0 * std::atan(std::tan(0.5 * 2.0 * std::atan(36.0 / 70.0)) * 1000.0 / 1600.0) * 180.0 / 3.14159265;
     const ToolView view = ToolView::fromMatrix(
-        test::lookAtProjection(eye, eye + Vec3f(0.0f, -std::sin(pitch), -std::cos(pitch)) * 60.0f, verticalFov, 1.6), 1600, 1000);
+        bench.aimed ? test::lookAtProjection(bench.eye, bench.strokeAt, verticalFov, 1.6)
+                    : test::lookAtProjection(eye, eye + Vec3f(0.0f, -std::sin(pitch), -std::cos(pitch)) * 60.0f, verticalFov, 1.6),
+        1600, 1000);
     float x0 = 0.0f, y0 = 0.0f;
     EXPECT_TRUE(view.project(bench.strokeAt, x0, y0));
     BrushTool tool;
@@ -553,6 +562,53 @@ TEST(Budget, BrushStrokeLatencyWithFields) {
         report(label, t);
         std::printf("[ budget ]   nodes incremental per dab at least %zu\n",
                     *std::min_element(t.dabIncremental.begin(), t.dabIncremental.end()));
+    }
+}
+
+TEST(Budget, ProfileAGroomFile) {
+    // A groom file of one's own (GROOMLAB_PROFILE_GROOM: its path; skipped without), profiled: its
+    // first evaluation and a second, then a comb stroke on it (the camera aimed at the scalp's
+    // highest point from a scalp's size away), each with its nodes' times.
+    const char* path = std::getenv("GROOMLAB_PROFILE_GROOM");
+    if (!path || !*path) GTEST_SKIP() << "GROOMLAB_PROFILE_GROOM names no groom file";
+    const GroomFile file = readGroomFile(path);
+    // (Its maps named relative to it: read from beside it.)
+    const std::filesystem::path before = std::filesystem::current_path();
+    std::filesystem::current_path(std::filesystem::absolute(path).parent_path());
+    struct Back {
+        std::filesystem::path to;
+        ~Back() { std::filesystem::current_path(to); }
+    } back{before};
+    for (const bool cached : {true, false}) {
+        // (Not caching intermediates: the second evaluation runs every node again, warm.)
+        GroomSession session(file.data);
+        session.setCacheIntermediates(cached);
+        ViewRequest request;
+        request.density = 1.0f;
+        request.pointBudget = 16.0e6;
+        for (const char* pass : {cached ? "first" : "uncached first", cached ? "second" : "uncached second (every node again)"}) {
+            const auto t0 = std::chrono::steady_clock::now();
+            const ViewResult& view = session.evaluate(request);
+            std::printf("[ profile ] %s evaluation: %.0f ms, %zu strands\n[ profile ]   nodes: %s\n", pass, msSince(t0),
+                        view.strands ? view.strands->strandCount() : std::size_t{0}, nodeTimes(session).c_str());
+        }
+    }
+    Bench bench;
+    bench.data = file.data;
+    const ScalpMesh& scalp = *bench.data.scalp;
+    Vec3f lo = scalp.points().front(), hi = lo;
+    for (const Vec3f& q : scalp.points()) {
+        lo = {std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)};
+        hi = {std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)};
+        if (q.y > bench.strokeAt.y || &q == &scalp.points().front()) bench.strokeAt = q;
+    }
+    const float size = (hi - lo).length();
+    bench.aimed = true;
+    bench.eye = bench.strokeAt + Vec3f(0.0f, 0.6f, 0.8f) * size;
+    for (const float sculpt : {0.35f, 1.0f}) {
+        char label[96];
+        std::snprintf(label, sizeof(label), "the groom file at sculptDensity %.2f", sculpt);
+        report(label, strokeLatency(bench, sculpt, 2, 10));
     }
 }
 

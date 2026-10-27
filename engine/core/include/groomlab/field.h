@@ -61,6 +61,12 @@ public:
         if (field_) return field_->strandLocal();
         return !(hasMap_ && map_.source == MapRef::Source::Expression && expression_.readsLongest());
     }
+    // When all it reads of the rest of the set is `longest`, the longest strand's length its last
+    // validate() read; else negative (FieldValue::longestRead).
+    float longestRead() const {
+        if (field_) return field_->longestRead();
+        return strandLocal() ? -1.0f : bound_.longest;
+    }
 
     // Largest value the field can take (the constant, or the map's max).
     float maximum() const;

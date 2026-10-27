@@ -187,6 +187,13 @@ VectorNoise::VectorNoise(std::uint64_t seed, int octaves, const float* weights) 
     }
 }
 
+VectorNoise::VectorNoise(const std::uint64_t* octaveSeeds, int octaves, const float* weights) : count_(std::clamp(octaves, 1, kMaxOctaves)) {
+    for (int o = 0; o < count_; ++o) {
+        octaves_[o].seed = octaveSeeds[o];
+        weights_[o] = weights ? weights[o] : 1.0f;
+    }
+}
+
 Vec3f VectorNoise::operator()(const Vec3f& p) {
     // vectorNoise's sum, octave by octave in the same order.
     Vec3f sum;

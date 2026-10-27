@@ -25,7 +25,7 @@ the build. The build folders mirror the source (`hosts/maya/RelWithDebInfo/Groom
 | Layer | Where | What it holds |
 | --- | --- | --- |
 | Core | `engine/core/` (`groomlab_core` static lib) | `GroomSession` (`groom_session.cpp`, also called `Groom`: one groom kept evaluated for any host, see [SESSION.md](SESSION.md)), painted scalp maps (`scalp_maps.cpp`), `StrandSet` (copy-on-write arrays), `ScalpMesh`, `GuideHierarchy`/`GuideSet`, the graph evaluator and cache (`graph.cpp`), the editors' edits of a graph's JSON every host makes (`graph_edit.cpp`: names, seeds, connections and their checks, a node's ports), operators (`engine/core/src/operators/*`), brushes (`brush.cpp`), the interactive tools and strokes for any host (`stroke.cpp`, `stroke_tools.cpp`: see [SESSION.md](SESSION.md)), guide picking and selection (`guide_selection.cpp`), painted maps on the scalp (`scalp_paint.cpp`), Catmull-Clark subdivision of the scalp and colliders (`subdivision.cpp`: the plans per cage topology, what match render refines by), HairColor's color patterns for every host (`color_patterns.cpp`: bands along a strand, vane space and the feather patterns drawn in it, the vane normals, the iridescent tint the shaders match), cards (`cards.cpp`; feathers' cards `card_feathers.cpp`, shared textures, layers and the atlas `card_atlas.cpp`, the bakes `card_bake.cpp`, the levels of detail every host offers and what a Cards node cards `card_presets.cpp`, a bake in memory, its files' names and layout and the `cardMaps` record `card_files.cpp`), rachis meshes and feather groups for engines (`feathers.cpp`), strands as meshes and budgets by strand ID for the utilities (`strand_geometry.cpp`), correctives, flow, parts, the viewport's buffers for any host (`display.cpp`, `DisplayBuilder`, see [SESSION.md](SESSION.md)), meshes' sparse signed distance fields on the world's grid, shared across evaluations (`distance_field.cpp`: Collide's, the guide simulation's, Interpolate's keepClearance: coarser cells, a wider band, the field's answers alone, and as tables for the GPU's walk), scales (`scales.cpp`: the built-in plates, `ScaleMeshBuilder` bending the Instance node's scales onto the skin through those fields, kept per scale, with their per-scale shader data: what the viewport, Arnold and the exports read), scales baked into skin maps (`scale_maps.cpp`), the guide simulation (`simulation.cpp`: the position-based rod solver, its water (buoyancy, water drag, a current) and per-point wetness, and each Simulate node's frames, which the session steps and keeps: see [SESSION.md](SESSION.md) Simulation; the node `operators/simulate_op.cpp`), following the scalp (`follow_scalp.cpp`: rest evaluation carried root by root), paths along the scalp (`surface_paths.cpp`: the rest pose welded into a graph, shared by its rest surface hash, and fronts from guide roots: distances along the skin and the turns a direction takes round folds, Interpolate's frame transfer and `followSurface`), groom files, USD writer, glTF writer (`gltf_writer.cpp`) and compressed PNGs (`png.cpp`) for game exports, path resolution (`paths.cpp`). |
-| GPU | `engine/gpu/` (`groomlab_gpu` static lib, Windows) | The GPU look preview's engine, host-free: which run of nodes ending a graph the GPU can take (Interpolate, Length, Clump, Noise, Curl, Width, Part, Gravity, Flyaway, Collide) and with what params, mapped values and kept operator work (`look_chain.h`), the compute engine on a device the host gives (`look_engine.h`: one run algorithm, DirectX 11 and OpenGL backends), what every host's preview shares (`look_preview.h`: planning a drag's or a stroke's run, arming the stroke, the base the engine holds), the kernels (`shaders/look.slang`, compiled by Slang at build time). |
+| GPU | `engine/gpu/` (`groomlab_gpu` static lib, Windows) | The GPU look preview's engine, host-free: which run of nodes ending a graph the GPU can take (Interpolate, Length, Clump, Noise, Curl, Width, Part, Gravity, Flyaway, Collide...; a Cull, Split or Mirror as a run's first stage, the nodes up its input a run of their own copied into its layout) and with what params, mapped values and kept operator work (`look_chain.h`), the compute engine on a device the host gives (`look_engine.h`: one run algorithm, DirectX 11 and OpenGL backends), what every host's preview shares (`look_preview.h`: planning a drag's or a stroke's run, arming the stroke, the base the engine holds), the kernels (`shaders/look.slang`, compiled by Slang at build time). |
 | Maya plugin | `hosts/maya/src/` (`GroomLab.mll`) | `groomLabShape` (`groom_shape.cpp`: plugs and dirty tracking into its `GroomSession`), Viewport 2.0 drawing (`groom_draw_override*.cpp`: uploads the core's display buffers, keeps shaders and textures), the brush and select tools (`brush_tool.cpp`, `select_tool.cpp`: adapters of the core's tools, Maya's views read by `tool_view.cpp`), the camera solve and the Reference Flow tool (`reference_tool.cpp`), commands (`*_cmd.cpp`; `sim_cmd.cpp`: `groomLabSimulate`), Maya-to-core conversion (`maya_inputs.cpp`, also linked by the Arnold translator), crash logging (`crash_log.cpp`). |
 | Python | `hosts/maya/scripts/groomlab/` | The artist API, `groomlab.<name>` (`__init__.py` imports it from its modules and lists them: `groom.py`, `guides.py`, `painting.py` (maps), `params.py` (graph, controls, keys), `cards.py`, `game.py`, `files.py` (.groom), `paths.py` and more; a module imports from the ones listed before it, any later one inside the function that needs it), reference photos as cameras (`reference.py`), the graph model (`graph.py`: its edits the core's `GraphEdit`), sims, and the UI (`ui/`: Groom Tools palette and its Tools, Paint, Sculpt and Reference tabs, Graph Editor, Attribute Editor template, menu, hotkeys, themes). The UI reaches Qt only through `ui/qt.py` (`from groomlab.ui.qt import QtCore, QtGui, QtWidgets`): PySide2 in Maya 2022 to 2024, PySide6 in 2025 and later, and the few names that differ (`qt.QAction`, `qt.QActionGroup`, `qt.QShortcut`, `qt.exec_(dialog)`, `qt.event_pos(event)`, `qt.to_int(flags)`, `qt.shiboken`, `qt.QtSvg()`); never import PySide2 or PySide6 directly. |
 | Bindings | `engine/python/` | `groomlab_core` pybind11 module for each Maya's Python (3.7 in Maya 2022, 3.9 in 2023, 3.10 in 2024, 3.11 in 2025 and 2026, 3.13 in 2027): tests and pipelines, and the plugin's own Python (`hosts/maya/scripts/groomlab` imports it for what every host shares, so nothing the app also needs is written twice; it installs beside the plugin, on the module's `PYTHONPATH`, and the mayapy and GUI tests put the build's on theirs); `GroomSession` (`bind_session.cpp`) keeps a groom evaluated from buffers; strokes on it from screen or world points (`bind_stroke.cpp`); `DisplayBuilder` (`bind_display.cpp`) gives the viewport's buffers as buffer views. |
@@ -191,7 +191,7 @@ session's `viewport` suite (`maya.gui`) on a 24-core machine. CI reports them wi
 | One parameter tweak at preview density | < 33 ms | ~5 ms |
 | Brush dab on 2k guides + interpolation preview | < 16 ms | ~14 ms (~20 ms with a full look graph) |
 | Viewport orbit, 200k preview strands | >= 24 fps | ~120 fps |
-| Render expansion, 1M strands x 24 points | < 5 s, < 1 GB | ~1 s, ~800 MB |
+| Render expansion, 1M strands x 24 points | < 5 s, < 1.25 GB | ~0.9 s, ~1.1 GB |
 | Groom file, graph + 5k guides | < 10 MB | ~6 MB |
 | Scene open with 3 grooms | < 3 s added | ~20 ms |
 
@@ -2300,32 +2300,13 @@ drag or stroke spreading the hair past that loses the grid's far side until the 
 deformed away from its rest pose (the walk asks the rest pose's field vertex by vertex) refuses, as
 does a node without a scalp whose strands the run moves (its cell goes by their size). Their params
 (strength, packing, randomness, profile) change values on the grid alone: each drags on the GPU.
-Tie runs as three kernels (look.slang's Tie section): `TieFrameCS` (one group) finds the strands it
-ties, the core's start points' mean, the frame and the ring's 64 bins from the strands the run hands
-it (so a drag of `center` and a dab upstream bin again, as the CPU would); `TieRouteCS` makes each
-strand's ring point and route: the scalp's closest points under the arc found down the mesh of its
-collision field's tables (`TieInputs`: Tie's own copy, each vertex's ring welded with those of the
-vertices at its position, so the walk crosses a seam as the CPU's tree does; each strand's walk
-starts from the face its start was nearest on the CPU), then their hull, into a buffer of 34 float4 a
-strand; `TieLayCS` makes the path a point at a time, pushes each out of the scalp through the tables
-(the field's answers alone, where the CPU's push asks the mesh) and lays the strand along it (one
-push and one path step in its code: about 10 s of d3dcompiler). Its affect (a mask by strand) is
-field 0, mixing its result as the graph does; one varying along the strands refuses. Its angles take
-Cephes' atan and acos (fxc's acos is off by up to about 7e-5, which flipped the CPU's sample count).
-Its tail channel is written where a Tie after it in the run reads it (a second Tie down the tail, a
-node masked by the tail); a mapped param after it reading the tail refuses (the CPU's).
-Within a few thousandths of the CPU on the test's head (8 across), but where a route's closest point
-ties across a seam whose split vertices' normals differ (a few hundredths); about 8 ms at 100k
-strands. A scalp deformed away from its rest pose refuses.
 A stage masked by its affect (a map, a plugged field, a number between 0 and 1, a dragged affect) runs
 as ever, then `AffectCS` mixes its result back toward what the node's first stage took, per strand
 or per point, as `applyAffect` does (`StageParams::masked`; the engine keeps the node's input alive
 till then, a Wet's past its levels; a Width's widths, those it took copied aside after another
 Width). Its affect is the node's first stage's third field (`StageFields::affect`, read on what it
-takes like the mapped params: fixed, or made per strand by `FieldCS`); an attribute map of a Tie's
-tail written in the same run is read where that Tie writes it (`FieldValues::channelFrom`). This is
-the one way every stage is mixed, the shapers reading their neighbours included; only Tie reads its
-affect itself (it picks the strands it ties, and its tail is mixed too: `mixesByItsAffect`).
+takes like the mapped params: fixed, or made per strand by `FieldCS`). This is the one way every
+stage is mixed, the shapers reading their neighbours included.
 Operators a host reads state from by their result (Clump, Wet, Wind, an auto Part, BlendNeighbors,
 Tangle, Flow, Jiggle) follow the graph's mixed result (`Operator::resultMixed`). Noise masked by a Group costs about 0.15 ms more at 100k.
 Jiggle with motion runs too: `JiggleOp` keeps the scalp, history and frame its result read
@@ -2681,7 +2662,7 @@ strand is braided by its own root) and Split (`Operator::evaluateOutputsIncremen
 kept per output, so each output's readers get the changed strands it holds, in its own indices;
 an output a changed strand left or joined, its select read from what changed, is cut again and
 says `all`, as Cull falls back when its kept strands change). Everything else evaluates in full:
-Tangle, BlendNeighbors, Wet, SelfCollide, Static and Tie read other strands, Mirror changes the layout (on guides, the
+Tangle, BlendNeighbors, Wet, SelfCollide and Static read other strands, Mirror changes the layout (on guides, the
 Interpolate after it diffs them itself), Curl by clump reads whole clumps. A node with several
 outputs that evaluates in full diffs each output against its last. A node that evaluates in full while its own key stayed and its inputs changed in
 only some strands (one of those, or an incremental operator that fell back) then compares its

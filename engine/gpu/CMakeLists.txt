@@ -22,13 +22,11 @@ if(NOT WIN32)
         message(STATUS "GPU look preview (engine/gpu): Windows only for now, left out with its tests (groomlab_gpu_tests)")
         return()
     endif()
-    # The hosts compile against the engine (the Maya plugin, the app): its planning, run algorithm
-    # and LineFrames' shared part build without a backend (src/look_engine_none.cpp: every factory
+    # The hosts compile against the engine (the Maya plugin, the app): its planning and LineFrames'
+    # shared part build without a backend (the run algorithm and its CPU backend are the core's) (src/look_engine_none.cpp: every factory
     # throws, so the hosts preview on the CPU). No slangc, no kernels embedded, no device tests.
     add_library(groomlab_gpu STATIC
         src/look_chain.cpp
-        src/look_engine.cpp
-        src/look_engine_internal.h
         src/look_engine_none.cpp
         src/look_preview.cpp
         src/line_frames.cpp)
@@ -40,7 +38,7 @@ if(NOT WIN32)
     # macos-aarch64 or linux-x86_64 release): GROOMLAB_SLANGC.
     set(GROOMLAB_SLANGC "" CACHE FILEPATH "slangc for the gpu.*kernel_targets tests (empty: they are left out)")
     if(GROOMLAB_BUILD_TESTS AND GROOMLAB_SLANGC)
-        file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/groomlab/gpu/look_kernels.inc" _kernel_lines REGEX "^GROOMLAB_KERNEL\\(")
+        file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../core/include/groomlab/look/look_kernels.inc" _kernel_lines REGEX "^GROOMLAB_KERNEL\\(")
         set(_kernels "")
         foreach(_line IN LISTS _kernel_lines)
             string(REGEX REPLACE "^GROOMLAB_KERNEL\\(([A-Za-z0-9_]+)\\).*" "\\1CS" _k "${_line}")
@@ -93,9 +91,9 @@ set(_source "${CMAKE_CURRENT_SOURCE_DIR}/shaders/look.slang")
 # The math look.slang shares with the core (it includes it): an edit there recompiles every kernel.
 set(_shared_math "${CMAKE_CURRENT_SOURCE_DIR}/../core/include/groomlab/shared/groom_math.h")
 set(_gen "${CMAKE_CURRENT_BINARY_DIR}/generated")
-# Its kernels: one a line of include/groomlab/gpu/look_kernels.inc, which makes the engine's Kernel
+# Its kernels: one a line of include/groomlab/look/look_kernels.inc, which makes the engine's Kernel
 # enum and the backends' tables too ("GROOMLAB_KERNEL(Name)": the entry point NameCS).
-set(_kernel_list "${CMAKE_CURRENT_SOURCE_DIR}/include/groomlab/gpu/look_kernels.inc")
+set(_kernel_list "${CMAKE_CURRENT_SOURCE_DIR}/../core/include/groomlab/look/look_kernels.inc")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_kernel_list}")
 file(STRINGS "${_kernel_list}" _kernel_lines REGEX "^GROOMLAB_KERNEL\\(")
 set(_kernels "")
@@ -187,10 +185,32 @@ foreach(_target dxbc glsl)
         @ONLY)
 endforeach()
 
+# The same kernels compiled to C++ for the CPU engine (engine/core: groomlab/look/look_engine.h
+# makeCpuLookEngine; the core's operators' bits), into the core's source tree
+# (src/look/generated/look_kernels_cpu.cpp, kept in the repository: the core builds anywhere without
+# Slang), made again here when look.slang or the math it shares changes, before the core builds.
+# Where a kernel's group works as one (barriers, groupshared memory), its C++ form runs each strand
+# or clump whole on a thread (look.slang's __target_switch cpp cases).
+set(_cpu_entries "")
+foreach(_k IN LISTS _kernels)
+    list(APPEND _cpu_entries -entry ${_k} -stage compute)
+endforeach()
+set(_cpu_kernels_cpp "${CMAKE_CURRENT_SOURCE_DIR}/../core/src/look/generated/look_kernels_cpu.cpp")
+add_custom_command(OUTPUT "${_gen}/look_kernels_cpu.stamp"
+    BYPRODUCTS "${_gen}/look_kernels_cpu.raw.cpp"
+    COMMAND "${_slangc}" "${_source}" -I "${CMAKE_CURRENT_SOURCE_DIR}/../core/include" ${_cpu_entries} -target cpp
+            -o "${_gen}/look_kernels_cpu.raw.cpp"
+    COMMAND "${CMAKE_COMMAND}" -DIN=${_gen}/look_kernels_cpu.raw.cpp -DOUT=${_cpu_kernels_cpp}
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/portable_cpu_kernels.cmake"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${_gen}/look_kernels_cpu.stamp"
+    DEPENDS "${_source}" "${_shared_math}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/portable_cpu_kernels.cmake"
+    COMMENT "slangc: the look kernels for the CPU (C++, into engine/core)"
+    VERBATIM)
+add_custom_target(groomlab_cpu_kernels DEPENDS "${_gen}/look_kernels_cpu.stamp")
+add_dependencies(groomlab_core_objects groomlab_cpu_kernels)
+
 add_library(groomlab_gpu STATIC
     src/look_chain.cpp
-    src/look_engine.cpp
-    src/look_engine_internal.h
     src/look_engine_d3d11.cpp
     src/look_engine_gl.cpp
     src/look_preview.cpp

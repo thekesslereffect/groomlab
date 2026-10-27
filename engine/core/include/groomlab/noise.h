@@ -73,6 +73,8 @@ float periodicNoise(const Vec3f& p, const Vec3f& period, std::uint64_t seed);
 class VectorNoise {
 public:
     VectorNoise(std::uint64_t seed, int octaves, const float* weights = nullptr);
+    // Each octave's seed given (hashCombine(seed, octave), as the GPU preview's constants hold them).
+    VectorNoise(const std::uint64_t* octaveSeeds, int octaves, const float* weights);
     Vec3f operator()(const Vec3f& p);
 
     static constexpr int kMaxOctaves = kMaxNoiseOctaves;

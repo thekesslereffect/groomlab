@@ -36,6 +36,7 @@
 #include "groomlab/frames.h"
 #include "groomlab/gpu/look_engine.h"
 #include "groomlab/gpu/look_preview.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/groom.h"
 #include "groomlab/presets.h"
 #include "groomlab/graph_io.h"
@@ -222,9 +223,31 @@ private:
     void(APIENTRY* bufferSubData_)(GLenum, std::ptrdiff_t, std::ptrdiff_t, const void*) = nullptr;
 };
 
+// The CPU engine (look.slang's kernels compiled to C++): its targets are float3 arrays in memory.
+class CpuBackend final : public Backend {
+public:
+    bool available() const override { return true; }
+    std::unique_ptr<gpu::LookEngine> engine() override { return gpu::makeCpuLookEngine(); }
+    void* displayBuffer(std::size_t bytes) override { return new float[(bytes + 3) / 4](); }
+    void* plainBuffer(std::size_t) override { return nullptr; }
+    std::vector<Vec3f> read(void* buffer, std::size_t count) override {
+        std::vector<Vec3f> out(count);
+        std::memcpy(out.data(), buffer, count * 12);
+        return out;
+    }
+    std::vector<float> readFloats(void* buffer, std::size_t count) override {
+        std::vector<float> out(count);
+        std::memcpy(out.data(), buffer, count * 4);
+        return out;
+    }
+    void fill(void* buffer, const void* data, std::size_t bytes) override { std::memcpy(buffer, data, bytes); }
+    void release(void* buffer) override { delete[] static_cast<float*>(buffer); }
+};
+
 std::unique_ptr<Backend> makeBackend(const std::string& name) {
     if (name == "DirectX11") return std::make_unique<D3D11Backend>();
     if (name == "OpenGL") return std::make_unique<GLBackend>();
+    if (name == "CPU") return std::make_unique<CpuBackend>();
     return nullptr;
 }
 
@@ -549,10 +572,10 @@ protected:
         for (const gpu::LookStage& s : p.chain.stages) stages += std::string(stages.empty() ? "" : " ") + gpu::stageName(s.kind);
         std::printf("[ %-8s ] %s: %zu strands, %zu points: positions max %.3g mean %.3g (%zu over 1e-4), normals max %.3g, tangents max %.3g, "
                     "bitangents max %.3g, widths max %.3g; GPU ms interpolate %.3f (clearance %.3f) clump %.3f length %.3f noise %.3f curl %.3f "
-                    "width %.3f selfCollide %.3f static %.3f tie %.3f lines %.3f; engine made in %.1f ms\n",
+                    "width %.3f selfCollide %.3f static %.3f lines %.3f; engine made in %.1f ms\n",
                     GetParam().c_str(), stages.c_str(), want->strandCount(), n, c.positions.max, c.positions.mean, over, c.normals.max,
                     c.tangents.max, c.bitangents.max, c.widthMax, times.interpolateMs, times.clearanceMs, times.clumpMs, times.lengthMs, times.noiseMs,
-                    times.curlMs, times.widthMs, times.selfCollideMs, times.staticMs, times.tieMs, times.linesMs, makeMs);
+                    times.curlMs, times.widthMs, times.selfCollideMs, times.staticMs, times.linesMs, makeMs);
         return c;
     }
 
@@ -1800,8 +1823,9 @@ TEST(GpuPreview, ASubdivideOfNoViewportLevelsHandsOn) {
     EXPECT_FALSE(gpu::findLookChain(doc(1), &smooth, &why) && !smooth.stages.empty());
 }
 
-TEST(GpuPreview, AClumpVaryingEachStrandsPullRunsOnTheCpu) {
-    // strandStrengthRandom is the CPU's for now: a Clump using it refuses the GPU its params, saying so.
+TEST(GpuPreview, AClumpVaryingEachStrandsPullRunsOnTheGpu) {
+    // strandStrengthRandom: ClumpCS scales each strand's pull by its draw (the strand data's w), so a
+    // Clump using it keeps the GPU, its share in value2[3].
     const auto doc = [](double random) {
         return loadGraphJson(R"({"version": 1, "output": "out",
           "nodes": [{"name": "scalp", "type": "Scalp"}, {"name": "scatter", "type": "Scatter"},
@@ -1810,15 +1834,16 @@ TEST(GpuPreview, AClumpVaryingEachStrandsPullRunsOnTheCpu) {
           "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"}, {"from": "scatter", "to": "clump", "input": "strands"},
                           {"from": "clump", "to": "out", "input": "strands"}]})");
     };
-    std::string why;
     for (const double random : {0.0, 0.5}) {
         const GraphDocument d = doc(random);
         gpu::LookChain chain;
+        std::string why;
         ASSERT_TRUE(gpu::findLookChain(d, &chain, &why)) << why;
         gpu::LookParams params;
-        EXPECT_EQ(gpu::readLookParams(d, chain, {}, &params, &why), random == 0.0) << why;
+        ASSERT_TRUE(gpu::readLookParams(d, chain, {}, &params, &why)) << why;
+        ASSERT_FALSE(params.stages.empty());
+        EXPECT_FLOAT_EQ(params.stages.back().value2[3], static_cast<float>(random));
     }
-    EXPECT_NE(why.find("strandStrengthRandom"), std::string::npos) << why;
 }
 
 TEST(GpuPreview, StageTableNamesRealTypesAndParams) {
@@ -1855,7 +1880,7 @@ TEST(GpuPreview, StageTableNamesRealTypesAndParams) {
     check(#Type, vectors, "vectors", {"vec3"});         \
     check(#Type, nums, "numbers", numbers);
 #define GROOMLAB_PASS_THROUGH(Type) check(#Type, "", "pass-through", {});
-#include "groomlab/gpu/look_stages.inc"
+#include "groomlab/look/look_stages.inc"
 #undef GROOMLAB_STAGE
 #undef GROOMLAB_STAGE_NODE
 #undef GROOMLAB_GPU_PARAMS
@@ -2425,6 +2450,8 @@ TEST(GpuPreview, NoiseStaysUnderItsReach) {
 TEST_P(LookEngineTest, AStrokeUploadsOnlyItsStrands) {
     // The base changed in a few strands (a brush stroke's incremental evaluation says which): only
     // their points go up, and the run gives what a full upload of the new base gives, to the bit.
+    // (The CPU engine uploads nothing: it shares the base's own arrays, LookEngine::sharesBase.)
+    if (GetParam() == "CPU") GTEST_SKIP() << "the CPU engine shares the base";
     GroomSession session(groom(graph(0.3)));
     ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
     const Prepared p = prepare(session, {}, "noise");
@@ -3767,7 +3794,7 @@ TEST_P(LookEngineTest, MergeRunsADragUpItsInputBAsTheCpuDoes) {
                     GetParam().c_str(), p.base->strandCount(), gpuMs[2], cpuMs[2]);
     }
 }
-INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, ::testing::Values(std::string("DirectX11"), std::string("OpenGL")),
+INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, ::testing::Values(std::string("DirectX11"), std::string("OpenGL"), std::string("CPU")),
                          [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
 
 TEST(GpuPreview, MaskedNodesAreStagesAndRenderOnlyOnesAreHandedOn) {
@@ -4405,43 +4432,6 @@ TEST(GpuPreview, TheHairGridsLayoutIsTheCpus) {
     }
 }
 
-// ---- Tie -----------------------------------------------------------------------------------------
-
-// A Tie's params: its ring behind the test's head (a sphere of radius 4 about the origin, strands
-// about 3 long: those rooted near the back pass the ring, the rest stop on the way), then `extra`
-// (JSON object items, a leading comma).
-std::string tieParams(const std::string& extra = R"(, "spread": 15.0, "twist": 0.3, "ease": 0.3)",
-                      const std::string& center = "[0.0, 1.0, -5.0]", double radius = 0.5) {
-    return R"("params": {"center": )" + center + R"(, "radius": )" + std::to_string(radius) + extra + "}";
-}
-
-// The GPU's Tie against the CPU's: within the kernels' rounding (their sin, cos and tan, a strand's
-// point found on its path in float where the CPU solves in double, the field's answers where the
-// CPU's push asks the mesh), a few thousandths at most on a head 8 across, but where a route's
-// closest point under its arc ties between two faces across the test sphere's seam: its split
-// vertices' normals are each their own side's, so the skin point lifted off it is lifted one way or
-// the other as the CPU's tree or the GPU's walk down the mesh meets the faces first, and the route
-// over it moves by a few hundredths (a strand or two of a groom). Few points apart at all, a mean
-// of millionths.
-constexpr double kTiePointTolerance = 2e-2, kTieMeanTolerance = 1e-5;
-void expectTieClose(const Compared& c, bool widths = true) {
-    EXPECT_GT(c.positions.count, 1000u);
-    EXPECT_LT(c.positions.max, kTiePointTolerance);
-    EXPECT_LT(c.positions.mean, kTieMeanTolerance);
-    EXPECT_LT(c.over, c.positions.count / 100);  // (more than 1e-4 apart)
-    EXPECT_LT(c.normals.max, 5e-2);
-    EXPECT_LT(c.tangents.max, 5e-2);
-    if (widths) EXPECT_LT(c.widthMax, 1e-5);
-}
-#define EXPECT_GPU_TIES(graphJson, overrides, committedJson)                           \
-    do {                                                                               \
-        GroomSession dragged(groom(graphJson));                                        \
-        ASSERT_TRUE(dragged.evaluate(ViewRequest{}).strands);                          \
-        GroomSession committed(groom(committedJson));                                  \
-        ASSERT_TRUE(committed.evaluate(ViewRequest{}).strands);                        \
-        expectTieClose(runAndCompare(dragged, overrides, committed));                  \
-    } while (0)
-
 // How many of a node's points its last evaluation moved more than `by` from what it took.
 std::size_t movedBy(GroomSession& session, const std::string& name, float by = 1e-3f) {
     const GraphDocument& doc = *session.viewDocument();
@@ -4453,195 +4443,6 @@ std::size_t movedBy(GroomSession& session, const std::string& name, float by = 1
     std::size_t moved = 0;
     for (std::size_t i = 0; i < taken->pointCount(); ++i) moved += (taken->positions()[i] - made->positions()[i]).length() > by;
     return moved;
-}
-
-TEST_P(LookEngineTest, TieTiesAsTheCpuDoes) {
-    // Tie on the GPU: its frame and ring's bins from the core strands, each strand's route over the
-    // scalp to the ring, its path pushed out of the scalp and the strand laid along it (strands too
-    // short stopping on the way): alone and after Interpolate (a run from it), with its tail channel
-    // and without, tightly and loosely, with its direction its own, against the CPU's.
-    const std::string extras[] = {R"(, "spread": 15.0, "twist": 0.3, "ease": 0.3)",
-                                  R"(, "spread": 30.0, "tightness": 0.4, "ease": 0.0, "tailChannel": "")",
-                                  R"(, "direction": [0.3, -1.0, -0.6], "twist": -0.5, "ease": 1.0)"};
-    for (const std::string& extra : extras) {
-        SCOPED_TRACE(extra);
-        GroomSession session(groom(withoutClearance(chainGraph({{"Tie", tieParams(extra)}}))));
-        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-        EXPECT_GT(movedBy(session, "n0"), 20000u);
-        const Prepared p = prepare(session, {}, "interpolate");
-        ASSERT_EQ(p.chain.stages.size(), 3u);
-        EXPECT_EQ(p.chain.stages[1].kind, gpu::StageKind::Tie);
-        expectTieClose(runAndCompare(session, {}, session, "n0"));
-        expectTieClose(runAndCompare(session, {}, session, "interpolate"));
-    }
-}
-
-TEST_P(LookEngineTest, TieDragsGiveWhatTheCpuTies) {
-    // Drags of each of its numbers and of its center and direction (the ring's bins made again from
-    // the core strands), against a CPU evaluation of the graph holding the value.
-    const std::string graph = withoutClearance(chainGraph({{"Tie", tieParams()}}));
-    const std::pair<const char*, double> drags[] = {{"radius", 0.8}, {"spread", 35.0}, {"twist", -0.6}, {"tightness", 0.5}, {"ease", 0.8}};
-    for (const auto& [param, value] : drags) {
-        SCOPED_TRACE(param);
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n0", {{param, value}}}}), withParam(graph, "n0", param, value));
-    }
-    {
-        SCOPED_TRACE("center");
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n0", {{"center", Vec3f(1.5f, 2.0f, -4.75f)}}}}),
-                        withParam(graph, "n0", "center", nlohmann::json::array({1.5, 2.0, -4.75})));
-    }
-    {
-        SCOPED_TRACE("direction");
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n0", {{"direction", Vec3f(0.25f, -1.0f, -0.5f)}}}}),
-                        withParam(graph, "n0", "direction", nlohmann::json::array({0.25, -1.0, -0.5})));
-    }
-}
-
-TEST_P(LookEngineTest, ADabUpstreamOfTieGivesWhatTheCpuTies) {
-    // A brush dab on the guides: Interpolate's strands blended again, then tied on the GPU (its bins
-    // from the strands the dab moved).
-    GroomData data = groom(withoutClearance(chainGraph({{"Tie", tieParams()}})));
-    GroomSession dabbed(data);
-    ASSERT_TRUE(dabbed.evaluate(ViewRequest{}).strands);
-    const StrandsPtr before = dabbed.last().strands;
-    const GuidesPtr bent = guideSet(*data.scalp, 1.4f);
-    dabbed.setGuides(bent);
-    ViewRequest dab;
-    dab.stopAt = "interpolate";
-    ASSERT_EQ(dabbed.evaluate(dab).strands, before);
-    GroomData after = data;
-    after.guides = bent;
-    GroomSession fresh(after);
-    ASSERT_TRUE(fresh.evaluate(ViewRequest{}).strands);
-    expectTieClose(runAndCompare(dabbed, {}, fresh, "interpolate"));
-}
-
-TEST_P(LookEngineTest, ACurlByTheTailAfterTieAsTheCpuDoes) {
-    // A Curl masked by the tail (its affect mapped to it, per point) runs on the GPU, mixed by it:
-    // from the Curl (the tail as the CPU wrote it), from the Tie and from Interpolate (the tail as the
-    // Tie writes it on the GPU, read after it); drags of the Tie's radius and the Curl's, a dab. A
-    // Curl whose radius is mapped to the tail runs on the GPU, the tail as the CPU wrote it, where the
-    // run starts after the Tie; a run of the Tie (which writes the tail the Curl reads) is the CPU's.
-    const std::string curl = R"("params": {"radius": 0.08, "frequency": 1.5)";
-    {
-        const std::string graph = withoutClearance(chainGraph({{"Tie", tieParams()}, {"Curl", curl + R"(, "affect": {"attribute": "tail"}})"}}));
-        GroomData data = groom(graph);
-        GroomSession session(data);
-        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-        EXPECT_GT(movedBy(session, "n1"), 2000u);
-        const Prepared p = prepare(session, {}, "n0");
-        ASSERT_EQ(p.chain.stages.size(), 3u);
-        EXPECT_TRUE(p.run.params.stages[1].masked);
-        EXPECT_EQ(p.run.fields.stages[1].affect.channelFrom, 0u);  // (the Tie's tail, written on the GPU)
-        expectTieClose(runAndCompare(session, {}, session, "n1"));
-        expectTieClose(runAndCompare(session, {}, session, "n0"));
-        expectTieClose(runAndCompare(session, {}, session, "interpolate"));
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n0", {{"radius", 0.8}}}}), withParam(graph, "n0", "radius", 0.8));
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n1", {{"radius", 0.12}}}}), withParam(graph, "n1", "radius", 0.12));
-        GroomSession dabbed(data);
-        ASSERT_TRUE(dabbed.evaluate(ViewRequest{}).strands);
-        const StrandsPtr before = dabbed.last().strands;
-        const GuidesPtr bent = guideSet(*data.scalp, 1.4f);
-        dabbed.setGuides(bent);
-        ViewRequest dab;
-        dab.stopAt = "interpolate";
-        ASSERT_EQ(dabbed.evaluate(dab).strands, before);
-        GroomData after = data;
-        after.guides = bent;
-        GroomSession fresh(after);
-        ASSERT_TRUE(fresh.evaluate(ViewRequest{}).strands);
-        expectTieClose(runAndCompare(dabbed, {}, fresh, "interpolate"));
-    }
-    GroomSession session(groom(withoutClearance(chainGraph({{"Tie", tieParams()}, {"Curl", curl + R"(, "radius": {"attribute": "tail"}})"}}))));
-    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-    EXPECT_GT(movedBy(session, "n1"), 2000u);
-    expectTieClose(runAndCompare(session, {}, session, "n1"));
-    Prepared refused;
-    EXPECT_FALSE(prepareRun(session, {}, "n0", &refused));
-    EXPECT_NE(refused.why.find("tail"), std::string::npos) << refused.why;
-}
-
-TEST_P(LookEngineTest, TwoTiesAsTheCpuDoes) {
-    // A double ponytail (the left half of the head to a tie on the left, the right half to one on the
-    // right: each Tie's affect a mask by the roots, read per strand), and a second Tie down the
-    // first's tail (it starts where the first's tail does: the tail the first writes on the GPU when
-    // both run). From the second, from the first, from Interpolate; drags of each one's radius.
-    const std::string left = tieParams(R"(, "spread": 10.0, "affect": {"expression": "x < 0 ? 1 : 0"})", "[-5.0, 1.0, -1.5]");
-    const std::string right = tieParams(R"(, "spread": 10.0, "twist": 0.2, "affect": {"expression": "x < 0 ? 0 : 1"})", "[5.0, 1.0, -1.5]");
-    const std::string first = tieParams(R"(, "spread": 5.0)"), second = tieParams(R"(, "spread": 20.0)", "[0.0, 1.0, -6.0]", 0.3);
-    const std::pair<const char*, std::string> graphs[] = {{"a double ponytail", withoutClearance(chainGraph({{"Tie", left}, {"Tie", right}}))},
-                                                          {"a second Tie down the tail", withoutClearance(chainGraph({{"Tie", first}, {"Tie", second}}))}};
-    for (const auto& [name, graph] : graphs) {
-        SCOPED_TRACE(name);
-        GroomSession session(groom(graph));
-        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-        EXPECT_GT(movedBy(session, "n0"), 5000u);
-        EXPECT_GT(movedBy(session, "n1"), 2000u);
-        const Prepared p = prepare(session, {}, "n0");
-        ASSERT_EQ(p.chain.stages.size(), 3u);
-        ASSERT_TRUE(p.run.inputs[1].tie);
-        EXPECT_EQ(p.run.inputs[1].tie->channelFrom, 0u);  // (the first's tail, written on the GPU)
-        expectTieClose(runAndCompare(session, {}, session, "n1"));
-        expectTieClose(runAndCompare(session, {}, session, "n0"));
-        expectTieClose(runAndCompare(session, {}, session, "interpolate"));
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n1", {{"radius", 0.4}}}}), withParam(graph, "n1", "radius", 0.4));
-        EXPECT_GPU_TIES(graph, (gpu::Overrides{{"n0", {{"radius", 0.7}}}}), withParam(graph, "n0", "radius", 0.7));
-    }
-}
-
-TEST_P(LookEngineTest, TieAtAHundredThousandStrands) {
-    // About 100k strands: the GPU's Tie against the CPU's, and its time on the GPU (the median of 5
-    // runs after one; noisy where something else uses the GPU).
-    LookGraph g;
-    g.scatter = R"("params": {"density": 500.0, "length": 3.0})";
-    g.after = "Tie";
-    g.afterParams = tieParams();
-    GroomSession session(groom(g.json()));
-    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-    EXPECT_GT(session.last().strands->strandCount(), 90000u);
-    expectTieClose(runAndCompare(session, {}, session, "after"), false);
-    const Prepared p = prepare(session, {}, "after");
-    auto engine = backend_->engine();
-    engine->setBase(p.base, session.last().scalp.get());
-    engine->run(p.run, true);
-    engine->times(true);
-    std::vector<double> ms;
-    for (int run = 0; run < 5; ++run) {
-        engine->run(p.run, true);
-        ms.push_back(engine->times(true).tieMs);
-    }
-    std::sort(ms.begin(), ms.end());
-    std::printf("[ %-8s ] Tie at %zu strands, %zu points: %.3f ms on the GPU (median of 5)\n", GetParam().c_str(), p.base->strandCount(),
-                p.base->pointCount(), ms[2]);
-}
-
-TEST(GpuPreview, CurlAddingPointsIsTheCpus) {
-    // A Curl whose strands have too few points a turn for its tolerance adds points (curl_op.cpp):
-    // its result is laid out unlike its input, which a run keeps, so the GPU's run starts after it.
-    // At the points it was given (tolerance 0) it runs on the GPU.
-    for (const double tolerance : {0.3, 0.0}) {
-        LookGraph g;
-        g.curl = R"("params": {"radius": 0.1, "frequency": 3.0, "tolerance": )" + std::to_string(tolerance) + "}";  // 1.7 points a turn
-        GroomSession session(groom(g.json()));
-        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
-        const GraphDocument& doc = *session.viewDocument();
-        const NodeId curl = doc.nodesByName.at("curl");
-        const StrandsPtr in = valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("noise")));
-        const StrandsPtr out = valueAs<StrandsPtr>(doc.graph.cachedValue(curl));
-        ASSERT_TRUE(in && out);
-        std::string why;
-        gpu::LookChain chain;
-        ASSERT_TRUE(gpu::findLookChain(doc, &chain, &why)) << why;
-        if (tolerance > 0.0) {
-            EXPECT_GT(out->pointCount(), in->pointCount() * 2);
-            EXPECT_EQ(chain.base, curl);
-            EXPECT_EQ(chain.node(gpu::StageKind::Curl), 0u);
-            EXPECT_NE(chain.node(gpu::StageKind::Width), 0u);
-        } else {
-            EXPECT_EQ(out->pointCount(), in->pointCount());
-            EXPECT_EQ(chain.node(gpu::StageKind::Curl), curl);
-        }
-    }
 }
 
 // ---- Wet -----------------------------------------------------------------------------------------
@@ -4810,8 +4611,8 @@ TEST(GpuPreview, TakesOnlyWhatItRuns) {
         EXPECT_FALSE(gpu::findLookChain(*session.viewDocument(), &chain, &why));
     }
     {
-        // A map read from the points (t, by arc length) holds only on the first stage of a run, and
-        // Noise and Curl read each point after the ones before it moved.
+        // A map read from the points (t, by arc length) holds only on the first stage of a run (there
+        // read on the points the stage takes, per point too, as the operators read them).
         LookGraph g;
         g.width = R"("params": {"width": {"expression": "0.02 - 0.015 * t", "min": 0.0, "max": 1.0}})";
         g.curl = R"("params": {"radius": {"expression": "0.1 * t", "min": 0.0, "max": 1.0}, "frequency": 0.8})";
@@ -4826,8 +4627,8 @@ TEST(GpuPreview, TakesOnlyWhatItRuns) {
         EXPECT_EQ(fields.stages[1].field[0].mode, gpu::FieldValues::kPerPoint);
         EXPECT_TRUE(fields.stages[1].field[0].readsPositions);
         EXPECT_TRUE(gpu::sameLookFields(doc, chain, fields));
-        EXPECT_FALSE(gpu::lookFieldsHold(doc, chain, fields, &why));  // Curl's radius by t, per point
-        EXPECT_NE(why.find("curl.radius"), std::string::npos) << why;
+        EXPECT_FALSE(gpu::lookFieldsHold(doc, chain, fields, &why));  // (Curl's radius by t, per point, holds: Width's after it not)
+        EXPECT_NE(why.find("width.width"), std::string::npos) << why;
         g.curl = R"("params": {"radius": 0.1, "frequency": 0.8})";
         GroomSession plain(groom(g.json()));
         plain.evaluate(ViewRequest{});
@@ -5235,11 +5036,12 @@ TEST_P(LookEngineTest, ShapersAtAHundredThousandStrands) {
     }
 }
 
-TEST(GpuPreview, ShapersAreTheGpusAndMirrorTheCpus) {
+TEST(GpuPreview, ShapersAreTheGpusAndMirrorStartsARun) {
     // Bend, Direction, Transform, Displace and Twist are stages, their numbers, vectors, seeds and
     // profiles previewable; a direction per strand (an expression) and a Direction mapping all three
     // of its params are the CPU's, saying why. Mirror adds and drops strands (new IDs, roots found
-    // again on the scalp): the run starts after it.
+    // again on the scalp): a run's first stage, its result the base (the nodes up its input a run of
+    // their own: CullSplitAndMirrorRunADragUpTheirInputAsTheCpuDoes).
     std::string why;
     for (const char* type : {"Bend", "Direction", "Transform", "Displace", "Twist"}) {
         SCOPED_TRACE(type);
@@ -5279,7 +5081,9 @@ TEST(GpuPreview, ShapersAreTheGpusAndMirrorTheCpus) {
         gpu::LookChain chain;
         ASSERT_TRUE(gpu::findLookChain(*session.viewDocument(), &chain, &why)) << why;
         EXPECT_EQ(session.viewDocument()->nameOf(chain.base), "n0");
-        EXPECT_EQ(chain.stages.front().kind, gpu::StageKind::Noise);
+        EXPECT_EQ(chain.stages.front().kind, gpu::StageKind::Mirror);
+        ASSERT_GE(chain.stages.size(), 2u);
+        EXPECT_EQ(chain.stages[1].kind, gpu::StageKind::Noise);
     }
 }
 
@@ -5902,6 +5706,710 @@ TEST_P(LookEngineTest, MeshCutAtAHundredThousandStrands) {
     std::sort(ms.begin(), ms.end());
     std::printf("[ %-8s ] MeshCut at %zu strands, %zu points: %.3f ms on the GPU (median of 5)\n", GetParam().c_str(), p.base->strandCount(),
                 p.base->pointCount(), ms[2]);
+}
+
+// A Cull, Split or Mirror after Interpolate, a Noise and a Width, a Noise after it (taking a Split's
+// output `output`).
+std::string gatherGraph(const std::string& type, const std::string& params, const std::string& output = "") {
+    return R"({"nodes": [
+        {"name": "scalp", "type": "Scalp"}, {"name": "scatter", "type": "Scatter", "params": {"density": 40.0, "length": 3.0}},
+        {"name": "guides", "type": "Guides"}, {"name": "interpolate", "type": "Interpolate", "params": {"keepClearance": false}},
+        {"name": "noise", "type": "Noise", "params": {"amplitude": 0.3, "frequency": 1.0}},
+        {"name": "width", "type": "Width", "params": {"width": 0.01, "randomness": 0.2}},
+        {"name": "picked", "type": ")" + type + R"(", "params": )" + params + R"(},
+        {"name": "after", "type": "Noise", "params": {"amplitude": 0.1, "seed": 9}},
+        {"name": "output", "type": "Output"}],
+      "connections": [
+        {"from": "scalp", "to": "scatter", "input": "scalp"}, {"from": "scatter", "to": "interpolate", "input": "strands"},
+        {"from": "guides", "to": "interpolate", "input": "guides"}, {"from": "scalp", "to": "interpolate", "input": "scalp"},
+        {"from": "interpolate", "to": "noise", "input": "strands"}, {"from": "noise", "to": "width", "input": "strands"},
+        {"from": "width", "to": "picked", "input": "strands"},
+        {"from": "picked", "to": "after", "input": "strands")" + (output.empty() ? "" : R"(, "output": ")" + output + "\"") + R"(},
+        {"from": "after", "to": "output", "input": "strands"}],
+      "output": "output"})";
+}
+
+TEST_P(LookEngineTest, CullSplitAndMirrorRunADragUpTheirInputAsTheCpuDoes) {
+    // A drag of a node before a Cull, Split or Mirror (the Noise, the Width): the GPU runs from it,
+    // the nodes up its input a run of their own on a sibling, their strands laid out as its last
+    // evaluation laid them out (kept, or mirrored and moved onto the scalp), then the Noise after it:
+    // as the CPU evaluates the dragged value. A drag after it: from there, as before.
+    struct Case {
+        const char* name;
+        const char* type;
+        const char* params;
+        const char* output = "";  // a Split's output the Noise after it takes
+    };
+    const Case cases[] = {{"Cull", "Cull", R"({"keep": 0.6, "seed": 3})"},
+                          {"Split a", "Split", R"({"weightA": 1.0, "weightB": 1.0})"},
+                          {"Split b", "Split", R"({"weightA": 1.0, "weightB": 1.0, "weightC": 1.0})", "b"},
+                          {"Split d", "Split", R"({"weightA": 1.0, "weightB": 1.0, "weightD": 1.0})", "d"},
+                          {"Mirror (replace)", "Mirror", R"({"axis": "x", "mode": "replace"})"},
+                          {"Mirror (add)", "Mirror", R"({"axis": "x", "mode": "add"})"}};
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.name);
+        const std::string graph = gatherGraph(c.type, c.params, c.output);
+        GroomSession session(groom(graph));
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        const GraphDocument& doc = *session.viewDocument();
+        const NodeId picked = doc.nodesByName.at("picked");
+        const StrandsPtr in = valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("width")));
+        const std::size_t port = *c.output ? doc.graph.outputIndex(picked, c.output) : 0;
+        const StrandsPtr made = valueAs<StrandsPtr>(doc.graph.cachedValue(picked, port));
+        ASSERT_TRUE(in && made);
+        EXPECT_NE(in->strandCount(), made->strandCount()) << "the test's premise: it keeps or adds strands";
+        gpu::LookChain chain;
+        std::string why;
+        ASSERT_TRUE(gpu::findLookChain(doc, &chain, &why)) << why;
+        ASSERT_EQ(chain.stages.size(), 2u);
+        EXPECT_EQ(chain.stages.front().node, picked);
+        EXPECT_TRUE(gpu::gathers(chain.stages.front().kind));
+        EXPECT_EQ(chain.base, picked) << "its result the base";
+        EXPECT_EQ(chain.baseOutput, port);
+        EXPECT_EQ(chain.stages[1].from, 0u) << "the Noise after it takes its result";
+        for (const auto& [node, value] : {std::pair<const char*, double>{"noise", 0.55}, {"width", 0.016}}) {
+            SCOPED_TRACE(node);
+            const std::string param = std::string(node) == "noise" ? "amplitude" : "width";
+            const gpu::Overrides drag{{node, {{param, value}}}};
+            Prepared p;
+            ASSERT_TRUE(prepareRun(session, drag, "", &p)) << "the GPU previews it: " << p.why;
+            EXPECT_EQ(p.chain.stages.front().node, picked);
+            ASSERT_TRUE(p.run.params.stages.front().branch) << "the run up its input";
+            ASSERT_TRUE(p.run.inputs.front().merged && p.run.inputs.front().gather);
+            EXPECT_EQ(doc.nameOf(p.run.params.stages.front().branch->chain.stages.front().node), node);
+            GroomSession committed(groom(withParam(graph, node, param, value)));
+            ASSERT_TRUE(committed.evaluate(ViewRequest{}).strands);
+            expectClose(runAndCompare(session, drag, committed));
+        }
+        {  // after it: its result as cached
+            GroomSession committed(groom(withParam(graph, "after", "amplitude", 0.25)));
+            ASSERT_TRUE(committed.evaluate(ViewRequest{}).strands);
+            const gpu::Overrides drag{{"after", {{"amplitude", 0.25}}}};
+            const Prepared p = prepare(session, drag);
+            EXPECT_EQ(doc.nameOf(p.chain.stages.front().node), "after");
+            expectPointsClose(runAndCompare(session, drag, committed));
+        }
+        {  // a preview holding hidden core strands (preview_core.h): the run up its input holds them too
+            ViewRequest half;
+            half.density = 0.5f;
+            GroomSession thinned(groom(graph));
+            ASSERT_TRUE(thinned.evaluate(half).strands);
+            GroomSession thinnedCommitted(groom(withParam(graph, "noise", "amplitude", 0.55)));
+            ASSERT_TRUE(thinnedCommitted.evaluate(half).strands);
+            expectClose(runAndCompare(thinned, {{"noise", {{"amplitude", 0.55}}}}, thinnedCommitted));
+        }
+    }
+    // A Cull keeping by an expression the run could change: the CPU's (the run ends after it).
+    {
+        nlohmann::json g = nlohmann::json::parse(gatherGraph("Cull", R"({"seed": 3})"));
+        for (auto& n : g["nodes"]) {
+            if (n["name"] == "picked") n["params"]["keep"] = {{"expression", "0.2 * length"}, {"min", 0.0}, {"max", 1.0}};
+        }
+        GroomSession session(groom(g.dump()));
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        const GraphDocument& doc = *session.viewDocument();
+        gpu::LookChain chain;
+        std::string why;
+        ASSERT_TRUE(gpu::findLookChain(doc, &chain, &why)) << why;
+        EXPECT_EQ(chain.indexOf(doc.nodesByName.at("picked")), gpu::kNoStage);
+        EXPECT_EQ(chain.base, doc.nodesByName.at("picked"));
+        EXPECT_EQ(gpu::firstOverridden(doc, chain, {{"noise", {{"amplitude", 0.55}}}}), gpu::kNoStage);
+    }
+}
+
+TEST_P(LookEngineTest, ASculptStrokeThroughACullRunsOnTheGpu) {
+    // A comb on a Sculpt node's guides with a Cull after the look: the stroke armed from the look's
+    // Interpolate (the run up the Cull's input, its stopAt), the Cull laying its strands out as it
+    // kept them: as the CPU evaluates each dab.
+    nlohmann::json g = nlohmann::json::parse(withoutClearance(sculptGraph()));
+    for (auto& c : g["connections"]) {
+        if (c["to"] == "output") c["to"] = "thin";
+    }
+    g["nodes"].push_back({{"name", "thin"}, {"type", "Cull"}, {"params", {{"keep", 0.6}, {"seed", 2}}}});
+    g["connections"].push_back({{"from", "thin"}, {"to", "output"}, {"input", "strands"}});
+    GroomSession session(groom(g.dump()));
+    SessionStrokeHost host(session);
+    session.setSculptTarget("sculpt");
+    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+    const SculptInput in = session.sculptInput("sculpt");
+    const Guide* top = &in.guides->guides()[0];
+    for (const Guide& guide : in.guides->guides()) {
+        if (guide.points[0].y > top->points[0].y) top = &guide;
+    }
+    const ToolView view = ToolView::fromMatrix(test::lookAtProjection({0.0f, 14.0f, 10.0f}, {0.0f, 4.0f, 0.0f}, 40.0, 1.0), 800, 800);
+    float cx = 0.0f, cy = 0.0f;
+    ASSERT_TRUE(view.project(top->points[top->points.size() / 2], cx, cy));
+    std::vector<std::array<float, 2>> line;
+    for (int k = 0; k < 10; ++k) line.push_back({cx - 90.0f + 20.0f * static_cast<float>(k), cy + 4.0f * static_cast<float>(k)});
+    BrushTool tool;
+    tool.settings.setMode("comb");
+    tool.settings.screenRadius = 90.0f;
+    tool.settings.brush.strength = 1.0f;
+    gpu::LookPreview preview;
+    const gpu::LookPreview::Shown shown = [&] { return session.last().strands; };
+    auto engine = backend_->engine();
+    bool armed = false;
+    int gpuDabs = 0;
+    double worst = 0.0, moved = 0.0;
+    ASSERT_TRUE(tool.stroke(host, view, line, 1.0f, 0, [&] {
+        if (!armed) {
+            ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+            std::string why;
+            armed = preview.armStroke(session, shown, &why);
+            ASSERT_TRUE(armed) << why;
+            EXPECT_EQ(preview.stopAt(), "interpolate");
+            return;
+        }
+        const StrandsPtr before = session.last().strands;
+        ViewRequest dab;
+        dab.stopAt = preview.stopAt();
+        EXPECT_EQ(session.evaluate(dab).strands, before);
+        std::string why;
+        ASSERT_TRUE(preview.strokeHolds(session, shown, &why)) << why;
+        const gpu::LookPlan& plan = *preview.strokePlan();
+        EXPECT_EQ(plan.chain.stages.front().kind, gpu::StageKind::Cull);
+        ASSERT_TRUE(plan.run.params.stages.front().branch);
+        preview.upload(*engine, plan, session.last().scalp.get());
+        engine->run(plan.run, true);
+        ++gpuDabs;
+        const std::vector<Vec3f> got = engine->readPositions();
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        worst = std::max(worst, gpu::compareVectors(got, session.last().strands->positions()).max);
+        moved = std::max(moved, gpu::compareVectors(before->positions(), session.last().strands->positions()).max);
+    }));
+    preview.endStroke();
+    EXPECT_GE(gpuDabs, 4);
+    EXPECT_LT(worst, kPointTolerance);
+    EXPECT_GT(moved, 0.05) << "the dabs reshaped the hair";
+}
+
+
+TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
+    // The CPU engine (look.slang's kernels as C++) run stage by stage from each chain's first node,
+    // each stage's points against its node's cached result: how many floats differ in their bits
+    // (none: the CPU operators and the kernels give the same bits, the kernels' transcendentals the
+    // core's portable ones, cmake/portable_cpu_kernels.cmake). The operators run their own C++ (the
+    // engine off for them: else those switched to it make what they are compared against).
+    struct Graph {
+        std::string name, json, from;
+        std::function<GroomData(const std::string&)> make = nullptr;  // (null: groom)
+    };
+    std::vector<Graph> graphs = {{"noise curl width", graph(0.3), "noise"}, {"hair_basics", startingGraph("hairBasics"), ""},
+                                 {"default", startingGraph("default"), ""}};
+    for (const char* preset : {"curly", "parted_style", "gravity", "flyaways", "cinematic_hair", "everyday_sim", "wind_and_jiggle"}) {
+        graphs.push_back({preset, presetGraph(preset), ""});
+    }
+    // The stages the presets above leave out: the shapers, the neighbours' shapers, the hair grids,
+    // Wet, Blend, Jiggle, MeshCut.
+    const std::pair<const char*, const char*> shapers[] = {
+        {"Bend", R"("params": {"angle": 35.0, "randomness": 0.3})"},
+        {"Direction", R"("params": {"inclination": 30.0, "strength": 0.7, "roll": 20.0})"},
+        {"Transform", R"("params": {"scale": 1.2, "translate": [0.0, 0.05, 0.0], "rotate": [10.0, 0.0, 5.0]})"},
+        {"Displace", R"("params": {"distance": 0.1})"},
+        {"Twist", R"("params": {"turns": 0.6})"}};
+    for (const auto& [type, params] : shapers) graphs.push_back({type, shaperGraph(type, params, true), ""});
+    for (const auto& [type, params] : {std::pair<const char*, const char*>{"Smooth", R"("params": {"strength": 0.8, "scale": 0.3})"},
+                                       {"BlendNeighbors", R"("params": {"strength": 0.6})"},
+                                       {"Tangle", R"("params": {"strength": 0.6, "fraction": 0.5})"}}) {
+        graphs.push_back({type, neighbourGraph(type, params), ""});
+    }
+    graphs.push_back({"Collide", withoutClearance(chainGraph({{"Collide", R"("params": {"offset": 0.12, "softness": 0.1})"}}, true, true)), ""});
+    graphs.push_back({"SelfCollide", withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.6})"}, {"SelfCollide", ""}})), ""});
+    graphs.push_back({"Clump strandStrengthRandom",
+                      withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.8, "strandStrengthRandom": 0.6, "strengthRandom": 0.3})"}})), ""});
+    graphs.push_back({"Static", withoutClearance(chainGraph({{"Static", ""}, {"Noise", R"("params": {"amplitude": 0.1})"}})), ""});
+    graphs.push_back({"Wet", withoutClearance(chainGraph({{"Wet", wetParams(3, 0.6)}})), ""});
+    graphs.push_back({"Blend", blendGraph(R"("params": {"mix": 0.6, "profile": [[0, 0.2], [1, 1]]})"), ""});
+    graphs.push_back({"Jiggle", jiggleGraph(), ""});
+    graphs.push_back({"MeshCut", meshCutGraph(R"("params": {"offset": 0.02})"), "",
+                      [](const std::string& j) { return meshCutGroom(j, Vec3f(0.0f, 4.6f, 0.0f), 1.6f); }});
+    graphs.push_back({"Jiggle moving", jiggleGraph(), "", [](const std::string& j) { return jiggleGroom(j, 4); }});
+    graphs.push_back({"Jiggle settling", jiggleGraph(), "", [](const std::string& j) { return jiggleGroom(j, 13); }});
+    for (const char* mode : {"segments", "scale", "even"}) {
+        graphs.push_back({std::string("RestoreLength ") + mode,
+                          withReference(neighbourGraph("RestoreLength", std::string(R"("params": {"mode": ")") + mode + R"("})"), "n1", "interpolate"), ""});
+    }
+    graphs.push_back({"Flow", withoutClearance(chainGraph({{"Flow", R"("params": {"lift": 12.0, "bend": 0.6, "rollRandom": 6.0})"}, {"Noise", kKinks}})), "",
+                      [](const std::string& j) { return flowGroom(j, true); }});
+    std::size_t differing = 0;
+    for (const Graph& g : graphs) {
+        GroomData data = g.make ? g.make(g.json) : groom(g.json);
+        test::paintRequiredMaps(g.json, data);
+        data.partsJson = meridianParts(*data.scalp);
+        GroomSession session(data);
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands) << g.name;
+        Prepared p;
+        if (!prepareRun(session, {}, g.from, &p)) {
+            std::printf("[ CPU bits ] %s: not run (%s)\n", g.name.c_str(), p.why.c_str());
+            continue;
+        }
+        const GraphDocument& doc = *session.viewDocument();
+        auto engine = gpu::makeCpuLookEngine();
+        engine->setBase(p.base, session.last().scalp.get());
+        std::string line;
+        const bool counted = true;
+        for (std::size_t k = 1; k <= p.chain.stages.size(); ++k) {
+            if (k < p.chain.stages.size() && p.chain.stages[k].node == p.chain.stages[k - 1].node) continue;  // (a Wet's levels)
+            const gpu::LookStage& stage = p.chain.stages[k - 1];
+            const StrandsPtr want = valueAs<StrandsPtr>(doc.graph.cachedValue(stage.node));
+            gpu::LookRun run = p.run;
+            run.params.stages.resize(k);
+            run.fields.stages.resize(k);
+            run.inputs.resize(k);
+            engine->run(run, false);
+            const std::vector<Vec3f> got = engine->readPositions();
+            if (!want || got.size() != want->pointCount()) {
+                line += " " + doc.nameOf(stage.node) + "(?)";
+                continue;
+            }
+            std::size_t bits = 0;
+            double most = 0.0;
+            for (std::size_t i = 0; i < got.size(); ++i) {
+                for (int a = 0; a < 3; ++a) {
+                    const float x = (&got[i].x)[a], y = (&want->positions()[i].x)[a];
+                    if (std::memcmp(&x, &y, 4) != 0) {
+                        ++bits;
+                        most = std::max(most, static_cast<double>(std::abs(x - y)));
+                    }
+                }
+            }
+            if (counted) differing += bits;
+            char part[160];
+            std::snprintf(part, sizeof part, " %s %zu/%zu (%.2g)", gpu::stageName(stage.kind), bits, got.size() * 3, most);
+            line += part;
+        }
+        std::printf("[ CPU bits ] %s:%s\n", g.name.c_str(), line.c_str());
+    }
+    std::printf("[ CPU bits ] floats differing in all: %zu\n", differing);
+    EXPECT_EQ(differing, 0u);
+}
+
+TEST(CpuEngine, CollideOverADeformedScalpRunsAlikeTwice) {
+    // Collide over a scalp deformed away from its rest pose (each strand walked through the rest
+    // pose's field from its cursor, the deformed mesh asked where that cannot tell: collideRestPush
+    // through the host): the same bits from two sessions, and strands pushed; hard, soft, smoothed;
+    // and method exact (the mesh itself at every point, through the same host).
+    for (const char* params : {R"("params": {"offset": 0.12})", R"("params": {"offset": 0.12, "softness": 0.1})",
+                               R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3})",
+                               R"("params": {"offset": 0.12, "method": "exact"})",
+                               R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3, "method": "exact"})"}) {
+        SCOPED_TRACE(params);
+        const GroomData data = deformedGroom(withoutClearance(chainGraph({{"Collide", params}})));
+        auto collided = [&](GroomSession& session) {
+            if (!session.evaluate(ViewRequest{}).strands) return StrandsPtr();
+            const GraphDocument& doc = *session.viewDocument();
+            return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("n0")));
+        };
+        GroomSession on(data);
+        const StrandsPtr once = collided(on);
+        GroomSession off(data);
+        const StrandsPtr again = collided(off);
+        ASSERT_TRUE(once && again);
+        ASSERT_EQ(once->pointCount(), again->pointCount());
+        EXPECT_EQ(std::memcmp(once->positions().data(), again->positions().data(), again->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(once->contentHash(), again->contentHash());
+        // (Something to push: strands that the deformed scalp moved.)
+        NodeId source = 0;
+        const GraphDocument& doc = *off.viewDocument();
+        ASSERT_TRUE(doc.graph.inputSource(doc.nodesByName.at("n0"), 0, &source));
+        EXPECT_NE(valueAs<StrandsPtr>(doc.graph.cachedValue(source))->contentHash(), again->contentHash()) << "pushes nothing";
+    }
+}
+
+TEST(CpuEngine, HairGridsOverADeformedScalpRunAlikeTwice) {
+    // SelfCollide and Static over a scalp deformed away from its rest pose (the walk's floor asked
+    // through the rest pose, each strand from its cursor: hairGridFloorPush through the host): the
+    // same bits from two sessions, and strands moved; the strands hung into the scalp by a Gravity
+    // first, for the floor to push.
+    for (const std::pair<const char*, const char*>& node : {std::pair<const char*, const char*>{"SelfCollide", R"("params": {"strength": 1.0, "packing": 0.02})"},
+                                                            {"Static", R"("params": {"strength": 1.0})"}}) {
+        SCOPED_TRACE(node.first);
+        const GroomData data = deformedGroom(withoutClearance(
+            chainGraph({{"Gravity", R"("params": {"strength": 1.6, "stiffness": 0.2})"}, {node.first, node.second}})));
+        auto made = [&](GroomSession& session) {
+            if (!session.evaluate(ViewRequest{}).strands) return StrandsPtr();
+            const GraphDocument& doc = *session.viewDocument();
+            return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("n1")));
+        };
+        GroomSession on(data);
+        const StrandsPtr once = made(on);
+        GroomSession off(data);
+        const StrandsPtr again = made(off);
+        ASSERT_TRUE(once && again);
+        ASSERT_EQ(once->pointCount(), again->pointCount());
+        EXPECT_EQ(std::memcmp(once->positions().data(), again->positions().data(), again->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(once->contentHash(), again->contentHash());
+        NodeId source = 0;
+        const GraphDocument& doc = *off.viewDocument();
+        ASSERT_TRUE(doc.graph.inputSource(doc.nodesByName.at("n1"), 0, &source));
+        EXPECT_NE(valueAs<StrandsPtr>(doc.graph.cachedValue(source))->contentHash(), again->contentHash()) << "moves nothing";
+    }
+}
+
+TEST(CpuEngine, HairGridsCoarsenedRunAlikeTwice) {
+    // Hair spreading far wider than its scalp (long strands out from a small head every way: the
+    // grid's cells coarsen, HairGridLayout::cell): SelfCollide and Static, the same bits twice.
+    const MeshPtr scalp = test::makeSphere(12, 24, 1.0f);
+    auto in = std::make_shared<StrandSet>();
+    Rng rng(7);
+    for (StrandId id = 1; id <= 200; ++id) {
+        const Vec3f way = Vec3f(rng.uniform(-1.0f, 1.0f), rng.uniform(-1.0f, 1.0f), rng.uniform(-1.0f, 1.0f));
+        if (way.length() < 0.1f) continue;
+        const SurfacePoint at = scalp->closestPoint(way.normalized() * 2.0f);
+        std::vector<Vec3f> points;
+        for (int i = 0; i < 8; ++i) {
+            const float t = static_cast<float>(i) / 7.0f;
+            points.push_back(at.position + (at.normal * 2000.0f + Vec3f(0.0f, -100.0f * t, 0.0f)) * t);
+        }
+        in->addStrand(id, points, {}, at.root);
+    }
+    // (And a bundle crossing itself on top.)
+    for (StrandId id = 1001; id <= 3000; ++id) {
+        const Vec3f way = Vec3f(rng.uniform(-0.3f, 0.3f), 1.0f, rng.uniform(-0.3f, 0.3f));
+        const SurfacePoint at = scalp->closestPoint(way * 2.0f);
+        const Vec3f lean(rng.uniform(-1.0f, 1.0f), 0.0f, rng.uniform(-1.0f, 1.0f));
+        std::vector<Vec3f> points;
+        for (int i = 0; i < 8; ++i) {
+            const float t = static_cast<float>(i) / 7.0f;
+            points.push_back(at.position + (Vec3f(0.0f, 3.0f, 0.0f) + lean) * t);
+        }
+        in->addStrand(id, points, {}, at.root);
+    }
+    ExternalInputs ext;
+    ext.set("scalp", scalp, scalp->contentHash());
+    EvalContext ctx;
+    ctx.externals = &ext;
+    for (const char* type : {op::kSelfCollide, op::kStatic}) {
+        SCOPED_TRACE(type);
+        HairGridLayout layout;
+        std::string why;
+        ASSERT_TRUE(hairGridLayout(type, *in, scalp, &layout, &why)) << why;
+        EXPECT_TRUE(layout.coarsened);
+        auto made = [&] {
+            auto op = OperatorRegistry::instance().create(type);
+            op->params().set("strength", 1.0);
+            if (std::string(type) == op::kSelfCollide) op->params().set("packing", 0.001);
+            const StrandsPtr out = valueAs<StrandsPtr>(op->evaluate(ctx, {Value(StrandsPtr(in))}));
+                return out;
+        };
+        const StrandsPtr once = made(), again = made();
+        ASSERT_TRUE(once && again);
+        ASSERT_EQ(once->pointCount(), again->pointCount());
+        EXPECT_EQ(std::memcmp(once->positions().data(), again->positions().data(), again->pointCount() * sizeof(Vec3f)), 0);
+        // (SelfCollide finds no hair packed past its packing in cells this coarse: Static moves it,
+        // the grid's constants the same for both.)
+        if (std::string(type) == op::kStatic) EXPECT_NE(again->contentHash(), in->contentHash()) << "moves nothing";
+    }
+}
+
+TEST(CpuEngine, BlendRunsAlikeTwice) {
+    // Blend's points on the CPU engine (BlendCS, look b handed in), its widths and look mixed by the
+    // same weights: the same bits from two sessions, everything it makes (contentHash); a mix by
+    // number with a profile, a per-point map, the shape alone.
+    for (const char* params : {R"("params": {"mix": 0.6, "profile": [[0, 0.2], [1, 1]]})",
+                               R"("params": {"mix": {"expression": "t * rand", "min": 0.0, "max": 1.0}})",
+                               R"("params": {"mix": 0.4, "include": "shape"})"}) {
+        SCOPED_TRACE(params);
+        const GroomData data = groom(blendGraph(params, "", "", true));
+        auto blended = [&](GroomSession& session) {
+            if (!session.evaluate(ViewRequest{}).strands) return StrandsPtr();
+            const GraphDocument& doc = *session.viewDocument();
+            return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("blend")));
+        };
+        GroomSession on(data);
+        const StrandsPtr once = blended(on);
+        GroomSession off(data);
+        const StrandsPtr again = blended(off);
+        ASSERT_TRUE(once && again);
+        ASSERT_EQ(once->pointCount(), again->pointCount());
+        EXPECT_EQ(std::memcmp(once->positions().data(), again->positions().data(), again->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(once->contentHash(), again->contentHash());
+    }
+}
+
+TEST(CpuEngine, InterpolateOverADeformedScalpRunsAlikeTwice) {
+    // Keeping clearance over a deformed scalp (the walk through the rest pose's field, each strand
+    // from its cursor): Interpolate on the CPU once, the same bits from two sessions; and with
+    // degenerate faces among the strands (an edge of the deformed scalp collapsed: the walk asks the
+    // mesh at their vertices, through the host).
+    for (const bool degenerate : {false, true}) {
+    for (const char* which : {"default", "hairBasics"}) {
+        SCOPED_TRACE(std::string(which) + (degenerate ? " degenerate" : ""));
+        GroomData data = deformedGroom(startingGraph(which));
+        if (degenerate) {
+            std::vector<Vec3f> points = data.scalp->points();
+            for (std::size_t t = 0; t < data.scalp->triangleCount(); t += 37) {
+                const auto& tri = data.scalp->triangles()[t];
+                points[static_cast<std::size_t>(tri[1])] = points[static_cast<std::size_t>(tri[0])];
+            }
+            auto broken = std::make_shared<ScalpMesh>(points, data.scalp->triangles());
+            broken->setRestPoints(data.scalp->restPoints());
+            data.scalp = broken;
+        }
+        auto interpolated = [&](GroomSession& session) {
+            if (!session.evaluate(ViewRequest{}).strands) return StrandsPtr();
+            const GraphDocument& doc = *session.viewDocument();
+            return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("interpolate")));
+        };
+        GroomSession on(data);
+        const StrandsPtr once = interpolated(on);
+        GroomSession off(data);
+        const StrandsPtr again = interpolated(off);
+        ASSERT_TRUE(once && again);
+        ASSERT_EQ(once->pointCount(), again->pointCount());
+        EXPECT_EQ(std::memcmp(once->positions().data(), again->positions().data(), again->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(once->contentHash(), again->contentHash());
+    }
+    }
+}
+
+TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
+    // Each operator's stage run alone on the CPU engine (look_cpu.h runStage, on the inputs the
+    // operator makes) against the operator itself, and the operator run twice: on the strands it
+    // took, bit for bit, points and widths; mapped params, per point and per strand, root frames
+    // with UVs and without.
+    struct Case {
+        std::string type, params;
+        bool uvs = false;
+        bool cpus = false;  // its inputs the operator's own (a direction per strand): its stage alone not run
+        bool adds = false;  // adds points (Curl): its stage alone not run
+        std::pair<std::string, std::string> before = {};  // a node before it (after the Clump)
+    };
+    const Case cases[] = {
+        {"Width", R"("params": {"width": 0.02, "randomness": 0.3, "profile": [[0, 1], [1, 0.2]]})"},
+        {"Width", R"("params": {"width": {"expression": "0.02 - 0.015 * t", "min": 0.0, "max": 1.0}})"},
+        {"Width", R"("params": {"width": {"expression": "0.01 + 0.01 * rand", "min": 0.0, "max": 1.0}})"},
+        {"Bend", R"("params": {"angle": 40.0, "start": 0.2, "end": 0.8, "randomness": 0.3, "seed": 3})"},
+        {"Bend", R"("params": {"angle": 180.0, "end": 0.0, "along": "direction", "direction": [0.0, -1.0, 0.3]})"},
+        {"Bend", R"("params": {"angle": {"expression": "rand", "min": -60.0, "max": 60.0}, "along": "direction", "direction": [1.0, -1.0, 0.3], "end": 0.6})"},
+        {"Bend", R"("params": {"angle": 70.0, "along": "tangent", "direction": [0.0, 0.0, 1.0], "start": 0.1})", true},
+        {"Direction", R"("params": {"inclination": 60.0, "roll": 30.0, "rollRandom": 20.0, "inclinationRandom": 5.0, "seed": 2, "along": "direction"})"},
+        {"Direction", R"("params": {"inclination": {"expression": "rand", "min": 20.0, "max": 80.0}, "strength": {"expression": "rand", "min": 0.2, "max": 1.0},
+                                    "roll": 45.0, "along": "direction", "direction": [1.0, 0.0, 0.0]})"},
+        {"Direction", R"("params": {"inclination": 70.0, "roll": {"expression": "rand", "min": -90.0, "max": 90.0}, "strength": 0.6})", true},
+        // All three mapped: each strand's three handed to the stage (StageInputs::directions).
+        {"Direction", R"("params": {"inclination": {"expression": "rand", "min": 20.0, "max": 80.0}, "roll": {"expression": "30 * x", "min": -90.0, "max": 90.0},
+                                    "strength": {"expression": "0.4 + 0.5 * rand", "min": 0.0, "max": 1.0}, "rollRandom": 10.0})", false, true},
+        {"Transform", R"("params": {"scale": 1.2, "translate": [0.0, 0.05, 0.0], "rotate": [10.0, 0.0, 5.0]})"},
+        {"Transform", R"("params": {"scale": {"expression": "0.8 + 0.4 * rand", "min": 0.0, "max": 2.0}, "scaleRandom": 0.2,
+                                    "translateRandom": [0.02, 0.0, 0.01], "rotateRandom": [5.0, 0.0, 5.0], "seed": 4})"},
+        {"Transform", R"("params": {"space": "world", "pivot": [0.0, 1.0, 0.0], "rotate": [0.0, 20.0, 0.0], "scale": 0.9})"},
+        {"Displace", R"("params": {"distance": 0.1, "profile": [[0, 0], [1, 1]]})"},
+        {"Displace", R"("params": {"distance": {"expression": "0.05 * t", "min": 0.0, "max": 1.0}, "along": "direction", "direction": [0.0, 1.0, 0.0]})"},
+        {"Displace", R"("params": {"distance": {"expression": "0.02 + 0.06 * rand", "min": 0.0, "max": 1.0}})"},
+        // A direction per strand (a vector expression): the operator's own run hands each strand's
+        // (StageInputs::directions); the stage alone, without them, is the CPU's.
+        {"Gravity", R"("params": {"strength": 0.6, "direction": {"expression": "[x, -1, 0.3]"}})", false, true},
+        {"Bend", R"("params": {"angle": 50.0, "along": "direction", "direction": {"expression": "[1, 0, z]"}})", false, true},
+        {"Displace", R"("params": {"distance": 0.08, "along": "direction", "direction": {"expression": "[y, 1, 0]"}})", false, true},
+        {"Part", R"("params": {"strength": 0.8, "width": 0.3})"},
+        {"Part", R"("params": {"strength": {"expression": "0.4 + 0.6 * rand", "min": 0.0, "max": 1.0}, "width": 0.5, "profile": [[0, 0], [1, 1]]})"},
+        {"Flyaway", R"("params": {"stray": 0.1, "fraction": 0.3, "frequency": 3.0, "start": 0.2, "standOut": 0.3, "lengthen": 0.2, "seed": 5})"},
+        {"Flyaway", R"("params": {"stray": {"expression": "0.05 + 0.1 * rand", "min": 0.0, "max": 1.0}, "fraction": {"expression": "rand", "min": 0.0, "max": 0.6}})"},
+        {"Twist", R"("params": {"turns": 0.6})"},
+        {"Twist", R"("params": {"turns": {"expression": "0.3 + rand", "min": -2.0, "max": 2.0}, "profile": [[0, 0], [1, 1]]})"},
+        {"Tangle", R"("params": {"strength": 0.6, "fraction": 0.5})"},
+        {"Tangle", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "fraction": 0.7, "sameClump": false, "reach": 0.0})"},
+        {"BlendNeighbors", R"("params": {"strength": 0.6})"},
+        {"BlendNeighbors", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "preserveLength": true, "neighbors": 5})"},
+        {"Length", R"("params": {"keep": 0.8, "fraction": 0.5, "trimMin": 0.1, "trimMax": 0.4, "seed": 2})"},
+        {"Length", R"("params": {"keep": {"expression": "0.5 + 0.5 * rand", "min": 0.0, "max": 1.0}})"},
+        {"Wind", R"("params": {"strength": 0.5, "gust": 0.6, "turbulence": 0.3, "direction": [1.0, 0.0, 0.3]})"},
+        {"Wind", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "loop": true, "loopStart": 1, "loopEnd": 25})"},
+        {"Noise", R"("params": {"amplitude": 0.15, "frequency": 1.3})"},
+        {"Noise", R"("params": {"amplitude": 0.1, "frequency": 4.0, "octaves": 4, "fraction": 0.6, "seed": 3})"},
+        {"Noise", R"("params": {"amplitude": {"expression": "0.05 + 0.1 * rand", "min": 0.0, "max": 1.0}, "space": "world", "frequency": 2.0})"},
+        {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "frequency": 3.0})"},
+        {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "space": "world", "frequency": 3.0})"},
+        {"Collide", R"("params": {"offset": 0.12})"},
+        {"Collide", R"("params": {"offset": 0.08, "softness": 0.1, "smoothing": 0.2, "iterations": 3})"},
+        {"Collide", R"("params": {"offset": 0.12, "softness": 0.05, "method": "exact"})", false, true},
+        {"Clump", R"("params": {"count": 80, "strength": 0.7})"},
+        {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * t", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
+                                "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
+        {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
+                                "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
+        {"Clump", R"("params": {"count": 40, "strength": -0.3, "repelRadius": 0.2, "flatten": "random", "flatness": 0.7})"},
+        {"Interpolate", R"("params": {"keepClearance": true})", false, true},
+        {"Interpolate", R"("params": {"keepClearance": false, "limitDistance": 0.6, "preserveLength": true})", false, true},
+        {"Interpolate", R"("params": {"keepClearance": true, "limitDistance": 1.5, "smoothGuides": true})", true, true},
+        {"Smooth", R"("params": {"strength": 0.8, "scale": 0.3})"},
+        {"Smooth", R"("params": {"strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "scale": 0.1, "profile": [[0, 0], [1, 1]]})"},
+        {"Smooth", R"("params": {"strength": 1.0, "scale": 1.0})"},
+        {"Gravity", R"("params": {"strength": 0.8, "stiffness": 0.3})"},
+        {"Gravity", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "direction": [0.3, -1.0, 0.0]})"},
+        {"Curl", R"("params": {"radius": 0.1, "frequency": 1.0, "tolerance": 0.0})"},
+        {"Curl", R"("params": {"radius": 0.05, "frequency": 0.3})"},
+        {"Curl", R"("params": {"radius": 0.05, "frequency": 3.0, "tolerance": 0.1})", false, false, true},
+        {"Curl", R"("params": {"radius": 0.08, "frequency": 1.5, "shape": "zigzag", "tolerance": 0.2})", false, false, true},
+        {"Curl", R"("params": {"radius": 0.08, "frequency": 1.2, "shape": "wave", "randomness": 0.6, "spacingRandom": 0.5, "tolerance": 0.0})"},
+        {"Curl", R"("params": {"radius": 0.08, "frequency": 1.2, "shape": "zigzag", "frequencyProfile": [[0, 0.5], [1, 1]], "tolerance": 0.0})"},
+        {"Curl", R"("params": {"radius": 0.1, "frequency": 0.8, "coherence": "clump", "tolerance": 0.0})"},
+        {"Curl", R"("params": {"radius": 0.1, "frequency": 0.8, "weight": 1.0, "tolerance": 0.0})"},
+        {"Curl", R"("params": {"radius": {"expression": "0.05 + 0.1 * rand", "min": 0.0, "max": 1.0}, "frequency": 1.0, "phase": 0.3, "tolerance": 0.0})"},
+        {"Curl", R"("params": {"shape": "coil", "coilWidths": 3.0, "frequency": 2.0, "tolerance": 0.0})", false, false, false,
+         {"Width", R"("params": {"width": 0.02, "randomness": 0.4})"}},
+        {"SelfCollide", R"("params": {"packing": 0.02})", false, false, false, {"Width", R"("params": {"width": 0.02, "randomness": 0.4})"}},
+        {"SelfCollide", R"("params": {"packing": 0.03, "strength": {"expression": "0.5 + 0.5 * rand", "min": 0.0, "max": 1.0}, "profile": [[0, 0], [1, 1]]})",
+         false, false, false, {"Width", R"("params": {"width": 0.04})"}},
+        {"SelfCollide", R"("params": {"packing": 0.01})"},
+        {"Static", R"("params": {"strength": 0.5})"},
+        {"Static", R"("params": {"strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "randomness": 0.8, "profile": [[0, 0.2], [1, 1]]})"},
+    };
+    std::size_t differing = 0, compared = 0;
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.type + " " + c.params);
+        // (Interpolate: the graph's own, its params these.)
+        const bool interpolate = c.type == "Interpolate";
+        std::string json = shaperGraph(interpolate ? "Bend" : c.type, interpolate ? R"("params": {"angle": 10.0})" : c.params, true, c.before);
+        if (interpolate) {
+            nlohmann::json j = nlohmann::json::parse(json);
+            const nlohmann::json own = nlohmann::json::parse("{" + c.params + "}")["params"];
+            for (auto& n : j["nodes"]) {
+                if (n["type"] == "Interpolate") n["params"].update(own);
+            }
+            json = j.dump();
+        }
+        GroomData data = c.uvs ? paintedGroom(json) : groom(json);
+        data.partsJson = meridianParts(*data.scalp);
+        GroomSession session(data);
+        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+        const GraphDocument& doc = *session.viewDocument();
+        NodeId id = 0;
+        if (interpolate) {
+            for (const auto& [name, node] : doc.nodesByName) {
+                if (doc.graph.node(node).typeName() == "Interpolate") id = node;
+            }
+        } else {
+            id = doc.nodesByName.at(c.before.first.empty() ? shaperName(true) : "n2");
+        }
+        ExternalInputs ext;
+        setGroomExternals(ext, session.last().scalp, data.guides, session.last().hierarchy, session.last().parts, session.last().flow);
+        EvalContext ctx;
+        ctx.externals = &ext;
+        ctx.time = 1.25;  // (Wind's gusts somewhere along)
+        const Operator& op = doc.graph.node(id);
+        std::vector<Value> inputs(op.inputs().size());
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            NodeId src = 0;
+            std::size_t output = 0;
+            if (doc.graph.inputSource(id, i, &src, &output)) inputs[i] = doc.graph.cachedValue(src, output);
+        }
+        const std::map<std::string, gpu::StageKind> kinds = {{"Width", gpu::StageKind::Width},         {"Bend", gpu::StageKind::Bend},
+                                                             {"Direction", gpu::StageKind::Direction}, {"Transform", gpu::StageKind::Transform},
+                                                             {"Displace", gpu::StageKind::Displace},   {"Gravity", gpu::StageKind::Gravity},
+                                                             {"Part", gpu::StageKind::Part},           {"Flyaway", gpu::StageKind::Flyaway},
+                                                             {"Twist", gpu::StageKind::Twist},         {"Tangle", gpu::StageKind::Tangle},
+                                                             {"BlendNeighbors", gpu::StageKind::BlendNeighbors},
+                                                             {"Length", gpu::StageKind::Length},       {"Wind", gpu::StageKind::Wind},
+                                                             {"Noise", gpu::StageKind::Noise},         {"Collide", gpu::StageKind::Collide},
+                                                             {"Clump", gpu::StageKind::Clump},         {"Interpolate", gpu::StageKind::Interpolate},
+                                                             {"Smooth", gpu::StageKind::Smooth},       {"Curl", gpu::StageKind::Curl},
+                                                             {"SelfCollide", gpu::StageKind::SelfCollide}, {"Static", gpu::StageKind::Static}};
+        const gpu::StageKind kind = kinds.at(c.type);
+        gpu::StageInputs stageInputs;
+        std::string whyNot;
+        if (kind == gpu::StageKind::Twist) stageInputs.twist = gpu::twistInputs(*valueAs<StrandsPtr>(inputs[0]), valueAs<GuidesPtr>(inputs[1]).get(), "clumpId", false, &whyNot);
+        // (Tangle's partners, BlendNeighbors' neighbours and Clump's centers: their operators' own, as they just made them.)
+        if (kind == gpu::StageKind::Clump) {
+                const Value cpu = op.evaluate(ctx, inputs);
+                ClumpState state;
+            ASSERT_TRUE(clumpState(op, valueAs<StrandsPtr>(cpu), &state));
+            stageInputs.clump = gpu::clumpInputs(state.assigned, state.curves, state.centerNormals, state.centerIds,
+                                                 static_cast<std::uint64_t>(op.params().getInt("seed")));
+        }
+        if (kind == gpu::StageKind::Tangle || kind == gpu::StageKind::BlendNeighbors) {
+                const Value cpu = op.evaluate(ctx, inputs);
+                if (kind == gpu::StageKind::Tangle) {
+                std::shared_ptr<const TangleState> state;
+                ASSERT_TRUE(tangleState(op, valueAs<StrandsPtr>(cpu), &state));
+                stageInputs.tangle = gpu::tangleInputs(*valueAs<StrandsPtr>(inputs[0]), *state);
+            } else {
+                std::shared_ptr<const BlendNeighborsState> state;
+                ASSERT_TRUE(blendNeighborsState(op, valueAs<StrandsPtr>(cpu), &state));
+                stageInputs.neighbors = state;
+            }
+        }
+        if (kind == gpu::StageKind::Collide) {
+            // Its surfaces' fields as CollideOp asks them (collisionField at its offset and search radius).
+            std::vector<MeshPtr> meshes;
+            std::vector<DistanceFieldPtr> fields;
+            const float offset = static_cast<float>(op.params().getDouble("offset")), softness = static_cast<float>(op.params().getDouble("softness"));
+            const float radius = std::max(offset + softness, static_cast<float>(op.params().getDouble("maxDepth"))) * 1.001f + 1e-6f;
+            for (std::size_t slot = 1; slot < inputs.size(); ++slot) {
+                if (const MeshPtr mesh = valueAs<MeshPtr>(inputs[slot])) {
+                    meshes.push_back(mesh);
+                    fields.push_back(collisionField(mesh, offset, radius));
+                }
+            }
+            stageInputs.collide = gpu::collideInputs(meshes, 0u, fields, offset, softness, &whyNot);
+        }
+        if (kind == gpu::StageKind::Curl && op.params().getString("coherence") == "clump") {
+            stageInputs.curl = gpu::curlInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), "clumpId",
+                                               static_cast<std::uint64_t>(op.params().getInt("seed")));
+        }
+        if (kind == gpu::StageKind::SelfCollide || kind == gpu::StageKind::Static) {
+            auto layout = std::make_shared<HairGridLayout>();
+            ASSERT_TRUE(hairGridLayout(op.typeName(), *valueAs<StrandsPtr>(inputs[0]), session.last().scalp, layout.get(), &whyNot)) << whyNot;
+            auto grid = std::make_shared<gpu::HairGridInputs>();
+            grid->walls = hairGridWalls(*session.last().scalp, layout->h, layout->wallReach);
+            grid->layout = layout;
+            stageInputs.grid = grid;
+        }
+        if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
+        // The operator, its stage alone on the engine, the operator again.
+        StrandsPtr made[3];
+        made[0] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
+        if (c.adds) EXPECT_GT(made[0]->pointCount(), valueAs<StrandsPtr>(inputs[0])->pointCount());
+        if (kind == gpu::StageKind::SelfCollide || kind == gpu::StageKind::Static) {
+            EXPECT_TRUE(made[0] != valueAs<StrandsPtr>(inputs[0])) << "pushes nothing";  // (its input: none moved)
+        }
+        if (interpolate) {
+                const StrandsPtr cpu = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
+                const StrandsPtr now = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
+            ASSERT_TRUE(cpu && now);
+            ASSERT_EQ(cpu->pointCount(), now->pointCount());
+            std::size_t bits = 0;
+            for (std::size_t i = 0; i < cpu->pointCount(); ++i) bits += std::memcmp(&cpu->positions()[i], &now->positions()[i], sizeof(Vec3f)) != 0;
+            for (const std::string name : {"guideInfluence", "region"}) {
+                const std::vector<float>* a = cpu->strandChannel(name);
+                const std::vector<float>* b = now->strandChannel(name);
+                EXPECT_EQ(a == nullptr, b == nullptr) << name;
+                if (a && b) EXPECT_TRUE(*a == *b) << name;
+            }
+            EXPECT_EQ(bits, 0u) << "the operator again";
+            differing += bits;
+            compared += cpu->pointCount();
+            continue;
+        }
+        gpu::StageParamReader reader(op.params(), "");
+        reader.time = ctx.time;
+        reader.framesPerSecond = ctx.framesPerSecond;
+        if (!c.adds && !c.cpus) made[1] = gpu::runStage(kind, reader, valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), stageInputs);
+        made[2] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
+        for (int m = 1; m < 3; ++m) {
+            if (!made[m]) continue;
+            ASSERT_TRUE(made[0]);
+            ASSERT_EQ(made[0]->pointCount(), made[m]->pointCount());
+            ASSERT_EQ(made[0]->widths().size(), made[m]->widths().size());
+            std::size_t bits = 0;
+            for (std::size_t i = 0; i < made[0]->pointCount(); ++i) {
+                bits += std::memcmp(&made[0]->positions()[i], &made[m]->positions()[i], sizeof(Vec3f)) != 0;
+            }
+            for (std::size_t i = 0; i < made[0]->widths().size(); ++i) {
+                bits += std::memcmp(&made[0]->widths()[i], &made[m]->widths()[i], sizeof(float)) != 0;
+            }
+            // (Flyaway's strays flagged alike.)
+            if (m == 2 && made[0]->strandChannel("flyaway")) {
+                const std::vector<float>* got = made[m]->strandChannel("flyaway");
+                EXPECT_TRUE(got && *got == *made[0]->strandChannel("flyaway"));
+            }
+            EXPECT_EQ(bits, 0u) << (m == 1 ? "the stage alone" : "the operator again");
+            differing += bits;
+            compared += made[0]->pointCount();
+        }
+    }
+    std::printf("[ CPU ops ] points differing: %zu of %zu\n", differing, compared);
 }
 
 }  // namespace

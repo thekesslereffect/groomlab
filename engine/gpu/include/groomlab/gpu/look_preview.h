@@ -34,6 +34,9 @@ struct LookPlan {
     LookRun run;
     StrandsPtr base, output;
     const GraphDocument* doc = nullptr;
+    // The node the run starts from: its first stage's, or where that is a Cull, Split or Mirror, the
+    // first of the run up its input (StageParams::branch: a stroke's Interpolate).
+    NodeId start = 0;
 };
 
 // Where a plan's run starts.

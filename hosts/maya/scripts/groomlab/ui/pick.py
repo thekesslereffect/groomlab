@@ -296,7 +296,7 @@ def pick_input(groom, kind, name=None, on_end=None, ask=True, use_selection=True
 
 
 def selected_position(groom=None, selection=None):
-    """Where the selection is, for a param holding a world position (Tie's center, Transform's
+    """Where the selection is, for a param holding a world position (Transform's
     pivot): the mean of the selected vertices (or CVs, lattice points: any components), else the
     first selected locator's or transform's rotate pivot, in world space and centimeters, as groom
     data is (the scalp is read in world space), whatever the UI's units. `groom` (and its transform)
