@@ -96,6 +96,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->flag[0] = static_cast<int>(r.samples);
             s->flag[1] = params.getBool("preserveLength") ? 1 : 0;
             s->flag2[1] = params.getString("take") == "length" ? 1 : 0;
+            s->value2[2] = params.getString("blend") == "directions" ? 1.0f : 0.0f;  // (look.slang blendsDirections)
             s->ramp = r.ramp("falloff");
             return true;
         case StageKind::Clump: {

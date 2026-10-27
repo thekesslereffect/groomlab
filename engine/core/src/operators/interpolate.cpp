@@ -1074,12 +1074,19 @@ public:
                 .soft(0, 4)
                 .adv()
                 .when("neighbors", {"2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"}),
+            ParamSpec{"blend", std::string("offsets"), "How the guides' shapes combine: offsets: their points averaged (guides "
+                                                       "pointing different ways pull the strand in, preserveLength scales it "
+                                                       "back); directions: each segment along their segments' average way, "
+                                                       "at their average length (no pulling in; a strand between two parted "
+                                                       "guides keeps their length)", "", {"offsets", "directions"}}
+                .when("take", {"shape"}),
             ParamSpec{"smoothGuides", true, "Follow each guide as the smooth curve the viewport draws through its points (a "
                                             "centripetal Catmull-Rom spline), not straight lines between them, so a bend "
                                             "drawn with few points stays round in the hair"}
                 .adv(),
             ParamSpec{"preserveLength", true, "Scale each blended strand to its guides' blended length (blending guides that "
-                                              "point different ways would shorten it; take shape)"}
+                                              "point different ways would shorten it; take shape; blend directions "
+                                              "keeps it already)"}
                 .adv()
                 .when("take", {"shape"}),
             ParamSpec{"keepClearance", true, "Keep strands out of the skin: where the skin under a strand bulges more "

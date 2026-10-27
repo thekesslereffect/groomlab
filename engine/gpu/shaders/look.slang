@@ -1130,6 +1130,34 @@ InterpGuide interpGuide(uint s, InterpStrand st, uint lane) {
     return out;
 }
 
+// blend directions (gValue2.z 1): the blended path rebuilt segment by segment from the root, each
+// segment along the guides' segments there turned and weighed (the difference of two samples of the
+// offsets' blend: a turn is linear), at the guides' weighted length over the segments (`walkStep`), so
+// guides pointing different ways no longer pull the strand in. A segment whose guides cancel out
+// keeps the one before's way (the first: the root normal's, else +y).
+struct DirectionWalk {
+    float3 raw, at, dir;
+};
+bool blendsDirections() { return gValue2.z != 0.0f; }
+DirectionWalk directionWalk(float3 root, float3 normal) {
+    DirectionWalk w;
+    w.raw = root;
+    w.at = root;
+    w.dir = len3(normal) > 0.0f ? normal : float3(0.0f, 1.0f, 0.0f);
+    return w;
+}
+// The next sample of the walk from the offsets' blend's next sample `raw`.
+float3 directionStep(inout DirectionWalk w, float3 raw, float walkStep) {
+    PRECISE float3 d = raw - w.raw;
+    w.raw = raw;
+    const float l = lengthExact(d);
+    if (l > 0.0f) w.dir = float3(divExact(d.x, l), divExact(d.y, l), divExact(d.z, l));
+    PRECISE float3 moved = w.dir * walkStep;
+    PRECISE float3 at = w.at + moved;
+    w.at = at;
+    return at;
+}
+
 // fillTubes (the CPU engine's; look_run.h InterpolateInputs::tubes): gAux.z the word of gAux1 where
 // the tubes start (0: none). A strand's tube (-1: none, it blends) and section coordinates, the
 // deeper tube whose soft edge it lies in (-1: none), its coordinates there and how far it leans.
@@ -1273,9 +1301,17 @@ void interpolateStrandAlone(uint s) {
         }
         for (uint l = 0; l < 4 && 4 * q + l < samples; ++l) blendAt[4 * q + l] = float4(laneOf(sum, l), 0.0f);
     }
+    const bool directions = blendsDirections();
+    if (directions) {
+        PRECISE float guideLen = 0.0f;
+        for (uint i = 0; i < found; ++i) guideLen += guide[i].length;
+        const float walkStep = divExact(guideLen, float(samples - 1));
+        DirectionWalk walk = directionWalk(root, strandData(s).xyz);
+        for (uint j = 1; j < samples; ++j) blendAt[j].xyz = directionStep(walk, blendAt[j].xyz, walkStep);
+    }
     for (uint j = 1; j < samples; ++j) blendAt[j].w = lengthExact(blendAt[j].xyz - blendAt[j - 1].xyz);
     float scale = 0.0f;
-    if (gFlag.y != 0) {
+    if (gFlag.y != 0 && !directions) {  // (directions: the guides' length already)
         float own = 0.0f, guideLen = 0.0f;
         for (uint j = 1; j < samples; ++j) own += blendAt[j].w;
         for (uint i = 0; i < found; ++i) guideLen += guide[i].length;
@@ -1372,13 +1408,27 @@ void interpolateStreamedOf(uint s) {
     for (uint i = 0; i < min(st.found, BIND_SLOTS); ++i) guide[i] = interpGuide(s, st, i);
     interpolateStreamed(s, st, tb, guide, st.found, loadPoint(st.begin), gFlag.x, st.begin, st.n);
 }
+// The path's sample j (blend directions: the walk's, j one past the last it gave).
+float3 pathSample(uint s, InterpStrand st, inout InterpGuide guide[BIND_SLOTS], uint found, float3 root, uint samples, uint j,
+                  float scale, float3 first, inout SampleStream ss, inout DirectionWalk walk, float walkStep) {
+    if (walkStep > 0.0f) return directionStep(walk, streamedRaw(s, st, guide, found, root, samples, j, ss), walkStep);
+    return streamedSample(s, st, guide, found, root, samples, j, scale, first, ss);
+}
 void interpolateStreamed(uint s, InterpStrand st, TubeOf tb, inout InterpGuide guide[BIND_SLOTS], uint found, float3 root, uint samples,
                          uint begin, uint n) {
     SampleStream ss;
     ss.quad = 0xFFFFFFFFu;
     const float3 first = streamedRaw(s, st, guide, found, root, samples, 0, ss);
+    // blend directions: the walk's step (0: the offsets' blend), each pass walking from the root.
+    float walkStep = 0.0f;
+    if (blendsDirections()) {
+        PRECISE float guideLen = 0.0f;
+        for (uint i = 0; i < found; ++i) guideLen += heldGuide(s, st, guide, i).length;
+        walkStep = divExact(guideLen, float(samples - 1));
+    }
+    const float3 normal = strandData(s).xyz;
     float scale = 0.0f;
-    if (gFlag.y != 0) {
+    if (gFlag.y != 0 && !(walkStep > 0.0f)) {
         float own = 0.0f, guideLen = 0.0f;
         float3 before = first;
         for (uint j = 1; j < samples; ++j) {
@@ -1391,9 +1441,10 @@ void interpolateStreamed(uint s, InterpStrand st, TubeOf tb, inout InterpGuide g
     }
     float arc = 0.0f;
     {
+        DirectionWalk walk = directionWalk(root, normal);
         float3 before = first;
         for (uint j = 1; j < samples; ++j) {
-            const float3 b = streamedSample(s, st, guide, found, root, samples, j, scale, first, ss);
+            const float3 b = pathSample(s, st, guide, found, root, samples, j, scale, first, ss, walk, walkStep);
             arc += lengthExact(b - before);
             before = b;
         }
@@ -1401,7 +1452,8 @@ void interpolateStreamed(uint s, InterpStrand st, TubeOf tb, inout InterpGuide g
     const float step = divExact(arc, float(n - 1));
     uint lo = 1;
     float3 seg = first;
-    float4 to = float4(streamedSample(s, st, guide, found, root, samples, 1, scale, first, ss), 0.0f);
+    DirectionWalk walk = directionWalk(root, normal);
+    float4 to = float4(pathSample(s, st, guide, found, root, samples, 1, scale, first, ss, walk, walkStep), 0.0f);
     to.w = lengthExact(to.xyz - seg);
     float arcSeg = 0.0f, arcLo = arcSeg + to.w;
     for (uint i = 0; i < n; ++i) {
@@ -1410,7 +1462,7 @@ void interpolateStreamed(uint s, InterpStrand st, TubeOf tb, inout InterpGuide g
             ++lo;
             seg = to.xyz;
             arcSeg = arcLo;
-            to.xyz = streamedSample(s, st, guide, found, root, samples, lo, scale, first, ss);
+            to.xyz = pathSample(s, st, guide, found, root, samples, lo, scale, first, ss, walk, walkStep);
             to.w = lengthExact(to.xyz - seg);
             arcLo = arcSeg + to.w;
         }
@@ -1482,16 +1534,26 @@ void interpolateGroup(uint3 id, uint3 local) {
         if (m < rows && j < samples) sBlend[base + j] = float4(pick(b0, b1, b2, b3, m), 0.0f);
     }
     groupSync();
+    // blend directions: the path walked again in order (interpolateStrandAlone's arithmetic).
+    const bool directions = blendsDirections();
+    if (directions && blend && lane == 0) {
+        PRECISE float guideLen = 0.0f;
+        for (uint i = 0; i < found; ++i) guideLen += sLength[guides + i];
+        const float walkStep = divExact(guideLen, float(samples - 1));
+        DirectionWalk walk = directionWalk(root, strandData(s).xyz);
+        for (uint j = 1; j < samples; ++j) sBlend[base + j].xyz = directionStep(walk, sBlend[base + j].xyz, walkStep);
+    }
+    groupSync();
     [ForceUnroll] for (uint m = 0; m < LANE_SAMPLES; ++m) {
         const uint j = lane + m * STRAND_LANES;
-        if (m < rows && j > 0 && j < samples) sBlend[base + j].w = lengthExact(pick(b0, b1, b2, b3, m) - sBlend[base + j - 1].xyz);
+        if (m < rows && j > 0 && j < samples) sBlend[base + j].w = lengthExact(sBlend[base + j].xyz - sBlend[base + j - 1].xyz);
     }
     groupSync();
     // Scaled to the guides' blended length (at most twice its own), about the root: the lengths
     // summed in order.
     if (blend && lane == 0) {
         float scale = 0.0f;
-        if (gFlag.y != 0) {
+        if (gFlag.y != 0 && !directions) {
             float own = 0.0f, guideLen = 0.0f;
             for (uint j = 1; j < samples; ++j) own += sBlend[base + j].w;
             for (uint i = 0; i < found; ++i) guideLen += sLength[guides + i];

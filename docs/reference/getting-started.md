@@ -89,7 +89,9 @@ cmds.setAttr(groom + ".previewDensity", 1.0)
   Catmull-Rom spline), so a bend drawn with few points stays round in the hair instead of
   turning at each point. `preserveLength` (on) scales
   each blended strand to its guides' blended length, up to 2x, since blending guides that point
-  different ways shortens the result.
+  different ways shortens the result. `blend` `directions` builds each strand segment by segment
+  along its guides' average direction at their average length instead, so strands between guides
+  pointing apart keep their length without being scaled.
 - **Interpolate follows the skin:** with a scalp connected, each guide's shape is carried from
   its root to the strand's along the scalp: turned from one surface normal to the other where the
   straight line between the roots hugs the skin (almost everywhere: a guide combed back stays

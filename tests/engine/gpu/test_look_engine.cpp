@@ -1708,6 +1708,12 @@ TEST_P(LookEngineTest, InterpolateGivesWhatTheCpuBlends) {
     LookGraph flat = g;
     flat.interpolate = R"("params": {"preserveLength": false, "smoothGuides": false})";
     EXPECT_GPU_MATCHES(flat.json(), gpu::Overrides{}, flat.json());
+    LookGraph directions = g;
+    directions.interpolate = R"("params": {"blend": "directions"})";
+    EXPECT_GPU_MATCHES(directions.json(), gpu::Overrides{}, directions.json());
+    LookGraph directionsReach = g;
+    directionsReach.interpolate = R"("params": {"blend": "directions", "limitDistance": 0.9})";
+    EXPECT_GPU_MATCHES(directions.json(), (gpu::Overrides{{"interpolate", {{"limitDistance", 0.9}}}}), directionsReach.json());
 }
 
 // ---- Ramps and seeds dragged ---------------------------------------------------------------------

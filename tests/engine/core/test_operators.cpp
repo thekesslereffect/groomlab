@@ -829,6 +829,65 @@ TEST(Interpolate, PreserveLengthKeepsTheGuidesLength) {
     EXPECT_LT(middleLength(false), 0.85f * guideLength);
 }
 
+TEST(Interpolate, BlendDirectionsKeepsTheGuidesLengthBetweenPartedGuides) {
+    // Two guides of the same length pointing apart (a parting): blend offsets pulls the strands
+    // between them in (preserveLength off), blend directions keeps the guides' length and points
+    // them the way between, straight up halfway. With 17 points a strand and with 600 (more samples
+    // than the CPU engine holds: the streamed blend).
+    const auto plane = test::makePlane(8, 1.0f);
+    auto guides = std::make_shared<GuideSet>();
+    guides->add(1, test::straightCurve({0.0f, 0, 0.5f}, {-0.7f, 0.7f, 0}));
+    guides->add(2, test::straightCurve({1.0f, 0, 0.5f}, {0.7f, 0.7f, 0}));
+    guides->rootOnMesh(*plane);
+    const float guideLength = 0.7f * std::sqrt(2.0f);
+    for (const std::size_t points : {std::size_t{17}, std::size_t{600}}) {
+        auto strands = std::make_shared<StrandSet>();
+        for (int i = 1; i < 100; ++i) {
+            const SurfacePoint at = plane->closestPoint({0.01f * static_cast<float>(i), 0.0f, 0.5f});
+            std::vector<Vec3f> pts(points);
+            for (std::size_t j = 0; j < points; ++j) pts[j] = at.position + Vec3f(0, 0.3f * static_cast<float>(j) / static_cast<float>(points - 1), 0);
+            strands->addStrand(static_cast<StrandId>(i), pts, {}, at.root);
+        }
+        auto run = [&](const std::string& blend) {
+            auto op = OperatorRegistry::instance().create(op::kInterpolate);
+            op->params().set("neighbors", std::int64_t{2});
+            op->params().set("preserveLength", false);
+            op->params().set("blend", blend);
+            ExternalInputs ext;
+            EvalContext ctx;
+            ctx.externals = &ext;
+            return valueAs<StrandsPtr>(op->evaluate(ctx, {Value(StrandsPtr(strands)), Value(GuidesPtr(guides)), Value(MeshPtr(plane))}));
+        };
+        // The strands rooted near the middle: their mean length; how far the middle one's tip leans in x.
+        auto middle = [&](const StrandsPtr& out, float* lean) {
+            float sum = 0.0f;
+            std::size_t count = 0;
+            *lean = 0.0f;
+            for (std::size_t s = 0; s < out->strandCount(); ++s) {
+                const Vec3f* p = out->strandPoints(s);
+                const std::size_t n = out->strandPointCount(s);
+                if (std::abs(p[0].x - 0.5f) > 0.03f) continue;
+                float len = 0.0f;
+                for (std::size_t i = 1; i < n; ++i) len += (p[i] - p[i - 1]).length();
+                sum += len;
+                ++count;
+                if (std::abs(p[0].x - 0.5f) < 0.005f) *lean = std::max(*lean, std::abs(p[n - 1].x - 0.5f));
+            }
+            return count ? sum / static_cast<float>(count) : 0.0f;
+        };
+        float lean = 0.0f;
+        EXPECT_LT(middle(run("offsets"), &lean), 0.85f * guideLength) << points;
+        EXPECT_NEAR(middle(run("directions"), &lean), guideLength, 0.01f * guideLength) << points;
+        EXPECT_LT(lean, 0.01f) << points;
+        // At a guide's root, its shape (its own way, its length).
+        const StrandsPtr out = run("directions");
+        const Vec3f* first = out->strandPoints(0);
+        const Vec3f tip = first[out->strandPointCount(0) - 1] - first[0];
+        EXPECT_LT(tip.x, -0.5f) << points;
+        EXPECT_NEAR(tip.length(), guideLength, 0.05f) << points;
+    }
+}
+
 // Scalp, guides and parts into Scatter and Interpolate, the strands' channels included.
 struct BoundInterpolate {
     GraphDocument doc = loadGraphJson(R"({"version": 1, "output": "interp", "nodes": [
@@ -1130,7 +1189,7 @@ StrandsPtr strandsAt(const ScalpMesh* scalp, const std::vector<Vec3f>& roots, co
 
 // Interpolate's outputs over the cases its code branches on, in order, each named: a curved scalp
 // with a rest pose, a sphere with guides opposite strands (normals turned half way round), no
-// scalp; parts; a radius and its falloff; take length; preserveLength off; one neighbor and
+// scalp; parts; a radius and its falloff; take length; preserveLength off; blend directions; one neighbor and
 // sixteen (every guide, plain inverse distance); powers 0, 1 and 3; straight guide spans; guide
 // attributes and per-point layers (one longer than its guide, one missing on a guide); a guide of
 // one point (skipped) and one of two; strands of 0, 1, 2, 5, 16, 33 and 40 points (fewer and more
@@ -1238,6 +1297,15 @@ std::vector<std::pair<std::string, StrandsPtr>> interpolateCases() {
          }},
         {"take length", [](ParamSet& p) { p.set("take", std::string("length")); }},
         {"no preserveLength", [](ParamSet& p) { p.set("preserveLength", false); }},
+        {"directions", [](ParamSet& p) { p.set("blend", std::string("directions")); }},
+        {"directions radius", [](ParamSet& p) {
+             p.set("blend", std::string("directions"));
+             p.set("limitDistance", 0.3);
+         }},
+        {"directions sixteen", [](ParamSet& p) {
+             p.set("blend", std::string("directions"));
+             p.set("neighbors", std::int64_t{16});
+         }},
         {"one neighbor", [](ParamSet& p) { p.set("neighbors", std::int64_t{1}); }},
         {"one neighbor parts", [](ParamSet& p) { p.set("neighbors", std::int64_t{1}); }, 0, true},
         {"sixteen neighbors", [](ParamSet& p) { p.set("neighbors", std::int64_t{16}); }},
@@ -1253,6 +1321,8 @@ std::vector<std::pair<std::string, StrandsPtr>> interpolateCases() {
         {"no scalp", [](ParamSet&) {}, 2},
         {"no scalp radius", [](ParamSet& p) { p.set("limitDistance", 0.5); }, 2},
         {"no scalp no preserveLength", [](ParamSet& p) { p.set("preserveLength", false); }, 2},
+        {"no scalp directions", [](ParamSet& p) { p.set("blend", std::string("directions")); }, 2},
+        {"sphere directions", [](ParamSet& p) { p.set("blend", std::string("directions")); }, 1},
         {"ties", [](ParamSet&) {}, 3},
         {"ties one neighbor", [](ParamSet& p) { p.set("neighbors", std::int64_t{1}); }, 3},
         {"ties sixteen", [](ParamSet& p) { p.set("neighbors", std::int64_t{16}); }, 3},
