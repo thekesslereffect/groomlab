@@ -260,12 +260,22 @@ void LookEngine::setBaseView(const StrandsPtr& base, const ScalpMesh* scalp, std
     shownKey_ = 0;
 }
 
+void LookEngine::letGoOfBase() {
+    if (!sharesBase() || !base_) return;
+    heldBase_ = base_;
+    base_.reset();
+}
+
 bool LookEngine::setBase(const StrandsPtr& base, const ScalpMesh* scalp, const StrandChanges* changed) {
     if (!base) return false;
     if (view_) {  // (leaving a view: all of it again)
         view_.reset();
         base_.reset();
+        heldBase_.reset();
+    } else if (!base_) {
+        base_ = heldBase_.lock();  // (alive: its arrays too, so what is compared by address is its)
     }
+    heldBase_.reset();
     if (base == base_ && (!sharesBase() || scalp == normalsScalp_)) return false;
     const auto start = std::chrono::steady_clock::now();
     const StrandSet& s = *base;

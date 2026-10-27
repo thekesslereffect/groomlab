@@ -92,6 +92,10 @@ void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* s
     }
     engine->run(run, false, targets);
     engine->dropTargets();
+    struct LetGo {  // (after the tail is read)
+        LookEngine* engine;
+        ~LetGo() { engine->letGoOfBase(); }
+    } letGo{engine};
     if (!tail.empty()) {
         std::vector<float> written = engine->readTail(0);
         if (written.size() != out.pointCount()) throw std::runtime_error("CPU look engine: the tail channel not written");
@@ -185,6 +189,7 @@ bool runStageOnStrands(StageKind kind, const StageParamReader& reader, const Str
     }
     engine.run(run, false, targets);
     engine.dropTargets();
+    engine.letGoOfBase();
     return true;
 }
 

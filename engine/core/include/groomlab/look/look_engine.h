@@ -141,6 +141,10 @@ public:
     bool wroteUvs() const { return uvsWritten_; }
     // Lets go of the targets the last run used (views on them, bindings): before the host frees them.
     virtual void dropTargets() = 0;
+    // A sharing engine (the CPU's) between an operator's runs: holds its base only while someone
+    // else does (a weak hold), so the strands it ran on are freed with the graph's results (a render
+    // keeping no intermediates); the same strands set again find what was made of them still there.
+    void letGoOfBase();
     // The last run's GPU times; `wait` blocks until the GPU has them (else invalid when not ready).
     GpuTimes times(bool wait);
     // Waits until the GPU has done everything submitted.
@@ -298,6 +302,7 @@ protected:
     }
 
     StrandsPtr base_;
+    std::weak_ptr<const StrandSet> heldBase_;  // letGoOfBase's
     std::shared_ptr<const std::vector<std::uint32_t>> view_;  // setBaseView's strands (null: all of base_)
     std::size_t baseStrand(std::size_t i) const { return view_ ? (*view_)[i] : i; }
     std::size_t strandCount_ = 0, pointCount_ = 0, uniformCount_ = 0;  // uniformCount_: points per strand, 0 when they differ
