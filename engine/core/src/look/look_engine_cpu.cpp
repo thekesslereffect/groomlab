@@ -125,6 +125,35 @@ bool clearanceMeshPush(std::uint64_t host, const float p[3], float offset, float
     return moved;
 }
 
+bool clearanceSurfacePush(std::uint64_t host, const float p[3], float offset, float maxDepth, float searchRadius, float probe[2],
+                          float cursor[5], float delta[3]) {
+    const InterpolateClearance& c = *reinterpret_cast<const InterpolateClearance*>(static_cast<std::uintptr_t>(host));
+    // (Interpolate's Clearance::probe.)
+    MeshDistanceField::Probe pr;
+    pr.beside = c.beside;
+    pr.fieldOnly = true;
+    pr.relaxed = true;
+    pr.learnt(probe[0], probe[1]);
+    RestPoseCollision::Cursor cur;
+    std::uint32_t vertex = 0;
+    std::memcpy(&vertex, &cursor[0], 4);
+    cur.vertex = vertex == 0xFFFFFFFFu ? RestPoseCollision::Cursor::kNone : static_cast<std::size_t>(vertex);
+    cur.anchor = Vec3f(cursor[1], cursor[2], cursor[3]);
+    cur.clear = cursor[4];
+    Vec3f d;
+    const bool moved = c.surface.push(Vec3f(p[0], p[1], p[2]), offset, maxDepth, searchRadius, &d, cur, &pr);
+    probe[0] = pr.heightLow;
+    probe[1] = pr.distanceLow;
+    vertex = cur.vertex == RestPoseCollision::Cursor::kNone ? 0xFFFFFFFFu : static_cast<std::uint32_t>(cur.vertex);
+    std::memcpy(&cursor[0], &vertex, 4);
+    cursor[1] = cur.anchor.x;
+    cursor[2] = cur.anchor.y;
+    cursor[3] = cur.anchor.z;
+    cursor[4] = cur.clear;
+    if (moved) put(d, delta);
+    return moved;
+}
+
 bool flowClosest(std::uint64_t host, const float p[3], float reach, std::uint32_t* face, float uv[2], float at[3], float normal[3]) {
     const SurfacePoint hit = flowHost(host).scalp->closestPoint(Vec3f(p[0], p[1], p[2]), reach);
     if (hit.root.face < 0) return false;

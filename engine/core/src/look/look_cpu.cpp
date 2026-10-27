@@ -3,33 +3,14 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
-#include <cstdlib>
-#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
 
+#include "groomlab/graph.h"
 #include "groomlab/parallel.h"
 
 namespace groomlab::gpu {
-
-namespace {
-std::atomic<int> engineOn{-1};  // -1: as GROOMLAB_CPU_ENGINE says (read once)
-}  // namespace
-
-bool cpuEngineOn() {
-    int on = engineOn.load(std::memory_order_relaxed);
-    if (on < 0) {
-        const char* v = std::getenv("GROOMLAB_CPU_ENGINE");
-        on = v && std::strcmp(v, "0") == 0 ? 0 : 1;
-        int unset = -1;
-        engineOn.compare_exchange_strong(unset, on);
-    }
-    return on != 0;
-}
-
-void setCpuEngineOn(bool on) { engineOn.store(on ? 1 : 0, std::memory_order_relaxed); }
 
 void readFieldValues(const ScalarField& field, const StrandSet& in, bool pointsAllowed, FieldValues* out) {
     field.validate(in);  // binds channels and expressions to the set; throws GraphError as the operator would
@@ -76,84 +57,32 @@ LookEngine& cpuEngineOfThread() {
 }
 }  // namespace
 
-void runOnCpuEngine(const LookRun& run, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out, bool widths) {
-    LookEngine* engine = &cpuEngineOfThread();
-    engine->setBase(in, scalp);
-    LookTargets targets;
-    targets.baseAsOutput = true;
-    bool moves = false;
-    for (const StageParams& s : run.params.stages) moves = moves || s.stage.kind != StageKind::Width;
-    // (A stage moving points writes every one, as on the GPU: no copy of the base's first.)
-    if (moves) targets.positions = out.overwritePositions().data();
-    if (widths) {
-        std::vector<float>& w = out.mutableWidths();
-        w.resize(out.pointCount());
-        targets.widths = w.data();
-    }
-    engine->run(run, false, targets);
-    engine->dropTargets();
-    engine->letGoOfBase();
-}
+namespace {
 
-StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs) {
-    return runStage(kind, StageParamReader(params, ""), in, scalp, std::move(inputs));
-}
-
-StrandsPtr runStage(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs) {
-    if (!in || in->empty()) return nullptr;
-    auto out = std::make_shared<StrandSet>(*in);
-    return runStageInto(kind, reader, in, scalp, *out, std::move(inputs)) ? out : nullptr;
-}
-
-bool runStageOnStrands(StageKind kind, const ParamSet& params, const StrandsPtr& in, const std::vector<std::uint32_t>& which,
-                       const ScalpMesh* scalp, StrandSet& out, StageInputs inputs) {
-    return runStageOnStrands(kind, StageParamReader(params, ""), in, which, scalp, out, std::move(inputs));
-}
-
-bool runStageOnStrands(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const std::vector<std::uint32_t>& which,
-                       const ScalpMesh* scalp, StrandSet& out, StageInputs inputs) {
-    if (!in || which.empty()) return false;
-    switch (kind) {  // (stages whose inputs, if any, are no strand's: their root frames the engine's own)
-        case StageKind::Noise:
-        case StageKind::Width:
-        case StageKind::Length:
-        case StageKind::Bend:
-        case StageKind::Direction:
-        case StageKind::Transform:
-        case StageKind::Displace:
-        case StageKind::Gravity:
-        case StageKind::Flyaway:
-        case StageKind::Wind:
-        case StageKind::Smooth:
-        case StageKind::Collide:
-        case StageKind::MeshCut:
-        case StageKind::Clump:  // (their centers the caller's, for these strands)
-        case StageKind::Part:  // (their sides the caller's, for these strands)
-        case StageKind::Flow:  // (their roots traced the caller's)
-        case StageKind::Twist:  // (around axes: their axes the caller's, for these strands)
-        case StageKind::Jiggle:  // (their lags the caller's, for these strands)
-        case StageKind::Interpolate:  // (their binding the caller's, for these strands)
-        case StageKind::RestoreLength:  // (their reference the caller's, for these strands)
-        case StageKind::Blend:  // (look b handed in: StageInputs::blendWith)
-        case StageKind::Curl: break;  // (alone: by clump it reads its clumps)
-        default: return false;
-    }
+// The stage `kind` of an operator's run: its params, its inputs and its mapped params' values on `in`
+// (the strands `which` alone: a view's), or the node's error where the engine cannot take them.
+LookRun stageRun(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs,
+                 const std::vector<std::uint32_t>* which) {
     const ParamSet& params = reader.params();
     LookRun run;
     StageParams& s = run.params.stages.emplace_back();
     s.stage.kind = kind;
     if (params.has("seed")) s.seed = static_cast<std::uint64_t>(params.getInt("seed"));
     std::string why;
-    if (!readStageParams(kind, reader, &s, &why)) return false;
+    if (!readStageParams(kind, reader, &s, &why)) throw GraphError(std::string(stageName(kind)) + ": " + why);
+    if (which && kind == StageKind::Curl && s.flag[2] != 0) {
+        throw GraphError("curl: by clump it reads its clumps' other strands (in full)");
+    }
     run.fields.stages.resize(1);
     run.inputs.push_back(std::move(inputs));
     const std::array<std::string, 2> mapped = mappedParams(kind, params);
     const bool coil = kind == StageKind::Curl && params.getString("shape") == "coil";
-    if (kind == StageKind::Curl && (s.flag[2] != 0 || (coil && in->widths().size() != in->pointCount()))) return false;
-    if (coil) {  // (runStageInto's: by the whole set's points, a view reads them there)
+    if (coil) {
+        // A coil's radius by the strands' widths at each point (times coilWidths), as they carry them
+        // (none: 1 everywhere); by the whole set's points (a view reads them there).
         FieldValues& values = run.fields.stages[0].field[0];
         values.mode = FieldValues::kPerPoint;
-        values.values = in->widths();
+        values.values = in->widths().size() == in->pointCount() ? in->widths() : std::vector<float>(in->pointCount(), 1.0f);
         values.fixed = true;
         values.widths = true;
     }
@@ -161,8 +90,55 @@ bool runStageOnStrands(StageKind kind, const StageParamReader& reader, const Str
         if (mapped[i].empty() || !mappedParam(params, mapped[i]) || (coil && i == 0)) continue;
         if (kind == StageKind::Direction && reader.directions) continue;  // (its three per strand: StageInputs::directions)
         FieldValues& values = run.fields.stages[0].field[i];
-        readFieldValues(ScalarField(params, mapped[i], scalp), *in, which, mappedPerPoint(kind, i), &values);
+        const ScalarField field(params, mapped[i], scalp);
+        if (which) {
+            readFieldValues(field, *in, *which, mappedPerPoint(kind, i), &values);
+        } else {
+            readFieldValues(field, *in, mappedPerPoint(kind, i), &values);
+        }
     }
+    return run;
+}
+
+// `run` on `engine` into `targets`, the engine's errors the node's.
+void runOn(LookEngine& engine, StageKind kind, const LookRun& run, const LookTargets& targets) {
+    try {
+        engine.run(run, false, targets);
+    } catch (const GraphError&) {
+        engine.dropTargets();
+        engine.letGoOfBase();
+        throw;
+    } catch (const std::exception& e) {
+        engine.dropTargets();
+        engine.letGoOfBase();
+        throw GraphError(std::string(stageName(kind)) + ": " + e.what());
+    }
+    engine.dropTargets();
+    engine.letGoOfBase();
+}
+
+}  // namespace
+
+StrandsPtr runStage(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs) {
+    return runStage(kind, StageParamReader(params, ""), in, scalp, std::move(inputs));
+}
+
+StrandsPtr runStage(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StageInputs inputs) {
+    if (!in || in->empty()) return in;
+    auto out = std::make_shared<StrandSet>(*in);
+    runStageInto(kind, reader, in, scalp, *out, std::move(inputs));
+    return out;
+}
+
+void runStageOnStrands(StageKind kind, const ParamSet& params, const StrandsPtr& in, const std::vector<std::uint32_t>& which,
+                       const ScalpMesh* scalp, StrandSet& out, StageInputs inputs) {
+    runStageOnStrands(kind, StageParamReader(params, ""), in, which, scalp, out, std::move(inputs));
+}
+
+void runStageOnStrands(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const std::vector<std::uint32_t>& which,
+                       const ScalpMesh* scalp, StrandSet& out, StageInputs inputs) {
+    if (!in || which.empty()) return;
+    const LookRun run = stageRun(kind, reader, in, scalp, std::move(inputs), &which);
     // The thread's engine (runOnCpuEngine's) on a view of these strands, its result written into
     // `out` in place (their points; a Width: their widths).
     LookEngine& engine = cpuEngineOfThread();
@@ -176,49 +152,31 @@ bool runStageOnStrands(StageKind kind, const StageParamReader& reader, const Str
     } else {
         targets.positions = out.mutablePositions().data();
     }
-    engine.run(run, false, targets);
-    engine.dropTargets();
-    engine.letGoOfBase();
-    return true;
+    runOn(engine, kind, run, targets);
 }
 
-bool runStageInto(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out,
-                  StageInputs inputs) {
-    return runStageInto(kind, StageParamReader(params, ""), in, scalp, out, std::move(inputs));
+void runStageInto(StageKind kind, const ParamSet& params, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out, StageInputs inputs) {
+    runStageInto(kind, StageParamReader(params, ""), in, scalp, out, std::move(inputs));
 }
 
-bool runStageInto(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out,
+void runStageInto(StageKind kind, const StageParamReader& reader, const StrandsPtr& in, const ScalpMesh* scalp, StrandSet& out,
                   StageInputs inputs) {
-    if (!in || in->empty()) return false;
-    const ParamSet& params = reader.params();
-    LookRun run;
-    StageParams& s = run.params.stages.emplace_back();
-    s.stage.kind = kind;
-    if (params.has("seed")) s.seed = static_cast<std::uint64_t>(params.getInt("seed"));
-    std::string why;
-    if (!readStageParams(kind, reader, &s, &why)) return false;
-    run.fields.stages.resize(1);
-    run.inputs.push_back(std::move(inputs));
-    const std::array<std::string, 2> mapped = mappedParams(kind, params);
-    const bool coil = kind == StageKind::Curl && params.getString("shape") == "coil";
-    if (coil) {
-        // A coil's radius by the strands' widths at each point (times coilWidths), as they carry them.
-        if (in->widths().size() != in->pointCount()) return false;
-        FieldValues& values = run.fields.stages[0].field[0];
-        values.mode = FieldValues::kPerPoint;
-        values.values = in->widths();
-        values.fixed = true;
-        values.widths = true;
-    }
-    for (int i = 0; i < 2; ++i) {
-        if (mapped[i].empty() || !mappedParam(params, mapped[i]) || (coil && i == 0)) continue;
-        if (kind == StageKind::Direction && reader.directions) continue;  // (its three per strand: StageInputs::directions)
-        FieldValues& values = run.fields.stages[0].field[i];
-        readFieldValues(ScalarField(params, mapped[i], scalp), *in, mappedPerPoint(kind, i), &values);
-    }
+    if (!in || in->empty()) return;
+    const LookRun run = stageRun(kind, reader, in, scalp, std::move(inputs), nullptr);
     // (Bend's, Direction's, Transform's and Displace's root frames: the engine's own, LookEngine::putStageInputs.)
-    runOnCpuEngine(run, in, scalp, out, kind == StageKind::Width);
-    return true;
+    LookEngine& engine = cpuEngineOfThread();
+    engine.setBase(in, scalp);
+    LookTargets targets;
+    targets.baseAsOutput = true;
+    if (kind == StageKind::Width) {
+        std::vector<float>& w = out.mutableWidths();
+        w.resize(out.pointCount());
+        targets.widths = w.data();
+    } else {
+        // (A stage moving points writes every one, as on the GPU: no copy of the base's first.)
+        targets.positions = out.overwritePositions().data();
+    }
+    runOn(engine, kind, run, targets);
 }
 
 }  // namespace groomlab::gpu

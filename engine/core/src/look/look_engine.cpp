@@ -1608,12 +1608,16 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             const InterpolateInputs* in = k < r.inputs.size() ? r.inputs[k].interpolate.get() : nullptr;
             const InterpolateClearance* clearance = in ? in->clearance.get() : nullptr;
             c.flag[3] = clearance ? 1u : 0u;
-            if (clearance && clearance->rest && sharesBase()) {
-                // (Its walk reaching a degenerate face's vertex asks the mesh through the host:
-                // look.slang gClearHost.)
+            if (clearance && clearance->host && !sharesBase()) {
+                throw std::runtime_error("GPU preview: Interpolate's clearance asked through the host is the CPU engine's");
+            }
+            if (clearance && (clearance->rest || clearance->host) && sharesBase()) {
+                // (Its walk reaching a degenerate face's vertex, or with `host` every push, asks
+                // the scalp through the host: look.slang gClearHost.)
                 const auto host = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(clearance));
                 c.octaveSeeds[12] = static_cast<std::uint32_t>(host);
                 c.octaveSeeds[13] = static_cast<std::uint32_t>(host >> 32);
+                c.octaveSeeds[14] = clearance->host ? 1u : 0u;
             }
             if (clearance) {
                 c.value[1] = clearance->floor;

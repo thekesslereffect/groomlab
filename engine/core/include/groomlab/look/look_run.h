@@ -349,7 +349,7 @@ struct RootInputs {
 // strands (`members`: count + 1 offsets, then the strands), the middles made on the GPU from the
 // strands it moves. Per strand 4 words (`strands`): its axis or clump (0xffffffff: it does not turn),
 // then the root's bits its axis was found for (around axes: a root the run moves finds its own).
-constexpr std::size_t kTwistAxisSamples = 32;  // extra_ops.cpp kAxisSamples
+constexpr std::size_t kTwistAxisSamples = 32;  // a Twist axis's samples (look.slang TwistCS)
 struct TwistInputs {
     std::shared_ptr<const std::vector<std::uint32_t>> strands;
     std::shared_ptr<const std::vector<float>> axes;               // around axes (else null)

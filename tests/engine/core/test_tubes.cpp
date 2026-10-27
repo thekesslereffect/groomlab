@@ -550,23 +550,21 @@ TEST(FillTubes, StrandsRideTheirTubeToTheTip) {
     EXPECT_NEAR(tipZ, 0.08f, 0.01f);
 }
 
-TEST(FillTubes, TheCpuEngineRidesThemAsTheCppDoes) {
-    // Interpolate filling tubes on the CPU engine (look.slang rideTubeAt) against its own C++ (the
-    // engine off), bit for bit: riders, strands in a soft edge, the rest blending; keeping
-    // clearance and not, with a radius's fall-off.
+TEST(FillTubes, RidingTheTubesRunsAlikeTwice) {
+    // Interpolate filling tubes (look.slang rideTubeAt) in two graphs of its own, bit for bit:
+    // riders, strands in a soft edge, the rest blending; keeping clearance and not, with a radius's
+    // fall-off.
     for (const bool keep : {true, false}) {
         TubeGraph f;
         f.g.node(f.interp).params().set("tubeBlend", 0.5);
         f.g.node(f.interp).params().set("keepClearance", keep);
         f.g.node(f.interp).params().set("limitDistance", 0.5);
         const StrandsPtr engine = f.eval(f.interp);
-        gpu::setCpuEngineOn(false);
         TubeGraph g;  // (a graph of its own: evaluated afresh)
         g.g.node(g.interp).params().set("tubeBlend", 0.5);
         g.g.node(g.interp).params().set("keepClearance", keep);
         g.g.node(g.interp).params().set("limitDistance", 0.5);
         const StrandsPtr cpp = g.eval(g.interp);
-        gpu::setCpuEngineOn(true);
         ASSERT_EQ(engine->pointCount(), cpp->pointCount());
         std::size_t riders = 0;
         const std::vector<float>& ids = *cpp->strandChannel("tubeId");
@@ -580,12 +578,11 @@ TEST(FillTubes, TheCpuEngineRidesThemAsTheCppDoes) {
     }
 }
 
-TEST(FillTubes, TheCpuEngineTakesLayersAndLengthAsTheCppDoes) {
-    // Interpolate on the CPU engine against its own C++ (the engine off), bit for bit: guides'
-    // painted layers read along the strands' final points, and take length; tubes filled and not
-    // (and take length with tubes: riders scaled to their guides' length).
-    auto run = [](bool engine, bool tubes, bool length, std::int64_t segments) {
-        gpu::setCpuEngineOn(engine);
+TEST(FillTubes, LayersAndLengthRunAlikeTwice) {
+    // Interpolate in two graphs of its own, bit for bit: guides' painted layers read along the
+    // strands' final points, and take length; tubes filled and not (and take length with tubes:
+    // riders scaled to their guides' length).
+    auto run = [](bool tubes, bool length, std::int64_t segments) {
         TubeGraph f;
         f.g.node(f.resample).params().set("segments", segments);
         auto set = std::make_shared<GuideSet>();
@@ -603,15 +600,13 @@ TEST(FillTubes, TheCpuEngineTakesLayersAndLengthAsTheCppDoes) {
         f.g.node(f.interp).params().set("fillTubes", tubes);
         f.g.node(f.interp).params().set("tubeBlend", 0.5);
         if (length) f.g.node(f.interp).params().set("take", std::string("length"));
-        const StrandsPtr out = f.eval(f.interp);
-        gpu::setCpuEngineOn(true);
-        return out;
+        return f.eval(f.interp);
     };
     // (99: more samples than the GPU's 64; 600: more than the CPU engine holds, streamed.)
     for (const std::int64_t segments : {std::int64_t{15}, std::int64_t{99}, std::int64_t{600}}) {
     for (const bool tubes : {false, true}) {
         for (const bool length : {false, true}) {
-            const StrandsPtr on = run(true, tubes, length, segments), off = run(false, tubes, length, segments);
+            const StrandsPtr on = run(tubes, length, segments), off = run(tubes, length, segments);
             ASSERT_EQ(on->pointCount(), off->pointCount());
             EXPECT_EQ(std::memcmp(on->positions().data(), off->positions().data(), on->pointCount() * sizeof(Vec3f)), 0)
                 << tubes << length;
@@ -625,18 +620,14 @@ TEST(FillTubes, TheCpuEngineTakesLayersAndLengthAsTheCppDoes) {
     }
 }
 
-TEST(FillTubes, TheCpuEngineClumpsInsideTubesAsTheCppDoes) {
-    // A Clump following the tubes (each tube's centers its own) on the CPU engine against its own
-    // C++, bit for bit.
-    auto run = [](bool engine) {
-        gpu::setCpuEngineOn(engine);
+TEST(FillTubes, ClumpingInsideTubesRunsAlikeTwice) {
+    // A Clump following the tubes (each tube's centers its own) in two graphs of its own, bit for bit.
+    auto run = [] {
         TubeGraph f;
         f.g.node(f.clump).params().set("strandStrengthRandom", 0.4);
-        const StrandsPtr out = f.eval(f.clump);
-        gpu::setCpuEngineOn(true);
-        return out;
+        return f.eval(f.clump);
     };
-    const StrandsPtr on = run(true), off = run(false);
+    const StrandsPtr on = run(), off = run();
     ASSERT_EQ(on->pointCount(), off->pointCount());
     EXPECT_EQ(std::memcmp(on->positions().data(), off->positions().data(), on->pointCount() * sizeof(Vec3f)), 0);
     EXPECT_EQ(on->contentHash(), off->contentHash());

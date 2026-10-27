@@ -85,10 +85,6 @@ private:
         const ScalarField strayField(params(), "stray", scalp);
         fractionField.validate(*in);
         strayField.validate(*in);
-        const float frequency = static_cast<float>(params().getDouble("frequency"));
-        const float start = static_cast<float>(params().getDouble("start"));
-        const float lift = static_cast<float>(params().getDouble("standOut"));
-        const float lengthen = static_cast<float>(params().getDouble("lengthen"));
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
 
         const StrandChanges* changes = nullptr;
@@ -117,74 +113,24 @@ private:
             if (earlier.size() == flags->size()) *flags = std::move(earlier);
         }
         std::vector<float>& flag = *flags;
-        if (!last && gpu::cpuEngineOn()) {
-            // look.slang's FlyawayCS, the GPU preview's own (look_cpu.h): its strays flagged here by
-            // the gate it draws (the strand data's), on the points it took.
-            std::vector<std::uint8_t> strays(out->strandCount(), 0);
-            parallelFor(0, out->strandCount(), [&](std::size_t s) {
-                strays[s] = unitFloat(hashCombine(out->ids()[s], seed ^ 0xF1A7)) < fractionField.at(*out, s) && out->strandPointCount(s) >= 2;
-            });
-            if (gpu::runStageInto(gpu::StageKind::Flyaway, params(), in, scalp, *out)) {
-                for (std::size_t s = 0; s < strays.size(); ++s) {
-                    if (strays[s]) flag[s] = 1.0f;
-                }
-                *result = StrandsPtr(out);
-                return true;
-            }
-        }
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
-        auto stray = [&](std::size_t s) {
-            const std::uint64_t h = hashCombine(out->ids()[s], seed ^ 0xF1A7);
-            if (unitFloat(h) >= fractionField.at(*out, s)) return;
-            const std::size_t n = out->strandPointCount(s);
-            if (n < 2) return;
-            flag[s] = 1.0f;
-            Rng rng(h);
-            const Vec3f offset = randomOffsetZYX(rng);
-            const float amount = strayField.at(*out, s);
-            const float extra = lengthen * rng.uniform(0.5f, 1.0f);
-            Vec3f* pts = out->strandPoints(s);
-            thread_local std::vector<Vec3f> original;  // scratch, reused across strands
-            original.assign(pts, pts + n);
-            const Vec3f rootDir = (original[1] - original[0]).normalized();
-            for (std::size_t i = 1; i < n; ++i) {
-                const float t = paramAt(i, n);
-                // Past the tip it carries on along the last segment (lengthened strays).
-                const Vec3f p = pointAlong(original.data(), n, t * (1.0f + extra), true);
-                const float w = smoothstep(start, 1.0f, t);
-                Vec3f wander = vectorNoise(offset + Vec3f(0, 0, t * frequency), seed, 1);
-                wander = wander * (1.0f - lift) + rootDir * (lift * (0.5f + 0.5f * wander.length()));
-                pts[i] = p + wander * (amount * w);
-            }
+        // look.slang's FlyawayCS, the GPU preview's own (look_cpu.h): its strays flagged here by the
+        // gate it draws (the strand data's), on the points it took; in full, or the strands the input
+        // changed in (each from its earlier flag), into the last result's copy.
+        auto strayed = [&](std::size_t s) {
+            return unitFloat(hashCombine(out->ids()[s], seed ^ 0xF1A7)) < fractionField.at(*out, s) && out->strandPointCount(s) >= 2;
         };
-        if (last) {
-            // On the CPU engine (look.slang's FlyawayCS): each strand's flag by the gate it draws, on
-            // the points it took.
-            std::vector<std::uint8_t> strays(changes->strands.size(), 0);
-            for (std::size_t k = 0; k < changes->strands.size(); ++k) {
-                const std::size_t s = changes->strands[k];
-                copyStrandPoints(*out, *in, s);
-                strays[k] = unitFloat(hashCombine(out->ids()[s], seed ^ 0xF1A7)) < fractionField.at(*out, s) && out->strandPointCount(s) >= 2;
+        if (!last) {
+            std::vector<std::uint8_t> strays(out->strandCount(), 0);
+            parallelFor(0, out->strandCount(), [&](std::size_t s) { strays[s] = strayed(s); });
+            gpu::runStageInto(gpu::StageKind::Flyaway, params(), in, scalp, *out);
+            for (std::size_t s = 0; s < strays.size(); ++s) {
+                if (strays[s]) flag[s] = 1.0f;
             }
-            if (gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Flyaway, params(), in, changes->strands, scalp, *out)) {
-                for (std::size_t k = 0; k < changes->strands.size(); ++k) {
-                    const std::size_t s = changes->strands[k];
-                    flag[s] = strays[k] ? 1.0f : had ? (*had)[s] : 0.0f;
-                }
-            } else {
-                forEachListed(changes->strands, [&](std::size_t s) {
-                    copyStrandPoints(*out, *in, s);
-                    flag[s] = had ? (*had)[s] : 0.0f;
-                    stray(s);
-                });
-            }
-            *changed = *changes;
         } else {
-            parallelFor(0, out->strandCount(), stray);
+            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+            gpu::runStageOnStrands(gpu::StageKind::Flyaway, params(), in, changes->strands, scalp, *out);
+            for (const std::uint32_t s : changes->strands) flag[s] = strayed(s) ? 1.0f : had ? (*had)[s] : 0.0f;
+            *changed = *changes;
         }
         *result = StrandsPtr(out);
         return true;
@@ -242,16 +188,12 @@ public:
         fractionField.validate(*in);
         strengthField.validate(*in);
         const float radius = static_cast<float>(params().getDouble("radius"));
-        const float start = static_cast<float>(params().getDouble("start"));
-        const float span = static_cast<float>(params().getDouble("span"));
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
-        const float reach = static_cast<float>(params().getDouble("reach"));
         const std::vector<float>* clumps = params().getBool("sameClump") ? in->strandChannel(kClumpIdChannel) : nullptr;
         if (clumps && clumps->size() != in->strandCount()) clumps = nullptr;
         const std::vector<float>* regions = regionsOf(*in, params().getString("regionChannel"));
 
         remember(nullptr, nullptr);
-        auto out = std::make_shared<StrandSet>(*in);
         const std::size_t count = in->strandCount();
         std::vector<Vec3f> roots(count);
         // Partners come from the preview core (preview_core.h: the strands every preview holds), so
@@ -278,13 +220,11 @@ public:
         // Up to 6 candidates within the radius; of the strand's own clump (or region), from the 24 nearest.
         constexpr std::size_t kCandidates = 6, kSearched = 24;
         const std::size_t searched = clumps || regions ? kSearched : kCandidates + 1;
-        // Each strand's pick first (its partner and the middle of its span), so a pair
-        // that picked each other can share one span and meet in the middle.
+        // Each strand's pick (its partner and the draw placing the middle of its span), so a pair
+        // that picked each other can share one span and meet in the middle (look.slang TangleCS).
         constexpr std::size_t kNone = std::numeric_limits<std::size_t>::max();
         std::vector<std::size_t> partnerOf(count, kNone);
-        std::vector<float> centerOf(count, 0.0f), drawOf(count, 0.0f);
-        const float half = 0.5f * span;
-        const float lo = std::min(start + half, 1.0f), hi = std::max(1.0f - half * 0.5f, lo);
+        std::vector<float> drawOf(count, 0.0f);
         parallelFor(0, count, [&](std::size_t s) {
             const std::uint64_t h = hashCombine(in->ids()[s], seed ^ 0x7A61);
             if (in->strandPointCount(s) < 2 || unitFloat(h) >= fractionField.at(*in, s)) return;
@@ -312,9 +252,7 @@ public:
                     partnerOf[s] = partners[k];
                 }
             }
-            Rng rng(h);
-            drawOf[s] = Rng(h).nextFloat();  // (what uniform draws by: kept for a host laying the spans elsewhere)
-            centerOf[s] = rng.uniform(lo, hi);
+            drawOf[s] = Rng(h).nextFloat();  // (where its span's middle lies: the stage's draw, look.slang TangleCS)
         });
         auto state = std::make_shared<TangleState>();
         state->partners.resize(count);
@@ -323,57 +261,13 @@ public:
         }
         state->draws = std::move(drawOf);
 
-        if (gpu::cpuEngineOn()) {  // look.slang's TangleCS, the GPU preview's own (look_cpu.h)
-            gpu::StageInputs partners;
-            partners.tangle = gpu::tangleInputs(*in, *state);
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Tangle, params(), in, scalpOf(ctx), std::move(partners))) {
-                remember(made, std::move(state));
-                return made;
-            }
-        }
-        out->mutablePositions();  // cloned once here, not by whichever thread writes first
-        parallelFor(0, count, [&](std::size_t s) {
-            const std::size_t other = partnerOf[s];
-            if (other == kNone) return;
-            // A mutual pair meets in the middle over the span of its lower ID; a strand
-            // whose partner picked another moves all the way onto it.
-            const bool mutual = partnerOf[other] == s;
-            const float share = mutual ? 0.5f : 1.0f;
-            const float center = mutual && in->ids()[other] < in->ids()[s] ? centerOf[other] : centerOf[s];
-            const float strength = std::clamp(strengthField.at(*in, s), 0.0f, 1.0f);
-            const std::size_t n = in->strandPointCount(s);
-            const Vec3f* src = in->strandPoints(s);
-            const Vec3f* partner = in->strandPoints(other);
-            const std::size_t m = in->strandPointCount(other);
-            Vec3f* pts = out->strandPoints(s);
-            bool moved = false;
-            for (std::size_t i = 1; i < n; ++i) {
-                const float t = paramAt(i, n);
-                const float x = (t - center) / half;
-                if (std::abs(x) >= 1.0f) continue;
-                const float bump = (1.0f - x * x) * (1.0f - x * x);
-                const Vec3f target = pointAlong(partner, m, t, true);
-                // Let go from half the reach to the reach: a partner drifting away releases smoothly.
-                const float gap = (target - src[i]).length();
-                const float held = reach > 0.0f ? 1.0f - smoothstep(0.5f * reach, reach, gap) : 1.0f;
-                const float w = share * strength * bump * held;
-                if (!(w > 0.0f)) continue;
-                pts[i] = src[i] + (target - src[i]) * w;
-                moved = true;
-            }
-            if (!moved) return;
-            // Lengths kept: each point back at its segment's length from the one before, along
-            // where the pull put it (follow the leader), so a stuck strand never stretches.
-            for (std::size_t i = 1; i < n; ++i) {
-                const Vec3f d = pts[i] - pts[i - 1];
-                const float len = d.length();
-                const float l = (src[i] - src[i - 1]).length();
-                pts[i] = len > 1e-12f ? pts[i - 1] + d * (l / len) : pts[i - 1] + (src[i] - src[i - 1]);
-            }
-        });
-        const StrandsPtr result(out);
-        remember(result, std::move(state));
-        return result;
+        // look.slang's TangleCS, the GPU preview's own (look_cpu.h), on the partners and draws picked
+        // here.
+        gpu::StageInputs partners;
+        partners.tangle = gpu::tangleInputs(*in, *state);
+        const StrandsPtr made = gpu::runStage(gpu::StageKind::Tangle, params(), in, scalpOf(ctx), std::move(partners));
+        remember(made, std::move(state));
+        return made;
     }
 
     // operator_state.h tangleState.
@@ -452,9 +346,6 @@ private:
         const FlowPtr flow = valueAs<FlowPtr>(ctx.external("flow"));
         const ScalarField liftField(params(), "lift", scalp);
         liftField.validate(*in);
-        const float bend = static_cast<float>(params().getDouble("bend"));
-        const float jitter = static_cast<float>(params().getDouble("rollRandom")) * 0.0174532925f;
-        const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
 
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
@@ -471,112 +362,20 @@ private:
         const bool arrows = flow && !flow->empty();
         if (!arrows) ctx.note("no flow arrows: lay some with the Flow tool (Groom Tools > Create > Flow); strands lie along their own "
                                 "direction");
-        if (!last && gpu::cpuEngineOn()) {
-            // look.slang's FlowCS, the GPU preview's own (look_cpu.h), on the core's field and scalp.
-            gpu::StageInputs traced;
+        // look.slang's FlowCS, the GPU preview's own (look_cpu.h), on the core's field and scalp (each
+        // strand's root traced here): in full, or the strands the input changed in.
+        gpu::StageInputs traced;
+        if (!last) {
             traced.flow = gpu::flowInputs(*in, scalp, arrows ? flow : nullptr);
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Flow, params(), in, scalp, std::move(traced))) {
-                *result = made;
-                remember(made, arrows ? flow : nullptr, scalp);
-                return true;
-            }
+            *result = gpu::runStage(gpu::StageKind::Flow, params(), in, scalp, std::move(traced));
+            remember(valueAs<StrandsPtr>(*result), arrows ? flow : nullptr, scalp);
+            return true;
         }
         auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
-        }
-        auto lay = [&](std::size_t s) {
-            const std::size_t n = out->strandPointCount(s);
-            if (n < 2) return;
-            Vec3f* pts = out->strandPoints(s);
-            const StrandRoot& root = out->roots()[s];
-            const bool onScalp = scalp && scalp->contains(root);
-            Vec3f normal = onScalp ? scalp->normal(root) : (pts[1] - pts[0]).normalized();
-            const float spin = jitter > 0.0f ? jitter * (2.0f * unitFloat(hashCombine(out->ids()[s], seed ^ 0xF70)) - 1.0f) : 0.0f;
-            const float lift = liftField.at(*out, s) * 0.0174532925f;
-            const float length = arcLength(pts, n);
-            // The heading along the skin at a spot: the flow there (else the strand's own
-            // segment, laid on the skin), turned by this strand's jitter.
-            // Zero when neither gives one: a segment standing straight out of the scalp at the
-            // root (Scatter's) has no way along the skin. (Laid on the skin farther on, where the
-            // scalp has curved away under the trace, it would point back at the root: the strand
-            // would zigzag about where it starts.)
-            const Vec3f rootNormal = normal;
-            auto heading = [&](const Vec3f& at, const StrandRoot& over, const Vec3f& nrm, const Vec3f& own) {
-                Vec3f d = arrows ? (onScalp ? flow->atRoot(*scalp, over, nrm) : flow->at(at, nrm)) : Vec3f{};
-                if (d.length() < 1e-6f) {  // (the flow's is a unit vector or none)
-                    // Within a twentieth of a degree of the root's normal (its rounding no direction
-                    // at all, nor the same rounding at another scale): none.
-                    const Vec3f off = own - rootNormal * own.dot(rootNormal);
-                    if (!(off.length() > 1e-3f * own.length())) return Vec3f{};
-                    d = own - nrm * own.dot(nrm);
-                    if (!(d.length() > 1e-3f * own.length())) return Vec3f{};
-                }
-                d = d.normalized();
-                if (spin != 0.0f) d = (d * pm::cos(spin) + nrm.cross(d) * pm::sin(spin)).normalized();
-                return d;
-            };
-            // Traced along the flow like a streamline: each step re-reads the flow where the
-            // strand is over the skin and eases its heading toward it (over about kFlowTurn of
-            // the strand's length, so it curves rather than kinks), rises by the lift angle off
-            // the skin there, and follows the scalp's curve (the height is kept over the skin).
-            constexpr float kFlowTurn = 0.1f;
-            Vec3f skin = pts[0];
-            StrandRoot over = root;  // the scalp point the trace is over
-            Vec3f dir = heading(skin, over, normal, pts[n - 1] - pts[0]);
-            if (dir.length() < 0.5f) dir = anyPerpendicular(normal);  // straight up, no arrows: any way
-            float height = 0.0f;
-            Vec3f previous = pts[0];
-            for (std::size_t i = 1; i < n; ++i) {
-                const float t = paramAt(i - 1, n - 1 > 1 ? n - 1 : 2);
-                const float a = lift * (1.0f - bend * t);
-                const Vec3f original = pts[i];
-                const float len = (original - previous).length();
-                const Vec3f own = original - previous;
-                previous = original;
-                Vec3f want = heading(skin, over, normal, own);
-                if (want.length() < 0.5f) want = dir;  // nothing new here: carry on
-                const float follow = 1.0f - pm::exp(-len / std::max(kFlowTurn * length, 1e-6f));
-                Vec3f turned = dir + (want - dir) * follow;
-                turned = turned - normal * turned.dot(normal);
-                dir = turned.length() > 1e-6f ? turned.normalized() : want;
-                Vec3f next = skin + dir * (len * pm::cos(a));
-                height += len * pm::sin(a);
-                if (onScalp) {
-                    const SurfacePoint hit = scalp->closestPoint(next, 2.0f * len + 1e-6f);
-                    // Snapped back mostly along the step (not along the normal, as over a curve or a
-                    // facet): past an open edge of the scalp, where the strand carries on in the
-                    // tangent plane rather than stalling at the border.
-                    const Vec3f back = next - hit.position;
-                    const float backLen = back.length();
-                    const bool pastEdge = backLen > 1e-3f * len && std::abs(back.dot(dir)) > 0.5f * backLen;
-                    if (hit.root.face >= 0 && !pastEdge) {
-                        next = hit.position;
-                        normal = hit.normal;
-                        over = hit.root;
-                        dir = dir - normal * dir.dot(normal);  // stays along the skin as it curves
-                        dir = dir.length() > 1e-6f ? dir.normalized() : want;
-                    }
-                }
-                skin = next;
-                pts[i] = skin + normal * height;
-            }
-        };
-        if (last) {
-            gpu::StageInputs traced;  // (on the CPU engine: these strands' roots traced)
-            if (gpu::cpuEngineOn()) traced.flow = gpu::flowInputs(*in, scalp, arrows ? flow : nullptr, &changes->strands);
-            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Flow, params(), in, changes->strands, scalp, *out, std::move(traced)))) {
-                forEachListed(changes->strands, [&](std::size_t s) {
-                    copyStrandPoints(*out, *in, s);
-                    lay(s);
-                });
-            }
-            *changed = *changes;
-        } else {
-            parallelFor(0, out->strandCount(), lay);
-        }
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        traced.flow = gpu::flowInputs(*in, scalp, arrows ? flow : nullptr, &changes->strands);
+        gpu::runStageOnStrands(gpu::StageKind::Flow, params(), in, changes->strands, scalp, *out, std::move(traced));
+        *changed = *changes;
         *result = StrandsPtr(out);
         remember(valueAs<StrandsPtr>(*result), arrows ? flow : nullptr, scalp);
         return true;

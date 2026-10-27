@@ -189,6 +189,10 @@ void gridFloorCursor(std::uint64_t host, std::uint32_t strand, const float p[3],
 // distance_field.h meshPushOf on operator_state.h InterpolateClearance's mesh (its beside), the
 // probe's height and distance learnt (probe[2]); the delta into `delta`.
 bool clearanceMeshPush(std::uint64_t host, const float p[3], float offset, float maxDepth, float searchRadius, float probe[2], float delta[3]);
+// distance_field.h CollisionSurface::push on InterpolateClearance's surface (its probe: beside, the
+// field's answers alone, relaxed), the walk's cursor (vertex, anchor xyz, clear: cursor[5]).
+bool clearanceSurfacePush(std::uint64_t host, const float p[3], float offset, float maxDepth, float searchRadius, float probe[2],
+                          float cursor[5], float delta[3]);
 bool gridFloorPush(std::uint64_t host, float p[3], float state[9]);
 template <class T>
 inline T& ref(T& x) { return x; }
@@ -294,6 +298,35 @@ inline bool groomlab_clearance_mesh_push(const W& host, const V& p, float offset
     const bool moved = groomlab::gpu::cpu_host::clearanceMeshPush(groomlab::gpu::cpu_host::address(host), q, offset, maxDepth, searchRadius, probe, d);
     ref(heightLow) = probe[0];
     ref(distanceLow) = probe[1];
+    ref(delta).x = d[0];
+    ref(delta).y = d[1];
+    ref(delta).z = d[2];
+    return moved;
+}
+template <class W, class V, class F, class U, class A, class D>
+inline bool groomlab_clearance_surface_push(const W& host, const V& p, float offset, float maxDepth, float searchRadius, F&& heightLow,
+                                            F&& distanceLow, U&& vertex, A&& anchor, F&& clear, D&& delta) {
+    using groomlab::gpu::cpu_host::ref;
+    const float q[3] = {p.x, p.y, p.z};
+    float probe[2] = {ref(heightLow), ref(distanceLow)}, d[3] = {0.0f, 0.0f, 0.0f};
+    float cursor[5];
+    const std::uint32_t v = ref(vertex);
+    std::memcpy(&cursor[0], &v, 4);
+    cursor[1] = ref(anchor).x;
+    cursor[2] = ref(anchor).y;
+    cursor[3] = ref(anchor).z;
+    cursor[4] = ref(clear);
+    const bool moved =
+        groomlab::gpu::cpu_host::clearanceSurfacePush(groomlab::gpu::cpu_host::address(host), q, offset, maxDepth, searchRadius, probe, cursor, d);
+    ref(heightLow) = probe[0];
+    ref(distanceLow) = probe[1];
+    std::uint32_t back;
+    std::memcpy(&back, &cursor[0], 4);
+    ref(vertex) = back;
+    ref(anchor).x = cursor[1];
+    ref(anchor).y = cursor[2];
+    ref(anchor).z = cursor[3];
+    ref(clear) = cursor[4];
     ref(delta).x = d[0];
     ref(delta).y = d[1];
     ref(delta).z = d[2];

@@ -324,7 +324,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             if (!mappable("strength", &s->value[0])) return false;
             const float scale = std::clamp(static_cast<float>(number("scale")), 0.0f, 1.0f);
             s->value[1] = scale;
-            // extra_ops.cpp smoothCells: four cells to the deviation, 8 to 128.
+            // Its cells along a strand's length: four to the deviation (scale x its length), 8 to 128.
             s->flag[0] = static_cast<int>(std::clamp(std::ceil(4.0f / std::max(scale, 1e-3f)), 8.0f, 128.0f));
             s->ramp = r.ramp("profile");
             s->tabled = true;
@@ -673,30 +673,17 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
     }
     auto made = std::make_shared<CollideInputs>();
     made->colliders = colliders;
-    for (std::size_t m = 0; m < meshes.size(); ++m) {
-        if (fields[m]) continue;
-        if (!exact && (m >= rests.size() || !rests[m])) {
-            *why = "a surface has no field the GPU can read (deformed: the CPU's)";
-            return nullptr;
-        }
-        made->rests |= 1u << m;
-    }
-    if (made->rests) {
-        auto host = std::make_shared<CollideHost>();
-        host->rests = rests;
-        host->rests.resize(meshes.size());  // (method exact: null, the mesh itself)
-        host->meshes = meshes;
-        host->maxDepth = maxDepth;
-        host->searchRadius = searchRadius;
-        host->softness = softness;
-        made->host = std::move(host);
-    }
+    // Each field's tables (none: asked through the host, as method exact asks the mesh: a deformed
+    // mesh, method exact, and with `rests` given (the CPU engine's caller) a field without a grid,
+    // which asks the mesh at every point).
+    std::vector<MeshDistanceField::Tables> tables(meshes.size());
     for (std::size_t m = 0; m < meshes.size(); ++m) {
         if (!fields[m]) {
-            // Asked through the host: no tables read (a placeholder of zeros, its header's size).
-            made->tables.push_back(std::make_shared<const std::vector<std::uint32_t>>(MeshDistanceField::kTableHeaderWords, 0u));
-            made->boxes.push_back(Vec3f{});
-            made->boxes.push_back(Vec3f{});
+            if (!exact && rests.empty()) {
+                *why = "a surface has no field the GPU can read (deformed: the CPU's)";
+                return nullptr;
+            }
+            made->rests |= 1u << m;
             continue;
         }
         // cellSizeFor rounds the offset's log2 to the nearest whole number: the offsets of a cell
@@ -707,12 +694,34 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
         if (MeshDistanceField::cellSizeFor(*meshes[m], std::numeric_limits<float>::max()) > field.cellSize()) {
             upTo = std::min(upTo, field.cellSize() * 1.4143f + softness);
         }
-        MeshDistanceField::Tables tables = field.tables(std::max(offset + softness, upTo), field.reach());
-        if (!tables) {
-            *why = "a surface has no field the GPU can read (too big for its grid: the CPU's)";
-            return nullptr;
+        tables[m] = field.tables(std::max(offset + softness, upTo), field.reach());
+        if (!tables[m]) {
+            if (rests.empty()) {
+                *why = "a surface has no field the GPU can read (too big for its grid: the CPU's)";
+                return nullptr;
+            }
+            made->rests |= 1u << m;
         }
-        made->tables.push_back(std::move(tables));
+    }
+    if (made->rests) {
+        auto host = std::make_shared<CollideHost>();
+        host->rests = rests;
+        host->rests.resize(meshes.size());  // (null: the mesh itself)
+        host->meshes = meshes;
+        host->maxDepth = maxDepth;
+        host->searchRadius = searchRadius;
+        host->softness = softness;
+        made->host = std::move(host);
+    }
+    for (std::size_t m = 0; m < meshes.size(); ++m) {
+        if (!tables[m]) {
+            // Asked through the host: no tables read (a placeholder of zeros, its header's size).
+            made->tables.push_back(std::make_shared<const std::vector<std::uint32_t>>(MeshDistanceField::kTableHeaderWords, 0u));
+            made->boxes.push_back(Vec3f{});
+            made->boxes.push_back(Vec3f{});
+            continue;
+        }
+        made->tables.push_back(std::move(tables[m]));
         const MeshPtr& mesh = meshes[m];
         Vec3f lo = mesh->points().empty() ? Vec3f{} : mesh->points().front(), hi = lo;
         for (const Vec3f& q : mesh->points()) {

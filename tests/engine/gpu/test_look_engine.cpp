@@ -5890,10 +5890,6 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     // (none: the CPU operators and the kernels give the same bits, the kernels' transcendentals the
     // core's portable ones, cmake/portable_cpu_kernels.cmake). The operators run their own C++ (the
     // engine off for them: else those switched to it make what they are compared against).
-    gpu::setCpuEngineOn(false);
-    struct EngineBack {
-        ~EngineBack() { gpu::setCpuEngineOn(true); }
-    } engineBack;
     struct Graph {
         std::string name, json, from;
         std::function<GroomData(const std::string&)> make = nullptr;  // (null: groom)
@@ -5988,10 +5984,10 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     EXPECT_EQ(differing, 0u);
 }
 
-TEST(CpuEngine, CollideOverADeformedScalpGivesItsCppsBits) {
+TEST(CpuEngine, CollideOverADeformedScalpRunsAlikeTwice) {
     // Collide over a scalp deformed away from its rest pose (each strand walked through the rest
     // pose's field from its cursor, the deformed mesh asked where that cannot tell: collideRestPush
-    // through the host): on the CPU engine against its own C++, bit for bit; hard, soft, smoothed;
+    // through the host): the same bits from two sessions, and strands pushed; hard, soft, smoothed;
     // and method exact (the mesh itself at every point, through the same host).
     for (const char* params : {R"("params": {"offset": 0.12})", R"("params": {"offset": 0.12, "softness": 0.1})",
                                R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3})",
@@ -6005,28 +6001,26 @@ TEST(CpuEngine, CollideOverADeformedScalpGivesItsCppsBits) {
             return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("n0")));
         };
         GroomSession on(data);
-        const StrandsPtr engine = collided(on);
-        gpu::setCpuEngineOn(false);
+        const StrandsPtr once = collided(on);
         GroomSession off(data);
-        const StrandsPtr cpp = collided(off);
-        gpu::setCpuEngineOn(true);
-        ASSERT_TRUE(engine && cpp);
-        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
-        EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
-        EXPECT_EQ(engine->contentHash(), cpp->contentHash());
+        const StrandsPtr again = collided(off);
+        ASSERT_TRUE(once && again);
+        ASSERT_EQ(once->pointCount(), again->pointCount());
+        EXPECT_EQ(std::memcmp(once->positions().data(), again->positions().data(), again->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(once->contentHash(), again->contentHash());
         // (Something to push: strands that the deformed scalp moved.)
         NodeId source = 0;
         const GraphDocument& doc = *off.viewDocument();
         ASSERT_TRUE(doc.graph.inputSource(doc.nodesByName.at("n0"), 0, &source));
-        EXPECT_NE(valueAs<StrandsPtr>(doc.graph.cachedValue(source))->contentHash(), cpp->contentHash()) << "pushes nothing";
+        EXPECT_NE(valueAs<StrandsPtr>(doc.graph.cachedValue(source))->contentHash(), again->contentHash()) << "pushes nothing";
     }
 }
 
-TEST(CpuEngine, HairGridsOverADeformedScalpGiveTheirCppsBits) {
+TEST(CpuEngine, HairGridsOverADeformedScalpRunAlikeTwice) {
     // SelfCollide and Static over a scalp deformed away from its rest pose (the walk's floor asked
-    // through the rest pose, each strand from its cursor: hairGridFloorPush through the host): on
-    // the CPU engine against their own C++, bit for bit; the strands hung into the scalp by a
-    // Gravity first, for the floor to push.
+    // through the rest pose, each strand from its cursor: hairGridFloorPush through the host): the
+    // same bits from two sessions, and strands moved; the strands hung into the scalp by a Gravity
+    // first, for the floor to push.
     for (const std::pair<const char*, const char*>& node : {std::pair<const char*, const char*>{"SelfCollide", R"("params": {"strength": 1.0, "packing": 0.02})"},
                                                             {"Static", R"("params": {"strength": 1.0})"}}) {
         SCOPED_TRACE(node.first);
@@ -6038,26 +6032,23 @@ TEST(CpuEngine, HairGridsOverADeformedScalpGiveTheirCppsBits) {
             return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("n1")));
         };
         GroomSession on(data);
-        const StrandsPtr engine = made(on);
-        gpu::setCpuEngineOn(false);
+        const StrandsPtr once = made(on);
         GroomSession off(data);
-        const StrandsPtr cpp = made(off);
-        gpu::setCpuEngineOn(true);
-        ASSERT_TRUE(engine && cpp);
-        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
-        EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
-        EXPECT_EQ(engine->contentHash(), cpp->contentHash());
+        const StrandsPtr again = made(off);
+        ASSERT_TRUE(once && again);
+        ASSERT_EQ(once->pointCount(), again->pointCount());
+        EXPECT_EQ(std::memcmp(once->positions().data(), again->positions().data(), again->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(once->contentHash(), again->contentHash());
         NodeId source = 0;
         const GraphDocument& doc = *off.viewDocument();
         ASSERT_TRUE(doc.graph.inputSource(doc.nodesByName.at("n1"), 0, &source));
-        EXPECT_NE(valueAs<StrandsPtr>(doc.graph.cachedValue(source))->contentHash(), cpp->contentHash()) << "moves nothing";
+        EXPECT_NE(valueAs<StrandsPtr>(doc.graph.cachedValue(source))->contentHash(), again->contentHash()) << "moves nothing";
     }
 }
 
-TEST(CpuEngine, HairGridsCoarsenedGiveTheirCppsBits) {
+TEST(CpuEngine, HairGridsCoarsenedRunAlikeTwice) {
     // Hair spreading far wider than its scalp (long strands out from a small head every way: the
-    // grid's cells coarsen, HairGridLayout::cell): SelfCollide and Static on the CPU engine against
-    // their own C++, bit for bit.
+    // grid's cells coarsen, HairGridLayout::cell): SelfCollide and Static, the same bits twice.
     const MeshPtr scalp = test::makeSphere(12, 24, 1.0f);
     auto in = std::make_shared<StrandSet>();
     Rng rng(7);
@@ -6094,28 +6085,26 @@ TEST(CpuEngine, HairGridsCoarsenedGiveTheirCppsBits) {
         std::string why;
         ASSERT_TRUE(hairGridLayout(type, *in, scalp, &layout, &why)) << why;
         EXPECT_TRUE(layout.coarsened);
-        auto made = [&](bool engine) {
-            gpu::setCpuEngineOn(engine);
+        auto made = [&] {
             auto op = OperatorRegistry::instance().create(type);
             op->params().set("strength", 1.0);
             if (std::string(type) == op::kSelfCollide) op->params().set("packing", 0.001);
             const StrandsPtr out = valueAs<StrandsPtr>(op->evaluate(ctx, {Value(StrandsPtr(in))}));
-            gpu::setCpuEngineOn(true);
-            return out;
+                return out;
         };
-        const StrandsPtr engine = made(true), cpp = made(false);
-        ASSERT_TRUE(engine && cpp);
-        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
-        EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
+        const StrandsPtr once = made(), again = made();
+        ASSERT_TRUE(once && again);
+        ASSERT_EQ(once->pointCount(), again->pointCount());
+        EXPECT_EQ(std::memcmp(once->positions().data(), again->positions().data(), again->pointCount() * sizeof(Vec3f)), 0);
         // (SelfCollide finds no hair packed past its packing in cells this coarse: Static moves it,
         // the grid's constants the same for both.)
-        if (std::string(type) == op::kStatic) EXPECT_NE(cpp->contentHash(), in->contentHash()) << "moves nothing";
+        if (std::string(type) == op::kStatic) EXPECT_NE(again->contentHash(), in->contentHash()) << "moves nothing";
     }
 }
 
-TEST(CpuEngine, BlendGivesItsCppsBits) {
+TEST(CpuEngine, BlendRunsAlikeTwice) {
     // Blend's points on the CPU engine (BlendCS, look b handed in), its widths and look mixed by the
-    // same weights: against its own C++, bit for bit, everything it makes (contentHash); a mix by
+    // same weights: the same bits from two sessions, everything it makes (contentHash); a mix by
     // number with a profile, a per-point map, the shape alone.
     for (const char* params : {R"("params": {"mix": 0.6, "profile": [[0, 0.2], [1, 1]]})",
                                R"("params": {"mix": {"expression": "t * rand", "min": 0.0, "max": 1.0}})",
@@ -6128,21 +6117,19 @@ TEST(CpuEngine, BlendGivesItsCppsBits) {
             return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("blend")));
         };
         GroomSession on(data);
-        const StrandsPtr engine = blended(on);
-        gpu::setCpuEngineOn(false);
+        const StrandsPtr once = blended(on);
         GroomSession off(data);
-        const StrandsPtr cpp = blended(off);
-        gpu::setCpuEngineOn(true);
-        ASSERT_TRUE(engine && cpp);
-        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
-        EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
-        EXPECT_EQ(engine->contentHash(), cpp->contentHash());
+        const StrandsPtr again = blended(off);
+        ASSERT_TRUE(once && again);
+        ASSERT_EQ(once->pointCount(), again->pointCount());
+        EXPECT_EQ(std::memcmp(once->positions().data(), again->positions().data(), again->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(once->contentHash(), again->contentHash());
     }
 }
 
-TEST(CpuEngine, InterpolateOverADeformedScalpGivesItsCppsBits) {
+TEST(CpuEngine, InterpolateOverADeformedScalpRunsAlikeTwice) {
     // Keeping clearance over a deformed scalp (the walk through the rest pose's field, each strand
-    // from its cursor): Interpolate on the CPU engine against its own C++, bit for bit; and with
+    // from its cursor): Interpolate on the CPU once, the same bits from two sessions; and with
     // degenerate faces among the strands (an edge of the deformed scalp collapsed: the walk asks the
     // mesh at their vertices, through the host).
     for (const bool degenerate : {false, true}) {
@@ -6165,29 +6152,27 @@ TEST(CpuEngine, InterpolateOverADeformedScalpGivesItsCppsBits) {
             return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("interpolate")));
         };
         GroomSession on(data);
-        const StrandsPtr engine = interpolated(on);
-        gpu::setCpuEngineOn(false);
+        const StrandsPtr once = interpolated(on);
         GroomSession off(data);
-        const StrandsPtr cpp = interpolated(off);
-        gpu::setCpuEngineOn(true);
-        ASSERT_TRUE(engine && cpp);
-        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
-        EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
-        EXPECT_EQ(engine->contentHash(), cpp->contentHash());
+        const StrandsPtr again = interpolated(off);
+        ASSERT_TRUE(once && again);
+        ASSERT_EQ(once->pointCount(), again->pointCount());
+        EXPECT_EQ(std::memcmp(once->positions().data(), again->positions().data(), again->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(once->contentHash(), again->contentHash());
     }
     }
 }
 
-TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
-    // The stages the CPU engine runs for their operators (look_cpu.h runStage), and the operators as
-    // they run now (on it where they switched: Part's sides are the core's, its turns still its C++):
-    // each against the operator's own C++ (the engine off), on the strands it took, bit for bit,
-    // points and widths; mapped params, per point and per strand, root frames with UVs and without.
+TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
+    // Each operator's stage run alone on the CPU engine (look_cpu.h runStage, on the inputs the
+    // operator makes) against the operator itself, and the operator run twice: on the strands it
+    // took, bit for bit, points and widths; mapped params, per point and per strand, root frames
+    // with UVs and without.
     struct Case {
         std::string type, params;
         bool uvs = false;
-        bool cpus = false;  // the operator's own C++ (its inputs the operator's: a direction per strand)
-        bool adds = false;  // adds points (Curl): the operator's own C++, its stage alone not compared
+        bool cpus = false;  // its inputs the operator's own (a direction per strand): its stage alone not run
+        bool adds = false;  // adds points (Curl): its stage alone not run
         std::pair<std::string, std::string> before = {};  // a node before it (after the Clump)
     };
     const Case cases[] = {
@@ -6310,7 +6295,6 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
             std::size_t output = 0;
             if (doc.graph.inputSource(id, i, &src, &output)) inputs[i] = doc.graph.cachedValue(src, output);
         }
-        // (Run there, not handed to its C++.)
         const std::map<std::string, gpu::StageKind> kinds = {{"Width", gpu::StageKind::Width},         {"Bend", gpu::StageKind::Bend},
                                                              {"Direction", gpu::StageKind::Direction}, {"Transform", gpu::StageKind::Transform},
                                                              {"Displace", gpu::StageKind::Displace},   {"Gravity", gpu::StageKind::Gravity},
@@ -6326,21 +6310,17 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         gpu::StageInputs stageInputs;
         std::string whyNot;
         if (kind == gpu::StageKind::Twist) stageInputs.twist = gpu::twistInputs(*valueAs<StrandsPtr>(inputs[0]), valueAs<GuidesPtr>(inputs[1]).get(), "clumpId", false, &whyNot);
-        // (Tangle's partners, BlendNeighbors' neighbours and Clump's centers: their operators' own, as their C++ just made them.)
+        // (Tangle's partners, BlendNeighbors' neighbours and Clump's centers: their operators' own, as they just made them.)
         if (kind == gpu::StageKind::Clump) {
-            gpu::setCpuEngineOn(false);
-            const Value cpu = op.evaluate(ctx, inputs);
-            gpu::setCpuEngineOn(true);
-            ClumpState state;
+                const Value cpu = op.evaluate(ctx, inputs);
+                ClumpState state;
             ASSERT_TRUE(clumpState(op, valueAs<StrandsPtr>(cpu), &state));
             stageInputs.clump = gpu::clumpInputs(state.assigned, state.curves, state.centerNormals, state.centerIds,
                                                  static_cast<std::uint64_t>(op.params().getInt("seed")));
         }
         if (kind == gpu::StageKind::Tangle || kind == gpu::StageKind::BlendNeighbors) {
-            gpu::setCpuEngineOn(false);
-            const Value cpu = op.evaluate(ctx, inputs);
-            gpu::setCpuEngineOn(true);
-            if (kind == gpu::StageKind::Tangle) {
+                const Value cpu = op.evaluate(ctx, inputs);
+                if (kind == gpu::StageKind::Tangle) {
                 std::shared_ptr<const TangleState> state;
                 ASSERT_TRUE(tangleState(op, valueAs<StrandsPtr>(cpu), &state));
                 stageInputs.tangle = gpu::tangleInputs(*valueAs<StrandsPtr>(inputs[0]), *state);
@@ -6377,20 +6357,16 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
             stageInputs.grid = grid;
         }
         if (kind == gpu::StageKind::Part) stageInputs.part = gpu::partInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().parts.get(), session.last().scalp.get(), "");
-        // Its C++ (the engine off), the stage on the engine, the operator as it runs now.
+        // The operator, its stage alone on the engine, the operator again.
         StrandsPtr made[3];
-        gpu::setCpuEngineOn(false);
         made[0] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
-        gpu::setCpuEngineOn(true);
         if (c.adds) EXPECT_GT(made[0]->pointCount(), valueAs<StrandsPtr>(inputs[0])->pointCount());
         if (kind == gpu::StageKind::SelfCollide || kind == gpu::StageKind::Static) {
             EXPECT_TRUE(made[0] != valueAs<StrandsPtr>(inputs[0])) << "pushes nothing";  // (its input: none moved)
         }
         if (interpolate) {
-            gpu::setCpuEngineOn(false);
-            const StrandsPtr cpu = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
-            gpu::setCpuEngineOn(true);
-            const StrandsPtr now = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
+                const StrandsPtr cpu = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
+                const StrandsPtr now = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
             ASSERT_TRUE(cpu && now);
             ASSERT_EQ(cpu->pointCount(), now->pointCount());
             std::size_t bits = 0;
@@ -6401,7 +6377,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
                 EXPECT_EQ(a == nullptr, b == nullptr) << name;
                 if (a && b) EXPECT_TRUE(*a == *b) << name;
             }
-            EXPECT_EQ(bits, 0u) << "the operator now";
+            EXPECT_EQ(bits, 0u) << "the operator again";
             differing += bits;
             compared += cpu->pointCount();
             continue;
@@ -6409,10 +6385,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         gpu::StageParamReader reader(op.params(), "");
         reader.time = ctx.time;
         reader.framesPerSecond = ctx.framesPerSecond;
-        if (!c.adds) {
-            made[1] = gpu::runStage(kind, reader, valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), stageInputs);
-            EXPECT_EQ(made[1] != nullptr, !c.cpus);
-        }
+        if (!c.adds && !c.cpus) made[1] = gpu::runStage(kind, reader, valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), stageInputs);
         made[2] = valueAs<StrandsPtr>(op.evaluate(ctx, inputs));
         for (int m = 1; m < 3; ++m) {
             if (!made[m]) continue;
@@ -6426,12 +6399,12 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
             for (std::size_t i = 0; i < made[0]->widths().size(); ++i) {
                 bits += std::memcmp(&made[0]->widths()[i], &made[m]->widths()[i], sizeof(float)) != 0;
             }
-            // (Flyaway's strays flagged as its C++ flags them.)
+            // (Flyaway's strays flagged alike.)
             if (m == 2 && made[0]->strandChannel("flyaway")) {
                 const std::vector<float>* got = made[m]->strandChannel("flyaway");
                 EXPECT_TRUE(got && *got == *made[0]->strandChannel("flyaway"));
             }
-            EXPECT_EQ(bits, 0u) << (m == 1 ? "the stage on the engine" : "the operator now");
+            EXPECT_EQ(bits, 0u) << (m == 1 ? "the stage alone" : "the operator again");
             differing += bits;
             compared += made[0]->pointCount();
         }
@@ -6439,107 +6412,5 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
     std::printf("[ CPU ops ] points differing: %zu of %zu\n", differing, compared);
 }
 
-TEST(CpuEngine, SpeedAgainstTheOperators) {
-    // Each stage of dense grooms (400 strands a unit): the CPU engine's run of it against its
-    // operator's evaluation of the same input, its own C++ (the engine off) and as it runs now (ms,
-    // best of 3). A report: which kernels are at their operators' speed, which want tuning.
-    struct Graph {
-        std::string name, json;
-        std::function<GroomData(const std::string&)> make = nullptr;  // (null: groom)
-    };
-    std::vector<Graph> graphs = {{"look", graph(0.3)}, {"hair_basics", startingGraph("hairBasics")}};
-    for (const char* preset : {"parted_style", "gravity", "flyaways", "cinematic_hair", "wind_and_jiggle"}) graphs.push_back({preset, presetGraph(preset)});
-    const std::pair<const char*, const char*> shapers[] = {
-        {"Bend", R"("params": {"angle": 35.0, "randomness": 0.3})"},
-        {"Direction", R"("params": {"inclination": 30.0, "strength": 0.7, "roll": 20.0})"},
-        {"Transform", R"("params": {"scale": 1.2, "translate": [0.0, 0.05, 0.0], "rotate": [10.0, 0.0, 5.0]})"},
-        {"Displace", R"("params": {"distance": 0.1})"},
-        {"Twist", R"("params": {"turns": 0.6})"}};
-    for (const auto& [type, params] : shapers) graphs.push_back({type, shaperGraph(type, params, true)});
-    for (const auto& [type, params] : {std::pair<const char*, const char*>{"Smooth", R"("params": {"strength": 0.8, "scale": 0.3})"},
-                                       {"BlendNeighbors", R"("params": {"strength": 0.6})"},
-                                       {"Tangle", R"("params": {"strength": 0.6, "fraction": 0.5})"}}) {
-        graphs.push_back({type, neighbourGraph(type, params)});
-    }
-    graphs.push_back({"Collide", withoutClearance(chainGraph({{"Collide", R"("params": {"offset": 0.12})"}}, true, true))});
-    graphs.push_back({"SelfCollide", withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.6})"}, {"SelfCollide", ""}}))});
-    graphs.push_back({"Static", withoutClearance(chainGraph({{"Static", R"("params": {"strength": 0.5})"}}))});
-    graphs.push_back({"RestoreLength", withReference(neighbourGraph("RestoreLength", R"("params": {"mode": "segments"})"), "n1", "interpolate")});
-    graphs.push_back({"MeshCut", meshCutGraph(R"("params": {"offset": 0.02})"),
-                      [](const std::string& j) { return meshCutGroom(j, Vec3f(0.0f, 4.6f, 0.0f), 1.6f); }});
-    std::set<std::string> seen;
-    for (const Graph& g : graphs) {
-        nlohmann::json j = nlohmann::json::parse(g.json);
-        for (auto& n : j["nodes"]) {
-            if (n["type"] == "Scatter") n["params"]["density"] = 400.0;
-        }
-        GroomData data = g.make ? g.make(j.dump()) : groom(j.dump());
-        test::paintRequiredMaps(g.json, data);
-        data.partsJson = meridianParts(*data.scalp);
-        GroomSession session(data);
-        ASSERT_TRUE(session.evaluate(ViewRequest{}).strands) << g.name;
-        Prepared p;
-        if (!prepareRun(session, {}, "", &p)) continue;
-        const GraphDocument& doc = *session.viewDocument();
-        ExternalInputs ext;
-        setGroomExternals(ext, session.last().scalp, data.guides, session.last().hierarchy, session.last().parts, session.last().flow);
-        setMapExternals(ext, data.maps);
-        EvalContext ctx;
-        ctx.externals = &ext;
-        auto engine = gpu::makeCpuLookEngine();
-        for (std::size_t k = 0; k < p.chain.stages.size(); ++k) {
-            const gpu::LookStage& stage = p.chain.stages[k];
-            const std::string kind = gpu::stageName(stage.kind);
-            if (stage.level >= 0 || !seen.insert(kind).second) continue;  // (a Wet's levels; each kind once)
-            NodeId src = 0;
-            std::size_t output = 0;
-            if (!doc.graph.inputSource(stage.node, 0, &src, &output)) continue;
-            const StrandsPtr input = valueAs<StrandsPtr>(doc.graph.cachedValue(src, output));
-            if (!input) continue;
-            gpu::LookRun run = p.run;
-            run.params.stages = {p.run.params.stages[k]};
-            run.params.stages[0].stage.from = gpu::kNoStage;
-            run.params.stages[0].stage.from2 = gpu::kNoStage;
-            run.fields.stages = k < p.run.fields.stages.size() ? std::vector<gpu::StageFields>{p.run.fields.stages[k]} : std::vector<gpu::StageFields>{};
-            run.inputs = k < p.run.inputs.size() ? std::vector<gpu::StageInputs>{p.run.inputs[k]} : std::vector<gpu::StageInputs>{};
-            engine->setBase(input, session.last().scalp.get());
-            std::vector<Vec3f> out(input->pointCount());
-            gpu::LookTargets targets;
-            targets.positions = out.data();
-            double engineMs = 1e30, opMs = 1e30, onMs = 1e30;
-            try {
-                for (int r = 0; r < 3; ++r) {
-                    const auto t0 = std::chrono::steady_clock::now();
-                    engine->run(run, false, targets);
-                    engineMs = std::min(engineMs, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
-                }
-            } catch (const std::exception& e) {
-                std::printf("[ CPU speed ] %s: not run alone (%s)\n", kind.c_str(), e.what());
-                continue;
-            }
-            engine->dropTargets();
-            const Operator& op = doc.graph.node(stage.node);
-            std::vector<Value> inputs(op.inputs().size());
-            for (std::size_t i = 0; i < inputs.size(); ++i) {
-                if (doc.graph.inputSource(stage.node, i, &src, &output)) inputs[i] = doc.graph.cachedValue(src, output);
-            }
-            for (const bool on : {false, true}) {
-                gpu::setCpuEngineOn(on);
-                for (int r = 0; r < 3; ++r) {
-                    // (Another set each time, as a graph's evaluations hand it: the engine takes it anew.)
-                    std::vector<Value> fresh = inputs;
-                    fresh[0] = Value(StrandsPtr(std::make_shared<StrandSet>(*input)));
-                    const auto t0 = std::chrono::steady_clock::now();
-                    const Value made = op.evaluate(ctx, fresh);
-                    double& best = on ? onMs : opMs;
-                    best = std::min(best, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
-                }
-            }
-            std::printf("[ CPU speed ] %-15s %8zu strands %9zu points: engine %8.2f ms, operator's C++ %8.2f ms (x%5.2f), operator now %8.2f ms\n",
-                        kind.c_str(), input->strandCount(), input->pointCount(), engineMs, opMs, engineMs / opMs, onMs);
-        }
-    }
-    gpu::setCpuEngineOn(true);
-}
 }  // namespace
 }  // namespace groomlab

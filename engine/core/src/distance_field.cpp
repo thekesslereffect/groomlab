@@ -1352,24 +1352,28 @@ RestPoseCollision::Cursor CollisionSurface::cursor(const StrandRoot& root, const
 
 bool CollisionSurface::pushOut(Vec3f& p, float offset, float maxDepth, float searchRadius, RestPoseCollision::Cursor& cursor,
                                MeshDistanceField::Probe* probe) const {
+    Vec3f delta;
+    if (!push(p, offset, maxDepth, searchRadius, &delta, cursor, probe)) return false;
+    p += delta;
+    return true;
+}
+
+bool CollisionSurface::push(const Vec3f& p, float offset, float maxDepth, float searchRadius, Vec3f* delta,
+                            RestPoseCollision::Cursor& cursor, MeshDistanceField::Probe* probe) const {
     if (rest) {
-        Vec3f delta;
-        switch (rest->push(p, offset, maxDepth, searchRadius, &delta, cursor, probe)) {
+        switch (rest->push(p, offset, maxDepth, searchRadius, delta, cursor, probe)) {
             case MeshDistanceField::Push::Kept: return false;
-            case MeshDistanceField::Push::Moved: p += delta; return true;
+            case MeshDistanceField::Push::Moved: return true;
             case MeshDistanceField::Push::Ask: break;  // the mesh's answer
         }
-        return pushOutOf(*mesh, nullptr, p, offset, maxDepth, searchRadius, probe);
-    }
-    if (field) {  // (pushOutOf's, without the call)
-        Vec3f delta;
-        switch (field->push(p, offset, maxDepth, searchRadius, &delta, probe)) {
+    } else if (field) {
+        switch (field->push(p, offset, maxDepth, searchRadius, delta, probe)) {
             case MeshDistanceField::Push::Kept: return false;
-            case MeshDistanceField::Push::Moved: p += delta; return true;
+            case MeshDistanceField::Push::Moved: return true;
             case MeshDistanceField::Push::Ask: break;
         }
     }
-    return pushOutOf(*mesh, nullptr, p, offset, maxDepth, searchRadius, probe);
+    return meshPushOf(*mesh, p, offset, maxDepth, searchRadius, delta, probe);
 }
 
 }  // namespace groomlab

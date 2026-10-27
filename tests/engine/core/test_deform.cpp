@@ -287,52 +287,6 @@ TEST(Collide, SmoothingCurvesStrandsOntoTheSurfaceKeepingLengths) {
     }
 }
 
-TEST(Collide, SkipsASurfaceAStrandIsFarFromAsIfAskedAtEveryPoint) {
-    // Each surface's field asked once for a strand (bounds at its root, out to its farthest point):
-    // strands far above a floor skip it, those reaching it and those a scalp push moves toward it
-    // ask it at their points. The strands come out as when every surface is asked at every point,
-    // bit for bit: hard, soft, smoothed, with the scalp too, and with the deep search Collide takes
-    // for a large maxDepth (the wolf's: every point within reach of both surfaces). (CollideOp's own
-    // C++, which incremental evaluations and what the CPU engine refuses run: the engine off.)
-    gpu::setCpuEngineOn(false);
-    struct EngineBack {
-        ~EngineBack() { gpu::setCpuEngineOn(true); }
-    } engineBack;
-    FloorScene scene;
-    const auto plane = test::makePlane(8, 8.0f);  // a floor 3 below the scalp
-    std::vector<Vec3f> points = plane->points();
-    for (Vec3f& p : points) p += Vec3f(-4.0f, -3.0f, -4.0f);
-    scene.floor = std::make_shared<const ScalpMesh>(std::move(points), plane->triangles());
-    // Strands from the plane: half slanting down through the floor, half up and away from it.
-    auto s = std::make_shared<StrandSet>();
-    for (int i = 0; i < 40; ++i) {
-        const StrandRoot root{2 * i % static_cast<int>(scene.h.scalp->triangleCount()), 0.3f, 0.3f};
-        const Vec3f dir = i % 2 ? Vec3f(1.5f, -3.6f, 0.0f) : Vec3f(0.15f, 0.5f, 0.1f);
-        s->addStrand(static_cast<StrandId>(i + 1), test::straightCurve(scene.h.scalp->position(root), dir, 24), {}, root);
-    }
-    const StrandsPtr in = s;
-    for (const double maxDepth : {3.0, 16.0}) {
-        for (const auto& [softness, smoothing] : {std::pair<double, double>{0.0, 0.0}, {0.15, 0.0}, {0.0, 0.6}, {0.1, 0.6}}) {
-            SCOPED_TRACE(std::to_string(maxDepth) + " " + std::to_string(softness) + " " + std::to_string(smoothing));
-            const std::map<std::string, ParamValue> params{{"offset", 0.02}, {"softness", softness}, {"smoothing", smoothing},
-                                                           {"maxDepth", maxDepth}, {"iterations", std::int64_t{2}}};
-            for (const bool withScalp : {false, true}) {
-                const std::vector<Value> inputs{in, withScalp ? Value{scene.h.scalp} : Value{}, scene.floor};
-                const std::size_t skippedBefore = collideSkippedSurfaces();
-                const StrandsPtr fast = scene.h.run(op::kCollide, inputs, params);
-                const std::size_t skipped = collideSkippedSurfaces() - skippedBefore;
-                setCollideStrandBounds(false);
-                const StrandsPtr every = scene.h.run(op::kCollide, inputs, params);
-                setCollideStrandBounds(true);
-                ASSERT_TRUE(fast && every);
-                EXPECT_EQ(fast->positions(), every->positions());
-                EXPECT_NE(every->positions(), in->positions()) << "the test's premise: strands reach the floor";
-                if (maxDepth < 10.0) EXPECT_GE(skipped, 20u) << "the strands rising away skip the floor (with the scalp: " << withScalp << ")";
-            }
-        }
-    }
-}
-
 TEST(ColliderMesh, ReadsTheNamedMeshExternal) {
     Harness h;
     const MeshPtr ball = sphereAt({0.5f, 0.5f, 0.5f}, 0.3f);

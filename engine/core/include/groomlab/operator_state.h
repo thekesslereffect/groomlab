@@ -197,8 +197,16 @@ struct InterpolateClearance {
     // The scalp: over a deformed one, what the walk asks where it reaches a degenerate face's vertex
     // (meshPushOf; the CPU engine's alone, through the host: look.slang hostClearanceMeshPush).
     MeshPtr mesh;
+    // A scalp whose field the walk cannot read as tables (too big for its field's grid; deformed
+    // without a rest field): every push asked of `surface` through the host (`host`, the CPU
+    // engine's alone: look.slang hostClearanceSurfacePush), the tables a placeholder.
+    CollisionSurface surface;
+    bool host = false;
 };
-std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet& params, const MeshPtr& scalp, std::string* why);
+// `host` (the CPU engine's caller): a scalp whose field the walk cannot read as tables is asked
+// through the host (InterpolateClearance::host) rather than refused.
+std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet& params, const MeshPtr& scalp, std::string* why,
+                                                                 bool host = false);
 // Over a deformed scalp (clearance.rest): each strand's walk's first vertex, its root face's vertex
 // nearest its first point (RestPoseCollision::cursor; 0xffffffff: none), for the kernel's walk. Null
 // with *why where a walk could reach a degenerate face's vertex (no motion: the mesh asked, the CPU

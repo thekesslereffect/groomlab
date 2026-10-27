@@ -410,6 +410,9 @@ struct CollisionSurface {
     // there).
     bool pushOut(Vec3f& p, float offset, float maxDepth, float searchRadius, RestPoseCollision::Cursor& cursor,
                  MeshDistanceField::Probe* probe = nullptr) const;
+    // The same, its push into *delta (what pushOut adds to p) and p left as it is.
+    bool push(const Vec3f& p, float offset, float maxDepth, float searchRadius, Vec3f* delta, RestPoseCollision::Cursor& cursor,
+              MeshDistanceField::Probe* probe = nullptr) const;
 };
 
 }  // namespace groomlab

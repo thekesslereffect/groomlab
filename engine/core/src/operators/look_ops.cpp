@@ -111,16 +111,6 @@ Frame frameBetween(const Frame& a, const Frame& b, float f) {
     return out;
 }
 
-// Where a strand's point `arc` from its root lies on a center of kCenterSamples points with
-// cumulative arc lengths `arcs`: the sample `k` at or before it (walked on from the last, as
-// arc grows along the strand) and the share `f` of the way to the next; past the center's tip,
-// the tip (k = kCenterSamples - 2, f = 1). (look.slang centerAt repeats this.)
-void centerSampleAt(const float* arcs, float arc, std::size_t& k, float* f) {
-    while (k + 2 < kCenterSamples && arcs[k + 1] < arc) ++k;
-    const float span = arcs[k + 1] - arcs[k];
-    *f = span > 0.0f ? std::clamp((arc - arcs[k]) / span, 0.0f, 1.0f) : 0.0f;
-}
-
 // ---------------------------------------------------------------------------
 
 // Feathers: Propagate's barbs carry featherId and side (and isShaft on the shafts). Every barb of
@@ -1104,20 +1094,11 @@ private:
 
         const ScalarField strength(params(), "strength", scalpOf(ctx));
         strength.validate(*in);
-        const bool strengthPerPoint = strength.perPoint();
-        const Ramp profile = params().getRamp("profile");
         const std::string channel = params().getString("clumpChannel");
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
-        const float radius = static_cast<float>(params().getDouble("lockRadius"));
-        const float repelRadius = static_cast<float>(params().getDouble("repelRadius"));
-        const float flatness = static_cast<float>(params().getDouble("flatness"));
-        const bool shaped = flatness > 0.0f;  // a clump's cross-section squashed
-        const std::string flatten = shaped ? params().getString("flatten") : std::string();
-        const Vec3f flattenDirection = flatten == "direction" ? params().getVec3("flattenDirection") : Vec3f{};
         // Each clump's axis: the core strand it gathers nearest its center's root (centersFrom
         // inputPoints), else the center's own curve (a center of its own is a strand).
         const bool fromStrands = from == "inputPoints";
-        const bool extend = params().getString("pastTip") == "extend";
         if (fromStrands && strength.isConstant() && strength.maximum() < 0.0f) {
             ctx.note("parts the strands around the strands nearest its centers (centersFrom inputPoints); inputCurves "
                      "parts them around the center curves themselves (whiskers, horns)");
@@ -1171,21 +1152,8 @@ private:
             }, 64);
             shareCenters(roots, curves, &axes);
         };
-        // Per clump (by its center's ID): its strength and lock radius scaled at random.
-        const auto strengthRandom = static_cast<float>(params().getDouble("strengthRandom"));
-        const auto radiusRandom = static_cast<float>(params().getDouble("lockRadiusRandom"));
-        auto clumpStrength = [&](std::size_t c) {
-            return 1.0f - strengthRandom * unitFloat(hashCombine(used[c]->id, seed ^ 0x57E4Aull));
-        };
-        // Per strand (by its ID), on top: how far it follows its clump's pull.
-        const auto strandRandom = static_cast<float>(params().getDouble("strandStrengthRandom"));
-        auto clumpRadius = [&](std::size_t c) {
-            return radius * (1.0f + radiusRandom * (2.0f * unitFloat(hashCombine(used[c]->id, seed ^ 0x2AD1Bull)) - 1.0f));
-        };
         const ScalarField volumize(params(), "volumize", scalp);
         volumize.validate(*in);
-        const bool volumizing = !(volumize.isConstant() && volumize.maximum() == 0.0f);
-        const Ramp volumizeProfile = params().getRamp("volumizeProfile");
         const FeatherVanes vanes(*in, used, starts);
         // Regions (regionChannel, which Interpolate's regionMap writes): a strand clumps only toward
         // a center of its own region. A center's region: a center of its own, its strand's; else its
@@ -1509,195 +1477,30 @@ private:
             made_.centerRegions = std::move(centerRegions);
             made_.regionsFromStrands = regionsFromStrands;
         };
-        if (!last && gpu::cpuEngineOn()) {
-            // look.slang's ClumpCS, the GPU preview's own (look_cpu.h), on the centers chosen here
-            // (following tubes: each tube's own, picked here).
-            std::vector<StrandId> ids(used.size());
-            for (std::size_t c = 0; c < used.size(); ++c) ids[c] = used[c]->id;
-            gpu::StageInputs centers;
-            centers.clump = gpu::clumpInputs(assigned, curves, centerNormals, ids, seed);
-            if (gpu::runStageInto(gpu::StageKind::Clump, params(), in, scalp, *out, std::move(centers))) {
-                if (clumpIds) {
-                    parallelFor(0, assigned->size(), [&](std::size_t s) {
-                        const std::uint32_t c = (*assigned)[s];
-                        if (c != kNoCenter) (*clumpIds)[s] = numbers[c];
-                    }, 4096);
-                }
-                keep();
-                *result = StrandsPtr(out);
-                return true;
+        // look.slang's ClumpCS, the GPU preview's own (look_cpu.h), on the centers chosen here
+        // (following tubes: each tube's own, picked here): in full, or the strands to make again
+        // (each from its incoming points and no clump ID, as in a full run) on a view of them.
+        std::vector<StrandId> ids(used.size());
+        for (std::size_t c = 0; c < used.size(); ++c) ids[c] = used[c]->id;
+        gpu::StageInputs taken;
+        if (!last) {
+            taken.clump = gpu::clumpInputs(assigned, curves, centerNormals, ids, seed);
+            gpu::runStageInto(gpu::StageKind::Clump, params(), in, scalp, *out, std::move(taken));
+            if (clumpIds) {
+                parallelFor(0, assigned->size(), [&](std::size_t s) {
+                    const std::uint32_t c = (*assigned)[s];
+                    if (c != kNoCenter) (*clumpIds)[s] = numbers[c];
+                }, 4096);
             }
-        }
-        std::vector<Frame> frames;
-        if (radius > 0.0f || shaped) {
-            frames.resize(curves.size());
-            parallelFor(0, roots.size(), [&](std::size_t c) {
-                thread_local std::vector<Frame> one;  // scratch, reused across centers
-                const Vec3f* pts = curves.data() + c * kCenterSamples;
-                rotationMinimizingFramesInto(pts, kCenterSamples, frameSeed(centerNormals[c], pts[0], pts[1]), one);
-                std::copy(one.begin(), one.end(), frames.begin() + static_cast<std::ptrdiff_t>(c * kCenterSamples));
-            }, 64);
-        }
-        // Each center's cumulative arc length at its samples: a strand's point is pulled toward
-        // the center's point as far from the root as the point is along its strand, so short
-        // hairs stay by the clump's root (as Ornatrix's and Yeti's) rather than reaching its tip.
-        std::vector<float> centerArcs(curves.size());
-        parallelFor(0, roots.size(), [&](std::size_t c) {
-            cumulativeArcLength(curves.data() + c * kCenterSamples, kCenterSamples, centerArcs.data() + c * kCenterSamples);
-        }, 256);
-        // Flat clumps: each center's way across that its ribbon is thin in, before it is taken
-        // square to the center at each sample: the scalp's normal at its root (lying on the
-        // scalp), a random turn about its frame (random), or across the width's direction.
-        std::vector<Vec3f> thinWay;
-        if (flatness > 0.0f) {
-            thinWay.resize(roots.size());
-            for (std::size_t c = 0; c < roots.size(); ++c) {
-                const Frame& first = frames[c * kCenterSamples];
-                Vec3f way = first.normal;
-                if (flatten == "random") {
-                    const float a = kTwoPi * unitFloat(hashCombine(used[c]->id, seed ^ 0xF1A7));
-                    way = first.normal * pm::cos(a) + first.binormal * pm::sin(a);
-                } else if (flatten == "direction") {
-                    way = first.tangent.cross(flattenDirection);  // across the tangent and the width's way
-                } else if (scalp && scalp->contains(used[c]->root)) {
-                    way = scalp->normal(used[c]->root);
-                }
-                thinWay[c] = way;
-            }
-        }
-
-        const RampAlong along(profile, *out);
-        const RampAlong volumizeAlong(volumizeProfile, *out);
-        // A clumped point's offset from its center's point `center` (its frame there `fr`)
-        // squashed across by the flatness (as much as the point clumps, w).
-        auto shape = [&](Vec3f& p, std::size_t c, const Vec3f& center, const Frame& fr, float w) {
-            Vec3f offset = p - center;
-            Vec3f thin = thinWay[c] - fr.tangent * thinWay[c].dot(fr.tangent);
-            thin = thin.length() > 1e-6f ? thin.normalized() : fr.normal;  // along the center: its frame's
-            offset -= thin * (offset.dot(thin) * flatness * w);
-            p = center + offset;
-        };
-
-        auto clumpStrand = [&](std::size_t s) {
-            const std::size_t c = (*assigned)[s];
-            if (c == kNoCenter) return;
-            const std::size_t n = out->strandPointCount(s);
-            Vec3f* pts = out->strandPoints(s);
-            if (clumpIds) (*clumpIds)[s] = numbers[c];
-
-            float escape = strengthRandom > 0.0f ? clumpStrength(c) : 1.0f;
-            if (strandRandom > 0.0f) escape *= 1.0f - strandRandom * unitFloat(hashCombine(out->ids()[s], seed ^ 0x5E7A9ull));
-            // Volumize: read on the strand as it came (its points are still the input's here).
-            const float volume = volumizing ? volumize.at(*out, s) : 0.0f;
-            // Point i pushed out from the center's axis (its point `axisPoint`, running along
-            // `tangent` there) by the volume there (across the axis).
-            auto fill = [&](std::size_t i, const Vec3f& axisPoint, const Vec3f& tangent) {
-                const float v = volume * volumizeAlong(i, n);
-                if (v == 0.0f) return;
-                const Vec3f d = pts[i] - axisPoint;
-                pts[i] += (d - tangent * d.dot(tangent)) * v;
-            };
-            const float strandAmount = strengthPerPoint ? 0.0f : strength.at(*out, s) * escape;
-            auto amountAt = [&](std::size_t i) {
-                return strengthPerPoint ? strength.atPoint(*in, s, i) * escape : strandAmount;
-            };
-            const Vec3f* center = curves.data() + c * kCenterSamples;
-            const float* centerArc = centerArcs.data() + c * kCenterSamples;
-            const float centerLength = centerArc[kCenterSamples - 1];
-            const Frame* fr = frames.empty() ? nullptr : frames.data() + c * kCenterSamples;
-            // pastTip extend: past the center's tip, on along its last segment's way.
-            const Vec3f tipWay =
-                extend ? (center[kCenterSamples - 1] - center[kCenterSamples - 2]).normalized() : Vec3f{};
-            // Each point is measured along the strand as it came (`arc`, from the root): pulled
-            // toward (or, at a negative strength, repelled from) the center's point as far along
-            // the center, past its tip the tip (or on past it: extend).
-            const Vec3f* src = in->strandPoints(s);
-            float arc = 0.0f;
-            std::size_t k = 0;  // the center's sample at or before `arc` (centerSampleAt)
-            bool repelling = false;
-            Vec3f skin;
-            float turn = 0.0f;  // its way round a center it sits on: the lock's angle
-            auto repel = [&](std::size_t i, float raw) {
-                if (!(raw < 0.0f) || repelRadius <= 0.0f) return false;
-                if (!repelling) {
-                    const StrandRoot& root = out->roots()[s];
-                    skin = scalp && scalp->contains(root) ? scalp->normal(root) : Vec3f{};
-                    turn = kTwoPi * unitFloat(hashCombine(out->ids()[s], seed ^ 0x10C4));
-                    repelling = true;
-                }
-                pts[i] = repelled(pts[i], center, centerLength, arc, std::min(-raw, 1.0f), repelRadius, src[0] - center[0], turn,
-                                  skin, paramAt(i, n));
-                return true;
-            };
-            // A fixed spot in the lock's disk (uniform over its area), in the center's frame there.
-            float angle = 0.0f, r = 0.0f;
-            if (radius > 0.0f) {
-                const std::uint64_t h = hashCombine(out->ids()[s], seed ^ 0x10C4);
-                angle = kTwoPi * unitFloat(h);
-                r = (radiusRandom > 0.0f ? clumpRadius(c) : radius) * std::sqrt(unitFloat(hash64(h)));
-            }
-            for (std::size_t i = 1; i < n; ++i) {
-                arc += (src[i] - src[i - 1]).length();
-                const float raw = amountAt(i) * along(i, n);
-                if (repel(i, raw)) continue;
-                const float w = std::clamp(raw, 0.0f, 1.0f);
-                float f = 0.0f;
-                centerSampleAt(centerArc, arc, k, &f);
-                Vec3f at = center[k] * (1.0f - f) + center[k + 1] * f;
-                if (extend && arc > centerLength) at += tipWay * (arc - centerLength);
-                if (radius > 0.0f) {
-                    const Frame frame = frameBetween(fr[k], fr[k + 1], f);
-                    const Vec3f target = at + frame.toWorld({r * pm::cos(angle), r * pm::sin(angle), 0.0f});
-                    pts[i] += (target - pts[i]) * w;
-                    if (shaped) shape(pts[i], c, at, frame, w);
-                } else {
-                    pts[i] += (at - pts[i]) * w;
-                    if (shaped) shape(pts[i], c, at, frameBetween(fr[k], fr[k + 1], f), w);
-                }
-                if (volume != 0.0f) fill(i, at, (center[k + 1] - center[k]).normalized());
-            }
-            if (!repelling) return;
-            // Lengths kept, as Tangle keeps them, after a push out: each point back at its
-            // segment's length from the one before, along where the pull or push put it (follow the
-            // leader). A segment nothing moved stays as it came, bit for bit (the strands beyond the
-            // repel radius). (Every strand's: a RestoreLength after the Clump.)
-            for (std::size_t i = 1; i < n; ++i) {
-                const Vec3f d = pts[i] - pts[i - 1];
-                const float len = d.length();
-                const float l = (src[i] - src[i - 1]).length();
-                if (len == l) continue;
-                pts[i] = len > 1e-12f ? pts[i - 1] + d * (l / len) : pts[i - 1] + (src[i] - src[i - 1]);
-            }
-        };
-        if (last) {
-            // Each from its incoming points and no clump ID, as in a full run: on the CPU engine (its
-            // ClumpCS on a view of them, their centers the ones chosen here) or below.
-            bool viewed = false;
-            if (!tubeIds && gpu::cpuEngineOn()) {
-                auto theirs = std::make_shared<std::vector<std::uint32_t>>(dirty.size());
-                for (std::size_t k = 0; k < dirty.size(); ++k) (*theirs)[k] = (*assigned)[dirty[k]];
-                std::vector<StrandId> ids(used.size());
-                for (std::size_t c = 0; c < used.size(); ++c) ids[c] = used[c]->id;
-                gpu::StageInputs centers;
-                centers.clump = gpu::clumpInputs(theirs, curves, centerNormals, ids, seed);
-                viewed = gpu::runStageOnStrands(gpu::StageKind::Clump, params(), in, dirty, scalp, *out, std::move(centers));
-                if (viewed && clumpIds) {
-                    for (const std::uint32_t s : dirty) (*clumpIds)[s] = (*assigned)[s] != kNoCenter ? numbers[(*assigned)[s]] : -1.0f;
-                }
-            }
-            if (!viewed) {
-                forEachListed(dirty, [&](std::size_t s) {
-                    copyStrandPoints(*out, *in, s);
-                    if (clumpIds) (*clumpIds)[s] = -1.0f;
-                    clumpStrand(s);
-                });
+        } else {
+            auto theirs = std::make_shared<std::vector<std::uint32_t>>(dirty.size());
+            for (std::size_t k = 0; k < dirty.size(); ++k) (*theirs)[k] = (*assigned)[dirty[k]];
+            taken.clump = gpu::clumpInputs(theirs, curves, centerNormals, ids, seed);
+            gpu::runStageOnStrands(gpu::StageKind::Clump, params(), in, dirty, scalp, *out, std::move(taken));
+            if (clumpIds) {
+                for (const std::uint32_t s : dirty) (*clumpIds)[s] = (*assigned)[s] != kNoCenter ? numbers[(*assigned)[s]] : -1.0f;
             }
             *changed = StrandChanges::listed(std::move(dirty));
-        } else {
-            parallelFor(0, out->strandCount(), [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                clumpStrand(s);
-            });
         }
         keep();
         *result = StrandsPtr(out);
@@ -1813,10 +1616,6 @@ public:
     }
 };
 
-// The spacing of a kinky Noise's knots in the noise's space: apart by more than a lattice cell, so
-// neighbouring kinks are drawn about independently.
-constexpr float kKinkSpacing = 1.618034f;
-
 // Smooth random displacement. "world" space is coherent between neighbors
 // (waves through the groom); "strand" space is independent per strand. On a
 // fraction of the strands, with a high frequency, it is frizz. In `kinky` mode
@@ -1871,12 +1670,8 @@ private:
         amplitudeField.validate(*in);
         const ScalarField fractionField(params(), "fraction", scalpOf(ctx));
         fractionField.validate(*in);
-        const bool perPoint = amplitudeField.perPoint();
         const float frequency = static_cast<float>(params().getDouble("frequency"));
-        const int octaves = static_cast<int>(params().getInt("octaves"));
-        const Ramp profile = params().getRamp("profile");
         const bool strandSpace = params().getString("space") != "world";
-        const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const bool kinky = params().getString("mode") == "kinky";
 
         const StrandChanges* changes = nullptr;
@@ -1891,104 +1686,28 @@ private:
                 return true;
             }
         }
-        auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->overwritePositions();  // every point written: each strand copied in before it is shaped
-        }
-        const RampAlong along(profile, *out);
-        // Smooth noise is read at the strand's points: the octaves finer than they draw fade out
-        // (octaveWeights), by the point spacing in the noise's space: in strand space a strand
-        // spans `frequency` cells whatever its length, in world space a unit of length does.
-        // (Kinky noise draws its knots `frequency` apart itself: nothing to fade.)
-        auto spacingOf = [&](const Vec3f* pts, std::size_t n) {
-            if (kinky || n < 2) return 0.0f;
-            const auto segments = static_cast<float>(n - 1);
-            return strandSpace ? frequency / segments : arcLength(pts, n) * frequency / segments;
-        };
+        // Smooth noise is read at the strand's points: the octaves finer than they draw fade out (in
+        // strand space a strand spans `frequency` cells whatever its length). (Kinky noise draws
+        // its knots `frequency` apart itself: nothing to fade.)
         if (!kinky && strandSpace && !last) {
             const std::size_t uniform = in->uniformPointCount();
             float base = 1.0f;
-            if (uniform >= 2) octaveWeights(spacingOf(nullptr, uniform), 1, &base);
+            if (uniform >= 2) octaveWeights(frequency / static_cast<float>(uniform - 1), 1, &base);
             if (base == 0.0f) {
                 ctx.note("frequency " + std::to_string(frequency) + " is finer than the strands' " + std::to_string(uniform - 1) +
                          " segments draw: the noise fades out; raise Resample's segments or lower the frequency");
             }
         }
-        if (!last && gpu::cpuEngineOn() && gpu::runStageInto(gpu::StageKind::Noise, params(), in, scalpOf(ctx), *out)) {
-            *result = StrandsPtr(out);  // look.slang's NoiseCS, the GPU preview's own (look_cpu.h)
+        // look.slang's NoiseCS, the GPU preview's own (look_cpu.h): in full, or the strands the input
+        // changed in, into the last result's copy.
+        if (!last) {
+            *result = gpu::runStage(gpu::StageKind::Noise, params(), in, scalpOf(ctx));
             return true;
         }
-        auto shape = [&](std::size_t s) {  // strand s's points: the incoming ones, shaped
-            const float fraction = fractionField.at(*out, s);
-            if (fraction < 1.0f && unitFloat(hashCombine(out->ids()[s], seed ^ 0xF822)) >= fraction) return;
-            const std::size_t n = out->strandPointCount(s);
-            Vec3f* pts = out->strandPoints(s);
-            // Strand space: a random far-apart offset per strand, walked along the length.
-            Rng rng(hashCombine(out->ids()[s], seed));
-            const Vec3f strandOffset = randomOffsetZYX(rng);
-            const float amplitude = perPoint ? 0.0f : amplitudeField.at(*out, s);
-            float weights[kMaxNoiseOctaves];
-            octaveWeights(spacingOf(pts, n), octaves, weights);
-            VectorNoise noise(seed, octaves, weights);
-            if (kinky) {
-                // Knot k's offset: the noise at the strand's offset (strand space) or its root
-                // (world), k spacings along z; each point straight between the knots around it,
-                // by its share of the length (strand space) or its arc length (world), both read
-                // on the points as they came.
-                const Vec3f base = strandSpace ? strandOffset : pts[0] * frequency;
-                auto knot = [&](float k) {
-                    const Vec3f q = base + Vec3f(0.0f, 0.0f, k * kKinkSpacing);
-                    return strandSpace ? noise(q) : vectorNoise(q, seed, octaves);
-                };
-                bool holding = false;  // a knot pair below
-                float held = 0.0f;     // the knot it starts at
-                Vec3f below, above;
-                float arc = 0.0f;
-                Vec3f previous = pts[0];
-                for (std::size_t i = 1; i < n; ++i) {
-                    const Vec3f original = pts[i];
-                    arc += (original - previous).length();
-                    previous = original;
-                    const float a = (perPoint ? amplitudeField.atPoint(*in, s, i) : amplitude) * along(i, n);
-                    if (a == 0.0f) continue;
-                    const float u = (strandSpace ? paramAt(i, n) : arc) * frequency;
-                    const float k = std::floor(u);
-                    if (!holding || k != held) {
-                        below = holding && k == held + 1.0f ? above : knot(k);
-                        above = knot(k + 1.0f);
-                        held = k;
-                        holding = true;
-                    }
-                    pts[i] = original + (below + (above - below) * (u - k)) * a;
-                }
-                return;
-            }
-            for (std::size_t i = 1; i < n; ++i) {
-                const float t = paramAt(i, n);
-                const float a = (perPoint ? amplitudeField.atPoint(*in, s, i) : amplitude) * along(i, n);
-                if (a == 0.0f) continue;
-                // Each point is sampled at its own position before it moves.
-                const Vec3f q = strandSpace ? strandOffset + Vec3f(0, 0, t * frequency) : pts[i] * frequency;
-                // World space: neighbours rarely share a lattice cell, so the cache would only cost.
-                pts[i] += (strandSpace ? noise(q) : vectorNoise(q, seed, octaves, weights)) * a;
-            }
-        };
-        if (last) {
-            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Noise, params(), in, changes->strands, scalpOf(ctx), *out))) {
-                forEachListed(changes->strands, [&](std::size_t s) {
-                    copyStrandPoints(*out, *in, s);
-                    shape(s);
-                });
-            }
-            *changed = *changes;
-        } else {
-            parallelFor(0, out->strandCount(), [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                shape(s);
-            });
-        }
+        auto out = std::make_shared<StrandSet>(*in);
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        gpu::runStageOnStrands(gpu::StageKind::Noise, params(), in, changes->strands, scalpOf(ctx), *out);
+        *changed = *changes;
         *result = StrandsPtr(out);
         return true;
     }
@@ -2698,16 +2417,15 @@ private:
         if (!mix.complete) return false;
         // The points on the CPU engine (look.slang BlendCS, look b handed in); the widths and the
         // look mixed below by the same weights.
-        bool pointsMixed = false;
-        if (gpu::cpuEngineOn()) {
-            gpu::StageInputs with;
-            with.blendWith = b;
-            pointsMixed = last ? gpu::runStageOnStrands(gpu::StageKind::Blend, params(), a, remade, scalpOf(ctx), *out, std::move(with))
-                               : gpu::runStageInto(gpu::StageKind::Blend, params(), a, scalpOf(ctx), *out, std::move(with));
+        gpu::StageInputs with;
+        with.blendWith = b;
+        if (last) {
+            gpu::runStageOnStrands(gpu::StageKind::Blend, params(), a, remade, scalpOf(ctx), *out, std::move(with));
+        } else {
+            gpu::runStageInto(gpu::StageKind::Blend, params(), a, scalpOf(ctx), *out, std::move(with));
         }
         auto blendStrand = [&](std::size_t s) {
             if (last) {  // made again from a's strand, as a full evaluation's copy of a starts it
-                if (!pointsMixed) copyStrandPoints(*out, *a, s);
                 if (outWidths.size() == a->widths().size()) {
                     const auto begin = static_cast<std::ptrdiff_t>(a->strandBegin(s));
                     const auto end = begin + static_cast<std::ptrdiff_t>(a->strandPointCount(s));
@@ -2725,12 +2443,9 @@ private:
             };
             float sum = 0.0f;
             if (same) {
-                Vec3f* pts = out->strandPoints(s);
-                const Vec3f* to = b->strandPoints(s);
                 for (std::size_t k = 0; k < n; ++k) {
                     const float f = weightAt(k);
                     sum += f;
-                    if (!pointsMixed) pts[k] = pts[k] + (to[k] - pts[k]) * f;
                     if (widths) {
                         float& width = outWidths[begin + k];
                         width += (b->widths()[begin + k] - width) * f;

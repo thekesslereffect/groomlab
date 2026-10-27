@@ -66,8 +66,6 @@ private:
             *result = in;
             return true;
         }
-        const bool keepInside = params().getString("keep") == "inside";
-        const auto offset = static_cast<float>(params().getDouble("offset"));
 
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
@@ -81,72 +79,18 @@ private:
                 return true;
             }
         }
-        if (!last && gpu::cpuEngineOn()) {  // look.slang's MeshCutCS, the GPU preview's own (look_cpu.h)
-            gpu::StageInputs tree;
-            tree.meshCut = gpu::meshCutInputs(mesh);
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::MeshCut, params(), in, nullptr, std::move(tree))) {
-                *result = made;
-                return true;
-            }
+        // look.slang's MeshCutCS, the GPU preview's own (look_cpu.h), on the mesh's ray tree: in full,
+        // or the strands the input changed in.
+        gpu::StageInputs tree;
+        tree.meshCut = gpu::meshCutInputs(mesh);
+        if (!last) {
+            *result = gpu::runStage(gpu::StageKind::MeshCut, params(), in, nullptr, std::move(tree));
+            return true;
         }
         auto out = std::make_shared<StrandSet>(*in);
-        if (last) {
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        } else {
-            out->mutablePositions();
-        }
-        auto cut = [&](std::size_t s) {
-            const std::size_t n = out->strandPointCount(s);
-            if (n < 2) return;
-            Vec3f* pts = out->strandPoints(s);
-            // Which side the root is on: on the surface (or within a hair of it) counts as outside.
-            const SurfacePoint near = mesh->closestPoint(pts[0]);
-            // A hair: a ten-thousandth of the root's segment, or the rounding of where it is (both
-            // scale with the scene).
-            const float hair = std::max(1e-4f * (pts[1] - pts[0]).length(),
-                                        4e-6f * std::max({std::abs(pts[0].x), std::abs(pts[0].y), std::abs(pts[0].z)}));
-            const bool rootInside = near.root.face >= 0 && (pts[0] - near.position).dot(near.normal) < -hair;
-            if (rootInside != keepInside) {  // rooted where the mesh cuts away: nothing kept
-                for (std::size_t i = 1; i < n; ++i) pts[i] = pts[0];
-                return;
-            }
-            // The first crossing, root to tip: its length along the strand.
-            float along = 0.0f, crossing = -1.0f;
-            for (std::size_t i = 1; i < n && crossing < 0.0f; ++i) {
-                const Vec3f segment = pts[i] - pts[i - 1];
-                const float length = segment.length();
-                if (!(length > 0.0f)) continue;
-                SurfacePoint hit;
-                float t = 0.0f;
-                // A root on the surface itself (the mesh is the scalp) starts on it: not a crossing.
-                const float skip = i == 1 ? 1e-4f : 0.0f;
-                const Vec3f from = pts[i - 1] + segment * skip;
-                if (mesh->intersectRay(from, segment * (1.0f - skip), &hit, &t) && t <= 1.0f) {
-                    crossing = along + length * (skip + t * (1.0f - skip));
-                }
-                along += length;
-            }
-            if (crossing < 0.0f) return;  // never crosses: whole
-            const float total = arcLength(pts, n);
-            if (!(total > 0.0f)) return;
-            const float kept = std::max(crossing - offset, 0.0f);
-            thread_local std::vector<Vec3f> source;
-            source.assign(pts, pts + n);
-            resampleByArcLengthInto(source.data(), n, pts, n, std::min(kept / total, 1.0f));
-        };
-        if (last) {
-            gpu::StageInputs tree;  // (on the CPU engine: its ray tree)
-            if (gpu::cpuEngineOn()) tree.meshCut = gpu::meshCutInputs(mesh);
-            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::MeshCut, params(), in, changes->strands, nullptr, *out, std::move(tree)))) {
-                forEachListed(changes->strands, [&](std::size_t s) {
-                    copyStrandPoints(*out, *in, s);
-                    cut(s);
-                });
-            }
-            *changed = *changes;
-        } else {
-            parallelFor(0, out->strandCount(), cut);
-        }
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        gpu::runStageOnStrands(gpu::StageKind::MeshCut, params(), in, changes->strands, nullptr, *out, std::move(tree));
+        *changed = *changes;
         *result = StrandsPtr(out);
         return true;
     }

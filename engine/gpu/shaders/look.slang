@@ -1072,6 +1072,7 @@ uint2 interpRecord(InterpStrand st, uint lane) {
 }
 uint interpGuideIndex(uint s, InterpStrand st, uint lane) { return interpRecord(st, lane).x; }
 float interpGuideWeight(uint s, InterpStrand st, uint lane) { return float(interpRecord(st, lane).y + 1u) * (1.0f / 65536.0f); }
+[ForceInline]
 InterpGuide interpGuide(uint s, InterpStrand st, uint lane) {
     const uint recordsAt = st.recordsAt, found = st.found, twisted = st.twisted;
     InterpGuide out;
@@ -1253,13 +1254,13 @@ void interpolateStrandAlone(uint s) {
         return;
     }
     const uint samples = gFlag.x;
-    InterpGuide guide[BIND_SLOTS];
-    for (uint i = 0; i < min(found, BIND_SLOTS); ++i) guide[i] = interpGuide(s, st, i);
-    const float3 root = loadPoint(begin);
     if (samples > CPU_MAX_SAMPLES || found > BIND_SLOTS) {
-        interpolateStreamed(s, st, tb, guide, found, root, samples, begin, n);
+        interpolateStreamedOf(s);
         return;
     }
+    InterpGuide guide[BIND_SLOTS];
+    for (uint i = 0; i < found; ++i) guide[i] = interpGuide(s, st, i);
+    const float3 root = loadPoint(begin);
     float4 blendAt[CPU_MAX_SAMPLES];
     float arcAt[CPU_MAX_SAMPLES];
     // (Four samples side by side, as the C++ rows take them, every guide added onto their sums in
@@ -1312,6 +1313,7 @@ void interpolateStrandAlone(uint s) {
 
 // Point i of the strand from its segment of the blended path, from `a` to `to` (.w its length),
 // `along0` along it: part of the way from where it came by the influence, leaning to a tube's edge.
+[ForceInline]
 float3 interpolatedPoint(InterpStrand st, TubeOf tb, float3 root, uint begin, uint i, uint n, float3 a, float4 to, float along0) {
     const float t = to.w > 0.0f ? clamp(divExact(along0, to.w), 0.0f, 1.0f) : 0.0f;
     PRECISE float3 along = to.xyz - a;
@@ -1360,6 +1362,16 @@ float3 streamedSample(uint s, InterpStrand st, inout InterpGuide guide[BIND_SLOT
     PRECISE float3 scaledAway = away * scale;
     PRECISE float3 moved = first + scaledAway;
     return moved;
+}
+// interpolateStrandAlone's blend of strand s streamed: its record, tube and guides read again here,
+// so the arrays' version takes no address of its own (which costs it its speed).
+void interpolateStreamedOf(uint s) {
+    InterpStrand st = interpStrand(s);
+    const TubeOf tb = tubeOf(s);
+    if (st.bound && gAux.z != 0u && tb.tube >= 0) st.influence = 1.0f;
+    InterpGuide guide[BIND_SLOTS];
+    for (uint i = 0; i < min(st.found, BIND_SLOTS); ++i) guide[i] = interpGuide(s, st, i);
+    interpolateStreamed(s, st, tb, guide, st.found, loadPoint(st.begin), gFlag.x, st.begin, st.n);
 }
 void interpolateStreamed(uint s, InterpStrand st, TubeOf tb, inout InterpGuide guide[BIND_SLOTS], uint found, float3 root, uint samples,
                          uint begin, uint n) {
@@ -1684,10 +1696,32 @@ bool restLocate(float3 p, float searchRadius, inout Probe probe, inout RestCurso
 
 // operator_state.h InterpolateClearance's mesh asked (distance_field.h meshPushOf) through the host
 // at gClearHost (Interpolate's octave seeds' last words: none of its own).
-#define gClearHost gOctaveSeeds[3].xy
+#define gClearHost gOctaveSeeds[3].xy  // (.z: every push through the host, clearHostWalk)
 bool hostClearanceMeshPush(uint2 host, float3 p, float offset, float maxDepth, float searchRadius, inout float heightLow, inout float distanceLow,
                            inout float3 delta) {
     __target_switch { case cpp: __intrinsic_asm "groomlab_clearance_mesh_push($0, $1, $2, $3, $4, $5, $6, $7)"; }
+}
+bool hostClearanceSurfacePush(uint2 host, float3 p, float offset, float maxDepth, float searchRadius, inout float heightLow,
+                              inout float distanceLow, inout uint vertex, inout float3 anchor, inout float clear, inout float3 delta) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_clearance_surface_push($0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)"; }
+}
+// A scalp whose field the walk cannot read as tables (InterpolateClearance::host; the CPU engine's):
+// every push asked of it through the host, its cursor the walk's.
+bool clearHostWalk() {
+    __target_switch {
+    case cpp: return gOctaveSeeds[3].z != 0u;
+    default: return false;
+    }
+}
+uint walkHostPush(float3 p, float offset, float maxDepth, float searchRadius, inout Probe probe, inout float3 delta, inout RestCursor cursor) {
+    __target_switch {
+    case cpp:
+        return hostClearanceSurfacePush(gClearHost, p, offset, maxDepth, searchRadius, probe.heightLow, probe.distanceLow, cursor.vertex,
+                                        cursor.anchor, cursor.clear, delta)
+                   ? PUSH_MOVED
+                   : PUSH_KEPT;
+    default: return PUSH_KEPT;
+    }
 }
 uint walkMeshPush(float3 p, float offset, float maxDepth, float searchRadius, inout Probe probe, inout float3 delta) {
     __target_switch {
@@ -1704,6 +1738,7 @@ uint walkMeshPush(float3 p, float offset, float maxDepth, float searchRadius, in
 uint walkPush(FieldTables t, bool deformed, float3 p, float offset, float maxDepth, float searchRadius, inout Probe probe, out float3 delta,
               inout RestCursor cursor) {
     delta = float3(0.0f, 0.0f, 0.0f);
+    if (clearHostWalk()) return walkHostPush(p, offset, maxDepth, searchRadius, probe, delta, cursor);
     float3 q = p;
     uint motion = 0;
     bool turned = false;
@@ -2551,7 +2586,52 @@ void NoisePointsCS(uint3 id : SV_DispatchThreadID) {
     storePoint(gOut, p, a.i > 0 ? noiseAt(a.s, a.i, a.n, p, v) : v);
 }
 
-// ---- Curl (curl_op.cpp CurlOp::run: the curl about each strand's axis) ------------------------------
+// ---- Curl: the curl about each strand's axis --------------------------------------------------------
+//
+// The curl is a curve of its own, not an offset of each point: around an axis, a smooth curve of
+// kAxisSamples samples (the strand's own points at their shares of the strand, or with coherence
+// clump the mean of the clump's core strands there, preview_core.h), an offset of radius r (the
+// radius param, varied, times the profile) turning at the frequency in the axis's
+// rotation-minimizing frames, by the axis's arc length, eased in from 0 at the root. Each point of
+// the strand (its own, and any Curl adds) takes the offset at its share of the strand, so the
+// same strand at 40 segments or at 256 makes one curl, and more points only sample it more
+// finely. Where the points coming in are too few a turn for the tolerance (a coil over a strand of
+// 40 segments), Curl first cuts each of the strand's segments into as many as its longest needs at
+// the most the curl turns there (its frequency, randomness, frequencyProfile and spacingRandom at
+// their most; a zigzag enough to keep its kinks' peaks), up to maxSegments, on the strand taken as a smooth curve
+// (each point keeping its share of the strand), then curls those points as its own: the curl
+// itself is this stage's (curl_op.cpp adds the points first).
+//
+// A polyline as a smooth curve: each segment a cubic Hermite curve between its points, the slope
+// at a point the derivative there of the parabola through it and its neighbours (spaced by their
+// distances), so a polyline sampling a smooth curve at any spacing gives that curve back to O(h).
+// The axis's arc length is that curve's (two-point Gauss per segment), its frames carried from the
+// root along its samples by double reflection (Wang et al. 2008) with the curve's own tangents,
+// seeded by the scalp's normal across the tangent at the root; between samples, by one double
+// reflection from the sample before.
+//
+// The curl turns at a local frequency, the frequency times frequencyProfile (by the share of the
+// strand) times a smooth noise of the strand's (spacingRandom): its angle is that integrated
+// along the axis's arc (curl_phase.h), through the axis's "profiled arc" (the arc length weighted
+// by frequencyProfile: two-point Gauss on each piece of a segment between the ramp's keys, as the
+// arc length itself), and the noise's integral in closed form. With the defaults (frequencyProfile
+// 1 everywhere, spacingRandom 0) the profiled arc is the arc and the angle 2 pi f s + phase.
+//
+// Weighted curls (weight): each part of a curl carries the hair hanging below it, so its turns
+// spread apart. The load at a point is T = hang * turnsBelow: hang = max(0, the axis's tangent 
+// weightDirection), smoothed a little (two passes of 1-2-1 over the axis's samples), and
+// turnsBelow the curl's turns from there to the tip (the integral of the local frequency as
+// above: counted in turns, so scale-invariant, and long ringlets carry more than short curls).
+// The local pitch stretches to p (1 + weight T / kWeightTurns): the local frequency is divided by
+// that stretch, which joins the profiled arc's weight (the stretch at the axis's samples, linear
+// between them), so the angle is still that one integral. The radius keeps a turn's wire length
+// as a stretched spring does: (2 pi r) + p is kept, so r' = r u with u = 1 - (q - 1) / (2 pi f
+// r) for a stretch q at local frequency f, r the curl's own radius (the radius param, varied, before
+// the profile and the ease: those then scale r'); an overstretched curl (u 0 or less) goes straight.
+// r' = r sqrt(u) down to u = 1/4, then eased to 0 at u = 0 by the cubic matching it there (value
+// and slope), so the strand bends smoothly where its curl opens out (sqrt's slope is endless at
+// 0). Weight 0 leaves all of it out (the curl as before).
+//
 //
 // gValue: radius (field 0, per point allowed), frequency, randomness, phase (turns); gFlag.x: the
 // shape (0 helix, 1 wave, 2 zigzag, 3 coil: a helix whose radius is coilWidths (gValue.x) strand
@@ -3277,6 +3357,7 @@ Lanes3 pickLanes(bool4 m, Lanes3 a, Lanes3 b) {
 }
 // addTurned for four samples of a guide side by side (j0 to j0 + 3, a multiple of 4; the last
 // sample standing in past the end), a lane each with addTurned's arithmetic: the CPU's InterpolateCS.
+[ForceInline]
 Lanes3 addTurnedLanes(Lanes3 sum, uint g, uint j0, uint samples, uint kind, float4 a, float4 b, float c2z, float w) {
     // (The CPU engine's offsets by fours: x, y and z rows of four samples, look_engine.cpp.)
     const uint at = (gAux.w + (g * ((samples + 3) / 4) + j0 / 4) * 12) * 4;
@@ -3875,7 +3956,7 @@ void PointsTextureCS(uint3 id : SV_DispatchThreadID) {
 // above carried down, Turn: a unit quaternion, xyz the axis' part, w) and turns further toward the
 // direction by a share growing with the load past it and its softness, keeping its length.
 
-#define GRAVITY_BEND 8.0f  // deform_ops.cpp kGravityBend
+#define GRAVITY_BEND 8.0f  // how fast strands bend where they bend most: over a whole strand within about 2% of gravity's (exp(-8 x the mean load, 0.5))
 
 float4 turnAboutAxis(float3 unitAxis, float angle) { return float4(unitAxis * sin(0.5f * angle), cos(0.5f * angle)); }
 float3 turnApplied(float4 q, float3 p) {  // p + 2w (v x p) + 2 v x (v x p)

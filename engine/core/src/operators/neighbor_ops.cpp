@@ -14,6 +14,7 @@
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "groomlab/curve.h"
@@ -109,8 +110,6 @@ public:
         }
         if (amount.isConstant() && amount.maximum() <= 0.0f) return in;
         const std::size_t requested = static_cast<std::size_t>(params().getInt("neighbors"));
-        const Ramp profile = params().getRamp("profile");
-        const bool preserveLength = params().getBool("preserveLength");
         const PartsPtr parts = params().getBool("respectParts") ? valueAs<PartsPtr>(ctx.external("parts")) : nullptr;
 
         // Roots to search (rest pose where there is one), root normals (zero when unrooted), sides of parts.
@@ -200,65 +199,12 @@ public:
         }
         state->normals = normals;
 
-        if (gpu::cpuEngineOn()) {  // look.slang's BlendNeighborsCS, the GPU preview's own (look_cpu.h)
-            gpu::StageInputs neighbours;
-            neighbours.neighbors = state;
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::BlendNeighbors, params(), in, scalp, std::move(neighbours))) {
-                remember(made, std::move(state));
-                return made;
-            }
-        }
-        auto out = std::make_shared<StrandSet>(*in);
-        const RampAlong along(profile, *in);
-        parallelFor(0, count, [&](std::size_t s) {
-            const std::size_t n = in->strandPointCount(s);
-            if (n < 2) return;
-            const float a = std::clamp(amount.at(*in, s), 0.0f, 1.0f);
-            if (a <= 0.0f) return;
-            const std::size_t kept = keptOf[s];
-            if (kept == 0) return;
-
-            const Vec3f* own = in->strandPoints(s);
-            const Vec3f root = own[0];
-            thread_local std::vector<Vec3f> mean, resampled;
-            mean.assign(n, Vec3f{});
-            const bool haveNormal = normals[s].length() > 0.0f;
-            for (std::size_t i = 0; i < kept; ++i) {
-                const std::size_t g = nearOf[s][i];
-                const float w = shareOf[s][i];
-                const Vec3f* pts = in->strandPoints(g);
-                if (in->strandPointCount(g) != n) {
-                    resampled.resize(n);
-                    resampleByArcLengthInto(pts, in->strandPointCount(g), resampled.data(), n);
-                    pts = resampled.data();
-                }
-                const Vec3f groot = pts[0];
-                if (haveNormal && normals[g].length() > 0.0f) {
-                    const Rotation turn(normals[g], normals[s]);
-                    for (std::size_t j = 1; j < n; ++j) mean[j] += turn(pts[j] - groot) * w;
-                } else {
-                    for (std::size_t j = 1; j < n; ++j) mean[j] += (pts[j] - groot) * w;
-                }
-            }
-
-            Vec3f* dst = out->strandPoints(s);
-            for (std::size_t j = 1; j < n; ++j) {
-                const Vec3f offset = own[j] - root;
-                const float t = a * std::clamp(along(j, n), 0.0f, 1.0f);
-                dst[j] = root + offset + (mean[j] - offset) * t;
-            }
-            if (preserveLength) {
-                const float target = arcLength(own, n);
-                const float blended = arcLength(dst, n);
-                if (target > 1e-8f && blended > 1e-6f * target) {
-                    const float scale = target / blended;
-                    for (std::size_t j = 1; j < n; ++j) dst[j] = root + (dst[j] - root) * scale;
-                }
-            }
-        });
-        const StrandsPtr result(out);
-        remember(result, std::move(state));
-        return result;
+        // look.slang's BlendNeighborsCS, the GPU preview's own (look_cpu.h), on the neighbours found here.
+        gpu::StageInputs neighbours;
+        neighbours.neighbors = state;
+        const StrandsPtr made = gpu::runStage(gpu::StageKind::BlendNeighbors, params(), in, scalp, std::move(neighbours));
+        remember(made, std::move(state));
+        return made;
     }
 
 private:
@@ -352,128 +298,42 @@ private:
             }
         }
 
-        if (!last && gpu::cpuEngineOn()) {
-            // look.slang's RestoreLengthCS, the GPU preview's own (look_cpu.h), on its reference.
-            gpu::StageInputs ref;
-            if (!even) {
-                const StrandsPtr strandsRef = inputs.size() > 1 ? valueAs<StrandsPtr>(inputs[1]) : nullptr;
-                const GuidesPtr guidesRef = inputs.size() > 1 ? valueAs<GuidesPtr>(inputs[1]) : nullptr;
-                bool found = false;
-                ref.restore = gpu::restoreInputs(*in, strandsRef.get(), guidesRef.get(), nullptr, &found);
-                if (!found) return handOn();  // nothing to restore from
-            }
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::RestoreLength, params(), in, nullptr, std::move(ref))) {
-                *result = made;
-                return true;
-            }
-        }
-        // The reference curves by ID: strands, or guides fed to the Curves input.
-        struct Ref {
-            const Vec3f* points;
-            std::size_t count;
-        };
-        std::unordered_map<StrandId, Ref> reference;
+        // look.slang's RestoreLengthCS, the GPU preview's own (look_cpu.h), on its reference (strands,
+        // or guides fed to the Curves input; by ID): in full, or the strands to restore again.
         const StrandsPtr refStrands = inputs.size() > 1 ? valueAs<StrandsPtr>(inputs[1]) : nullptr;
         const GuidesPtr refGuides = inputs.size() > 1 ? valueAs<GuidesPtr>(inputs[1]) : nullptr;
-        if (refStrands) {
-            reference.reserve(refStrands->strandCount());
-            for (std::size_t s = 0; s < refStrands->strandCount(); ++s) {
-                if (refStrands->strandPointCount(s) >= 2) {
-                    reference[refStrands->ids()[s]] = {refStrands->strandPoints(s), refStrands->strandPointCount(s)};
-                }
+        gpu::StageInputs ref;
+        if (!last) {
+            if (!even) {
+                bool found = false;
+                ref.restore = gpu::restoreInputs(*in, refStrands.get(), refGuides.get(), nullptr, &found);
+                if (!found) return handOn();  // nothing to restore from
             }
-        } else if (refGuides) {
-            reference.reserve(refGuides->guides().size());
-            for (const Guide& g : refGuides->guides()) {
-                if (g.points.size() >= 2) reference[g.id] = {g.points.data(), g.points.size()};
-            }
+            *result = gpu::runStage(gpu::StageKind::RestoreLength, params(), in, nullptr, std::move(ref));
+            return true;
         }
-        if (!even && reference.empty()) return handOn();  // nothing to restore from
-        const bool scale = mode == "scale";
-
         // Incrementally: the strands the input changed in, and those whose reference strand
         // changed. A reference strand stands for the input's strand of its index when both hold
         // the same IDs in the same order and every reference strand is one (two points or more,
         // its ID its own).
         std::vector<std::uint32_t> remade;
-        if (last) {
-            const StrandChanges* refChanges = even ? nullptr : someStrandsChanged(*incremental, 1);
-            if (refChanges && !refChanges->none()) {
-                if (!refStrands || reference.size() != refStrands->strandCount() || refStrands->ids() != in->ids()) {
-                    return false;
-                }
-                std::set_union(changes->strands.begin(), changes->strands.end(), refChanges->strands.begin(),
-                               refChanges->strands.end(), std::back_inserter(remade));
-            } else {
-                remade = changes->strands;
+        const StrandChanges* refChanges = even ? nullptr : someStrandsChanged(*incremental, 1);
+        if (refChanges && !refChanges->none()) {
+            if (!refStrands || refStrands->ids() != in->ids()) return false;
+            std::unordered_set<StrandId> ids;
+            for (std::size_t s = 0; s < refStrands->strandCount(); ++s) {
+                if (refStrands->strandPointCount(s) < 2 || !ids.insert(refStrands->ids()[s]).second) return false;
             }
-        }
-
-        auto out = std::make_shared<StrandSet>(*in);
-        if (last) positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        auto restore = [&](std::size_t s) {
-            const std::size_t n = in->strandPointCount(s);
-            if (n < 2) return;
-            const Vec3f* src = in->strandPoints(s);
-            thread_local std::vector<Vec3f> restored, refSampled;
-            restored.assign(src, src + n);
-
-            if (even) {
-                refSampled.resize(n);
-                resampleByArcLengthInto(src, n, refSampled.data(), n);
-                std::copy(refSampled.begin(), refSampled.end(), restored.begin());
-            } else {
-                auto it = reference.find(in->ids()[s]);
-                if (it == reference.end()) return;
-                const Ref& ref = it->second;
-                if (scale) {
-                    const float own = arcLength(src, n);
-                    const float target = arcLength(ref.points, ref.count);
-                    if (own <= 1e-8f) return;
-                    const float factor = target / own;
-                    for (std::size_t i = 1; i < n; ++i) restored[i] = src[0] + (src[i] - src[0]) * factor;
-                } else {
-                    // The reference's segment lengths at this strand's point count.
-                    const Vec3f* refPts = ref.points;
-                    if (ref.count != n) {
-                        refSampled.resize(n);
-                        resampleByArcLengthInto(ref.points, ref.count, refSampled.data(), n);
-                        refPts = refSampled.data();
-                    }
-                    // Lengths from the root out, along the deformed directions.
-                    Vec3f previous = src[0];
-                    for (std::size_t i = 1; i < n; ++i) {
-                        const float length = (refPts[i] - refPts[i - 1]).length();
-                        Vec3f d = src[i] - previous;
-                        float l = d.length();
-                        if (l <= 1e-8f) {
-                            // A collapsed segment: carry on in the previous direction (or the reference's).
-                            d = i > 1 ? restored[i - 1] - restored[i - 2] : refPts[i] - refPts[i - 1];
-                            l = d.length();
-                        }
-                        const Vec3f moved = l > 1e-8f ? previous + d * (length / l) : previous;
-                        restored[i] = moved;
-                        previous = moved;
-                    }
-                }
-            }
-
-            std::copy(restored.begin() + 1, restored.end(), out->strandPoints(s) + 1);
-        };
-        if (last) {
-            gpu::StageInputs ref;  // (on the CPU engine: these strands' reference)
-            if (gpu::cpuEngineOn() && !even) ref.restore = gpu::restoreInputs(*in, refStrands.get(), refGuides.get(), nullptr, nullptr, &remade);
-            if (!(gpu::cpuEngineOn() && (even || ref.restore) &&
-                  gpu::runStageOnStrands(gpu::StageKind::RestoreLength, params(), in, remade, nullptr, *out, std::move(ref)))) {
-                forEachListed(remade, [&](std::size_t s) {
-                    copyStrandPoints(*out, *in, s);
-                    restore(s);
-                });
-            }
-            *changed = StrandChanges::listed(std::move(remade));
+            std::set_union(changes->strands.begin(), changes->strands.end(), refChanges->strands.begin(), refChanges->strands.end(),
+                           std::back_inserter(remade));
         } else {
-            parallelFor(0, out->strandCount(), restore);
+            remade = changes->strands;
         }
+        auto out = std::make_shared<StrandSet>(*in);
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        if (!even) ref.restore = gpu::restoreInputs(*in, refStrands.get(), refGuides.get(), nullptr, nullptr, &remade);
+        gpu::runStageOnStrands(gpu::StageKind::RestoreLength, params(), in, remade, nullptr, *out, std::move(ref));
+        *changed = StrandChanges::listed(std::move(remade));
         *result = StrandsPtr(out);
         return true;
     }
