@@ -58,7 +58,10 @@ What it took to compile: nothing beyond the existing guards. The SSE2 paths fall
 scalar code (Emscripten does not define `__SSE2__` without `-msse2`), `engine/gpu` leaves itself
 out off Windows, TBB is off (the serial backend, `parallel_serial.cpp`), and one cast in
 `node_library.cpp` (Emscripten's libc++ counts file times in `__int128`). C++ exceptions are
-WebAssembly exceptions (`-fwasm-exceptions`, top-level `CMakeLists.txt`, under `if(EMSCRIPTEN)`).
+WebAssembly exceptions (`-fwasm-exceptions`, top-level `CMakeLists.txt`, under `if(EMSCRIPTEN)`). Since the look stages run
+from `look.slang`'s generated C++ (0.33.0), Slang's C++ prelude needs one guard: it knows no
+WebAssembly target, so `look_kernels_cpu_support.h` names the platform Linux's for Emscripten and
+reads `<float.h>` first, keeping the prelude's `half` a struct (wasm32 has no `_Float16`).
 
 ## The JavaScript API
 
