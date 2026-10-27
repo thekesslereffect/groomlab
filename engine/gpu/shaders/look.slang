@@ -1667,7 +1667,8 @@ void clearanceWalk(bool staged, uint base, uint n, float target, FieldTables tab
         j = m;
     }
 }
-// The walks kept (gOut3: every strand's walked points as the last run left them) and gFlag2.y: this
+// The walks kept (gOut3: every strand's walked points as the last run left them; gFlag2.w 1: none
+// kept, an operator's own run) and gFlag2.y: this
 // run changed only the guides flagged beside their rows (gAux1, word 5 of a guide's 8), the base,
 // binding, field and params as they were (look_engine.cpp walkOnlyChanged). A strand bound to
 // none of those walks to the same points as before: they are taken from gOut3. A strand that
@@ -1729,6 +1730,7 @@ void clearanceAlone(uint s) {
     }
     const FieldTables tables = fieldTables();
     clearanceWalk(false, c.begin, c.n, c.target, tables, c.startVertex);
+    if (gFlag2.w != 0) return;  // (an operator's own run: nothing kept)
     for (uint i = 0; i < c.n; ++i) storePoint(gOut3, c.begin + i, loadOut(c.begin + i));
 }
 

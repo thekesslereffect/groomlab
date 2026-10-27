@@ -1623,6 +1623,11 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         std::uint32_t countWord = 0, countPer = 1;
     };
     std::vector<Step> steps;
+    // Room for the widths a Width makes: on the CPU, writing them into the run's target, that very
+    // memory (bindTargets), none of its own.
+    auto roomForWidths = [&] {
+        if (!(sharesBase() && targets.widths)) allocate(kWidths, pointCount_ * 4);
+    };
     std::vector<StageConstants> slots;
     std::size_t lastMover = kNoStage;
     for (std::size_t k = 0; k < stages.size(); ++k) {
@@ -2062,7 +2067,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                 steps.push_back(keep);
             }
             widthsMade = true;
-            allocate(kWidths, pointCount_ * 4);
+            roomForWidths();
             Binding b;
             b.in = input;
             b.out[0] = kWidths;
@@ -2096,7 +2101,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             b.out[0] = out;
             b.aux[0] = auxBuffer(k, 2);
             if (runsWidth(r.inputs[k].merged->params)) {
-                allocate(kWidths, pointCount_ * 4);
+                roomForWidths();
                 widthsMade = true;
                 b.aux[1] = auxBuffer(k, 1);
                 b.out[1] = kWidths;
@@ -2137,7 +2142,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                 steps.push_back(b);
             }
             if (branchWidths && !widthsMade) {
-                allocate(kWidths, pointCount_ * 4);
+                roomForWidths();
                 Step w{Kernel::Count, Binding{}, 0, true, -3};
                 w.copyFrom = kBaseWidths;
                 w.copyTo = kWidths;
@@ -2413,16 +2418,19 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             // Keeping clearance: the walk, on the points Interpolate wrote (in place), with its
             // constants.
             // Every strand's walked points kept (aux 4) for the next run, which walks only the
-            // strands bound to the guides it changed (flags beside the guides' rows, aux 1).
+            // strands bound to the guides it changed (flags beside the guides' rows, aux 1). (Not
+            // for an operator's own run, each walking afresh: flag2.w 1, no room.)
+            const bool keeps = !targets.baseAsOutput;
             Binding walk;
             walk.out[0] = to;
             walk.out[2] = auxBuffer(k, 4);
-            allocate(walk.out[2], bytes);
+            allocate(walk.out[2], keeps ? bytes : 4);
             walk.aux[0] = b.aux[0];
             walk.aux[1] = b.aux[1];
             walk.aux[2] = b.aux[2];
-            c.flag2[1] = held_[k].walkPartial ? 1u : 0u;
-            walkedStages.push_back(k);
+            c.flag2[1] = keeps && held_[k].walkPartial ? 1u : 0u;
+            c.flag2[3] = keeps ? 0u : 1u;
+            if (keeps) walkedStages.push_back(k);
             slots.push_back(c);
             steps.push_back({Kernel::Clearance, walk, strandGroups, false, kClearanceStamp});
         }

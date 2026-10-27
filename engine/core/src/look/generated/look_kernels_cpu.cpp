@@ -8622,10 +8622,15 @@ static void clearanceAlone_0(uint32_t s_15, KernelContext_0 * kernelContext_55)
 
     clearanceWalk_0(false, _S670.begin_2, _S670.n_2, _S670.target_0, &_S674, _S670.startVertex_0, kernelContext_55);
 
+
+
+    if((kernelContext_55->globalParams_0->Look_0->gFlag2_0.w) != 0U)
+    {
+
+        return;
+    }
+
     i_28 = 0U;
-
-
-
     for(;;)
     {
 
