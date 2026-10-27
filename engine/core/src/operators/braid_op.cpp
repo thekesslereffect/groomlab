@@ -24,7 +24,9 @@
 // with fewer points (strands interpolated from a few guide points, say) gets
 // points added along it (up to maxSegments), so the braid stays a round,
 // woven volume rather than a few flat zigzags. `display` paths shows each
-// braid's path and its sections' center curves in place of the hair.
+// braid's path and its sections' center curves in place of the hair; the
+// `paths` output hands the paths on as guides (those it picked, without a
+// braids input) for nodes downstream.
 //
 // With `feed`, strands rooted anywhere along a path (within `feedDistance` of
 // its first `feedUntil` share) join the braid where they are and run along it
@@ -131,6 +133,7 @@ struct BraidPath {
     float length = 0.0f;
     Vec3f root;
     StrandId id = 0;           // the guide's (a picked strand's) ID
+    StrandRoot guideRoot;      // and its root
     std::vector<float> turns;  // weave travelled at each point (tightness integrated); empty: the distance
     float repeats = 0.0f;      // weave repeats along the whole path
     std::vector<float> grown;  // feed growth: the width's factor at each point (empty: 1)
@@ -504,6 +507,9 @@ public:
     std::vector<PortSpec> inputs() const override {
         return {{"strands", PortType::Strands}, {"braids", PortType::Guides, true}};
     }
+    // The braided strands, and the paths they are braided along (the braids input's, or those it
+    // picked among the strands), evenly resampled, for nodes downstream.
+    std::vector<PortSpec> outputs() const override { return {output(), {"paths", PortType::Guides}}; }
     std::vector<ParamSpec> paramSpecs() const override {
         return {
             {"style", std::string("three"), "three, fishtail, rope or cornrow", "", {"three", "fishtail", "rope", "cornrow"}},
@@ -588,27 +594,44 @@ public:
     }
 
     Value evaluate(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
+        return evaluateOutputs(ctx, inputs).front();
+    }
+    std::vector<Value> evaluateOutputs(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
         Value out;
-        run(ctx, inputs, nullptr, &out, nullptr);
-        return out;
+        GuidesPtr paths;
+        run(ctx, inputs, nullptr, &out, nullptr, &paths);
+        return {out, paths};
     }
     // Without feed each strand is braided by its own root alone (the nearest path's root within
     // the region): while the paths stay, the strands that changed are braided again (each to as
-    // many points as before, or it evaluates in full) and the rest keep the last result's points.
-    bool evaluateIncremental(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs& incremental,
-                             Value* out, StrandChanges* changed) const override {
-        return run(ctx, inputs, &incremental, out, changed);
+    // many points as before, or it evaluates in full) and the rest keep the last result's points;
+    // the paths are the last ones.
+    bool evaluateOutputsIncremental(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs& incremental,
+                                    std::vector<Value>* outs, std::vector<StrandChanges>* changed) const override {
+        if (incremental.previousOutputs.size() != 2) return false;
+        IncrementalInputs strands;
+        strands.previous = incremental.previousOutputs[0];
+        strands.inputs = incremental.inputs;
+        Value out;
+        StrandChanges made;
+        if (!run(ctx, inputs, &strands, &out, &made, nullptr)) return false;
+        *outs = {out, incremental.previousOutputs[1]};
+        *changed = {std::move(made), StrandChanges::listed({})};
+        return true;
     }
 
 private:
+    // In full (`paths`: the paths' guides, null: not asked), or (with `incremental`) only the strands
+    // the input changed in; false when that cannot be done.
     bool run(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
-             StrandChanges* changed) const {
+             StrandChanges* changed, GuidesPtr* paths) const {
         const StrandsPtr in = valueAs<StrandsPtr>(inputs.at(0));
         if (!in) throw GraphError("Braid: strands input not connected");
         GuidesPtr braids = valueAs<GuidesPtr>(inputs.at(1));
         auto handOn = [&] {  // nothing to braid along: the graph passes the input's changes on
             if (incremental) return false;
             *result = in;
+            if (paths) *paths = GuidesPtr(std::make_shared<GuideSet>());
             return true;
         };
         const ScalpMesh* scalp = valueAs<MeshPtr>(ctx.external("scalp")).get();
@@ -669,6 +692,7 @@ private:
             if (!(p.length > 1e-6f)) continue;  // also NaN
             p.root = p.points.front();
             p.id = g.id;
+            p.guideRoot = g.root;
             const bool rooted = scalp && scalp->contains(g.root);
             // Out of the scalp: at the root, or where the path starts when it is not bound.
             Vec3f up = rooted ? scalp->normal(g.root)
@@ -695,6 +719,11 @@ private:
             br.paths.push_back(std::move(p));
         }
         if (br.paths.empty()) return handOn();
+        if (paths) {
+            auto made = std::make_shared<GuideSet>();
+            for (const BraidPath& p : br.paths) made->add(p.id, p.points).root = p.guideRoot;
+            *paths = GuidesPtr(made);
+        }
 
         // Incrementally: the same paths, no feed, no earlier Braid's ids (numbered on from their
         // highest), the hair shown.

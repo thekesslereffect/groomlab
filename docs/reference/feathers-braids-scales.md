@@ -30,6 +30,9 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.15, crossings=
 - **Seeing the weave:** `display` paths shows each braid's path and the center curve of each
   of its sections in place of the hair (a `braidSection` channel tells them apart: -1 the path),
   handy for tuning `crossings`, `width` and the feed; set it back to hair before rendering.
+- **Paths output:** the node's second output, `paths`, hands on the paths it braids along as
+  guides (the braids input's, evenly resampled, or those it picked for box braids), for nodes
+  downstream: a second Braid, a Twist's axes, cards.
 - **Feed** (`feed`, on for cornrows by default in `add_braid`): strands within `feedDistance`
   of anywhere along a path join it where they reach it (their own shape, e.g. guides combed
   toward the braid, or straight from the root) and run along it from there, as hair is picked

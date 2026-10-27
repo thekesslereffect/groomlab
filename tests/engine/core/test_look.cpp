@@ -2060,6 +2060,37 @@ TEST(Braid, FeedThickensTheBraidWithTheHairItPicksUp) {
     EXPECT_NEAR(spread(0.0, 0.22f, 0.42f), spread(0.0, 0.58f, 0.78f), 0.1f * spread(0.0, 0.58f, 0.78f));
 }
 
+TEST(Braid, ThePathsOutputHandsOnThePathsItBraidsAlong) {
+    // Its braids input's paths, evenly resampled, in their order with their IDs.
+    BraidScene scene("three");
+    scene.addPath({{0.2f, 0, 0.2f}, {0.2f, 1.0f, 0.2f}});
+    EvalContext ctx;
+    ctx.externals = &scene.lg.ext;
+    const GuidesPtr paths = valueAs<GuidesPtr>(scene.lg.g.evaluateOutput(scene.braid, 1, ctx));
+    ASSERT_TRUE(paths);
+    ASSERT_EQ(paths->guides().size(), 2u);
+    for (std::size_t b = 0; b < 2; ++b) {
+        const Guide& g = paths->guides()[b];
+        EXPECT_EQ(g.id, b + 1);
+        ASSERT_GE(g.points.size(), 64u);
+        const Vec3f axis = b == 0 ? Vec3f{0.5f, 0.0f, 0.5f} : Vec3f{0.2f, 0.0f, 0.2f};
+        for (const Vec3f& p : g.points) EXPECT_LT(std::hypot(p.x - axis.x, p.z - axis.z), 1e-5f) << b;
+        EXPECT_NEAR(g.points.back().y, 1.0f, 1e-5f);
+    }
+    // Without a braids input: the paths it picked among the strands, each a strand's (its ID).
+    LookGraph lg{3000.0, 16};
+    const NodeId braid = lg.add(op::kBraid, lg.scatter);
+    lg.g.node(braid).params().set("region", 0.3);
+    EvalContext own;
+    own.externals = &lg.ext;
+    const GuidesPtr picked = valueAs<GuidesPtr>(lg.g.evaluateOutput(braid, 1, own));
+    const StrandsPtr strands = lg.eval(lg.scatter);
+    ASSERT_TRUE(picked);
+    EXPECT_GE(picked->guides().size(), 4u);
+    const std::set<StrandId> ids(strands->ids().begin(), strands->ids().end());
+    for (const Guide& g : picked->guides()) EXPECT_TRUE(ids.count(g.id)) << g.id;
+}
+
 TEST(Braid, DisplayPathsShowsEachPathAndItsSections) {
     BraidScene scene("three");
     scene.addPath({{0.2f, 0, 0.2f}, {0.2f, 1.0f, 0.2f}});
