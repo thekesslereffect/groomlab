@@ -19,7 +19,6 @@
     {"name": "braid", "type": "Braid", "params": {"style": "three", "width": 1.2, "crossings": 0.45, "region": 2.6, "fuzz": 0.2}, "ui": {"x": 960, "y": 0}},
     {"name": "color", "type": "HairColor", "params": {"melanin": 0.92, "redness": 0.08, "melaninRandom": 0.05}, "ui": {"x": 1200, "y": 0}},
     {"name": "width", "type": "Width", "params": {"width": 0.008, "profile": [[0, 1], [1, 0.3]]}, "ui": {"x": 1440, "y": 0}},
-    {"name": "resample", "type": "Resample", "params": {"segments": 60}, "ui": {"x": 1680, "y": 0}},
     {"name": "output", "type": "Output", "ui": {"x": 1920, "y": 0}}
   ],
   "connections": [
@@ -30,8 +29,7 @@
     {"from": "interpolate", "to": "braid", "input": "strands"},
     {"from": "braid", "to": "color", "input": "strands"},
     {"from": "color", "to": "width", "input": "strands"},
-    {"from": "width", "to": "resample", "input": "strands"},
-    {"from": "resample", "to": "output", "input": "strands"}
+    {"from": "width", "to": "output", "input": "strands"}
   ],
   "output": "output"
 }

@@ -49,6 +49,8 @@ std::size_t curvaturePoints(const Vec3f* p, std::size_t n, float perSegment, int
     return static_cast<std::size_t>(std::clamp(static_cast<int>(std::min(wanted, 1e6f)), least, most)) + 1;
 }
 
+}  // namespace
+
 // Strand s of `in` resampled into `out`'s points for it (as many as `out` has), widths
 // (`widths`: `in` has them) and point channels (`inPoint`, `outPoint`) following. Points are
 // spaced evenly by arc length, or with `byCurvature` closer together where the strand bends (by a
@@ -113,8 +115,6 @@ void resampleStrand(const StrandSet& source, StrandSet& out, std::size_t s, bool
         }
     }
 }
-
-}  // namespace
 
 // Every strand resampled to points[s] points, widths and per-point channels following; IDs, roots
 // and per-strand channels stay (resampleStrand).
@@ -369,6 +369,17 @@ private:
     }
 };
 
+// Braided strands (a braidId of 0 or more) keep the points their weave is drawn with (Braid adds
+// them, by its resolution): fewer would draw the weave as a few flat zigzags.
+std::size_t keptPoints(const std::vector<float>* braid, const StrandSet& in, std::size_t s, std::size_t points) {
+    return braid && (*braid)[s] >= 0.0f ? std::max(points, in.strandPointCount(s)) : points;
+}
+void keepBraids(const StrandSet& in, std::vector<std::size_t>& points) {
+    const std::vector<float>* braid = in.strandChannel("braidId");
+    if (!braid) return;
+    for (std::size_t s = 0; s < points.size(); ++s) points[s] = keptPoints(braid, in, s, points[s]);
+}
+
 // Sets the strands' resolution, best after Interpolate: strands (or guides)
 // through it are resampled to `segments`, and every Scatter before it grows its
 // strands with them in the first place (the most any Resample after the Scatter
@@ -385,6 +396,7 @@ private:
 //              `segments`), placed closer together where it bends and farther
 //              apart on straight runs. `segments` stays the working resolution
 //              (Scatter grows with it), so curls are shaped in full detail first
+// Braided strands keep the points their weave is drawn with (keptPoints).
 class ResampleOp : public Operator {
 public:
     std::string typeName() const override { return op::kResample; }
@@ -395,7 +407,8 @@ public:
         return {
             notAnimatable({"segments", std::int64_t{16}, "Segments per strand (points = segments + 1); every Scatter before it "
                                                         "grows its strands with them (the most any Resample after it, on "
-                                                        "the way to the Output, asks for). 0: keep each strand's"})
+                                                        "the way to the Output, asks for). 0: keep each strand's. Braided strands keep "
+                                                        "the points their weave is drawn with (Braid's resolution)"})
                 .range(0, 1024)
                 .soft(0, 64),
             {"mode", std::string("even"), "even: segments for every strand; curvature: fewer points for render and export, "
@@ -429,10 +442,13 @@ public:
             return false;
         }
         const std::size_t count = in->strandCount();
+        const std::vector<float>* braid = in->strandChannel("braidId");
         if (mode == "even") {
             // Every strand at its count already: a full evaluation hands the input on as it is.
             bool same = true;
-            for (std::size_t s = 0; s < count && same; ++s) same = in->strandPointCount(s) == static_cast<std::size_t>(segments) + 1;
+            for (std::size_t s = 0; s < count && same; ++s) {
+                same = in->strandPointCount(s) == keptPoints(braid, *in, s, static_cast<std::size_t>(segments) + 1);
+            }
             if (same) return false;
         } else {
             // Each changed strand's count by its turning, as a full evaluation finds it: the last
@@ -447,7 +463,8 @@ public:
             const float perSegment = static_cast<float>(params().getDouble("maxAngle")) * 0.0174532925f;
             std::atomic<bool> moved{false};
             forEachListed(changes->strands, [&](std::size_t s) {
-                if (curvaturePoints(in->strandPoints(s), in->strandPointCount(s), perSegment, least, most) != last->strandPointCount(s)) {
+                if (keptPoints(braid, *in, s, curvaturePoints(in->strandPoints(s), in->strandPointCount(s), perSegment, least, most)) !=
+                    last->strandPointCount(s)) {
                     moved = true;
                 }
             });
@@ -545,6 +562,7 @@ public:
                 }
             }
         }
+        keepBraids(*in, points);
         if (mode != "curvature") {  // curvature moves the points even at the same count
             bool same = true;
             for (std::size_t s = 0; s < count && same; ++s) same = in->strandPointCount(s) == points[s];

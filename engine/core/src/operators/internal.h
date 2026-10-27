@@ -177,6 +177,12 @@ StrandsPtr applyAffect(const StrandSet& in, const StrandsPtr& out, const ScalarF
 // Every strand resampled by arc length to points[s] points, widths and per-point channels
 // following; IDs, roots and per-strand channels stay (shape_ops.cpp: Resample's).
 StrandsPtr resampleStrands(const StrandSet& source, const std::vector<std::size_t>& points, bool byCurvature = false);
+// Strand s of `source` resampled into `out`'s points for it (as many as `out` has; evenly by arc
+// length, or closer together where it bends with `byCurvature`), widths (`widths`: `source` has
+// them) and point channels (`inPoint` into `outPoint`) following: what resampleStrands does for each.
+void resampleStrand(const StrandSet& source, StrandSet& out, std::size_t s, bool byCurvature, bool widths,
+                    const std::vector<const std::vector<float>*>& inPoint, const std::vector<std::vector<float>*>& outPoint,
+                    std::vector<float>& outWidths);
 
 // Points binned in a world-aligned grid of cubes `cell` wide (at least the farthest a query
 // reaches): a query visits the points of a point's cell and its 26 neighbours. What a query finds
