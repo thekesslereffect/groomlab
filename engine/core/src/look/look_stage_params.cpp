@@ -82,7 +82,9 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             return true;
         }
         case StageKind::Interpolate:
-            if (params.getString("take") != "shape") {
+            // take length (flag2 1): each strand's own shape scaled to the guides' length (the CPU
+            // engine's; the GPU preview's: the CPU's).
+            if (params.getString("take") != "shape" && !r.lengthAlone) {
                 *why = r.name() + " takes the guides' length alone: the CPU's";
                 return false;
             }
@@ -93,12 +95,15 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->value[0] = static_cast<float>(number("limitDistance"));
             s->flag[0] = static_cast<int>(r.samples);
             s->flag[1] = params.getBool("preserveLength") ? 1 : 0;
+            s->flag2[1] = params.getString("take") == "length" ? 1 : 0;
             s->ramp = r.ramp("falloff");
             return true;
         case StageKind::Clump: {
             // Its strength and volumize mapped; the rest numbers and choices (clumpShape).
             if (!mappable("strength", &s->value[0]) || !mappable("volumize", &s->value[1])) return false;
             clumpShape(params, [&](const char* name) { return number(name); }, s);
+            // Per strand, on top: how far it follows its clump's pull (a Wet's levels: none).
+            s->value2[3] = params.has("strandStrengthRandom") ? static_cast<float>(params.getDouble("strandStrengthRandom")) : 0.0f;
             s->ramp = r.ramp("profile");
             s->ramp2 = r.ramp("volumizeProfile");
             return true;

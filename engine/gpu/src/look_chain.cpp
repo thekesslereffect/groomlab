@@ -885,11 +885,6 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                         return false;
                     }
                 }
-                // Each strand's own share of the pull (strandStrengthRandom): the CPU's for now.
-                if (stage.level < 0 && params.getDouble("strandStrengthRandom") > 0.0) {
-                    *why = doc.nameOf(id) + " varies each strand's pull (strandStrengthRandom): the CPU's";
-                    return false;
-                }
                 auto shape = [&](const ParamSet& clump, const auto& get) { clumpShape(clump, get, &s); };
                 if (stage.level >= 0) {
                     // A Wet's level: its Clump's params as Wet set them for its last result
@@ -2014,50 +2009,21 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 }
                 clearance = memo.clearance;
                 // Over a deformed scalp: each strand's walk starts at the vertex of its root's face
-                // nearest its first point (RestPoseCollision::cursor).
-                if (clearance->rest && (memo.cursorsFor != clearance || memo.cursorStrands != in || !memo.cursors)) {
-                    auto cursors = std::make_shared<std::vector<std::uint32_t>>(in->strandCount(), 0xFFFFFFFFu);
-                    const RestPoseCollision& rest = *clearance->rest;
-                    parallelFor(0, in->strandCount(), [&](std::size_t s) {
-                        if (in->strandPointCount(s) == 0) return;
-                        const RestPoseCollision::Cursor c = rest.cursor(in->roots()[s], in->strandPoints(s)[0]);
-                        if (c.vertex != RestPoseCollision::Cursor::kNone) (*cursors)[s] = static_cast<std::uint32_t>(c.vertex);
-                    }, 4096);
-                    memo.cursors = std::move(cursors);
-                    memo.cursorsFor = clearance;
-                    memo.cursorStrands = in;
-                    // How near the strands' roots the scalp's degenerate faces' vertices come (which
-                    // push asks the mesh at: the CPU's alone).
-                    const std::vector<std::uint32_t>& w = *clearance->walk;
-                    std::vector<Vec3f> degenerate;
-                    for (std::uint32_t v = 0; v < w[RestPoseCollision::kWalkVertices]; ++v) {
-                        if (w[w[RestPoseCollision::kWalkMotions] + v * RestPoseCollision::kWalkMotionWords] != RestPoseCollision::kWalkNoMotion) continue;
-                        Vec3f q;
-                        std::memcpy(&q.x, &w[w[RestPoseCollision::kWalkPoints] + v * 3], sizeof(Vec3f));
-                        degenerate.push_back(q);
-                    }
-                    memo.degenerateApart = std::numeric_limits<float>::infinity();
-                    if (!degenerate.empty()) {
-                        const PointIndex index(degenerate);
-                        for (std::size_t s = 0; s < in->strandCount(); ++s) {
-                            if (in->strandPointCount(s) == 0) continue;
-                            float d2 = 0.0f;
-                            index.nearest(in->strandPoints(s)[0], &d2);
-                            memo.degenerateApart = std::min(memo.degenerateApart, std::sqrt(d2));
-                        }
-                    }
-                }
+                // nearest its first point, the walks kept away from its degenerate faces
+                // (interpolateRestCursors).
                 if (clearance->rest) {
-                    // A walk from a root reaches no vertex farther from it than twice the strand's
-                    // reach (twice the longest guide: lookBounds) and two of the longest edge, and
-                    // asks a vertex's motion only within the longest edge and the search of it.
                     float longest = 0.0f;
                     for (const float length : memo.rows->lengths) longest = std::max(longest, length);
-                    float edge = 0.0f;
-                    std::memcpy(&edge, &(*clearance->walk)[RestPoseCollision::kWalkLongestEdge], sizeof(float));
-                    const float reach = 4.0f * longest + 3.0f * edge + clearance->searchRadius;
-                    if (!(memo.degenerateApart > reach * 1.01f)) {
-                        *why = name + ": its strands come near a degenerate face of the deformed scalp (the CPU's)";
+                    if (memo.cursorsFor != clearance || memo.cursorStrands != in || memo.cursorsLongest != longest) {
+                        std::string whyNot;
+                        memo.cursors = interpolateRestCursors(*clearance, *in, longest, &whyNot);
+                        memo.cursorsWhy = whyNot;
+                        memo.cursorsFor = clearance;
+                        memo.cursorStrands = in;
+                        memo.cursorsLongest = longest;
+                    }
+                    if (!memo.cursors) {
+                        *why = name + ": " + memo.cursorsWhy + " (the CPU's)";
                         return false;
                     }
                 }

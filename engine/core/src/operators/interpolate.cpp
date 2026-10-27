@@ -1756,8 +1756,36 @@ private:
         // (look_cpu.h), on this binding and these guides: its inputs for every strand, or (`which`)
         // for those strands alone (a view of them); false where its C++ blends (strands blending
         // more guides than the kernel's slots, layers, tubes, a deformed scalp). The channels here.
-        const bool engineBlends = !lengthOnly && !reference && layerNames.empty() && samples <= 64 && gpu::cpuEngineOn() &&
-                                  (!clearance || clearance.surface.field);
+        // A bound strand's layers: each blended over its guides like the shape, then read at each of
+        // its points, once the shape is final, by where it sits along the strand (arc length).
+        auto blendLayers = [&](std::size_t s, Scratch& scratch) {
+            if (layerChannels.empty()) return;
+            const Binding::Record record = bindings.record(s);
+            const std::size_t n = out->strandPointCount(s);
+            std::vector<float>& blendedLayer = scratch.blendedLayer;
+            std::vector<float>& strandArc = scratch.strandArc;
+            const Vec3f* shaped = static_cast<const StrandSet&>(*out).strandPoints(s);
+            strandArc.resize(n);
+            arcParams(shaped, n, strandArc.data());
+            blendedLayer.resize(samples);
+            const std::size_t begin = out->strandBegin(s);
+            for (std::size_t a = 0; a < layerChannels.size(); ++a) {
+                std::fill(blendedLayer.begin(), blendedLayer.end(), 0.0f);
+                for (std::uint32_t i = 0; i < record.count; ++i) {
+                    const float* row = layerValues[a].data() + record.guide(i) * samples;
+                    const float wi = record.weight(i);
+                    for (std::size_t k = 0; k < samples; ++k) blendedLayer[k] += row[k] * wi;
+                }
+                float* channel = layerChannels[a]->data() + begin;
+                for (std::size_t j = 0; j < n; ++j) {
+                    const float x = strandArc[j] * static_cast<float>(samples - 1);
+                    const std::size_t k = std::min(static_cast<std::size_t>(x), samples - 2);
+                    const float f = x - static_cast<float>(k);
+                    channel[j] = blendedLayer[k] * (1.0f - f) + blendedLayer[k + 1] * f;
+                }
+            }
+        };
+        const bool engineBlends = !(lengthOnly && fill) && !reference && samples <= gpu::kInterpolateCpuSamples && gpu::cpuEngineOn();
         auto engineInputs = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* blend) {
             const std::size_t count = which ? which->size() : strandCount;
             auto strandAt = [&](std::size_t k) { return which ? static_cast<std::size_t>((*which)[k]) : k; };
@@ -1765,10 +1793,22 @@ private:
                 if (bindings.record(strandAt(k)).count > gpu::kInterpolateSlots) return false;
             }
             std::shared_ptr<const InterpolateClearance> field;
+            std::shared_ptr<const std::vector<std::uint32_t>> cursors;
             if (clearance) {
                 std::string whyNot;
                 field = interpolateClearance(params(), scalp, &whyNot);
-                if (!field || field->rest) return false;
+                if (!field) return false;
+                if (field->rest) {  // over a deformed scalp: each strand's walk's first vertex
+                    float longest = 0.0f;
+                    for (const float length : guideLengths) longest = std::max(longest, length);
+                    cursors = interpolateRestCursors(*field, *strands, longest, &whyNot);
+                    if (!cursors) return false;
+                    if (which) {
+                        auto listed = std::make_shared<std::vector<std::uint32_t>>(count);
+                        for (std::size_t k = 0; k < count; ++k) (*listed)[k] = (*cursors)[strandAt(k)];
+                        cursors = std::move(listed);
+                    }
+                }
             }
             auto data = std::make_shared<gpu::InterpolateInputs>();
             {
@@ -1804,6 +1844,7 @@ private:
             }, 4096);
             data->strandNormals = std::move(strandNormals);
             data->clearance = std::move(field);
+            data->cursors = std::move(cursors);
             if (fill) {
                 // The tubes and each strand's as the kernel reads them (look_run.h InterpolateInputs::tubes).
                 const std::size_t tubes = fill->spines.size(), perTube = 1 + 9 * samples;
@@ -1854,9 +1895,16 @@ private:
         if (!last && engineBlends && engineInputs(nullptr, &blend)) {
             gpu::StageParamReader reader(params(), "");
             reader.samples = samples;
+            reader.lengthAlone = lengthOnly;
             reader.tubes = fill != nullptr;
             if (gpu::runStageInto(gpu::StageKind::Interpolate, reader, strands, scalp.get(), *out, std::move(blend))) {
                 parallelFor(0, strandCount, blendChannels, 1024);
+                if (!layerChannels.empty()) {
+                    parallelFor(0, strandCount, [&](std::size_t s) {
+                        thread_local Scratch scratch;
+                        if (bindings.record(s).bound) blendLayers(s, scratch);
+                    }, 256);
+                }
                 if (regionWritten) {
                     std::vector<float>& channel = out->addStrandChannel(regionName, -1.0f);
                     const std::vector<std::int32_t>& strandRegions = *regions->strands;
@@ -1908,31 +1956,7 @@ private:
             // The layers blend like the shape, then each strand point reads the
             // blend where it sits along the strand (by arc length), once the
             // shape is final: below, after the points move.
-            auto writeLayers = [&]() {
-                if (layerChannels.empty()) return;
-                std::vector<float>& blendedLayer = scratch.blendedLayer;
-                std::vector<float>& strandArc = scratch.strandArc;
-                const Vec3f* shaped = static_cast<const StrandSet&>(*out).strandPoints(s);
-                strandArc.resize(n);
-                arcParams(shaped, n, strandArc.data());
-                blendedLayer.resize(samples);
-                const std::size_t begin = out->strandBegin(s);
-                for (std::size_t a = 0; a < layerChannels.size(); ++a) {
-                    std::fill(blendedLayer.begin(), blendedLayer.end(), 0.0f);
-                    for (std::size_t i = 0; i < found; ++i) {
-                        const float* row = layerValues[a].data() + idx[i] * samples;
-                        const float wi = w[i];
-                        for (std::size_t k = 0; k < samples; ++k) blendedLayer[k] += row[k] * wi;
-                    }
-                    float* channel = layerChannels[a]->data() + begin;
-                    for (std::size_t j = 0; j < n; ++j) {
-                        const float x = strandArc[j] * static_cast<float>(samples - 1);
-                        const std::size_t k = std::min(static_cast<std::size_t>(x), samples - 2);
-                        const float f = x - static_cast<float>(k);
-                        channel[j] = blendedLayer[k] * (1.0f - f) + blendedLayer[k + 1] * f;
-                    }
-                }
-            };
+            auto writeLayers = [&]() { blendLayers(s, scratch); };
             struct LayersAtExit {
                 decltype(writeLayers)& write;
                 ~LayersAtExit() { write(); }
@@ -2143,12 +2167,17 @@ private:
             // their defaults, as a fresh output's.
             gpu::StageParamReader reader(params(), "");
             reader.samples = samples;
+            reader.lengthAlone = lengthOnly;
             viewed = gpu::runStageOnStrands(gpu::StageKind::Interpolate, reader, strands, dirty, scalp.get(), *out, std::move(blend));
             if (viewed) {
                 forEachListed(dirty, [&](std::size_t s) {
+                    thread_local Scratch scratch;
                     for (std::vector<float>* channel : attrChannels) (*channel)[s] = 0.0f;
+                    const std::size_t begin = out->strandBegin(s), n = out->strandPointCount(s);
+                    for (std::vector<float>* channel : layerChannels) std::fill(channel->begin() + begin, channel->begin() + begin + n, 0.0f);
                     if (influenceChannel) (*influenceChannel)[s] = 0.0f;
                     blendChannels(s);
+                    if (bindings.record(s).bound) blendLayers(s, scratch);
                 });
                 *changed = StrandChanges::listed(std::move(dirty));
             }
@@ -3043,6 +3072,51 @@ std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet&
         return nullptr;
     }
     return out;
+}
+
+std::shared_ptr<const std::vector<std::uint32_t>> interpolateRestCursors(const InterpolateClearance& clearance, const StrandSet& in,
+                                                                         float longestGuide, std::string* why) {
+    if (!clearance.rest || !clearance.walk) {
+        *why = "no deformed scalp's walk";
+        return nullptr;
+    }
+    auto cursors = std::make_shared<std::vector<std::uint32_t>>(in.strandCount(), 0xFFFFFFFFu);
+    const RestPoseCollision& rest = *clearance.rest;
+    parallelFor(0, in.strandCount(), [&](std::size_t s) {
+        if (in.strandPointCount(s) == 0) return;
+        const RestPoseCollision::Cursor c = rest.cursor(in.roots()[s], in.strandPoints(s)[0]);
+        if (c.vertex != RestPoseCollision::Cursor::kNone) (*cursors)[s] = static_cast<std::uint32_t>(c.vertex);
+    }, 4096);
+    // How near the strands' roots the scalp's degenerate faces' vertices come (which push asks the
+    // mesh at: the CPU's alone). A walk from a root reaches no vertex farther from it than twice the
+    // strand's reach (twice the longest guide) and two of the longest edge, and asks a vertex's
+    // motion only within the longest edge and the search of it.
+    const std::vector<std::uint32_t>& w = *clearance.walk;
+    std::vector<Vec3f> degenerate;
+    for (std::uint32_t v = 0; v < w[RestPoseCollision::kWalkVertices]; ++v) {
+        if (w[w[RestPoseCollision::kWalkMotions] + v * RestPoseCollision::kWalkMotionWords] != RestPoseCollision::kWalkNoMotion) continue;
+        Vec3f q;
+        std::memcpy(&q.x, &w[w[RestPoseCollision::kWalkPoints] + v * 3], sizeof(Vec3f));
+        degenerate.push_back(q);
+    }
+    float apart = std::numeric_limits<float>::infinity();
+    if (!degenerate.empty()) {
+        const PointIndex index(degenerate);
+        for (std::size_t s = 0; s < in.strandCount(); ++s) {
+            if (in.strandPointCount(s) == 0) continue;
+            float d2 = 0.0f;
+            index.nearest(in.strandPoints(s)[0], &d2);
+            apart = std::min(apart, std::sqrt(d2));
+        }
+    }
+    float edge = 0.0f;
+    std::memcpy(&edge, &w[RestPoseCollision::kWalkLongestEdge], sizeof(float));
+    const float reach = 4.0f * longestGuide + 3.0f * edge + clearance.searchRadius;
+    if (!(apart > reach * 1.01f)) {
+        *why = "its strands come near a degenerate face of the deformed scalp";
+        return nullptr;
+    }
+    return cursors;
 }
 
 std::size_t interpolateBindCount() { return bindCount.load(); }

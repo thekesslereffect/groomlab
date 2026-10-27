@@ -45,6 +45,9 @@ public:
     // Interpolate filling tubes: the caller hands their spines in (InterpolateInputs::tubes, the CPU
     // engine's); else a fillTubes Interpolate is the CPU's.
     bool tubes = false;
+    // Interpolate taking the guides' length alone (take length): the caller runs it on the CPU
+    // engine; else the CPU's.
+    bool lengthAlone = false;
 
 private:
     const ParamSet& params_;

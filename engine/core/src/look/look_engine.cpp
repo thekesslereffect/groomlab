@@ -536,6 +536,7 @@ void LookEngine::putStrandData(const LookRun& run, bool frames) {
                     const std::uint64_t h = hashCombine(id, seed ^ 0x10C4);
                     d[1] = unitFloat(h);
                     d[2] = std::sqrt(unitFloat(hash64(h)));
+                    d[3] = unitFloat(hashCombine(id, seed ^ 0x5E7A9ull));  // strandStrengthRandom's draw
                     break;
                 }
                 case StageKind::Noise: {

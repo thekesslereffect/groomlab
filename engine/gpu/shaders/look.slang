@@ -47,6 +47,7 @@
 #define POINT_GROUP_SIZE 256
 #define CENTER_SAMPLES 32  // Clump's centers (operator_state.h kClumpCenterSamples)
 #define MAX_SAMPLES 64     // Interpolate's guide samples at most (more: the CPU's)
+#define CPU_MAX_SAMPLES 512  // on the CPU engine (look_run.h kInterpolateCpuSamples)
 
 // The math the CPU shares with these kernels (blends and steps, the ramps' cubic, the noise's lattice
 // hash and gradients, the curl's spacing noise; the 64-bit hash arithmetic in 32-bit halves, mul64
@@ -1050,6 +1051,14 @@ struct InterpGuide {
     uint4 c;
     float length;
 };
+// Guide `lane` of a strand's binding: its index and its weight's code.
+uint2 interpRecord(InterpStrand st, uint lane) {
+    if (gAux.x == 2) return gAux0.Load2((st.recordsAt + 2 * lane) * 4);
+    const uint r = gAux0.Load((st.recordsAt + lane) * 4);
+    return uint2(r & 0xffffu, r >> 16);
+}
+uint interpGuideIndex(uint s, InterpStrand st, uint lane) { return interpRecord(st, lane).x; }
+float interpGuideWeight(uint s, InterpStrand st, uint lane) { return float(interpRecord(st, lane).y + 1u) * (1.0f / 65536.0f); }
 InterpGuide interpGuide(uint s, InterpStrand st, uint lane) {
     const uint recordsAt = st.recordsAt, found = st.found, twisted = st.twisted;
     InterpGuide out;
@@ -1197,6 +1206,31 @@ void interpolateStrandAlone(uint s) {
         for (uint i = 0; i < n; ++i) storePoint(gOut, begin + i, loadPoint(begin + i));
         return;
     }
+    if (gFlag2.y != 0u) {
+        // take length: its own shape scaled about the root to the guides' blended length (the
+        // guides' turns unused), part of the way by the influence.
+        PRECISE float guideLen = 0.0f;
+        for (uint i = 0; i < found; ++i) guideLen += guideLength(interpGuideIndex(s, st, i)) * interpGuideWeight(s, st, i);
+        PRECISE float own = 0.0f;
+        for (uint i = 1; i < n; ++i) own += lengthExact(loadPoint(begin + i) - loadPoint(begin + i - 1));
+        const float3 root = loadPoint(begin);
+        if (own <= 1e-8f) {
+            for (uint i = 0; i < n; ++i) storePoint(gOut, begin + i, loadPoint(begin + i));
+            return;
+        }
+        PRECISE float ratio = divExact(guideLen, own);
+        PRECISE float less = ratio - 1.0f;
+        PRECISE float part = st.influence * less;
+        PRECISE float scale = 1.0f + part;
+        storePoint(gOut, begin, root);
+        for (uint i = 1; i < n; ++i) {
+            PRECISE float3 away = loadPoint(begin + i) - root;
+            PRECISE float3 scaled = away * scale;
+            PRECISE float3 p = root + scaled;
+            storePoint(gOut, begin + i, p);
+        }
+        return;
+    }
     if (tb.tube >= 0) {
         const float3 root = loadPoint(begin);
         for (uint i = 0; i < n; ++i) {
@@ -1209,8 +1243,8 @@ void interpolateStrandAlone(uint s) {
     InterpGuide guide[BIND_SLOTS];
     for (uint i = 0; i < found; ++i) guide[i] = interpGuide(s, st, i);
     const float3 root = loadPoint(begin);
-    float4 blendAt[MAX_SAMPLES];
-    float arcAt[MAX_SAMPLES];
+    float4 blendAt[CPU_MAX_SAMPLES];
+    float arcAt[CPU_MAX_SAMPLES];
     // (Four samples side by side, as the C++ rows take them, every guide added onto their sums in
     // turn: each sample's sum taken guide by guide, in order.)
     const uint quads = (samples + 3) / 4;
@@ -2131,7 +2165,8 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
     const float4 d = strandData(s);
     // The clump's variation (by its center's ID): its strength scaled down, its lock radius varied.
     const float4 variation = asfloat(gAux1.Load4((gAux.z + c * 4) * 4));
-    const float escape = gValue2.x > 0.0f ? 1.0f - gValue2.x * variation.x : 1.0f;
+    float escape = gValue2.x > 0.0f ? 1.0f - gValue2.x * variation.x : 1.0f;
+    if (gValue2.w > 0.0f) escape *= 1.0f - gValue2.w * d.w;  // strandStrengthRandom (its draw: strand data w)
     const float strandAmount = fieldAt(0, gValue.x, s, 0) * escape;
     const float radius = gValue.w;
     const float angle = kTwoPi * d.y;

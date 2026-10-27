@@ -1509,8 +1509,9 @@ private:
             made_.centerRegions = std::move(centerRegions);
             made_.regionsFromStrands = regionsFromStrands;
         };
-        if (!last && !tubeIds && strandRandom <= 0.0f && gpu::cpuEngineOn()) {
-            // look.slang's ClumpCS, the GPU preview's own (look_cpu.h), on the centers chosen here.
+        if (!last && gpu::cpuEngineOn()) {
+            // look.slang's ClumpCS, the GPU preview's own (look_cpu.h), on the centers chosen here
+            // (following tubes: each tube's own, picked here).
             std::vector<StrandId> ids(used.size());
             for (std::size_t c = 0; c < used.size(); ++c) ids[c] = used[c]->id;
             gpu::StageInputs centers;
@@ -1672,7 +1673,7 @@ private:
             // Each from its incoming points and no clump ID, as in a full run: on the CPU engine (its
             // ClumpCS on a view of them, their centers the ones chosen here) or below.
             bool viewed = false;
-            if (!tubeIds && strandRandom <= 0.0f && gpu::cpuEngineOn()) {
+            if (!tubeIds && gpu::cpuEngineOn()) {
                 auto theirs = std::make_shared<std::vector<std::uint32_t>>(dirty.size());
                 for (std::size_t k = 0; k < dirty.size(); ++k) (*theirs)[k] = (*assigned)[dirty[k]];
                 std::vector<StrandId> ids(used.size());

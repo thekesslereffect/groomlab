@@ -1823,8 +1823,9 @@ TEST(GpuPreview, ASubdivideOfNoViewportLevelsHandsOn) {
     EXPECT_FALSE(gpu::findLookChain(doc(1), &smooth, &why) && !smooth.stages.empty());
 }
 
-TEST(GpuPreview, AClumpVaryingEachStrandsPullRunsOnTheCpu) {
-    // strandStrengthRandom is the CPU's for now: a Clump using it refuses the GPU its params, saying so.
+TEST(GpuPreview, AClumpVaryingEachStrandsPullRunsOnTheGpu) {
+    // strandStrengthRandom: ClumpCS scales each strand's pull by its draw (the strand data's w), so a
+    // Clump using it keeps the GPU, its share in value2[3].
     const auto doc = [](double random) {
         return loadGraphJson(R"({"version": 1, "output": "out",
           "nodes": [{"name": "scalp", "type": "Scalp"}, {"name": "scatter", "type": "Scatter"},
@@ -1833,15 +1834,16 @@ TEST(GpuPreview, AClumpVaryingEachStrandsPullRunsOnTheCpu) {
           "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"}, {"from": "scatter", "to": "clump", "input": "strands"},
                           {"from": "clump", "to": "out", "input": "strands"}]})");
     };
-    std::string why;
     for (const double random : {0.0, 0.5}) {
         const GraphDocument d = doc(random);
         gpu::LookChain chain;
+        std::string why;
         ASSERT_TRUE(gpu::findLookChain(d, &chain, &why)) << why;
         gpu::LookParams params;
-        EXPECT_EQ(gpu::readLookParams(d, chain, {}, &params, &why), random == 0.0) << why;
+        ASSERT_TRUE(gpu::readLookParams(d, chain, {}, &params, &why)) << why;
+        ASSERT_FALSE(params.stages.empty());
+        EXPECT_FLOAT_EQ(params.stages.back().value2[3], static_cast<float>(random));
     }
-    EXPECT_NE(why.find("strandStrengthRandom"), std::string::npos) << why;
 }
 
 TEST(GpuPreview, StageTableNamesRealTypesAndParams) {
@@ -6143,6 +6145,8 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     }
     graphs.push_back({"Collide", withoutClearance(chainGraph({{"Collide", R"("params": {"offset": 0.12, "softness": 0.1})"}}, true, true)), ""});
     graphs.push_back({"SelfCollide", withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.6})"}, {"SelfCollide", ""}})), ""});
+    graphs.push_back({"Clump strandStrengthRandom",
+                      withoutClearance(chainGraph({{"Clump", R"("params": {"count": 60, "strength": 0.8, "strandStrengthRandom": 0.6, "strengthRandom": 0.3})"}})), ""});
     graphs.push_back({"Static", withoutClearance(chainGraph({{"Static", ""}, {"Noise", R"("params": {"amplitude": 0.1})"}})), ""});
     graphs.push_back({"Tie", withoutClearance(chainGraph({{"Tie", R"("params": {"radius": 0.4})"}})), ""});
     graphs.push_back({"Wet", withoutClearance(chainGraph({{"Wet", wetParams(3, 0.6)}})), ""});
@@ -6209,6 +6213,30 @@ TEST(CpuEngine, BitsAgainstTheOperatorsStageByStage) {
     }
     std::printf("[ CPU bits ] floats differing in all: %zu\n", differing);
     EXPECT_EQ(differing, 0u);
+}
+
+TEST(CpuEngine, InterpolateOverADeformedScalpGivesItsCppsBits) {
+    // Keeping clearance over a deformed scalp (the walk through the rest pose's field, each strand
+    // from its cursor): Interpolate on the CPU engine against its own C++, bit for bit.
+    for (const char* which : {"default", "hairBasics"}) {
+        SCOPED_TRACE(which);
+        const GroomData data = deformedGroom(startingGraph(which));
+        auto interpolated = [&](GroomSession& session) {
+            if (!session.evaluate(ViewRequest{}).strands) return StrandsPtr();
+            const GraphDocument& doc = *session.viewDocument();
+            return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("interpolate")));
+        };
+        GroomSession on(data);
+        const StrandsPtr engine = interpolated(on);
+        gpu::setCpuEngineOn(false);
+        GroomSession off(data);
+        const StrandsPtr cpp = interpolated(off);
+        gpu::setCpuEngineOn(true);
+        ASSERT_TRUE(engine && cpp);
+        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
+        EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(engine->contentHash(), cpp->contentHash());
+    }
 }
 
 TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {

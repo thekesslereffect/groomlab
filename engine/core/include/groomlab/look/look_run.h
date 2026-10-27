@@ -77,7 +77,7 @@ struct LookChain {
 //   Clump: value[0] strength (mapped; negative repels), [1] volumize (mapped, per strand), [2]
 //          flatness, [3] lockRadius; flag[0] repelRadius's float bits, [1] pastTip extend, [2]
 //          flatten (0 surface, 1 random, 2 direction); value2[0] strengthRandom, [1]
-//          lockRadiusRandom, [2] copyAmount; flag2[0-2] flattenDirection's float bits; seed;
+//          lockRadiusRandom, [2] copyAmount, [3] strandStrengthRandom; flag2[0-2] flattenDirection's float bits; seed;
 //          ramp: the profile; ramp2: volumizeProfile. A Wet's level the same, from its level's
 //          Clump params (WetState), its profile wetLevelProfile at the (dragged) wetness.
 //   Noise: value[0] amplitude (mapped), [1] frequency, [2] fraction (mapped, at the root); flag[0]
@@ -247,6 +247,9 @@ struct LookFields {
 // uploads what it does not hold (by pointer).
 // The guides a strand blends at most on the GPU (its records' slots); more: the CPU's.
 constexpr std::size_t kInterpolateSlots = 16;
+// The guide samples Interpolate's kernel takes on the CPU engine at most (look.slang CPU_MAX_SAMPLES;
+// the GPU's: 64).
+constexpr std::size_t kInterpolateCpuSamples = 512;
 struct LookCentersRun;
 struct InterpolateInputs {
     // The binding (Interpolate's, or bound again for guide roots a stroke moved): its chunks say

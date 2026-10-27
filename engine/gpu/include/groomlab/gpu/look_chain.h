@@ -248,7 +248,8 @@ private:
         std::shared_ptr<const std::vector<std::uint32_t>> cursors;
         std::shared_ptr<const InterpolateClearance> cursorsFor;
         StrandsPtr cursorStrands;
-        float degenerateApart = 0.0f;  // the nearest a degenerate face's vertex is to a root
+        float cursorsLongest = -1.0f;  // the longest guide they were found for
+        std::string cursorsWhy;        // why there are none (interpolateRestCursors)
         bool rebound = false;  // `current` bound again since the operator's binding (moved guide roots)
     };
     struct ClumpMemo {

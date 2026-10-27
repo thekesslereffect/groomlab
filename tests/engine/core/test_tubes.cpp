@@ -467,7 +467,7 @@ TEST(TubeChildren, FlattenedGuidesCarryTheirTubes) {
 struct TubeGraph {
     Graph g;
     ExternalInputs ext;
-    NodeId scatter = 0, interp = 0, clump = 0;
+    NodeId scatter = 0, interp = 0, clump = 0, resample = 0;
     TubeProfile tube;
     static constexpr float kLength = 1.0f;
 
@@ -482,7 +482,7 @@ struct TubeGraph {
         scatter = g.addNode(op::kScatter);
         g.node(scatter).params().set("density", density);
         g.connect(scalp, scatter, 0);
-        const NodeId resample = g.addNode(op::kResample);  // unconnected: the strands' segments
+        resample = g.addNode(op::kResample);  // unconnected: the strands' segments
         g.node(resample).params().set("segments", std::int64_t{15});
         const NodeId guides = g.addNode(op::kGuides);
         interp = g.addNode(op::kInterpolate);
@@ -578,6 +578,67 @@ TEST(FillTubes, TheCpuEngineRidesThemAsTheCppDoes) {
         EXPECT_EQ(engine->contentHash(), cpp->contentHash()) << keep;
         EXPECT_GT(riders, 100u);
     }
+}
+
+TEST(FillTubes, TheCpuEngineTakesLayersAndLengthAsTheCppDoes) {
+    // Interpolate on the CPU engine against its own C++ (the engine off), bit for bit: guides'
+    // painted layers read along the strands' final points, and take length; tubes filled and not.
+    auto run = [](bool engine, bool tubes, bool length, std::int64_t segments) {
+        gpu::setCpuEngineOn(engine);
+        TubeGraph f;
+        f.g.node(f.resample).params().set("segments", segments);
+        auto set = std::make_shared<GuideSet>();
+        Guide& a = set->add(1, straightGuide({0.5f, 0, 0.5f}, TubeGraph::kLength));
+        a.hasTube = true;
+        a.tube = f.tube;
+        a.frameUp = {1, 0, 0};
+        set->add(2, straightGuide({0.12f, 0, 0.12f}, 0.6f));
+        for (Guide& g : set->guides()) {
+            std::vector<float> layer(g.points.size());
+            for (std::size_t i = 0; i < layer.size(); ++i) layer[i] = 0.1f * static_cast<float>(i) + static_cast<float>(g.id);
+            g.pointAttributes["paint"] = layer;
+        }
+        f.ext.set("guides", GuidesPtr(set), 9);
+        f.g.node(f.interp).params().set("fillTubes", tubes);
+        f.g.node(f.interp).params().set("tubeBlend", 0.5);
+        if (length) f.g.node(f.interp).params().set("take", std::string("length"));
+        const StrandsPtr out = f.eval(f.interp);
+        gpu::setCpuEngineOn(true);
+        return out;
+    };
+    for (const std::int64_t segments : {std::int64_t{15}, std::int64_t{99}}) {  // (99: more samples than the GPU's 64)
+    for (const bool tubes : {false, true}) {
+        for (const bool length : {false, true}) {
+            if (tubes && length) continue;
+            const StrandsPtr on = run(true, tubes, length, segments), off = run(false, tubes, length, segments);
+            ASSERT_EQ(on->pointCount(), off->pointCount());
+            EXPECT_EQ(std::memcmp(on->positions().data(), off->positions().data(), on->pointCount() * sizeof(Vec3f)), 0)
+                << tubes << length;
+            const std::vector<float>* a = on->pointChannel("paint");
+            const std::vector<float>* b = off->pointChannel("paint");
+            ASSERT_TRUE(a && b);
+            EXPECT_EQ(std::memcmp(a->data(), b->data(), a->size() * sizeof(float)), 0) << tubes << length;
+            EXPECT_EQ(on->contentHash(), off->contentHash()) << tubes << length << segments;
+        }
+    }
+    }
+}
+
+TEST(FillTubes, TheCpuEngineClumpsInsideTubesAsTheCppDoes) {
+    // A Clump following the tubes (each tube's centers its own) on the CPU engine against its own
+    // C++, bit for bit.
+    auto run = [](bool engine) {
+        gpu::setCpuEngineOn(engine);
+        TubeGraph f;
+        f.g.node(f.clump).params().set("strandStrengthRandom", 0.4);
+        const StrandsPtr out = f.eval(f.clump);
+        gpu::setCpuEngineOn(true);
+        return out;
+    };
+    const StrandsPtr on = run(true), off = run(false);
+    ASSERT_EQ(on->pointCount(), off->pointCount());
+    EXPECT_EQ(std::memcmp(on->positions().data(), off->positions().data(), on->pointCount() * sizeof(Vec3f)), 0);
+    EXPECT_EQ(on->contentHash(), off->contentHash());
 }
 
 TEST(FillTubes, LeavesStrandsOutsideTubesAsTheyWere) {

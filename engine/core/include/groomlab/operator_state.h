@@ -196,6 +196,12 @@ struct InterpolateClearance {
     std::shared_ptr<const std::vector<std::uint32_t>> walk;
 };
 std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet& params, const MeshPtr& scalp, std::string* why);
+// Over a deformed scalp (clearance.rest): each strand's walk's first vertex, its root face's vertex
+// nearest its first point (RestPoseCollision::cursor; 0xffffffff: none), for the kernel's walk. Null
+// with *why where a walk could reach a degenerate face's vertex (no motion: the CPU's alone) within
+// the strands' reach (`longestGuide` the longest guide's length).
+std::shared_ptr<const std::vector<std::uint32_t>> interpolateRestCursors(const InterpolateClearance& clearance, const StrandSet& strands,
+                                                                         float longestGuide, std::string* why);
 // Which points of a strand of `points` points the walk asks of the field: every step-th and the
 // tip, at most 16 asked (a strand of up to 17 points: every point); the points between move by the
 // moves of the two asked around them, blended by index, or are walked one by one where either of
