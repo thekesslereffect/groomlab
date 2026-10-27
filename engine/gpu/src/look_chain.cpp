@@ -2094,7 +2094,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             // inputPoints: each center's curve is a strand it takes (its axis).
             const bool fromStrands = centersFrom == "inputPoints";
             // inputCurves: each center's curve is a strand of its centers input (their preview core,
-            // strandsAsGuides), resampled.
+            // as ClumpOp reads them), resampled.
             const bool fromCurves = centersFrom == "inputCurves";
             // Centers the run moves (made from a stage before this one): the Clump's own choice of
             // the strands it takes, or its axis strands, resampled on the GPU; or the curves of a

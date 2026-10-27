@@ -631,6 +631,10 @@ struct StrandChanges {
     bool all = true;
     std::vector<std::uint32_t> strands;  // sorted, each once (when not all)
     bool pointsKept = false;
+    // The strands carry another set of instances (an Instance node's made again: which strands
+    // they sit on may differ): a node taking these evaluates in full (its result then compared
+    // with its last), a host draws the instances anew.
+    bool instancesChanged = false;
 
     bool none() const { return !all && strands.empty(); }
     static StrandChanges listed(std::vector<std::uint32_t> strands) {
@@ -643,8 +647,9 @@ struct StrandChanges {
 using ChangesPtr = std::shared_ptr<const StrandChanges>;
 
 // How `next` differs from `previous`, when the two hold the same strands (as StrandChanges says:
-// count, IDs, roots, point counts, channel names and defaults, instances, card and feather
-// layers): the strands whose points, widths or channel values differ, byte for byte, found in
+// count, IDs, roots, point counts, channel names and defaults, card and feather layers; instances
+// that differ are said, StrandChanges::instancesChanged): the strands whose points, widths or
+// channel values differ, byte for byte, found in
 // parallel blocks, the arrays the two share skipped. Null when they do not hold the same strands
 // (or either is null). What a node that evaluated in full hands on (Graph::setDiffFullResults).
 ChangesPtr strandChangesBetween(const StrandsPtr& previous, const StrandsPtr& next);

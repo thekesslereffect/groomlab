@@ -126,10 +126,8 @@ private:
 StrandsPtr guidesAsStrands(const GuideSet& guides);
 // Strands as guides (graph.cpp, as a Curves node hands guides back): IDs, roots, points, strand
 // channels as attributes and point channels as per-point layers. For an input taking either kind
-// whose operator reads guides (Clump's centers). `coreOnly`: only the preview core's strands
-// (preview_core.h), the same at every preview density. The roles' channel never comes along.
-// `channels`: only those strand channels (those the strands have) and no point layers.
-GuidesPtr strandsAsGuides(const StrandSet& strands, bool coreOnly = false, const std::vector<std::string>* channels = nullptr);
+// whose operator reads guides. The roles' channel (preview_core.h) never comes along.
+GuidesPtr strandsAsGuides(const StrandSet& strands);
 
 // Numbers b's groups after a's highest (look_ops.cpp): its clumpId, braidId and featherId (each
 // channel both have) offset by groupNumberBase of the largest of a's core strands (strand_set.h,

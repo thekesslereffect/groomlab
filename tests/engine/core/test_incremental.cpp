@@ -27,6 +27,7 @@
 #include "groomlab/flow.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/guide_set.h"
+#include "groomlab/instances.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/paths.h"
 #include "groomlab/presets.h"
@@ -302,6 +303,35 @@ TEST(Incremental, BypassedNodesAndParamEditsAndLayoutChanges) {
     EXPECT_EQ(chain->run(strands)->contentHash(), freshHash(strands, quieter));
     EXPECT_EQ(chain->graph.incrementalCount(), before);
     Graph::setIncrementalEvaluation(true);
+}
+
+TEST(Incremental, AnotherSetOfInstancesIsSaidWithTheStrandsThatChanged) {
+    // Two results of the same strands, one strand moved and the instances made again (an Instance
+    // node's probability reading a length a dab changed): the strand that moved, and that the
+    // instances are another set (the nodes after evaluate in full; a host draws them anew).
+    const StrandsPtr before = someStrands(50, 3);
+    auto withInstances = [](const StrandSet& strands, std::size_t count) {
+        auto set = std::make_shared<InstanceSet>();
+        set->instances.resize(count);
+        for (std::size_t k = 0; k < count; ++k) set->instances[k].strand = strands.ids()[k];
+        auto out = std::make_shared<StrandSet>(strands);
+        out->setInstances(set);
+        return out;
+    };
+    const StrandsPtr a = withInstances(*before, 4);
+    auto moved = withInstances(*before, 5);
+    moved->strandPoints(7)[1] += Vec3f(0.0f, 0.1f, 0.0f);
+    const ChangesPtr changes = strandChangesBetween(a, moved);
+    ASSERT_TRUE(changes);
+    EXPECT_FALSE(changes->all);
+    EXPECT_EQ(changes->strands, std::vector<std::uint32_t>{7});
+    EXPECT_TRUE(changes->instancesChanged);
+    // The same set of instances: not said.
+    auto same = std::make_shared<StrandSet>(*a);
+    same->strandPoints(9)[1] += Vec3f(0.0f, 0.1f, 0.0f);
+    const ChangesPtr kept = strandChangesBetween(a, same);
+    ASSERT_TRUE(kept);
+    EXPECT_FALSE(kept->instancesChanged);
 }
 
 TEST(Incremental, AWholeSetValueReadFallsBackToAFullEvaluation) {

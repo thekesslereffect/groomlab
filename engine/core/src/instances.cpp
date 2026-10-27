@@ -3,9 +3,10 @@
 #include "groomlab/portable_math.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
-#include <unordered_map>
+#include <memory>
 
 #include "groomlab/color_patterns.h"
 #include "groomlab/curve.h"
@@ -16,6 +17,46 @@
 #include "groomlab/strand_set.h"
 
 namespace groomlab {
+
+namespace {
+
+// Strand IDs to slots 0, 1, ... in the order first added: open addressing (twice the IDs' room,
+// rounded up to a power of two; linear probing). Finding never writes: safe in parallel.
+class IdSlots {
+public:
+    static constexpr std::size_t kNone = ~std::size_t{0};
+    explicit IdSlots(std::size_t most) {
+        std::size_t room = 16;
+        while (room < 2 * most) room *= 2;
+        mask_ = room - 1;
+        ids_.resize(room);
+        slots_.assign(room, kNone);
+    }
+    // Its slot, given the next one when new.
+    std::size_t add(std::uint64_t id) {
+        for (std::size_t at = hash64(id) & mask_;; at = (at + 1) & mask_) {
+            if (slots_[at] == kNone) {
+                ids_[at] = id;
+                return slots_[at] = count_++;
+            }
+            if (ids_[at] == id) return slots_[at];
+        }
+    }
+    std::size_t find(std::uint64_t id) const {
+        for (std::size_t at = hash64(id) & mask_;; at = (at + 1) & mask_) {
+            if (slots_[at] == kNone) return kNone;
+            if (ids_[at] == id) return slots_[at];
+        }
+    }
+    std::size_t size() const { return count_; }
+
+private:
+    std::vector<std::uint64_t> ids_;
+    std::vector<std::size_t> slots_;
+    std::size_t mask_ = 0, count_ = 0;
+};
+
+}  // namespace
 
 std::vector<std::string> instancePrototypeNames(const std::string& text) {
     std::string spaced = text;
@@ -202,14 +243,21 @@ std::vector<InstanceSet::Placed> InstanceSet::resolve(const StrandSet& strands, 
     if (instances.empty()) return out;
     // Each instance's strand (the first holding its ID), found through the IDs the instances name
     // (fewer than the strands), then every instance placed in parallel and kept in order.
+    // (Each ID's slot, then the strands looked up in parallel blocks, each slot taking its least
+    // strand.)
     constexpr std::size_t kUnfound = ~std::size_t{0};
-    std::unordered_map<std::uint64_t, std::size_t> index;
-    index.reserve(instances.size());
-    for (const Instance& i : instances) index.emplace(i.strand, kUnfound);
-    for (std::size_t s = 0; s < strands.strandCount(); ++s) {
-        const auto it = index.find(strands.ids()[s]);
-        if (it != index.end() && it->second == kUnfound) it->second = s;
-    }
+    IdSlots slotOf(instances.size());
+    for (const Instance& i : instances) slotOf.add(i.strand);
+    std::unique_ptr<std::atomic<std::size_t>[]> firstOf(new std::atomic<std::size_t>[slotOf.size()]);
+    for (std::size_t k = 0; k < slotOf.size(); ++k) firstOf[k].store(kUnfound, std::memory_order_relaxed);
+    parallelFor(0, strands.strandCount(), [&](std::size_t s) {
+        const std::size_t slot = slotOf.find(strands.ids()[s]);
+        if (slot == IdSlots::kNone) return;
+        std::atomic<std::size_t>& first = firstOf[slot];
+        std::size_t seen = first.load(std::memory_order_relaxed);
+        while (s < seen && !first.compare_exchange_weak(seen, s, std::memory_order_relaxed)) {
+        }
+    }, 4096);
     std::vector<Placed> all(instances.size());
     std::vector<char> placedOne(instances.size(), 0);
     const std::vector<float>& widths = strands.widths();
@@ -225,7 +273,7 @@ std::vector<InstanceSet::Placed> InstanceSet::resolve(const StrandSet& strands, 
     }
     parallelFor(0, instances.size(), [&](std::size_t k) {
         const Instance& i = instances[k];
-        const std::size_t s = index.find(i.strand)->second;
+        const std::size_t s = firstOf[slotOf.find(i.strand)].load(std::memory_order_relaxed);
         if (s == kUnfound) return;
         const Vec3f* pts = strands.strandPoints(s);
         const std::size_t n = strands.strandPointCount(s);

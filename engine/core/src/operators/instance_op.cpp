@@ -15,6 +15,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <mutex>
 
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
@@ -193,6 +195,12 @@ public:
 
 private:
     bool scales_;  // a Scales node (else an Instance)
+    // The last instances made: a full evaluation making the same again hands those on (the same
+    // set, so the graph sees the strands' instances stayed and which strands changed:
+    // strandChangesBetween).
+    mutable std::mutex keptMutex_;
+    mutable std::shared_ptr<const InstanceSet> kept_;
+    mutable std::uint64_t keptHash_ = 0;
 
     // In full, or (with `incremental`) the input with the last result's instances; false when
     // that cannot be done.
@@ -392,8 +400,19 @@ private:
                 }
             }
         });
+        std::shared_ptr<const InstanceSet> made = std::move(instances);
+        const std::uint64_t hash = made->contentHash();
+        {
+            const std::lock_guard<std::mutex> lock(keptMutex_);
+            if (kept_ && keptHash_ == hash && kept_->size() == made->size()) {
+                made = kept_;
+            } else {
+                kept_ = made;
+                keptHash_ = hash;
+            }
+        }
         auto out = std::make_shared<StrandSet>(*in);
-        out->setInstances(std::move(instances));
+        out->setInstances(std::move(made));
         *result = StrandsPtr(out);
         return true;
     }

@@ -136,20 +136,32 @@ VaneKey vaneOf(const StrandSet& s, std::size_t i) {
     return {std::llround((*s.strandChannel(kFeatherChannel))[i]), std::llround((*s.strandChannel(kSideChannel))[i])};
 }
 
+// A center as Clump reads it: a guide, or a strand (its points read in place, never copied).
+// Its region (the regionChannel's value), feather and side: its attributes or channels of those
+// names (NaN: it has none).
+struct ClumpCenter {
+    StrandId id = 0;
+    StrandRoot root;
+    const Vec3f* points = nullptr;
+    std::size_t count = 0;
+    float region = std::numeric_limits<float>::quiet_NaN();
+    float feather = std::numeric_limits<float>::quiet_NaN();
+    float side = std::numeric_limits<float>::quiet_NaN();
+};
+
 // Clump's centers grouped by vane, when the strands are barbs and every center names its vane.
 class FeatherVanes {
 public:
     // `starts`: per center, its first point.
-    FeatherVanes(const StrandSet& strands, const std::vector<const Guide*>& centers, const std::vector<Vec3f>& starts)
+    FeatherVanes(const StrandSet& strands, const std::vector<const ClumpCenter*>& centers, const std::vector<Vec3f>& starts)
         : feathers_(strands.strandChannel(kFeatherChannel)), sides_(strands.strandChannel(kSideChannel)),
           shafts_(strands.strandChannel(kIsShaftChannel)) {
         if (!hasVanes(strands) || centers.empty()) return;
         std::vector<std::vector<Vec3f>> byVane;
         for (std::size_t c = 0; c < centers.size(); ++c) {
-            const auto f = centers[c]->attributes.find(kFeatherChannel);
-            const auto side = centers[c]->attributes.find(kSideChannel);
-            if (f == centers[c]->attributes.end() || side == centers[c]->attributes.end()) return;  // not vane centers
-            const auto [it, fresh] = index_.emplace(VaneKey{std::llround(f->second), std::llround(side->second)},
+            const float f = centers[c]->feather, side = centers[c]->side;
+            if (f != f || side != side) return;  // not vane centers
+            const auto [it, fresh] = index_.emplace(VaneKey{std::llround(f), std::llround(side)},
                                                     members_.size());
             if (fresh) {
                 members_.emplace_back();
@@ -668,7 +680,7 @@ constexpr float kTubeRegionBase = static_cast<float>(std::int64_t{1} << 23);
 
 // Each center's number for the clump channel (clumpId): from its ID (stableGroupNumbers), so an
 // edit (or a center picked anew) in one place renumbers no clump elsewhere.
-std::vector<float> clumpNumbers(const std::vector<const Guide*>& centers) {
+std::vector<float> clumpNumbers(const std::vector<const ClumpCenter*>& centers) {
     std::vector<std::uint64_t> ids(centers.size());
     for (std::size_t c = 0; c < centers.size(); ++c) ids[c] = centers[c]->id;
     return stableGroupNumbers(ids);
@@ -1012,18 +1024,57 @@ private:
             throw GraphError("Clump: unknown centersFrom '" + from + "' (pick, inputPoints or inputCurves)");
         }
         const bool linked = inputs.at(1).index() != 0;
-        GuidesPtr centers;
+        const std::string regionName = params().getString("regionChannel");
+        // The centers, in order (each guide; each core strand of strands; its own picks), and what
+        // holds their points.
+        std::vector<ClumpCenter> given;
+        GuidesPtr centerGuideSet;
+        StrandsPtr centerStrands;
+        auto guideCenters = [&](const GuidesPtr& guides) {
+            centerGuideSet = guides;
+            given.resize(guides->guides().size());
+            for (std::size_t k = 0; k < given.size(); ++k) {
+                const Guide& g = guides->guides()[k];
+                ClumpCenter& c = given[k];
+                c.id = g.id;
+                c.root = g.root;
+                c.points = g.points.data();
+                c.count = g.points.size();
+                auto read = [&](const std::string& name, float* to) {
+                    const auto it = g.attributes.find(name);
+                    if (it != g.attributes.end()) *to = it->second;
+                };
+                if (!regionName.empty()) read(regionName, &c.region);
+                read(kFeatherChannel, &c.feather);
+                read(kSideChannel, &c.side);
+            }
+        };
+        // Strands of `strands` as centers, by index (with these IDs, else their own).
+        auto strandCenters = [&](const StrandsPtr& strands, const std::vector<std::size_t>& which, const std::vector<StrandId>* ids) {
+            centerStrands = strands;
+            const std::vector<float>* region = regionName.empty() ? nullptr : strands->strandChannel(regionName);
+            const std::vector<float>* feather = strands->strandChannel(kFeatherChannel);
+            const std::vector<float>* side = strands->strandChannel(kSideChannel);
+            given.resize(which.size());
+            parallelFor(0, which.size(), [&](std::size_t k) {
+                const std::size_t s = which[k];
+                ClumpCenter& c = given[k];
+                c.id = ids ? (*ids)[k] : strands->ids()[s];
+                c.root = strands->roots()[s];
+                c.points = strands->strandPoints(s);
+                c.count = strands->strandPointCount(s);
+                if (region) c.region = (*region)[s];
+                if (feather) c.feather = (*feather)[s];
+                if (side) c.side = (*side)[s];
+            }, 1024);
+        };
         if (own && linked) {
             ctx.note("centers are connected but centersFrom is pick (it picks its own): set centersFrom to inputPoints "
                      "or inputCurves to clump by them");
         } else if (!own) {
-            centers = valueAs<GuidesPtr>(inputs.at(1));
+            if (const GuidesPtr guides = valueAs<GuidesPtr>(inputs.at(1))) guideCenters(guides);
             // Strands as centers: their preview core (preview_core.h), the same at every preview density.
-            // (Of their channels only the regions', all of a center's Clump reads.)
-            if (const StrandsPtr strands = valueAs<StrandsPtr>(inputs.at(1))) {
-                const std::vector<std::string> carried{params().getString("regionChannel")};
-                centers = strandsAsGuides(*strands, true, &carried);
-            }
+            if (const StrandsPtr strands = valueAs<StrandsPtr>(inputs.at(1))) strandCenters(strands, coreStrands(*strands), nullptr);
             if (!linked) ctx.note("no clumps: connect centers (guides or strands) or set centersFrom to pick; the strands pass through");
         }
         // centersFrom pick: centers of its own, picked among the strands (the ones centerWeight
@@ -1031,7 +1082,6 @@ private:
         std::vector<std::size_t> chosen;
         std::vector<std::size_t> picked;  // centers of its own: the strand each is (whether by roots or not)
         std::vector<Vec3f> pickedAt;      // and where each is (its spot on the rest scalp): what strands clump by
-        const std::string regionName = params().getString("regionChannel");
         const ClumpSizing sizing = own ? clumpSizing(params()) : ClumpSizing{};
         // followTubes: strands filling tube guides clump inside their own tube (addTubeCenters,
         // their tubes as regions below); not on barbs.
@@ -1050,7 +1100,7 @@ private:
             weight.validate(*in);
             if (hasVanes(*in)) {
                 if (incremental) return false;
-                centers = vaneCenters(*in, sizing, weight, seed);
+                guideCenters(vaneCenters(*in, sizing, weight, seed));
             } else {
                 // The choice kept from the last run that read the same (a tweak of the strength,
                 // profile, radius... picks again from nothing new); the centers are the chosen
@@ -1077,18 +1127,13 @@ private:
                     addTubeCenters(*in, *tubeIds, scalpOf(ctx), pick->spacing, sizing.randomness, weight, seed, ctx.scale, now,
                                    nowIds, pickedAt);
                 }
-                auto pickedCenters = std::make_shared<GuideSet>();
-                for (std::size_t c = 0; c < now.size(); ++c) {
-                    const std::size_t s = now[c];
-                    const Vec3f* pts = in->strandPoints(s);
-                    pickedCenters->add(nowIds[c], std::vector<Vec3f>(pts, pts + in->strandPointCount(s))).root = in->roots()[s];
-                }
+                strandCenters(in, now, &nowIds);
+                for (ClumpCenter& c : given) c.region = c.feather = c.side = std::numeric_limits<float>::quiet_NaN();  // (a pick's carry none)
                 if (pick->byRoots && !tubeIds) chosen = now;
                 picked = now;
-                centers = GuidesPtr(pickedCenters);
             }
         }
-        if (!centers || centers->empty() || in->empty()) {
+        if (given.empty() || in->empty()) {
             if (incremental) return false;
             if (own && sizing.none()) {
                 ctx.note("no clumps: set a count or size above 0 (or centersFrom inputPoints with centers connected); the "
@@ -1119,13 +1164,12 @@ private:
         // Center c occupies [c * kCenterSamples, (c + 1) * kCenterSamples); from the strands, made
         // once the strands are assigned (axisCurves).
         std::vector<Vec3f> curves;
-        std::vector<const Guide*> used;  // the centers, in `roots` order
+        std::vector<const ClumpCenter*> used;  // the centers, in `roots` order
         std::vector<std::size_t> centerGuides;
         // From the strands, a center gives only its root: a single point will do. (The centers
         // listed first, then each made on its own.)
-        const std::vector<Guide>& given = centers->guides();
         for (std::size_t k = 0; k < given.size(); ++k) {
-            if (given[k].points.size() >= (fromStrands ? 1u : 2u)) centerGuides.push_back(k);
+            if (given[k].count >= (fromStrands ? 1u : 2u)) centerGuides.push_back(k);
         }
         starts.resize(centerGuides.size());
         roots.resize(centerGuides.size());
@@ -1133,13 +1177,13 @@ private:
         if (!fromStrands) curves.resize(centerGuides.size() * kCenterSamples);
         parallelFor(0, centerGuides.size(), [&](std::size_t c) {
             const std::size_t guide = centerGuides[c];
-            const Guide& g = given[guide];
+            const ClumpCenter& g = given[guide];
             if (fromStrands) {
-                starts[c] = g.points.front();
+                starts[c] = g.points[0];
             } else {
                 thread_local std::vector<Vec3f> resampled;
                 resampled.resize(kCenterSamples);
-                resampleByArcLengthInto(g.points.data(), g.points.size(), resampled.data(), kCenterSamples);
+                resampleByArcLengthInto(g.points, g.count, resampled.data(), kCenterSamples);
                 starts[c] = resampled.front();
                 std::copy(resampled.begin(), resampled.end(), curves.begin() + static_cast<std::ptrdiff_t>(c * kCenterSamples));
             }
@@ -1283,9 +1327,8 @@ private:
                     centerRegions[c] = (*strandRegions)[picked[centerGuides[c]]];
                     continue;
                 }
-                const auto it = used[c]->attributes.find(regionName);
-                if (it != used[c]->attributes.end()) {
-                    centerRegions[c] = it->second;
+                if (used[c]->region == used[c]->region) {
+                    centerRegions[c] = used[c]->region;
                 } else {
                     unknown.push_back(c);
                 }

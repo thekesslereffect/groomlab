@@ -229,6 +229,19 @@ private:
     mutable std::atomic<std::size_t> added_{0};  // strands the last evaluation added points to
 };
 
+// Whether `field` reads a strand by what it carries alone (its root, ID, channels and points), so
+// alike on a set of some strands (curlDensified's): a number, or a texture, color set, attribute
+// or guide map, its own or a Map node's. Not an expression (`index`, `longest`: of the whole set).
+bool readsStrandAlone(const ScalarField& field) {
+    const ScalarField* own = &field;
+    if (const FieldPtr& plugged = field.plugged()) {
+        own = plugged->scalarField();
+        if (!own || own->plugged()) return false;
+    }
+    const MapRef* map = own->map();
+    return !map || map->source != MapRef::Source::Expression;
+}
+
 // The strands `which` of `in` (all: null), each at `counts[k]` points: its segments each cut into
 // as many (counts[k] - 1 over its own segments) on the strand taken as a smooth curve (Curve), its
 // own points kept; widths and point channels taken linearly along each segment there.
@@ -342,9 +355,9 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
         if (other) return false;
         if (last->pointCount() == in->pointCount()) return runOwn(ctx, inputs, incremental, result, changed);  // (none added)
         // With the points it added: the changed strands made apart (as in full), written over the
-        // last result's, while each strand's curl reads it alone (alone, its radius the same
-        // everywhere).
-        if (params().getString("coherence") == "clump" || !ScalarField(params(), "radius", scalpOf(ctx)).isConstant()) return false;
+        // last result's, while each strand's curl reads it alone (alone, its radius read alike on
+        // a set of some strands).
+        if (params().getString("coherence") == "clump" || !readsStrandAlone(ScalarField(params(), "radius", scalpOf(ctx)))) return false;
         if (changes->none()) {
             *result = last;
             *changed = *changes;

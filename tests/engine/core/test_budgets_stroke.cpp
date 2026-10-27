@@ -211,9 +211,11 @@ private:
 // Each node's time as it last ran, for the report.
 std::string nodeTimes(const GroomSession& session) {
     std::string out;
+    const GroomStats st = session.stats();
     for (const auto& [name, ms] : session.nodeTimes()) {
-        char one[96];
-        std::snprintf(one, sizeof(one), "%s%s %.1f", out.empty() ? "" : ", ", name.c_str(), ms);
+        char one[160];
+        const auto r = st.runs.find(name);
+        std::snprintf(one, sizeof(one), "%s%s %.1f [%s]", out.empty() ? "" : ", ", name.c_str(), ms, r == st.runs.end() ? "?" : r->second.c_str());
         out += one;
     }
     return out;
