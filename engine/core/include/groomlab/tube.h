@@ -210,6 +210,10 @@ public:
     Vec3f at(float t, float u, float v) const;
     // The same at sample i.
     Vec3f atSample(std::size_t i, float u, float v) const { return centers_[i] + axisU_[i] * u + axisV_[i] * v; }
+    // Sample i's center and section axes (atSample's: center + axisU u + axisV v).
+    const Vec3f& center(std::size_t i) const { return centers_[i]; }
+    const Vec3f& axisU(std::size_t i) const { return axisU_[i]; }
+    const Vec3f& axisV(std::size_t i) const { return axisV_[i]; }
     // Lays the tube's root footprint on the surface the guide grows from, its normal there
     // `normal`: the root section turned from the guide's root direction onto the normal (the
     // smallest turn), so it lies flat in the surface's tangent plane however steeply or shallowly

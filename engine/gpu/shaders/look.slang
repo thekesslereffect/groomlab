@@ -1108,15 +1108,101 @@ InterpGuide interpGuide(uint s, InterpStrand st, uint lane) {
     return out;
 }
 
+// fillTubes (the CPU engine's; look_run.h InterpolateInputs::tubes): gAux.z the word of gAux1 where
+// the tubes start (0: none). A strand's tube (-1: none, it blends) and section coordinates, the
+// deeper tube whose soft edge it lies in (-1: none), its coordinates there and how far it leans.
+struct TubeOf {
+    int tube, edge;
+    float u, v, eu, ev, lean;
+};
+uint tubeSamples() { return gAux1.Load(gAux.z * 4); }
+uint tubeWordsAt(uint tube) { return gAux.z + 2 + tube * (1 + 9 * tubeSamples()); }
+TubeOf tubeOf(uint s) {
+    TubeOf t;
+    t.tube = -1;
+    t.edge = -1;
+    t.u = t.v = t.eu = t.ev = t.lean = 0.0f;
+    if (gAux.z == 0u) return t;
+    const uint at = tubeWordsAt(gAux1.Load(gAux.z * 4 + 4)) + s * 8;
+    const uint4 a = gAux1.Load4(at * 4), b = gAux1.Load4(at * 4 + 16);
+    t.tube = asint(a.x);
+    t.u = asfloat(a.y);
+    t.v = asfloat(a.z);
+    t.edge = asint(a.w);
+    t.eu = asfloat(b.x);
+    t.ev = asfloat(b.y);
+    t.lean = asfloat(b.z);
+    return t;
+}
+// TubeSpine::atSample and at: the tube's point at sample i, and at share t (between samples).
+float3 tubeSample(uint tube, uint i, float u, float v) {
+    const uint at = tubeWordsAt(tube) + 1 + i * 9;
+    const float3 c = asfloat(gAux1.Load3(at * 4)), axisU = asfloat(gAux1.Load3((at + 3) * 4)), axisV = asfloat(gAux1.Load3((at + 6) * 4));
+    PRECISE float3 cu = c + axisU * u;
+    PRECISE float3 r = cu + axisV * v;
+    return r;
+}
+float3 tubeAt(uint tube, float t, float u, float v) {
+    const uint n = tubeSamples();
+    const float x = clamp(t, 0.0f, 1.0f) * float(n - 1);
+    const uint i = min(uint(x), n - 2);
+    const float f = x - float(i);
+    if (f == 0.0f) return tubeSample(tube, i, u, v);
+    PRECISE float3 a = tubeSample(tube, i, u, v) * (1.0f - f);
+    PRECISE float3 b = tubeSample(tube, i + 1, u, v) * f;
+    PRECISE float3 r = a + b;
+    return r;
+}
+// interpolate.cpp rideTube: point j of n riding the tube at (u, v), its root kept where it grows and
+// the difference faded out by (1 - t / join)^2.
+float3 rideTubeAt(uint tube, float u, float v, float3 root, uint j, uint n) {
+    if (j == 0) return root;
+    const float last = float(n - 1);
+    const float t = float(j) / last;
+    const float3 p = tubeAt(tube, t, u, v);
+    const float join = asfloat(gAux1.Load(tubeWordsAt(tube) * 4));
+    if (t >= join) return p;
+    PRECISE float3 delta = root - tubeAt(tube, 0.0f, u, v);
+    const float fade = 1.0f - t / join;
+    PRECISE float faded = fade * fade;
+    PRECISE float3 moved = delta * faded;
+    PRECISE float3 r = p + moved;
+    return r;
+}
+// A point leaning part of the way to riding the deeper tube whose soft edge it lies in.
+float3 leanToEdge(TubeOf tb, float3 p, float3 root, uint j, uint n) {
+    if (tb.edge < 0 || j == 0) return p;
+    const float3 ride = rideTubeAt(uint(tb.edge), tb.eu, tb.ev, root, j, n);
+    PRECISE float3 toward = ride - p;
+    PRECISE float3 part = toward * tb.lean;
+    PRECISE float3 r = p + part;
+    return r;
+}
+
 // The CPU's InterpolateCS (its threads run one after another: no group to share samples with): a
 // strand whole on the thread of its first lane, sample by sample with the very arithmetic the
 // group's lanes do, in the same order (the strand's samples and guides in arrays of its own).
 void interpolateStrandAlone(uint s) {
-    const InterpStrand st = interpStrand(s);
+    InterpStrand st = interpStrand(s);
+    const TubeOf tb = tubeOf(s);
+    if (st.bound && gAux.z != 0u) {
+        // Riding a tube: all of the guides' (no radius's fall-off); in a soft edge: moved even out
+        // of the radius' reach.
+        if (tb.tube >= 0) st.influence = 1.0f;
+        st.blend = st.n >= 2 && (st.influence > 0.0f || tb.edge >= 0);
+    }
     if (gFlag2.x != 0) gOut3.Store(s * 4, asuint(st.bound ? st.influence : 0.0f));
     const uint begin = st.begin, n = st.n, found = st.found;
     if (!st.blend) {
         for (uint i = 0; i < n; ++i) storePoint(gOut, begin + i, loadPoint(begin + i));
+        return;
+    }
+    if (tb.tube >= 0) {
+        const float3 root = loadPoint(begin);
+        for (uint i = 0; i < n; ++i) {
+            const float3 p = rideTubeAt(uint(tb.tube), tb.u, tb.v, root, i, n);
+            storePoint(gOut, begin + i, leanToEdge(tb, p, root, i, n));
+        }
         return;
     }
     const uint samples = gFlag.x;
@@ -1182,7 +1268,7 @@ void interpolateStrandAlone(uint s) {
             PRECISE float3 mixed = kept + taken;
             p = i == 0 ? incoming : mixed;
         }
-        storePoint(gOut, begin + i, p);
+        storePoint(gOut, begin + i, leanToEdge(tb, p, root, i, n));
     }
 }
 
@@ -1710,7 +1796,10 @@ ClearStrand clearStrand(uint s) {
             influence = t >= 1.0f ? 0.0f : clamp(rampAt(t), 0.0f, 1.0f) * min((1.0f - t) * 20.0f, 1.0f);
         }
         const float4 data = strandData(s);
-        c.walks = influence > 0.0f && c.n >= 2 && len3(data.xyz) > 0.0f;
+        // (fillTubes: a strand riding a tube takes all of it; one in a soft edge walks however far.)
+        const TubeOf tb = tubeOf(s);
+        if (tb.tube >= 0) influence = 1.0f;
+        c.walks = (influence > 0.0f || tb.edge >= 0) && c.n >= 2 && len3(data.xyz) > 0.0f;
         PRECISE float byInfluence = gValue.y * influence;
         c.target = byInfluence;
         c.startVertex = asuint(data.w);

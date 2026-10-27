@@ -42,6 +42,9 @@ public:
     double framesPerSecond = 24.0;
     // Interpolate's guide samples (interpolateSamples of the strands it takes).
     std::size_t samples = 0;
+    // Interpolate filling tubes: the caller hands their spines in (InterpolateInputs::tubes, the CPU
+    // engine's); else a fillTubes Interpolate is the CPU's.
+    bool tubes = false;
 
 private:
     const ParamSet& params_;

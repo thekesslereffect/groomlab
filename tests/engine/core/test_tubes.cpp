@@ -15,6 +15,7 @@
 #include "groomlab/display.h"
 #include "groomlab/graph.h"
 #include "groomlab/guide_hierarchy.h"
+#include "groomlab/look/look_cpu.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -547,6 +548,36 @@ TEST(FillTubes, StrandsRideTheirTubeToTheTip) {
     EXPECT_LT(rootZ, 0.15f * 0.25f + 1e-3f);
     EXPECT_LT(tipX, 0.08f * 0.25f + 1e-3f);
     EXPECT_NEAR(tipZ, 0.08f, 0.01f);
+}
+
+TEST(FillTubes, TheCpuEngineRidesThemAsTheCppDoes) {
+    // Interpolate filling tubes on the CPU engine (look.slang rideTubeAt) against its own C++ (the
+    // engine off), bit for bit: riders, strands in a soft edge, the rest blending; keeping
+    // clearance and not, with a radius's fall-off.
+    for (const bool keep : {true, false}) {
+        TubeGraph f;
+        f.g.node(f.interp).params().set("tubeBlend", 0.5);
+        f.g.node(f.interp).params().set("keepClearance", keep);
+        f.g.node(f.interp).params().set("limitDistance", 0.5);
+        const StrandsPtr engine = f.eval(f.interp);
+        gpu::setCpuEngineOn(false);
+        TubeGraph g;  // (a graph of its own: evaluated afresh)
+        g.g.node(g.interp).params().set("tubeBlend", 0.5);
+        g.g.node(g.interp).params().set("keepClearance", keep);
+        g.g.node(g.interp).params().set("limitDistance", 0.5);
+        const StrandsPtr cpp = g.eval(g.interp);
+        gpu::setCpuEngineOn(true);
+        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
+        std::size_t riders = 0;
+        const std::vector<float>& ids = *cpp->strandChannel("tubeId");
+        for (std::size_t s = 0; s < cpp->strandCount(); ++s) riders += ids[s] >= 0.0f ? 1 : 0;
+        for (std::size_t s = 0; s < cpp->strandCount(); ++s) {
+            ASSERT_EQ(std::memcmp(engine->strandPoints(s), cpp->strandPoints(s), cpp->strandPointCount(s) * sizeof(Vec3f)), 0)
+                << "strand " << s << (keep ? " keeping clearance" : "");
+        }
+        EXPECT_EQ(engine->contentHash(), cpp->contentHash()) << keep;
+        EXPECT_GT(riders, 100u);
+    }
 }
 
 TEST(FillTubes, LeavesStrandsOutsideTubesAsTheyWere) {

@@ -959,7 +959,8 @@ void LookEngine::putStageInputs(const LookRun& run) {
             held.aux[0] = recordWords;
             held.a = data->binding.get();
             held.keep = data->binding;
-            if (held.b != data->rows.get()) {
+            if (data->tubes && !sharesBase()) throw std::runtime_error("GPU preview: Interpolate's tubes are the CPU engine's");
+            if (held.b != data->rows.get() || held.alive[2].get() != data->tubes.get()) {
                 // The guides: 8 words each (normal xyz, turns, length), then their offsets.
                 const InterpolateGuideRows& rows = *data->rows;
                 const std::size_t count = rows.roots.size();
@@ -992,9 +993,17 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 } else if (!rows.offsets.empty()) {
                     std::memcpy(words.data() + count * 8, rows.offsets.data(), rows.offsets.size() * 12);
                 }
+                // fillTubes: the tubes and each strand's (look.slang tubeOf) after them, at word aux[2].
+                held.aux[2] = 0;
+                if (data->tubes && !data->tubes->empty()) {
+                    held.aux[2] = static_cast<std::uint32_t>(words.size());
+                    words.resize(words.size() + data->tubes->size());
+                    std::memcpy(words.data() + held.aux[2], data->tubes->data(), data->tubes->size() * 4);
+                }
                 write(auxBuffer(k, 1), words.data(), words.size() * 4, false);
                 held.b = data->rows.get();
                 held.alive[1] = data->rows;
+                held.alive[2] = data->tubes;
                 held.aux[3] = static_cast<std::uint32_t>(count * 8);
                 runUploadMegabytes_ += static_cast<double>(words.size() * 4) / 1e6;
             }

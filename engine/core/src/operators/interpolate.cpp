@@ -1756,7 +1756,7 @@ private:
         // (look_cpu.h), on this binding and these guides: its inputs for every strand, or (`which`)
         // for those strands alone (a view of them); false where its C++ blends (strands blending
         // more guides than the kernel's slots, layers, tubes, a deformed scalp). The channels here.
-        const bool engineBlends = !lengthOnly && !fill && !reference && layerNames.empty() && samples <= 64 && gpu::cpuEngineOn() &&
+        const bool engineBlends = !lengthOnly && !reference && layerNames.empty() && samples <= 64 && gpu::cpuEngineOn() &&
                                   (!clearance || clearance.surface.field);
         auto engineInputs = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* blend) {
             const std::size_t count = which ? which->size() : strandCount;
@@ -1804,6 +1804,38 @@ private:
             }, 4096);
             data->strandNormals = std::move(strandNormals);
             data->clearance = std::move(field);
+            if (fill) {
+                // The tubes and each strand's as the kernel reads them (look_run.h InterpolateInputs::tubes).
+                const std::size_t tubes = fill->spines.size(), perTube = 1 + 9 * samples;
+                auto words = std::make_shared<std::vector<std::uint32_t>>(2 + tubes * perTube + count * 8, 0u);
+                auto put = [&](std::size_t at, float v) { std::memcpy(words->data() + at, &v, 4); };
+                (*words)[0] = static_cast<std::uint32_t>(samples);
+                (*words)[1] = static_cast<std::uint32_t>(tubes);
+                for (std::size_t t = 0; t < tubes; ++t) {
+                    const TubeSpine& spine = fill->spines[t];
+                    const std::size_t at = 2 + t * perTube;
+                    put(at, spine.empty() ? 1.0f : spine.rootJoin());
+                    for (std::size_t i = 0; i < spine.samples() && i < samples; ++i) {
+                        const Vec3f parts[3] = {spine.center(i), spine.axisU(i), spine.axisV(i)};
+                        for (int a = 0; a < 3; ++a) {
+                            put(at + 1 + i * 9 + a * 3, parts[a].x);
+                            put(at + 1 + i * 9 + a * 3 + 1, parts[a].y);
+                            put(at + 1 + i * 9 + a * 3 + 2, parts[a].z);
+                        }
+                    }
+                }
+                parallelFor(0, count, [&](std::size_t k) {
+                    const std::size_t s = strandAt(k), at = 2 + tubes * perTube + k * 8;
+                    std::memcpy(words->data() + at, &fill->tubeOf[s], 4);
+                    put(at + 1, fill->at[s].u);
+                    put(at + 2, fill->at[s].v);
+                    std::memcpy(words->data() + at + 3, &fill->edgeOf[s], 4);
+                    put(at + 4, fill->edgeAt[s].u);
+                    put(at + 5, fill->edgeAt[s].v);
+                    put(at + 6, fill->edgeWeight[s]);
+                }, 4096);
+                data->tubes = std::move(words);
+            }
             blend->interpolate = std::move(data);
             return true;
         };
@@ -1816,12 +1848,13 @@ private:
                 for (std::uint32_t i = 0; i < record.count; ++i) v += attrValues[a][record.guide(i)] * record.weight(i);
                 (*attrChannels[a])[s] = v;
             }
-            if (influenceChannel) (*influenceChannel)[s] = influenceAt(record.nearest2);
+            if (influenceChannel) (*influenceChannel)[s] = fill && fill->tubeOf[s] >= 0 ? 1.0f : influenceAt(record.nearest2);
         };
         gpu::StageInputs blend;
         if (!last && engineBlends && engineInputs(nullptr, &blend)) {
             gpu::StageParamReader reader(params(), "");
             reader.samples = samples;
+            reader.tubes = fill != nullptr;
             if (gpu::runStageInto(gpu::StageKind::Interpolate, reader, strands, scalp.get(), *out, std::move(blend))) {
                 parallelFor(0, strandCount, blendChannels, 1024);
                 if (regionWritten) {
@@ -1829,6 +1862,7 @@ private:
                     const std::vector<std::int32_t>& strandRegions = *regions->strands;
                     parallelFor(0, channel.size(), [&](std::size_t s) { channel[s] = static_cast<float>(strandRegions[s]); }, 4096);
                 }
+                if (fill) writeTubeChannels(*out, *fill);
                 remember(StrandsPtr(out), strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey, regionSource, regions);
                 *result = StrandsPtr(out);
                 return true;
@@ -2153,25 +2187,27 @@ private:
                 const std::vector<std::int32_t>& strandRegions = *regions->strands;
                 parallelFor(0, channel.size(), [&](std::size_t s) { channel[s] = static_cast<float>(strandRegions[s]); }, 4096);
             }
-            if (fill) {
-                // Written last: each strand's tube wins over a guide attribute of its name.
-                std::vector<float>& ids = out->addStrandChannel("tubeId", -1.0f);
-                std::vector<float>& us = out->addStrandChannel("tubeU", 0.0f);
-                std::vector<float>& vs = out->addStrandChannel("tubeV", 0.0f);
-                parallelFor(0, ids.size(), [&](std::size_t s) {
-                    const std::int32_t t = fill->tubeOf[s];
-                    if (t < 0) return;
-                    ids[s] = fill->numbers[static_cast<std::size_t>(t)];
-                    us[s] = fill->at[s].u;
-                    vs[s] = fill->at[s].v;
-                }, 4096);
-            }
+            if (fill) writeTubeChannels(*out, *fill);
         }
         const StrandsPtr blended = out;
         remember(blended, strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey,
                  regionSource, regions);
         *result = blended;
         return true;
+    }
+
+    // fillTubes' channels, written last: each strand's tube wins over a guide attribute of its name.
+    static void writeTubeChannels(StrandSet& out, const TubeFill& fill) {
+        std::vector<float>& ids = out.addStrandChannel("tubeId", -1.0f);
+        std::vector<float>& us = out.addStrandChannel("tubeU", 0.0f);
+        std::vector<float>& vs = out.addStrandChannel("tubeV", 0.0f);
+        parallelFor(0, ids.size(), [&](std::size_t s) {
+            const std::int32_t t = fill.tubeOf[s];
+            if (t < 0) return;
+            ids[s] = fill.numbers[static_cast<std::size_t>(t)];
+            us[s] = fill.at[s].u;
+            vs[s] = fill.at[s].v;
+        }, 4096);
     }
 
     // fillTubes: each strand's tube (TubeFill::tubeOf, at) from its root (its first point), among

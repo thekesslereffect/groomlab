@@ -86,7 +86,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
                 *why = r.name() + " takes the guides' length alone: the CPU's";
                 return false;
             }
-            if (params.getBool("fillTubes")) {
+            if (params.getBool("fillTubes") && !r.tubes) {
                 *why = r.name() + " fills the guides' tubes (fillTubes): the CPU's";
                 return false;
             }

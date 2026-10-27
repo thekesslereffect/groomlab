@@ -260,6 +260,11 @@ struct InterpolateInputs {
     // Keeping clearance over a deformed scalp (clearance->walk): per strand the vertex its walk
     // starts at (0xffffffff: none, the nearest found from every vertex).
     std::shared_ptr<const std::vector<std::uint32_t>> cursors;
+    // fillTubes (the CPU engine's): the tubes' samples and count, each tube (its root join, then
+    // each sample's center, U and V axes: 1 + 9 x samples words), then 8 words a strand (its tube,
+    // -1 none; its section u, v; the deeper tube whose soft edge it lies in, -1 none; its
+    // coordinates there; how far it leans; 0): look.slang tubeOf. Null: none.
+    std::shared_ptr<const std::vector<std::uint32_t>> tubes;
 };
 struct ClumpInputs {
     std::shared_ptr<const std::vector<std::uint32_t>> assigned;  // per strand: its center (kNoClumpCenter: none)
