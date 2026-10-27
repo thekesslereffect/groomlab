@@ -213,10 +213,18 @@ private:
             }
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                twist(s);
-            });
+            gpu::StageInputs axesOf;  // (on the CPU engine: these strands' axes)
+            std::string whyNot;
+            if (gpu::cpuEngineOn()) {
+                axesOf.twist = gpu::twistInputs(*in, axesIn.get(), params().getString("clumpChannel"), false, &whyNot, &changes->strands);
+            }
+            if (!(axesOf.twist && gpu::runStageOnStrands(gpu::StageKind::Twist, params(), in, changes->strands, scalpOf(ctx), *out,
+                                                         std::move(axesOf)))) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    twist(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), twist);

@@ -138,6 +138,10 @@ bool runStageOnStrands(StageKind kind, const StageParamReader& reader, const Str
         case StageKind::Clump:  // (their centers the caller's, for these strands)
         case StageKind::Part:  // (their sides the caller's, for these strands)
         case StageKind::Flow:  // (their roots traced the caller's)
+        case StageKind::Twist:  // (around axes: their axes the caller's, for these strands)
+        case StageKind::Jiggle:  // (their lags the caller's, for these strands)
+        case StageKind::Interpolate:  // (their binding the caller's, for these strands)
+        case StageKind::RestoreLength:  // (their reference the caller's, for these strands)
         case StageKind::Curl: break;  // (alone: by clump it reads its clumps)
         default: return false;
     }

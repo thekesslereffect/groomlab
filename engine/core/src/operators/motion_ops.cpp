@@ -637,10 +637,43 @@ private:
             }
         };
         if (last) {
-            forEachListed(changes->strands, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                jiggle(s);
-            });
+            bool viewed = false;
+            if (gpu::cpuEngineOn()) {
+                // look.slang's JiggleCS on these strands (a view of them), on the lags of the faces
+                // and vertices they grow from, each worked out as in full.
+                std::vector<char> usedFace(tris.size(), 0), usedVertex(now.size(), 0);
+                for (const std::uint32_t s : changes->strands) {
+                    const StrandRoot& root = in->roots()[s];
+                    if (!scalp.contains(root) || usedFace[static_cast<std::size_t>(root.face)]) continue;
+                    usedFace[static_cast<std::size_t>(root.face)] = 1;
+                    for (const std::int32_t v : tris[static_cast<std::size_t>(root.face)]) usedVertex[static_cast<std::size_t>(v)] = 1;
+                }
+                std::vector<std::size_t> faces, vertices;
+                for (std::size_t f = 0; f < tris.size(); ++f) {
+                    if (usedFace[f]) faces.push_back(f);
+                }
+                for (std::size_t v = 0; v < now.size(); ++v) {
+                    if (usedVertex[v]) vertices.push_back(v);
+                }
+                vertexLag.assign(now.size(), Vec3f{});
+                parallelFor(0, vertices.size(), [&](std::size_t i) { vertexLag[vertices[i]] = lagOfVertex(vertices[i]); });
+                faceTurn.assign(tris.size(), Mat3{});
+                faceTurned.assign(tris.size(), 0);
+                parallelFor(0, faces.size(), [&](std::size_t i) {
+                    const std::size_t f = faces[i];
+                    faceTurned[f] = turnOfFace(f, &faceTurn[f]) ? 1 : 0;
+                });
+                lags.frames = frames;
+                gpu::StageInputs lagged;
+                lagged.jiggle = gpu::jiggleInputs(*in, scalp, lags, &changes->strands);
+                viewed = gpu::runStageOnStrands(gpu::StageKind::Jiggle, params(), in, changes->strands, &scalp, *out, std::move(lagged));
+            }
+            if (!viewed) {
+                forEachListed(changes->strands, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    jiggle(s);
+                });
+            }
             *changed = *changes;
         } else {
             parallelFor(0, out->strandCount(), jiggle);

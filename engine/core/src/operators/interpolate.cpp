@@ -1752,78 +1752,86 @@ private:
             const float t = std::sqrt(nearest2) / radius;
             return t >= 1.0f ? 0.0f : std::clamp(falloff(t), 0.0f, 1.0f) * std::min((1.0f - t) * 20.0f, 1.0f);
         };
-        if (!last && !lengthOnly && !fill && !reference && layerNames.empty() && samples <= 64 && gpu::cpuEngineOn() &&
-            (!clearance || clearance.surface.field)) {
-            // look.slang's InterpolateCS (and ClearanceCS keeping clearance), the GPU preview's own
-            // (look_cpu.h), on this binding and these guides; the channels here. (Strands blending
-            // more guides than the kernel's slots, layers, tubes, a deformed scalp: its C++.)
-            bool fits = true;
-            for (std::size_t s = 0; s < strandCount && fits; ++s) fits = bindings.record(s).count <= gpu::kInterpolateSlots;
-            std::shared_ptr<const InterpolateClearance> field;
-            std::string whyNot;
-            if (fits && clearance) {
-                field = interpolateClearance(params(), scalp, &whyNot);
-                fits = field && !field->rest;
+        // look.slang's InterpolateCS (and ClearanceCS keeping clearance), the GPU preview's own
+        // (look_cpu.h), on this binding and these guides: its inputs for every strand, or (`which`)
+        // for those strands alone (a view of them); false where its C++ blends (strands blending
+        // more guides than the kernel's slots, layers, tubes, a deformed scalp). The channels here.
+        const bool engineBlends = !lengthOnly && !fill && !reference && layerNames.empty() && samples <= 64 && gpu::cpuEngineOn() &&
+                                  (!clearance || clearance.surface.field);
+        auto engineInputs = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* blend) {
+            const std::size_t count = which ? which->size() : strandCount;
+            auto strandAt = [&](std::size_t k) { return which ? static_cast<std::size_t>((*which)[k]) : k; };
+            for (std::size_t k = 0; k < count; ++k) {
+                if (bindings.record(strandAt(k)).count > gpu::kInterpolateSlots) return false;
             }
-            if (fits) {
-                gpu::StageInputs blend;
-                auto data = std::make_shared<gpu::InterpolateInputs>();
-                {
-                    const std::lock_guard<std::mutex> lock(madeMutex_);
-                    if (!engineState_ || engineState_->binding != binding || engineState_->strands != strands) {
-                        auto state = std::make_shared<InterpolateState>();
-                        state->binding = binding;
-                        state->baseKey = baseKey;
-                        state->strandCount = strandCount;
-                        state->roots = roots;
-                        state->guides = guides;
-                        state->strands = strands;
-                        state->channels = !attrNames.empty();
-                        engineState_ = std::move(state);
-                    }
-                    data->binding = engineState_;
+            std::shared_ptr<const InterpolateClearance> field;
+            if (clearance) {
+                std::string whyNot;
+                field = interpolateClearance(params(), scalp, &whyNot);
+                if (!field || field->rest) return false;
+            }
+            auto data = std::make_shared<gpu::InterpolateInputs>();
+            {
+                const std::lock_guard<std::mutex> lock(madeMutex_);
+                if (!engineState_ || engineState_->binding != binding || engineState_->strands != strands) {
+                    auto state = std::make_shared<InterpolateState>();
+                    state->binding = binding;
+                    state->baseKey = baseKey;
+                    state->strandCount = strandCount;
+                    state->roots = roots;
+                    state->guides = guides;
+                    state->strands = strands;
+                    state->channels = !attrNames.empty();
+                    engineState_ = std::move(state);
                 }
-                auto rows = std::make_shared<InterpolateGuideRows>();
-                rows->samples = samples;
-                rows->roots = roots;
-                rows->normals = normals;
-                rows->lengths = guideLengths;
-                rows->offsets.resize(kept.size() * samples);
-                for (std::size_t g = 0; g < kept.size(); ++g) {
-                    const float* o = offsets.data() + g * 3 * stride;
-                    for (std::size_t j = 0; j < samples; ++j) rows->offsets[g * samples + j] = Vec3f(o[j], o[stride + j], o[2 * stride + j]);
+                data->binding = which ? interpolateStateOf(*engineState_, *which) : engineState_;
+            }
+            auto rows = std::make_shared<InterpolateGuideRows>();
+            rows->samples = samples;
+            rows->roots = roots;
+            rows->normals = normals;
+            rows->lengths = guideLengths;
+            rows->offsets.resize(kept.size() * samples);
+            for (std::size_t g = 0; g < kept.size(); ++g) {
+                const float* o = offsets.data() + g * 3 * stride;
+                for (std::size_t j = 0; j < samples; ++j) rows->offsets[g * samples + j] = Vec3f(o[j], o[stride + j], o[2 * stride + j]);
+            }
+            data->rows = std::move(rows);
+            auto strandNormals = std::make_shared<std::vector<Vec3f>>(count);
+            parallelFor(0, count, [&](std::size_t k) {
+                const StrandRoot& root = strands->roots()[strandAt(k)];
+                (*strandNormals)[k] = align && scalp->contains(root) ? scalp->normal(root) : Vec3f{};
+            }, 4096);
+            data->strandNormals = std::move(strandNormals);
+            data->clearance = std::move(field);
+            blend->interpolate = std::move(data);
+            return true;
+        };
+        // A bound strand's channels from its guides.
+        auto blendChannels = [&](std::size_t s) {
+            const Binding::Record record = bindings.record(s);
+            if (!record.bound) return;
+            for (std::size_t a = 0; a < attrChannels.size(); ++a) {
+                float v = 0.0f;
+                for (std::uint32_t i = 0; i < record.count; ++i) v += attrValues[a][record.guide(i)] * record.weight(i);
+                (*attrChannels[a])[s] = v;
+            }
+            if (influenceChannel) (*influenceChannel)[s] = influenceAt(record.nearest2);
+        };
+        gpu::StageInputs blend;
+        if (!last && engineBlends && engineInputs(nullptr, &blend)) {
+            gpu::StageParamReader reader(params(), "");
+            reader.samples = samples;
+            if (gpu::runStageInto(gpu::StageKind::Interpolate, reader, strands, scalp.get(), *out, std::move(blend))) {
+                parallelFor(0, strandCount, blendChannels, 1024);
+                if (regionWritten) {
+                    std::vector<float>& channel = out->addStrandChannel(regionName, -1.0f);
+                    const std::vector<std::int32_t>& strandRegions = *regions->strands;
+                    parallelFor(0, channel.size(), [&](std::size_t s) { channel[s] = static_cast<float>(strandRegions[s]); }, 4096);
                 }
-                data->rows = std::move(rows);
-                auto strandNormals = std::make_shared<std::vector<Vec3f>>(strandCount);
-                parallelFor(0, strandCount, [&](std::size_t s) {
-                    const StrandRoot& root = strands->roots()[s];
-                    (*strandNormals)[s] = align && scalp->contains(root) ? scalp->normal(root) : Vec3f{};
-                }, 4096);
-                data->strandNormals = std::move(strandNormals);
-                data->clearance = std::move(field);
-                blend.interpolate = std::move(data);
-                gpu::StageParamReader reader(params(), "");
-                reader.samples = samples;
-                if (gpu::runStageInto(gpu::StageKind::Interpolate, reader, strands, scalp.get(), *out, std::move(blend))) {
-                    parallelFor(0, strandCount, [&](std::size_t s) {
-                        const Binding::Record record = bindings.record(s);
-                        if (!record.bound) return;
-                        for (std::size_t a = 0; a < attrChannels.size(); ++a) {
-                            float v = 0.0f;
-                            for (std::uint32_t i = 0; i < record.count; ++i) v += attrValues[a][record.guide(i)] * record.weight(i);
-                            (*attrChannels[a])[s] = v;
-                        }
-                        if (influenceChannel) (*influenceChannel)[s] = influenceAt(record.nearest2);
-                    }, 1024);
-                    if (regionWritten) {
-                        std::vector<float>& channel = out->addStrandChannel(regionName, -1.0f);
-                        const std::vector<std::int32_t>& strandRegions = *regions->strands;
-                        parallelFor(0, channel.size(), [&](std::size_t s) { channel[s] = static_cast<float>(strandRegions[s]); }, 4096);
-                    }
-                    remember(StrandsPtr(out), strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey, regionSource, regions);
-                    *result = StrandsPtr(out);
-                    return true;
-                }
+                remember(StrandsPtr(out), strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey, regionSource, regions);
+                *result = StrandsPtr(out);
+                return true;
             }
         }
         // One strand: its channels, then its points from its guides. `scratch` is the thread's.
@@ -2095,7 +2103,23 @@ private:
                 j = m = std::min(m + step, n - 1);
             }
         };
-        if (last) {
+        bool viewed = false;
+        if (last && engineBlends && engineInputs(&dirty, &blend)) {
+            // The strands to blend again on the engine (a view of them), each one's channels from
+            // their defaults, as a fresh output's.
+            gpu::StageParamReader reader(params(), "");
+            reader.samples = samples;
+            viewed = gpu::runStageOnStrands(gpu::StageKind::Interpolate, reader, strands, dirty, scalp.get(), *out, std::move(blend));
+            if (viewed) {
+                forEachListed(dirty, [&](std::size_t s) {
+                    for (std::vector<float>* channel : attrChannels) (*channel)[s] = 0.0f;
+                    if (influenceChannel) (*influenceChannel)[s] = 0.0f;
+                    blendChannels(s);
+                });
+                *changed = StrandChanges::listed(std::move(dirty));
+            }
+        }
+        if (last && !viewed) {
             // Each strand blended again from its channels' defaults, as a fresh output's (a strand
             // no longer bound writes none of them).
             // (Keeping clearance, in smaller chunks: a dab's few hundred strands each ask the
@@ -2116,7 +2140,7 @@ private:
                 }
             }, 1);
             *changed = StrandChanges::listed(std::move(dirty));
-        } else {
+        } else if (!last) {
             const std::size_t blendChunks = (out->strandCount() + kBlendChunk - 1) / kBlendChunk;
             parallelFor(0, blendChunks, [&](std::size_t c) {
                 thread_local Scratch scratch;
@@ -2870,6 +2894,44 @@ std::vector<const void*> interpolateChunks(const InterpolateState& state) {
         for (const auto& chunk : binding->chunks) chunks.push_back(chunk.get());
     }
     return chunks;
+}
+
+std::shared_ptr<const InterpolateState> interpolateStateOf(const InterpolateState& state, const std::vector<std::uint32_t>& which) {
+    const auto* binding = static_cast<const Binding*>(state.binding.get());
+    auto made = std::make_shared<Binding>();
+    made->strandCount = which.size();
+    std::vector<float> twists;
+    for (std::size_t first = 0; first < which.size(); first += kBindChunk) {
+        const std::size_t n = std::min(kBindChunk, which.size() - first);
+        auto chunk = std::make_shared<BindingChunk>();
+        chunk->wide = true;
+        chunk->offsets.assign(n + 1, 0u);
+        chunk->nearest2.resize(n);
+        chunk->bound.resize(n);
+        for (std::size_t i = 0; i < n; ++i) {
+            const Binding::Record r = binding->record(which[first + i]);
+            const std::uint32_t at = chunk->offsets[i];
+            chunk->offsets[i + 1] = at + r.count;
+            chunk->nearest2[i] = r.nearest2;
+            chunk->bound[i] = r.bound ? 1 : 0;
+            for (std::uint32_t g = 0; g < r.count; ++g) {
+                chunk->guides32.push_back(r.guide(g));
+                chunk->weights.push_back(r.code(g));
+            }
+            twists.resize(r.count);
+            if (!r.twists(twists.data())) continue;
+            for (std::uint32_t g = 0; g < r.count; ++g) {
+                if (twists[g] == 0.0f) continue;
+                chunk->twistAt.push_back(at + g);
+                chunk->twists.push_back(twists[g]);
+            }
+        }
+        made->chunks.push_back(std::move(chunk));
+    }
+    auto out = std::make_shared<InterpolateState>(state);
+    out->binding = std::move(made);
+    out->strandCount = which.size();
+    return out;
 }
 
 bool interpolateRebind(const Operator& op, const PartLines* parts, const std::vector<Vec3f>& roots,

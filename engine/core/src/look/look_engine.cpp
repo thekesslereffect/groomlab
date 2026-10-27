@@ -1349,8 +1349,17 @@ void LookEngine::putShaperInputs(std::size_t k, const StageParams& stage, const 
             throw std::runtime_error("GPU preview: RestoreLength's reference is for other strands");
         }
         if (held.a != data->lengths.get() || !has(auxBuffer(k, 0))) {
-            write(auxBuffer(k, 0), data->lengths->empty() ? nullptr : data->lengths->data(), std::max<std::size_t>(data->lengths->size(), 1) * 4, false);
-            write(auxBuffer(k, 1), data->firsts->empty() ? nullptr : data->firsts->data(), std::max<std::size_t>(data->firsts->size(), 4) * 4, false);
+            // (On the CPU the very memory, kept alive while held.)
+            if (data->lengths->empty()) {
+                write(auxBuffer(k, 0), nullptr, 4, false);
+            } else {
+                share(auxBuffer(k, 0), data->lengths->data(), data->lengths->size() * 4);
+            }
+            if (data->firsts->empty()) {
+                write(auxBuffer(k, 1), nullptr, 16, false);
+            } else {
+                share(auxBuffer(k, 1), data->firsts->data(), data->firsts->size() * 4);
+            }
             held.a = data->lengths.get();
             held.keep = in->restore;
             runUploadMegabytes_ += static_cast<double>((data->lengths->size() + data->firsts->size()) * 4) / 1e6;

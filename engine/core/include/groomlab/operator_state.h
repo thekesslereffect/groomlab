@@ -142,6 +142,9 @@ void interpolateRecords(const InterpolateState& state, std::size_t first, std::s
 // holding equal records (a host updates only the others).
 std::size_t interpolateChunkStrands();
 std::vector<const void*> interpolateChunks(const InterpolateState& state);
+// `state` for its strands `which` alone, in that order (each one's records as they are): what the
+// CPU engine binds a view of them by (LookEngine::setBaseView).
+std::shared_ptr<const InterpolateState> interpolateStateOf(const InterpolateState& state, const std::vector<std::uint32_t>& which);
 // The bytes the binding's records hold (guides, weights, twists, per strand its offset, nearest
 // distance and whether it is bound; not what binding again reads).
 std::size_t interpolateRecordBytes(const InterpolateState& state);

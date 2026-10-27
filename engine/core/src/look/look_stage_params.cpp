@@ -542,15 +542,19 @@ std::shared_ptr<const RootInputs> rootInputs(const StrandSet& in, const ScalpMes
 }
 
 std::shared_ptr<TwistInputs> twistInputs(const StrandSet& in, const GuideSet* axesIn, const std::string& channel, bool nearestByKernel,
-                                         std::string* why) {
-    const std::size_t strands = in.strandCount();
+                                         std::string* why, const std::vector<std::uint32_t>* which) {
+    const bool aroundAxes = axesIn && !axesIn->empty();
+    if (which && (!aroundAxes || nearestByKernel)) return nullptr;  // (a clump's middle is its members')
+    const std::size_t strands = which ? which->size() : in.strandCount();
     auto words = std::make_shared<std::vector<std::uint32_t>>(strands * 4, 0u);
     auto made = std::make_shared<TwistInputs>();
-    auto rootBits = [&](std::size_t s) {
+    auto strandAt = [&](std::size_t k) { return which ? static_cast<std::size_t>((*which)[k]) : k; };
+    auto rootBits = [&](std::size_t k) {
+        const std::size_t s = strandAt(k);
         if (in.strandPointCount(s) == 0) return;
-        std::memcpy(words->data() + s * 4 + 1, &in.strandPoints(s)[0], 12);
+        std::memcpy(words->data() + k * 4 + 1, &in.strandPoints(s)[0], 12);
     };
-    if (axesIn && !axesIn->empty()) {
+    if (aroundAxes) {
         // TwistOp: each guide of two points or more resampled by arc length, and each strand's
         // nearest by its root.
         auto axes = std::make_shared<std::vector<float>>();
@@ -569,9 +573,10 @@ std::shared_ptr<TwistInputs> twistInputs(const StrandSet& in, const GuideSet* ax
             std::fill(words->begin(), words->end(), 0xffffffffu);  // (no root's bits: TwistCS finds each nearest)
         } else if (!roots.empty()) {
             const PointIndex index(roots);
-            parallelFor(0, strands, [&](std::size_t s) {
-                (*words)[s * 4] = in.strandPointCount(s) == 0 ? 0xffffffffu : static_cast<std::uint32_t>(index.nearest(in.strandPoints(s)[0]));
-                rootBits(s);
+            parallelFor(0, strands, [&](std::size_t k) {
+                const std::size_t s = strandAt(k);
+                (*words)[k * 4] = in.strandPointCount(s) == 0 ? 0xffffffffu : static_cast<std::uint32_t>(index.nearest(in.strandPoints(s)[0]));
+                rootBits(k);
             }, 1024);
         }
         if (axes->empty()) axes->push_back(0.0f);
@@ -705,7 +710,7 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
 }
 
 std::shared_ptr<RestoreInputs> restoreInputs(const StrandSet& in, const StrandSet* refStrands, const GuideSet* refGuides, float* longest,
-                                             bool* found) {
+                                             bool* found, const std::vector<std::uint32_t>* which) {
     // The reference curves by ID (RestoreLengthOp: strands, or guides), each at the strand's point
     // count as the node resamples it.
     struct Ref {
@@ -724,10 +729,12 @@ std::shared_ptr<RestoreInputs> restoreInputs(const StrandSet& in, const StrandSe
         }
     }
     if (found) *found = !reference.empty();
+    const std::size_t strands = which ? which->size() : in.strandCount();
     auto lengths = std::make_shared<std::vector<float>>(in.pointCount(), 0.0f);
-    auto firsts = std::make_shared<std::vector<float>>(in.strandCount() * 4, 0.0f);
-    std::vector<float> reaches(in.strandCount(), 0.0f);
-    parallelFor(0, in.strandCount(), [&](std::size_t s) {
+    auto firsts = std::make_shared<std::vector<float>>(strands * 4, 0.0f);
+    std::vector<float> reaches(strands, 0.0f);
+    parallelFor(0, strands, [&](std::size_t k) {
+        const std::size_t s = which ? static_cast<std::size_t>((*which)[k]) : k;
         const std::size_t n = in.strandPointCount(s), begin = in.strandBegin(s);
         if (n == 0) return;
         (*lengths)[begin] = -1.0f;
@@ -744,10 +751,10 @@ std::shared_ptr<RestoreInputs> restoreInputs(const StrandSet& in, const StrandSe
         }
         const float whole = arcLength(ref.points, ref.count);
         (*lengths)[begin] = whole;
-        reaches[s] = whole;
+        reaches[k] = whole;
         for (std::size_t i = 1; i < n; ++i) (*lengths)[begin + i] = (pts[i] - pts[i - 1]).length();
         const Vec3f first = pts[1] - pts[0];
-        float* f = firsts->data() + s * 4;
+        float* f = firsts->data() + k * 4;
         f[0] = first.x;
         f[1] = first.y;
         f[2] = first.z;
@@ -957,11 +964,14 @@ std::shared_ptr<CurlInputs> curlInputs(const StrandSet& in, const ScalpMesh* sca
     return made;
 }
 
-std::shared_ptr<JiggleInputs> jiggleInputs(const StrandSet& in, const ScalpMesh& scalp, const JiggleLags& lags) {
+std::shared_ptr<JiggleInputs> jiggleInputs(const StrandSet& in, const ScalpMesh& scalp, const JiggleLags& lags,
+                                           const std::vector<std::uint32_t>* which) {
     const auto& tris = scalp.triangles();
-    auto strands = std::make_shared<std::vector<float>>(in.strandCount() * 4, 0.0f);
-    parallelFor(0, in.strandCount(), [&](std::size_t s) {
-        float* to = strands->data() + s * 4;
+    const std::size_t count = which ? which->size() : in.strandCount();
+    auto strands = std::make_shared<std::vector<float>>(count * 4, 0.0f);
+    parallelFor(0, count, [&](std::size_t k) {
+        const std::size_t s = which ? static_cast<std::size_t>((*which)[k]) : k;
+        float* to = strands->data() + k * 4;
         std::uint32_t face = 0xFFFFFFFFu;
         const StrandRoot& root = in.roots()[s];
         if (in.strandPointCount(s) >= 2 && scalp.contains(root) && !lags.vertexLag.empty()) {

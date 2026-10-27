@@ -109,9 +109,11 @@ std::shared_ptr<const RootInputs> rootInputs(const StrandSet& in, const ScalpMes
 // Twist's axes (TwistInputs, as TwistOp makes them): around the curves of `axes` (two points or more,
 // resampled by arc length) each strand's nearest by its root (`nearestByKernel`: left to TwistCS, its
 // root words other than any root); else around each clump's middle (by `channel`: its core
-// strands, preview_core.h). Null with *why where the strands carry no such channel.
+// strands, preview_core.h). Null with *why where the strands carry no such channel. `which` (around
+// axes, not by kernel): those strands alone, a strand's words at its place in the list (an engine's
+// view, LookEngine::setBaseView).
 std::shared_ptr<TwistInputs> twistInputs(const StrandSet& in, const GuideSet* axes, const std::string& channel, bool nearestByKernel,
-                                         std::string* why);
+                                         std::string* why, const std::vector<std::uint32_t>* which = nullptr);
 // Tangle's partners as the kernel takes them (TangleInputs) from its operator's (operator_state.h
 // TangleState, on `in`).
 std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleState& state);
@@ -124,9 +126,10 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
 // RestoreLength's reference (RestoreInputs) for the strands `in`: each strand's reference curve by
 // its ID (`refStrands`', else `refGuides`'), resampled to its point count, its segments' lengths and
 // first segment (a strand without one: -1, left as it is); `longest` the longest reference, `found`
-// whether there is any (null: not asked).
+// whether there is any (null: not asked). `which`: those strands alone (an engine's view), their
+// first segments at their places in the list, their lengths at their points (the rest 0).
 std::shared_ptr<RestoreInputs> restoreInputs(const StrandSet& in, const StrandSet* refStrands, const GuideSet* refGuides, float* longest,
-                                             bool* found = nullptr);
+                                             bool* found = nullptr, const std::vector<std::uint32_t>* which = nullptr);
 // Smooth's window ends (SmoothOp's, the same for every strand: its three boxes `smoothWidth` cells
 // wide over the reflected period of 2 x `cells` cells), each cell's upper end, then each one's
 // lower: whole periods before it, how far into its cell, and the cell (24 bytes each: the CPU
@@ -144,7 +147,8 @@ std::shared_ptr<FlowInputs> flowInputs(const StrandSet& in, const ScalpMesh* sca
                                        const std::vector<std::uint32_t>* which = nullptr);  // which: those strands alone, in that order
 // Jiggle's lags as the kernel takes them (JiggleInputs) from its operator's (operator_state.h
 // jiggleLags, over `scalp`) for the strands `in`.
-std::shared_ptr<JiggleInputs> jiggleInputs(const StrandSet& in, const ScalpMesh& scalp, const JiggleLags& lags);
+std::shared_ptr<JiggleInputs> jiggleInputs(const StrandSet& in, const ScalpMesh& scalp, const JiggleLags& lags,
+                                           const std::vector<std::uint32_t>* which = nullptr);  // which: those strands alone, in that order
 // Curl's clumps as the kernel takes them (CurlInputs, coherence clump), found on the strands `in` by
 // the channel `channel` as CurlOp finds them, their frames from `scalp`'s normals (null: none), their
 // draws by `seed`; null without the channel.

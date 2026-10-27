@@ -461,10 +461,15 @@ private:
             std::copy(restored.begin() + 1, restored.end(), out->strandPoints(s) + 1);
         };
         if (last) {
-            forEachListed(remade, [&](std::size_t s) {
-                copyStrandPoints(*out, *in, s);
-                restore(s);
-            });
+            gpu::StageInputs ref;  // (on the CPU engine: these strands' reference)
+            if (gpu::cpuEngineOn() && !even) ref.restore = gpu::restoreInputs(*in, refStrands.get(), refGuides.get(), nullptr, nullptr, &remade);
+            if (!(gpu::cpuEngineOn() && (even || ref.restore) &&
+                  gpu::runStageOnStrands(gpu::StageKind::RestoreLength, params(), in, remade, nullptr, *out, std::move(ref)))) {
+                forEachListed(remade, [&](std::size_t s) {
+                    copyStrandPoints(*out, *in, s);
+                    restore(s);
+                });
+            }
             *changed = StrandChanges::listed(std::move(remade));
         } else {
             parallelFor(0, out->strandCount(), restore);
