@@ -197,14 +197,14 @@ struct InterpolateClearance {
     // The scalp: over a deformed one, what the walk asks where it reaches a degenerate face's vertex
     // (meshPushOf; the CPU engine's alone, through the host: look.slang hostClearanceMeshPush).
     MeshPtr mesh;
-    // A scalp whose field the walk cannot read as tables (too big for its field's grid; deformed
-    // without a rest field): every push asked of `surface` through the host (`host`, the CPU
-    // engine's alone: look.slang hostClearanceSurfacePush), the tables a placeholder.
+    // The CPU engine's: every push asked of `surface` through the host (`host`: look.slang
+    // hostClearanceSurfacePush; its field makes only the bricks the strands come near, where tables
+    // are made whole), the tables a placeholder.
     CollisionSurface surface;
     bool host = false;
 };
-// `host` (the CPU engine's caller): a scalp whose field the walk cannot read as tables is asked
-// through the host (InterpolateClearance::host) rather than refused.
+// `host` (the CPU engine's caller): every push asked of the scalp's surface through the host
+// (InterpolateClearance::host), no tables made.
 std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet& params, const MeshPtr& scalp, std::string* why,
                                                                  bool host = false);
 // Over a deformed scalp (clearance.rest): each strand's walk's first vertex, its root face's vertex
@@ -236,10 +236,11 @@ struct CollideRestState {
 // CollideOp's push of point p out of `mesh` to `to` above it (the offset, or with `soft` the offset
 // plus the softness, the push then eased: softPush), within maxDepth below and the search radius:
 // through `rest` for a mesh deformed away from its rest pose (its rest field, the mesh itself where
-// that cannot tell), else (method exact) the mesh itself. True when it moved p. The CPU engine's
-// Collide asks the same (look.slang hostCollidePush).
-bool collideRestPush(const RestPoseCollision* rest, const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth,
-                     float searchRadius, CollideRestState& state);
+// that cannot tell), else through `field` (a still mesh's: its answers alone, the mesh's where it
+// has no grid), else (method exact) the mesh itself. True when it moved p. The CPU engine's Collide
+// asks the same (look.slang hostCollidePush; the GPU's reads the field as tables).
+bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* field, const ScalpMesh& mesh, Vec3f& p, float to, bool soft,
+                     float softness, float maxDepth, float searchRadius, CollideRestState& state);
 // Its last step: the mesh's own closest point (the bound of the last query skipping what it settles).
 bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth, float searchRadius,
                      CollideRestState& state);

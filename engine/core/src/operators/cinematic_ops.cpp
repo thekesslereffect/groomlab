@@ -73,6 +73,7 @@ public:
                              Value* out, StrandChanges* changed) const override {
         return run(ctx, inputs, &incremental, out, changed);
     }
+    void resultMixed(const StrandsPtr& made, const StrandsPtr& mixed) const override { longest_.mixed(made, mixed); }
 
 private:
     // In full, or (with `incremental`) only the strands the input changed in, into the last
@@ -92,7 +93,7 @@ private:
         if (incremental) {
             changes = someStrandsChanged(*incremental, 0);
             last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !fractionField.strandLocal() || !strayField.strandLocal()) return false;
+            if (!last || !longest_.local(last, {&fractionField, &strayField})) return false;
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;
@@ -132,9 +133,12 @@ private:
             for (const std::uint32_t s : changes->strands) flag[s] = strayed(s) ? 1.0f : had ? (*had)[s] : 0.0f;
             *changed = *changes;
         }
+        longest_.made(out, {&fractionField, &strayField});
         *result = StrandsPtr(out);
         return true;
     }
+
+    LongestKept longest_;  // the longest strand its fields read for the last result
 };
 
 // Mats and wet strands: a fraction of strands stick to a neighbor (a core strand, preview_core.h: the

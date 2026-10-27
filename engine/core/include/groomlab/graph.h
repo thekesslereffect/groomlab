@@ -100,6 +100,10 @@ public:
     // not on the rest of the set (an expression of `longest` reads every strand): what lets the
     // node it is plugged into make again only some strands (Operator::evaluateIncremental).
     virtual bool strandLocal() const { return false; }
+    // When all it reads of the rest of the set is `longest` (an expression of it: strandLocal false
+    // for that alone), the longest strand's length its last validate() read; else negative. With
+    // that the same, a strand's value is still the strand's own (LongestKept, operators/internal.h).
+    virtual float longestRead() const { return -1.0f; }
     // A field made of a ScalarField (a Map or Expression node's): it, for what reads the field's
     // inside (a GPU evaluating it, groomlab_gpu); null for any other.
     virtual const ScalarField* scalarField() const { return nullptr; }

@@ -183,6 +183,10 @@ bool flowClosest(std::uint64_t host, const float p[3], float reach, std::uint32_
 // in 9 words (look_engine_cpu.cpp restState).
 void collideCursor(std::uint64_t host, std::uint32_t mesh, std::uint32_t strand, const float p[3], float state[9]);
 bool collidePush(std::uint64_t host, std::uint32_t mesh, float p[3], float to, bool soft, float state[9]);
+// Whether CollideHost's mesh's field (a still one's) settles a strand rooted at `root` out to
+// `within`: its bounds there above `reach` (the offset plus the softness) or beyond the search,
+// each by two of its cells' diagonals.
+bool collideSettled(std::uint64_t host, std::uint32_t mesh, const float root[3], float within, float reach);
 // operator_state.h hairGridFloorCursor and hairGridFloorPush on the engine's look_run.h
 // HairGridInputs (its layout's floorSurface, its roots), the walk's state in collidePush's 9 words.
 void gridFloorCursor(std::uint64_t host, std::uint32_t strand, const float p[3], float state[9]);
@@ -288,6 +292,11 @@ inline bool groomlab_collide_push(const W& host, std::uint32_t mesh, V&& p, floa
     ref(p).z = q[2];
     groomlab_collide_state_in(a, b, c, w);
     return moved;
+}
+template <class W, class V>
+inline bool groomlab_collide_settled(const W& host, std::uint32_t mesh, const V& root, float within, float reach) {
+    const float r[3] = {root.x, root.y, root.z};
+    return groomlab::gpu::cpu_host::collideSettled(groomlab::gpu::cpu_host::address(host), mesh, r, within, reach);
 }
 template <class W, class V, class F, class D>
 inline bool groomlab_clearance_mesh_push(const W& host, const V& p, float offset, float maxDepth, float searchRadius, F&& heightLow, F&& distanceLow,

@@ -1027,8 +1027,8 @@ void LookEngine::putStageInputs(const LookRun& run) {
             if (!data->variation || data->variation->size() != data->centers * 4) {
                 throw std::runtime_error("GPU preview: Clump's variation missing");
             }
-            auto withNormals = [&](std::vector<float>& words) {
-                float* at = words.data() + data->centers * (kCenterFloats + kFrameFloats);
+            auto withNormals = [&](float* words) {
+                float* at = words + data->centers * (kCenterFloats + kFrameFloats);
                 for (std::size_t c = 0; c < data->centers; ++c, at += kNormalFloats) {
                     const Vec3f& n = (*data->normals)[c];
                     at[0] = n.x;
@@ -1036,7 +1036,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     at[2] = n.z;
                     at[3] = 0.0f;
                 }
-                if (!data->variation->empty()) std::memcpy(words.data() + variationAt, data->variation->data(), data->variation->size() * 4);
+                if (!data->variation->empty()) std::memcpy(words + variationAt, data->variation->data(), data->variation->size() * 4);
                 held.c = data->variation.get();
                 held.alive[2] = data->variation;
             };
@@ -1045,10 +1045,16 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     if (data->curves->size() != data->centers * kClumpCenterSamples) {
                         throw std::runtime_error("GPU preview: Clump's centers do not match its curves");
                     }
-                    std::vector<float> words(bytes / 4, 0.0f);
-                    if (!data->curves->empty()) std::memcpy(words.data(), data->curves->data(), data->curves->size() * 12);
-                    withNormals(words);
-                    write(auxBuffer(k, 1), words.data(), bytes, true);
+                    // (On the CPU written in place: the frames and arcs the kernels write left as they are.)
+                    if (float* to = static_cast<float*>(writable(auxBuffer(k, 1), bytes))) {
+                        if (!data->curves->empty()) std::memcpy(to, data->curves->data(), data->curves->size() * 12);
+                        withNormals(to);
+                    } else {
+                        std::vector<float> words(bytes / 4, 0.0f);
+                        if (!data->curves->empty()) std::memcpy(words.data(), data->curves->data(), data->curves->size() * 12);
+                        withNormals(words.data());
+                        write(auxBuffer(k, 1), words.data(), bytes, true);
+                    }
                     held.b = data->curves.get();
                     held.alive[1] = data->curves;
                     held.framesMade = false;
@@ -1058,7 +1064,7 @@ void LookEngine::putStageInputs(const LookRun& run) {
                 if (!data->chosen || data->chosen->size() != data->centers) throw std::runtime_error("GPU preview: Clump's centers chosen missing");
                 if (held.b != data->chosen.get()) {
                     std::vector<float> words(bytes / 4, 0.0f);  // the curves and frames the kernels write
-                    withNormals(words);
+                    withNormals(words.data());
                     write(auxBuffer(k, 1), words.data(), bytes, true);
                     write(auxBuffer(k, 2), data->chosen->data(), data->chosen->size() * 4, false);
                     held.b = data->chosen.get();

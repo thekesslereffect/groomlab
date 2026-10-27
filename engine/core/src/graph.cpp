@@ -503,24 +503,39 @@ StrandsPtr guidesAsStrands(const GuideSet& guides) {
     return out;
 }
 
-GuidesPtr strandsAsGuides(const StrandSet& strands, bool coreOnly) {
+GuidesPtr strandsAsGuides(const StrandSet& strands, bool coreOnly, const std::vector<std::string>* channels) {
     auto out = std::make_shared<GuideSet>();
     std::vector<std::string> names = strands.strandChannelNames();
+    if (channels) {
+        names.erase(std::remove_if(names.begin(), names.end(),
+                                   [&](const std::string& n) { return std::find(channels->begin(), channels->end(), n) == channels->end(); }),
+                    names.end());
+    }
     names.erase(std::remove(names.begin(), names.end(), std::string(kPreviewChannel)), names.end());
-    const std::vector<std::string> layers = strands.pointChannelNames();
+    const std::vector<std::string> layers = channels ? std::vector<std::string>() : strands.pointChannelNames();
     const PreviewCore core(strands);
+    std::vector<std::size_t> taken;
+    taken.reserve(strands.strandCount());
     for (std::size_t s = 0; s < strands.strandCount(); ++s) {
-        if (coreOnly && !core.core(s)) continue;
+        if (!coreOnly || core.core(s)) taken.push_back(s);
+    }
+    // Each guide made on its own (in strand order, as GuideSet::add appends them).
+    std::vector<Guide>& guides = out->guides();
+    guides.resize(taken.size());
+    parallelFor(0, taken.size(), [&](std::size_t k) {
+        const std::size_t s = taken[k];
         const Vec3f* pts = strands.strandPoints(s);
         const std::size_t n = strands.strandPointCount(s), begin = strands.strandBegin(s);
-        Guide& g = out->add(strands.ids()[s], std::vector<Vec3f>(pts, pts + n));
+        Guide& g = guides[k];
+        g.id = strands.ids()[s];
+        g.points.assign(pts, pts + n);
         g.root = strands.roots()[s];
         for (const std::string& name : names) g.attributes[name] = (*strands.strandChannel(name))[s];
         for (const std::string& name : layers) {
             const float* values = strands.pointChannel(name)->data() + begin;
             g.pointAttributes[name].assign(values, values + n);
         }
-    }
+    }, 64);
     return out;
 }
 

@@ -259,6 +259,9 @@ struct Clearance {
     }
 };
 
+// interpolateClearance's inputs from the scalp's Clearance at hand (below).
+std::shared_ptr<const InterpolateClearance> clearanceInputs(const Clearance& c, const MeshPtr& scalp, std::string* why, bool host);
+
 // Tests: the binding as first written (setInterpolateReferencePaths), to compare.
 std::atomic<bool> referencePaths{false};
 
@@ -1277,6 +1280,13 @@ private:
         return b;
     }
 
+    // The kept guides' search roots, root normals, offset rows (`stride` floats a row) and lengths at
+    // `samples` samples.
+    struct GuideRows {
+        std::size_t samples = 0;
+        std::vector<Vec3f> roots, normals;
+        std::vector<float> offsets, lengths;
+    };
     // What the last result was made from (evaluateIncremental): the result and its strands (by
     // identity, not kept alive), the guides (the kept ones in order), the binding, the guide
     // attribute and layer names, the scalp's surface and the binding's base key.
@@ -1288,6 +1298,7 @@ private:
         std::vector<std::string> attrNames, layerNames;
         std::uint64_t scalp = 0;
         std::uint64_t baseKey = 0;
+        std::shared_ptr<const GuideRows> rows;  // the kept guides' as made
         // regionMap: what the regions were read from (the strands' colors, kept while the strands
         // and the map are) and the regions.
         std::shared_ptr<const RegionSource> regionSource;
@@ -1376,13 +1387,26 @@ private:
                 if (kept[g]->id != made.kept[g]->id) return false;  // guides added, erased or reordered
             }
         }
-        std::vector<Vec3f> roots(kept.size());    // search positions: on the rest scalp when it has one
-        std::vector<Vec3f> normals(kept.size());  // zero when a guide is not rooted on the scalp
-        std::vector<float> offsets(kept.size() * 3 * stride, 0.0f);
-        std::vector<float> guideLengths(kept.size());
+        // Incrementally, the guides that changed (the others take their rows as made).
+        std::vector<char> guideChanged;
+        const GuideRows* before = last && made.rows && made.rows->samples == samples ? made.rows.get() : nullptr;
+        if (last) {
+            guideChanged.resize(kept.size());
+            parallelFor(0, kept.size(), [&](std::size_t g) { guideChanged[g] = sameGuide(*kept[g], *made.kept[g]) ? 0 : 1; });
+        }
+        auto rowsMade = std::make_shared<GuideRows>();
+        rowsMade->samples = samples;
+        std::vector<Vec3f>& roots = rowsMade->roots;      // search positions: on the rest scalp when it has one
+        std::vector<Vec3f>& normals = rowsMade->normals;  // zero when a guide is not rooted on the scalp
+        std::vector<float>& offsets = rowsMade->offsets;
+        std::vector<float>& guideLengths = rowsMade->lengths;
+        roots.resize(kept.size());
+        normals.resize(kept.size());
+        offsets.assign(kept.size() * 3 * stride, 0.0f);
+        guideLengths.resize(kept.size());
         const bool smoothGuides = params().getBool("smoothGuides");
         // keepClearance: the scalp's field.
-        const Clearance clearance = align && !lengthOnly && params().getBool("keepClearance") ? Clearance::of(scalp) : Clearance{};
+        const Clearance clearance = align && !lengthOnly && params().getBool("keepClearance") ? clearanceOf(scalp) : Clearance{};
         // fillTubes: each kept guide's tube laid along its shape as the blend reads it.
         std::unique_ptr<TubeFill> fill;
         const std::vector<Guide>* levelTubes = fillTubes && guides->levelTubes() ? guides->levelTubes().get() : nullptr;
@@ -1412,6 +1436,14 @@ private:
         }
         parallelFor(0, kept.size(), [&](std::size_t k) {
             const Guide& g = *kept[k];
+            if (before && !guideChanged[k]) {  // (no tubes: a fill evaluates in full)
+                roots[k] = before->roots[k];
+                normals[k] = before->normals[k];
+                guideLengths[k] = before->lengths[k];
+                std::copy_n(before->offsets.begin() + static_cast<std::ptrdiff_t>(k * 3 * stride), 3 * stride,
+                            offsets.begin() + static_cast<std::ptrdiff_t>(k * 3 * stride));
+                return;
+            }
             thread_local std::vector<Vec3f> resampled;
             guideLengths[k] = guideShape(g, samples, smoothGuides, resampled);
             roots[k] = restRootOr(align ? scalp.get() : nullptr, g.root, resampled.front());
@@ -1582,8 +1614,6 @@ private:
         // (another binding: guide roots moved) those whose guides or weights did.
         std::vector<std::uint32_t> dirty;
         if (last) {
-            std::vector<char> guideChanged(kept.size());
-            parallelFor(0, kept.size(), [&](std::size_t g) { guideChanged[g] = sameGuide(*kept[g], *made.kept[g]) ? 0 : 1; });
             const Binding& before = *made.binding;
             const std::size_t chunks = bindings.chunks.size();
             std::vector<std::vector<std::uint32_t>> found(chunks);
@@ -1603,7 +1633,7 @@ private:
             for (const auto& list : found) dirty.insert(dirty.end(), list.begin(), list.end());
             if (dirty.empty()) {  // nothing reaches a strand: the last result as it is
                 remember(last, strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey,
-                         regionSource, regions);
+                         regionSource, regions, rowsMade);
                 *result = last;
                 *changed = StrandChanges::listed({});
                 return true;
@@ -1691,7 +1721,7 @@ private:
             std::shared_ptr<const std::vector<std::uint32_t>> cursors;
             if (clearance) {
                 std::string whyNot;
-                field = interpolateClearance(params(), scalp, &whyNot, true);
+                field = clearanceInputs(clearance, scalp, &whyNot, true);
                 if (!field) throw GraphError("Interpolate: " + whyNot);
                 if (field->rest) {  // over a deformed scalp: each strand's walk's first vertex
                     float longest = 0.0f;
@@ -1826,7 +1856,7 @@ private:
         }
         const StrandsPtr blended = out;
         remember(blended, strands, guides, kept, binding, attrNames, layerNames, scalpKey, baseKey,
-                 regionSource, regions);
+                 regionSource, regions, rowsMade);
         *result = blended;
         return true;
     }
@@ -1943,8 +1973,9 @@ private:
                   const std::vector<const Guide*>& kept, const std::shared_ptr<const Binding>& binding,
                   const std::vector<std::string>& attrNames, const std::vector<std::string>& layerNames,
                   std::uint64_t scalp, std::uint64_t baseKey, std::shared_ptr<const RegionSource> regionSource,
-                  std::shared_ptr<const RegionSplit> regions) const {
+                  std::shared_ptr<const RegionSplit> regions, std::shared_ptr<const GuideRows> rows) const {
         const std::lock_guard<std::mutex> lock(madeMutex_);
+        made_.rows = std::move(rows);
         made_.regionSource = std::move(regionSource);
         made_.regions = std::move(regions);
         made_.output = output;
@@ -2503,6 +2534,18 @@ private:
     mutable std::vector<std::pair<std::uint64_t, std::shared_ptr<const Binding>>> memo_;  // newest first
     mutable std::mutex madeMutex_;
     mutable Made made_;
+    // The last scalp's Clearance (its bounds and field asked again only for another scalp).
+    mutable std::mutex clearanceMutex_;
+    mutable MeshPtr clearanceScalp_;
+    mutable Clearance clearance_;
+    Clearance clearanceOf(const MeshPtr& scalp) const {
+        const std::lock_guard<std::mutex> lock(clearanceMutex_);
+        if (clearanceScalp_ != scalp) {
+            clearance_ = Clearance::of(scalp);
+            clearanceScalp_ = scalp;
+        }
+        return clearance_;
+    }
     // The binding as the CPU engine takes it (InterpolateState), kept while the binding is: its
     // records stay uploaded (look_engine.cpp compares them by address).
     mutable std::shared_ptr<const InterpolateState> engineState_;
@@ -2571,9 +2614,11 @@ std::shared_ptr<const InterpolateState> interpolateStateOf(const InterpolateStat
     const auto* binding = static_cast<const Binding*>(state.binding.get());
     auto made = std::make_shared<Binding>();
     made->strandCount = which.size();
-    std::vector<float> twists;
-    for (std::size_t first = 0; first < which.size(); first += kBindChunk) {
-        const std::size_t n = std::min(kBindChunk, which.size() - first);
+    // (Each chunk made on its own, side by side.)
+    made->chunks.resize((which.size() + kBindChunk - 1) / kBindChunk);
+    parallelFor(0, made->chunks.size(), [&](std::size_t c) {
+        const std::size_t first = c * kBindChunk, n = std::min(kBindChunk, which.size() - first);
+        thread_local std::vector<float> twists;
         auto chunk = std::make_shared<BindingChunk>();
         chunk->wide = true;
         chunk->offsets.assign(n + 1, 0u);
@@ -2597,8 +2642,8 @@ std::shared_ptr<const InterpolateState> interpolateStateOf(const InterpolateStat
                 chunk->twists.push_back(twists[g]);
             }
         }
-        made->chunks.push_back(std::move(chunk));
-    }
+        made->chunks[c] = std::move(chunk);
+    }, 1);
     auto out = std::make_shared<InterpolateState>(state);
     out->binding = std::move(made);
     out->strandCount = which.size();
@@ -2614,11 +2659,18 @@ bool interpolateRebind(const Operator& op, const PartLines* parts, const std::ve
 std::size_t interpolateSamples(const StrandSet& strands) {
     const PreviewCore core(strands);
     if (core.all()) return std::max(kMinGuideSamples, strands.maxPointCount());
-    std::size_t most = 0;
-    for (std::size_t s = 0; s < strands.strandCount(); ++s) {
-        if (core.core(s)) most = std::max(most, strands.strandPointCount(s));
-    }
-    return std::max(kMinGuideSamples, most);
+    // (In blocks side by side, each its most, then theirs.)
+    constexpr std::size_t kBlock = 4096;
+    const std::size_t count = strands.strandCount(), blocks = (count + kBlock - 1) / kBlock;
+    std::vector<std::size_t> most(blocks, 0);
+    parallelFor(0, blocks, [&](std::size_t b) {
+        for (std::size_t s = b * kBlock; s < std::min(count, (b + 1) * kBlock); ++s) {
+            if (core.core(s)) most[b] = std::max(most[b], strands.strandPointCount(s));
+        }
+    }, 1);
+    std::size_t all = 0;
+    for (const std::size_t m : most) all = std::max(all, m);
+    return std::max(kMinGuideSamples, all);
 }
 
 void interpolateGuideRows(const ParamSet& params, const std::vector<const Guide*>& kept, const MeshPtr& scalpPtr,
@@ -2653,7 +2705,12 @@ std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet&
         *why = "it does not keep clearance";
         return nullptr;
     }
-    const Clearance c = Clearance::of(scalp);
+    return clearanceInputs(Clearance::of(scalp), scalp, why, host);
+}
+
+namespace {
+
+std::shared_ptr<const InterpolateClearance> clearanceInputs(const Clearance& c, const MeshPtr& scalp, std::string* why, bool host) {
     if (!c) {
         *why = "its scalp has no size";
         return nullptr;
@@ -2666,6 +2723,16 @@ std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet&
     out->searchRadius = c.searchRadius;
     out->beside = c.beside;
     out->mesh = scalp;
+    if (host) {
+        // The CPU engine's: every push asked of the surface itself, its field making only the
+        // bricks the strands come near (tables are made whole); over a deformed scalp each strand's
+        // walk from its root's vertex (interpolateRestCursors).
+        out->host = true;
+        out->surface = c.surface;
+        out->rest = c.surface.rest;
+        out->tables = std::make_shared<const std::vector<std::uint32_t>>(MeshDistanceField::kTableHeaderWords, 0u);
+        return out;
+    }
     if (c.surface.field) {
         out->tables = c.surface.field->tables(c.cap, c.searchRadius);
     } else if (c.surface.rest) {  // a deformed scalp's walk goes through its rest pose, vertex by vertex
@@ -2674,19 +2741,14 @@ std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet&
         out->rest = c.surface.rest;
     }
     if (!out->tables) {
-        if (!host) {
-            *why = c.surface.field || c.surface.rest ? "its scalp is too big for the clearance field's grid"
-                                                     : "it keeps clearance over a deformed scalp its rest field cannot push from";
-            return nullptr;
-        }
-        // Every push asked of the surface through the host (a placeholder for the tables).
-        out->host = true;
-        out->surface = c.surface;
-        out->walk = nullptr;
-        out->tables = std::make_shared<const std::vector<std::uint32_t>>(MeshDistanceField::kTableHeaderWords, 0u);
+        *why = c.surface.field || c.surface.rest ? "its scalp is too big for the clearance field's grid"
+                                                 : "it keeps clearance over a deformed scalp its rest field cannot push from";
+        return nullptr;
     }
     return out;
 }
+
+}  // namespace
 
 std::shared_ptr<const std::vector<std::uint32_t>> interpolateRestCursors(const InterpolateClearance& clearance, const StrandSet& in,
                                                                          float longestGuide, std::string* why, bool meshAsked) {

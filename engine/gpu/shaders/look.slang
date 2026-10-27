@@ -4092,6 +4092,18 @@ void hostCollideCursor(uint2 host, uint mesh, uint strand, float3 p, inout float
 bool hostCollidePush(uint2 host, uint mesh, inout float3 p, float to, bool soft, inout float4 a, inout float4 b, inout float c) {
     __target_switch { case cpp: __intrinsic_asm "groomlab_collide_push($0, $1, $2, $3, $4, $5, $6, $7)"; }
 }
+bool hostCollideSettled(uint2 host, uint mesh, float3 root, float within, float reach) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_collide_settled($0, $1, $2, $3, $4)"; }
+}
+// Whether mesh m asked through the host (CollideHost) settles every push for the strand rooted at
+// `root` out to `within` (a still mesh's field's bounds there: the strand well above it or beyond
+// the search, as fieldBounds tells from tables); never on a GPU.
+bool collideHostSettled(uint m, float3 root, float within, float reach) {
+    __target_switch {
+    case cpp: return hostCollideSettled(gFlag2.zw, m, root, within, reach);
+    default: return false;
+    }
+}
 // A strand's walk state over each deformed mesh (the cursor restarted each pass; the bound kept).
 struct CollideRestStates {
     float4 a[2], b[2];
@@ -4264,7 +4276,13 @@ void CollideCS(uint3 id : SV_DispatchThreadID) {
     PRECISE float within = widened + 1e-6f;
     float2 skipWithin = float2(-1.0f, -1.0f);
     for (uint m = 0; m < meshes; ++m) {
-        if (collideRest(m)) continue;  // (a deformed mesh: no tables, never settled for the strand)
+        if (collideRest(m)) {
+            // Asked through the host (the CPU engine's): a still mesh's field settles it there.
+            if (collideHostSettled(m, root, within, reach)) {
+                if (m == 0) skipWithin.x = within; else skipWithin.y = within;
+            }
+            continue;
+        }
         sTableBase = m == 0 ? 0u : gAux.x;
         const FieldTables t = m == 0 ? scalpTables : colliderTables;
         float heightLow, distanceLow;

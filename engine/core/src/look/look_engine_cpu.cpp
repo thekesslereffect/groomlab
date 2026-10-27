@@ -88,7 +88,7 @@ bool collidePush(std::uint64_t host, std::uint32_t mesh, float p[3], float to, b
     const CollideHost& h = collideHost(host);
     CollideRestState st = restState(state);
     Vec3f q(p[0], p[1], p[2]);
-    const bool moved = collideRestPush(h.rests[mesh].get(), *h.meshes[mesh], q, to, soft, h.softness, h.maxDepth, h.searchRadius, st);
+    const bool moved = collideRestPush(h.rests[mesh].get(), h.fields[mesh].get(), *h.meshes[mesh], q, to, soft, h.softness, h.maxDepth, h.searchRadius, st);
     put(q, p);
     putState(st, state);
     return moved;
@@ -152,6 +152,17 @@ bool clearanceSurfacePush(std::uint64_t host, const float p[3], float offset, fl
     cursor[4] = cur.clear;
     if (moved) put(d, delta);
     return moved;
+}
+
+bool collideSettled(std::uint64_t host, std::uint32_t mesh, const float root[3], float within, float reach) {
+    const CollideHost& h = collideHost(host);
+    const MeshDistanceField* field = mesh < h.fields.size() && !h.rests[mesh] ? h.fields[mesh].get() : nullptr;
+    if (!field) return false;
+    // (CollideOp's own test: the margin the field's blend may answer below a point's height by.)
+    const float margin = 2.0f * 1.7320508f * field->cellSize();
+    float heightLow = 0.0f, distanceLow = 0.0f;
+    return field->bounds(Vec3f(root[0], root[1], root[2]), within, &heightLow, &distanceLow) &&
+           (heightLow >= reach + margin || distanceLow > h.searchRadius + margin);
 }
 
 bool flowClosest(std::uint64_t host, const float p[3], float reach, std::uint32_t* face, float uv[2], float at[3], float normal[3]) {
@@ -256,7 +267,8 @@ protected:
     bool sharesBase() const override { return true; }
     void* writable(int id, std::size_t bytes) override {
         Words& w = buffers_[id];
-        if (!w || w->host || w->ownWords < (bytes + 3) / 4) w = ownWords(bytes);
+        // (Its own words again where they hold it and nothing else holds them: a sibling's borrow.)
+        if (!w || w->host || w->ownWords < (bytes + 3) / 4 || w.use_count() > 1) w = ownWords(bytes);
         return w->data();
     }
     bool has(int id) const override { return buffers_.count(id) != 0; }

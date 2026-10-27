@@ -97,6 +97,10 @@ void clumpShape(const ParamSet& clump, const Get& get, StageParams* s) {
 // and `seed` (clumpVariation: the strength's, the lock radius's and a random flatten's draws).
 std::shared_ptr<ClumpInputs> clumpInputs(std::shared_ptr<const std::vector<std::uint32_t>> assigned, std::vector<Vec3f> curves,
                                          std::vector<Vec3f> normals, const std::vector<StrandId>& ids, std::uint64_t seed);
+// The same of curves and normals already shared (a Clump's kept ones: no copies).
+std::shared_ptr<ClumpInputs> clumpInputs(std::shared_ptr<const std::vector<std::uint32_t>> assigned,
+                                         std::shared_ptr<const std::vector<Vec3f>> curves, std::shared_ptr<const std::vector<Vec3f>> normals,
+                                         const std::vector<StrandId>& ids, std::uint64_t seed);
 std::shared_ptr<const std::vector<float>> clumpVariation(const std::vector<StrandId>& ids, std::uint64_t seed);
 
 // A param holding a map of its own, or that or a field plugged in (as its node's evaluation reads it).

@@ -433,11 +433,18 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
 
 std::shared_ptr<ClumpInputs> clumpInputs(std::shared_ptr<const std::vector<std::uint32_t>> assigned, std::vector<Vec3f> curves,
                                          std::vector<Vec3f> normals, const std::vector<StrandId>& ids, std::uint64_t seed) {
+    return clumpInputs(std::move(assigned), std::make_shared<const std::vector<Vec3f>>(std::move(curves)),
+                       std::make_shared<const std::vector<Vec3f>>(std::move(normals)), ids, seed);
+}
+
+std::shared_ptr<ClumpInputs> clumpInputs(std::shared_ptr<const std::vector<std::uint32_t>> assigned,
+                                         std::shared_ptr<const std::vector<Vec3f>> curves, std::shared_ptr<const std::vector<Vec3f>> normals,
+                                         const std::vector<StrandId>& ids, std::uint64_t seed) {
     auto made = std::make_shared<ClumpInputs>();
     made->assigned = std::move(assigned);
     made->centers = ids.size();
-    made->curves = std::make_shared<const std::vector<Vec3f>>(std::move(curves));
-    made->normals = std::make_shared<const std::vector<Vec3f>>(std::move(normals));
+    made->curves = std::move(curves);
+    made->normals = std::move(normals);
     made->variation = clumpVariation(ids, seed);
     return made;
 }
@@ -673,11 +680,15 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
     }
     auto made = std::make_shared<CollideInputs>();
     made->colliders = colliders;
-    // Each field's tables (none: asked through the host, as method exact asks the mesh: a deformed
-    // mesh, method exact, and with `rests` given (the CPU engine's caller) a field without a grid,
-    // which asks the mesh at every point).
+    // Each field's tables (none: asked through the host: a deformed mesh, method exact, and every
+    // mesh with `rests` given, the CPU engine's caller, which asks the fields themselves: they make
+    // only the bricks the strands come near, where tables are made whole).
     std::vector<MeshDistanceField::Tables> tables(meshes.size());
     for (std::size_t m = 0; m < meshes.size(); ++m) {
+        if (!rests.empty()) {
+            made->rests |= 1u << m;
+            continue;
+        }
         if (!fields[m]) {
             if (!exact && rests.empty()) {
                 *why = "a surface has no field the GPU can read (deformed: the CPU's)";
@@ -707,6 +718,7 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
         auto host = std::make_shared<CollideHost>();
         host->rests = rests;
         host->rests.resize(meshes.size());  // (null: the mesh itself)
+        host->fields = fields;
         host->meshes = meshes;
         host->maxDepth = maxDepth;
         host->searchRadius = searchRadius;

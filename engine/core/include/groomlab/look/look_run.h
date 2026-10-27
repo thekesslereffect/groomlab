@@ -311,6 +311,7 @@ struct PartInputs {
 // the mesh itself (its rest null).
 struct CollideHost {
     std::vector<std::shared_ptr<const RestPoseCollision>> rests;  // per mesh (null: a still one, or method exact)
+    std::vector<DistanceFieldPtr> fields;  // per mesh: a still one's field (null: deformed, or method exact)
     std::vector<MeshPtr> meshes;
     float maxDepth = 0.0f, searchRadius = 0.0f, softness = 0.0f;
     std::shared_ptr<const std::vector<StrandRoot>> roots;  // per strand of the run (its walk starts at its root)

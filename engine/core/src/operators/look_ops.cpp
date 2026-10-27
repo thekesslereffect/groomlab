@@ -903,9 +903,9 @@ public:
     // What the last result was made from, when it is `output` (operator_state.h).
     bool state(const StrandsPtr& output, ClumpState* state) const {
         const std::lock_guard<std::mutex> lock(madeMutex_);
-        if (!output || !sameOrShown(made_.output.lock(), output) || !made_.assigned) return false;
-        state->curves = made_.curves;
-        state->centerNormals = made_.centerNormals;
+        if (!output || !sameOrShown(made_.output.lock(), output) || !made_.assigned || !made_.curves) return false;
+        state->curves = *made_.curves;
+        state->centerNormals = *made_.centerNormals;
         state->assigned = made_.assigned;
         state->centerGuides = made_.centerGuides;
         state->chosen = made_.chosen;
@@ -928,7 +928,9 @@ private:
     // centers' search roots and curves, and each strand's center (kNoCenter: not clumped).
     struct Made {
         std::weak_ptr<const StrandSet> output;
-        std::vector<Vec3f> roots, curves, centerNormals;
+        std::vector<Vec3f> roots;
+        std::shared_ptr<const PointIndex> index;  // over `roots`
+        std::shared_ptr<const std::vector<Vec3f>> curves, centerNormals;  // (shared with the run's ClumpInputs)
         std::shared_ptr<const std::vector<std::uint32_t>> assigned;
         // What the assignment was searched from besides the centers' roots: each strand's query
         // (its root on the rest scalp, else its first point; NaN without points) and the parts'
@@ -1017,7 +1019,11 @@ private:
         } else if (!own) {
             centers = valueAs<GuidesPtr>(inputs.at(1));
             // Strands as centers: their preview core (preview_core.h), the same at every preview density.
-            if (const StrandsPtr strands = valueAs<StrandsPtr>(inputs.at(1))) centers = strandsAsGuides(*strands, true);
+            // (Of their channels only the regions', all of a center's Clump reads.)
+            if (const StrandsPtr strands = valueAs<StrandsPtr>(inputs.at(1))) {
+                const std::vector<std::string> carried{params().getString("regionChannel")};
+                centers = strandsAsGuides(*strands, true, &carried);
+            }
             if (!linked) ctx.note("no clumps: connect centers (guides or strands) or set centersFrom to pick; the strands pass through");
         }
         // centersFrom pick: centers of its own, picked among the strands (the ones centerWeight
@@ -1115,21 +1121,31 @@ private:
         std::vector<Vec3f> curves;
         std::vector<const Guide*> used;  // the centers, in `roots` order
         std::vector<std::size_t> centerGuides;
-        for (const Guide& g : centers->guides()) {
-            // From the strands, a center gives only its root: a single point will do.
-            if (g.points.size() < (fromStrands ? 1u : 2u)) continue;
-            if (fromStrands) {
-                starts.push_back(g.points.front());
-            } else {
-                const auto resampled = resampleByArcLength(g.points.data(), g.points.size(), kCenterSamples);
-                starts.push_back(resampled.front());
-                curves.insert(curves.end(), resampled.begin(), resampled.end());
-            }
-            const auto guide = static_cast<std::size_t>(&g - centers->guides().data());
-            roots.push_back(guide < pickedAt.size() ? pickedAt[guide] : binding.stablePosition(g.root, starts.back()));
-            centerGuides.push_back(static_cast<std::size_t>(&g - centers->guides().data()));
-            used.push_back(&g);
+        // From the strands, a center gives only its root: a single point will do. (The centers
+        // listed first, then each made on its own.)
+        const std::vector<Guide>& given = centers->guides();
+        for (std::size_t k = 0; k < given.size(); ++k) {
+            if (given[k].points.size() >= (fromStrands ? 1u : 2u)) centerGuides.push_back(k);
         }
+        starts.resize(centerGuides.size());
+        roots.resize(centerGuides.size());
+        used.resize(centerGuides.size());
+        if (!fromStrands) curves.resize(centerGuides.size() * kCenterSamples);
+        parallelFor(0, centerGuides.size(), [&](std::size_t c) {
+            const std::size_t guide = centerGuides[c];
+            const Guide& g = given[guide];
+            if (fromStrands) {
+                starts[c] = g.points.front();
+            } else {
+                thread_local std::vector<Vec3f> resampled;
+                resampled.resize(kCenterSamples);
+                resampleByArcLengthInto(g.points.data(), g.points.size(), resampled.data(), kCenterSamples);
+                starts[c] = resampled.front();
+                std::copy(resampled.begin(), resampled.end(), curves.begin() + static_cast<std::ptrdiff_t>(c * kCenterSamples));
+            }
+            roots[c] = guide < pickedAt.size() ? pickedAt[guide] : binding.stablePosition(g.root, starts[c]);
+            used[c] = &g;
+        }, 64);
         if (roots.empty()) {
             if (incremental) return false;
             *result = unclumped(in);
@@ -1211,13 +1227,13 @@ private:
                 axes = made.axes;
                 axisCurves();
             }
-            if (made.curves.size() != curves.size()) return false;
+            if (!made.curves || made.curves->size() != curves.size()) return false;
             // The centers whose curves moved, then the strands to clump again: those that moved and
             // those clumped toward a center that did.
             std::vector<char> movedCenter(roots.size(), 0);
             bool anyMoved = false;
             for (std::size_t c = 0; c < roots.size(); ++c) {
-                movedCenter[c] = std::memcmp(curves.data() + c * kCenterSamples, made.curves.data() + c * kCenterSamples,
+                movedCenter[c] = std::memcmp(curves.data() + c * kCenterSamples, made.curves->data() + c * kCenterSamples,
                                              kCenterSamples * sizeof(Vec3f)) != 0;
                 anyMoved = anyMoved || movedCenter[c];
             }
@@ -1238,7 +1254,8 @@ private:
                 return true;
             }
         }
-        const PointIndex index(roots);
+        // (Incrementally the last run's: the centers rooted where they were.)
+        const std::shared_ptr<const PointIndex> index = last && made.index ? made.index : std::make_shared<const PointIndex>(roots);
         const PartsPtr parts = params().getBool("respectParts") ? valueAs<PartsPtr>(ctx.external("parts")) : nullptr;
         // Parts lie on the scalp drawn: sides are found from the roots there (the queries are on
         // the cage when it is refined).
@@ -1331,12 +1348,14 @@ private:
         } else if (last && made.queries && made.partsKey == partsKey && made.queries->size() == in->strandCount()) {
             // The queries of the strands made again: the kept ones unless one moved.
             queries = made.queries;
+            std::vector<Vec3f> now(dirty.size());
+            parallelFor(0, dirty.size(), [&](std::size_t k) { now[k] = queryOf(dirty[k]); }, 256);
             std::shared_ptr<std::vector<Vec3f>> moved;
-            for (const std::uint32_t s : dirty) {
-                const Vec3f q = queryOf(s);
-                if (std::memcmp(&q, &(*queries)[s], sizeof(Vec3f)) == 0) continue;
+            for (std::size_t k = 0; k < dirty.size(); ++k) {
+                const std::uint32_t s = dirty[k];
+                if (std::memcmp(&now[k], &(*queries)[s], sizeof(Vec3f)) == 0) continue;
                 if (!moved) moved = std::make_shared<std::vector<Vec3f>>(*queries);
-                (*moved)[s] = q;
+                (*moved)[s] = now[k];
             }
             if (moved) queries = moved;
             if (moved && fromStrands) return false;  // a strand moved center: the axes in full
@@ -1374,7 +1393,7 @@ private:
             }
             const Vec3f query = queries ? (*queries)[s] : binding.stablePosition(in->roots()[s], pts[0]);
             // The centers it may clump toward: all, or its region's (none: not clumped).
-            const PointIndex* search = &index;
+            const PointIndex* search = index.get();
             const std::vector<std::uint32_t>* region = nullptr;
             if (strandRegions) {
                 const float mine = (*strandRegions)[s];
@@ -1455,15 +1474,18 @@ private:
 
         // Round locks and ribbons: each center's cross-section frames, from the scalp's normal at
         // its root (frameSeed), so the locks turn with the scalp.
-        std::vector<Vec3f> centerNormals(roots.size());
-        for (std::size_t c = 0; c < roots.size(); ++c) centerNormals[c] = rootNormalOr(scalp, used[c]->root);
+        auto centerNormals = std::make_shared<std::vector<Vec3f>>(roots.size());
+        parallelFor(0, roots.size(), [&](std::size_t c) { (*centerNormals)[c] = rootNormalOr(scalp, used[c]->root); }, 256);
+        const auto curvesMade = std::make_shared<const std::vector<Vec3f>>(std::move(curves));
+        const std::shared_ptr<const std::vector<Vec3f>> normalsMade = std::move(centerNormals);
         // What it keeps for the GPU preview (operator_state.h clumpState).
         auto keep = [&] {
             const std::lock_guard<std::mutex> lock(madeMutex_);
             made_.output = out;
             made_.roots = std::move(roots);
-            made_.curves = std::move(curves);
-            made_.centerNormals = std::move(centerNormals);
+            made_.index = index;
+            made_.curves = curvesMade;
+            made_.centerNormals = normalsMade;
             made_.assigned = std::move(assigned);
             made_.centerGuides = std::move(centerGuides);
             made_.chosen = std::move(chosen);
@@ -1484,7 +1506,7 @@ private:
         for (std::size_t c = 0; c < used.size(); ++c) ids[c] = used[c]->id;
         gpu::StageInputs taken;
         if (!last) {
-            taken.clump = gpu::clumpInputs(assigned, curves, centerNormals, ids, seed);
+            taken.clump = gpu::clumpInputs(assigned, curvesMade, normalsMade, ids, seed);
             gpu::runStageInto(gpu::StageKind::Clump, params(), in, scalp, *out, std::move(taken));
             if (clumpIds) {
                 parallelFor(0, assigned->size(), [&](std::size_t s) {
@@ -1495,7 +1517,7 @@ private:
         } else {
             auto theirs = std::make_shared<std::vector<std::uint32_t>>(dirty.size());
             for (std::size_t k = 0; k < dirty.size(); ++k) (*theirs)[k] = (*assigned)[dirty[k]];
-            taken.clump = gpu::clumpInputs(theirs, curves, centerNormals, ids, seed);
+            taken.clump = gpu::clumpInputs(theirs, curvesMade, normalsMade, ids, seed);
             gpu::runStageOnStrands(gpu::StageKind::Clump, params(), in, dirty, scalp, *out, std::move(taken));
             if (clumpIds) {
                 for (const std::uint32_t s : dirty) (*clumpIds)[s] = (*assigned)[s] != kNoCenter ? numbers[(*assigned)[s]] : -1.0f;
@@ -1659,8 +1681,11 @@ public:
                              Value* out, StrandChanges* changed) const override {
         return run(ctx, inputs, &incremental, out, changed);
     }
+    void resultMixed(const StrandsPtr& made, const StrandsPtr& mixed) const override { longest_.mixed(made, mixed); }
 
 private:
+    LongestKept longest_;  // the longest strand its fields read for the last result
+
     // In full, or (with `incremental`) only the strands the input changed in, into the last
     // result's copy; false when that cannot be done.
     bool run(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
@@ -1679,7 +1704,7 @@ private:
         if (incremental) {
             changes = someStrandsChanged(*incremental, 0);
             last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            if (!last || !amplitudeField.strandLocal() || !fractionField.strandLocal()) return false;
+            if (!last || !longest_.local(last, {&amplitudeField, &fractionField})) return false;
             if (changes->none()) {  // the same strands in: the same result
                 *result = last;
                 *changed = *changes;
@@ -1700,15 +1725,18 @@ private:
         }
         // look.slang's NoiseCS, the GPU preview's own (look_cpu.h): in full, or the strands the input
         // changed in, into the last result's copy.
+        StrandsPtr out;
         if (!last) {
-            *result = gpu::runStage(gpu::StageKind::Noise, params(), in, scalpOf(ctx));
-            return true;
+            out = gpu::runStage(gpu::StageKind::Noise, params(), in, scalpOf(ctx));
+        } else {
+            auto made = std::make_shared<StrandSet>(*in);
+            positionsOfLast(*made, last, *incremental);  // the strands left alone, as they were made
+            gpu::runStageOnStrands(gpu::StageKind::Noise, params(), in, changes->strands, scalpOf(ctx), *made);
+            *changed = *changes;
+            out = made;
         }
-        auto out = std::make_shared<StrandSet>(*in);
-        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-        gpu::runStageOnStrands(gpu::StageKind::Noise, params(), in, changes->strands, scalpOf(ctx), *out);
-        *changed = *changes;
-        *result = StrandsPtr(out);
+        longest_.made(out, {&amplitudeField, &fractionField});
+        *result = out;
         return true;
     }
 };

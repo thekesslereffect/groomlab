@@ -58,6 +58,7 @@ public:
     float maximum() const override { return field_.maximum(); }
     bool readsPositions() const override { return field_.readsPositions(); }
     bool strandLocal() const override { return field_.strandLocal(); }
+    float longestRead() const override { return field_.longestRead(); }
     const ScalarField* scalarField() const override { return &field_; }
 
 private:
@@ -93,6 +94,7 @@ public:
     float maximum() const override { return fields_[3]->maximum(); }
     bool readsPositions() const override { return fields_[3]->readsPositions(); }
     bool strandLocal() const override { return fields_[3]->strandLocal(); }
+    float longestRead() const override { return fields_[3]->longestRead(); }
     const ScalarField* scalarField() const override { return fields_[3].get(); }
     bool isColor() const override { return true; }
     std::array<float, 3> colorAt(const StrandSet& strands, std::size_t s) const override {
@@ -524,6 +526,7 @@ public:
     void validate(const StrandSet& strands) const override { in_->validate(strands); }
     bool readsPositions() const override { return in_->readsPositions(); }
     bool strandLocal() const override { return in_->strandLocal(); }
+    float longestRead() const override { return in_->longestRead(); }
     // The largest output: the curve at its keys (it never overshoots them) and at
     // samples between, mapped to [outMin, outMax] whichever way round they are.
     float maximum() const override {
@@ -603,6 +606,12 @@ public:
     bool perPoint() const override { return a_->perPoint() || (b_ && b_->perPoint()); }
     bool readsPositions() const override { return a_->readsPositions() || (b_ && b_->readsPositions()); }
     bool strandLocal() const override { return a_->strandLocal() && (!b_ || b_->strandLocal()); }
+    float longestRead() const override {  // (both of the same strands: the same longest)
+        const float a = a_->strandLocal() ? 0.0f : a_->longestRead();
+        const float b = !b_ || b_->strandLocal() ? 0.0f : b_->longestRead();
+        if (a < 0.0f || b < 0.0f || strandLocal()) return -1.0f;
+        return std::max(a, b);
+    }
     void validate(const StrandSet& strands) const override {
         a_->validate(strands);
         if (b_) b_->validate(strands);

@@ -131,6 +131,39 @@ std::shared_ptr<StrandSet> dabbed(const StrandSet& strands, std::size_t dabs, Rn
     return out;
 }
 
+// The set's longest strand's length (each strand's segments summed in order, as an expression's
+// `longest` reads it).
+float longestOf(const StrandSet& strands) {
+    float longest = 0.0f;
+    for (std::size_t s = 0; s < strands.strandCount(); ++s) {
+        const Vec3f* pts = strands.strandPoints(s);
+        float length = 0.0f;
+        for (std::size_t k = 1; k < strands.strandPointCount(s); ++k) length += (pts[k] - pts[k - 1]).length();
+        longest = std::max(longest, length);
+    }
+    return longest;
+}
+
+// `strands` with its longest strand longer still (its points half as far again from its root):
+// the set's longest changes.
+std::shared_ptr<StrandSet> longestLengthened(const StrandSet& strands) {
+    auto out = std::make_shared<StrandSet>(strands);
+    std::size_t most = 0;
+    float longest = -1.0f;
+    for (std::size_t s = 0; s < strands.strandCount(); ++s) {
+        const Vec3f* pts = strands.strandPoints(s);
+        float length = 0.0f;
+        for (std::size_t k = 1; k < strands.strandPointCount(s); ++k) length += (pts[k] - pts[k - 1]).length();
+        if (length > longest) {
+            longest = length;
+            most = s;
+        }
+    }
+    Vec3f* pts = out->strandPoints(most);
+    for (std::size_t k = 1; k < out->strandPointCount(most); ++k) pts[k] = pts[0] + (pts[k] - pts[0]) * 1.5f;
+    return out;
+}
+
 // held -> diff -> noise -> curl -> length -> width -> resample -> out, built in code: the test
 // operators are not registered (every registered type must have a golden case).
 struct Chain {
@@ -272,8 +305,9 @@ TEST(Incremental, BypassedNodesAndParamEditsAndLayoutChanges) {
 }
 
 TEST(Incremental, AWholeSetValueReadFallsBackToAFullEvaluation) {
-    // Noise's amplitude from an expression of `longest` (the set's longest strand): a dab may
-    // change every strand's value, so Noise evaluates in full; Width's per-strand mask stays local.
+    // Noise's amplitude from an expression of `longest` (the set's longest strand): a dab changing
+    // the longest changes every strand's value, so Noise evaluates in full; one leaving it, only
+    // the strands it moved (LongestKept). Width's per-strand mask stays local.
     const Verified verified;
     const ChainEdit maps = [](Chain& c) {
         MapRef longest;
@@ -290,13 +324,19 @@ TEST(Incremental, AWholeSetValueReadFallsBackToAFullEvaluation) {
     StrandsPtr strands = someStrands(200, 4);
     ASSERT_EQ(chain->run(strands)->contentHash(), freshHash(strands, maps));
     Rng rng(2);
-    for (int dab = 0; dab < 3; ++dab) {
-        strands = dabbed(*strands, 4, rng);
-        EXPECT_EQ(chain->run(strands)->contentHash(), freshHash(strands, maps));
+    // TestDiff on every dab; Noise, with the longest changed, in full, then says which strands its
+    // result changed in (Graph::setDiffFullResults): Curl, Length and Width follow them.
+    bool fell = false, kept = false;
+    for (int dab = 0; dab < 4; ++dab) {
+        const float was = longestOf(*strands);
+        strands = dab == 3 ? longestLengthened(*strands) : dabbed(*strands, 4, rng);
+        const std::size_t before = chain->graph.incrementalCount();
+        EXPECT_EQ(chain->run(strands)->contentHash(), freshHash(strands, maps)) << "dab " << dab;
+        const bool same = longestOf(*strands) == was;
+        (same ? kept : fell) = true;
+        EXPECT_EQ(chain->graph.incrementalCount() - before, same ? 5u : 4u) << "dab " << dab;
     }
-    // TestDiff on every dab; Noise reads the whole set and evaluates in full, then says which
-    // strands its result changed in (Graph::setDiffFullResults): Curl, Length and Width follow them.
-    EXPECT_EQ(chain->graph.incrementalCount(), 12u);
+    EXPECT_TRUE(fell && kept);
 }
 
 // held -> diff -> collide (the scalp and a collider) -> smooth -> gravity -> displace -> flow ->
@@ -502,8 +542,9 @@ TEST(Incremental, FieldNodesPluggedIntoParamsKeepNodesIncremental) {
         EXPECT_EQ(chain->run(strands)->contentHash(), freshHash(strands, fields)) << "dab " << dab;
         EXPECT_EQ(chain->graph.incrementalCount() - before, 5u) << "dab " << dab;  // TestDiff, Noise, Curl, Length, Width
     }
-    // An Expression of `longest` plugged into Noise: Noise evaluates in full, and tells the nodes
-    // after it which strands its result changed in (Graph::setDiffFullResults), so they do not.
+    // An Expression of `longest` plugged into Noise: with the longest changed Noise evaluates in
+    // full, and tells the nodes after it which strands its result changed in
+    // (Graph::setDiffFullResults), so they do not.
     const ChainEdit whole = [](Chain& c) {
         const NodeId expression = addField(c, "whole", op::kExpression);
         c.graph.node(expression).params().set("expression", std::string("0.05 * longest"));
@@ -516,13 +557,15 @@ TEST(Incremental, FieldNodesPluggedIntoParamsKeepNodesIncremental) {
     };
     whole(*chain);
     for (int dab = 0; dab < 3; ++dab) {
-        strands = dabbed(*strands, 4, rng);
+        const float was = longestOf(*strands);
+        strands = dab == 2 ? longestLengthened(*strands) : dabbed(*strands, 4, rng);
         const std::size_t before = chain->graph.incrementalCount();
         EXPECT_EQ(chain->run(strands)->contentHash(), freshHash(strands, longest)) << "dab " << dab;
-        if (dab > 0) EXPECT_EQ(chain->graph.incrementalCount() - before, 4u) << "dab " << dab;  // all but Noise
+        const std::size_t made = longestOf(*strands) == was ? 5u : 4u;  // (the longest changed: all but Noise)
+        if (dab > 0) EXPECT_EQ(chain->graph.incrementalCount() - before, made) << "dab " << dab;
     }
     Graph::setDiffFullResults(false);
-    strands = dabbed(*strands, 4, rng);
+    strands = longestLengthened(*strands);
     std::size_t before = chain->graph.incrementalCount();
     EXPECT_EQ(chain->run(strands)->contentHash(), freshHash(strands, longest));
     EXPECT_EQ(chain->graph.incrementalCount() - before, 1u);  // TestDiff alone

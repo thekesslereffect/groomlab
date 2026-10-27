@@ -607,8 +607,23 @@ void registerDisplaceOperator(OperatorRegistry& registry) {
                           [] { return std::make_unique<DisplaceOp>(); });
 }
 
-bool collideRestPush(const RestPoseCollision* rest, const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth,
-                     float searchRadius, CollideRestState& state) {
+bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* field, const ScalpMesh& mesh, Vec3f& p, float to, bool soft,
+                     float softness, float maxDepth, float searchRadius, CollideRestState& state) {
+    if (!rest && field) {
+        // A still mesh's field answers alone (never Ask, but for a field without a grid: the
+        // mesh's), as the GPU's Collide does from its tables.
+        Vec3f delta;
+        MeshDistanceField::Probe alone;
+        alone.fieldOnly = true;
+        switch (field->push(p, to, maxDepth, searchRadius, &delta, &alone)) {
+            case MeshDistanceField::Push::Kept: return false;
+            case MeshDistanceField::Push::Moved:
+                if (soft) delta = softPush(delta, softness);
+                p += delta;
+                return true;
+            case MeshDistanceField::Push::Ask: break;  // the mesh's answer, below
+        }
+    }
     if (rest) {
         // The mesh's bound first: it costs less than the walk to the point's vertex, and the answer
         // (a miss) is the mesh's own.
