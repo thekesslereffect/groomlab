@@ -284,7 +284,7 @@ Add a **Clump**. By default it picks its own clump centers among the strands (`c
   lets them bunch and open a little. `weight` stretches the turns where hair hangs below them
   (along `weightDirection`): ringlets loose at the root and tight at the tip, more on long hair,
   hardly at all on hair lying flat or pointing up. Curl adds points where a strand has too few for a round turn
-  (`tolerance`), so it never aliases.
+  (`tolerance`): each segment cut evenly along the smooth strand, so it never aliases.
 - **Bend** bends hair up off the scalp or down onto it (`along` `normal`), or combs it toward a
   `direction` laid onto the scalp (`along` `direction`; `angle` 180 with `start` and `end` 0 lays
   it all the way, never past). **Gravity** lets it hang from the root (a Collide after it drapes it

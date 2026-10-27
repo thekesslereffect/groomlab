@@ -180,9 +180,9 @@
   },
   "feathers_afterfeather": {
    "channels": {
-    "point.colorB": "eac0d338c7e7a50f",
-    "point.colorG": "33148168953e940c",
-    "point.colorR": "5f3750cd1bcdf988",
+    "point.colorB": "c79dc90bf4efa1a8",
+    "point.colorG": "08d9414b8b7744be",
+    "point.colorR": "ec77555ef1fbb23c",
     "strand.barbIndex": "0cc15a7718166ac6",
     "strand.clumpId": "bc592b6547371cb8",
     "strand.colorB": "1e976091e1422584",
@@ -204,13 +204,13 @@
     "strand.vaneTipV": "bfd3a3c7db3289ae",
     "strand.vaneU": "1f33720db60e927d"
    },
-   "everything": "50c70276020eb37c",
+   "everything": "bf91ef14b8c9439f",
    "ids": "d4cd893c387c02f4",
-   "points": 904468,
-   "positions": "fa6680a385fcbad9",
+   "points": 910156,
+   "positions": "98675de3d6c88c84",
    "roots": "b857798ad3499341",
    "strands": 198198,
-   "widths": "740ab46f3ccac6ec"
+   "widths": "5afeda894e438347"
   },
   "feathers_barred": {
    "channels": {
@@ -288,13 +288,13 @@
     "strand.vaneTipV": "573b70428b69e676",
     "strand.vaneU": "a0bb33239ae071a7"
    },
-   "everything": "17024b0d4df09ecd",
+   "everything": "8bb04777c4ed3c67",
    "ids": "8ef411d0e95f3cbd",
-   "points": 110676,
-   "positions": "92222d0a6a385ef0",
+   "points": 135044,
+   "positions": "296e01cc90e7befd",
    "roots": "6f66daaa3e86fc6c",
    "strands": 7540,
-   "widths": "a0486c1685e86c31"
+   "widths": "2d4f022ebce659b2"
   },
   "feathers_eye_spot": {
    "channels": {

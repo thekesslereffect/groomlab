@@ -9,8 +9,11 @@
 // the strand (its own, and any Curl adds) takes the offset at its share of the strand, so the
 // same strand at 40 segments or at 256 makes one curl, and more points only sample it more
 // finely. Where the points coming in are too few a turn for the tolerance (a coil over a strand of
-// 40 segments), Curl adds points between them (up to maxSegments) on the strand taken as a smooth
-// curve; a zigzag gets the points of its kinks.
+// 40 segments), Curl first cuts each of the strand's segments into as many as its longest needs at
+// the most the curl turns there (its frequency, randomness, frequencyProfile and spacingRandom at
+// their most; a zigzag enough to keep its kinks' peaks), up to maxSegments, on the strand taken as a smooth curve
+// (each point keeping its share of the strand), then curls those points as its own: the curl
+// itself is CurlCS's on the CPU engine (the GPU preview's), the C++ below with the engine off.
 //
 // A polyline as a smooth curve: each segment a cubic Hermite curve between its points, the slope
 // at a point the derivative there of the parabola through it and its neighbours (spaced by their
@@ -43,9 +46,9 @@
 // 0). Weight 0 leaves all of it out (the curl as before).
 //
 // look.slang (CurlCS, CurlAxesCS) repeats this arithmetic in its order for the GPU preview, for
-// strands Curl adds no points to (weighted: its own axis walked to the tip first for the stretch);
-// a full evaluation adding none runs it on the CPU engine (look_cpu.h runStage), the C++ here the
-// incremental evaluations' and the points it adds.
+// every strand (weighted: its own axis walked to the tip first for the stretch), at its own points
+// and any Curl added: on the CPU engine (look_cpu.h runStage, runStageOnStrands), the C++ here with
+// the engine off.
 
 #include <algorithm>
 #include <array>
@@ -597,81 +600,6 @@ inline V4 derivativeAt(const V4& dd, const V4& a, const V4& b, __m128 u) {
 }
 #endif
 
-// Axis::arcAt for four shares t at once (the points Curl adds: each a frame's reflection and an
-// arc's square roots), side by side as carryFour: the frames, arcs and profiled arcs there.
-void arcsAtFour(const Axis& axis, const float t[4], Frame frame[4], float arc[4], float profiled[4]) {
-#if GROOMLAB_CURL_SSE2
-    std::size_t k[4];
-    alignas(16) float share[4];
-    bool inside = true;  // every point within its segment (else each as arcAt)
-    for (int l = 0; l < 4; ++l) {
-        const float xs = t[l] * static_cast<float>(axis.samples - 1);
-        k[l] = std::min(static_cast<std::size_t>(std::max(xs, 0.0f)), axis.samples - 2);
-        share[l] = xs - static_cast<float>(k[l]);
-        inside = inside && share[l] > 0.0f;
-    }
-    if (!inside) {
-        for (int l = 0; l < 4; ++l) arc[l] = axis.arcAt(t[l], &frame[l], &profiled[l]);
-        return;
-    }
-    auto at = [&](const auto& member, std::size_t next) {
-        return lanes(member[k[0] + next], member[k[1] + next], member[k[2] + next], member[k[3] + next]);
-    };
-    const __m128 u = _mm_load_ps(share), h = _mm_setr_ps(axis.h[k[0]], axis.h[k[1]], axis.h[k[2]], axis.h[k[3]]);
-    const V4 p0 = at(axis.x, 0), dd = at(axis.x, 1) - p0, a = at(axis.d, 0) * h, b = at(axis.d, 1) * h;
-    // The frame (hermiteDerivative, tangentOf, hermiteStep, reflectFrameBy).
-    V4 ft = lanes(axis.f[k[0]].tangent, axis.f[k[1]].tangent, axis.f[k[2]].tangent, axis.f[k[3]].tangent);
-    V4 fn = lanes(axis.f[k[0]].normal, axis.f[k[1]].normal, axis.f[k[2]].normal, axis.f[k[3]].normal);
-    V4 fb = lanes(axis.f[k[0]].binormal, axis.f[k[1]].binormal, axis.f[k[2]].binormal, axis.f[k[3]].binormal);
-    const V4 t1 = unitOr(derivativeAt(dd, a, b, u), ft);
-    const __m128 one = _mm_set1_ps(1.0f), u2 = _mm_mul_ps(u, u), back = _mm_sub_ps(one, u);
-    const V4 step = dd * _mm_mul_ps(u2, _mm_sub_ps(_mm_set1_ps(3.0f), _mm_mul_ps(_mm_set1_ps(2.0f), u))) +
-                    a * _mm_mul_ps(_mm_mul_ps(u, back), back) + b * _mm_mul_ps(u2, _mm_sub_ps(u, one));
-    reflectFour(ft, fn, fb, step, t1);
-    Vec3f tt[4], nn[4], bb[4];
-    unpack(ft, tt);
-    unpack(fn, nn);
-    unpack(fb, bb);
-    // The arc (segmentArc: two-point Gauss over 0 to u).
-    __m128 speed[2];
-    for (int g = 0; g < 2; ++g) {
-        const V4 v = derivativeAt(dd, a, b, _mm_mul_ps(u, _mm_set1_ps(g == 0 ? kGauss0 : kGauss1)));
-        speed[g] = _mm_sqrt_ps(dot(v, v));
-    }
-    alignas(16) float segment[4];
-    _mm_store_ps(segment, _mm_mul_ps(_mm_mul_ps(_mm_set1_ps(0.5f), u), _mm_add_ps(speed[0], speed[1])));
-    for (int l = 0; l < 4; ++l) {
-        const std::size_t j = k[l];
-        frame[l] = Frame{tt[l], nn[l], bb[l]};
-        arc[l] = axis.arc[j] + segment[l];
-        profiled[l] = axis.spaced() ? axis.profiledArc[j] + profiledSegmentArc(axis.x[j], axis.x[j + 1], axis.d[j], axis.d[j + 1], axis.h[j], share[l], j,
-                                                                               axis.samples, axis.profile, axis.tangents, axis.stretchOf(j))
-                                    : arc[l];
-    }
-#else
-    for (int l = 0; l < 4; ++l) arc[l] = axis.arcAt(t[l], &frame[l], &profiled[l]);
-#endif
-}
-
-// Curve::at for four places, segment j[l] at u[l], side by side.
-void pointsAtFour(const Curve& c, const std::uint32_t j[4], const float u[4], Vec3f out[4]) {
-#if GROOMLAB_CURL_SSE2
-    auto at = [&](const std::vector<Vec3f>& member, std::size_t next) {
-        return lanes(member[j[0] + next], member[j[1] + next], member[j[2] + next], member[j[3] + next]);
-    };
-    const V4 p0 = lanes(c.p[j[0]], c.p[j[1]], c.p[j[2]], c.p[j[3]]);
-    const V4 p1 = lanes(c.p[j[0] + 1], c.p[j[1] + 1], c.p[j[2] + 1], c.p[j[3] + 1]);
-    const __m128 h = _mm_setr_ps(c.h[j[0]], c.h[j[1]], c.h[j[2]], c.h[j[3]]), v = _mm_setr_ps(u[0], u[1], u[2], u[3]);
-    const V4 dd = p1 - p0, a = at(c.d, 0) * h, b = at(c.d, 1) * h;
-    const __m128 one = _mm_set1_ps(1.0f), v2 = _mm_mul_ps(v, v), back = _mm_sub_ps(one, v);
-    unpack(p0 + dd * _mm_mul_ps(v2, _mm_sub_ps(_mm_set1_ps(3.0f), _mm_mul_ps(_mm_set1_ps(2.0f), v))) +
-               a * _mm_mul_ps(_mm_mul_ps(v, back), back) + b * _mm_mul_ps(v2, _mm_sub_ps(v, one)),
-           out);
-#else
-    for (int l = 0; l < 4; ++l) out[l] = c.at(j[l], u[l]);
-#endif
-}
-
 // Axis::carry for four axes of as many samples, their frames side by side (SIMD lanes where the
 // CPU has them: the same operations in the same order, the branches as per-lane picks). A frame
 // carried along a sample is a chain of dependent steps; four at once keep the CPU busy while
@@ -784,12 +712,6 @@ void makeFour(Curve* const c[4], Axis* const a[4], const Vec3f* const points[4],
 #endif
 }
 
-// Where a point Curl writes lies on its strand: segment j at u (u == 0: point j itself).
-struct Place {
-    std::uint32_t j = 0;
-    float u = 0.0f;
-};
-
 }  // namespace
 
 // Wraps strands into curls around their current shape: a helix (the default), a planar wave or
@@ -854,10 +776,10 @@ public:
                 .world(),
             notAnimatable(ParamSpec{"tolerance", 0.5,
                                     "How far a straight segment may stray from the round curl, a share of its radius: where the "
-                                    "points coming in are too few a turn for it, Curl adds points (0.5: 3 a turn, so no curl "
-                                    "aliases into another; 0.3: 4; 0.1: 7; 0.03: 13; a zigzag gets its kinks). 0: only the "
-                                    "points coming in. Points added take the GPU preview off this node: more Resample segments "
-                                    "keep it",
+                                    "points coming in are too few a turn for it, Curl cuts each segment evenly along the smooth "
+                                    "strand first (0.5: 3 a turn, so no curl aliases into another; 0.3: 4; 0.1: 7; 0.03: 13; a "
+                                    "zigzag more than 2 / tolerance, keeping its kinks' peaks). 0: only the points coming in. "
+                                    "Points added take the GPU preview off this node: more Resample segments keep it",
                                     "fraction"}
                               .range(0, 1)
                               .soft(0, 0.5))
@@ -903,9 +825,6 @@ private:
     struct Settings {
         Shape shape = Shape::Helix;
         float frequency = 4.0f, randomness = 0.3f, phase = 0.0f, phaseRandom = 1.0f, coilWidths = 3.0f;
-        float tolerance = 0.0f;
-        int perTurn = 0;  // the points a turn the tolerance asks for (0: none added)
-        std::size_t maxSegments = 256;
         std::uint64_t seed = 0;
         Ramp frequencyProfile;
         std::vector<float> frequencyTangents;  // its keys' (Ramp::at)
@@ -953,9 +872,15 @@ private:
     Clumps findClumps(const StrandSet& in, const Settings& set, const ScalpMesh* scalp) const;
 
     // In full, or (with `incremental`) only the strands the input changed in, into the last
-    // result's copy; false when that cannot be done.
+    // result's copy; false when that cannot be done. The points it adds first (pointsFor,
+    // curlDensified), then each strand curled at its own points (runOwn).
     bool run(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
              StrandChanges* changed) const;
+    bool runOwn(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
+                StrandChanges* changed) const;
+    // The points a strand of `n` points `p` is curled at: its own, or with the tolerance, each
+    // segment cut into as many as its longest needs at the most the curl turns (at most maxSegments).
+    std::size_t pointsFor(const Vec3f* p, std::size_t n) const;
 
     mutable std::atomic<bool> unitWidths_{false};
     mutable std::atomic<std::size_t> added_{0};  // strands the last evaluation added points to
@@ -1020,8 +945,152 @@ CurlOp::Clumps CurlOp::findClumps(const StrandSet& in, const Settings& set, cons
     return c;
 }
 
+// The strands `which` of `in` (all: null), each at `counts[k]` points: its segments each cut into
+// as many (counts[k] - 1 over its own segments) on the strand taken as a smooth curve (Curve), its
+// own points kept; widths and point channels taken linearly along each segment there.
+StrandsPtr curlDensified(const StrandSet& in, const std::vector<std::size_t>& counts, const std::vector<std::uint32_t>* which) {
+    const std::size_t made = counts.size();
+    auto out = std::make_shared<StrandSet>();
+    out->resize(counts, StrandSet::kLeavePositions);
+    auto source = [&](std::size_t k) { return which ? static_cast<std::size_t>((*which)[k]) : k; };
+    std::vector<StrandId>& ids = out->mutableIds();
+    std::vector<StrandRoot>& roots = out->mutableRoots();
+    for (std::size_t k = 0; k < made; ++k) {
+        ids[k] = in.ids()[source(k)];
+        roots[k] = in.roots()[source(k)];
+    }
+    std::vector<std::vector<float>*> outPoint;
+    std::vector<const std::vector<float>*> inPoint;
+    for (const std::string& name : in.pointChannelNames()) {
+        outPoint.push_back(&out->addPointChannel(name, in.pointChannelDefault(name)));
+        inPoint.push_back(in.pointChannel(name));
+    }
+    for (const std::string& name : in.strandChannelNames()) {
+        std::vector<float>& to = out->addStrandChannel(name, in.strandChannelDefault(name));
+        const std::vector<float>& from = *in.strandChannel(name);
+        for (std::size_t k = 0; k < made; ++k) to[k] = from[source(k)];
+    }
+    const bool hasWidths = in.widths().size() == in.pointCount();
+    std::vector<float>& outWidths = out->mutableWidths();
+    parallelFor(0, made, [&](std::size_t k) {
+        const std::size_t s = source(k), n = in.strandPointCount(s), m = counts[k];
+        const std::size_t begin = in.strandBegin(s), to = out->strandBegin(k);
+        const Vec3f* pts = in.strandPoints(s);
+        Vec3f* dst = out->strandPoints(k);
+        const std::size_t q = m == n || n < 2 ? 1 : (m - 1) / (n - 1);
+        auto values = [&](const float* from, float* into) {
+            if (q == 1) {
+                std::copy_n(from, n, into);
+                return;
+            }
+            for (std::size_t j = 0; j + 1 < n; ++j) {
+                for (std::size_t r = 0; r < q; ++r) {
+                    const float u = static_cast<float>(r) / static_cast<float>(q);
+                    into[j * q + r] = r == 0 ? from[j] : from[j] + (from[j + 1] - from[j]) * u;
+                }
+            }
+            into[m - 1] = from[n - 1];
+        };
+        if (q == 1) {
+            std::copy_n(pts, n, dst);
+        } else {
+            thread_local Curve curve;
+            curve.make(pts, n);
+            for (std::size_t j = 0; j + 1 < n; ++j) {
+                for (std::size_t r = 0; r < q; ++r) dst[j * q + r] = r == 0 ? pts[j] : curve.at(j, static_cast<float>(r) / static_cast<float>(q));
+            }
+            dst[m - 1] = pts[n - 1];
+        }
+        if (hasWidths) values(in.widths().data() + begin, outWidths.data() + to);
+        for (std::size_t c = 0; c < outPoint.size(); ++c) values(inPoint[c]->data() + begin, outPoint[c]->data() + to);
+    }, 16);
+    out->setInstances(in.instances());
+    for (const auto& layer : in.cardLayers()) out->addCardLayer(layer);
+    for (const auto& layer : in.featherLayers()) out->addFeatherLayer(layer);
+    return out;
+}
+
+std::size_t CurlOp::pointsFor(const Vec3f* p, std::size_t n) const {
+    const float tolerance = std::clamp(static_cast<float>(params().getDouble("tolerance")), 0.0f, 1.0f);
+    const auto most = static_cast<std::size_t>(std::max<std::int64_t>(1, params().getInt("maxSegments")));
+    if (!(tolerance > 0.0f) || n < 2 || most <= n - 1) return n;
+    // A chord strays r (1 - cos(pi / m)) from a turn of m points: within tolerance r at
+    // m = pi / acos(1 - tolerance) a turn. A zigzag's kinks: the point nearest one at most half a
+    // spacing off loses about 2 / m of its peak, so more than 2 / tolerance a turn.
+    int perTurn = std::max(3, static_cast<int>(std::ceil(kPi / pm::acos(1.0f - tolerance) - 1e-4f)));
+    if (params().getString("shape") == "zigzag") perTurn = std::max(perTurn, static_cast<int>(std::ceil(2.0f / tolerance)) + 1);
+    // The most the curl turns per unit of length: its frequency at its randomness's most, times the
+    // profile's most and the spacing noise's.
+    float profileMost = 0.0f;
+    for (const auto& key : params().getRamp("frequencyProfile").keys) profileMost = std::max(profileMost, key.second);
+    const float randomness = static_cast<float>(params().getDouble("randomness"));
+    const float spacing = std::clamp(static_cast<float>(params().getDouble("spacingRandom")), 0.0f, 1.0f);
+    const float turns = std::fabs(static_cast<float>(params().getDouble("frequency"))) * (1.0f + 0.5f * std::fabs(randomness)) * profileMost *
+                        (1.0f + spacing);
+    float longest = 0.0f;
+    for (std::size_t j = 1; j < n; ++j) longest = std::max(longest, (p[j] - p[j - 1]).length());
+    const float wanted = std::ceil(longest * turns * static_cast<float>(perTurn) - 1e-3f);
+    if (!(wanted > 1.0f)) return n;
+    const std::size_t q = std::min(static_cast<std::size_t>(std::min(wanted, 1e6f)), most / (n - 1));
+    return q <= 1 ? n : n + (n - 1) * (q - 1);
+}
+
 bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
                  StrandChanges* changed) const {
+    const StrandsPtr in = requireStrands(inputs, 0, op::kCurl);
+    const std::size_t strands = in->strandCount();
+    auto withStrands = [&](StrandsPtr given) {
+        std::vector<Value> again = inputs;
+        again[0] = Value(std::move(given));
+        return again;
+    };
+    if (incremental) {
+        const StrandChanges* changes = someStrandsChanged(*incremental, 0);
+        const StrandsPtr last = changes ? valueAs<StrandsPtr>(incremental->previous) : nullptr;
+        if (!last || last->strandCount() != strands) return false;
+        std::atomic<bool> other{false};
+        std::vector<std::size_t> counts(changes->strands.size());
+        parallelFor(0, counts.size(), [&](std::size_t k) {
+            const std::size_t s = changes->strands[k];
+            counts[k] = pointsFor(in->strandPoints(s), in->strandPointCount(s));
+            if (counts[k] != last->strandPointCount(s)) other = true;  // (another layout: in full)
+        }, 256);
+        if (other) return false;
+        if (last->pointCount() == in->pointCount()) return runOwn(ctx, inputs, incremental, result, changed);  // (none added)
+        // With the points it added: the changed strands made apart (as in full), written over the
+        // last result's, while each strand's curl reads it alone (alone, its radius the same
+        // everywhere).
+        if (params().getString("coherence") == "clump" || !ScalarField(params(), "radius", scalpOf(ctx)).isConstant()) return false;
+        if (changes->none()) {
+            *result = last;
+            *changed = *changes;
+            return true;
+        }
+        Value made;
+        if (!runOwn(ctx, withStrands(curlDensified(*in, counts, &changes->strands)), nullptr, &made, nullptr)) return false;
+        auto out = copyOfLast(last, *incremental);
+        writeStrands(*out, *valueAs<StrandsPtr>(made), changes->strands);
+        *result = StrandsPtr(out);
+        *changed = *changes;
+        return true;
+    }
+    std::vector<std::size_t> counts(strands);
+    std::atomic<std::size_t> added{0};
+    parallelFor(0, strands, [&](std::size_t s) {
+        counts[s] = pointsFor(in->strandPoints(s), in->strandPointCount(s));
+        if (counts[s] != in->strandPointCount(s)) added.fetch_add(1, std::memory_order_relaxed);
+    }, 256);
+    if (added == 0) {
+        added_.store(0, std::memory_order_relaxed);
+        return runOwn(ctx, inputs, nullptr, result, nullptr);
+    }
+    if (!runOwn(ctx, withStrands(curlDensified(*in, counts, nullptr)), nullptr, result, nullptr)) return false;
+    added_.store(added, std::memory_order_relaxed);
+    return true;
+}
+
+bool CurlOp::runOwn(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
+                    StrandChanges* changed) const {
     const StrandsPtr in = requireStrands(inputs, 0, op::kCurl);
     const ScalpMesh* scalp = scalpOf(ctx);
     const ScalarField radiusField(params(), "radius", scalp);
@@ -1036,17 +1105,9 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
     set.phaseRandom = static_cast<float>(params().getDouble("phaseRandom"));
     set.coilWidths = static_cast<float>(params().getDouble("coilWidths"));
     set.seed = static_cast<std::uint64_t>(params().getInt("seed"));
-    set.tolerance = std::clamp(static_cast<float>(params().getDouble("tolerance")), 0.0f, 1.0f);
-    // A chord strays r (1 - cos(pi / m)) from a turn of m points: within tolerance r at
-    // m = pi / acos(1 - tolerance) a turn.
-    set.perTurn = set.tolerance > 0.0f ? std::max(3, static_cast<int>(std::ceil(kPi / pm::acos(1.0f - set.tolerance) - 1e-4f))) : 0;
-    set.maxSegments = static_cast<std::size_t>(std::max<std::int64_t>(1, params().getInt("maxSegments")));
     const Ramp profile = params().getRamp("profile");
     set.frequencyProfile = params().getRamp("frequencyProfile");
     set.frequencyTangents = set.frequencyProfile.tangents();
-    const std::vector<float> profileTangents = profile.tangents();
-    static std::atomic<std::uint64_t> evaluations{0};
-    const std::uint64_t evaluation = ++evaluations;  // (tells this one's tables apart from another's)
     set.profiled = std::any_of(set.frequencyProfile.keys.begin(), set.frequencyProfile.keys.end(), [](const auto& k) { return k.second != 1.0f; });
     set.spacingRandom = std::clamp(static_cast<float>(params().getDouble("spacingRandom")), 0.0f, 1.0f);
     const Vec3f weightDirection = params().getVec3("weightDirection");
@@ -1091,7 +1152,7 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
         *result = std::move(made);
         return true;
     };
-    if (!incremental && set.perTurn == 0 && gpu::cpuEngineOn() && onEngine()) return true;
+    if (!incremental && gpu::cpuEngineOn() && onEngine()) return true;
     const Clumps clumps = byClump ? findClumps(*in, set, scalp) : Clumps{};
     const RampAlong along(profile, *in);
     const float* widths = coil && in->widths().size() == in->pointCount() ? in->widths().data() : nullptr;
@@ -1180,467 +1241,70 @@ bool CurlOp::run(const EvalContext& ctx, const std::vector<Value>& inputs, const
         }
     };
 
-    // The share of the strand within its segment j of n at which the curl about `axis` is at
-    // `angle` (the angle never turns back: bisection on the share, through the profiled arc).
-    auto shareAtAngle = [&](const Axis& axis, float angle, std::size_t j, std::size_t n) {
-        const Draw& d = axis.draw;
-        const float sign = d.frequency < 0.0f ? -1.0f : 1.0f;
-        float lo = paramAt(j, n), hi = paramAt(j + 1, n);
-        for (int step = 0; step < 32; ++step) {
-            const float mid = 0.5f * (lo + hi);
-            if (!(mid > lo && mid < hi)) break;
-            float w = 0.0f;
-            axis.arcAt(mid, nullptr, &w);
-            if (sign * (curlAngle(d.frequency, w, d.phase, set.spacingRandom, d.spacingKey) - angle) < 0.0f) {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-        }
-        return 0.5f * (lo + hi);
-    };
-
-    const bool kinks = set.shape == Shape::Zigzag;
-    // A strand of n points made `count` by cutting each segment evenly (a helix's, a wave's or a
-    // coil's: plan's places for that count).
-    auto evenPlaces = [&](std::size_t n, std::size_t count, std::vector<Place>& places) {
-        const std::size_t a = n > 1 ? (count - n) / (n - 1) : 0;
-        places.clear();
-        places.reserve(count);
-        for (std::size_t j = 0; j + 1 < n; ++j) {
-            places.push_back({static_cast<std::uint32_t>(j), 0.0f});
-            for (std::size_t k = 1; k <= a; ++k) places.push_back({static_cast<std::uint32_t>(j), static_cast<float>(k) / static_cast<float>(a + 1)});
-        }
-        if (n > 0) places.push_back({static_cast<std::uint32_t>(n - 1), 0.0f});
-    };
-
-    // Where strand s's points go (`places`): its own, and those Curl adds between them where they
-    // are too few a turn. Returns how many there are. `fill` false: a helix's, a wave's or a coil's
-    // count alone (evenPlaces makes its places from it).
-    auto plan = [&](std::size_t s, const Axis& axis, std::vector<Place>& places, bool fill = true) -> std::size_t {
-        const std::size_t n = in->strandPointCount(s);
-        places.clear();
-        auto own = [&]() -> std::size_t {
-            if (fill) {
-                places.resize(n);
-                for (std::size_t i = 0; i < n; ++i) places[i] = {static_cast<std::uint32_t>(i), 0.0f};
-            }
-            return n;
-        };
-        const Draw& d = axis.draw;
-        const float f = std::fabs(d.frequency);
-        if (set.perTurn == 0 || n < 2 || set.maxSegments <= n - 1 || !(f > 0.0f)) return own();
-        const float strandRadius = strandRadiusOf(s);
-        thread_local std::vector<std::uint32_t> adds;  // per segment: the points added in it
-        thread_local std::vector<float> stray;         // per segment (zigzag): how far it cuts its kink
-        adds.assign(n - 1, 0);
-        stray.assign(n - 1, 0.0f);
-        std::size_t added = 0;
-        // The local frequency's size at point j (curl_phase.h), its profiled arc w (weighted: over
-        // the stretch there).
-        auto rateAt = [&](std::size_t j, float w) {
-            return std::fabs(curlLocalFrequency(d.frequency, set.frequencyProfile.at(paramAt(j, n), set.frequencyTangents.data()), w,
-                                                set.spacingRandom, d.spacingKey)) /
-                   axis.stretchAt(paramAt(j, n));
-        };
-        // A helix's or a wave's: every segment cut into as many as the one turning most needs (one
-        // count a strand: its points stay evenly spread, and it rarely changes for a strand
-        // that changes a little): its turns, or where the spacing varies, the most of its turns
-        // and its length at the local frequency at either end.
-        float most = 0.0f;
-        for (std::size_t j = 0; j + 1 < n; ++j) {
-            if (radiusAt(s, j, strandRadius) * along(j, n) == 0.0f && radiusAt(s, j + 1, strandRadius) * along(j + 1, n) == 0.0f) continue;
-            float w0 = 0.0f, w1 = 0.0f;
-            const float arc0 = axis.arcAt(j, n, nullptr, &w0), arc1 = axis.arcAt(j + 1, n, nullptr, &w1);
-            if (!kinks) {
-                if (set.even()) {
-                    most = std::max(most, f * std::fabs(arc1 - arc0));
-                } else {
-                    const float turns = std::fabs(curlTurns(d.frequency, w1, set.spacingRandom, d.spacingKey) -
-                                                  curlTurns(d.frequency, w0, set.spacingRandom, d.spacingKey));
-                    const float length = std::fabs(arc1 - arc0);
-                    most = std::max({most, turns, rateAt(j, w0) * length, rateAt(j + 1, w1) * length});
-                }
-            } else {
-                // The kinks within it (at pi/2 + k pi), where the segment cuts one by more than the
-                // tolerance.
-                const float a0 = curlAngle(d.frequency, w0, d.phase, set.spacingRandom, d.spacingKey);
-                const float a1 = curlAngle(d.frequency, w1, d.phase, set.spacingRandom, d.spacingKey);
-                const float lo = std::min(a0, a1), hi = std::max(a0, a1);
-                const float first = std::ceil((lo - 0.5f * kPi) / kPi), lastK = std::floor((hi - 0.5f * kPi) / kPi);
-                if (lastK < first || !(hi > lo)) continue;
-                const float count = lastK - first + 1.0f;
-                float worst = 2.0f;  // more than one: the segment cuts across them all
-                if (count == 1.0f) {
-                    const float k = 0.5f * kPi + first * kPi;
-                    const float z0 = zigzag(a0), z1 = zigzag(a1);
-                    // Where along the segment the kink is: by its angle, or where the spacing
-                    // varies, found.
-                    const float at = set.even() ? (k - a0) / (a1 - a0) : shareAtAngle(axis, k, j, n) * static_cast<float>(n - 1) - static_cast<float>(j);
-                    worst = std::fabs(zigzag(k) - (z0 + (z1 - z0) * at));
-                }
-                if (worst > set.tolerance) {
-                    adds[j] = static_cast<std::uint32_t>(std::min(count, 4096.0f));
-                    stray[j] = worst;
-                }
-            }
-            added += adds[j];
-        }
-        if (!kinks) {
-            // Each segment in q, at most maxSegments in all.
-            const std::size_t q = std::min(static_cast<std::size_t>(std::max(1.0f, std::ceil(most * static_cast<float>(set.perTurn) - 1e-3f))),
-                                           set.maxSegments / (n - 1));
-            if (q <= 1) return own();
-            const std::size_t count = n + (n - 1) * (q - 1);
-            if (fill) evenPlaces(n, count, places);
-            return count;
-        }
-        if (added == 0) return own();
-        // At most maxSegments: a zigzag's segments cutting their kinks most keep theirs.
-        const std::size_t budget = set.maxSegments - (n - 1);
-        if (added > budget) {
-            thread_local std::vector<std::uint32_t> order;
-            order.clear();
-            for (std::uint32_t j = 0; j + 1 < n; ++j) {
-                if (adds[j]) order.push_back(j);
-            }
-            std::stable_sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) { return stray[a] > stray[b]; });
-            std::size_t left = budget;
-            for (const std::uint32_t j : order) {
-                if (adds[j] <= left) left -= adds[j];
-                else adds[j] = 0;
-            }
-            added = 0;
-            for (const std::uint32_t a : adds) added += a;
-            if (added == 0) return own();
-        }
-        places.reserve(n + added);
-        for (std::size_t j = 0; j + 1 < n; ++j) {
-            places.push_back({static_cast<std::uint32_t>(j), 0.0f});
-            const std::uint32_t a = adds[j];
-            if (!a) continue;
-            // A zigzag's kinks: where the curl's angle is pi/2 + k pi along the segment.
-            float w0 = 0.0f, w1 = 0.0f;
-            axis.arcAt(j, n, nullptr, &w0);
-            axis.arcAt(j + 1, n, nullptr, &w1);
-            const float a0 = curlAngle(d.frequency, w0, d.phase, set.spacingRandom, d.spacingKey);
-            const float a1 = curlAngle(d.frequency, w1, d.phase, set.spacingRandom, d.spacingKey);
-            const float first = std::ceil((std::min(a0, a1) - 0.5f * kPi) / kPi);
-            const std::size_t at = places.size();
-            for (std::uint32_t k = 0; k < a; ++k) {
-                const float angle = 0.5f * kPi + (first + static_cast<float>(k)) * kPi;
-                const float t = set.even() ? axis.shareAtArc((angle - d.phase) / (kTwoPi * d.frequency)) : shareAtAngle(axis, angle, j, n);
-                const float u = std::clamp(t * static_cast<float>(n - 1) - static_cast<float>(j), 0.0f, 1.0f);
-                if (u > 0.0f && u < 1.0f) places.push_back({static_cast<std::uint32_t>(j), u});
-            }
-            std::sort(places.begin() + static_cast<std::ptrdiff_t>(at), places.end(), [](const Place& a, const Place& b) { return a.u < b.u; });
-            places.erase(std::unique(places.begin() + static_cast<std::ptrdiff_t>(at), places.end(),
-                                     [](const Place& a, const Place& b) { return a.u == b.u; }),
-                         places.end());
-        }
-        places.push_back({static_cast<std::uint32_t>(n - 1), 0.0f});
-        return places.size();
-    };
-    // Strand s's places for its count from plan.
-    auto placesFor = [&](std::size_t s, const Axis& axis, std::size_t count, std::vector<Place>& places) {
-        if (kinks) plan(s, axis, places);
-        else evenPlaces(in->strandPointCount(s), count, places);
-    };
-
-    // Strand s curled at `places` into `to`.
-    auto curl = [&](std::size_t s, const Curve& curve, const Axis& axis, const std::vector<Place>& places, Vec3f* to) {
+    // Strand s curled at its own points into `to`.
+    auto curl = [&](std::size_t s, const Curve& curve, const Axis& axis, Vec3f* to) {
         const std::size_t n = curve.n;
         const Draw& d = axis.draw;
         const float strandRadius = strandRadiusOf(s);
-        auto shareOf = [&](const Place& at) { return (static_cast<float>(at.j) + at.u) / static_cast<float>(n - 1); };
-        // The points Curl adds on the strand, and the axis's frames and profiled arcs there, four at
-        // a time (arcsAtFour, pointsAtFour; the last four filled out with the last point).
-        thread_local std::vector<Frame> addedFrames;
-        thread_local std::vector<float> addedArcs;
-        thread_local std::vector<Vec3f> addedPoints;
-        if (places.size() > n) {
-            addedFrames.resize(places.size());
-            addedArcs.resize(places.size());
-            addedPoints.resize(places.size());
-            std::size_t waiting[4], count = 0;
-            auto four = [&] {
-                float t[4], u[4], arc[4], w[4];
-                std::uint32_t j[4];
-                Frame frame[4];
-                Vec3f point[4];
-                for (std::size_t l = 0; l < 4; ++l) {
-                    const Place at = places[waiting[std::min(l, count - 1)]];
-                    t[l] = shareOf(at);
-                    j[l] = at.j;
-                    u[l] = at.u;
-                }
-                arcsAtFour(axis, t, frame, arc, w);
-                pointsAtFour(curve, j, u, point);
-                for (std::size_t l = 0; l < count; ++l) {
-                    addedFrames[waiting[l]] = frame[l];
-                    addedArcs[waiting[l]] = w[l];
-                    addedPoints[waiting[l]] = point[l];
-                }
-                count = 0;
-            };
-            for (std::size_t k = 1; k < places.size(); ++k) {
-                if (places[k].u == 0.0f) continue;
-                waiting[count++] = k;
-                if (count == 4) four();
+        to[0] = curve.p[0];  // the root stays
+        for (std::size_t i = 1; i < n; ++i) {
+            const float t = paramAt(i, n);
+            Frame frame;
+            float w = 0.0f;  // the profiled arc: eased in over the first quarter turn by it, turned by it
+            axis.arcAt(i, n, &frame, &w);
+            const float base = radiusAt(s, i, strandRadius);
+            float r = base * d.vary * along(i, n) * curlEase(w, t, d.frequency);
+            if (axis.load > 0.0f) {
+                // Weighted: the share of the curl's own radius a turn's wire keeps at the stretched
+                // pitch.
+                const float local = curlLocalFrequency(d.frequency, set.profiled ? set.frequencyProfile.at(t, set.frequencyTangents.data()) : 1.0f,
+                                                       w, set.spacingRandom, d.spacingKey);
+                r *= stretchedShare(base * d.vary, axis.stretchAt(t), local);
             }
-            if (count) four();
+            const float angle = curlAngle(d.frequency, w, d.phase, set.spacingRandom, d.spacingKey);
+            to[i] = curve.p[i] + offsetAt(set.shape, frame, r, angle, d.plane);
         }
-        // The profile at each place: a strand cut evenly has its places at the same shares as
-        // every strand of as many points and places, so each thread keeps the last such strand's
-        // (for this evaluation: `evaluation`).
-        thread_local struct {
-            std::uint64_t evaluation = 0;
-            std::size_t n = 0, count = 0;
-            std::vector<float> at;
-        } even;
-        const float* shapes = nullptr;
-        if (!kinks && places.size() > n) {
-            if (even.evaluation != evaluation || even.n != n || even.count != places.size()) {
-                even.evaluation = evaluation;
-                even.n = n;
-                even.count = places.size();
-                even.at.resize(places.size());
-                for (std::size_t k = 0; k < places.size(); ++k) {
-                    const Place at = places[k];
-                    even.at[k] = at.u == 0.0f ? along(at.j, n) : profile.at(shareOf(at), profileTangents.data());
-                }
-            }
-            shapes = even.at.data();
-        }
-        // Each point (`added`: whether there are points Curl added, the strand's own alone made
-        // apart).
-        auto all = [&](auto added) {
-            to[0] = curve.p[0];  // the root stays
-            for (std::size_t k = 1; k < places.size(); ++k) {
-                const Place at = places[k];
-                const bool own = !added || at.u == 0.0f;
-                const float t = own ? paramAt(at.j, n) : shareOf(at);
-                Frame frame;
-                float w = 0.0f;  // the profiled arc: eased in over the first quarter turn by it, turned by it
-                if (own) {
-                    axis.arcAt(at.j, n, &frame, &w);
-                } else {
-                    frame = addedFrames[k];
-                    w = addedArcs[k];
-                }
-                const float r0 = radiusAt(s, at.j, strandRadius);
-                const float base = own ? r0 : r0 + (radiusAt(s, at.j + 1, strandRadius) - r0) * at.u;
-                const float shape = added && shapes ? shapes[k] : own ? along(at.j, n) : profile.at(t, profileTangents.data());
-                float r = base * d.vary * shape * curlEase(w, t, d.frequency);
-                if (axis.load > 0.0f) {
-                    // Weighted: the share of the curl's own radius a turn's wire keeps at the
-                    // stretched pitch.
-                    const float local = curlLocalFrequency(d.frequency, set.profiled ? set.frequencyProfile.at(t, set.frequencyTangents.data()) : 1.0f,
-                                                           w, set.spacingRandom, d.spacingKey);
-                    r *= stretchedShare(base * d.vary, axis.stretchAt(t), local);
-                }
-                const float angle = curlAngle(d.frequency, w, d.phase, set.spacingRandom, d.spacingKey);
-                to[k] = (own ? curve.p[at.j] : addedPoints[k]) + offsetAt(set.shape, frame, r, angle, d.plane);
-            }
-        };
-        if (places.size() > n) all(std::true_type{});
-        else all(std::false_type{});
-    };
-
-    // Strands `which` of the input (all: null) with the points Curl adds: a set of their own (each
-    // `counts` points: strand k's at k, or at which[k]), the strands' widths and point channels
-    // taken at each place along their segments.
-    auto build = [&](const std::vector<std::uint32_t>* which, const std::vector<std::size_t>& counts) {
-        auto out = std::make_shared<StrandSet>();
-        out->resize(counts, StrandSet::kLeavePositions);
-        const std::size_t made = counts.size();
-        auto source = [&](std::size_t k) { return which ? static_cast<std::size_t>((*which)[k]) : k; };
-        if (which) {
-            std::vector<StrandId>& ids = out->mutableIds();
-            std::vector<StrandRoot>& roots = out->mutableRoots();
-            for (std::size_t k = 0; k < made; ++k) {
-                ids[k] = in->ids()[source(k)];
-                roots[k] = in->roots()[source(k)];
-            }
-        } else {
-            out->mutableIds() = in->ids();
-            out->mutableRoots() = in->roots();
-        }
-        std::vector<std::vector<float>*> outPoint;
-        std::vector<const std::vector<float>*> inPoint;
-        for (const std::string& name : in->pointChannelNames()) {
-            outPoint.push_back(&out->addPointChannel(name, in->pointChannelDefault(name)));
-            inPoint.push_back(in->pointChannel(name));
-        }
-        for (const std::string& name : in->strandChannelNames()) {
-            std::vector<float>& to = out->addStrandChannel(name, in->strandChannelDefault(name));
-            const std::vector<float>& from = *in->strandChannel(name);
-            if (!which) {
-                to = from;
-                continue;
-            }
-            for (std::size_t k = 0; k < made; ++k) to[k] = from[source(k)];
-        }
-        const bool hasWidths = in->widths().size() == in->pointCount();
-        std::vector<float>& outWidths = out->mutableWidths();
-        // Strand k of the set made: its source's curve curled about `axis` (null: fewer than 2
-        // points, as they are).
-        auto fill = [&](std::size_t k, const Curve& curve, const Axis* axis, std::vector<Place>& places) {
-            const std::size_t s = source(k);
-            const std::size_t n = in->strandPointCount(s), begin = in->strandBegin(s), to = out->strandBegin(k);
-            if (!axis) {
-                for (std::size_t i = 0; i < n; ++i) out->strandPoints(k)[i] = in->strandPoints(s)[i];
-                if (hasWidths) std::copy_n(in->widths().data() + begin, n, outWidths.data() + to);
-                for (std::size_t ch = 0; ch < outPoint.size(); ++ch) std::copy_n(inPoint[ch]->data() + begin, n, outPoint[ch]->data() + to);
-                return;
-            }
-            placesFor(s, *axis, counts[k], places);
-            curl(s, curve, *axis, places, out->strandPoints(k));
-            auto sample = [&](const float* values, float* into) {
-                for (std::size_t p = 0; p < places.size(); ++p) {
-                    const Place at = places[p];
-                    into[p] = at.u == 0.0f ? values[at.j] : values[at.j] + (values[at.j + 1] - values[at.j]) * at.u;
-                }
-            };
-            if (hasWidths) sample(in->widths().data() + begin, outWidths.data() + to);
-            for (std::size_t ch = 0; ch < outPoint.size(); ++ch) sample(inPoint[ch]->data() + begin, outPoint[ch]->data() + to);
-        };
-        if (which) {
-            parallelFor(0, made, [&](std::size_t k) {
-                thread_local Curve curve;
-                thread_local Axis own;
-                thread_local std::vector<Place> places;
-                const std::size_t s = source(k);
-                fill(k, curve, in->strandPointCount(s) < 2 ? nullptr : &prepare(s, curve, own), places);
-            }, 16);
-        } else {
-            parallelFor(0, (made + 3) / 4, [&](std::size_t g) {
-                thread_local std::array<Curve, 4> curves;
-                thread_local std::array<Axis, 4> owns;
-                thread_local std::vector<Place> places;
-                const Axis* axes[4];
-                prepareFour(4 * g, curves.data(), owns.data(), axes);
-                for (std::size_t k = 4 * g; k < std::min(4 * g + 4, made); ++k) fill(k, curves[k - 4 * g], axes[k - 4 * g], places);
-            }, 16);
-        }
-        out->setInstances(in->instances());
-        for (const auto& layer : in->cardLayers()) out->addCardLayer(layer);
-        for (const auto& layer : in->featherLayers()) out->addFeatherLayer(layer);
-        return out;
     };
 
     if (last) {
-        // The strands the input changed in, into the last result's copy, as long as each gets the
-        // points it had (else in full).
+        // The strands the input changed in, into the last result's copy (laid out as the input).
         const std::vector<std::uint32_t>& list = changes->strands;
-        std::vector<std::size_t> counts(list.size());
-        std::atomic<bool> other{false};
-        parallelFor(0, list.size(), [&](std::size_t k) {
-            thread_local Curve curve;
-            thread_local Axis own;
-            thread_local std::vector<Place> places;
-            const std::size_t s = list[k], n = in->strandPointCount(s);
-            counts[k] = n >= 2 ? plan(s, prepare(s, curve, own), places, false) : n;
-            if (counts[k] != last->strandPointCount(s)) other = true;
-        }, 64);
-        if (other) return false;
-        if (last->pointCount() == in->pointCount()) {
-            // Laid out as the input (no points added).
-            auto out = std::make_shared<StrandSet>(*in);
-            positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
-            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Curl, params(), in, list, scalp, *out))) {
-                forEachListed(list, [&](std::size_t s) {
-                    thread_local Curve curve;
-                    thread_local Axis own;
-                    thread_local std::vector<Place> places;
-                    if (in->strandPointCount(s) < 2) {
-                        copyStrandPoints(*out, *in, s);
-                        return;
-                    }
-                    const Axis& axis = prepare(s, curve, own);
-                    plan(s, axis, places);
-                    curl(s, curve, axis, places, out->strandPoints(s));
-                });
-            }
-            *result = StrandsPtr(out);
-        } else {
-            // With the points Curl added: the changed strands made apart, written over the last result's.
-            const std::shared_ptr<StrandSet> made = build(&list, counts);
-            auto out = copyOfLast(last, *incremental);
-            writeStrands(*out, *made, list);
-            *result = StrandsPtr(out);
+        auto out = std::make_shared<StrandSet>(*in);
+        positionsOfLast(*out, last, *incremental);  // the strands left alone, as they were made
+        if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Curl, params(), in, list, scalp, *out))) {
+            forEachListed(list, [&](std::size_t s) {
+                thread_local Curve curve;
+                thread_local Axis own;
+                if (in->strandPointCount(s) < 2) {
+                    copyStrandPoints(*out, *in, s);
+                    return;
+                }
+                curl(s, curve, prepare(s, curve, own), out->strandPoints(s));
+            });
         }
+        *result = StrandsPtr(out);
         *changed = *changes;
         return true;
     }
 
-    // Each strand curled at its own points, as long as Curl adds none to any; each strand's count.
-    std::vector<std::size_t> counts(strandCount);
-    if (set.perTurn > 0 && !byClump && gpu::cpuEngineOn()) {
-        // The counts first (the arcs alone): none added, the engine's; else the strands laid out anew.
-        parallelFor(0, (strandCount + 3) / 4, [&](std::size_t g) {
-            thread_local std::array<Curve, 4> curves;
-            thread_local std::array<Axis, 4> owns;
-            thread_local std::vector<Place> places;
-            const Axis* axes[4];
-            const std::size_t first = 4 * g;
-            prepareFour(first, curves.data(), owns.data(), axes, false);
-            for (std::size_t s = first; s < std::min(first + 4, strandCount); ++s) {
-                const std::size_t n = in->strandPointCount(s);
-                counts[s] = n < 2 ? n : plan(s, *axes[s - first], places, false);
+    // Each strand curled at its own points.
+    auto out = std::make_shared<StrandSet>(*in);
+    out->overwritePositions();  // every point written below
+    parallelFor(0, (strandCount + 3) / 4, [&](std::size_t g) {
+        thread_local std::array<Curve, 4> curves;
+        thread_local std::array<Axis, 4> owns;
+        const Axis* axes[4];
+        const std::size_t first = 4 * g;
+        prepareFour(first, curves.data(), owns.data(), axes, true);
+        for (std::size_t s = first; s < std::min(first + 4, strandCount); ++s) {
+            if (in->strandPointCount(s) < 2) {
+                copyStrandPoints(*out, *in, s);
+                continue;
             }
-        }, 16);
-        std::size_t added = 0;
-        for (std::size_t s = 0; s < strandCount; ++s) added += counts[s] != in->strandPointCount(s);
-        if (added > 0) {
-            added_.store(added, std::memory_order_relaxed);
-            *result = StrandsPtr(build(nullptr, counts));
-            return true;
+            curl(s, curves[s - first], *axes[s - first], out->strandPoints(s));
         }
-        if (onEngine()) return true;
-    }
-    std::atomic<bool> adds{false};
-    {
-        auto out = std::make_shared<StrandSet>(*in);
-        out->overwritePositions();  // every point written below
-        parallelFor(0, (strandCount + 3) / 4, [&](std::size_t g) {
-            thread_local std::array<Curve, 4> curves;
-            thread_local std::array<Axis, 4> owns;
-            thread_local std::vector<Place> places;
-            const Axis* axes[4];
-            const std::size_t first = 4 * g;
-            // Once Curl adds points to some strand, the rest need only their counts here (build
-            // makes them all).
-            const bool counting = adds.load(std::memory_order_relaxed);
-            prepareFour(first, curves.data(), owns.data(), axes, !counting);
-            for (std::size_t s = first; s < std::min(first + 4, strandCount); ++s) {
-                const std::size_t n = in->strandPointCount(s);
-                counts[s] = n;
-                if (n < 2) {
-                    copyStrandPoints(*out, *in, s);
-                    continue;
-                }
-                const Axis& axis = *axes[s - first];
-                counts[s] = plan(s, axis, places, !counting);
-                if (counts[s] > n) {
-                    // (Written once: every thread writing it for each strand would queue them
-                    // all on its cache line.)
-                    if (!adds.load(std::memory_order_relaxed)) adds.store(true, std::memory_order_relaxed);
-                } else if (!counting && !adds.load(std::memory_order_relaxed)) {
-                    curl(s, curves[s - first], axis, places, out->strandPoints(s));
-                }
-            }
-        }, 16);
-        std::size_t added = 0;
-        for (std::size_t s = 0; s < strandCount; ++s) added += counts[s] != in->strandPointCount(s);
-        added_.store(added, std::memory_order_relaxed);
-        if (!adds) {
-            *result = StrandsPtr(out);
-            return true;
-        }
-    }
-    // Points added: a new layout.
-    *result = StrandsPtr(build(nullptr, counts));
+    }, 16);
+    *result = StrandsPtr(out);
     return true;
 }
 
