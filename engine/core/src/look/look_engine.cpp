@@ -428,15 +428,21 @@ void LookEngine::putStrandData(const LookRun& run, bool frames) {
         const InterpolateInputs* in = k < run.inputs.size() ? run.inputs[k].interpolate.get() : nullptr;
         key.push_back(reinterpret_cast<std::uintptr_t>(in ? in->strandNormals.get() : nullptr));
         key.push_back(reinterpret_cast<std::uintptr_t>(in ? in->cursors.get() : nullptr));
+        key.push_back(reinterpret_cast<std::uintptr_t>(k < run.inputs.size() ? run.inputs[k].directions.get() : nullptr));
     }
     if (key == dataKey_) return;
     const StrandSet& s = *base_;
     const std::size_t n = strandCount_;
     dataBlocks_.assign(stages.size(), 0);
+    directionBlocks_.assign(stages.size(), 0);
     std::size_t blocks = 1;  // block 0: the root normals
     for (std::size_t k = 0; k < stages.size(); ++k) {
         dataBlocks_[k] = blocks;
         blocks += strandDataBlocks(stages[k].stage.kind);
+        if (k < run.inputs.size() && run.inputs[k].directions) {
+            if (run.inputs[k].directions->size() != n) throw std::runtime_error("GPU preview: a stage's directions are for other strands");
+            directionBlocks_[k] = blocks++;
+        }
     }
     // Written in place where the engine holds it in memory (the CPU's), else up from here; each
     // strand's numbers zero but what its stages set.
@@ -458,6 +464,13 @@ void LookEngine::putStrandData(const LookRun& run, bool frames) {
         }
         const StrandId id = s.ids()[baseStrand(i)];
         for (std::size_t k = 0; k < stages.size(); ++k) {
+            if (directionBlocks_[k]) {
+                const Vec3f& w = (*run.inputs[k].directions)[i];
+                float* d = data + (directionBlocks_[k] * n + i) * 4;
+                d[0] = w.x;
+                d[1] = w.y;
+                d[2] = w.z;
+            }
             if (!dataBlocks_[k]) continue;
             float* d = data + (dataBlocks_[k] * n + i) * 4;
             const std::uint64_t seed = stages[k].seed;
@@ -1566,6 +1579,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         c.uniformCount = static_cast<std::uint32_t>(uniformCount_);
         c.pointCount = static_cast<std::uint32_t>(stagePoints(p));
         c.dataBlock = static_cast<std::uint32_t>(dataBlocks_[k] * n);
+        c.table[2] = k < directionBlocks_.size() ? static_cast<std::uint32_t>(directionBlocks_[k] * n) : 0u;  // (look.slang stageDirection)
         for (int i = 0; i < 4; ++i) {
             c.value[i] = p.value[i];
             c.flag[i] = static_cast<std::uint32_t>(p.flag[i]);

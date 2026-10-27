@@ -77,7 +77,7 @@
     uint4 gFlag;         // its switches and counts
     uint4 gOctaveSeeds[4];  // Noise: octave o's seed (lo, hi): [o / 2].xy for even o, .zw for odd
     uint4 gRamp;         // its profile: key count, offset (floats in gRamps; key k at + 3k), straight, table count
-    uint4 gTable;        // x: the table's offset (the profile by point index, strands of gRamp.w points); y: the lines' normals block
+    uint4 gTable;        // x: the table's offset (the profile by point index, strands of gRamp.w points); y: the lines' normals block; z: each strand's direction's (stageDirection; 0: none)
     uint4 gField;        // mapped params 0 and 1: mode (0 the number, 1 per strand, 2 per point), offset (floats in gFields)
     uint4 gAux;          // offsets into gAux0 and gAux1 (words), by node
     uint4 gDispatch;     // x: the groups in a row of the dispatch (threadIndex)
@@ -103,6 +103,9 @@
 float3 loadPoint(uint p) { return asfloat(gIn.Load3(p * 12)); }
 void storePoint(RWByteAddressBuffer b, uint p, float3 v) { b.Store3(p * 12, asuint(v)); }
 float4 strandData(uint s) { return asfloat(gStrandData.Load4((gDataBlock + s) * 16)); }
+// Gravity's, Bend's and Displace's direction: each strand's where the run hands them (a vector
+// field's, look_run.h StageInputs::directions, at gTable.z), else the param's `constant`.
+float3 stageDirection(uint s, float3 constant) { return gTable.z != 0u ? asfloat(gStrandData.Load3((gTable.z + s) * 16)) : constant; }
 // A view of some of the strands (gTable2.w 1: the CPU engine's for an operator's incremental
 // evaluation, LookEngine::setBaseView): each strand's first point and end, two words, in the whole
 // set's points.
@@ -3777,7 +3780,7 @@ void GravityCS(uint3 id : SV_DispatchThreadID) {
     if (s >= gStrandCount) return;
     const uint begin = strandBegin(s), n = strandCountOf(s);
     const float amount = n >= 2 ? fieldAt(0, gValue.x, s, 0) : 0.0f;
-    const float3 down = gValue2.xyz;
+    const float3 down = stageDirection(s, gValue2.xyz);
     const float total = n >= 2 ? strandLength(begin, n) : 0.0f;
     if (!(amount > 0.0f) || dot(down, down) == 0.0f || !(total > 0.0f)) {
         copyStrand(begin, n);
@@ -5935,7 +5938,7 @@ void BendCS(uint3 id : SV_DispatchThreadID) {
         copyStrand(begin, n);
         return;
     }
-    const float3 way = gValue2.xyz;
+    const float3 way = stageDirection(s, gValue2.xyz);
     const bool alongNormal = gFlag.x == 0u;
     const RootAxes a = rootAxesOf(s, begin, n, way, true);
     float3 target = a.n;
@@ -6080,7 +6083,7 @@ void DisplaceCS(uint3 id : SV_DispatchThreadID) {
     const uint begin = strandBegin(s), n = strandCountOf(s);
     if (n == 0u) return;
     const float4 f0 = rootFrameOf(s, 0u);
-    const float3 way = gFlag.x != 0u && f0.w != 0.0f ? f0.xyz : gValue2.xyz;
+    const float3 way = gFlag.x != 0u && f0.w != 0.0f ? f0.xyz : stageDirection(s, gValue2.xyz);
     const bool perPoint = fieldPerPoint(0);
     const float strandAmount = perPoint ? 0.0f : fieldAt(0, gValue.x, s, 0);
     storePoint(gOut, begin, loadPoint(begin));

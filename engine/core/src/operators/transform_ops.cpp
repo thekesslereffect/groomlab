@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <memory>
 
 #include "groomlab/field.h"
@@ -99,6 +100,23 @@ struct EngineStage {
     gpu::StageKind kind;
     const ParamSet& params;
     const ScalpMesh* scalp;
+    // Each strand's direction (StageInputs::directions) of strand s, where the node takes one per
+    // strand (Bend's vector field); null: the param's one.
+    std::function<Vec3f(std::size_t)> direction = nullptr;
+    // Its stage on the CPU engine for the strands `which` (all: null) of `in`, into `out`.
+    bool run(const StrandsPtr& in, const std::vector<std::uint32_t>* which, StrandSet* out, StrandsPtr* made) const {
+        gpu::StageParamReader reader(params, "");
+        gpu::StageInputs inputs;
+        if (direction) {
+            reader.directions = true;
+            auto ways = std::make_shared<std::vector<Vec3f>>(which ? which->size() : in->strandCount());
+            parallelFor(0, ways->size(), [&](std::size_t k) { (*ways)[k] = direction(which ? (*which)[k] : k); }, 4096);
+            inputs.directions = std::move(ways);
+        }
+        if (which) return gpu::runStageOnStrands(kind, reader, in, *which, scalp, *out, std::move(inputs));
+        *made = gpu::runStage(kind, reader, in, scalp, std::move(inputs));
+        return *made != nullptr;
+    }
 };
 template <class Shape>
 bool reshapeEach(const StrandsPtr& in, bool identity, bool local, const IncrementalInputs* incremental, bool otherInputsSame,
@@ -127,7 +145,7 @@ bool reshapeEach(const StrandsPtr& in, bool identity, bool local, const Incremen
         out->mutablePositions();  // cloned once here: the loop writes points while fields read the set
     }
     if (last) {
-        if (!(engine && gpu::cpuEngineOn() && gpu::runStageOnStrands(engine->kind, engine->params, in, changes->strands, engine->scalp, *out))) {
+        if (!(engine && gpu::cpuEngineOn() && engine->run(in, &changes->strands, out.get(), nullptr))) {
             forEachListed(changes->strands, [&](std::size_t s) {
                 copyStrandPoints(*out, *in, s);
                 shape(*out, s);
@@ -392,13 +410,16 @@ private:
                 pts[i] = bent;
             }
         };
+        // (A direction per strand: each strand's, as `shape` reads it.)
+        EngineStage engine{gpu::StageKind::Bend, params(), scalp};
+        if (!direction.isConstant()) engine.direction = [&](std::size_t s) { return direction.at(*in, s); };
         if (!incremental && !identity && gpu::cpuEngineOn()) {  // look.slang's, the GPU preview's own (look_cpu.h)
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Bend, params(), in, scalp)) {
+            StrandsPtr made;
+            if (engine.run(in, nullptr, nullptr, &made)) {
                 *result = made;
                 return true;
             }
         }
-        const EngineStage engine{gpu::StageKind::Bend, params(), scalp};
         return reshapeEach(in, identity, angle.strandLocal() && direction.strandLocal(), incremental, true, result, changed,
                            shape, &engine);
     }

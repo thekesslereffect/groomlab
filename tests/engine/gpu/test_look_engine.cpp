@@ -6075,6 +6075,11 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Displace", R"("params": {"distance": {"expression": "0.05 * t", "min": 0.0, "max": 1.0}, "along": "direction", "direction": [0.0, 1.0, 0.0]})",
          false, true},
         {"Displace", R"("params": {"distance": {"expression": "0.02 + 0.06 * rand", "min": 0.0, "max": 1.0}})"},
+        // A direction per strand (a vector expression): the operator's own run hands each strand's
+        // (StageInputs::directions); the stage alone, without them, is the CPU's.
+        {"Gravity", R"("params": {"strength": 0.6, "direction": {"expression": "[x, -1, 0.3]"}})", false, true},
+        {"Bend", R"("params": {"angle": 50.0, "along": "direction", "direction": {"expression": "[1, 0, z]"}})", false, true},
+        {"Displace", R"("params": {"distance": 0.08, "along": "direction", "direction": {"expression": "[y, 1, 0]"}})", false, true},
         {"Part", R"("params": {"strength": 0.8, "width": 0.3})"},
         {"Part", R"("params": {"strength": {"expression": "0.4 + 0.6 * rand", "min": 0.0, "max": 1.0}, "width": 0.5, "profile": [[0, 0], [1, 1]]})"},
         {"Flyaway", R"("params": {"stray": 0.1, "fraction": 0.3, "frequency": 3.0, "start": 0.2, "standOut": 0.3, "lengthen": 0.2, "seed": 5})"},

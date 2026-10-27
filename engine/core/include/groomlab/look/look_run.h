@@ -419,6 +419,10 @@ struct FlowInputs {
     FlowHost host;
 };
 struct StageInputs {
+    // Gravity, Bend and Displace given their direction per strand (a vector field's: an expression,
+    // Gravity's painted color set), one a strand of the run's, as each operator takes it (Gravity's
+    // unit or zero, Displace's unit, Bend's as it is); null: the param's one for every strand.
+    std::shared_ptr<const std::vector<Vec3f>> directions;
     std::shared_ptr<const InterpolateInputs> interpolate;
     std::shared_ptr<const ClumpInputs> clump;
     std::shared_ptr<const CurlInputs> curl;

@@ -142,10 +142,11 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             } catch (const std::exception&) {
                 constant = false;
             }
-            if (!constant || !params.getString("directionColorSet").empty()) {
+            if (!r.directions && (!constant || !params.getString("directionColorSet").empty())) {
                 *why = r.name() + " takes its direction per strand (the CPU's)";
                 return false;
             }
+            if (r.directions) down = Vec3f{};  // (each strand's: StageInputs::directions)
             if (!mappable("strength", &s->value[0])) return false;
             s->value[1] = static_cast<float>(number("stiffness"));
             if (!(down.length() < 1e-6f)) {
@@ -227,7 +228,9 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             // The direction one world vector (as every strand takes it); one per strand (an
             // expression) is the CPU's.
             Vec3f direction;
-            if (!r.constantVector("direction", &direction)) {
+            if (r.directions && kind != StageKind::Direction) {
+                direction = Vec3f{};  // (each strand's: StageInputs::directions)
+            } else if (!r.constantVector("direction", &direction)) {
                 *why = r.name() + " takes its direction per strand (the CPU's)";
                 return false;
             }

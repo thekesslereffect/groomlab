@@ -703,8 +703,34 @@ private:
                 return true;
             }
         }
+        // Each strand's way down (its field's, a painted color set's over it): unit, or zero.
+        auto downOf = [&](std::size_t s) {
+            Vec3f down = worldDirection.at(*in, s);
+            const StrandRoot& root = in->roots()[s];
+            if (painted && scalp->contains(root)) {
+                const ScalpMesh::Color c = scalp->colorAt(colorSet, root);
+                const Vec3f p{c[0] * 2.0f - 1.0f, c[1] * 2.0f - 1.0f, c[2] * 2.0f - 1.0f};
+                if (p.length() > 1e-3f) down = p;
+            }
+            return down.length() < 1e-6f ? Vec3f{} : down.normalized();
+        };
+        // On the CPU engine (look.slang GravityCS): one way down, or each strand's
+        // (StageInputs::directions; `which`: those strands alone, in that order).
+        const bool perStrand = !worldDirection.isConstant() || !colorSet.empty();
+        auto engineRun = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* inputs) {
+            gpu::StageParamReader reader(params(), "");
+            reader.directions = perStrand;
+            if (perStrand) {
+                auto downs = std::make_shared<std::vector<Vec3f>>(which ? which->size() : in->strandCount());
+                parallelFor(0, downs->size(), [&](std::size_t k) { (*downs)[k] = downOf(which ? (*which)[k] : k); }, 4096);
+                inputs->directions = std::move(downs);
+            }
+            return reader;
+        };
         if (!last && gpu::cpuEngineOn()) {  // look.slang's, the GPU preview's own (look_cpu.h)
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Gravity, params(), in, scalp)) {
+            gpu::StageInputs inputs;
+            const gpu::StageParamReader reader = engineRun(nullptr, &inputs);
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Gravity, reader, in, scalp, std::move(inputs))) {
                 *result = made;
                 return true;
             }
@@ -720,15 +746,8 @@ private:
             if (n < 2) return;
             const float amount = strength.at(*out, s);
             if (amount <= 0.0f) return;
-            const StrandRoot& root = out->roots()[s];
-            Vec3f down = worldDirection.at(*in, s);
-            if (painted && scalp->contains(root)) {
-                const ScalpMesh::Color c = scalp->colorAt(colorSet, root);
-                const Vec3f p{c[0] * 2.0f - 1.0f, c[1] * 2.0f - 1.0f, c[2] * 2.0f - 1.0f};
-                if (p.length() > 1e-3f) down = p;
-            }
-            if (down.length() < 1e-6f) return;
-            down = down.normalized();
+            const Vec3f down = downOf(s);
+            if (down.length() == 0.0f) return;
             Vec3f* pts = out->strandPoints(s);
             // The strand's own segments (read before they move) and its length.
             thread_local std::vector<Vec3f> segments;
@@ -765,7 +784,9 @@ private:
             }
         };
         if (last) {
-            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Gravity, params(), in, changes->strands, scalp, *out))) {
+            gpu::StageInputs inputs;
+            const gpu::StageParamReader reader = engineRun(&changes->strands, &inputs);
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Gravity, reader, in, changes->strands, scalp, *out, std::move(inputs)))) {
                 forEachListed(changes->strands, [&](std::size_t s) {
                     copyStrandPoints(*out, *in, s);
                     hang(s);
@@ -844,8 +865,22 @@ private:
                 return true;
             }
         }
+        // On the CPU engine (look.slang DisplaceCS): one direction, or each strand's unit one
+        // (StageInputs::directions; `which`: those strands alone, in that order).
+        auto engineRun = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* inputs) {
+            gpu::StageParamReader reader(params(), "");
+            reader.directions = !directionField.isConstant();
+            if (reader.directions) {
+                auto ways = std::make_shared<std::vector<Vec3f>>(which ? which->size() : in->strandCount());
+                parallelFor(0, ways->size(), [&](std::size_t k) { (*ways)[k] = unit(directionField.at(*in, which ? (*which)[k] : k)); }, 4096);
+                inputs->directions = std::move(ways);
+            }
+            return reader;
+        };
         if (!last && gpu::cpuEngineOn()) {  // look.slang's, the GPU preview's own (look_cpu.h)
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Displace, params(), in, scalp)) {
+            gpu::StageInputs inputs;
+            const gpu::StageParamReader reader = engineRun(nullptr, &inputs);
+            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Displace, reader, in, scalp, std::move(inputs))) {
                 *result = made;
                 return true;
             }
@@ -871,7 +906,9 @@ private:
             }
         };
         if (last) {
-            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Displace, params(), in, changes->strands, scalp, *out))) {
+            gpu::StageInputs inputs;
+            const gpu::StageParamReader reader = engineRun(&changes->strands, &inputs);
+            if (!(gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Displace, reader, in, changes->strands, scalp, *out, std::move(inputs)))) {
                 forEachListed(changes->strands, [&](std::size_t s) {
                     copyStrandPoints(*out, *in, s);
                     displace(s);

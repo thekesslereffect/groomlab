@@ -48,6 +48,9 @@ public:
     // Interpolate taking the guides' length alone (take length): the caller runs it on the CPU
     // engine; else the CPU's.
     bool lengthAlone = false;
+    // Gravity, Bend and Displace given their direction per strand (StageInputs::directions): the
+    // caller's; else one varying is the CPU's.
+    bool directions = false;
 
 private:
     const ParamSet& params_;

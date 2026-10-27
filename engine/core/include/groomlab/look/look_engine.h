@@ -334,6 +334,7 @@ private:
     // What the buffers hold: the per-strand numbers' key, the fields' serial, each stage's inputs.
     std::vector<std::uint64_t> dataKey_;
     std::vector<std::size_t> dataBlocks_;  // per stage: its block in kStrandData (0: none)
+    std::vector<std::size_t> directionBlocks_;  // per stage: its strands' directions' block (StageInputs::directions; 0: none)
     std::uint64_t fieldSerial_ = 0;
     // Per stage kFieldSlots fields (0 and 1, then its affect), each its mode and offset.
     static constexpr std::size_t kFieldSlots = 3;
