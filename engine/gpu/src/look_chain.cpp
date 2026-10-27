@@ -955,9 +955,7 @@ bool readLookParams(const GraphDocument& doc, const LookChain& chain, const Over
                 break;
             }
             case StageKind::Blend: {
-                if (!mappable("mix", &s.value[0])) return false;
-                s.ramp = ramp("profile");
-                s.tabled = true;
+                if (!readStageParams(stage.kind, reader, &s, why)) return false;
                 break;
             }
             // ---- The shapers reading their neighbours or a reference ----
@@ -1549,13 +1547,7 @@ bool lookFieldsHold(const GraphDocument& doc, const LookChain& chain, const Look
             // Made again on the GPU from the run's points (its channels read as LookInputs::read
             // checks: the binding held).
             if (v.program) continue;
-            if (k == 0) {
-                if (i < 2 && v.readsPositions && v.mode == FieldValues::kPerPoint && movesPointByPoint(stage.kind)) {
-                    *why = name + " reads each point after the ones before it moved (the CPU's)";
-                    return false;
-                }
-                continue;
-            }
+            if (k == 0) continue;  // (read on the points the stage takes, as the operators read them)
             if (v.readsPositions) {
                 *why = name + " reads the points, which the run moves before it";
                 return false;
@@ -2298,19 +2290,19 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                     *why = name + ": " + whyNot + " (the CPU's)";
                     return false;
                 }
-                if (layout->coarsened) {
-                    *why = name + "'s hair spreads far wider than its scalp: its grid's cells coarsen (the CPU's)";
+                if (layout->floorSurface) {
+                    *why = name + "'s scalp is deformed away from its rest pose (its floor asked through the rest pose: the CPU's)";
                     return false;
                 }
                 auto made = std::make_shared<HairGridInputs>();
                 made->layout = layout;
                 if (scalpMesh) {
                     const HairGridInputs* held = memo.inputs.get();
-                    if (held && held->walls && memo.scalp == scalpMesh && held->layout->h == layout->h &&
+                    if (held && held->walls && memo.scalp == scalpMesh && held->layout->cell == layout->cell &&
                         held->layout->wallReach == layout->wallReach) {
                         made->walls = held->walls;
                     } else {
-                        made->walls = hairGridWalls(*scalpMesh, layout->h, layout->wallReach);
+                        made->walls = hairGridWalls(*scalpMesh, layout->cell, layout->wallReach);
                     }
                     if (!made->walls) {
                         *why = name + ": its scalp is too large for its grid's cell (the CPU's)";

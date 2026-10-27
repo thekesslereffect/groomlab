@@ -518,13 +518,18 @@ private:
             const float angle = pm::acos(c) * w;
             for (std::size_t k = 1; k < n; ++k) pts[k] = pts[0] + rotateAxisAngle(pts[k] - pts[0], axis, angle);
         };
+        // (All three mapped: each strand's three, as `shape` reads them.)
+        EngineStage engine{gpu::StageKind::Direction, params(), scalp};
+        if (gpu::directionMapped(params()).size() > 2) {
+            engine.direction = [&](std::size_t s) { return Vec3f(inclination.at(*in, s), roll.at(*in, s), strength.at(*in, s)); };
+        }
         if (!incremental && !identity && gpu::cpuEngineOn()) {  // look.slang's, the GPU preview's own (look_cpu.h)
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Direction, params(), in, scalp)) {
+            StrandsPtr made;
+            if (engine.run(in, nullptr, nullptr, &made)) {
                 *result = made;
                 return true;
             }
         }
-        const EngineStage engine{gpu::StageKind::Direction, params(), scalp};
         return reshapeEach(in, identity, inclination.strandLocal() && roll.strandLocal() && strength.strandLocal(), incremental, true,
                            result, changed, shape, &engine);
     }

@@ -183,6 +183,13 @@ bool flowClosest(std::uint64_t host, const float p[3], float reach, std::uint32_
 // in 9 words (look_engine_cpu.cpp restState).
 void collideCursor(std::uint64_t host, std::uint32_t mesh, std::uint32_t strand, const float p[3], float state[9]);
 bool collidePush(std::uint64_t host, std::uint32_t mesh, float p[3], float to, bool soft, float state[9]);
+// operator_state.h hairGridFloorCursor and hairGridFloorPush on the engine's look_run.h
+// HairGridInputs (its layout's floorSurface, its roots), the walk's state in collidePush's 9 words.
+void gridFloorCursor(std::uint64_t host, std::uint32_t strand, const float p[3], float state[9]);
+// distance_field.h meshPushOf on operator_state.h InterpolateClearance's mesh (its beside), the
+// probe's height and distance learnt (probe[2]); the delta into `delta`.
+bool clearanceMeshPush(std::uint64_t host, const float p[3], float offset, float maxDepth, float searchRadius, float probe[2], float delta[3]);
+bool gridFloorPush(std::uint64_t host, float p[3], float state[9]);
 template <class T>
 inline T& ref(T& x) { return x; }
 template <class T>
@@ -272,6 +279,41 @@ inline bool groomlab_collide_push(const W& host, std::uint32_t mesh, V&& p, floa
     groomlab_collide_state_out(a, b, c, w);
     float q[3] = {ref(p).x, ref(p).y, ref(p).z};
     const bool moved = groomlab::gpu::cpu_host::collidePush(groomlab::gpu::cpu_host::address(host), mesh, q, to, soft, w);
+    ref(p).x = q[0];
+    ref(p).y = q[1];
+    ref(p).z = q[2];
+    groomlab_collide_state_in(a, b, c, w);
+    return moved;
+}
+template <class W, class V, class F, class D>
+inline bool groomlab_clearance_mesh_push(const W& host, const V& p, float offset, float maxDepth, float searchRadius, F&& heightLow, F&& distanceLow,
+                                         D&& delta) {
+    using groomlab::gpu::cpu_host::ref;
+    const float q[3] = {p.x, p.y, p.z};
+    float probe[2] = {ref(heightLow), ref(distanceLow)}, d[3] = {0.0f, 0.0f, 0.0f};
+    const bool moved = groomlab::gpu::cpu_host::clearanceMeshPush(groomlab::gpu::cpu_host::address(host), q, offset, maxDepth, searchRadius, probe, d);
+    ref(heightLow) = probe[0];
+    ref(distanceLow) = probe[1];
+    ref(delta).x = d[0];
+    ref(delta).y = d[1];
+    ref(delta).z = d[2];
+    return moved;
+}
+template <class W, class V, class A, class B, class C>
+inline void groomlab_grid_floor_cursor(const W& host, std::uint32_t strand, const V& p, A&& a, B&& b, C&& c) {
+    float w[9];
+    groomlab_collide_state_out(a, b, c, w);
+    const float q[3] = {p.x, p.y, p.z};
+    groomlab::gpu::cpu_host::gridFloorCursor(groomlab::gpu::cpu_host::address(host), strand, q, w);
+    groomlab_collide_state_in(a, b, c, w);
+}
+template <class W, class V, class A, class B, class C>
+inline bool groomlab_grid_floor_push(const W& host, V&& p, A&& a, B&& b, C&& c) {
+    using groomlab::gpu::cpu_host::ref;
+    float w[9];
+    groomlab_collide_state_out(a, b, c, w);
+    float q[3] = {ref(p).x, ref(p).y, ref(p).z};
+    const bool moved = groomlab::gpu::cpu_host::gridFloorPush(groomlab::gpu::cpu_host::address(host), q, w);
     ref(p).x = q[0];
     ref(p).y = q[1];
     ref(p).z = q[2];

@@ -322,16 +322,22 @@ private:
         // Feathers' shafts with a rachis (Propagate's shaftWidth: kRachisChannel) are as wide as
         // it: they keep their widths (a barb width set after the feathers is the barbs').
         const std::vector<float>* isShaft = in->strandChannel(kRachisChannel);
-        if (!last && !isShaft && gpu::cpuEngineOn()) {
+        const bool inWidths = in->widths().size() == in->pointCount();
+        // The shafts' widths as they came (after the engine's WidthCS, which widens every strand).
+        auto keepShaft = [&](std::size_t s) {
+            if (!isShaft || !((*isShaft)[s] >= 0.5f)) return;
+            const std::size_t begin = in->strandBegin(s), n = in->strandPointCount(s);
+            std::vector<float>& w = out->mutableWidths();
+            for (std::size_t k = 0; k < n; ++k) w[begin + k] = inWidths ? in->widths()[begin + k] : 1.0f;
+        };
+        if (!last && gpu::cpuEngineOn() && gpu::runStageInto(gpu::StageKind::Width, params(), in, scalpOf(ctx), *out)) {
             // look.slang's WidthCS, the GPU preview's own (look_cpu.h).
-            if (StrandsPtr made = gpu::runStage(gpu::StageKind::Width, params(), in, scalpOf(ctx))) {
-                *result = made;
-                return true;
-            }
+            if (isShaft) parallelFor(0, out->strandCount(), keepShaft, 4096);
+            *result = StrandsPtr(out);
+            return true;
         }
         // Every strand's widths are written (the strands left alone keep the last result's).
         std::vector<float>& widths = last ? widthsOfLast(*out, last, *incremental) : out->mutableWidths();
-        const bool inWidths = in->widths().size() == in->pointCount();
         auto shape = [&](std::size_t s) {
             const std::size_t n = in->strandPointCount(s);
             if (n == 0) return;
@@ -357,7 +363,9 @@ private:
             }
         };
         if (last) {
-            if (!(!isShaft && gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Width, params(), in, changes->strands, scalpOf(ctx), *out))) {
+            if (gpu::cpuEngineOn() && gpu::runStageOnStrands(gpu::StageKind::Width, params(), in, changes->strands, scalpOf(ctx), *out)) {
+                if (isShaft) forEachListed(changes->strands, keepShaft);
+            } else {
                 forEachListed(changes->strands, shape);
             }
             *changed = *changes;

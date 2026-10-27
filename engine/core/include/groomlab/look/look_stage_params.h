@@ -48,8 +48,9 @@ public:
     // Interpolate taking the guides' length alone (take length): the caller runs it on the CPU
     // engine; else the CPU's.
     bool lengthAlone = false;
-    // Gravity, Bend and Displace given their direction per strand (StageInputs::directions): the
-    // caller's; else one varying is the CPU's.
+    // Gravity, Bend and Displace given their direction per strand (StageInputs::directions; Direction:
+    // its inclination, roll and strength per strand): the caller's; else one varying (Direction's
+    // three mapped) is the CPU's.
     bool directions = false;
     // Collide's method exact asked through the host (CollideHost, null rests: the mesh itself): the
     // caller's, on the CPU engine; else the CPU's.
@@ -109,9 +110,6 @@ std::vector<std::string> directionMapped(const ParamSet& params);
 std::array<std::string, 2> mappedParams(StageKind kind, const ParamSet& params);
 // Whether field `i`'s values may vary along the strands (read per point where they do).
 bool mappedPerPoint(StageKind kind, int i);
-// Whether the stage moves each point by its own mapped value (a per-point value read after the
-// points before it moved is the CPU's).
-bool movesPointByPoint(StageKind kind);
 
 // The frames Bend, Direction, Transform and Displace take (RootInputs): each strand's scalp normal
 // and U direction at its root (none off the scalp), 8 floats a strand into `to` (every one written).

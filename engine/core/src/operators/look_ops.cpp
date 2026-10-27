@@ -1599,7 +1599,7 @@ private:
             };
             const float strandAmount = strengthPerPoint ? 0.0f : strength.at(*out, s) * escape;
             auto amountAt = [&](std::size_t i) {
-                return strengthPerPoint ? strength.atPoint(*out, s, i) * escape : strandAmount;
+                return strengthPerPoint ? strength.atPoint(*in, s, i) * escape : strandAmount;
             };
             const Vec3f* center = curves.data() + c * kCenterSamples;
             const float* centerArc = centerArcs.data() + c * kCenterSamples;
@@ -1951,7 +1951,7 @@ private:
                     const Vec3f original = pts[i];
                     arc += (original - previous).length();
                     previous = original;
-                    const float a = (perPoint ? amplitudeField.atPoint(*out, s, i) : amplitude) * along(i, n);
+                    const float a = (perPoint ? amplitudeField.atPoint(*in, s, i) : amplitude) * along(i, n);
                     if (a == 0.0f) continue;
                     const float u = (strandSpace ? paramAt(i, n) : arc) * frequency;
                     const float k = std::floor(u);
@@ -1967,7 +1967,7 @@ private:
             }
             for (std::size_t i = 1; i < n; ++i) {
                 const float t = paramAt(i, n);
-                const float a = (perPoint ? amplitudeField.atPoint(*out, s, i) : amplitude) * along(i, n);
+                const float a = (perPoint ? amplitudeField.atPoint(*in, s, i) : amplitude) * along(i, n);
                 if (a == 0.0f) continue;
                 // Each point is sampled at its own position before it moves.
                 const Vec3f q = strandSpace ? strandOffset + Vec3f(0, 0, t * frequency) : pts[i] * frequency;
@@ -2696,9 +2696,18 @@ private:
                                       [&](const auto& key) { return key.second == ramp.keys.front().second; });
         const LookMix mix = look ? LookMix(*a, *b, perPoint || !flat, writable) : LookMix();
         if (!mix.complete) return false;
+        // The points on the CPU engine (look.slang BlendCS, look b handed in); the widths and the
+        // look mixed below by the same weights.
+        bool pointsMixed = false;
+        if (gpu::cpuEngineOn()) {
+            gpu::StageInputs with;
+            with.blendWith = b;
+            pointsMixed = last ? gpu::runStageOnStrands(gpu::StageKind::Blend, params(), a, remade, scalpOf(ctx), *out, std::move(with))
+                               : gpu::runStageInto(gpu::StageKind::Blend, params(), a, scalpOf(ctx), *out, std::move(with));
+        }
         auto blendStrand = [&](std::size_t s) {
             if (last) {  // made again from a's strand, as a full evaluation's copy of a starts it
-                copyStrandPoints(*out, *a, s);
+                if (!pointsMixed) copyStrandPoints(*out, *a, s);
                 if (outWidths.size() == a->widths().size()) {
                     const auto begin = static_cast<std::ptrdiff_t>(a->strandBegin(s));
                     const auto end = begin + static_cast<std::ptrdiff_t>(a->strandPointCount(s));
@@ -2721,7 +2730,7 @@ private:
                 for (std::size_t k = 0; k < n; ++k) {
                     const float f = weightAt(k);
                     sum += f;
-                    pts[k] = pts[k] + (to[k] - pts[k]) * f;
+                    if (!pointsMixed) pts[k] = pts[k] + (to[k] - pts[k]) * f;
                     if (widths) {
                         float& width = outWidths[begin + k];
                         width += (b->widths()[begin + k] - width) * f;

@@ -134,6 +134,7 @@ bool runStageOnStrands(StageKind kind, const StageParamReader& reader, const Str
         case StageKind::Jiggle:  // (their lags the caller's, for these strands)
         case StageKind::Interpolate:  // (their binding the caller's, for these strands)
         case StageKind::RestoreLength:  // (their reference the caller's, for these strands)
+        case StageKind::Blend:  // (look b handed in: StageInputs::blendWith)
         case StageKind::Curl: break;  // (alone: by clump it reads its clumps)
         default: return false;
     }
@@ -158,9 +159,9 @@ bool runStageOnStrands(StageKind kind, const StageParamReader& reader, const Str
     }
     for (int i = 0; i < 2; ++i) {
         if (mapped[i].empty() || !mappedParam(params, mapped[i]) || (coil && i == 0)) continue;
+        if (kind == StageKind::Direction && reader.directions) continue;  // (its three per strand: StageInputs::directions)
         FieldValues& values = run.fields.stages[0].field[i];
         readFieldValues(ScalarField(params, mapped[i], scalp), *in, which, mappedPerPoint(kind, i), &values);
-        if (values.readsPositions && values.mode == FieldValues::kPerPoint && movesPointByPoint(kind)) return false;
     }
     // The thread's engine (runOnCpuEngine's) on a view of these strands, its result written into
     // `out` in place (their points; a Width: their widths).
@@ -211,10 +212,9 @@ bool runStageInto(StageKind kind, const StageParamReader& reader, const StrandsP
     }
     for (int i = 0; i < 2; ++i) {
         if (mapped[i].empty() || !mappedParam(params, mapped[i]) || (coil && i == 0)) continue;
+        if (kind == StageKind::Direction && reader.directions) continue;  // (its three per strand: StageInputs::directions)
         FieldValues& values = run.fields.stages[0].field[i];
         readFieldValues(ScalarField(params, mapped[i], scalp), *in, mappedPerPoint(kind, i), &values);
-        // Read at each point after the ones before it moved: the CPU's.
-        if (values.readsPositions && values.mode == FieldValues::kPerPoint && movesPointByPoint(kind)) return false;
     }
     // (Bend's, Direction's, Transform's and Displace's root frames: the engine's own, LookEngine::putStageInputs.)
     runOnCpuEngine(run, in, scalp, out, kind == StageKind::Width);

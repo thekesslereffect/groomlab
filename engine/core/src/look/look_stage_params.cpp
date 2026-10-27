@@ -63,6 +63,7 @@ bool readsStageParams(StageKind kind) {
         case StageKind::Static:
         case StageKind::RestoreLength:
         case StageKind::MeshCut:
+        case StageKind::Blend:
         case StageKind::Jiggle: return true;
         default: return false;
     }
@@ -222,6 +223,13 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             return true;
         }
         // ---- The shapers working on each strand alone ----
+        case StageKind::Blend: {
+            // BlendOp: mix (field 0, per point allowed) and its profile by point index.
+            if (!mappable("mix", &s->value[0])) return false;
+            s->ramp = r.ramp("profile");
+            s->tabled = true;
+            return true;
+        }
         case StageKind::Bend:
         case StageKind::Direction:
         case StageKind::Displace: {
@@ -247,15 +255,19 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             } else if (kind == StageKind::Direction) {
                 // Its mapped params' fields: the first two mapped, a third the CPU's.
                 const std::vector<std::string> fields = directionMapped(params);
-                if (fields.size() > 2) {
+                if (r.directions) {
+                    // Each strand's three (StageInputs::directions): look.slang directionParam's 3.
+                    for (int i = 0; i < 3; ++i) s->flag[1 + i] = 3;
+                } else if (fields.size() > 2) {
                     *why = r.name() + " maps its inclination, roll and strength all three (the CPU's)";
                     return false;
-                }
-                const char* const names[3] = {"inclination", "roll", "strength"};
-                for (int i = 0; i < 3; ++i) {
-                    if (!mappable(names[i], &s->value[i])) return false;
-                    const auto at = std::find(fields.begin(), fields.end(), names[i]);
-                    s->flag[1 + i] = at == fields.end() ? 2 : static_cast<int>(at - fields.begin());
+                } else {
+                    const char* const names[3] = {"inclination", "roll", "strength"};
+                    for (int i = 0; i < 3; ++i) {
+                        if (!mappable(names[i], &s->value[i])) return false;
+                        const auto at = std::find(fields.begin(), fields.end(), names[i]);
+                        s->flag[1 + i] = at == fields.end() ? 2 : static_cast<int>(at - fields.begin());
+                    }
                 }
                 s->value[3] = static_cast<float>(number("inclinationRandom"));
                 s->value2[0] = direction.x;
@@ -471,10 +483,6 @@ std::array<std::string, 2> mappedParams(StageKind kind, const ParamSet& params) 
 bool mappedPerPoint(StageKind kind, int i) {
     return i == 0 && (kind == StageKind::Clump || kind == StageKind::Noise || kind == StageKind::Curl || kind == StageKind::Width ||
                       kind == StageKind::Blend || kind == StageKind::Displace);
-}
-
-bool movesPointByPoint(StageKind kind) {
-    return kind == StageKind::Clump || kind == StageKind::Noise || kind == StageKind::Curl || kind == StageKind::Displace;
 }
 
 namespace {

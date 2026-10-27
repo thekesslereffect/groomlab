@@ -94,6 +94,37 @@ bool collidePush(std::uint64_t host, std::uint32_t mesh, float p[3], float to, b
     return moved;
 }
 
+void gridFloorCursor(std::uint64_t host, std::uint32_t strand, const float p[3], float state[9]) {
+    const HairGridInputs& h = *reinterpret_cast<const HairGridInputs*>(static_cast<std::uintptr_t>(host));
+    CollideRestState st = restState(state);
+    const StrandRoot root = h.roots && strand < h.roots->size() ? (*h.roots)[strand] : StrandRoot{-1, 0.0f, 0.0f};
+    st.cursor = hairGridFloorCursor(*h.layout, root, Vec3f(p[0], p[1], p[2]));
+    putState(st, state);
+}
+
+bool gridFloorPush(std::uint64_t host, float p[3], float state[9]) {
+    const HairGridInputs& h = *reinterpret_cast<const HairGridInputs*>(static_cast<std::uintptr_t>(host));
+    CollideRestState st = restState(state);
+    Vec3f q(p[0], p[1], p[2]);
+    const bool moved = hairGridFloorPush(*h.layout, q, st.cursor);
+    put(q, p);
+    putState(st, state);
+    return moved;
+}
+
+bool clearanceMeshPush(std::uint64_t host, const float p[3], float offset, float maxDepth, float searchRadius, float probe[2], float delta[3]) {
+    const InterpolateClearance& c = *reinterpret_cast<const InterpolateClearance*>(static_cast<std::uintptr_t>(host));
+    MeshDistanceField::Probe pr;
+    pr.beside = c.beside;
+    pr.learnt(probe[0], probe[1]);
+    Vec3f d;
+    const bool moved = meshPushOf(*c.mesh, Vec3f(p[0], p[1], p[2]), offset, maxDepth, searchRadius, &d, &pr);
+    probe[0] = pr.heightLow;
+    probe[1] = pr.distanceLow;
+    put(d, delta);
+    return moved;
+}
+
 bool flowClosest(std::uint64_t host, const float p[3], float reach, std::uint32_t* face, float uv[2], float at[3], float normal[3]) {
     const SurfacePoint hit = flowHost(host).scalp->closestPoint(Vec3f(p[0], p[1], p[2]), reach);
     if (hit.root.face < 0) return false;

@@ -895,7 +895,7 @@ private:
             Vec3f* pts = out->strandPoints(s);
             for (std::size_t i = 1; i < n; ++i) {
                 // Per point: read before the point moves (the field sees the incoming shape).
-                pts[i] += way * ((perPoint ? amount.atPoint(*out, s, i) : strandAmount) * along(i, n));
+                pts[i] += way * ((perPoint ? amount.atPoint(*in, s, i) : strandAmount) * along(i, n));
             }
         };
         if (last) {

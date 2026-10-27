@@ -375,8 +375,12 @@ TEST(SelfCollide, ItsGridAsAHostReadsIt) {
     std::vector<Vec3f> rest = deformed->points();
     for (Vec3f& q : rest) q = q * 0.97f;
     deformed->setRestPoints(rest);
-    EXPECT_FALSE(hairGridLayout(op::kStatic, *hair.strands, deformed, &l, &why));
-    EXPECT_NE(why.find("deformed"), std::string::npos) << why;
+    // Over a deformed scalp: the floor through its rest pose (no tables: the CPU engine's walk asks
+    // the host, hairGridFloorPush).
+    ASSERT_TRUE(hairGridLayout(op::kStatic, *hair.strands, deformed, &l, &why)) << why;
+    EXPECT_TRUE(static_cast<bool>(l.floorSurface));
+    EXPECT_FALSE(l.tables);
+    EXPECT_GT(l.floor, 0.0f);
 }
 
 TEST(SelfCollide, APreviewShowsTheRendersStrands) {

@@ -5,8 +5,10 @@
 #include "hair_grid.h"
 
 #include <cstring>
+#include <limits>
 #include <exception>
 
+#include "groomlab/curve.h"
 #include "groomlab/look/look_cpu.h"
 #include "groomlab/operator_state.h"
 #include "groomlab/operators.h"
@@ -327,9 +329,31 @@ StrandsPtr onEngine(gpu::StageKind kind, const std::string& type, const ParamSet
     try {
         auto layout = std::make_shared<HairGridLayout>();
         std::string why;
-        if (!hairGridLayout(type, *in, scalp, layout.get(), &why, ctx.scale) || layout->coarsened) return nullptr;
+        if (!hairGridLayout(type, *in, scalp, layout.get(), &why, ctx.scale)) return nullptr;
         auto grid = std::make_shared<gpu::HairGridInputs>();
-        if (scalp && !(grid->walls = walls.of(scalp, layout->h, layout->wallReach))) return nullptr;
+        if (scalp && !(grid->walls = walls.of(scalp, layout->cell, layout->wallReach))) {
+            // A scalp too big for the walls' box at this cell: the part of it the grid can reach (the
+            // strands' box grown by the longest strand, the grid's margin and its dilated blocks).
+            const float big = std::numeric_limits<float>::max();
+            Vec3f box[2] = {Vec3f(big, big, big), Vec3f(-big, -big, -big)};
+            float longest = 0.0f;
+            for (std::size_t s = 0; s < in->strandCount(); ++s) {
+                const Vec3f* pts = in->strandPoints(s);
+                const std::size_t n = in->strandPointCount(s);
+                if (!finitePoints(pts, n)) continue;
+                for (std::size_t i = 0; i < n; ++i) {
+                    box[0] = {std::min(box[0].x, pts[i].x), std::min(box[0].y, pts[i].y), std::min(box[0].z, pts[i].z)};
+                    box[1] = {std::max(box[1].x, pts[i].x), std::max(box[1].y, pts[i].y), std::max(box[1].z, pts[i].z)};
+                }
+                longest = std::max(longest, arcLength(pts, n));
+            }
+            const auto grow = static_cast<float>(longest + (static_cast<double>(layout->margin) + 4.0 * (layout->dilate + 1) + 4.0) * layout->cell);
+            box[0] = box[0] - Vec3f(grow, grow, grow);
+            box[1] = box[1] + Vec3f(grow, grow, grow);
+            if (!(box[0].x <= box[1].x) || !(grid->walls = hairGridWalls(*scalp, layout->cell, layout->wallReach, box))) return nullptr;
+        }
+        // (Over a deformed scalp's floor: each strand's root, its walk's start.)
+        if (layout->floorSurface) grid->roots = std::shared_ptr<const std::vector<StrandRoot>>(in, &in->roots());
         grid->layout = std::move(layout);
         gpu::StageInputs stage;
         stage.grid = std::move(grid);
@@ -400,17 +424,18 @@ bool hairGridLayout(const std::string& type, const StrandSet& in, const std::sha
     l.blockCells[2] = g.bz;
     l.blocks = g.blockAt.size();
     l.coarsened = g.h != layout.h;
+    l.cell = g.h;
     if (scalp && layout.size > 0.0f) {
         const ScalpFloor floor = ScalpFloor::of(scalp, layout.size);
-        if (floor && !floor.surface.field) {
-            *why = "its scalp is deformed away from its rest pose (the walk asks the rest pose's field)";
-            return false;
-        }
         if (floor) {
             l.floor = floor.floor;
             l.depth = floor.depth;
             l.searchRadius = floor.searchRadius;
             l.beside = floor.beside;
+        }
+        if (floor && !floor.surface.field) {
+            l.floorSurface = floor.surface;  // (deformed: through its rest pose, hairGridFloorPush)
+        } else if (floor) {
             l.tables = floor.surface.field->tables(floor.floor, floor.searchRadius);
             if (!l.tables) {
                 *why = "its scalp is too big for the floor's field";
@@ -422,7 +447,19 @@ bool hairGridLayout(const std::string& type, const StrandSet& in, const std::sha
     return true;
 }
 
-std::shared_ptr<const std::vector<std::uint32_t>> hairGridWalls(const ScalpMesh& scalp, double h, double reachCells) {
+RestPoseCollision::Cursor hairGridFloorCursor(const HairGridLayout& layout, const StrandRoot& root, const Vec3f& rootPoint) {
+    return layout.floorSurface.cursor(root, rootPoint);
+}
+
+bool hairGridFloorPush(const HairGridLayout& layout, Vec3f& p, RestPoseCollision::Cursor& cursor) {
+    // (ScalpFloor::push.)
+    MeshDistanceField::Probe probe;
+    probe.beside = layout.beside;
+    probe.fieldOnly = true;
+    return layout.floorSurface.pushOut(p, layout.floor, layout.depth, layout.searchRadius, cursor, &probe);
+}
+
+std::shared_ptr<const std::vector<std::uint32_t>> hairGridWalls(const ScalpMesh& scalp, double h, double reachCells, const Vec3f* within) {
     if (scalp.triangleCount() == 0 || scalp.points().empty() || !(h > 0.0)) return nullptr;
     const auto reach = static_cast<float>(reachCells * h);  // (as wallsOf asks)
     // Every node within reach of a triangle: the scalp's box grown by the reach, a node more.
@@ -437,8 +474,16 @@ std::shared_ptr<const std::vector<std::uint32_t>> hairGridWalls(const ScalpMesh&
     const double l[3] = {lo.x, lo.y, lo.z}, u[3] = {hi.x, hi.y, hi.z};
     std::int64_t count = 1;
     for (int a = 0; a < 3; ++a) {
-        origin[a] = static_cast<std::int64_t>(std::floor((l[a] - r) / h)) - 1;
-        dims[a] = static_cast<std::int64_t>(std::ceil((u[a] + r) / h)) + 2 - origin[a];
+        // (Within the box `within` gives, where it gives one: a grid's nodes lie in it.)
+        double lower = l[a] - r, upper = u[a] + r;
+        if (within) {
+            lower = std::max(lower, static_cast<double>((&within[0].x)[a]));
+            upper = std::max(lower, std::min(upper, static_cast<double>((&within[1].x)[a])));
+        }
+        if (!(std::fabs(lower / h) < 1e15 && std::fabs(upper / h) < 1e15)) return nullptr;  // (a box no grid lays)
+        origin[a] = static_cast<std::int64_t>(std::floor(lower / h)) - 1;
+        dims[a] = static_cast<std::int64_t>(std::ceil(upper / h)) + 2 - origin[a];
+        if (dims[a] <= 0 || dims[a] > (std::int64_t{1} << 24)) return nullptr;
         count *= dims[a];
     }
     if (count <= 0 || count > (std::int64_t{1} << 24)) return nullptr;  // (a word a node: 64 MB at most)

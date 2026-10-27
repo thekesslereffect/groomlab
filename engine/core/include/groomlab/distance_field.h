@@ -312,6 +312,10 @@ DistanceFieldPtr collisionField(const std::shared_ptr<const ScalpMesh>& mesh, fl
 // tell. True when p moved.
 bool pushOutOf(const ScalpMesh& mesh, const MeshDistanceField* field, Vec3f& p, float offset, float maxDepth, float searchRadius,
                MeshDistanceField::Probe* probe = nullptr);
+// Its mesh's part: the push the mesh's closest point asks for (*delta, added to p), what it learnt
+// into `probe`; true when it moves p.
+bool meshPushOf(const ScalpMesh& mesh, const Vec3f& p, float offset, float maxDepth, float searchRadius, Vec3f* delta,
+                MeshDistanceField::Probe* probe = nullptr);
 
 // Collide on a mesh deformed away from its rest pose, through the rest pose's field: made once
 // (kept across frames, while the rest surface, the cell size and the reach stay), where a field of

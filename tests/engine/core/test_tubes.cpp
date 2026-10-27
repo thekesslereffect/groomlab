@@ -582,7 +582,8 @@ TEST(FillTubes, TheCpuEngineRidesThemAsTheCppDoes) {
 
 TEST(FillTubes, TheCpuEngineTakesLayersAndLengthAsTheCppDoes) {
     // Interpolate on the CPU engine against its own C++ (the engine off), bit for bit: guides'
-    // painted layers read along the strands' final points, and take length; tubes filled and not.
+    // painted layers read along the strands' final points, and take length; tubes filled and not
+    // (and take length with tubes: riders scaled to their guides' length).
     auto run = [](bool engine, bool tubes, bool length, std::int64_t segments) {
         gpu::setCpuEngineOn(engine);
         TubeGraph f;
@@ -606,10 +607,10 @@ TEST(FillTubes, TheCpuEngineTakesLayersAndLengthAsTheCppDoes) {
         gpu::setCpuEngineOn(true);
         return out;
     };
-    for (const std::int64_t segments : {std::int64_t{15}, std::int64_t{99}}) {  // (99: more samples than the GPU's 64)
+    // (99: more samples than the GPU's 64; 600: more than the CPU engine holds, streamed.)
+    for (const std::int64_t segments : {std::int64_t{15}, std::int64_t{99}, std::int64_t{600}}) {
     for (const bool tubes : {false, true}) {
         for (const bool length : {false, true}) {
-            if (tubes && length) continue;
             const StrandsPtr on = run(true, tubes, length, segments), off = run(false, tubes, length, segments);
             ASSERT_EQ(on->pointCount(), off->pointCount());
             EXPECT_EQ(std::memcmp(on->positions().data(), off->positions().data(), on->pointCount() * sizeof(Vec3f)), 0)

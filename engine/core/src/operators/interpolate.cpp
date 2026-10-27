@@ -1785,13 +1785,10 @@ private:
                 }
             }
         };
-        const bool engineBlends = !(lengthOnly && fill) && !reference && samples <= gpu::kInterpolateCpuSamples && gpu::cpuEngineOn();
+        const bool engineBlends = !reference && gpu::cpuEngineOn();
         auto engineInputs = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* blend) {
             const std::size_t count = which ? which->size() : strandCount;
             auto strandAt = [&](std::size_t k) { return which ? static_cast<std::size_t>((*which)[k]) : k; };
-            for (std::size_t k = 0; k < count; ++k) {
-                if (bindings.record(strandAt(k)).count > gpu::kInterpolateSlots) return false;
-            }
             std::shared_ptr<const InterpolateClearance> field;
             std::shared_ptr<const std::vector<std::uint32_t>> cursors;
             if (clearance) {
@@ -1801,7 +1798,7 @@ private:
                 if (field->rest) {  // over a deformed scalp: each strand's walk's first vertex
                     float longest = 0.0f;
                     for (const float length : guideLengths) longest = std::max(longest, length);
-                    cursors = interpolateRestCursors(*field, *strands, longest, &whyNot);
+                    cursors = interpolateRestCursors(*field, *strands, longest, &whyNot, true);
                     if (!cursors) return false;
                     if (which) {
                         auto listed = std::make_shared<std::vector<std::uint32_t>>(count);
@@ -2168,6 +2165,7 @@ private:
             gpu::StageParamReader reader(params(), "");
             reader.samples = samples;
             reader.lengthAlone = lengthOnly;
+            reader.tubes = fill != nullptr;
             viewed = gpu::runStageOnStrands(gpu::StageKind::Interpolate, reader, strands, dirty, scalp.get(), *out, std::move(blend));
             if (viewed) {
                 forEachListed(dirty, [&](std::size_t s) {
@@ -3066,6 +3064,7 @@ std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet&
     out->depth = c.depth;
     out->searchRadius = c.searchRadius;
     out->beside = c.beside;
+    out->mesh = scalp;
     out->tables = c.surface.field ? c.surface.field->tables(c.cap, c.searchRadius) : c.surface.rest->restField().tables(c.cap, c.searchRadius);
     if (!out->tables) {
         *why = "its scalp is too big for the clearance field's grid";
@@ -3075,7 +3074,7 @@ std::shared_ptr<const InterpolateClearance> interpolateClearance(const ParamSet&
 }
 
 std::shared_ptr<const std::vector<std::uint32_t>> interpolateRestCursors(const InterpolateClearance& clearance, const StrandSet& in,
-                                                                         float longestGuide, std::string* why) {
+                                                                         float longestGuide, std::string* why, bool meshAsked) {
     if (!clearance.rest || !clearance.walk) {
         *why = "no deformed scalp's walk";
         return nullptr;
@@ -3087,8 +3086,9 @@ std::shared_ptr<const std::vector<std::uint32_t>> interpolateRestCursors(const I
         const RestPoseCollision::Cursor c = rest.cursor(in.roots()[s], in.strandPoints(s)[0]);
         if (c.vertex != RestPoseCollision::Cursor::kNone) (*cursors)[s] = static_cast<std::uint32_t>(c.vertex);
     }, 4096);
+    if (meshAsked) return cursors;  // (the CPU engine asks the mesh at them)
     // How near the strands' roots the scalp's degenerate faces' vertices come (which push asks the
-    // mesh at: the CPU's alone). A walk from a root reaches no vertex farther from it than twice the
+    // mesh at: the CPU engine's alone). A walk from a root reaches no vertex farther from it than twice the
     // strand's reach (twice the longest guide) and two of the longest edge, and asks a vertex's
     // motion only within the longest edge and the search of it.
     const std::vector<std::uint32_t>& w = *clearance.walk;

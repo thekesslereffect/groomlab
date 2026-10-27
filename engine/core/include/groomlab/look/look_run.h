@@ -238,9 +238,6 @@ struct LookFields {
 // uploads what it does not hold (by pointer).
 // The guides a strand blends at most on the GPU (its records' slots); more: the CPU's.
 constexpr std::size_t kInterpolateSlots = 16;
-// The guide samples Interpolate's kernel takes on the CPU engine at most (look.slang CPU_MAX_SAMPLES;
-// the GPU's: 64).
-constexpr std::size_t kInterpolateCpuSamples = 512;
 struct LookCentersRun;
 struct InterpolateInputs {
     // The binding (Interpolate's, or bound again for guide roots a stroke moved): its chunks say
@@ -333,6 +330,9 @@ struct CollideInputs {
 struct HairGridInputs {
     std::shared_ptr<const HairGridLayout> layout;
     std::shared_ptr<const std::vector<std::uint32_t>> walls;  // null: no scalp
+    // Over a deformed scalp's floor (layout->floorSurface; the CPU engine's alone, asked through the
+    // host, look.slang hostGridFloorPush): each strand's root, a strand of the run each.
+    std::shared_ptr<const std::vector<StrandRoot>> roots;
 };
 // Bend, Direction, Transform and Displace: each strand's root on the scalp (the groom's, as the
 // operators take it), read on the strands the node took (fixed while the scalp and the roots are),
@@ -423,7 +423,11 @@ struct StageInputs {
     // Gravity, Bend and Displace given their direction per strand (a vector field's: an expression,
     // Gravity's painted color set), one a strand of the run's, as each operator takes it (Gravity's
     // unit or zero, Displace's unit, Bend's as it is); null: the param's one for every strand.
+    // Direction's: each strand's inclination, roll and strength (all three mapped).
     std::shared_ptr<const std::vector<Vec3f>> directions;
+    // Blend on the CPU engine: look b's strands (laid out as the run's, look a's), its points what
+    // the stage mixes toward (a run's own Blend: its look b's stage).
+    StrandsPtr blendWith;
     std::shared_ptr<const InterpolateInputs> interpolate;
     std::shared_ptr<const ClumpInputs> clump;
     std::shared_ptr<const CurlInputs> curl;

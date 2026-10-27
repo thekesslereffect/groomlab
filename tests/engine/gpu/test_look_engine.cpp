@@ -4611,8 +4611,8 @@ TEST(GpuPreview, TakesOnlyWhatItRuns) {
         EXPECT_FALSE(gpu::findLookChain(*session.viewDocument(), &chain, &why));
     }
     {
-        // A map read from the points (t, by arc length) holds only on the first stage of a run, and
-        // Noise and Curl read each point after the ones before it moved.
+        // A map read from the points (t, by arc length) holds only on the first stage of a run (there
+        // read on the points the stage takes, per point too, as the operators read them).
         LookGraph g;
         g.width = R"("params": {"width": {"expression": "0.02 - 0.015 * t", "min": 0.0, "max": 1.0}})";
         g.curl = R"("params": {"radius": {"expression": "0.1 * t", "min": 0.0, "max": 1.0}, "frequency": 0.8})";
@@ -4627,8 +4627,8 @@ TEST(GpuPreview, TakesOnlyWhatItRuns) {
         EXPECT_EQ(fields.stages[1].field[0].mode, gpu::FieldValues::kPerPoint);
         EXPECT_TRUE(fields.stages[1].field[0].readsPositions);
         EXPECT_TRUE(gpu::sameLookFields(doc, chain, fields));
-        EXPECT_FALSE(gpu::lookFieldsHold(doc, chain, fields, &why));  // Curl's radius by t, per point
-        EXPECT_NE(why.find("curl.radius"), std::string::npos) << why;
+        EXPECT_FALSE(gpu::lookFieldsHold(doc, chain, fields, &why));  // (Curl's radius by t, per point, holds: Width's after it not)
+        EXPECT_NE(why.find("width.width"), std::string::npos) << why;
         g.curl = R"("params": {"radius": 0.1, "frequency": 0.8})";
         GroomSession plain(groom(g.json()));
         plain.evaluate(ViewRequest{});
@@ -6022,12 +6022,143 @@ TEST(CpuEngine, CollideOverADeformedScalpGivesItsCppsBits) {
     }
 }
 
+TEST(CpuEngine, HairGridsOverADeformedScalpGiveTheirCppsBits) {
+    // SelfCollide and Static over a scalp deformed away from its rest pose (the walk's floor asked
+    // through the rest pose, each strand from its cursor: hairGridFloorPush through the host): on
+    // the CPU engine against their own C++, bit for bit; the strands hung into the scalp by a
+    // Gravity first, for the floor to push.
+    for (const std::pair<const char*, const char*>& node : {std::pair<const char*, const char*>{"SelfCollide", R"("params": {"strength": 1.0, "packing": 0.02})"},
+                                                            {"Static", R"("params": {"strength": 1.0})"}}) {
+        SCOPED_TRACE(node.first);
+        const GroomData data = deformedGroom(withoutClearance(
+            chainGraph({{"Gravity", R"("params": {"strength": 1.6, "stiffness": 0.2})"}, {node.first, node.second}})));
+        auto made = [&](GroomSession& session) {
+            if (!session.evaluate(ViewRequest{}).strands) return StrandsPtr();
+            const GraphDocument& doc = *session.viewDocument();
+            return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("n1")));
+        };
+        GroomSession on(data);
+        const StrandsPtr engine = made(on);
+        gpu::setCpuEngineOn(false);
+        GroomSession off(data);
+        const StrandsPtr cpp = made(off);
+        gpu::setCpuEngineOn(true);
+        ASSERT_TRUE(engine && cpp);
+        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
+        EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(engine->contentHash(), cpp->contentHash());
+        NodeId source = 0;
+        const GraphDocument& doc = *off.viewDocument();
+        ASSERT_TRUE(doc.graph.inputSource(doc.nodesByName.at("n1"), 0, &source));
+        EXPECT_NE(valueAs<StrandsPtr>(doc.graph.cachedValue(source))->contentHash(), cpp->contentHash()) << "moves nothing";
+    }
+}
+
+TEST(CpuEngine, HairGridsCoarsenedGiveTheirCppsBits) {
+    // Hair spreading far wider than its scalp (long strands out from a small head every way: the
+    // grid's cells coarsen, HairGridLayout::cell): SelfCollide and Static on the CPU engine against
+    // their own C++, bit for bit.
+    const MeshPtr scalp = test::makeSphere(12, 24, 1.0f);
+    auto in = std::make_shared<StrandSet>();
+    Rng rng(7);
+    for (StrandId id = 1; id <= 200; ++id) {
+        const Vec3f way = Vec3f(rng.uniform(-1.0f, 1.0f), rng.uniform(-1.0f, 1.0f), rng.uniform(-1.0f, 1.0f));
+        if (way.length() < 0.1f) continue;
+        const SurfacePoint at = scalp->closestPoint(way.normalized() * 2.0f);
+        std::vector<Vec3f> points;
+        for (int i = 0; i < 8; ++i) {
+            const float t = static_cast<float>(i) / 7.0f;
+            points.push_back(at.position + (at.normal * 2000.0f + Vec3f(0.0f, -100.0f * t, 0.0f)) * t);
+        }
+        in->addStrand(id, points, {}, at.root);
+    }
+    // (And a bundle crossing itself on top.)
+    for (StrandId id = 1001; id <= 3000; ++id) {
+        const Vec3f way = Vec3f(rng.uniform(-0.3f, 0.3f), 1.0f, rng.uniform(-0.3f, 0.3f));
+        const SurfacePoint at = scalp->closestPoint(way * 2.0f);
+        const Vec3f lean(rng.uniform(-1.0f, 1.0f), 0.0f, rng.uniform(-1.0f, 1.0f));
+        std::vector<Vec3f> points;
+        for (int i = 0; i < 8; ++i) {
+            const float t = static_cast<float>(i) / 7.0f;
+            points.push_back(at.position + (Vec3f(0.0f, 3.0f, 0.0f) + lean) * t);
+        }
+        in->addStrand(id, points, {}, at.root);
+    }
+    ExternalInputs ext;
+    ext.set("scalp", scalp, scalp->contentHash());
+    EvalContext ctx;
+    ctx.externals = &ext;
+    for (const char* type : {op::kSelfCollide, op::kStatic}) {
+        SCOPED_TRACE(type);
+        HairGridLayout layout;
+        std::string why;
+        ASSERT_TRUE(hairGridLayout(type, *in, scalp, &layout, &why)) << why;
+        EXPECT_TRUE(layout.coarsened);
+        auto made = [&](bool engine) {
+            gpu::setCpuEngineOn(engine);
+            auto op = OperatorRegistry::instance().create(type);
+            op->params().set("strength", 1.0);
+            if (std::string(type) == op::kSelfCollide) op->params().set("packing", 0.001);
+            const StrandsPtr out = valueAs<StrandsPtr>(op->evaluate(ctx, {Value(StrandsPtr(in))}));
+            gpu::setCpuEngineOn(true);
+            return out;
+        };
+        const StrandsPtr engine = made(true), cpp = made(false);
+        ASSERT_TRUE(engine && cpp);
+        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
+        EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
+        // (SelfCollide finds no hair packed past its packing in cells this coarse: Static moves it,
+        // the grid's constants the same for both.)
+        if (std::string(type) == op::kStatic) EXPECT_NE(cpp->contentHash(), in->contentHash()) << "moves nothing";
+    }
+}
+
+TEST(CpuEngine, BlendGivesItsCppsBits) {
+    // Blend's points on the CPU engine (BlendCS, look b handed in), its widths and look mixed by the
+    // same weights: against its own C++, bit for bit, everything it makes (contentHash); a mix by
+    // number with a profile, a per-point map, the shape alone.
+    for (const char* params : {R"("params": {"mix": 0.6, "profile": [[0, 0.2], [1, 1]]})",
+                               R"("params": {"mix": {"expression": "t * rand", "min": 0.0, "max": 1.0}})",
+                               R"("params": {"mix": 0.4, "include": "shape"})"}) {
+        SCOPED_TRACE(params);
+        const GroomData data = groom(blendGraph(params, "", "", true));
+        auto blended = [&](GroomSession& session) {
+            if (!session.evaluate(ViewRequest{}).strands) return StrandsPtr();
+            const GraphDocument& doc = *session.viewDocument();
+            return valueAs<StrandsPtr>(doc.graph.cachedValue(doc.nodesByName.at("blend")));
+        };
+        GroomSession on(data);
+        const StrandsPtr engine = blended(on);
+        gpu::setCpuEngineOn(false);
+        GroomSession off(data);
+        const StrandsPtr cpp = blended(off);
+        gpu::setCpuEngineOn(true);
+        ASSERT_TRUE(engine && cpp);
+        ASSERT_EQ(engine->pointCount(), cpp->pointCount());
+        EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
+        EXPECT_EQ(engine->contentHash(), cpp->contentHash());
+    }
+}
+
 TEST(CpuEngine, InterpolateOverADeformedScalpGivesItsCppsBits) {
     // Keeping clearance over a deformed scalp (the walk through the rest pose's field, each strand
-    // from its cursor): Interpolate on the CPU engine against its own C++, bit for bit.
+    // from its cursor): Interpolate on the CPU engine against its own C++, bit for bit; and with
+    // degenerate faces among the strands (an edge of the deformed scalp collapsed: the walk asks the
+    // mesh at their vertices, through the host).
+    for (const bool degenerate : {false, true}) {
     for (const char* which : {"default", "hairBasics"}) {
-        SCOPED_TRACE(which);
-        const GroomData data = deformedGroom(startingGraph(which));
+        SCOPED_TRACE(std::string(which) + (degenerate ? " degenerate" : ""));
+        GroomData data = deformedGroom(startingGraph(which));
+        if (degenerate) {
+            std::vector<Vec3f> points = data.scalp->points();
+            for (std::size_t t = 0; t < data.scalp->triangleCount(); t += 37) {
+                const auto& tri = data.scalp->triangles()[t];
+                points[static_cast<std::size_t>(tri[1])] = points[static_cast<std::size_t>(tri[0])];
+            }
+            auto broken = std::make_shared<ScalpMesh>(points, data.scalp->triangles());
+            broken->setRestPoints(data.scalp->restPoints());
+            data.scalp = broken;
+        }
         auto interpolated = [&](GroomSession& session) {
             if (!session.evaluate(ViewRequest{}).strands) return StrandsPtr();
             const GraphDocument& doc = *session.viewDocument();
@@ -6044,6 +6175,7 @@ TEST(CpuEngine, InterpolateOverADeformedScalpGivesItsCppsBits) {
         EXPECT_EQ(std::memcmp(engine->positions().data(), cpp->positions().data(), cpp->pointCount() * sizeof(Vec3f)), 0);
         EXPECT_EQ(engine->contentHash(), cpp->contentHash());
     }
+    }
 }
 
 TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
@@ -6054,7 +6186,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
     struct Case {
         std::string type, params;
         bool uvs = false;
-        bool cpus = false;  // the operator's own C++ (a per-point value read after the points before it moved)
+        bool cpus = false;  // the operator's own C++ (its inputs the operator's: a direction per strand)
         bool adds = false;  // adds points (Curl): the operator's own C++, its stage alone not compared
         std::pair<std::string, std::string> before = {};  // a node before it (after the Clump)
     };
@@ -6070,13 +6202,15 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Direction", R"("params": {"inclination": {"expression": "rand", "min": 20.0, "max": 80.0}, "strength": {"expression": "rand", "min": 0.2, "max": 1.0},
                                     "roll": 45.0, "along": "direction", "direction": [1.0, 0.0, 0.0]})"},
         {"Direction", R"("params": {"inclination": 70.0, "roll": {"expression": "rand", "min": -90.0, "max": 90.0}, "strength": 0.6})", true},
+        // All three mapped: each strand's three handed to the stage (StageInputs::directions).
+        {"Direction", R"("params": {"inclination": {"expression": "rand", "min": 20.0, "max": 80.0}, "roll": {"expression": "30 * x", "min": -90.0, "max": 90.0},
+                                    "strength": {"expression": "0.4 + 0.5 * rand", "min": 0.0, "max": 1.0}, "rollRandom": 10.0})", false, true},
         {"Transform", R"("params": {"scale": 1.2, "translate": [0.0, 0.05, 0.0], "rotate": [10.0, 0.0, 5.0]})"},
         {"Transform", R"("params": {"scale": {"expression": "0.8 + 0.4 * rand", "min": 0.0, "max": 2.0}, "scaleRandom": 0.2,
                                     "translateRandom": [0.02, 0.0, 0.01], "rotateRandom": [5.0, 0.0, 5.0], "seed": 4})"},
         {"Transform", R"("params": {"space": "world", "pivot": [0.0, 1.0, 0.0], "rotate": [0.0, 20.0, 0.0], "scale": 0.9})"},
         {"Displace", R"("params": {"distance": 0.1, "profile": [[0, 0], [1, 1]]})"},
-        {"Displace", R"("params": {"distance": {"expression": "0.05 * t", "min": 0.0, "max": 1.0}, "along": "direction", "direction": [0.0, 1.0, 0.0]})",
-         false, true},
+        {"Displace", R"("params": {"distance": {"expression": "0.05 * t", "min": 0.0, "max": 1.0}, "along": "direction", "direction": [0.0, 1.0, 0.0]})"},
         {"Displace", R"("params": {"distance": {"expression": "0.02 + 0.06 * rand", "min": 0.0, "max": 1.0}})"},
         // A direction per strand (a vector expression): the operator's own run hands each strand's
         // (StageInputs::directions); the stage alone, without them, is the CPU's.
@@ -6107,8 +6241,7 @@ TEST(CpuEngine, TheOperatorsOnItGiveTheirOwnBits) {
         {"Collide", R"("params": {"offset": 0.12, "softness": 0.05, "method": "exact"})", false, true},
         {"Clump", R"("params": {"count": 80, "strength": 0.7})"},
         {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * t", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
-                                "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})",
-         false, true},
+                                "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
         {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
                                 "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
         {"Clump", R"("params": {"count": 40, "strength": -0.3, "repelRadius": 0.2, "flatten": "random", "flatness": 0.7})"},

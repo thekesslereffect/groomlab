@@ -47,7 +47,7 @@
 #define POINT_GROUP_SIZE 256
 #define CENTER_SAMPLES 32  // Clump's centers (operator_state.h kClumpCenterSamples)
 #define MAX_SAMPLES 64     // Interpolate's guide samples at most (more: the CPU's)
-#define CPU_MAX_SAMPLES 512  // on the CPU engine (look_run.h kInterpolateCpuSamples)
+#define CPU_MAX_SAMPLES 512  // held whole on the CPU engine (more: streamed, interpolateStreamed)
 
 // The math the CPU shares with these kernels (blends and steps, the ramps' cubic, the noise's lattice
 // hash and gradients, the curl's spacing noise; the 64-bit hash arithmetic in 32-bit halves, mul64
@@ -272,8 +272,8 @@ float strandLength(uint begin, uint n) {
 //
 // gAux0: the binding (operator_state.h InterpolateRecords), packed (look_engine.cpp): per strand
 // two words, its header (where its records start in gAux0, in words, times 64; 32 when it has
-// twists; how many, BIND_SLOTS at most, 0: not bound, left as it is) and its nearest guide's
-// distance squared; its records gAux.x words each (one: the guide's index and its weight's code
+// twists; how many, BIND_SLOTS at most on a GPU, 0: not bound, left as it is; 31: as many as the
+// word before its records says, the CPU engine's) and its nearest guide's distance squared; its records gAux.x words each (one: the guide's index and its weight's code
 // times 65536; two: the index, the code), then, when it has twists (where the path along the skin
 // bends round a fold), a twist a record. A weight is (code + 1) / 65536, exactly the CPU's.
 // gAux1: per guide 8 words (normal xyz, turns, length) then its offsets (gFlag.x samples, xyz
@@ -289,7 +289,17 @@ float strandLength(uint begin, uint n) {
 uint3 bindHeader(uint s, out float nearest2) {
     const uint2 h = gAux0.Load2(s * 8);
     nearest2 = asfloat(h.y);
-    return uint3(h.x >> 6, h.x & 31u, (h.x >> 5) & 1u);
+    const uint at = h.x >> 6, count = h.x & 31u;
+    if (count == 31u) return uint3(at + 1u, gAux0.Load(at * 4), (h.x >> 5) & 1u);
+    return uint3(at, count, (h.x >> 5) & 1u);
+}
+// The guides a strand blends of its header's: all of them on the CPU (its arrays past BIND_SLOTS
+// read as they are needed), BIND_SLOTS at most on a GPU.
+uint bindFound(uint3 header) {
+    __target_switch {
+    case cpp: return header.y;
+    default: return min(header.y, BIND_SLOTS);
+    }
 }
 
 float3 guideNormal(uint g) { return asfloat(gAux1.Load3(g * 32)); }
@@ -1032,7 +1042,7 @@ InterpStrand interpStrand(uint s) {
     st.bound = header.y != 0;
     if (st.bound) {  // else no points, or no guide: left as it is
         st.recordsAt = header.x;
-        st.found = min(header.y, BIND_SLOTS);
+        st.found = bindFound(header);
         st.twisted = header.z;
         // How much the guides take this strand: all of it, or by distance within the radius.
         if (gValue.x > 0.0f) {
@@ -1244,8 +1254,12 @@ void interpolateStrandAlone(uint s) {
     }
     const uint samples = gFlag.x;
     InterpGuide guide[BIND_SLOTS];
-    for (uint i = 0; i < found; ++i) guide[i] = interpGuide(s, st, i);
+    for (uint i = 0; i < min(found, BIND_SLOTS); ++i) guide[i] = interpGuide(s, st, i);
     const float3 root = loadPoint(begin);
+    if (samples > CPU_MAX_SAMPLES || found > BIND_SLOTS) {
+        interpolateStreamed(s, st, tb, guide, found, root, samples, begin, n);
+        return;
+    }
     float4 blendAt[CPU_MAX_SAMPLES];
     float arcAt[CPU_MAX_SAMPLES];
     // (Four samples side by side, as the C++ rows take them, every guide added onto their sums in
@@ -1291,21 +1305,106 @@ void interpolateStrandAlone(uint s) {
         PRECISE float target = step * float(i);
         while (lo < samples - 1 && arcAt[lo] < target) ++lo;
         const uint seg = lo - 1;
-        const float4 to = blendAt[lo];
         PRECISE float along0 = target - arcAt[seg];
-        const float t = to.w > 0.0f ? clamp(divExact(along0, to.w), 0.0f, 1.0f) : 0.0f;
-        const float3 a = blendAt[seg].xyz;
-        PRECISE float3 along = to.xyz - a;
-        PRECISE float3 part = along * t;
-        PRECISE float3 p = a + part;
-        if (st.influence < 1.0f) {
-            const float3 incoming = loadPoint(begin + i);
-            PRECISE float3 kept = incoming * (1.0f - st.influence);
-            PRECISE float3 taken = p * st.influence;
-            PRECISE float3 mixed = kept + taken;
-            p = i == 0 ? incoming : mixed;
+        storePoint(gOut, begin + i, interpolatedPoint(st, tb, root, begin, i, n, blendAt[seg].xyz, blendAt[lo], along0));
+    }
+}
+
+// Point i of the strand from its segment of the blended path, from `a` to `to` (.w its length),
+// `along0` along it: part of the way from where it came by the influence, leaning to a tube's edge.
+float3 interpolatedPoint(InterpStrand st, TubeOf tb, float3 root, uint begin, uint i, uint n, float3 a, float4 to, float along0) {
+    const float t = to.w > 0.0f ? clamp(divExact(along0, to.w), 0.0f, 1.0f) : 0.0f;
+    PRECISE float3 along = to.xyz - a;
+    PRECISE float3 part = along * t;
+    PRECISE float3 p = a + part;
+    if (st.influence < 1.0f) {
+        const float3 incoming = loadPoint(begin + i);
+        PRECISE float3 kept = incoming * (1.0f - st.influence);
+        PRECISE float3 taken = p * st.influence;
+        PRECISE float3 mixed = kept + taken;
+        p = i == 0 ? incoming : mixed;
+    }
+    return leanToEdge(tb, p, root, i, n);
+}
+
+// A strand of more samples than interpolateStrandAlone's arrays hold (CPU_MAX_SAMPLES): its blended
+// path streamed, each four samples' sums made again where a pass reads them (a pass for its own
+// length, take length's; one for the path's; the walk), the very arithmetic in the same order.
+struct SampleStream {
+    uint quad;
+    float3 at[4];
+};
+// Guide i of the strand's: held (the first BIND_SLOTS), else read.
+InterpGuide heldGuide(uint s, InterpStrand st, inout InterpGuide guide[BIND_SLOTS], uint i) {
+    return i < BIND_SLOTS ? guide[i] : interpGuide(s, st, i);
+}
+float3 streamedRaw(uint s, InterpStrand st, inout InterpGuide guide[BIND_SLOTS], uint found, float3 root, uint samples, uint j,
+                   inout SampleStream ss) {
+    const uint q = j / 4;
+    if (ss.quad != q) {
+        Lanes3 sum = lanes3(root, root, root, root);
+        for (uint i = 0; i < found; ++i) {
+            const InterpGuide gd = heldGuide(s, st, guide, i);
+            sum = addTurnedLanes(sum, gd.c.z, 4 * q, samples, gd.c.w, gd.a, gd.b, asfloat(gd.c.x), asfloat(gd.c.y));
         }
-        storePoint(gOut, begin + i, leanToEdge(tb, p, root, i, n));
+        for (uint l = 0; l < 4; ++l) ss.at[l] = laneOf(sum, l);
+        ss.quad = q;
+    }
+    return ss.at[j - 4 * q];
+}
+float3 streamedSample(uint s, InterpStrand st, inout InterpGuide guide[BIND_SLOTS], uint found, float3 root, uint samples, uint j,
+                      float scale, float3 first, inout SampleStream ss) {
+    const float3 b = streamedRaw(s, st, guide, found, root, samples, j, ss);
+    if (!(scale > 0.0f) || j == 0) return b;
+    PRECISE float3 away = b - first;
+    PRECISE float3 scaledAway = away * scale;
+    PRECISE float3 moved = first + scaledAway;
+    return moved;
+}
+void interpolateStreamed(uint s, InterpStrand st, TubeOf tb, inout InterpGuide guide[BIND_SLOTS], uint found, float3 root, uint samples,
+                         uint begin, uint n) {
+    SampleStream ss;
+    ss.quad = 0xFFFFFFFFu;
+    const float3 first = streamedRaw(s, st, guide, found, root, samples, 0, ss);
+    float scale = 0.0f;
+    if (gFlag.y != 0) {
+        float own = 0.0f, guideLen = 0.0f;
+        float3 before = first;
+        for (uint j = 1; j < samples; ++j) {
+            const float3 b = streamedRaw(s, st, guide, found, root, samples, j, ss);
+            own += lengthExact(b - before);
+            before = b;
+        }
+        for (uint i = 0; i < found; ++i) guideLen += heldGuide(s, st, guide, i).length;
+        if (own > 1e-8f && guideLen > 0.0f) scale = min(divExact(guideLen, own), 2.0f);
+    }
+    float arc = 0.0f;
+    {
+        float3 before = first;
+        for (uint j = 1; j < samples; ++j) {
+            const float3 b = streamedSample(s, st, guide, found, root, samples, j, scale, first, ss);
+            arc += lengthExact(b - before);
+            before = b;
+        }
+    }
+    const float step = divExact(arc, float(n - 1));
+    uint lo = 1;
+    float3 seg = first;
+    float4 to = float4(streamedSample(s, st, guide, found, root, samples, 1, scale, first, ss), 0.0f);
+    to.w = lengthExact(to.xyz - seg);
+    float arcSeg = 0.0f, arcLo = arcSeg + to.w;
+    for (uint i = 0; i < n; ++i) {
+        PRECISE float target = step * float(i);
+        while (lo < samples - 1 && arcLo < target) {
+            ++lo;
+            seg = to.xyz;
+            arcSeg = arcLo;
+            to.xyz = streamedSample(s, st, guide, found, root, samples, lo, scale, first, ss);
+            to.w = lengthExact(to.xyz - seg);
+            arcLo = arcSeg + to.w;
+        }
+        PRECISE float along0 = target - arcSeg;
+        storePoint(gOut, begin + i, interpolatedPoint(st, tb, root, begin, i, n, seg, to, along0));
     }
 }
 
@@ -1583,6 +1682,22 @@ bool restLocate(float3 p, float searchRadius, inout Probe probe, inout RestCurso
     return true;
 }
 
+// operator_state.h InterpolateClearance's mesh asked (distance_field.h meshPushOf) through the host
+// at gClearHost (Interpolate's octave seeds' last words: none of its own).
+#define gClearHost gOctaveSeeds[3].xy
+bool hostClearanceMeshPush(uint2 host, float3 p, float offset, float maxDepth, float searchRadius, inout float heightLow, inout float distanceLow,
+                           inout float3 delta) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_clearance_mesh_push($0, $1, $2, $3, $4, $5, $6, $7)"; }
+}
+uint walkMeshPush(float3 p, float offset, float maxDepth, float searchRadius, inout Probe probe, inout float3 delta) {
+    __target_switch {
+    case cpp:
+        return hostClearanceMeshPush(gClearHost, p, offset, maxDepth, searchRadius, probe.heightLow, probe.distanceLow, delta) ? PUSH_MOVED
+                                                                                                                                  : PUSH_KEPT;
+    default: return PUSH_KEPT;
+    }
+}
+
 // One push of the clearance walk: the scalp's field at p, or over a deformed scalp (`deformed`)
 // the rest pose's at p taken there by its nearest vertex's motion, the push turned back
 // (RestPoseCollision::push). (One field push in it, the walk's one call of it.)
@@ -1595,7 +1710,9 @@ uint walkPush(FieldTables t, bool deformed, float3 p, float offset, float maxDep
     if (deformed) {
         if (!restLocate(p, searchRadius, probe, cursor, motion)) return PUSH_KEPT;
         const uint flags = walkWord(motion);
-        if (flags == 2u) return PUSH_KEPT;  // a degenerate face's vertex (the host keeps walks away from those)
+        // A degenerate face's vertex: the mesh asked (on the CPU, through the host; a GPU's host keeps
+        // walks away from those).
+        if (flags == 2u) return walkMeshPush(p, offset, maxDepth, searchRadius, probe, delta);
         turned = flags == 0u;  // (1, still: the same frame at rest)
         if (turned) q = motionPoint(motion, true, p);
     }
@@ -1798,7 +1915,7 @@ void clearanceWalk(bool staged, uint base, uint n, float target, FieldTables tab
 // walks writes its points there for the next run.
 bool guidesChanged(uint3 header) {
     bool changed = false;
-    const uint found = min(header.y, BIND_SLOTS);
+    const uint found = bindFound(header);
     for (uint i = 0; i < found && !changed; ++i) {
         const uint g = gAux.x == 2 ? gAux0.Load((header.x + 2 * i) * 4) : (gAux0.Load((header.x + i) * 4) & 0xffffu);
         changed = gAux1.Load(g * 32 + 20) != 0;
@@ -4311,17 +4428,18 @@ void BlendPointsCS(uint3 id : SV_DispatchThreadID) {
 // an open edge a point is beside the scalp (clearancePush). gValue2: 2^32 / h^3, a strand's
 // cross-section (SelfCollide: without widths; Static: its charge's), the strands of a render each
 // stands for, packing (SelfCollide) or randomness (Static). gFlag: x flags (GRID_STATIC,
-// GRID_WIDTHS, GRID_FLOOR), y the segments, z the margin, w the colour (SOR), the axis (Static's
+// GRID_WIDTHS, GRID_FLOOR, GRID_FLOOR_HOST), y the segments, z the margin, w the colour (SOR), the axis (Static's
 // reach) or the pass (SelfCollide's push). gFlag2: the room held, block cells along x, y, z, and
 // blocks. gGrid0-3 (the octave seeds' words): see below.
 
 #define gGrid0 gOctaveSeeds[0]  // x, y: SelfCollide's limit (packing in fixed point, lo, hi); z omega's bits; w the walls' first word in gAux2 (TABLE_NONE: none)
 #define gGrid1 gOctaveSeeds[1]  // the floor, its depth, its search radius (bits); w a strand's width without widths (bits)
 #define gGrid2 gOctaveSeeds[2]  // 0.5 / h, h^2, the far charge's softening squared (Static), the walls' reach (bits)
-#define gGrid3 gOctaveSeeds[3]  // x the sums' words a node
+#define gGrid3 gOctaveSeeds[3]  // x the sums' words a node; yz the floor's host (GRID_FLOOR_HOST: look_run.h HairGridInputs)
 #define GRID_STATIC 1u
 #define GRID_WIDTHS 2u
 #define GRID_FLOOR 4u
+#define GRID_FLOOR_HOST 8u  // the floor over a deformed scalp: asked through the host (the CPU engine's alone)
 #define GRID_HEADER 32
 #define GRID_LO 0          // the samples' lowest corner (3 words, ordered floats)
 #define GRID_HI 3          // ... and highest
@@ -5255,12 +5373,51 @@ bool gridMayTouchScalp(GridHead head, float3 p, float margin) {
     return height < margin;
 }
 
+// The floor over a deformed scalp (GRID_FLOOR_HOST): operator_state.h hairGridFloorCursor and
+// hairGridFloorPush through the host, a strand's walk state as collideRestPush's (started at its
+// first push: its cursor from its root as it is).
+void hostGridFloorCursor(uint2 host, uint strand, float3 p, inout float4 a, inout float4 b, inout float c) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_grid_floor_cursor($0, $1, $2, $3, $4, $5)"; }
+}
+bool hostGridFloorPush(uint2 host, inout float3 p, inout float4 a, inout float4 b, inout float c) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_grid_floor_push($0, $1, $2, $3, $4)"; }
+}
+struct GridFloorState {
+    float4 a, b;
+    float c;
+    bool started;
+};
+GridFloorState gridFloorState() {
+    GridFloorState st;
+    st.a = float4(asfloat(0xFFFFFFFFu), 0.0f, 0.0f, 0.0f);
+    st.b = float4(-1.0f, 0.0f, 0.0f, 0.0f);
+    st.c = -1.0f;
+    st.started = false;
+    return st;
+}
+// walkStrand's push over a deformed scalp: pushed, then its length kept and pushed again.
+void gridFloorHostPush(uint s, float3 root, float3 previous, inout float3 p, float wanted, inout GridFloorState fl) {
+    __target_switch {
+    case cpp:
+        if (!fl.started) {
+            hostGridFloorCursor(gGrid3.yz, s, root, fl.a, fl.b, fl.c);
+            fl.started = true;
+        }
+        if (hostGridFloorPush(gGrid3.yz, p, fl.a, fl.b, fl.c)) {
+            p = keepLength(previous, p, wanted);
+            hostGridFloorPush(gGrid3.yz, p, fl.a, fl.b, fl.c);
+        }
+        return;
+    default: return;
+    }
+}
+
 // walkStrand's step for point p (its move added): its length from the walked point before kept,
 // and, where it may be under the floor, pushed above it (then its length kept and pushed again):
-// one push in the code (clearancePush, as the clearance walk's).
-float3 gridWalkStep(GridHead head, FieldTables tables, float3 previous, float3 p, float wanted) {
+// one push in the code (clearancePush, as the clearance walk's; over a deformed scalp the host's).
+float3 gridWalkStep(GridHead head, FieldTables tables, float3 previous, float3 p, float wanted, uint s, float3 root, inout GridFloorState fl) {
     p = keepLength(previous, p, wanted);
-    if ((gFlag.x & GRID_FLOOR) == 0u) return p;
+    if ((gFlag.x & (GRID_FLOOR | GRID_FLOOR_HOST)) == 0u) return p;
     const float floorAt = asfloat(gGrid1.x), depth = asfloat(gGrid1.y), searchRadius = asfloat(gGrid1.z);
     float margin = 0.25f * gValue.y + floorAt;
     __target_switch {
@@ -5268,6 +5425,10 @@ float3 gridWalkStep(GridHead head, FieldTables tables, float3 previous, float3 p
     default: break;
     }
     if (!gridMayTouchScalp(head, p, margin)) return p;
+    if ((gFlag.x & GRID_FLOOR_HOST) != 0u) {
+        gridFloorHostPush(s, root, previous, p, wanted, fl);
+        return p;
+    }
     for (uint push = 0; push < 2; ++push) {
         Probe probe;
         learnt(probe, -infinity(), 0.0f);
@@ -5297,9 +5458,11 @@ void GridWalkCS(uint3 id : SV_DispatchThreadID) {
     sTableBase = 0;
     const FieldTables tables = fieldTables();
     float3 previous = loadOut(begin + from - 1);
+    const float3 root = loadOut(begin);
+    GridFloorState fl = gridFloorState();
     for (uint i = from; i < n; ++i) {
         PRECISE float3 p = loadOut(begin + i) + asfloat(gAux0.Load3((begin + i) * 12));
-        p = gridWalkStep(head, tables, previous, p, apartExact(loadPoint(begin + i), loadPoint(begin + i - 1)));
+        p = gridWalkStep(head, tables, previous, p, apartExact(loadPoint(begin + i), loadPoint(begin + i - 1)), s, root, fl);
         storePoint(gOut, begin + i, p);
         previous = p;
     }
@@ -5981,10 +6144,14 @@ void BendCS(uint3 id : SV_DispatchThreadID) {
 }
 
 // Direction (DirectionOp::run, `shape`). gValue: inclination, roll, strength (each its number, or
-// field gFlag.y, .z, .w: 0 or 1, 2 none), inclinationRandom; gValue2.xyz: the direction roll 0 points
+// field gFlag.y, .z, .w: 0 or 1, 2 none, 3 the strand's own: all three mapped, look_run.h
+// StageInputs::directions, component c), inclinationRandom; gValue2.xyz: the direction roll 0 points
 // along, .w: rollRandom; gFlag.x: by the scalp's UVs; the strand's numbers .xy: its draws. Each strand
 // rooted on the scalp turned about its root toward its inclination and roll, by the strength's share.
-float directionParam(uint slot, float number, uint s) { return slot < 2u ? fieldAt(slot, number, s, 0) : number; }
+float directionParam(uint slot, float number, uint s, uint c) {
+    if (slot == 3u) return asfloat(gStrandData.Load((gTable.z + s) * 16 + c * 4));
+    return slot < 2u ? fieldAt(slot, number, s, 0) : number;
+}
 
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
@@ -5993,14 +6160,14 @@ void DirectionCS(uint3 id : SV_DispatchThreadID) {
     if (s >= gStrandCount) return;
     const uint begin = strandBegin(s), n = strandCountOf(s);
     const bool rooted = n >= 2 && rootFrameOf(s, 0u).w != 0.0f;
-    const float w = rooted ? min(directionParam(gFlag.w, gValue.z, s), 1.0f) : 0.0f;
+    const float w = rooted ? min(directionParam(gFlag.w, gValue.z, s, 2u), 1.0f) : 0.0f;
     const float3 current = w > 0.0f ? firstDirectionIn(begin, n) : float3(0.0f, 0.0f, 0.0f);
     if (!(w > 0.0f) || len3(current) < 0.5f) {
         copyStrand(begin, n);
         return;
     }
     const float4 d = strandData(s);
-    float incline = directionParam(gFlag.y, gValue.x, s), roll = directionParam(gFlag.z, gValue.y, s);
+    float incline = directionParam(gFlag.y, gValue.x, s, 0u), roll = directionParam(gFlag.z, gValue.y, s, 1u);
     if (gValue.w > 0.0f) incline += gValue.w * d.x;
     if (gValue2.w > 0.0f) roll += gValue2.w * d.y;
     const RootAxes a = rootAxesOf(s, begin, n, gValue2.xyz, gFlag.x != 0u);

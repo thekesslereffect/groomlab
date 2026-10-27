@@ -820,13 +820,16 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     for (std::size_t s = 0; s < n; ++s) {
                         const std::uint32_t first = r.offsets[s], count = r.offsets[s + 1] - first;
                         std::memcpy(&p.headers[2 * s + 1], &r.nearest2[s], 4);
-                        if (count > kInterpolateSlots) {
+                        if (count > kInterpolateSlots && !sharesBase()) {
                             overflow = true;
                             continue;
                         }
                         bool twisted = false;
                         for (std::uint32_t g = 0; g < count; ++g) twisted = twisted || r.twists[first + g] != 0.0f;
-                        p.headers[2 * s] = static_cast<std::uint32_t>(p.records.size() << 6) | (twisted ? 32u : 0u) | count;
+                        // (31 or more, the CPU engine's: 31, the count the word before the records.)
+                        const bool escaped = count >= 31;
+                        p.headers[2 * s] = static_cast<std::uint32_t>(p.records.size() << 6) | (twisted ? 32u : 0u) | (escaped ? 31u : count);
+                        if (escaped) p.records.push_back(count);
                         for (std::uint32_t g = 0; g < count; ++g) {
                             if (recordWords == 1) {
                                 p.records.push_back(r.guides[first + g] | (static_cast<std::uint32_t>(r.weights[first + g]) << 16));
@@ -1300,6 +1303,18 @@ void LookEngine::putStageInputs(const LookRun& run) {
 void LookEngine::putShaperInputs(std::size_t k, const StageParams& stage, const StageInputs* in) {
     const std::size_t stageN = stageStrands(stage), stageP = stagePoints(stage);
     StageHeld& held = held_[k];
+    if (stage.stage.kind == StageKind::Blend) {
+        // Look b handed in (an operator's own Blend on the CPU, StageInputs::blendWith): its points
+        // in aux 0, the very memory (look.slang BlendCS's gAux0). (A run's Blend: its look b's stage.)
+        if (!in || !in->blendWith) return;
+        if (!sharesBase() || in->blendWith->pointCount() != pointCount_) throw std::runtime_error("GPU preview: Blend's look b is for other strands");
+        if (held.a != in->blendWith.get() || !has(auxBuffer(k, 0))) {
+            share(auxBuffer(k, 0), in->blendWith->positions().data(), std::max<std::size_t>(pointCount_, 1) * sizeof(Vec3f));
+            held.a = in->blendWith.get();
+            held.keep = in->blendWith;
+        }
+        return;
+    }
     if (stage.stage.kind == StageKind::Smooth) {
         // On the CPU its boxes' window ends, worked out once (look_stage_params.h smoothEnds:
         // look.slang SmoothCS's cpu form reads them from aux 0).
@@ -1593,6 +1608,13 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             const InterpolateInputs* in = k < r.inputs.size() ? r.inputs[k].interpolate.get() : nullptr;
             const InterpolateClearance* clearance = in ? in->clearance.get() : nullptr;
             c.flag[3] = clearance ? 1u : 0u;
+            if (clearance && clearance->rest && sharesBase()) {
+                // (Its walk reaching a degenerate face's vertex asks the mesh through the host:
+                // look.slang gClearHost.)
+                const auto host = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(clearance));
+                c.octaveSeeds[12] = static_cast<std::uint32_t>(host);
+                c.octaveSeeds[13] = static_cast<std::uint32_t>(host >> 32);
+            }
             if (clearance) {
                 c.value[1] = clearance->floor;
                 c.value[2] = clearance->depth;
@@ -1710,18 +1732,23 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         allocate(unknowns, std::max<std::size_t>(blocks * 64 * 10 * 4, 4));  // (look.slang UNKNOWN_WORDS)
         allocate(sums, std::max<std::size_t>(blocks * 64 * sumWords * 4, 4));
         allocate(nodes, std::max<std::size_t>(blocks * 64 * 12 * 4, 4));
-        const double h = l.h;
+        const double h = l.cell > 0.0 ? l.cell : l.h;  // (the grid's cell; the samples by l.h)
         StageConstants g = constantsOf(k);  // (its per-strand numbers, mapped strength, profile)
         g.value[0] = p.value[0];
         g.value[1] = static_cast<float>(h);
-        g.value[2] = static_cast<float>(0.5 * h);
+        g.value[2] = static_cast<float>(0.5 * l.h);
         g.value[3] = l.beside;
         g.value2[0] = static_cast<float>(4294967296.0 / (h * h * h));
         g.value2[1] = static_cast<float>(isStatic ? l.section : l.nominal);
         g.value2[2] = static_cast<float>(l.weight);
         g.value2[3] = p.value[1];
         const std::size_t segmentCount = l.segments.size() / 2;
-        g.flag[0] = (isStatic ? 1u : 0u) | (!isStatic && l.widths ? 2u : 0u) | (l.tables ? 4u : 0u);
+        // (8: the floor over a deformed scalp, asked through the host: look.slang hostGridFloorPush.)
+        const HairGridInputs& gridIn = *r.inputs[k].grid;
+        if (l.floorSurface && (!sharesBase() || !gridIn.roots || gridIn.roots->size() != n)) {
+            throw std::runtime_error("GPU preview: the hair grid's floor over a deformed scalp is the CPU engine's");
+        }
+        g.flag[0] = (isStatic ? 1u : 0u) | (!isStatic && l.widths ? 2u : 0u) | (l.tables ? 4u : 0u) | (l.floorSurface ? 8u : 0u);
         g.flag[1] = static_cast<std::uint32_t>(segmentCount);
         g.flag[2] = static_cast<std::uint32_t>(l.margin);
         g.flag[3] = 0;
@@ -1745,7 +1772,10 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
         grid4[10] = bits(static_cast<float>(2.0 * 2.0 * h * h));  // (static_op.cpp kSoften cells, squared)
         grid4[11] = bits(static_cast<float>(l.wallReach * h));
         grid4[12] = sumWords;
-        for (int w = 13; w < 16; ++w) grid4[w] = 0;
+        const auto floorHost = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&gridIn));
+        grid4[13] = static_cast<std::uint32_t>(floorHost);  // (look.slang gGrid3.yz)
+        grid4[14] = static_cast<std::uint32_t>(floorHost >> 32);
+        grid4[15] = 0;
         // The ops' numbers in double (the CPU's kernels: look.slang gridWeightD, gridNominalD, and
         // SelfCollide's gridPackingD, as readStageParams put it in `more`).
         const double section = isStatic ? l.section : l.nominal;
@@ -2179,7 +2209,8 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             case StageKind::Blend:
                 kernel = perPoint() ? Kernel::BlendPoints : Kernel::Blend;
                 groups = perPoint() ? pointGroups : strandGroups;
-                b.aux[0] = input2;  // look b's points (look a's: its input)
+                // look b's points (look a's: its input; an operator's own: handed in, aux 0)
+                b.aux[0] = k < r.inputs.size() && r.inputs[k].blendWith ? auxBuffer(k, 0) : input2;
                 break;
             case StageKind::Collide:
                 kernel = Kernel::Collide;
