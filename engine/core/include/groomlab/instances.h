@@ -119,6 +119,8 @@ public:
     std::uint32_t prototypeIndex(const std::string& name);  // added when new
     void append(const InstanceSet& other);                  // prototypes merged by name
     std::uint64_t contentHash() const;
+    // One instance into `h`, as contentHash takes each.
+    static std::uint64_t hashInstance(std::uint64_t h, const Instance& i);
     // Whether any instance reads its strand's rest pose (pinned to its rest
     // distance, fitted to its rest length, a scale): the host evaluates the rest pose.
     bool needsRestPose() const;

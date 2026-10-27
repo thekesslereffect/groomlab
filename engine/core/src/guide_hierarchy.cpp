@@ -620,7 +620,11 @@ void GuideHierarchy::placeGuide(HierarchyGuide& g, const ScalpMesh* scalp, const
         std::reverse(g.points.begin(), g.points.end());
         g.frameUp = anyPerpendicular(rootTangent(g.points));
     }
-    g.root = rootRigidly(g.points, *scalp);
+    // An edited guide whose first point is still its root's spot (a brush moved the rest of it)
+    // keeps that root as it is: found again, the closest point's rounding would move the whole
+    // guide by a hair each edit.
+    const bool rootStays = !firstRooting && scalp->contains(g.root) && scalp->position(g.root) == g.points.front();
+    if (!rootStays) g.root = rootRigidly(g.points, *scalp);
     // A new primary with a shaped tube (one it took from its neighbours) starts its frame across
     // the scalp, so the tube lies flat on the head at twist 0 (a ribbon's width along the scalp,
     // its height off it) however it leaves the scalp.

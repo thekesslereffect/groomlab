@@ -105,6 +105,28 @@ void InstanceSet::append(const InstanceSet& other) {
     }
 }
 
+std::uint64_t InstanceSet::hashInstance(std::uint64_t h, const Instance& i) {
+    float f[10] = {i.t,     i.direction.x, i.direction.y,  i.direction.z, i.spin,
+                   i.scale, i.offset,      i.restDistance, i.aspect,      i.restLength};
+    h = hashCombine(hashCombine(hashCombine(h, i.prototype), i.strand), i.id);
+    h = hashCombine(h, static_cast<std::uint64_t>(i.orient) | (i.scaleByWidth ? 0x100u : 0u) |
+                           (i.pinToRest ? 0x200u : 0u) | (i.fitStrand ? 0x400u : 0u));
+    for (const float v : f) {
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &v, sizeof bits);
+        h = hashCombine(h, bits);
+    }
+    if (i.deform) h = hashCombine(h, 0xDEF0u + i.deformAxis);  // (undeformed ones hash as they always did)
+    if (i.onSkin) {  // (instances on strands hash as they always did)
+        h = hashCombine(h, static_cast<std::uint64_t>(i.variant) | (static_cast<std::uint64_t>(i.preview) << 16) |
+                               (i.conform ? 1ull << 24 : 0ull) | (i.aimRoot ? 1ull << 25 : 0ull) |
+                               (i.followStrand ? 1ull << 26 : 0ull) |
+                               (static_cast<std::uint64_t>(static_cast<std::uint32_t>(i.material)) << 32));
+        h = hashFloat(hashFloat(hashFloat(h, i.lift), i.tile), i.stack);
+    }
+    return h;
+}
+
 std::uint64_t InstanceSet::contentHash() const {
     std::uint64_t h = hash64(0x1A57);
     for (const std::string& name : prototypes) {
@@ -112,26 +134,7 @@ std::uint64_t InstanceSet::contentHash() const {
     }
     for (const std::string& name : materials) h = hashString(h, name);
     if (hidesStrands) h = hashCombine(h, 0x41DEu);
-    for (const Instance& i : instances) {
-        float f[10] = {i.t,     i.direction.x, i.direction.y,  i.direction.z, i.spin,
-                       i.scale, i.offset,      i.restDistance, i.aspect,      i.restLength};
-        h = hashCombine(hashCombine(hashCombine(h, i.prototype), i.strand), i.id);
-        h = hashCombine(h, static_cast<std::uint64_t>(i.orient) | (i.scaleByWidth ? 0x100u : 0u) |
-                               (i.pinToRest ? 0x200u : 0u) | (i.fitStrand ? 0x400u : 0u));
-        for (const float v : f) {
-            std::uint32_t bits = 0;
-            std::memcpy(&bits, &v, sizeof bits);
-            h = hashCombine(h, bits);
-        }
-        if (i.deform) h = hashCombine(h, 0xDEF0u + i.deformAxis);  // (undeformed ones hash as they always did)
-        if (i.onSkin) {  // (instances on strands hash as they always did)
-            h = hashCombine(h, static_cast<std::uint64_t>(i.variant) | (static_cast<std::uint64_t>(i.preview) << 16) |
-                                   (i.conform ? 1ull << 24 : 0ull) | (i.aimRoot ? 1ull << 25 : 0ull) |
-                                   (i.followStrand ? 1ull << 26 : 0ull) |
-                                   (static_cast<std::uint64_t>(static_cast<std::uint32_t>(i.material)) << 32));
-            h = hashFloat(hashFloat(hashFloat(h, i.lift), i.tile), i.stack);
-        }
-    }
+    for (const Instance& i : instances) h = hashInstance(h, i);
     return h;
 }
 

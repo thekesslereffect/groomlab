@@ -530,6 +530,40 @@ TEST(Incremental, CollideAndThePerStrandDeformersFollowRandomDabs) {
     }
 }
 
+TEST(Incremental, InstancesOfAPerStrandChanceAreDrawnAgainOnlyWhereADabMoved) {
+    // Instance's probability by each strand's length over the longest: a dab leaving the longest
+    // draws again only the strands it moved, the others' instances spliced in from the last
+    // result (the very set when none of theirs changed); one changing it, in full. Every result a
+    // fresh chain's.
+    const Verified verified;
+    const ChainEdit byLength = [](Chain& c) {
+        MapRef chance;
+        chance.source = MapRef::Source::Expression;
+        chance.name = "length / longest";
+        c.node(op::kInstance).params().set("probability", chance);
+        c.node(op::kInstance).params().set("count", std::int64_t{3});
+    };
+    auto chain = makeDeformChain(byLength);
+    StrandsPtr strands = someStrands(500, 7);
+    StrandsPtr last = chain->run(strands);
+    ASSERT_EQ(last->contentHash(), freshDeformHash(strands, byLength));
+    Rng rng(19);
+    bool kept = false, fell = false;
+    for (int dab = 0; dab < 8; ++dab) {
+        const std::size_t before = chain->graph.incrementalCount();
+        const float was = longestOf(*last);
+        strands = dab == 7 ? longestLengthened(*strands) : dabbed(*strands, 1 + static_cast<std::size_t>(rng.nextFloat() * 40.0f), rng);
+        const StrandsPtr out = chain->run(strands);
+        EXPECT_EQ(out->contentHash(), freshDeformHash(strands, byLength)) << "dab " << dab;
+        const bool same = longestOf(*out) == was;
+        (same ? kept : fell) = true;
+        last = out;
+        // TestDiff and the 12 operators after it; with the longest changed, Instance in full.
+        EXPECT_EQ(chain->graph.incrementalCount() - before, same ? 13u : 12u) << "dab " << dab;
+    }
+    EXPECT_TRUE(kept && fell);
+}
+
 // Plugs `field` into param `param` of `node` (an exposed param), as a link in the editor does.
 void plug(Chain& c, NodeId field, const std::string& node, const std::string& param) {
     const NodeId id = c[node];

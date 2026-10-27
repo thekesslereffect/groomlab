@@ -953,6 +953,7 @@ private:
         std::vector<std::size_t> chosen;        // centers of its own: the strand each guide is (ClumpState)
         std::vector<std::uint32_t> axes;        // centersFrom inputPoints: each center's axis strand (ClumpState)
         std::vector<StrandId> ids;              // per center: its ID (ClumpState::centerIds)
+        std::shared_ptr<const std::vector<float>> numbers;  // per center: its number (clumpNumbers; none without a channel)
         std::vector<std::size_t> picked;        // centers of its own: the strand each guide is (ClumpState)
         // Regions (regionChannel): the strands' regions' hash (0: none), each center's region, and
         // whether some center's is its nearest strand's.
@@ -1030,6 +1031,7 @@ private:
         std::vector<ClumpCenter> given;
         GuidesPtr centerGuideSet;
         StrandsPtr centerStrands;
+        std::vector<std::size_t> centerIndices;  // (strands as centers) each center's strand
         auto guideCenters = [&](const GuidesPtr& guides) {
             centerGuideSet = guides;
             given.resize(guides->guides().size());
@@ -1052,6 +1054,7 @@ private:
         // Strands of `strands` as centers, by index (with these IDs, else their own).
         auto strandCenters = [&](const StrandsPtr& strands, const std::vector<std::size_t>& which, const std::vector<StrandId>* ids) {
             centerStrands = strands;
+            centerIndices = which;
             const std::vector<float>* region = regionName.empty() ? nullptr : strands->strandChannel(regionName);
             const std::vector<float>* feather = strands->strandChannel(kFeatherChannel);
             const std::vector<float>* side = strands->strandChannel(kSideChannel);
@@ -1171,13 +1174,43 @@ private:
         for (std::size_t k = 0; k < given.size(); ++k) {
             if (given[k].count >= (fromStrands ? 1u : 2u)) centerGuides.push_back(k);
         }
+        // Incrementally, what the last run made (its result checked below), and the centers (strands)
+        // the centers input left as they were: their search roots and curves as it made them (when
+        // no copyAmount shares the curves out).
+        Made made;
+        std::vector<Vec3f> spare;  // the curves' array before last (its pages kept: written again, not faulted in)
+        if (incremental) {
+            const std::lock_guard<std::mutex> lock(madeMutex_);
+            made = made_;
+            spare = std::move(spareCurves_);
+        }
+        std::vector<char> centerMoved;
+        if (incremental && !own && centerStrands && !fromStrands && !(params().getDouble("copyAmount") > 0.0) &&
+            made.centerGuides == centerGuides && made.roots.size() == centerGuides.size() && made.curves &&
+            made.curves->size() == centerGuides.size() * kCenterSamples) {
+            if (const StrandChanges* moved = someStrandsChanged(*incremental, 1)) {
+                centerMoved.assign(centerStrands->strandCount(), 0);
+                for (const std::uint32_t c : moved->strands) centerMoved[c] = 1;
+            }
+        }
         starts.resize(centerGuides.size());
-        roots.resize(centerGuides.size());
         used.resize(centerGuides.size());
-        if (!fromStrands) curves.resize(centerGuides.size() * kCenterSamples);
+        if (!centerMoved.empty()) {  // (the moved centers' made again below)
+            roots = made.roots;
+            curves = std::move(spare);
+            curves.assign(made.curves->begin(), made.curves->end());
+        } else {
+            roots.resize(centerGuides.size());
+            if (!fromStrands) curves.resize(centerGuides.size() * kCenterSamples);
+        }
         parallelFor(0, centerGuides.size(), [&](std::size_t c) {
             const std::size_t guide = centerGuides[c];
             const ClumpCenter& g = given[guide];
+            used[c] = &g;
+            if (!centerMoved.empty() && !centerMoved[centerIndices[guide]]) {  // as the last run made it
+                starts[c] = curves[c * kCenterSamples];
+                return;
+            }
             if (fromStrands) {
                 starts[c] = g.points[0];
             } else {
@@ -1188,8 +1221,7 @@ private:
                 std::copy(resampled.begin(), resampled.end(), curves.begin() + static_cast<std::ptrdiff_t>(c * kCenterSamples));
             }
             roots[c] = guide < pickedAt.size() ? pickedAt[guide] : binding.stablePosition(g.root, starts[c]);
-            used[c] = &g;
-        }, 64);
+        }, 256);
         if (roots.empty()) {
             if (incremental) return false;
             *result = unclumped(in);
@@ -1226,10 +1258,10 @@ private:
         std::vector<float> tubeRegions;
         if (tubeIds && !picked.empty()) {
             tubeRegions.resize(in->strandCount());
-            const std::vector<float>* given = strandRegions;
+            const std::vector<float>* channelRegions = strandRegions;
             parallelFor(0, tubeRegions.size(), [&](std::size_t s) {
                 const float t = (*tubeIds)[s];
-                tubeRegions[s] = t >= 0.0f ? kTubeRegionBase + t : given ? (*given)[s] : 0.0f;
+                tubeRegions[s] = t >= 0.0f ? kTubeRegionBase + t : channelRegions ? (*channelRegions)[s] : 0.0f;
             }, 4096);
             strandRegions = &tubeRegions;
         }
@@ -1237,21 +1269,22 @@ private:
         const std::uint64_t regionHash = strandRegions ? hashChannel(*strandRegions) : 0;
         std::vector<float> centerRegions;
         bool regionsFromStrands = false;  // some center's region is its nearest strand's
-        // Each clump's number in the clump channel (clumpNumbers).
-        const std::vector<float> numbers = channel.empty() ? std::vector<float>() : clumpNumbers(used);
+        // Each clump's number in the clump channel (clumpNumbers; incrementally the last run's for
+        // the same centers).
+        std::shared_ptr<const std::vector<float>> numbers;
+        if (!channel.empty()) {
+            bool same = incremental && made.numbers && made.ids.size() == used.size();
+            for (std::size_t c = 0; same && c < used.size(); ++c) same = made.ids[c] == used[c]->id;
+            numbers = same ? made.numbers : std::make_shared<const std::vector<float>>(clumpNumbers(used));
+        }
         // Incrementally: the last result made here, from centers rooted where these are (each
         // strand's center the same), with a strength that reads each strand alone and no vanes.
         const StrandChanges* changes = nullptr;
         StrandsPtr last;
-        Made made;
         std::vector<std::uint32_t> dirty;
         if (incremental) {
             changes = someStrandsChanged(*incremental, 0);
             last = changes ? previousStrandsFor(*incremental, *in) : nullptr;
-            {
-                const std::lock_guard<std::mutex> lock(madeMutex_);
-                made = made_;
-            }
             auto sameBits = [](const std::vector<Vec3f>& a, const std::vector<Vec3f>& b) {
                 return a.size() == b.size() && (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(Vec3f)) == 0);
             };
@@ -1277,6 +1310,7 @@ private:
             std::vector<char> movedCenter(roots.size(), 0);
             bool anyMoved = false;
             for (std::size_t c = 0; c < roots.size(); ++c) {
+                if (!centerMoved.empty() && !centerMoved[centerIndices[centerGuides[c]]]) continue;  // (its curve kept)
                 movedCenter[c] = std::memcmp(curves.data() + c * kCenterSamples, made.curves->data() + c * kCenterSamples,
                                              kCenterSamples * sizeof(Vec3f)) != 0;
                 anyMoved = anyMoved || movedCenter[c];
@@ -1522,11 +1556,15 @@ private:
         const auto curvesMade = std::make_shared<const std::vector<Vec3f>>(std::move(curves));
         const std::shared_ptr<const std::vector<Vec3f>> normalsMade = std::move(centerNormals);
         // What it keeps for the GPU preview (operator_state.h clumpState).
+        made.curves.reset();
         auto keep = [&] {
             const std::lock_guard<std::mutex> lock(madeMutex_);
             made_.output = out;
             made_.roots = std::move(roots);
             made_.index = index;
+            // The last curves' array kept for the next run's when nothing else reads it.
+            std::shared_ptr<const std::vector<Vec3f>> before = std::move(made_.curves);
+            if (before && before.use_count() == 1) spareCurves_ = std::move(const_cast<std::vector<Vec3f>&>(*before));
             made_.curves = curvesMade;
             made_.centerNormals = normalsMade;
             made_.assigned = std::move(assigned);
@@ -1535,6 +1573,7 @@ private:
             made_.axes = std::move(axes);
             made_.ids.resize(used.size());
             for (std::size_t c = 0; c < used.size(); ++c) made_.ids[c] = used[c]->id;
+            made_.numbers = numbers;
             made_.picked = std::move(picked);
             made_.queries = std::move(queries);
             made_.partsKey = partsKey;
@@ -1554,7 +1593,7 @@ private:
             if (clumpIds) {
                 parallelFor(0, assigned->size(), [&](std::size_t s) {
                     const std::uint32_t c = (*assigned)[s];
-                    if (c != kNoCenter) (*clumpIds)[s] = numbers[c];
+                    if (c != kNoCenter) (*clumpIds)[s] = (*numbers)[c];
                 }, 4096);
             }
         } else {
@@ -1563,7 +1602,7 @@ private:
             taken.clump = gpu::clumpInputs(theirs, curvesMade, normalsMade, ids, seed);
             gpu::runStageOnStrands(gpu::StageKind::Clump, params(), in, dirty, scalp, *out, std::move(taken));
             if (clumpIds) {
-                for (const std::uint32_t s : dirty) (*clumpIds)[s] = (*assigned)[s] != kNoCenter ? numbers[(*assigned)[s]] : -1.0f;
+                for (const std::uint32_t s : dirty) (*clumpIds)[s] = (*assigned)[s] != kNoCenter ? (*numbers)[(*assigned)[s]] : -1.0f;
             }
             *changed = StrandChanges::listed(std::move(dirty));
         }
@@ -1622,6 +1661,7 @@ private:
 
     mutable std::mutex madeMutex_;
     mutable Made made_;
+    mutable std::vector<Vec3f> spareCurves_;  // (made_'s lock)
     mutable std::mutex pickMutex_;
     mutable std::vector<std::pair<std::uint64_t, std::shared_ptr<const Pick>>> pickMemo_;  // newest first
 };

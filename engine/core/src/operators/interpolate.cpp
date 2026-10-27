@@ -1614,15 +1614,15 @@ private:
         // (another binding: guide roots moved) those whose guides or weights did.
         std::vector<std::uint32_t> dirty;
         if (last) {
-            const Binding& before = *made.binding;
+            const Binding& boundBefore = *made.binding;
             const std::size_t chunks = bindings.chunks.size();
             std::vector<std::vector<std::uint32_t>> found(chunks);
             parallelFor(0, chunks, [&](std::size_t c) {
                 // A chunk bound again (guide roots moved near it): its strands whose records changed too.
-                const bool rebound = c >= before.chunks.size() || before.chunks[c] != bindings.chunks[c];
+                const bool rebound = c >= boundBefore.chunks.size() || boundBefore.chunks[c] != bindings.chunks[c];
                 const std::size_t end = std::min(strandCount, (c + 1) * kBindChunk);
                 for (std::size_t s = c * kBindChunk; s < end; ++s) {
-                    bool again = rebound && !sameRecord(before, bindings, s);
+                    bool again = rebound && !sameRecord(boundBefore, bindings, s);
                     const Binding::Record r = bindings.record(s);
                     if (!again && r.bound) {
                         for (std::uint32_t i = 0; i < r.count && !again; ++i) again = guideChanged[r.guide(i)] != 0;

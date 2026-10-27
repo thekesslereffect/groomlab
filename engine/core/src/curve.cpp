@@ -108,7 +108,10 @@ std::vector<Vec3f> smoothPolyline(const Vec3f* points, std::size_t count, int su
         const Vec3f p0 = i > 0 ? points[i - 1] : p1 * 3.0f - p2 * 3.0f + points[2];
         const Vec3f p3 = i + 2 < count ? points[i + 2] : p2 * 3.0f - p1 * 3.0f + points[count - 3];
         const float t0 = 0.0f, t1 = t0 + knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3);
-        for (int k = 0; k < subdivisions; ++k) {
+        // A span starts at its point, exactly (the pyramid's sum of it twice rounds: a guide's root
+        // would move with its other points).
+        out.push_back(p1);
+        for (int k = 1; k < subdivisions; ++k) {
             const float t = t1 + (t2 - t1) * static_cast<float>(k) / static_cast<float>(subdivisions);
             // Barry and Goldman's pyramid.
             const Vec3f a1 = p0 * ((t1 - t) / (t1 - t0)) + p1 * ((t - t0) / (t1 - t0));
