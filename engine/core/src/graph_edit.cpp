@@ -734,17 +734,25 @@ void GraphEdit::connect(const std::string& src, const std::string& dst, const st
 bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, const std::string& input,
                               const std::string& output) {
     impl_->connect(src, dst, input, output);
-    // A Clump picking its own centers takes the centers linked to it (its centersFrom: inputPoints).
-    if (input != "centers") return false;
-    for (json& n : impl_->nodes()) {
-        if (!n.is_object() || n.value("name", std::string()) != dst) continue;
-        if (n.value("type", std::string()) != op::kClump) return false;
-        json& params = n["params"];
-        if (!params.is_object()) params = json::object();
-        const auto it = params.find("centersFrom");
-        if (it != params.end() && !(it->is_string() && it->get<std::string>() == "pick")) return false;
-        params["centersFrom"] = "inputPoints";
-        return true;
+    // A Clump picking its own centers takes the centers linked to it (its centersFrom: inputPoints);
+    // a Cards node following the strands, the guides linked to it (its cardsFrom: guides).
+    struct Switch {
+        const char *type, *input, *param, *from, *to;
+    };
+    static const Switch kSwitches[] = {{op::kClump, "centers", "centersFrom", "pick", "inputPoints"},
+                                       {op::kCards, "guides", "cardsFrom", "strands", "guides"}};
+    for (const Switch& sw : kSwitches) {
+        if (input != sw.input) continue;
+        for (json& n : impl_->nodes()) {
+            if (!n.is_object() || n.value("name", std::string()) != dst) continue;
+            if (n.value("type", std::string()) != sw.type) return false;
+            json& params = n["params"];
+            if (!params.is_object()) params = json::object();
+            const auto it = params.find(sw.param);
+            if (it != params.end() && !(it->is_string() && it->get<std::string>() == sw.from)) return false;
+            params[sw.param] = sw.to;
+            return true;
+        }
     }
     return false;
 }

@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <map>
@@ -621,6 +622,65 @@ TEST(FeatherCards, EachHalfFoldsToFollowItsVane) {
         const Vec3f l = both.positions[row] - spine, r = both.positions[row + 2] - spine;
         EXPECT_NEAR(std::atan2(r.y, r.z), up, 0.07f);
         EXPECT_NEAR(std::atan2(l.y, -l.z), downLeft, 0.07f);
+    }
+}
+
+// The angle between a quad's two triangles (the smaller of its two diagonals' folds), degrees.
+float quadFold(const Vec3f& a, const Vec3f& b, const Vec3f& c, const Vec3f& d) {
+    float best = 180.0f;
+    const std::array<std::array<const Vec3f*, 4>, 2> splits{{{&a, &b, &c, &d}, {&b, &c, &d, &a}}};
+    for (const auto& q : splits) {
+        const Vec3f n1 = (*q[1] - *q[0]).cross(*q[2] - *q[0]), n2 = (*q[2] - *q[0]).cross(*q[3] - *q[0]);
+        if (!(n1.length() > 0.0f) || !(n2.length() > 0.0f)) continue;
+        best = std::min(best, std::acos(std::clamp(n1.normalized().dot(n2.normalized()), -1.0f, 1.0f)) * 57.29578f);
+    }
+    return best;
+}
+
+TEST(FeatherCards, FlattenLaysEachCardsQuadsFlat) {
+    // Barbs each turned a random way round the shaft (up to 25 degrees) and lifted at random: the
+    // vane's plane and folds wander station by station, and a card following them twists, its
+    // quads folded along their diagonals (the texture faceted: issue 26). featherFlatten 1 lays
+    // each card in one plane with one fold a half: every quad flat, the root row seated as a whole.
+    FeatherScene scene;
+    const StrandsPtr plain = scene.feathers(scene.shafts({{1.0f, 1.2f}, {2.2f, 1.0f}}), 0.0f, "both", 40, 10.0);
+    auto bent = std::make_shared<StrandSet>(*plain);
+    const std::vector<float>* sides = bent->strandChannel("side");
+    ASSERT_TRUE(sides);
+    std::uint32_t rng = 7;
+    auto random = [&] { return (rng = rng * 1664525u + 1013904223u) / 4294967296.0f; };
+    for (std::size_t i = 0; i < bent->strandCount(); ++i) {
+        if (std::abs((*sides)[i]) < 0.5f) continue;  // (the shafts)
+        const float turn = (2.0f * random() - 1.0f) * 25.0f * 0.017453293f, c = std::cos(turn), sn = std::sin(turn);
+        Vec3f* p = bent->strandPoints(i);
+        const Vec3f root = p[0];
+        for (std::size_t k = 1; k < bent->strandPointCount(i); ++k) {
+            const Vec3f d = p[k] - root;  // round the shaft (along x)
+            p[k] = root + Vec3f(d.x, d.y * c - d.z * sn, d.y * sn + d.z * c);
+        }
+    }
+    for (const bool spine : {true, false}) {
+        SCOPED_TRACE(spine ? "spine" : "flat strip");
+        auto folds = [&](float flatten) {
+            CardSettings settings = featherSettings(spine);
+            settings.featherSegments = 8;
+            settings.featherFlatten = flatten;
+            const CardMesh mesh = buildCards(*bent, scene.scalp.get(), settings);
+            EXPECT_EQ(mesh.cards.size(), 2u);
+            float worst = 0.0f, sum = 0.0f;
+            const std::size_t quads = mesh.quads.size() / 4;
+            for (std::size_t q = 0; q < quads; ++q) {
+                const std::uint32_t* v = &mesh.quads[4 * q];
+                const float f = quadFold(mesh.positions[v[0]], mesh.positions[v[1]], mesh.positions[v[2]], mesh.positions[v[3]]);
+                worst = std::max(worst, f);
+                sum += f;
+            }
+            return std::make_pair(sum / static_cast<float>(std::max<std::size_t>(quads, 1)), worst);
+        };
+        const auto following = folds(0.0f), flat = folds(1.0f);
+        EXPECT_GT(following.first, 2.0f) << "the barbs twist the card";
+        EXPECT_LT(flat.first, 0.5f);
+        EXPECT_LT(flat.second, 3.0f);
     }
 }
 

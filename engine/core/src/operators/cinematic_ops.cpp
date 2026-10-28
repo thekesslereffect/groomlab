@@ -428,9 +428,19 @@ class CardsOp : public Operator {
 public:
     std::string typeName() const override { return op::kCards; }
     std::string category() const override { return "look"; }
-    std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Strands}}; }
+    // 2: featherFlatten 1 by default (nodes saved before keep 0: ParamSpec::formerDefault).
+    int version() const override { return 2; }
+    // The guides: what cardsFrom guides lays the cards along.
+    std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Strands}, {"guides", PortType::Guides, true}}; }
     std::vector<ParamSpec> paramSpecs() const override {
         return {
+            notAnimatable({"cardsFrom", std::string("strands"),
+                           "What the hair's cards follow: strands: the strands, grouped by their clumps (else by root), "
+                           "each card along its own strands; guides: the guides input, a card (or a cross) along each "
+                           "guide itself from where it grows, as wide as the strands nearest it and baked from them "
+                           "(clumps, cardsPerClump, layers and flyawayCards then do nothing)",
+                           "", {"strands", "guides"}})
+                .when("featherMode", {"auto", "perVane", "off"}),
             ParamSpec{"clumpChannel", std::string("clumpId"), "Group strands by this channel (Clump writes clumpId); "
                                                               "without it, strands group by root into as many groups as "
                                                               "maxCards allows (0: 60)"}
@@ -547,6 +557,14 @@ public:
                                                  "vane (lift, droop, cupping): two quads per segment. Off: a flat strip"})
                 .in("Feathers")
                 .when("featherMode", {"auto", "perFeather"}),
+            notAnimatable({"featherFlatten", 1.0, "How flat each feather card lies: 1 one plane along the shaft and one fold per "
+                                                  "half (every quad flat), 0 turning and folding with its barbs station by "
+                                                  "station (closer to the strands, but twisted quads show the texture faceted)",
+                           "fraction"})
+                .range(0, 1)
+                .formerDefault(2, 0.0)
+                .in("Feathers")
+                .when("featherMode", {"auto", "perFeather"}),
             ParamSpec{"separation", 0.0, "Cards closer than this gap to another card, or passing through it, are pushed apart "
                                          "along their normals, roots held (a share of the narrower card's width; 0: off). "
                                          "Only the mesh moves: the texture stays as baked", "fraction"}
@@ -590,13 +608,24 @@ public:
     Value evaluate(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
         const StrandsPtr in = requireStrands(inputs, op::kCards);
         const std::string channel = params().getString("clumpChannel");
-        if (!channel.empty() && !in->empty() && !in->strandChannel(channel)) {
+        const bool fromGuides = params().getString("cardsFrom") == "guides";
+        const GuidesPtr guides = fromGuides && inputs.size() > 1 ? valueAs<GuidesPtr>(inputs[1]) : nullptr;
+        if (fromGuides && (!guides || guides->empty())) {
+            ctx.note("cardsFrom guides: connect the guides input (a Guides node) with some guides; the cards follow "
+                     "the strands until then");
+        }
+        if (!guides && !channel.empty() && !in->empty() && !in->strandChannel(channel)) {
             ctx.note("the strands have no '" + channel + "' channel (put a Clump before it): the cards group them by "
                      "root instead");
         }
         if (!ctx.buildCards) return in;
         CardSettings s;
         s.channel = channel;
+        if (guides) {
+            for (const Guide& g : guides->guides()) {
+                if (g.points.size() >= 2) s.guideSpines.push_back(g.points);
+            }
+        }
         s.cardsPerClump = static_cast<int>(params().getInt("cardsPerClump"));
         s.layers = static_cast<int>(params().getInt("layers"));
         s.segments = static_cast<int>(params().getInt("segments"));
@@ -631,6 +660,7 @@ public:
         s.featherSegments = static_cast<int>(params().getInt("featherSegments"));
         s.featherMinLength = static_cast<float>(params().getDouble("featherMinLength"));
         s.featherSpine = params().getBool("featherSpine");
+        s.featherFlatten = static_cast<float>(params().getDouble("featherFlatten"));
         s.separation = static_cast<float>(params().getDouble("separation"));
         s.featherSeparation = static_cast<float>(params().getDouble("featherSeparation"));
         s.separationIterations = static_cast<int>(params().getInt("separationIterations"));

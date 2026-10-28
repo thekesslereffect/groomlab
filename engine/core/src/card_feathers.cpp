@@ -53,7 +53,7 @@ struct FeatherShape {
     bool valid = false;
 };
 
-FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const ScalpMesh* scalp) {
+FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const ScalpMesh* scalp, float flatten) {
     FeatherShape f;
     const std::vector<float>* sides = s.strandChannel(kFeatherSideChannel);
     const std::vector<float>* shaftUs = s.strandChannel(kShaftUChannel);
@@ -191,10 +191,17 @@ FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const Sc
             for (std::size_t k = 1; k + 1 < K; ++k) smooth[k] = across[k - 1] * 0.25f + across[k] * 0.5f + across[k + 1] * 0.25f;
             across = smooth;
         }
+        // Flattened (CardSettings::featherFlatten): each station's side toward the feather's mean
+        // one, so the card twists less along its shaft (at 1 not at all: one plane, its quads flat).
+        Vec3f mean{};
+        for (const Vec3f& a : across) mean += a;
+        const float flat = std::clamp(flatten, 0.0f, 1.0f);
         f.side.resize(K);
         f.normal.resize(K);
         for (std::size_t k = 0; k < K; ++k) {
-            Vec3f side = across[k] - f.tangent[k] * across[k].dot(f.tangent[k]);
+            Vec3f way = across[k];
+            if (flat > 0.0f && mean.length() > 1e-6f) way = way * (1.0f - flat) + mean.normalized() * flat;
+            Vec3f side = way - f.tangent[k] * way.dot(f.tangent[k]);
             side = side.length() > 1e-6f ? side.normalized() : anyPerpendicular(f.tangent[k]);
             f.side[k] = side;
             f.normal[k] = side.cross(f.tangent[k]).normalized();
@@ -269,6 +276,13 @@ FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const Sc
                     smooth[k] = 0.25f * angle[k > 0 ? k - 1 : 0] + 0.5f * angle[k] + 0.25f * angle[std::min(k + 1, K - 1)];
                 }
                 angle = smooth;
+            }
+            // Flattened: toward the vane's mean fold (at 1 one fold all along: each half flat).
+            const float flat = std::clamp(flatten, 0.0f, 1.0f);
+            if (flat > 0.0f) {
+                float mean = 0.0f;
+                for (const float a : angle) mean += a / static_cast<float>(K);
+                for (float& a : angle) a = a * (1.0f - flat) + mean * flat;
             }
             std::vector<float>& fold = h == 0 ? f.foldRight : f.foldLeft;
             for (std::size_t k = 0; k < K; ++k) fold[k] = pm::tan(angle[k]);
@@ -381,7 +395,7 @@ CardMesh::Card makeFeatherCard(const FeatherShape& f, const std::vector<std::siz
     sampleStations(card);
     // Its base on the skin where the shaft grows, as a hair card's (the card reaches back past
     // the root as far as the barbs do, into the skin, and the clearance lifts it out again).
-    if (scalp) seatCard(card, *scalp, f.root, f.strandWidth);
+    if (scalp) seatCard(card, *scalp, f.root, f.strandWidth, std::clamp(settings.featherFlatten, 0.0f, 1.0f));
     return card;
 }
 
@@ -447,7 +461,7 @@ std::vector<CardMesh::Card> makeFeatherCards(const StrandSet& s, const ScalpMesh
     const std::vector<Feather> feathers = groupFeathers(s, member);
     if (feathers.empty()) return out;
     std::vector<FeatherShape> shapes(feathers.size());
-    parallelFor(0, feathers.size(), [&](std::size_t i) { shapes[i] = measureFeather(s, feathers[i], scalp); }, 1);
+    parallelFor(0, feathers.size(), [&](std::size_t i) { shapes[i] = measureFeather(s, feathers[i], scalp, settings.featherFlatten); }, 1);
     const int cross = std::clamp(settings.crossCount, 2, 6);
     auto cardsOf = [&](std::size_t i) { return static_cast<std::size_t>(shapes[i].down ? cross : 1); };
 

@@ -9,7 +9,9 @@ description: Hair cards with LODs and baked texture maps, and strand exports for
 
 Add a **Cards** node (Add Node > Games) at the point in the graph that should be converted to
 cards, or run `groomlab.create_cards(groom, lod="mid")`. Cards are placed along the groom's clumps
-and shape, and their textures are baked from the groom's own strands.
+and shape, and their textures are baked from the groom's own strands. To lay one card along each
+guide instead (a card per curve), set the node's **Cards From** to **Guides** and link a Guides node
+to its guides input (drawing the link sets it; `create_cards(groom, from_guides=True)` does both).
 
 The top of the node's panel shows the cards' cost and has **Show cards**, **Show textures**,
 **LOD**, **Bake Maps**, **Bake Scalp** and the exports, in view however far its parameters scroll.
@@ -208,6 +210,9 @@ cards) that mixes in the iridescent color by that mask, with the hue rotated by 
 - **As cards:** `groomlab.create_feather_cards(groom, lod="mid")` creates one alpha-tested strip
   per feather, with both vanes and the rachis baked into its texture, and similar feathers
   sharing a few textures. Each card is folded along a spine so lifted or cupped vanes form a V.
+  **Flatten** (`featherFlatten`, 1 by default) keeps each card in one plane with one fold per
+  half, so its quads are flat and the texture shows no facets; lower it to follow the barbs'
+  twists more closely (cards saved before GroomLab 0.34 keep 0).
   Unreal, Unity and glTF export them.
 - **As strands:** the rachis becomes a mesh to skin with the character, and the barbs are strands
   rooted on it.

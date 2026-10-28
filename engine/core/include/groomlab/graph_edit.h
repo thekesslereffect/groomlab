@@ -70,7 +70,8 @@ public:
     void connect(const std::string& src, const std::string& dst, const std::string& input, const std::string& output = {});
     // A link the user drew in an editor (every host's): connect, then a node whose dropdown says
     // whether it uses that input set to use it: a Clump of centersFrom pick fed centers takes them
-    // (inputPoints). Disconnecting changes nothing back; connect alone (pastes, compounds, scripts,
+    // (inputPoints), a Cards node of cardsFrom strands fed guides lays its cards along them (guides).
+    // Disconnecting changes nothing back; connect alone (pastes, compounds, scripts,
     // loading) never changes a param. True when a param changed.
     bool connectByHand(const std::string& src, const std::string& dst, const std::string& input,
                        const std::string& output = {});
