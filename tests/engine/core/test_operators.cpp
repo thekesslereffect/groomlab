@@ -903,6 +903,54 @@ TEST(Interpolate, BlendDirectionsKeepsTheGuidesLengthBetweenPartedGuides) {
     }
 }
 
+TEST(Interpolate, GuideWeightPullsTheBlendTowardTheHeavierGuides) {
+    // Two guides pointing apart, their guideWeight from a guide layer: the strands between lean
+    // toward the heavier one; a guide weighed 0 shapes nothing another guide reaches. A number, or
+    // every guide weighed alike, blends as without.
+    const auto plane = test::makePlane(8, 1.0f);
+    auto strands = std::make_shared<StrandSet>();
+    for (int i = 1; i < 100; ++i) {
+        const SurfacePoint at = plane->closestPoint({0.01f * static_cast<float>(i), 0.0f, 0.5f});
+        strands->addStrand(static_cast<StrandId>(i), {at.position, at.position + Vec3f(0, 0.15f, 0), at.position + Vec3f(0, 0.3f, 0)},
+                           {}, at.root);
+    }
+    auto run = [&](float left, float right, const ParamValue& weight) {
+        auto guides = std::make_shared<GuideSet>();
+        guides->add(1, test::straightCurve({0.0f, 0, 0.5f}, {-0.7f, 0.7f, 0})).attributes["w"] = left;
+        guides->add(2, test::straightCurve({1.0f, 0, 0.5f}, {0.7f, 0.7f, 0})).attributes["w"] = right;
+        guides->rootOnMesh(*plane);
+        auto op = OperatorRegistry::instance().create(op::kInterpolate);
+        op->params().set("neighbors", std::int64_t{2});
+        op->params().set("guideWeight", weight);
+        ExternalInputs ext;
+        EvalContext ctx;
+        ctx.externals = &ext;
+        return valueAs<StrandsPtr>(op->evaluate(ctx, {Value(StrandsPtr(strands)), Value(GuidesPtr(guides)), Value(MeshPtr(plane))}));
+    };
+    // The tip of the strand rooted halfway, and of the one at the right guide's root, from their roots.
+    auto tip = [](const StrandsPtr& out, std::size_t s) {
+        const Vec3f* p = out->strandPoints(s);
+        return p[out->strandPointCount(s) - 1] - p[0];
+    };
+    MapRef layer;
+    layer.source = MapRef::Source::Guide;
+    layer.name = "w";
+    // (Positions: the layer's values become a strand channel.)
+    const std::vector<Vec3f> plain = run(1.0f, 1.0f, 1.0)->positions();
+    EXPECT_EQ(run(1.0f, 0.25f, 0.3)->positions(), plain);
+    EXPECT_EQ(run(0.5f, 0.5f, ParamValue(layer))->positions(), plain);
+    EXPECT_NEAR(tip(run(1.0f, 1.0f, 1.0), 49).x, 0.0f, 0.02f);
+    const StrandsPtr leaning = run(1.0f, 0.25f, ParamValue(layer));
+    EXPECT_LT(tip(leaning, 49).x, -0.1f);
+    EXPECT_GT(tip(leaning, 98).x, 0.15f) << "at its root a guide still wins";
+    // The right guide weighed 0: every strand the left one reaches takes its shape.
+    const StrandsPtr left = run(1.0f, 0.0f, ParamValue(layer));
+    EXPECT_LT(tip(left, 49).x, -0.2f);
+    EXPECT_LT(tip(left, 98).x, -0.2f);
+    // Both 0: alike, as without.
+    EXPECT_EQ(run(0.0f, 0.0f, ParamValue(layer))->positions(), plain);
+}
+
 // Scalp, guides and parts into Scatter and Interpolate, the strands' channels included.
 struct BoundInterpolate {
     GraphDocument doc = loadGraphJson(R"({"version": 1, "output": "interp", "nodes": [

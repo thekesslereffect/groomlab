@@ -1869,7 +1869,8 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 // here (a reshaped guide's smooth curve starts a rounding away), the one held stands:
                 // its weights are a rounding apart, and it is on the GPU already.
                 bool same = memo.current && memo.current->baseKey == state.baseKey && memo.current->strandCount == state.strandCount &&
-                            memo.current->strands == state.strands && memo.current->roots.size() == state.roots.size();
+                            memo.current->strands == state.strands && memo.current->roots.size() == state.roots.size() &&
+                            memo.current->weights == state.weights;
                 for (std::size_t g = 0; same && g < state.roots.size(); ++g) {
                     same = (state.roots[g] - memo.current->roots[g]).length() <= 1e-5f * std::max(1.0f, memo.current->roots[g].length());
                 }
@@ -1916,11 +1917,20 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                         moved = true;
                     }
                 }
-                if (moved) {
+                // A guideWeight map: the guides' weights at their roots now (a guide layer painted,
+                // a root moved over a painted scalp) bind again too.
+                std::vector<float> weights;
+                try {
+                    weights = interpolateGuideWeights(evaluatedParams(graph, id), kept, guides.get(), scalp.get());
+                } catch (const GraphError&) {
+                    *why = name + ": its guideWeight map cannot be read (the CPU's)";
+                    return false;
+                }
+                if (moved || weights != memo.current->weights) {
                     auto bound = std::make_shared<InterpolateState>(*memo.current);
                     std::vector<StrandRoot> guideRoots(kept.size());
                     for (std::size_t g = 0; g < kept.size(); ++g) guideRoots[g] = kept[g]->root;
-                    if (!interpolateRebind(graph.node(id), parts, roots, guideRoots, bound.get())) {
+                    if (!interpolateRebind(graph.node(id), parts, roots, guideRoots, weights, bound.get())) {
                         *why = name + ": its guides could not be bound again";
                         return false;
                     }

@@ -2302,6 +2302,43 @@ TEST_P(LookEngineTest, GuideRootsMovedDabAfterDabRewriteOnlyTheirRecords) {
     EXPECT_GT(lighter, 0u) << "every dab wrote the whole binding";
 }
 
+TEST_P(LookEngineTest, GuideWeightsFromAScalpMapBindAgainAsRootsMove) {
+    // guideWeight from a map painted on the scalp: a dab moving some guides' roots weighs them
+    // again where they now stand (a guide layer is a channel: painting one is the CPU's), and the
+    // strands they reach are bound again, as the CPU binds them; against a fresh CPU session.
+    LookGraph g;
+    g.guides = true;
+    g.interpolate = R"("params": {"guideWeight": {"colorSet": "mask", "min": 0.05, "max": 1.0}})";
+    GroomData data = paintedGroom(g.json());
+    GroomSession session(data);
+    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+    const StrandsPtr before = session.last().strands;
+    gpu::LookInputs inputs;  // as a host keeps it from dab to dab
+    GuidesPtr guides = data.guides;
+    ViewRequest dab;
+    dab.stopAt = "interpolate";
+    for (int d = 1; d <= 4; ++d) {
+        SCOPED_TRACE("dab " + std::to_string(d));
+        auto moved = std::make_shared<GuideSet>(*guides);
+        for (std::size_t k = 0; k < 3; ++k) {
+            Guide& guide = moved->guides()[(static_cast<std::size_t>(d) * 7 + k * 11) % moved->guides().size()];
+            for (Vec3f& p : guide.points) p = p + Vec3f(0.0f, d % 2 ? 0.6f : -0.4f, 0.1f);
+        }
+        moved->rootOnMesh(*data.scalp);
+        guides = moved;
+        session.setGuides(moved);
+        ASSERT_EQ(session.evaluate(dab).strands, before);
+        GroomData after = data;
+        after.guides = moved;
+        GroomSession fresh(after);
+        ASSERT_TRUE(fresh.evaluate(ViewRequest{}).strands);
+        Prepared p;
+        ASSERT_TRUE(prepareRun(session, {}, "interpolate", &p, &inputs)) << p.why;
+        expectClose(runAndCompare(session, {}, fresh, "interpolate"));
+    }
+    EXPECT_GT(inputs.rebinds(), 0u);
+}
+
 TEST_P(LookEngineTest, ADabWalksOnlyTheStrandsOfTheGuidesItChanged) {
     // Keeping clearance: a dab reshaping a few guides (their roots where they were) walks only the
     // strands bound to them, the others keeping the last run's walks (look_engine.cpp

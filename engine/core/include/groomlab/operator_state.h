@@ -131,6 +131,7 @@ struct InterpolateState {
     GuidesPtr guides;
     StrandsPtr strands;        // the strands it took (input 0), when still held
     bool channels = false;     // guide attributes or layers made strand or point channels
+    std::vector<float> weights;  // per kept guide, its guideWeight (empty: every guide alike)
 };
 bool interpolateState(const Operator& op, const StrandsPtr& output, InterpolateState* state);
 // The binding's records, flat (a pass over every strand: hosts keep them per binding), and those
@@ -155,9 +156,16 @@ std::size_t interpolateRecordBytes(const InterpolateState& state);
 // on the scalp (the paths along it start there; a guide whose root and reach stayed keeps its
 // paths). `parts`: the groom's parts (respected as the node's params say; null: none). The
 // operator keeps the binding as one of its own, so its next evaluation with these roots finds it.
-// False when `op` is not an Interpolate or the guides are not as many.
+// `guideWeights`: the kept guides' weights (interpolateGuideWeights). False when `op` is not an
+// Interpolate or the guides are not as many.
 bool interpolateRebind(const Operator& op, const PartLines* parts, const std::vector<Vec3f>& roots,
-                       const std::vector<StrandRoot>& guideRoots, InterpolateState* state);
+                       const std::vector<StrandRoot>& guideRoots, const std::vector<float>& guideWeights,
+                       InterpolateState* state);
+// The kept guides' guideWeight (`params`: the Interpolate node's, as evaluated: a field plugged in)
+// read at their roots on `scalp` (a guide off it: 1); empty when every guide weighs alike (a number,
+// no scalp), as the binding holds them (InterpolateState::weights). Throws GraphError as the map does.
+std::vector<float> interpolateGuideWeights(const ParamSet& params, const std::vector<const Guide*>& kept, const GuideSet* guides,
+                                           const ScalpMesh* scalp);
 
 // The kept guides' shapes as Interpolate blends them (its first stage): each guide (the smooth
 // curve through its points with smoothGuides) resampled by arc length to `samples` points, as

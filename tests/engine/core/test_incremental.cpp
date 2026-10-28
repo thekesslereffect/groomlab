@@ -1077,6 +1077,20 @@ TEST(Incremental, InterpolateBlendsAgainOnlyTheStrandsADabReaches) {
     }
 }
 
+TEST(Incremental, GuideWeightFromAGuideLayerFollowsStrokes) {
+    // guideWeight read from the guides' painted clump value: painting it weighs those guides again
+    // (the strands they reach bound again), combing keeps the weights, sliding moves their roots.
+    const Verified verified;
+    std::string graph = kInterpolateGraph;
+    const std::string interp = R"("params": {"limitDistance": 0.45})";
+    graph.replace(graph.find(interp), interp.size(), R"("params": {"guideWeight": {"guide": "clump", "min": 0.1, "max": 1.0}})");
+    GroomSession session(sphereGroom(graph, 40, 0));
+    SessionStrokeHost host(session);
+    ViewRequest request;
+    request.sculptDensity = 0.5f;
+    EXPECT_GT(strokeAndCompare(session, host, request, {"clump", "comb", "slide"}, 5), 0u);
+}
+
 TEST(Incremental, GuidesAddedOrErasedMidStrokeAndUndo) {
     // The kept guides change (one erased, one added through the preview): Interpolate evaluates in
     // full, and the next dabs are incremental again. Undo and redo after the strokes.

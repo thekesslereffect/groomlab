@@ -333,6 +333,36 @@ TEST(Stroke, CtrlSelectsWithGuideBrushesInvertsPaintingAndShiftDragSmooths) {
     EXPECT_EQ(g.host->edits().back().mode, "smooth");
 }
 
+TEST(Stroke, PaintingGuideWeightReshapesTheHairWhereGuidesGiveWay) {
+    // + New Map > Guide weight: a vertex map wired to Interpolate's guideWeight, white (as before:
+    // the hair unchanged); a stroke of black lets the guides there give way to their neighbours,
+    // reshaping the hair round it, as a fresh session of the painted groom gives it.
+    const ToolView view = frontView();
+    const auto path = screenLine(view, Vec3f(-0.2f, 0.9f, 0.5f).normalized(), Vec3f(0.2f, 0.9f, 0.5f).normalized(), 8);
+    Groom g(40);
+    const std::vector<Vec3f> before = g.session->evaluate(ViewRequest{}).strands->positions();
+    BrushTool tool;
+    const PaintableSetting* setting = paintableSetting("guideWeight");
+    ASSERT_TRUE(setting);
+    const std::string node = firstNodeOfType(g.session->data().graphJson, setting->type);
+    ASSERT_FALSE(node.empty());
+    paintParamMap(*g.host, tool.settings, node, setting->param);
+    const ViewResult& wired = g.session->evaluate(ViewRequest{});
+    ASSERT_TRUE(wired.errors.empty()) << wired.errors[0];
+    EXPECT_EQ(wired.strands->positions(), before) << "a white map weighs every guide alike";
+    tool.settings.brush.value = 0.0f;
+    tool.settings.brush.strength = 1.0f;
+    tool.settings.brush.hardness = 1.0f;
+    tool.settings.screenRadius = 60.0f;
+    ASSERT_TRUE(tool.stroke(*g.host, view, path, 1.0f, 0u));
+    const ViewResult& painted = g.session->evaluate(ViewRequest{});
+    ASSERT_TRUE(painted.errors.empty()) << painted.errors[0];
+    EXPECT_NE(painted.strands->positions(), before);
+    GroomSession fresh(g.session->data());
+    fresh.setScalpMapsJson(g.session->scalpMapsJson());
+    EXPECT_EQ(fresh.evaluate(ViewRequest{}).strands->positions(), painted.strands->positions());
+}
+
 TEST(Stroke, CtrlTakesHairAwayOnADensityOrWidthMapWhateverTheValue) {
     // The tester's report: with the value lowered, Ctrl painted hair back in (toward 1 - value).
     // Ctrl takes away (toward 0) whatever the value; without Ctrl, toward the value. The map is

@@ -164,6 +164,7 @@
 
 #include "groomlab/curve.h"
 #include "groomlab/distance_field.h"
+#include "groomlab/field.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
 #include "groomlab/look/look_cpu.h"
@@ -422,6 +423,8 @@ struct Binding {
     std::uint64_t baseKey = 0;
     std::vector<Vec3f> roots;
     std::vector<float> reaches;
+    // Each kept guide's guideWeight at its root (empty: every guide alike).
+    std::vector<float> guideWeights;
     // With a region map: what the regions are read from, the regions, and each guide's reach
     // among its own region's guides (as `reaches`; infinite for a guide in none).
     std::shared_ptr<const RegionSource> regionSource;
@@ -834,6 +837,9 @@ float shepardWeight(float base, float power) {
     return power == 2.0f ? base * base : pm::pow(base, power);
 }
 
+// Guide g's guideWeight among `weights` (empty: every guide's 1).
+float weightOf(const std::vector<float>& weights, std::size_t g) { return weights.empty() ? 1.0f : weights[g]; }
+
 // ---- Regions (regionMap) ------------------------------------------------------------------------
 
 // How far apart (in RGB, 0-1 a channel) two colors of a region map may be and still be one region's:
@@ -1075,6 +1081,13 @@ public:
                 .range(1, static_cast<double>(kMaxNeighbors))
                 .soft(1, 8)
                 .adv(),
+            ParamSpec{"guideWeight", 1.0, "How strongly each guide pulls the strands around it against its neighbours, "
+                                          "read at its root, 0 or more (mappable: paint where guides pull more or less; "
+                                          "a number alone changes nothing, every guide weighed alike). 0: a guide that "
+                                          "shapes only strands no other guide reaches (2 neighbors or more)"}
+                .atLeast(0)
+                .soft(0, 1)
+                .when("neighbors", {"2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"}),
             ParamSpec{"reach", 1.5, "Each guide's reach, as a multiple of the distance to its neighbors-th nearest guide; "
                                     "more blends more guides into each strand (smoothness scales it: by 2/3 at 0 to "
                                     "2 at 1)"}
@@ -1242,6 +1255,7 @@ public:
         state->guides = made.guides;
         state->strands = made.strands.lock();
         state->channels = !made.attrNames.empty() || !made.layerNames.empty();
+        state->weights = made.binding->guideWeights;
         return true;
     }
 
@@ -1249,11 +1263,13 @@ public:
     // binds them, from the same strands, params and parts (the binding's base key), the held
     // binding passed as the previous one; kept in the memo as run() keeps its own.
     bool rebind(const PartLines* groomParts, const std::vector<Vec3f>& roots, const std::vector<StrandRoot>& guideRoots,
-                InterpolateState* state) const {
+                const std::vector<float>& guideWeights, InterpolateState* state) const {
         const auto* held = static_cast<const Binding*>(state->binding.get());
         if (!held || roots.size() != held->roots.size() || roots.empty() || guideRoots.size() != roots.size()) return false;
+        if (!guideWeights.empty() && guideWeights.size() != roots.size()) return false;
         BindParams b = bindParams(roots.size(), groomParts, held->fronts != nullptr);
-        const std::uint64_t key = hashPoints(held->baseKey, roots);
+        b.guideWeights = guideWeights.empty() ? nullptr : &guideWeights;
+        const std::uint64_t key = weighedKey(hashPoints(held->baseKey, roots), guideWeights);
         std::shared_ptr<const Binding> previous;
         std::shared_ptr<const Binding> binding = findBinding(key, held->baseKey, &previous);
         if (!binding) {
@@ -1270,7 +1286,16 @@ public:
         }
         state->binding = binding;
         state->roots = roots;
+        state->weights = guideWeights;
         return true;
+    }
+
+    // A binding's key with the guides' weights (none: as it was).
+    static std::uint64_t weighedKey(std::uint64_t key, const std::vector<float>& guideWeights) {
+        if (guideWeights.empty()) return key;
+        key = hashCombine(key, 0x9E16u);
+        for (const float w : guideWeights) key = hashFloat(key, w);
+        return key;
     }
 
 private:
@@ -1283,6 +1308,7 @@ private:
         bool followSurface = false;  // (on a scalp)
         float radius = 0.0f;         // (with followSurface: the paths reach that far at least)
         const PartLines* parts = nullptr;
+        const std::vector<float>* guideWeights = nullptr;  // per guide (null: every guide alike)
     };
     BindParams bindParams(std::size_t guideCount, const PartLines* groomParts, bool onScalp) const {
         BindParams b;
@@ -1551,7 +1577,7 @@ private:
         if (last && (attrNames != made.attrNames || layerNames != made.layerNames)) return false;
         // Parts: strands skip guides across a part.
         const PartsPtr parts = params().getBool("respectParts") ? valueAs<PartsPtr>(ctx.external("parts")) : nullptr;
-        const BindParams b = bindParams(roots.size(), parts.get(), align);
+        BindParams b = bindParams(roots.size(), parts.get(), align);
 
         // Where each strand looks for its guides: its root on the rest scalp when there is one.
         const std::size_t strandCount = strands->strandCount();
@@ -1572,6 +1598,7 @@ private:
         };
         std::vector<StrandRoot> guideRoots(kept.size());
         for (std::size_t g = 0; g < kept.size(); ++g) guideRoots[g] = kept[g]->root;
+        const std::vector<float> guideWeights = interpolateGuideWeights(params(), kept, guides.get(), scalp.get());
         // Regions: the strands' colors on the map (the last result's while the strands and the map
         // are the same), the guides' at their roots now, and from those the regions. Incrementally
         // every strand keeps its region (else it is evaluated in full: its region channel changes).
@@ -1628,10 +1655,11 @@ private:
             if (align) baseKey = hashFloat(hashCombine(hashCombine(baseKey, scalp->restSurfaceHash()), b.followSurface), b.radius);
             if (regionSource) baseKey = hashPoints(hashCombine(baseKey, regionSource->salt), *regionSource->strandColors);
         }
-        const std::uint64_t key = hashPoints(baseKey, roots);
+        const std::uint64_t key = weighedKey(hashPoints(baseKey, roots), guideWeights);
         std::shared_ptr<const Binding> previous;
         std::shared_ptr<const Binding> binding = findBinding(key, baseKey, &previous);
         if (!binding) {
+            b.guideWeights = guideWeights.empty() ? nullptr : &guideWeights;
             if (!queries) {
                 // The last result's strands: their search positions are the last binding's.
                 if (last && made.binding->queries && made.binding->queries->size() == strandCount) {
@@ -2057,6 +2085,7 @@ private:
         auto out = std::make_shared<Binding>();
         out->baseKey = baseKey;
         out->roots = roots;
+        if (b.guideWeights) out->guideWeights = *b.guideWeights;
         out->queries = queriesPtr;
         out->hasPoints = hasPointsPtr;
         out->strandCount = queries.size();
@@ -2205,7 +2234,8 @@ private:
                 const bool pathsChanged = fronts && previous->fronts->front(g) != fronts->front(g);
                 const bool reachChanged = !same(previous->reaches[g], out->reaches[g]) ||
                                           (regionCount && !same(previous->regionReaches[g], out->regionReaches[g]));
-                if (moved || pathsChanged || reachChanged) changed.push_back(roots[g]);
+                const bool weightChanged = !same(weightOf(previous->guideWeights, g), weightOf(out->guideWeights, g));
+                if (moved || pathsChanged || reachChanged || weightChanged) changed.push_back(roots[g]);
             }
         }
         const bool reuse = partial && changed.size() <= roots.size() / 2;
@@ -2519,6 +2549,17 @@ private:
                         std::fill(twist.begin(), twist.begin() + static_cast<std::ptrdiff_t>(found), 0.0f);
                     }
                 }
+                // guideWeight: each guide's share scaled by its weight (every one here weighed 0:
+                // the shares as they were, so no strand is left unbound).
+                if (b.guideWeights && !nearestOnly) {
+                    std::array<float, kMaxCandidates + 1> scaled;
+                    float scaledSum = 0.0f;
+                    for (std::size_t j = 0; j < found; ++j) {
+                        scaled[j] = w[j] * (*b.guideWeights)[idx[j]];
+                        scaledSum += scaled[j];
+                    }
+                    if (scaledSum > 0.0f) std::copy(scaled.begin(), scaled.begin() + static_cast<std::ptrdiff_t>(found), w.begin());
+                }
                 // The nearest guide's distance (the influence), then the guides with a share of
                 // the weights (kept in 16 bits: quantizeWeights): the others add nothing to any
                 // blend (a guide past its reach weighs 0). Every weight 0 (underflowed): left as it is.
@@ -2691,9 +2732,23 @@ std::shared_ptr<const InterpolateState> interpolateStateOf(const InterpolateStat
 }
 
 bool interpolateRebind(const Operator& op, const PartLines* parts, const std::vector<Vec3f>& roots,
-                       const std::vector<StrandRoot>& guideRoots, InterpolateState* state) {
+                       const std::vector<StrandRoot>& guideRoots, const std::vector<float>& guideWeights,
+                       InterpolateState* state) {
     const auto* interpolate = dynamic_cast<const InterpolateOp*>(&op);
-    return interpolate && interpolate->rebind(parts, roots, guideRoots, state);
+    return interpolate && interpolate->rebind(parts, roots, guideRoots, guideWeights, state);
+}
+
+std::vector<float> interpolateGuideWeights(const ParamSet& params, const std::vector<const Guide*>& kept, const GuideSet* guides,
+                                           const ScalpMesh* scalp) {
+    const ScalarField field(params, "guideWeight", scalp, guides);
+    if (field.isConstant() || !scalp || scalp->triangleCount() == 0) return {};
+    std::vector<float> weights(kept.size(), 1.0f);
+    for (std::size_t g = 0; g < kept.size(); ++g) {
+        if (scalp->contains(kept[g]->root)) weights[g] = std::max(0.0f, field.atRoot(kept[g]->root));
+    }
+    // Every guide alike: the blend as without (the shares are normalised).
+    if (std::all_of(weights.begin(), weights.end(), [&](float w) { return w == weights.front(); })) return {};
+    return weights;
 }
 
 std::size_t interpolateSamples(const StrandSet& strands) {

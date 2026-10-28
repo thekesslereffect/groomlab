@@ -225,8 +225,13 @@ parts, regions, clearance and tubes stay.
    flatten them today). A few days in the same kernel.
 4. **A `weights` choice:** `smooth` (today's), `triangle` (barycentric over the guide roots, the
    Houdini and DreamWorks look) and `surface` (section 3 A's smooth weights).
-5. **Per-guide influence:** a guide attribute or painted map scaling its weight (DreamWorks'
-   artist control): cheap, and the fix studios reach for against stray blending.
+5. **Per-guide influence** (done: `guideWeight`): a mappable number read at each guide's root
+   (a scalp map, a guide layer, a plugged field) scaling the guide's share of every blend, the
+   shares normalised again (every candidate weighed 0: as they were); Groom Tools > Paint offers
+   it as Guide weight. In the binding: its key holds the weights, a guide whose weight changed
+   binds the strands it reaches again as a moved root does, and the GPU drag path reads them
+   again each dab (a root moved over a painted scalp). Painting a guide layer is the CPU's, as
+   any guide layer carried as a channel is. The user chose this over items 3 and 4 for now.
 6. **Later, for Simulate:** the 2024 force interpolation for simulated render hair.
 
 ## 7. Order and size
