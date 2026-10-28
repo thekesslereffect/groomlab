@@ -282,6 +282,23 @@ panel offers **Relink Image...**.
   `brush_stroke(..., "smooth", attribute=name, paint_kind=..., smooth_strength=2)` by script);
   **Falloff** (every brush) fades the brush toward its edge (1) or paints full strength to it (0;
   `hardness` in scripts); each stroke is one undo step, a texture's file included.
+- **Brush alphas** (Paint on a vertex or texture map): a grayscale image stamped inside the brush
+  circle (white paints, black not), the falloff times the image where a point lands; the image
+  fills the square around the circle. Picked from the library: `GROOMLAB_ALPHA_PATH`'s folders,
+  the user's `Documents/GroomLab/alphas` (`GROOMLAB_USER_ALPHAS`; every host's), then the ones
+  shipped with the host (`alphas/` beside the plug-in, the add-on's `bin/alphas`, the app's
+  `alphas/`; drawn by `tools/dev/make_alphas.py`); a name in an earlier folder hides a later one,
+  and Add Alpha... numbers a copy whose name is taken. Any image `loadTexture` reads; its alpha
+  channel when it has transparency, else its luminance; mip levels so a small brush reads it
+  without shimmer. Stamps fall `alpha_spacing` x the diameter apart along the cursor's path (in
+  pixels; without an alpha, one dab per mouse event as before), each turned by `alpha_angle`:
+  `alpha_rotation` "fixed", "stroke" (the stroke's screen direction plus the angle; a click alone
+  stamps on release) or "random" (per stamp). `alpha_invert` uses 1 - the image. Symmetry's
+  mirrored stamp weighs each point by the stamp at its mirror image (the pattern mirrored, also
+  across topology). Scripted strokes (world points) and smoothing take no alpha.
+  `groomlab.brush_tool("paint", alpha=path, ...)`, `brush_alphas()`, `add_brush_alpha(file)`,
+  `brush_alpha_folder()`; the context's `-alpha`, `-alphaRotation`, `-alphaAngle`,
+  `-alphaSpacing`, `-alphaInvert`.
 - **No seams in painted maps:** every kind of map is painted on the surface, not in UV space. A
   dab reaches the scalp within its sphere that is connected to where it lands: both sides of a
   UV seam, never across a gap to another part of the scalp (the back of an ear). Smoothing a

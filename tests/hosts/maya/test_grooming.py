@@ -3749,6 +3749,37 @@ class GroomingTest(unittest.TestCase):
         ctx = groomlab.brush_tool("comb", activate=False)
         cmds.groomLabBrushCtx(ctx, edit=True, targets="guides,flow")
 
+    def test_brush_alphas_library_and_tool_flags(self):
+        # The alphas shipped with the module, then images added: copied into the user's folder
+        # (GROOMLAB_USER_ALPHAS here), listed first. The tool takes an alpha by its file.
+        shipped = groomlab.brush_alphas()
+        names = [a["name"] for a in shipped]
+        for name in ("Cells", "Clouds", "Grain", "Noise", "Speckle", "Spots", "Square", "Streaks"):
+            self.assertIn(name, names)
+        self.assertTrue(all(a["shipped"] for a in shipped))
+        user = tempfile.mkdtemp(prefix="groomlab_alphas_")
+        old = os.environ.get("GROOMLAB_USER_ALPHAS")
+        os.environ["GROOMLAB_USER_ALPHAS"] = user
+        try:
+            speckle = next(a["path"] for a in shipped if a["name"] == "Speckle")
+            outside = os.path.join(tempfile.mkdtemp(prefix="groomlab_alpha_src_"), "Speckle.png")
+            shutil.copyfile(speckle, outside)
+            added = groomlab.add_brush_alpha(outside)
+            self.assertEqual(os.path.basename(added), "Speckle 2.png")  # a shipped one's name: numbered
+            self.assertEqual(groomlab.brush_alphas()[0]["name"], "Speckle 2")
+            self.assertEqual(os.path.normcase(os.path.normpath(groomlab.brush_alpha_folder())), os.path.normcase(os.path.normpath(user)))
+            with self.assertRaises(ValueError):
+                groomlab.add_brush_alpha(__file__)
+        finally:
+            if old is None:
+                os.environ.pop("GROOMLAB_USER_ALPHAS", None)
+            else:
+                os.environ["GROOMLAB_USER_ALPHAS"] = old
+        # The tool takes the flags (they round-trip in the Maya UI only: the GUI cases check them).
+        groomlab.add_map(self.groom, "crown", 0.0, kind="vertices")
+        groomlab.brush_tool("paint", attribute="crown", paint_kind="vertices", alpha=speckle, alpha_rotation="random",
+                            alpha_spacing=0.5, activate=False)
+
 
     def test_card_textures_toggle(self):
         # The cards view draws the cards with their baked maps (displayCardTextures, on by default)

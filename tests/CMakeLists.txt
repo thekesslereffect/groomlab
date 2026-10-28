@@ -6,6 +6,7 @@ add_executable(groomlab_tests
     engine/core/test_async_evaluation.cpp
     engine/core/test_attributes.cpp
     engine/core/test_brush.cpp
+    engine/core/test_brush_alpha.cpp
     engine/core/test_brush_catalog.cpp
     engine/core/test_brush_pack.cpp
     engine/core/test_budgets.cpp

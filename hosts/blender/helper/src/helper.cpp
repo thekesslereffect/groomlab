@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/brush_alpha.h"
 #include "groomlab/attributes.h"
 #include "groomlab/card_files.h"
 #include "groomlab/card_maps.h"
@@ -1076,6 +1077,21 @@ std::string shippedNodesDir() {
     return {};
 }
 
+// The brush alphas shipped with the helper (brush_alpha.h): bin/alphas beside it (or one up), else
+// the source tree's (a build tree's helper).
+std::string shippedAlphasDir() {
+    std::error_code ec;
+    if (!g_executableDir.empty()) {
+        for (const fs::path& p : {fs::u8path(g_executableDir) / "alphas", fs::u8path(g_executableDir) / ".." / "alphas"}) {
+            if (fs::is_directory(p, ec)) return p.lexically_normal().generic_u8string();
+        }
+    }
+#ifdef GROOMLAB_SHIPPED_ALPHAS
+    if (fs::is_directory(fs::u8path(GROOMLAB_SHIPPED_ALPHAS), ec)) return GROOMLAB_SHIPPED_ALPHAS;
+#endif
+    return {};
+}
+
 // A preset's file: by "path", else by "name" in the preset folders.
 std::string presetFile(const json& args, std::string* stem) {
     std::string path = optString(args, "path", "");
@@ -1289,6 +1305,7 @@ std::string sampleMeshesDir() { return shippedMeshesDir(); }
 void setExecutableDir(const std::string& dir) {
     g_executableDir = dir;
     setShippedNodeDir(shippedNodesDir());  // what "node:<id>" adds resolve through
+    setShippedBrushAlphaDir(shippedAlphasDir());
 }
 
 Helper::Helper() = default;
@@ -1965,6 +1982,20 @@ json Helper::run(const std::string& cmd, const json& args) {
     if (cmd == "library_nodes") {
         if (shippedNodeDir().empty()) setShippedNodeDir(shippedNodesDir());
         return json::parse(libraryNodesJson());
+    }
+    // ---- Brush alphas (brush_alpha.h): the library every host's alpha picker lists ----
+    if (cmd == "brush_alphas") {
+        if (shippedBrushAlphaDir().empty()) setShippedBrushAlphaDir(shippedAlphasDir());
+        json alphas = json::array();
+        for (const BrushAlphaFile& a : listBrushAlphas()) alphas.push_back({{"name", a.name}, {"path", a.path}, {"shipped", a.shipped}});
+        return {{"alphas", alphas}, {"userDir", brushAlphaUserDir()}};
+    }
+    if (cmd == "add_brush_alpha") {
+        try {
+            return {{"path", addBrushAlpha(needString(args, "file"))}};
+        } catch (const std::runtime_error& e) {
+            fail("bad_request", e.what());
+        }
     }
     if (cmd == "preset_graph") {
         // A preset's graph as it would apply to this scalp (fitted), nothing changed: the add-on's

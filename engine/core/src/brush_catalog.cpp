@@ -82,7 +82,7 @@ std::vector<BrushEntry> makeCatalog() {
          "(Ctrl: a gray map toward 0, or 1 when the value is 0; a color map toward the inverse color; Shift+drag: "
          "smooth). Guide maps paint over the guides, scalp maps over the scalp. + New Map > for a setting makes a map "
          "a setting reads (Density, Width, Length...): Ctrl on the density map removes hair.",
-         with(without(kBrushCommon, {"collide"}), {"map", "smoothStrength"})},
+         with(without(kBrushCommon, {"collide"}), {"map", "alpha", "smoothStrength"})},
         // Guides: picking and protecting them.
         {"select", "Select", C::Guides, 0, "select", 1.0f, false,
          "Lasso guides (Shift: toggle, Ctrl: deselect, Ctrl+Shift: add): the rest freeze, so brushes work on the "
@@ -160,6 +160,9 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
         {"flow", "Flow", "What a click or drag lays: arrows, or a sink (brush-sized) hair turns around"},
         {"map", "Map", "The map painted, the value (or color and channels) it is painted toward"},
         {"smoothStrength", "Smooth", "How much Shift+drag smooths a map per stamp (past 1: several passes)"},
+        {"alpha", "Alpha", "An image stamped inside the brush on scalp maps (speckles, noise, streaks): white paints, black "
+                           "does not. Rotation turns it (fixed, along the stroke, random per stamp), Spacing sets how far "
+                           "apart the stamps fall. Add your own images to the library (right-click)"},
         {"selection", "Selection", "How the lasso adds to or replaces the selection, and the soft radius"},
         {"freezeMask", "Freeze mask", "The frozen guides draw blue; Unfreeze All clears the mask"},
         {"tubeChannel", "Paints", "What the Shape brush paints on the tubes near it: their width, their flatness (toward "

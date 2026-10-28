@@ -1,11 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Sculpting brushes: a scripted stroke, and the interactive brush tool."""
+"""Sculpting brushes: a scripted stroke, the interactive brush tool, and the brush alphas."""
 
 import json
+import os
 
 from maya import cmds
 
+import groomlab_core
+
 from groomlab.base import ensure_plugin
+
+# The brush alphas shipped with GroomLab (the module's alphas folder); the user's own are in
+# Documents/GroomLab/alphas, shared by every host.
+SHIPPED_ALPHAS = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "alphas"))
+groomlab_core.set_shipped_brush_alpha_dir(SHIPPED_ALPHAS)
 
 
 BRUSH_MODES = ("comb", "slide", "smooth", "straighten", "lift", "twist", "curl", "attract", "direction", "noise", "length",
@@ -168,7 +176,8 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
                part_name="part", erase_guides=True, erase_parts=True, erase_flow=True, stretch=False, flow_sink="",
                targets="guides", paint_color=None, paint_channels="rgba", mask_by_scalp=True, strength_profile=None,
                falloff_profile=None, solo_new_guides=False, tube_channel="width", tube=None, activate=True,
-               paint_mode="replace"):
+               paint_mode="replace", alpha="", alpha_rotation="fixed", alpha_angle=0.0, alpha_spacing=0.25,
+               alpha_invert=False):
     """Configure the interactive GroomLab brush (radius in pixels) and make it the current tool.
 
     Select the groom first; then drag over it in the viewport. Each drag is one undo step.
@@ -192,6 +201,12 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
     - `paint_color` (r, g, b[, a]) and `paint_channels` ("rgba" or a subset): what paint does to a
       color map (Ctrl: toward 1 - the color in those channels; Shift+drag smooths them).
     - `strength_profile` and `falloff_profile`: the brush's curves, as in brush_stroke.
+    - `alpha` (paint on a scalp map: vertices or texture): an image file stamped inside the brush,
+      white painting and black not (brush_alphas() lists the library; "" none). Each stamp is turned
+      by `alpha_angle` degrees: `alpha_rotation` "fixed" that angle, "stroke" along the way the
+      stroke goes plus it, "random" a random angle per stamp. Stamps fall `alpha_spacing` x the
+      brush's diameter apart; `alpha_invert` paints where the image is black. Guide maps and
+      Shift+drag smoothing take no alpha.
     - `tube_channel` (shape): what the Shape brush paints on the tubes near it: "width",
       "flatness" or "twist" (a negative strength does the opposite).
     - `tube` (place, draw): the new guides' tube, as in brush_stroke (the Groom Tools' Tubes panel
@@ -214,7 +229,9 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
               "hardness": float(hardness), "smoothStrength": float(smooth_strength),
               "paintMode": paint_mode,
               "strengthProfile": curve_text(strength_profile), "falloffProfile": curve_text(falloff_profile),
-              "soloNewGuides": bool(solo_new_guides), "tubeChannel": _tube_channel(tube_channel)}
+              "soloNewGuides": bool(solo_new_guides), "tubeChannel": _tube_channel(tube_channel),
+              "alpha": alpha or "", "alphaRotation": alpha_rotation, "alphaAngle": float(alpha_angle),
+              "alphaSpacing": float(alpha_spacing), "alphaInvert": bool(alpha_invert)}
     kwargs.update(_paint_color_flags(paint_color, paint_channels))
     if attribute:
         kwargs["attribute"] = attribute
@@ -230,3 +247,23 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
     if activate:
         cmds.setToolTo(BRUSH_CONTEXT)
     return BRUSH_CONTEXT
+
+
+def brush_alphas():
+    """The brush alphas to paint with: [{"name", "path", "shipped"}], the user's own first (the
+    folders on GROOMLAB_ALPHA_PATH and Documents/GroomLab/alphas), then the ones shipped with GroomLab."""
+    return list(groomlab_core.list_brush_alphas())
+
+
+def add_brush_alpha(path):
+    """Copies an image (PNG, JPEG, TGA, BMP, PSD, HDR...) into the user's alpha folder, so every
+    host lists it; returns its path there. ValueError: not an image GroomLab reads."""
+    return groomlab_core.add_brush_alpha(path)
+
+
+def brush_alpha_folder():
+    """The user's alpha folder (made when missing): drop images there to add them."""
+    folder = groomlab_core.brush_alpha_user_dir()
+    if folder and not os.path.isdir(folder):
+        os.makedirs(folder)
+    return folder

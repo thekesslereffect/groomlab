@@ -94,6 +94,20 @@ struct BrushToolSettings {
     // Smoothing a map (Shift+drag while painting, or the Smooth brush on it): how much per stamp;
     // past 1 the stamp runs in passes (2: two full passes).
     float smoothStrength = 1.0f;
+    // Paint on a scalp map through an alpha (brush_alpha.h): each dab weighs the falloff times the
+    // image, dabs alphaSpacing x the brush's diameter apart along the cursor's path, each turned by
+    // alphaAngle (degrees) as alphaRotation says: Fixed that angle, Stroke the way the stroke goes
+    // plus it, Random a random angle per dab. Smoothing and guide maps take no alpha (stampsAlpha).
+    enum class AlphaRotation { Fixed, Stroke, Random };
+    std::string alphaPath;  // the alpha's file ("" none); setAlpha reads it into `alpha`
+    BrushAlphaPtr alpha;
+    AlphaRotation alphaRotation = AlphaRotation::Fixed;
+    float alphaAngle = 0.0f;
+    float alphaSpacing = 0.25f;
+    bool alphaInvert = false;
+    static constexpr float kMinAlphaSpacing = 0.02f, kMaxAlphaSpacing = 4.0f;
+    // Whether dabs stamp the alpha: one is set and the brush paints a scalp map (not smoothing).
+    bool stampsAlpha() const { return alpha && brush.mode == BrushMode::Attribute && paintsScalp(); }
     // A scalp map is painted (Paint) or smoothed (Smooth: Shift+drag while painting, or the brush).
     bool paintsScalp() const {
         return (brush.mode == BrushMode::Attribute || brush.mode == BrushMode::Smooth) && paintKind != "guides";
@@ -130,6 +144,13 @@ struct BrushToolSettings {
     std::string falloffProfileJson() const;
     void setSmoothStrength(float strength);
     void setPaintColor(const PaintColor& color);
+    // The alpha read from its file ("" none). Throws TextureError or std::invalid_argument (a
+    // file it cannot read), the alpha left as it was.
+    void setAlpha(const std::string& path);
+    // "fixed", "stroke" or "random"; throws std::invalid_argument for anything else.
+    void setAlphaRotation(const std::string& name);
+    std::string alphaRotationName() const;
+    void setAlphaSpacing(float fraction);  // kMinAlphaSpacing .. kMaxAlphaSpacing
     // Symmetry by name, as every host offers it: "x", "y", "z" (a world plane at
     // brush.mirrorCenter), "topology" (across the scalp's own surface: brush.mirrorTopology),
     // "none". Throws std::invalid_argument for anything else.
@@ -214,6 +235,9 @@ struct MapDab {
     int mirrorAxis = -1;
     float mirrorCenter = 0.0f;
     bool mirrorTopology = false;  // the mirrored dab at its partner spot on the painted mesh (ScalpMirror)
+    // The mirrored dab weighs each point by the dab's own weight at its mirror image (an alpha's
+    // pattern mirrored), not by a world sphere.
+    bool mirrorWeight = false;
     // A dab of `brush` (the pressed settings: Ctrl's value already flipped) on a map of `channels`:
     // a color map toward s.paintTarget(inverted), a gray map toward brush.value. Smoothing runs
     // s.smoothStrength x `smoothScale` (the pen's pressure; a scripted stroke's |strength|), in
@@ -599,7 +623,11 @@ private:
     void stampOverlays(const ToolView& view, const Vec3f& center, const Vec3f& drag, float x, float y);
     void rebuildDrawn();
     bool beginMapStroke(StrokeHost& host);
-    void stampMap(StrokeHost& host, const ToolView& view, const Vec3f& center, float x, float y);
+    void stampMap(StrokeHost& host, const ToolView& view, const Vec3f& center, float x, float y, AlphaStamp alpha = {});
+    // An alpha stroke's dabs up to the cursor (stampsAlpha), and one of them at (x, y).
+    void stampAlpha(StrokeHost& host, const ToolView& view, float x, float y);
+    void alphaDab(StrokeHost& host, const ToolView& view, float x, float y, float direction);
+    void finishAlpha(StrokeHost& host, const ToolView& view);  // the click's dab still waiting, if any
     void updateTexturePreview(StrokeHost& host);
     void commitMap(StrokeHost& host);
     void dropMapStroke(StrokeHost* host);
@@ -645,6 +673,11 @@ private:
     std::uint64_t neighborsScalp_ = 0;
     bool mapChanged_ = false;
     std::chrono::steady_clock::time_point lastTexturePreview_{};
+    // An alpha stroke: where its last dab is (pixels), whether the first waits for the stroke's
+    // direction (AlphaRotation::Stroke), and the dabs so far (Random's angles).
+    bool alphaStarted_ = false, alphaPending_ = false;
+    float alphaX_ = 0.0f, alphaY_ = 0.0f;
+    std::uint64_t alphaStroke_ = 0, alphaDabs_ = 0;
     // Shot sculpting: this stroke records a corrective.
     bool shot_ = false;
     // A stroke on a Sculpt node's guides (StrokeHost::sculptNode): what the node is fed, its

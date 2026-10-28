@@ -103,6 +103,36 @@ std::string BrushToolSettings::falloffProfileJson() const { return rampJson(brus
 
 void BrushToolSettings::setSmoothStrength(float strength) { smoothStrength = std::max(0.0f, strength); }
 
+void BrushToolSettings::setAlpha(const std::string& path) {
+    if (path.empty()) {
+        alpha.reset();
+        alphaPath.clear();
+        return;
+    }
+    alpha = loadBrushAlpha(path);
+    alphaPath = path;
+}
+
+void BrushToolSettings::setAlphaRotation(const std::string& name) {
+    if (name == "fixed") alphaRotation = AlphaRotation::Fixed;
+    else if (name == "stroke") alphaRotation = AlphaRotation::Stroke;
+    else if (name == "random") alphaRotation = AlphaRotation::Random;
+    else throw std::invalid_argument("the alpha's rotation is fixed, stroke or random, not '" + name + "'");
+}
+
+std::string BrushToolSettings::alphaRotationName() const {
+    switch (alphaRotation) {
+        case AlphaRotation::Stroke: return "stroke";
+        case AlphaRotation::Random: return "random";
+        case AlphaRotation::Fixed: break;
+    }
+    return "fixed";
+}
+
+void BrushToolSettings::setAlphaSpacing(float fraction) {
+    alphaSpacing = std::clamp(fraction, kMinAlphaSpacing, kMaxAlphaSpacing);
+}
+
 void BrushToolSettings::setPaintColor(const PaintColor& color) {
     for (std::size_t k = 0; k < paintColor.size(); ++k) paintColor[k] = std::clamp(color[k], 0.0f, 1.0f);
 }
@@ -610,10 +640,25 @@ std::size_t paintMapDab(MapCanvas& map, const ScalpMesh& scalp, const MapDab& d,
         topology.mirrorTopology = true;
         const StrokeSymmetry sym = StrokeSymmetry::of(topology, &scalp);
         const Vec3f m = sym.on() ? sym.point(center) : center;
-        if ((m - center).length() > 1e-6f) changed += dabOnce(map, scalp, d, m, radius, sphereWeight(m, radius, d.falloff), true);
+        if ((m - center).length() > 1e-6f) {
+            if (d.mirrorWeight && weight) {  // the dab's own weight at each point's partner
+                changed += dabOnce(map, scalp, d, m, radius, [&weight, &sym](const Vec3f& p) { return weight(sym.point(p)); }, threadSafe);
+            } else {
+                changed += dabOnce(map, scalp, d, m, radius, sphereWeight(m, radius, d.falloff), true);
+            }
+        }
     } else if (d.mirrorAxis >= 0) {  // the mirrored dab: a world sphere (a screen circle is the cursor's)
         const Vec3f m = mirrorPoint(center, d.mirrorAxis, d.mirrorCenter);
-        if ((m - center).length() > 1e-6f) changed += dabOnce(map, scalp, d, m, radius, sphereWeight(m, radius, d.falloff), true);
+        if ((m - center).length() > 1e-6f) {
+            if (d.mirrorWeight && weight) {  // the dab's own weight at each point's mirror image
+                const int axis = d.mirrorAxis;
+                const float plane = d.mirrorCenter;
+                changed += dabOnce(map, scalp, d, m, radius, [&weight, axis, plane](const Vec3f& p) { return weight(mirrorPoint(p, axis, plane)); },
+                                   threadSafe);
+            } else {
+                changed += dabOnce(map, scalp, d, m, radius, sphereWeight(m, radius, d.falloff), true);
+            }
+        }
     }
     return changed;
 }

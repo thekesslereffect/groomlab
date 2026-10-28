@@ -18,6 +18,7 @@ headless Blender (run_blender_test.py installs the extension in a throwaway prof
 import importlib
 import json
 import os
+import shutil
 import sys
 import types
 import unittest
@@ -26,6 +27,10 @@ import bpy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blender_util as bu  # noqa: E402
+
+# The helper (started later) adds alphas to the test's own folder, never the user's.
+os.environ["GROOMLAB_USER_ALPHAS"] = os.path.join(bu.TMP, "alphas")
+shutil.rmtree(os.environ["GROOMLAB_USER_ALPHAS"], ignore_errors=True)
 
 pkg, m = bu.enable()
 groom, process, graph = m["groom"], m["process"], m["graph"]
@@ -464,6 +469,54 @@ class ToolsTest(unittest.TestCase):
         self.assertTrue(tools.current_map(bpy.context.scene).texture.endswith("spot_b.png"))
         self.assertEqual(bpy.ops.groomlab.map_remove(), {"FINISHED"})
         self.assertTrue(os.path.isfile(b))  # a PNG of yours linked in place stays
+        t.tab = "TOOLS"
+
+    def test_3b_paint_alpha(self):
+        # Paint on a scalp map shows the Alpha grid (the library: the shipped alphas), not on a
+        # guide map; a pick reaches the helper's tool with its rotation and spacing; Add copies an
+        # image into the user's folder (GROOMLAB_USER_ALPHAS: the test's own).
+        alphas = importlib.import_module(bu.MODULE + ".alphas")
+        head, t = self.head, self.t
+        t.tab = "PAINT"
+        self.assertEqual(bpy.ops.groomlab.map_new(name="speckles", kind="vertices", value=0.0), {"FINISHED"})
+        self.assertEqual(bpy.ops.groomlab.tool(tool="paint"), {"FINISHED"})
+        log = drawn(palette.VIEW3D_PT_groomlab_tools)
+        self.assertIn(("icon_view", "alpha_choice"), log)
+        self.assertNotIn(("prop", "alpha_spacing"), log)  # its rows only while one is picked
+        library = alphas.library(refresh=True)
+        names = [a["name"] for a in library]
+        for name in ("Speckle", "Spots", "Streaks"):
+            self.assertIn(name, names)
+        items = alphas.enum_items(t, bpy.context)
+        self.assertEqual(items[0][0], "NONE")
+        t.alpha_choice = next(i[0] for i in items if i[1] == "Spots")
+        spots = next(a["path"] for a in library if a["name"] == "Spots")
+        self.assertEqual(os.path.normcase(t.alpha), os.path.normcase(spots))
+        t.alpha_rotation = "STROKE"
+        t.alpha_spacing = 60
+        tool = hcall(head, "tool_get")["settings"]
+        self.assertEqual(os.path.normcase(tool["alpha"]), os.path.normcase(spots))
+        self.assertEqual(tool["alphaRotation"], "stroke")
+        self.assertAlmostEqual(tool["alphaSpacing"], 0.6, places=5)
+        log = drawn(palette.VIEW3D_PT_groomlab_tools)
+        for name in ("alpha_rotation", "alpha_angle", "alpha_spacing", "alpha_invert"):
+            self.assertIn(("prop", name), log)
+        self.assertIn("groomlab.alpha_clear", [e[1] for e in log if e[0] == "op_text"])
+        # Add: a copy in the user's folder, picked.
+        user = os.environ["GROOMLAB_USER_ALPHAS"]
+        outside = os.path.join(bu.TMP, "alpha_src", "Spots.png")
+        os.makedirs(os.path.dirname(outside), exist_ok=True)
+        shutil.copyfile(spots, outside)
+        self.assertEqual(bpy.ops.groomlab.alpha_add(filepath=outside), {"FINISHED"})
+        self.assertEqual(os.path.normcase(os.path.normpath(os.path.dirname(t.alpha))), os.path.normcase(os.path.normpath(user)))
+        self.assertEqual(os.path.basename(t.alpha), "Spots 2.png")
+        self.assertEqual(alphas.library(refresh=True)[0]["name"], "Spots 2")
+        # A guide map: no alpha rows.
+        self.assertEqual(bpy.ops.groomlab.map_new(name="layer", kind="guides", value=0.0), {"FINISHED"})
+        self.assertNotIn(("icon_view", "alpha_choice"), drawn(palette.VIEW3D_PT_groomlab_tools))
+        self.assertEqual(bpy.ops.groomlab.alpha_clear(), {"FINISHED"})
+        self.assertEqual(hcall(head, "tool_get")["settings"]["alpha"], "")
+        bpy.ops.groomlab.tool_exit()
         t.tab = "TOOLS"
 
     def test_4_tubes(self):

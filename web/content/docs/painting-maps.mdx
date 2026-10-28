@@ -110,6 +110,28 @@ a swatch and **R G B A** toggles, and the brush paints only the enabled channels
 - In the brush settings, **Falloff** sets the brush edge softness and **Smooth** sets how strongly
   Shift+drag blurs.
 
+## Brush alphas
+
+On a vertex or texture map, the Paint brush can stamp an **alpha**: a grayscale image inside the
+brush circle, so a stroke leaves speckles, spots, noise or streaks instead of a round spot. White
+paints, black does not. The alpha multiplies the brush's own falloff: the brush is a round stamp
+whose **Falloff** sets how wide its soft edge is (0: hard to the edge), and the alpha's pattern is
+cut into it.
+
+- Click the **Alpha** thumbnail to pick one from the library: **None**, your own alphas, then the
+  ones that ship with GroomLab (Speckle, Spots, Noise, Clouds, Grain, Streaks, Cells, Square).
+- **Add Alpha...** copies an image (PNG, JPEG, TGA, PSD, HDR...) into your alpha folder,
+  `Documents/GroomLab/alphas`, which Maya, Blender and the app all list. **Open Folder** opens it:
+  images you drop there show up too. An image with transparency uses its alpha channel, else its
+  brightness.
+- **Rotation**: **Fixed** (every stamp at the **Angle**), **Follow Stroke** (each stamp turned the
+  way the stroke goes, plus the angle: Streaks lays strands along the stroke) or **Random**.
+- **Spacing**: how far apart the stamps fall along a stroke, in percent of the brush's diameter.
+  Keep it low for a smooth trail; 100% and up leaves separate stamps.
+- **Invert** paints where the alpha is black.
+- With symmetry on, the mirrored stamp mirrors the alpha too. Guide maps and Shift+drag smoothing
+  take no alpha.
+
 ## Other map sources
 
 Any mappable parameter can also read a texture at the root's UV, a Maya color set, a strand

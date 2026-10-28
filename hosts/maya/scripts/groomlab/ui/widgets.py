@@ -1433,3 +1433,159 @@ class ColorSwatch(QtWidgets.QToolButton):
         rgb = self._ask(self.rgb)
         if rgb is not None:
             self.apply(rgb)
+
+
+# -- Brush alphas ----------------------------------------------------------------
+
+_alpha_icons = {}  # path -> (modified time, QIcon)
+
+
+def alpha_icon(path, size=64):
+    """An alpha's thumbnail (white: full weight) as an icon, kept until its file changes; a dashed
+    empty square for none ("")."""
+    pixmap = QtGui.QPixmap(size, size)
+    if not path:
+        pixmap.fill(QtCore.Qt.transparent)
+        painter = QtGui.QPainter(pixmap)
+        pen = QtGui.QPen(QtGui.QColor(140, 140, 140), 2, QtCore.Qt.DashLine)
+        painter.setPen(pen)
+        painter.drawRect(4, 4, size - 9, size - 9)
+        painter.drawLine(8, size - 9, size - 9, 8)
+        painter.end()
+        return QtGui.QIcon(pixmap)
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = None
+    cached = _alpha_icons.get(path)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    import groomlab_core
+    try:
+        data = groomlab_core.brush_alpha_thumbnail(path, size)
+    except ValueError:
+        return alpha_icon("", size)
+    image = QtGui.QImage(data, size, size, size, QtGui.QImage.Format_Grayscale8).copy()
+    icon = QtGui.QIcon(QtGui.QPixmap.fromImage(image))
+    _alpha_icons[path] = (stamp, icon)
+    return icon
+
+
+class AlphaPicker(QtWidgets.QWidget):
+    """The Paint brush's alpha: a thumbnail button (and the alpha's name) opening a grid of the
+    library's alphas (None first, the user's own, then the shipped ones), with Add Alpha... and the
+    folder below it; right-click the button for the same. Emits changed(path) ("" none)."""
+
+    changed = QtCore.Signal(str)
+    THUMB = 64
+
+    def __init__(self, parent=None):
+        super(AlphaPicker, self).__init__(parent)
+        self.path = ""
+        row = QtWidgets.QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme_px(8))
+        self.button = QtWidgets.QToolButton()
+        self.button.setObjectName("alphaButton")
+        self.button.setIconSize(QtCore.QSize(theme_px(40), theme_px(40)))
+        self.button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.button.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.button.customContextMenuRequested.connect(self.context_menu)
+        self.name = QtWidgets.QLabel()
+        row.addWidget(self.button)
+        row.addWidget(self.name, 1)
+        self.popup = QtWidgets.QMenu(self.button)
+        self.grid = QtWidgets.QListWidget()
+        self.grid.setObjectName("alphaGrid")
+        self.grid.setViewMode(QtWidgets.QListView.IconMode)
+        self.grid.setIconSize(QtCore.QSize(self.THUMB, self.THUMB))
+        self.grid.setGridSize(QtCore.QSize(self.THUMB + theme_px(18), self.THUMB + theme_px(26)))
+        self.grid.setResizeMode(QtWidgets.QListView.Adjust)
+        self.grid.setMovement(QtWidgets.QListView.Static)
+        self.grid.setWordWrap(True)
+        self.grid.setFixedSize((self.THUMB + theme_px(18)) * 4 + theme_px(24), (self.THUMB + theme_px(26)) * 3 + theme_px(8))
+        self.grid.itemClicked.connect(self._picked)
+        panel = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(panel)
+        column.setContentsMargins(theme_px(6), theme_px(6), theme_px(6), theme_px(6))
+        column.addWidget(self.grid)
+        buttons = QtWidgets.QHBoxLayout()
+        add = QtWidgets.QPushButton("Add Alpha...")
+        add.setToolTip("Copy an image (PNG, JPEG, TGA, PSD...) into your alpha folder: every host lists it")
+        add.clicked.connect(self.add)
+        folder = QtWidgets.QPushButton("Open Folder")
+        folder.setToolTip("Your alpha folder (Documents/GroomLab/alphas): images dropped there are listed too")
+        folder.clicked.connect(self.open_folder)
+        buttons.addWidget(add)
+        buttons.addWidget(folder)
+        buttons.addStretch(1)
+        column.addLayout(buttons)
+        action = QtWidgets.QWidgetAction(self.popup)
+        action.setDefaultWidget(panel)
+        self.popup.addAction(action)
+        self.popup.aboutToShow.connect(self.fill)
+        self.button.setMenu(self.popup)
+        self.show_alpha()
+
+    def fill(self):
+        """The library as it is now (images dropped in a folder since show up)."""
+        import groomlab
+        self.grid.clear()
+        entries = [{"name": "None", "path": ""}] + groomlab.brush_alphas()
+        for entry in entries:
+            item = QtWidgets.QListWidgetItem(alpha_icon(entry["path"], self.THUMB), entry["name"])
+            item.setData(QtCore.Qt.UserRole, entry["path"])
+            item.setToolTip(entry["path"] or "No alpha: the brush's falloff alone")
+            item.setTextAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
+            self.grid.addItem(item)
+            if os.path.normcase(entry["path"]) == os.path.normcase(self.path):
+                self.grid.setCurrentItem(item)
+
+    def _picked(self, item):
+        self.popup.close()
+        self.set_path(item.data(QtCore.Qt.UserRole) or "")
+
+    def set_path(self, path, emit=True):
+        """Shows the alpha (a file gone: none) and, with `emit`, tells the brush."""
+        path = path if path and os.path.isfile(path) else ""
+        changed = path != self.path
+        self.path = path
+        self.show_alpha()
+        if emit and changed:
+            self.changed.emit(path)
+
+    def show_alpha(self):
+        self.button.setIcon(alpha_icon(self.path, self.THUMB))
+        name = os.path.splitext(os.path.basename(self.path))[0] if self.path else "None"
+        self.name.setText(name)
+        self.button.setToolTip((self.path or "No alpha") + " (click: pick one; right-click: more)")
+
+    def add(self):
+        import groomlab
+        self.popup.close()
+        files, _filter = QtWidgets.QFileDialog.getOpenFileNames(
+            self, "Add Alpha", "", "Images (*.png *.jpg *.jpeg *.tga *.bmp *.psd *.gif *.hdr *.pic *.pnm *.ppm *.pgm)")
+        added = ""
+        for f in files:
+            try:
+                added = groomlab.add_brush_alpha(f)
+            except ValueError as e:
+                QtWidgets.QMessageBox.warning(self, "Add Alpha", str(e))
+        if added:
+            self.set_path(added)
+
+    def open_folder(self):
+        import groomlab
+        self.popup.close()
+        folder = groomlab.brush_alpha_folder()
+        if folder:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(folder))
+
+    def context_menu(self, pos):
+        menu = QtWidgets.QMenu(self)
+        clear = menu.addAction("Clear Alpha")
+        clear.setEnabled(bool(self.path))
+        clear.triggered.connect(lambda: self.set_path(""))
+        menu.addAction("Add Alpha...").triggered.connect(self.add)
+        menu.addAction("Open Alpha Folder").triggered.connect(self.open_folder)
+        qt.exec_(menu, self.button.mapToGlobal(pos))

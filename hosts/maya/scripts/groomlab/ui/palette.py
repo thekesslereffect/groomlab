@@ -1007,6 +1007,8 @@ class ToolPalette(QtWidgets.QWidget):
             "strengthProfile", [[0, 0.25], [1, 1]], ("root", "tip"))
         for box in (self.falloff_curve_box, self.strength_curve_box):
             card.addWidget(box)
+        self.alpha_box = self.alpha_setting()
+        card.addWidget(self.alpha_box)
         # Symmetry, and across what: world X, or the scalp's own topology (a head turned, or not
         # quite symmetric).
         self.symmetry = self.setting_box("symmetry")
@@ -1407,6 +1409,79 @@ class ToolPalette(QtWidgets.QWidget):
         editor.committed.connect(lambda _keys: self.push(**{flag: self.curve_of(check, editor)}))
         editor.check = check
         return box, editor
+
+    def alpha_setting(self):
+        """Paint's alpha on a scalp map (the catalog's "alpha"): the picker, and while one is
+        picked its rotation, angle, spacing and invert."""
+        box, column = self.options()
+        top = QtWidgets.QHBoxLayout()
+        top.setSpacing(theme.px(10))
+        label = QtWidgets.QLabel(SETTINGS["alpha"]["label"])
+        label.setToolTip(SETTINGS["alpha"]["hint"])
+        self.alpha = widgets.AlphaPicker()
+        self.alpha.changed.connect(self.alpha_changed)
+        top.addWidget(label)
+        top.addWidget(self.alpha, 1)
+        column.addLayout(top)
+        self.alpha_options = QtWidgets.QWidget()
+        form = QtWidgets.QFormLayout(self.alpha_options)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setLabelAlignment(QtCore.Qt.AlignRight)
+        form.setRowWrapPolicy(QtWidgets.QFormLayout.DontWrapRows)
+        rotation_row = QtWidgets.QHBoxLayout()
+        self.alpha_rotation = QtWidgets.QComboBox()
+        self.alpha_rotation.setObjectName("alphaRotation")
+        for name, label_text, tip in (("fixed", "Fixed", "Every stamp at the angle"),
+                                      ("stroke", "Follow Stroke", "Each stamp turned the way the stroke goes, plus the angle"),
+                                      ("random", "Random", "Each stamp at a random angle")):
+            self.alpha_rotation.addItem(label_text, name)
+            self.alpha_rotation.setItemData(self.alpha_rotation.count() - 1, tip, QtCore.Qt.ToolTipRole)
+        self.alpha_rotation.currentIndexChanged.connect(self.alpha_rotation_changed)
+        self.alpha_angle = widgets.SoftSlider(0, 0, 360, integer=True, minimum=-360, maximum=360)
+        self.alpha_angle.setToolTip("The alpha's angle in degrees, counterclockwise (Follow Stroke: added to the stroke's way)")
+        self.alpha_angle.committed.connect(lambda v: self.push(alphaAngle=v))
+        self.alpha_angle.dragged.connect(lambda v: self.push(alphaAngle=v))
+        rotation_row.addWidget(self.alpha_rotation)
+        rotation_row.addWidget(self.alpha_angle, 1)
+        form.addRow("Rotation", rotation_row)
+        self.alpha_spacing = widgets.SoftSlider(25, 5, 100, integer=True, minimum=2, maximum=400, key="palette.alphaSpacing")
+        self.alpha_spacing.committed.connect(lambda v: self.push(alphaSpacing=v / 100.0))
+        spacing = widgets.with_unit(self.alpha_spacing, "%", "How far apart the stamps fall along a stroke, in percent of "
+                                                             "the brush's diameter: low for a smooth trail, 100 and up "
+                                                             "for separate stamps")
+        form.addRow("Spacing", spacing)
+        self.alpha_invert = QtWidgets.QCheckBox("Invert")
+        self.alpha_invert.setToolTip("Paint where the alpha is black instead")
+        self.alpha_invert.toggled.connect(lambda on: self.push(alphaInvert=on))
+        form.addRow("", self.alpha_invert)
+        self.alpha_options.setVisible(False)
+        column.addWidget(self.alpha_options)
+        return box
+
+    def alpha_changed(self, path):
+        self.alpha_options.setVisible(bool(path))
+        self.push(alpha=path)
+
+    def alpha_rotation_changed(self, _index):
+        name = self.alpha_rotation.currentData()
+        self.alpha_angle.setEnabled(name != "random")
+        self.push(alphaRotation=name)
+
+    def alpha_flags(self):
+        """The alpha settings as brush_tool takes them (an alpha whose file is gone: none)."""
+        self.alpha.set_path(self.alpha.path, emit=False)
+        self.alpha_options.setVisible(bool(self.alpha.path))
+        return dict(alpha=self.alpha.path, alpha_rotation=self.alpha_rotation.currentData(),
+                    alpha_angle=self.alpha_angle.value(), alpha_spacing=self.alpha_spacing.value() / 100.0,
+                    alpha_invert=self.alpha_invert.isChecked())
+
+    def sync_alpha(self):
+        """The alpha shows for Paint on a scalp map (vertices or texture), not on a guide map."""
+        if not hasattr(self, "alpha_box"):
+            return  # the Paint tab picks its map while the card is still being built
+        on = "alpha" in TOOL_SETTINGS.get(self.tool, set()) and self.paint_tab.current_kind() in ("vertices", "texture")
+        self.alpha_box.setVisible(on)
+        self.alpha_options.setVisible(on and bool(self.alpha.path))
 
     @staticmethod
     def curve_of(check, editor):
@@ -1978,6 +2053,7 @@ class ToolPalette(QtWidgets.QWidget):
                 return
             kwargs["attribute"] = name
             kwargs.update(self.paint_tab.paint_flags())
+            kwargs.update(self.alpha_flags())
             if self.groom():
                 self.paint_tab.show_while_painting(name)
         try:
@@ -2029,6 +2105,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.strength_curve_box.setVisible("strengthProfile" in uses)
         self.smooth_strength.setVisible("smoothStrength" in uses)
         self.smooth_label.setVisible("smoothStrength" in uses)
+        self.sync_alpha()
         self.selected_only.setVisible("selectedOnly" in uses)
         self.pressure.setVisible("pressure" in uses)
         self.pressure.setEnabled("pressure" in uses)

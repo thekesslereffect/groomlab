@@ -289,6 +289,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `targets` ("guides,parts,flow" or a list), `eraseGuides`, `eraseParts`, `eraseFlow` | what shaping brushes and Erase act on |
 | `partName`, `flowSink` ("", whorl, whorlcw, converge, part) | Part and Flow |
 | `attribute`, `value`, `pointwise`, `paintKind` (guides, vertices, texture), `paintTexture`, `paintResolution`, `paintColor` [r,g,b(,a)], `paintChannels` ("rgba"...), `smoothStrength` | Paint (and Smooth on a map) |
+| `alpha` (an image's path, "" none), `alphaRotation` (fixed, stroke, random), `alphaAngle` (degrees), `alphaSpacing` (of the diameter), `alphaInvert` | Paint on a vertex or texture map: the brush alpha (`brush_alphas` lists the library, `add_brush_alpha` {file} copies one into the user's folder) |
 
 | Command | Arguments | Result |
 |---|---|---|

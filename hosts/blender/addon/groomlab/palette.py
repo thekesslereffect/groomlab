@@ -14,6 +14,8 @@ An action shows when actions.py binds it (the rest is hidden). Drawing never wri
 the lists (groups, maps, parts, tubes, correctives) are refreshed by the tools after each edit, or
 by a timer when the panel shows another groom than they were filled for."""
 
+import os
+
 import bpy
 
 from . import groom, icons, menu, photos, process, tools
@@ -293,6 +295,27 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             row.enabled = False
             row.label(text="Weight: pick a corrective")
 
+    def draw_alpha(self, card, t, label):
+        """Paint's alpha on a scalp map: the library's grid (the thumbnail opens it), Add and the
+        folder beside it; while one is picked, its rotation, spacing and invert."""
+        row = card.row(align=False)
+        row.label(text=label("alpha", "Alpha"))
+        row.template_icon_view(t, "alpha_choice", show_labels=True, scale=2.5, scale_popup=4.0)
+        side = row.column(align=True)
+        side.label(text=os.path.splitext(os.path.basename(t.alpha))[0] if t.alpha else "None")
+        buttons = side.row(align=True)
+        buttons.operator("groomlab.alpha_add", text="", icon="ADD")
+        buttons.operator("groomlab.alpha_folder", text="", icon="FILE_FOLDER")
+        if t.alpha:
+            buttons.operator("groomlab.alpha_clear", text="", icon="X")
+            col = card.column(align=True)
+            col.row(align=True).prop(t, "alpha_rotation", expand=True)
+            angle = col.row(align=True)
+            angle.enabled = t.alpha_rotation != "RANDOM"
+            angle.prop(t, "alpha_angle")
+            col.prop(t, "alpha_spacing")
+            col.prop(t, "alpha_invert")
+
     def draw_card(self, layout, context, t, scalp):
         tool = t.tool
         info = tools.tool_info(tool) if tool else None
@@ -316,6 +339,9 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 col.prop(t, "strength_profile", text=label("strengthProfile", "Root to tip"))
             if "smoothStrength" in uses:
                 col.prop(t, "smooth_strength", text=label("smoothStrength", "Smooth"))
+        m = tools.current_map(context.scene) if "alpha" in uses else None
+        if m is not None and m.kind in ("vertices", "texture"):  # a guide map takes no alpha
+            self.draw_alpha(card, t, label)
         if "tubeChannel" in uses:
             row = card.row(align=True)
             row.label(text=label("tubeChannel", "Paints"))

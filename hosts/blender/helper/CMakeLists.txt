@@ -18,6 +18,9 @@ target_compile_definitions(groomlab_helper_objs PRIVATE "GROOMLAB_SHIPPED_PRESET
 # The compound nodes shipped with every host, the same way (bin/nodes when installed).
 groomlab_path_literal(_helper_nodes "${PROJECT_SOURCE_DIR}/hosts/maya/nodes")
 target_compile_definitions(groomlab_helper_objs PRIVATE "GROOMLAB_SHIPPED_NODES=${_helper_nodes}")
+# The brush alphas shipped with every host, the same way (bin/alphas when installed).
+groomlab_path_literal(_helper_alphas "${PROJECT_SOURCE_DIR}/hosts/maya/alphas")
+target_compile_definitions(groomlab_helper_objs PRIVATE "GROOMLAB_SHIPPED_ALPHAS=${_helper_alphas}")
 # The sample meshes (Nika, Manny, the wolf, Buddy's rig: CC BY 4.0) the add-on adds, the same way (bin/meshes when installed).
 groomlab_path_literal(_helper_meshes "${PROJECT_SOURCE_DIR}/hosts/maya/meshes")
 target_compile_definitions(groomlab_helper_objs PRIVATE "GROOMLAB_SHIPPED_MESHES=${_helper_meshes}")
@@ -55,6 +58,7 @@ if(WIN32 AND GROOMLAB_TBB_RUNTIME)
 endif()
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/presets/" DESTINATION "${GROOMLAB_BLENDER_BIN}/presets" COMPONENT Blender)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/nodes/" DESTINATION "${GROOMLAB_BLENDER_BIN}/nodes" COMPONENT Blender)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/alphas/" DESTINATION "${GROOMLAB_BLENDER_BIN}/alphas" COMPONENT Blender)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/meshes/" DESTINATION "${GROOMLAB_BLENDER_BIN}/meshes" COMPONENT Blender
         PATTERN "*.ma" EXCLUDE)  # Buddy's Maya rig (Blender's is buddy_rig.fbx)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-HELPER.txt" DESTINATION "${GROOMLAB_BLENDER_BIN}" COMPONENT Blender)

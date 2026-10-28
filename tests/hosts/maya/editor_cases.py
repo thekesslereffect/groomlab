@@ -4461,6 +4461,65 @@ class DockableWindowsTest(unittest.TestCase):
             window.stop_tool()
             window.close()
 
+    def test_paint_alpha_picker(self):
+        # Paint on a scalp map shows the Alpha picker (not on a guide map): its grid lists None
+        # and the library, a pick reaches the tool with its rotation, spacing and invert, shown
+        # only while an alpha is picked.
+        from PySide2 import QtCore
+        from groomlab.ui import palette
+        cmds.select(self.groom)
+        groomlab.add_map(self.groom, "crown", 0.0, kind="vertices")
+        groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 1.5, 0.2)])])
+        groomlab.add_map(self.groom, "layer", 0.0)  # on the guides
+        window = palette.show()
+        try:
+            window.poll()
+            window.show_tab("paint")
+            tab = window.paint_tab
+            tab.select("crown")
+            window.buttons["paint"].click()
+            self.app_events()
+            ctx = groomlab.BRUSH_CONTEXT
+            self.assertTrue(window.alpha_box.isVisibleTo(window))
+            self.assertFalse(window.alpha_options.isVisibleTo(window))
+            self.assertTrue(tab.select("layer"))
+            self.app_events()
+            self.assertFalse(window.alpha_box.isVisibleTo(window))
+            tab.select("crown")
+            self.app_events()
+            self.assertTrue(window.alpha_box.isVisibleTo(window))
+            window.alpha.fill()
+            names = [window.alpha.grid.item(i).text() for i in range(window.alpha.grid.count())]
+            self.assertEqual(names[0], "None")
+            self.assertIn("Speckle", names)
+            speckle = window.alpha.grid.item(names.index("Speckle"))
+            window.alpha._picked(speckle)
+            path = speckle.data(QtCore.Qt.UserRole)
+            self.assertEqual(os.path.normcase(cmds.groomLabBrushCtx(ctx, query=True, alpha=True)), os.path.normcase(path))
+            self.assertEqual(window.alpha.name.text(), "Speckle")
+            self.assertTrue(window.alpha_options.isVisibleTo(window))
+            window.alpha_rotation.setCurrentIndex(window.alpha_rotation.findData("random"))
+            self.assertEqual(cmds.groomLabBrushCtx(ctx, query=True, alphaRotation=True), "random")
+            self.assertFalse(window.alpha_angle.isEnabled())
+            window.alpha_spacing.committed.emit(50)
+            self.assertAlmostEqual(cmds.groomLabBrushCtx(ctx, query=True, alphaSpacing=True), 0.5, places=4)
+            window.alpha_invert.setChecked(True)
+            self.assertTrue(cmds.groomLabBrushCtx(ctx, query=True, alphaInvert=True))
+            # Picked again, the tool starts with the same alpha.
+            window.buttons["paint"].click()
+            window.buttons["paint"].click()
+            self.app_events()
+            self.assertEqual(os.path.normcase(cmds.groomLabBrushCtx(ctx, query=True, alpha=True)), os.path.normcase(path))
+            with self.assertRaises(RuntimeError):  # a file it cannot read: the alpha kept
+                cmds.groomLabBrushCtx(ctx, edit=True, alpha="C:/nowhere/gone.png")
+            self.assertEqual(os.path.normcase(cmds.groomLabBrushCtx(ctx, query=True, alpha=True)), os.path.normcase(path))
+            window.alpha.set_path("")
+            self.assertEqual(cmds.groomLabBrushCtx(ctx, query=True, alpha=True), "")
+            self.assertFalse(window.alpha_options.isVisibleTo(window))
+        finally:
+            window.stop_tool()
+            window.close()
+
     def test_paint_tab_color_maps(self):
         # A color map: the tab shows a swatch and channel toggles instead of the value; each
         # change reaches the Paint tool; Fill fills the color in the ticked channels. No dialog

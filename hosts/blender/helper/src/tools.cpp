@@ -579,6 +579,18 @@ void applySettings(ToolState& t, const json& settings) {
             } else if (key == "paintChannels") s.paintChannels = channelMask(settingString(v, k).empty() ? std::string("rgba") : settingString(v, k));
             else if (key == "paintMode") s.brush.paintMode = paintModeFromString(settingString(v, k));
             else if (key == "smoothStrength") s.setSmoothStrength(settingNumber(v, k));
+            else if (key == "alpha") {
+                try {
+                    s.setAlpha(v.is_null() ? std::string() : settingString(v, k));
+                } catch (const std::invalid_argument&) {
+                    throw;
+                } catch (const std::exception& e) {
+                    fail("bad_request", std::string("alpha: ") + e.what());
+                }
+            } else if (key == "alphaRotation") s.setAlphaRotation(settingString(v, k));
+            else if (key == "alphaAngle") s.alphaAngle = settingNumber(v, k);
+            else if (key == "alphaSpacing") s.setAlphaSpacing(settingNumber(v, k));
+            else if (key == "alphaInvert") s.alphaInvert = settingBool(v, k);
             else fail("bad_request", "no tool setting '" + key + "'");
         }
         if (symmetrySet && symmetry == "topology") {
@@ -643,6 +655,11 @@ json settingsJson(const ToolState& t) {
     j["paintChannels"] = channelLetters(s.paintChannels);
     j["paintMode"] = paintModeName(s.brush.paintMode);
     j["smoothStrength"] = s.smoothStrength;
+    j["alpha"] = s.alphaPath;
+    j["alphaRotation"] = s.alphaRotationName();
+    j["alphaAngle"] = s.alphaAngle;
+    j["alphaSpacing"] = s.alphaSpacing;
+    j["alphaInvert"] = s.alphaInvert;
     return j;
 }
 

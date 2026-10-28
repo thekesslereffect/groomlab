@@ -130,6 +130,8 @@ def env_for(**extra):
     env["GROOMLAB_USER_PRESETS"] = extra.pop("user_presets", os.path.join(tempfile.gettempdir(), "groomlab_no_user_presets"))
     env.pop("GROOMLAB_NODE_PATH", None)
     env["GROOMLAB_USER_NODES"] = extra.pop("user_nodes", os.path.join(tempfile.gettempdir(), "groomlab_no_user_nodes"))
+    env.pop("GROOMLAB_ALPHA_PATH", None)
+    env["GROOMLAB_USER_ALPHAS"] = extra.pop("user_alphas", os.path.join(tempfile.gettempdir(), "groomlab_no_user_alphas"))
     env.pop("GROOMLAB_CARD_PRESET_PATH", None)
     env["GROOMLAB_USER_CARD_PRESETS"] = extra.pop("user_card_presets",
                                                   os.path.join(tempfile.gettempdir(), "groomlab_helper_card_presets"))

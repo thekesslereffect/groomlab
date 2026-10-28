@@ -10,6 +10,7 @@ groom's scalp object, so the tests drive the same code with a synthetic view."""
 
 import base64  # noqa: F401  (the state's textures are base64 in the helper's answer, kept as they come)
 import json
+import os
 import time
 
 import bpy
@@ -239,6 +240,8 @@ def settings_of(scene, tool=None):
             s.update(attribute=m.name, paintKind=m.kind)
             if m.kind == "texture" and m.texture:
                 s["paintTexture"] = m.texture
+        s.update(alpha=t.alpha if t.alpha and os.path.isfile(t.alpha) else "", alphaRotation=t.alpha_rotation.lower(),
+                 alphaAngle=float(t.alpha_angle), alphaSpacing=t.alpha_spacing / 100.0, alphaInvert=bool(t.alpha_invert))
     return s
 
 

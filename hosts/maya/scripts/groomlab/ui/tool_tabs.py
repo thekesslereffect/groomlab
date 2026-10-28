@@ -1213,6 +1213,7 @@ class PaintTab(_GroomTab):
             self.users.setText("")
             return
         self._sync_color_controls()
+        self.owner.sync_alpha()  # a scalp map takes an alpha, a guide map not
         if push and name and self.owner.tool == "paint":
             self.owner.push(attribute=name, **self.context_flags())
             self.show_while_painting(name)
