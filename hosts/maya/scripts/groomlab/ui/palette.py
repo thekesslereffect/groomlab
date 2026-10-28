@@ -1248,6 +1248,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.full_density.setObjectName("sculptFullDensity")
         self.full_density.setToolTip("Keep every strand of the preview up while a stroke is live, instead of a "
                                      "lighter share of them (slower on heavy grooms, but nothing pops)")
+        self.full_density.setChecked(True)  # (the groom's sculptDensity default, 1)
         self.full_density.toggled.connect(lambda _: self.apply_sculpt_display(self.sculpt.currentIndex()))
         form.addRow(self.full_density)
         # Tubes: shapes, sizes and the shape library, a section of its own (open with the Shape

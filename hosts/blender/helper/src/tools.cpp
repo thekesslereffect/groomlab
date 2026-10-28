@@ -3404,8 +3404,8 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         if (optBool(args, "solo", false) && (!picked.empty() || mode == SelectMode::Replace)) {
             const std::shared_ptr<const GuideHierarchy> stored = s.groom->authoredHierarchy();
             GuideHierarchy probe = stored ? *stored : GuideHierarchy{};
-            if (freezeToSelection(probe, selection)) {
-                editGuides(t, "solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
+            if (freezeToPick(probe, selection, mode)) {
+                editGuides(t, "solo selection", [&](GuideHierarchy& g) { freezeToPick(g, selection, mode); });
                 froze = true;
             }
         }

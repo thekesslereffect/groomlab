@@ -690,23 +690,23 @@
   },
   "tube_locks": {
    "channels": {
-    "strand.clumpId": "8ea1576d95cc84fb",
-    "strand.colorB": "dd240b4cdf49cf2a",
-    "strand.colorG": "8fc659edf60ce2a0",
-    "strand.colorR": "a0633003b39e08ea",
-    "strand.melanin": "a626b5e2761c99ea",
-    "strand.melaninRedness": "68f2cce1ccff3492",
-    "strand.tubeId": "93d3b167114b5953",
-    "strand.tubeU": "d42579e277198495",
-    "strand.tubeV": "51e042b24dda2282"
+    "strand.clumpId": "7404c12cc08a152e",
+    "strand.colorB": "766f2669a0a8e1b5",
+    "strand.colorG": "3ffa4e101ac89bda",
+    "strand.colorR": "beb9044bb05efd80",
+    "strand.melanin": "37dcc3f2f6378f18",
+    "strand.melaninRedness": "7dd653c1c96969a1",
+    "strand.tubeId": "c50b11fad20e3955",
+    "strand.tubeU": "bd4bc1d443ccc031",
+    "strand.tubeV": "bf996f494bd81a52"
    },
-   "everything": "6b96bb6e526dd2ce",
-   "ids": "8777a799e00baf39",
-   "points": 476,
-   "positions": "0dff0c44b96d186c",
-   "roots": "36a40ecf9554f11c",
-   "strands": 28,
-   "widths": "35af8b227d0d500f"
+   "everything": "e15bf99a62a9c345",
+   "ids": "d960092680c33616",
+   "points": 1428,
+   "positions": "a24f4f2703c10a7e",
+   "roots": "d4991a8f008280c4",
+   "strands": 84,
+   "widths": "9eb99a781a839b40"
   },
   "two_tone_tips": {
    "channels": {

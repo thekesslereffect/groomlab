@@ -24,7 +24,7 @@ from .ui import _wrap
 NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 # Blender's keys (palette.json's gestures are Maya's: middle-drag, the hotkey set).
 GESTURES = ("B + drag: radius · M + drag: strength · Ctrl+drag: paint the selection (the rest frozen) · "
-            "Ctrl+Shift+drag: lasso it · Ctrl+click: add the guides in the ring (on none: deselect and unfreeze all) · "
+            "Ctrl+Shift+drag: lasso it · Ctrl+click: add the guides in the ring (on none: deselect and unfreeze all) · Ctrl+Shift+click: toggle them (a selected guide comes out, frozen) · "
             "painting maps or Freeze, Ctrl: the opposite")
 FLOW_HINTS = {"": defs.text("flowArrows"), "*": defs.text("flowSinks")}
 TABS = {"TOOLS": "tools", "PAINT": "paint", "CORRECTIVES": "correctives", "PHOTOS": "photos"}  # palette.json's ids

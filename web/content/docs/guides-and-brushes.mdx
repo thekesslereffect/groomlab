@@ -52,9 +52,9 @@ and reshapes all its descendants.
 - **Segments:** the slider under Guide groups & edits shows the point count of the selected guides
   (of every guide when none are selected). Dragging it resamples them live; releasing applies it as
   one undo step. Give guides more segments before combing tight curls.
-- **Which guides drive the strands:** by default Interpolate uses the deepest level of the
-  hierarchy. Once children exist, the strands are interpolated from the children, and the
-  primaries shape the strands through them ([Interpolate](/docs/node-graph#interpolate-and-guide-influence)).
+- **Which guides drive the strands:** by default Interpolate uses each group's deepest level.
+  Where a group has children, the strands are interpolated from the children, and the primaries
+  shape the strands through them; a group without children drives the strands itself ([Interpolate](/docs/node-graph#interpolate-and-guide-influence)).
 
 ## Tube guides
 
@@ -286,7 +286,8 @@ guides are drawn blue. Freezing does not affect the strands.
 - **Ctrl+click** with any guide brush adds the guides inside the brush ring to the selection:
   every guide not selected freezes. **Ctrl+drag** paints guides into the selection with the ring,
   **Ctrl+Shift+drag** lassos them. **Ctrl+click** where the ring holds no guide deselects and
-  unfreezes all.
+  unfreezes all. **Ctrl+Shift+click** toggles the guides in the ring: one already selected comes
+  out of the selection and freezes.
 - **Select** works the same way: the selected guides stay live, all others are frozen, and a
   click on nothing unfreezes all.
 - **Solo new guides** (Place and Draw settings, off by default): each guide you place stays live

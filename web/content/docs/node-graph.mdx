@@ -160,9 +160,10 @@ blended with weights that fall off with distance, then the blended curve is resa
 strand's point count.
 
 **Which guides are used.** Interpolate uses whatever its `guides` input delivers. In the default
-graph that is a **Guides** node with `level` -1, which delivers the deepest guide level only:
-once any child guides exist, strands interpolate from the children, and the primary guides drive
-the strands only through their children. Set the Guides node's `group` (one or more group names)
+graph that is a **Guides** node with `level` -1, which delivers each family's deepest groups:
+where a group has child guides, strands interpolate from the children, and its primary guides
+drive the strands only through them; a group without children (or whose child groups are empty)
+delivers its own guides. Scatter's `guideRadius` grows hair around every level of those groups. Set the Guides node's `group` (one or more group names)
 to choose groups explicitly, or `exclude` to leave groups out (for example braid paths). Guide
 visibility and the freeze mask do not affect interpolation.
 

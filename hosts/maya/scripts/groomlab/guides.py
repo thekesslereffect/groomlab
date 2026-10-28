@@ -299,7 +299,7 @@ def symmetry_sync(groom, axis="x", center=0.0, from_negative=False):
 # The sculpting display
 
 
-def set_sculpt_display(groom, mode="dimStrands", density=0.35):
+def set_sculpt_display(groom, mode="normal", density=1.0):
     """While a stroke is live: "normal", "dimStrands" or "guidesOnly", at `density` x the preview
     density (1.0: every strand of the preview stays up, nothing pops when the stroke ends)."""
     modes = ("normal", "dimStrands", "guidesOnly")

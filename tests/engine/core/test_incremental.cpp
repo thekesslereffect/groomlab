@@ -1705,6 +1705,7 @@ struct PartialHost {
     PartialHost() {
         builder.setRetain(false);
         builder.setWriteLines(true);
+        settings.sculptDisplay = 1;  // dimmed while a stroke is live (the default draws them as they are)
     }
     void draw(const ViewResult& view, bool stroke) {
         const DisplayFrame& frame = builder.update(DisplayInputs::fromView(view, stroke), settings);

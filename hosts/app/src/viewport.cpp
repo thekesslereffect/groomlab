@@ -403,9 +403,9 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
                 session_->select(lasso_, SelectMode::Add, true);  // the guides inside added, the rest frozen
             } else if (paintMoved_ && drag == Drag::Paint) {
                 session_->soloSelection();  // the rest frozen, one undo step (the Select tool's solo)
-            } else if (session_->paintSelection(pressAt_, SelectMode::Add, true) == 0) {
-                // A click: the guides in the ring added, the rest frozen; on none, nothing selected
-                // and every guide unfrozen.
+            } else if (session_->paintSelection(pressAt_, drag == Drag::Lasso ? SelectMode::Toggle : SelectMode::Add, true) == 0) {
+                // A click: the guides in the ring added, the rest frozen (Ctrl+Shift: toggled, so a
+                // selected guide comes out, frozen); on none, nothing selected and every guide unfrozen.
                 session_->paintSelection(pressAt_, SelectMode::Replace, true);
             }
             lasso_.clear();

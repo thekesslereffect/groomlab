@@ -468,18 +468,17 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             for (const GuideId id : picked) {
                 if (!h->guide(id)) return fail(kName, MString("no guide ") + std::to_string(id).c_str());
             }
-            if (!db.isFlagSet(kClearSelection[0])) {
-                const SelectMode mode = db.isFlagSet(kAdd[0])        ? SelectMode::Add
-                                        : db.isFlagSet(kDeselect[0]) ? SelectMode::Deselect
-                                        : db.isFlagSet(kToggle[0])   ? SelectMode::Toggle
-                                                                     : SelectMode::Replace;
-                result = combineSelection(selectedIds, picked, mode);
-            }
+            const SelectMode mode = db.isFlagSet(kClearSelection[0]) ? SelectMode::Replace
+                                    : db.isFlagSet(kAdd[0])            ? SelectMode::Add
+                                    : db.isFlagSet(kDeselect[0])       ? SelectMode::Deselect
+                                    : db.isFlagSet(kToggle[0])         ? SelectMode::Toggle
+                                                                       : SelectMode::Replace;
+            if (!db.isFlagSet(kClearSelection[0])) result = combineSelection(selectedIds, picked, mode);
             MObject data = selectionData(result);
             modifier_.newPlugValue(groomFn.findPlug("guideSelection", true), data);
-            // The Select tool's solo: every guide not selected frozen (none selected: all unfrozen),
-            // in the same undo step as the selection.
-            if (db.isFlagSet(kFreezeOthers[0]) && freezeToSelection(*h, result)) {
+            // The Select tool's solo: every guide not selected frozen (none selected: all unfrozen,
+            // unless a toggle took the last out: freezeToPick), in the same undo step as the selection.
+            if (db.isFlagSet(kFreezeOthers[0]) && freezeToPick(*h, result, mode)) {
                 h->evaluate(scalp.get());
                 modifier_.newPlugValueString(dataPlug, MString(h->toJson().c_str()));
             }

@@ -36,7 +36,7 @@ SHORTCUTS = (
     ("Ctrl (painting)", "Painting maps or guide attributes: the opposite (toward 0, unfreeze, erase)"),
     ("Shift (stroke)", "Smooth instead"),
     ("S", "Select guides (Shift: toggle, Ctrl: deselect)"),
-    ("Ctrl + drag", "Paint guides into the selection, the rest frozen (Ctrl + click: add the guides in the ring; on none: deselect and unfreeze all)"),
+    ("Ctrl + drag", "Paint guides into the selection, the rest frozen (Ctrl + click: add the guides in the ring; on none: deselect and unfreeze all; Ctrl + Shift + click: toggle them, a selected guide comes out, frozen)"),
     ("Ctrl+Shift + drag", "Lasso guides into the selection, the rest frozen"),
     ("Page Up / Page Down", "The brush level (parents / children)"),
     ("Y", "The pie menu: every brush"),
@@ -360,8 +360,8 @@ class ToolSession(object):
                 show_lasso(None)
                 try:
                     if span < 4.0:                       # a click: the guides in the ring added, the rest frozen
-                        ring = self.ring(context, points[0])
-                        if not tools.select(lasso_scalp, view, ring, "add").get("picked"):
+                        ring = self.ring(context, points[0])  # (Ctrl+Shift: toggled, a selected guide out, frozen)
+                        if not tools.select(lasso_scalp, view, ring, "toggle" if mode == "lasso" else "add").get("picked"):
                             tools.select(lasso_scalp, view, ring, "replace")  # on none: all deselected, unfrozen
                     elif mode == "lasso":                # the guides inside added, the rest frozen
                         if len(points) >= 3:

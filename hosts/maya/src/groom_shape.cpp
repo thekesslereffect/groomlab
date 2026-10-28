@@ -322,7 +322,7 @@ void GroomShape::setBrushTarget(GroomShape* shape) {
         if (before) before->takeWarm(true);  // (its document goes below)
         if (before && !before->session_.hasPreview()) {
             // The brush tool put away (or on another groom): its stroke document's memory (a
-            // third of the view's at the default sculptDensity) goes, and the viewport lets the
+            // third of the view's at a sculptDensity of 0.35) goes, and the viewport lets the
             // dimmed strands' buffers go.
             before->session_.releaseStroke();
             ++before->displayVersion_;
@@ -880,13 +880,13 @@ MStatus GroomShape::initialize() {
     CHECK_MSTATUS_AND_RETURN_IT(status);
     nAttr.setStorable(true);
 
-    aSculptDisplay = eAttr.create("sculptDisplay", "glsd", 1, &status);
+    aSculptDisplay = eAttr.create("sculptDisplay", "glsd", 0, &status);
     CHECK_MSTATUS_AND_RETURN_IT(status);
     eAttr.addField("normal", 0);
     eAttr.addField("dimStrands", 1);
     eAttr.addField("guidesOnly", 2);
     eAttr.setStorable(true);
-    aSculptDensity = nAttr.create("sculptDensity", "glsdn", MFnNumericData::kFloat, 0.35, &status);
+    aSculptDensity = nAttr.create("sculptDensity", "glsdn", MFnNumericData::kFloat, 1.0, &status);
     CHECK_MSTATUS_AND_RETURN_IT(status);
     nAttr.setMin(0.01);
     nAttr.setMax(1.0);

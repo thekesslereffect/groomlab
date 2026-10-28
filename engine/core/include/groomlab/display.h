@@ -357,7 +357,7 @@ struct DisplaySettings {
     bool clumpLod = true;
     float clumpLodError = 0.175f;
     bool lighting = true;
-    int sculptDisplay = 1;   // while a stroke is live: 0 as ever, 1 dimmed and flat, 2 hidden
+    int sculptDisplay = 0;   // while a stroke is live: 0 as ever, 1 dimmed and flat, 2 hidden
     bool cardsView = false;  // the Cards nodes' cards show instead of the strands
     bool instances = true;
     // The hair shown (the hosts' strands eye): off, nothing the groom grows is built (strands,

@@ -29,7 +29,7 @@ const std::vector<Shortcut>& shortcuts() {
         {"brush.invert", "Brush", "Ctrl (painting)", "Painting maps or guide attributes: the opposite (toward 0, unfreeze, erase)", kAll},
         {"brush.smooth", "Brush", "Shift (stroke)", "Smooth instead", kAll},
         {"brush.select", "Brush", "S", "Select guides (Shift: toggle, Ctrl: deselect)", kApp | kBlender},
-        {"brush.selectAdd", "Brush", "Ctrl + drag", "Paint guides into the selection, the rest frozen (Ctrl + click: add the guides in the ring; on none: deselect and unfreeze all)", kAll},
+        {"brush.selectAdd", "Brush", "Ctrl + drag", "Paint guides into the selection, the rest frozen (Ctrl + click: add the guides in the ring; on none: deselect and unfreeze all; Ctrl + Shift + click: toggle them, a selected guide comes out, frozen)", kAll},
         {"brush.selectLasso", "Brush", "Ctrl+Shift + drag", "Lasso guides into the selection, the rest frozen", kAll},
         {"brush.level", "Brush", "Page Up / Page Down", "The brush level (parents / children)", kAll, kSet},
         {"brush.symmetry", "Brush", "Alt+Shift+X", "Symmetry on or off", kMaya | kApp, kSet},

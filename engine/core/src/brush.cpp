@@ -1345,20 +1345,32 @@ void soloGuides(GuideHierarchy& h, const std::vector<GuideId>& active, const std
     for (const GuideId id : ids) h.setAttribute(id, freeze, on.count(id) ? 0.0f : 1.0f);
 }
 
-bool freezeToSelection(GuideHierarchy& h, const std::vector<GuideId>& selection, const std::string& freeze) {
-    if (selection.empty()) return unfreezeAll(h, freeze);
+namespace {
+// soloGuides on `active`, true when the freeze layer changed.
+bool soloChanged(GuideHierarchy& h, const std::vector<GuideId>& active, const std::string& freeze) {
     std::vector<float> before;
     for (const HierarchyGuide& g : h.guides()) {
         const auto it = g.attributes.find(freeze);
         before.push_back(it == g.attributes.end() ? -1.0f : it->second);
     }
-    soloGuides(h, selection, freeze);
+    soloGuides(h, active, freeze);
     std::size_t i = 0;
     for (const HierarchyGuide& g : h.guides()) {
         const auto it = g.attributes.find(freeze);
         if ((it == g.attributes.end() ? -1.0f : it->second) != before[i++]) return true;
     }
     return false;
+}
+}  // namespace
+
+bool freezeToSelection(GuideHierarchy& h, const std::vector<GuideId>& selection, const std::string& freeze) {
+    if (selection.empty()) return unfreezeAll(h, freeze);
+    return soloChanged(h, selection, freeze);
+}
+
+bool freezeToPick(GuideHierarchy& h, const std::vector<GuideId>& selection, SelectMode mode, const std::string& freeze) {
+    if (selection.empty() && mode == SelectMode::Toggle) return soloChanged(h, selection, freeze);
+    return freezeToSelection(h, selection, freeze);
 }
 
 bool unfreezeAll(GuideHierarchy& h, const std::string& freeze) {

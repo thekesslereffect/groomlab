@@ -50,12 +50,12 @@
                     "HairColor", "Bend", "Direction", "Transform", "SelfCollide", "Static"]
     },
     "texts": {
-      "gestures": "Middle-drag: radius · Shift+middle-drag: strength · Shift+drag: smooth · Ctrl+drag: paint the selection (the rest frozen) · Ctrl+Shift+drag: lasso the selection · Ctrl+click: add the guides in the ring (on none: deselect and unfreeze all) · painting maps or Freeze, Ctrl: the opposite · with the GroomLab hotkey set: B / M + drag radius / strength, Page Up / Down the level, Alt+Shift+X symmetry",
+      "gestures": "Middle-drag: radius · Shift+middle-drag: strength · Shift+drag: smooth · Ctrl+drag: paint the selection (the rest frozen) · Ctrl+Shift+drag: lasso the selection · Ctrl+click: add the guides in the ring (on none: deselect and unfreeze all) · Ctrl+Shift+click: toggle them (a selected guide comes out, frozen) · painting maps or Freeze, Ctrl: the opposite · with the GroomLab hotkey set: B / M + drag radius / strength, Page Up / Down the level, Alt+Shift+X symmetry",
       "symmetryTip": "Alt+Shift+X turns it on or off (with the GroomLab hotkey set: GroomLab > Help > Install GroomLab Hotkeys). While it is on, a red line on the scalp shows the mirror plane for as long as a brush is on; the brushes that mirror (and Place, Draw, Select) use it.",
       "eraseNote": "Erase removes guides (with their children), parts and flow arrows, not the scattered hair. To take hair away, paint the density map holding Ctrl (Paint tab > + New Map > for a setting > Density).",
       "flowArrows": "Drag to lay arrows; drag over arrows to comb them; Ctrl erases.",
       "flowSinks": "Click to place, the size of the brush; Ctrl-click removes sinks.",
-      "labels": {"app": {"gestures": "B / M + drag (or middle-drag / Shift+middle-drag): radius / strength · Shift+drag: smooth · Ctrl+drag: paint the selection (the rest frozen) · Ctrl+Shift+drag: lasso the selection · Ctrl+click: add the guides in the ring (on none: deselect and unfreeze all) · painting maps or Freeze, Ctrl: the opposite · Page Up / Down: the level · Alt+Shift+X: symmetry · Y + click: the marking menu"}}
+      "labels": {"app": {"gestures": "B / M + drag (or middle-drag / Shift+middle-drag): radius / strength · Shift+drag: smooth · Ctrl+drag: paint the selection (the rest frozen) · Ctrl+Shift+drag: lasso the selection · Ctrl+click: add the guides in the ring (on none: deselect and unfreeze all) · Ctrl+Shift+click: toggle them (a selected guide comes out, frozen) · painting maps or Freeze, Ctrl: the opposite · Page Up / Down: the level · Alt+Shift+X: symmetry · Y + click: the marking menu"}}
     }
   }
 }

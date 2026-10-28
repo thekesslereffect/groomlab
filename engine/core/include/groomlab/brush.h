@@ -323,6 +323,12 @@ bool unfreezeAll(GuideHierarchy& hierarchy, const std::string& freeze = "freeze"
 // other guide frozen (soloGuides); an empty selection unfreezes every guide. True when the
 // freeze layer changed.
 bool freezeToSelection(GuideHierarchy& hierarchy, const std::vector<GuideId>& selection, const std::string& freeze = "freeze");
+enum class SelectMode;  // guide_selection.h
+// The solo after a pick in `mode` (the Select tool, a guide brush's Ctrl+click): freezeToSelection,
+// except a toggle that leaves nothing selected (the last selected guides clicked out) freezes every
+// guide, so the guides it took out freeze rather than everything unfreezing.
+bool freezeToPick(GuideHierarchy& hierarchy, const std::vector<GuideId>& selection, SelectMode mode,
+                  const std::string& freeze = "freeze");
 
 // Place brush: adds a primary guide at scalp point `at`. Returns its ID.
 GuideId placeGuide(GuideHierarchy& hierarchy, const ScalpMesh& scalp, const PlaceSettings& settings,

@@ -770,7 +770,7 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
         gpuWrote_ = gpuWroteItem_ = false;
     }
     // The brush tool put away (GroomShape::strokeKept): the dimmed strands kept hidden for the
-    // next stroke give their buffers back (at 500k strands and the default sculptDensity, ~55 MB
+    // next stroke give their buffers back (at 500k strands and a sculptDensity of 0.35, ~55 MB
     // of video memory, and its system-memory copy under DirectX 11); the next stroke writes them whole.
     if (!shape_->strokeKept() && builder_.forgetKept(DisplayItemId::DimStrands)) {
         const float none[4] = {0.0f, 0.0f, 0.0f, 0.0f};

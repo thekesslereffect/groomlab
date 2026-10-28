@@ -219,8 +219,8 @@ std::vector<Scenario> scenarios() {
     add("density", [](Scenario& s) { s.settings.colorMode = kDensityColors; });
     add("ribbons", [](Scenario& s) { s.settings.colorMode = kClumpColors, s.settings.ribbons = true, s.settings.ribbonWidthScale = 3.0f; });
     add("litRibbons", [](Scenario& s) { s.settings.ribbons = true, s.settings.ribbonWidthScale = 2.0f; });
-    add("strokeDim", [](Scenario& s) { s.stroke = true; });
-    add("strokeDimColored", [](Scenario& s) { s.stroke = true, s.settings.colorMode = kRandomColors; });
+    add("strokeDim", [](Scenario& s) { s.stroke = true, s.settings.sculptDisplay = 1; });
+    add("strokeDimColored", [](Scenario& s) { s.stroke = true, s.settings.sculptDisplay = 1, s.settings.colorMode = kRandomColors; });
     add("strokeHidden", [](Scenario& s) { s.stroke = true, s.settings.sculptDisplay = 2, s.settings.tubes = true; });
     add("roots", [](Scenario& s) { s.roots = true; });
     add("guideLevels", [](Scenario& s) {
@@ -1087,6 +1087,7 @@ TEST(Display, LitLinesTakeTheStrandsOwnColors) {
         DisplayBuilder dimmed;
         DisplayInputs stroke = in;
         stroke.stroke = true;
+        s.settings.sculptDisplay = 1;
         const DisplayFrame& f = dimmed.update(stroke, s.settings);
         EXPECT_TRUE(f.item(DisplayItemId::DimStrands).geometry->colors.empty());
         EXPECT_FALSE(f.item(DisplayItemId::DimStrands).geometry->empty());

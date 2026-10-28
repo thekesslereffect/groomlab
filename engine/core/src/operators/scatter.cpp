@@ -425,9 +425,9 @@ public:
             notAnimatable({"previewAll", false, "Every root in the viewport too, whatever the groom's preview density: for "
                                                 "a few big pieces (feather shafts, scales, instances) that a thinned "
                                                 "preview would leave bald"}),
-            notAnimatable({"guideRadius", 0.0, "Only within this distance of a guide's root (the guides input): fur along drawn "
-                                               "guides, a patch, a stripe. 0, or nothing connected to guides: the whole "
-                                               "scalp", "length"})
+            notAnimatable({"guideRadius", 0.0, "Only within this distance of a guide's root (the guides input, every level of "
+                                               "its groups: primaries and their children): fur along drawn guides, a "
+                                               "patch, a stripe. 0, or nothing connected to guides: the whole scalp", "length"})
                 .atLeast(0)
                 .soft(0, 5)
                 .adv(),
@@ -459,6 +459,11 @@ public:
         if (mesh->isPiece() && guides) {
             auto local = std::make_shared<GuideSet>(*guides);
             for (Guide& g : local->guides()) g.root = toPieceRoot(*mesh, g.root);
+            if (local->levelTubes()) {
+                auto tubes = std::make_shared<std::vector<Guide>>(*local->levelTubes());
+                for (Guide& g : *tubes) g.root = toPieceRoot(*mesh, g.root);
+                local->setLevelTubes(std::move(tubes));
+            }
             guides = std::move(local);
         }
         const ScalarField densityField(params(), "density", mesh.get(), guides.get());
@@ -489,14 +494,19 @@ public:
             std::vector<Vec3f> positions;
             positions.reserve(guides->size());
             auto shaped = std::make_unique<GuideFootprints>(margin);
-            for (const Guide& g : guides->guides()) {
-                if (g.points.empty()) continue;
+            auto around = [&](const Guide& g) {
+                if (g.points.empty()) return;
                 const Vec3f root = binding.stablePosition(g.root, g.points[0]);
                 if (g.hasTube && g.tube.edited() && g.points.size() >= 2) {
                     shaped->add(g, root, surface.contains(g.root) ? surface.normal(g.root) : Vec3f{});
                 } else {
                     positions.push_back(root);
                 }
+            };
+            for (const Guide& g : guides->guides()) around(g);
+            // The family's other levels too (a group's primaries with its children: GuideSet::levelTubes).
+            if (guides->levelTubes()) {
+                for (const Guide& g : *guides->levelTubes()) around(g);
             }
             guideRootsHash = hashFloat(hash64(positions.size()), guideRadius);
             if (!shaped->empty()) guideRootsHash = hashCombine(guideRootsHash, shaped->hash());  // (none: as it always was)

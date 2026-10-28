@@ -279,6 +279,25 @@ int GuideHierarchy::maxDepth() const {
     return depth;
 }
 
+std::set<GroupId> GuideHierarchy::deepestGroups() const {
+    std::set<GroupId> holding, above;
+    for (const HierarchyGuide& g : guides_) {
+        if (g.points.size() >= 2) holding.insert(g.group);
+    }
+    for (const GroupId id : holding) {
+        const GuideGroup* grp = group(id);
+        for (int depth = 0; grp && grp->parent != kNoGroup && depth < 64; ++depth) {
+            above.insert(grp->parent);
+            grp = group(grp->parent);
+        }
+    }
+    std::set<GroupId> out;
+    for (const GroupId id : holding) {
+        if (!above.count(id)) out.insert(id);
+    }
+    return out;
+}
+
 void GuideHierarchy::renameGroup(GroupId id, const std::string& name) {
     invalidateHash();
     if (name.empty()) throw std::invalid_argument("a guide group needs a name");
@@ -1313,21 +1332,21 @@ GuideSet GuideHierarchy::flattenGroup(GroupId groupId) const {
 }
 
 GuideSet GuideHierarchy::flatten(int level) const {
-    if (level < 0) level = maxDepth();
     GuideSet set;
     const bool attributes = hasAttributes();
     const bool layers = hasPointAttributes();
     std::unordered_map<GroupId, int> depths;
     for (const GuideGroup& grp : groups_) depths[grp.id] = groupDepth(grp.id);
+    const std::set<GroupId> deepest = level < 0 ? deepestGroups() : std::set<GroupId>{};
     for (const HierarchyGuide& g : guides_) {
-        if (depths[g.group] != level || g.points.size() < 2) continue;
+        if ((level < 0 ? !deepest.count(g.group) : depths[g.group] != level) || g.points.size() < 2) continue;
         Guide& out = set.add(g.id, g.points);
         out.root = g.root;
         out.hasTube = true;
         out.tube = g.tube;
         out.tube.scaleWidth(scale_);
         out.frameUp = g.frameUp;
-        out.depth = level;
+        out.depth = depths[g.group];
         if (attributes) out.attributes = effectiveAttributes(g);
         if (layers) out.pointAttributes = effectivePointAttributes(g);
     }
