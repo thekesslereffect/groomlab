@@ -400,7 +400,9 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
         case Drag::Lasso:
             syncView();
             if (paintMoved_ && drag == Drag::Lasso && lasso_.size() >= 3) {
-                session_->select(lasso_, SelectMode::Add, true);  // the guides inside added, the rest frozen
+                // The guides inside added, the rest frozen; round none (off the guides): nothing
+                // selected and every guide unfrozen, as a click on none.
+                if (session_->select(lasso_, SelectMode::Add, true) == 0) session_->select(lasso_, SelectMode::Replace, true);
             } else if (paintMoved_ && drag == Drag::Paint) {
                 session_->soloSelection();  // the rest frozen, one undo step (the Select tool's solo)
             } else if (session_->paintSelection(pressAt_, SelectMode::Add, true) == 0) {
