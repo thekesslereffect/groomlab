@@ -10,8 +10,7 @@
 // rest pose, each until the spacing around it settles, so an edit of the scalp moves roots only
 // near it). Each root sits `randomness` of the way from its even spot (0) to its random one (1),
 // on the surface: a small change of the randomness moves every root a little and keeps the same
-// strands, at every value. Past 1 (up to kMaxRandomness) each goes on the same way, past its random
-// spot: more clustering and gaps than white noise. At exactly 1 only the random spots show, and no
+// strands, at every value. At exactly 1 only the random spots show, and no
 // even ones are worked out (the fast default). The even spots are always every root's, relaxed
 // together whatever a preview holds of them, so a preview's strands sit where the render's do.
 // The placements with even spots are kept (the memo, without the randomness or the preview), and
@@ -75,18 +74,17 @@ constexpr double kMaxStrands = 50.0e6;
 constexpr double kHeavyStrands = 2.0e6;
 constexpr double kMaxPreviewPoints = 60.0e6;  // about 1 GB per cached copy
 constexpr double kMaxPoints = 400.0e6;         // any evaluation (renders too): past this, memory runs out
-constexpr int kRelaxIterations = 30;
-constexpr float kRelaxSettled = 0.02f;         // every root moving less than this many spacings a step: done
-constexpr std::size_t kRelaxNeighbors = 13;    // itself and twelve around it (two hexagonal rings, about)
+constexpr int kRelaxIterations = 24;
+constexpr std::size_t kRelaxNeighbors = 24;    // itself and every neighbor within reach, about (two rings hold 12)
 constexpr int kRelaxBlock = 4;                 // iterations per neighbor search and surface snap
 constexpr float kRelaxReach = 2.0f;            // neighbors push within this many spacings
 constexpr float kRelaxStep = 0.6f;             // spacings moved per unit of push
-constexpr float kRelaxQuantum = 1.0f / 1024.0f;  // spacings: the lattice a step lands on
+constexpr float kRelaxQuantum = 1.0f / 1024.0f;  // spacings: the lattice the relaxed roots land on
 constexpr std::size_t kPlacedMemo = 2;         // placements a Scatter keeps (a preview and a render, say)
-// The randomness's hard maximum: past its random spot a root goes on (twice as far from its even
-// spot as that at 2); farther, it would cross most of its neighbours' and snap back onto a curved
-// scalp from well off it.
-constexpr float kMaxRandomness = 2.0f;
+// The randomness's maximum: white noise (gaps and clusters past it are a density map's or a Clump's).
+constexpr float kMaxRandomness = 1.0f;
+// A scatter making this many strands or fewer is never thinned in a preview (previewAll's).
+constexpr double kNeverThinned = 250.0;
 
 std::atomic<std::size_t> relaxCount{0};
 std::atomic<std::size_t> relaxIterationCount{0};
@@ -161,16 +159,19 @@ struct OpenEdges {
 };
 
 // Spreads roots evenly on the rest surface (blue noise): each pushes away from
-// its neighbors within kRelaxReach spacings, harder the closer they are,
-// until the pushes balance. Open edges of the scalp push back like a mirror
-// image of the root across them, so roots don't pile up along a hairline.
-// `spacing(i)` is the ideal distance around root i (from the local density);
-// `edgeStep` the smallest (at the density's maximum), how finely the open edges are sampled.
-// Roots keep their order (and so their IDs).
-// Local: a root moves by its neighbors alone, and settles (stays where it is from then on, its
-// neighbors still feeling it) once neither it nor any neighbor moved more than kRelaxSettled of a
-// spacing in a step. So an edit of the scalp moves roots only within the reach the iterations
-// carry it (kRelaxIterations x kRelaxReach spacings at most), never how long the rest relax.
+// its neighbors within kRelaxReach spacings, harder the closer they are, for kRelaxIterations
+// steps. Open edges of the scalp push back like a mirror image of the root across them, so roots
+// don't pile up along a hairline. `spacing(i)` is the ideal distance around root i (from the
+// local density); `edgeStep` the smallest (at the density's maximum), how finely the open edges
+// are sampled. Roots keep their order (and so their IDs).
+// Smooth: every root takes every step (none stops early), its push fading to nothing at the reach
+// from every neighbor within it (kRelaxNeighbors hold them all, about), so a root placed a rounding
+// apart (the same scalp in other units) ends a rounding apart: nothing it does is a choice a
+// rounding could tip (a strand near the border of two clumps after it would change clumps). The
+// roots land on a lattice of kRelaxQuantum spacings at the end only.
+// Local: a root moves by its neighbors alone, so an edit of the scalp moves roots only within the
+// reach the iterations carry it (kRelaxIterations x kRelaxReach spacings at most); farther, every
+// root makes the same steps from the same neighbors, to the bit.
 // `allowed(root)`: where a root may sit (density above 0, near the guides with guideRadius). A
 // root pushed outside stays where it last was: the edge of a density map holds roots like a wall,
 // instead of the roots along it, pushed only from inside, drifting out into the zero area.
@@ -197,11 +198,8 @@ void relaxRoots(std::vector<StrandRoot>& roots, const ScalpMesh& rest, float edg
     // spacing per step); roots settle back onto the surface at each block's end.
     std::vector<std::uint32_t> near(n * kRelaxNeighbors);
     std::vector<Vec3f> moved(n);
-    std::vector<float> stepped(n, 0.0f);   // each root's step this iteration, in its spacings
-    std::vector<int> settledAt(n, -1);     // the iteration a root settled in (-1: not yet)
     for (int iteration = 0; iteration < kRelaxIterations; ++iteration) {
         ++relaxIterationCount;
-        const int blockStart = iteration - iteration % kRelaxBlock;
         if (iteration % kRelaxBlock == 0) {
             const PointIndex index(pos);
             parallelFor(0, n, [&](std::size_t i) {
@@ -216,8 +214,7 @@ void relaxRoots(std::vector<StrandRoot>& roots, const ScalpMesh& rest, float edg
         }
         parallelFor(0, n, [&](std::size_t i) {
             moved[i] = pos[i];
-            stepped[i] = 0.0f;
-            if (!(space[i] > 0.0f) || settledAt[i] >= 0) return;
+            if (!(space[i] > 0.0f)) return;
             Vec3f push{0.0f, 0.0f, 0.0f};
             for (std::size_t k = 0; k < kRelaxNeighbors; ++k) {
                 const std::size_t j = near[i * kRelaxNeighbors + k];
@@ -244,37 +241,25 @@ void relaxRoots(std::vector<StrandRoot>& roots, const ScalpMesh& rest, float edg
                 }
             }
             push = push - nrm[i] * push.dot(nrm[i]);  // along the surface
-            Vec3f step = push * (kRelaxStep * space[i]);
+            // At most half a spacing a step, eased into (no corner where the step is cut).
+            const Vec3f step = push * (kRelaxStep * space[i]);
             const float limit = 0.5f * space[i], len = step.length();
-            if (len > limit) step = step * (limit / len);
-            // On a lattice of kRelaxQuantum spacings: a far root a push from an edit reaches only as
-            // a rounding (a change of a millionth) lands where it would have, so the edit's ripple
-            // stops there instead of spreading on over the iterations.
-            const float q = kRelaxQuantum * space[i];
-            const Vec3f to = pos[i] + step;
-            moved[i] = {std::round(to.x / q) * q, std::round(to.y / q) * q, std::round(to.z / q) * q};
-            stepped[i] = std::min(len, limit) / space[i];
+            moved[i] = pos[i] + step * (limit / std::sqrt(len * len + limit * limit));
+            if (iteration + 1 == kRelaxIterations) {
+                // On a lattice of kRelaxQuantum spacings: an edit's ripple, a rounding by then where
+                // it reaches at all, lands where it would have.
+                const float q = kRelaxQuantum * space[i];
+                const Vec3f to = moved[i];
+                moved[i] = {std::round(to.x / q) * q, std::round(to.y / q) * q, std::round(to.z / q) * q};
+            }
         });
-        // Settled (the pushes around it balance: neither it nor a neighbor moved more than a
-        // hundredth or two of a spacing): the rest of the iterations would move it nothing to see.
-        parallelFor(0, n, [&](std::size_t i) {
-            if (settledAt[i] >= 0 || !(space[i] > 0.0f)) return;
-            bool calm = stepped[i] < kRelaxSettled;
-            for (std::size_t k = 0; calm && k < kRelaxNeighbors; ++k) calm = stepped[near[i * kRelaxNeighbors + k]] < kRelaxSettled;
-            if (calm) settledAt[i] = iteration;
-        });
-        // Every root settled: the iterations left would move none.
-        bool settled = true;
-        for (std::size_t i = 0; settled && i < n; ++i) settled = settledAt[i] >= 0 || !(space[i] > 0.0f);
-        if (settled) iteration = kRelaxIterations - 1;
         if ((iteration + 1) % kRelaxBlock != 0 && iteration + 1 != kRelaxIterations) {
             pos.swap(moved);
             continue;
         }
-        // Onto the surface: the roots that moved in this block (one settled before it was put on
-        // the surface at that block's end and has not moved since).
+        // Onto the surface.
         parallelFor(0, n, [&](std::size_t i) {
-            if (!(space[i] > 0.0f) || (settledAt[i] >= 0 && settledAt[i] < blockStart)) return;
+            if (!(space[i] > 0.0f)) return;
             const SurfacePoint hit = rest.closestPoint(moved[i], 4.0f * space[i]);
             if (hit.root.face < 0) return;  // off the surface: stays where it last was
             if (!allowed(hit.root)) {  // outside the density (or the guides' reach): back where it last was
@@ -402,10 +387,8 @@ public:
                 .soft(0, 10),
             ParamSpec{"randomness", 1.0, "How random the roots are: 0 evenly spread (blue noise), 1 at random (white "
                                          "noise); in between each root moves smoothly from its even spot to its random "
-                                         "one, past 1 on beyond it (more clumps and gaps), up to 2. The same strands "
-                                         "at every value", "fraction"}
+                                         "one. The same strands at every value", "fraction"}
                 .range(0, kMaxRandomness)
-                .soft(0, 1)
                 .when("layout", {"random"}),
             notAnimatable({"layout", std::string("random"),
                            "random: roots at random (randomness 0 spreads them evenly); uvGrid: one per cell of a grid "
@@ -423,11 +406,12 @@ public:
                 .range(0, 1)
                 .when("layout", {"uvGrid"}),
             notAnimatable({"previewAll", false, "Every root in the viewport too, whatever the groom's preview density: for "
-                                                "a few big pieces (feather shafts, scales, instances) that a thinned "
-                                                "preview would leave bald"}),
-            notAnimatable({"guideRadius", 0.0, "Only within this distance of a guide's root (the guides input): fur along drawn "
-                                               "guides, a patch, a stripe. 0, or nothing connected to guides: the whole "
-                                               "scalp", "length"})
+                                                "big pieces (instances, scales) that a thinned preview would leave bald. "
+                                                "A scatter making 250 strands or fewer is never thinned anyway"})
+                .adv(),
+            notAnimatable({"guideRadius", 0.0, "Only within this distance of a guide's root (the guides input, every level of "
+                                               "its groups: primaries and their children): fur along drawn guides, a "
+                                               "patch, a stripe. 0, or nothing connected to guides: the whole scalp", "length"})
                 .atLeast(0)
                 .soft(0, 5)
                 .adv(),
@@ -459,10 +443,30 @@ public:
         if (mesh->isPiece() && guides) {
             auto local = std::make_shared<GuideSet>(*guides);
             for (Guide& g : local->guides()) g.root = toPieceRoot(*mesh, g.root);
+            if (local->levelTubes()) {
+                auto tubes = std::make_shared<std::vector<Guide>>(*local->levelTubes());
+                for (Guide& g : *tubes) g.root = toPieceRoot(*mesh, g.root);
+                local->setLevelTubes(std::move(tubes));
+            }
             guides = std::move(local);
         }
         const ScalarField densityField(params(), "density", mesh.get(), guides.get());
-        const double density = std::max(0.0f, densityField.maximum());
+        double density = std::max(0.0f, densityField.maximum());
+        if (!densityField.isConstant()) {
+            // An expression (not clamped to 0-1) or a plugged field can go past the maximum it reports,
+            // where value / maximum would clip at 1: its largest at the cage's corners and face middles
+            // when past it, rounded up to a step of a log lattice (an edit of the scalp moving it a
+            // little keeps it, and so the roots far from the edit).
+            float sampled = 0.0f;
+            constexpr float kAt[4][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}, {1.0f / 3.0f, 1.0f / 3.0f}};
+            for (std::size_t f = 0; f < surface.triangleCount(); ++f) {
+                for (const auto& uv : kAt) {
+                    const float v = densityField.atCageRoot(StrandRoot{static_cast<std::int32_t>(f), uv[0], uv[1]});
+                    if (std::isfinite(v)) sampled = std::max(sampled, v);
+                }
+            }
+            if (sampled > density) density = roundToDecadeStep(sampled, 8, true);
+        }
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const float length = static_cast<float>(params().getDouble("length"));
         // Strand resolution comes from the Resample node (EvalContext::strandSegments).
@@ -489,14 +493,19 @@ public:
             std::vector<Vec3f> positions;
             positions.reserve(guides->size());
             auto shaped = std::make_unique<GuideFootprints>(margin);
-            for (const Guide& g : guides->guides()) {
-                if (g.points.empty()) continue;
+            auto around = [&](const Guide& g) {
+                if (g.points.empty()) return;
                 const Vec3f root = binding.stablePosition(g.root, g.points[0]);
                 if (g.hasTube && g.tube.edited() && g.points.size() >= 2) {
                     shaped->add(g, root, surface.contains(g.root) ? surface.normal(g.root) : Vec3f{});
                 } else {
                     positions.push_back(root);
                 }
+            };
+            for (const Guide& g : guides->guides()) around(g);
+            // The family's other levels too (a group's primaries with its children: GuideSet::levelTubes).
+            if (guides->levelTubes()) {
+                for (const Guide& g : *guides->levelTubes()) around(g);
             }
             guideRootsHash = hashFloat(hash64(positions.size()), guideRadius);
             if (!shaped->empty()) guideRootsHash = hashCombine(guideRootsHash, shaped->hash());  // (none: as it always was)
@@ -534,7 +543,9 @@ public:
         // while previewing: a preview past this stops with a message rather than exhausting memory.
         // The viewport's point budget: thin the preview further to fit (the same strands, fewer of them).
         const double fullPoints = strandsMade * static_cast<double>(segments + 1);
-        const bool previewAll = params().getBool("previewAll");
+        // A small scatter (kNeverThinned strands or fewer: feather shafts, scales) is never thinned
+        // either: a few of them thinned leave a part bald, and showing them all costs next to nothing.
+        const bool previewAll = params().getBool("previewAll") || !(strandsMade > kNeverThinned);
         float keepFraction = previewAll ? std::max(ctx.previewDensity, 1.0f) : ctx.previewDensity;
         const bool thinned = ctx.maxPoints > 0.0 && fullPoints * keepFraction > ctx.maxPoints;
         if (thinned) keepFraction = static_cast<float>(ctx.maxPoints / fullPoints);

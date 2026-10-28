@@ -175,7 +175,7 @@ bool stageOf(const std::string& type, StageKind* kind) {
 }
 
 // A Collide's surfaces (its scalp and collider inputs, as last evaluated).
-// `colliders`: which of them are the collider input's, a bit each (softness and smoothing act on it).
+// `colliders`: which of them are the collider input's, a bit each (softness acts on it).
 std::vector<MeshPtr> collideMeshes(const Graph& graph, NodeId id, std::uint32_t* colliders = nullptr) {
     std::vector<MeshPtr> meshes;
     if (colliders) *colliders = 0;
@@ -388,7 +388,7 @@ Role roleOf(const GraphDocument& doc, NodeId id, StageKind* kind, std::string* w
         const StrandsPtr out = cachedStrands(graph, id), a = inputStrands(graph, id, 0);
         if (out && a && out == a) return Role::PassOn;
         const ParamSet& p = graph.node(id).params();
-        if (p.getDouble("blend") > 0.0 && p.getDouble("match") > 0.0) return Role::End;
+        if (p.getDouble("blend") > 0.0 && p.getDouble("strength") > 0.0) return Role::End;
     }
     if (type == op::kCull || type == op::kSplit || type == op::kMirror) {
         // Every strand kept, none added: its input handed on as it came. Strands kept by what the run
@@ -1861,7 +1861,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 *why = name + ": its params were read for other strands";
                 return false;
             }
-            const bool smooth = graph.node(id).params().getBool("smoothGuides");
+            const bool smooth = true;  // (Interpolate follows each guide's smooth curve)
             InterpolateMemo& memo = interpolate_[id];
             if (memo.made != state.binding) {
                 // The operator bound again (an evaluation: a stroke's press). Where it bound the same
@@ -1869,7 +1869,8 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 // here (a reshaped guide's smooth curve starts a rounding away), the one held stands:
                 // its weights are a rounding apart, and it is on the GPU already.
                 bool same = memo.current && memo.current->baseKey == state.baseKey && memo.current->strandCount == state.strandCount &&
-                            memo.current->strands == state.strands && memo.current->roots.size() == state.roots.size();
+                            memo.current->strands == state.strands && memo.current->roots.size() == state.roots.size() &&
+                            memo.current->weights == state.weights;
                 for (std::size_t g = 0; same && g < state.roots.size(); ++g) {
                     same = (state.roots[g] - memo.current->roots[g]).length() <= 1e-5f * std::max(1.0f, memo.current->roots[g].length());
                 }
@@ -1916,11 +1917,20 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                         moved = true;
                     }
                 }
-                if (moved) {
+                // A guideWeight map: the guides' weights at their roots now (a guide layer painted,
+                // a root moved over a painted scalp) bind again too.
+                std::vector<float> weights;
+                try {
+                    weights = interpolateGuideWeights(evaluatedParams(graph, id), kept, guides.get(), scalp.get());
+                } catch (const GraphError&) {
+                    *why = name + ": its guideWeight map cannot be read (the CPU's)";
+                    return false;
+                }
+                if (moved || weights != memo.current->weights) {
                     auto bound = std::make_shared<InterpolateState>(*memo.current);
                     std::vector<StrandRoot> guideRoots(kept.size());
                     for (std::size_t g = 0; g < kept.size(); ++g) guideRoots[g] = kept[g]->root;
-                    if (!interpolateRebind(graph.node(id), parts, roots, guideRoots, bound.get())) {
+                    if (!interpolateRebind(graph.node(id), parts, roots, guideRoots, weights, bound.get())) {
                         *why = name + ": its guides could not be bound again";
                         return false;
                     }
@@ -2047,23 +2057,13 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 // gathering no strand neither gives nor takes), in the order it sums them.
                 const std::size_t count = fixed->centers;
                 if (clumpParams.getDouble("copyAmount") > 0.0 && count > 1) {
-                    const std::size_t want = std::min<std::size_t>(static_cast<std::size_t>(clumpParams.getInt("copyNeighbors")), count - 1);
                     const PointIndex index(state.centerRoots);
                     const bool axes = state.axes.size() == count;
-                    auto shapeless = [&](std::size_t c) { return axes && state.axes[c] == kNoClumpCenter; };
-                    auto neighbors = std::make_shared<std::vector<std::uint32_t>>(count * 9, 0u);
+                    const std::function<bool(std::size_t)> shapeless = [&](std::size_t c) { return axes && state.axes[c] == kNoClumpCenter; };
+                    auto neighbors = std::make_shared<std::vector<std::uint32_t>>(count * kClumpCopyWords, 0u);
                     parallelFor(0, count, [&](std::size_t c) {
                         if (shapeless(c)) return;
-                        std::array<std::size_t, 9> near{};
-                        std::array<float, 9> d2{};
-                        const std::size_t found = index.kNearest(state.centerRoots[c], want + 1, near.data(), d2.data());
-                        std::uint32_t* to = neighbors->data() + c * 9;
-                        std::uint32_t taken = 0;
-                        for (std::size_t j = 0; j < found && taken < want; ++j) {
-                            if (near[j] == c || shapeless(near[j])) continue;
-                            to[1 + taken++] = static_cast<std::uint32_t>(near[j]);
-                        }
-                        to[0] = taken;
+                        clumpCopyNeighbors(index, state.centerRoots, c, shapeless, neighbors->data() + c * kClumpCopyWords);
                     }, 16);
                     fixed->neighbors = std::move(neighbors);
                 }
@@ -2100,8 +2100,38 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             // the strands it takes, or its axis strands, resampled on the GPU; or the curves of a
             // branch of their own the run moves (a stroke's guides through another Interpolate),
             // made by that branch's run on the GPU, then resampled.
+            // inputCurves straight from guides (a Guides node a stroke reshapes): each center's curve made
+            // again on the CPU from the guides now, as ClumpOp resamples them, while every center keeps
+            // its guide (its ID) and root (no strand changes clump). copyAmount's sharing is the CPU's.
+            const GuidesPtr guidesNow =
+                fromCurves && stage.level <= 0 ? valueAs<GuidesPtr>(graph.cachedValue(centersNode, centersOutput)) : nullptr;
             if (stage.level <= 0 && !dependsOn(graph, own || fromStrands ? upstream(graph, id) : centersNode, before)) {
                 out[k].clump = memo.fixed;
+            } else if (guidesNow) {
+                ClumpState kept;
+                constexpr std::size_t K = kClumpCenterSamples;
+                bool ok = clumpParams.getDouble("copyAmount") <= 0.0 && memo.fixed && memo.fixed->curves && keptState(&kept) &&
+                          kept.curves.size() == kept.centerGuides.size() * K && kept.centerIds.size() == kept.centerGuides.size();
+                auto curves = std::make_shared<std::vector<Vec3f>>(ok ? kept.curves.size() : 0);
+                for (std::size_t c = 0; ok && c < kept.centerGuides.size(); ++c) {
+                    const std::size_t g = kept.centerGuides[c];
+                    ok = g < guidesNow->guides().size();
+                    if (!ok) break;
+                    const Guide& guide = guidesNow->guides()[g];
+                    ok = guide.id == kept.centerIds[c] && !guide.points.empty();
+                    if (!ok) break;
+                    resampleByArcLengthInto(guide.points.data(), guide.points.size(), curves->data() + c * K, K);
+                    const Vec3f& was = kept.curves[c * K];
+                    ok = ((*curves)[c * K] - was).length() <= 1e-5f * std::max(1.0f, was.length());  // (its root stays)
+                }
+                if (!ok) {
+                    *why = name + "'s centers are guides the run moves at their roots, adds or removes, or shares by "
+                                  "copyAmount (the CPU's)";
+                    return false;
+                }
+                auto made = std::make_shared<ClumpInputs>(*memo.fixed);
+                made->curves = std::move(curves);
+                out[k].clump = std::move(made);
             } else {
                 if (!memo.tried) {
                     memo.tried = true;
@@ -2333,10 +2363,10 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             // The fields the CPU's Collide asks at this offset (collisionField: one for every
             // offset of the same cell size and reach), their tables made once for every offset
             // sharing them (a dragged offset is the kernel's number): for offsets up to the most of
-            // those plus the softness, at the field's reach, more than any of their pushes asks of
+            // those, at the field's reach, more than any of their pushes asks of
             // the tables (a push the tables' bounds settle at that offset and radius is settled at
             // a smaller one: the walk's answers are the same).
-            const float offset = p->value[0], softness = p->value2[0];
+            const float offset = p->value[0];
             DistanceFieldPtr surfaceFields[2];
             for (std::size_t m = 0; m < meshes.size() && m < 2; ++m) {
                 surfaceFields[m] = collisionField(meshes[m], offset, p->value[2]);
@@ -2346,10 +2376,10 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 }
             }
             CollideMemo& memo = collide_[id];
-            bool same = memo.inputs && memo.softness == softness;
+            bool same = memo.inputs != nullptr;
             for (std::size_t m = 0; m < 2; ++m) {
                 same = same && memo.meshes[m] == (m < meshes.size() ? meshes[m] : nullptr) && memo.fields[m] == surfaceFields[m] &&
-                       (!surfaceFields[m] || offset + softness <= memo.most[m]);
+                       (!surfaceFields[m] || offset <= memo.most[m]);
             }
             if (!same) {
                 float most[2] = {0.0f, 0.0f};
@@ -2360,11 +2390,11 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                     const MeshDistanceField& field = *surfaceFields[m];
                     float upTo = field.reach();
                     if (MeshDistanceField::cellSizeFor(*meshes[m], std::numeric_limits<float>::max()) > field.cellSize()) {
-                        upTo = std::min(upTo, field.cellSize() * 1.4143f + softness);
+                        upTo = std::min(upTo, field.cellSize() * 1.4143f);
                     }
-                    most[m] = std::max(offset + softness, upTo);
+                    most[m] = std::max(offset, upTo);
                 }
-                std::shared_ptr<const CollideInputs> made = collideInputs(meshes, colliders, fields, offset, softness, &whyNot);
+                std::shared_ptr<const CollideInputs> made = collideInputs(meshes, colliders, fields, offset, &whyNot);
                 if (!made) {
                     *why = name + ": " + whyNot;
                     return false;
@@ -2375,7 +2405,6 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                     memo.fields[m] = surfaceFields[m];
                     memo.most[m] = most[m];
                 }
-                memo.softness = softness;
                 memo.inputs = std::move(made);
             }
             out[k].collide = memo.inputs;
@@ -2838,7 +2867,7 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
                 *why = name + " keeps no partners for its result";
                 return false;
             }
-            if (!channelHolds(own.getBool("sameClump") ? std::string(kClumpIdChannel) : std::string()) ||
+            if (!channelHolds(own.getString("clumpChannel")) ||
                 !channelHolds(own.getString("regionChannel"))) {
                 *why = name + " picks its partners by clumps or regions the run writes anew (the CPU's)";
                 return false;
@@ -3154,7 +3183,7 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
                 if (s.stage.kind == StageKind::Collide) {
                     const CollideInputs* collide = k < inputs.size() ? inputs[k].collide.get() : nullptr;
                     for (std::size_t m = 0; collide && m + 1 < collide->boxes.size(); m += 2) {
-                        const float r = 2.0f * std::abs(s.value[0] + s.value2[0]);  // (the offset, and the softness above it)
+                        const float r = 2.0f * std::abs(s.value[0]);  // (the offset)
                         const Vec3f clo = collide->boxes[m], chi = collide->boxes[m + 1];
                         lo = {std::min(lo.x, clo.x - r), std::min(lo.y, clo.y - r), std::min(lo.z, clo.z - r)};
                         hi = {std::max(hi.x, chi.x + r), std::max(hi.y, chi.y + r), std::max(hi.z, chi.z + r)};

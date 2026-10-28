@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -125,6 +126,10 @@ public:
     GroupId findGroup(const std::string& name) const;  // kNoGroup if absent
     int groupDepth(GroupId id) const;                   // 0 for root groups, -1 if unknown
     int maxDepth() const;                               // -1 when there are no groups
+    // The deepest groups of each family: those holding guides (2 points or more) with no group
+    // below them that does. What level -1 takes (flatten): a group without children is its own
+    // family's deepest, and a group whose child groups are empty keeps its guides.
+    std::set<GroupId> deepestGroups() const;
 
     // Removes a group, its descendant groups and all their guides.
     void removeGroup(GroupId id);
@@ -281,7 +286,7 @@ public:
     void setPointAttribute(GuideId id, const std::string& name, std::vector<float> values);
 
     // ---- Output ---------------------------------------------------------
-    // Guides of every group at `level` (-1: the deepest level), as a flat set
+    // Guides of every group at `level` (-1: each family's deepest, deepestGroups), as a flat set
     // for operators such as Interpolate. Each carries its tube (widths at the
     // size shown, scale()) and frameUp, for Interpolate's fillTubes.
     GuideSet flatten(int level = -1) const;

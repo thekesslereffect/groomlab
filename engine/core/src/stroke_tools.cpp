@@ -365,6 +365,8 @@ const std::vector<PaintableSetting>& paintableSettings() {
         {"curl", "Curl", "Curl", "affect", "Where the curls go: white curled, black straight"},
         {"noise", "Noise amplitude", "Noise", "amplitude", "How much noise: white the node's amplitude, black smooth"},
         {"flyaways", "Flyaways", "Flyaway", "fraction", "Where strays leave the flow: white the node's share of strays, black none"},
+        {"guideWeight", "Guide weight", "Interpolate", "guideWeight",
+         "How strongly the guides rooted there pull the hair around them: white fully, black they give way to their neighbours"},
     };
     return settings;
 }

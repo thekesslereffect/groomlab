@@ -47,6 +47,12 @@ struct CardSettings {
     // joins the nearest: as many as maxCards allows (over the cards each takes,
     // cardsPerClump x layers; 0: 60).
     std::string channel = "clumpId";
+    // Cards from guides (the Cards node's cardsFrom guides; empty: cards from the strands): each
+    // strand joins the guide whose root is nearest its own, and each guide holding `minStrands`
+    // or more is one card (or a cross, as crossStyle says) along the guide itself, its smooth
+    // curve rooted where the guide grows, as wide as its strands and baked from them. Clumps,
+    // sub-cards, layers and flyaway cards don't apply (feathers and braids are carded as ever).
+    std::vector<std::vector<Vec3f>> guideSpines;
     // At most this many cards (the one budget; sub-cards, crossed and flyaway cards count) (0: no
     // limit): neighbouring clumps merge to keep within it.
     int maxCards = 0;
@@ -132,6 +138,12 @@ struct CardSettings {
     // card bends along the rachis as the groom's feather does (Card::spine). Off: a flat strip of
     // one quad per segment. Down feathers' crossed cards stay flat either way.
     bool featherSpine = true;
+    // Flatten (0..1): each vaned feather's card toward one plane along its shaft (its side the
+    // feather's mean) and each spine half toward one fold, so its quads lie flat instead of
+    // twisting with the barbs station by station (a twisted quad shows the texture faceted along
+    // its diagonal). 0 follows the barbs; 1 a single plane, every quad flat (the Cards node's
+    // default since its version 2). The root row then seats as a whole (seatCard's rigid).
+    float featherFlatten = 0.0f;
     // Separation: cards closer than a gap to another card, or passing through it, are pushed apart
     // along their normals (separateCards), roots held. The gap is a share of the narrower card's
     // width: `separation` for hair cards (0: none), `featherSeparation` for feather cards (the

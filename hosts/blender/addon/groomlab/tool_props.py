@@ -470,7 +470,7 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # While sculpting
     sculpt_display: EnumProperty(name=defs.get("choices/sculptDisplay")["label"], items=SCULPT_DISPLAY, default="normal",
                                  description=defs.get("choices/sculptDisplay")["tip"])
-    full_density: BoolProperty(name="Full density", default=False,
+    full_density: BoolProperty(name="Full density", default=True,
                                description="Keep every strand of the preview up while a stroke is live, instead of a "
                                            "lighter share of them (slower on heavy grooms, but nothing pops)")
     starter_dismissed: BoolProperty(default=False)

@@ -72,12 +72,12 @@ struct LookChain {
 // values (StageFields): a plugged field's own number (the CPU multiplies the field by it), 1 for a
 // map that is the param's own value.
 //   Interpolate: value[0] limitDistance; flag[0] samples, [1] preserveLength; ramp: the falloff.
-//   Length: value[0] keep (mapped, per strand), [1] fraction (mapped, per strand), [2] trimMin,
-//           [3] trimMax (low to high); seed.
+//   Length: value[0] keep (mapped, per strand), [1] fraction (mapped, per strand), [2] the least
+//           a trimmed strand loses (0), [3] the most (randomness); seed.
 //   Clump: value[0] strength (mapped; negative repels), [1] volumize (mapped, per strand), [2]
 //          flatness, [3] lockRadius; flag[0] repelRadius's float bits, [1] pastTip extend, [2]
 //          flatten (0 surface, 1 random, 2 direction); value2[0] strengthRandom, [1]
-//          lockRadiusRandom, [2] copyAmount, [3] strandStrengthRandom; flag2[0-2] flattenDirection's float bits; seed;
+//          lockRadiusRandom, [2] copyAmount, [3] strandStrengthRandom; flag2[0-2] flatDirection's float bits; seed;
 //          ramp: the profile; ramp2: volumizeProfile. A Wet's level the same, from its level's
 //          Clump params (WetState), its profile wetLevelProfile at the (dragged) wetness.
 //   Noise: value[0] amplitude (mapped), [1] frequency, [2] fraction (mapped, at the root); flag[0]
@@ -276,8 +276,9 @@ struct ClumpInputs {
     // Per center 4 floats (its per-clump variation, drawn from its ID and the seed as ClumpOp draws
     // it): the strength's draw, the lock radius's, a random flatten's turn (a share of one), 0.
     std::shared_ptr<const std::vector<float>> variation;
-    // copyAmount, centers made on the GPU: per center the nearest centers it takes the shape of, 9
-    // words (the count, then up to 8; a center without a shape neither gives nor takes).
+    // copyAmount, centers made on the GPU: per center the nearest centers it takes the shape of,
+    // kClumpCopyWords words (clumpCopyNeighbors: the count, the centers, their weights; a center
+    // without a shape neither gives nor takes).
     std::shared_ptr<const std::vector<std::uint32_t>> neighbors;
     // pastTip extend: the longest strand it took (the CPU's last run), how far past an axis's tip a
     // point can go (lookBounds).
@@ -313,7 +314,7 @@ struct CollideHost {
     std::vector<std::shared_ptr<const RestPoseCollision>> rests;  // per mesh (null: a still one, or method exact)
     std::vector<DistanceFieldPtr> fields;  // per mesh: a still one's field (null: deformed, or method exact)
     std::vector<MeshPtr> meshes;
-    float maxDepth = 0.0f, searchRadius = 0.0f, softness = 0.0f;
+    float maxDepth = 0.0f, searchRadius = 0.0f;
     std::shared_ptr<const std::vector<StrandRoot>> roots;  // per strand of the run (its walk starts at its root)
 };
 struct CollideInputs {
@@ -321,7 +322,7 @@ struct CollideInputs {
     std::shared_ptr<const CollideHost> host;  // (with rests)
     std::vector<MeshDistanceField::Tables> tables;
     std::vector<Vec3f> boxes;  // per mesh: lo, hi
-    std::uint32_t colliders = 0;  // which are the collider input's, a bit each (softness and smoothing act on it)
+    std::uint32_t colliders = 0;  // which are the collider input's, a bit each (softness acts on it)
 };
 // SelfCollide and Static: the hair grid as the node lays it on the strands it takes
 // (operator_state.h HairGridLayout: the strands splatted, their segments, the cell, what a sample

@@ -146,22 +146,16 @@ TEST(Scatter, LowRandomnessSpreadsRootsEvenlyAndKeepsIds) {
     EXPECT_LT(onEdge, b->strandCount() / 50);  // a piled-up row would be about 4 / sqrt(1000) = 13%
 }
 
-TEST(Scatter, RelaxationStopsOnceTheRootsSettle) {
-    // Relaxing runs up to 30 iterations; once no root moves more than a fiftieth of its spacing
-    // in a step the pushes balance, and the rest would move nothing to see. An even layout
-    // relaxed again from where it settled stops at once.
+TEST(Scatter, RelaxationRunsItsFixedIterations) {
+    // Relaxing takes every one of its 24 iterations (none stops early: a root a rounding apart, the
+    // same scalp in other units, ends a rounding apart) and spreads the roots evenly.
     OneOp g(1000.0);
     g.graph.node(g.scatter).params().set("randomness", 0.0);
     const std::size_t before = scatterRelaxIterationCount();
     const auto a = g.eval(g.scatter);
     ASSERT_TRUE(a);
     const std::size_t first = scatterRelaxIterationCount() - before;
-    EXPECT_GT(first, 0u);
-    EXPECT_LE(first, 30u);
-    std::printf("[ relax    ] %zu iterations from white noise at density 1000\n", first);
-    // The same roots, placed again (another seed param that does not move them: the memo
-    // is dropped by a different cache key): a settled layout is not what a new seed gives, so
-    // instead check the even spread survived the early stop.
+    EXPECT_EQ(first, 24u);
     const Spacing sa = nearestSpacing(*a);
     const float hex = 1.0746f / std::sqrt(1000.0f);
     EXPECT_LT(sa.spread, 0.07f);
@@ -470,17 +464,16 @@ TEST(Length, KeepsAShareOfTheLength) {
 
 TEST(Length, TrimsAShareOfTheStrandsByARandomRange) {
     // Each strand's length share, keep 0.8: a fraction of the strands trimmed, each by a share of
-    // its kept length between trimMin and trimMax.
+    // its kept length up to randomness.
     OneOp g(2000.0);
     const NodeId len = g.graph.addNode(op::kLength);
     g.graph.connect(g.scatter, len, 0);
     const StrandsPtr in = g.eval(g.scatter);
-    auto shares = [&](double fraction, double trimMin, double trimMax) {
+    auto shares = [&](double fraction, double randomness) {
         ParamSet& p = g.graph.node(len).params();
         p.set("keep", 0.8);
         p.set("fraction", fraction);
-        p.set("trimMin", trimMin);
-        p.set("trimMax", trimMax);
+        p.set("randomness", randomness);
         const StrandsPtr out = g.eval(len);
         std::vector<float> share(out->strandCount());
         for (std::size_t s = 0; s < share.size(); ++s) {
@@ -489,19 +482,18 @@ TEST(Length, TrimsAShareOfTheStrandsByARandomRange) {
         }
         return share;
     };
-    for (const float s : shares(1.0, 0.0, 0.0)) EXPECT_NEAR(s, 0.8f, 1e-4f) << "no range: keep alone";
-    const std::vector<float> all = shares(1.0, 0.2, 0.5);
+    for (const float s : shares(1.0, 0.0)) EXPECT_NEAR(s, 0.8f, 1e-4f) << "no range: keep alone";
+    const std::vector<float> all = shares(1.0, 0.5);
     float lo = 1.0f, hi = 0.0f;
     for (const float s : all) {
         lo = std::min(lo, s);
         hi = std::max(hi, s);
     }
     EXPECT_GE(lo, 0.8f * 0.5f - 1e-4f);
-    EXPECT_LE(hi, 0.8f * 0.8f + 1e-4f);
-    EXPECT_GT(hi - lo, 0.15f) << "spread across the range, not split in two";
-    EXPECT_EQ(shares(1.0, 0.5, 0.2), all) << "the range either way round";
+    EXPECT_LE(hi, 0.8f + 1e-4f);
+    EXPECT_GT(hi - lo, 0.25f) << "spread across the range, not split in two";
     // A fraction: those strands (by ID) as with all of them, the rest kept; raising it only adds.
-    const std::vector<float> some = shares(0.3, 0.2, 0.5), more = shares(0.6, 0.2, 0.5);
+    const std::vector<float> some = shares(0.3, 0.5), more = shares(0.6, 0.5);
     std::size_t trimmed = 0, moreTrimmed = 0;
     for (std::size_t s = 0; s < all.size(); ++s) {
         const bool cut = std::abs(some[s] - 0.8f) > 1e-4f;
@@ -513,10 +505,10 @@ TEST(Length, TrimsAShareOfTheStrandsByARandomRange) {
     EXPECT_NEAR(static_cast<double>(trimmed) / all.size(), 0.3, 0.06);
     EXPECT_NEAR(static_cast<double>(moreTrimmed) / all.size(), 0.6, 0.06);
     // A wider range scales each strand's trim (its own draw), no strand jumps.
-    const std::vector<float> wider = shares(1.0, 0.2, 0.6);
+    const std::vector<float> wider = shares(1.0, 0.6);
     for (std::size_t s = 0; s < all.size(); ++s) {
         EXPECT_LE(wider[s], all[s] + 1e-5f);
-        EXPECT_NEAR(1.0f - wider[s] / 0.8f - 0.2f, (1.0f - all[s] / 0.8f - 0.2f) * 4.0f / 3.0f, 1e-3f);
+        EXPECT_NEAR(1.0f - wider[s] / 0.8f, (1.0f - all[s] / 0.8f) * 6.0f / 5.0f, 1e-3f);
     }
 }
 
@@ -686,28 +678,36 @@ TEST(Interpolate, WeightsAreContinuousWhereTheNeighborSetChanges) {
     const NodeId interp = g.graph.addNode(op::kInterpolate);
     g.graph.connect(g.scatter, interp, 0);
     g.graph.connect(guideNode, interp, 1);
-    const auto out = g.eval(interp);
-    ASSERT_TRUE(out);
-    ASSERT_GT(out->strandCount(), 1000u);
-
-    // Tips of strands rooted close together stay close together.
-    float worst = 0.0f;
-    const std::size_t n = out->strandCount();
-    for (std::size_t a = 0; a < n; ++a) {
-        const Vec3f* pa = out->strandPoints(a);
-        const std::size_t na = out->strandPointCount(a);
-        for (std::size_t b = a + 1; b < n; ++b) {
-            const Vec3f* pb = out->strandPoints(b);
-            const float roots = (pa[0] - pb[0]).length();
-            if (roots > 0.02f) continue;
-            const float tips = ((pa[na - 1] - pa[0]) - (pb[out->strandPointCount(b) - 1] - pb[0])).length();
-            worst = std::max(worst, tips);
+    // Tips of strands rooted close together stay close together, with either blend.
+    auto worstFor = [&](const char* blend) {
+        g.graph.node(interp).params().set("blend", std::string(blend));
+        const auto out = g.eval(interp);
+        EXPECT_TRUE(out && out->strandCount() > 1000u);
+        float worst = 0.0f;
+        const std::size_t n = out ? out->strandCount() : 0;
+        for (std::size_t a = 0; a < n; ++a) {
+            const Vec3f* pa = out->strandPoints(a);
+            const std::size_t na = out->strandPointCount(a);
+            for (std::size_t b = a + 1; b < n; ++b) {
+                const Vec3f* pb = out->strandPoints(b);
+                const float roots = (pa[0] - pb[0]).length();
+                if (roots > 0.02f) continue;
+                const float tips = ((pa[na - 1] - pa[0]) - (pb[out->strandPointCount(b) - 1] - pb[0])).length();
+                worst = std::max(worst, tips);
+            }
         }
-    }
+        return worst;
+    };
     // A pop (the old hard cutoff) swaps whole guides: about 2 here. Smooth
     // weights leave the gradient of this deliberately harsh layout (unit hair
     // on guides pointing against each other, a third of their length apart).
-    EXPECT_LT(worst, 0.5f) << "neighbouring strands differ by " << worst << " at the tip";
+    const float offsets = worstFor("offsets");
+    EXPECT_LT(offsets, 0.5f) << "neighbouring strands differ by " << offsets << " at the tip";
+    // Blend directions turns strands between guides pointing apart where offsets shrinks them, so
+    // its gradient is steeper there; where the guides cancel out it eases to no length, so no strand
+    // flips (a flip: about 2 here).
+    const float directions = worstFor("directions");
+    EXPECT_LT(directions, 1.0f) << "neighbouring strands differ by " << directions << " at the tip (blend directions)";
 }
 
 TEST(Interpolate, AStrandRootedOnAGuideRootStaysFiniteAtAnyPower) {
@@ -762,6 +762,11 @@ TEST(Interpolate, TheShapeIsContinuousAcrossTheGuidesFringe) {
     const NodeId interp = g.graph.addNode(op::kInterpolate);
     g.graph.connect(g.scatter, interp, 0);
     g.graph.connect(guideNode, interp, 1);
+    // (With either blend: directions turns strands between guides pointing apart where offsets
+    // shrinks them, a steeper gradient there, but no flip, a pop's size.)
+    for (const auto& [blend, bound] : {std::pair<const char*, float>{"offsets", 0.8f}, {"directions", 1.2f}}) {
+    SCOPED_TRACE(blend);
+    g.graph.node(interp).params().set("blend", std::string(blend));
     const auto out = g.eval(interp);
     ASSERT_TRUE(out);
     const std::size_t n = out->strandCount();
@@ -792,8 +797,9 @@ TEST(Interpolate, TheShapeIsContinuousAcrossTheGuidesFringe) {
             }
         }
     }
-    EXPECT_LT(worst, 0.8f) << "neighbouring strands across the fringe differ by " << worst << " at the tip, rooted at "
-                           << worstAt.x << " " << worstAt.z;
+    EXPECT_LT(worst, bound) << "neighbouring strands across the fringe differ by " << worst << " at the tip, rooted at "
+                            << worstAt.x << " " << worstAt.z;
+    }
 }
 
 TEST(Interpolate, PreserveLengthKeepsTheGuidesLength) {
@@ -807,6 +813,7 @@ TEST(Interpolate, PreserveLengthKeepsTheGuidesLength) {
     const NodeId guideNode = g.graph.addNode(op::kGuides);
     const NodeId interp = g.graph.addNode(op::kInterpolate);
     g.graph.node(interp).params().set("neighbors", std::int64_t{2});
+    g.graph.node(interp).params().set("blend", std::string("offsets"));  // (directions keeps it already)
     g.graph.connect(g.scatter, interp, 0);
     g.graph.connect(guideNode, interp, 1);
     auto middleLength = [&](bool preserve) {
@@ -827,6 +834,113 @@ TEST(Interpolate, PreserveLengthKeepsTheGuidesLength) {
     const float guideLength = 0.7f * std::sqrt(2.0f);
     EXPECT_NEAR(middleLength(true), guideLength, 0.02f);
     EXPECT_LT(middleLength(false), 0.85f * guideLength);
+}
+
+TEST(Interpolate, BlendDirectionsKeepsTheGuidesLengthBetweenPartedGuides) {
+    // Two guides of the same length pointing apart (a parting): blend offsets pulls the strands
+    // between them in (preserveLength off), blend directions keeps the guides' length and points
+    // them the way between, straight up halfway. With 17 points a strand and with 600 (more samples
+    // than the CPU engine holds: the streamed blend).
+    const auto plane = test::makePlane(8, 1.0f);
+    auto guides = std::make_shared<GuideSet>();
+    guides->add(1, test::straightCurve({0.0f, 0, 0.5f}, {-0.7f, 0.7f, 0}));
+    guides->add(2, test::straightCurve({1.0f, 0, 0.5f}, {0.7f, 0.7f, 0}));
+    guides->rootOnMesh(*plane);
+    const float guideLength = 0.7f * std::sqrt(2.0f);
+    for (const std::size_t points : {std::size_t{17}, std::size_t{600}}) {
+        auto strands = std::make_shared<StrandSet>();
+        for (int i = 1; i < 100; ++i) {
+            const SurfacePoint at = plane->closestPoint({0.01f * static_cast<float>(i), 0.0f, 0.5f});
+            std::vector<Vec3f> pts(points);
+            for (std::size_t j = 0; j < points; ++j) pts[j] = at.position + Vec3f(0, 0.3f * static_cast<float>(j) / static_cast<float>(points - 1), 0);
+            strands->addStrand(static_cast<StrandId>(i), pts, {}, at.root);
+        }
+        auto run = [&](const std::string& blend) {
+            auto op = OperatorRegistry::instance().create(op::kInterpolate);
+            op->params().set("neighbors", std::int64_t{2});
+            op->params().set("preserveLength", false);
+            op->params().set("blend", blend);
+            ExternalInputs ext;
+            EvalContext ctx;
+            ctx.externals = &ext;
+            return valueAs<StrandsPtr>(op->evaluate(ctx, {Value(StrandsPtr(strands)), Value(GuidesPtr(guides)), Value(MeshPtr(plane))}));
+        };
+        // The strands rooted near the middle: their mean length; how far the middle one's tip leans in x.
+        auto middle = [&](const StrandsPtr& out, float* lean) {
+            float sum = 0.0f;
+            std::size_t count = 0;
+            *lean = 0.0f;
+            for (std::size_t s = 0; s < out->strandCount(); ++s) {
+                const Vec3f* p = out->strandPoints(s);
+                const std::size_t n = out->strandPointCount(s);
+                if (std::abs(p[0].x - 0.5f) > 0.03f) continue;
+                float len = 0.0f;
+                for (std::size_t i = 1; i < n; ++i) len += (p[i] - p[i - 1]).length();
+                sum += len;
+                ++count;
+                if (std::abs(p[0].x - 0.5f) < 0.005f) *lean = std::max(*lean, std::abs(p[n - 1].x - 0.5f));
+            }
+            return count ? sum / static_cast<float>(count) : 0.0f;
+        };
+        float lean = 0.0f;
+        EXPECT_LT(middle(run("offsets"), &lean), 0.85f * guideLength) << points;
+        EXPECT_NEAR(middle(run("directions"), &lean), guideLength, 0.01f * guideLength) << points;
+        EXPECT_LT(lean, 0.01f) << points;
+        // At a guide's root, its shape (its own way, its length).
+        const StrandsPtr out = run("directions");
+        const Vec3f* first = out->strandPoints(0);
+        const Vec3f tip = first[out->strandPointCount(0) - 1] - first[0];
+        EXPECT_LT(tip.x, -0.5f) << points;
+        EXPECT_NEAR(tip.length(), guideLength, 0.05f) << points;
+    }
+}
+
+TEST(Interpolate, GuideWeightPullsTheBlendTowardTheHeavierGuides) {
+    // Two guides pointing apart, their guideWeight from a guide layer: the strands between lean
+    // toward the heavier one; a guide weighed 0 shapes nothing another guide reaches. A number, or
+    // every guide weighed alike, blends as without.
+    const auto plane = test::makePlane(8, 1.0f);
+    auto strands = std::make_shared<StrandSet>();
+    for (int i = 1; i < 100; ++i) {
+        const SurfacePoint at = plane->closestPoint({0.01f * static_cast<float>(i), 0.0f, 0.5f});
+        strands->addStrand(static_cast<StrandId>(i), {at.position, at.position + Vec3f(0, 0.15f, 0), at.position + Vec3f(0, 0.3f, 0)},
+                           {}, at.root);
+    }
+    auto run = [&](float left, float right, const ParamValue& weight) {
+        auto guides = std::make_shared<GuideSet>();
+        guides->add(1, test::straightCurve({0.0f, 0, 0.5f}, {-0.7f, 0.7f, 0})).attributes["w"] = left;
+        guides->add(2, test::straightCurve({1.0f, 0, 0.5f}, {0.7f, 0.7f, 0})).attributes["w"] = right;
+        guides->rootOnMesh(*plane);
+        auto op = OperatorRegistry::instance().create(op::kInterpolate);
+        op->params().set("neighbors", std::int64_t{2});
+        op->params().set("guideWeight", weight);
+        ExternalInputs ext;
+        EvalContext ctx;
+        ctx.externals = &ext;
+        return valueAs<StrandsPtr>(op->evaluate(ctx, {Value(StrandsPtr(strands)), Value(GuidesPtr(guides)), Value(MeshPtr(plane))}));
+    };
+    // The tip of the strand rooted halfway, and of the one at the right guide's root, from their roots.
+    auto tip = [](const StrandsPtr& out, std::size_t s) {
+        const Vec3f* p = out->strandPoints(s);
+        return p[out->strandPointCount(s) - 1] - p[0];
+    };
+    MapRef layer;
+    layer.source = MapRef::Source::Guide;
+    layer.name = "w";
+    // (Positions: the layer's values become a strand channel.)
+    const std::vector<Vec3f> plain = run(1.0f, 1.0f, 1.0)->positions();
+    EXPECT_EQ(run(1.0f, 0.25f, 0.3)->positions(), plain);
+    EXPECT_EQ(run(0.5f, 0.5f, ParamValue(layer))->positions(), plain);
+    EXPECT_NEAR(tip(run(1.0f, 1.0f, 1.0), 49).x, 0.0f, 0.02f);
+    const StrandsPtr leaning = run(1.0f, 0.25f, ParamValue(layer));
+    EXPECT_LT(tip(leaning, 49).x, -0.1f);
+    EXPECT_GT(tip(leaning, 98).x, 0.15f) << "at its root a guide still wins";
+    // The right guide weighed 0: every strand the left one reaches takes its shape.
+    const StrandsPtr left = run(1.0f, 0.0f, ParamValue(layer));
+    EXPECT_LT(tip(left, 49).x, -0.2f);
+    EXPECT_LT(tip(left, 98).x, -0.2f);
+    // Both 0: alike, as without.
+    EXPECT_EQ(run(0.0f, 0.0f, ParamValue(layer))->positions(), plain);
 }
 
 // Scalp, guides and parts into Scatter and Interpolate, the strands' channels included.
@@ -976,8 +1090,7 @@ TEST(Interpolate, TheBindingIsMadeAgainWhenRootsPartsOrItsParamsChange) {
         {"parts removed", [](BoundInterpolate&, InterpInputs& in) { in.parts = nullptr; }},
         {"respectParts off", [](BoundInterpolate& g, InterpInputs&) { g.node("interp").params().set("respectParts", false); }},
         {"neighbors", [](BoundInterpolate& g, InterpInputs&) { g.node("interp").params().set("neighbors", std::int64_t{5}); }},
-        {"reach", [](BoundInterpolate& g, InterpInputs&) { g.node("interp").params().set("reach", 2.5); }},
-        {"power", [](BoundInterpolate& g, InterpInputs&) { g.node("interp").params().set("power", 3.0); }},
+        {"smoothness", [](BoundInterpolate& g, InterpInputs&) { g.node("interp").params().set("smoothness", 0.8); }},
         {"strand roots", [](BoundInterpolate& g, InterpInputs&) { g.node("scatter").params().set("seed", std::int64_t{4}); }},
         {"rest pose", [](BoundInterpolate&, InterpInputs& in) { in.scalp = bentPlane(0.0f, 0.3f, 0.4f); }},
     };
@@ -1130,7 +1243,7 @@ StrandsPtr strandsAt(const ScalpMesh* scalp, const std::vector<Vec3f>& roots, co
 
 // Interpolate's outputs over the cases its code branches on, in order, each named: a curved scalp
 // with a rest pose, a sphere with guides opposite strands (normals turned half way round), no
-// scalp; parts; a radius and its falloff; take length; preserveLength off; one neighbor and
+// scalp; parts; a radius and its falloff; take length; preserveLength off; blend directions; one neighbor and
 // sixteen (every guide, plain inverse distance); powers 0, 1 and 3; straight guide spans; guide
 // attributes and per-point layers (one longer than its guide, one missing on a guide); a guide of
 // one point (skipped) and one of two; strands of 0, 1, 2, 5, 16, 33 and 40 points (fewer and more
@@ -1238,6 +1351,15 @@ std::vector<std::pair<std::string, StrandsPtr>> interpolateCases() {
          }},
         {"take length", [](ParamSet& p) { p.set("take", std::string("length")); }},
         {"no preserveLength", [](ParamSet& p) { p.set("preserveLength", false); }},
+        {"directions", [](ParamSet& p) { p.set("blend", std::string("directions")); }},
+        {"directions radius", [](ParamSet& p) {
+             p.set("blend", std::string("directions"));
+             p.set("limitDistance", 0.3);
+         }},
+        {"directions sixteen", [](ParamSet& p) {
+             p.set("blend", std::string("directions"));
+             p.set("neighbors", std::int64_t{16});
+         }},
         {"one neighbor", [](ParamSet& p) { p.set("neighbors", std::int64_t{1}); }},
         {"one neighbor parts", [](ParamSet& p) { p.set("neighbors", std::int64_t{1}); }, 0, true},
         {"sixteen neighbors", [](ParamSet& p) { p.set("neighbors", std::int64_t{16}); }},
@@ -1253,6 +1375,8 @@ std::vector<std::pair<std::string, StrandsPtr>> interpolateCases() {
         {"no scalp", [](ParamSet&) {}, 2},
         {"no scalp radius", [](ParamSet& p) { p.set("limitDistance", 0.5); }, 2},
         {"no scalp no preserveLength", [](ParamSet& p) { p.set("preserveLength", false); }, 2},
+        {"no scalp directions", [](ParamSet& p) { p.set("blend", std::string("directions")); }, 2},
+        {"sphere directions", [](ParamSet& p) { p.set("blend", std::string("directions")); }, 1},
         {"ties", [](ParamSet&) {}, 3},
         {"ties one neighbor", [](ParamSet& p) { p.set("neighbors", std::int64_t{1}); }, 3},
         {"ties sixteen", [](ParamSet& p) { p.set("neighbors", std::int64_t{16}); }, 3},

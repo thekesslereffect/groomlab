@@ -78,11 +78,11 @@ follow it.
 | Collide | Collide, SelfCollide, MeshCut | Collisions with meshes and between strands; cuts by a mesh. |
 | Look | Clump, Twist, Braid, Noise, Curl, Flyaway, Static, Tangle, Wet, Instance, Scales | Clumping, locks, braids, frizz, curls, strays, static and wet hair; meshes and scales along strands. |
 | Motion | Wind, Jiggle, Simulate | Procedural motion and guide simulation ([Motion & simulation](/docs/motion-and-simulation)). |
-| Feathers | Propagate, Plume, Split | Feathers grown from shafts and layered over the body ([Fur & feathers](/docs/fur-and-feathers)). |
+| Feathers | Propagate, Plume | Feathers grown from shafts and layered over the body ([Fur & feathers](/docs/fur-and-feathers)). |
 | Color | HairColor, Bands, FeatherColor, RenderData | Hair color, banded fur, feather patterns ([Color patterns](/docs/color-patterns)); opacity ([Rendering](/docs/rendering)). |
 | Convert | ToGuides, ToStrands, StrandMesh | Convert strands to guides and back; strands as a live polygon mesh. |
 | Fields & Curves | Map, Expression, Control, FieldNoise, FieldRemap, FieldCombine, Curve | Drive parameters from maps, images, expressions or sliders. |
-| Utility | Value, Group, Blend, Attribute, Merge, Switch, Output | One value for any param, strand masks, custom attributes, blending and combining branches, variants. |
+| Utility | Value, Group, Blend, Attribute, Merge, Switch, Split, Output | One value for any param, strand masks, custom attributes, blending and combining branches, variants, routing strands to four outputs. |
 | Games | Cards | Game hair cards ([Game export](/docs/game-export)). |
 
 Random values are seeded from each strand's stable ID, so a groom evaluates identically on every
@@ -95,13 +95,14 @@ Clump pulls strands toward clump centers. Main parameters:
 
 | Param | Effect | Typical |
 | --- | --- | --- |
-| `strength` | Pull toward the center, mappable. Negative values push strands away (fur parting around whiskers, horns, eyes; `repelRadius` sets the distance). | 0.5-0.9 |
+| `strength` | Pull toward the center, mappable. Negative values push strands away (fur parting around whiskers, horns, eyes): strands within twice `repelRadius` (advanced) move out, those at the center to `repelRadius`, keeping their order so none cross at the part. | 0.5-0.9 |
 | `centersFrom` | Source of the clump centers: `pick` selects them among the strands; `inputPoints` or `inputCurves` take them from the `centers` input (see below). | `pick` |
 | `clumpBy`, `count`, `size` | With `pick`: about `count` clumps, or (`clumpBy` `size`) clumps about `size` apart, so a body gets more clumps than a head at the same clump size. | 300 clumps |
 | `randomness` | 0 distributes the centers evenly, 1 places them at random. | |
-| `lockRadius` | Gathers strands into a round lock of this radius (dreads, wet strings); add a Twist after it for ropes. | 0 |
-| `flatness` | Flattens each clump into a ribbon (wet hair). | 0 |
-| `volumize`, `strengthRandom`, `lockRadiusRandom`, `copyAmount` | Fill each clump out near the root; randomize each clump's strength and lock radius; copy neighboring clumps' shape so adjacent clumps share one flow. | 0 |
+| `lockRadius` | Gathers strands into a round lock of this radius (dreads, wet strings); each strand keeps its place around the lock, so strands never cross in it. Add a Twist after it for ropes. | 0 |
+| `flatness`, `flatAlong` | Flattens each clump into a ribbon (wet hair), lying along the scalp, at random or along `flatDirection`; the ribbon turns with the clump without spinning. | 0 |
+| `volumize`, `strengthRandom`, `copyAmount` | Fill each clump out near the root; randomize each clump's strength; copy neighboring clumps' shape (the 4 nearest, weighed by distance, with no pops as clumps move) so adjacent clumps share one flow. | 0 |
+| `strandStrengthRandom` | Each strand's pull weakened by up to this share, at random: some strands hug the clump, some hang loose (Yeti's `weightRandom`). | 0 |
 | `pastTip` | For strands longer than their clump's axis: `gather` them at the axis tip, or `extend` past it while keeping their length. | `gather` |
 | `clumpChannel` | Per-strand attribute that receives the clump index (`clumpId`). Chained Clumps should each use their own; Twist, Cards and HairColor's `clumpShare` read the one named by their own `clumpChannel`. | `clumpId` |
 | `followTubes` | With `pick`, for strands filling [tube guides](/docs/guides-and-brushes#tube-guides) (Interpolate's `fillTubes`): each tube picks its own centers among its strands, as far apart as `clumpBy` says, and a strand clumps only toward its own tube's, so clumps stay inside the tube and flatten, twist and taper with it. Strands in no tube clump as usual. No effect on strands without tubes. | on |
@@ -131,11 +132,11 @@ To keep strand lengths after clumping, add a **RestoreLength** after the Clump w
 
 | Node | Effect | Main params |
 | --- | --- | --- |
-| **Length** | Trims strands. Each keeps `keep` of its length; a `fraction` of them loses a random share between `trimMin` and `trimMax`, for uneven ends. To lengthen strands, use Transform's `scale`. | `keep`, `fraction`, `trimMin`, `trimMax` |
+| **Length** | Trims strands. Each keeps `keep` of its length; a `fraction` of them loses a random share up to `randomness`, for uneven ends. To lengthen strands, use Transform's `scale`. | `keep`, `fraction`, `randomness` |
 | **Direction** | Sets the strand direction at the root by `inclination` (degrees from the scalp normal: 0 is straight out, 90 is flat) and `roll` (degrees around the normal). | `inclination`, `roll`, `strength` |
 | **Bend** | Bends strands toward the scalp normal (negative: down onto the scalp), the scalp's U direction or a world direction, between `start` and `end` along the length, without bending past it. With `start` and `end` at 0 it raises each strand at the root, for root volume. With `along` `direction`, the direction is projected onto the scalp, so `angle` 180 combs every strand that way; `direction` can also be a per-strand vector expression. | `angle`, `along`, `start`, `end` |
 | **Transform** | Translates, rotates and scales each strand about its root, or the whole set about a pivot. | `scale`, `scaleRandom` |
-| **Collide** | Pushes strands out of the scalp and of collision meshes (**Pick** on the Colliders row, or a ColliderMesh node), `offset` above the surface. `softness` ramps the push in over a band above the surface, so hair bends away before contact; `smoothing` spreads the correction up the strand, so hair resting on a surface slides along it instead of folding. Both apply to colliders only, not the scalp; 0 gives a hard projection. Place it last. | `offset`, `softness`, `smoothing` |
+| **Collide** | Pushes strands out of the scalp and of collision meshes (**Pick** on the Colliders row, or a ColliderMesh node), `offset` above the surface. `softness` is a length along the strand: hair starts curving that far before it meets a collider and then slides along it instead of folding flat. It applies to colliders only, not the scalp; 0 gives a hard projection. Place it last. | `offset`, `softness` |
 | **SelfCollide** | Resolves hair-hair interpenetration as a volume constraint: where hair is packed denser than `packing` (the fraction of space hair may fill) allows, it is pushed apart, so layers rest on each other and volume builds up behind the ears and at the crown. Hair below that density is not moved, and nothing is pushed into the scalp. Lower `packing` for more volume. Place it near the end, after the shaping nodes. It works on strands; cards (the Cards node) are kept apart by the Cards node's own Separation. | `strength`, `packing`, `profile` |
 | **Static** | Electrostatic repulsion between strands: the outer layer puffs out, tips lift away from the head, and clumps fray into single strands. The charge increases toward the tips (`profile`); `randomness` lets some strands move farther. | `strength`, `randomness`, `profile` |
 | **Sculpt** | Brushable procedural guides: place it after a ToGuides (dense guides interpolated from your sparse ones), select it in the Graph Editor, and the shaping brushes edit its guides. Edits are stored as bends and length changes along each guide, so upstream changes (combing the sparse guides, changing density) are applied under them. **Clear Sculpt Edits** at the top of its panel removes them. | `strength` |
@@ -160,18 +161,20 @@ blended with weights that fall off with distance, then the blended curve is resa
 strand's point count.
 
 **Which guides are used.** Interpolate uses whatever its `guides` input delivers. In the default
-graph that is a **Guides** node with `level` -1, which delivers the deepest guide level only:
-once any child guides exist, strands interpolate from the children, and the primary guides drive
-the strands only through their children. Set the Guides node's `group` (one or more group names)
+graph that is a **Guides** node with `level` -1, which delivers each family's deepest groups:
+where a group has child guides, strands interpolate from the children, and its primary guides
+drive the strands only through them; a group without children (or whose child groups are empty)
+delivers its own guides. Scatter's `guideRadius` grows hair around every level of those groups. Set the Guides node's `group` (one or more group names)
 to choose groups explicitly, or `exclude` to leave groups out (for example braid paths). Guide
 visibility and the freeze mask do not affect interpolation.
 
-**How the weights are computed.** Every guide has its own influence radius, its *reach*: `reach`
-times the distance to its `neighbors`-th nearest other guide. Guides are therefore wider where
+**How the weights are computed.** Every guide has its own influence radius, its *reach*: 1.5
+times the distance to its `neighbors`-th nearest other guide (scaled by `smoothness`: 1 to 3 times). Guides are therefore wider where
 they are sparse and narrower where they are dense, without a global radius to tune. For a strand
 at distance *d* from a guide of reach *R*, the guide's weight is the modified Shepard term
 `(R - d) / (R·d)` (zero at the edge of the reach), divided by the largest such term among the
-strand's guides, raised to `power`, and finally normalized so the weights sum to 1. Distances
+strand's guides, raised to a power (2, scaled by `smoothness`: 6 sharp to 1 soft), and finally
+normalized so the weights sum to 1. Distances
 are in scene units, measured between root positions on the scalp's rest pose (along the skin with
 `followSurface`, see below), never in UV space.
 
@@ -181,14 +184,14 @@ strand is left unguided. To leave strands far from guides unaffected, use `limit
 
 | Param | Default | Effect | When to change it |
 | --- | --- | --- | --- |
-| `neighbors` | 3 | Sets each guide's reach (to its *n*-th nearest guide, times `reach`) and so how many guides blend into a strand. 1 takes the nearest guide only, with hard edges between guides (Voronoi cells). Range 1-16. | Raise it for smoother blending over sparse or uneven guides; 1 for stylized, cleanly separated locks. |
-| `reach` | 1.5 | Multiplier on each guide's reach (at least 1). | Raise it when strands between guides look pulled toward single guides; lower it to keep each guide's shape more local. |
-| `power` | 2 | Exponent on the normalized weights (advanced; hidden when `neighbors` is 1). Higher values make the nearest guide dominate; 0 blends all guides in reach equally. | Raise it for crisper transitions between guides, lower it for softer ones. |
+| `smoothness` | 50% | How softly the guides blend into one another, the one control most grooms need: 0% is sharp (each strand mostly its nearest guide: crisp locks with soft edges), 100% is soft (each guide reaching twice as far, its neighbours blended evenly). At 50% the weights are exactly as `neighbors`, `reach` and `power` set them; it scales `reach` (by 2/3 at 0%, 2 at 100%) and `power` (by 3 at 0%, 1/2 at 100%). Hidden when `neighbors` is 1. | Lower it for stylized, separated locks; raise it for soft fur or sparse guides. |
+| `guideWeight` | 1 | How strongly each guide pulls the strands around it against its neighbours, read at the guide's root (mappable). Paint it with Groom Tools > Paint > + New Map > Guide weight, or plug in any map: where it is black the guides give way to their neighbours, and a guide weighed 0 shapes only the strands no other guide reaches. A number alone changes nothing (every guide weighed alike). A painted guide layer works too. Hidden when `neighbors` is 1. | Stop a stray guide from bleeding into its neighbours' hair, or let the key guides of a style dominate the ones around them. |
+| `neighbors` | 3 | Advanced. Sets each guide's reach (to its *n*-th nearest guide, times 1.5 scaled by `smoothness`) and so how many guides blend into a strand. 1 takes the nearest guide only, with hard edges between guides (Voronoi cells). Range 1-16. | Raise it for smoother blending over sparse or uneven guides; 1 for stylized, cleanly separated locks. |
 | `limitDistance` | 0 | Maximum distance (scene units) from the nearest guide root at which guides have any influence. Strands farther away keep their incoming shape (for example from a Flow node). 0 disables the limit, and `falloff` and `influenceChannel` are then unused. | Guides only for tufts or accents on otherwise flow-groomed fur, within a radius of each guide (to paint where instead, see the `flow_with_guides` preset: a Blend by a painted map). |
 | `falloff` | linear 1 to 0 | With `limitDistance` above 0: influence as a function of distance, from the guide root (left) to `limitDistance` (right). Between 0 and 1 the strand is a blend of its incoming shape and the interpolated one. | Shape the transition between guided and unguided areas. |
 | `influenceChannel` | `guideInfluence` | With `limitDistance` above 0: per-strand attribute that receives the influence, 0-1 (empty: not written). | Mask later nodes (Affect) by how strongly the guides apply. |
 | `take` | `shape` | `shape` takes the guides' shape and length. `length` keeps each strand's incoming shape and only scales it to the blended guide length. | `length` for fur shaped by Flow or Direction, with guides used only to paint length. |
-| `smoothGuides` | on | Reads each guide as a centripetal Catmull-Rom curve through its points, as the viewport draws it, rather than as a polyline. | Turn off only to reproduce polyline guides exactly. |
+| `blend` | `directions` | How the guides' shapes combine. `offsets` averages their points: guides pointing different ways pull the strands between them in (`preserveLength` scales them back as a whole). `directions` builds each strand segment by segment, along its guides' average direction at their average length, so strands between guides pointing apart (a parting, a cowlick) keep the guides' length and curve smoothly from one side to the other. Where guides nearly cancel out (more than about 120 degrees apart) `directions` eases the strand's segments down as `offsets` does, so no strand flips. Shown with `take` `shape`. Interpolate nodes saved before GroomLab 0.34 keep `offsets` (Upgrade switches them). | `offsets` to match grooms made before, or for its softer transitions where guides point against each other. |
 | `preserveLength` | on | Rescales each blended strand to the weighted mean length of its guides (blending guides that point in different directions would otherwise shorten it; at most 2x). | Turn off to see the raw blend. |
 | `keepClearance` | on | Keeps strands out of the skin: where the skin bulges more under a strand than under its guides (an ear, a cheek, the neck), the part that would sink in is lifted just onto the skin with its length kept, and past the bulge the strand eases back to its groomed path, so hair drapes over an ear instead of standing off it. Needs the `scalp` input. | Leave on; use a Collide node only for other meshes (shoulders, a collar). |
 | `followSurface` | on | Measures distances along the scalp surface instead of in a straight line, so a guide does not influence strands across an ear, a fold or a thin shell. Also transports guide shapes across the curved scalp, so hair combed back stays combed back over the whole head. | Leave on; turn off only on flat or open scalps where straight-line distance is wanted. |
@@ -326,7 +329,10 @@ Branch after Interpolate into two looks and join them with a **Blend** node. Its
 a, 1: input b) multiplied by its root-to-tip `profile` blends the shape and, with a **HairColor**
 in each branch, the color. Set `include` to `shape` to blend only the shape. Drive `mix` with a
 slider or a painted map to animate or paint it (the `blend_two_looks` preset). A plugged map is
-multiplied by `mix` (1 by default), so with `mix` at 1 the map alone sets the blend.
+multiplied by `mix` (1 by default), so with `mix` at 1 the map alone sets the blend. `keepLength`
+(advanced, on for new Blend nodes) blends each segment's direction and length from the root, so a
+strand midway between a curly look and a straight one keeps its length; Blend nodes saved before
+GroomLab 0.34 blend the points.
 
 ## Animating parameters
 

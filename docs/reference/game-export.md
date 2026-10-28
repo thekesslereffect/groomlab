@@ -80,6 +80,15 @@ Game cards as glTF, below).
   and the atlas). `groomlab.create_cards` and `cards_preset` change every Cards node of the
   graph (not those inside compounds), or only the one named (`node=`); the panel's LOD menu sets
   its own node.
+- **Cards from guides** (`cardsFrom` `guides`, with the node's `guides` input linked to a Guides
+  node; drawing that link in a Graph Editor sets it, and `groomlab.create_cards(groom,
+  from_guides=True)` does both): each strand joins the guide whose root is nearest its own, and
+  each guide holding `minStrands` or more is one card (or a cross, as `crossStyle` says) along the
+  guide itself, its smooth curve from where it grows, as wide as those strands and baked from
+  them, so the cards are where the guides are (a card per curve, as curve-to-card tools make
+  them). Clumps, `cardsPerClump`, `layers`, `maxCards`' merging and `flyawayCards` then do
+  nothing; feathers and braids are carded as ever. `strands` (the default) follows the strands
+  as below: with few guides that gives many more, narrower cards, each along its own strands.
 - **Cards per clump:** clumps come from the `clumpChannel` (`clumpId` by default, what Clump
   writes); without clumps, strands group by root into as many groups as `maxCards` allows
   (`maxCards` / (`cardsPerClump` x `layers`); 0: 60). Each clump then gets `cardsPerClump` x `layers` cards: its strands are banded by depth (how far
@@ -106,7 +115,8 @@ Game cards as glTF, below).
   width, never farther than their strands lie off it) and turns them a little the other way, so
   layered cards never share a plane (no z-fighting, more volume); a lone card is never ruffled.
 - **Separation** (its own section: `separation` for hair cards, off by default; `featherSeparation` for feather
-  cards, 0.05; `separationIterations`, 8): cards closer than a gap to another card, or passing
+  cards, off by default since GroomLab 0.34, nodes saved before keeping 0.05; `separationIterations`,
+  8): cards closer than a gap to another card, or passing
   through it, are pushed apart along their normals (`separateCards`, `engine/core/src/
   card_separation.cpp`). The gap is a share of the narrower card's width (between a hair and a
   feather card, the larger share), so it fits any scale. Each pass moves every card along its own
@@ -276,6 +286,14 @@ carrying `featherId`, `shaftU`, `side` and `isShaft`):
   the half shades with. Off: the flat strip of one quad per segment, exactly as before. Down
   feathers' crossed cards stay flat strips either way (a puff has no vanes to fold to, and each
   crossed card already bends along the shaft down its middle).
+- **Flatten** (`featherFlatten`, 1 for new Cards nodes, 0 for nodes saved before GroomLab 0.34):
+  how flat each card lies. At 1 the card keeps one plane along the shaft (its side the feather's
+  mean) and each spine half one fold, so every quad is flat and the texture shows no facets along
+  the quads' diagonals; the shaft still bends the card and the outline still follows the vanes,
+  and the root row seats on the skin as a whole, parallel to the rows above. At 0 the card turns
+  and folds with the barbs station by station, closer to the strands but with twisted quads
+  (issue 26: 37% of one groom's quads folded more than 15 degrees, 1% at 1). Values between
+  blend the two.
 - **Down feathers** (barbs `around` the shaft) get `crossCount` crossed cards (two, an X) as wide
   as the puff, each showing the same baked puff, alternate ones mirrored.
 - **Shared textures:** with `variations`, alike feathers (length, the vanes' outline, their

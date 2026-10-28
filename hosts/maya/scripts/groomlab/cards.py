@@ -20,9 +20,14 @@ from groomlab.paths import asset_folder, asset_name, resolve_path
 def create_cards(groom, segments=None, width_scale=None, density=None, clump_channel=None,
                  width_segments=None, curvature=None, twist=None, taper=None, before="output",
                  lod=None, cards_per_clump=None, layers=None, flyaway_cards=None, fit_twist=None, ruffle=None,
-                 margin=None, max_cards=None, braids=None, node=None):
+                 margin=None, max_cards=None, braids=None, node=None, from_guides=None):
     """Game cards for the groom, shown in its cards view (displayCards); returns the Cards node
     (`node`, else the first in the graph).
+
+    `from_guides` True lays the hair's cards along the guides (the node's cardsFrom guides): a
+    card, or a cross, along each guide from where it grows, as wide as the strands nearest it and
+    baked from them, the guides input linked to the graph's Guides node (the one feeding an
+    Interpolate); False lays them along the strands again (clumps, cardsPerClump and the rest).
 
     `braids` (on by default): strands a Braid node wove (its braidId channel) make one card
     set per braid, crossed along it (a cornrow one card on the scalp), instead of being carded
@@ -83,6 +88,18 @@ def create_cards(groom, segments=None, width_scale=None, density=None, clump_cha
         for target in targets:
             for key, value in params.items():
                 model.set_param(target, key, value)
+    if from_guides is not None:
+        guides = None
+        if from_guides:
+            feeding = [model.source_of(n, "guides") for n in model.order if model.node_type(n) == "Interpolate"]
+            guides = next((g for g in feeding if g), None) or next(
+                (n for n in model.order if model.node_type(n) == "Guides"), None)
+            if guides is None:
+                raise ValueError("%s has no Guides node to lay the cards along" % groom)
+        for target in targets:
+            model.set_param(target, "cardsFrom", "guides" if from_guides else "strands")
+            if guides:
+                model.connect(guides, target, "guides")
     model.save(groom)
     compare_cards(groom, True)  # show them
     return targets[0]

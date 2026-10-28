@@ -37,7 +37,7 @@ SHORTCUTS = (
     ("Shift (stroke)", "Smooth instead"),
     ("S", "Select guides (Shift: toggle, Ctrl: deselect)"),
     ("Ctrl + drag", "Paint guides into the selection, the rest frozen (Ctrl + click: add the guides in the ring; on none: deselect and unfreeze all)"),
-    ("Ctrl+Shift + drag", "Lasso guides into the selection, the rest frozen"),
+    ("Ctrl+Shift + drag", "Lasso guides into the selection, the rest frozen (round none: deselect and unfreeze all)"),
     ("Page Up / Page Down", "The brush level (parents / children)"),
     ("Y", "The pie menu: every brush"),
     ("Esc / right-click", "Cancel the stroke; Esc again leaves the tool"),
@@ -364,8 +364,8 @@ class ToolSession(object):
                         if not tools.select(lasso_scalp, view, ring, "add").get("picked"):
                             tools.select(lasso_scalp, view, ring, "replace")  # on none: all deselected, unfrozen
                     elif mode == "lasso":                # the guides inside added, the rest frozen
-                        if len(points) >= 3:
-                            tools.select(lasso_scalp, view, points, "add")
+                        if len(points) >= 3 and not tools.select(lasso_scalp, view, points, "add").get("picked"):
+                            tools.select(lasso_scalp, view, points, "replace")  # round none: all deselected, unfrozen
                     else:                                # painted: the rest frozen, one undo step
                         tools.selection_set(lasso_scalp, mode="add", solo=True)
                 except HelperError as e:

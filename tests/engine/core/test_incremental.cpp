@@ -204,7 +204,7 @@ std::unique_ptr<Chain> makeChain(const ChainEdit& edit = {}, bool stale = false)
     chain->node("noise").params().set("frequency", 3.0);
     chain->node("curl").params().set("radius", 0.02);
     chain->node("length").params().set("keep", 0.8);
-    chain->node("length").params().set("trimMax", 0.3);
+    chain->node("length").params().set("randomness", 0.3);
     chain->node("resample").params().set("segments", std::int64_t{7});
     chain->node("resample").params().set("mode", std::string("even"));
     const char* order[] = {"held", "diff", "noise", "curl", "length", "width", "resample", "out"};
@@ -1077,6 +1077,20 @@ TEST(Incremental, InterpolateBlendsAgainOnlyTheStrandsADabReaches) {
     }
 }
 
+TEST(Incremental, GuideWeightFromAGuideLayerFollowsStrokes) {
+    // guideWeight read from the guides' painted clump value: painting it weighs those guides again
+    // (the strands they reach bound again), combing keeps the weights, sliding moves their roots.
+    const Verified verified;
+    std::string graph = kInterpolateGraph;
+    const std::string interp = R"("params": {"limitDistance": 0.45})";
+    graph.replace(graph.find(interp), interp.size(), R"("params": {"guideWeight": {"guide": "clump", "min": 0.1, "max": 1.0}})");
+    GroomSession session(sphereGroom(graph, 40, 0));
+    SessionStrokeHost host(session);
+    ViewRequest request;
+    request.sculptDensity = 0.5f;
+    EXPECT_GT(strokeAndCompare(session, host, request, {"clump", "comb", "slide"}, 5), 0u);
+}
+
 TEST(Incremental, GuidesAddedOrErasedMidStrokeAndUndo) {
     // The kept guides change (one erased, one added through the preview): Interpolate evaluates in
     // full, and the next dabs are incremental again. Undo and redo after the strokes.
@@ -1691,6 +1705,7 @@ struct PartialHost {
     PartialHost() {
         builder.setRetain(false);
         builder.setWriteLines(true);
+        settings.sculptDisplay = 1;  // dimmed while a stroke is live (the default draws them as they are)
     }
     void draw(const ViewResult& view, bool stroke) {
         const DisplayFrame& frame = builder.update(DisplayInputs::fromView(view, stroke), settings);

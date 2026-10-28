@@ -25,7 +25,7 @@
     "sculptDisplay": {
       "label": "Strands",
       "tip": "How strands draw while a stroke is live (they also drop to a lighter density unless Full density is on)",
-      "default": "dimStrands",
+      "default": "normal",
       "items": [
         {"value": "normal", "label": "Strands as they are"},
         {"value": "dimStrands", "label": "Strands dimmed"},

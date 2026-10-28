@@ -377,6 +377,12 @@ struct ParamSpec {
     // node's ports: a Value node's kind, an Input's type).
     enum class Port { Auto, Value, None };
     Port port = Port::Auto;
+    // A default the param changed from: its operator raised its version (Operator::version) to
+    // `since` when the default became `defaultValue`, and a node saved before that version which
+    // leaves the param out takes `before`, what it made then (loadGraphJson, and a host's saved
+    // graph: GraphEdit's completed params). 0: never changed.
+    int since = 0;
+    ParamValue before = {};
 
     // The spec with hard limits (and the slider's range, unless one is set).
     ParamSpec range(double lo, double hi) const {
@@ -400,6 +406,13 @@ struct ParamSpec {
     ParamSpec in(std::string groupName) const {
         ParamSpec s = *this;
         s.group = std::move(groupName);
+        return s;
+    }
+    // The default this param had before version `version` of its operator (since, before).
+    ParamSpec formerDefault(int version, ParamValue value) const {
+        ParamSpec s = *this;
+        s.since = version;
+        s.before = std::move(value);
         return s;
     }
     ParamSpec adv() const {

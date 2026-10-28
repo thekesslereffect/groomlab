@@ -346,7 +346,8 @@ public:
             ParamSpec{"history", std::int64_t{12}, "Earlier frames of the scalp's motion it reacts to (more: a longer "
                                                    "memory)"}
                 .range(1, kMaxScalpHistory)
-                .soft(1, 24),
+                .soft(1, 24)
+                .adv(),
             {"profile", Ramp::linear(0.0f, 1.0f), "How much each part lags, root to tip (tips lag more)"},
             notAnimatable({"loop", false, "Read the frames before loopStart from the end of the range, so a scalp "
                                           "animation that loops from loopStart to loopEnd jiggles seamlessly: a looping "

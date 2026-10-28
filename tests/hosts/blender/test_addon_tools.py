@@ -485,6 +485,14 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(t.selected_count, 0)
         self.drag(ts, lasso + [lasso[0]], ctrl=True, shift=True)
         self.assertEqual(t.selected_count, 5)
+        # A lasso round no guide (off them): deselects and unfreezes all, as a click on none.
+        off = [[lo[0] - 20, lo[1] - 20, 1.0], [lo[0] + 20, lo[1] - 20, 1.0], [lo[0] + 20, lo[1] + 20, 1.0],
+               [lo[0] - 20, lo[1] + 20, 1.0], [lo[0] - 20, lo[1] - 20, 1.0]]
+        self.drag(ts, off, ctrl=True, shift=True)
+        self.assertEqual(t.selected_count, 0)
+        self.assertEqual(t.frozen_count, 0)
+        self.drag(ts, lasso + [lasso[0]], ctrl=True, shift=True)
+        self.assertEqual(t.selected_count, 5)
         self.click(ts, lo[0], lo[1], ctrl=True)
         t.radius = 2000
         self.click(ts, tip[0], tip[1], ctrl=True)

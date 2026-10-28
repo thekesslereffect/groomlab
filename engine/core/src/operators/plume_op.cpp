@@ -221,7 +221,8 @@ public:
             notAnimatable({"invert", false, "Turn the order over: the feathers that would lie on top lie underneath"}),
             notAnimatable({"iterations", std::int64_t{4}, "Passes per feather: each turns it by what its points still need"})
                 .range(0, 32)
-                .soft(1, 8),
+                .soft(1, 8)
+                .adv(),
             ParamSpec{"stiffness", 1.0, "1: each feather turns as a rigid whole about its root; 0: it bends, each part only "
                                         "as much as the contacts up to it need", "fraction"}
                 .range(0, 1),

@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -73,6 +74,15 @@ struct ClumpState {
 // preview_core.h sameOrShown; the same for interpolateState.)
 bool clumpState(const Operator& op, const StrandsPtr& output, ClumpState* state);
 
+// Clump's copyAmount: the centers center `c` takes its shape from, by root (`roots`, indexed by
+// `index`): its 4 nearest (skipping itself and those `shapeless` says have no shape), each weighed
+// by the inverse of its distance falling to 0 at the next center out (Shepard-Franke), so a center
+// joining or leaving the four as roots move weighs nothing as it does (no pop). Into `out`, 9 words:
+// the count, the centers, their weights (float bits, summing to 1). Count 0: none.
+constexpr std::size_t kClumpCopyWords = 9;
+void clumpCopyNeighbors(const class PointIndex& index, const std::vector<Vec3f>& roots, std::size_t c,
+                        const std::function<bool(std::size_t)>& shapeless, std::uint32_t* out);
+
 // ---- Wet ----------------------------------------------------------------------------------------
 
 // Wet (wet_op.cpp) clumps with a Clump per level, run largest first: level j (j halvings of its
@@ -131,6 +141,7 @@ struct InterpolateState {
     GuidesPtr guides;
     StrandsPtr strands;        // the strands it took (input 0), when still held
     bool channels = false;     // guide attributes or layers made strand or point channels
+    std::vector<float> weights;  // per kept guide, its guideWeight (empty: every guide alike)
 };
 bool interpolateState(const Operator& op, const StrandsPtr& output, InterpolateState* state);
 // The binding's records, flat (a pass over every strand: hosts keep them per binding), and those
@@ -155,9 +166,16 @@ std::size_t interpolateRecordBytes(const InterpolateState& state);
 // on the scalp (the paths along it start there; a guide whose root and reach stayed keeps its
 // paths). `parts`: the groom's parts (respected as the node's params say; null: none). The
 // operator keeps the binding as one of its own, so its next evaluation with these roots finds it.
-// False when `op` is not an Interpolate or the guides are not as many.
+// `guideWeights`: the kept guides' weights (interpolateGuideWeights). False when `op` is not an
+// Interpolate or the guides are not as many.
 bool interpolateRebind(const Operator& op, const PartLines* parts, const std::vector<Vec3f>& roots,
-                       const std::vector<StrandRoot>& guideRoots, InterpolateState* state);
+                       const std::vector<StrandRoot>& guideRoots, const std::vector<float>& guideWeights,
+                       InterpolateState* state);
+// The kept guides' guideWeight (`params`: the Interpolate node's, as evaluated: a field plugged in)
+// read at their roots on `scalp` (a guide off it: 1); empty when every guide weighs alike (a number,
+// no scalp), as the binding holds them (InterpolateState::weights). Throws GraphError as the map does.
+std::vector<float> interpolateGuideWeights(const ParamSet& params, const std::vector<const Guide*>& kept, const GuideSet* guides,
+                                           const ScalpMesh* scalp);
 
 // The kept guides' shapes as Interpolate blends them (its first stage): each guide (the smooth
 // curve through its points with smoothGuides) resampled by arc length to `samples` points, as
@@ -233,17 +251,16 @@ struct CollideRestState {
     Vec3f anchor;
     float bound = -1.0f;
 };
-// CollideOp's push of point p out of `mesh` to `to` above it (the offset, or with `soft` the offset
-// plus the softness, the push then eased: softPush), within maxDepth below and the search radius:
+// CollideOp's push of point p out of `mesh` to `to` above it (the offset), within maxDepth below and
+// the search radius:
 // through `rest` for a mesh deformed away from its rest pose (its rest field, the mesh itself where
 // that cannot tell), else through `field` (a still mesh's: its answers alone, the mesh's where it
 // has no grid), else (method exact) the mesh itself. True when it moved p. The CPU engine's Collide
 // asks the same (look.slang hostCollidePush; the GPU's reads the field as tables).
-bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* field, const ScalpMesh& mesh, Vec3f& p, float to, bool soft,
-                     float softness, float maxDepth, float searchRadius, CollideRestState& state);
+bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* field, const ScalpMesh& mesh, Vec3f& p, float to,
+                     float maxDepth, float searchRadius, CollideRestState& state);
 // Its last step: the mesh's own closest point (the bound of the last query skipping what it settles).
-bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth, float searchRadius,
-                     CollideRestState& state);
+bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, float maxDepth, float searchRadius, CollideRestState& state);
 
 // ---- Part ---------------------------------------------------------------------------------------
 

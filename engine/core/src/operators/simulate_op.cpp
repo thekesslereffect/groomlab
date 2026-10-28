@@ -98,7 +98,8 @@ public:
             notAnimatable({"repulsionRadius", 0.2, "Distance guides keep from each other while repulsion is on", "length"})
                 .atLeast(0)
                 .soft(0, 1)
-                .in("Collisions"),
+                .in("Collisions")
+                .adv(),
             notAnimatable({"volume", 0.0, "Hair volume, 0-1 (0: off): hair packed tighter than volumeCellSize is pushed "
                                           "apart, down the density of the hair around it, so long hair keeps its body"})
                 .range(0, 1)
@@ -107,7 +108,8 @@ public:
                                                   "this far apart (larger: fuller, smoother)", "length"})
                 .atLeast(0.001)
                 .soft(0.1, 5)
-                .in("Volume"),
+                .in("Volume")
+                .adv(),
             notAnimatable({"substeps", std::int64_t{4}, "Solver steps per frame (more: steadier fast motion)"})
                 .range(1, 64)
                 .soft(1, 16)

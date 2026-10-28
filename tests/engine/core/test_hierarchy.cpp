@@ -500,6 +500,47 @@ TEST(Hierarchy, GuidesOperatorFlattensLevelsAndGroups) {
     EXPECT_THROW(g.evaluate(guides, ctx), GraphError);
 }
 
+TEST(Hierarchy, LevelMinusOneTakesEachFamilysDeepestGroups) {
+    // A group with children (theirs), a group without (its own), and one whose child group is
+    // empty (its own): level -1 takes all three families, not only the hierarchy's deepest depth
+    // (which left the plain groups out of Interpolate and Scatter's guideRadius). Scatter's
+    // guideRadius grows round every level of them: as with the groups listed by hand.
+    TwoGuides s;
+    const GroupId children = s.h.generateChildren(s.primary, "children", {});
+    TubeProfile tube;
+    tube.width = {0.1f, 0.2f};
+    const GroupId bangs = s.h.addGroup("bangs");
+    s.h.addGuide(bangs, bentGuide({0.2f, 0, 0.8f}), tube);
+    s.h.addGuide(bangs, bentGuide({0.4f, 0, 0.8f}), tube);
+    const GroupId lone = s.h.addGroup("lone");
+    s.h.addGuide(lone, bentGuide({0.8f, 0, 0.2f}), tube);
+    s.h.addGroup("loneKids", lone);
+    s.h.evaluate(s.scalp.get());
+    EXPECT_EQ(s.h.deepestGroups(), (std::set<GroupId>{children, bangs, lone}));
+    EXPECT_EQ(s.h.flatten().size(), 13u);  // 10 children, 2 bangs, 1 lone
+
+    auto hierarchy = std::make_shared<GuideHierarchy>(s.h);
+    ExternalInputs ext;
+    ext.set("hierarchy", HierarchyPtr(hierarchy), hierarchy->contentHash());
+    ext.set("scalp", s.scalp, 1);
+    EvalContext ctx;
+    ctx.externals = &ext;
+    Graph g;
+    const NodeId scalp = g.addNode(op::kScalp);
+    const NodeId guides = g.addNode(op::kGuides);
+    const NodeId scatter = g.addNode(op::kScatter);
+    g.node(scatter).params().set("density", 4000.0);
+    g.node(scatter).params().set("guideRadius", 0.08);
+    g.connect(scalp, scatter, 0);
+    g.connect(guides, scatter, 1);
+    EXPECT_EQ(valueAs<GuidesPtr>(g.evaluate(guides, ctx))->size(), 13u);
+    const std::size_t byDefault = g.evaluateStrands(scatter, ctx)->strandCount();
+    g.node(guides).params().set("group", std::string("primary children bangs lone"));
+    const std::size_t listed = g.evaluateStrands(scatter, ctx)->strandCount();
+    EXPECT_GT(byDefault, 0u);
+    EXPECT_EQ(byDefault, listed);
+}
+
 TEST(Hierarchy, AGuidesNodeOnAGroupMadeEmptyGivesNoGuidesBeforeAnyIsDrawn) {
     // A groom with no guides yet and its hand-placed group made (the hand_placed_feathers preset):
     // an empty set, so the feathers it feeds grow nothing rather than missing their input.

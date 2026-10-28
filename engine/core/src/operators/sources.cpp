@@ -228,7 +228,8 @@ public:
         return {
             ParamSpec{"input", std::string("guides"), "Name of the external flat guide input"}.adv(),
             ParamSpec{"hierarchy", std::string("hierarchy"), "Name of the external guide hierarchy input"}.adv(),
-            notAnimatable({"level", std::int64_t{-1}, "Hierarchy level to use (-1: deepest), without groups"})
+            notAnimatable({"level", std::int64_t{-1}, "Hierarchy level to use without groups (-1: each family's deepest groups: a group's "
+                                                  "children where it has some, else its own guides)"})
                 .soft(-1, 5)
                 .when("group", {""}),
             {"group", std::string(), "Hierarchy groups to use instead of a level, space or comma separated, with "
@@ -351,8 +352,8 @@ private:
             }
             return out;
         }
-        int level = static_cast<int>(params().getInt("level"));
-        if (level < 0) level = hierarchy.maxDepth();
+        const int level = static_cast<int>(params().getInt("level"));
+        if (level < 0) return hierarchy.deepestGroups();
         for (const GuideGroup& grp : hierarchy.groups()) {
             if (hierarchy.groupDepth(grp.id) == level) out.insert(grp.id);
         }
@@ -431,12 +432,9 @@ private:
                 }
             }
         } else {
-            int level = static_cast<int>(params().getInt("level"));
-            if (level < 0) level = hierarchy.maxDepth();
-            std::unordered_map<GroupId, int> depths;
-            for (const GuideGroup& grp : hierarchy.groups()) depths[grp.id] = hierarchy.groupDepth(grp.id);
+            const std::set<GroupId> groups = pickedGroups(hierarchy);
             for (const HierarchyGuide& g : hierarchy.guides()) {
-                if (depths[g.group] == level && g.points.size() >= 2 && !isExcluded(g.group)) take(g);
+                if (groups.count(g.group) && g.points.size() >= 2 && !isExcluded(g.group)) take(g);
             }
         }
         // The family's other levels: their tubes as pick() hands them on (GuideSet::levelTubes).

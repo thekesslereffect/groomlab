@@ -737,7 +737,7 @@ TEST(GraphEdit, NewNodesFitTheGroomsSize) {
     EXPECT_DOUBLE_EQ(params["atReference"]["amplitude"].get<double>(), 0.2);
     EXPECT_DOUBLE_EQ(params["unsized"]["amplitude"].get<double>(), 0.2);
     EXPECT_DOUBLE_EQ(params["twice"]["amplitude"].get<double>(), 0.4);  // a length: times 2
-    EXPECT_EQ(params["twice"]["octaves"].get<int>(), 2);                // unitless: the spec's
+    EXPECT_EQ(params["twice"]["octaves"].get<int>(), 1);                // unitless: the spec's
     EXPECT_DOUBLE_EQ(params["given"]["amplitude"].get<double>(), 0.05);
     EXPECT_DOUBLE_EQ(params["fur"]["density"].get<double>(), 80.0 * 100.0);  // a density: over the square
     EXPECT_DOUBLE_EQ(params["fur"]["length"].get<double>(), 0.1);
@@ -858,6 +858,45 @@ TEST(NodeVersions, OldNodesKeepTheirBehaviourUntilUpgraded) {
     }
     EXPECT_THROW(loadGraphJson(R"({"nodes": [{"name": "x", "type": "TestVersioned", "version": 0}], "output": "x"})"),
                  GraphError);
+}
+
+TEST(NodeVersions, AChangedDefaultKeepsTheFormerOneForNodesSavedBefore) {
+    // Interpolate 2 made blend directions the default (ParamSpec::formerDefault): a node saved at 1
+    // that leaves it out keeps offsets,
+    // loaded or completed by an editor; one set otherwise keeps its value; a new node takes the
+    // new defaults; an Upgrade moves a param still at its former default to the new one.
+    const std::string saved =
+        R"({"nodes": [{"name": "old", "type": "Interpolate", "version": 1, "params": {}},
+                      {"name": "chose", "type": "Interpolate", "version": 1, "params": {"blend": "directions"}},
+                      {"name": "new", "type": "Interpolate", "params": {}}], "output": "old"})";
+    GraphDocument doc = loadGraphJson(saved);
+    auto blendOf = [&](const char* name) { return doc.graph.node(doc.node(name)).params().getString("blend"); };
+    EXPECT_EQ(blendOf("old"), "offsets");
+    EXPECT_EQ(blendOf("chose"), "directions");
+    EXPECT_EQ(blendOf("new"), "directions");
+    // Saved again: the old node's values written down, its version kept.
+    const nlohmann::json written = nlohmann::json::parse(saveGraphJson(doc));
+    for (const nlohmann::json& n : written["nodes"]) {
+        EXPECT_EQ(n["params"]["blend"].get<std::string>(), n["name"] == "old" ? "offsets" : "directions") << n["name"];
+        EXPECT_EQ(n["version"].get<int>(), n["name"] == "new" ? 2 : 1) << n["name"];
+    }
+    // An editor completing the params (what a host saves) gives the same.
+    GraphEdit edit(saved);
+    edit.completeParams();
+    auto editedBlend = [&](const char* name) {
+        const nlohmann::json graph = nlohmann::json::parse(edit.toJson());
+        for (const nlohmann::json& n : graph["nodes"]) {
+            if (n["name"] == name) return n["params"]["blend"].get<std::string>();
+        }
+        return std::string();
+    };
+    EXPECT_EQ(editedBlend("old"), "offsets");
+    EXPECT_EQ(editedBlend("new"), "directions");
+    // Upgraded: the new defaults.
+    EXPECT_TRUE(edit.upgradeNode("old"));
+    EXPECT_EQ(editedBlend("old"), "directions");
+    GraphDocument upgraded = loadGraphJson(edit.toJson());
+    EXPECT_EQ(upgraded.graph.node(upgraded.node("old")).params().getString("blend"), "directions");
 }
 
 TEST(Graph, EachScatterGrowsWithTheResampleOfItsOwnBranch) {

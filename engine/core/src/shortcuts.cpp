@@ -30,7 +30,7 @@ const std::vector<Shortcut>& shortcuts() {
         {"brush.smooth", "Brush", "Shift (stroke)", "Smooth instead", kAll},
         {"brush.select", "Brush", "S", "Select guides (Shift: toggle, Ctrl: deselect)", kApp | kBlender},
         {"brush.selectAdd", "Brush", "Ctrl + drag", "Paint guides into the selection, the rest frozen (Ctrl + click: add the guides in the ring; on none: deselect and unfreeze all)", kAll},
-        {"brush.selectLasso", "Brush", "Ctrl+Shift + drag", "Lasso guides into the selection, the rest frozen", kAll},
+        {"brush.selectLasso", "Brush", "Ctrl+Shift + drag", "Lasso guides into the selection, the rest frozen (round none: deselect and unfreeze all)", kAll},
         {"brush.level", "Brush", "Page Up / Page Down", "The brush level (parents / children)", kAll, kSet},
         {"brush.symmetry", "Brush", "Alt+Shift+X", "Symmetry on or off", kMaya | kApp, kSet},
         {"brush.menu", "Brush", "Y + click", "The marking menu: every brush", kMaya | kApp, kSet},

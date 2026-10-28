@@ -24,7 +24,8 @@ from `generate_children`, `braids` for braid paths. The **Guides** tab of the Gr
 them as a tree with guide counts, levels and the graph nodes naming them; it selects, renames, deletes
 and adds a Guides node for a group. Every group, child groups too, is drawn in a hue of its own
 (a parent and its children, and siblings, well apart), from a hue of the groom's own; a group's
-swatch shows it and picks another (`set_guide_group_color`). A `Guides` node reads every group at a `level` (-1: the deepest), or the
+swatch shows it and picks another (`set_guide_group_color`). A `Guides` node reads every group at a `level` (-1: each family's deepest groups, a group
+without children its own guides), or the
 groups named in `group` (one or several, their guides together), and leaves the groups in `exclude`
 out; in the Graph Editor both have a **+** menu of the groom's groups. Other text params offer what
 exists too: a dropdown for fixed values (Braid `style`, HairColor `mode`, Instance
@@ -67,7 +68,8 @@ groomlab.brush_stroke(groom, "place", [point], level=1)            # a child pla
   coordinates, with their shape stored in the root's surface frame, so they move and turn with a
   moving or deforming scalp.
 - **Tip-first curves:** curves drawn tip-first are flipped when rooted.
-- **Which level is used:** the default graph's `Guides` node uses the deepest level (`level: -1`).
+- **Which level is used:** the default graph's `Guides` node uses each family's deepest groups
+  (`level: -1`): a group's children where it has some, else its own guides.
   Set `level` or `group` to use another one, and connected `guideCurves` are merged in as extra
   flat guides.
 - **Viewport:** primaries draw in `guideColor` (a vibrant blue by default), each level down
@@ -255,8 +257,9 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
 - **Ctrl while stroking:** reverses the brush. Signed brushes flip, paint goes toward
   1 − value (unfreeze or erase a map), and Cut grows.
 - **Hover:** the guides the brush would touch light up before you press.
-- **While sculpting:** strands drop to `sculptDensity` × the preview density and are dimmed
-  (or hidden: `sculptDisplay`), so the guides read.
+- **While sculpting:** by default the strands stay as they are, every strand of the preview
+  (`sculptDisplay` normal, `sculptDensity` 1: **Full density** on). Dim or hide them, or turn
+  Full density off (the strands drop to 0.35 × the preview density) to keep heavy grooms fast.
 - **Isolate** (beside the Group choice): the brushed group and its child groups stay at full
   color and the rest dim (`groomlab.isolate_group`).
 - **Guides by map:** guides can be colored by a painted map, black 0 to white 1
@@ -269,7 +272,7 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   the guides a stroke makes unfrozen and freeze every other, in the same undo step, so the next
   brush works on the new guide at once. **Ctrl+click** with a guide brush solos the
   guides in its ring the same way (Ctrl+drag paints them in, Ctrl+Shift+drag lassos them); a
-  Ctrl+click where the ring holds none unfreezes them all. The **Select**
+  Ctrl+click where the ring holds none, or a Ctrl+Shift lasso round none, unfreezes them all. The **Select**
   tool solos its selection (the guides not selected freeze, a pick of nothing unfreezes all;
   `select_tool(solo=False)` turns it off), one undo step with the selection. With symmetry on
   (world X or topology) the mirror guides stay live too: a guide placed with its mirror image, a
@@ -289,8 +292,8 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
     without the hotkey set.
 - **Shift and Ctrl in a brush:** Shift+drag smooths, whatever the brush. With a guide brush,
   Ctrl selects: Ctrl+click adds the guides in the ring (the rest freeze; on none: unfreeze all),
-  Ctrl+drag paints them in, Ctrl+Shift+drag lassos them. Painting maps or Freeze, Ctrl is the
-  opposite.
+  Ctrl+drag paints them in, Ctrl+Shift+drag lassos them (round none: deselect and unfreeze all).
+  Painting maps or Freeze, Ctrl is the opposite.
   - **Your own keys:** every tool also has a runtime command (category GroomLab) you can bind.
 
 - **Which guides:** `level` (or `group`) picks the guides a brush edits. Children still follow

@@ -124,9 +124,14 @@ void completeNode(json& node, int depth = 0) {
     if (!node.contains("version")) node["version"] = spec.value("version", 1);
     if (!node.contains("params") || !node["params"].is_object()) node["params"] = json::object();
     json& params = node["params"];
+    const int version = storedVersion(node, spec);
     for (const json& p : spec.value("params", json::array())) {
         const std::string name = p.value("name", std::string());
-        if (!name.empty() && !params.contains(name)) params[name] = p.value("default", json());
+        if (name.empty() || params.contains(name)) continue;
+        // (A default changed since the node's version: the one it was saved with.)
+        const json former = p.value("formerDefault", json());
+        const bool older = former.is_object() && version < former.value("since", 0);
+        params[name] = older ? former.at("value") : p.value("default", json());
     }
     if (type == "Script") {  // its header's params too (a definition that cannot be read: none)
         try {
@@ -594,7 +599,19 @@ bool GraphEdit::upgradeNode(const std::string& name) {
         if (!n.is_object() || n.value("name", std::string()) != name) continue;
         const nlohmann::json& spec = operatorSpec(n.value("type", std::string()));
         const int newest = spec.value("version", 1);
-        if (storedVersion(n, spec) >= newest) return false;
+        const int stored = storedVersion(n, spec);
+        if (stored >= newest) return false;
+        // A param whose default changed since, still at the former one, takes the new default (as a
+        // new node has it); one set to anything else stays.
+        if (n.contains("params") && n["params"].is_object()) {
+            nlohmann::json& params = n["params"];
+            for (const nlohmann::json& p : spec.value("params", nlohmann::json::array())) {
+                const nlohmann::json former = p.value("formerDefault", nlohmann::json());
+                const std::string name = p.value("name", std::string());
+                if (!former.is_object() || stored >= former.value("since", 0) || !params.contains(name)) continue;
+                if (params[name] == former.at("value")) params[name] = p.value("default", nlohmann::json());
+            }
+        }
         n["version"] = newest;
         completeNode(n);  // params the newer version added
         return true;
@@ -717,17 +734,43 @@ void GraphEdit::connect(const std::string& src, const std::string& dst, const st
 bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, const std::string& input,
                               const std::string& output) {
     impl_->connect(src, dst, input, output);
-    // A Clump picking its own centers takes the centers linked to it (its centersFrom: inputPoints).
-    if (input != "centers") return false;
-    for (json& n : impl_->nodes()) {
-        if (!n.is_object() || n.value("name", std::string()) != dst) continue;
-        if (n.value("type", std::string()) != op::kClump) return false;
-        json& params = n["params"];
-        if (!params.is_object()) params = json::object();
-        const auto it = params.find("centersFrom");
-        if (it != params.end() && !(it->is_string() && it->get<std::string>() == "pick")) return false;
-        params["centersFrom"] = "inputPoints";
-        return true;
+    // A Clump picking its own centers takes the centers linked to it (its centersFrom: inputPoints;
+    // from a Guides node, through any curve nodes after it, inputCurves: each clump along its
+    // guide); a Cards node following the strands, the guides linked to it (its cardsFrom: guides).
+    auto fromGuidesNode = [&] {
+        std::string at = src;
+        std::set<std::string> seen;
+        while (!at.empty() && seen.insert(at).second) {
+            if (nodeType(at) == op::kGuides) return true;
+            std::string next;
+            const json spec = impl_->spec(at);
+            for (const json& port : spec["inputs"]) {
+                if (port.value("type", std::string()) == "Curves") {
+                    next = impl_->sourceOf(at, port.value("name", std::string()));
+                    break;
+                }
+            }
+            at = next;
+        }
+        return false;
+    };
+    struct Switch {
+        const char *type, *input, *param, *from, *to, *toForGuides;
+    };
+    static const Switch kSwitches[] = {{op::kClump, "centers", "centersFrom", "pick", "inputPoints", "inputCurves"},
+                                       {op::kCards, "guides", "cardsFrom", "strands", "guides", "guides"}};
+    for (const Switch& sw : kSwitches) {
+        if (input != sw.input) continue;
+        for (json& n : impl_->nodes()) {
+            if (!n.is_object() || n.value("name", std::string()) != dst) continue;
+            if (n.value("type", std::string()) != sw.type) return false;
+            json& params = n["params"];
+            if (!params.is_object()) params = json::object();
+            const auto it = params.find(sw.param);
+            if (it != params.end() && !(it->is_string() && it->get<std::string>() == sw.from)) return false;
+            params[sw.param] = fromGuidesNode() ? sw.toForGuides : sw.to;
+            return true;
+        }
     }
     return false;
 }

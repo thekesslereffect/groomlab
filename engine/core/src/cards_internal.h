@@ -46,8 +46,10 @@ std::vector<Vec3f> cardVertexRow(const CardMesh::Card& card, std::size_t i, cons
 // row standing on edge moved as a whole, its lowest vertex there), then `lift` along the card's
 // normal (the node's offset). Only when `root`, where the strands grow, lies on the scalp
 // (within a few `clearance` of it): a card of strands rooted elsewhere (a feather held off the
-// body, curves not grown from this scalp) keeps the row its stations give.
-void seatCard(CardMesh::Card& card, const ScalpMesh& scalp, const Vec3f& root, float clearance);
+// body, curves not grown from this scalp) keeps the row its stations give. `rigid` (0..1): the row
+// toward moving as a whole (its lowest vertex onto the skin), so it stays parallel to the rows
+// above and the first quads flat (a flattened feather card: CardSettings::featherFlatten).
+void seatCard(CardMesh::Card& card, const ScalpMesh& scalp, const Vec3f& root, float clearance, float rigid = 0.0f);
 
 // The fixed-resolution shape when there is one (cards made here), else the stations.
 struct CardShape {

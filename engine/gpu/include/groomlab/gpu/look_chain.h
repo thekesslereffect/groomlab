@@ -267,13 +267,12 @@ private:
         const ScalpMesh* scalp = nullptr;
         std::shared_ptr<const PartInputs> inputs;
     };
-    // Collide: its surfaces' fields and their tables, each made for offsets (plus the softness) up
+    // Collide: its surfaces' fields and their tables, each made for offsets up
     // to its `most` at its field's reach: every offset of its field's cell size and reach.
     struct CollideMemo {
         MeshPtr meshes[2];
         DistanceFieldPtr fields[2];
         float most[2] = {0.0f, 0.0f};
-        float softness = 0.0f;
         std::shared_ptr<const CollideInputs> inputs;
     };
     struct ReachMemo {

@@ -1395,6 +1395,9 @@ TEST(AppPanels, DabsOffTheUiThreadCommitWhatDabsHereCommit) {
         EXPECT_TRUE(window.setBrushText(QStringLiteral("mode=comb")));
         EXPECT_TRUE(window.setBrushText(QStringLiteral("radius=120")));
         EXPECT_TRUE(window.setBrushText(QStringLiteral("strength=1")));
+        // A stroke document of its own (at full density, the default, the stroke is the view's
+        // own and its dabs evaluate here: GroomSession::detachStroke).
+        EXPECT_TRUE(window.setBrushText(QStringLiteral("sculptDensity=0.35")));
         GroomDocument* doc = window.document();
         auto* viewport = window.findChild<Viewport*>();
         EXPECT_TRUE(doc && viewport);

@@ -79,13 +79,13 @@ void clumpShape(const ParamSet& clump, const Get& get, StageParams* s) {
     const float repelRadius = static_cast<float>(get("repelRadius"));
     std::memcpy(&s->flag[0], &repelRadius, sizeof(float));  // the kernel reads its bits as a float
     s->flag[1] = clump.getString("pastTip") == "extend" ? 1 : 0;
-    const std::string flatten = clump.getString("flatten");
+    const std::string flatten = clump.getString("flatAlong");
     s->flag[2] = flatten == "random" ? 1 : flatten == "direction" ? 2 : 0;
     // The per-clump variation (by each center's ID: ClumpInputs::variation) and copy.
     s->value2[0] = static_cast<float>(get("strengthRandom"));
     s->value2[1] = static_cast<float>(get("lockRadiusRandom"));
     s->value2[2] = static_cast<float>(get("copyAmount"));
-    const Vec3f direction = clump.getVec3("flattenDirection");
+    const Vec3f direction = clump.getVec3("flatDirection");
     std::memcpy(&s->flag2[0], &direction.x, sizeof(float));
     std::memcpy(&s->flag2[1], &direction.y, sizeof(float));
     std::memcpy(&s->flag2[2], &direction.z, sizeof(float));
@@ -140,7 +140,7 @@ std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleStat
 // collideHostRoots); with `exact` (method exact) every mesh without a field or rest pose too, asked
 // of the mesh itself.
 std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes, std::uint32_t colliders,
-                                             const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why,
+                                             const std::vector<DistanceFieldPtr>& fields, float offset, std::string* why,
                                              const std::vector<std::shared_ptr<const RestPoseCollision>>& rests = {}, float maxDepth = 0.0f,
                                              float searchRadius = 0.0f, bool exact = false);
 // `inputs` with its host's roots: the strands `in`'s (`which`: those alone, in that order).

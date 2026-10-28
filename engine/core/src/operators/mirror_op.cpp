@@ -7,6 +7,7 @@
 #include <cmath>
 #include <unordered_set>
 
+#include "groomlab/color_patterns.h"
 #include "groomlab/graph.h"
 #include "groomlab/operators.h"
 #include "groomlab/parallel.h"
@@ -110,6 +111,11 @@ public:
             const Vec3f onto = at.position - pts[0];
             for (std::size_t i = 0; i < n; ++i) pts[i] += onto;
         });
+        // A feather's vane normal (Propagate's vaneNormalX/Y/Z: Instance's alongStrand and Plume read
+        // it) reflected with its strand.
+        if (std::vector<float>* normal = mirror.mutableStrandChannel(kVaneNormalChannels[axis])) {
+            for (float& v : *normal) v = -v;
+        }
         offsetGroupIds(*out, mirror);  // its clumps, braids and feathers its own, apart from the kept side's
         out->append(mirror);
         return StrandsPtr(out);

@@ -150,7 +150,7 @@ class GraphApiTest(unittest.TestCase):
         self.assertEqual(self.catalog.param_spec("Curl", "coherence")["choices"], ["strand", "clump"])
         self.assertEqual(self.catalog.param_spec("Noise", "mode")["choices"], ["smooth", "kinky"])
         self.assertEqual(self.catalog.param_spec("Collide", "method")["choices"], ["field", "exact"])
-        self.assertEqual(self.catalog.param_spec("Clump", "flatten")["choices"], ["surface", "random", "direction"])
+        self.assertEqual(self.catalog.param_spec("Clump", "flatAlong")["choices"], ["surface", "random", "direction"])
         self.assertEqual(self.catalog.param_spec("Clump", "volumizeProfile")["kind"], "ramp")
         # showWhen by a param, chained: Clump's count with clumpBy count, clumpBy with centersFrom
         # pick; never by an input linked (Merge's blend always).
@@ -696,14 +696,14 @@ class GraphApiTest(unittest.TestCase):
         with self.assertRaises(gm.GraphError):
             model.connect("scatter", "length", "keep")  # strands do not fit a field port
         # Not mappable: one value for the whole node (a Value port), which a field cannot feed.
-        model.expose_param("length", "trimMin")
-        self.assertEqual(model.input_spec("length", "trimMin")["type"], "Value")
-        self.assertEqual(model.input_spec("length", "trimMin")["valueKind"], "number")
+        model.expose_param("length", "randomness")
+        self.assertEqual(model.input_spec("length", "randomness")["type"], "Value")
+        self.assertEqual(model.input_spec("length", "randomness")["valueKind"], "number")
         with self.assertRaises(gm.GraphError):
-            model.connect(noise, "length", "trimMin")
+            model.connect(noise, "length", "randomness")
         with self.assertRaises(gm.GraphError):
             model.expose_param("length", "nope")
-        model.unexpose_param("length", "trimMin")
+        model.unexpose_param("length", "randomness")
         model.unexpose_param("length", "keep")
         self.assertIsNone(model.source_of("length", "keep"))
         model.save(self.groom)

@@ -853,7 +853,8 @@ void BrushContext::getClassName(MString& name) const { name = "groomLabBrush"; }
 void BrushContext::toolOnSetup(MEvent&) {
     setHelpString("Drag: brush the selected groom (Place: click one guide, drag for many; Draw: draw a guide "
                   "from the scalp). Shift+drag: smooth (Shape: the tubes' channel it paints). Ctrl+drag: paint "
-                  "guides into the selection, the rest frozen; Ctrl+Shift+drag: lasso them; Ctrl+click: add the "
+                  "guides into the selection, the rest frozen; Ctrl+Shift+drag: lasso them (round none: deselect and "
+                  "unfreeze all); Ctrl+click: add the "
                   "guides in the ring (on none: deselect and unfreeze all). Painting maps or guide attributes, "
                   "Ctrl is the opposite. "
                   "B/M or middle-drag: radius/strength. Double-click the tool for its settings.");
@@ -1175,9 +1176,11 @@ void BrushContext::finishPaintSelection() {
         const std::vector<GuideId> picked = pickGuidesInView(ring, pick);
         applyGuideSelection(picked, picked.empty() ? "replace" : "add", true, true);
     } else if (lasso_) {
-        // The guides inside the lasso added, the rest frozen: one undo step.
-        std::vector<GuideId> selection = paintBefore_;
-        for (const GuideId id : pickGuidesInView(lassoPath_, pick)) {
+        // The guides inside the lasso added, the rest frozen: one undo step. Round none (off the
+        // guides): nothing selected and every guide unfrozen, as a click on none.
+        const std::vector<GuideId> lassoed = pickGuidesInView(lassoPath_, pick);
+        std::vector<GuideId> selection = lassoed.empty() ? std::vector<GuideId>{} : paintBefore_;
+        for (const GuideId id : lassoed) {
             if (std::find(selection.begin(), selection.end(), id) == selection.end()) selection.push_back(id);
         }
         applyGuideSelection(selection, "replace", true, true);

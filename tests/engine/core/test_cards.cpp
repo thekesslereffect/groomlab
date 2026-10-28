@@ -233,6 +233,80 @@ TEST(Cards, TheCardsNodeBuildsCardsFromTheStrandsBeforeIt) {
     EXPECT_GT(covered, 128u * 128u / 20u);
 }
 
+TEST(Cards, CardsFromGuidesLieAlongEachGuideFromWhereItGrows) {
+    // Issue 25: cards follow the strands, grouped by clump or root, so they start between the
+    // guides and blend their shapes. cardsFrom guides lays a card along each guide itself, from its
+    // root, as wide as the strands nearest it (baked from them); hair cards from the strands as
+    // ever without the guides input.
+    const auto plane = test::makePlane(16, 4.0f);
+    auto guides = std::make_shared<GuideSet>();
+    const std::array<Vec3f, 4> roots = {Vec3f(1.0f, 0, 1.0f), Vec3f(3.0f, 0, 1.0f), Vec3f(1.0f, 0, 3.0f), Vec3f(3.0f, 0, 3.0f)};
+    const std::array<Vec3f, 4> leans = {Vec3f(1.2f, 0, 0), Vec3f(0, 0, 1.2f), Vec3f(-1.2f, 0, 0), Vec3f(0, 0, -1.2f)};
+    for (std::size_t g = 0; g < roots.size(); ++g) {
+        std::vector<Vec3f> pts;
+        for (int i = 0; i <= 8; ++i) {
+            const float t = static_cast<float>(i) / 8.0f;
+            pts.push_back(roots[g] + Vec3f(0, 1.2f * t, 0) + leans[g] * (t * t));
+        }
+        guides->add(g + 1, pts);
+    }
+    guides->rootOnMesh(*plane);
+    GraphDocument doc = loadGraphJson(R"j({"version": 1, "output": "out", "nodes": [
+        {"name": "scalp", "type": "Scalp"}, {"name": "guides", "type": "Guides"},
+        {"name": "scatter", "type": "Scatter", "params": {"density": 150.0}},
+        {"name": "interpolate", "type": "Interpolate"},
+        {"name": "cards", "type": "Cards", "params": {"cardsFrom": "guides", "segments": 8, "crossStyle": "single"}},
+        {"name": "out", "type": "Output"}],
+      "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
+        {"from": "scatter", "to": "interpolate", "input": "strands"},
+        {"from": "guides", "to": "interpolate", "input": "guides"},
+        {"from": "scalp", "to": "interpolate", "input": "scalp"},
+        {"from": "interpolate", "to": "cards", "input": "strands"},
+        {"from": "guides", "to": "cards", "input": "guides"},
+        {"from": "cards", "to": "out", "input": "strands"}]})j");
+    ExternalInputs externals;
+    setGroomExternals(externals, plane, guides, nullptr);
+    EvalContext ctx;
+    ctx.externals = &externals;
+    ctx.buildCards = true;
+    const StrandsPtr out = doc.graph.evaluateStrands(doc.output, ctx);
+    ASSERT_TRUE(out);
+    ASSERT_EQ(out->cardLayers().size(), 1u);
+    const CardMesh& mesh = *out->cardLayers().front();
+    ASSERT_EQ(mesh.cards.size(), roots.size()) << "a card per guide";
+    std::set<std::size_t> taken;
+    std::size_t strands = 0;
+    for (const CardMesh::Card& card : mesh.cards) {
+        std::size_t g = 0;
+        for (std::size_t k = 1; k < roots.size(); ++k) {
+            if ((card.center.front() - roots[k]).length() < (card.center.front() - roots[g]).length()) g = k;
+        }
+        EXPECT_TRUE(taken.insert(g).second);
+        SCOPED_TRACE("guide " + std::to_string(g + 1));
+        EXPECT_LT((card.center.front() - guides->guides()[g].points.front()).length(), 0.05f) << "from where the guide grows";
+        // Along the guide: every station on its curve, as long as it.
+        const Guide& guide = guides->guides()[g];
+        for (const Vec3f& c : card.center) {
+            float nearest = 1e30f;
+            for (std::size_t i = 0; i + 1 < guide.points.size(); ++i) {
+                const Vec3f a = guide.points[i], ab = guide.points[i + 1] - a;
+                const float t = std::clamp((c - a).dot(ab) / ab.dot(ab), 0.0f, 1.0f);
+                nearest = std::min(nearest, (c - (a + ab * t)).length());
+            }
+            EXPECT_LT(nearest, 0.03f);
+        }
+        EXPECT_NEAR(arcLength(card.center), arcLength(guide.points), 0.05f * arcLength(guide.points));
+        strands += card.strands.size();
+        EXPECT_GT(card.width.front(), 0.5f) << "as wide as the strands nearest it";
+    }
+    EXPECT_EQ(strands, out->strandCount()) << "every strand on its guide's card";
+    // Without the guides input: the strands' cards, and a note saying why.
+    doc.graph.disconnect(doc.nodesByName.at("cards"), 1);
+    const StrandsPtr loose = doc.graph.evaluateStrands(doc.output, ctx);
+    ASSERT_TRUE(loose && loose->cardLayers().size() == 1u);
+    EXPECT_FALSE(loose->cardLayers().front()->cards.empty());
+}
+
 TEST(Cards, BakeCoversTheCardsAndWritesTga) {
     const StrandsPtr s = clumpedFur();
     const auto plane = test::makePlane(16);

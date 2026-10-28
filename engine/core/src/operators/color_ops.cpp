@@ -200,18 +200,21 @@ public:
                 .in("Highlight"),
             ParamSpec{"specularRandom", 0.0, "Each strand's specular up to this share more or less, at random", "fraction"}
                 .range(0, 1)
-                .in("Highlight"),
+                .in("Highlight")
+                .adv(),
             ParamSpec{"roughness", 0.5, "Highlight spread, 0 sharp to 1 broad (mappable)"}.range(0, 1).in("Highlight"),
             ParamSpec{"roughnessRandom", 0.0, "Each strand's roughness up to this share more or less, at random", "fraction"}
                 .range(0, 1)
-                .in("Highlight"),
+                .in("Highlight")
+                .adv(),
             ParamSpec{"tilt", 3.0,
                       "Cuticle tilt, degrees: how far the highlight and its colored second highlight move apart along "
                       "the strand (real hair: 2-4)",
                       "angle"}
                 .range(-20, 20)
                 .soft(0, 10)
-                .in("Highlight"),
+                .in("Highlight")
+                .adv(),
         };
     }
     // A painted map is found through the host's map catalog ("maps"): it joins the cache key.
@@ -595,7 +598,7 @@ public:
                       "Tint over the undercoat's color, linear RGB (white: the hair's own)", "color"}
                 .colorMap()
                 .in("Guard hairs"),
-            ParamSpec{"randomness", 0.1, "Random offset of each strand's band pigment (melanin and redness), +/-"}
+            ParamSpec{"melaninRandom", 0.1, "Random offset of each strand's band pigment (melanin and redness), +/-"}
                 .soft(0, 0.5)
                 .in("Random"),
             ParamSpec{"offsetRandom", 0.15,
@@ -635,7 +638,7 @@ private:
         const ColorField bandDye(params(), "dye");
         const Ramp profile = params().getRamp("profile");
         const int count = static_cast<int>(params().getInt("count"));
-        const float randomness = static_cast<float>(params().getDouble("randomness"));
+        const float randomness = static_cast<float>(params().getDouble("melaninRandom"));
         const float offsetRandom = static_cast<float>(params().getDouble("offsetRandom"));
         const float widthRandom = static_cast<float>(params().getDouble("widthRandom"));
         const float guards = static_cast<float>(params().getDouble("guards"));
@@ -749,6 +752,8 @@ private:
 class FeatherColorOp : public Operator {
 public:
     std::string typeName() const override { return op::kFeatherColor; }
+    // 2: downStrength 1 by default (nodes saved before keep 0: ParamSpec::formerDefault).
+    int version() const override { return 2; }
     std::vector<ChannelWrite> channelWrites() const override {
         std::vector<ChannelWrite> out;
         for (const char* name : kColorChannels) out.push_back({name, ""});
@@ -833,7 +838,10 @@ public:
                       "color"}
                 .colorMap()
                 .in("Down"),
-            ParamSpec{"downStrength", 0.0, "How far the down zone's barbs go to downColor, 0-1", "fraction"}.range(0, 1).in("Down"),
+            ParamSpec{"downStrength", 1.0, "How far the down zone's barbs go to downColor, 0-1", "fraction"}
+                .range(0, 1)
+                .formerDefault(2, 0.0)
+                .in("Down"),
             // Iridescence: structural color, angle-dependent, in the shading.
             ParamSpec{"iridescence", 0.0,
                       "Structural color, 0 none to 1 full (mappable, per point): an angle-dependent sheen the hair shading "
@@ -842,9 +850,11 @@ public:
                 .range(0, 1)
                 .in("Iridescence"),
             ParamSpec{"iridescenceColor", Vec3f(0.05f, 0.55f, 0.2f),
-                      "The structural color seen face-on (along the strand's normal: a feather's vane), linear RGB", "color"}
+                      "The structural color seen face-on (along the strand's normal: a feather's vane), linear RGB. "
+                      "Groom-wide: the first FeatherColor with iridescence sets it for the whole groom", "color"}
                 .in("Iridescence"),
-            ParamSpec{"iridescenceShift", 0.3, "How far its hue turns from face-on to edge-on, in turns (+/-)", "turns"}
+            ParamSpec{"iridescenceShift", 0.3, "How far its hue turns from face-on to edge-on, in turns (+/-). Groom-wide, "
+                                               "as iridescenceColor", "turns"}
                 .soft(-1, 1)
                 .in("Iridescence"),
             ParamSpec{"iridescenceOn", std::string("all"),

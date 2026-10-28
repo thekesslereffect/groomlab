@@ -490,7 +490,7 @@ TEST(Tangle, PartnersComeFromTheStrandsOwnClump) {
     EXPECT_EQ(movedMost(*in, *apart, 0), 0.0f);
     EXPECT_EQ(movedMost(*in, *apart, 1), 0.0f);
     // ...unless asked, or when they share the clump.
-    const auto across = tangledPair({1.0f, 1.0f}, {3.0f, 4.0f}, [](ParamSet& p) { p.set("sameClump", false); })[1];
+    const auto across = tangledPair({1.0f, 1.0f}, {3.0f, 4.0f}, [](ParamSet& p) { p.set("clumpChannel", std::string()); })[1];
     EXPECT_LT(closest(*across), 1e-3f);
     const auto together = tangledPair({1.0f, 1.0f}, {3.0f, 3.0f})[1];
     EXPECT_LT(closest(*together), 1e-3f);

@@ -210,6 +210,13 @@ GraphDocument parse(json root) {
                                  ", newer than this GroomLab's (" + std::to_string(op.version()) + "); update GroomLab to open it");
             }
             op.setNodeVersion(static_cast<int>(v.get<std::int64_t>()));
+            // A param whose default changed since that version, left out: the former default, what
+            // the node made then (ParamSpec::since).
+            for (const ParamSpec& s : specs) {
+                if (s.since > 0 && op.nodeVersion() < s.since && !(params.is_object() && params.contains(s.name))) {
+                    op.params().set(s.name, s.before);
+                }
+            }
         }
         doc.graph.setLabel(id, name);
         doc.nodesByName[name] = id;
@@ -431,6 +438,8 @@ std::string paramSpecJson(const ParamSpec& p) {
     if (!p.showWhen.empty()) param["showWhen"] = {{"param", p.showWhen.param}, {"in", p.showWhen.in}};
     if (p.channelOptional) param["channelOptional"] = true;
     if (!p.unitWhen.param.empty()) param["unitWhen"] = {{"param", p.unitWhen.param}, {"in", p.unitWhen.in}};
+    // A changed default: nodes saved before version `since` take `before` (ParamSpec::since).
+    if (p.since > 0) param["formerDefault"] = {{"since", p.since}, {"value", paramToJson(p.before)}};
     // The input port it takes when exposed (none: it cannot be an input).
     PortSpec port;
     if (paramPortSpec(p, &port)) {
@@ -546,7 +555,7 @@ const std::string& defaultGraphJson() {
     {"name": "guides", "type": "Guides"},
     {"name": "scatter", "type": "Scatter"},
     {"name": "interpolate", "type": "Interpolate"},
-    {"name": "length", "type": "Length", "params": {"fraction": 1.0, "trimMin": 0.0, "trimMax": 0.2}},
+    {"name": "length", "type": "Length", "params": {"fraction": 1.0, "randomness": 0.2}},
     {"name": "noise", "type": "Noise"},
     {"name": "color", "type": "HairColor"},
     {"name": "width", "type": "Width"},

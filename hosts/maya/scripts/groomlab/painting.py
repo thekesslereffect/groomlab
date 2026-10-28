@@ -801,7 +801,8 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
 
 def setting_targets(groom):
     """What + New Map > for a setting offers on this groom: the common settings (groomlab_core's
-    paintable_settings: Density, Width, Length, Clump strength, Curl, Noise amplitude, Flyaways),
+    paintable_settings: Density, Width, Length, Clump strength, Curl, Noise amplitude, Flyaways,
+    Guide weight),
     each [{"id", "label", "node", "param", "hint"}] with node "" when the graph has no node of its
     type; then every mappable param of the graph (Other) as {"id": "node.param", ...}. Returns
     (settings, others)."""

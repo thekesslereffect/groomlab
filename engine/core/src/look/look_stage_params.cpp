@@ -76,9 +76,8 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
     switch (kind) {
         case StageKind::Length: {
             if (!mappable("keep", &s->value[0]) || !mappable("fraction", &s->value[1])) return false;
-            const auto a = static_cast<float>(number("trimMin")), b = static_cast<float>(number("trimMax"));
-            s->value[2] = std::min(a, b);
-            s->value[3] = std::max(a, b);
+            s->value[2] = 0.0f;  // (the least a trimmed strand loses)
+            s->value[3] = std::clamp(static_cast<float>(number("randomness")), 0.0f, 1.0f);
             return true;
         }
         case StageKind::Interpolate:
@@ -96,6 +95,8 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->flag[0] = static_cast<int>(r.samples);
             s->flag[1] = params.getBool("preserveLength") ? 1 : 0;
             s->flag2[1] = params.getString("take") == "length" ? 1 : 0;
+            s->value2[2] = params.getString("blend") == "directions" ? 1.0f : 0.0f;  // (look.slang blendsDirections)
+            s->value2[3] = 1.0f;  // (the clearance walk asks every point)
             s->ramp = r.ramp("falloff");
             return true;
         case StageKind::Clump: {
@@ -143,7 +144,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             } catch (const std::exception&) {
                 constant = false;
             }
-            if (!r.directions && (!constant || !params.getString("directionColorSet").empty())) {
+            if (!r.directions && !constant) {
                 *why = r.name() + " takes its direction per strand (the CPU's)";
                 return false;
             }
@@ -175,13 +176,11 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             }
             const auto offset = static_cast<float>(number("offset"));
             const auto maxDepth = static_cast<float>(params.getDouble("maxDepth"));
-            const auto softness = static_cast<float>(params.getDouble("softness"));
             s->value[0] = offset;
             s->value[1] = maxDepth;
-            s->value[2] = std::max(offset + softness, maxDepth) * 1.001f + 1e-6f;  // CollideOp's search radius
+            s->value[2] = std::max(offset, maxDepth) * 1.001f + 1e-6f;  // CollideOp's search radius
             s->flag[0] = static_cast<int>(params.getInt("iterations"));
-            s->value2[0] = softness;
-            s->value2[1] = static_cast<float>(params.getDouble("smoothing"));
+            s->value2[1] = static_cast<float>(params.getDouble("softness"));
             return true;
         }
         case StageKind::Wind: {
@@ -228,6 +227,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             if (!mappable("mix", &s->value[0])) return false;
             s->ramp = r.ramp("profile");
             s->tabled = true;
+            s->flag[0] = params.getBool("keepLength") ? 1 : 0;
             return true;
         }
         case StageKind::Bend:
@@ -671,7 +671,7 @@ std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleStat
 }
 
 std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes, std::uint32_t colliders,
-                                             const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why,
+                                             const std::vector<DistanceFieldPtr>& fields, float offset, std::string* why,
                                              const std::vector<std::shared_ptr<const RestPoseCollision>>& rests, float maxDepth,
                                              float searchRadius, bool exact) {
     if (meshes.size() > 2 || fields.size() != meshes.size()) {
@@ -703,9 +703,9 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
         const MeshDistanceField& field = *fields[m];
         float upTo = field.reach();
         if (MeshDistanceField::cellSizeFor(*meshes[m], std::numeric_limits<float>::max()) > field.cellSize()) {
-            upTo = std::min(upTo, field.cellSize() * 1.4143f + softness);
+            upTo = std::min(upTo, field.cellSize() * 1.4143f);
         }
-        tables[m] = field.tables(std::max(offset + softness, upTo), field.reach());
+        tables[m] = field.tables(std::max(offset, upTo), field.reach());
         if (!tables[m]) {
             if (rests.empty()) {
                 *why = "a surface has no field the GPU can read (too big for its grid: the CPU's)";
@@ -722,7 +722,6 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
         host->meshes = meshes;
         host->maxDepth = maxDepth;
         host->searchRadius = searchRadius;
-        host->softness = softness;
         made->host = std::move(host);
     }
     for (std::size_t m = 0; m < meshes.size(); ++m) {

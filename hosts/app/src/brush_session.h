@@ -59,7 +59,7 @@ public:
     std::string toolId() const;
     // The view's density while a stroke is live (ViewRequest::sculptDensity): the strands step
     // back to this fraction so each dab evaluates fast; the release evaluates them all again.
-    float sculptDensity = 0.35f;
+    float sculptDensity = 1.0f;
     // Shot sculpting (the core's, as Maya's Sculpt tab): with `on`, strokes reshape the groom as
     // shown at `seconds` (frame `frame`) and record the difference into the corrective layer
     // `layer` (made at that time when the groom has none of the name) instead of the guides.

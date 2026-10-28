@@ -249,7 +249,7 @@ public:
                       "angle"}
                 .soft(-90, 90)
                 .in("Shape"),
-            ParamSpec{"curlProfile", Ramp::constant(1.0f), "Curl along the shaft, root to tip (times curl)"}.in("Shape"),
+            ParamSpec{"curlProfile", Ramp::constant(1.0f), "Curl along the shaft, root to tip (times curl)"}.in("Shape").adv(),
             ParamSpec{"lift", 0.0, "Degrees the barbs rise out of the vane at the shaft (toward the scalp normal)", "angle"}
                 .soft(-90, 90)
                 .in("Shape")
@@ -258,8 +258,8 @@ public:
                                      "around: back toward the root)", "angle"}
                 .soft(-90, 90)
                 .in("Shape"),
-            ParamSpec{"splits", 0.0, "Gaps per vane: neighbouring barbs gather into this many groups, as in a ruffled "
-                                     "feather (0: none); written to clumpId"}
+            ParamSpec{"splits", 0.0, "Groups per vane: neighbouring barbs gather into about this many groups, as in a "
+                                     "ruffled feather (0 or 1: none); written to clumpId"}
                 .atLeast(0)
                 .soft(0, 10)
                 .in("Splits"),
@@ -275,7 +275,7 @@ public:
                 .in("Random"),
             ParamSpec{"down", 0.0, "The down zone (afterfeather): from start up to this far along the shaft (0 root .. 1 "
                                    "tip) the barbs are soft and curly, the vane's begin past it (0: none); isDown 1 on "
-                                   "them, for HairColor's downColor"}
+                                   "them, for FeatherColor's downColor"}
                 .range(0, 1)
                 .in("Down"),
             notAnimatable({"downCount", std::int64_t{20}, "Down barbs per side in the down zone (around: twice this)"})
@@ -304,13 +304,16 @@ public:
                 .in("Rachis"),
             ParamSpec{"shaftWidthProfile", Ramp{{0.0f, 1.0f}, {1.0f, 0.25f}}, "The rachis's width along the shaft, root "
                                                                               "to tip (times shaftWidth)"}
-                .in("Rachis"),
+                .in("Rachis")
+                .adv(),
             notAnimatable({"shaftSides", std::int64_t{6}, "Sides of the rachis tube (2: a flat ribbon in the vane plane)"})
                 .range(2, 32)
-                .in("Rachis"),
+                .in("Rachis")
+                .adv(),
             ParamSpec{"rootOnShaft", true, "With a shaftWidth: barbs start on the rachis's surface, not its center line, "
                                            "so an engine binds them to their own rachis"}
-                .in("Rachis"),
+                .in("Rachis")
+                .adv(),
             notAnimatable({"groupId", std::int64_t{0}, "The groom group the feathers export in (written to groupId; 0: not set). "
                                                        "Unreal gives each group its own material, LODs and physics"})
                 .range(0, 1 << 20)
@@ -791,7 +794,10 @@ public:
     static constexpr std::size_t kOutputs = 4;
 
     std::string typeName() const override { return op::kSplit; }
-    std::string category() const override { return "feathers"; }
+    std::string category() const override { return "utility"; }
+    // 2: select 1 by default, so a map plugged into it reads as itself (a mappable param scales its
+    // map by its own value; nodes saved before keep 0: ParamSpec::formerDefault).
+    int version() const override { return 2; }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
     std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Curves}}; }
     PortSpec output() const override { return {"a", PortType::Curves}; }
@@ -806,9 +812,10 @@ public:
             notAnimatable({"weightB", 1.0, "Share of the strands sent to b"}).atLeast(0).soft(0, 1),
             notAnimatable({"weightC", 0.0, "Share of the strands sent to c"}).atLeast(0).soft(0, 1),
             notAnimatable({"weightD", 0.0, "Share of the strands sent to d"}).atLeast(0).soft(0, 1),
-            notAnimatable({"select", 0.0, "With mode map: a 0-1 value per strand, where it falls among the shares picks the "
+            notAnimatable({"select", 1.0, "With mode map: a 0-1 value per strand, where it falls among the shares picks the "
                                           "output (mappable: a painted map, a channel)"})
                 .range(0, 1)
+                .formerDefault(2, 0.0)
                 .when("mode", {"map"}),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv()
                 .when("mode", {"random"}),
@@ -1017,7 +1024,7 @@ void registerPropagateOperator(OperatorRegistry& registry) {
 
 void registerSplitOperator(OperatorRegistry& registry) {
     registry.registerType(op::kSplit,
-                          {"feathers",
+                          {"utility",
                            "Sends each strand to one of four outputs by share or by a map: several designs on one set.",
                            "outputs share designs"},
                           [] { return std::make_unique<SplitOp>(); });

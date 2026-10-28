@@ -214,9 +214,8 @@ struct FloorScene {
         }
         in = s;
     }
-    StrandsPtr collide(double softness, double smoothing) {
-        return h.run(op::kCollide, {in, Value{}, floor},
-                     {{"offset", 0.02}, {"softness", softness}, {"smoothing", smoothing}, {"iterations", std::int64_t{4}}});
+    StrandsPtr collide(double softness) {
+        return h.run(op::kCollide, {in, Value{}, floor}, {{"offset", 0.02}, {"softness", softness}, {"iterations", std::int64_t{4}}});
     }
 };
 
@@ -233,58 +232,46 @@ float sharpestTurn(const StrandSet& s) {
     return most;
 }
 
-TEST(Collide, SoftnessEasesStrandsOntoTheSurface) {
-    // Softness: the push eases in over a band above the offset, so strands curve away before they
-    // touch: no point ends below the offset, points well above the band stay where they were, the
-    // sharpest turn is gentler than the hard push's fold, segment lengths kept as a hard push keeps them.
+TEST(Collide, SoftnessCurvesStrandsOntoTheSurfaceKeepingLengths) {
+    // Softness: the correction fades toward the root over that length (faded in from the root),
+    // the strand turned segment by segment (lengths kept): no point inside the offset nor floated
+    // above it, the fold spread over many segments, the strand lifted before where it meets the
+    // floor; a softness longer than the strand's way to the floor kinks nothing at the root.
     FloorScene scene;
-    const StrandsPtr hard = scene.collide(0.0, 0.0), soft = scene.collide(0.15, 0.0);
-    for (std::size_t s = 0; s < soft->strandCount(); ++s) {
-        for (std::size_t i = 1; i < soft->strandPointCount(s); ++i) {
-            EXPECT_GT(soft->strandPoints(s)[i].y, -0.5f + 0.02f - 2e-3f) << "strand " << s << " point " << i;
-            EXPECT_NEAR(segmentLength(*soft, s, i), segmentLength(*scene.in, s, i), 0.05f * segmentLength(*scene.in, s, i));
-            // Above the offset plus the softness (and before any point near the floor): untouched.
-            if (scene.in->strandPoints(s)[i].y > -0.5f + 0.02f + 0.15f + 0.05f) EXPECT_EQ(soft->strandPoints(s)[i], scene.in->strandPoints(s)[i]);
-        }
-    }
-    EXPECT_LT(sharpestTurn(*soft), 0.8f * sharpestTurn(*hard)) << sharpestTurn(*soft) << " against " << sharpestTurn(*hard);
-    // They act on the collider alone: strands sinking into the scalp (which they grow from, every
-    // root within any band above it) and never reaching the floor walk as the hard push walks them.
-    const StrandsPtr sinking = strandsOn(*scene.h.scalp, Vec3f{0.3f, -0.3f, 0.0f});
-    auto run = [&](double softness, double smoothing) {
-        return scene.h.run(op::kCollide, {sinking, scene.h.scalp, scene.floor},
-                           {{"offset", 0.02}, {"softness", softness}, {"smoothing", smoothing}, {"iterations", std::int64_t{4}}});
-    };
-    const StrandsPtr scalpHard = run(0.0, 0.0);
-    EXPECT_NE(scalpHard->positions(), sinking->positions());
-    EXPECT_EQ(run(0.15, 0.0)->positions(), scalpHard->positions());
-    EXPECT_EQ(run(0.15, 0.6)->positions(), scalpHard->positions());
-}
-
-TEST(Collide, SmoothingCurvesStrandsOntoTheSurfaceKeepingLengths) {
-    // Smoothing: the correction fades toward the root over that length, the strand turned segment
-    // by segment (lengths kept): no point inside the offset, the fold spread over many segments,
-    // the strand lifted before where it meets the floor; with softness too.
-    FloorScene scene;
-    const StrandsPtr hard = scene.collide(0.0, 0.0);
-    for (const double softness : {0.0, 0.1}) {
+    const StrandsPtr hard = scene.collide(0.0);
+    for (const double softness : {0.2, 0.6, 1.2, 3.0}) {
         SCOPED_TRACE(softness);
-        const StrandsPtr smooth = scene.collide(softness, 0.6);
+        const StrandsPtr soft = scene.collide(softness);
         bool liftedBefore = false;
-        for (std::size_t s = 0; s < smooth->strandCount(); ++s) {
-            EXPECT_EQ(smooth->strandPoints(s)[0], scene.in->strandPoints(s)[0]);
-            for (std::size_t i = 1; i < smooth->strandPointCount(s); ++i) {
-                EXPECT_GT(smooth->strandPoints(s)[i].y, -0.5f + 0.02f - 2e-3f) << "strand " << s << " point " << i;
-                EXPECT_NEAR(segmentLength(*smooth, s, i), segmentLength(*scene.in, s, i), 0.1f * segmentLength(*scene.in, s, i));  // (the tip pushed again)
+        float lowest = 1e9f;
+        for (std::size_t s = 0; s < soft->strandCount(); ++s) {
+            EXPECT_EQ(soft->strandPoints(s)[0], scene.in->strandPoints(s)[0]);
+            for (std::size_t i = 1; i < soft->strandPointCount(s); ++i) {
+                lowest = std::min(lowest, soft->strandPoints(s)[i].y);
+                EXPECT_GT(soft->strandPoints(s)[i].y, -0.5f + 0.02f - 2e-3f) << "strand " << s << " point " << i;
+                EXPECT_NEAR(segmentLength(*soft, s, i), segmentLength(*scene.in, s, i), 0.1f * segmentLength(*scene.in, s, i));  // (the tip pushed again)
                 // A point the hard push left where it was (above the floor) lifted ahead of the fold.
-                if (hard->strandPoints(s)[i] == scene.in->strandPoints(s)[i] && smooth->strandPoints(s)[i].y > hard->strandPoints(s)[i].y + 1e-3f) {
+                if (hard->strandPoints(s)[i] == scene.in->strandPoints(s)[i] && soft->strandPoints(s)[i].y > hard->strandPoints(s)[i].y + 1e-3f) {
                     liftedBefore = true;
                 }
             }
         }
+        std::printf("[ collide  ] softness %.1f: sharpest turn %.3f rad (hard %.3f), lowest %.4f above the floor\n", softness,
+                    sharpestTurn(*soft), sharpestTurn(*hard), lowest + 0.5f);
         EXPECT_TRUE(liftedBefore);
-        EXPECT_LT(sharpestTurn(*smooth), 0.5f * sharpestTurn(*hard)) << sharpestTurn(*smooth) << " against " << sharpestTurn(*hard);
+        EXPECT_LT(lowest, -0.5f + 0.02f + 0.01f);  // resting on the floor at the offset, not floating
+        EXPECT_LT(sharpestTurn(*soft), 0.5f * sharpestTurn(*hard)) << sharpestTurn(*soft) << " against " << sharpestTurn(*hard);
     }
+    // It acts on the collider alone: strands sinking into the scalp (which they grow from) and never
+    // reaching the floor walk as the hard push walks them.
+    const StrandsPtr sinking = strandsOn(*scene.h.scalp, Vec3f{0.3f, -0.3f, 0.0f});
+    auto run = [&](double softness) {
+        return scene.h.run(op::kCollide, {sinking, scene.h.scalp, scene.floor},
+                           {{"offset", 0.02}, {"softness", softness}, {"iterations", std::int64_t{4}}});
+    };
+    const StrandsPtr scalpHard = run(0.0);
+    EXPECT_NE(scalpHard->positions(), sinking->positions());
+    EXPECT_EQ(run(0.6)->positions(), scalpHard->positions());
 }
 
 TEST(ColliderMesh, ReadsTheNamedMeshExternal) {

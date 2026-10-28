@@ -228,6 +228,8 @@ class DirectionOp : public Operator {
 public:
     std::string typeName() const override { return op::kDirection; }
     std::string category() const override { return "shape"; }
+    // 2: along direction by default (nodes saved before keep tangent: ParamSpec::formerDefault).
+    int version() const override { return 2; }
     std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Curves}}; }
     PortSpec output() const override { return {"out", PortType::Curves}; }  // strands or guides, as fed
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
@@ -241,9 +243,11 @@ public:
             ParamSpec{"strength", 1.0, "How far each strand turns to its direction, 0-1: that share of the turn (mappable)",
                       "fraction"}
                 .soft(0, 1),
-            {"along", std::string("tangent"),
-             "Where roll 0 points: tangent: the scalp's U direction (its UVs; without them the direction below); "
-             "direction: the direction below, laid onto the scalp", "", {"tangent", "direction"}},
+            ParamSpec{"along", std::string("direction"),
+                      "Where roll 0 points: direction: the direction below, laid onto the scalp (no seams); tangent: the "
+                      "scalp's U direction (its UVs, so a UV seam draws a line through the hair; without UVs the "
+                      "direction below)", "", {"tangent", "direction"}}
+                .formerDefault(2, std::string("tangent")),
             ParamSpec{"direction", Vec3f{0.0f, -1.0f, 0.0f}, "Where roll 0 points (world space), laid onto the scalp at each root"}
                 .world(),
             ParamSpec{"inclinationRandom", 0.0, "Up to this many degrees more or less inclination per strand", "angle"}

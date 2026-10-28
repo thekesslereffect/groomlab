@@ -261,8 +261,8 @@ struct LookGraph {
     std::string interpolate = R"("params": {})";
     std::string scatter = R"("params": {"density": 40.0, "length": 3.0})";
     std::string clump = R"("params": {"strength": 0.8})";
-    std::string lengthNode = R"("params": {"keep": 0.9, "fraction": 0.7, "trimMin": 0.1, "trimMax": 0.3})";
-    std::string noise = R"("params": {"amplitude": 0.3, "frequency": 1.0})";
+    std::string lengthNode = R"("params": {"keep": 0.9, "fraction": 0.7, "randomness": 0.3})";
+    std::string noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "octaves": 2})";
     std::string curl = R"("params": {"radius": 0.1, "frequency": 0.8})";
     std::string width = R"("params": {"width": 0.01})";
     std::string nodes, connections;  // ", {...}" each
@@ -334,7 +334,7 @@ struct LookGraph {
 
 std::string graph(double amplitude) {
     LookGraph g;
-    g.noise = R"("params": {"amplitude": )" + std::to_string(amplitude) + R"(, "frequency": 1.0})";
+    g.noise = R"("params": {"amplitude": )" + std::to_string(amplitude) + R"(, "frequency": 1.0, "octaves": 2})";
     return g.json();
 }
 
@@ -631,6 +631,16 @@ std::string withoutClearance(const std::string& graphJson) {
     nlohmann::json graph = nlohmann::json::parse(graphJson);
     for (nlohmann::json& n : graph["nodes"]) {
         if (n["type"] == "Interpolate") n["params"]["keepClearance"] = false;
+    }
+    return graph.dump();
+}
+
+// The graph with its Interpolates blending offsets (the version 1 default: the shape a test was
+// tuned on, where it measures a later stage's own rounding on the strands' edge cases).
+std::string blendingOffsets(const std::string& graphJson) {
+    nlohmann::json graph = nlohmann::json::parse(graphJson);
+    for (nlohmann::json& n : graph["nodes"]) {
+        if (n["type"] == "Interpolate") n["params"]["blend"] = "offsets";
     }
     return graph.dump();
 }
@@ -982,7 +992,7 @@ TEST_P(LookEngineTest, AnInstanceEndingTheGraphHandsTheGpusPointsOn) {
     g.after = "Instance";
     g.afterParams = R"("params": {"probability": 0.4, "tMin": 0.5, "scale": 0.05})";
     LookGraph c = g;
-    c.noise = R"("params": {"amplitude": 0.45, "frequency": 1.0})";
+    c.noise = R"("params": {"amplitude": 0.45, "frequency": 1.0, "octaves": 2})";
     {
         GroomSession session(groom(g.json()));
         ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
@@ -1016,15 +1026,15 @@ TEST_P(LookEngineTest, KinkyNoise) {
     // thread a strand: its arc length), from Noise; then a drag of its frequency.
     for (const std::string space : {"strand", "world"}) {
         LookGraph g;
-        g.noise = R"("params": {"amplitude": 0.3, "frequency": 3.0, "mode": "kinky", "space": ")" + space + R"("})";
+        g.noise = R"("params": {"amplitude": 0.3, "frequency": 3.0, "mode": "kinky", "octaves": 2, "space": ")" + space + R"("})";
         GroomSession session(groom(g.json()));
         ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
         expectClose(runAndCompare(session, {}, session, "noise"));
     }
     LookGraph g;
-    g.noise = R"("params": {"amplitude": 0.3, "frequency": 3.0, "mode": "kinky"})";
+    g.noise = R"("params": {"amplitude": 0.3, "frequency": 3.0, "mode": "kinky", "octaves": 2})";
     LookGraph c = g;
-    c.noise = R"("params": {"amplitude": 0.3, "frequency": 4.5, "mode": "kinky"})";
+    c.noise = R"("params": {"amplitude": 0.3, "frequency": 4.5, "mode": "kinky", "octaves": 2})";
     EXPECT_GPU_MATCHES(g.json(), (gpu::Overrides{{"noise", {{"frequency", 4.5}}}}), c.json());
 }
 
@@ -1209,7 +1219,7 @@ TEST_P(LookEngineTest, MappedParamsPerStrandAndPerPoint) {
     // Width takes). From Noise (the first stage the GPU changes): the graph's own values.
     LookGraph g;
     g.noise = R"("params": {"amplitude": {"expression": "0.2 + 0.4 * rand", "min": 0.0, "max": 1.0}, "frequency": 1.0,
-                            "fraction": {"expression": "u", "min": 0.3, "max": 1.0}})";
+                            "fraction": {"expression": "u", "min": 0.3, "max": 1.0}, "octaves": 2})";
     g.curl = R"("params": {"radius": {"expression": "0.05 + 0.1 * pt", "min": 0.0, "max": 1.0}, "frequency": 0.8})";
     g.width = R"("params": {"width": {"expression": "0.02 - 0.015 * t", "min": 0.0, "max": 1.0}})";
     GroomSession session(groom(g.json()));
@@ -1228,7 +1238,7 @@ TEST_P(LookEngineTest, ADragKeepsTheMaps) {
     // A number dragged while other params are maps that read no positions: the maps' values as
     // read once, the dragged number's.
     LookGraph g;
-    g.noise = R"("params": {"amplitude": {"expression": "0.2 + 0.4 * rand", "min": 0.0, "max": 1.0}, "frequency": 1.0})";
+    g.noise = R"("params": {"amplitude": {"expression": "0.2 + 0.4 * rand", "min": 0.0, "max": 1.0}, "frequency": 1.0, "octaves": 2})";
     g.curl = R"("params": {"radius": {"expression": "0.05 + 0.1 * pt", "min": 0.0, "max": 1.0}, "frequency": 0.8})";
     g.width = R"("params": {"width": {"expression": "0.01 + 0.01 * rand", "min": 0.0, "max": 1.0}})";
     LookGraph c = g;
@@ -1243,7 +1253,7 @@ TEST_P(LookEngineTest, PaintedMapsAndTextures) {
     std::string path = texture;
     std::replace(path.begin(), path.end(), '\\', '/');
     LookGraph g;
-    g.noise = R"("params": {"amplitude": {"colorSet": "mask", "min": 0.0, "max": 0.6}, "frequency": 1.0})";
+    g.noise = R"("params": {"amplitude": {"colorSet": "mask", "min": 0.0, "max": 0.6}, "frequency": 1.0, "octaves": 2})";
     g.curl = R"("params": {"radius": {"texture": ")" + path + R"(", "min": 0.02, "max": 0.2}, "frequency": 0.8})";
     LookGraph c = g;
     c.curl = R"("params": {"radius": {"texture": ")" + path + R"(", "min": 0.02, "max": 0.2}, "frequency": 1.2})";
@@ -1294,13 +1304,13 @@ TEST_P(LookEngineTest, AValueInputSetsAParamTheGpuReads) {
 TEST_P(LookEngineTest, PluggedCurvesAndManyKeys) {
     // A Curve node plugged into Noise's profile, a profile of twelve keys on Curl.
     LookGraph g;
-    g.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0}, "paramInputs": ["profile"])";
+    g.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "octaves": 2}, "paramInputs": ["profile"])";
     g.curl = R"("params": {"radius": 0.1, "frequency": 0.8, "profile": {"keys": [[0, 0], [0.1, 0.4], [0.2, 0.2], [0.3, 0.9],
         [0.4, 0.5], [0.5, 1.0], [0.6, 0.3], [0.7, 0.8], [0.8, 0.6], [0.9, 1.0], [0.95, 0.2], [1.0, 0.7]]}})";
     g.nodes = R"(, {"name": "shape", "type": "Curve", "params": {"curve": {"keys": [[0, 0], [0.3, 1], [1, 0.4]]}, "interpolation": "ease"}})";
     g.connections = R"(, {"from": "shape", "to": "noise", "input": "profile"})";
     LookGraph c = g;
-    c.noise = R"("params": {"amplitude": 0.4, "frequency": 1.0}, "paramInputs": ["profile"])";
+    c.noise = R"("params": {"amplitude": 0.4, "frequency": 1.0, "octaves": 2}, "paramInputs": ["profile"])";
     EXPECT_GPU_MATCHES(g.json(), (gpu::Overrides{{"noise", {{"amplitude", 0.4}}}}), c.json());
 }
 
@@ -1311,7 +1321,7 @@ TEST_P(LookEngineTest, StrandsOfDifferentLengths) {
     g.uneven = true;
     g.curl = R"("params": {"radius": {"expression": "0.05 + 0.1 * pt", "min": 0.0, "max": 1.0}, "frequency": 0.8})";
     LookGraph c = g;
-    c.noise = R"("params": {"amplitude": 0.5, "frequency": 1.0})";
+    c.noise = R"("params": {"amplitude": 0.5, "frequency": 1.0, "octaves": 2})";
     GroomSession check(groom(g.json()));
     ASSERT_TRUE(check.evaluate(ViewRequest{}).strands);
     EXPECT_EQ(check.last().strands->uniformPointCount(), 0u);
@@ -1665,7 +1675,7 @@ TEST_P(LookEngineTest, HairColorHandsTheGpusPointsOn) {
     LookGraph g;
     g.after = "HairColor";
     LookGraph c = g;
-    c.noise = R"("params": {"amplitude": 0.45, "frequency": 1.0})";
+    c.noise = R"("params": {"amplitude": 0.45, "frequency": 1.0, "octaves": 2})";
     EXPECT_GPU_MATCHES(g.json(), (gpu::Overrides{{"noise", {{"amplitude", 0.45}}}}), c.json());
 }
 
@@ -1677,15 +1687,15 @@ TEST_P(LookEngineTest, LengthGivesWhatTheCpuCuts) {
     // Kept, and a share of the strands trimmed at random by a share in a range: drags of each
     // (the range given high to low: either way round); the fraction by a map per strand.
     LookGraph cut = g;
-    cut.lengthNode = R"("params": {"keep": 0.8, "fraction": 0.6, "trimMin": 0.1, "trimMax": 0.4})";
-    const std::pair<const char*, double> drags[] = {{"keep", 0.6}, {"fraction", 0.3}, {"trimMin", 0.5}, {"trimMax", 0.2}};
+    cut.lengthNode = R"("params": {"keep": 0.8, "fraction": 0.6, "randomness": 0.4})";
+    const std::pair<const char*, double> drags[] = {{"keep", 0.6}, {"fraction", 0.3}, {"randomness", 0.2}};
     for (const auto& [param, value] : drags) {
         SCOPED_TRACE(param);
         EXPECT_GPU_MATCHES(cut.json(), (gpu::Overrides{{"length", {{param, value}}}}),
                            withParam(cut.json(), "length", param, value));
     }
     LookGraph mapped = g;
-    mapped.lengthNode = R"("params": {"fraction": {"expression": "rand", "min": 0.0, "max": 1.0}, "trimMax": 0.5})";
+    mapped.lengthNode = R"("params": {"fraction": {"expression": "rand", "min": 0.0, "max": 1.0}, "randomness": 0.5})";
     EXPECT_GPU_MATCHES(mapped.json(), gpu::Overrides{}, mapped.json());
 }
 
@@ -1708,6 +1718,12 @@ TEST_P(LookEngineTest, InterpolateGivesWhatTheCpuBlends) {
     LookGraph flat = g;
     flat.interpolate = R"("params": {"preserveLength": false, "smoothGuides": false})";
     EXPECT_GPU_MATCHES(flat.json(), gpu::Overrides{}, flat.json());
+    LookGraph directions = g;
+    directions.interpolate = R"("params": {"blend": "directions"})";
+    EXPECT_GPU_MATCHES(directions.json(), gpu::Overrides{}, directions.json());
+    LookGraph directionsReach = g;
+    directionsReach.interpolate = R"("params": {"blend": "directions", "limitDistance": 0.9})";
+    EXPECT_GPU_MATCHES(directions.json(), (gpu::Overrides{{"interpolate", {{"limitDistance", 0.9}}}}), directionsReach.json());
 }
 
 // ---- Ramps and seeds dragged ---------------------------------------------------------------------
@@ -1725,9 +1741,9 @@ TEST_P(LookEngineTest, ARampDragGivesWhatTheCpuEvaluatesForIt) {
     {
         LookGraph g;
         LookGraph c = g;
-        c.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "profile": )" + bump + "}";
+        c.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "octaves": 2, "profile": )" + bump + "}";
         EXPECT_GPU_MATCHES(g.json(), rampDrag("noise", "profile", bump), c.json());
-        c.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "profile": )" + straight + "}";
+        c.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "octaves": 2, "profile": )" + straight + "}";
         EXPECT_GPU_MATCHES(g.json(), rampDrag("noise", "profile", straight), c.json());
     }
     {
@@ -1765,7 +1781,7 @@ TEST_P(LookEngineTest, ASeedDragGivesWhatTheCpuDrawsForIt) {
     g.length = true;
     g.clump = R"("params": {"strength": 0.8, "lockRadius": 0.1, "seed": 1})";
     g.lengthNode = R"("params": {"keep": 0.9, "randomness": 0.3, "seed": 1})";
-    g.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "seed": 1})";
+    g.noise = R"("params": {"amplitude": 0.3, "frequency": 1.0, "seed": 1, "octaves": 2})";
     g.curl = R"("params": {"radius": 0.1, "frequency": 0.8, "randomness": 0.5, "seed": 1})";
     g.width = R"("params": {"width": 0.01, "randomness": 0.4, "seed": 1})";
     struct Case {
@@ -1775,7 +1791,7 @@ TEST_P(LookEngineTest, ASeedDragGivesWhatTheCpuDrawsForIt) {
     };
     const Case cases[] = {
         {"length", &LookGraph::lengthNode, R"("params": {"keep": 0.9, "randomness": 0.3, "seed": 17})"},
-        {"noise", &LookGraph::noise, R"("params": {"amplitude": 0.3, "frequency": 1.0, "seed": 17})"},
+        {"noise", &LookGraph::noise, R"("params": {"amplitude": 0.3, "frequency": 1.0, "seed": 17, "octaves": 2})"},
         {"curl", &LookGraph::curl, R"("params": {"radius": 0.1, "frequency": 0.8, "randomness": 0.5, "seed": 17})"},
         {"width", &LookGraph::width, R"("params": {"width": 0.01, "randomness": 0.4, "seed": 17})"},
     };
@@ -2286,6 +2302,43 @@ TEST_P(LookEngineTest, GuideRootsMovedDabAfterDabRewriteOnlyTheirRecords) {
     EXPECT_GT(lighter, 0u) << "every dab wrote the whole binding";
 }
 
+TEST_P(LookEngineTest, GuideWeightsFromAScalpMapBindAgainAsRootsMove) {
+    // guideWeight from a map painted on the scalp: a dab moving some guides' roots weighs them
+    // again where they now stand (a guide layer is a channel: painting one is the CPU's), and the
+    // strands they reach are bound again, as the CPU binds them; against a fresh CPU session.
+    LookGraph g;
+    g.guides = true;
+    g.interpolate = R"("params": {"guideWeight": {"colorSet": "mask", "min": 0.05, "max": 1.0}})";
+    GroomData data = paintedGroom(g.json());
+    GroomSession session(data);
+    ASSERT_TRUE(session.evaluate(ViewRequest{}).strands);
+    const StrandsPtr before = session.last().strands;
+    gpu::LookInputs inputs;  // as a host keeps it from dab to dab
+    GuidesPtr guides = data.guides;
+    ViewRequest dab;
+    dab.stopAt = "interpolate";
+    for (int d = 1; d <= 4; ++d) {
+        SCOPED_TRACE("dab " + std::to_string(d));
+        auto moved = std::make_shared<GuideSet>(*guides);
+        for (std::size_t k = 0; k < 3; ++k) {
+            Guide& guide = moved->guides()[(static_cast<std::size_t>(d) * 7 + k * 11) % moved->guides().size()];
+            for (Vec3f& p : guide.points) p = p + Vec3f(0.0f, d % 2 ? 0.6f : -0.4f, 0.1f);
+        }
+        moved->rootOnMesh(*data.scalp);
+        guides = moved;
+        session.setGuides(moved);
+        ASSERT_EQ(session.evaluate(dab).strands, before);
+        GroomData after = data;
+        after.guides = moved;
+        GroomSession fresh(after);
+        ASSERT_TRUE(fresh.evaluate(ViewRequest{}).strands);
+        Prepared p;
+        ASSERT_TRUE(prepareRun(session, {}, "interpolate", &p, &inputs)) << p.why;
+        expectClose(runAndCompare(session, {}, fresh, "interpolate"));
+    }
+    EXPECT_GT(inputs.rebinds(), 0u);
+}
+
 TEST_P(LookEngineTest, ADabWalksOnlyTheStrandsOfTheGuidesItChanged) {
     // Keeping clearance: a dab reshaping a few guides (their roots where they were) walks only the
     // strands bound to them, the others keeping the last run's walks (look_engine.cpp
@@ -2533,8 +2586,8 @@ TEST_P(LookEngineTest, ClumpVariesItsClumpsAsTheCpuDoes) {
         "{" + varied + R"(, "volumize": 0.4, "volumizeProfile": [[0, 1], [0.6, 0.4], [1, 0]]})",
         R"({"strength": 0.9, "volumize": {"expression": "0.2 + 0.3 * rand", "min": 0.0, "max": 1.0}})",
         R"({"strength": 0.9, "flatness": 0.7})",
-        R"({"strength": 0.9, "flatness": 0.6, "flatten": "random", "lockRadius": 0.1})",
-        R"({"strength": 0.9, "flatness": 0.8, "flatten": "direction", "flattenDirection": [0, 1, 1]})"};
+        R"({"strength": 0.9, "flatness": 0.6, "flatAlong": "random", "lockRadius": 0.1})",
+        R"({"strength": 0.9, "flatness": 0.8, "flatAlong": "direction", "flatDirection": [0, 1, 1]})"};
     for (const std::string& params : clumps) {
         for (const bool guides : {false, true}) {
             // (A flat clump lying along the scalp, on strands straight out of it: its thin way is
@@ -2990,7 +3043,10 @@ TEST_P(LookEngineTest, CollideKeepsStrandsOutAsTheCpuDoes) {
                           {"hung into the scalp and through a ball", {{"Gravity", hang}, {"Collide", shallow}}, true}};
     for (const Case& k : cases) {
         SCOPED_TRACE(k.name);
-        GroomData data = groom(withoutClearance(chainGraph(k.nodes, true, k.collider)));
+        // (Blending offsets: hung by Gravity, a point on the edge of one of Collide's decisions,
+        // which OpenGL's rounding of Gravity tips, is the measure here; the strands blend
+        // directions alike on every backend: InterpolateGivesWhatTheCpuBlends.)
+        GroomData data = groom(blendingOffsets(withoutClearance(chainGraph(k.nodes, true, k.collider))));
         if (k.collider) {
             const MeshPtr sphere = test::makeSphere(16, 32, 1.2f);
             std::vector<Vec3f> points = sphere->points();
@@ -3154,14 +3210,13 @@ TEST_P(LookEngineTest, CollideKeepsStrandsOutAsTheCpuDoes) {
     EXPECT_NE(refused.why.find("exact"), std::string::npos) << refused.why;
 }
 
-TEST_P(LookEngineTest, CollideEasesAndSmoothsAsTheCpuDoes) {
-    // Collide's softness (the push eased in over a band above the offset) and smoothing (the
-    // correction spread toward the root, the strand bent segment by segment), alone and together,
-    // through a ball over the head and hung into the scalp: from Collide, and through a ball from
-    // Interpolate and a dab, against the CPU.
+TEST_P(LookEngineTest, CollideSoftensAsTheCpuDoes) {
+    // Collide's softness (the correction spread toward the root, faded in from it, the strand bent
+    // segment by segment), short and long, through a ball over the head and hung into the scalp:
+    // from Collide, and through a ball from Interpolate and a dab, against the CPU.
     const char* const params[] = {R"("params": {"offset": 0.12, "maxDepth": 0.6, "softness": 0.3})",
-                                  R"("params": {"offset": 0.12, "maxDepth": 0.6, "smoothing": 1.5})",
-                                  R"("params": {"offset": 0.12, "maxDepth": 3.0, "softness": 0.2, "smoothing": 1.0})"};
+                                  R"("params": {"offset": 0.12, "maxDepth": 0.6, "softness": 1.5})",
+                                  R"("params": {"offset": 0.12, "maxDepth": 3.0, "softness": 1.0})"};
     const std::string hang = R"("params": {"strength": 1.6, "stiffness": 0.2})";
     for (const char* p : params) {
         for (const bool hung : {false, true}) {
@@ -3608,7 +3663,14 @@ TEST_P(LookEngineTest, TheLookPresetsRunOnTheGpu) {
             after.guides = bent;
             GroomSession fresh(after);
             ASSERT_TRUE(fresh.evaluate(request).strands);
+            // The guides the stroke changes, as the preview marks them (look_preview.cpp): a branch
+            // reading them too (cinematic_hair's clump centers through an Interpolate of their own) runs anew.
+            NodeId guides = 0;
+            const GraphDocument& doc = *dabbed.viewDocument();
+            ASSERT_TRUE(doc.graph.inputSource(doc.nodesByName.at("interpolate"), 1, &guides));
+            changed_ = {guides};
             expectRun(runAndCompare(dabbed, {}, fresh, "interpolate"));
+            changed_.clear();
         }
     }
 }
@@ -4763,7 +4825,7 @@ TEST(GpuPreview, TakesOnlyWhatItRuns) {
         EXPECT_TRUE(gpu::previewableParam("Curl", "weight"));
         EXPECT_TRUE(gpu::previewableParam("Curl", "weightDirection"));
         EXPECT_TRUE(gpu::previewableParam("Collide", "offset"));     // a number of the kernel's (its fields' tables made for it)
-        EXPECT_FALSE(gpu::previewableParam("Collide", "softness"));  // its fields' tables: the CPU's
+        EXPECT_FALSE(gpu::previewableParam("Collide", "softness"));  // (a second dispatch or none)
         EXPECT_FALSE(gpu::previewableParam("Gravity", "direction"));
     }
 }
@@ -5990,9 +6052,9 @@ TEST(CpuEngine, CollideOverADeformedScalpRunsAlikeTwice) {
     // through the host): the same bits from two sessions, and strands pushed; hard, soft, smoothed;
     // and method exact (the mesh itself at every point, through the same host).
     for (const char* params : {R"("params": {"offset": 0.12})", R"("params": {"offset": 0.12, "softness": 0.1})",
-                               R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3})",
+                               R"("params": {"offset": 0.1, "softness": 0.4, "iterations": 3})",
                                R"("params": {"offset": 0.12, "method": "exact"})",
-                               R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3, "method": "exact"})"}) {
+                               R"("params": {"offset": 0.1, "softness": 0.4, "iterations": 3, "method": "exact"})"}) {
         SCOPED_TRACE(params);
         const GroomData data = deformedGroom(withoutClearance(chainGraph({{"Collide", params}})));
         auto collided = [&](GroomSession& session) {
@@ -6209,10 +6271,10 @@ TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
         {"Twist", R"("params": {"turns": 0.6})"},
         {"Twist", R"("params": {"turns": {"expression": "0.3 + rand", "min": -2.0, "max": 2.0}, "profile": [[0, 0], [1, 1]]})"},
         {"Tangle", R"("params": {"strength": 0.6, "fraction": 0.5})"},
-        {"Tangle", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "fraction": 0.7, "sameClump": false, "reach": 0.0})"},
+        {"Tangle", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "fraction": 0.7, "clumpChannel": "", "reach": 0.0})"},
         {"BlendNeighbors", R"("params": {"strength": 0.6})"},
         {"BlendNeighbors", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "preserveLength": true, "neighbors": 5})"},
-        {"Length", R"("params": {"keep": 0.8, "fraction": 0.5, "trimMin": 0.1, "trimMax": 0.4, "seed": 2})"},
+        {"Length", R"("params": {"keep": 0.8, "fraction": 0.5, "randomness": 0.4, "seed": 2})"},
         {"Length", R"("params": {"keep": {"expression": "0.5 + 0.5 * rand", "min": 0.0, "max": 1.0}})"},
         {"Wind", R"("params": {"strength": 0.5, "gust": 0.6, "turbulence": 0.3, "direction": [1.0, 0.0, 0.3]})"},
         {"Wind", R"("params": {"strength": {"expression": "rand", "min": 0.0, "max": 1.0}, "loop": true, "loopStart": 1, "loopEnd": 25})"},
@@ -6222,14 +6284,14 @@ TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
         {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "frequency": 3.0})"},
         {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "space": "world", "frequency": 3.0})"},
         {"Collide", R"("params": {"offset": 0.12})"},
-        {"Collide", R"("params": {"offset": 0.08, "softness": 0.1, "smoothing": 0.2, "iterations": 3})"},
+        {"Collide", R"("params": {"offset": 0.08, "softness": 0.2, "iterations": 3})"},
         {"Collide", R"("params": {"offset": 0.12, "softness": 0.05, "method": "exact"})", false, true},
         {"Clump", R"("params": {"count": 80, "strength": 0.7})"},
         {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * t", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
                                 "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
         {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * rand", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
                                 "lockRadius": 0.05, "lockRadiusRandom": 0.3, "strengthRandom": 0.4, "copyAmount": 0.3, "pastTip": "extend", "seed": 6})"},
-        {"Clump", R"("params": {"count": 40, "strength": -0.3, "repelRadius": 0.2, "flatten": "random", "flatness": 0.7})"},
+        {"Clump", R"("params": {"count": 40, "strength": -0.3, "repelRadius": 0.2, "flatAlong": "random", "flatness": 0.7})"},
         {"Interpolate", R"("params": {"keepClearance": true})", false, true},
         {"Interpolate", R"("params": {"keepClearance": false, "limitDistance": 0.6, "preserveLength": true})", false, true},
         {"Interpolate", R"("params": {"keepClearance": true, "limitDistance": 1.5, "smoothGuides": true})", true, true},
@@ -6334,15 +6396,15 @@ TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
             // Its surfaces' fields as CollideOp asks them (collisionField at its offset and search radius).
             std::vector<MeshPtr> meshes;
             std::vector<DistanceFieldPtr> fields;
-            const float offset = static_cast<float>(op.params().getDouble("offset")), softness = static_cast<float>(op.params().getDouble("softness"));
-            const float radius = std::max(offset + softness, static_cast<float>(op.params().getDouble("maxDepth"))) * 1.001f + 1e-6f;
+            const float offset = static_cast<float>(op.params().getDouble("offset"));
+            const float radius = std::max(offset, static_cast<float>(op.params().getDouble("maxDepth"))) * 1.001f + 1e-6f;
             for (std::size_t slot = 1; slot < inputs.size(); ++slot) {
                 if (const MeshPtr mesh = valueAs<MeshPtr>(inputs[slot])) {
                     meshes.push_back(mesh);
                     fields.push_back(collisionField(mesh, offset, radius));
                 }
             }
-            stageInputs.collide = gpu::collideInputs(meshes, 0u, fields, offset, softness, &whyNot);
+            stageInputs.collide = gpu::collideInputs(meshes, 0u, fields, offset, &whyNot);
         }
         if (kind == gpu::StageKind::Curl && op.params().getString("coherence") == "clump") {
             stageInputs.curl = gpu::curlInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), "clumpId",

@@ -14,6 +14,7 @@
 #include "groomlab/export_view.h"
 #include "groomlab/frames.h"
 #include "groomlab/parallel.h"
+#include "groomlab/point_index.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_mesh.h"
 #include "groomlab/strand_set.h"
@@ -122,7 +123,7 @@ std::vector<Vec3f> cardRow(const CardMesh::Card& card, std::size_t i) {
     return row;
 }
 
-void seatCard(CardMesh::Card& card, const ScalpMesh& scalp, const Vec3f& root, float clearance) {
+void seatCard(CardMesh::Card& card, const ScalpMesh& scalp, const Vec3f& root, float clearance, float rigid) {
     card.base.clear();
     if (card.center.empty() || scalp.triangleCount() == 0) return;
     if (scalp.closestPoint(root, 4.0f * clearance).root.face < 0) return;  // not rooted on this scalp
@@ -146,6 +147,13 @@ void seatCard(CardMesh::Card& card, const ScalpMesh& scalp, const Vec3f& root, f
     // line: it moves as a whole instead, its lowest vertex onto the skin.
     if ((seated.back() - seated.front()).length() < 0.5f * (row.back() - row.front()).length()) {
         for (std::size_t e = 0; e < row.size(); ++e) seated[e] = row[e] + up[e] * (clearance - lowest);
+    } else if (rigid > 0.0f) {
+        // Toward the row moved as a whole along the skin's mean normal under it.
+        Vec3f mean{};
+        for (const Vec3f& u : up) mean += u;
+        mean = mean.normalized();
+        const float r = std::min(rigid, 1.0f);
+        for (std::size_t e = 0; e < row.size(); ++e) seated[e] = seated[e] * (1.0f - r) + (row[e] + mean * (clearance - lowest)) * r;
     }
     card.base = std::move(seated);
 }
@@ -730,6 +738,8 @@ struct CardSpec {
     // cross style, and no fit (woven strands have no axis across to follow).
     int braid = -1;
     int cards = 0;
+    // A guide's cards (CardSettings::guideSpines): along this curve instead of the strands' median.
+    const std::vector<Vec3f>* spine = nullptr;
 };
 
 // How far p lies from the card's surface: off its plane (bowed by its curvature), and
@@ -787,7 +797,8 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
     std::vector<CardMesh::Card> out;
     if (members.empty()) return out;
     const bool hasScalp = scalp && scalp->triangleCount() > 0;
-    const std::vector<Vec3f> center = medianCurve(s, members);
+    const std::vector<Vec3f> center =
+        spec.spine ? resampleSmoothCurve(spec.spine->data(), spec.spine->size(), kRefStations) : medianCurve(s, members);
     const std::vector<Frame> frames = cardFrames(center, hasScalp ? scalp : nullptr);
     const std::vector<Offset> offsets = strandOffsets(s, members, center, 16);
     const float twist = settings.twist * 0.0174532925f;
@@ -1059,7 +1070,8 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
             if (away.length() < 1e-6f) away = near.normal;
             facing = away.dot(card.refNormal[mid]) >= 0.0f ? 1.0f : -1.0f;
         }
-        if (hasScalp && crossing == 1 && spec.braid < 0 && !spec.flyaway && offsets.size() >= 8) {
+        // (A guide's card stays on its guide.)
+        if (hasScalp && crossing == 1 && spec.braid < 0 && !spec.flyaway && !spec.spine && offsets.size() >= 8) {
             std::vector<float> depths;
             depths.reserve(offsets.size());
             for (const Offset& o : offsets) depths.push_back(facing * o.d.dot(card.refNormal[o.station]));
@@ -1207,6 +1219,48 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
                 out.push_back(std::move(braidCards[b][j]));
             }
         }
+    }
+    // Cards from guides: each strand left joins the guide whose root is nearest its own, and each
+    // guide holding enough of them is a card set along the guide itself; nothing is left for the
+    // clumps (strands of guides holding too few make no card).
+    if (!settings.guideSpines.empty()) {
+        std::vector<Vec3f> guideRoots;
+        std::vector<const std::vector<Vec3f>*> spines;
+        for (const std::vector<Vec3f>& spine : settings.guideSpines) {
+            if (spine.size() < 2 || !(arcLength(spine.data(), spine.size()) > 0.0f)) continue;
+            guideRoots.push_back(spine.front());
+            spines.push_back(&spine);
+        }
+        std::vector<std::vector<std::size_t>> byGuide(guideRoots.size());
+        if (!guideRoots.empty()) {
+            const PointIndex index(guideRoots);
+            for (std::size_t i = 0; i < s.strandCount(); ++i) {
+                if (braided[i] || s.strandPointCount(i) < 2 || arcLength(s.strandPoints(i), s.strandPointCount(i)) <= 0.0f) continue;
+                const std::size_t g = index.nearest(s.strandPoints(i)[0]);
+                if (g < byGuide.size()) byGuide[g].push_back(i);
+            }
+        }
+        std::vector<std::vector<CardMesh::Card>> guideCards(byGuide.size());
+        parallelFor(0, byGuide.size(), [&](std::size_t g) {
+            if (static_cast<int>(byGuide[g].size()) < minStrands) return;
+            CardSpec spec;
+            spec.spine = spines[g];
+            guideCards[g] = buildGroupCards(s, byGuide[g], skin, settings, spec);
+        }, 1);
+        for (std::size_t g = 0; g < guideCards.size(); ++g) {
+            if (guideCards[g].empty()) continue;
+            CardSpec spec;
+            spec.spine = spines[g];
+            spec.crossing = static_cast<int>(guideCards[g].size());
+            spec.group = groups++;
+            for (std::size_t j = 0; j < guideCards[g].size(); ++j) {
+                spec.turn = static_cast<int>(j);
+                specs.push_back(spec);
+                out.push_back(std::move(guideCards[g][j]));
+            }
+        }
+        std::fill(braided.begin(), braided.end(), 1);
+        std::fill(cluster.begin(), cluster.end(), -1);
     }
     // The budget left for the clumps.
     int clumpBudget = hairMax;

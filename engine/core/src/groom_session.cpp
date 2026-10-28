@@ -2428,14 +2428,12 @@ ScalpMapView GroomSession::scalpMapView(const std::string& name, const std::stri
     // The deepest level's guides, as h->flatten() gives them to sampleGuideLayer: each one's root
     // (on the scalp's rest pose) and its value of the layer. Sampled again only when those (or
     // the scalp) changed: combing a guide moves no root.
-    const int level = h->maxDepth();
-    std::unordered_map<GroupId, int> depths;
-    for (const GuideGroup& grp : h->groups()) depths[grp.id] = h->groupDepth(grp.id);
+    const std::set<GroupId> deepest = h->deepestGroups();
     std::vector<Vec3f> roots;
     std::vector<float> values;
     std::uint64_t key = hashCombine(hashText(hash64(0x5CA1CC), view.name), scalp_->contentHash());
     for (const HierarchyGuide& g : h->guides()) {
-        if (depths[g.group] != level || g.points.size() < 2) continue;
+        if (!deepest.count(g.group) || g.points.size() < 2) continue;
         roots.push_back(scalp_->contains(g.root) ? scalp_->restPositionOr(g.root, g.points.front()) : g.points.front());
         float value = 0.0f;
         values.push_back(h->effectiveAttribute(g, view.name, &value) ? value : 0.0f);
