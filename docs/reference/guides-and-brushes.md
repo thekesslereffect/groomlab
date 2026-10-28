@@ -272,8 +272,7 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   the guides a stroke makes unfrozen and freeze every other, in the same undo step, so the next
   brush works on the new guide at once. **Ctrl+click** with a guide brush solos the
   guides in its ring the same way (Ctrl+drag paints them in, Ctrl+Shift+drag lassos them); a
-  Ctrl+click where the ring holds none unfreezes them all; Ctrl+Shift+click toggles them (a
-  selected guide comes out and freezes). The **Select**
+  Ctrl+click where the ring holds none unfreezes them all. The **Select**
   tool solos its selection (the guides not selected freeze, a pick of nothing unfreezes all;
   `select_tool(solo=False)` turns it off), one undo step with the selection. With symmetry on
   (world X or topology) the mirror guides stay live too: a guide placed with its mirror image, a
@@ -293,8 +292,8 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
     without the hotkey set.
 - **Shift and Ctrl in a brush:** Shift+drag smooths, whatever the brush. With a guide brush,
   Ctrl selects: Ctrl+click adds the guides in the ring (the rest freeze; on none: unfreeze all),
-  Ctrl+drag paints them in, Ctrl+Shift+drag lassos them, Ctrl+Shift+click toggles them (a selected
-  guide comes out, frozen). Painting maps or Freeze, Ctrl is the opposite.
+  Ctrl+drag paints them in, Ctrl+Shift+drag lassos them. Painting maps or Freeze, Ctrl is the
+  opposite.
   - **Your own keys:** every tool also has a runtime command (category GroomLab) you can bind.
 
 - **Which guides:** `level` (or `group`) picks the guides a brush edits. Children still follow

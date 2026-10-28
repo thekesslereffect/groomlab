@@ -489,12 +489,6 @@ class ToolsTest(unittest.TestCase):
         t.radius = 2000
         self.click(ts, tip[0], tip[1], ctrl=True)
         self.assertEqual(t.selected_count, 5)
-        # Ctrl+Shift+click toggles: the selected guides come out, frozen (the last ones too).
-        self.click(ts, tip[0], tip[1], ctrl=True, shift=True)
-        self.assertEqual(t.selected_count, 0)
-        self.assertGreaterEqual(t.frozen_count, 5)
-        self.click(ts, tip[0], tip[1], ctrl=True)
-        self.assertEqual(t.selected_count, 5)
         t.radius = radius
         bpy.ops.groomlab.tool(tool="select")
         # Away from the 3D view: Blender's events.

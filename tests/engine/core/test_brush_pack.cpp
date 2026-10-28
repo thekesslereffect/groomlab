@@ -16,7 +16,6 @@
 #include "groomlab/frames.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_session.h"
-#include "groomlab/guide_selection.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_mirror.h"
@@ -719,22 +718,6 @@ TEST(BrushPack, FreezeToSelectionFollowsTheSelection) {
     EXPECT_TRUE(freezeToSelection(f.h, {})) << "nothing selected: every guide unfrozen";
     EXPECT_TRUE(f.h.attributeNames().empty());
     EXPECT_FALSE(freezeToSelection(f.h, {}));
-}
-
-TEST(BrushPack, ATogglePickFreezesTheGuidesItTakesOut) {
-    // Ctrl+Shift+click on a guide brush (a toggle with solo): a selected guide clicked out freezes,
-    // the last one too (every guide frozen, not all unfrozen as a plain pick of nothing does).
-    Field f;
-    const GuideId a = f.add(0.2f, 0.2f), b = f.add(0.5f, 0.5f), c = f.add(0.8f, 0.8f);
-    EXPECT_TRUE(freezeToPick(f.h, combineSelection({a, b}, {b}, SelectMode::Toggle), SelectMode::Toggle));
-    EXPECT_EQ(frozen(f.h, a), 0.0f);
-    EXPECT_EQ(frozen(f.h, b), 1.0f);
-    EXPECT_EQ(frozen(f.h, c), 1.0f);
-    EXPECT_TRUE(freezeToPick(f.h, combineSelection({a}, {a}, SelectMode::Toggle), SelectMode::Toggle));
-    EXPECT_EQ(frozen(f.h, a), 1.0f) << "the last one out freezes too";
-    EXPECT_EQ(frozen(f.h, b), 1.0f);
-    EXPECT_TRUE(freezeToPick(f.h, {}, SelectMode::Replace)) << "a plain pick of nothing: every guide unfrozen";
-    EXPECT_TRUE(f.h.attributeNames().empty());
 }
 
 TEST(BrushPack, SoloHonoursSymmetry) {

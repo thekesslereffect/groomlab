@@ -854,8 +854,7 @@ void BrushContext::toolOnSetup(MEvent&) {
     setHelpString("Drag: brush the selected groom (Place: click one guide, drag for many; Draw: draw a guide "
                   "from the scalp). Shift+drag: smooth (Shape: the tubes' channel it paints). Ctrl+drag: paint "
                   "guides into the selection, the rest frozen; Ctrl+Shift+drag: lasso them; Ctrl+click: add the "
-                  "guides in the ring (on none: deselect and unfreeze all); Ctrl+Shift+click: toggle them (a "
-                  "selected guide comes out, frozen). Painting maps or guide attributes, "
+                  "guides in the ring (on none: deselect and unfreeze all). Painting maps or guide attributes, "
                   "Ctrl is the opposite. "
                   "B/M or middle-drag: radius/strength. Double-click the tool for its settings.");
     installPenPressure();
@@ -1166,7 +1165,7 @@ void BrushContext::finishPaintSelection() {
     pick.symmetry = tool_.settings.symmetryName();
     if (!paintMoved_) {
         // A click: the guides in the ring added, the rest frozen; on none, nothing selected and
-        // every guide unfrozen. Ctrl+Shift: toggled (those already selected taken out, so frozen).
+        // every guide unfrozen.
         std::vector<std::array<float, 2>> ring;
         const float r = std::max(tool_.settings.screenRadius, 1.0f);
         for (int k = 0; k < 24; ++k) {
@@ -1174,7 +1173,7 @@ void BrushContext::finishPaintSelection() {
             ring.push_back({float(paintX_) + r * std::cos(a), float(paintY_) + r * std::sin(a)});
         }
         const std::vector<GuideId> picked = pickGuidesInView(ring, pick);
-        applyGuideSelection(picked, picked.empty() ? "replace" : lasso_ ? "toggle" : "add", true, true);
+        applyGuideSelection(picked, picked.empty() ? "replace" : "add", true, true);
     } else if (lasso_) {
         // The guides inside the lasso added, the rest frozen: one undo step.
         std::vector<GuideId> selection = paintBefore_;

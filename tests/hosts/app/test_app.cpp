@@ -1423,14 +1423,6 @@ TEST(AppBrush, PlacesErasesSelectsAndDeletesGuides) {
     EXPECT_TRUE(f.session.settings().ctrlSelects());
     f.session.settings().screenRadius = 2000.0f;
     EXPECT_EQ(f.session.paintSelection(root, SelectMode::Replace), afterErase);
-    // Ctrl+Shift+click: toggled, so the selected guides come out, frozen (the last ones too).
-    EXPECT_EQ(f.session.paintSelection(root, SelectMode::Toggle, true), afterErase);
-    EXPECT_TRUE(f.doc->selection().empty());
-    for (const HierarchyGuide& guide : f.doc->session().authoredHierarchy()->guides()) {
-        float value = 0.0f;
-        EXPECT_TRUE(f.doc->session().authoredHierarchy()->effectiveAttribute(guide, "freeze", &value) && value == 1.0f) << guide.id;
-    }
-    EXPECT_EQ(f.session.paintSelection(QPointF(1.0, 1.0), SelectMode::Replace, true), 0u);  // (a pick of nothing: all unfrozen)
     f.session.settings().screenRadius = 5.0f;
     EXPECT_EQ(f.session.paintSelection(QPointF(1.0, 1.0), SelectMode::Replace), 0u);
     EXPECT_TRUE(f.doc->selection().empty());
