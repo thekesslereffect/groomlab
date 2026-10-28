@@ -34,19 +34,6 @@ PartsPtr autoPartLines(const ParamSet& params, const StrandSet& strands, const S
     return found.empty() ? nullptr : std::make_shared<const PartLines>(found, scalp);
 }
 
-// Collide's softness: a push of `delta` up to the offset plus the softness `s` (|delta| = u: how far
-// below that the point is), eased: a point within the band of 2s below that rises u^2 / 4s (at its
-// top it rises nothing, the rise growing smoothly), one deeper rises to the offset itself (u - s).
-// Its new height is a smooth maximum of its height and the offset, never below either (look.slang
-// softPush, the same arithmetic).
-Vec3f softPush(const Vec3f& delta, float s) {
-    if (!(s > 0.0f)) return delta;
-    const float u = delta.length();
-    if (!(u > 0.0f)) return delta;
-    const float f = u < 2.0f * s ? u / (4.0f * s) : (u - s) / u;
-    return delta * f;
-}
-
 // Whether p is too far from the point the mesh's closest point query was last asked at (the
 // distance to a mesh changes no faster than the point moves): its answer, a miss, the same.
 bool collideBeyondBound(const CollideRestState& state, const Vec3f& p, float searchRadius) {
@@ -75,10 +62,10 @@ bool collideBeyondBound(const CollideRestState& state, const Vec3f& p, float sea
 // asked through its rest pose's field, made once for every frame: each point taken to rest space by
 // its nearest vertex's frame (RestPoseCollision), the deformed mesh asked where that field cannot
 // tell (the GPU leaves such a Collide to the CPU). A deforming collider without a rest pose gets a
-// field per frame. `softness` eases the push in over a band above the offset (softPush) and
-// `smoothing` spreads the pushes toward the root (smoothCorrections); with either the walk carries
-// each segment along its own heading once a point moved (a strand meeting a surface slides along
-// it), both 0 the walk above, as it always was.
+// field per frame. `softness` spreads the collider's pushes toward the root over that length along
+// the strand (look.slang smoothStrand), faded in from the root, then walks again so no point stays
+// inside; with it the walk carries each segment along its own heading once a point moved (a strand
+// meeting a surface slides along it), 0 the walk above, as it always was.
 class CollideOp : public Operator {
 public:
     std::string typeName() const override { return op::kCollide; }
@@ -91,13 +78,9 @@ public:
         return {
             ParamSpec{"offset", 0.05, "Distance kept between strands and the surfaces", "length"}.soft(0, 0.5),
             ParamSpec{"maxDepth", 3.0, "Points deeper under a surface than this are not pushed", "length"}.soft(0, 10),
-            ParamSpec{"softness", 0.0, "Height above the offset where the collider's push starts to ease in: strands curve away "
-                                       "before they touch instead of kinking there (0: a hard push; the scalp's always is)", "length"}
-                .atLeast(0)
-                .soft(0, 1),
-            ParamSpec{"smoothing", 0.0, "Length along the strand, toward the root, over which the collider's push fades out: "
-                                        "the strand curves onto it and slides along it, its segments' lengths kept (0: none)",
-                      "length"}
+            ParamSpec{"softness", 0.0, "Length along the strand, before it meets the collider, over which it curves onto "
+                                       "it and then slides along it, its segments' lengths kept, instead of folding flat "
+                                       "where it touches (0: a hard push; the scalp's always is)", "length"}
                 .atLeast(0)
                 .soft(0, 5),
             ParamSpec{"iterations", std::int64_t{2}, "Root-to-tip passes"}.range(1, 16).soft(1, 8).adv(),
@@ -130,7 +113,7 @@ private:
         const StrandsPtr in = requireStrands(inputs, op::kCollide);
         // The surfaces to stay out of: the scalp, then the collider.
         std::vector<MeshPtr> meshes;
-        std::vector<char> colliders;  // per mesh: the collider input's (softness and smoothing act on it)
+        std::vector<char> colliders;  // per mesh: the collider input's (softness acts on it)
         for (std::size_t slot = 1; slot < 3 && slot < inputs.size(); ++slot) {
             const MeshPtr mesh = valueAs<MeshPtr>(inputs[slot]);
             if (mesh && mesh->triangleCount() > 0) {
@@ -155,11 +138,8 @@ private:
         }
         const auto offset = static_cast<float>(params().getDouble("offset"));
         const auto maxDepth = static_cast<float>(params().getDouble("maxDepth"));
-        const auto softness = static_cast<float>(params().getDouble("softness"));
-        // A soft push asks how far below `reach` (the offset plus the softness) a point is.
-        const float reach = offset + softness;
         // Only points this close to the surface can need a push; the bound keeps far points cheap.
-        const float searchRadius = std::max(reach, maxDepth) * 1.001f + 1e-6f;
+        const float searchRadius = std::max(offset, maxDepth) * 1.001f + 1e-6f;
         // The meshes' fields (shared across evaluations, by surface): the cell size from the mesh
         // and the offset, reaching past the search radius. A mesh deformed away from its rest
         // pose (an animated scalp, a collider with a rest pose) is a new mesh on every frame,
@@ -186,7 +166,7 @@ private:
         for (std::size_t m = 0; m < colliders.size(); ++m) colliderBits |= colliders[m] ? 1u << m : 0u;
         std::string whyNot;
         const std::shared_ptr<gpu::CollideInputs> surfaces =
-            gpu::collideInputs(meshes, colliderBits, fields, offset, softness, &whyNot, rests, maxDepth, searchRadius, exact);
+            gpu::collideInputs(meshes, colliderBits, fields, offset, &whyNot, rests, maxDepth, searchRadius, exact);
         if (!surfaces) throw GraphError("Collide: " + whyNot);
         if (!incremental) {
             gpu::StageInputs all;
@@ -593,8 +573,8 @@ void registerDisplaceOperator(OperatorRegistry& registry) {
                           [] { return std::make_unique<DisplaceOp>(); });
 }
 
-bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* field, const ScalpMesh& mesh, Vec3f& p, float to, bool soft,
-                     float softness, float maxDepth, float searchRadius, CollideRestState& state) {
+bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* field, const ScalpMesh& mesh, Vec3f& p, float to,
+                     float maxDepth, float searchRadius, CollideRestState& state) {
     if (!rest && field) {
         // A still mesh's field answers alone (never Ask, but for a field without a grid: the
         // mesh's), as the GPU's Collide does from its tables.
@@ -604,7 +584,6 @@ bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* fie
         switch (field->push(p, to, maxDepth, searchRadius, &delta, &alone)) {
             case MeshDistanceField::Push::Kept: return false;
             case MeshDistanceField::Push::Moved:
-                if (soft) delta = softPush(delta, softness);
                 p += delta;
                 return true;
             case MeshDistanceField::Push::Ask: break;  // the mesh's answer, below
@@ -618,7 +597,6 @@ bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* fie
         switch (rest->push(p, to, maxDepth, searchRadius, &delta, state.cursor)) {
             case MeshDistanceField::Push::Kept: return false;
             case MeshDistanceField::Push::Moved:
-                if (soft) delta = softPush(delta, softness);
                 p += delta;
                 return true;
             case MeshDistanceField::Push::Ask: break;  // the deformed mesh's own answer, below
@@ -626,11 +604,10 @@ bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* fie
     }
     // Where the rest field cannot tell: the deformed mesh itself (which the rest field alone would
     // miss by how the mesh bends); method exact: always.
-    return collideMeshPush(mesh, p, to, soft, softness, maxDepth, searchRadius, state);
+    return collideMeshPush(mesh, p, to, maxDepth, searchRadius, state);
 }
 
-bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth, float searchRadius,
-                     CollideRestState& state) {
+bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, float maxDepth, float searchRadius, CollideRestState& state) {
     if (collideBeyondBound(state, p, searchRadius)) return false;
     Vec3f delta;
     float lowerBound = 0.0f;
@@ -641,7 +618,6 @@ bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float
     const float height = (p - sp.position).dot(sp.normal);
     if (height >= to || height <= -maxDepth) return false;
     delta = sp.normal * (to - height);
-    if (soft) delta = softPush(delta, softness);
     p += delta;
     return true;
 }

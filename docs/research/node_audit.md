@@ -136,7 +136,7 @@ New nodes only; saved nodes keep the old default through `formerDefault`.
 ## Nodes with no change
 
 - **Width, Flow, Resample, Smooth, Cull, Collide:** lean and right.
-  - Collide's `softness` and `smoothing` apply to the collider only; the tooltips could say so.
+  - Collide's `softness` and `smoothing` merged (2026-10-28) into one `softness`: a length along the strand (the old smoothing, faded in from the root). The old height-band softness also floated hair off the surface (0.16 above a 0.02 offset at 0.3), and smoothing kinked at the root once longer than the strand's way to the surface.
 - **Transform:** in strand space, `rotate` follows the scalp's UV U, so it jumps across UV seams. Low priority. Reusing Direction's `along` would fix it.
 - **Noise:** lean.
 - **Twist, Wet, BlendNeighbors:** distinct and lean.

@@ -84,11 +84,11 @@ void collideCursor(std::uint64_t host, std::uint32_t mesh, std::uint32_t strand,
     putState(st, state);
 }
 
-bool collidePush(std::uint64_t host, std::uint32_t mesh, float p[3], float to, bool soft, float state[9]) {
+bool collidePush(std::uint64_t host, std::uint32_t mesh, float p[3], float to, float state[9]) {
     const CollideHost& h = collideHost(host);
     CollideRestState st = restState(state);
     Vec3f q(p[0], p[1], p[2]);
-    const bool moved = collideRestPush(h.rests[mesh].get(), h.fields[mesh].get(), *h.meshes[mesh], q, to, soft, h.softness, h.maxDepth, h.searchRadius, st);
+    const bool moved = collideRestPush(h.rests[mesh].get(), h.fields[mesh].get(), *h.meshes[mesh], q, to, h.maxDepth, h.searchRadius, st);
     put(q, p);
     putState(st, state);
     return moved;

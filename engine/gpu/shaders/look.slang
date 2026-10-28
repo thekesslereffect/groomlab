@@ -4163,23 +4163,9 @@ void FlyawayCS(uint3 id : SV_DispatchThreadID) {
 // faces the field holds there, the mesh's own almost everywhere). Each pass walks the strand from
 // the root: each point kept its segment's length from the point before (follow the leader), then
 // pushed out of each surface in turn (and if it moved, its length kept and pushed again), as the
-// CPU rounds each step; passes stop when one moves nothing. gValue2.x, the softness: the first
-// pass's first push of a point asked to the offset plus it and eased (softPush). gValue2.y, the
-// smoothing: the passes' corrections spread toward the root (smoothCorrections), the strand bent so
-// from the root, then walked again (no ease).
-
-// deform_ops.cpp softPush: a push up to the offset plus the softness s eased, as the CPU rounds it.
-float3 softPush(float3 delta, float s) {
-    if (!(s > 0.0f)) return delta;
-    const float u = lengthExact(delta);
-    if (!(u > 0.0f)) return delta;
-    PRECISE float twice = 2.0f * s;
-    PRECISE float four = 4.0f * s;
-    PRECISE float less = u - s;
-    const float f = u < twice ? divExact(u, four) : divExact(less, u);
-    PRECISE float3 eased = delta * f;
-    return eased;
-}
+// CPU rounds each step; passes stop when one moves nothing. gValue2.y, the softness: the passes'
+// corrections spread toward the root over that length (smoothStrand), the strand bent so from the
+// root, then walked again.
 
 // Collide over a mesh deformed away from its rest pose (gFlag.w: a bit each; the CPU engine's
 // alone): the operator's own push through the host (look_run.h CollideHost, its address in
@@ -4190,8 +4176,8 @@ bool collideRest(uint m) { return ((gFlag.w >> m) & 1u) != 0; }
 void hostCollideCursor(uint2 host, uint mesh, uint strand, float3 p, inout float4 a, inout float4 b, inout float c) {
     __target_switch { case cpp: __intrinsic_asm "groomlab_collide_cursor($0, $1, $2, $3, $4, $5, $6)"; }
 }
-bool hostCollidePush(uint2 host, uint mesh, inout float3 p, float to, bool soft, inout float4 a, inout float4 b, inout float c) {
-    __target_switch { case cpp: __intrinsic_asm "groomlab_collide_push($0, $1, $2, $3, $4, $5, $6, $7)"; }
+bool hostCollidePush(uint2 host, uint mesh, inout float3 p, float to, inout float4 a, inout float4 b, inout float c) {
+    __target_switch { case cpp: __intrinsic_asm "groomlab_collide_push($0, $1, $2, $3, $4, $5, $6)"; }
 }
 bool hostCollideSettled(uint2 host, uint mesh, float3 root, float within, float reach) {
     __target_switch { case cpp: __intrinsic_asm "groomlab_collide_settled($0, $1, $2, $3, $4)"; }
@@ -4225,30 +4211,28 @@ void collideRestCursor(uint s, uint m, float3 root, inout CollideRestStates rest
     default: return;
     }
 }
-// Point p pushed out of deformed mesh m to `to` (`soft`: eased): true when it moved.
-bool collideRestPush(uint m, inout float3 p, float to, bool soft, inout CollideRestStates rest) {
+// Point p pushed out of deformed mesh m to `to`: true when it moved.
+bool collideRestPush(uint m, inout float3 p, float to, inout CollideRestStates rest) {
     __target_switch {
-    case cpp: return hostCollidePush(gFlag2.zw, m, p, to, soft, rest.a[m], rest.b[m], rest.c[m]);
+    case cpp: return hostCollidePush(gFlag2.zw, m, p, to, rest.a[m], rest.b[m], rest.c[m]);
     default: return false;
     }
 }
 
 // The passes over the strand at `begin` (n points, in gOut), as the CPU walks it. `carried` (with
-// softness or smoothing): each point the point before plus its own segment of the strand walked
-// (gIn, or with `fromIn` false gOut itself, the strand smoothing bent; the passes after the first:
-// gOut) once a point moved, else the point itself, then pushed (`ease`: the first pass's first push
-// eased by the softness); else each point follows the one before (its length kept), then pushed.
-// Softness and smoothing act on the collider alone (gFlag.z: which surfaces are the collider
-// input's, a bit each): a strand it never moves walks as without them. Returns whether it moved one.
-bool collideWalk(uint s, uint begin, uint n, uint meshes, FieldTables scalpTables, FieldTables colliderTables, bool carried, bool ease, bool fromIn,
+// softness): each point the point before plus its own segment of the strand walked (gIn, or with
+// `fromIn` false gOut itself, the strand smoothStrand bent; the passes after the first: gOut) once a
+// point moved, else the point itself, then pushed; else each point follows the one before (its
+// length kept), then pushed. Softness acts on the collider alone (gFlag.z: which surfaces are the
+// collider input's, a bit each): a strand it never moves walks as without it. Returns whether it
+// moved one.
+bool collideWalk(uint s, uint begin, uint n, uint meshes, FieldTables scalpTables, FieldTables colliderTables, bool carried, bool fromIn,
                  float3 root, float2 skipWithin, inout CollideRestStates rest) {
     const float offset = gValue.x, maxDepth = gValue.y, searchRadius = gValue.z;
-    PRECISE float reach = offset + gValue2.x;
     bool touched = false;
     for (uint pass = 0; pass < gFlag.x; ++pass) {
         bool moved = false, shifted = false;
         float3 previous = loadOut(begin);
-        const bool eased = ease && pass == 0;
         const bool inWalked = fromIn && pass == 0;
         float3 last = inWalked ? loadPoint(begin) : loadOut(begin);  // the walked strand's point before
         for (uint m = 0; m < meshes; ++m) {  // (each pass walks a deformed mesh from the root)
@@ -4270,18 +4254,16 @@ bool collideWalk(uint s, uint begin, uint n, uint meshes, FieldTables scalpTable
             // over them all, so the kernel's code holds one push (a driver compiles each copy of it,
             // and each loop about it, for seconds).
             Probe probe;
-            float pushOffset = offset;
             for (uint step = 0; step < meshes * 2; ++step) {
                 const uint m = step >> 1;
                 const bool second = (step & 1u) != 0;
                 sTableBase = m == 0 ? 0u : gAux.x;
                 const FieldTables tables = m == 0 ? scalpTables : colliderTables;
                 const bool collider = ((gFlag.z >> m) & 1u) != 0;
-                const bool easedHere = eased && collider;
                 if (collideRest(m)) {
                     // Through the host (the push and, once it moved the point, its length kept, a second).
                     float3 q = p;
-                    const bool restMoved = collideRestPush(m, q, second || !easedHere ? offset : reach, !second && easedHere, rest);
+                    const bool restMoved = collideRestPush(m, q, offset, rest);
                     if (second) {
                         if (restMoved) p = q;
                         continue;
@@ -4305,12 +4287,9 @@ bool collideWalk(uint s, uint begin, uint n, uint meshes, FieldTables scalpTable
                     ++step;  // (no push, no second)
                     continue;
                 }
-                if (!second) {
-                    learnt(probe, -infinity(), 0.0f);
-                    pushOffset = easedHere ? reach : offset;
-                }
+                if (!second) learnt(probe, -infinity(), 0.0f);
                 float3 delta;
-                const bool pushedOut = clearancePush(tables, p, pushOffset, maxDepth, searchRadius, probe, delta) == PUSH_MOVED;
+                const bool pushedOut = clearancePush(tables, p, offset, maxDepth, searchRadius, probe, delta) == PUSH_MOVED;
                 if (second) {
                     if (pushedOut) {
                         PRECISE float3 again = p + delta;
@@ -4322,7 +4301,6 @@ bool collideWalk(uint s, uint begin, uint n, uint meshes, FieldTables scalpTable
                     ++step;  // (no second push)
                     continue;
                 }
-                if (easedHere) delta = softPush(delta, gValue2.x);
                 PRECISE float3 pushed = p + delta;
                 moved = true;
                 if (collider) {
@@ -4331,7 +4309,6 @@ bool collideWalk(uint s, uint begin, uint n, uint meshes, FieldTables scalpTable
                 }
                 p = keepLength(previous, pushed, wanted);
                 learnt(probe, -infinity(), 0.0f);
-                pushOffset = offset;
             }
             storePoint(gOut, begin + i, p);
             previous = p;
@@ -4347,7 +4324,7 @@ void CollideCS(uint3 id : SV_DispatchThreadID) {
     const uint s = threadIndex(id, GROUP_SIZE);
     if (s >= gStrandCount) return;
     const uint begin = strandBegin(s), n = strandCountOf(s);
-    // gFlag.y: the second dispatch of a smoothing Collide (the engine's): on the first's points, for
+    // gFlag.y: the second dispatch of a soft Collide (the engine's): on the first's points, for
     // the strands the collider moved (the first wrote a word a strand into gOut2, read as gAux0).
     const bool second = gFlag.y != 0;
     if (!second) copyStrand(begin, n);
@@ -4361,17 +4338,16 @@ void CollideCS(uint3 id : SV_DispatchThreadID) {
     const FieldTables scalpTables = fieldTables();
     sTableBase = gAux.x;
     const FieldTables colliderTables = fieldTables();
-    const bool soft = gValue2.x > 0.0f;
-    const float smoothing = gValue2.y;
-    const bool carried = soft || smoothing > 0.0f;
-    if (second) smoothStrand(begin, n, smoothing);
+    const float softness = gValue2.y;
+    const bool carried = softness > 0.0f;
+    if (second) smoothStrand(begin, n, softness);
     // Each surface's field asked once for the whole strand (bounds at its
     // root out to its farthest point and the push's reach): settled there, it is skipped at the
     // points that stay that near the root.
     const float3 root = loadOut(begin);
     float farthest = 0.0f;
     for (uint i = 1; i < n; ++i) farthest = max(farthest, apartExact(loadOut(begin + i), root));
-    PRECISE float reach = gValue.x + gValue2.x;
+    const float reach = gValue.x;
     PRECISE float spread = farthest * 1.001f;
     PRECISE float widened = spread + reach;
     PRECISE float within = widened + 1e-6f;
@@ -4394,40 +4370,56 @@ void CollideCS(uint3 id : SV_DispatchThreadID) {
             if (m == 0) skipWithin.x = within; else skipWithin.y = within;
         }
     }
-    // The walk; with smoothing, a second dispatch bends the strand by its corrections spread and
+    // The walk; with softness, a second dispatch bends the strand by its corrections spread and
     // walks it again (two dispatches, not a loop here: a driver compiles a loop about the walk
     // several times slower).
     CollideRestStates rest = collideRestStates();
-    const bool touched = collideWalk(s, begin, n, meshes, scalpTables, colliderTables, carried, soft && !second, !second, root, skipWithin, rest);
+    const bool touched = collideWalk(s, begin, n, meshes, scalpTables, colliderTables, carried, !second, root, skipWithin, rest);
     __target_switch {
     case cpp:
-        // On the CPU the smoothing's walk follows in the same thread (no second dispatch: the
+        // On the CPU the softness's walk follows in the same thread (no second dispatch: the
         // engine's), each strand's walk state over a deformed mesh kept, as the CPU's.
-        if (smoothing > 0.0f && touched) {
-            smoothStrand(begin, n, smoothing);
-            collideWalk(s, begin, n, meshes, scalpTables, colliderTables, carried, false, false, root, skipWithin, rest);
+        if (softness > 0.0f && touched) {
+            smoothStrand(begin, n, softness);
+            collideWalk(s, begin, n, meshes, scalpTables, colliderTables, carried, false, root, skipWithin, rest);
         }
         return;
     default: break;
     }
-    if (!second && smoothing > 0.0f) gOut2.Store(s * 4, touched ? 1u : 0u);
+    if (!second && softness > 0.0f) gOut2.Store(s * 4, touched ? 1u : 0u);
 }
 
-// Collide's smoothing on the strand at `begin`: point i's correction (gOut less gIn)
-// the mean of its own and each later point's within `smoothing` along the strand, each weighed by
-// smoothstep (its own 1); written as its spot (gIn plus it) once read (a point reads only those
-// after it). Then the strand bent so from the root, each segment turned toward its spot, its
-// length kept.
-void smoothStrand(uint begin, uint n, float smoothing) {
+// Collide's softness on the strand at `begin`: point i's correction (gOut less gIn) the mean of its
+// own and each later point's within `softness` along the strand, each weighed by smoothstep (its
+// own 1), faded in from the root (smoothstep) over the softness or, if shorter, the strand's way to
+// the first point a push moved: the whole correction there, none at the root and no kink there
+// (a softness past where the strand meets the surface would otherwise turn its first segment
+// hard); written as its spot (gIn plus it) once read (a point reads only those after it). Then the
+// strand bent so from the root, each segment turned toward its spot, its length kept.
+void smoothStrand(uint begin, uint n, float softness) {
+    float fadeOver = softness;
+    float toFirst = 0.0f;
     for (uint i = 1; i < n; ++i) {
+        PRECISE float walked = toFirst + apartExact(loadPoint(begin + i), loadPoint(begin + i - 1));
+        toFirst = walked;
+        const float3 was = loadPoint(begin + i), now = loadOut(begin + i);
+        if (now.x != was.x || now.y != was.y || now.z != was.z) {
+            fadeOver = min(softness, toFirst);
+            break;
+        }
+    }
+    float fromRoot = 0.0f;
+    for (uint i = 1; i < n; ++i) {
+        PRECISE float walked = fromRoot + apartExact(loadPoint(begin + i), loadPoint(begin + i - 1));
+        fromRoot = walked;
         PRECISE float3 sum = loadOut(begin + i) - loadPoint(begin + i);
         float weight = 1.0f;
         float apart = 0.0f;
         for (uint j = i + 1; j < n; ++j) {
             PRECISE float along = apart + apartExact(loadPoint(begin + j), loadPoint(begin + j - 1));
             apart = along;
-            if (!(apart < smoothing)) break;
-            const float x = divExact(apart, smoothing);
+            if (!(apart < softness)) break;
+            const float x = divExact(apart, softness);
             PRECISE float xx = x * x;
             PRECISE float twoX = 2.0f * x;
             PRECISE float rest = 3.0f - twoX;
@@ -4440,8 +4432,18 @@ void smoothStrand(uint begin, uint n, float smoothing) {
             PRECISE float weighed = weight + w;
             weight = weighed;
         }
+        float fade = 1.0f;
+        if (fromRoot < fadeOver) {
+            const float x = divExact(fromRoot, fadeOver);
+            PRECISE float xx = x * x;
+            PRECISE float twoX = 2.0f * x;
+            PRECISE float rest = 3.0f - twoX;
+            PRECISE float cubic = xx * rest;
+            fade = cubic;
+        }
         const float3 mean = float3(divExact(sum.x, weight), divExact(sum.y, weight), divExact(sum.z, weight));
-        PRECISE float3 spot = loadPoint(begin + i) + mean;
+        PRECISE float3 faded = mean * fade;
+        PRECISE float3 spot = loadPoint(begin + i) + faded;
         storePoint(gOut, begin + i, spot);
     }
     // Each segment turned to the smoothed strand's (its spots), its length kept, from the root.

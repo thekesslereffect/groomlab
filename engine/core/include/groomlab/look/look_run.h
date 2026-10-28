@@ -314,7 +314,7 @@ struct CollideHost {
     std::vector<std::shared_ptr<const RestPoseCollision>> rests;  // per mesh (null: a still one, or method exact)
     std::vector<DistanceFieldPtr> fields;  // per mesh: a still one's field (null: deformed, or method exact)
     std::vector<MeshPtr> meshes;
-    float maxDepth = 0.0f, searchRadius = 0.0f, softness = 0.0f;
+    float maxDepth = 0.0f, searchRadius = 0.0f;
     std::shared_ptr<const std::vector<StrandRoot>> roots;  // per strand of the run (its walk starts at its root)
 };
 struct CollideInputs {
@@ -322,7 +322,7 @@ struct CollideInputs {
     std::shared_ptr<const CollideHost> host;  // (with rests)
     std::vector<MeshDistanceField::Tables> tables;
     std::vector<Vec3f> boxes;  // per mesh: lo, hi
-    std::uint32_t colliders = 0;  // which are the collider input's, a bit each (softness and smoothing act on it)
+    std::uint32_t colliders = 0;  // which are the collider input's, a bit each (softness acts on it)
 };
 // SelfCollide and Static: the hair grid as the node lays it on the strands it takes
 // (operator_state.h HairGridLayout: the strands splatted, their segments, the cell, what a sample

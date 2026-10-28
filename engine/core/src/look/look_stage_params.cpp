@@ -176,13 +176,11 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             }
             const auto offset = static_cast<float>(number("offset"));
             const auto maxDepth = static_cast<float>(params.getDouble("maxDepth"));
-            const auto softness = static_cast<float>(params.getDouble("softness"));
             s->value[0] = offset;
             s->value[1] = maxDepth;
-            s->value[2] = std::max(offset + softness, maxDepth) * 1.001f + 1e-6f;  // CollideOp's search radius
+            s->value[2] = std::max(offset, maxDepth) * 1.001f + 1e-6f;  // CollideOp's search radius
             s->flag[0] = static_cast<int>(params.getInt("iterations"));
-            s->value2[0] = softness;
-            s->value2[1] = static_cast<float>(params.getDouble("smoothing"));
+            s->value2[1] = static_cast<float>(params.getDouble("softness"));
             return true;
         }
         case StageKind::Wind: {
@@ -673,7 +671,7 @@ std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleStat
 }
 
 std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes, std::uint32_t colliders,
-                                             const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why,
+                                             const std::vector<DistanceFieldPtr>& fields, float offset, std::string* why,
                                              const std::vector<std::shared_ptr<const RestPoseCollision>>& rests, float maxDepth,
                                              float searchRadius, bool exact) {
     if (meshes.size() > 2 || fields.size() != meshes.size()) {
@@ -705,9 +703,9 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
         const MeshDistanceField& field = *fields[m];
         float upTo = field.reach();
         if (MeshDistanceField::cellSizeFor(*meshes[m], std::numeric_limits<float>::max()) > field.cellSize()) {
-            upTo = std::min(upTo, field.cellSize() * 1.4143f + softness);
+            upTo = std::min(upTo, field.cellSize() * 1.4143f);
         }
-        tables[m] = field.tables(std::max(offset + softness, upTo), field.reach());
+        tables[m] = field.tables(std::max(offset, upTo), field.reach());
         if (!tables[m]) {
             if (rests.empty()) {
                 *why = "a surface has no field the GPU can read (too big for its grid: the CPU's)";
@@ -724,7 +722,6 @@ std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes,
         host->meshes = meshes;
         host->maxDepth = maxDepth;
         host->searchRadius = searchRadius;
-        host->softness = softness;
         made->host = std::move(host);
     }
     for (std::size_t m = 0; m < meshes.size(); ++m) {

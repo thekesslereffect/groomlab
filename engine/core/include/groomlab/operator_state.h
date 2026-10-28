@@ -251,17 +251,16 @@ struct CollideRestState {
     Vec3f anchor;
     float bound = -1.0f;
 };
-// CollideOp's push of point p out of `mesh` to `to` above it (the offset, or with `soft` the offset
-// plus the softness, the push then eased: softPush), within maxDepth below and the search radius:
+// CollideOp's push of point p out of `mesh` to `to` above it (the offset), within maxDepth below and
+// the search radius:
 // through `rest` for a mesh deformed away from its rest pose (its rest field, the mesh itself where
 // that cannot tell), else through `field` (a still mesh's: its answers alone, the mesh's where it
 // has no grid), else (method exact) the mesh itself. True when it moved p. The CPU engine's Collide
 // asks the same (look.slang hostCollidePush; the GPU's reads the field as tables).
-bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* field, const ScalpMesh& mesh, Vec3f& p, float to, bool soft,
-                     float softness, float maxDepth, float searchRadius, CollideRestState& state);
+bool collideRestPush(const RestPoseCollision* rest, const MeshDistanceField* field, const ScalpMesh& mesh, Vec3f& p, float to,
+                     float maxDepth, float searchRadius, CollideRestState& state);
 // Its last step: the mesh's own closest point (the bound of the last query skipping what it settles).
-bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, bool soft, float softness, float maxDepth, float searchRadius,
-                     CollideRestState& state);
+bool collideMeshPush(const ScalpMesh& mesh, Vec3f& p, float to, float maxDepth, float searchRadius, CollideRestState& state);
 
 // ---- Part ---------------------------------------------------------------------------------------
 

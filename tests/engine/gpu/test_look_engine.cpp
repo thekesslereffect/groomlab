@@ -3210,14 +3210,13 @@ TEST_P(LookEngineTest, CollideKeepsStrandsOutAsTheCpuDoes) {
     EXPECT_NE(refused.why.find("exact"), std::string::npos) << refused.why;
 }
 
-TEST_P(LookEngineTest, CollideEasesAndSmoothsAsTheCpuDoes) {
-    // Collide's softness (the push eased in over a band above the offset) and smoothing (the
-    // correction spread toward the root, the strand bent segment by segment), alone and together,
-    // through a ball over the head and hung into the scalp: from Collide, and through a ball from
-    // Interpolate and a dab, against the CPU.
+TEST_P(LookEngineTest, CollideSoftensAsTheCpuDoes) {
+    // Collide's softness (the correction spread toward the root, faded in from it, the strand bent
+    // segment by segment), short and long, through a ball over the head and hung into the scalp:
+    // from Collide, and through a ball from Interpolate and a dab, against the CPU.
     const char* const params[] = {R"("params": {"offset": 0.12, "maxDepth": 0.6, "softness": 0.3})",
-                                  R"("params": {"offset": 0.12, "maxDepth": 0.6, "smoothing": 1.5})",
-                                  R"("params": {"offset": 0.12, "maxDepth": 3.0, "softness": 0.2, "smoothing": 1.0})"};
+                                  R"("params": {"offset": 0.12, "maxDepth": 0.6, "softness": 1.5})",
+                                  R"("params": {"offset": 0.12, "maxDepth": 3.0, "softness": 1.0})"};
     const std::string hang = R"("params": {"strength": 1.6, "stiffness": 0.2})";
     for (const char* p : params) {
         for (const bool hung : {false, true}) {
@@ -4826,7 +4825,7 @@ TEST(GpuPreview, TakesOnlyWhatItRuns) {
         EXPECT_TRUE(gpu::previewableParam("Curl", "weight"));
         EXPECT_TRUE(gpu::previewableParam("Curl", "weightDirection"));
         EXPECT_TRUE(gpu::previewableParam("Collide", "offset"));     // a number of the kernel's (its fields' tables made for it)
-        EXPECT_FALSE(gpu::previewableParam("Collide", "softness"));  // its fields' tables: the CPU's
+        EXPECT_FALSE(gpu::previewableParam("Collide", "softness"));  // (a second dispatch or none)
         EXPECT_FALSE(gpu::previewableParam("Gravity", "direction"));
     }
 }
@@ -6053,9 +6052,9 @@ TEST(CpuEngine, CollideOverADeformedScalpRunsAlikeTwice) {
     // through the host): the same bits from two sessions, and strands pushed; hard, soft, smoothed;
     // and method exact (the mesh itself at every point, through the same host).
     for (const char* params : {R"("params": {"offset": 0.12})", R"("params": {"offset": 0.12, "softness": 0.1})",
-                               R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3})",
+                               R"("params": {"offset": 0.1, "softness": 0.4, "iterations": 3})",
                                R"("params": {"offset": 0.12, "method": "exact"})",
-                               R"("params": {"offset": 0.1, "softness": 0.05, "smoothing": 0.4, "iterations": 3, "method": "exact"})"}) {
+                               R"("params": {"offset": 0.1, "softness": 0.4, "iterations": 3, "method": "exact"})"}) {
         SCOPED_TRACE(params);
         const GroomData data = deformedGroom(withoutClearance(chainGraph({{"Collide", params}})));
         auto collided = [&](GroomSession& session) {
@@ -6285,7 +6284,7 @@ TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
         {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "frequency": 3.0})"},
         {"Noise", R"("params": {"amplitude": 0.1, "mode": "kinky", "space": "world", "frequency": 3.0})"},
         {"Collide", R"("params": {"offset": 0.12})"},
-        {"Collide", R"("params": {"offset": 0.08, "softness": 0.1, "smoothing": 0.2, "iterations": 3})"},
+        {"Collide", R"("params": {"offset": 0.08, "softness": 0.2, "iterations": 3})"},
         {"Collide", R"("params": {"offset": 0.12, "softness": 0.05, "method": "exact"})", false, true},
         {"Clump", R"("params": {"count": 80, "strength": 0.7})"},
         {"Clump", R"("params": {"count": 50, "strength": {"expression": "0.3 + 0.7 * t", "min": 0.0, "max": 1.0}, "volumize": 0.2, "flatness": 0.5,
@@ -6397,15 +6396,15 @@ TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
             // Its surfaces' fields as CollideOp asks them (collisionField at its offset and search radius).
             std::vector<MeshPtr> meshes;
             std::vector<DistanceFieldPtr> fields;
-            const float offset = static_cast<float>(op.params().getDouble("offset")), softness = static_cast<float>(op.params().getDouble("softness"));
-            const float radius = std::max(offset + softness, static_cast<float>(op.params().getDouble("maxDepth"))) * 1.001f + 1e-6f;
+            const float offset = static_cast<float>(op.params().getDouble("offset"));
+            const float radius = std::max(offset, static_cast<float>(op.params().getDouble("maxDepth"))) * 1.001f + 1e-6f;
             for (std::size_t slot = 1; slot < inputs.size(); ++slot) {
                 if (const MeshPtr mesh = valueAs<MeshPtr>(inputs[slot])) {
                     meshes.push_back(mesh);
                     fields.push_back(collisionField(mesh, offset, radius));
                 }
             }
-            stageInputs.collide = gpu::collideInputs(meshes, 0u, fields, offset, softness, &whyNot);
+            stageInputs.collide = gpu::collideInputs(meshes, 0u, fields, offset, &whyNot);
         }
         if (kind == gpu::StageKind::Curl && op.params().getString("coherence") == "clump") {
             stageInputs.curl = gpu::curlInputs(*valueAs<StrandsPtr>(inputs[0]), session.last().scalp.get(), "clumpId",

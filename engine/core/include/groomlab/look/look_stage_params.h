@@ -140,7 +140,7 @@ std::shared_ptr<TangleInputs> tangleInputs(const StrandSet& in, const TangleStat
 // collideHostRoots); with `exact` (method exact) every mesh without a field or rest pose too, asked
 // of the mesh itself.
 std::shared_ptr<CollideInputs> collideInputs(const std::vector<MeshPtr>& meshes, std::uint32_t colliders,
-                                             const std::vector<DistanceFieldPtr>& fields, float offset, float softness, std::string* why,
+                                             const std::vector<DistanceFieldPtr>& fields, float offset, std::string* why,
                                              const std::vector<std::shared_ptr<const RestPoseCollision>>& rests = {}, float maxDepth = 0.0f,
                                              float searchRadius = 0.0f, bool exact = false);
 // `inputs` with its host's roots: the strands `in`'s (`which`: those alone, in that order).

@@ -2233,7 +2233,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                     c.flag2[2] = static_cast<std::uint32_t>(host);
                     c.flag2[3] = static_cast<std::uint32_t>(host >> 32);
                 }
-                if (p.value2[1] > 0.0f) {  // smoothing: whether the collider moved each strand, for the second dispatch
+                if (p.value2[1] > 0.0f) {  // softness: whether the collider moved each strand, for the second dispatch
                     b.out[1] = auxBuffer(k, 1);
                     allocate(b.out[1], std::max<std::size_t>(n * 4, 4));
                 }
@@ -2324,7 +2324,7 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
                 break;
         }
         slots.push_back(c);
-        // Collide smoothing (value2 1): a second dispatch on the first's points (look.slang CollideCS,
+        // Collide softness (value2 1): a second dispatch on the first's points (look.slang CollideCS,
         // flag 1), the stage's time stamped after it.
         const bool collideTwice = kernel == Kernel::Collide && p.value2[1] > 0.0f && !sharesBase();  // (the CPU: one, look.slang CollideCS)
         steps.push_back({kernel, b, groups, false, collideTwice ? -3 : static_cast<int>(p.stage.kind)});

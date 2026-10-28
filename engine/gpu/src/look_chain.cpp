@@ -175,7 +175,7 @@ bool stageOf(const std::string& type, StageKind* kind) {
 }
 
 // A Collide's surfaces (its scalp and collider inputs, as last evaluated).
-// `colliders`: which of them are the collider input's, a bit each (softness and smoothing act on it).
+// `colliders`: which of them are the collider input's, a bit each (softness acts on it).
 std::vector<MeshPtr> collideMeshes(const Graph& graph, NodeId id, std::uint32_t* colliders = nullptr) {
     std::vector<MeshPtr> meshes;
     if (colliders) *colliders = 0;
@@ -2363,10 +2363,10 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             // The fields the CPU's Collide asks at this offset (collisionField: one for every
             // offset of the same cell size and reach), their tables made once for every offset
             // sharing them (a dragged offset is the kernel's number): for offsets up to the most of
-            // those plus the softness, at the field's reach, more than any of their pushes asks of
+            // those, at the field's reach, more than any of their pushes asks of
             // the tables (a push the tables' bounds settle at that offset and radius is settled at
             // a smaller one: the walk's answers are the same).
-            const float offset = p->value[0], softness = p->value2[0];
+            const float offset = p->value[0];
             DistanceFieldPtr surfaceFields[2];
             for (std::size_t m = 0; m < meshes.size() && m < 2; ++m) {
                 surfaceFields[m] = collisionField(meshes[m], offset, p->value[2]);
@@ -2376,10 +2376,10 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 }
             }
             CollideMemo& memo = collide_[id];
-            bool same = memo.inputs && memo.softness == softness;
+            bool same = memo.inputs != nullptr;
             for (std::size_t m = 0; m < 2; ++m) {
                 same = same && memo.meshes[m] == (m < meshes.size() ? meshes[m] : nullptr) && memo.fields[m] == surfaceFields[m] &&
-                       (!surfaceFields[m] || offset + softness <= memo.most[m]);
+                       (!surfaceFields[m] || offset <= memo.most[m]);
             }
             if (!same) {
                 float most[2] = {0.0f, 0.0f};
@@ -2390,11 +2390,11 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                     const MeshDistanceField& field = *surfaceFields[m];
                     float upTo = field.reach();
                     if (MeshDistanceField::cellSizeFor(*meshes[m], std::numeric_limits<float>::max()) > field.cellSize()) {
-                        upTo = std::min(upTo, field.cellSize() * 1.4143f + softness);
+                        upTo = std::min(upTo, field.cellSize() * 1.4143f);
                     }
-                    most[m] = std::max(offset + softness, upTo);
+                    most[m] = std::max(offset, upTo);
                 }
-                std::shared_ptr<const CollideInputs> made = collideInputs(meshes, colliders, fields, offset, softness, &whyNot);
+                std::shared_ptr<const CollideInputs> made = collideInputs(meshes, colliders, fields, offset, &whyNot);
                 if (!made) {
                     *why = name + ": " + whyNot;
                     return false;
@@ -2405,7 +2405,6 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                     memo.fields[m] = surfaceFields[m];
                     memo.most[m] = most[m];
                 }
-                memo.softness = softness;
                 memo.inputs = std::move(made);
             }
             out[k].collide = memo.inputs;
@@ -3184,7 +3183,7 @@ LookBounds lookBounds(const LookParams& p, const LookFields& fields, const std::
                 if (s.stage.kind == StageKind::Collide) {
                     const CollideInputs* collide = k < inputs.size() ? inputs[k].collide.get() : nullptr;
                     for (std::size_t m = 0; collide && m + 1 < collide->boxes.size(); m += 2) {
-                        const float r = 2.0f * std::abs(s.value[0] + s.value2[0]);  // (the offset, and the softness above it)
+                        const float r = 2.0f * std::abs(s.value[0]);  // (the offset)
                         const Vec3f clo = collide->boxes[m], chi = collide->boxes[m + 1];
                         lo = {std::min(lo.x, clo.x - r), std::min(lo.y, clo.y - r), std::min(lo.z, clo.z - r)};
                         hi = {std::max(hi.x, chi.x + r), std::max(hi.y, chi.y + r), std::max(hi.z, chi.z + r)};
