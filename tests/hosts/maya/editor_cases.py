@@ -1174,8 +1174,8 @@ class GraphEditorTest(unittest.TestCase):
         clump = self.editor.add_node("Clump")
         self.editor.link("interpolate", clump, "strands")
         self.assertEqual(self.editor.model.param(clump, "centersFrom"), "pick")
-        self.editor.link("guides", clump, "centers")  # drawn by hand: the Clump takes them
-        self.assertEqual(self.editor.model.param(clump, "centersFrom"), "inputPoints")
+        self.editor.link("guides", clump, "centers")  # drawn by hand: the Clump takes the guides' curves
+        self.assertEqual(self.editor.model.param(clump, "centersFrom"), "inputCurves")
         self.editor.link(clump, "length", "strands")
         self.editor.scene.clearSelection()
         self.editor.items[clump].setSelected(True)
@@ -1204,11 +1204,13 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(groomlab.errors(self.groom), [])
 
     def test_feather_nodes(self):
-        # Propagate, Plume and Split sit under Feathers in the Add Node menu; Propagate's profiles
-        # edit with the curve editor; Split shows its four outputs, one feeding Propagate.
+        # Propagate and Plume sit under Feathers in the Add Node menu (Split under Utility);
+        # Propagate's profiles edit with the curve editor; Split shows its four outputs, one feeding
+        # Propagate.
         from groomlab.ui import widgets
-        feathers = dict(self.ge.categories(self.editor.catalog))["Feathers"]
-        self.assertEqual(feathers, ["Propagate", "Plume", "Split"])
+        categories = dict(self.ge.categories(self.editor.catalog))
+        self.assertEqual(categories["Feathers"], ["Propagate", "Plume"])
+        self.assertIn("Split", categories["Utility"])
         self.editor.scene.clearSelection()
         split = self.editor.add_node("Split")
         self.editor.link("interpolate", split, "strands")

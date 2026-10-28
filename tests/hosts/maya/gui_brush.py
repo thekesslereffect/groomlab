@@ -83,6 +83,10 @@ def step_setup():
         y = math.sqrt(1 - 0.25)
         curves.append(cmds.curve(degree=2, point=[(x, y, z), (1.2 * x, y + 0.5, 1.2 * z), (1.3 * x, y + 1.0, 1.3 * z)]))
     groom = groomlab.create_groom(scalp)
+    # Dimmed strands while sculpting (not the default since 0.34): what the stroke checks below
+    # watch the dabs write.
+    cmds.setAttr(groom + ".sculptDisplay", 1)
+    cmds.setAttr(groom + ".sculptDensity", 0.35)
     groomlab.guides_from_curves(groom, curves, tube_radius=0.12)
     cmds.delete(curves)
     cmds.setAttr("persp.translate", 0.0, 1.4, 5.0)

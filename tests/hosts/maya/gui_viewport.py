@@ -1039,13 +1039,23 @@ def true_width_check(snapshots=None):
         cmds.refresh(currentView=True, force=True)
         return json.loads(cmds.groomLabGraphStats(groom, drawTimes=True))["draw"]
 
+    background = []
+
     def ink(name):
-        """The share of the picture's pixels that are not the background (its corner's)."""
+        """The share of the picture's pixels that are not the background (the corner's of a picture
+        without the groom: up close the hair can cover every corner)."""
+        def blast(path):
+            cmds.playblast(frame=[1], format="image", compression="png", viewer=False, showOrnaments=False,
+                           percent=100, widthHeight=(480, 360), completeFilename=path)
+            return QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
+        if not background:
+            transform = cmds.listRelatives(groom, parent=True)[0] if cmds.nodeType(groom) == "groomLabShape" else groom
+            cmds.setAttr(transform + ".visibility", False)
+            background.append(QtGui.QColor(blast(os.path.join(folder, "truewidth_background.png")).pixel(2, 2)))
+            cmds.setAttr(transform + ".visibility", True)
         path = os.path.join(folder, "truewidth_%s.png" % name)
-        cmds.playblast(frame=[1], format="image", compression="png", viewer=False, showOrnaments=False,
-                       percent=100, widthHeight=(480, 360), completeFilename=path)
-        image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
-        corner = QtGui.QColor(image.pixel(2, 2))
+        image = blast(path)
+        corner = background[0]
         inked = 0
         for y in range(0, image.height(), 2):
             for x in range(0, image.width(), 2):
@@ -2553,8 +2563,10 @@ def gpu_preview_check():
               and after.get("displayMB") == 0)
     compared = json.loads(cmds.groomLabGpuPreview(shape, check=True))
     say("GPU preview against the CPU:", compared)
+    # (Frames to 2e-3: a point's rounding over a short segment turns it by about that over the
+    # segment's length, and Curl's sines on the GPU round a few 1e-4 off the CPU's on this groom.)
     check("GPU preview: the GPU's points and frames are the CPU's (rounding)",
-          compared.get("positions", {}).get("max", 1) < 1e-3 and compared.get("normals", {}).get("max", 1) < 1e-3)
+          compared.get("positions", {}).get("max", 1) < 1e-3 and compared.get("normals", {}).get("max", 1) < 2e-3)
     # The node feeding the look nodes changed and a drag before the next draw: the drawn frame is
     # the new strands' (uploaded again), the commit's.
     cmds.groomLabGpuPreview(shape, node="noise", param="amplitude", value=0.07)
