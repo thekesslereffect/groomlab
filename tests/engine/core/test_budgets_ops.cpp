@@ -152,7 +152,7 @@ TEST(Budget, ShapeOperatorsOnAHead) {
     const StrandsPtr& in = g.strands;
     report("Length (keep 0.8, trim up to 0.3)", *in, timeOp(op::kLength, in, [](Operator& o) {
                o.params().set("keep", 0.8);
-               o.params().set("trimMax", 0.3);
+               o.params().set("randomness", 0.3);
            }));
     report("Width", *in, timeOp(op::kWidth, in, [](Operator& o) { o.params().set("width", 0.01); }));
     report("Bend", *in, timeOp(op::kBend, in, [](Operator& o) { o.params().set("angle", 40.0); }));

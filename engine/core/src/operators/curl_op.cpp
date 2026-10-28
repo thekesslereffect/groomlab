@@ -145,10 +145,12 @@ public:
                                          "a Width node before it)"}
                 .soft(0, 10)
                 .when("shape", {"coil"}),
-            ParamSpec{"phase", 0.0, "Where along a turn every curl starts, in turns (0-1)", "turns"}.soft(0, 1),
+            ParamSpec{"phase", 0.0, "Where along a turn every curl starts, in turns (0-1)", "turns"}.soft(0, 1)
+                .adv(),
             ParamSpec{"phaseRandom", 1.0, "How much of a turn each strand's (or clump's) start varies at random, 0-1",
                       "fraction"}
-                .range(0, 1),
+                .range(0, 1)
+                .adv(),
             {"coherence", std::string("strand"),
              "strand: each strand curls on its own; clump: the strands of a clump curl together around its middle, with "
              "one phase, frequency and plane (ringlets; after a Clump)", "", {"strand", "clump"}},
@@ -167,7 +169,8 @@ public:
                 .soft(0, 2),
             ParamSpec{"weightDirection", Vec3f{0.0f, -1.0f, 0.0f},
                       "The way the weight pulls (world space): curls stretch where the strands hang along it"}
-                .world(),
+                .world()
+                .adv(),
             notAnimatable(ParamSpec{"tolerance", 0.5,
                                     "How far a straight segment may stray from the round curl, a share of its radius: where the "
                                     "points coming in are too few a turn for it, Curl cuts each segment evenly along the smooth "

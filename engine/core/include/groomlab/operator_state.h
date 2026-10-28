@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -72,6 +73,15 @@ struct ClumpState {
 // (`output`: the Clump's last result, or what the graph handed on of it with no strand hidden:
 // preview_core.h sameOrShown; the same for interpolateState.)
 bool clumpState(const Operator& op, const StrandsPtr& output, ClumpState* state);
+
+// Clump's copyAmount: the centers center `c` takes its shape from, by root (`roots`, indexed by
+// `index`): its 4 nearest (skipping itself and those `shapeless` says have no shape), each weighed
+// by the inverse of its distance falling to 0 at the next center out (Shepard-Franke), so a center
+// joining or leaving the four as roots move weighs nothing as it does (no pop). Into `out`, 9 words:
+// the count, the centers, their weights (float bits, summing to 1). Count 0: none.
+constexpr std::size_t kClumpCopyWords = 9;
+void clumpCopyNeighbors(const class PointIndex& index, const std::vector<Vec3f>& roots, std::size_t c,
+                        const std::function<bool(std::size_t)>& shapeless, std::uint32_t* out);
 
 // ---- Wet ----------------------------------------------------------------------------------------
 

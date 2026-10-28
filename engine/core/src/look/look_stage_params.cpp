@@ -76,9 +76,8 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
     switch (kind) {
         case StageKind::Length: {
             if (!mappable("keep", &s->value[0]) || !mappable("fraction", &s->value[1])) return false;
-            const auto a = static_cast<float>(number("trimMin")), b = static_cast<float>(number("trimMax"));
-            s->value[2] = std::min(a, b);
-            s->value[3] = std::max(a, b);
+            s->value[2] = 0.0f;  // (the least a trimmed strand loses)
+            s->value[3] = std::clamp(static_cast<float>(number("randomness")), 0.0f, 1.0f);
             return true;
         }
         case StageKind::Interpolate:
@@ -97,7 +96,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             s->flag[1] = params.getBool("preserveLength") ? 1 : 0;
             s->flag2[1] = params.getString("take") == "length" ? 1 : 0;
             s->value2[2] = params.getString("blend") == "directions" ? 1.0f : 0.0f;  // (look.slang blendsDirections)
-            s->value2[3] = params.getBool("clearanceEveryPoint") ? 1.0f : 0.0f;  // (the clearance walk's step)
+            s->value2[3] = 1.0f;  // (the clearance walk asks every point)
             s->ramp = r.ramp("falloff");
             return true;
         case StageKind::Clump: {
@@ -145,7 +144,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             } catch (const std::exception&) {
                 constant = false;
             }
-            if (!r.directions && (!constant || !params.getString("directionColorSet").empty())) {
+            if (!r.directions && !constant) {
                 *why = r.name() + " takes its direction per strand (the CPU's)";
                 return false;
             }
@@ -230,6 +229,7 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
             if (!mappable("mix", &s->value[0])) return false;
             s->ramp = r.ramp("profile");
             s->tabled = true;
+            s->flag[0] = params.getBool("keepLength") ? 1 : 0;
             return true;
         }
         case StageKind::Bend:

@@ -81,7 +81,7 @@
     uint4 gAux;          // offsets into gAux0 and gAux1 (words), by node
     uint4 gDispatch;     // x: the groups in a row of the dispatch (threadIndex)
     float4 gValue2;      // more numbers (Clump: strengthRandom, lockRadiusRandom, copyAmount; FieldCS: min, max)
-    uint4 gFlag2;        // more switches (Clump: flattenDirection's bits; Interpolate: x, write the influence)
+    uint4 gFlag2;        // more switches (Clump: flatDirection's bits; Interpolate: x, write the influence)
     uint4 gRamp2;        // a second profile (Clump's volumizeProfile), as gRamp
     uint4 gTable2;       // x: its table's offset
 };
@@ -2161,8 +2161,8 @@ void clearanceGroup(uint3 id, uint3 local, uint3 group) {
 }
 // ---- Length --------------------------------------------------------------------------------------
 //
-// gValue: keep (mapped: field 0, per strand), fraction (field 1, per strand), trimMin, trimMax
-// (low to high). The strand's numbers: .x its trim's draw, .w its pick's (under the fraction:
+// gValue: keep (mapped: field 0, per strand), fraction (field 1, per strand), the least and the
+// most a trimmed strand loses (0, randomness). The strand's numbers: .x its trim's draw, .w its pick's (under the fraction:
 // trimmed).
 
 [shader("compute")]
@@ -2270,9 +2270,10 @@ void CentersCS(uint3 id : SV_DispatchThreadID) {
 
 // ---- Clump's copy (ClumpOp::shareCenters), on the centers it made --------------------------------
 //
-// Center c's curve (gIn, as CentersCS resampled it) takes on gValue2.z (copyAmount) of the mean
-// shape (its points less its root) of its nearest centers: gAux0, 9 words a center (the count,
-// then the centers, in the order the CPU sums them). Into gOut (the curves the strands clump toward).
+// Center c's curve (gIn, as CentersCS resampled it) takes on gValue2.z (copyAmount) of the shape
+// (its points less its root) of its nearest centers, weighed: gAux0, 9 words a center
+// (clumpCopyNeighbors: the count, 4 centers, their weights, in the order the CPU sums them). Into
+// gOut (the curves the strands clump toward).
 
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
@@ -2292,10 +2293,12 @@ void ShareCS(uint3 id : SV_DispatchThreadID) {
         float3 shape = float3(0.0f, 0.0f, 0.0f);
         for (uint j = 0; j < taken; ++j) {
             const uint other = gAux0.Load(c * 36 + (1 + j) * 4) * CENTER_SAMPLES;
-            shape += loadPoint(other + i) - loadPoint(other);
+            const float w = asfloat(gAux0.Load(c * 36 + (5 + j) * 4));
+            PRECISE float3 part = (loadPoint(other + i) - loadPoint(other)) * w;
+            shape = shape + part;
         }
         const float3 offset = mine - mine0;
-        storePoint(gOut, base + i, mine0 + offset + (shape / float(taken) - offset) * gValue2.z);
+        storePoint(gOut, base + i, mine0 + offset + (shape - offset) * gValue2.z);
     }
 }
 
@@ -2308,7 +2311,7 @@ void ShareCS(uint3 id : SV_DispatchThreadID) {
 // gValue: strength (mapped: field 0), volumize (mapped: field 1, per strand), flatness, radius;
 // gFlag.x: the repel radius' float bits, gFlag.y: pastTip extend (past the center's tip, on along
 // its last way), gFlag.z: flatten (0 surface, 1 random, 2 direction); gValue2: strengthRandom,
-// lockRadiusRandom; gFlag2.xyz: flattenDirection's bits; the profile, and volumizeProfile the
+// lockRadiusRandom; gFlag2.xyz: flatDirection's bits; the profile, and volumizeProfile the
 // second. The strand's numbers: unused, its spot in the lock (angle and radius as fractions). A
 // negative strength repels (look_ops.cpp repelled), off the skin where the root normals' block
 // says the root is on it (w 1).
@@ -2344,8 +2347,15 @@ Frame centerFrame(uint c, uint k) {
 
 static const float kTwoPi = 6.28318530718f;
 
-// look_ops.cpp repelled: p, `arc` along its strand, pushed away from center c's point as far
-// along it (`centerLength` long), within `radius`, by `amount`.
+// Clump's repel (a negative strength): p, `arc` along its strand, pushed away from center c's
+// point as far along it (`centerLength` long; past its tip, the distance grows by how far past it
+// the point is). A point at r from it within twice `radius` goes out by amount radius (1 - x)^2
+// (1 + x), x = r / (2 radius): one on the center to the radius at amount 1, the push easing smoothly
+// to nothing at twice the radius, and keeping the points' order (r + push grows with r, at a third
+// of its rate at least: none overtakes another, no strands cross at the part).
+// A point on (or very near) the center goes the way its root lies from the center's root, else a
+// way of its own (`angle` about the center), blended in smoothly. With a skin normal (zero: none)
+// the push never goes into the skin and lies along it at the root, lifting free of it toward the tip (t).
 float3 repelled(float3 p, uint c, float centerLength, float arc, float amount, float radius, float3 rootOffset, float angle,
                 float3 skin, float t) {
     const float along = centerLength > 0.0f ? min(arc / centerLength, 1.0f) : 0.0f;
@@ -2356,7 +2366,7 @@ float3 repelled(float3 p, uint c, float centerLength, float arc, float amount, f
     const float3 across = d - tangent * dot(d, tangent);
     const float past = max(arc - centerLength, 0.0f);
     const float r = sqrt(dot(across, across) + past * past);
-    if (!(r < radius)) return p;
+    if (!(r < 2.0f * radius)) return p;
     const float near = 0.01f * radius;
     const float3 side = anyPerpendicular(tangent);
     const float3 spun = side * cos(angle) + cross(tangent, side) * sin(angle);
@@ -2365,18 +2375,19 @@ float3 repelled(float3 p, uint c, float centerLength, float arc, float amount, f
     float3 way = normalized(across + own * near);
     const float up = dot(way, skin);
     way = way - skin * (up < 0.0f ? up : up * (1.0f - t));
-    const float x = r / radius;
+    const float x = 0.5f * r / radius;
     const float push = amount * radius * ((1.0f - x) * (1.0f - x) * (1.0f + x));
     return p + way * push;
 }
 
 // Clump's shape: a clumped point's offset from its center's point `center` (its frame there
-// `fr`) squashed across `thinWay` by the flatness, as much as the point clumps (w).
-float3 flattened(float3 p, float3 center, Frame fr, float3 thinWay, float w) {
+// `fr`) squashed across the thin way by the flatness, as much as the point clumps (w). The thin
+// way is `thin` (x: along the frame's normal, y: its binormal), as it was at the root, carried
+// along the center's frames: it turns with the axis and never spins where the axis does.
+float3 flattened(float3 p, float3 center, Frame fr, float2 thin, float w) {
     float3 offset = p - center;
-    float3 thin = thinWay - fr.t * dot(thinWay, fr.t);
-    thin = len3(thin) > 1e-6f ? normalized(thin) : fr.n;  // along the center: its frame's
-    offset -= thin * (dot(offset, thin) * gValue.z * w);
+    const float3 way = fr.n * thin.x + fr.b * thin.y;
+    offset -= way * (dot(offset, way) * gValue.z * w);
     return center + offset;
 }
 
@@ -2404,10 +2415,10 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
     // Volumize: read on the strand as it came; flatness: the way each clump's ribbon is thin in.
     const float volume = fieldAt(1, gValue.y, s, 0);
     const bool shaped = gValue.z > 0.0f;
-    float3 thinWay = float3(0.0f, 0.0f, 0.0f);
+    float2 thin = float2(1.0f, 0.0f);  // (the root frame's normal)
     if (shaped) {
         const Frame first = centerFrame(c, 0);
-        thinWay = first.n;
+        float3 thinWay = first.n;
         if (gFlag.z == 1u) {
             const float a = kTwoPi * variation.z;
             thinWay = first.n * cos(a) + first.b * sin(a);
@@ -2417,6 +2428,10 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
             const float3 centerNormal = asfloat(gAux1.Load3((gAux.y + gFlag.w * CENTER_SAMPLES * 9 + c * 4) * 4));
             if (dot(centerNormal, centerNormal) > 0.0f) thinWay = centerNormal;
         }
+        // In the root frame (along the axis there: its normal).
+        const float2 inFrame = float2(dot(thinWay, first.n), dot(thinWay, first.b));
+        const float l = sqrt(inFrame.x * inFrame.x + inFrame.y * inFrame.y);
+        if (l > 1e-6f) thin = inFrame / l;
     }
     // A negative strength anywhere along the strand: those points repelled, then the strand's
     // segment lengths kept (follow the leader, each point as it is made).
@@ -2441,6 +2456,16 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
     for (uint a = 0; a < CENTER_SAMPLES; ++a) arcs[a] = asfloat(gAux1.Load((gAux.w + c * CENTER_SAMPLES + a) * 4));
     const float centerLength = arcs[CENTER_SAMPLES - 1];
     const float3 rootOffset = loadPoint(begin) - centerPoint(c, 0);
+    // Its spot in a lock: its own way round the axis (its root's from the center's, in the root
+    // frame: strands keep their places around the lock and never cross in it), at its drawn share of
+    // the radius (so the disk fills evenly); a strand rooted on the center, a way of its own.
+    float2 lockWay = float2(cos(angle), sin(angle));
+    if (radius > 0.0f) {
+        const Frame first = centerFrame(c, 0);
+        const float2 inFrame = float2(dot(rootOffset, first.n), dot(rootOffset, first.b));
+        const float l = sqrt(inFrame.x * inFrame.x + inFrame.y * inFrame.y);
+        if (l > 1e-6f * (1.0f + len3(rootOffset))) lockWay = inFrame / l;
+    }
     // pastTip extend: past the center's tip, on along its last segment's way.
     const float3 tipWay = normalized(centerPoint(c, CENTER_SAMPLES - 1) - centerPoint(c, CENTER_SAMPLES - 2));
     float arc = 0.0f;  // the strand's length up to point i, as it came
@@ -2464,12 +2489,12 @@ void ClumpCS(uint3 id : SV_DispatchThreadID) {
             if (radius > 0.0f) {
                 // A fixed spot in the lock's disk, in the center's frame there (between samples).
                 const Frame fr = frameBetween(centerFrame(c, k), centerFrame(c, k + 1), f);
-                const float3 target = at + ((fr.n * (r * cos(angle)) + fr.b * (r * sin(angle))) + fr.t * 0.0f);
+                const float3 target = at + ((fr.n * (r * lockWay.x) + fr.b * (r * lockWay.y)) + fr.t * 0.0f);
                 moved = p + (target - p) * w;
-                if (shaped) moved = flattened(moved, at, fr, thinWay, w);
+                if (shaped) moved = flattened(moved, at, fr, thin, w);
             } else {
                 moved = p + (at - p) * w;
-                if (shaped) moved = flattened(moved, at, frameBetween(centerFrame(c, k), centerFrame(c, k + 1), f), thinWay, w);
+                if (shaped) moved = flattened(moved, at, frameBetween(centerFrame(c, k), centerFrame(c, k + 1), f), thin, w);
             }
             if (volume != 0.0f) {
                 // Volumize: pushed out from the axis there by the volume's share across it.
@@ -4562,7 +4587,32 @@ void BlendCS(uint3 id : SV_DispatchThreadID) {
     const uint s = threadIndex(id, GROUP_SIZE);
     if (s >= gStrandCount) return;
     const uint begin = strandBegin(s), n = strandCountOf(s);
-    for (uint i = 0; i < n; ++i) storePoint(gOut, begin + i, blendAt(s, i, n, begin + i));
+    if (gFlag.x == 0u || n < 2u) {
+        for (uint i = 0; i < n; ++i) storePoint(gOut, begin + i, blendAt(s, i, n, begin + i));
+        return;
+    }
+    // keepLength: the root blended, then each segment's way and length blended (as much as the
+    // point it ends at mixes), from the root: a strand midway between a curly look and a straight
+    // one keeps its length instead of being pulled in.
+    float3 at = blendAt(s, 0u, n, begin);
+    storePoint(gOut, begin, at);
+    for (uint i = 1; i < n; ++i) {
+        const uint p = begin + i;
+        const float mix = fieldPerPoint(0) ? fieldAt(0, gValue.x, s, p) : fieldAt(0, gValue.x, s, 0);
+        const float f = clamp(mix, 0.0f, 1.0f) * rampAlong(i, n);
+        const float3 segA = loadPoint(p) - loadPoint(p - 1u);
+        const float3 segB = asfloat(gAux0.Load3(p * 12)) - asfloat(gAux0.Load3((p - 1u) * 12));
+        PRECISE float3 way = segA + (segB - segA) * f;
+        const float la = len3(segA), lb = len3(segB);
+        PRECISE float length = la + (lb - la) * f;
+        const float l = len3(way);
+        PRECISE float3 step = l > 1e-12f ? way * (length / l) : way;
+        at = at + step;
+        // All a's, or all b's: that point to the bit (a mix of 0 or 1 gives back that look).
+        if (f == 0.0f) at = loadPoint(p);
+        else if (f == 1.0f) at = asfloat(gAux0.Load3(p * 12));
+        storePoint(gOut, p, at);
+    }
 }
 
 [shader("compute")]
@@ -6381,10 +6431,11 @@ void BendCS(uint3 id : SV_DispatchThreadID) {
     none = none || len3(target) < 0.5f;
     float3 axis = cross(chord, target);
     if (!none && len3(axis) < 1e-5f) {
-        // Along it already, or standing straight up: it bends over along the root frame's x.
-        none = !alongNormal || dot(chord, target) < 0.0f;
+        // Along it already: toward it (a positive angle) there is nowhere to go, as a strand a hair
+        // off it turns that hair; away from the normal (a negative angle) it bends over along the
+        // root frame's x.
+        none = degrees > 0.0f || !alongNormal || dot(chord, target) < 0.0f;
         axis = a.b;
-        degrees = -abs(degrees);
     }
     if (!none) {
         axis = normalized(axis);
@@ -6518,9 +6569,14 @@ void DisplaceCS(uint3 id : SV_DispatchThreadID) {
     const bool perPoint = fieldPerPoint(0);
     const float strandAmount = perPoint ? 0.0f : fieldAt(0, gValue.x, s, 0);
     storePoint(gOut, begin, loadPoint(begin));
+    // The profile by arc length (as Width's): the same displacement however the points are spaced.
+    const float total = strandLength(begin, n);
+    float along = 0.0f;
     for (uint i = 1; i < n; ++i) {
         const float amount = perPoint ? fieldAt(0, gValue.x, s, begin + i) : strandAmount;
-        storePoint(gOut, begin + i, loadPoint(begin + i) + way * (amount * rampAlong(i, n)));
+        along += len3(loadPoint(begin + i) - loadPoint(begin + i - 1));
+        const float t = total > 1e-12f ? along / total : paramAt(i, n);
+        storePoint(gOut, begin + i, loadPoint(begin + i) + way * (amount * rampAt(t)));
     }
 }
 

@@ -15,12 +15,12 @@
   "nodes": [
     {"name": "scalp", "type": "Scalp", "ui": {"x": 0, "y": 0}},
     {"name": "scatter", "type": "Scatter", "params": {"density": 25.0, "length": 3.0}, "ui": {"x": 240, "y": 0}},
-    {"name": "length", "type": "Length", "params": {"fraction": 1.0, "trimMin": 0.0, "trimMax": 0.35}, "ui": {"x": 480, "y": 0}},
+    {"name": "length", "type": "Length", "params": {"fraction": 1.0, "randomness": 0.35}, "ui": {"x": 480, "y": 0}},
     {"name": "flow", "type": "Flow", "params": {"lift": 14.0, "bend": 0.55, "rollRandom": 8.0}, "ui": {"x": 720, "y": 0}},
     {"name": "tufts", "type": "Clump", "params": {"clumpBy": "size", "size": 0.9, "strength": 0.35, "profile": [[0, 0], [0.6, 0.15], [1, 0.5]], "strengthRandom": 0.4}, "ui": {"x": 1200, "y": 0}},
     {"name": "noise", "type": "Noise", "params": {"amplitude": 0.06, "frequency": 2.0}, "ui": {"x": 1440, "y": 0}},
     {"name": "color", "type": "HairColor", "params": {"melanin": 0.62, "redness": 0.35, "tipColor": [0.02, 0.018, 0.015], "tipProfile": [[0, 0], [0.88, 0], [0.94, 1], [1, 1]], "melaninRandom": 0.08, "tipStrength": 1.0, "specular": 0.35, "roughness": 0.45}, "ui": {"x": 1680, "y": 0}},
-    {"name": "colorBands", "type": "Bands", "params": {"strength": 1.0, "melanin": 0.1, "redness": 0.75, "profile": [[0, 0], [0.4, 0], [0.5, 1], [0.66, 1], [0.72, 0], [1, 0]], "count": 1, "offsetRandom": 0.08, "widthRandom": 0.08, "guards": 0.4, "guardsBy": "random", "undercoatDye": [0.85, 0.82, 0.8], "randomness": 0.08}, "ui": {"x": 1920, "y": 0}},
+    {"name": "colorBands", "type": "Bands", "params": {"strength": 1.0, "melanin": 0.1, "redness": 0.75, "profile": [[0, 0], [0.4, 0], [0.5, 1], [0.66, 1], [0.72, 0], [1, 0]], "count": 1, "offsetRandom": 0.08, "widthRandom": 0.08, "guards": 0.4, "guardsBy": "random", "undercoatDye": [0.85, 0.82, 0.8], "melaninRandom": 0.08}, "ui": {"x": 1920, "y": 0}},
     {"name": "width", "type": "Width", "params": {"width": 0.007, "profile": [[0, 1], [1, 0.15]], "randomness": 0.3}, "ui": {"x": 2400, "y": 0}},
     {"name": "resample", "type": "Resample", "params": {"segments": 8}, "ui": {"x": 2640, "y": 0}},
     {"name": "output", "type": "Output", "ui": {"x": 2880, "y": 0}}

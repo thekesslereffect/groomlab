@@ -1112,10 +1112,10 @@ class GraphEditorTest(unittest.TestCase):
             headers = [h.objectName() for h in body.findChildren(QtWidgets.QPushButton)
                        if h.objectName().startswith("paramSection_")]
             self.assertEqual(headers, ["paramSection_Advanced"])
-            trim = panel.key_widgets["trimMax"]
-            self.assertAlmostEqual(trim.value(), self.editor.model.param("length", "trimMax") * 100.0)
+            trim = panel.key_widgets["randomness"]
+            self.assertAlmostEqual(trim.value(), self.editor.model.param("length", "randomness") * 100.0)
             trim.committed.emit(25.0)
-            self.assertAlmostEqual(self.editor.model.param("length", "trimMax"), 0.25)
+            self.assertAlmostEqual(self.editor.model.param("length", "randomness"), 0.25)
 
             # Resample: maxAngle (degrees) only in curvature mode, minSegments in length or curvature.
             self.editor.scene.clearSelection()

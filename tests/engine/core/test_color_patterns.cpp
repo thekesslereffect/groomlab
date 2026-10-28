@@ -85,7 +85,7 @@ StrandsPtr overHairColor(const char* type, const StrandsPtr& in, const std::func
 }
 
 // Bands without their pigment's randomness, so every band is the band pigment's color.
-void exactBands(ParamSet& p) { p.set("randomness", 0.0); }
+void exactBands(ParamSet& p) { p.set("melaninRandom", 0.0); }
 
 // ---- Bands along the strand ---------------------------------------------------------------------
 
@@ -839,7 +839,7 @@ TEST(ColorNodes, EachTakesItsOwnParams) {
     const std::map<std::string, ParamSpec> render = specsOf(op::kRenderData);
     for (const char* name : {"specular", "specularRandom", "roughness", "roughnessRandom"}) EXPECT_FALSE(render.count(name)) << name;
     for (const char* name : {"strength", "melanin", "redness", "dye", "profile", "count", "offsetRandom", "widthRandom",
-                             "randomness", "guards", "guardsBy", "undercoatDye", "seed"}) {
+                             "melaninRandom", "guards", "guardsBy", "undercoatDye", "seed"}) {
         EXPECT_TRUE(bands.count(name)) << name;
     }
     EXPECT_EQ(bands.size(), 13u);

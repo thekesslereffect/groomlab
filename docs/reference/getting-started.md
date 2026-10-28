@@ -77,23 +77,23 @@ cmds.setAttr(groom + ".previewDensity", 1.0)
   other seeded node a seed no node of its type has, and warns (without stopping the save) when
   two Scatters, Instances or Flyaways share one (`GraphModel.warnings()`). A `Merge` still gives
   the second look's colliding IDs new ones, but their roots coincide.
-- **Interpolate blends without seams:** every guide reaches `reach` (1.5) times the distance to
-  its `neighbors`-th (3) nearest guide, and a strand inside that reach weighs the guide by
-  `((R - d) / (R d))^power`, which reaches zero exactly at the edge of the reach. Guides in
+- **Interpolate blends without seams:** every guide reaches 1.5 times the distance to its
+  `neighbors`-th (3) nearest guide, and a strand inside that reach weighs the guide by
+  `((R - d) / (R d))^2`, which reaches zero exactly at the edge of the reach (`smoothness` scales
+  the reach and the power). Guides in
   dense areas reach less far than sparse ones, and a guide's reach does not depend on the
   strand, so the blend is smooth across the scalp: no pops as guides move, no seams where a
   strand's nearest guides change (plain nearest-k inverse distance has both). `neighbors` 1
   gives every strand its nearest guide alone, with hard edges. Guides are sampled at least as
-  finely as the strands, so curly guides keep their detail. With `smoothGuides` (on) each guide
-  is followed as the smooth curve the viewport draws through its points (a centripetal
-  Catmull-Rom spline), so a bend drawn with few points stays round in the hair instead of
-  turning at each point. `preserveLength` (on) scales
+  finely as the strands, so curly guides keep their detail. Each guide is followed as the smooth
+  curve the viewport draws through its points (a centripetal Catmull-Rom spline), so a bend drawn
+  with few points stays round in the hair instead of turning at each point. `preserveLength` (on) scales
   each blended strand to its guides' blended length, up to 2x, since blending guides that point
   different ways shortens the result. `blend` `directions` (the default for new Interpolate
   nodes) builds each strand segment by segment along its guides' average direction at their
   average length instead, so strands between guides pointing apart keep their length without
   being scaled. `smoothness` (50%) is the one weighting control most grooms need: lower for
-  crisp locks, higher for soft blending; at 50% `neighbors`, `reach` and `power` apply as set.
+  crisp locks, higher for soft blending.
 - **Interpolate follows the skin:** with a scalp connected, each guide's shape is carried from
   its root to the strand's along the scalp: turned from one surface normal to the other where the
   straight line between the roots hugs the skin (almost everywhere: a guide combed back stays

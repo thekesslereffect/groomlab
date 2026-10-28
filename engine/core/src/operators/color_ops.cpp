@@ -200,18 +200,21 @@ public:
                 .in("Highlight"),
             ParamSpec{"specularRandom", 0.0, "Each strand's specular up to this share more or less, at random", "fraction"}
                 .range(0, 1)
-                .in("Highlight"),
+                .in("Highlight")
+                .adv(),
             ParamSpec{"roughness", 0.5, "Highlight spread, 0 sharp to 1 broad (mappable)"}.range(0, 1).in("Highlight"),
             ParamSpec{"roughnessRandom", 0.0, "Each strand's roughness up to this share more or less, at random", "fraction"}
                 .range(0, 1)
-                .in("Highlight"),
+                .in("Highlight")
+                .adv(),
             ParamSpec{"tilt", 3.0,
                       "Cuticle tilt, degrees: how far the highlight and its colored second highlight move apart along "
                       "the strand (real hair: 2-4)",
                       "angle"}
                 .range(-20, 20)
                 .soft(0, 10)
-                .in("Highlight"),
+                .in("Highlight")
+                .adv(),
         };
     }
     // A painted map is found through the host's map catalog ("maps"): it joins the cache key.
@@ -595,7 +598,7 @@ public:
                       "Tint over the undercoat's color, linear RGB (white: the hair's own)", "color"}
                 .colorMap()
                 .in("Guard hairs"),
-            ParamSpec{"randomness", 0.1, "Random offset of each strand's band pigment (melanin and redness), +/-"}
+            ParamSpec{"melaninRandom", 0.1, "Random offset of each strand's band pigment (melanin and redness), +/-"}
                 .soft(0, 0.5)
                 .in("Random"),
             ParamSpec{"offsetRandom", 0.15,
@@ -635,7 +638,7 @@ private:
         const ColorField bandDye(params(), "dye");
         const Ramp profile = params().getRamp("profile");
         const int count = static_cast<int>(params().getInt("count"));
-        const float randomness = static_cast<float>(params().getDouble("randomness"));
+        const float randomness = static_cast<float>(params().getDouble("melaninRandom"));
         const float offsetRandom = static_cast<float>(params().getDouble("offsetRandom"));
         const float widthRandom = static_cast<float>(params().getDouble("widthRandom"));
         const float guards = static_cast<float>(params().getDouble("guards"));

@@ -146,22 +146,16 @@ TEST(Scatter, LowRandomnessSpreadsRootsEvenlyAndKeepsIds) {
     EXPECT_LT(onEdge, b->strandCount() / 50);  // a piled-up row would be about 4 / sqrt(1000) = 13%
 }
 
-TEST(Scatter, RelaxationStopsOnceTheRootsSettle) {
-    // Relaxing runs up to 30 iterations; once no root moves more than a fiftieth of its spacing
-    // in a step the pushes balance, and the rest would move nothing to see. An even layout
-    // relaxed again from where it settled stops at once.
+TEST(Scatter, RelaxationRunsItsFixedIterations) {
+    // Relaxing takes every one of its 24 iterations (none stops early: a root a rounding apart, the
+    // same scalp in other units, ends a rounding apart) and spreads the roots evenly.
     OneOp g(1000.0);
     g.graph.node(g.scatter).params().set("randomness", 0.0);
     const std::size_t before = scatterRelaxIterationCount();
     const auto a = g.eval(g.scatter);
     ASSERT_TRUE(a);
     const std::size_t first = scatterRelaxIterationCount() - before;
-    EXPECT_GT(first, 0u);
-    EXPECT_LE(first, 30u);
-    std::printf("[ relax    ] %zu iterations from white noise at density 1000\n", first);
-    // The same roots, placed again (another seed param that does not move them: the memo
-    // is dropped by a different cache key): a settled layout is not what a new seed gives, so
-    // instead check the even spread survived the early stop.
+    EXPECT_EQ(first, 24u);
     const Spacing sa = nearestSpacing(*a);
     const float hex = 1.0746f / std::sqrt(1000.0f);
     EXPECT_LT(sa.spread, 0.07f);
@@ -470,17 +464,16 @@ TEST(Length, KeepsAShareOfTheLength) {
 
 TEST(Length, TrimsAShareOfTheStrandsByARandomRange) {
     // Each strand's length share, keep 0.8: a fraction of the strands trimmed, each by a share of
-    // its kept length between trimMin and trimMax.
+    // its kept length up to randomness.
     OneOp g(2000.0);
     const NodeId len = g.graph.addNode(op::kLength);
     g.graph.connect(g.scatter, len, 0);
     const StrandsPtr in = g.eval(g.scatter);
-    auto shares = [&](double fraction, double trimMin, double trimMax) {
+    auto shares = [&](double fraction, double randomness) {
         ParamSet& p = g.graph.node(len).params();
         p.set("keep", 0.8);
         p.set("fraction", fraction);
-        p.set("trimMin", trimMin);
-        p.set("trimMax", trimMax);
+        p.set("randomness", randomness);
         const StrandsPtr out = g.eval(len);
         std::vector<float> share(out->strandCount());
         for (std::size_t s = 0; s < share.size(); ++s) {
@@ -489,19 +482,18 @@ TEST(Length, TrimsAShareOfTheStrandsByARandomRange) {
         }
         return share;
     };
-    for (const float s : shares(1.0, 0.0, 0.0)) EXPECT_NEAR(s, 0.8f, 1e-4f) << "no range: keep alone";
-    const std::vector<float> all = shares(1.0, 0.2, 0.5);
+    for (const float s : shares(1.0, 0.0)) EXPECT_NEAR(s, 0.8f, 1e-4f) << "no range: keep alone";
+    const std::vector<float> all = shares(1.0, 0.5);
     float lo = 1.0f, hi = 0.0f;
     for (const float s : all) {
         lo = std::min(lo, s);
         hi = std::max(hi, s);
     }
     EXPECT_GE(lo, 0.8f * 0.5f - 1e-4f);
-    EXPECT_LE(hi, 0.8f * 0.8f + 1e-4f);
-    EXPECT_GT(hi - lo, 0.15f) << "spread across the range, not split in two";
-    EXPECT_EQ(shares(1.0, 0.5, 0.2), all) << "the range either way round";
+    EXPECT_LE(hi, 0.8f + 1e-4f);
+    EXPECT_GT(hi - lo, 0.25f) << "spread across the range, not split in two";
     // A fraction: those strands (by ID) as with all of them, the rest kept; raising it only adds.
-    const std::vector<float> some = shares(0.3, 0.2, 0.5), more = shares(0.6, 0.2, 0.5);
+    const std::vector<float> some = shares(0.3, 0.5), more = shares(0.6, 0.5);
     std::size_t trimmed = 0, moreTrimmed = 0;
     for (std::size_t s = 0; s < all.size(); ++s) {
         const bool cut = std::abs(some[s] - 0.8f) > 1e-4f;
@@ -513,10 +505,10 @@ TEST(Length, TrimsAShareOfTheStrandsByARandomRange) {
     EXPECT_NEAR(static_cast<double>(trimmed) / all.size(), 0.3, 0.06);
     EXPECT_NEAR(static_cast<double>(moreTrimmed) / all.size(), 0.6, 0.06);
     // A wider range scales each strand's trim (its own draw), no strand jumps.
-    const std::vector<float> wider = shares(1.0, 0.2, 0.6);
+    const std::vector<float> wider = shares(1.0, 0.6);
     for (std::size_t s = 0; s < all.size(); ++s) {
         EXPECT_LE(wider[s], all[s] + 1e-5f);
-        EXPECT_NEAR(1.0f - wider[s] / 0.8f - 0.2f, (1.0f - all[s] / 0.8f - 0.2f) * 4.0f / 3.0f, 1e-3f);
+        EXPECT_NEAR(1.0f - wider[s] / 0.8f, (1.0f - all[s] / 0.8f) * 6.0f / 5.0f, 1e-3f);
     }
 }
 
@@ -1098,8 +1090,7 @@ TEST(Interpolate, TheBindingIsMadeAgainWhenRootsPartsOrItsParamsChange) {
         {"parts removed", [](BoundInterpolate&, InterpInputs& in) { in.parts = nullptr; }},
         {"respectParts off", [](BoundInterpolate& g, InterpInputs&) { g.node("interp").params().set("respectParts", false); }},
         {"neighbors", [](BoundInterpolate& g, InterpInputs&) { g.node("interp").params().set("neighbors", std::int64_t{5}); }},
-        {"reach", [](BoundInterpolate& g, InterpInputs&) { g.node("interp").params().set("reach", 2.5); }},
-        {"power", [](BoundInterpolate& g, InterpInputs&) { g.node("interp").params().set("power", 3.0); }},
+        {"smoothness", [](BoundInterpolate& g, InterpInputs&) { g.node("interp").params().set("smoothness", 0.8); }},
         {"strand roots", [](BoundInterpolate& g, InterpInputs&) { g.node("scatter").params().set("seed", std::int64_t{4}); }},
         {"rest pose", [](BoundInterpolate&, InterpInputs& in) { in.scalp = bentPlane(0.0f, 0.3f, 0.4f); }},
     };

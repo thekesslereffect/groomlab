@@ -14,7 +14,7 @@
   "nodes": [
     {"name": "scalp", "type": "Scalp", "ui": {"x": 0, "y": 0}},
     {"name": "scatter", "type": "Scatter", "params": {"density": 25.0, "length": 3.5}, "ui": {"x": 240, "y": 0}},
-    {"name": "length", "type": "Length", "params": {"fraction": 1.0, "trimMin": 0.0, "trimMax": 0.3}, "ui": {"x": 480, "y": 0}},
+    {"name": "length", "type": "Length", "params": {"fraction": 1.0, "randomness": 0.3}, "ui": {"x": 480, "y": 0}},
     {"name": "flow", "type": "Flow", "params": {"lift": 14.0, "bend": 0.55, "rollRandom": 8.0}, "ui": {"x": 720, "y": 0}},
     {"name": "tufts", "type": "Clump", "params": {"clumpBy": "size", "size": 0.9, "strength": 0.4, "profile": [[0, 0], [0.6, 0.15], [1, 0.5]], "strengthRandom": 0.4}, "ui": {"x": 1200, "y": 0}},
     {"name": "noise", "type": "Noise", "params": {"amplitude": 0.06, "frequency": 2.0}, "ui": {"x": 1440, "y": 0}},

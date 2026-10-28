@@ -259,9 +259,10 @@ TEST(Direction, InclinationFromTheNormalAndRollAroundIt) {
     const StrandsPtr up = rig.eval(straight);
     for (std::size_t s = 0; s < up->strandCount(); s += 5) EXPECT_NEAR(firstSegment(*up, s).y, 1.0f, 1e-5f);
     // Flat along the scalp's U (+x), then rolled a quarter turn to the bitangent (U x N = +z).
-    const NodeId flat = rig.add(op::kDirection, rig.scatter, {{"inclination", 90.0}, {"roll", 0.0}});
-    const NodeId rolled = rig.add(op::kDirection, rig.scatter, {{"inclination", 90.0}, {"roll", 90.0}});
-    const NodeId half = rig.add(op::kDirection, rig.scatter, {{"inclination", 90.0}, {"strength", 0.5}});
+    const ParamValue tangent = std::string("tangent");  // (roll 0 along the scalp's U)
+    const NodeId flat = rig.add(op::kDirection, rig.scatter, {{"inclination", 90.0}, {"roll", 0.0}, {"along", tangent}});
+    const NodeId rolled = rig.add(op::kDirection, rig.scatter, {{"inclination", 90.0}, {"roll", 90.0}, {"along", tangent}});
+    const NodeId half = rig.add(op::kDirection, rig.scatter, {{"inclination", 90.0}, {"strength", 0.5}, {"along", tangent}});
     const StrandsPtr f = rig.eval(flat), r = rig.eval(rolled), h = rig.eval(half);
     for (std::size_t s = 0; s < f->strandCount(); ++s) {
         EXPECT_NEAR(angleBetween(firstSegment(*f, s), Vec3f(1, 0, 0)), 0.0f, 1e-3f);
@@ -580,12 +581,12 @@ TEST(ScatterLayout, AUvGridPutsARootAtEachCellsCenter) {
     for (std::size_t i = 0; i < j->strandCount(); ++i) {
         EXPECT_LE(std::fabs(j->strandPoints(i)[0].x - s->strandPoints(i)[0].x), 0.4f / 20.0f + 1e-5f);
     }
-    // A preview keeps some of the same strands.
+    // A preview of so few (250 or fewer) keeps them all.
     EvalContext preview;
     preview.externals = &rig.ext;
     preview.previewDensity = 0.5f;
     const StrandsPtr thin = rig.g.evaluateStrands(grid, preview);
-    EXPECT_LT(thin->strandCount(), 150u);
+    EXPECT_EQ(thin->strandCount(), 200u);
     for (const StrandId id : thin->ids()) EXPECT_TRUE(ids.count(id));
     // On a deformed scalp the grid keeps its strands.
     std::vector<Vec3f> moved = rig.scalp->points();

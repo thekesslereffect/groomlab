@@ -1062,8 +1062,7 @@ public:
     }
     bool carriesChannels(std::size_t slot) const override { return slot <= 1; }
     std::string category() const override { return "grow"; }
-    // 2: blend directions and clearanceEveryPoint by default (nodes saved before keep offsets and
-    // every few points asked: ParamSpec::formerDefault).
+    // 2: blend directions by default (nodes saved before keep offsets: ParamSpec::formerDefault).
     int version() const override { return 2; }
     std::vector<PortSpec> inputs() const override {
         return {{"strands", PortType::Strands}, {"guides", PortType::Guides, true}, {"scalp", PortType::Mesh, true}};
@@ -1072,33 +1071,23 @@ public:
         return {
             ParamSpec{"smoothness", 0.5, "How softly the guides blend into one another: 0 sharp (each strand mostly its "
                                          "nearest guide: crisp locks, soft edges), 1 soft (each guide reaching twice "
-                                         "as far, its neighbours blended evenly); 0.5 as reach and power are set "
-                                         "(2 neighbors or more)", "fraction"}
+                                         "as far, its neighbours blended evenly); 0.5 between (2 neighbors or more)",
+                                         "fraction"}
                 .range(0, 1)
                 .when("neighbors", {"2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"}),
             ParamSpec{"neighbors", std::int64_t{3}, "How far each guide reaches: to its neighbors-th nearest guide (times "
-                                                    "reach). 1: every strand takes its nearest guide alone, with hard edges"}
+                                                    "1.5, scaled by smoothness). 1: every strand takes its nearest guide "
+                                                    "alone, with hard edges"}
                 .range(1, static_cast<double>(kMaxNeighbors))
                 .soft(1, 8)
                 .adv(),
             ParamSpec{"guideWeight", 1.0, "How strongly each guide pulls the strands around it against its neighbours, "
                                           "read at its root, 0 or more (mappable: paint where guides pull more or less; "
-                                          "a number alone changes nothing, every guide weighed alike). 0: a guide that "
-                                          "shapes only strands no other guide reaches (2 neighbors or more)"}
+                                          "a number alone changes nothing, every guide weighed alike: paint it, Groom "
+                                          "Tools > Paint > + New Map > Guide weight). 0: a guide that shapes only strands "
+                                          "no other guide reaches (2 neighbors or more)"}
                 .atLeast(0)
                 .soft(0, 1)
-                .when("neighbors", {"2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"}),
-            ParamSpec{"reach", 1.5, "Each guide's reach, as a multiple of the distance to its neighbors-th nearest guide; "
-                                    "more blends more guides into each strand (smoothness scales it: by 2/3 at 0 to "
-                                    "2 at 1)"}
-                .atLeast(1)
-                .soft(1, 4)
-                .adv(),
-            ParamSpec{"power", 2.0, "Falloff power of the guide weights over distance, 2 neighbors or more (smoothness "
-                                    "scales it: by 3 at 0 to 1/2 at 1)"}
-                .atLeast(0)
-                .soft(0, 4)
-                .adv()
                 .when("neighbors", {"2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"}),
             ParamSpec{"blend", std::string("directions"), "How the guides' shapes combine: offsets: their points averaged (guides "
                                                        "pointing different ways pull the strand in, preserveLength scales it "
@@ -1107,31 +1096,22 @@ public:
                                                        "guides keeps their length)", "", {"offsets", "directions"}}
                 .when("take", {"shape"})
                 .formerDefault(2, std::string("offsets")),
-            ParamSpec{"smoothGuides", true, "Follow each guide as the smooth curve the viewport draws through its points (a "
-                                            "centripetal Catmull-Rom spline), not straight lines between them, so a bend "
-                                            "drawn with few points stays round in the hair"}
-                .adv(),
             ParamSpec{"preserveLength", true, "Scale each blended strand to its guides' blended length (blending guides that "
                                               "point different ways would shorten it; take shape; blend directions "
                                               "keeps it already)"}
                 .adv()
-                .when("take", {"shape"}),
+                .when("blend", {"offsets"}),
             ParamSpec{"keepClearance", true, "Keep strands out of the skin: where the skin under a strand bulges more "
                                              "than under its guides (an ear, a cheek, the neck), the part that would "
                                              "sink in is lifted just onto the skin, its length kept, and past the bulge "
                                              "the strand eases back to its groomed path, so hair drapes over an ear "
                                              "instead of standing off it (take shape; needs the scalp input)"}
                 .when("take", {"shape"}),
-            ParamSpec{"clearanceEveryPoint", true, "Keeping clearance, ask the skin at every point of a strand (off: at "
-                                                   "most 16 a strand, the points between led by them: faster, but a point "
-                                                   "between two clear of the skin may dip into it)"}
-                .adv()
-                .when("keepClearance", {"true"})
-                .formerDefault(2, false),
-            ParamSpec{"respectParts", true, "Never blend guides from the other side of a part"},
+            ParamSpec{"respectParts", true, "Never blend guides from the other side of a part"}.adv(),
             ParamSpec{"followSurface", true, "Measure how far guides reach along the scalp (the scalp input), not in a "
                                               "straight line, so they do not reach across an ear, a fold or a thin shell "
-                                              "(the same on a smooth scalp)"},
+                                              "(the same on a smooth scalp)"}
+                .adv(),
             ParamSpec{"limitDistance", 0.0, "How far guides reach: strands farther from every guide root keep their "
                                             "incoming shape (e.g. from Flow); 0: every strand follows the guides (and "
                                             "falloff and influenceChannel do nothing)", "length"}
@@ -1313,8 +1293,6 @@ private:
     BindParams bindParams(std::size_t guideCount, const PartLines* groomParts, bool onScalp) const {
         BindParams b;
         b.requested = static_cast<std::size_t>(params().getInt("neighbors"));
-        b.power = static_cast<float>(params().getDouble("power"));
-        b.reach = static_cast<float>(params().getDouble("reach"));
         smoothed(static_cast<float>(params().getDouble("smoothness")), &b);
         b.parts = params().getBool("respectParts") ? groomParts : nullptr;
         b.nearestOnly = b.requested == 1;
@@ -1322,10 +1300,10 @@ private:
         if (b.followSurface) b.radius = static_cast<float>(params().getDouble("limitDistance"));
         return sizedFor(b, guideCount);
     }
-    // `b`'s reach and power scaled by `smoothness` (0-1), along two straight runs meeting at 0.5,
-    // where they are as set: at 0 the reach by 2/3 (never below 1) and the power by 3 (with the
-    // defaults: reach 1, power 6, mostly the nearest guide), at 1 the reach by 2 and the power by
-    // a half (reach 3, power 1).
+    // `b`'s reach (1.5) and power (2) scaled by `smoothness` (0-1), along two straight runs meeting
+    // at 0.5, where they are as they are: at 0 the reach by 2/3 (never below 1) and the power by 3
+    // (reach 1, power 6, mostly the nearest guide), at 1 the reach by 2 and the power by a half
+    // (reach 3, power 1).
     static void smoothed(float smoothness, BindParams* b) {
         const float s = std::clamp(smoothness, 0.0f, 1.0f);
         if (s == 0.5f) return;  // (as set, to the bit)
@@ -1470,7 +1448,7 @@ private:
         normals.resize(kept.size());
         offsets.assign(kept.size() * 3 * stride, 0.0f);
         guideLengths.resize(kept.size());
-        const bool smoothGuides = params().getBool("smoothGuides");
+        const bool smoothGuides = true;  // (each guide the smooth curve through its points)
         // keepClearance: the scalp's field.
         const Clearance clearance = align && !lengthOnly && params().getBool("keepClearance") ? clearanceOf(scalp) : Clearance{};
         // fillTubes: each kept guide's tube laid along its shape as the blend reads it.
@@ -2773,7 +2751,8 @@ void interpolateGuideRows(const ParamSet& params, const std::vector<const Guide*
     // As InterpolateOp::run makes them: the same shapes, roots and normals.
     const ScalpMesh* scalp = scalpPtr.get();
     const bool align = scalp && scalp->triangleCount() > 0;
-    const bool smoothGuides = params.getBool("smoothGuides");
+    const bool smoothGuides = true;  // (as InterpolateOp::run)
+    (void)params;
     rows->samples = samples;
     rows->offsets.assign(kept.size() * samples, Vec3f{});
     rows->roots.assign(kept.size(), Vec3f{});

@@ -204,7 +204,7 @@ std::unique_ptr<Chain> makeChain(const ChainEdit& edit = {}, bool stale = false)
     chain->node("noise").params().set("frequency", 3.0);
     chain->node("curl").params().set("radius", 0.02);
     chain->node("length").params().set("keep", 0.8);
-    chain->node("length").params().set("trimMax", 0.3);
+    chain->node("length").params().set("randomness", 0.3);
     chain->node("resample").params().set("segments", std::int64_t{7});
     chain->node("resample").params().set("mode", std::string("even"));
     const char* order[] = {"held", "diff", "noise", "curl", "length", "width", "resample", "out"};

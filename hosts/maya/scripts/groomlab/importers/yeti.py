@@ -975,9 +975,11 @@ class YetiReader(object):
         keys = _ramp_points(current) if current is not None else None
         op.params["profile"] = ramp_keys(_thin(multiply_profiles(keys, attraction) if keys else attraction),
                                          linear=True)
-        rnd = max(self.num(n, "weightRandom", 0.0), self.num(n, "clumpWeightRandom", 0.0))
-        if rnd > 0:
-            op.params["strengthRandom"] = max(0.0, min(1.0, rnd))
+        # Yeti's clumpWeightRandom varies the weight per clump, weightRandom per strand.
+        for yeti_name, ours in (("clumpWeightRandom", "strengthRandom"), ("weightRandom", "strandStrengthRandom")):
+            rnd = self.num(n, yeti_name, 0.0)
+            if rnd > 0:
+                op.params[ours] = max(0.0, min(1.0, rnd))
         fly = self.num(n, "flyAway", 0.0)
         if fly > 0:
             seed = zlib.crc32((n.id or n.name).encode("utf-8")) % 9973

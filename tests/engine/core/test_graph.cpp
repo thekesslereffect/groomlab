@@ -737,7 +737,7 @@ TEST(GraphEdit, NewNodesFitTheGroomsSize) {
     EXPECT_DOUBLE_EQ(params["atReference"]["amplitude"].get<double>(), 0.2);
     EXPECT_DOUBLE_EQ(params["unsized"]["amplitude"].get<double>(), 0.2);
     EXPECT_DOUBLE_EQ(params["twice"]["amplitude"].get<double>(), 0.4);  // a length: times 2
-    EXPECT_EQ(params["twice"]["octaves"].get<int>(), 2);                // unitless: the spec's
+    EXPECT_EQ(params["twice"]["octaves"].get<int>(), 1);                // unitless: the spec's
     EXPECT_DOUBLE_EQ(params["given"]["amplitude"].get<double>(), 0.05);
     EXPECT_DOUBLE_EQ(params["fur"]["density"].get<double>(), 80.0 * 100.0);  // a density: over the square
     EXPECT_DOUBLE_EQ(params["fur"]["length"].get<double>(), 0.1);
@@ -861,8 +861,8 @@ TEST(NodeVersions, OldNodesKeepTheirBehaviourUntilUpgraded) {
 }
 
 TEST(NodeVersions, AChangedDefaultKeepsTheFormerOneForNodesSavedBefore) {
-    // Interpolate 2 made blend directions and clearanceEveryPoint the defaults (ParamSpec::
-    // formerDefault): a node saved at 1 that leaves them out keeps offsets and every few points,
+    // Interpolate 2 made blend directions the default (ParamSpec::formerDefault): a node saved at 1
+    // that leaves it out keeps offsets,
     // loaded or completed by an editor; one set otherwise keeps its value; a new node takes the
     // new defaults; an Upgrade moves a param still at its former default to the new one.
     const std::string saved =
@@ -872,10 +872,8 @@ TEST(NodeVersions, AChangedDefaultKeepsTheFormerOneForNodesSavedBefore) {
     GraphDocument doc = loadGraphJson(saved);
     auto blendOf = [&](const char* name) { return doc.graph.node(doc.node(name)).params().getString("blend"); };
     EXPECT_EQ(blendOf("old"), "offsets");
-    EXPECT_FALSE(doc.graph.node(doc.node("old")).params().getBool("clearanceEveryPoint"));
     EXPECT_EQ(blendOf("chose"), "directions");
     EXPECT_EQ(blendOf("new"), "directions");
-    EXPECT_TRUE(doc.graph.node(doc.node("new")).params().getBool("clearanceEveryPoint"));
     // Saved again: the old node's values written down, its version kept.
     const nlohmann::json written = nlohmann::json::parse(saveGraphJson(doc));
     for (const nlohmann::json& n : written["nodes"]) {
@@ -899,7 +897,6 @@ TEST(NodeVersions, AChangedDefaultKeepsTheFormerOneForNodesSavedBefore) {
     EXPECT_EQ(editedBlend("old"), "directions");
     GraphDocument upgraded = loadGraphJson(edit.toJson());
     EXPECT_EQ(upgraded.graph.node(upgraded.node("old")).params().getString("blend"), "directions");
-    EXPECT_TRUE(upgraded.graph.node(upgraded.node("old")).params().getBool("clearanceEveryPoint"));
 }
 
 TEST(Graph, EachScatterGrowsWithTheResampleOfItsOwnBranch) {

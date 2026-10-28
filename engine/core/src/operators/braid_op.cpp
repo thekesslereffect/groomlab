@@ -526,16 +526,19 @@ public:
                 .in("Weave"),
             ParamSpec{"phase", 0.0, "Slides the weave along the braid, in repeats (0.5: half a crossing)", "turns"}
                 .soft(0, 1)
-                .in("Weave"),
+                .in("Weave")
+                .adv(),
             ParamSpec{"crossingsProfile", Ramp::constant(1.0f), "Crossings along the braid, start to end, times `crossings`"}
                 .in("Weave"),
             ParamSpec{"sectionTwist", 0.0, "Turns of each section's hair around its own center per weave repeat "
                                            "(signed)", "turns"}
                 .soft(-2, 2)
-                .in("Weave"),
+                .in("Weave")
+                .adv(),
             notAnimatable(ParamSpec{"resolution", 12.0, "Points per weave repeat: a braided strand with fewer gets points "
                                                         "added, so the weave is drawn smoothly however few points the "
-                                                        "strands came with (0: their own points)"})
+                                                        "strands came with (0: their own points)"}
+                .adv())
                 .atLeast(0)
                 .soft(0, 32)
                 .in("Weave"),
@@ -549,7 +552,8 @@ public:
             ParamSpec{"crossings", 2.5, "Weave repeats per unit of braid length (tighter: more)", "perLength"}.soft(0, 10),
             ParamSpec{"lobeFill", 0.6, "How much of a lobe's space its strands fill, 0 to 1", "fraction"}
                 .range(0, 1)
-                .in("Weave"),
+                .in("Weave")
+                .adv(),
             ParamSpec{"region", 0.25, "Strands rooted within this distance of a braid's root join it (large: a "
                                       "ponytail's); without a braids input, the braids it picks among the strands are "
                                       "about this far apart", "length"}
@@ -577,7 +581,8 @@ public:
                 .when("feed", {"true"}),
             ParamSpec{"alongScalp", true, "Strands drawn in from afar sweep over the scalp into the braid instead of "
                                           "cutting through the head"}
-                .in("Strands"),
+                .in("Strands")
+                .adv(),
             ParamSpec{"gather", 0.15, "Share of the strand spent leaving the scalp into the braid", "fraction"}
                 .range(0, 0.9)
                 .in("Strands"),

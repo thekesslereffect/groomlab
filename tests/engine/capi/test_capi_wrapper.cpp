@@ -489,10 +489,9 @@ TEST(CApi, UpgradingACurrentNodeChangesNothing) {
     const std::string graph = session.graphJson();
     for (const std::string& node : session.nodeNames()) {
         const json spec = json::parse(session.nodeSpecJson(node));
-        if (spec.value("type", std::string()) == "Interpolate") {
-            EXPECT_TRUE(spec.at("outdated").get<bool>()) << node;
-            continue;
-        }
+        // (Interpolate, and the nodes whose defaults changed since: outdated.)
+        if (spec.value("type", std::string()) == "Interpolate") EXPECT_TRUE(spec.at("outdated").get<bool>()) << node;
+        if (spec.at("outdated").get<bool>()) continue;
         EXPECT_FALSE(spec.at("outdated").get<bool>()) << node;
         EXPECT_FALSE(session.upgradeNode(node)) << node;
     }
