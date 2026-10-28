@@ -774,7 +774,7 @@ public:
                       "strands: a Scatter, guides, single points) only says where the clumps are (their roots), each "
                       "axis the strand it gathers nearest its center's root (the hair as grown there); inputCurves: each "
                       "axis is the center curve itself (groomed clump curves, a Noise on the centers waving each clump "
-                      "as one). Connecting centers in the Graph Editor sets inputPoints",
+                      "as one). Connecting centers in the Graph Editor sets inputPoints (a Guides node: inputCurves)",
                       "", {"pick", "inputPoints", "inputCurves"}},
             ParamSpec{"clumpBy", std::string("count"),
                       "The clumps it picks among the strands: count: about `count` of them, whatever the scalp's size "

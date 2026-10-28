@@ -700,6 +700,14 @@ class GraphTest(SceneMixin, unittest.TestCase):
         self.assertTrue(edit.connect_by_hand("g", "c", "centers"))
         self.assertEqual(json.loads(edit.to_json())["nodes"][1]["params"]["centersFrom"], "inputPoints")
         self.assertFalse(edit.connect_by_hand("g", "c", "centers"))  # already taking them
+        # From a Guides node (through a curve node after it too): each clump along its guide.
+        for source in ("guides", "wave"):
+            edit = gl.GraphEdit(json.dumps({"version": 1, "nodes": [
+                {"name": "s", "type": "Scatter"}, {"name": "c", "type": "Clump"}, {"name": "guides", "type": "Guides"},
+                {"name": "wave", "type": "Noise"}],
+                "connections": [{"from": "s", "to": "c", "input": "strands"}, {"from": "guides", "to": "wave", "input": "strands"}]}))
+            self.assertTrue(edit.connect_by_hand(source, "c", "centers"), source)
+            self.assertEqual(json.loads(edit.to_json())["nodes"][1]["params"]["centersFrom"], "inputCurves", source)
         self.assertEqual(params["Clump"]["flatness"]["default"], 0.0)
         self.assertEqual(params["Noise"]["mode"]["default"], "smooth")
         self.assertEqual(params["Width"]["randomness"]["default"], 0.0)

@@ -428,7 +428,8 @@ class CardsOp : public Operator {
 public:
     std::string typeName() const override { return op::kCards; }
     std::string category() const override { return "look"; }
-    // 2: featherFlatten 1 by default (nodes saved before keep 0: ParamSpec::formerDefault).
+    // 2: featherFlatten 1 and featherSeparation 0 by default (nodes saved before keep 0 and 0.05:
+    // ParamSpec::formerDefault).
     int version() const override { return 2; }
     // The guides: what cardsFrom guides lays the cards along.
     std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Strands}, {"guides", PortType::Guides, true}}; }
@@ -572,14 +573,15 @@ public:
                 .soft(0, 0.2)
                 .in("Separation")
                 .when("featherMode", {"auto", "perVane", "off"}),
-            ParamSpec{"featherSeparation", 0.05, "Feather cards closer than this gap to another card, or passing through it, are "
+            ParamSpec{"featherSeparation", 0.0, "Feather cards closer than this gap to another card, or passing through it, are "
                                                  "pushed apart along their normals, roots held, so overlapping feathers lie on each "
                                                  "other instead of clipping (a share of the narrower card's width; 0: off). Only the "
                                                  "mesh moves: the texture stays as baked", "fraction"}
                 .range(0, 1)
                 .soft(0, 0.2)
                 .in("Separation")
-                .when("featherMode", {"auto", "perFeather"}),
+                .when("featherMode", {"auto", "perFeather"})
+                .formerDefault(2, 0.05),
             notAnimatable({"separationIterations", std::int64_t{8}, "Passes of the cards' separation (separation, "
                                                                     "featherSeparation): more settle crowded cards further"})
                 .range(1, 64)

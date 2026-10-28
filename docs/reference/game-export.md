@@ -115,7 +115,8 @@ Game cards as glTF, below).
   width, never farther than their strands lie off it) and turns them a little the other way, so
   layered cards never share a plane (no z-fighting, more volume); a lone card is never ruffled.
 - **Separation** (its own section: `separation` for hair cards, off by default; `featherSeparation` for feather
-  cards, 0.05; `separationIterations`, 8): cards closer than a gap to another card, or passing
+  cards, off by default since GroomLab 0.34, nodes saved before keeping 0.05; `separationIterations`,
+  8): cards closer than a gap to another card, or passing
   through it, are pushed apart along their normals (`separateCards`, `engine/core/src/
   card_separation.cpp`). The gap is a share of the narrower card's width (between a hair and a
   feather card, the larger share), so it fits any scale. Each pass moves every card along its own
