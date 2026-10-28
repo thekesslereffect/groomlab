@@ -302,7 +302,7 @@ class ToolsTest(unittest.TestCase):
         self.assertAlmostEqual(g.color[0], 1.0, places=2)
         self.assertIn("group.color", menu.state(bpy.context))
         log = drawn(bpy.types.GROOMLAB_MT_group_context)
-        self.assertEqual(texts(log), ["New Group...", "Rename", "Color...", "Default Color", "Select Guides", "Delete"])
+        self.assertEqual(texts(log), ["New Group...", "Rename", "Color...", "Default Color", "Select Guides", "Reset Segments", "Delete"])
         self.assertEqual(bpy.ops.groomlab.group_edit(action="DEFAULT_COLOR", group="primary"), {"FINISHED"})
         g = next(g for g in t.groups if g.name == "primary")
         self.assertFalse(g.has_color)
@@ -312,11 +312,14 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual([round(c, 3) for c in g.color], [round(c, 3) for c in want])
         self.assertGreater(max(g.color) - min(g.color), 0.2)
         self.assertNotAlmostEqual(g.color[0], 1.0, places=2)
-        # Segments: every guide resampled (headless: committed at once), one undo step.
+        # Segments, nothing selected: the picked group's guides resampled (headless: committed at
+        # once), its new guides getting the count too; one undo step.
         before = set(tools.guide_segments(head)["segments"])
         t.resample_segments = 5
         self.assertEqual(set(tools.guide_segments(head)["segments"]), {5})
-        self.assertIn("all 40", t.segments_scope)
+        self.assertIn("primary: 40", t.segments_scope)
+        info = tools.call(head, "guides_info", guideColorSeed=head.name)["groups"]
+        self.assertEqual(next(x for x in info if x["name"] == "primary")["segments"], 5)
         self.assertEqual(bpy.ops.groomlab.tool_undo(), {"FINISHED"})
         self.assertEqual(set(tools.guide_segments(head)["segments"]), before)
         # Mirror Selection: the mirror images of the selected guides.

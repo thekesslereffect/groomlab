@@ -1745,6 +1745,7 @@ json bakeToGuides(Session& s, const json& args) {
             fail("bad_request", "'" + group + "' is a child group: bake into a root group");
         }
         added = h.addGuides(gid, baked);
+        for (const GuideId id : added) h.setPoints(id, h.withGroupSegments(gid, h.guide(id)->points));  // the group's segments, if it has its own
         h.evaluate(scalp.get());
     } catch (const RequestError&) {
         throw;

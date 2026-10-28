@@ -255,6 +255,7 @@ class GuidesTab(_GroomTab):
         "group.color": lambda self: self.pick_color(self.group()),
         "group.defaultColor": lambda self: self.set_color(self.group(), None),
         "group.select": "select_group",
+        "group.resetSegments": "reset_group_segments",
         "group.delete": "delete_group",
         "guides.children": "generate_children",
         "guides.syncPos": lambda self: self.menu_action(lambda: menu.symmetry_sync(False)),
@@ -313,16 +314,19 @@ class GuidesTab(_GroomTab):
         row.addWidget(self.children_count)
         layout.addLayout(row)
 
-        # Segments: the selected guides' (else every guide's) point count, resampled live while
-        # dragging (a preview from the stored guides) and committed as one undo step on release.
+        # Segments: the selected guides' (else the picked group's, else every guide's) point count,
+        # resampled live while dragging (a preview from the stored guides) and committed as one
+        # undo step on release; a whole group's new guides get it too.
         seg_row = QtWidgets.QHBoxLayout()
         self.segments_label = QtWidgets.QLabel("Segments")
         seg_row.addWidget(self.segments_label)
         self.segments = widgets.SoftSlider(12, lo=2, hi=64, integer=True, minimum=1, maximum=256,
                                            key="guides.segments")
-        self.segments.setToolTip("Points along the guides, kept on their smooth curve: the selected guides, or "
-                                 "every guide with none selected. Drag to see it live; release (or type a value) "
-                                 "to apply it as one undo step. More segments let a guide curl tighter.")
+        self.segments.setToolTip("Points along the guides, kept on their smooth curve: the selected guides (their own "
+                                 "count from then on, kept when the group's changes; the group's count makes them "
+                                 "follow it again), else the picked group's (its new guides get as many too), else "
+                                 "every guide. Frozen guides keep theirs. Drag to see it live; release (or type a "
+                                 "value) to apply it as one undo step. More segments let a guide curl tighter.")
         self.segments.dragged.connect(self.segments_dragged)
         self.segments.committed.connect(self.segments_committed)
         seg_row.addWidget(self.segments, 1)
@@ -335,18 +339,30 @@ class GuidesTab(_GroomTab):
     def light_refresh(self):
         self.sync_segments()
 
+    def segments_group(self):
+        """The group Segments works on: the palette's picked one, with no guides selected (None: the
+        selected guides, else every guide)."""
+        picked = getattr(self.owner, "current_group", None)
+        group = picked() if picked else ""
+        if not group or not self.groom or groomlab.selected_guides(self.groom):
+            return None
+        return group if any(g["name"] == group for g in groomlab.list_guide_groups(self.groom)) else None
+
     def sync_segments(self):
         """The slider shows the targets' segment count (the most common; the label says when they differ)."""
         if self._previewing:
             return
         counts = []
+        group = None
         if self.groom:
             try:
-                counts = groomlab.guide_segments(self.groom)
+                group = self.segments_group()
+                counts = groomlab.guide_segments(self.groom, group=group)
             except RuntimeError:
                 counts = []
         selected = bool(self.groom and groomlab.selected_guides(self.groom))
-        scope = "%d selected" % len(counts) if selected else "all %d" % len(counts)
+        scope = ("%d selected" % len(counts) if selected else
+                 "%s: %d" % (group, len(counts)) if group else "all %d" % len(counts))
         if counts:
             common = max(set(counts), key=counts.count)
             mixed = min(counts) != max(counts)
@@ -371,7 +387,7 @@ class GuidesTab(_GroomTab):
         if self._preview_segments is None or not self.groom:
             return
         try:
-            groomlab.preview_resample_guides(self.groom, self._preview_segments)
+            groomlab.preview_resample_guides(self.groom, self._preview_segments, group=self.segments_group())
             self._previewing = True
         except Exception as e:  # a timer's slot: nothing above it would report it
             self.status(str(e).strip())
@@ -386,16 +402,20 @@ class GuidesTab(_GroomTab):
         self._previewing = False
 
     def segments_committed(self, value):
-        """Apply: the targets resampled to `value`, one undo step (none when nothing changes)."""
+        """Apply: the targets resampled to `value`, one undo step (selected guides already at it: none).
+        A group (or every guide) commits anyway: its new guides take the count on."""
         segments = int(round(value))
         if not self.groom:
             return
         self._preview_segments = None
-        counts = groomlab.guide_segments(self.groom)
-        if counts and any(c != segments for c in counts):
-            count = self.run(groomlab.resample_guides, self.groom, segments)
-            if count:
-                self.status("Resampled %d guides to %d segments." % (count, segments))
+        group = self.segments_group()
+        selected = bool(groomlab.selected_guides(self.groom))
+        counts = groomlab.guide_segments(self.groom, group=group)
+        if counts and (not selected or any(c != segments for c in counts)):
+            count = self.run(groomlab.resample_guides, self.groom, segments, group=group)
+            if count is not None:
+                scope = " (new guides of %s too)" % group if group else "" if selected else " (new guides too)"
+                self.status("Resampled %d guides to %d segments%s." % (count, segments, scope))
         self.end_preview()
         self.sync_segments()
 
@@ -440,8 +460,9 @@ class GuidesTab(_GroomTab):
                 item.setData(0, QtCore.Qt.UserRole, g["name"])
                 item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEditable)
                 item.setCheckState(0, QtCore.Qt.Unchecked if g["name"] in hidden else QtCore.Qt.Checked)
-                item.setToolTip(0, "%s: checked shows it in the viewport; double-click to rename%s"
-                                % (g["name"], "\nNamed in the graph by " + users if users else ""))
+                item.setToolTip(0, "%s: checked shows it in the viewport; double-click to rename%s%s"
+                                % (g["name"], "\nNamed in the graph by " + users if users else "",
+                                   "\nNew guides: %d segments" % g["segments"] if g["segments"] else ""))
                 items[g["name"]] = item
                 self.tree.setItemWidget(item, 1, self._swatch(g["name"], colors.get(g["name"]), g["color"]))
             if len(left) == len(pending):
@@ -532,6 +553,13 @@ class GuidesTab(_GroomTab):
             cmds.select(cmds.listRelatives(self.groom, parent=True))
             self.run(groomlab.select_guides, self.groom, group=self.group())
             self.status("Selected %d guides of %s." % (len(groomlab.selected_guides(self.groom)), self.group()))
+
+    def reset_group_segments(self):
+        if self._need_group():
+            segments = self.run(groomlab.reset_group_segments, self.groom, self.group())
+            if segments:
+                self.status("Every guide of %s at %d segments (frozen ones kept)." % (self.group(), segments))
+            self.sync_segments()
 
     def rename_group(self):
         if not self._need_group():

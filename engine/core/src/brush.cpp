@@ -982,6 +982,12 @@ GroupId targetGroup(GuideHierarchy& h, const std::string& name) {
     return gid == kNoGroup ? h.addGroup(group) : gid;
 }
 
+// The segments a new guide of `gid` gets: the group's own, else the tool's.
+int newGuideSegments(const GuideHierarchy& h, GroupId gid, int toolSegments) {
+    const GuideGroup* g = h.group(gid);
+    return g && g->segments > 0 ? g->segments : std::max(toolSegments, 1);
+}
+
 // For a new guide in a child group: the guide of the parent group whose root is nearest.
 GuideId nearestParent(const GuideHierarchy& h, GroupId childGroup, const Vec3f& root) {
     const GroupId parentGroup = h.group(childGroup)->parent;
@@ -1934,7 +1940,7 @@ void setPlacementTube(PlaceSettings& s, const std::string& json) {
 GuideId placeGuide(GuideHierarchy& hierarchy, const ScalpMesh& scalp, const PlaceSettings& s, const SurfacePoint& at) {
     if (at.root.face < 0) throw std::invalid_argument("placeGuide: not a point on the scalp");
     const GroupId gid = targetGroup(hierarchy, s.group);
-    const int segments = std::max(s.segments, 1);
+    const int segments = newGuideSegments(hierarchy, gid, s.segments);
     std::vector<Vec3f> pts;
     NeighborMatch match;
     bool matched = false;
@@ -1949,6 +1955,8 @@ GuideId placeGuide(GuideHierarchy& hierarchy, const ScalpMesh& scalp, const Plac
         }
         pts = std::move(match.points);
         for (Vec3f& p : pts) p += at.position;
+        // The neighbors' shape at the group's own segments (else their point count).
+        if (matched) pts = hierarchy.withGroupSegments(gid, std::move(pts));
         if (!pts.empty()) pts = keepOffScalp(pts, scalp);
     }
     if (pts.empty()) {
@@ -1995,11 +2003,11 @@ GuideId drawGuide(GuideHierarchy& hierarchy, const ScalpMesh& scalp, const Place
     }
     const SurfacePoint root = scalp.closestPoint(path.front());
     if (root.root.face < 0) throw std::invalid_argument("drawGuide: the stroke does not start on the scalp");
+    const GroupId gid = targetGroup(hierarchy, s.group);
     std::vector<Vec3f> pts = path;
     pts.front() = root.position;
-    pts = resampleByArcLength(pts.data(), pts.size(), static_cast<std::size_t>(std::max(s.segments, 1)) + 1);
+    pts = resampleByArcLength(pts.data(), pts.size(), static_cast<std::size_t>(newGuideSegments(hierarchy, gid, s.segments)) + 1);
     pts = keepOffScalp(pts, scalp);
-    const GroupId gid = targetGroup(hierarchy, s.group);
     // The shape is drawn; painted layers and the tube come from the neighbors, as for Place.
     std::map<std::string, float> layers;
     if (s.matchNeighbors && hierarchy.groupDepth(gid) == 0) layers = neighborAttributes(hierarchy, neighborGroups(hierarchy, gid), root);

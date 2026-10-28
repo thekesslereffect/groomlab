@@ -1696,6 +1696,7 @@ class ToolPalette(QtWidgets.QWidget):
         self._target = (self.current_group(), self.level.currentData())
         self.push(level=self.level.currentData(), group=self.current_group())
         self.apply_isolation()
+        self.guides_tab.sync_segments()  # Segments works on the picked group
 
     def pick_group(self, name):
         """Brushes and new guides use group `name` (from the groups list)."""
@@ -2217,8 +2218,8 @@ def show(tab=None):
         _window = _make()
         widgets.into_dock(_window, UI_SCRIPT)  # the dock Maya kept: opens where it was
     _window.show(dockable=True, area="left", floating=False, uiScript=UI_SCRIPT)  # (a new dock: on the left)
-    if tab:
     widgets.keep_dock_resizable(_window)
+    if tab:
         _window.show_tab(tab)
     groomlab.adopt_scene_groom()  # a scene with grooms: one of them, not "Start a groom"
     _window.poll()
@@ -2234,8 +2235,8 @@ def restore():
         widgets.dispose(_window)
     _window = _make()
     widgets.into_dock(_window, UI_SCRIPT, restoring=True)
-
     widgets.keep_dock_resizable(_window)
+
 
 def _close_at_exit():
     """Maya quits: the palette stops its poll and callbacks and its widgets go while Qt and Python

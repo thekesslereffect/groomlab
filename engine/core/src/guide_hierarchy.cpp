@@ -242,6 +242,81 @@ void GuideHierarchy::setGroupColor(GroupId id, const std::array<float, 3>& linea
     throw std::invalid_argument("setGroupColor: unknown group");
 }
 
+void GuideHierarchy::setGroupSegments(GroupId id, int segments) {
+    if (segments < 0 || segments > 256) throw std::invalid_argument("setGroupSegments: segments are 0 to 256");
+    for (GuideGroup& g : groups_) {
+        if (g.id == id) {
+            if (g.segments != segments) invalidateHash();
+            g.segments = segments;
+            return;
+        }
+    }
+    throw std::invalid_argument("setGroupSegments: unknown group");
+}
+
+std::vector<Vec3f> GuideHierarchy::withGroupSegments(GroupId id, std::vector<Vec3f> points) const {
+    const GuideGroup* g = group(id);
+    if (!g || g->segments < 1 || points.size() < 2) return points;
+    return resampleSmoothCurve(points.data(), points.size(), static_cast<std::size_t>(g->segments) + 1);
+}
+
+std::size_t GuideHierarchy::resample(const std::vector<GuideId>& ids, int segments, bool groupWide) {
+    if (segments < 1 || segments > 256) throw std::invalid_argument("resample: segments are 1 to 256");
+    std::size_t count = 0;
+    for (const GuideId id : ids) {
+        const HierarchyGuide* g = guide(id);
+        if (!g) throw std::invalid_argument("resample: no guide " + std::to_string(id));
+        float frozen = 0.0f;
+        if (g->points.size() < 2 || (effectiveAttribute(*g, "freeze", &frozen) && frozen >= 0.5f)) continue;
+        if (groupWide && g->ownSegments) continue;
+        if (!groupWide) {
+            const GuideGroup* grp = group(g->group);
+            const bool own = !grp || grp->segments != segments;
+            if (own != g->ownSegments) invalidateHash();
+            mutableGuide(id)->ownSegments = own;
+        }
+        setPoints(id, resampleSmoothCurve(g->points.data(), g->points.size(), static_cast<std::size_t>(segments) + 1));
+        ++count;
+    }
+    return count;
+}
+
+int GuideHierarchy::resetGroupSegments(GroupId id) {
+    const GuideGroup* grp = group(id);
+    if (!grp) throw std::invalid_argument("resetGroupSegments: unknown group");
+    const std::vector<GuideId> ids = guidesInGroup(id);
+    int segments = grp->segments;
+    if (segments < 1) {
+        // The most common count, of the guides that follow the group (else of all of them).
+        std::map<int, std::size_t> counts, all;
+        for (const GuideId g : ids) {
+            const HierarchyGuide& guide = *this->guide(g);
+            if (guide.points.size() < 2) continue;
+            const int n = static_cast<int>(guide.points.size()) - 1;
+            ++all[n];
+            if (!guide.ownSegments) ++counts[n];
+        }
+        const std::map<int, std::size_t>& from = counts.empty() ? all : counts;
+        if (from.empty()) return 0;
+        segments = std::max_element(from.begin(), from.end(), [](const auto& a, const auto& b) { return a.second < b.second; })->first;
+        setGroupSegments(id, std::min(segments, 256));
+        segments = std::min(segments, 256);
+    }
+    std::vector<GuideId> follow;
+    for (const GuideId g : ids) {
+        float frozen = 0.0f;
+        const HierarchyGuide& guide = *this->guide(g);
+        if (effectiveAttribute(guide, "freeze", &frozen) && frozen >= 0.5f) continue;
+        if (guide.ownSegments) {
+            invalidateHash();
+            mutableGuide(g)->ownSegments = false;
+        }
+        follow.push_back(g);
+    }
+    resample(follow, segments, true);
+    return segments;
+}
+
 GroupId GuideHierarchy::addGroup(const std::string& name, GroupId parent) {
     invalidateHash();
     if (parent != kNoGroup && !group(parent)) throw std::invalid_argument("addGroup: unknown parent group");
@@ -439,6 +514,7 @@ GroupId GuideHierarchy::generateChildren(GroupId parentGroup, const std::string&
         if (!old.empty()) removeGuides(old);
     }
 
+    std::vector<GuideId> made;
     for (const GuideId parentId : chosen) {
         // The parent's frames, once for all its children (a shaped tube's children start theirs from its root's).
         const std::vector<Frame> parentFrames = guide(parentId)->frames();
@@ -484,7 +560,13 @@ GroupId GuideHierarchy::generateChildren(GroupId parentGroup, const std::string&
 
             index_[id] = guides_.size();
             guides_.push_back(std::move(child));
+            made.push_back(id);
         }
+    }
+    // A child group with segments of its own: the children rebuilt to them (their parents' count
+    // otherwise).
+    if (group(childGroup)->segments > 0) {
+        for (const GuideId id : made) setPoints(id, withGroupSegments(childGroup, guide(id)->points));
     }
     return childGroup;
 }
@@ -516,7 +598,7 @@ GuideId GuideHierarchy::addChildGuide(GroupId groupId, GuideId parentId, std::ve
     // A shaped parent's children start their frames from its root's (resolveFollower keeps them so).
     child.frameUp = parent->tube.shaped() ? parent->frames().front().normal : anyPerpendicular(rootTangent(points));
     child.points = std::move(points);
-    child.offsets = offsetsFromWorld(child, *parent);
+    bindOffsets(child, *parent);
     const GuideId id = child.id;
     index_[id] = guides_.size();
     guides_.push_back(std::move(child));
@@ -575,6 +657,10 @@ void GuideHierarchy::resolveFollower(HierarchyGuide& child, const HierarchyGuide
         }
         child.root = sp.root;
     }
+    // Its own point count: the shape respaced along its smooth curve (the root stays where it is).
+    if (child.pointCount >= 2 && child.pointCount != n && n >= 2) {
+        child.points = resampleSmoothCurve(child.points.data(), n, child.pointCount);
+    }
 }
 
 std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child, const HierarchyGuide& parent) const {
@@ -599,6 +685,12 @@ std::vector<Vec3f> GuideHierarchy::offsetsFromWorld(const HierarchyGuide& child,
         offsets[i] = {at.u, at.v, local.z / scale_};
     }
     return offsets;
+}
+
+void GuideHierarchy::bindOffsets(HierarchyGuide& child, const HierarchyGuide& parent) const {
+    child.offsets = offsetsFromWorld(child, parent);
+    const std::size_t own = child.points.size();
+    child.pointCount = own >= 2 && own != parent.points.size() ? static_cast<std::uint32_t>(own) : 0;
 }
 
 void GuideHierarchy::evaluateGuide(HierarchyGuide& g, const ScalpMesh* scalp, const std::vector<Frame>* parentFrames) {
@@ -852,7 +944,7 @@ void GuideHierarchy::reparent(const std::vector<GuideId>& ids, GuideId newParent
     for (const GuideId id : ids) {
         HierarchyGuide* g = mutableGuide(id);
         makeFollower(*g, newParent);
-        if (!g->locked) g->offsets = offsetsFromWorld(*g, *guide(newParent));
+        if (!g->locked) bindOffsets(*g, *guide(newParent));
     }
 }
 
@@ -878,7 +970,7 @@ void GuideHierarchy::promoteGroup(GroupId groupId) {
             g->rootLocal.clear();
         } else {
             makeFollower(*g, newParent);
-            if (!g->locked) g->offsets = offsetsFromWorld(*g, *guide(newParent));
+            if (!g->locked) bindOffsets(*g, *guide(newParent));
         }
     }
     grp->parent = grandparent;
@@ -913,7 +1005,7 @@ void GuideHierarchy::demoteGroup(GroupId groupId, GroupId newParent) {
         const bool wasPrimary = !g->isChild();
         makeFollower(*g, nearest);
         if (wasPrimary) g->locked = false;
-        if (!g->locked) g->offsets = offsetsFromWorld(*g, *guide(nearest));
+        if (!g->locked) bindOffsets(*g, *guide(nearest));
     }
     grp->parent = newParent;
 }
@@ -1020,7 +1112,7 @@ void GuideHierarchy::unlock(GuideId id) {
     if (!g || !g->isChild() || !g->locked) return;
     const HierarchyGuide* parent = guide(g->parent);
     if (!parent) return;
-    g->offsets = offsetsFromWorld(*g, *parent);
+    bindOffsets(*g, *parent);
     g->locked = false;
     g->rootLocal.clear();
 }
@@ -1094,7 +1186,7 @@ void GuideHierarchy::setPoints(GuideId id, std::vector<Vec3f> points) {
     g->points = std::move(points);
     g->rootLocal.clear();  // re-bind to the scalp on the next evaluate
     if (g->followsParent()) {
-        if (const HierarchyGuide* parent = guide(g->parent)) g->offsets = offsetsFromWorld(*g, *parent);
+        if (const HierarchyGuide* parent = guide(g->parent)) bindOffsets(*g, *parent);
     }
     fitLayers(*g);
 }
@@ -1367,6 +1459,7 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
     for (const GuideGroup& g : groups_) {
         h = hashCombine(hashCombine(h, g.id), g.parent);
         h = hashString(h, g.name);
+        if (g.segments > 0) h = hashCombine(h, static_cast<std::uint64_t>(g.segments));  // (none: hashes as it always has)
     }
     if (!tubeShapes_.empty()) {  // (a hierarchy without custom shapes hashes as it always has)
         h = hashCombine(h, tubeShapes_.size());
@@ -1376,6 +1469,7 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
     for (const HierarchyGuide& g : guides_) {
         h = hashCombine(hashCombine(hashCombine(h, g.id), g.group), g.parent);
         h = hashCombine(h, g.locked ? 1 : 0);
+        if (g.ownSegments) h = hashCombine(h, 0x05E6u);  // (none: as it always has)
         h = hashCombine(h, static_cast<std::uint64_t>(static_cast<std::int64_t>(g.root.face)));
         h = hashFloat(hashFloat(h, g.root.u), g.root.v);
         h = hashVec(h, g.frameUp);
@@ -1389,6 +1483,7 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
         for (const Vec3f& p : g.points) h = hashVec(h, p);
         h = hashCombine(h, g.offsets.size());
         for (const Vec3f& o : g.offsets) h = hashVec(h, o);
+        if (g.pointCount > 0) h = hashCombine(h, static_cast<std::uint64_t>(g.pointCount) + 0x9C0u);  // (none: as it always has)
         h = hashCombine(h, g.rootLocal.size());
         for (const Vec3f& l : g.rootLocal) h = hashVec(h, l);
         h = hashVec(h, g.frameUpLocal);
@@ -1432,10 +1527,12 @@ json guideToJson(const HierarchyGuide& g) {
     };
     if (g.parent != kNoGuide) j["parent"] = g.parent;
     if (g.locked) j["locked"] = true;
+    if (g.ownSegments) j["ownSegments"] = true;
     if (!g.attributes.empty()) j["attributes"] = g.attributes;
     if (!g.pointAttributes.empty()) j["pointAttributes"] = g.pointAttributes;
     if (g.followsParent()) {
         j["offsets"] = vecsToJson(g.offsets);
+        if (g.pointCount > 0) j["pointCount"] = g.pointCount;
     } else {
         j["points"] = vecsToJson(g.points);
         if (!g.rootLocal.empty()) {
@@ -1454,6 +1551,7 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
     g.group = j.at("group").get<GroupId>();
     g.parent = j.value("parent", kNoGuide);
     g.locked = j.value("locked", false);
+    g.ownSegments = j.value("ownSegments", false);
     const json& r = j.at("root");
     g.root = {r.at(0).get<std::int32_t>(), r.at(1).get<float>(), r.at(2).get<float>()};
     const json& up = j.at("frameUp");
@@ -1489,6 +1587,7 @@ HierarchyGuide guideFromJson(const json& j, const TubeShapeLibrary& library, std
     }
     if (j.contains("points")) g.points = vecsFromJson(j.at("points"));
     if (j.contains("offsets")) g.offsets = vecsFromJson(j.at("offsets"));
+    g.pointCount = std::min(j.value("pointCount", std::uint32_t{0}), std::uint32_t{257});
     if (j.contains("rootLocal")) g.rootLocal = vecsFromJson(j.at("rootLocal"));
     if (j.contains("frameUpLocal")) {
         const json& ul = j.at("frameUpLocal");
@@ -1559,7 +1658,11 @@ bool findGuideElements(const std::string& text, std::vector<std::pair<std::size_
 
 std::string GuideHierarchy::toJson() const {
     json groups = json::array();
-    for (const GuideGroup& g : groups_) groups.push_back({{"id", g.id}, {"name", g.name}, {"parent", g.parent}});
+    for (const GuideGroup& g : groups_) {
+        json group = {{"id", g.id}, {"name", g.name}, {"parent", g.parent}};
+        if (g.segments > 0) group["segments"] = g.segments;
+        groups.push_back(std::move(group));
+    }
     // Each guide written on its own, side by side (the text of a big groom's guides took tens of
     // ms on one thread), then joined as one document's dump would join them: the root's keys in
     // their sorted order (nlohmann's objects keep them sorted), no spaces. The same bytes.
@@ -1656,6 +1759,7 @@ GuideHierarchy GuideHierarchy::fromJson(const std::string& text) {
 
         for (const json& g : root.value("groups", json::array())) {
             GuideGroup group{g.at("id").get<GroupId>(), g.at("name").get<std::string>(), g.value("parent", kNoGroup)};
+            group.segments = std::clamp(g.value("segments", 0), 0, 256);
             h.nextGroupId_ = std::max(h.nextGroupId_, group.id + 1);
             h.groups_.push_back(std::move(group));
         }

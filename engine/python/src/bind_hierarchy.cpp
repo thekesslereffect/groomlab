@@ -183,6 +183,7 @@ void bindHierarchy(py::module_& m) {
         .def_readwrite("id", &GuideGroup::id)
         .def_readwrite("name", &GuideGroup::name)
         .def_readwrite("parent", &GuideGroup::parent)
+        .def_readwrite("segments", &GuideGroup::segments, "Segments the group's new guides get (0: the tool's own)")
         .def("__repr__", [](const GuideGroup& g) {
             return "<GuideGroup id=" + std::to_string(g.id) + " name='" + g.name + "' parent=" + std::to_string(g.parent) + ">";
         });
@@ -192,6 +193,7 @@ void bindHierarchy(py::module_& m) {
         .def(py::init<>())
         .def_readwrite("id", &HierarchyGuide::id)
         .def_readwrite("group", &HierarchyGuide::group)
+        .def_readwrite("own_segments", &HierarchyGuide::ownSegments)
         .def_readwrite("parent", &HierarchyGuide::parent)
         .def_readwrite("locked", &HierarchyGuide::locked)
         .def_readwrite("root", &HierarchyGuide::root)
@@ -437,6 +439,8 @@ void bindHierarchy(py::module_& m) {
         .def("max_depth", &GuideHierarchy::maxDepth)
         .def("remove_group", &GuideHierarchy::removeGroup, py::arg("id"), "Removes a group, its sub-groups and their guides.")
         .def("rename_group", &GuideHierarchy::renameGroup, py::arg("id"), py::arg("name"))
+        .def("set_group_segments", &GuideHierarchy::setGroupSegments, py::arg("id"), py::arg("segments"),
+             "Segments the group's new guides get (0 to 256; 0: the tool's own).")
         // Guides.
         .def("add_guide",
              [](GuideHierarchy& h, GroupId group, py::handle points, const TubeProfile& tube, GuideId id) {
@@ -511,6 +515,13 @@ void bindHierarchy(py::module_& m) {
         .def("unlock", &GuideHierarchy::unlock, py::arg("id"))
         .def("set_points", [](GuideHierarchy& h, GuideId id, py::handle points) { h.setPoints(id, toPoints(points)); }, py::arg("id"), py::arg("points"),
              "Replaces a guide's world shape (a brush edit).")
+        .def("resample", &GuideHierarchy::resample, py::arg("ids"), py::arg("segments"), py::arg("group_wide") = false,
+             "Rebuilds guides with `segments` segments along their smooth curve, keeping their shape; "
+             "frozen guides are left as they are. Picked guides get segments of their own (unless their "
+             "group's count); group_wide leaves guides with their own as they are. Returns how many were rebuilt.")
+        .def("reset_group_segments", &GuideHierarchy::resetGroupSegments, py::arg("id"),
+             "Every guide of the group (frozen ones kept) back to the group's segments, those with their own "
+             "too. Returns the segments.")
         .def("set_tube", &GuideHierarchy::setTube, py::arg("id"), py::arg("tube"))
         .def(
             "tube_shapes",

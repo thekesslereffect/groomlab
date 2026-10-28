@@ -2612,17 +2612,19 @@ class GuidesTabTest(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
 
     def test_the_segments_slider_previews_live_and_applies_one_step(self):
-        # Nothing selected: the slider shows every guide's segments and resamples them all; dragging
-        # previews (the stored guides untouched, no undo step), releasing applies as one step.
+        # Nothing selected, the primary group picked: the slider shows its guides' segments and
+        # resamples them all; dragging previews (the stored guides untouched, no undo step),
+        # releasing applies as one step, the group's new guides taking the count too.
         curve = cmds.curve(degree=1, point=[(0.3, 0.95, 0), (0.3, 1.6, 0.3), (0.6, 1.9, 0.6)])
         groomlab.guides_from_curves(self.groom, [curve])
         cmds.select(self.groom)  # the palette follows Maya's selection: keep it on the groom
         groomlab.clear_guide_selection(self.groom)
         groomlab.resample_guides(self.groom, 12)
+        self.tools.pick_group("primary")
         self.events()
         tab = self.tab
         self.assertEqual(tab.segments.value(), 12)
-        self.assertIn("all 2", tab.segments_label.text())
+        self.assertIn("primary: 2", tab.segments_label.text())
         stored = cmds.getAttr(self.groom + ".guideData")
         settle_undo()
         undo_before = cmds.undoInfo(query=True, undoName=True)
@@ -2637,8 +2639,15 @@ class GuidesTabTest(unittest.TestCase):
         self.assertFalse(tab._previewing)
         self.assertEqual(groomlab.guide_segments(self.groom), [40, 40])
         self.assertEqual(tab.segments.value(), 40)
+        primary = lambda: next(g for g in groomlab.list_guide_groups(self.groom) if g["name"] == "primary")
+        self.assertEqual(primary()["segments"], 40)
         cmds.undo()  # the whole drag: one step
         self.assertEqual(groomlab.guide_segments(self.groom), [12, 12])
+        self.assertEqual(primary()["segments"], 12)  # (the resample to 12 above was every guide's)
+        # All groups picked: every guide.
+        self.tools.level.setCurrentIndex(0)
+        self.events()
+        self.assertIn("all 2", tab.segments_label.text())
         # A selected guide: its own count, and only it is resampled.
         first = groomlab.guide_ids(self.groom, "primary")[0]
         groomlab.select_guides(self.groom, guides=[first])

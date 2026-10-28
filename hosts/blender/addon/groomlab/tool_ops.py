@@ -730,6 +730,7 @@ class GROOMLAB_OT_group_new(GroomToolOperator):
 
 GROUP_ACTIONS = [("RENAME", defs.label("group.rename"), defs.tip("group.rename")),
                  ("SELECT", defs.label("group.select"), defs.tip("group.select")),
+                 ("RESET_SEGMENTS", defs.label("group.resetSegments"), defs.tip("group.resetSegments")),
                  ("DELETE", defs.label("group.delete"), defs.tip("group.delete")),
                  ("DEFAULT_COLOR", defs.label("group.defaultColor"), defs.tip("group.defaultColor")),
                  ("HIDE", "Show / Hide", "Show or hide the group in the viewport"),
@@ -785,6 +786,10 @@ class GROOMLAB_OT_group_edit(GroomToolOperator):
                 tools.guides_edit(scalp, "remove_group", group=group)
             elif self.action == "DEFAULT_COLOR":
                 tools.set_group_color(scalp, group, None)
+            elif self.action == "RESET_SEGMENTS":
+                segments = tools.reset_group_segments(scalp, group)
+                tools.refresh_segments(scalp, context.scene)
+                tools.status(context.scene, "Every guide of %s at %d segments (frozen ones kept)." % (group, segments))
             elif self.action == "HIDE":
                 hidden = set(g.name for g in context.scene.groomlab_tools.groups if g.hidden)
                 hidden ^= {group}

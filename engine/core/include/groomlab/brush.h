@@ -287,7 +287,7 @@ struct PlaceSettings {
     // the parent group, following it from then on: children placed by hand.
     std::string group = "primary";
     float length = 0.5f;            // standing guides, and when there are no neighbors
-    int segments = 12;
+    int segments = 12;  // a group with segments of its own (GuideGroup::segments) gives its guides those
     // The new guides' tube (widths at the size shown): its shape always (a host's chosen shape:
     // Groom Tools' Tubes panel), its width, aspect and twist where no guides are near to blend them
     // from (matchNeighbors). `tubeShape`, when set, names the shape instead: a built-in's name or one

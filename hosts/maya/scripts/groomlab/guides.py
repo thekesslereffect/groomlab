@@ -69,14 +69,14 @@ def generate_children(groom, parent_group=None, name=None, count=5, root_spread=
 
 
 def list_guide_groups(groom):
-    """Return the groom's guide groups as dicts: name, parent, depth, count, and color: the color it
+    """Return the groom's guide groups as dicts: name, parent, depth, count, color: the color it
     draws in without one of the groom's own (guide_group_colors): its own (a ToGuides node's),
-    else its automatic one, "#rrggbb"."""
+    else its automatic one, "#rrggbb"; and segments: what its new guides get (0: the tool's own)."""
     groups = []
     for row in cmds.groomLabGuides(groom, listGroups=True) or []:
-        name, parent, depth, count, color = row.split("|")
+        name, parent, depth, count, color, segments = row.split("|")
         groups.append({"name": name, "parent": parent or None, "depth": int(depth), "count": int(count),
-                       "color": color})
+                       "color": color, "segments": int(segments)})
     return groups
 
 
@@ -325,9 +325,24 @@ def color_guides_by_map(groom, name=None):
 
 def resample_guides(groom, segments, guides=None, group=None, level=None):
     """Give guides (default: the selected ones, else every guide) `segments` segments evenly spaced
-    along the smooth curve through their points, keeping their shape. One undo step; returns the
-    number of guides resampled."""
+    along the smooth curve through their points, keeping their shape; frozen guides keep theirs. A
+    whole `group`, a `level`, or every guide (none given or selected): their groups' new guides get
+    `segments` too (set_group_segments). One undo step; returns the number of guides resampled."""
     return cmds.groomLabGuides(groom, resample=segments, **_targets(guides, group, level))
+
+
+def reset_group_segments(groom, group):
+    """Every guide of a group back to the group's segments, those given their own (resampled on
+    their own) too; frozen guides keep theirs. A group without segments of its own takes its guides'
+    most common count first. One undo step; returns the segments."""
+    return cmds.groomLabGuides(groom, resetGroupSegments=True, group=group)
+
+
+def set_group_segments(groom, group, segments):
+    """The segments a guide group's new guides get (drawn, placed, from curves, baked, generated
+    children); 0 leaves it to the tool. Its guides now are left as they are (resample_guides
+    rebuilds them). One undo step."""
+    cmds.groomLabGuides(groom, setGroupSegments=int(segments), group=group)
 
 
 def guide_segments(groom, guides=None, group=None, level=None):

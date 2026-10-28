@@ -57,8 +57,9 @@ from groomlab.guides import (  # noqa: F401
     demote_group, end_guide_preview, generate_children, get_hierarchy, group_users,
     guide_group_colors, guide_ids, guide_segments, guides_from_curves, hidden_guide_groups, import_guides_from_alembic,
     isolate_group, list_guide_groups, lock_guides, mirror_group, mirror_guide_selection, preview_resample_guides,
-    promote_group, remove_guide_group, rename_guide_group, reparent_guides, resample_guides, select_guides, select_tool,
-    selected_guides, set_guide_attribute, set_guide_group_color, set_sculpt_display, set_soft_selection,
+    promote_group, remove_guide_group, rename_guide_group, reparent_guides, resample_guides, reset_group_segments,
+    select_guides, select_tool,
+    selected_guides, set_group_segments, set_guide_attribute, set_guide_group_color, set_sculpt_display, set_soft_selection,
     show_guide_group, symmetry_sync, unlock_guides, set_tube, get_tube, TUBE_SHAPES, _group_list,
     scale_tube, smooth_tube, fill_tubes, set_fill_tubes, tube_shapes, add_tube_shape, set_tube_shape_points,
     rename_tube_shape, remove_tube_shape, preview_tube_shape, tube_targets)

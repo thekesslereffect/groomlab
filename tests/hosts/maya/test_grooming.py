@@ -1430,6 +1430,34 @@ class GroomingTest(unittest.TestCase):
         other = self.primaries[1]
         groomlab.resample_guides(self.groom, 20, guides=[other])
         self.assertEqual(len(guide_points(self.groom)[other]), 21)
+
+        # A frozen guide keeps its points; a whole group resampled keeps the count for its new
+        # guides (from curves here), until set_group_segments clears it.
+        groomlab.set_guide_attribute(self.groom, "freeze", 1.0, guides=[other])
+        groomlab.resample_guides(self.groom, 6, group="primary")
+        self.assertEqual(len(guide_points(self.groom)[other]), 21)
+        # A guide given its own segments (picked) keeps them when its group's change.
+        groomlab.set_guide_attribute(self.groom, "freeze", 0.0, guides=[other])
+        groomlab.resample_guides(self.groom, 6, group="primary")
+        self.assertEqual(len(guide_points(self.groom)[other]), 21)
+        groomlab.resample_guides(self.groom, 6, guides=[other])  # its group's count: it follows the group again
+        groomlab.resample_guides(self.groom, 5, group="primary")
+        self.assertEqual(len(guide_points(self.groom)[other]), 6)
+        # Reset Segments: every guide of the group at its count, its own given up.
+        groomlab.resample_guides(self.groom, 11, guides=[other])
+        self.assertEqual(groomlab.reset_group_segments(self.groom, "primary"), 5)
+        self.assertEqual(set(groomlab.guide_segments(self.groom, group="primary")), {5})
+        groomlab.resample_guides(self.groom, 6, group="primary")
+        group = lambda: next(g for g in groomlab.list_guide_groups(self.groom) if g["name"] == "primary")
+        self.assertEqual(group()["segments"], 6)
+        curve = cmds.curve(degree=1, point=[(0.3, 0.95, 0), (0.3, 1.6, 0.3), (0.6, 1.9, 0.6)])
+        made = groomlab.guides_from_curves(self.groom, [curve])
+        self.assertEqual(len(guide_points(self.groom)[made[0]]), 7)
+        cmds.undo()
+        groomlab.set_group_segments(self.groom, "primary", 0)
+        self.assertEqual(group()["segments"], 0)
+        cmds.undo()
+        self.assertEqual(group()["segments"], 6)
         self.assertEqual(groomlab.errors(self.groom), [])
 
     def test_scripted_strokes_reach_the_other_scalps(self):

@@ -38,6 +38,9 @@ struct GuideGroup {
     // node's): display only, not saved; a host's per-group color (guideGroupColors) wins.
     bool hasColor = false;
     std::array<float, 3> color{0, 0, 0};
+    // The segments the group's new guides get (drawn, placed, from curves, baked, generated
+    // children), and what Resample on the whole group sets: 0, the tool's own. Saved.
+    int segments = 0;
 };
 
 struct HierarchyGuide {
@@ -45,6 +48,9 @@ struct HierarchyGuide {
     GroupId group = kNoGroup;
     GuideId parent = kNoGuide;  // kNoGuide for primary guides
     bool locked = false;        // locked children keep their own world shape (GH-6)
+    // Resampled on its own (picked guides, not its whole group): its segments are its own, kept
+    // when its group's are set (resample with groupWide skips it). Saved.
+    bool ownSegments = false;
     StrandRoot root;
     TubeProfile tube;  // tube.h: its shape and sections, the volume its children (and fillTubes' strands) fill
     // Reference direction for this guide's first frame normal (projected
@@ -84,6 +90,10 @@ struct HierarchyGuide {
     // so children follow the tube as it flattens, twists and tapers; z is along
     // the parent's tangent, in scene units.
     std::vector<Vec3f> offsets;
+    // A following child's own point count (it was resampled, drawn or its group has segments of
+    // its own): its shape, rebuilt from its parent's, respaced to that many points. 0: its
+    // parent's count.
+    std::uint32_t pointCount = 0;
 
     bool isChild() const { return parent != kNoGuide; }
     bool followsParent() const { return isChild() && !locked; }
@@ -130,6 +140,12 @@ public:
     // below them that does. What level -1 takes (flatten): a group without children is its own
     // family's deepest, and a group whose child groups are empty keeps its guides.
     std::set<GroupId> deepestGroups() const;
+
+    // A group's segments for new guides (GuideGroup::segments, 0 to 256; 0: none of its own).
+    void setGroupSegments(GroupId id, int segments);
+    // `points` (a new guide's for group `id`) along the smooth curve through them at the group's
+    // segments; as they are when it has none.
+    std::vector<Vec3f> withGroupSegments(GroupId id, std::vector<Vec3f> points) const;
 
     // Removes a group, its descendant groups and all their guides.
     void removeGroup(GroupId id);
@@ -246,6 +262,20 @@ public:
     // Removes guides and their descendants.
     void removeGuides(const std::vector<GuideId>& guides);
 
+    // Rebuilds guides with `segments` segments (1 to 256) evenly along the smooth curve through
+    // their points, as the viewport draws it, keeping their shape (the Segments slider). Frozen
+    // guides (the freeze layer, their own or inherited) and guides of fewer than 2 points are
+    // left as they are. Picked guides (not `groupWide`) get segments of their own
+    // (HierarchyGuide::ownSegments), unless it is their group's count (they follow the group
+    // again); `groupWide` (a whole group, a level, every guide) leaves guides with their own as
+    // they are. Returns how many were rebuilt.
+    std::size_t resample(const std::vector<GuideId>& ids, int segments, bool groupWide = false);
+    // Every guide of a group back to the group's segments, those with their own too (they follow
+    // the group again); frozen guides are left as they are. A group without segments of its own
+    // takes its guides' most common count first. Returns the segments (0: the group has no
+    // guides).
+    int resetGroupSegments(GroupId id);
+
     // Detaches a child: it keeps its current world shape from now on.
     void lock(GuideId id);
     // Re-attaches a child: its current world shape becomes offsets.
@@ -336,6 +366,9 @@ private:
     std::vector<std::size_t> depthOrder(const std::vector<std::size_t>& indices) const;
     std::vector<std::size_t> subtrees(const std::vector<GuideId>& roots, bool includeRoots) const;
     std::vector<Vec3f> offsetsFromWorld(const HierarchyGuide& child, const HierarchyGuide& parent) const;
+    // A following child bound to `parent` as it is now: its offsets, and its own point count when
+    // it differs from the parent's.
+    void bindOffsets(HierarchyGuide& child, const HierarchyGuide& parent) const;
     // A tube's library shape made this hierarchy's entry of that name (added when it has none).
     void adoptTubeShape(TubeProfile& tube);
     void rebuildIndex();

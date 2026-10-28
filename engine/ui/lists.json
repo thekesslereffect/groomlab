@@ -10,7 +10,7 @@
         {"id": "group.select", "glyph": "select"},
         {"id": "group.delete", "glyph": "delete"}
       ],
-      "context": ["group.new", "group.rename", "group.color", "group.defaultColor", "group.select", "-", "group.delete"],
+      "context": ["group.new", "group.rename", "group.color", "group.defaultColor", "group.select", "group.resetSegments", "-", "group.delete"],
       "edits": {
         "label": "Edit Guides",
         "tip": "Children, resampling, symmetry, mirroring, reparenting, curves, selection",

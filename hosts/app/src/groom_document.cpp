@@ -997,7 +997,9 @@ std::string GroomDocument::bakeNodeToGuides(const std::string& node, const std::
         GroupId gid = h.findGroup(group);
         if (gid == kNoGroup) gid = h.addGroup(group);
         else if (h.groupDepth(gid) != 0) throw std::invalid_argument("'" + group + "' is a child group: bake into a root group");
-        added = h.addGuides(gid, baked).size();
+        const std::vector<GuideId> ids = h.addGuides(gid, baked);
+        for (const GuideId id : ids) h.setPoints(id, h.withGroupSegments(gid, h.guide(id)->points));  // the group's segments, if it has its own
+        added = ids.size();
     });
     if (error.empty() && count) *count = added;
     return error;

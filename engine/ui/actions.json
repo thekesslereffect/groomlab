@@ -161,6 +161,7 @@
     "group.color": {"label": "Color...", "tip": "The group's color in the viewport", "needs": ["group"]},
     "group.defaultColor": {"label": "Default Color", "tip": "The group's color back to its automatic one", "needs": ["group", "group.color"]},
     "group.select": {"label": "Select Guides", "tip": "Select the group's guides", "needs": ["group"]},
+    "group.resetSegments": {"label": "Reset Segments", "tip": "Every guide of the group back to the group's segments, those given their own too (frozen guides kept)", "needs": ["group"]},
     "group.delete": {"label": "Delete", "tip": "Delete the group, its child groups and their guides", "needs": ["group"]},
     "group.promoteDemote": {"label": "Promote / Demote...", "tip": "Move a group one level up, or down under a sibling group"},
     "guides.children": {"label": "Children", "tip": "Generate children for the selected guides (or the picked group): the count beside Edit Guides"},

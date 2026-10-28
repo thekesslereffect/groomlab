@@ -81,6 +81,12 @@ def _group_changed(self, context):
         self.group_index = next((i for i, g in enumerate(self.groups) if g.name == self.group), -1)
     from . import display, tools
     tools.push_safely(context)
+    scalp = tools.active(context)
+    if scalp is not None and tools.is_hierarchy(scalp):
+        try:
+            tools.refresh_segments(scalp, context.scene)  # Segments works on the picked group
+        except tools.HelperError:
+            pass
     display.mark_all()
     display.redraw()
 
@@ -441,9 +447,11 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                           "outside a tube lean toward riding it, so no seam shows round it (0: a hard edge)")
     # Edit Guides' Segments: the targets' segment count, resampled live, committed as one undo step
     resample_segments: IntProperty(name="Segments", default=12, min=1, max=256, soft_min=2, soft_max=64, update=_segments,
-                                   description="Points along the guides, kept on their smooth curve: the selected guides, "
-                                               "or every guide with none selected. More segments let a guide curl tighter")
-    segments_scope: StringProperty()  # "3 selected" / "all 40" (", mixed")
+                                   description="Points along the guides, kept on their smooth curve: the selected guides "
+                                               "(their own count from then on, kept when the group's changes; the group's "
+                                               "count makes them follow it again), else the picked group's (its new guides "
+                                               "get as many too). Frozen guides keep theirs. More segments let a guide curl tighter")
+    segments_scope: StringProperty()  # "3 selected" / "bangs: 12" / "all 40" (", mixed")
     # Selection
     soft_radius: FloatProperty(name="Soft radius", default=0.0, min=0.0, soft_max=0.1, subtype="DISTANCE", unit="LENGTH",
                                update=_soft_radius,

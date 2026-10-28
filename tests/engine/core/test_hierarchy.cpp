@@ -191,6 +191,107 @@ TEST(Hierarchy, ChildrenFillTheParentTube) {
     }
 }
 
+TEST(Hierarchy, ResampleKeepsFrozenGuidesAndTheirChildren) {
+    TwoGuides s;
+    const std::vector<GuideId> ids = s.h.guidesInGroup(s.primary);
+    const GroupId kids = s.h.generateChildren(s.primary, "children", {});
+    s.h.evaluate(s.scalp.get());
+    s.h.setAttribute(ids[0], "freeze", 1.0f);  // its children inherit it
+    const std::size_t before = s.h.guide(ids[0])->points.size();
+    std::vector<GuideId> all = ids;
+    for (const GuideId id : s.h.guidesInGroup(kids)) all.push_back(id);
+    const std::size_t rebuilt = s.h.resample(all, 4);
+    EXPECT_EQ(rebuilt, 1u + s.h.childrenOf(ids[1]).size());
+    EXPECT_EQ(s.h.guide(ids[0])->points.size(), before);
+    EXPECT_EQ(s.h.guide(ids[1])->points.size(), 5u);
+    for (const GuideId id : s.h.childrenOf(ids[0])) EXPECT_EQ(s.h.guide(id)->points.size(), before);
+    for (const GuideId id : s.h.childrenOf(ids[1])) EXPECT_EQ(s.h.guide(id)->points.size(), 5u);
+    // At their parent's count, children follow its count; at their own, they keep it as they
+    // follow (saved too); back at the parent's, they follow its count again.
+    const std::vector<GuideId> own = s.h.childrenOf(ids[1]);
+    s.h.resample({ids[1]}, 9);
+    s.h.evaluate(s.scalp.get());
+    for (const GuideId id : own) EXPECT_EQ(s.h.guide(id)->points.size(), 10u);
+    s.h.resample(own, 4);
+    s.h.evaluate(s.scalp.get());
+    for (const GuideId id : own) EXPECT_EQ(s.h.guide(id)->points.size(), 5u);
+    GuideHierarchy back = GuideHierarchy::fromJson(s.h.toJson());
+    back.evaluate(s.scalp.get());
+    for (const GuideId id : own) EXPECT_EQ(back.guide(id)->points.size(), 5u);
+    s.h.resample({own[0]}, 9);
+    s.h.resample({ids[1]}, 6);
+    s.h.evaluate(s.scalp.get());
+    EXPECT_EQ(s.h.guide(own[0])->points.size(), 7u);
+    EXPECT_EQ(s.h.guide(own[1])->points.size(), 5u);
+    EXPECT_THROW(s.h.resample(ids, 0), std::invalid_argument);
+}
+
+TEST(Hierarchy, PickedGuidesKeepTheirOwnSegmentsWhenTheGroupChanges) {
+    TwoGuides s;
+    const std::vector<GuideId> ids = s.h.guidesInGroup(s.primary);
+    s.h.resample({ids[0]}, 20);  // picked: its own
+    EXPECT_TRUE(s.h.guide(ids[0])->ownSegments);
+    s.h.setGroupSegments(s.primary, 6);
+    EXPECT_EQ(s.h.resample(ids, 6, true), 1u);  // the group's: the other only
+    EXPECT_EQ(s.h.guide(ids[0])->points.size(), 21u);
+    EXPECT_EQ(s.h.guide(ids[1])->points.size(), 7u);
+    EXPECT_FALSE(s.h.guide(ids[1])->ownSegments);
+    const GuideHierarchy back = GuideHierarchy::fromJson(s.h.toJson());  // saved
+    EXPECT_TRUE(back.guide(ids[0])->ownSegments);
+    EXPECT_FALSE(back.guide(ids[1])->ownSegments);
+    // Picked to its group's count: it follows the group again.
+    s.h.resample({ids[0]}, 6);
+    EXPECT_FALSE(s.h.guide(ids[0])->ownSegments);
+    s.h.setGroupSegments(s.primary, 9);
+    EXPECT_EQ(s.h.resample(ids, 9, true), 2u);
+    EXPECT_EQ(s.h.guide(ids[0])->points.size(), 10u);
+}
+
+TEST(Hierarchy, ResetGroupSegmentsClearsGuidesOwnCounts) {
+    TwoGuides s;
+    const std::vector<GuideId> ids = s.h.guidesInGroup(s.primary);
+    // No segments of its own: its guides' most common count (of those following the group).
+    s.h.resample({ids[0]}, 20);
+    EXPECT_EQ(s.h.resetGroupSegments(s.primary), 12);
+    EXPECT_EQ(s.h.group(s.primary)->segments, 12);
+    EXPECT_FALSE(s.h.guide(ids[0])->ownSegments);
+    EXPECT_EQ(s.h.guide(ids[0])->points.size(), 13u);
+    // Its own: every guide to it, frozen ones kept.
+    s.h.setGroupSegments(s.primary, 5);
+    s.h.resample({ids[0]}, 20);
+    s.h.resample({ids[1]}, 30);
+    s.h.setAttribute(ids[1], "freeze", 1.0f);
+    EXPECT_EQ(s.h.resetGroupSegments(s.primary), 5);
+    EXPECT_EQ(s.h.guide(ids[0])->points.size(), 6u);
+    EXPECT_EQ(s.h.guide(ids[1])->points.size(), 31u);
+    EXPECT_TRUE(s.h.guide(ids[1])->ownSegments);
+    GuideHierarchy empty;
+    EXPECT_EQ(empty.resetGroupSegments(empty.addGroup("none")), 0);
+}
+
+TEST(Hierarchy, GroupSegmentsAreSavedAndShapeNewChildren) {
+    TwoGuides s;
+    const GroupId kids = s.h.addGroup("children", s.primary);
+    s.h.setGroupSegments(kids, 4);
+    EXPECT_THROW(s.h.setGroupSegments(kids, 300), std::invalid_argument);
+    s.h.generateChildren(s.primary, "children", {});
+    s.h.evaluate(s.scalp.get());
+    ASSERT_FALSE(s.h.guidesInGroup(kids).empty());
+    for (const GuideId id : s.h.guidesInGroup(kids)) EXPECT_EQ(s.h.guide(id)->points.size(), 5u);
+    // The parents keep theirs (their group has no segments of its own); a new guide's points fit
+    // the group's.
+    EXPECT_GT(s.h.guide(s.h.guidesInGroup(s.primary)[0])->points.size(), 5u);
+    EXPECT_EQ(s.h.withGroupSegments(kids, bentGuide({0.5f, 0, 0.5f})).size(), 5u);
+    EXPECT_EQ(s.h.withGroupSegments(s.primary, bentGuide({0.5f, 0, 0.5f})).size(), bentGuide({0.5f, 0, 0.5f}).size());
+    // Saved, and changing it changes the hierarchy's hash.
+    const std::uint64_t hash = s.h.contentHash();
+    const GuideHierarchy back = GuideHierarchy::fromJson(s.h.toJson());
+    EXPECT_EQ(back.group(back.findGroup("children"))->segments, 4);
+    EXPECT_EQ(back.group(back.findGroup("primary"))->segments, 0);
+    s.h.setGroupSegments(kids, 6);
+    EXPECT_NE(s.h.contentHash(), hash);
+}
+
 TEST(Hierarchy, ChildIdsAreStable) {
     TwoGuides a, b;
     const GroupId ka = a.h.generateChildren(a.primary, "children", {});

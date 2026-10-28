@@ -91,6 +91,7 @@ BINDINGS = {
     "group.color": ("groomlab.group_color", {}),
     "group.defaultColor": ("groomlab.group_edit", {"action": "DEFAULT_COLOR"}),
     "group.select": ("groomlab.group_edit", {"action": "SELECT"}),
+    "group.resetSegments": ("groomlab.group_edit", {"action": "RESET_SEGMENTS"}),
     "group.delete": ("groomlab.group_edit", {"action": "DELETE"}),
     "group.promoteDemote": ("groomlab.group_promote_demote", {}),
     "guides.children": ("groomlab.guides_edit", {"action": "CHILDREN"}),

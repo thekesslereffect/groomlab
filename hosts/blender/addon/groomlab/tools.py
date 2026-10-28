@@ -664,6 +664,17 @@ def _preview_shown(scalp):
     groom._redraw()
 
 
+def reset_group_segments(scalp, group):
+    """Maya's reset_group_segments: every guide of the group back to its segments, those with their
+    own too (frozen ones kept). Returns the segments."""
+    return int(guides_edit(scalp, "reset_group_segments", group=group).get("segments") or 0)
+
+
+def set_group_segments(scalp, group, segments):
+    """Maya's set_group_segments: the segments a group's new guides get (0: the tool's own)."""
+    return guides_edit(scalp, "set_group_segments", group=group, segments=int(segments))
+
+
 def preview_resample(scalp, segments, guides=None, group=None, level=None):
     """The Segments slider while dragged: the guides shown resampled, no change, no undo step;
     resample_guides commits, end_preview drops it."""
@@ -1031,17 +1042,27 @@ def refresh_parts(scalp, scene=None):
         t.part_index = names.index(picked) if picked in names else (0 if names else -1)
 
 
+def segments_group(t):
+    """The group Edit Guides' Segments works on: the picked one, with no guides selected (None: the
+    selected guides, else every guide)."""
+    if t.selected_count or not 0 <= t.group_index < len(t.groups):
+        return None
+    return t.groups[t.group_index].name
+
+
 def refresh_segments(scalp, scene=None):
     """Edit Guides' Segments: the targets' count (the most common; the label says when they differ)."""
     scene = scene or groom.scene_of(scalp)
     t = scene.groomlab_tools
     if _deferred.get("segments") is not None:
         return  # a drag's commit pending: the slider stays as dragged
-    counts = [int(c) for c in guide_segments(scalp).get("segments") or []]
+    group = segments_group(t)
+    counts = [int(c) for c in guide_segments(scalp, group=group).get("segments") or []]
     with props.quiet():
         if counts:
             t.resample_segments = max(set(counts), key=counts.count)
-            scope = "%d selected" % len(counts) if t.selected_count else "all %d" % len(counts)
+            scope = ("%d selected" % len(counts) if t.selected_count else
+                     "%s: %d" % (group, len(counts)) if group else "all %d" % len(counts))
             t.segments_scope = scope + (", mixed" if min(counts) != max(counts) else "")
         else:
             t.segments_scope = ""
@@ -1085,17 +1106,20 @@ def segments_changed(context, segments):
     if scalp is None or not is_hierarchy(scalp):
         return
     scene = context.scene
+    group = segments_group(scene.groomlab_tools)
 
     def commit():
-        counts = [int(c) for c in guide_segments(scalp).get("segments") or []]
-        if counts and any(c != segments for c in counts):
-            r = resample_guides(scalp, segments)
-            status(scene, "Resampled %d guides to %d segments." % (int(r.get("resampled") or len(counts)), segments))
+        # Selected guides already at the count: nothing to do. A group (or every guide) commits
+        # anyway: its new guides take the count on.
+        counts = [int(c) for c in guide_segments(scalp, group=group).get("segments") or []]
+        if counts and (not scene.groomlab_tools.selected_count or any(c != segments for c in counts)):
+            r = resample_guides(scalp, segments, group=group)
+            status(scene, "Resampled %d guides to %d segments." % (int(r.get("resampled") or 0), segments))
         end_preview(scalp)
         refresh_segments(scalp, scene)
     try:
         if not bpy.app.background:
-            preview_resample(scalp, segments)
+            preview_resample(scalp, segments, group=group)
         defer("segments", commit)
     except HelperError as e:
         status(scene, e.message)

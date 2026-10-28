@@ -91,6 +91,8 @@ public:
     bool demoteGroup(const std::string& name, const std::string& under);
     bool reparentSelected(GuideId parent);
     bool resampleGuides(int segments);
+    // Every guide of a group back to its segments, those with their own too (frozen ones kept).
+    bool resetGroupSegments(const std::string& name);
     // A group's own color ("#rrggbb"; "" its automatic color again).
     bool setGroupColor(const std::string& name, const std::string& color);
     // The root group above a group (itself for a root); the groups beside it (same parent).

@@ -118,8 +118,11 @@ to its level's), **Select Guides** and **Delete**.
 group to the other side), **Reparent...** (the selected children under another parent, by its
 guide ID), **Promote / Demote...** and **Clear Selection**; then Blender's own Lock, Unlock, Freeze,
 Unfreeze, Unfreeze All, Delete Selected and Select All. **Segments** resamples the selected guides
-(every guide with none selected) along their smooth curve: the viewport shows it as you drag, and
-it is applied as one undo step when you stop.
+(else the picked group's, else every guide) along their smooth curve, frozen guides kept: the
+viewport shows it as you drag, and it is applied as one undo step when you stop. A whole group
+resampled keeps the count for its new guides; selected guides resampled keep a count of their own
+when the group's changes (resample them to the group's count to follow it again, or right-click the
+group > Reset Segments for all of them).
 
 ### Tubes
 

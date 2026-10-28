@@ -1151,7 +1151,8 @@ json guidesInfo(ToolState& t) {
                               {"guides", h->guidesInGroup(g.id).size()},
                               {"hidden", t.hidden.count(g.name) > 0},
                               {"color", t.groupColors.count(g.name) ? json(t.groupColors.at(g.name)) : json(nullptr)},
-                              {"autoColor", guideColorHex(drawn)}});
+                              {"autoColor", guideColorHex(drawn)},
+                              {"segments", g.segments}});
         }
         for (const HierarchyGuide& g : h->guides()) {
             if (!g.isChild()) ++primaries;
@@ -1201,6 +1202,15 @@ std::vector<GuideId> targetGuides(ToolState& t, const GuideHierarchy& h, const j
         if (!h.guide(id)) fail("not_found", "no guide " + std::to_string(id));
     }
     return ids;
+}
+
+// Whether resample's targets are whole groups (a group, a level, or every guide with none
+// selected): guides with segments of their own keep them (else the picked guides get their own).
+bool resampleGroupWide(ToolState& t, const json& args) {
+    if (given(args, "ids")) return false;
+    if (given(args, "group") || given(args, "level")) return true;
+    pruneSelection(t);
+    return t.selection.empty();
 }
 
 // A guide group's color as given: "#rrggbb", [r, g, b] (0-1), or null / "" for none (its
@@ -1386,18 +1396,23 @@ json guidesEdit(ToolState& t, const json& args) {
         });
     } else if (op == "resample") {
         // Maya's groomLabGuides -resample: each guide `segments` segments evenly along the smooth
-        // curve through its points (as the viewport draws it), its shape kept.
+        // curve through its points (as the viewport draws it), its shape kept; frozen guides kept.
+        // A whole group, a level or every guide: their groups' new guides get these segments too.
         const int segments = settingInt(need(args, "segments"), "segments");
         if (segments < 1 || segments > 256) fail("bad_request", "segments: 1 to 256");
         std::size_t count = 0;
         t.session.groom->setPreviewHierarchy(nullptr);  // a live preview (guides_preview) ends with its commit
         editGuides(t, "resample guides", [&](GuideHierarchy& h) {
-            for (const GuideId id : targetGuides(t, h, args, true, "resample")) {
-                const HierarchyGuide* g = h.guide(id);
-                if (g->points.size() < 2) continue;
-                h.setPoints(id, resampleSmoothCurve(g->points.data(), g->points.size(), static_cast<std::size_t>(segments) + 1));
-                ++count;
+            const std::vector<GuideId> ids = targetGuides(t, h, args, true, "resample");
+            const bool groupWide = resampleGroupWide(t, args);
+            if (groupWide) {
+                const GroupId only = given(args, "group") ? h.findGroup(needString(args, "group")) : kNoGroup;
+                const int level = given(args, "level") ? settingInt(args["level"], "level") : -1;
+                for (const GuideGroup& g : h.groups()) {
+                    if (only != kNoGroup ? g.id == only : (level < 0 || h.groupDepth(g.id) == level)) h.setGroupSegments(g.id, segments);
+                }
             }
+            count = h.resample(ids, segments, groupWide);
         });
         r["resampled"] = count;
     } else if (op == "mirror_selection") {
@@ -1435,11 +1450,32 @@ json guidesEdit(ToolState& t, const json& args) {
             commitEdit(t, std::move(stroke));
         }
         r["color"] = color.empty() ? json(nullptr) : json(color);
+    } else if (op == "reset_group_segments") {
+        // Maya's reset_group_segments: every guide of the group back to its segments (frozen kept).
+        const std::string group = needString(args, "group");
+        int segments = 0;
+        editGuides(t, "reset segments", [&](GuideHierarchy& h) {
+            const GroupId gid = h.findGroup(group);
+            if (gid == kNoGroup) fail("not_found", "no group named '" + group + "'");
+            segments = h.resetGroupSegments(gid);
+            if (segments < 1) fail("state", "the group has no guides");
+        });
+        r["segments"] = segments;
+    } else if (op == "set_group_segments") {
+        // Maya's set_group_segments: the segments the group's new guides get (0: the tool's own).
+        const std::string group = needString(args, "group");
+        const int segments = settingInt(need(args, "segments"), "segments");
+        if (segments < 0 || segments > 256) fail("bad_request", "segments: 0 to 256");
+        editGuides(t, "group segments", [&](GuideHierarchy& h) {
+            const GroupId gid = h.findGroup(group);
+            if (gid == kNoGroup) fail("not_found", "no group named '" + group + "'");
+            h.setGroupSegments(gid, segments);
+        });
     } else {
         fail("bad_request",
              "op is add_group, remove_group, rename_group, generate_children, delete_guides, lock, unlock, set_attribute, "
              "freeze, unfreeze, unfreeze_all, remove_layer, mirror_all, mirror_group, promote_group, demote_group, reparent, "
-             "resample, mirror_selection or set_group_color");
+             "resample, mirror_selection, set_group_color, set_group_segments or reset_group_segments");
     }
     r["undo"] = undoJson(t);
     r["guides"] = guidesInfo(t);
@@ -1473,12 +1509,7 @@ json guidesPreview(ToolState& t, const json& args) {
     if (segments < 1 || segments > 256) fail("bad_request", "segments: 1 to 256");
     std::size_t count = 0;
     previewGuides(t, [&](GuideHierarchy& h) {
-        for (const GuideId id : targetGuides(t, h, args, true, "preview")) {
-            const HierarchyGuide* g = h.guide(id);
-            if (g->points.size() < 2) continue;
-            h.setPoints(id, resampleSmoothCurve(g->points.data(), g->points.size(), static_cast<std::size_t>(segments) + 1));
-            ++count;
-        }
+        count = h.resample(targetGuides(t, h, args, true, "preview"), segments, resampleGroupWide(t, args));
     });
     return {{"previewed", count}};
 }

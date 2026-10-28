@@ -141,6 +141,13 @@ void AppActions::addListBindings(ui::Bindings& b, MainWindow& w) {
                              m->notify(QObject::tr("Selected %1 guides of %2.").arg(m->document_->selection().size()).arg(qs(name)));
                          }),
                          {}, has("group")};
+    b["group.resetSegments"] = {run([m, group] {
+                                    const std::string name = group();
+                                    if (!m->document_ || name.empty()) return;
+                                    m->guidesPanel_->resetGroupSegments(name);
+                                    m->refreshUndoActions();
+                                }),
+                                {}, has("group")};
     b["group.delete"] = {run([m, group] {
                              const std::string name = group();
                              if (!m->document_ || name.empty()) return;
