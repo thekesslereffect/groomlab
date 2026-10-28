@@ -760,7 +760,6 @@ private:
     QCheckBox* flow_ = nullptr;
     QCheckBox* instances_ = nullptr;
     QSpinBox* guideSmoothing_ = nullptr;
-    QSpinBox* guideDisplaySegments_ = nullptr;
     QLineEdit* isolateGroup_ = nullptr;
     QComboBox* guideColorMode_ = nullptr;
     QComboBox* sculptDisplay_ = nullptr;

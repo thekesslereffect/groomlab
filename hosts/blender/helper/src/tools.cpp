@@ -2717,7 +2717,6 @@ DisplaySettings displaySettingsOf(ToolState& t, const json& v) {
                 s.guidePoints = std::clamp(settingInt(x, k), 0, 2);
             }
         } else if (key == "guideSmoothing") s.guideSmoothing = settingInt(x, k);
-        else if (key == "guideDisplaySegments") s.guideDisplaySegments = settingInt(x, k);
         else if (key == "hiddenGuideGroups") {
             if (x.is_array()) {
                 std::string names;

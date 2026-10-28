@@ -183,7 +183,6 @@
               {"id": "guideWidth", "label": "Guide Width", "maya": "guideWidth", "app": "guideWidth", "tip": "The guides' width in pixels (selected guides one more)"},
               {"id": "guidePoints", "label": "Guide Points", "maya": "guidePoints", "app": "guidePoints", "tip": "The guides' points as dots: off, roots and tips, or all"},
               {"id": "guideSmoothing", "label": "Guide Smoothing", "maya": "guideSmoothing", "app": "guideSmoothing", "tip": "Guides draw as a smooth curve through their points: this many pieces per segment (1: straight segments)"},
-              {"id": "guideDisplaySegments", "label": "Guide Display Segments", "labels": {"app": "Display Segments"}, "maya": "guideDisplaySegments", "app": "guideDisplaySegments", "tip": "Dots evenly along each guide as drawn: this many segments (0: a dot on every point the guide has)"},
               {"id": "isolateGroup", "label": "Isolate Group", "maya": "isolateGroup", "app": "isolateGroup", "tip": "One guide group at full color with its child groups, the others dimmed (empty: none; the Groom Tools' Isolate sets it)"},
               {"id": "guideColorMode", "label": "Guide Color", "maya": "guideColorMode", "app": "guideColorMode", "tip": "Each guide group's own color, or a painted guide layer from black to white"}
             ]

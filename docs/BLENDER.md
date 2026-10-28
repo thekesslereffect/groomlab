@@ -380,7 +380,7 @@ parts and flow, the session's scalp, the selection and the map shown, with Maya'
 (`settings`: `guides`, `tubes`, `tubeWires`, `flow`, `guideWidth`,
 `guideColorMode` (group, layer), `guideColorLayer`, `guideColorSeed` (the groom's name: the
 automatic colors' hue), `isolateGroup`, `guidePoints` (off,
-ends, all), `guideSmoothing` (4), `guideDisplaySegments`, `hiddenGuideGroups` (default: the
+ends, all), `guideSmoothing` (4), `hiddenGuideGroups` (default: the
 session's), `guideGroupColors`, `theme` {pointSize, selected, softSelected, frozen, parts,
 flow, flowField, tubes}). The answer, every array in the session's `display` block (valid until
 the next `display`):

@@ -98,7 +98,6 @@ void bindDisplay(py::module_& m) {
         .def_readwrite("isolate_group", &DisplaySettings::isolateGroup)
         .def_readwrite("guide_points", &DisplaySettings::guidePoints, "0 off, 1 roots and tips, 2 all.")
         .def_readwrite("guide_smoothing", &DisplaySettings::guideSmoothing)
-        .def_readwrite("guide_display_segments", &DisplaySettings::guideDisplaySegments)
         .def_readwrite("hidden_guide_groups", &DisplaySettings::hiddenGuideGroups)
         .def_readwrite("guide_group_colors", &DisplaySettings::guideGroupColors, "'name:#rrggbb ...' (sRGB).")
         .def_readwrite("flow", &DisplaySettings::flow)

@@ -329,8 +329,6 @@ void MainWindow::buildProperties() {
     p->setControl("guidePoints", guidePoints_);
     guideSmoothing_ = spin(1, 16, settings_.guideSmoothing);
     p->setControl("guideSmoothing", guideSmoothing_);
-    guideDisplaySegments_ = spin(0, 64, settings_.guideDisplaySegments);
-    p->setControl("guideDisplaySegments", guideDisplaySegments_);
     isolateGroup_ = new QLineEdit(QString::fromStdString(settings_.isolateGroup));
     isolateGroup_->setPlaceholderText(tr("None"));
     p->setControl("isolateGroup", isolateGroup_);
@@ -459,7 +457,6 @@ void MainWindow::buildProperties() {
         });
     };
     number(guideSmoothing_, &DisplaySettings::guideSmoothing);
-    number(guideDisplaySegments_, &DisplaySettings::guideDisplaySegments);
     connect(isolateGroup_, &QLineEdit::editingFinished, this, [this] {
         settings_.isolateGroup = isolateGroup_->text().trimmed().toStdString();
         redisplay();

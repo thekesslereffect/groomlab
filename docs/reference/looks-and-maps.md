@@ -436,9 +436,7 @@ own color (`guideGroupColors`, the Groom Tools' swatch) wins. **Guide Color** (`
 is `Group` (the default) or `Painted Layer`: a painted guide layer (`guideColorLayer`) from
 black to white. `guidePoints`
 draws round dots on each guide, in the guide's own color: `all` (the default), `roots and
-tips`, or `off`. With `all`, `guideDisplaySegments` (6 by default) spaces the dots evenly
-along the curve as drawn, like beads, whatever point count the guide has; 0 puts a dot on
-every point it has. Dots are `guideWidth` plus the theme's `pointSize` across, keep their size
+tips`, or `off`: one dot on each point the guide has. Dots are `guideWidth` plus the theme's `pointSize` across, keep their size
 on screen and hide behind the head; on a groom with many guides they thin to about 2,500
 (roots and tips always). To rebuild the guides themselves to a point count, use
 the **Segments** slider (Groom Tools > Tools, Guide groups & edits) or `groomlab.resample_guides` (points spaced along

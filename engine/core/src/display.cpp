@@ -1877,12 +1877,11 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     frame_.pointSize = theme.pointSize + s.guideWidth;
     const bool byLayer = s.guideColorMode == 1;
     const int smoothing = std::clamp(s.guideSmoothing, 1, 16);
-    const int dotSegments = std::clamp(s.guideDisplaySegments, 0, 64);
     const int pointMode = s.guidePoints;
     std::uint64_t key = hashCombine(hash64(in.hierarchyVersion), (s.guides ? 1u : 0u) + (s.tubes ? 2u : 0u) + (byLayer ? 4u : 0u) +
                                                                      32u * static_cast<unsigned>(pointMode));
     key = hashCombine(key, theme.version);
-    key = hashCombine(key, static_cast<std::uint64_t>(smoothing + 32 * dotSegments));
+    key = hashCombine(key, static_cast<std::uint64_t>(smoothing));
     key = hashChars(key, s.hiddenGuideGroups);
     key = hashChars(key, s.guideGroupColors);
     key = hashChars(key, s.isolateGroup);
@@ -1926,7 +1925,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     if (hierarchy && s.guides && pointMode == 2) {
         std::size_t total = 0;
         for (const HierarchyGuide& g : hierarchy->guides()) {
-            total += dotSegments > 0 ? static_cast<std::size_t>(dotSegments) + 1 : g.points.size();
+            total += g.points.size();
         }
         stride = std::max<std::size_t>(1, (total + kPointBudget - 1) / kPointBudget);
     }
@@ -1980,19 +1979,8 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                 out[3] = 1.0f;
             }
             if (pointMode == 0) continue;
-            // Dots on the points, in the curve's color (dimmed, frozen or by map with it). With
-            // display segments: evenly along the curve as drawn, whatever points the guide has.
-            std::vector<Vec3f> points;
-            if (dotSegments > 0 && pointMode == 2) {
-                std::vector<Vec3f> line(drawn);
-                for (std::size_t k = 0; k < drawn; ++k) {
-                    const float* v = guides.positions.data() + (first + k) * 3;
-                    line[k] = {v[0], v[1], v[2]};
-                }
-                points = resampleByArcLength(line.data(), drawn, static_cast<std::size_t>(dotSegments) + 1);
-            } else {
-                points = g.points;
-            }
+            // Dots on the guide's own points, in the curve's color (dimmed, frozen or by map with it).
+            const std::vector<Vec3f>& points = g.points;
             const std::size_t n = points.size();
             for (std::size_t k = 0; k < n; ++k) {
                 const bool end = k == 0 || k + 1 == n;
