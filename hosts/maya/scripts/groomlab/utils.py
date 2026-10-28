@@ -379,15 +379,14 @@ _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".
 def graph_maps(graph):
     """Painted maps a graph reads by name: Map nodes' maps, HairColor's map and Interpolate's
     regionMap (not an image file's path), guide maps (guide layers) and color set maps (a vertex map
-    or a mesh color set: color set maps, Gravity's directionColorSet), inside compounds too.
+    or a mesh color set: color set maps), inside compounds too.
     {name: how it is read}."""
     found = {}
     for node in graph.get("nodes", []):
         params = node.get("params") or {}
         if node.get("type") == "Map":
             found.setdefault(params.get("name", "mask"), "map")
-        for param, how, kind in (("map", "map", "HairColor"), ("regionMap", "map", "Interpolate"),
-                                 ("directionColorSet", "colorSet", "Gravity")):
+        for param, how, kind in (("map", "map", "HairColor"), ("regionMap", "map", "Interpolate")):
             value = params.get(param) if node.get("type") == kind else None
             if isinstance(value, str) and value and not value.lower().endswith(_IMAGE_EXTENSIONS):
                 found.setdefault(value, how)

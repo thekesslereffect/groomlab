@@ -282,7 +282,7 @@ TEST(Presets, NewNodesAndTheDefaultGraphFitTheScalp) {
     EXPECT_NEAR(nodeOfType(small, "Scatter")["params"]["length"].get<double>(), 0.1, 1e-9);
     EXPECT_NEAR(nodeOfType(small, "Noise")["params"]["amplitude"].get<double>(), 0.02, 1e-9);
     EXPECT_NEAR(nodeOfType(small, "Width")["params"]["width"].get<double>(), 0.0007, 1e-12);
-    EXPECT_DOUBLE_EQ(nodeOfType(small, "Length")["params"]["trimMax"].get<double>(), 0.2) << "its own params as they are";
+    EXPECT_DOUBLE_EQ(nodeOfType(small, "Length")["params"]["randomness"].get<double>(), 0.2) << "its own params as they are";
     EXPECT_EQ(json::parse(defaultGraphJsonFor(std::nullopt)), json::parse(defaultGraphJson()));
     EXPECT_EQ(json::parse(defaultGraphJsonFor(kDefaultsScalpSize)), json::parse(defaultGraphJson()));
 }

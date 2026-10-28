@@ -25,7 +25,7 @@
 namespace groomlab {
 namespace {
 
-constexpr int kSteps = 120;  // 0 to 1.2 by 0.01
+constexpr int kSteps = 100;  // 0 to 1 by 0.01
 double stepValue(int k) { return static_cast<double>(k) / 100.0; }
 
 struct ScatterRig {
@@ -100,14 +100,12 @@ void sweepScatter(MeshPtr scalp, double density, float previewDensity, float sla
     EXPECT_LE(worst, 1.0f) << what << " at " << worstAt;
     // Every root moved in steps of a hundredth of its way at most: far below a spacing.
     EXPECT_LT(worstMove, 0.05f * spacing) << what;
-    // The overdrive goes on along the same way: past 1 the roots move on (they did not stop at 1).
+    // Past 1 (its most): as at 1.
     const StrandsPtr over = rig.eval(1.2, previewDensity);
-    float beyond = 0.0f;
-    for (std::size_t i = 0; i < over->strandCount(); ++i) beyond += (over->strandPoints(i)[0] - random->strandPoints(i)[0]).length();
-    EXPECT_GT(beyond / static_cast<float>(over->strandCount()), 0.02f * spacing) << what;
+    for (std::size_t i = 0; i < over->strandCount(); ++i) EXPECT_EQ(over->strandPoints(i)[0], random->strandPoints(i)[0]) << what;
 }
 
-TEST(Continuity, ScatterRandomnessMovesTheSameRootsSmoothlyFromEvenToRandomAndPast) {
+TEST(Continuity, ScatterRandomnessMovesTheSameRootsSmoothlyFromEvenToRandom) {
     sweepScatter(test::makePlane(8, 1.0f), 2000.0, 1.0f, 0.0f, "plane, full");
     sweepScatter(test::makePlane(8, 1.0f), 2000.0, 0.2f, 0.0f, "plane, preview 0.2");
     sweepScatter(test::makeSphere(24, 48, 0.5f), 2000.0, 1.0f, 0.5f, "sphere, full");

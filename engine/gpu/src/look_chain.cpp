@@ -1861,7 +1861,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 *why = name + ": its params were read for other strands";
                 return false;
             }
-            const bool smooth = graph.node(id).params().getBool("smoothGuides");
+            const bool smooth = true;  // (Interpolate follows each guide's smooth curve)
             InterpolateMemo& memo = interpolate_[id];
             if (memo.made != state.binding) {
                 // The operator bound again (an evaluation: a stroke's press). Where it bound the same
@@ -2057,23 +2057,13 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                 // gathering no strand neither gives nor takes), in the order it sums them.
                 const std::size_t count = fixed->centers;
                 if (clumpParams.getDouble("copyAmount") > 0.0 && count > 1) {
-                    const std::size_t want = std::min<std::size_t>(static_cast<std::size_t>(clumpParams.getInt("copyNeighbors")), count - 1);
                     const PointIndex index(state.centerRoots);
                     const bool axes = state.axes.size() == count;
-                    auto shapeless = [&](std::size_t c) { return axes && state.axes[c] == kNoClumpCenter; };
-                    auto neighbors = std::make_shared<std::vector<std::uint32_t>>(count * 9, 0u);
+                    const std::function<bool(std::size_t)> shapeless = [&](std::size_t c) { return axes && state.axes[c] == kNoClumpCenter; };
+                    auto neighbors = std::make_shared<std::vector<std::uint32_t>>(count * kClumpCopyWords, 0u);
                     parallelFor(0, count, [&](std::size_t c) {
                         if (shapeless(c)) return;
-                        std::array<std::size_t, 9> near{};
-                        std::array<float, 9> d2{};
-                        const std::size_t found = index.kNearest(state.centerRoots[c], want + 1, near.data(), d2.data());
-                        std::uint32_t* to = neighbors->data() + c * 9;
-                        std::uint32_t taken = 0;
-                        for (std::size_t j = 0; j < found && taken < want; ++j) {
-                            if (near[j] == c || shapeless(near[j])) continue;
-                            to[1 + taken++] = static_cast<std::uint32_t>(near[j]);
-                        }
-                        to[0] = taken;
+                        clumpCopyNeighbors(index, state.centerRoots, c, shapeless, neighbors->data() + c * kClumpCopyWords);
                     }, 16);
                     fixed->neighbors = std::move(neighbors);
                 }
@@ -2110,8 +2100,38 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
             // the strands it takes, or its axis strands, resampled on the GPU; or the curves of a
             // branch of their own the run moves (a stroke's guides through another Interpolate),
             // made by that branch's run on the GPU, then resampled.
+            // inputCurves straight from guides (a Guides node a stroke reshapes): each center's curve made
+            // again on the CPU from the guides now, as ClumpOp resamples them, while every center keeps
+            // its guide (its ID) and root (no strand changes clump). copyAmount's sharing is the CPU's.
+            const GuidesPtr guidesNow =
+                fromCurves && stage.level <= 0 ? valueAs<GuidesPtr>(graph.cachedValue(centersNode, centersOutput)) : nullptr;
             if (stage.level <= 0 && !dependsOn(graph, own || fromStrands ? upstream(graph, id) : centersNode, before)) {
                 out[k].clump = memo.fixed;
+            } else if (guidesNow) {
+                ClumpState kept;
+                constexpr std::size_t K = kClumpCenterSamples;
+                bool ok = clumpParams.getDouble("copyAmount") <= 0.0 && memo.fixed && memo.fixed->curves && keptState(&kept) &&
+                          kept.curves.size() == kept.centerGuides.size() * K && kept.centerIds.size() == kept.centerGuides.size();
+                auto curves = std::make_shared<std::vector<Vec3f>>(ok ? kept.curves.size() : 0);
+                for (std::size_t c = 0; ok && c < kept.centerGuides.size(); ++c) {
+                    const std::size_t g = kept.centerGuides[c];
+                    ok = g < guidesNow->guides().size();
+                    if (!ok) break;
+                    const Guide& guide = guidesNow->guides()[g];
+                    ok = guide.id == kept.centerIds[c] && !guide.points.empty();
+                    if (!ok) break;
+                    resampleByArcLengthInto(guide.points.data(), guide.points.size(), curves->data() + c * K, K);
+                    const Vec3f& was = kept.curves[c * K];
+                    ok = ((*curves)[c * K] - was).length() <= 1e-5f * std::max(1.0f, was.length());  // (its root stays)
+                }
+                if (!ok) {
+                    *why = name + "'s centers are guides the run moves at their roots, adds or removes, or shares by "
+                                  "copyAmount (the CPU's)";
+                    return false;
+                }
+                auto made = std::make_shared<ClumpInputs>(*memo.fixed);
+                made->curves = std::move(curves);
+                out[k].clump = std::move(made);
             } else {
                 if (!memo.tried) {
                     memo.tried = true;
@@ -2848,7 +2868,7 @@ bool LookInputs::readShaper(const GraphDocument& doc, const LookChain& chain, st
                 *why = name + " keeps no partners for its result";
                 return false;
             }
-            if (!channelHolds(own.getBool("sameClump") ? std::string(kClumpIdChannel) : std::string()) ||
+            if (!channelHolds(own.getString("clumpChannel")) ||
                 !channelHolds(own.getString("regionChannel"))) {
                 *why = name + " picks its partners by clumps or regions the run writes anew (the CPU's)";
                 return false;

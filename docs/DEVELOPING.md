@@ -2689,7 +2689,7 @@ against its last result; `Graph::setIncrementalEvaluation(false)` turns it off.
 The `scalp` external is keyed by the surface only (`ScalpMesh::surfaceHash`: points, triangles,
 UVs, rest pose; not the color sets), so painting a vertex map leaves Scatter, Interpolate and the
 rest cached. Every reader of a color set (a map param with a colorSet source, HairColor's
-map, Gravity's directionColorSet, the Map node) adds that set's hash itself
+map, the Map node) adds that set's hash itself
 (`colorSetSalt` in operators/internal.h); a new color-set reader must do the same, or it goes
 stale when the set is repainted. The Scalp node hands out the current mesh even on a cache hit
 (`Operator::refreshesOnCacheHit`), so its colors are never stale. File stamps (textures, UDIM

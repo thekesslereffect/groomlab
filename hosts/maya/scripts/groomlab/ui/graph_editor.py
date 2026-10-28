@@ -3869,8 +3869,6 @@ class ParamPanel(QtWidgets.QScrollArea):
             return [c["name"] for c in self.editor.channel_sources(node)], "none"
         if channel == "writes":  # a name of its own: nothing to pick
             return [], "none (no attribute)"
-        if op_type == "Gravity" and param == "directionColorSet":
-            return self.editor.color_sets(), "none (the direction above)"
         if op_type == "Part" and param == "part":
             try:
                 return (groomlab.list_parts(groom) if groom else []), "every part"

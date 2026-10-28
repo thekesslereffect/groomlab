@@ -966,13 +966,13 @@ struct Locks {
 };
 
 TEST(Clump, DefaultsDoNotFlatten) {
-    Locks plain({}), spelled({{"flatness", 0.0}, {"flatten", std::string("surface")}, {"flattenDirection", Vec3f{1, 0, 0}}});
+    Locks plain({}), spelled({{"flatness", 0.0}, {"flatAlong", std::string("surface")}, {"flatDirection", Vec3f{1, 0, 0}}});
     EXPECT_EQ(plain.sg.eval(plain.clump)->positions(), spelled.sg.eval(spelled.clump)->positions());
 }
 
 TEST(Clump, FlatnessSquashesClumpsIntoRibbons) {
     // Upright locks flattened with their width along x: no thickness left along z, the width kept.
-    Locks round({}), ribbon({{"flatness", 1.0}, {"flatten", std::string("direction")}, {"flattenDirection", Vec3f{1, 0, 0}}});
+    Locks round({}), ribbon({{"flatness", 1.0}, {"flatAlong", std::string("direction")}, {"flatDirection", Vec3f{1, 0, 0}}});
     const StrandsPtr a = round.sg.eval(round.clump), b = ribbon.sg.eval(ribbon.clump);
     const std::size_t tip = a->strandPointCount(0) - 1;
     const std::vector<Vec3f> oa = round.offsets(*a, tip), ob = ribbon.offsets(*b, tip);
@@ -985,7 +985,7 @@ TEST(Clump, FlatnessSquashesClumpsIntoRibbons) {
     EXPECT_LT(thick, 1e-4f);
     EXPECT_NEAR(wide, wideBefore, 0.02f);
     // Half flat: half the thickness.
-    Locks half({{"flatness", 0.5}, {"flatten", std::string("direction")}, {"flattenDirection", Vec3f{1, 0, 0}}});
+    Locks half({{"flatness", 0.5}, {"flatAlong", std::string("direction")}, {"flatDirection", Vec3f{1, 0, 0}}});
     const std::vector<Vec3f> oh = half.offsets(*half.sg.eval(half.clump), tip);
     for (std::size_t s = 0; s < b->strandCount(); ++s) EXPECT_NEAR(oh[s].z, 0.5f * oa[s].z, 2e-3f);
 }
@@ -994,7 +994,7 @@ TEST(Clump, FlatClumpsLieAlongTheScalpOrTurnAtRandom) {
     // Strands combed along the plane (+x): flattened along the surface, the ribbons lie flat on it
     // (no thickness along its normal, +y); turned at random, clumps lie every which way.
     auto flatOn = [&](const std::string& way) {
-        Locks l({{"flatness", 1.0}, {"flatten", way}}, true);
+        Locks l({{"flatness", 1.0}, {"flatAlong", way}}, true);
         const StrandsPtr out = l.sg.eval(l.clump);
         return l.offsets(*out, out->strandPointCount(0) - 1);
     };

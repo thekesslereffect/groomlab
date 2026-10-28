@@ -375,7 +375,7 @@ static void testUpgrade(void) {
     CHECK_OK(gl_session_get_graph_json(session, &before));
     CHECK_OK(gl_session_upgrade_node(session, "clump", &upgraded));
     CHECK(upgraded == 0);
-    CHECK_OK(gl_session_upgrade_node(session, "noise", NULL));
+    CHECK_OK(gl_session_upgrade_node(session, "scatter", NULL));
     CHECK_OK(gl_session_get_graph_json(session, &after));
     CHECK(before && after && strcmp(before, after) == 0);
     gl_free(before);

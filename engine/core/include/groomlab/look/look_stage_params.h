@@ -79,13 +79,13 @@ void clumpShape(const ParamSet& clump, const Get& get, StageParams* s) {
     const float repelRadius = static_cast<float>(get("repelRadius"));
     std::memcpy(&s->flag[0], &repelRadius, sizeof(float));  // the kernel reads its bits as a float
     s->flag[1] = clump.getString("pastTip") == "extend" ? 1 : 0;
-    const std::string flatten = clump.getString("flatten");
+    const std::string flatten = clump.getString("flatAlong");
     s->flag[2] = flatten == "random" ? 1 : flatten == "direction" ? 2 : 0;
     // The per-clump variation (by each center's ID: ClumpInputs::variation) and copy.
     s->value2[0] = static_cast<float>(get("strengthRandom"));
     s->value2[1] = static_cast<float>(get("lockRadiusRandom"));
     s->value2[2] = static_cast<float>(get("copyAmount"));
-    const Vec3f direction = clump.getVec3("flattenDirection");
+    const Vec3f direction = clump.getVec3("flatDirection");
     std::memcpy(&s->flag2[0], &direction.x, sizeof(float));
     std::memcpy(&s->flag2[1], &direction.y, sizeof(float));
     std::memcpy(&s->flag2[2], &direction.z, sizeof(float));

@@ -293,7 +293,7 @@ Add a **Clump**. By default it picks its own clump centers among the strands (`c
 - **Smooth** takes out bumps up to `scale` (a share of the strand's length): small values take out
   kinks, 1 straightens the strand. It looks the same at any point count.
 - **Length** trims strands: `keep` is the share kept from the root (mappable); `fraction` of the
-  strands are trimmed at random, each losing between `trimMin` and `trimMax` of its length. To
+  strands are trimmed at random, each losing up to `randomness` of its length. To
   lengthen, use Transform's `scale`.
 - **Width** sets thickness; its `randomness` varies it per strand.
 - **Collide**, best last, keeps strands off the scalp and any collider. It keeps a distance field,
@@ -360,7 +360,7 @@ share a UV layout).
 ### Color and realism
 
 - **Flyaway** adds stray hairs. **Tangle** mats strands together (wet hair, after a tight Clump);
-  strands stick only within their own clump (`sameClump`) and within `reach`.
+  strands stick only within their own clump (`clumpChannel`, `clumpId`; empty: across clumps) and within `reach`.
 - **Static** is dry winter hair: the hair is charged and repels itself, so it lifts off the head,
   flares out toward the tips and clumped locks fray into their strands. `strength` is how charged
   (0 leaves the hair as it was), `randomness` lets some strands fly farther than others, and

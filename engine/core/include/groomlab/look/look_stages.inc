@@ -42,7 +42,7 @@
 
 // (Interpolate's other params pick each strand's guides and weights: the CPU's binding.)
 GROOMLAB_STAGE(Interpolate, "interpolate", "", "", "falloff", "", "limitDistance")
-GROOMLAB_STAGE(Length, "length", "keep", "fraction", "", "", "affect keep fraction trimMin trimMax seed")
+GROOMLAB_STAGE(Length, "length", "keep", "fraction", "", "", "affect keep fraction randomness seed")
 GROOMLAB_STAGE(Clump, "clump", "strength", "volumize", "volumizeProfile profile", "",
                "affect strength lockRadius repelRadius volumize flatness strengthRandom lockRadiusRandom seed")
 GROOMLAB_STAGE(Noise, "noise", "amplitude", "fraction", "profile", "", "affect amplitude frequency fraction octaves seed")

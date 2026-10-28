@@ -378,11 +378,9 @@ public:
             ParamSpec{"strength", 1.0, "How far strands bend under their weight (mappable): 0 none, 1 hanging, more heavier"}
                 .soft(0, 2),
             ParamSpec{"direction", Vec3f{0.0f, -1.0f, 0.0f}, "Gravity's direction (world space; or an expression "
-                                                             "giving a vector per strand)"}
+                                                             "giving a vector per strand: a painted one, vmap(\"name\") * 2 - 1)"}
                 .world()
                 .vectorExpr(),
-            {"directionColorSet", std::string(), "Scalp color set holding a painted direction per root (RGB 0-1 = XYZ "
-                                                 "-1..1; empty: none)"},
             ParamSpec{"stiffness", 1.0, "Bend stiffness: how much strands resist bending, 0-1, times stiffnessProfile (1 "
                                         "there: not at all)", "fraction"}
                 .range(0, 1),
@@ -391,10 +389,6 @@ public:
         };
     }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
-    // The painted direction's color set (the scalp's key leaves its color sets out).
-    std::uint64_t contextSalt(const EvalContext& ctx) const override {
-        return colorSetSalt(ctx, params().getString("directionColorSet"));
-    }
 
     Value evaluate(const EvalContext& ctx, const std::vector<Value>& inputs) const override {
         Value out;
@@ -418,8 +412,6 @@ private:
         strength.validate(*in);
         const VectorField worldDirection(params(), "direction", scalp);
         worldDirection.validate(*in);
-        const std::string colorSet = params().getString("directionColorSet");
-        const bool painted = !colorSet.empty() && scalp && scalp->hasColorSet(colorSet);
 
         const StrandChanges* changes = nullptr;
         StrandsPtr last;  // the last result, to make again only the strands the input changed in
@@ -433,20 +425,14 @@ private:
                 return true;
             }
         }
-        // Each strand's way down (its field's, a painted color set's over it): unit, or zero.
+        // Each strand's way down (its field's): unit, or zero.
         auto downOf = [&](std::size_t s) {
-            Vec3f down = worldDirection.at(*in, s);
-            const StrandRoot& root = in->roots()[s];
-            if (painted && scalp->contains(root)) {
-                const ScalpMesh::Color c = scalp->colorAt(colorSet, root);
-                const Vec3f p{c[0] * 2.0f - 1.0f, c[1] * 2.0f - 1.0f, c[2] * 2.0f - 1.0f};
-                if (p.length() > 1e-3f) down = p;
-            }
+            const Vec3f down = worldDirection.at(*in, s);
             return down.length() < 1e-6f ? Vec3f{} : down.normalized();
         };
         // On the CPU engine (look.slang GravityCS): one way down, or each strand's
         // (StageInputs::directions; `which`: those strands alone, in that order).
-        const bool perStrand = !worldDirection.isConstant() || !colorSet.empty();
+        const bool perStrand = !worldDirection.isConstant();
         auto engineRun = [&](const std::vector<std::uint32_t>* which, gpu::StageInputs* inputs) {
             gpu::StageParamReader reader(params(), "");
             reader.directions = perStrand;

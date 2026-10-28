@@ -411,7 +411,7 @@ TEST(Propagate, EveryCommonNodeWorksOnBarbs) {
         {"Noise", R"({"amplitude": 0.02, "frequency": 6.0})"},
         {"Curl", R"({"radius": 0.01})"},
         {"Bend", R"({"angle": 20.0, "along": "direction", "direction": [0, 0, 1]})"},
-        {"Length", R"({"keep": 0.7, "trimMax": 0.2})"},
+        {"Length", R"({"keep": 0.7, "randomness": 0.2})"},
         {"Width", R"({"width": 0.004, "profile": [[0, 1], [1, 0.2]]})"},
         {"HairColor", R"({"melanin": 0.3, "melaninRandom": 0.2, "clumpShare": 0.8})"},
         {"Bend", R"({"angle": 15.0, "end": 0.0})"},

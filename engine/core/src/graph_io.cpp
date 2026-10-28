@@ -555,7 +555,7 @@ const std::string& defaultGraphJson() {
     {"name": "guides", "type": "Guides"},
     {"name": "scatter", "type": "Scatter"},
     {"name": "interpolate", "type": "Interpolate"},
-    {"name": "length", "type": "Length", "params": {"fraction": 1.0, "trimMin": 0.0, "trimMax": 0.2}},
+    {"name": "length", "type": "Length", "params": {"fraction": 1.0, "randomness": 0.2}},
     {"name": "noise", "type": "Noise"},
     {"name": "color", "type": "HairColor"},
     {"name": "width", "type": "Width"},

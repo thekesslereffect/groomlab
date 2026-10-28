@@ -686,43 +686,6 @@ std::vector<float> clumpNumbers(const std::vector<const ClumpCenter*>& centers) 
     return stableGroupNumbers(ids);
 }
 
-// Clump's repel (a negative strength): point p, `arc` from its strand's root (along the strand as
-// it came), pushed away from the center's point as far from the center's root (its curve of
-// kCenterSamples points, `centerLength` long; past its tip, the tip), across the center there.
-// Points within `radius` of it go out toward the radius by amount (|strength| there) times
-// radius (1 - x)^2 (1 + x), x their distance over the radius: a point on the center goes all the
-// way out at amount 1, the push easing off to nothing at the radius (the strands beyond it as they
-// came). Past the center's tip the distance grows by how far past it the point is, so hair longer
-// than the center is let go within a radius of its tip. A point on (or very near) the center goes
-// the way its root lies from the center's root, else a way of its own (`angle` about the center),
-// blended in smoothly. With a skin normal (zero: none) the push never goes into the skin and lies
-// along it at the root, lifting free of it toward the tip (t). (look.slang ClumpCS repeats this.)
-Vec3f repelled(const Vec3f& p, const Vec3f* curve, float centerLength, float arc, float amount, float radius,
-               const Vec3f& rootOffset, float angle, const Vec3f& skin, float t) {
-    const float along = centerLength > 0.0f ? std::min(arc / centerLength, 1.0f) : 0.0f;
-    const Vec3f center = pointAlong(curve, kCenterSamples, along);
-    const auto k = static_cast<std::size_t>(std::lround(along * static_cast<float>(kCenterSamples - 1)));
-    const Vec3f tangent = (curve[std::min(k + 1, kCenterSamples - 1)] - curve[k > 0 ? k - 1 : 0]).normalized();
-    const Vec3f d = p - center;
-    const Vec3f across = d - tangent * d.dot(tangent);
-    const float past = std::max(arc - centerLength, 0.0f);  // beyond the center's tip
-    const float r = std::sqrt(across.dot(across) + past * past);
-    if (!(r < radius)) return p;
-    // The way out: across, blended (within a hundredth of the radius) into the root's way, itself
-    // blended into the strand's own turn, so it never jumps (nor turns on a rounding) near the center.
-    const float near = 0.01f * radius;
-    const Vec3f side = anyPerpendicular(tangent);
-    const Vec3f spun = side * pm::cos(angle) + tangent.cross(side) * pm::sin(angle);
-    const Vec3f fromRoot = rootOffset - tangent * rootOffset.dot(tangent);
-    const Vec3f own = (fromRoot + spun * near).normalized();
-    Vec3f way = (across + own * near).normalized();
-    const float up = way.dot(skin);
-    way = way - skin * (up < 0.0f ? up : up * (1.0f - t));
-    const float x = r / radius;
-    const float push = amount * radius * ((1.0f - x) * (1.0f - x) * (1.0f + x));
-    return p + way * push;
-}
-
 // Pulls each strand toward the nearest clump center (by root), more strongly
 // toward the tip as the profile ramp says, onto the clump's axis at the same
 // arc length from the root. Chain Clumps (with different sizes, or guide levels
@@ -804,7 +767,8 @@ public:
             ParamSpec{"centerWeight", 1.0, "Chance each strand can be a center it picks, 0-1 (mappable: e.g. an Expression "
                                            "favoring long strands, or guideInfluence)", "fraction"}
                 .soft(0, 1)
-                .when("centersFrom", {"pick"}),
+                .when("centersFrom", {"pick"})
+                .adv(),
             ParamSpec{"pastTip", std::string("gather"),
                       "A strand longer than its clump's axis: gather: its points past the axis's tip gather at the tip; "
                       "extend: they go on past it, along the axis's last direction, so long hair keeps its length",
@@ -835,19 +799,21 @@ public:
                                          "center", "length"}
                 .atLeast(0)
                 .soft(0, 1),
-            ParamSpec{"repelRadius", 0.5, "With a negative strength: how far from its center a strand is pushed out to (the "
-                                          "part's half width; strands farther away stay as they are)", "length"}
+            ParamSpec{"repelRadius", 0.5, "With a negative strength: how far from its center a strand is pushed out to at "
+                                          "least (the part's half width): those within twice it move out, the nearest "
+                                          "to it, keeping their order; those farther away stay as they are", "length"}
                 .atLeast(0)
-                .soft(0, 2),
+                .soft(0, 2)
+                .adv(),
             ParamSpec{"flatness", 0.0, "Squashes each clump across into a ribbon, 0-1, as much as it clumps there (wet hair)",
                       "fraction"}
                 .range(0, 1),
-            {"flatten", std::string("surface"),
+            {"flatAlong", std::string("surface"),
              "Which way a flat clump lies: surface: flat along the scalp; random: turned at random per clump; direction: "
-             "its width along flattenDirection", "", {"surface", "random", "direction"}},
-            ParamSpec{"flattenDirection", Vec3f{1.0f, 0.0f, 0.0f}, "Flatten direction: the way a ribbon's width runs (world space)"}
+             "its width along flatDirection", "", {"surface", "random", "direction"}},
+            ParamSpec{"flatDirection", Vec3f{1.0f, 0.0f, 0.0f}, "Flatten direction: the way a ribbon's width runs (world space)"}
                 .world()
-                .when("flatten", {"direction"}),
+                .when("flatAlong", {"direction"}),
             // XGen's and Yeti's clump controls, each per clump (by its center's ID), 0: none.
             ParamSpec{"volumize", 0.0, "Pushes each clump's strands out from its axis by this share of how far they are from "
                                        "it, most near the root, filling the clump's volume (mappable)"}
@@ -865,15 +831,12 @@ public:
             ParamSpec{"lockRadiusRandom", 0.0, "Each clump's lock radius up to this share bigger or smaller, at random per "
                                                "clump", "fraction"}
                 .range(0, 1)
-                .in("Random"),
+                .in("Random")
+                .adv(),
             ParamSpec{"copyAmount", 0.0, "Each clump takes on this share of its neighbouring clumps' shape (their center "
                                          "curves, from their roots), so clumps share one flow", "fraction"}
                 .range(0, 1)
                 .in("Shape"),
-            notAnimatable({"copyNeighbors", std::int64_t{1}, "How many of the nearest clumps a clump copies (their mean)"})
-                .range(1, 8)
-                .in("Shape")
-                .adv(),
         };
     }
 
@@ -1612,38 +1575,36 @@ private:
     }
 
     // Copy (XGen's and Yeti's), on the centers' curves (kCenterSamples points each, root first)
-    // before any strand clumps toward them: each curve takes on `copyAmount` of the mean shape (its
-    // points less its root) of its `copyNeighbors` nearest centers by root. Roots stay; nothing
-    // changes at the default (0). (Clump noise: a Noise node on the centers before the Clump.)
+    // before any strand clumps toward them: each curve takes on `copyAmount` of the shape (its
+    // points less its root) of its nearest centers by root, weighed by distance (clumpCopyNeighbors).
+    // Roots stay; nothing changes at the default (0). (Clump noise: a Noise node on the centers
+    // before the Clump.)
     // With `axes` (centersFrom inputPoints), a center without an axis strand neither gives nor takes.
     void shareCenters(const std::vector<Vec3f>& roots, std::vector<Vec3f>& curves,
                       const std::vector<std::uint32_t>* axes) const {
         const std::size_t count = roots.size();
         const auto copyAmount = static_cast<float>(params().getDouble("copyAmount"));
         if (copyAmount > 0.0f && count > 1) {
-            const auto k = std::min<std::size_t>(static_cast<std::size_t>(params().getInt("copyNeighbors")), count - 1);
             const PointIndex index(roots);
             const std::vector<Vec3f> own = curves;
-            auto shapeless = [&](std::size_t c) { return axes && (*axes)[c] == kNoCenter; };
+            const std::function<bool(std::size_t)> shapeless = [&](std::size_t c) { return axes && (*axes)[c] == kNoCenter; };
             parallelFor(0, count, [&](std::size_t c) {
                 if (shapeless(c)) return;
-                std::array<std::size_t, 9> near{};
-                std::array<float, 9> d2{};
-                const std::size_t found = index.kNearest(roots[c], k + 1, near.data(), d2.data());
+                std::array<std::uint32_t, kClumpCopyWords> near{};
+                clumpCopyNeighbors(index, roots, c, shapeless, near.data());
+                if (near[0] == 0) return;
                 std::array<Vec3f, kCenterSamples> shape{};
-                std::size_t taken = 0;
-                for (std::size_t j = 0; j < found && taken < k; ++j) {
-                    if (near[j] == c || shapeless(near[j])) continue;
-                    const Vec3f* other = own.data() + near[j] * kCenterSamples;
-                    for (std::size_t i = 0; i < kCenterSamples; ++i) shape[i] += other[i] - other[0];
-                    ++taken;
+                for (std::uint32_t j = 0; j < near[0]; ++j) {
+                    const Vec3f* other = own.data() + static_cast<std::size_t>(near[1 + j]) * kCenterSamples;
+                    float w = 0.0f;
+                    std::memcpy(&w, &near[5 + j], sizeof w);
+                    for (std::size_t i = 0; i < kCenterSamples; ++i) shape[i] += (other[i] - other[0]) * w;
                 }
-                if (taken == 0) return;
                 const Vec3f* mine = own.data() + c * kCenterSamples;
                 Vec3f* curve = curves.data() + c * kCenterSamples;
                 for (std::size_t i = 1; i < kCenterSamples; ++i) {
                     const Vec3f offset = mine[i] - mine[0];
-                    curve[i] = mine[0] + offset + (shape[i] / static_cast<float>(taken) - offset) * copyAmount;
+                    curve[i] = mine[0] + offset + (shape[i] - offset) * copyAmount;
                 }
             }, 16);
         }
@@ -1732,6 +1693,8 @@ public:
 class NoiseOp : public Operator {
 public:
     std::string typeName() const override { return op::kNoise; }
+    // 2: one octave by default (nodes saved before keep 2: ParamSpec::formerDefault).
+    int version() const override { return 2; }
     std::string category() const override { return "look"; }
     std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Curves}}; }
     PortSpec output() const override { return {"out", PortType::Curves}; }  // strands or guides, as fed
@@ -1741,7 +1704,7 @@ public:
             ParamSpec{"frequency", 3.0, "Features per scene unit (world) or per strand length (strand)", "perLength"}
                 .unitsWhen("space", {"world"})
                 .soft(0, 20),
-            ParamSpec{"octaves", std::int64_t{2}, "Fractal octaves"}.range(1, 8).adv(),
+            ParamSpec{"octaves", std::int64_t{1}, "Fractal octaves"}.range(1, 8).adv().formerDefault(2, std::int64_t{2}),
             {"profile", Ramp::linear(0.0f, 1.0f), "Amplitude along the length, root to tip"},
             {"space", std::string("strand"), "strand: independent per strand; world: coherent across strands", "",
              {"strand", "world"}},
@@ -2433,12 +2396,19 @@ class BlendOp : public Operator {
 public:
     std::string typeName() const override { return op::kBlend; }
     std::string category() const override { return "utility"; }
+    // 2: keepLength on by default (nodes saved before keep blending points: ParamSpec::formerDefault).
+    int version() const override { return 2; }
     std::vector<PortSpec> inputs() const override { return {{"a", PortType::Strands}, {"b", PortType::Strands}}; }
     std::vector<ParamSpec> paramSpecs() const override {
         return {
             // 1 by default: a plugged mask multiplies it, so the mask alone is the mix (0.5 halved it)
             ParamSpec{"mix", 1.0, "0: a, 1: b (mappable, per point)", "fraction"}.soft(0, 1),
             {"profile", Ramp::constant(1.0f), "Mix along the length, root to tip"},
+            ParamSpec{"keepLength", true, "Blend each segment's way and length from the root, so a strand midway between a "
+                                          "curly look and a straight one keeps its length (off: its points blended, "
+                                          "which pulls such a strand in)"}
+                .adv()
+                .formerDefault(2, false),
             {"include", std::string("shapeAndLook"),
              "What moves toward b: the shape (points, widths) and the look (HairColor's color, melanin, redness, "
              "roughness), or the shape alone; IDs and other channels always stay a's",
@@ -2753,6 +2723,46 @@ void registerBlendOperator(OperatorRegistry& registry) {
     registry.registerType(op::kBlend,
                           {"utility", "Mixes two looks of the same strands (dry to wet).", "mix looks wet dry"},
                           [] { return std::make_unique<BlendOp>(); });
+}
+
+
+void clumpCopyNeighbors(const PointIndex& index, const std::vector<Vec3f>& roots, std::size_t c,
+                        const std::function<bool(std::size_t)>& shapeless, std::uint32_t* out) {
+    std::fill(out, out + kClumpCopyWords, 0u);
+    constexpr std::size_t kTake = 4;
+    std::array<std::size_t, 12> near{};
+    std::array<float, 12> d2{};
+    const std::size_t found = index.kNearest(roots[c], near.size(), near.data(), d2.data());
+    // The candidates in order, nearest first: the four it takes, then the next one out (the ring).
+    std::array<std::size_t, kTake> taken{};
+    std::array<float, kTake> distance{};
+    std::size_t count = 0;
+    float ring = std::numeric_limits<float>::infinity();
+    for (std::size_t j = 0; j < found; ++j) {
+        if (near[j] == c || shapeless(near[j])) continue;
+        const float d = std::max(std::sqrt(d2[j]), 1e-6f);
+        if (count < kTake) {
+            taken[count] = near[j];
+            distance[count++] = d;
+        } else {
+            ring = d;
+            break;
+        }
+    }
+    float weights[kTake] = {};
+    float sum = 0.0f;
+    for (std::size_t j = 0; j < count; ++j) {
+        const float base = std::isfinite(ring) ? std::max(ring - distance[j], 0.0f) / (ring * distance[j]) : 1.0f / distance[j];
+        weights[j] = base * base;
+        sum += weights[j];
+    }
+    if (!(sum > 0.0f)) return;
+    out[0] = static_cast<std::uint32_t>(count);
+    for (std::size_t j = 0; j < count; ++j) {
+        out[1 + j] = static_cast<std::uint32_t>(taken[j]);
+        const float w = weights[j] / sum;
+        std::memcpy(&out[5 + j], &w, sizeof w);
+    }
 }
 
 }  // namespace groomlab

@@ -972,7 +972,7 @@ TEST(GroomFile, TurnsWorldDirectionsWithItsPoints) {
             if (p.value("worldDirection", false)) flagged.insert(op["type"].get<std::string>() + "." + p["name"].get<std::string>());
         }
     }
-    EXPECT_EQ(flagged, (std::set<std::string>{"Displace.direction", "Gravity.direction", "Clump.flattenDirection",
+    EXPECT_EQ(flagged, (std::set<std::string>{"Displace.direction", "Gravity.direction", "Clump.flatDirection",
                                               "Mirror.axis", "Simulate.currentDirection", "Simulate.gravityDirection",
                                               "Simulate.windDirection", "Wind.direction", "Bend.direction", "Direction.direction", "Plume.direction",
                                               "Transform.pivot", "Curl.weightDirection"}));

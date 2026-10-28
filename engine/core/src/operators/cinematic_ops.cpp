@@ -46,13 +46,15 @@ namespace {
 class FlyawayOp : public Operator {
 public:
     std::string typeName() const override { return op::kFlyaway; }
+    // 2: fraction 0.01 by default (nodes saved before keep 0.03: ParamSpec::formerDefault).
+    int version() const override { return 2; }
     // Its strays flagged, on top of an earlier Flyaway's.
     std::vector<ChannelWrite> channelWrites() const override { return {{"flyaway", "", true}}; }
     std::string category() const override { return "look"; }
     std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Strands}}; }
     std::vector<ParamSpec> paramSpecs() const override {
         return {
-            ParamSpec{"fraction", 0.03, "Fraction of strands that stray (mappable)", "fraction"}.soft(0, 1),
+            ParamSpec{"fraction", 0.01, "Fraction of strands that stray (mappable)", "fraction"}.soft(0, 1).formerDefault(2, 0.03),
             ParamSpec{"stray", 0.75, "How far strays wander from the flow at the tip, scene units (mappable)", "length"}
                 .soft(0, 3),
             ParamSpec{"frequency", 1.5, "Arcs per strand length"}.soft(0, 5),
@@ -148,9 +150,9 @@ private:
 // the pair's middle over one shared span. At strength 1 they meet (unless the
 // partner is itself pulled toward a third strand). Several Tangles with
 // different spans build up matting; after a tight Clump it reads as wet hair.
-// After a Clump, partners come from the strand's own clump (`sameClump`, the
-// clumpId channel): strands of neighbouring clumps would bridge the gap between
-// them. With regions (the `regionChannel` an Interpolate's regionMap writes) partners come from
+// After a Clump, partners come from the strand's own clump (`clumpChannel`, the
+// channel a Clump writes; empty: any clump): strands of neighbouring clumps would bridge
+// the gap between them. With regions (the `regionChannel` an Interpolate's regionMap writes) partners come from
 // the strand's own region. A partner farther than `reach` at a point does not pull it (a strand
 // sticks to hair it touches), and the strand keeps its segment lengths.
 class TangleOp : public Operator {
@@ -168,8 +170,10 @@ public:
                 .range(0, 1),
             ParamSpec{"start", 0.3, "Where along the length spans can begin, 0 root to 1 tip"}.range(0, 1),
             ParamSpec{"span", 0.4, "Length of the stuck span, a fraction of the strand", "fraction"}.range(0.01, 1),
-            {"sameClump", true, "Strands stick only to strands of their own clump (the clumpId channel a Clump writes), "
-                                "never across the gap to the next clump"},
+            ParamSpec{"clumpChannel", std::string("clumpId"),
+                      "Strands stick only to strands of their own clump (this channel, which a Clump writes), never "
+                      "across the gap to the next clump; empty, or a channel the strands lack: across clumps"}
+                .readsChannel(true),
             ParamSpec{"regionChannel", std::string("region"),
                       "Channel numbering each strand's region (an Interpolate's regionMap writes region): strands stick "
                       "only to strands of their own region; empty, or a channel the strands lack: across regions"}
@@ -193,7 +197,8 @@ public:
         strengthField.validate(*in);
         const float radius = static_cast<float>(params().getDouble("radius"));
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
-        const std::vector<float>* clumps = params().getBool("sameClump") ? in->strandChannel(kClumpIdChannel) : nullptr;
+        const std::string clumpChannel = params().getString("clumpChannel");
+        const std::vector<float>* clumps = clumpChannel.empty() ? nullptr : in->strandChannel(clumpChannel);
         if (clumps && clumps->size() != in->strandCount()) clumps = nullptr;
         const std::vector<float>* regions = regionsOf(*in, params().getString("regionChannel"));
 
@@ -472,12 +477,14 @@ public:
             ParamSpec{"margin", 0.1, "Share of the width kept clear of strands each side, so the bake never touches the "
                                      "texture's edges", "fraction"}
                 .range(0, 0.45)
-                .in("Shape"),
+                .in("Shape")
+                .adv(),
             ParamSpec{"fitTwist", 1.0, "How much each station turns to the way its strands lie across (their principal "
                                        "direction): 1 follows them, 0 faces out of the scalp", "fraction"}
                 .range(0, 1)
                 .in("Shape")
-                .when("featherMode", {"auto", "perVane", "off"}),
+                .when("featherMode", {"auto", "perVane", "off"})
+                .adv(),
             ParamSpec{"twist", 0.0, "Degrees the card turns around its length, root to tip (on top of the fit)", "angle"}
                 .soft(-180, 180)
                 .in("Shape")
@@ -493,14 +500,16 @@ public:
             notAnimatable({"minStrands", std::int64_t{3}, "Groups with fewer strands make no card (their strands are flyaways)"})
                 .atLeast(1)
                 .soft(1, 20)
-                .when("featherMode", {"auto", "perVane", "off"}),
+                .when("featherMode", {"auto", "perVane", "off"})
+                .adv(),
             notAnimatable({"flyawayCards", std::int64_t{0}, "Thin cards for strands no card holds (small clumps, strands without "
                                                              "one), the farthest from any card first; the rest join the nearest card "
                                                              "within reach"})
                 .range(0, 100000)
                 .soft(0, 200)
                 .when("featherMode", {"auto", "perVane", "off"}),
-            notAnimatable({"minWidth", 0.002, "Narrowest card", "width"}).soft(0, 0.05).in("Shape"),
+            notAnimatable({"minWidth", 0.002, "Narrowest card", "width"}).soft(0, 0.05).in("Shape")
+                .adv(),
             notAnimatable({"maxCards", std::int64_t{0}, "At most this many cards (sub-cards, crossed and flyaway cards count): clumps "
                                                          "give up sub-cards, then neighbouring clumps share wider cards (0: no "
                                                          "limit). Lower LODs use fewer. The one budget: without clumps, the "
@@ -513,7 +522,8 @@ public:
                 .range(0, 4096)
                 .soft(0, 64)
                 .in("Texture"),
-            ParamSpec{"mirror", true, "Cards sharing a texture alternate mirrored, so the repeat doesn't show"}.in("Texture"),
+            ParamSpec{"mirror", true, "Cards sharing a texture alternate mirrored, so the repeat doesn't show"}.in("Texture")
+                .adv(),
             ParamSpec{"crossStyle", std::string("auto"), "Cards per clump: single (one ribbon), cross (crossCount crossed "
                                                 "around its axis) or auto (a cross for round tufts standing off the "
                                                 "scalp, one ribbon elsewhere)", "", {"auto", "single", "cross"}}
@@ -521,23 +531,28 @@ public:
             // Shown whatever the crossStyle: braid cards and down feathers cross by it too.
             notAnimatable({"crossCount", std::int64_t{2}, "Cards in a cross (crossStyle, a braid's cards, a down feather's): 2 "
                                                           "an X, 3 a star, up to 6"})
-                .range(2, 6),
+                .range(2, 6)
+                .adv(),
             notAnimatable({"braids", true, "Braided strands (a Braid node's braidId channel) make one card set per braid: "
                                            "cards crossed along the braid, a cornrow one card lying on the scalp; off, they "
                                            "are carded by their clumps"})
-                .when("featherMode", {"auto", "perVane", "off"}),
+                .when("featherMode", {"auto", "perVane", "off"})
+                .adv(),
             notAnimatable({"segmentsByLength", false, "Segments in proportion to each card's length: `segments` for the longest, "
                                                       "fewer for short ones (the UVs don't change)"})
                 .in("Shape")
-                .when("featherMode", {"auto", "perVane", "off"}),
+                .when("featherMode", {"auto", "perVane", "off"})
+                .adv(),
             notAnimatable({"minSegments", std::int64_t{2}, "With segmentsByLength: the fewest segments a card gets"})
                 .range(1, 256)
                 .soft(1, 16)
                 .in("Shape")
-                .when("segmentsByLength", {"true"}),
+                .when("segmentsByLength", {"true"})
+                .adv(),
             ParamSpec{"volumeNormals", true, "Shade cards like the hair volume (normals out from the scalp) rather than "
                                              "as flat planes"}.in("Shape")
-                .when("featherMode", {"auto", "perVane", "off"}),
+                .when("featherMode", {"auto", "perVane", "off"})
+                .adv(),
             ParamSpec{"featherMode", std::string("auto"),
                       "Feathers (a Propagate node's barbs): auto cards each feather as one strip along its shaft spanning "
                       "both vanes (down feathers crossed cards) and the rest as hair; perFeather cards only the feathers; "
@@ -553,11 +568,13 @@ public:
                                                     "feathers at low LODs)", "fraction"})
                 .range(0, 1)
                 .in("Feathers")
-                .when("featherMode", {"auto", "perFeather"}),
+                .when("featherMode", {"auto", "perFeather"})
+                .adv(),
             notAnimatable({"featherSpine", true, "A vertex column down each feather card's shaft, each half folding to follow its "
                                                  "vane (lift, droop, cupping): two quads per segment. Off: a flat strip"})
                 .in("Feathers")
-                .when("featherMode", {"auto", "perFeather"}),
+                .when("featherMode", {"auto", "perFeather"})
+                .adv(),
             notAnimatable({"featherFlatten", 1.0, "How flat each feather card lies: 1 one plane along the shaft and one fold per "
                                                   "half (every quad flat), 0 turning and folding with its barbs station by "
                                                   "station (closer to the strands, but twisted quads show the texture faceted)",
@@ -565,7 +582,8 @@ public:
                 .range(0, 1)
                 .formerDefault(2, 0.0)
                 .in("Feathers")
-                .when("featherMode", {"auto", "perFeather"}),
+                .when("featherMode", {"auto", "perFeather"})
+                .adv(),
             ParamSpec{"separation", 0.0, "Cards closer than this gap to another card, or passing through it, are pushed apart "
                                          "along their normals, roots held (a share of the narrower card's width; 0: off). "
                                          "Only the mesh moves: the texture stays as baked", "fraction"}
@@ -586,7 +604,8 @@ public:
                                                                     "featherSeparation): more settle crowded cards further"})
                 .range(1, 64)
                 .soft(1, 16)
-                .in("Separation"),
+                .in("Separation")
+                .adv(),
             notAnimatable({"atlasSize", std::int64_t{2048}, "Atlas resolution to bake (pixels); several Cards nodes share one "
                                                             "atlas and bake, at the largest of theirs", "pixels"})
                 .range(16, 16384)
@@ -599,7 +618,8 @@ public:
                                                   "Several Cards nodes share one bake, at the largest of theirs", "pixels"})
                 .range(0, 8)
                 .soft(0, 2)
-                .in("Texture"),
+                .in("Texture")
+                .adv(),
         };
     }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }

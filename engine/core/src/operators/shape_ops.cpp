@@ -152,8 +152,8 @@ namespace {
 
 // Trims strands: each keeps `keep` of its length from the root (mappable). A `fraction` of the
 // strands (mappable; picked by ID, so raising it only adds strands) are trimmed at random, each
-// losing a share of its kept length drawn between trimMin and trimMax (its own draw: the range
-// scales it smoothly): keep x (1 - trim). Lengthening is Transform's scale.
+// losing a share of its kept length drawn up to `randomness` (its own draw: raising it scales the
+// trim smoothly): keep x (1 - trim). Lengthening is Transform's scale.
 class LengthOp : public Operator {
 public:
     std::string typeName() const override { return op::kLength; }
@@ -166,10 +166,8 @@ public:
                                    "Transform's scale)", "fraction"}
                 .range(0, 1),
             ParamSpec{"fraction", 1.0, "Share of the strands trimmed at random, 0-1 (mappable)", "fraction"}.soft(0, 1),
-            ParamSpec{"trimMin", 0.0, "The least share of its kept length a strand trimmed at random loses, 0-1", "fraction"}
-                .range(0, 1),
-            ParamSpec{"trimMax", 0.0, "The most share of its kept length a strand trimmed at random loses, 0-1 (0: no "
-                                      "random trim)", "fraction"}
+            ParamSpec{"randomness", 0.0, "The most share of its kept length a strand trimmed at random loses, 0-1: each "
+                                         "loses up to this (0: no random trim)", "fraction"}
                 .range(0, 1),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv(),
         };

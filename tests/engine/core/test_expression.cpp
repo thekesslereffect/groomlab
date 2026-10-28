@@ -279,7 +279,7 @@ TEST(Expression, DrivesParametersInAGroom) {
     GroomData d;
     d.scalp = test::makeSphere(24, 48, 1.0f);
     std::string graph = defaultGraphJson();
-    const std::string from = "\"type\": \"Length\", \"params\": {\"fraction\": 1.0, \"trimMin\": 0.0, \"trimMax\": 0.2}";
+    const std::string from = "\"type\": \"Length\", \"params\": {\"fraction\": 1.0, \"randomness\": 0.2}";
     ASSERT_NE(defaultGraphJson().find(from), std::string::npos);
     graph.replace(graph.find(from), from.size(),
                   "\"type\": \"Length\"" + std::string(R"j(, "params": {"keep": {"expression": "smoothstep(-1, 1, y)", "min": 0.2, "max": 1.0}})j"));
@@ -426,7 +426,7 @@ TEST(Expression, OnlyExpressionsReadingTheTimeEvaluateAgainOnAnotherFrame) {
     d.scalp = test::makePlane(8);
     auto withFactor = [&](const std::string& expression) {
         std::string graph = defaultGraphJson();
-        const std::string from = "\"type\": \"Length\", \"params\": {\"fraction\": 1.0, \"trimMin\": 0.0, \"trimMax\": 0.2}";
+        const std::string from = "\"type\": \"Length\", \"params\": {\"fraction\": 1.0, \"randomness\": 0.2}";
         graph.replace(graph.find(from), from.size(),
                       "\"type\": \"Length\", \"params\": {\"keep\": {\"expression\": \"" + expression + "\"}}");
         GroomData data = d;
@@ -1084,7 +1084,7 @@ TEST(Expression, MapsReadTheGroomsMapsAtTheRoot) {
     GroomData d;
     d.scalp = scalp;
     std::string graph = defaultGraphJson();
-    const std::string from = "\"type\": \"Length\", \"params\": {\"fraction\": 1.0, \"trimMin\": 0.0, \"trimMax\": 0.2}";
+    const std::string from = "\"type\": \"Length\", \"params\": {\"fraction\": 1.0, \"randomness\": 0.2}";
     graph.replace(graph.find(from), from.size(),
                   R"j("type": "Length", "params": {"keep": {"expression": "map(\"cut\", \"g\")"}})j");
     d.graphJson = graph;
@@ -1111,7 +1111,7 @@ TEST(Expression, VectorParamsTakeExpressions) {
     GroomData d;
     d.scalp = test::makeSphere(12, 24, 1.0f);
     const std::string base = defaultGraphJson();
-    const std::string from = "\"type\": \"Length\", \"params\": {\"fraction\": 1.0, \"trimMin\": 0.0, \"trimMax\": 0.2}";
+    const std::string from = "\"type\": \"Length\", \"params\": {\"fraction\": 1.0, \"randomness\": 0.2}";
     auto withGravity = [&](const std::string& direction) {
         std::string graph = base;
         graph.replace(graph.find(from), from.size(),
@@ -1134,7 +1134,7 @@ TEST(Expression, NewFunctionsMakeTheSameOnAnyThreadCount) {
     GroomData d;
     d.scalp = test::makeSphere(16, 32, 1.0f);
     std::string graph = defaultGraphJson();
-    const std::string from = "\"type\": \"Length\", \"params\": {\"fraction\": 1.0, \"trimMin\": 0.0, \"trimMax\": 0.2}";
+    const std::string from = "\"type\": \"Length\", \"params\": {\"fraction\": 1.0, \"randomness\": 0.2}";
     graph.replace(graph.find(from), from.size(),
                   R"j("type": "Length", "params": {"keep": {"expression": "$c = voronoi(P * 4, 4); if ($c > 0.2) { $c = $c->contrast(0.7); } 0.4 + 0.3 * fbm(P * 3, 5) - 0.1 + $c * 0.2 + curve(pick(rand, 0, 4) / 4, 0, 0, 4, 1, 0.2, 4) + 0.05 * pnoise(P * 3, 2) + 0.05 * rand(-1, 1, 3)"}})j");
     d.graphJson = graph;

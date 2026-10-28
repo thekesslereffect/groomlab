@@ -658,9 +658,9 @@ TEST(Clump, NegativeStrengthPartsTheStrandsAroundTheirCenters) {
         // Beyond the radius of its center (straight strands: every point as far as the root).
         const Vec3f* c = centers->guides()[static_cast<std::size_t>(clumpId)].points.data();
         const float rootDistance = clumpId == 1 ? 1.0f : std::hypot(a[0].x - c[0].x, a[0].z - c[0].z);
-        if (clumpId != 1 && rootDistance > radius * 1.01f) {
+        if (clumpId != 1 && rootDistance > 2.0f * radius * 1.01f) {
             ++untouched;
-            EXPECT_EQ(std::memcmp(a, b, n * sizeof(Vec3f)), 0) << "beyond the radius: as it came";
+            EXPECT_EQ(std::memcmp(a, b, n * sizeof(Vec3f)), 0) << "beyond twice the radius: as it came";
         }
     }
     EXPECT_GT(parted, 10u);
@@ -1198,6 +1198,20 @@ TEST(Blend, MixesTwoLooksOfTheSameStrands) {
     lg.g.connect(curl, blend, 1);
     const StrandsPtr dry = lg.eval(lg.scatter), wet = lg.eval(curl);
 
+    // keepLength (the default): midway between straight and curled, each strand as long as both
+    // (the points blended pull it in); a mix of 0 or 1 gives back that look to the bit.
+    auto lengthOf = [](const StrandsPtr& s, std::size_t i) { return arcLength(s->strandPoints(i), s->strandPointCount(i)); };
+    lg.g.node(blend).params().set("mix", 0.5);
+    const StrandsPtr kept = lg.eval(blend);
+    for (std::size_t i = 0; i < kept->strandCount(); i += 9) {
+        EXPECT_NEAR(lengthOf(kept, i), 0.5f * (lengthOf(dry, i) + lengthOf(wet, i)), 1e-3f * lengthOf(dry, i)) << i;
+    }
+    for (const double mix : {0.0, 1.0}) {
+        lg.g.node(blend).params().set("mix", mix);
+        EXPECT_EQ(lg.eval(blend)->positions(), (mix == 0.0 ? dry : wet)->positions()) << mix;
+    }
+    // Off: the points blended.
+    lg.g.node(blend).params().set("keepLength", false);
     lg.g.node(blend).params().set("mix", 0.0);
     EXPECT_EQ(lg.eval(blend)->positions(), dry->positions());
     lg.g.node(blend).params().set("mix", 1.0);
@@ -2470,7 +2484,7 @@ TEST(Interpolate, TakingLengthKeepsTheFlowShape) {
 
 TEST(Interpolate, StrandsFollowTheSmoothCurveThroughAGuidesPoints) {
     // A hook drawn with few points: the hair follows the curve the viewport draws through them,
-    // not the corners between them (smoothGuides off: the corners).
+    // not the corners between them.
     LookGraph lg{3000.0, 48};
     lg.segments(100);  // strands grown with 101 points, as a Resample of 100 segments gives them
     auto set = std::make_shared<GuideSet>();
@@ -2480,8 +2494,7 @@ TEST(Interpolate, StrandsFollowTheSmoothCurveThroughAGuidesPoints) {
     const NodeId guides = lg.g.addNode(op::kGuides);
     const NodeId interp = lg.add(op::kInterpolate, lg.scatter);
     lg.g.connect(guides, interp, 1);
-    auto sharpest = [&](bool smooth) {
-        lg.g.node(interp).params().set("smoothGuides", smooth);
+    auto sharpest = [&] {
         const StrandsPtr out = lg.eval(interp);
         float worst = 0.0f;
         for (std::size_t s = 0; s < out->strandCount(); ++s) {
@@ -2494,10 +2507,7 @@ TEST(Interpolate, StrandsFollowTheSmoothCurveThroughAGuidesPoints) {
         }
         return worst;
     };
-    const float smooth = sharpest(true), cornered = sharpest(false);
-    EXPECT_LT(smooth, 15.0f);              // a round bend, a few degrees a segment
-    EXPECT_GT(cornered, 2.0f * smooth);    // the straight spans turn at the guide's points
-    EXPECT_TRUE(OperatorRegistry::instance().create(op::kInterpolate)->params().getBool("smoothGuides"));
+    EXPECT_LT(sharpest(), 15.0f);  // a round bend, a few degrees a segment (straight spans: about 19 at the points)
 }
 
 }  // namespace
@@ -2533,7 +2543,7 @@ TEST(Expression, ClumpsOnlyTheLongStrands) {
     // its centers only among the long strands.
     LookGraph lg(3000.0);
     const NodeId length = lg.add(op::kLength, lg.scatter);
-    lg.g.node(length).params().set("trimMax", 1.0);
+    lg.g.node(length).params().set("randomness", 1.0);
     MapRef longOnly;
     longOnly.source = MapRef::Source::Expression;
     longOnly.name = "length / longest > 0.7 ? 1 : 0";
@@ -3393,6 +3403,7 @@ TEST(Blend, ShapeModeMovesOnlyPointsAndWidths) {
     const TwoLooks looks = twoLooks({0.1f, 0.2f, 0.3f}, false, true);
     const StrandsPtr out = blended(looks, [](ParamSet& p) {
         p.set("include", std::string("shape"));
+        p.set("keepLength", false);  // (the points blended)
         p.set("mix", 0.3);
         p.set("profile", Ramp::linear(0.2f, 1.0f));
     });

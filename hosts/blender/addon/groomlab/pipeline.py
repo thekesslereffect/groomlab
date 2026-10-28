@@ -1175,8 +1175,7 @@ def graph_maps(graph):
         params = node.get("params") or {}
         if node.get("type") == "Map":
             found.setdefault(params.get("name", "mask"), "map")
-        for param, how, kind in (("map", "map", "HairColor"), ("regionMap", "map", "Interpolate"),
-                                 ("directionColorSet", "colorSet", "Gravity")):
+        for param, how, kind in (("map", "map", "HairColor"), ("regionMap", "map", "Interpolate")):
             value = params.get(param) if node.get("type") == kind else None
             if isinstance(value, str) and value and not is_image_path(value):
                 found.setdefault(value, how)

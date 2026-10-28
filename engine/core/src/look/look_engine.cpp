@@ -2217,8 +2217,9 @@ void LookEngine::run(const LookRun& r, bool frames, const LookTargets& targets) 
             case StageKind::Flyaway: kernel = Kernel::Flyaway; break;
             case StageKind::Wind: kernel = Kernel::Wind; break;
             case StageKind::Blend:
-                kernel = perPoint() ? Kernel::BlendPoints : Kernel::Blend;
-                groups = perPoint() ? pointGroups : strandGroups;
+                // (keepLength walks each strand from its root: a thread a strand.)
+                kernel = perPoint() && p.flag[0] == 0 ? Kernel::BlendPoints : Kernel::Blend;
+                groups = perPoint() && p.flag[0] == 0 ? pointGroups : strandGroups;
                 // look b's points (look a's: its input; an operator's own: handed in, aux 0)
                 b.aux[0] = k < r.inputs.size() && r.inputs[k].blendWith ? auxBuffer(k, 0) : input2;
                 break;
