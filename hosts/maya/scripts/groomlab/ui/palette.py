@@ -2218,6 +2218,7 @@ def show(tab=None):
         widgets.into_dock(_window, UI_SCRIPT)  # the dock Maya kept: opens where it was
     _window.show(dockable=True, area="left", floating=False, uiScript=UI_SCRIPT)  # (a new dock: on the left)
     if tab:
+    widgets.keep_dock_resizable(_window)
         _window.show_tab(tab)
     groomlab.adopt_scene_groom()  # a scene with grooms: one of them, not "Start a groom"
     _window.poll()
@@ -2234,6 +2235,7 @@ def restore():
     _window = _make()
     widgets.into_dock(_window, UI_SCRIPT, restoring=True)
 
+    widgets.keep_dock_resizable(_window)
 
 def _close_at_exit():
     """Maya quits: the palette stops its poll and callbacks and its widgets go while Qt and Python

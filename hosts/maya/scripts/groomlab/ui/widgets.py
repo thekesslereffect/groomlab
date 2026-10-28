@@ -291,6 +291,85 @@ def into_dock(panel, ui_script, restoring=False):
     return True
 
 
+def _fixed_width(cell):
+    """Whether a splitter's `cell` holds only workspace controls Maya keeps at a fixed width (the
+    ToolBox)."""
+    from maya import cmds
+    names = [w.objectName() for w in [cell] + cell.findChildren(QtWidgets.QWidget)]
+    controls = [n for n in names if n and cmds.workspaceControl(n, exists=True)]
+    return bool(controls) and all(cmds.workspaceControl(n, query=True, widthProperty=True) == "fixed" for n in controls)
+
+
+def stuck_width(control):
+    """Whether a docked workspace `control` cannot change its width: in a row (a horizontal
+    splitter) whose only cells beside it are fixed-width ones, as left of the ToolBox, where Maya
+    puts a panel dragged onto the left edge past the ToolBox. Each handle beside it would resize the
+    fixed one, so neither moves. (The wrappers of its parents go as this returns, and PySide then
+    invalidates `control`'s, Maya's widget: wrap it again to use it after.)"""
+    cell, x = control, control.parentWidget()
+    while x is not None:
+        if isinstance(x, QtWidgets.QSplitter) and x.orientation() == QtCore.Qt.Horizontal and x.count() > 1:
+            i = x.indexOf(cell)
+            return all(_fixed_width(x.widget(j)) for j in (i - 1, i + 1) if 0 <= j < x.count())
+        cell, x = x, x.parentWidget()
+    return False
+
+
+def _workspace_control(name):
+    """The workspace control `name`'s widget, wrapped now (None when there is none)."""
+    from maya import cmds
+    import maya.OpenMayaUI as omui
+    pointer = omui.MQtUtil.findControl(name) if cmds.workspaceControl(name, exists=True) else None
+    return qt.wrap_instance(pointer, QtWidgets.QWidget) if pointer else None
+
+
+class _DockWidthKeeper(QtCore.QObject):
+    """Moves its panel's dock to the main window's left dock area (the same place, next to the
+    ToolBox, but with a width handle) when it is docked where its width is stuck (stuck_width).
+    It belongs to the panel and keeps only the dock's name: a wrapper of Maya's widget does not
+    stay valid (see stuck_width)."""
+
+    def __init__(self, panel, name):
+        super(_DockWidthKeeper, self).__init__(panel)
+        self.name, self.watched = name, None
+        self.timer = QtCore.QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(300)  # after Maya's drop has settled
+        self.timer.timeout.connect(self.check)
+
+    def watch(self):
+        """Watch the dock (a new one after Maya restores its workspace) for being docked again, and
+        check where it is now (a workspace saved that way)."""
+        control = _workspace_control(self.name)
+        if control is None:
+            return
+        pointer = qt.shiboken.getCppPointer(control)[0]
+        if pointer != self.watched:
+            control.installEventFilter(self)
+            self.watched = pointer
+        self.timer.start()
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QtCore.QEvent.Show, QtCore.QEvent.ParentChange):  # docked again: Maya shows it in its new place
+            self.timer.start()
+        return False
+
+    def check(self):
+        from maya import cmds
+        control = _workspace_control(self.name)
+        if control is not None and not cmds.workspaceControl(self.name, query=True, floating=True) and stuck_width(control):
+            cmds.workspaceControl(self.name, edit=True, dockToMainWindow=("left", False))
+
+
+def keep_dock_resizable(panel):
+    """Keep a docked panel's (MayaQWidgetDockableMixin, named) width adjustable wherever it is
+    docked (see _DockWidthKeeper)."""
+    keeper = panel.findChild(_DockWidthKeeper)
+    if keeper is None:
+        keeper = _DockWidthKeeper(panel, panel.objectName() + "WorkspaceControl")
+    keeper.watch()
+
+
 def dispose(widget):
     """Delete `widget` (and its children) now, not on a later event loop turn: when Maya quits
     there is none. Its Python wrapper stays, invalid (alive() False); its dock stays, as Maya saves
