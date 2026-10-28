@@ -13,6 +13,27 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.35.0 (October 28, 2026)
+
+- **Brush alphas.** The Paint brush on a vertex or texture map can stamp an alpha: a grayscale
+  image inside the brush circle, so a stroke leaves speckles, spots, noise or streaks instead of a
+  round spot. Pick one from the **Alpha** thumbnail (eight ship with GroomLab), or **Add Alpha...**
+  your own: they go to `Documents/GroomLab/alphas`, which Maya, Blender and the app share. Set its
+  **Rotation** (fixed, following the stroke, or random), **Spacing** and **Invert**; the alpha
+  multiplies the brush's falloff, and symmetry mirrors it. See
+  [Brush alphas](/docs/painting-maps#brush-alphas).
+- **Segments per group and per guide.** Each guide group keeps its own segment count, which its
+  new guides take. The Segments slider rebuilds the selected guides, else the picked group, else
+  every guide. Guides you resample on their own keep their count when the group's changes; the
+  group's right-click **Reset Segments** brings them back in line. Frozen guides are never
+  resampled.
+- **Changed: no Display Segments.** The guides' dots sit on their own points (still set by
+  **Guide Points**: all, roots and tips, or off).
+- **Blender: Create Groom without a preset.** A new groom starts from the default graph fitted to
+  the mesh, as in Maya and the app; pick a look later from the Presets menu.
+- **Fixes:** the Groom Tools and the Graph Editor docked back beside Maya's Toolbox can be resized
+  again.
+
 ## 0.34.0 (October 28, 2026)
 
 - **Interpolate: strands between parted guides keep their length.** A new `blend` param:
