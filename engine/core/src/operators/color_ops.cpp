@@ -752,6 +752,8 @@ private:
 class FeatherColorOp : public Operator {
 public:
     std::string typeName() const override { return op::kFeatherColor; }
+    // 2: downStrength 1 by default (nodes saved before keep 0: ParamSpec::formerDefault).
+    int version() const override { return 2; }
     std::vector<ChannelWrite> channelWrites() const override {
         std::vector<ChannelWrite> out;
         for (const char* name : kColorChannels) out.push_back({name, ""});
@@ -836,7 +838,10 @@ public:
                       "color"}
                 .colorMap()
                 .in("Down"),
-            ParamSpec{"downStrength", 0.0, "How far the down zone's barbs go to downColor, 0-1", "fraction"}.range(0, 1).in("Down"),
+            ParamSpec{"downStrength", 1.0, "How far the down zone's barbs go to downColor, 0-1", "fraction"}
+                .range(0, 1)
+                .formerDefault(2, 0.0)
+                .in("Down"),
             // Iridescence: structural color, angle-dependent, in the shading.
             ParamSpec{"iridescence", 0.0,
                       "Structural color, 0 none to 1 full (mappable, per point): an angle-dependent sheen the hair shading "
@@ -845,9 +850,11 @@ public:
                 .range(0, 1)
                 .in("Iridescence"),
             ParamSpec{"iridescenceColor", Vec3f(0.05f, 0.55f, 0.2f),
-                      "The structural color seen face-on (along the strand's normal: a feather's vane), linear RGB", "color"}
+                      "The structural color seen face-on (along the strand's normal: a feather's vane), linear RGB. "
+                      "Groom-wide: the first FeatherColor with iridescence sets it for the whole groom", "color"}
                 .in("Iridescence"),
-            ParamSpec{"iridescenceShift", 0.3, "How far its hue turns from face-on to edge-on, in turns (+/-)", "turns"}
+            ParamSpec{"iridescenceShift", 0.3, "How far its hue turns from face-on to edge-on, in turns (+/-). Groom-wide, "
+                                               "as iridescenceColor", "turns"}
                 .soft(-1, 1)
                 .in("Iridescence"),
             ParamSpec{"iridescenceOn", std::string("all"),

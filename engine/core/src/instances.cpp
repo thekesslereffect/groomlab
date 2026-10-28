@@ -317,6 +317,30 @@ std::vector<InstanceSet::Placed> InstanceSet::resolve(const StrandSet& strands, 
         }
         if (y.length() < 1e-6f) y = {0, 1, 0};
         Vec3f x = anyPerpendicular(y).normalized();
+        if (!i.deform && (i.orient == InstanceOrient::Strand || i.orient == InstanceOrient::Root) && n > 1) {
+            // The roll from the root: across the root segment's lean off the skin (any way across
+            // when it stands straight up), carried to y by the least turn. anyPerpendicular(y) alone
+            // picks its axis by y's smallest world component, so the roll would jump 90 degrees as
+            // a strand turns past one (every frame under Wind or Simulate); the root segment barely
+            // moves.
+            const Vec3f t0 = (pts[1] - pts[0]).normalized();
+            if (t0.length() > 0.5f) {
+                Vec3f side = anyPerpendicular(t0).normalized();
+                const StrandRoot& root = strands.roots()[s];
+                if (scalp && scalp->contains(root)) {
+                    const Vec3f lean = t0.cross(scalp->normal(root));
+                    if (lean.length() > 1e-3f) side = lean.normalized();
+                }
+                const Vec3f axis = t0.cross(y);
+                const float sine = axis.length(), cosine = std::clamp(t0.dot(y), -1.0f, 1.0f);
+                if (sine > 1e-6f) {
+                    const Vec3f k = axis * (1.0f / sine);  // Rodrigues: side turned about k by the angle t0 to y
+                    side = side * cosine + k.cross(side) * sine + k * (k.dot(side) * (1.0f - cosine));
+                }
+                side = side - y * side.dot(y);
+                if (side.length() > 1e-6f) x = side.normalized();
+            }
+        }
         if (i.deform) {
             // Bent along the strand: +Y its tangent, +Z the vane's normal (the skin's at the root
             // without one), so a leaf or a feather's vane faces the way the strand's own does.

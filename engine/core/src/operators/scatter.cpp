@@ -451,7 +451,22 @@ public:
             guides = std::move(local);
         }
         const ScalarField densityField(params(), "density", mesh.get(), guides.get());
-        const double density = std::max(0.0f, densityField.maximum());
+        double density = std::max(0.0f, densityField.maximum());
+        if (!densityField.isConstant()) {
+            // An expression (not clamped to 0-1) or a plugged field can go past the maximum it reports,
+            // where value / maximum would clip at 1: its largest at the cage's corners and face middles
+            // when past it, rounded up to a step of a log lattice (an edit of the scalp moving it a
+            // little keeps it, and so the roots far from the edit).
+            float sampled = 0.0f;
+            constexpr float kAt[4][2] = {{0.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, 1.0f}, {1.0f / 3.0f, 1.0f / 3.0f}};
+            for (std::size_t f = 0; f < surface.triangleCount(); ++f) {
+                for (const auto& uv : kAt) {
+                    const float v = densityField.atCageRoot(StrandRoot{static_cast<std::int32_t>(f), uv[0], uv[1]});
+                    if (std::isfinite(v)) sampled = std::max(sampled, v);
+                }
+            }
+            if (sampled > density) density = roundToDecadeStep(sampled, 8, true);
+        }
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         const float length = static_cast<float>(params().getDouble("length"));
         // Strand resolution comes from the Resample node (EvalContext::strandSegments).

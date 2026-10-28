@@ -1057,6 +1057,7 @@ TEST(ColorNodes, BandsAndFeatherColorWithNothingToDoHandTheStrandsOn) {
     EXPECT_EQ(bands, in);
     const StrandsPtr feather = valueAs<StrandsPtr>(run(op::kFeatherColor, {colored}, [](ParamSet& p) {
         p.set("pattern", std::string("none"));
+        p.set("downStrength", 0.0);
         p.set("downColor", Vec3f(1.0f, 0.0f, 0.0f));
         p.set("iridescenceColor", Vec3f(1.0f, 0.0f, 0.0f));
     }, f.scalp));

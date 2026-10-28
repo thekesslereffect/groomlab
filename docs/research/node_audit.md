@@ -8,7 +8,7 @@
 - [C. Removals and renames](#c-removals-and-renames)
 - [D. Default changes](#d-default-changes)
 - [Nodes with no change](#nodes-with-no-change)
-- [Not covered yet](#not-covered-yet)
+- [Part 2: the remaining nodes](#part-2-the-remaining-nodes-2026-10-28)
 
 ## Scope and method
 
@@ -141,6 +141,48 @@ New nodes only; saved nodes keep the old default through `formerDefault`.
 - **Noise:** lean.
 - **Twist, Wet, BlendNeighbors:** distinct and lean.
 
-## Not covered yet
+## Part 2: the remaining nodes (2026-10-28)
 
-Simulate, Propagate, Plume, Scales, Instance and the field and utility nodes.
+Covered: Simulate, Jiggle, Wind, SelfCollide, Static, Propagate, Plume, Scales, FeatherColor,
+Instance, StrandMesh, Subdivide, MeshCut, Mirror, RestoreLength, Part, Sculpt, and the field,
+utility and source nodes (Attribute, Expression, FieldCombine, FieldNoise, FieldRemap, Map,
+Value, Group, Control, Switch, Split, Merge, Curve, Guides, Scalp, Input, Output, ColliderMesh,
+Reference, RenderData, Compound, Script, ToGuides, ToStrands, Bands). No node should go.
+
+**Done:**
+- Hidden: Simulate `repulsionRadius`, `volumeCellSize`; Jiggle `history`; Plume `iterations`;
+  Propagate `shaftSides`, `rootOnShaft`, `shaftWidthProfile`, `curlProfile`; FieldNoise `offset`;
+  ToGuides `color`.
+- Tooltips: Propagate `down` (FeatherColor's downColor) and `splits` (groups, not gaps);
+  FeatherColor iridescence is groom-wide; Scales `lift` and `tile` stack; RestoreLength's stale
+  "Affect" comment; Switch picks one of two inputs.
+- Wind and Part turn each segment by a share of the angle to the target (they lerped directions,
+  which flips a segment pointing nearly against the target at w 0.5: hair combed across a part).
+- Instance (deform none, orient strand/root): the roll is built at the root segment and carried
+  along by the least turn (anyPerpendicular(tangent) jumped 90 degrees as the strand turned past a
+  world axis, every frame under Wind or Simulate). `spinRandom` turns either way, as Scales'.
+- Mirror reflects Propagate's vane normals with the strands.
+- Scatter: a density from an expression or a plugged field past its reported maximum is no longer
+  clipped (sampled at the cage's corners and face middles, rounded up to a log step).
+- FieldRemap with inMin == inMax is a step there. RenderData reads a per-point opacity field per point.
+- Renames: Merge `match` -> `strength`. Split moved to Utility.
+- Defaults (node versions): FeatherColor `downStrength` 1, Split `select` 1 (a plugged map reads as
+  itself), FieldNoise `octaves` 1.
+
+**Left, with why:**
+- Jiggle's memory is counted in frames (`history`), so non-24 fps shots lag less: counting it in
+  seconds touches the scalp-history plumbing (groom.cpp, the GPU stage, Maya's motion.py).
+- A width of exactly 1.0 means "no Width node" (instances.cpp, hair_grid.cpp): a real flag on the
+  strands has to travel through every node and file format.
+- Profiles read by point index (Wind, Jiggle, Part, Static, SelfCollide, Simulate's
+  rootStiffnessProfile, Bands, RenderData, HairColor's tip): one batch to arc length, the same as
+  Displace; looks change only after uneven spacing.
+- Propagate `width`: every feather compound overrides it with a Width node, but without one the
+  strands would fall back to width 1.
+- Expression field inputs (`$a`, `$b`) would make FieldRemap/FieldCombine/FieldNoise redundant: a
+  feature, not a cleanup.
+- Group's `softness` (a step around the threshold) and `falloff` (a length) are two edge models;
+  sphere/box read current positions, not the rest pose. Control's `min`/`max` are the slider's
+  range only. ColliderMesh `friction` -1 means inherit. Merge `blend` is a seam width.
+- Opinions not acted on: Instance `scale`/`fitScale` -> one `size`; Simulate `bend`/`twist` ->
+  `bendStiffness`/`twistStiffness`.

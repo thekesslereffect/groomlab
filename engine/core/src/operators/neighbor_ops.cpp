@@ -229,8 +229,7 @@ private:
 // along the deformed directions (follow the leader); `scale` scales the
 // whole strand about its root to the reference's arc length. Strands with
 // no reference are left alone. Without a reference, `even` respaces each
-// strand's own points evenly by arc length, keeping its length. Affect blends between the deformed
-// and the restored strand.
+// strand's own points evenly by arc length, keeping its length.
 class RestoreLengthOp : public Operator {
 public:
     std::string typeName() const override { return op::kRestoreLength; }

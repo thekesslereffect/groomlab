@@ -1647,7 +1647,7 @@ public:
             notAnimatable({"seed", std::int64_t{0}, "Random seed for the choice"}).adv(),
             {"channels", true, "Carry strand channels over as guide attributes (point channels as per-point layers)"},
             ParamSpec{"color", Vec3f(0.25f, 0.85f, 0.55f), "The color these guides draw in when they are shown as guides "
-                                                          "(a Sculpt node after this one), linear RGB", "color"},
+                                                          "(a Sculpt node after this one), linear RGB", "color"}.adv(),
         };
     }
 
@@ -2115,7 +2115,7 @@ public:
             ParamSpec{"blend", 0.0, "Where a and b meet, strands this close to the other side take on its shape, "
                                     "meeting halfway at the seam (0: no blending; nothing on b: a passes through)", "length"}
                 .soft(0, 2),
-            ParamSpec{"match", 1.0, "How far the shapes meet at the seam, 0-1", "fraction"}.range(0, 1),
+            ParamSpec{"strength", 1.0, "How far the shapes meet at the seam, 0-1", "fraction"}.range(0, 1),
         };
     }
 
@@ -2124,7 +2124,7 @@ public:
         const StrandsPtr b = valueAs<StrandsPtr>(inputs.at(1));
         if (!b || b->empty()) return a;
         const float blend = static_cast<float>(params().getDouble("blend"));
-        const float match = static_cast<float>(params().getDouble("match"));
+        const float match = static_cast<float>(params().getDouble("strength"));
         auto out = std::make_shared<StrandSet>(*a);
         auto bOut = std::make_shared<StrandSet>(*b);  // shares b's arrays until written
         if (blend > 0.0f && match > 0.0f && !a->empty()) {
@@ -2157,7 +2157,7 @@ public:
         const StrandsPtr b = valueAs<StrandsPtr>(inputs.at(1));
         if (!b || b->empty() || a->empty()) return false;  // a handed on: the graph passes its changes on
         const float blend = static_cast<float>(params().getDouble("blend"));
-        const float match = static_cast<float>(params().getDouble("match"));
+        const float match = static_cast<float>(params().getDouble("strength"));
         if (blend > 0.0f && match > 0.0f) return false;
         const StrandChanges* changesA = someStrandsChanged(incremental, 0);
         const StrandChanges* changesB = someStrandsChanged(incremental, 1);
@@ -2715,7 +2715,7 @@ void registerMergeOperator(OperatorRegistry& registry) {
 
 void registerSwitchOperator(OperatorRegistry& registry) {
     registry.registerType(op::kSwitch,
-                          {"utility", "Picks one of several inputs: look variants.", "variant choose pick"},
+                          {"utility", "Picks one of two inputs: look variants.", "variant choose pick"},
                           [] { return std::make_unique<SwitchOp>(); });
 }
 

@@ -75,7 +75,6 @@ GROOMLAB_OPERATOR(Simulate)              // Guides (+ Mesh collider) -> Guides (
 // [feathers]
 GROOMLAB_OPERATOR(Propagate)             // Curves (shafts) -> Strands (barbs grown off each shaft: feathers)
 GROOMLAB_OPERATOR(Plume)                 // Strands (feathers) (+ Mesh collider) -> Strands (laid over one another and off the body)
-GROOMLAB_OPERATOR(Split)                 // Curves -> Curves a, b, c, d (shares of the strands, by ID or a map)
 // [color]
 GROOMLAB_OPERATOR(HairColor)             // Strands -> Strands (melanin, linear RGB and highlight channels)
 GROOMLAB_OPERATOR(Bands)                 // Strands -> Strands (bands of another pigment along each hair: fur)
@@ -98,6 +97,7 @@ GROOMLAB_OPERATOR(Value)                 // -> Value (one value for a whole node
 GROOMLAB_OPERATOR(Group)                 // Curves -> Curves (a named 0-1 strand channel: a region, map or guide groups)
 GROOMLAB_OPERATOR(Blend)                 // Strands + Strands -> Strands (two looks of the same strands)
 GROOMLAB_OPERATOR(Attribute)             // Strands -> Strands (adds a channel)
+GROOMLAB_OPERATOR(Split)                 // Curves -> Curves a, b, c, d (shares of the strands, by ID or a map)
 GROOMLAB_OPERATOR(Merge)                 // Strands + Strands -> Strands
 GROOMLAB_OPERATOR(Switch)                // Strands | Strands -> Strands
 GROOMLAB_OPERATOR(Output)                // Strands -> Strands (graph result)

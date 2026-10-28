@@ -87,11 +87,15 @@ private:
         }
         const RampAlong along(profile, *out);
 
+        const bool perPoint = opacity.perPoint();  // (a field per point read at each point, as Bands reads it)
         auto write = [&](std::size_t s) {
-            float strand = std::clamp(opacity.at(*out, s), 0.0f, 1.0f);
+            float strand = perPoint ? 1.0f : std::clamp(opacity.at(*out, s), 0.0f, 1.0f);
             if (opacityRandom > 0.0f) strand *= 1.0f - opacityRandom * unitFloat(hashCombine(out->ids()[s], seed ^ 0x0BAC17ull));
             const std::size_t begin = out->strandBegin(s), n = out->strandPointCount(s);
-            for (std::size_t i = 0; i < n; ++i) (*opacities)[begin + i] = std::clamp(strand * along(i, n), 0.0f, 1.0f);
+            for (std::size_t i = 0; i < n; ++i) {
+                const float here = perPoint ? std::clamp(opacity.atPoint(*out, s, i), 0.0f, 1.0f) : 1.0f;
+                (*opacities)[begin + i] = std::clamp(strand * here * along(i, n), 0.0f, 1.0f);
+            }
         };
         if (last) {
             if (readsPoints) forEachListed(changes->strands, write);  // else every value stays

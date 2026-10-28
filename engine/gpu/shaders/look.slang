@@ -3678,8 +3678,9 @@ void WidthPointsCS(uint3 id : SV_DispatchThreadID) {
 //
 // gAux0: each strand's side of the parts, a float4 (the way away from its part, the distance to it;
 // -1: none), from its root (the CPU's). gValue: strength (field 0, per strand), width; the profile.
-// Strands within the width of a part turn each segment toward the way away, as much as the
-// strength by the falloff (1 - d / width)^2 and the profile, keeping the segments' lengths.
+// Strands within the width of a part turn each segment toward the way away, that share of the angle
+// between them (turnedToward) by the strength times the falloff (1 - d / width)^2 and the profile,
+// keeping the segments' lengths.
 
 [shader("compute")]
 [numthreads(GROUP_SIZE, 1, 1)]
@@ -3709,9 +3710,7 @@ void PartCS(uint3 id : SV_DispatchThreadID) {
         float3 p = previous;
         if (len > 0.0f) {
             const float w = clamp(amount * rampAlong(i, n), 0.0f, 1.0f);
-            float3 turned = (seg / len) * (1.0f - w) + away * w;
-            if (len3(turned) < 1e-6f) turned = seg / len;  // opposite directions: leave it
-            p = previous + normalized(turned) * len;
+            p = previous + turnedToward(seg / len, normalized(away), w) * len;
         }
         storePoint(gOut, begin + i, p);
         previous = p;
@@ -4061,6 +4060,17 @@ float4 turnAboutAxis(float3 unitAxis, float angle) { return float4(unitAxis * si
 float3 turnApplied(float4 q, float3 p) {  // p + 2w (v x p) + 2 v x (v x p)
     const float3 c = cross(q.xyz, p);
     return p + c * (2.0f * q.w) + cross(q.xyz, c) * 2.0f;
+}
+// Unit `dir` turned toward unit `target` by the share w of the angle between them, about their
+// common axis (Gravity's turn; straight against it: about any way across): smooth in w even for a
+// segment pointing nearly against the target, where a lerp of the two would flip at w 0.5.
+float3 turnedToward(float3 dir, float3 target, float w) {
+    const float c = clamp(dot(dir, target), -1.0f, 1.0f);
+    float3 axis = cross(dir, target);
+    const float sine = len3(axis);
+    axis = sine > 1e-6f ? axis / sine : anyPerpendicular(dir);
+    const float angle = atan2(sine, c) * w;
+    return angle > 0.0f ? turnApplied(turnAboutAxis(axis, angle), dir) : dir;
 }
 float4 turnThen(float4 a, float4 next) {  // a, then `next`, kept a unit quaternion
     float4 t;
@@ -4559,9 +4569,7 @@ void WindCS(uint3 id : SV_DispatchThreadID) {
         const float3 seg = loadPoint(begin + i) - loadPoint(begin + i - 1);
         const float len = len3(seg);
         if (len > 0.0f) {
-            float3 turned = seg / len * (1.0f - w) + target * w;
-            if (len3(turned) < 1e-6f) turned = seg / len;  // straight against the wind: left
-            previous = previous + normalized(turned) * len;
+            previous = previous + turnedToward(seg / len, target, w) * len;
         }
         storePoint(gOut, begin + i, previous);
     }

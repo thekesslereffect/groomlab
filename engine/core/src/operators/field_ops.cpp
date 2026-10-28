@@ -480,14 +480,20 @@ class FieldNoiseOp : public Operator {
 public:
     std::string typeName() const override { return op::kFieldNoise; }
     std::string category() const override { return "field"; }
+    // 2: octaves 1 by default, as Noise (nodes saved before keep 2: ParamSpec::formerDefault).
+    int version() const override { return 2; }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
     std::vector<PortSpec> inputs() const override { return {}; }
     PortSpec output() const override { return {"field", PortType::Field}; }
     std::vector<ParamSpec> paramSpecs() const override {
         return {
             ParamSpec{"frequency", 2.0, "Features per unit", "perLength"}.soft(0, 10),
-            ParamSpec{"octaves", std::int64_t{2}, "Layers of finer detail"}.range(1, 8).adv(),
-            {"offset", Vec3f{0, 0, 0}, "Moves the pattern, in features (it is added after the frequency: unitless)"},
+            ParamSpec{"octaves", std::int64_t{1}, "Layers of finer detail"}
+                .range(1, 8)
+                .formerDefault(2, std::int64_t{2})
+                .adv(),
+            ParamSpec{"offset", Vec3f{0, 0, 0}, "Moves the pattern, in features (it is added after the frequency: unitless)"}
+                .adv(),
             notAnimatable({"seed", std::int64_t{0}, "Random seed"}).adv(),
             ParamSpec{"min", 0.0, "Output in the troughs: what the noise's 0 becomes (an output range, not a limit)"}
                 .soft(0, 1),
@@ -513,7 +519,8 @@ public:
     RemapFieldValue(FieldPtr in, float inLo, float inHi, Ramp curve, float outLo, float outHi)
         : in_(std::move(in)), inLo_(inLo), inHi_(inHi), curve_(std::move(curve)), outLo_(outLo), outHi_(outHi) {}
     float map(float v) const {
-        float t = inHi_ != inLo_ ? (v - inLo_) / (inHi_ - inLo_) : 0.0f;
+        // inMin == inMax: a step there (the limit of the ramp either side of it).
+        float t = inHi_ != inLo_ ? (v - inLo_) / (inHi_ - inLo_) : v >= inLo_ ? 1.0f : 0.0f;
         t = std::clamp(t, 0.0f, 1.0f);
         return outLo_ + (outHi_ - outLo_) * curve_(t);
     }

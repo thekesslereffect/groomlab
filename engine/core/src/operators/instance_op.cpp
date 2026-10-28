@@ -73,10 +73,13 @@ public:
                                        "(mappable)"}
                     .soft(0, 2),
                 ParamSpec{"aspect", 0.1, "Width over length for strands without widths (mappable)"}.atLeast(0).soft(0, 1),
-                ParamSpec{"lift", 0.0, "Degrees each tip turns up off the skin, along the flow", "angle"}.soft(-90, 90),
+                ParamSpec{"lift", 0.0, "Degrees each tip turns up off the skin, along the flow (on top of tile's rise)",
+                          "angle"}
+                    .soft(-90, 90),
                 ParamSpec{"tile", 1.0,
                           "How far each tip rises over the next scale's base, in plate heights (1: by its own height, as "
-                          "roof tiles; 0: flat). Overlap comes from the density and the strands' length"}
+                          "roof tiles; 0: flat; lift turns it further). Overlap comes from the density and the strands' "
+                          "length"}
                     .atLeast(0)
                     .soft(0, 2),
                 ParamSpec{"stack", 0.02, "A random height of their own, a fraction of the plate's: overlapping scales "
@@ -171,7 +174,8 @@ public:
                 ParamSpec{"scaleRandom", 0.3, "Each one's size up to this share more or less, at random", "fraction"}
                     .range(0, 1)
                     .in("Random"),
-                ParamSpec{"spinRandom", 1.0, "Random turn about their axis, 0 to 1 (a full turn)", "fraction"}
+                ParamSpec{"spinRandom", 1.0, "Random turn about their axis, either way, 0-1 (1: up to half a turn either way: "
+                                             "any roll)", "fraction"}
                     .range(0, 1)
                     .in("Random"),
             };
@@ -422,7 +426,7 @@ private:
                 }
                 inst.t = tMin + (tMax - tMin) * rng.nextFloat();
                 inst.orient = orient;
-                inst.spin = kTwoPi * spinRandom * rng.nextFloat();
+                inst.spin = 0.5f * kTwoPi * spinRandom * (2.0f * rng.nextFloat() - 1.0f);  // either way, as Scales
                 inst.scale = d.size * (1.0f + scaleRandom * (2.0f * rng.nextFloat() - 1.0f));
                 inst.offset = offset;
                 inst.scaleByWidth = scaleByWidth;

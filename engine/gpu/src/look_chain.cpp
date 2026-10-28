@@ -388,7 +388,7 @@ Role roleOf(const GraphDocument& doc, NodeId id, StageKind* kind, std::string* w
         const StrandsPtr out = cachedStrands(graph, id), a = inputStrands(graph, id, 0);
         if (out && a && out == a) return Role::PassOn;
         const ParamSet& p = graph.node(id).params();
-        if (p.getDouble("blend") > 0.0 && p.getDouble("match") > 0.0) return Role::End;
+        if (p.getDouble("blend") > 0.0 && p.getDouble("strength") > 0.0) return Role::End;
     }
     if (type == op::kCull || type == op::kSplit || type == op::kMirror) {
         // Every strand kept, none added: its input handed on as it came. Strands kept by what the run
