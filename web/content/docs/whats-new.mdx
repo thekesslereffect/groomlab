@@ -13,6 +13,50 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.34.0 (October 28, 2026)
+
+- **Interpolate: strands between parted guides keep their length.** A new `blend` param:
+  `directions` (the default for new Interpolate nodes) builds each strand segment by segment
+  along its guides' directions, so hair between guides combed apart turns smoothly from one side
+  to the other instead of being pulled in. `offsets` is the old average. One **smoothness**
+  slider now sets how softly the guides blend into one another, and Keep Clearance checks the
+  skin at every point, so strands no longer dip in between two points.
+- **Guide weight.** Interpolate's `guideWeight` sets how strongly each guide pulls the strands
+  around it against its neighbours. Paint it: **Paint > + New Map > Guide weight**.
+- **Cards along the guides, flat feather cards.** Cards can follow a Guides node (`cardsFrom`
+  guides, or draw a link into its new `guides` input). New Cards nodes flatten feather cards to
+  their vane (Feather Flatten 1) and no longer push feathers apart (Feather Separation 0).
+- **Clump takes a Guides node's curves.** Linking a Guides node into Clump's centers sets
+  `inputCurves`.
+- **Collide: one softness.** `softness` is now a length along the strand: hair starts curving
+  that far before it meets a collider and slides along it, resting at the offset. It replaces
+  `softness` and `smoothing`; the old softness also floated hair off the surface. Set `softness`
+  again on a Collide that used either.
+- **Even roots that hold at any scale.** Scatter spreads its roots with a smooth relaxation, so a
+  scalp in other units (cm or m) grows the same hair, and an edit moves roots only near it. Its
+  `randomness` stops at 1.
+- **Fixes:** Wind and Part no longer flip a segment pointing nearly against them (hair combed
+  across a part). Instance's leaves no longer jump a quarter turn as their strands move, and
+  `spinRandom` turns them either way. Mirror flips feather vanes. A Scatter density from an
+  expression above 1 is no longer cut off. Clump locks no longer cross their strands, and a
+  negative Clump pushes strands out in order. Bend leaves a strand standing straight off the skin
+  as it leaves one a hair off it, and Displace reads its profile along the strand's length, not
+  its points. Guides level -1 takes each family's deepest groups. A Ctrl+Shift lasso drawn off the
+  guides deselects and unfreezes them all.
+- **Simpler nodes.** Rarely used params moved under Advanced, and a few changed. Saved nodes keep
+  their old defaults (Upgrade in the Graph Editor moves them to the new ones). Set these again if
+  you used them:
+  - Renamed: Length `trimMax` is `randomness`, Clump `flatten` is `flatAlong` (`flatDirection`),
+    Bands `randomness` is `melaninRandom`, Tangle `sameClump` is `clumpChannel`, Merge `match`
+    is `strength`.
+  - Removed: Length `trimMin`, Gravity `directionColorSet` (use an expression in `direction`),
+    Interpolate `reach`, `power` and `smoothGuides` (use `smoothness`), Clump `copyNeighbors`.
+  - New defaults for new nodes: Noise and FieldNoise one octave, Flyaway `fraction` 0.01,
+    Direction along `direction` (no line at the scalp's UV seams), FeatherColor `downStrength`
+    1, Split `select` 1, Blend `keepLength` on (each strand keeps its length between the two
+    looks).
+  - Split moved to Utility. The Cinematic hair preset is rebuilt.
+
 ## 0.33.0 (October 27, 2026)
 
 - **Faster grooming on dense grooms.** Combing guides on a 181,000-strand wolf takes about 14 ms
