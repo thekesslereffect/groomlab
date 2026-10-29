@@ -253,20 +253,35 @@ class GraphModel(object):
                                  # the last save (the groom's viewNode and Sculpt edits follow)
         self.copied = {}         # pasted node -> the node it copies, since the last save (Sculpt edits follow)
         self.groom_size = None   # the groom's scalp size (presets.scalp_size): new nodes' defaults fit it
+        # Why the groom's graph could not be read (from_groom with tolerant: a node or port this
+        # GroomLab does not have, as in a graph a newer GroomLab saved); "" when it was. The model is then empty and
+        # never written back (save, save_layout), so the groom keeps its graph.
+        self.unreadable = ""
         if data:
             self.load_dict(data)
 
     # -- Construction ------------------------------------------------------
 
     @classmethod
-    def from_groom(cls, groom, catalog=None):
+    def from_groom(cls, groom, catalog=None, tolerant=False):
+        """The groom's graph. A graph this GroomLab cannot read raises GraphError, or with `tolerant`
+        (the Graph Editor) gives an empty model saying why (`unreadable`), never written back."""
         from maya import cmds
         catalog = catalog or OperatorCatalog.from_maya()
         text = cmds.getAttr(groom + ".graph") or "{}"
         data = json.loads(text)
         if not data:
             data = json.loads(cmds.groomLabDefaultGraph())
-        model = cls(catalog, data)
+        try:
+            model = cls(catalog, data)
+        except GraphError as e:
+            if not tolerant:
+                raise
+            model = cls(catalog)
+            model.unreadable = ("Can't show this groom's graph (%s): it was most likely saved by a newer GroomLab. "
+                                "Update GroomLab to edit it; the groom still evaluates what this version can, and "
+                                "its graph is left as it is." % e)
+            return model
         from groomlab import presets  # Maya's (scalp_size), as cmds above
         model.groom_size = presets.scalp_size(groom)
         if not any("ui" in model.nodes[n] for n in model.order):
@@ -415,6 +430,8 @@ class GraphModel(object):
 
         The groom's viewNode (the Focus node) follows a renamed node and is
         cleared when the node it names is gone."""
+        if self.unreadable:
+            raise GraphError(self.unreadable)
         problems = self.validate()
         if problems:
             raise GraphError("; ".join(problems))
@@ -502,6 +519,8 @@ class GraphModel(object):
         the graph's text now."""
         from maya import cmds
         text = cmds.getAttr(groom + ".graph") or "{}"
+        if self.unreadable:
+            return text  # the graph this GroomLab could not read stays as it is
         stored = json.loads(text) if text.strip() else {}
         if not stored:
             stored = json.loads(cmds.groomLabDefaultGraph())  # the default graph, laid out

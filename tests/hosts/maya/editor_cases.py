@@ -4461,6 +4461,31 @@ class DockableWindowsTest(unittest.TestCase):
             window.stop_tool()
             window.close()
 
+    def test_graph_from_a_newer_groomlab_shows_why_and_is_kept(self):
+        # A graph this GroomLab cannot read (a link into an input only a newer version has): the
+        # Graph Editor opens empty with a message instead of a traceback, Apply refuses, and the
+        # groom's graph is left as it is. Scripts reading it still get the error.
+        import json as _json
+        from groomlab import graph as gm
+        from groomlab.ui import graph_editor
+        graph = _json.loads(cmds.getAttr(self.groom + ".graph") or "{}") or groomlab.get_graph(self.groom)
+        first = graph["nodes"][0]["name"]
+        graph["connections"].append({"from": first, "to": graph["output"], "input": "fromTheFuture"})
+        text = _json.dumps(graph)
+        cmds.setAttr(self.groom + ".graph", text, type="string")
+        with self.assertRaises(gm.GraphError):
+            gm.GraphModel.from_groom(self.groom)
+        editor = graph_editor.GraphEditor(self.groom)
+        try:
+            self.assertTrue(editor.model.unreadable)
+            self.assertIn("newer GroomLab", editor.status.text())
+            self.assertEqual(editor.model.order, [])
+            self.assertFalse(editor.apply())
+            editor.model.save_layout(self.groom)
+            self.assertEqual(cmds.getAttr(self.groom + ".graph"), text)
+        finally:
+            editor.deleteLater()
+
     def test_paint_alpha_picker(self):
         # Paint on a scalp map shows the Alpha picker (not on a guide map): its grid lists None
         # and the library, a pick reaches the tool with its rotation, spacing and invert, shown

@@ -189,8 +189,9 @@ def text_history(widget, redo=False):
 def load_model(groom, catalog=None):
     """The groom's graph as a GraphModel, laid out (from_groom places nodes that have no position):
     what the editor shows on open, Reload, and after the groom's graph changes elsewhere (a preset,
-    a script, undo and redo)."""
-    return gm.GraphModel.from_groom(groom, catalog)
+    a script, undo and redo). A graph this GroomLab cannot read (a newer GroomLab's) gives an empty
+    model saying why (GraphModel.unreadable), never written back."""
+    return gm.GraphModel.from_groom(groom, catalog, tolerant=True)
 
 
 def apply_theme(t=None):
@@ -4501,6 +4502,8 @@ class GraphEditor(QtWidgets.QWidget):
         self.model = load_model(self.groom, self.catalog)
         self.rebuild()  # keeps the selection where the names still exist
         self.refresh_status()
+        if self.model.unreadable:
+            self.report(self.model.unreadable, trouble=True)
 
     def _watch_selection(self):
         from maya import cmds
@@ -4800,7 +4803,7 @@ class GraphEditor(QtWidgets.QWidget):
         self.refresh_status()
         self.view.auto_frame = True
         QtCore.QTimer.singleShot(0, self.view.frame_readable)  # once the view has its size
-        self.report("")
+        self.report(self.model.unreadable, trouble=bool(self.model.unreadable))
 
     def reload(self):
         self.refresh_grooms()
@@ -5960,6 +5963,9 @@ class GraphEditor(QtWidgets.QWidget):
     def apply(self):
         """Write the graph to the groom (undoable)."""
         if not self.groom or not self.same_groom():
+            return False
+        if self.model.unreadable:
+            self.report(self.model.unreadable, trouble=True)
             return False
         problems = self.model.validate()
         if problems:
