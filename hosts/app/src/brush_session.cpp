@@ -51,7 +51,7 @@ void appendColoredLine(DisplayGeometry& g, const std::vector<Vec3f>& points, con
 BrushSession::BrushSession() {
     tool_.settings.brush.radius = 0.25f;
     tool_.settings.screenRadius = 60.0f;
-    tool_.settings.place.soloNewGuides = false;  // off, as Maya's and Blender's Groom Tools start (Ctrl+click selects)
+    tool_.settings.place.soloNewGuides = false;  // off, as Maya's and Blender's Groom Tools start (Shift+click selects)
 }
 
 BrushSession::~BrushSession() = default;
@@ -218,22 +218,6 @@ void BrushSession::showBox(const QPointF& a, const QPointF& b) {
     bool ok = true;
     for (std::size_t k = 0; k < 5 && ok; ++k) ok = atTargetDepth(pixels[k], corners[k]);
     if (ok) appendColoredLine(overlay_, corners, {0.9f, 0.9f, 0.9f});
-    ++overlayVersion_;
-}
-
-void BrushSession::showLasso(const std::vector<QPointF>& points) {
-    overlay_ = DisplayGeometry();
-    overlay_.overlay = true;
-    ringValid_ = false;
-    std::vector<Vec3f> line;
-    for (const QPointF& p : points) {
-        Vec3f at;
-        if (atTargetDepth(port(p), at)) line.push_back(at);
-    }
-    if (line.size() > 1) {
-        line.push_back(line.front());  // closed back to the press
-        appendColoredLine(overlay_, line, {0.9f, 0.9f, 0.9f});
-    }
     ++overlayVersion_;
 }
 

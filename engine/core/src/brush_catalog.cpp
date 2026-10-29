@@ -63,8 +63,8 @@ std::vector<BrushEntry> makeCatalog() {
          kShaping},
         {"shape", "Shape", C::Shape, 0, "shape", 0.5f, true,
          "Paint guides' tubes near the brush: Width grows them (Ctrl shrinks), Flatness flattens them toward a "
-         "ribbon (Ctrl rounds them), Twist turns them about the guide (Ctrl the other way); Shift smooths what it "
-         "paints along the guides. Children and Fill Tubes strands follow.",
+         "ribbon (Ctrl rounds them), Twist turns them about the guide (Ctrl the other way); the Tubes panel's Smooth "
+         "evens out what it painted. Children and Fill Tubes strands follow.",
          with(without(kShaping, {"collide"}), {"tubeChannel", "tube"})},
         // Trim.
         {"cut", "Cut", C::Trim, 0, "cut", 1.0f, false, "Trim guides where the brush touches them.",
@@ -154,7 +154,7 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
         {"newGuides", "New guides", "Match nearby guides' shape and maps, or the length and segments of a standing guide"},
         {"spacing", "Spacing", "The distance between the guides a drag places"},
         {"soloNewGuides", "Solo new guides", "New guides stay unfrozen and every other guide is frozen, so the brushes "
-                                             "work on the new ones at once (Ctrl+click guides with a brush to solo them, "
+                                             "work on the new ones at once (Shift+click guides with a brush to solo them, "
                                              "Unfreeze All to free them all)"},
         {"parts", "Parts", "The next part's name, and the parts drawn so far"},
         {"flow", "Flow", "What a click or drag lays: arrows, or a sink (brush-sized) hair turns around"},

@@ -339,7 +339,7 @@ class TubePanel(QtWidgets.QWidget):
         self.smooth = QtWidgets.QPushButton("Smooth")
         self.smooth.setObjectName("tubeSmooth")
         self.smooth.setToolTip("Smooth the targeted guides' tubes along each guide: what the brush painted evened "
-                               "out, the root's and tip's sections kept (Shift+drag with the brush smooths under it)")
+                               "out, the root's and tip's sections kept")
         self.smooth.clicked.connect(self.smooth_selected)
         self.smooth_what = QtWidgets.QComboBox()
         self.smooth_what.setObjectName("tubeSmoothChannels")
@@ -416,7 +416,7 @@ class TubePanel(QtWidgets.QWidget):
             w.setEnabled(tube is not None)
         if tube is None:
             self.targets.setText("No guides selected or soloed: the shape and values here go to the guides Place and "
-                                 "Draw make. Select guides (Select tool, or Ctrl+Shift with a brush) to set theirs.")
+                                 "Draw make. Select guides (Select tool, or Shift with a brush) to set theirs.")
             self.show_mixed(False)
         else:
             count = len(self._selection)
@@ -1594,7 +1594,7 @@ class ToolPalette(QtWidgets.QWidget):
         b.setMinimumSize(theme.px(64), theme.px(56))
         b.setProperty("role", "tool")
         b.setToolTip("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again "
-                     "(a brush's Ctrl+click where no guide is does the same)")
+                     "(a brush's Shift+click where no guide is does the same)")
         b.clicked.connect(lambda: self.paint_tab.unfreeze_all())
         self.buttons.setdefault("unfreeze", b)  # its icon follows the theme
         return b
@@ -1917,7 +1917,7 @@ class ToolPalette(QtWidgets.QWidget):
                 self.show_tool_settings()
             if not self.radius.slider.isSliderDown():
                 self.radius.setValue(cmds.groomLabBrushCtx(ctx, query=True, radius=True))
-            # Shift+click on a guide in the viewport solos it and picks its group.
+            # The group or level picked from the viewport (the level keys) shows here too.
             if self.tool != PART:
                 picked = cmds.groomLabBrushCtx(ctx, query=True, group=True)
                 if picked:

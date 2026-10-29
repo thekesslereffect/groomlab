@@ -3117,16 +3117,16 @@ void writeMaps(const Session& s, GroomFile& file) {
 json toolCatalogJson() {
     json tools = json::array();
     for (const BrushEntry& e : brushCatalog()) {
-        // Whether Ctrl selects guides with it (a guide brush) or is its opposite (painting, Part, Flow).
-        bool ctrlSelects = false;
+        // Whether Shift selects guides with it (a guide brush) or smooths (painting).
+        bool shiftSelects = false;
         try {
             BrushToolSettings probe;
             probe.setMode(e.id == kFreezeTool ? "paint" : e.id);  // (Freeze: Paint on the guides' freeze mask)
-            ctrlSelects = probe.ctrlSelects();
+            shiftSelects = probe.shiftSelects();
         } catch (const std::invalid_argument&) {
         }
         tools.push_back({{"id", e.id},
-                         {"ctrlSelects", ctrlSelects},
+                         {"shiftSelects", shiftSelects},
                          {"label", e.label},
                          {"category", brushCategoryName(e.category)},
                          {"order", e.order},

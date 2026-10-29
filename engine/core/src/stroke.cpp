@@ -310,13 +310,24 @@ BrushSettings BrushTool::pressed() const {
     }
     if (settings.pressure) b.strength *= pressure_;
     if (inverted_) {
-        // Ctrl (where it does not select: settings.ctrlSelects): the opposite action. Signed brushes flip; a gray map is painted toward 0 (unfreeze,
+        // Ctrl: the opposite action. The brushes that work both ways flip (Length shortens, Lift
+        // lays down, Twist and Curl turn back, Attract pushes apart, Direction turns away, Noise
+        // smooths, Shape shrinks, rounds or untwists); a gray map is painted toward 0 (unfreeze,
         // erase a layer, no hair on a density map, thinner on a width map), or toward 1 when the
         // value is 0 (grayCtrlTarget; a color map's inverse color is MapDab's); Cut grows instead.
+        // Comb, Slide, Smooth, Straighten and Erase have no opposite: Ctrl leaves them as they are.
         switch (b.mode) {
             case BrushMode::Attribute: b.value = grayCtrlTarget(b.value); break;
             case BrushMode::Cut: b.mode = BrushMode::Length; break;
-            default: b.strength = -b.strength; break;
+            case BrushMode::Lift:
+            case BrushMode::Length:
+            case BrushMode::ShapeTube:
+            case BrushMode::Twist:
+            case BrushMode::Curl:
+            case BrushMode::Attract:
+            case BrushMode::Direction:
+            case BrushMode::Noise: b.strength = -b.strength; break;
+            default: break;
         }
     }
     return b;
@@ -462,7 +473,7 @@ void BrushTool::stampOverlays(const ToolView& view, const Vec3f& center, const V
 }
 
 bool BrushTool::begin(StrokeHost& host, const ToolView& view, float x, float y, float pressure, unsigned modifiers) {
-    inverted_ = (modifiers & kStrokeCtrl) != 0 && !settings.ctrlSelects();
+    inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
     return startStroke(host, view, x, y);
 }
@@ -1017,10 +1028,12 @@ void BrushTool::cancel(StrokeHost* host) {
 }
 
 void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, float pressure, unsigned modifiers) {
-    inverted_ = (modifiers & kStrokeCtrl) != 0 && !settings.ctrlSelects();  // (a guide brush's Ctrl selects: the host's)
+    inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
     if (modifiers & kStrokeShift) {
-        // A drag smooths (decided on drag); a release without one does nothing.
+        // Painting, a drag smooths (decided on drag); a release without one does nothing. A guide
+        // brush's Shift selects (the host's): nothing here.
+        if (settings.shiftSelects()) return;
         shiftPending_ = true;
         pressX_ = x;
         pressY_ = y;
@@ -1064,10 +1077,11 @@ StrokeRelease BrushTool::release(StrokeHost& host, const ToolView& view) {
 
 bool BrushTool::stroke(StrokeHost& host, const ToolView& view, const std::vector<std::array<float, 2>>& points, float pressure,
                        unsigned modifiers, const std::function<void()>& afterDab) {
-    inverted_ = (modifiers & kStrokeCtrl) != 0 && !settings.ctrlSelects();
+    inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
+    if ((modifiers & kStrokeShift) && settings.shiftSelects()) return false;  // a guide brush's Shift selects: the host's
     const BrushMode saved = settings.brush.mode;
-    if (modifiers & kStrokeShift) useShiftSmoothing(settings.brush);  // as a Shift+drag does
+    if (modifiers & kStrokeShift) useShiftSmoothing(settings.brush);  // as a Shift+drag while painting does
     if (points.empty() || !startStroke(host, view, points[0][0], points[0][1])) {
         endShiftSmoothing(settings.brush, saved);
         return false;

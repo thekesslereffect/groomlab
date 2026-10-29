@@ -442,7 +442,7 @@ class ToolsTest(unittest.TestCase):
         t.radius = r0
         t.strength = 1.0
 
-        # Shift+click on a guide: its group (the level) picked.
+        # Shift+click on a guide with a guide brush: it is selected (the rest frozen), the group kept.
         bpy.ops.groomlab.guides_edit(action="CHILDREN")
         names = [g.name for g in t.groups]
         self.assertEqual(len(names), 2, names)
@@ -477,26 +477,31 @@ class ToolsTest(unittest.TestCase):
         self.drag(ts, [[lo[0], lo[1], 1.0], [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, 1.0], [hi[0], hi[1], 1.0]])
         self.assertEqual(t.selected_count, 5)
         t.select_shape = "LASSO"
-        # A guide brush selects with Ctrl: a click where its ring holds no guide deselects and
-        # unfreezes all, Ctrl+Shift+drag lassos (the rest frozen), a Ctrl click adds the ring's.
+        # A guide brush selects with Shift: a click where its ring holds no guide deselects and
+        # unfreezes all, a Shift click adds the ring's guides, a Shift drag paints them in (the
+        # rest frozen). Ctrl does not select.
         bpy.ops.groomlab.tool(tool="comb")
         radius = t.radius
         t.radius = 10
-        self.click(ts, lo[0], lo[1], ctrl=True)
-        self.assertEqual(t.selected_count, 0)
-        self.drag(ts, lasso + [lasso[0]], ctrl=True, shift=True)
-        self.assertEqual(t.selected_count, 5)
-        # A lasso round no guide (off them): deselects and unfreezes all, as a click on none.
-        off = [[lo[0] - 20, lo[1] - 20, 1.0], [lo[0] + 20, lo[1] - 20, 1.0], [lo[0] + 20, lo[1] + 20, 1.0],
-               [lo[0] - 20, lo[1] + 20, 1.0], [lo[0] - 20, lo[1] - 20, 1.0]]
-        self.drag(ts, off, ctrl=True, shift=True)
+        self.click(ts, lo[0], lo[1], shift=True)
         self.assertEqual(t.selected_count, 0)
         self.assertEqual(t.frozen_count, 0)
-        self.drag(ts, lasso + [lasso[0]], ctrl=True, shift=True)
-        self.assertEqual(t.selected_count, 5)
-        self.click(ts, lo[0], lo[1], ctrl=True)
         t.radius = 2000
-        self.click(ts, tip[0], tip[1], ctrl=True)
+        self.click(ts, tip[0], tip[1], shift=True)
+        self.assertEqual(t.selected_count, 5)
+        t.radius = 10
+        self.click(ts, lo[0], lo[1], shift=True)
+        self.assertEqual(t.selected_count, 0)
+        t.radius = 60
+        self.drag(ts, [[p[0], p[1], 1.0] for p in pixels], shift=True)
+        self.assertGreater(t.selected_count, 0)
+        self.assertGreater(t.frozen_count, 0)
+        t.radius = 10
+        self.click(ts, lo[0], lo[1], shift=True)
+        self.click(ts, tip[0], tip[1], ctrl=True)  # Ctrl: a stroke (Comb has no opposite), no selection
+        self.assertEqual(t.selected_count, 0)
+        t.radius = 2000
+        self.click(ts, tip[0], tip[1], shift=True)
         self.assertEqual(t.selected_count, 5)
         t.radius = radius
         bpy.ops.groomlab.tool(tool="select")

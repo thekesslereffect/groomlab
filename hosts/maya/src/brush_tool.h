@@ -144,11 +144,10 @@ public:
     // step timed: debugStrokeTimes.
     bool simulateStroke(const std::vector<std::pair<short, short>>& points, bool ctrl = false, bool shift = false,
                         bool draw = false);
-    // A Ctrl drag (or click, one point) through the given view points, as the mouse would: the
+    // A Shift drag (or click, one point) through the given view points, as the mouse would: the
     // selection painted (a click adds the guides in the ring; on none, deselects and unfreezes
-    // all); `lasso`: a Ctrl+Shift drag, the guides inside the path added. Returns how many guides
-    // are selected after it.
-    int simulateSelectPaint(const std::vector<std::pair<short, short>>& points, bool lasso = false);
+    // all). Returns how many guides are selected after it.
+    int simulateSelectPaint(const std::vector<std::pair<short, short>>& points);
     // The last drawn simulateStroke's steps in milliseconds, each to its redrawn frame: the press,
     // every point after it, the release (benchmarks: -debugStrokeTimes).
     const std::vector<double>& debugStrokeTimes() const { return debugStrokeTimes_; }
@@ -240,19 +239,17 @@ private:
     short adjustX_ = 0, adjustY_ = 0;
     float adjustRadius_ = 0.0f, adjustValue_ = 0.0f;
 
-    // Ctrl (a guide brush: BrushToolSettings::ctrlSelects): selecting guides without leaving the
+    // Shift (a guide brush: BrushToolSettings::shiftSelects): selecting guides without leaving the
     // brush. A drag paints the selection with the brush ring (each guide it passes over added,
     // shown live), the release one undo step with the rest frozen (as the Select tool's solo); a
     // click adds the guides in the ring, the rest frozen (on none: nothing selected, every guide
-    // unfrozen). Ctrl+Shift: a drag lassos (drawn as it goes; the guides inside added on release).
-    bool painting_ = false, paintMoved_ = false, lasso_ = false;
+    // unfrozen).
+    bool painting_ = false, paintMoved_ = false;
     short paintX_ = 0, paintY_ = 0;
     std::vector<GuideId> paintBefore_;  // the selection at the press
     std::set<GuideId> paintedGuides_;  // the guides the ring passed over
-    std::vector<std::array<float, 2>> lassoPath_;
     void paintSelection(short x, short y);
-    void drawLasso(MHWRender::MUIDrawManager& draw) const;
-    void beginPaintSelection(short x, short y, bool lasso);
+    void beginPaintSelection(short x, short y);
     void movePaintSelection(short x, short y);
     void finishPaintSelection();
 };

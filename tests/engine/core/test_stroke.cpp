@@ -270,33 +270,43 @@ TEST(Stroke, ScriptedCombIsTheCoreStroke) {
     EXPECT_NE(g.guides(), direct.toJson());
 }
 
-TEST(Stroke, CtrlSelectsWithGuideBrushesInvertsPaintingAndShiftDragSmooths) {
+TEST(Stroke, CtrlIsTheOppositeShiftSelectsWithGuideBrushesAndSmoothsPainting) {
     const ToolView view = frontView();
     const auto path = screenLine(view, {-0.3f, 1.1f, 0.6f}, {0.3f, 1.1f, 0.6f}, 12);
-    // Ctrl is the hosts' selection with a guide brush: a stroke the core is handed with it is the
-    // plain one (Lift stands the guides up all the same). Painting a guide attribute (Freeze),
-    // Ctrl is still the opposite (it unfreezes), as on maps, Part and Flow.
+    // Ctrl is every brush's opposite: Lift lays the guides down.
     std::string lifted, laid;
     for (const bool ctrl : {false, true}) {
         Groom g;
         BrushTool tool;
         tool.settings.setMode("lift");
         tool.settings.screenRadius = 150.0f;
-        EXPECT_TRUE(tool.settings.ctrlSelects());
         ASSERT_TRUE(tool.stroke(*g.host, view, path, 1.0f, ctrl ? kStrokeCtrl : 0u));
         (ctrl ? laid : lifted) = g.guides();
     }
-    EXPECT_EQ(lifted, laid);
-    for (const char* mode : {"comb", "smooth", "length", "cut", "erase", "shape", "noise"}) {
+    EXPECT_NE(lifted, laid);
+    // Comb has no opposite: Ctrl leaves it as it is.
+    std::string combed, ctrlCombed;
+    for (const bool ctrl : {false, true}) {
+        Groom g;
+        BrushTool tool;
+        tool.settings.setMode("comb");
+        tool.settings.screenRadius = 150.0f;
+        ASSERT_TRUE(tool.stroke(*g.host, view, path, 1.0f, ctrl ? kStrokeCtrl : 0u));
+        (ctrl ? ctrlCombed : combed) = g.guides();
+    }
+    EXPECT_EQ(combed, ctrlCombed);
+    // Shift selects with the guide brushes (the hosts'), smooths while painting.
+    for (const char* mode : {"comb", "smooth", "length", "cut", "erase", "noise", "shape"}) {
         BrushToolSettings s;
         s.setMode(mode);
-        EXPECT_TRUE(s.ctrlSelects()) << mode;
+        EXPECT_TRUE(s.shiftSelects()) << mode;
     }
     for (const char* mode : {"paint", "part", "flow", "place", "draw"}) {
         BrushToolSettings s;
         s.setMode(mode);
-        EXPECT_FALSE(s.ctrlSelects()) << mode;
+        EXPECT_FALSE(s.shiftSelects()) << mode;
     }
+    // Painting a guide attribute (Freeze), Ctrl is the opposite: it unfreezes.
     std::string frozen, thawed;
     for (const bool ctrl : {false, true}) {
         Groom g;
@@ -306,16 +316,49 @@ TEST(Stroke, CtrlSelectsWithGuideBrushesInvertsPaintingAndShiftDragSmooths) {
         tool.settings.brush.value = 1.0f;
         tool.settings.paintKind = "guides";
         tool.settings.screenRadius = 150.0f;
-        EXPECT_FALSE(tool.settings.ctrlSelects());
+        EXPECT_FALSE(tool.settings.shiftSelects());
         if (ctrl) ASSERT_TRUE(tool.stroke(*g.host, view, path, 1.0f, 0u));  // frozen first, then Ctrl unfreezes
         ASSERT_TRUE(tool.stroke(*g.host, view, path, 1.0f, ctrl ? kStrokeCtrl : 0u));
         (ctrl ? thawed : frozen) = g.guides();
     }
     EXPECT_NE(frozen, thawed);
-    // Shift: a click does nothing (no stroke, no step), a drag smooths while the tool stays the Comb.
+    // The Shape brush: Ctrl shrinks the tubes it grows.
+    std::string grown, shrunk;
+    for (const bool ctrl : {false, true}) {
+        Groom g;
+        BrushTool tool;
+        tool.settings.setMode("shape");
+        tool.settings.brush.strength = 0.5f;
+        tool.settings.screenRadius = 150.0f;
+        ASSERT_TRUE(tool.stroke(*g.host, view, path, 1.0f, ctrl ? kStrokeCtrl : 0u));
+        const GuideHierarchy h = GuideHierarchy::fromJson(g.guides());
+        float width = 0.0f;
+        for (const HierarchyGuide& guide : h.guides()) {
+            for (const float w : guide.tube.width) width += w;
+        }
+        (ctrl ? shrunk : grown) = std::to_string(width);
+    }
+    EXPECT_GT(std::stof(grown), std::stof(shrunk));
+    // A guide brush handed Shift strokes nothing (the host selects instead).
+    {
+        Groom g(20, 3);
+        BrushTool tool;
+        tool.settings.setMode("comb");
+        tool.settings.screenRadius = 150.0f;
+        EXPECT_FALSE(tool.stroke(*g.host, view, path, 1.0f, kStrokeShift));
+        tool.press(*g.host, view, path[0][0], path[0][1], 1.0f, kStrokeShift);
+        for (std::size_t i = 1; i < path.size(); ++i) tool.drag(*g.host, view, path[i][0], path[i][1], 1.0f);
+        EXPECT_FALSE(tool.stroking());
+        EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::None);
+        EXPECT_TRUE(g.host->edits().empty());
+    }
+    // Painting, Shift: a click does nothing (no stroke, no step), a drag smooths while the tool
+    // stays the Paint brush.
     Groom g(20, 3);
     BrushTool tool;
-    tool.settings.setMode("comb");
+    tool.settings.setMode("paint");
+    tool.settings.brush.attribute = "mask";
+    tool.settings.paintKind = "guides";
     tool.settings.screenRadius = 150.0f;
     tool.press(*g.host, view, path[0][0], path[0][1], 1.0f, kStrokeShift);
     EXPECT_FALSE(tool.stroking());
@@ -326,11 +369,9 @@ TEST(Stroke, CtrlSelectsWithGuideBrushesInvertsPaintingAndShiftDragSmooths) {
     for (std::size_t i = 1; i < path.size(); ++i) tool.drag(*g.host, view, path[i][0], path[i][1], 1.0f);
     EXPECT_TRUE(tool.stroking());
     EXPECT_EQ(tool.settings.brush.mode, BrushMode::Smooth);
-    EXPECT_EQ(tool.toolModeName(), "comb");
-    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::Stroke);
-    EXPECT_EQ(tool.settings.brush.mode, BrushMode::Comb);
-    ASSERT_EQ(g.host->edits().size(), clicked + 1);
-    EXPECT_EQ(g.host->edits().back().mode, "smooth");
+    EXPECT_EQ(tool.toolModeName(), "paint");
+    tool.release(*g.host, view);
+    EXPECT_EQ(tool.settings.brush.mode, BrushMode::Attribute);
 }
 
 TEST(Stroke, PaintingGuideWeightReshapesTheHairWhereGuidesGiveWay) {
