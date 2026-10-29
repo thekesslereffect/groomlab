@@ -190,6 +190,9 @@ target_compile_definitions(groomlab_app_lib PUBLIC "GROOMLAB_SHIPPED_PRESETS=${_
 # The compound nodes shipped with every host (hosts/maya/nodes), found the same way.
 groomlab_path_literal(_shipped_nodes "${PROJECT_SOURCE_DIR}/hosts/maya/nodes")
 target_compile_definitions(groomlab_app_lib PUBLIC "GROOMLAB_SHIPPED_NODES=${_shipped_nodes}")
+# The brush alphas shipped with every host (hosts/maya/alphas), found the same way.
+groomlab_path_literal(_shipped_alphas "${PROJECT_SOURCE_DIR}/hosts/maya/alphas")
+target_compile_definitions(groomlab_app_lib PUBLIC "GROOMLAB_SHIPPED_ALPHAS=${_shipped_alphas}")
 # The sample meshes (GroomLab > Add Sample Mesh: Nika, Manny, the wolf; CC BY 4.0), the same way.
 groomlab_path_literal(_shipped_meshes "${PROJECT_SOURCE_DIR}/hosts/maya/meshes")
 target_compile_definitions(groomlab_app_lib PUBLIC "GROOMLAB_SHIPPED_MESHES=${_shipped_meshes}")
@@ -211,6 +214,8 @@ qt_add_library(groomlab_app_ui STATIC
     src/app_graph_actions.cpp
     src/app_list_actions.cpp
     src/app_output_actions.cpp
+    src/alpha_picker.cpp
+    src/alpha_picker.h
     src/brush_panel.cpp
     src/brush_panel.h
     src/groom_tools.cpp
@@ -309,7 +314,9 @@ function(groomlab_app_deploy target)
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/presets" "$<TARGET_FILE_DIR:${target}>/presets"
         COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${target}>/nodes"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/nodes" "$<TARGET_FILE_DIR:${target}>/nodes"
-        COMMENT "Copying the graph presets and compound nodes beside ${target}")
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${target}>/alphas"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/alphas" "$<TARGET_FILE_DIR:${target}>/alphas"
+        COMMENT "Copying the graph presets, compound nodes and brush alphas beside ${target}")
     if(WIN32)
         if(GROOMLAB_TBB_RUNTIME)
             add_custom_command(TARGET ${target} POST_BUILD
@@ -343,6 +350,7 @@ set(GROOMLAB_APP_DIR "GroomLabApp")
 install(TARGETS groomlab_app RUNTIME DESTINATION "${GROOMLAB_APP_DIR}" COMPONENT App)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/presets/" DESTINATION "${GROOMLAB_APP_DIR}/presets" COMPONENT App)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/nodes/" DESTINATION "${GROOMLAB_APP_DIR}/nodes" COMPONENT App)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/alphas/" DESTINATION "${GROOMLAB_APP_DIR}/alphas" COMPONENT App)
 # The sample meshes (CC BY 4.0, REUSE.toml): their OBJs (the rigs are Maya's and Blender's).
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/meshes/" DESTINATION "${GROOMLAB_APP_DIR}/meshes" COMPONENT App
         FILES_MATCHING PATTERN "*.obj")

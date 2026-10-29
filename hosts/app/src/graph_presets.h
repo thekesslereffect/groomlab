@@ -22,6 +22,8 @@ std::string shippedPresetDir();
 // The compound nodes shipped with the app (node_library.h): the "nodes" folder beside the
 // executable, else the source tree's (hosts/maya/nodes).
 std::string shippedNodeFolder();
+// The brush alphas shipped with the app (brush_alpha.h), found the same way.
+std::string shippedAlphaFolder();
 // The sample meshes shipped with the app (GroomLab > Add Sample Mesh; CC BY 4.0): the "meshes"
 // folder beside the executable, else the source tree's (hosts/maya/meshes).
 std::string shippedMeshFolder();

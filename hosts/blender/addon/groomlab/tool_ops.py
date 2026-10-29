@@ -14,10 +14,11 @@ values, so the tests drive it with synthetic events and a synthetic view."""
 import os
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, StringProperty
+from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty,
+                       StringProperty)
 from bpy_extras.io_utils import ImportHelper
 
-from . import actions, display, groom, icons, props, tools
+from . import actions, display, groom, icons, process, props, tools
 from . import definitions as defs
 from .helper_client import HelperError, sentence
 
@@ -730,6 +731,7 @@ class GROOMLAB_OT_group_new(GroomToolOperator):
 
 GROUP_ACTIONS = [("RENAME", defs.label("group.rename"), defs.tip("group.rename")),
                  ("SELECT", defs.label("group.select"), defs.tip("group.select")),
+                 ("RESET_SEGMENTS", defs.label("group.resetSegments"), defs.tip("group.resetSegments")),
                  ("DELETE", defs.label("group.delete"), defs.tip("group.delete")),
                  ("DEFAULT_COLOR", defs.label("group.defaultColor"), defs.tip("group.defaultColor")),
                  ("HIDE", "Show / Hide", "Show or hide the group in the viewport"),
@@ -785,6 +787,10 @@ class GROOMLAB_OT_group_edit(GroomToolOperator):
                 tools.guides_edit(scalp, "remove_group", group=group)
             elif self.action == "DEFAULT_COLOR":
                 tools.set_group_color(scalp, group, None)
+            elif self.action == "RESET_SEGMENTS":
+                segments = tools.reset_group_segments(scalp, group)
+                tools.refresh_segments(scalp, context.scene)
+                tools.status(context.scene, "Every guide of %s at %d segments (frozen ones kept)." % (group, segments))
             elif self.action == "HIDE":
                 hidden = set(g.name for g in context.scene.groomlab_tools.groups if g.hidden)
                 hidden ^= {group}
@@ -1184,6 +1190,60 @@ class GROOMLAB_OT_map_show_file(MapOperator):
             self.report({"ERROR"}, "%s has no image on disk" % m.name)
             return {"CANCELLED"}
         bpy.ops.wm.path_open(filepath=folder)
+        return {"FINISHED"}
+
+
+# ---- Brush alphas -------------------------------------------------------------------------------------
+
+class GROOMLAB_OT_alpha_add(bpy.types.Operator, ImportHelper):
+    """Copy images (PNG, JPEG, TGA, PSD...) into your alpha folder (Documents/GroomLab/alphas, every host lists
+    them) and paint with the last one"""
+    bl_idname = "groomlab.alpha_add"
+    bl_label = "Add Alpha"
+    filter_glob: StringProperty(default=IMAGE_GLOB, options={"HIDDEN"})
+    files: CollectionProperty(type=bpy.types.OperatorFileListElement, options={"HIDDEN", "SKIP_SAVE"})
+    directory: StringProperty(subtype="DIR_PATH", options={"HIDDEN"})
+
+    def execute(self, context):
+        from . import alphas
+        names = [f.name for f in self.files if f.name] or [os.path.basename(self.filepath)]
+        folder = self.directory or os.path.dirname(self.filepath)
+        added = ""
+        for name in names:
+            try:
+                added = process.call("add_brush_alpha", file=os.path.join(folder, name))["path"]
+            except HelperError as e:
+                self.report({"ERROR"}, str(e))
+        if not added:
+            return {"CANCELLED"}
+        alphas.library(refresh=True)
+        context.scene.groomlab_tools.alpha = added
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_alpha_folder(bpy.types.Operator):
+    """Open your alpha folder (Documents/GroomLab/alphas): images dropped there are listed too"""
+    bl_idname = "groomlab.alpha_folder"
+    bl_label = "Open Alpha Folder"
+
+    def execute(self, context):
+        from . import alphas
+        folder = alphas.user_dir()
+        if not folder:
+            self.report({"ERROR"}, "no alpha folder (set GROOMLAB_USER_ALPHAS)")
+            return {"CANCELLED"}
+        os.makedirs(folder, exist_ok=True)
+        bpy.ops.wm.path_open(filepath=folder)
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_alpha_clear(bpy.types.Operator):
+    """Paint without an alpha: the brush's falloff alone"""
+    bl_idname = "groomlab.alpha_clear"
+    bl_label = "Clear Alpha"
+
+    def execute(self, context):
+        context.scene.groomlab_tools.alpha = ""
         return {"FINISHED"}
 
 
@@ -1898,6 +1958,7 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_map_new, GROOMLAB_OT_paint_param, GROOMLAB_OT_map_remove, GROOMLAB_OT_map_fill,
            GROOMLAB_OT_map_import, GROOMLAB_OT_map_relink, GROOMLAB_OT_map_rename, GROOMLAB_OT_map_convert,
            GROOMLAB_OT_map_set_channels, GROOMLAB_OT_map_reload, GROOMLAB_OT_map_show_file,
+           GROOMLAB_OT_alpha_add, GROOMLAB_OT_alpha_folder, GROOMLAB_OT_alpha_clear,
            GROOMLAB_OT_group_color, GROOMLAB_OT_group_promote_demote, GROOMLAB_OT_guides_mirror_group,
            GROOMLAB_OT_guides_reparent, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_flow_clear,
            GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,

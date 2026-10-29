@@ -95,6 +95,11 @@ const char* kPreviewResample[] = {"-prs", "-previewResample"};
 const char* kEndPreview[] = {"-epv", "-endPreview"};
 // Each target guide's segment count (points - 1): the slider's value.
 const char* kPointCounts[] = {"-pcn", "-pointCounts"};
+// The segments a group's new guides get (with -group; 0: the tool's own). -resample sets them too
+// when it rebuilds a whole group (-group), a level (-level) or every guide (nothing selected).
+const char* kSetGroupSegments[] = {"-sgs", "-setGroupSegments"};
+// Every guide of a group (-group) back to its segments, those with their own too (frozen kept).
+const char* kResetGroupSegments[] = {"-rgs", "-resetGroupSegments"};
 const char* kOnlySelected[] = {"-osl", "-onlySelected"};
 const char* kFreezeOthers[] = {"-fzo", "-freezeOthers"};
 const char* kReshape[] = {"-rsh", "-reshape"};  // <guide id> <curve>, multi-use
@@ -203,7 +208,7 @@ void describeGroups(const GuideHierarchy& h, const std::string& colorSeed, MStri
         const std::array<float, 3> drawn = g.hasColor ? g.color : shown != automatic.end() ? shown->second : std::array<float, 3>{};
         const MString row = MString(g.name.c_str()) + "|" + (parent ? parent->name.c_str() : "") + "|" +
                             h.groupDepth(g.id) + "|" + static_cast<unsigned>(h.guidesInGroup(g.id).size()) + "|" +
-                            guideColorHex(drawn).c_str();
+                            guideColorHex(drawn).c_str() + "|" + g.segments;
         out.append(row);
     }
 }
@@ -287,6 +292,8 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kRemoveAttribute[0], kRemoveAttribute[1], MSyntax::kString);
     s.addFlag(kRenameAttribute[0], kRenameAttribute[1], MSyntax::kString, MSyntax::kString);
     s.addFlag(kResample[0], kResample[1], MSyntax::kLong);
+    s.addFlag(kSetGroupSegments[0], kSetGroupSegments[1], MSyntax::kLong);
+    s.addFlag(kResetGroupSegments[0], kResetGroupSegments[1]);
     s.addFlag(kPreviewResample[0], kPreviewResample[1], MSyntax::kLong);
     s.addFlag(kEndPreview[0], kEndPreview[1]);
     s.addFlag(kPointCounts[0], kPointCounts[1]);
@@ -328,7 +335,8 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                             int(db.isFlagSet(kPromote[0])) + int(db.isFlagSet(kDemote[0])) + int(db.isFlagSet(kMirror[0])) +
                             int(db.isFlagSet(kSetAttribute[0])) + int(db.isFlagSet(kListAttributes[0])) +
                             int(db.isFlagSet(kRemoveAttribute[0])) + int(db.isFlagSet(kRenameAttribute[0])) +
-                            int(db.isFlagSet(kResample[0])) + int(db.isFlagSet(kReshape[0])) +
+                            int(db.isFlagSet(kResample[0])) + int(db.isFlagSet(kReshape[0])) + int(db.isFlagSet(kSetGroupSegments[0])) +
+                            int(db.isFlagSet(kResetGroupSegments[0])) +
                             int(db.isFlagSet(kPreviewResample[0])) + int(db.isFlagSet(kEndPreview[0])) +
                             int(db.isFlagSet(kPointCounts[0])) + int(db.isFlagSet(kSetTube[0])) + int(db.isFlagSet(kTube[0])) +
                             int(db.isFlagSet(kTubeShapes[0])) + int(db.isFlagSet(kEditTubeShape[0])) +
@@ -367,6 +375,12 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 }
             }
             return ids;
+        };
+        // Resample over whole groups (-group, -level, or every guide with none selected): guides
+        // with segments of their own keep them. Else the picked guides get segments of their own.
+        auto resampleGroupWide = [&]() {
+            return !db.isFlagSet(kGuide[0]) &&
+                   (db.isFlagSet(kGroup[0]) || db.isFlagSet(kLevel[0]) || readGuideSelection(groomPath.node()).empty());
         };
         if (db.isFlagSet(kPreviewTubeShape[0])) {
             // A library shape's new points shown on the groom (the stored guides, the shape
@@ -413,16 +427,9 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             const HierarchyPtr authored = shape->authoredHierarchy();  // as stored, rooted: never a preview
             if (!authored) return fail(kName, "the groom has no guides");
             auto preview = std::make_shared<GuideHierarchy>(*authored);
-            int count = 0;
-            for (const GuideId id : resampleTargets(*preview)) {
-                const HierarchyGuide* g = preview->guide(id);
-                if (!g || g->points.size() < 2) continue;
-                preview->setPoints(id, resampleSmoothCurve(g->points.data(), g->points.size(),
-                                                           static_cast<std::size_t>(segments) + 1));
-                ++count;
-            }
+            const std::size_t count = preview->resample(resampleTargets(*preview), segments, resampleGroupWide());  // as -resample
             shape->setPreviewHierarchy(preview);
-            setResult(count);
+            setResult(static_cast<int>(count));
             return MS::kSuccess;
         }
 
@@ -616,7 +623,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                     if (!curveWorldData(curve, data)) return fail(kName, curve + " is not a nurbsCurve");
                     std::vector<Vec3f> pts = sampleCurveData(data);
                     if (pts.size() < 2) return fail(kName, curve + " is too short");
-                    added.append(std::to_string(h->addGuide(gid, std::move(pts), tube)).c_str());
+                    added.append(std::to_string(h->addGuide(gid, h->withGroupSegments(gid, std::move(pts)), tube)).c_str());
                 }
                 setResult(added);
             } else if (db.isFlagSet(kFromNode[0])) {
@@ -642,7 +649,10 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 }
                 if (baked.empty()) return fail(kName, "node '" + nodeName + "' made no guides");
                 MStringArray added;
-                for (const GuideId id : h->addGuides(gid, baked, tubeFlags())) added.append(std::to_string(id).c_str());
+                for (const GuideId id : h->addGuides(gid, baked, tubeFlags())) {
+                    h->setPoints(id, h->withGroupSegments(gid, h->guide(id)->points));  // the group's segments, if it has its own
+                    added.append(std::to_string(id).c_str());
+                }
                 setResult(added);
             } else if (db.isFlagSet(kGenerate[0])) {
                 // Parents: -guide ids, or the selection with -onlySelected, else the whole group.
@@ -771,15 +781,35 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 if (segments < 1 || segments > 256) return fail(kName, "-resample takes 1 to 256 segments");
                 const std::vector<GuideId> ids = resampleTargets(*h);
                 if (ids.empty()) return fail(kName, "the groom has no guides to resample");
-                for (const GuideId id : ids) {
-                    const HierarchyGuide* g = h->guide(id);
-                    if (!g) return fail(kName, MString("no guide ") + std::to_string(id).c_str());
-                    if (g->points.size() < 2) continue;
-                    // Along the smooth curve through its points, as the viewport draws it.
-                    h->setPoints(id, resampleSmoothCurve(g->points.data(), g->points.size(),
-                                                         static_cast<std::size_t>(segments) + 1));
+                // A whole group, a level or every guide: their groups' new guides get these segments too.
+                const bool groupWide = resampleGroupWide();
+                std::vector<GroupId> groups;
+                if (db.isFlagSet(kGroup[0])) {
+                    groups.push_back(h->findGroup(flagString(db, kGroup[0], "").asChar()));
+                } else if (groupWide) {
+                    int level = -1;
+                    if (db.isFlagSet(kLevel[0])) db.getFlagArgument(kLevel[0], 0, level);
+                    for (const GuideGroup& g : h->groups()) {
+                        if (level < 0 || h->groupDepth(g.id) == level) groups.push_back(g.id);
+                    }
                 }
-                setResult(static_cast<int>(ids.size()));
+                for (const GroupId gid : groups) {
+                    if (gid != kNoGroup) h->setGroupSegments(gid, segments);
+                }
+                setResult(static_cast<int>(h->resample(ids, segments, groupWide)));  // frozen guides kept
+            } else if (db.isFlagSet(kSetGroupSegments[0])) {
+                int segments = 0;
+                db.getFlagArgument(kSetGroupSegments[0], 0, segments);
+                const MString groupName = flagString(db, kGroup[0], "");
+                const GroupId gid = h->findGroup(groupName.asChar());
+                if (gid == kNoGroup) return fail(kName, "-setGroupSegments needs -group, a guide group of the groom");
+                h->setGroupSegments(gid, segments);
+            } else if (db.isFlagSet(kResetGroupSegments[0])) {
+                const GroupId gid = h->findGroup(flagString(db, kGroup[0], "").asChar());
+                if (gid == kNoGroup) return fail(kName, "-resetGroupSegments needs -group, a guide group of the groom");
+                const int segments = h->resetGroupSegments(gid);
+                if (segments < 1) return fail(kName, "the group has no guides");
+                setResult(segments);
             } else if (db.isFlagSet(kReshape[0])) {
                 // Guides take the shapes of curves (Curves to Guides: edited copies coming back).
                 // Only guides whose curve differs from their shape change; parents first, so an

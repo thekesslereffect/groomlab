@@ -26,6 +26,7 @@
 #include <QLabel>
 #include <QSet>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QLayout>
 #include <QPushButton>
@@ -49,6 +50,7 @@
 #include <QSplitter>
 #include <QTabWidget>
 
+#include "alpha_picker.h"
 #include "app_shell.h"
 #include "brush_panel.h"
 #include "brush_session.h"
@@ -2044,6 +2046,47 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     EXPECT_DOUBLE_EQ(panel.findChild<ValueSlider*>(QStringLiteral("strength"))->minimum(), -1.0);
     tools.setTool("comb");
     EXPECT_DOUBLE_EQ(panel.findChild<ValueSlider*>(QStringLiteral("strength"))->minimum(), 0.0);
+    // Paint on a scalp map shows the Alpha picker (not on a guide map, nor with Comb): its grid
+    // lists None and the library; a pick reaches the settings, its rows shown while one is picked.
+    QWidget* alphaBox = panel.findChild<QWidget*>(QStringLiteral("alphaBox"));
+    ASSERT_TRUE(alphaBox);
+    EXPECT_FALSE(alphaBox->isVisibleTo(&panel));
+    session.setTool("paint");
+    tools.setTool("paint");
+    session.settings().paintKind = "guides";
+    tools.refresh();
+    EXPECT_FALSE(alphaBox->isVisibleTo(&panel));
+    session.settings().paintKind = "vertices";
+    tools.refresh();
+    EXPECT_TRUE(alphaBox->isVisibleTo(&panel));
+    AlphaPicker* picker = panel.alphaPicker();
+    picker->fill();
+    ASSERT_GT(picker->grid()->count(), 8);
+    EXPECT_EQ(picker->grid()->item(0)->text(), QStringLiteral("None"));
+    QListWidgetItem* spots = nullptr;
+    for (int i = 0; i < picker->grid()->count(); ++i) {
+        if (picker->grid()->item(i)->text() == QStringLiteral("Spots")) spots = picker->grid()->item(i);
+    }
+    ASSERT_TRUE(spots);
+    picker->pick(spots);
+    EXPECT_EQ(session.settings().alphaPath, spots->data(Qt::UserRole).toString().toStdString());
+    ASSERT_TRUE(session.settings().alpha);
+    auto* rotation = panel.findChild<QComboBox*>(QStringLiteral("alphaRotation"));
+    ASSERT_TRUE(rotation);
+    EXPECT_TRUE(rotation->isVisibleTo(&panel));
+    rotation->setCurrentIndex(rotation->findData(QStringLiteral("stroke")));
+    EXPECT_EQ(session.settings().alphaRotationName(), "stroke");
+    ValueSlider* spacing = panel.findChild<ValueSlider*>(QStringLiteral("alphaSpacing"));
+    spacing->beginEdit();
+    spacing->setEditText(QStringLiteral("50"));
+    ASSERT_TRUE(spacing->commitEdit());
+    EXPECT_FLOAT_EQ(session.settings().alphaSpacing, 0.5f);
+    picker->setPath({});
+    EXPECT_EQ(session.settings().alpha, nullptr);
+    EXPECT_FALSE(rotation->isVisibleTo(&panel));
+    session.settings().setAlphaRotation("fixed");
+    tools.setTool("comb");
+    session.setTool("comb");
 
     // A width map (what the Width brush was: + New map for Width): a white map wired to the Width
     // node's width, then the Paint brush on it (Ctrl: thinner); the wiring and the paint are a

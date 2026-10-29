@@ -247,7 +247,16 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
 - **Pen pressure:** with a tablet, pen pressure scales strength (`pressure=True`). Maya's API has
   no pressure, so a Qt event filter reads it; with a mouse it is 1.
 - **Resampling:** `groomlab.resample_guides(groom, segments, guides=None, group=None, level=None)`
-  respaces guides (default: the selected ones) to a new point count, keeping their shape.
+  respaces guides (default: the selected ones, else every guide) to a new point count, keeping
+  their shape; frozen guides keep theirs. Picked guides (`guides`, or the selection) get segments
+  of their own, which a whole group, a level or every guide resampled later leaves as they are;
+  picked at their group's count, they follow the group again
+  (`groomlab.reset_group_segments(groom, group)`: every guide of the group back to its count,
+  frozen ones kept; the group's right-click Reset Segments). A whole group, a level or every
+  guide also sets the segments their groups' new guides get (drawn, placed, from curves, baked,
+  generated children);
+  `groomlab.set_group_segments(groom, group, segments)` sets it alone (0: the tool's own), and
+  `list_guide_groups` gives each group's `segments`.
 **Working comfortably:**
 - **The current groom:** the top of the Groom Tools and the Graph Editor's groom list pick one
   current groom for both and for every tool (`groomlab.set_current_groom(groom)`); it stays

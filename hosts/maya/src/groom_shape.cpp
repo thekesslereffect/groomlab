@@ -224,7 +224,6 @@ MObject GroomShape::aGuidePoints;
 MObject GroomShape::aGuideSmoothing;
 MObject GroomShape::aHiddenGuideGroups;
 MObject GroomShape::aGuideGroupColors;
-MObject GroomShape::aGuideDisplaySegments;
 MObject GroomShape::aGuideSelection;
 MObject GroomShape::aSoftSelectRadius;
 MObject GroomShape::aGroomFile;
@@ -932,13 +931,6 @@ MStatus GroomShape::initialize() {
     nAttr.setSoftMax(8);
     nAttr.setMax(16);
     nAttr.setStorable(true);
-    // Dots evenly along each guide as drawn: this many segments (0: a dot on every point the guide has).
-    aGuideDisplaySegments = nAttr.create("guideDisplaySegments", "glgds", MFnNumericData::kInt, 6, &status);
-    CHECK_MSTATUS_AND_RETURN_IT(status);
-    nAttr.setMin(0);
-    nAttr.setSoftMax(16);
-    nAttr.setMax(64);
-    nAttr.setStorable(true);
 
     // Render settings read by the Arnold translator; they don't affect evaluation.
     aRenderMode = eAttr.create("renderMode", "glrdm", 0, &status);
@@ -1082,7 +1074,7 @@ MStatus GroomShape::initialize() {
     tAttr.setHidden(true);
 
     for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
-                          &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aGuideDisplaySegments, &aHiddenGuideGroups, &aGuideGroupColors, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
+                          &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aHiddenGuideGroups, &aGuideGroupColors, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
                           &aDisplayTubes, &aBrushTick, &aCardDensity, &aOutCards, &aOutRachis, &aOutStrandMesh, &aDisplayCards, &aDisplayStrandMesh, &aDisplayCardTextures, &aDisplayOverlaysOnTop, &aCardMaps, &aScalpMaps, &aScalpMapDisplay, &aScalpMapChannel, &aOutStrandCount, &aLastError, &aOutFrame}) {
         CHECK_MSTATUS_AND_RETURN_IT(addAttribute(*attr));
     }
@@ -2021,7 +2013,7 @@ MStatus GroomShape::setDependentsDirty(const MPlug& plug, MPlugArray& affected) 
         plug == aStrandColorSource || plug == aStrandColorMin || plug == aStrandColorMax || plug == aDisplayRibbons ||
         plug == aRibbonWidthScale || plug == aDisplayWidthCoverage || plug == aDisplayCoverageDensity || plug == aDisplayClumpLod || plug == aClumpLodError || plug == aSculptDisplay || plug == aIsolateGroup || plug == aGuideColorMode ||
         plug == aGuideColorLayer || plug == aDisplayInstances || plug == aDisplayLighting || plug == aDisplayShadows || plug == aDisplayHairShading || plug == aDisplaySelfShadowing || plug == aDisplayStrandVariation ||
-        plug == aGuideWidth || plug == aGuidePoints || plug == aGuideSmoothing || plug == aGuideDisplaySegments || plug == aHiddenGuideGroups || plug == aGuideGroupColors ||
+        plug == aGuideWidth || plug == aGuidePoints || plug == aGuideSmoothing || plug == aHiddenGuideGroups || plug == aGuideGroupColors ||
         plug == aDisplayFlow || plug == aDisplayColor ||
         plug == aUseMaterialColor || plug == aDisplayGuides || plug == aDisplayHair || plug == aDisplayTubes || plug == aDisplayCards || plug == aDisplayStrandMesh ||
         plug == aDisplayCardTextures || plug == aDisplayOverlaysOnTop || plug == aCardMaps || plug == aScalpMapDisplay || plug == aScalpMapChannel;

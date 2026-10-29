@@ -1430,6 +1430,34 @@ class GroomingTest(unittest.TestCase):
         other = self.primaries[1]
         groomlab.resample_guides(self.groom, 20, guides=[other])
         self.assertEqual(len(guide_points(self.groom)[other]), 21)
+
+        # A frozen guide keeps its points; a whole group resampled keeps the count for its new
+        # guides (from curves here), until set_group_segments clears it.
+        groomlab.set_guide_attribute(self.groom, "freeze", 1.0, guides=[other])
+        groomlab.resample_guides(self.groom, 6, group="primary")
+        self.assertEqual(len(guide_points(self.groom)[other]), 21)
+        # A guide given its own segments (picked) keeps them when its group's change.
+        groomlab.set_guide_attribute(self.groom, "freeze", 0.0, guides=[other])
+        groomlab.resample_guides(self.groom, 6, group="primary")
+        self.assertEqual(len(guide_points(self.groom)[other]), 21)
+        groomlab.resample_guides(self.groom, 6, guides=[other])  # its group's count: it follows the group again
+        groomlab.resample_guides(self.groom, 5, group="primary")
+        self.assertEqual(len(guide_points(self.groom)[other]), 6)
+        # Reset Segments: every guide of the group at its count, its own given up.
+        groomlab.resample_guides(self.groom, 11, guides=[other])
+        self.assertEqual(groomlab.reset_group_segments(self.groom, "primary"), 5)
+        self.assertEqual(set(groomlab.guide_segments(self.groom, group="primary")), {5})
+        groomlab.resample_guides(self.groom, 6, group="primary")
+        group = lambda: next(g for g in groomlab.list_guide_groups(self.groom) if g["name"] == "primary")
+        self.assertEqual(group()["segments"], 6)
+        curve = cmds.curve(degree=1, point=[(0.3, 0.95, 0), (0.3, 1.6, 0.3), (0.6, 1.9, 0.6)])
+        made = groomlab.guides_from_curves(self.groom, [curve])
+        self.assertEqual(len(guide_points(self.groom)[made[0]]), 7)
+        cmds.undo()
+        groomlab.set_group_segments(self.groom, "primary", 0)
+        self.assertEqual(group()["segments"], 0)
+        cmds.undo()
+        self.assertEqual(group()["segments"], 6)
         self.assertEqual(groomlab.errors(self.groom), [])
 
     def test_scripted_strokes_reach_the_other_scalps(self):
@@ -3720,6 +3748,37 @@ class GroomingTest(unittest.TestCase):
         # The interactive tool takes the same flag (context edits and queries only round-trip in the Maya UI).
         ctx = groomlab.brush_tool("comb", activate=False)
         cmds.groomLabBrushCtx(ctx, edit=True, targets="guides,flow")
+
+    def test_brush_alphas_library_and_tool_flags(self):
+        # The alphas shipped with the module, then images added: copied into the user's folder
+        # (GROOMLAB_USER_ALPHAS here), listed first. The tool takes an alpha by its file.
+        user = tempfile.mkdtemp(prefix="groomlab_alphas_")  # never the user's own folder
+        old = os.environ.get("GROOMLAB_USER_ALPHAS")
+        os.environ["GROOMLAB_USER_ALPHAS"] = user
+        try:
+            shipped = groomlab.brush_alphas()
+            names = [a["name"] for a in shipped]
+            for name in ("Cells", "Clouds", "Grain", "Noise", "Speckle", "Spots", "Square", "Streaks"):
+                self.assertIn(name, names)
+            self.assertTrue(all(a["shipped"] for a in shipped))
+            speckle = next(a["path"] for a in shipped if a["name"] == "Speckle")
+            outside = os.path.join(tempfile.mkdtemp(prefix="groomlab_alpha_src_"), "Speckle.png")
+            shutil.copyfile(speckle, outside)
+            added = groomlab.add_brush_alpha(outside)
+            self.assertEqual(os.path.basename(added), "Speckle 2.png")  # a shipped one's name: numbered
+            self.assertEqual(groomlab.brush_alphas()[0]["name"], "Speckle 2")
+            self.assertEqual(os.path.normcase(os.path.normpath(groomlab.brush_alpha_folder())), os.path.normcase(os.path.normpath(user)))
+            with self.assertRaises(ValueError):
+                groomlab.add_brush_alpha(__file__)
+        finally:
+            if old is None:
+                os.environ.pop("GROOMLAB_USER_ALPHAS", None)
+            else:
+                os.environ["GROOMLAB_USER_ALPHAS"] = old
+        # The tool takes the flags (they round-trip in the Maya UI only: the GUI cases check them).
+        groomlab.add_map(self.groom, "crown", 0.0, kind="vertices")
+        groomlab.brush_tool("paint", attribute="crown", paint_kind="vertices", alpha=speckle, alpha_rotation="random",
+                            alpha_spacing=0.5, activate=False)
 
 
     def test_card_textures_toggle(self):

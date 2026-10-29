@@ -29,33 +29,24 @@ class GroomOperator(bpy.types.Operator):
         return active_groom(context) is not None
 
 
-def _preset_items(self, context):
-    items = [(p[0], p[1], p[2]) for p in graph.cached_presets()]
-    return items or [("hair_basics", "Hair Basics", "")]
-
-
 class GROOMLAB_OT_add_groom(bpy.types.Operator):
     """Grow a GroomLab groom on the selected mesh: place and shape its guides with the Groom Tools, GroomLab makes the hair from them"""
     bl_idname = "groomlab.add_groom"
     bl_label = "Create Groom from Selection"
     bl_options = {"REGISTER", "UNDO"}
 
-    preset: EnumProperty(name="Preset", items=_preset_items, description="The look to start from")
-    guides: IntProperty(name="Starter Guides", default=0, min=0, max=5000,
+    # As Maya's and the app's Create Groom: the default graph fitted to the scalp, no dialog (a
+    # look comes later from the Presets menu). Scripts may name a preset and starter guides.
+    preset: StringProperty(name="Preset", default="", options={"HIDDEN", "SKIP_SAVE"},
+                           description="A preset's look to start from (\"\": the default graph)")
+    guides: IntProperty(name="Starter Guides", default=0, min=0, max=5000, options={"HIDDEN", "SKIP_SAVE"},
                         description="Guides spread over the scalp to start from (0: place them with Place and Draw, as in Maya)")
-    guide_points: IntProperty(name="Points per Guide", default=8, min=2, max=64)
+    guide_points: IntProperty(name="Points per Guide", default=8, min=2, max=64, options={"HIDDEN", "SKIP_SAVE"})
 
     @classmethod
     def poll(cls, context):
         obj = context.active_object
         return obj is not None and obj.type == "MESH" and obj.groomlab.role == "NONE"
-
-    def invoke(self, context, event):
-        try:
-            graph.presets()
-        except HelperError as e:
-            return _fail(self, e)
-        return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context):
         scalp = context.active_object

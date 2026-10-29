@@ -204,12 +204,13 @@ std::size_t ScalpVisibility::cellsCast() const {
 // ---- The screen brush ------------------------------------------------------------------
 
 BrushWeightFn screenBrushWeight(const ViewProjection& view, float x, float y, float radius, const BrushFalloff& falloff,
-                                std::shared_ptr<const ScalpVisibility> visibility) {
-    return [view, x, y, radius, falloff, visibility = std::move(visibility)](const Vec3f& p) {
+                                std::shared_ptr<const ScalpVisibility> visibility, AlphaStamp alpha) {
+    return [view, x, y, radius, falloff, visibility = std::move(visibility), alpha = std::move(alpha)](const Vec3f& p) {
         float px = 0.0f, py = 0.0f;
         if (!view.project(p, px, py)) return 0.0f;
         const float dx = px - x, dy = py - y;
-        const float w = falloff(std::sqrt(dx * dx + dy * dy), radius);
+        float w = falloff(std::sqrt(dx * dx + dy * dy), radius);
+        if (w > 0.0f && alpha) w *= alpha.at(dx, dy, radius);
         return w > 0.0f && visibility && visibility->hidden(p) ? 0.0f : w;  // the ray only for points in reach
     };
 }
@@ -276,13 +277,14 @@ bool ToolView::camera(Vec3f& eyeOut, Vec3f& directionOut, bool& orthographicOut)
 }
 
 BrushWeightFn ToolView::brushWeight(float x, float y, float radius, const BrushFalloff& falloff,
-                                    std::shared_ptr<const ScalpVisibility> visibility) const {
-    if (projection.valid()) return screenBrushWeight(projection, x, y, radius, falloff, std::move(visibility));
-    return [project = hostProject, occlusion = std::move(visibility), x, y, radius, falloff](const Vec3f& p) {
+                                    std::shared_ptr<const ScalpVisibility> visibility, AlphaStamp alpha) const {
+    if (projection.valid()) return screenBrushWeight(projection, x, y, radius, falloff, std::move(visibility), std::move(alpha));
+    return [project = hostProject, occlusion = std::move(visibility), alpha = std::move(alpha), x, y, radius, falloff](const Vec3f& p) {
         float px = 0.0f, py = 0.0f;
         if (!project || !project(p, px, py)) return 0.0f;
         const float dx = px - x, dy = py - y;
-        const float w = falloff(std::sqrt(dx * dx + dy * dy), radius);
+        float w = falloff(std::sqrt(dx * dx + dy * dy), radius);
+        if (w > 0.0f && alpha) w *= alpha.at(dx, dy, radius);
         return w > 0.0f && occlusion && occlusion->hidden(p) ? 0.0f : w;  // the ray only for points in reach
     };
 }

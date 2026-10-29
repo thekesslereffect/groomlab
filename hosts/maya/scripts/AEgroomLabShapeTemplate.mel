@@ -87,7 +87,6 @@ global proc AEgroomLabShapeTemplate(string $nodeName)
                 editorTemplate -addControl "guideWidth";
                 editorTemplate -addControl "guidePoints";
                 editorTemplate -addControl "guideSmoothing";
-                editorTemplate -addControl "guideDisplaySegments";
                 editorTemplate -addControl "isolateGroup";
                 editorTemplate -addControl "guideColorMode";
             editorTemplate -endLayout;

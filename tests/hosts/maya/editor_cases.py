@@ -2612,17 +2612,19 @@ class GuidesTabTest(unittest.TestCase):
             QtWidgets.QApplication.processEvents()
 
     def test_the_segments_slider_previews_live_and_applies_one_step(self):
-        # Nothing selected: the slider shows every guide's segments and resamples them all; dragging
-        # previews (the stored guides untouched, no undo step), releasing applies as one step.
+        # Nothing selected, the primary group picked: the slider shows its guides' segments and
+        # resamples them all; dragging previews (the stored guides untouched, no undo step),
+        # releasing applies as one step, the group's new guides taking the count too.
         curve = cmds.curve(degree=1, point=[(0.3, 0.95, 0), (0.3, 1.6, 0.3), (0.6, 1.9, 0.6)])
         groomlab.guides_from_curves(self.groom, [curve])
         cmds.select(self.groom)  # the palette follows Maya's selection: keep it on the groom
         groomlab.clear_guide_selection(self.groom)
         groomlab.resample_guides(self.groom, 12)
+        self.tools.pick_group("primary")
         self.events()
         tab = self.tab
         self.assertEqual(tab.segments.value(), 12)
-        self.assertIn("all 2", tab.segments_label.text())
+        self.assertIn("primary: 2", tab.segments_label.text())
         stored = cmds.getAttr(self.groom + ".guideData")
         settle_undo()
         undo_before = cmds.undoInfo(query=True, undoName=True)
@@ -2637,8 +2639,15 @@ class GuidesTabTest(unittest.TestCase):
         self.assertFalse(tab._previewing)
         self.assertEqual(groomlab.guide_segments(self.groom), [40, 40])
         self.assertEqual(tab.segments.value(), 40)
+        primary = lambda: next(g for g in groomlab.list_guide_groups(self.groom) if g["name"] == "primary")
+        self.assertEqual(primary()["segments"], 40)
         cmds.undo()  # the whole drag: one step
         self.assertEqual(groomlab.guide_segments(self.groom), [12, 12])
+        self.assertEqual(primary()["segments"], 12)  # (the resample to 12 above was every guide's)
+        # All groups picked: every guide.
+        self.tools.level.setCurrentIndex(0)
+        self.events()
+        self.assertIn("all 2", tab.segments_label.text())
         # A selected guide: its own count, and only it is resampled.
         first = groomlab.guide_ids(self.groom, "primary")[0]
         groomlab.select_guides(self.groom, guides=[first])
@@ -4448,6 +4457,65 @@ class DockableWindowsTest(unittest.TestCase):
             maps = groomlab.list_maps(self.groom)
             self.assertEqual(tab.map_for_setting("scatter", "density", kind="texture"), name)
             self.assertEqual(groomlab.list_maps(self.groom), maps)
+        finally:
+            window.stop_tool()
+            window.close()
+
+    def test_paint_alpha_picker(self):
+        # Paint on a scalp map shows the Alpha picker (not on a guide map): its grid lists None
+        # and the library, a pick reaches the tool with its rotation, spacing and invert, shown
+        # only while an alpha is picked.
+        from PySide2 import QtCore
+        from groomlab.ui import palette
+        cmds.select(self.groom)
+        groomlab.add_map(self.groom, "crown", 0.0, kind="vertices")
+        groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 1.5, 0.2)])])
+        groomlab.add_map(self.groom, "layer", 0.0)  # on the guides
+        window = palette.show()
+        try:
+            window.poll()
+            window.show_tab("paint")
+            tab = window.paint_tab
+            tab.select("crown")
+            window.buttons["paint"].click()
+            self.app_events()
+            ctx = groomlab.BRUSH_CONTEXT
+            self.assertTrue(window.alpha_box.isVisibleTo(window))
+            self.assertFalse(window.alpha_options.isVisibleTo(window))
+            self.assertTrue(tab.select("layer"))
+            self.app_events()
+            self.assertFalse(window.alpha_box.isVisibleTo(window))
+            tab.select("crown")
+            self.app_events()
+            self.assertTrue(window.alpha_box.isVisibleTo(window))
+            window.alpha.fill()
+            names = [window.alpha.grid.item(i).text() for i in range(window.alpha.grid.count())]
+            self.assertEqual(names[0], "None")
+            self.assertIn("Speckle", names)
+            speckle = window.alpha.grid.item(names.index("Speckle"))
+            window.alpha._picked(speckle)
+            path = speckle.data(QtCore.Qt.UserRole)
+            self.assertEqual(os.path.normcase(cmds.groomLabBrushCtx(ctx, query=True, alpha=True)), os.path.normcase(path))
+            self.assertEqual(window.alpha.name.text(), "Speckle")
+            self.assertTrue(window.alpha_options.isVisibleTo(window))
+            window.alpha_rotation.setCurrentIndex(window.alpha_rotation.findData("random"))
+            self.assertEqual(cmds.groomLabBrushCtx(ctx, query=True, alphaRotation=True), "random")
+            self.assertFalse(window.alpha_angle.isEnabled())
+            window.alpha_spacing.committed.emit(50)
+            self.assertAlmostEqual(cmds.groomLabBrushCtx(ctx, query=True, alphaSpacing=True), 0.5, places=4)
+            window.alpha_invert.setChecked(True)
+            self.assertTrue(cmds.groomLabBrushCtx(ctx, query=True, alphaInvert=True))
+            # Picked again, the tool starts with the same alpha.
+            window.buttons["paint"].click()
+            window.buttons["paint"].click()
+            self.app_events()
+            self.assertEqual(os.path.normcase(cmds.groomLabBrushCtx(ctx, query=True, alpha=True)), os.path.normcase(path))
+            with self.assertRaises(RuntimeError):  # a file it cannot read: the alpha kept
+                cmds.groomLabBrushCtx(ctx, edit=True, alpha="C:/nowhere/gone.png")
+            self.assertEqual(os.path.normcase(cmds.groomLabBrushCtx(ctx, query=True, alpha=True)), os.path.normcase(path))
+            window.alpha.set_path("")
+            self.assertEqual(cmds.groomLabBrushCtx(ctx, query=True, alpha=True), "")
+            self.assertFalse(window.alpha_options.isVisibleTo(window))
         finally:
             window.stop_tool()
             window.close()

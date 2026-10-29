@@ -101,7 +101,7 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     EXPECT_EQ(panel->menuState(), (std::set<std::string>{"group"}));
     std::unique_ptr<QMenu> menu(panel->contextMenu(rowOf(tree, tree->currentItem())));
     ASSERT_TRUE(menu);
-    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Group...", "Rename", "Color...", "Select Guides", "-", "Delete"}));
+    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Group...", "Rename", "Color...", "Select Guides", "Reset Segments", "-", "Delete"}));
 
     // A color of its own: one undo step; Default Color offered then; the display draws it.
     ASSERT_TRUE(panel->setGroupColor(root, "#FF8800"));
@@ -109,7 +109,7 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     EXPECT_EQ(doc->undoText(), "Undo color of " + root);
     EXPECT_EQ(panel->menuState(), (std::set<std::string>{"group", "group.color"}));
     menu.reset(panel->contextMenu(rowOf(tree, tree->currentItem())));
-    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Group...", "Rename", "Color...", "Default Color", "Select Guides", "-", "Delete"}));
+    EXPECT_EQ(shown(menu.get()), (std::vector<std::string>{"New Group...", "Rename", "Color...", "Default Color", "Select Guides", "Reset Segments", "-", "Delete"}));
     EXPECT_FALSE(panel->setGroupColor(root, "orange")) << "#rrggbb only";
     EXPECT_EQ(doc->undo(), "");
     EXPECT_TRUE(doc->groupColors().empty());

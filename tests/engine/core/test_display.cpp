@@ -228,7 +228,6 @@ std::vector<Scenario> scenarios() {
     });
     add("guideLayer", [](Scenario& s) {
         s.settings.guideColorMode = 1, s.settings.guideColorLayer = "len", s.settings.guideSmoothing = 1;
-        s.settings.guideDisplaySegments = 0;
     });
     add("guideGroups", [](Scenario& s) {
         s.settings.guideGroupColors = "children:#ff8800 nope:#12 primary:#zz0000";
@@ -1243,7 +1242,6 @@ TEST(Display, IsolateKeepsAGroupAndItsChildGroups) {
     auto shares = [&](const std::string& isolate) {
         DisplaySettings s;
         s.guideSmoothing = 1;
-        s.guideDisplaySegments = 0;
         s.isolateGroup = isolate;
         DisplayBuilder builder;
         const std::vector<float>& colors = builder.update(in, s).item(DisplayItemId::Guides).geometry->colors;

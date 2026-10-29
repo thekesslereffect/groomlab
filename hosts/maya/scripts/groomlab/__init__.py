@@ -10,7 +10,7 @@ The functions live in modules by what they work on, each imported into the packa
     collision  colliders
     extra_scalps  several scalps on one groom: other meshes the hair grows on
     guides     guides from curves, groups, selection, hierarchy tools, sculpt display
-    brushes    sculpting brushes and the brush tool
+    brushes    sculpting brushes, the brush tool and its alphas
     painting   maps: painted, used by params, their files; the freeze mask
     flow       parting lines, flow arrows and sinks, the Flow and Part nodes
     motion     Wind and Jiggle
@@ -57,12 +57,14 @@ from groomlab.guides import (  # noqa: F401
     demote_group, end_guide_preview, generate_children, get_hierarchy, group_users,
     guide_group_colors, guide_ids, guide_segments, guides_from_curves, hidden_guide_groups, import_guides_from_alembic,
     isolate_group, list_guide_groups, lock_guides, mirror_group, mirror_guide_selection, preview_resample_guides,
-    promote_group, remove_guide_group, rename_guide_group, reparent_guides, resample_guides, select_guides, select_tool,
-    selected_guides, set_guide_attribute, set_guide_group_color, set_sculpt_display, set_soft_selection,
+    promote_group, remove_guide_group, rename_guide_group, reparent_guides, resample_guides, reset_group_segments,
+    select_guides, select_tool,
+    selected_guides, set_group_segments, set_guide_attribute, set_guide_group_color, set_sculpt_display, set_soft_selection,
     show_guide_group, symmetry_sync, unlock_guides, set_tube, get_tube, TUBE_SHAPES, _group_list,
     scale_tube, smooth_tube, fill_tubes, set_fill_tubes, tube_shapes, add_tube_shape, set_tube_shape_points,
     rename_tube_shape, remove_tube_shape, preview_tube_shape, tube_targets)
-from groomlab.brushes import BRUSH_CONTEXT, BRUSH_MODES, TUBE_CHANNELS, brush_stroke, brush_tool, placement_tube  # noqa: F401
+from groomlab.brushes import (BRUSH_CONTEXT, BRUSH_MODES, TUBE_CHANNELS, add_brush_alpha, brush_alpha_folder,  # noqa: F401
+                              brush_alphas, brush_stroke, brush_tool, placement_tube)
 from groomlab.painting import (  # noqa: F401
     MAP_CHANNELS, MAP_DISPLAY_CHANNELS, MAP_KINDS, MISSING_KINDS, add_map, attribute_map, clump_paint, color_set_map,
     convert_map, export_map, expression_map, feed_map_node, fill_map, find_missing_files, freeze_guides, freeze_tool,

@@ -11,6 +11,7 @@ groomlab_fetch_json()
 # (engine/capi: a host's TBB never meets the library's).
 add_library(groomlab_core_objects OBJECT
     src/brush.cpp
+    src/brush_alpha.cpp
     src/brush_catalog.cpp
     src/camera_solve.cpp
     src/cards.cpp

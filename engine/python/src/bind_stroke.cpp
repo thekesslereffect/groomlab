@@ -134,6 +134,11 @@ void applySettings(BrushToolSettings& s, const py::dict& kwargs) {
         } else if (key == "paint_texture") s.paintTexture = v.is_none() ? std::string() : v.cast<std::string>();
         else if (key == "paint_resolution") s.paintResolution = v.cast<int>();
         else if (key == "smooth_strength") s.smoothStrength = std::max(0.0f, v.cast<float>());
+        else if (key == "alpha") s.setAlpha(v.is_none() ? std::string() : v.cast<std::string>());
+        else if (key == "alpha_rotation") s.setAlphaRotation(v.cast<std::string>());
+        else if (key == "alpha_angle") s.alphaAngle = v.cast<float>();
+        else if (key == "alpha_spacing") s.setAlphaSpacing(v.cast<float>());
+        else if (key == "alpha_invert") s.alphaInvert = v.cast<bool>();
         else if (key == "paint_color") {
             if (!v.is_none()) s.paintColor = toColor(v);
         } else if (key == "paint_channels") s.paintChannels = channelMask(v.is_none() ? std::string("rgba") : v.cast<std::string>());
@@ -527,6 +532,50 @@ void bindStroke(py::module_& m) {
         },
         py::arg("host"), py::arg("mode"), py::arg("points"),
         "groomlab.brush_stroke on a session: the same modes, keyword arguments and defaults, the same result.");
+
+    // Brush alphas (brush_alpha.h): the library every host's alpha picker lists.
+    m.def("brush_alpha_user_dir", &brushAlphaUserDir, "The user's alpha folder (GROOMLAB_USER_ALPHAS, else Documents/GroomLab/alphas).");
+    m.def("set_shipped_brush_alpha_dir", &setShippedBrushAlphaDir, py::arg("dir"), "The folder of alphas shipped with this host.");
+    m.def("shipped_brush_alpha_dir", &shippedBrushAlphaDir);
+    m.def("brush_alpha_dirs", &brushAlphaDirs, "Where alphas are found: GROOMLAB_ALPHA_PATH's folders, the user's, the shipped.");
+    m.def(
+        "list_brush_alphas",
+        [] {
+            py::list out;
+            for (const BrushAlphaFile& a : listBrushAlphas()) {
+                py::dict d;
+                d["name"] = a.name;
+                d["path"] = a.path;
+                d["shipped"] = a.shipped;
+                out.append(d);
+            }
+            return out;
+        },
+        "Every alpha in the library: [{name, path, shipped}], the user's first, each part by name.");
+    m.def(
+        "add_brush_alpha",
+        [](const std::string& file) {
+            try {
+                return addBrushAlpha(file);
+            } catch (const std::runtime_error& e) {
+                throw py::value_error(e.what());
+            }
+        },
+        py::arg("file"), "Copies an image into the user's alpha folder; returns its path there (ValueError: why not).");
+    m.def(
+        "brush_alpha_thumbnail",
+        [](const std::string& path, int size) {
+            BrushAlphaPtr alpha;
+            try {
+                alpha = loadBrushAlpha(path);
+            } catch (const std::exception& e) {
+                throw py::value_error(e.what());
+            }
+            const std::vector<std::uint8_t> pixels = alpha->thumbnail(size);
+            return py::bytes(reinterpret_cast<const char*>(pixels.data()), pixels.size());
+        },
+        py::arg("path"), py::arg("size") = 64,
+        "An alpha as a size x size gray thumbnail (bytes, rows top-down; white: full weight). ValueError: unreadable.");
 }
 
 }  // namespace groomlab::py_bind

@@ -106,6 +106,11 @@ class FakeLayout(object):
             raise AttributeError("%s has no property %r" % (data, name))
         self.log.append(("prop", name))
 
+    def template_icon_view(self, data, name, **kwargs):
+        if name not in data.bl_rna.properties:
+            raise AttributeError("%s has no property %r" % (data, name))
+        self.log.append(("icon_view", name))
+
     def operator(self, idname, **kwargs):
         module, op = idname.split(".")
         if not hasattr(getattr(bpy.ops, module), op):

@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "groomlab/brush_alpha.h"
 #include "groomlab/brush.h"
 #include "groomlab/math.h"
 #include "groomlab/scalp_mesh.h"
@@ -97,9 +98,10 @@ private:
 
 // The interactive brush's weight: the falloff of the screen distance from the cursor (x, y) to
 // a point's projection within `radius` pixels (as brushFalloff), 0 behind the camera and, with
-// `visibility`, where the scalp hides the point.
+// `visibility`, where the scalp hides the point; times `alpha` where the point lands in the
+// circle (brush_alpha.h) when one is given.
 BrushWeightFn screenBrushWeight(const ViewProjection& view, float x, float y, float radius, const BrushFalloff& falloff,
-                                std::shared_ptr<const ScalpVisibility> visibility = nullptr);
+                                std::shared_ptr<const ScalpVisibility> visibility = nullptr, AlphaStamp alpha = {});
 // Whether screenBrushWeight's circle can reach a box: false only when every point of the box
 // projects farther than `radius` from the cursor (a guide whose bounds it is skips the dab).
 BrushReachFn screenBrushReach(const ViewProjection& view, float x, float y, float radius);
@@ -133,7 +135,7 @@ struct ToolView {
     bool parallelWeights() const { return projection.valid(); }
     // screenBrushWeight through this view (the host's projection when the matrix is not valid).
     BrushWeightFn brushWeight(float x, float y, float radius, const BrushFalloff& falloff,
-                              std::shared_ptr<const ScalpVisibility> visibility = nullptr) const;
+                              std::shared_ptr<const ScalpVisibility> visibility = nullptr, AlphaStamp alpha = {}) const;
     // screenBrushReach, or empty (nothing skipped) without a valid matrix.
     BrushReachFn brushReach(float x, float y, float radius) const;
 };

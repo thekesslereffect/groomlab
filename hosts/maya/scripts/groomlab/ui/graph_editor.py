@@ -6256,6 +6256,7 @@ def show(groom=None):
         _window.show(dockable=True, floating=False, area="bottom", uiScript=UI_SCRIPT)
     else:
         _window.show(dockable=True, uiScript=UI_SCRIPT)
+    widgets.keep_dock_resizable(_window)
     return _window
 
 
@@ -6286,6 +6287,7 @@ def restore():
         widgets.dispose(_window)
     _window = _make(groomlab.active_groom() or (cmds.ls(type="groomLabShape") or [None])[0])
     widgets.into_dock(_window, UI_SCRIPT, restoring=True)
+    widgets.keep_dock_resizable(_window)
 
 
 def open_docked(size, available):

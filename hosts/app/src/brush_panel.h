@@ -7,6 +7,7 @@
 //
 //   Radius (px), Strength (± for the tools that work both ways), Falloff, Smooth
 //   Falloff curve, Root to tip                    (each a check box over its curve editor)
+//   Alpha        the picker; Rotation, Angle, Spacing, Invert while one is picked  (Paint on a scalp map)
 //   Selected only, Pen pressure, Keep off scalp, Front facing only   (two to a row)
 //   NEW GUIDES   Match nearby guides, Length, Segments, Spacing, Solo new guides   (Place, Draw)
 //   PARTS        Name, the parts drawn, Remove / Clear All                         (Part)
@@ -46,6 +47,7 @@ class QVBoxLayout;
 
 namespace groomlab::app {
 
+class AlphaPicker;
 class ValueSlider;
 class BrushSession;
 
@@ -63,6 +65,7 @@ public:
     bool hasSettings() const { return hasSettings_; }
     // The editors take the settings' values again (after a radius drag, a scripted edit).
     void refresh();
+    AlphaPicker* alphaPicker() const { return alpha_; }
     // The parts the Part brush drew (the Parts box's list) and the one picked ("" none).
     void setParts(const std::vector<std::string>& names);
     std::string selectedPart() const;
@@ -112,6 +115,13 @@ private:
     ValueSlider* smooth_ = nullptr;
     QWidget* falloffCurve_ = nullptr;
     QWidget* strengthCurve_ = nullptr;
+    QWidget* alphaBox_ = nullptr;  // Paint on a scalp map: the alpha and its rows
+    AlphaPicker* alpha_ = nullptr;
+    QWidget* alphaOptions_ = nullptr;
+    QComboBox* alphaRotation_ = nullptr;
+    ValueSlider* alphaAngle_ = nullptr;
+    ValueSlider* alphaSpacing_ = nullptr;
+    QCheckBox* alphaInvert_ = nullptr;
     QGridLayout* checks_ = nullptr;
     QCheckBox* selectedOnly_ = nullptr;
     QCheckBox* pressure_ = nullptr;

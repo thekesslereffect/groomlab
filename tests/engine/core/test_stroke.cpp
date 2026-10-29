@@ -645,5 +645,147 @@ TEST(GuidePicking, MirrorSelectionAsAScanWouldPick) {
     EXPECT_EQ(mirrorSelection(h, {first.id}, 0, center, 1e30f), scan({first.id}, 0, center, 1e30f));
 }
 
+// ---- Brush alphas ------------------------------------------------------------------------------
+
+// A sphere fine enough for an alpha's pattern in a vertex map ("crown"), four guides on it.
+struct FineGroom {
+    MeshPtr scalp = sphereWithUVs(96, 192);
+    std::unique_ptr<GroomSession> session;
+    std::unique_ptr<SessionStrokeHost> host;
+    FineGroom() {
+        GroomData data;
+        data.scalp = scalp;
+        data.hierarchyJson = groomOn(*scalp, 4, 0).toJson();
+        session = std::make_unique<GroomSession>(std::move(data));
+        session->setScalpMapsJson(R"({"crown": {"kind": "vertices", "values": []}})");
+        host = std::make_unique<SessionStrokeHost>(*session);
+    }
+    std::vector<float> crown() const { return session->scalpMaps().maps.at("crown").values; }
+};
+
+// An alpha `size` square, each texel `f(u, v)` (u, v in -1..1 at its center, v up).
+template <typename F>
+BrushAlphaPtr alphaOf(int size, F f) {
+    std::vector<float> values;
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            const float u = (x + 0.5f) / size * 2.0f - 1.0f, v = 1.0f - (y + 0.5f) / size * 2.0f;
+            values.push_back(f(u, v));
+        }
+    }
+    return std::make_shared<const BrushAlpha>(size, size, std::move(values));
+}
+
+void alphaPaint(BrushTool& tool, const BrushAlphaPtr& alpha, float radius) {
+    tool.settings.setMode("paint");
+    tool.settings.paintKind = "vertices";
+    tool.settings.brush.attribute = "crown";
+    tool.settings.brush.value = 1.0f;
+    tool.settings.brush.strength = 1.0f;
+    tool.settings.setHardness(1.0f);  // full strength to the edge: the alpha alone shapes the dab
+    tool.settings.screenRadius = radius;
+    tool.settings.alpha = alpha;
+}
+
+TEST(Stroke, AlphaShapesTheDab) {
+    // White on the left half: a click paints left of the cursor only; turned half a turn, right
+    // of it. Along the stroke, a click alone stamps on release.
+    const ToolView view = frontView();
+    const BrushAlphaPtr left = alphaOf(64, [](float u, float) { return u < 0.0f ? 1.0f : 0.0f; });
+    float cx = 0, cy = 0;
+    view.project(Vec3f(0.0f, 0.6f, 0.8f).normalized(), cx, cy);
+    for (const char* rotation : {"fixed", "turned", "stroke"}) {
+        SCOPED_TRACE(rotation);
+        FineGroom g;
+        BrushTool tool;
+        alphaPaint(tool, left, 80.0f);
+        if (std::string(rotation) == "turned") tool.settings.alphaAngle = 180.0f;
+        if (std::string(rotation) == "stroke") tool.settings.setAlphaRotation("stroke");
+        ASSERT_TRUE(tool.settings.stampsAlpha());
+        ASSERT_TRUE(tool.stroke(*g.host, view, {{std::round(cx), std::round(cy)}}));
+        const std::vector<float> crown = g.crown();
+        const bool flipped = std::string(rotation) == "turned";
+        std::size_t painted = 0, wrongSide = 0;
+        for (std::size_t v = 0; v < crown.size(); ++v) {
+            if (crown[v] <= 0.01f) continue;
+            float px = 0, py = 0;
+            view.project(g.scalp->points()[v], px, py);
+            ++painted;
+            if (flipped ? px < std::round(cx) - 3.0f : px > std::round(cx) + 3.0f) ++wrongSide;
+        }
+        EXPECT_GT(painted, 20u);
+        EXPECT_EQ(wrongSide, 0u);
+    }
+    // Shift+drag smoothing and guide maps take no alpha.
+    BrushTool tool;
+    alphaPaint(tool, left, 80.0f);
+    tool.settings.paintKind = "guides";
+    EXPECT_FALSE(tool.settings.stampsAlpha());
+}
+
+TEST(Stroke, AlphaDabsAreSpacedAlongTheStroke) {
+    // A dot alpha, dabs 1.5 diameters apart: separate spots, nothing between them; without the
+    // alpha the stroke paints all along.
+    const ToolView view = frontView();
+    const BrushAlphaPtr dot = alphaOf(64, [](float u, float v) { return u * u + v * v < 0.25f ? 1.0f : 0.0f; });
+    const std::vector<std::array<float, 2>> line =
+        screenLine(view, Vec3f(-0.35f, 0.6f, 0.75f).normalized(), Vec3f(0.35f, 0.6f, 0.75f).normalized(), 40);
+    const float radius = 40.0f, step = 1.5f * 2.0f * radius;
+    const float dx = line.back()[0] - line.front()[0], dy = line.back()[1] - line.front()[1];
+    ASSERT_GT(std::hypot(dx, dy), step + radius);
+    const float ux = dx / std::hypot(dx, dy), uy = dy / std::hypot(dx, dy);
+    // The most painted within `within` pixels of the point `along` pixels down the line.
+    const auto most = [&](const FineGroom& g, float along, float within) {
+        const float sx = line.front()[0] + ux * along, sy = line.front()[1] + uy * along;
+        const std::vector<float> crown = g.crown();
+        float m = 0.0f;
+        for (std::size_t v = 0; v < crown.size(); ++v) {
+            const Vec3f& p = g.scalp->points()[v];
+            float px = 0, py = 0;
+            if (p.z < 0.0f || !view.project(p, px, py) || std::hypot(px - sx, py - sy) > within) continue;
+            m = std::max(m, crown[v]);
+        }
+        return m;
+    };
+    FineGroom spaced;
+    BrushTool tool;
+    alphaPaint(tool, dot, radius);
+    tool.settings.setAlphaSpacing(1.5f);
+    ASSERT_TRUE(tool.stroke(*spaced.host, view, line));
+    EXPECT_GT(most(spaced, 0.0f, 12.0f), 0.5f);   // the first dab
+    EXPECT_GT(most(spaced, step, 12.0f), 0.5f);   // the second, a step on
+    EXPECT_EQ(most(spaced, 0.5f * step, 20.0f), 0.0f);  // nothing between
+    FineGroom plain;
+    BrushTool round;
+    alphaPaint(round, nullptr, radius);
+    ASSERT_TRUE(round.stroke(*plain.host, view, line));
+    EXPECT_GT(most(plain, 0.5f * step, 20.0f), 0.5f);
+}
+
+TEST(Stroke, AlphaIsMirroredWithSymmetry) {
+    // The left half (toward the head's middle, painting right of it): the mirrored dab paints
+    // toward the middle too, the alpha mirrored rather than a round spot.
+    const ToolView view = frontView();
+    const BrushAlphaPtr left = alphaOf(64, [](float u, float) { return u < 0.0f ? 1.0f : 0.0f; });
+    const Vec3f at = Vec3f(0.4f, 0.6f, 0.7f).normalized();
+    float cx = 0, cy = 0;
+    view.project(at, cx, cy);
+    FineGroom g;
+    BrushTool tool;
+    alphaPaint(tool, left, 70.0f);
+    tool.settings.setSymmetry("x");
+    ASSERT_TRUE(tool.stroke(*g.host, view, {{std::round(cx), std::round(cy)}}));
+    const std::vector<float> crown = g.crown();
+    std::size_t mirrored = 0, outward = 0;
+    for (std::size_t v = 0; v < crown.size(); ++v) {
+        const Vec3f& p = g.scalp->points()[v];
+        if (crown[v] <= 0.01f || p.x >= 0.0f) continue;
+        ++mirrored;
+        if (p.x < -at.x - 0.04f) ++outward;
+    }
+    EXPECT_GT(mirrored, 20u);
+    EXPECT_EQ(outward, 0u);
+}
+
 }  // namespace
 }  // namespace groomlab

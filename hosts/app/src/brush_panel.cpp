@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <tuple>
 
 #include <QButtonGroup>
 #include <QCheckBox>
@@ -22,10 +23,13 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/brush_alpha.h"
 #include "groomlab/brush_catalog.h"
 
+#include "alpha_picker.h"
 #include "brush_session.h"
 #include "glass.h"
+#include "graph_presets.h"
 #include "groom_document.h"
 #include "param_editors.h"
 #include "theme.h"
@@ -114,6 +118,79 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
                            [this](const std::string& v) { session_->settings().setStrengthProfile(v); });
     card->addWidget(falloffCurve_);
     card->addWidget(strengthCurve_);
+
+    // Paint's alpha on a scalp map: the picker, and while one is picked its rotation, angle,
+    // spacing and invert (Maya's Alpha rows).
+    if (shippedBrushAlphaDir().empty()) setShippedBrushAlphaDir(shippedAlphaFolder());
+    QVBoxLayout* alphaColumn = nullptr;
+    alphaBox_ = box({}, &alphaColumn);
+    alphaBox_->setObjectName(QStringLiteral("alphaBox"));
+    auto* alphaRow = new QHBoxLayout();
+    alphaRow->setSpacing(10);
+    auto* alphaLabel = new QLabel(settingLabel("alpha"), alphaBox_);
+    alphaLabel->setToolTip(settingHint("alpha"));
+    alpha_ = new AlphaPicker(alphaBox_);
+    connect(alpha_, &AlphaPicker::changed, this, [this](const QString& path) {
+        alphaOptions_->setVisible(!path.isEmpty());
+        if (updating_ || !session_) return;
+        try {
+            session_->settings().setAlpha(path.toStdString());
+        } catch (const std::exception&) {
+            alpha_->setPath({}, false);
+            session_->settings().setAlpha({});
+        }
+        edited();
+    });
+    refreshers_.push_back([this] { alpha_->setPath(session_->settings().alphaPath, false); });
+    alphaRow->addWidget(alphaLabel);
+    alphaRow->addWidget(alpha_, 1);
+    alphaColumn->addLayout(alphaRow);
+    alphaOptions_ = new QWidget(alphaBox_);
+    auto* alphaForm = makeForm();
+    alphaOptions_->setLayout(alphaForm);
+    alphaRotation_ = new QComboBox(alphaOptions_);
+    alphaRotation_->setObjectName(QStringLiteral("alphaRotation"));
+    for (const auto& [name, label, tip] : {std::tuple<const char*, QString, QString>{"fixed", tr("Fixed"), tr("Every stamp at the angle")},
+                                           {"stroke", tr("Follow Stroke"), tr("Each stamp turned the way the stroke goes, plus the angle")},
+                                           {"random", tr("Random"), tr("Each stamp at a random angle")}}) {
+        alphaRotation_->addItem(label, QString::fromLatin1(name));
+        alphaRotation_->setItemData(alphaRotation_->count() - 1, tip, Qt::ToolTipRole);
+    }
+    alphaForm->addRow(tr("Rotation"), alphaRotation_);
+    connect(alphaRotation_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        const std::string name = alphaRotation_->currentData().toString().toStdString();
+        alphaAngle_->setEnabled(name != "random");
+        if (updating_ || !session_) return;
+        session_->settings().setAlphaRotation(name);
+        edited();
+    });
+    refreshers_.push_back([this] {
+        alphaRotation_->setCurrentIndex(std::max(0, alphaRotation_->findData(QString::fromStdString(session_->settings().alphaRotationName()))));
+        alphaAngle_->setEnabled(session_->settings().alphaRotation != BrushToolSettings::AlphaRotation::Random);
+    });
+    alphaAngle_ = slider(alphaForm, tr("Angle"), 0.0, 360.0, -360.0, 360.0, 0, [this] { return session_->settings().alphaAngle; },
+                         [this](double v) { session_->settings().alphaAngle = static_cast<float>(v); },
+                         tr("The alpha's angle in degrees, counterclockwise (Follow Stroke: added to the stroke's way)"));
+    alphaAngle_->setObjectName(QStringLiteral("alphaAngle"));
+    alphaSpacing_ = slider(alphaForm, tr("Spacing"), 5.0, 100.0, 100.0 * BrushToolSettings::kMinAlphaSpacing,
+                           100.0 * BrushToolSettings::kMaxAlphaSpacing, 0, [this] { return 100.0 * session_->settings().alphaSpacing; },
+                           [this](double v) { session_->settings().setAlphaSpacing(static_cast<float>(v / 100.0)); },
+                           tr("How far apart the stamps fall along a stroke, in percent of the brush's diameter: low for a smooth "
+                              "trail, 100 and up for separate stamps"));
+    alphaSpacing_->setObjectName(QStringLiteral("alphaSpacing"));
+    alphaSpacing_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral(" %"); });
+    alphaInvert_ = check(tr("Invert"), [this] { return session_->settings().alphaInvert; },
+                         [this](bool on) { session_->settings().alphaInvert = on; }, tr("Paint where the alpha is black instead"));
+    alphaInvert_->setObjectName(QStringLiteral("alphaInvert"));
+    alphaForm->addRow(QString(), alphaInvert_);
+    alphaColumn->addWidget(alphaOptions_);
+    card->addWidget(alphaBox_);
+    // Shown for Paint on a scalp map (a guide map takes no alpha), its rows while one is picked.
+    refreshers_.push_back([this] {
+        const groomlab::BrushEntry* entry = tool_.empty() ? nullptr : brushEntry(tool_);
+        alphaBox_->setVisible(entry && entry->hasSetting("alpha") && session_->settings().paintKind != "guides");
+        alphaOptions_->setVisible(!alpha_->path().empty());
+    });
 
     // The tool's check boxes, two to a row (packed again for each tool: no holes).
     selectedOnly_ = setting("selectedOnly", [this] { return session_->settings().selectedOnly; },

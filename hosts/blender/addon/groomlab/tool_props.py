@@ -10,6 +10,7 @@ import bpy
 from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProperty, FloatVectorProperty,
                        IntProperty, PointerProperty, StringProperty)
 
+from . import alphas
 from . import definitions as defs
 from . import props
 
@@ -81,6 +82,12 @@ def _group_changed(self, context):
         self.group_index = next((i for i, g in enumerate(self.groups) if g.name == self.group), -1)
     from . import display, tools
     tools.push_safely(context)
+    scalp = tools.active(context)
+    if scalp is not None and tools.is_hierarchy(scalp):
+        try:
+            tools.refresh_segments(scalp, context.scene)  # Segments works on the picked group
+        except tools.HelperError:
+            pass
     display.mark_all()
     display.redraw()
 
@@ -375,6 +382,26 @@ class GroomLabTools(bpy.types.PropertyGroup):
     maps: CollectionProperty(type=GroomLabMapItem)
     value: FloatProperty(name="Value", default=1.0, min=0.0, max=1.0, subtype="FACTOR", update=_push(),
                          description="What the Paint brush paints toward, and what Fill sets")
+    # Paint on a scalp map through an alpha (Maya's Alpha picker): its file ("" none), shown and
+    # picked in the library's grid (alpha_choice), its rotation, angle, spacing and invert.
+    alpha: StringProperty(name="Alpha", update=_push(), description="The image stamped inside the brush (a file)")
+    alpha_choice: EnumProperty(name="Alpha", items=alphas.enum_items, get=alphas.choice_get, set=alphas.choice_set,
+                               description="An image stamped inside the brush on scalp maps (speckles, noise, "
+                                           "streaks): white paints, black does not")
+    alpha_rotation: EnumProperty(name="Rotation", items=[("FIXED", "Fixed", "Every stamp at the angle"),
+                                                         ("STROKE", "Follow Stroke",
+                                                          "Each stamp turned the way the stroke goes, plus the angle"),
+                                                         ("RANDOM", "Random", "Each stamp at a random angle")],
+                                 default="FIXED", update=_push())
+    alpha_angle: FloatProperty(name="Angle", default=0.0, min=-360.0, max=360.0, soft_min=0.0, soft_max=360.0,
+                               update=_push(), description="The alpha's angle in degrees, counterclockwise "
+                                                           "(Follow Stroke: added to the stroke's way)")
+    alpha_spacing: IntProperty(name="Spacing", default=25, min=2, max=400, soft_min=5, soft_max=100,
+                               subtype="PERCENTAGE", update=_push(),
+                               description="How far apart the stamps fall along a stroke, in percent of the brush's "
+                                           "diameter: low for a smooth trail, 100 and up for separate stamps")
+    alpha_invert: BoolProperty(name="Invert", default=False, update=_push(),
+                               description="Paint where the alpha is black instead")
     paint_mode: EnumProperty(name=defs.get("choices/paintMode")["label"], items=defs.enum_items("paintMode"),
                              default=defs.enum_default("paintMode"), update=_push(),
                              description=defs.get("choices/paintMode")["tip"])
@@ -441,9 +468,11 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                           "outside a tube lean toward riding it, so no seam shows round it (0: a hard edge)")
     # Edit Guides' Segments: the targets' segment count, resampled live, committed as one undo step
     resample_segments: IntProperty(name="Segments", default=12, min=1, max=256, soft_min=2, soft_max=64, update=_segments,
-                                   description="Points along the guides, kept on their smooth curve: the selected guides, "
-                                               "or every guide with none selected. More segments let a guide curl tighter")
-    segments_scope: StringProperty()  # "3 selected" / "all 40" (", mixed")
+                                   description="Points along the guides, kept on their smooth curve: the selected guides "
+                                               "(their own count from then on, kept when the group's changes; the group's "
+                                               "count makes them follow it again), else the picked group's (its new guides "
+                                               "get as many too). Frozen guides keep theirs. More segments let a guide curl tighter")
+    segments_scope: StringProperty()  # "3 selected" / "bangs: 12" / "all 40" (", mixed")
     # Selection
     soft_radius: FloatProperty(name="Soft radius", default=0.0, min=0.0, soft_max=0.1, subtype="DISTANCE", unit="LENGTH",
                                update=_soft_radius,

@@ -96,6 +96,13 @@ const char* kSmoothStrengthFlag[] = {"-sms", "-smoothStrength"};
 const char* kPaintColorFlag[] = {"-pco", "-paintColor"};
 const char* kPaintChannelsFlag[] = {"-pch", "-paintChannels"};
 const char* kPaintModeFlag[] = {"-pmd", "-paintMode"};
+// Paint on a scalp map through an alpha (brush_alpha.h): its file ("" none), rotation (fixed,
+// stroke, random), angle (degrees), spacing (of the brush's diameter) and invert.
+const char* kAlphaFlag[] = {"-alp", "-alpha"};
+const char* kAlphaRotationFlag[] = {"-alr", "-alphaRotation"};
+const char* kAlphaAngleFlag[] = {"-ala", "-alphaAngle"};
+const char* kAlphaSpacingFlag[] = {"-als", "-alphaSpacing"};
+const char* kAlphaInvertFlag[] = {"-ali", "-alphaInvert"};
 const char* kDebugHoverFlag[] = {"-dbh", "-debugHover"};
 const char* kHeldBytesFlag[] = {"-hb", "-heldUndoBytes"};
 const char* kPreviewUploadFlag[] = {"-pup", "-previewUpload"};
@@ -246,6 +253,11 @@ void addBrushFlags(MSyntax& s) {
     s.addFlag(kPaintColorFlag[0], kPaintColorFlag[1], MSyntax::kDouble, MSyntax::kDouble, MSyntax::kDouble, MSyntax::kDouble);
     s.addFlag(kPaintChannelsFlag[0], kPaintChannelsFlag[1], MSyntax::kString);
     s.addFlag(kPaintModeFlag[0], kPaintModeFlag[1], MSyntax::kString);
+    s.addFlag(kAlphaFlag[0], kAlphaFlag[1], MSyntax::kString);
+    s.addFlag(kAlphaRotationFlag[0], kAlphaRotationFlag[1], MSyntax::kString);
+    s.addFlag(kAlphaAngleFlag[0], kAlphaAngleFlag[1], MSyntax::kDouble);
+    s.addFlag(kAlphaSpacingFlag[0], kAlphaSpacingFlag[1], MSyntax::kDouble);
+    s.addFlag(kAlphaInvertFlag[0], kAlphaInvertFlag[1], MSyntax::kBoolean);
 }
 
 // Applies the shared flags that are set (not -radius) to `s`, from an
@@ -278,9 +290,22 @@ MStatus applyBrushFlags(const Args& args, BrushToolSettings& s, const char* comm
             if (text.length() > 0) flowSinkAngle(text.asChar());  // throws for an unknown kind
             s.flowSink = text.asChar();
         }
+        if (args.isFlagSet(kAlphaRotationFlag[0]) && args.getFlagArgument(kAlphaRotationFlag[0], 0, text)) {
+            s.setAlphaRotation(text.asChar());
+        }
     } catch (const std::invalid_argument& e) {
         return fail(command, e.what());
     }
+    if (args.isFlagSet(kAlphaFlag[0]) && args.getFlagArgument(kAlphaFlag[0], 0, text)) {
+        try {
+            s.setAlpha(text.asChar());
+        } catch (const std::exception& e) {
+            return fail(command, (std::string("-alpha: ") + e.what()).c_str());
+        }
+    }
+    if (args.isFlagSet(kAlphaAngleFlag[0]) && args.getFlagArgument(kAlphaAngleFlag[0], 0, d)) s.alphaAngle = float(d);
+    if (args.isFlagSet(kAlphaSpacingFlag[0]) && args.getFlagArgument(kAlphaSpacingFlag[0], 0, d)) s.setAlphaSpacing(float(d));
+    if (args.isFlagSet(kAlphaInvertFlag[0]) && args.getFlagArgument(kAlphaInvertFlag[0], 0, b)) s.alphaInvert = b;
     if (args.isFlagSet(kPaintKindFlag[0]) && args.getFlagArgument(kPaintKindFlag[0], 0, text)) {
         if (text != "guides" && text != "vertices" && text != "texture") return fail(command, "-paintKind takes guides, vertices or texture");
         s.paintKind = text.asChar();
@@ -1492,6 +1517,11 @@ MStatus BrushContextCmd::doQueryFlags() {
             setResult(color);
         } else if (args.isFlagSet(kPaintChannelsFlag[0])) setResult(MString(channelLetters(s.paintChannels).c_str()));
         else if (args.isFlagSet(kPaintModeFlag[0])) setResult(MString(paintModeName(s.brush.paintMode)));
+        else if (args.isFlagSet(kAlphaFlag[0])) setResult(MString(s.alphaPath.c_str()));
+        else if (args.isFlagSet(kAlphaRotationFlag[0])) setResult(MString(s.alphaRotationName().c_str()));
+        else if (args.isFlagSet(kAlphaAngleFlag[0])) setResult(double(s.alphaAngle));
+        else if (args.isFlagSet(kAlphaSpacingFlag[0])) setResult(double(s.alphaSpacing));
+        else if (args.isFlagSet(kAlphaInvertFlag[0])) setResult(s.alphaInvert);
         else if (args.isFlagSet(kDragSliderFlag[0])) setResult(MString(context_->dragSlider.empty() ? "none" : context_->dragSlider.c_str()));
         // Testing aids: what the texture strokes in the undo queue keep (bytes), and how the
         // viewport sends a stroke's texels to the map's texture.

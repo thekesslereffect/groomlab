@@ -197,7 +197,6 @@ public:
     static MObject aGuideSmoothing;    // guides draw smooth: pieces per segment (1: straight)
     static MObject aHiddenGuideGroups; // guide groups hidden in the viewport (names): not drawn, brushed or selected
     static MObject aGuideGroupColors;  // guide groups' own viewport colors (name:#rrggbb)
-    static MObject aGuideDisplaySegments;  // dots evenly along each drawn guide: segments (0: on its points)
     static MObject aDisplayLighting;
     static MObject aDisplayShadows;  // 0 off, 1 cast (on the scalp, body, floor), 2 cast and receive (self-shadowing)
     // How the lit strands and ribbons shade (hair_shading.h): 1 GroomLab's hair (the default:

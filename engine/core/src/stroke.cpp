@@ -356,6 +356,10 @@ void BrushTool::stampAt(StrokeHost& host, const ToolView& view, float x, float y
     if (!view.ray(x, y, origin, dir)) return;
     using Tool = BrushToolSettings::Tool;
     if (settings.tool == Tool::Brush && settings.paintsScalp()) {
+        if (settings.stampsAlpha()) {
+            stampAlpha(host, view, x, y);
+            return;
+        }
         // Scalp maps: painted where the cursor is over the scalp, stamp by stamp; off it, nothing.
         SurfacePoint hit;
         if (!scalp_->intersectRay(origin, dir, &hit)) return;
@@ -521,6 +525,9 @@ bool BrushTool::startStroke(StrokeHost& host, const ToolView& view, float x, flo
         stroking_ = true;
         changed_ = false;
         hitScalp_ = false;
+        alphaStarted_ = alphaPending_ = false;
+        ++alphaStroke_;
+        alphaDabs_ = 0;
         host.liveStroke(true);
         stampAt(host, view, x, y, true);
         return true;
@@ -679,14 +686,67 @@ bool BrushTool::beginMapStroke(StrokeHost& host) {
     return true;
 }
 
-void BrushTool::stampMap(StrokeHost& host, const ToolView& view, const Vec3f& center, float x, float y) {
+void BrushTool::stampAlpha(StrokeHost& host, const ToolView& view, float x, float y) {
+    // Dabs a set distance apart along the cursor's path (each event may make several, or none):
+    // an alpha's pattern stamped every alphaSpacing diameters, not smeared. Along the stroke, the
+    // first dab waits until the stroke has a direction (a click alone stamps on release).
+    const float step = std::max(1.0f, settings.alphaSpacing * 2.0f * std::max(settings.screenRadius, 1.0f));
+    if (!alphaStarted_) {
+        alphaStarted_ = true;
+        alphaX_ = x;
+        alphaY_ = y;
+        alphaPending_ = settings.alphaRotation == BrushToolSettings::AlphaRotation::Stroke;
+        if (!alphaPending_) alphaDab(host, view, x, y, 0.0f);
+        return;
+    }
+    const float dx = x - alphaX_, dy = y - alphaY_;
+    float distance = pm::hypot(dx, dy);
+    if (distance < step) return;
+    const float direction = pm::atan2(dy, dx);
+    if (alphaPending_) {
+        alphaPending_ = false;
+        alphaDab(host, view, alphaX_, alphaY_, direction);
+    }
+    const float ux = dx / distance, uy = dy / distance;
+    for (; distance >= step; distance -= step) {
+        alphaX_ += ux * step;
+        alphaY_ += uy * step;
+        alphaDab(host, view, alphaX_, alphaY_, direction);
+    }
+}
+
+void BrushTool::finishAlpha(StrokeHost& host, const ToolView& view) {
+    if (!alphaPending_) return;
+    alphaPending_ = false;  // a click along the stroke: its one dab, at the alpha's own angle
+    alphaDab(host, view, alphaX_, alphaY_, 0.0f);
+}
+
+void BrushTool::alphaDab(StrokeHost& host, const ToolView& view, float x, float y, float direction) {
+    using Rotation = BrushToolSettings::AlphaRotation;
+    const std::uint64_t index = alphaDabs_++;
+    Vec3f origin, dir;
+    SurfacePoint hit;
+    if (!view.ray(x, y, origin, dir) || !scalp_->intersectRay(origin, dir, &hit)) return;  // off the scalp: none
+    hitScalp_ = true;
+    constexpr float kTurn = 6.28318530717958647692f;
+    float angle = settings.alphaAngle * (kTurn / 360.0f);
+    if (settings.alphaRotation == Rotation::Stroke) angle += direction;
+    if (settings.alphaRotation == Rotation::Random) angle = kTurn * unitFloat(hashCombine(hash64(alphaStroke_), index));
+    stampMap(host, view, hit.position, x, y, AlphaStamp{settings.alpha, angle, settings.alphaInvert});
+}
+
+void BrushTool::stampMap(StrokeHost& host, const ToolView& view, const Vec3f& center, float x, float y, AlphaStamp alpha) {
     const BrushSettings b = pressed();
     const float radius = worldRadiusAt(view, center, x, y);
-    const BrushWeightFn weight = screenWeight(view, x, y);
+    const bool stamped = static_cast<bool>(alpha);
+    const BrushWeightFn weight = stamped ? view.brushWeight(x, y, std::max(settings.screenRadius, 1.0f), falloffOf(settings.brush), visibility_,
+                                                            std::move(alpha))
+                                         : screenWeight(view, x, y);
     // Smoothing (Shift+drag, or the Smooth brush on a map): the smooth strength, the pen's
     // pressure on top, in passes past 1. A color map: toward the paint color (Ctrl: its inverse)
     // in the chosen channels; gray: the value.
-    const MapDab dab = MapDab::of(settings, b, workingChannels_, inverted_, settings.pressure ? pressure_ : 1.0f);
+    MapDab dab = MapDab::of(settings, b, workingChannels_, inverted_, settings.pressure ? pressure_ : 1.0f);
+    dab.mirrorWeight = stamped;  // the mirrored dab stamps the alpha mirrored
     MapCanvas canvas;
     canvas.channels = workingChannels_;
     if (workingVertexMap_) {
@@ -885,7 +945,10 @@ void BrushTool::end(StrokeHost& host, const ToolView& view) {
     using Tool = BrushToolSettings::Tool;
     if (settings.tool == Tool::Part && !inverted_) commitPart(host);
     if (settings.tool == Tool::Flow) commitFlow(host, view);
-    if (settings.tool == Tool::Brush && settings.paintsScalp()) commitMap(host);
+    if (settings.tool == Tool::Brush && settings.paintsScalp()) {
+        finishAlpha(host, view);
+        commitMap(host);
+    }
     base_.reset();
     drawPath_.clear();
     if (mapStroke_) {
@@ -1013,6 +1076,7 @@ bool BrushTool::stroke(StrokeHost& host, const ToolView& view, const std::vector
         moveTo(host, view, points[i][0], points[i][1], pressure);
         if (afterDab) afterDab();
     }
+    if (mapStroke_) finishAlpha(host, view);
     const bool result = changed_ || mapChanged_;
     end(host, view);
     endShiftSmoothing(settings.brush, saved);

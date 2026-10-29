@@ -291,6 +291,85 @@ def into_dock(panel, ui_script, restoring=False):
     return True
 
 
+def _fixed_width(cell):
+    """Whether a splitter's `cell` holds only workspace controls Maya keeps at a fixed width (the
+    ToolBox)."""
+    from maya import cmds
+    names = [w.objectName() for w in [cell] + cell.findChildren(QtWidgets.QWidget)]
+    controls = [n for n in names if n and cmds.workspaceControl(n, exists=True)]
+    return bool(controls) and all(cmds.workspaceControl(n, query=True, widthProperty=True) == "fixed" for n in controls)
+
+
+def stuck_width(control):
+    """Whether a docked workspace `control` cannot change its width: in a row (a horizontal
+    splitter) whose only cells beside it are fixed-width ones, as left of the ToolBox, where Maya
+    puts a panel dragged onto the left edge past the ToolBox. Each handle beside it would resize the
+    fixed one, so neither moves. (The wrappers of its parents go as this returns, and PySide then
+    invalidates `control`'s, Maya's widget: wrap it again to use it after.)"""
+    cell, x = control, control.parentWidget()
+    while x is not None:
+        if isinstance(x, QtWidgets.QSplitter) and x.orientation() == QtCore.Qt.Horizontal and x.count() > 1:
+            i = x.indexOf(cell)
+            return all(_fixed_width(x.widget(j)) for j in (i - 1, i + 1) if 0 <= j < x.count())
+        cell, x = x, x.parentWidget()
+    return False
+
+
+def _workspace_control(name):
+    """The workspace control `name`'s widget, wrapped now (None when there is none)."""
+    from maya import cmds
+    import maya.OpenMayaUI as omui
+    pointer = omui.MQtUtil.findControl(name) if cmds.workspaceControl(name, exists=True) else None
+    return qt.wrap_instance(pointer, QtWidgets.QWidget) if pointer else None
+
+
+class _DockWidthKeeper(QtCore.QObject):
+    """Moves its panel's dock to the main window's left dock area (the same place, next to the
+    ToolBox, but with a width handle) when it is docked where its width is stuck (stuck_width).
+    It belongs to the panel and keeps only the dock's name: a wrapper of Maya's widget does not
+    stay valid (see stuck_width)."""
+
+    def __init__(self, panel, name):
+        super(_DockWidthKeeper, self).__init__(panel)
+        self.name, self.watched = name, None
+        self.timer = QtCore.QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.setInterval(300)  # after Maya's drop has settled
+        self.timer.timeout.connect(self.check)
+
+    def watch(self):
+        """Watch the dock (a new one after Maya restores its workspace) for being docked again, and
+        check where it is now (a workspace saved that way)."""
+        control = _workspace_control(self.name)
+        if control is None:
+            return
+        pointer = qt.shiboken.getCppPointer(control)[0]
+        if pointer != self.watched:
+            control.installEventFilter(self)
+            self.watched = pointer
+        self.timer.start()
+
+    def eventFilter(self, obj, event):
+        if event.type() in (QtCore.QEvent.Show, QtCore.QEvent.ParentChange):  # docked again: Maya shows it in its new place
+            self.timer.start()
+        return False
+
+    def check(self):
+        from maya import cmds
+        control = _workspace_control(self.name)
+        if control is not None and not cmds.workspaceControl(self.name, query=True, floating=True) and stuck_width(control):
+            cmds.workspaceControl(self.name, edit=True, dockToMainWindow=("left", False))
+
+
+def keep_dock_resizable(panel):
+    """Keep a docked panel's (MayaQWidgetDockableMixin, named) width adjustable wherever it is
+    docked (see _DockWidthKeeper)."""
+    keeper = panel.findChild(_DockWidthKeeper)
+    if keeper is None:
+        keeper = _DockWidthKeeper(panel, panel.objectName() + "WorkspaceControl")
+    keeper.watch()
+
+
 def dispose(widget):
     """Delete `widget` (and its children) now, not on a later event loop turn: when Maya quits
     there is none. Its Python wrapper stays, invalid (alive() False); its dock stays, as Maya saves
@@ -1354,3 +1433,159 @@ class ColorSwatch(QtWidgets.QToolButton):
         rgb = self._ask(self.rgb)
         if rgb is not None:
             self.apply(rgb)
+
+
+# -- Brush alphas ----------------------------------------------------------------
+
+_alpha_icons = {}  # path -> (modified time, QIcon)
+
+
+def alpha_icon(path, size=64):
+    """An alpha's thumbnail (white: full weight) as an icon, kept until its file changes; a dashed
+    empty square for none ("")."""
+    pixmap = QtGui.QPixmap(size, size)
+    if not path:
+        pixmap.fill(QtCore.Qt.transparent)
+        painter = QtGui.QPainter(pixmap)
+        pen = QtGui.QPen(QtGui.QColor(140, 140, 140), 2, QtCore.Qt.DashLine)
+        painter.setPen(pen)
+        painter.drawRect(4, 4, size - 9, size - 9)
+        painter.drawLine(8, size - 9, size - 9, 8)
+        painter.end()
+        return QtGui.QIcon(pixmap)
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = None
+    cached = _alpha_icons.get(path)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    import groomlab_core
+    try:
+        data = groomlab_core.brush_alpha_thumbnail(path, size)
+    except ValueError:
+        return alpha_icon("", size)
+    image = QtGui.QImage(data, size, size, size, QtGui.QImage.Format_Grayscale8).copy()
+    icon = QtGui.QIcon(QtGui.QPixmap.fromImage(image))
+    _alpha_icons[path] = (stamp, icon)
+    return icon
+
+
+class AlphaPicker(QtWidgets.QWidget):
+    """The Paint brush's alpha: a thumbnail button (and the alpha's name) opening a grid of the
+    library's alphas (None first, the user's own, then the shipped ones), with Add Alpha... and the
+    folder below it; right-click the button for the same. Emits changed(path) ("" none)."""
+
+    changed = QtCore.Signal(str)
+    THUMB = 64
+
+    def __init__(self, parent=None):
+        super(AlphaPicker, self).__init__(parent)
+        self.path = ""
+        row = QtWidgets.QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme_px(8))
+        self.button = QtWidgets.QToolButton()
+        self.button.setObjectName("alphaButton")
+        self.button.setIconSize(QtCore.QSize(theme_px(40), theme_px(40)))
+        self.button.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.button.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.button.customContextMenuRequested.connect(self.context_menu)
+        self.name = QtWidgets.QLabel()
+        row.addWidget(self.button)
+        row.addWidget(self.name, 1)
+        self.popup = QtWidgets.QMenu(self.button)
+        self.grid = QtWidgets.QListWidget()
+        self.grid.setObjectName("alphaGrid")
+        self.grid.setViewMode(QtWidgets.QListView.IconMode)
+        self.grid.setIconSize(QtCore.QSize(self.THUMB, self.THUMB))
+        self.grid.setGridSize(QtCore.QSize(self.THUMB + theme_px(18), self.THUMB + theme_px(26)))
+        self.grid.setResizeMode(QtWidgets.QListView.Adjust)
+        self.grid.setMovement(QtWidgets.QListView.Static)
+        self.grid.setWordWrap(True)
+        self.grid.setFixedSize((self.THUMB + theme_px(18)) * 4 + theme_px(24), (self.THUMB + theme_px(26)) * 3 + theme_px(8))
+        self.grid.itemClicked.connect(self._picked)
+        panel = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(panel)
+        column.setContentsMargins(theme_px(6), theme_px(6), theme_px(6), theme_px(6))
+        column.addWidget(self.grid)
+        buttons = QtWidgets.QHBoxLayout()
+        add = QtWidgets.QPushButton("Add Alpha...")
+        add.setToolTip("Copy an image (PNG, JPEG, TGA, PSD...) into your alpha folder: every host lists it")
+        add.clicked.connect(self.add)
+        folder = QtWidgets.QPushButton("Open Folder")
+        folder.setToolTip("Your alpha folder (Documents/GroomLab/alphas): images dropped there are listed too")
+        folder.clicked.connect(self.open_folder)
+        buttons.addWidget(add)
+        buttons.addWidget(folder)
+        buttons.addStretch(1)
+        column.addLayout(buttons)
+        action = QtWidgets.QWidgetAction(self.popup)
+        action.setDefaultWidget(panel)
+        self.popup.addAction(action)
+        self.popup.aboutToShow.connect(self.fill)
+        self.button.setMenu(self.popup)
+        self.show_alpha()
+
+    def fill(self):
+        """The library as it is now (images dropped in a folder since show up)."""
+        import groomlab
+        self.grid.clear()
+        entries = [{"name": "None", "path": ""}] + groomlab.brush_alphas()
+        for entry in entries:
+            item = QtWidgets.QListWidgetItem(alpha_icon(entry["path"], self.THUMB), entry["name"])
+            item.setData(QtCore.Qt.UserRole, entry["path"])
+            item.setToolTip(entry["path"] or "No alpha: the brush's falloff alone")
+            item.setTextAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
+            self.grid.addItem(item)
+            if os.path.normcase(entry["path"]) == os.path.normcase(self.path):
+                self.grid.setCurrentItem(item)
+
+    def _picked(self, item):
+        self.popup.close()
+        self.set_path(item.data(QtCore.Qt.UserRole) or "")
+
+    def set_path(self, path, emit=True):
+        """Shows the alpha (a file gone: none) and, with `emit`, tells the brush."""
+        path = path if path and os.path.isfile(path) else ""
+        changed = path != self.path
+        self.path = path
+        self.show_alpha()
+        if emit and changed:
+            self.changed.emit(path)
+
+    def show_alpha(self):
+        self.button.setIcon(alpha_icon(self.path, self.THUMB))
+        name = os.path.splitext(os.path.basename(self.path))[0] if self.path else "None"
+        self.name.setText(name)
+        self.button.setToolTip((self.path or "No alpha") + " (click: pick one; right-click: more)")
+
+    def add(self):
+        import groomlab
+        self.popup.close()
+        files, _filter = QtWidgets.QFileDialog.getOpenFileNames(
+            self, "Add Alpha", "", "Images (*.png *.jpg *.jpeg *.tga *.bmp *.psd *.gif *.hdr *.pic *.pnm *.ppm *.pgm)")
+        added = ""
+        for f in files:
+            try:
+                added = groomlab.add_brush_alpha(f)
+            except ValueError as e:
+                QtWidgets.QMessageBox.warning(self, "Add Alpha", str(e))
+        if added:
+            self.set_path(added)
+
+    def open_folder(self):
+        import groomlab
+        self.popup.close()
+        folder = groomlab.brush_alpha_folder()
+        if folder:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(folder))
+
+    def context_menu(self, pos):
+        menu = QtWidgets.QMenu(self)
+        clear = menu.addAction("Clear Alpha")
+        clear.setEnabled(bool(self.path))
+        clear.triggered.connect(lambda: self.set_path(""))
+        menu.addAction("Add Alpha...").triggered.connect(self.add)
+        menu.addAction("Open Alpha Folder").triggered.connect(self.open_folder)
+        qt.exec_(menu, self.button.mapToGlobal(pos))

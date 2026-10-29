@@ -645,6 +645,25 @@ TEST(Brush, PlaceInterpolatesItsNeighbors) {
     EXPECT_NEAR(g.tube.widthAt(1.0f), (0.2f * 10.0f + 0.1f * 10.0f / 3.0f) / (40.0f / 3.0f), 1e-4f);
 }
 
+TEST(Brush, NewGuidesTakeTheirGroupsSegments) {
+    Scene s;
+    s.add(0.3f, 0.5f);
+    s.add(0.7f, 0.5f);  // 8 segments each
+    s.h.setGroupSegments(s.primary, 5);
+    SurfacePoint hit;
+    ASSERT_TRUE(s.scalp->intersectRay({0.4f, 1.0f, 0.5f}, {0, -1, 0}, &hit));
+    PlaceSettings p;
+    p.segments = 3;  // the group's own win
+    EXPECT_EQ(s.pts(placeGuide(s.h, *s.scalp, p, hit)).size(), 6u);  // the neighbors' shape at the group's count
+    ASSERT_TRUE(s.scalp->intersectRay({0.5f, 1.0f, 0.2f}, {0, -1, 0}, &hit));
+    p.matchNeighbors = false;
+    EXPECT_EQ(s.pts(placeGuide(s.h, *s.scalp, p, hit)).size(), 6u);  // standing
+    EXPECT_EQ(s.pts(drawGuide(s.h, *s.scalp, p, {{0.6f, 0, 0.2f}, {0.6f, 0.5f, 0.2f}, {0.6f, 1.0f, 0.2f}})).size(), 6u);
+    // A group with none of its own: the tool's.
+    p.group = "other";
+    EXPECT_EQ(s.pts(drawGuide(s.h, *s.scalp, p, {{0.2f, 0, 0.8f}, {0.2f, 0.5f, 0.8f}, {0.2f, 1.0f, 0.8f}})).size(), 4u);
+}
+
 TEST(Brush, IncrementalEvaluationMatchesFull) {
     const auto scalp = test::makeSphere(60, 120, 1.0f);
     GuideHierarchy h;

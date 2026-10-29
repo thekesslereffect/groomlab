@@ -271,7 +271,8 @@ class ToolsTest(unittest.TestCase):
 
     def test_2_new_groom_in_the_hierarchy(self):
         head = self.head
-        self.assertEqual(bpy.ops.groomlab.add_groom("EXEC_DEFAULT", preset="hair_basics"), {"FINISHED"})
+        # As Maya's and the app's Create Groom: no dialog, the default graph (fitted), no guides.
+        self.assertEqual(bpy.ops.groomlab.add_groom("INVOKE_DEFAULT"), {"FINISHED"})
         g = head.groomlab
         self.assertEqual(g.guide_target, "hierarchy")
         self.assertIsNone(g.guides)  # no Blender curves: the guides live in the helper's hierarchy

@@ -887,10 +887,10 @@ def _scatter_length_cm(rt):
     return None
 
 
-def create_groom(context, scalp, preset="hair_basics", guide_count=0, guide_points=8, guides="hierarchy"):
+def create_groom(context, scalp, preset="", guide_count=0, guide_points=8, guides="hierarchy"):
     """Makes `scalp` (a mesh object) a GroomLab groom as Maya's Create Groom does: new_groom in the
-    helper (the preset's graph; guides in the hierarchy GroomLab's own tools edit: Place and Draw add
-    them), its Hair Curves object. `guide_count` starter guides go into the hierarchy's first group.
+    helper (the default graph fitted to the scalp, or `preset`'s; guides in the hierarchy GroomLab's
+    own tools edit: Place and Draw add them), its Hair Curves object. `guide_count` starter guides go into the hierarchy's first group.
     `guides="flat"`: B2's guides as a Blender Curves object sculpted with Blender's brushes (what
     grooms made before GroomLab's tools have; the tests of that path)."""
     scene = context.scene

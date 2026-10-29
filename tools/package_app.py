@@ -175,6 +175,10 @@ def check_manifest(folder):
     shipped_nodes = [f[len("nodes/"):] for f in files if f.startswith("nodes/")]
     if not source_nodes or shipped_nodes != source_nodes:
         problems.append("nodes/ differs from hosts/maya/nodes")
+    source_alphas = files_of(os.path.join(ROOT, "hosts", "maya", "alphas"))
+    shipped_alphas = [f[len("alphas/"):] for f in files if f.startswith("alphas/")]
+    if not source_alphas or shipped_alphas != source_alphas:
+        problems.append("alphas/ differs from hosts/maya/alphas")
     problems += check_imports(folder)
     return problems
 

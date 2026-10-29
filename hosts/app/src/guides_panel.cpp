@@ -159,7 +159,8 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     row->addWidget(count_);
     layout->addLayout(row);
 
-    // Segments: the selected (else every) guide resampled to a point count, one undo step.
+    // Segments: the selected guides (else the picked group's, else every guide) resampled to a
+    // point count, one undo step; a whole group's new guides get it too.
     auto* segRow = new QHBoxLayout();
     segRow->setSpacing(6);
     auto* segLabel = new QLabel(tr("Segments"), host);
@@ -167,8 +168,10 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     segments_ = new QSpinBox(host);
     segments_->setRange(1, 256);
     segments_->setValue(12);
-    segments_->setToolTip(tr("Points along the guides, kept on their smooth curve: the selected guides, or every guide with none "
-                             "selected. More segments let a guide curl tighter."));
+    segments_->setToolTip(tr("Points along the guides, kept on their smooth curve: the selected guides (their own count from "
+                             "then on, kept when the group's changes; their group's count makes them follow it again), else the "
+                             "picked group's (its new guides get as many too). Frozen guides keep theirs. More segments let a "
+                             "guide curl tighter."));
     segRow->addWidget(segments_, 1);
     auto* resample = new QPushButton(tr("Resample"), host);
     resample->setObjectName(QStringLiteral("resampleGuides"));
@@ -338,6 +341,7 @@ void GuidesPanel::refresh() {
                 QStringList users;
                 for (const auto& [node, param] : document_->groupUsers(group.name)) users << QStringLiteral("%1 (%2)").arg(qs(node), qs(param));
                 if (!users.isEmpty()) tip += tr("\nNamed in the graph by %1").arg(users.join(QStringLiteral(", ")));
+                if (group.segments > 0) tip += tr("\nNew guides: %1 segments").arg(group.segments);
                 item->setToolTip(0, tip);
                 item->setExpanded(true);
                 items[group.id] = item;
@@ -563,19 +567,39 @@ bool GuidesPanel::reparentSelected(GuideId parent) {
 bool GuidesPanel::resampleGuides(int segments) {
     if (!document_) return false;
     const std::vector<GuideId> selected = document_->selection();
+    const std::string group = selected.empty() ? currentGroup() : std::string();
+    segments = std::clamp(segments, 1, 256);
+    // Maya's -resample: along the smooth curve through their points, frozen guides kept. Selected
+    // guides get segments of their own; a whole group (with none picked: every group) keeps the
+    // count for its new guides and leaves guides with their own as they are.
     return edit("resample the guides", "resample guides", [&](GuideHierarchy& h) {
         std::vector<GuideId> ids = selected;
         if (ids.empty()) {
-            for (const HierarchyGuide& g : h.guides()) ids.push_back(g.id);
+            const GroupId gid = group.empty() ? kNoGroup : h.findGroup(group);
+            for (const GuideGroup& g : h.groups()) {
+                if (gid == kNoGroup || g.id == gid) h.setGroupSegments(g.id, segments);
+            }
+            if (gid != kNoGroup) {
+                ids = h.guidesInGroup(gid);
+            } else {
+                for (const HierarchyGuide& g : h.guides()) ids.push_back(g.id);
+            }
         }
-        if (ids.empty()) throw std::invalid_argument("the groom has no guides to resample");
-        for (const GuideId id : ids) {
-            const HierarchyGuide* g = h.guide(id);
-            if (!g || g->points.size() < 2) continue;
-            // Along the smooth curve through its points, as the viewport draws it (Maya's -resample).
-            h.setPoints(id, resampleSmoothCurve(g->points.data(), g->points.size(), static_cast<std::size_t>(std::clamp(segments, 1, 256)) + 1));
-        }
+        if (h.guides().empty()) throw std::invalid_argument("the groom has no guides to resample");
+        h.resample(ids, segments, selected.empty());  // a group: guides with segments of their own keep them
     });
+}
+
+bool GuidesPanel::resetGroupSegments(const std::string& name) {
+    int segments = 0;
+    const bool done = edit("reset the group's segments", "reset segments", [&](GuideHierarchy& h) {
+        const GroupId gid = h.findGroup(name);
+        if (gid == kNoGroup) throw std::invalid_argument("no group named " + name);
+        segments = h.resetGroupSegments(gid);
+        if (segments < 1) throw std::invalid_argument("the group has no guides");
+    });
+    if (done) emit message(tr("Every guide of %1 at %2 segments (frozen ones kept)").arg(qs(name)).arg(segments));
+    return done;
 }
 
 bool GuidesPanel::setGroupColor(const std::string& name, const std::string& color) {

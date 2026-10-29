@@ -587,7 +587,6 @@ DisplaySettings GroomSubSceneOverride::readSettings() {
     s.isolateGroup = MPlug(object_, GroomShape::aIsolateGroup).asString().asChar();
     s.guidePoints = MPlug(object_, GroomShape::aGuidePoints).asShort();
     s.guideSmoothing = MPlug(object_, GroomShape::aGuideSmoothing).asInt();
-    s.guideDisplaySegments = MPlug(object_, GroomShape::aGuideDisplaySegments).asInt();
     s.hiddenGuideGroups = MPlug(object_, GroomShape::aHiddenGuideGroups).asString().asChar();
     s.guideGroupColors = MPlug(object_, GroomShape::aGuideGroupColors).asString().asChar();  // "name:#rrggbb ..."
     s.guideColorSeed = guideColorSeedOf(object_);  // the groom's own hue: two grooms' groups differ

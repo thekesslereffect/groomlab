@@ -72,6 +72,16 @@ std::string shippedPresetDir() {
     return {};
 }
 
+std::string shippedAlphaFolder() {
+    std::error_code ec;
+    const fs::path beside = fs::u8path(QCoreApplication::applicationDirPath().toStdString()) / "alphas";
+    if (fs::is_directory(beside, ec)) return beside.generic_u8string();
+#ifdef GROOMLAB_SHIPPED_ALPHAS
+    if (fs::is_directory(fs::u8path(GROOMLAB_SHIPPED_ALPHAS), ec)) return GROOMLAB_SHIPPED_ALPHAS;
+#endif
+    return {};
+}
+
 std::string shippedNodeFolder() {
     std::error_code ec;
     const fs::path beside = fs::u8path(QCoreApplication::applicationDirPath().toStdString()) / "nodes";

@@ -49,9 +49,14 @@ and reshapes all its descendants.
 - **Restructure:** **Reparent...** (move the selected children under another parent) and
   **Promote / Demote...** (move a group one level up, or under a sibling group) in Edit Guides
   change the hierarchy while keeping the guides' shapes.
-- **Segments:** the slider under Guide groups & edits shows the point count of the selected guides
-  (of every guide when none are selected). Dragging it resamples them live; releasing applies it as
-  one undo step. Give guides more segments before combing tight curls.
+- **Segments:** the slider under Guide groups & edits shows the point count of the selected guides,
+  else of the picked group's (of every guide with All groups picked). Dragging it resamples them
+  live; releasing applies it as one undo step. Frozen guides keep theirs. Resampling a whole group
+  also sets the segments its new guides get from then on: drawn, placed, from curves, baked, and
+  children generated into it (the group's tooltip shows it). Selected guides resampled get a count
+  of their own: the group's count changing later leaves them as they are, until you resample them
+  to the group's count again, or right-click the group > **Reset Segments** (every guide of the
+  group back to its count, frozen ones kept). Give guides more segments before combing tight curls.
 - **Which guides drive the strands:** by default Interpolate uses each group's deepest level.
   Where a group has children, the strands are interpolated from the children, and the primaries
   shape the strands through them; a group without children drives the strands itself ([Interpolate](/docs/node-graph#interpolate-and-guide-influence)).
