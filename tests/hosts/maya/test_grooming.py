@@ -3752,15 +3752,15 @@ class GroomingTest(unittest.TestCase):
     def test_brush_alphas_library_and_tool_flags(self):
         # The alphas shipped with the module, then images added: copied into the user's folder
         # (GROOMLAB_USER_ALPHAS here), listed first. The tool takes an alpha by its file.
-        shipped = groomlab.brush_alphas()
-        names = [a["name"] for a in shipped]
-        for name in ("Cells", "Clouds", "Grain", "Noise", "Speckle", "Spots", "Square", "Streaks"):
-            self.assertIn(name, names)
-        self.assertTrue(all(a["shipped"] for a in shipped))
-        user = tempfile.mkdtemp(prefix="groomlab_alphas_")
+        user = tempfile.mkdtemp(prefix="groomlab_alphas_")  # never the user's own folder
         old = os.environ.get("GROOMLAB_USER_ALPHAS")
         os.environ["GROOMLAB_USER_ALPHAS"] = user
         try:
+            shipped = groomlab.brush_alphas()
+            names = [a["name"] for a in shipped]
+            for name in ("Cells", "Clouds", "Grain", "Noise", "Speckle", "Spots", "Square", "Streaks"):
+                self.assertIn(name, names)
+            self.assertTrue(all(a["shipped"] for a in shipped))
             speckle = next(a["path"] for a in shipped if a["name"] == "Speckle")
             outside = os.path.join(tempfile.mkdtemp(prefix="groomlab_alpha_src_"), "Speckle.png")
             shutil.copyfile(speckle, outside)
