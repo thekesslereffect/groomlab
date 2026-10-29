@@ -4,7 +4,14 @@
 #include <maya/MCallbackIdArray.h>
 #include <maya/MConditionMessage.h>
 #include <maya/MGlobal.h>
+#include <maya/MFileIO.h>
 #include <maya/MSceneMessage.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
 
 #include "brush_tool.h"
 #include "convert_cmd.h"
@@ -48,6 +55,39 @@ using groomlab::maya::VersionCmd;
 
 namespace {
 MCallbackIdArray gCallbacks;
+// The name Maya loaded the plugin under: "GroomLab", or a development hot reload's copy
+// (GroomLab_<tag>.mll, swapped in without restarting Maya).
+std::string gLoadedAs;
+
+// A scene a hot-reload copy saved requires that copy ("GroomLab_hot_1793..."), which no other
+// session has: opened as Maya starts (a double-clicked file), before GroomLab loads, its grooms
+// would come in as unknown nodes. A Maya ASCII scene it saves is given "GroomLab" back in its
+// requires line (the header only; a binary scene is left as it is, with a warning).
+void requireGroomLabByName(void*) {
+    try {
+        const std::string path = MFileIO::currentFile().asChar();
+        if (path.size() < 3) return;
+        const std::string ext = path.substr(path.size() - 3);
+        if (ext == ".mb" || ext == ".MB") {
+            MGlobal::displayWarning(MString("GroomLab: this scene requires the plugin as \"") + gLoadedAs.c_str() +
+                                    "\" (a development build): save it as Maya ASCII, or with GroomLab.mll loaded, "
+                                    "for it to open anywhere");
+            return;
+        }
+        std::ifstream in(std::filesystem::u8path(path), std::ios::binary);
+        if (!in) return;
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        in.close();
+        const std::size_t header = std::min(text.find("\ncreateNode "), text.size());
+        const std::string from = "\"" + gLoadedAs + "\"";
+        const std::size_t at = text.find(from);
+        if (at == std::string::npos || at > header) return;
+        text.replace(at, from.size(), "\"GroomLab\"");
+        std::ofstream out(std::filesystem::u8path(path), std::ios::binary | std::ios::trunc);
+        out << text;
+    } catch (...) {
+    }
+}
 
 void callGroomlab(const char* call) {
     MGlobal::executePythonCommand(MString("try:\n    import groomlab\n    groomlab.") + call +
@@ -58,6 +98,7 @@ void callGroomlab(const char* call) {
 
 PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
     MFnPlugin plugin(obj, "GroomLab", groomlab::kVersionString, "Any");
+    gLoadedAs = plugin.name().asChar();
     groomlab::maya::registerHostOperators();
 
     MStatus status = plugin.registerData(groomlab::maya::GroomFrameData::kTypeName, groomlab::maya::GroomFrameData::kTypeId,
@@ -199,6 +240,7 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
             }
         }));
     }
+    if (gLoadedAs != "GroomLab") gCallbacks.append(MSceneMessage::addCallback(MSceneMessage::kAfterSave, requireGroomLabByName));
     gCallbacks.append(MSceneMessage::addCallback(MSceneMessage::kAfterImport, [](void*) {
         try {
             callGroomlab("sync_file_nodes");
