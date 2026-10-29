@@ -169,8 +169,10 @@ The selected guides' tubes draw brighter.
   stroke on a tube gives it one section per guide point, so you shape it point by point.
   Symmetry, Selected only, frozen and soloed guides work as with every brush; each stroke is one
   undo step.
-- **Ctrl** does the opposite: it shrinks, rounds or untwists the tubes. The Tubes panel's
-  **Smooth** evens out what the brush painted along each guide.
+- **Ctrl** does the opposite: it shrinks, rounds or untwists the tubes.
+- **Shift+drag smooths** what the brush paints: the channel picked (width, flatness or twist) of
+  the sections under the brush, each evened out toward its neighbours along the guide. The
+  guides' shape stays as it is. (With the other guide brushes Shift selects.)
 - **Tubes** (a section of its own in Groom Tools > Tools, opened by the Shape brush, Place and Draw, or from its header): each guide keeps its own tube, and the
   card edits **only its targets**: the selected guides (select them with **Select**), or with none
   selected the soloed ones (left unfrozen while the rest are frozen). It follows every change of the
@@ -287,7 +289,7 @@ guides are drawn blue. Freezing does not affect the strands.
 
 - **Freeze** (a brush in the Guides category) paints the freeze mask; **Ctrl** unfreezes.
   **Unfreeze All**, next to it, clears the mask on every guide.
-- **Shift+click** with any guide brush adds the guides inside the brush ring to the selection:
+- **Shift+click** with any guide brush but Shape adds the guides inside the brush ring to the selection:
   every guide not selected freezes. **Shift+drag** paints guides into the selection with the
   ring. **Shift+click** where the ring holds no guide deselects and unfreezes all.
 - **Select** works the same way: the selected guides stay live, all others are frozen, and a
@@ -368,8 +370,8 @@ back without Ctrl.
   freeze, so the brush then works on the selection. **Shift+click** adds the guides inside the
   ring; on none it deselects and unfreezes all (see [Freeze and solo](#freeze-and-solo)). For a
   lasso, use the **Select** tool.
-- Painting maps or the freeze mask, **Shift+drag** smooths. To smooth guides, use the **Smooth**
-  brush.
+- Painting maps or the freeze mask, **Shift+drag** smooths; with the **Shape** brush it smooths
+  the tube channel it paints. To smooth guides, use the **Smooth** brush.
 - **Alt+Shift+X** turns symmetry on or off, after **GroomLab > Install GroomLab Hotkeys**.
 - **B** + drag sets the radius, **M** + drag the strength, after **GroomLab > Install GroomLab
   Hotkeys** (or middle-drag and Shift+middle-drag).

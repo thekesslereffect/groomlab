@@ -138,15 +138,16 @@ They sit below the tabs and change with the tool.
   Right-click the curve for presets.
 - **Front facing only:** what the head hides gets no stroke. **Keep off scalp:** guides never dip
   into the skin.
-- **Shift+drag** smooths, with any brush. **Ctrl** selects guides with the guide brushes (below);
-  painting maps or Freeze it does the opposite.
+- **Ctrl** does the brush's opposite (Length shortens, Lift lays down; painting, toward 0).
+  **Shift** selects guides with the guide brushes (below); painting maps or Freeze, and with the
+  Shape brush, **Shift+drag** smooths. To smooth guides, use the **Smooth** brush.
 
 ### Solo and freeze: work on one guide at a time
 
 Frozen guides draw blue and brushes leave them alone.
 - **Solo new guides** (Place and Draw, off by default): turn it on and each guide you place stays
   live while all the others freeze, so the next stroke shapes only the new one.
-- **Shift+click** with a guide brush to solo the guides inside its ring: they join the selection
+- **Shift+click** with a guide brush (not Shape) to solo the guides inside its ring: they join the selection
   and the rest freeze. **Shift+drag** paints guides in with the ring.
 - **Shift+click** where the ring holds no guide (bare scalp or empty space) to unfreeze them all,
   or click **Unfreeze All** beside the Freeze tool.

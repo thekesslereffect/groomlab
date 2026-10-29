@@ -879,7 +879,7 @@ void BrushContext::toolOnSetup(MEvent&) {
     setHelpString("Drag: brush the selected groom (Place: click one guide, drag for many; Draw: draw a guide "
                   "from the scalp). Ctrl: the opposite (Length shortens, Lift lays down; painting, toward 0). "
                   "Shift+drag: paint guides into the selection, the rest frozen; Shift+click: add the guides in the "
-                  "ring (on none: deselect and unfreeze all). Painting maps or guide attributes, Shift+drag smooths. "
+                  "ring (on none: deselect and unfreeze all). Painting maps or guide attributes, and with Shape, Shift+drag smooths. "
                   "B/M or middle-drag: radius/strength. Double-click the tool for its settings.");
     installPenPressure();
     active_ = true;

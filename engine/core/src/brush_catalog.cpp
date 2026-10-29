@@ -63,8 +63,8 @@ std::vector<BrushEntry> makeCatalog() {
          kShaping},
         {"shape", "Shape", C::Shape, 0, "shape", 0.5f, true,
          "Paint guides' tubes near the brush: Width grows them (Ctrl shrinks), Flatness flattens them toward a "
-         "ribbon (Ctrl rounds them), Twist turns them about the guide (Ctrl the other way); the Tubes panel's Smooth "
-         "evens out what it painted. Children and Fill Tubes strands follow.",
+         "ribbon (Ctrl rounds them), Twist turns them about the guide (Ctrl the other way); Shift smooths what it "
+         "paints along the guides. Children and Fill Tubes strands follow.",
          with(without(kShaping, {"collide"}), {"tubeChannel", "tube"})},
         // Trim.
         {"cut", "Cut", C::Trim, 0, "cut", 1.0f, false, "Trim guides where the brush touches them.",

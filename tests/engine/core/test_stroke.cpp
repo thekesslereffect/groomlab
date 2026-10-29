@@ -295,13 +295,13 @@ TEST(Stroke, CtrlIsTheOppositeShiftSelectsWithGuideBrushesAndSmoothsPainting) {
         (ctrl ? ctrlCombed : combed) = g.guides();
     }
     EXPECT_EQ(combed, ctrlCombed);
-    // Shift selects with the guide brushes (the hosts'), smooths while painting.
-    for (const char* mode : {"comb", "smooth", "length", "cut", "erase", "noise", "shape"}) {
+    // Shift selects with the guide brushes (the hosts'), smooths while painting and with Shape.
+    for (const char* mode : {"comb", "smooth", "length", "cut", "erase", "noise"}) {
         BrushToolSettings s;
         s.setMode(mode);
         EXPECT_TRUE(s.shiftSelects()) << mode;
     }
-    for (const char* mode : {"paint", "part", "flow", "place", "draw"}) {
+    for (const char* mode : {"paint", "shape", "part", "flow", "place", "draw"}) {
         BrushToolSettings s;
         s.setMode(mode);
         EXPECT_FALSE(s.shiftSelects()) << mode;

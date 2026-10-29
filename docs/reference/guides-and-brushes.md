@@ -304,7 +304,8 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   painting goes toward 0; Comb, Slide, Smooth, Straighten and Erase have none). With a guide
   brush Shift selects (`BrushToolSettings::shiftSelects`, the hosts'): Shift+click adds the
   guides in the ring (the rest freeze; on none: unfreeze all), Shift+drag paints them in; the
-  lasso is the Select tool's. Painting maps or Freeze, Shift+drag smooths.
+  lasso is the Select tool's. Painting maps or Freeze, and with Shape (its tube channel), Shift+drag
+  smooths.
   - **Your own keys:** every tool also has a runtime command (category GroomLab) you can bind.
 
 - **Which guides:** `level` (or `group`) picks the guides a brush edits. Children still follow

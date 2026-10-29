@@ -35,7 +35,7 @@ SHORTCUTS = (
     ("B + drag", "The brush radius"),
     ("M + drag", "The brush strength"),
     ("Ctrl (stroke)", "The opposite: Length shortens, Lift lays down, Shape shrinks; painting, toward 0 (unfreeze, erase)"),
-    ("Shift (painting)", "Painting maps or guide attributes: smooth instead"),
+    ("Shift (painting, Shape)", "Painting maps or guide attributes, or the Shape brush: smooth instead"),
     ("S", "Select guides (Shift: toggle, Ctrl: deselect)"),
     ("Shift + drag", "A guide brush: paint guides into the selection, the rest frozen (Shift + click: add the guides in the ring; on none: deselect and unfreeze all)"),
     ("Page Up / Page Down", "The brush level (parents / children)"),

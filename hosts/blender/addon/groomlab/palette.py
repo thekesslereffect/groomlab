@@ -27,7 +27,7 @@ NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 # Blender's keys (palette.json's gestures are Maya's: middle-drag, the hotkey set).
 GESTURES = ("B + drag: radius · M + drag: strength · Ctrl: the opposite (Length shortens, Lift lays down, Shape shrinks; "
             "painting, toward 0) · Shift+drag: paint the selection (the rest frozen) · Shift+click: add the guides in the "
-            "ring (on none: deselect and unfreeze all) · painting maps or Freeze, Shift+drag: smooth")
+            "ring (on none: deselect and unfreeze all) · painting maps or Freeze, and Shape, Shift+drag: smooth")
 FLOW_HINTS = {"": defs.text("flowArrows"), "*": defs.text("flowSinks")}
 TABS = {"TOOLS": "tools", "PAINT": "paint", "CORRECTIVES": "correctives", "PHOTOS": "photos"}  # palette.json's ids
 STARTER = tuple((s["id"], s["label"], s["tip"]) for s in defs.get("palette/starter/steps"))

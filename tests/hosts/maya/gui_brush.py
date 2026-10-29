@@ -218,12 +218,10 @@ def step_shape_wires():
             total += sum(abs(w[i + 1] - w[i]) for i in range(len(w) - 1))
         return total
     jagged = wiggle()
-    # Shift with the Shape brush selects guides now (Ctrl is its opposite): a Shift drag over the
-    # tubes leaves their width as it is and selects the guides under the ring.
+    # Shift with the Shape brush smooths the channel it paints (it selects with the other guide brushes).
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="shift " + " ".join("%d %d" % (x0 + 10 * k, y0) for k in range(10)))
-    check("Shift+drag with the Shape brush selects guides, the tubes kept (%.3f, %.3f before; %d selected)" % (
-        wiggle(), jagged, len(groomlab.selected_guides(groom))),
-          abs(wiggle() - jagged) < 1e-6 and groomlab.selected_guides(groom))
+    check("Shift+drag with the Shape brush smooths the tubes' width (%.3f, %.3f before), selecting none" % (
+        wiggle(), jagged), wiggle() < 0.9 * jagged and not groomlab.selected_guides(groom))
     check("... and leaves the guides' shape", [cmds.groomLabGuides(groom, guidePoints=g) for g in guides] == points0)
     cmds.undo()
     cmds.undo()
