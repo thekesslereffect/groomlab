@@ -18,7 +18,7 @@ import os
 
 import bpy
 
-from . import groom, icons, menu, photos, process, tools
+from . import groom, icons, menu, photos, process, tools, updates
 from . import definitions as defs
 from .ops import active_groom
 from .ui import _wrap
@@ -165,6 +165,10 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             op.what, op.mode = "GUIDES", "TOGGLE"
         row.operator("groomlab.graph_open", text="", icon_value=icons.icon("graph"))
         row.menu("GROOMLAB_MT_tools_more", text="", icon="DOWNARROW_HLT")
+        if updates.available:  # the startup check found a newer GroomLab
+            row = layout.box().row(align=True)
+            row.label(text="GroomLab %s is available" % updates.available[0], icon="INFO")
+            row.operator("groomlab.check_updates", text="Update...")
         if scalp is None:
             self.draw_empty(layout, context)
             return

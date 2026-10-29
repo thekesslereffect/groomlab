@@ -445,7 +445,7 @@ if(TARGET groomlab-helper AND TARGET groomlab-cli)
         set(_addon_env
             "GROOMLAB_CLI=$<TARGET_FILE:groomlab-cli>;GROOMLAB_TEST_DATA=${CMAKE_CURRENT_SOURCE_DIR}/data;GROOMLAB_USER_PRESETS=${CMAKE_CURRENT_BINARY_DIR}/blender_no_user_presets;GROOMLAB_USER_NODES=${CMAKE_CURRENT_BINARY_DIR}/blender_no_user_nodes")
         foreach(_t addon addon_free addon_render addon_graph addon_graph_authoring addon_tools addon_ui addon_pipeline
-                   addon_photos addon_vray)
+                   addon_photos addon_vray addon_updates)
             add_test(NAME blender.${_t}
                 COMMAND "${_blender_python}" -B "${CMAKE_CURRENT_SOURCE_DIR}/hosts/blender/run_blender_test.py" "${_blender_exe}"
                         "${GROOMLAB_BLENDER_EXTENSION_ZIP}" "${CMAKE_CURRENT_SOURCE_DIR}/hosts/blender/test_${_t}.py")
@@ -461,6 +461,9 @@ if(TARGET groomlab-helper AND TARGET groomlab-cli)
                              ENVIRONMENT "${_addon_env}")
         # Free for any use: exports with no key, no notice, Support GroomLab in the menu and About.
         set_tests_properties(blender.addon_free PROPERTIES LABELS "quick;blender" ENVIRONMENT "${_addon_env}")
+        # The updater: a release served on localhost, checked and installed over the running extension.
+        set_tests_properties(blender.addon_updates PROPERTIES LABELS "blender"
+                             ENVIRONMENT "${_addon_env};GROOMLAB_EXTENSION_ZIP=${GROOMLAB_BLENDER_EXTENSION_ZIP}")
         # The UI from the shared definitions (engine/ui): every id Blender shows bound, the Groom Tools' operators.
         set_tests_properties(blender.addon_ui PROPERTIES LABELS "blender" ENVIRONMENT "${_addon_env}")
         # The Graph Editor. The test build of the helper has an operator at version 2 for the Upgrade case.

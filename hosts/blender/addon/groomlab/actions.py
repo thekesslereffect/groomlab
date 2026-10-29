@@ -80,7 +80,7 @@ BINDINGS = {
     "photos.guides": ("groomlab.photos_guides", {}),
     "help.docs": ("wm.url_open", {"url": DOCS_URL}),
     "help.shortcuts": ("groomlab.shortcuts", {}),
-    "help.updates": ("wm.url_open", {"url": UPDATES_URL}),
+    "help.updates": ("groomlab.check_updates", {}),
     "help.discord": ("wm.url_open", {"url": DISCORD_URL}),
     "help.donate": ("wm.url_open", {"url": DONATE_URL}),
     "help.about": ("groomlab.about", {}),
