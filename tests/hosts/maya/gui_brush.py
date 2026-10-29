@@ -191,6 +191,14 @@ def step_shape_wires():
     check("... with the wires still drawn after it", cyan_pixels("shape_stroked") > before + 40)
     cmds.undo()
     check("the Shape stroke is one undo step", cmds.getAttr(groom + ".guideData") == data0)
+    # Ctrl shrinks the tubes instead (Ctrl is every brush's opposite).
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="ctrl " + " ".join("%d %d" % (x0 + 10 * k, y0) for k in range(10)))
+    shrunk = [g for g in cmds.groomLabGuides(groom, listGuides="primary")
+              if min(groomlab.get_tube(groom, g)["width"]) < 0.1 - 1e-4]
+    check("Ctrl+Shape shrinks the tubes near it (%d guides), selecting none" % len(shrunk),
+          bool(shrunk) and not groomlab.selected_guides(groom))
+    cmds.undo()
+    check("... one undo step too", cmds.getAttr(groom + ".guideData") == data0)
     # Every guide's tube draws while shaping; a selected guide's stands out (warm), the rest stay.
     guides = cmds.groomLabGuides(groom, listGuides="primary")
     warm0 = warm_pixels("shape_none_selected")
@@ -210,9 +218,12 @@ def step_shape_wires():
             total += sum(abs(w[i + 1] - w[i]) for i in range(len(w) - 1))
         return total
     jagged = wiggle()
+    # Shift with the Shape brush selects guides now (Ctrl is its opposite): a Shift drag over the
+    # tubes leaves their width as it is and selects the guides under the ring.
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="shift " + " ".join("%d %d" % (x0 + 10 * k, y0) for k in range(10)))
-    check("Shift+drag with the Shape brush smooths the tubes' width (%.3f, %.3f before)" % (wiggle(), jagged),
-          wiggle() < 0.9 * jagged)
+    check("Shift+drag with the Shape brush selects guides, the tubes kept (%.3f, %.3f before; %d selected)" % (
+        wiggle(), jagged, len(groomlab.selected_guides(groom))),
+          abs(wiggle() - jagged) < 1e-6 and groomlab.selected_guides(groom))
     check("... and leaves the guides' shape", [cmds.groomLabGuides(groom, guidePoints=g) for g in guides] == points0)
     cmds.undo()
     cmds.undo()
@@ -272,14 +283,14 @@ def step_redo():
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke=" ".join("%d %d" % (tx - 200 + 20 * k, ty) for k in range(14)))
     check("a stroke from empty space starts when it reaches hair", cmds.getAttr(groom + ".guideData") != data)
 
-    # Ctrl with a brush: the selection painted with the ring (each guide it passes over selected),
-    # the rest frozen, one undo step; a Ctrl click adds the guides in the ring.
+    # Shift with a brush: the selection painted with the ring (each guide it passes over selected),
+    # the rest frozen, one undo step; a Shift click adds the guides in the ring.
     gl = state["groomlab"]
     gl.clear_guide_selection(groom)
     data = cmds.getAttr(groom + ".guideData")
     selected = cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select " + " ".join("%d %d" % (tx - 200 + 20 * k, ty) for k in range(14)))
     painted = gl.selected_guides(groom)
-    check("a Ctrl drag paints guides into the selection (%d)" % len(painted), len(painted) > 0 and selected == len(painted))
+    check("a Shift drag paints guides into the selection (%d)" % len(painted), len(painted) > 0 and selected == len(painted))
     check("... and freezes the rest (the guides change)", cmds.getAttr(groom + ".guideData") != data)
     cmds.undo()
     check("one undo takes the painted selection and the freeze back", not gl.selected_guides(groom) and
@@ -288,7 +299,7 @@ def step_redo():
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select 5 5")
     import json as jsonlib  # (this step imports json later: the name is its local)
     still = [g for g in jsonlib.loads(cmds.getAttr(groom + ".guideData"))["guides"] if g.get("attributes", {}).get("freeze", 0.0) > 0.5]
-    check("a Ctrl click on nothing deselects and unfreezes every guide (%d selected, %d frozen)"
+    check("a Shift click on nothing deselects and unfreezes every guide (%d selected, %d frozen)"
           % (len(gl.selected_guides(groom)), len(still)), not gl.selected_guides(groom) and not still)
     gl.clear_guide_selection(groom)
     from groomlab.painting import unfreeze_all
@@ -982,8 +993,8 @@ def step_brush_pack():
     cmds.undo()
     check("one undo restores them", cmds.getAttr(groom + ".guideData") == data0)
 
-    # Solo: Place with Solo new guides freezes every other guide in its step; Ctrl+Shift+click a guide
-    # selects it (the rest frozen); the Select tool freezes the guides not selected, a pick of
+    # Solo: Place with Solo new guides freezes every other guide in its step; Shift+click a guide
+    # with a brush selects it (the rest frozen); the Select tool freezes the guides not selected, a pick of
     # nothing unfreezes them; Unfreeze All frees them all.
     def frozen():
         guides = json.loads(cmds.getAttr(groom + ".guideData"))["guides"]
@@ -1002,26 +1013,25 @@ def step_brush_pack():
     mid = len(xyz) // 6 * 3
     mx, my = to_view(tuple(xyz[mid:mid + 3]))
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (mx, my))
-    check("Ctrl+click a guide selects it and freezes the rest (%r)" % (frozen(),), frozen() == (7, 8))
+    check("Shift+click a guide selects it and freezes the rest (%r)" % (frozen(),), frozen() == (7, 8))
     check("... the brush's group as it was", cmds.groomLabBrushCtx(ctx, query=True, group=True) == "")
     sx, sy = to_view((0.0, -0.3, 0.95))
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (sx, sy))
-    check("Ctrl+click the bare scalp deselects and unfreezes every guide",
+    check("Shift+click the bare scalp deselects and unfreezes every guide",
           frozen() == (0, 8) and not groomlab.selected_guides(groom))
     cmds.undo()
-    check("each Ctrl click is an undo step", frozen() == (7, 8))
+    check("each Shift click is an undo step", frozen() == (7, 8))
     # A click takes every guide in the ring, not only one under the cursor.
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (sx, sy))
     cmds.groomLabBrushCtx(ctx, edit=True, radius=2000)
     taken = cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (mx, my))
-    check("a Ctrl+click with a wide ring selects the guides in it (%d)" % taken, taken > 1 and frozen()[0] == 8 - taken)
-    # Ctrl+Shift+drag: a lasso round the guide, the rest frozen.
+    check("a Shift+click with a wide ring selects the guides in it (%d)" % taken, taken > 1 and frozen()[0] == 8 - taken)
+    # "shift x y" with a guide brush is the same Shift selection as the mouse's.
     cmds.groomLabBrushCtx(ctx, edit=True, radius=6)
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (sx, sy))
-    lasso = " ".join("%d %d" % (mx + dx, my + dy) for dx, dy in ((-12, -12), (12, -12), (12, 12), (-12, 12), (-12, -11)))
-    lassoed = cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="lasso " + lasso)
-    check("a Ctrl+Shift drag lassos the guide inside it, the rest frozen (%d, %r)" % (lassoed, frozen()),
-          lassoed >= 1 and frozen()[0] == 8 - lassoed)
+    shifted = cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="shift %d %d" % (mx, my))
+    check("a Shift+click (the brush's Shift) selects the guide, the rest frozen (%d, %r)" % (shifted, frozen()),
+          shifted == 1 and frozen() == (7, 8))
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (sx, sy))
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (mx, my))
     # With symmetry, the guide's mirror guide stays live too (the ring's guides pair up across x).
@@ -1037,7 +1047,7 @@ def step_brush_pack():
     check("symmetry off: the line goes (%d red pixels)" % gone, gone < no_line + 10)
     cmds.groomLabBrushCtx(ctx, edit=True, symmetry="x")
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="select %d %d" % (mx, my))
-    check("Ctrl+click with symmetry selects the guide's mirror too (%r)" % (frozen(),), frozen() == (6, 8))
+    check("Shift+click with symmetry selects the guide's mirror too (%r)" % (frozen(),), frozen() == (6, 8))
     groomlab.select_tool(symmetry="x")
     cmds.groomLabSelectCtx(groomlab.SELECT_CONTEXT, edit=True, debugLasso="%d %d" % (mx, my))
     check("the Select tool with symmetry picks the mirror guide too",
@@ -1107,8 +1117,9 @@ def step_brush_pack():
           all(t in tools.buttons for t in ("direction", "noise")) and not any(t in tools.buttons for t in ("width", "density")))
     check("the new tiles have icons", all(not tools.buttons[t].icon().isNull() for t in ("direction", "noise")))
     check("Unfreeze All sits beside the Freeze tile", "unfreeze" in tools.buttons and not tools.buttons["unfreeze"].isCheckable())
-    check("the hints name the Ctrl selection and the Ctrl+Shift lasso",
-          "Ctrl+drag: paint the selection" in tools.gestures.text() and "Ctrl+Shift+drag: lasso" in tools.gestures.text())
+    check("the hints name the Shift selection and Ctrl's opposite",
+          "Shift+drag: paint the selection" in tools.gestures.text() and "Ctrl: the opposite" in tools.gestures.text()
+          and "lasso" not in tools.gestures.text())
     tools.activate("paint")
     check("Paint picked in the Groom Tools is the context's mode",
           cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, mode=True) == "paint")

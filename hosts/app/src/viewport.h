@@ -12,8 +12,8 @@
 // held: a left drag sets the strength (brush mode too), Y held: a left press opens the marking
 // menu (markingMenuPressed; the drag and the release go to it), S select mode, Escape the camera. Alt with any button is always the camera (Maya's); without
 // Alt the plain buttons orbit, pan and dolly in camera mode. In brush mode a left drag strokes
-// (Shift: smooth; Ctrl on a guide brush: paint the selection, Ctrl+Shift a lasso, a click adding the guides in the ring;
-// painting, Ctrl: the opposite), the middle button sets the
+// (Ctrl: the opposite; Shift on a guide brush: paint the selection, a click adding the guides in
+// the ring; painting, Shift: smooth), the middle button sets the
 // radius (Shift: the strength), the right orbits; in select mode a left click or box picks
 // (Shift: toggle, Ctrl: deselect, Ctrl+Shift: add). A pen's pressure (QTabletEvent) scales the
 // stroke.
@@ -114,7 +114,7 @@ protected:
     void leaveEvent(QEvent* event) override;
 
 private:
-    enum class Drag { None, Orbit, Pan, Dolly, Stroke, Radius, Strength, Box, Paint, Lasso, Menu };
+    enum class Drag { None, Orbit, Pan, Dolly, Stroke, Radius, Strength, Box, Paint, Menu };
     void cameraMoved();
     bool cameraPress(QMouseEvent* event, bool alt);  // the camera's buttons; false: not a camera drag
     float pressure() const;
@@ -125,8 +125,7 @@ private:
     Drag drag_ = Drag::None;
     QPoint last_;
     QPointF pressAt_;
-    bool paintMoved_ = false;  // a brush's Ctrl drag (Drag::Paint, Lasso) moved: it paints (else a click)
-    std::vector<QPointF> lasso_;  // a brush's Ctrl+Shift drag so far
+    bool paintMoved_ = false;  // a brush's Shift drag (Drag::Paint) moved: it paints (else a click)
     float dragStart_ = 0.0f;  // the radius or strength when its drag started
     bool bHeld_ = false;      // B is down: a left drag sizes the brush
     bool bDragged_ = false;   // ... and did, so releasing B keeps the mode

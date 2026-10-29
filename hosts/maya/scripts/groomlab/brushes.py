@@ -213,10 +213,13 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
       sets it to its shape and Width, Flatness and Twist); placement_tube() reads it back.
     - `solo_new_guides` (place, draw): each stroke's new guides stay unfrozen and every other
       guide is frozen, so the brushes after work on them alone (the Groom Tools turn it on).
-    - Ctrl with a guide brush selects guides: a drag paints them into the selection with the
-      ring, Ctrl+Shift+drag lassos them, a click adds the guides in the ring; every guide not
-      selected freezes (one undo step). A Ctrl+click where no guide is deselects and unfreezes
-      every guide. Painting (maps, Freeze), Ctrl is the opposite.
+    - Ctrl is the opposite: Length shortens, Lift lays down, Twist and Curl turn back, Attract
+      pushes apart, Direction turns away, Noise smooths, Shape shrinks, rounds or untwists, Cut
+      grows; painting, toward 0 (Comb, Slide, Smooth, Straighten and Erase have none).
+    - Shift with a guide brush selects guides: a drag paints them into the selection with the
+      ring, a click adds the guides in the ring; every guide not selected freezes (one undo step).
+      A Shift+click where no guide is deselects and unfreezes every guide. Painting (maps,
+      Freeze), Shift+drag smooths.
     """
     _check_mode(mode)
     ensure_plugin()

@@ -154,10 +154,8 @@ MainWindow::MainWindow() {
         selectMode_->setChecked(mode == Viewport::ToolMode::Select);
         refreshTool();
         if (mode == Viewport::ToolMode::Brush) {
-            notify(tr("Brush: drag to stroke, Shift smooths, Ctrl+drag paints the selection and Ctrl+Shift+drag "
-                      "lassos it (Ctrl+click adds the guides in the ring, a lasso the guides in it; on none: deselect and "
-                      "unfreeze all; painting "
-                      "maps, Ctrl is the opposite); "
+            notify(tr("Brush: drag to stroke, Ctrl is the opposite, Shift+drag paints the selection (Shift+click adds "
+                      "the guides in the ring; on none: deselect and unfreeze all; painting maps, Shift smooths); "
                       "B+drag (or middle-drag) sets the radius, M+drag the strength; Alt+Shift+X symmetry; Y+click the "
                       "marking menu; Alt orbits; Esc leaves"));
             if (document_) reevaluate();  // warms the stroke document

@@ -146,9 +146,9 @@ They sit below the tabs and change with the tool.
 Frozen guides draw blue and brushes leave them alone.
 - **Solo new guides** (Place and Draw, off by default): turn it on and each guide you place stays
   live while all the others freeze, so the next stroke shapes only the new one.
-- **Ctrl+click** with a guide brush to solo the guides inside its ring: they join the selection
-  and the rest freeze. **Ctrl+drag** paints guides in with the ring; **Ctrl+Shift+drag** lassos them.
-- **Ctrl+click** where the ring holds no guide (bare scalp or empty space) to unfreeze them all,
+- **Shift+click** with a guide brush to solo the guides inside its ring: they join the selection
+  and the rest freeze. **Shift+drag** paints guides in with the ring.
+- **Shift+click** where the ring holds no guide (bare scalp or empty space) to unfreeze them all,
   or click **Unfreeze All** beside the Freeze tool.
 - **Freeze** paints frozen guides by hand (Ctrl unfreezes).
 - Each of these is one undo step. With **Symmetry** on, the mirror guides stay live too.
@@ -690,7 +690,7 @@ Simulate has no loop.
 | No strands | `groomlab.errors(groom)` says why. Also check the scalp is connected (`inMesh`) and the graph has an Output. |
 | A node shows a grey **i** | It does nothing as set: a Part with no parts drawn, a Flow with no arrows, a Clump in an input mode with nothing connected, Interpolate without guides. Its note says why. Not an error. |
 | Strands pop on a deforming scalp | No rest mesh: **Set** on the Rest row of the Attribute Editor's Inputs. |
-| Brush does nothing | Select the groom first. Check **Group** at the top of the Groom Tools, frozen guides (blue: Ctrl+click where no guide is to unfreeze them all), and **Selected only** with an empty selection. |
+| Brush does nothing | Select the groom first. Check **Group** at the top of the Groom Tools, frozen guides (blue: Shift+click where no guide is to unfreeze them all), and **Selected only** with an empty selection. |
 | Cached Playback leaves a groom out | Its graph has a Simulate node without a bake over the playback range, or a Jiggle node. Bake the simulation to have it cached. |
 | A texture map does nothing | The scalp needs UVs, and the path must resolve: `groomlab.resolve_path("sourceimages/map.png")`. |
 | A map says "no map named" or "does not fit this scalp" | The Map node names a map the Paint tab doesn't list (make or rename it there), or a vertex map from a scalp with another vertex count (convert it to a guide layer or a texture on the old scalp first). |

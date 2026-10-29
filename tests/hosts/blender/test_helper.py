@@ -1044,9 +1044,8 @@ class ToolsTest(HelperTestCase):
         stretched = self.guides()
         lengths = [np.linalg.norm(np.diff(stretched[g], axis=0), axis=1).sum() for g in moved]
         self.assertGreater(max(lengths), 0.0405)  # stretch: longer with the drag
-        # Shift+drag with a brush smooths: the press waits (a Shift+click alone does nothing), the drag smooths
-        # (a tester found Blender's Shift held did nothing: its drags were refused, no stroke yet).
-        end = self.stroke("comb", self.comb_events(), shift=True)
+        # The Smooth brush relaxes the stroked guides (Shift with a guide brush selects: the add-on's).
+        end = self.stroke("smooth", self.comb_events())
         self.assertEqual(end["released"], "stroke")
         self.assertTrue(end["committed"])
         smoothed = self.guides()
@@ -1133,9 +1132,9 @@ class ToolsTest(HelperTestCase):
         self.step("undo")
         self.assertTrue(r["graphChanged"])
         self.assertNotIn("scatter_density", [m["name"] for m in self.call("maps_list")["maps"]])
-        # Solo: Place with soloNewGuides freezes every other guide in its step; a Shift+click does
-        # nothing (Shift is smoothing); a brush's Ctrl+Shift click (a solo pick that adds) selects a
-        # guide and freezes the rest; a pick of nothing unfreezes all; a painted selection's end
+        # Solo: Place with soloNewGuides freezes every other guide in its step; a guide brush handed
+        # Shift strokes nothing (the add-on selects instead); a brush's Shift click (a solo pick that
+        # adds) selects a guide and freezes the rest; a pick of nothing unfreezes all; a painted selection's end
         # (selection_set solo) freezes the rest.
         spot = self.cam.pixel(crown_points(7)[5])
         self.stroke("place", [[spot[0], spot[1], 1.0]], settings={"soloNewGuides": True}, ref={"solo_new_guides": True})

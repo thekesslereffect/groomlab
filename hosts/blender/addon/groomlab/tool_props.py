@@ -564,7 +564,12 @@ def _keymap_draw(prefs, context):
 class GroomLabPreferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
+    check_updates: BoolProperty(name="Check for updates at startup", default=True,
+                                description="Once a day, while Blender's online access is on, look for a newer GroomLab "
+                                            "and say so in the Groom Tools (Help > Check for Updates installs it)")
+
     def draw(self, context):
+        self.layout.prop(self, "check_updates")
         _keymap_draw(self, context)
 
 

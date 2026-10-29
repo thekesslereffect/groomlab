@@ -1417,20 +1417,20 @@ TEST(AppBrush, PlacesErasesSelectsAndDeletesGuides) {
     EXPECT_EQ(f.doc->selection().size(), afterErase - 1);
     EXPECT_EQ(f.session.select({root}, SelectMode::Toggle), 1u);
     EXPECT_EQ(f.doc->selection().size(), afterErase);
-    // A guide brush's Ctrl+click: the guides inside its ring (none: the selection cleared).
-    // Painting (Freeze), Ctrl stays the opposite.
+    // A guide brush's Shift+click: the guides inside its ring (none: the selection cleared).
+    // Painting (Freeze), Shift smooths.
     f.session.settings().setMode("comb");
-    EXPECT_TRUE(f.session.settings().ctrlSelects());
+    EXPECT_TRUE(f.session.settings().shiftSelects());
     f.session.settings().screenRadius = 2000.0f;
     EXPECT_EQ(f.session.paintSelection(root, SelectMode::Replace), afterErase);
     f.session.settings().screenRadius = 5.0f;
     EXPECT_EQ(f.session.paintSelection(QPointF(1.0, 1.0), SelectMode::Replace), 0u);
     EXPECT_TRUE(f.doc->selection().empty());
-    // Ctrl+Shift's lasso: the guides inside a polygon round the whole view.
+    // The Select tool's lasso: the guides inside a polygon round the whole view.
     EXPECT_EQ(f.session.select({QPointF(0.0, 0.0), QPointF(f.w, 0.0), QPointF(f.w, f.h), QPointF(0.0, f.h)}, SelectMode::Add), afterErase);
     EXPECT_EQ(f.doc->selection().size(), afterErase);
     f.session.setTool("freeze");
-    EXPECT_FALSE(f.session.settings().ctrlSelects());
+    EXPECT_FALSE(f.session.settings().shiftSelects());
     f.session.setTool("comb");
     // The selection shows as the display's selected item.
     DisplaySettings settings;

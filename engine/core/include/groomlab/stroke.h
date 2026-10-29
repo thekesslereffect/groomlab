@@ -112,11 +112,11 @@ struct BrushToolSettings {
     bool paintsScalp() const {
         return (brush.mode == BrushMode::Attribute || brush.mode == BrushMode::Smooth) && paintKind != "guides";
     }
-    // Whether Ctrl selects guides rather than inverting the stroke: the guide brushes (comb,
-    // length, cut...). Painting (maps, a guide attribute such as freeze) keeps Ctrl's opposite
-    // action, as do Part and Flow (erase). Hosts: Ctrl+click or drag paints the selection within
-    // the ring, Ctrl+Shift+drag lassos it (the rest frozen either way).
-    bool ctrlSelects() const { return tool == Tool::Brush && brush.mode != BrushMode::Attribute && !paintsScalp(); }
+    // Whether Shift selects guides (the hosts': a drag paints the selection within the ring, a
+    // click adds the guides in it, on none clears it; the rest frozen either way) rather than
+    // smoothing: the guide brushes (comb, length, cut, shape...). Painting (maps, a guide
+    // attribute such as freeze) keeps Shift's smoothing. Ctrl is every brush's opposite (pressed()).
+    bool shiftSelects() const { return tool == Tool::Brush && brush.mode != BrushMode::Attribute && !paintsScalp(); }
 
     // comb, smooth... (brush.h), clump, place, draw, part, flow.
     std::string modeName() const;
@@ -595,7 +595,8 @@ public:
                 float pressure = 1.0f, unsigned modifiers = 0, const std::function<void()>& afterDab = {});
 
     bool stroking() const { return stroking_; }
-    // A Shift press waiting for a drag (smoothing) or a release (a Shift+click): drags go on.
+    // A Shift press while painting, waiting for a drag (smoothing) or a release (a Shift+click):
+    // drags go on.
     bool shiftPending() const { return shiftPending_; }
     bool changed() const { return changed_ || mapChanged_; }
     // Part and Flow: the path drawn so far on the scalp (the host draws it until it is committed).

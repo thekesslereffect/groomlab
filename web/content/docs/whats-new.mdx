@@ -13,6 +13,20 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.35.1 (October 28, 2026)
+
+- **Changed: Shift selects, Ctrl flips.** With a guide brush, **Shift+drag** paints guides into the
+  selection and **Shift+click** adds the guides in the ring (on bare scalp: deselects and unfreezes
+  all); this was Ctrl. **Ctrl** now does every brush's opposite: Length shortens, Lift lays down,
+  Twist, Curl, Attract, Direction, Noise and Shape go the other way, Cut grows, painting goes
+  toward 0. The brush lasso is gone (the **Select** tool keeps its own). Painting maps or Freeze,
+  Shift+drag still smooths; smooth guides with the **Smooth** brush.
+- **Blender: updates from inside Blender.** **GroomLab > Help > Check for Updates...** shows the
+  newest version with what's new, and **Update** installs it in place (restart Blender to finish).
+  Once a day GroomLab checks at startup and says so in the Groom Tools. Both need Blender's
+  **Allow Online Access**. From this version on there's no need to download GroomLab from the site
+  to update it.
+
 ## 0.35.0 (October 28, 2026)
 
 - **Brush alphas.** The Paint brush on a vertex or texture map can stamp an alpha: a grayscale

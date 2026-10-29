@@ -643,8 +643,12 @@ Install from Disk and remote repositories take it. Releases: `tools/package_blen
 install into `dist/`, checked with `blender --command extension validate`) and
 `tools/publish_blender.py` (R2: `blender/GroomLab-Blender-<version>-<platform>.zip`, a `-latest`
 copy, `blender/latest.json`, and `blender/index.json`, a Blender extensions repository listing so
-users who add it as a remote repository get updates from Blender). The Maya release scripts are
-unchanged.
+users who add it as a remote repository get updates from Blender). The add-on's own updater
+(`groomlab/updates.py`: Help > Check for Updates..., a daily startup check) reads
+`blender/latest.json`, downloads the zip (its size and sha256 checked), stops the helper and
+installs it over the running extension with `extensions.package_install_files` into the same
+repository; it runs only with Blender's online access on (the manifest's `network` permission),
+never in background mode or with `GROOMLAB_NO_UPDATES=1`. The Maya release scripts are unchanged.
 
 User presets are shared with Maya and the app (presets.h: `GROOMLAB_USER_PRESETS`, else Maya's
 user folder).
