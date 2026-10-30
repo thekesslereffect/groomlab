@@ -188,9 +188,9 @@ function ChipRow({ label, children }: { label: string; children: ReactNode }) {
 /** A labeled block inside a card: a small muted name, then its rows. */
 function Sub({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="flex flex-col gap-0.5 pt-1.5">
-      <div className="flex h-5 items-center">
-        <span className="flex-1 text-sm-ui font-medium text-muted">{title}</span>
+    <div className="mt-2 flex flex-col gap-0.5 border-t border-line/60 pt-1.5">
+      <div className="flex h-6 items-center">
+        <span className="flex-1 text-sm-ui font-semibold text-dim">{title}</span>
         {actions}
       </div>
       {children}
@@ -274,58 +274,6 @@ function ToolHelp({ t }: { t: Tool }) {
   );
 }
 
-function Options({ s }: { s: ToolSettings }) {
-  const style = useOpt("gtOptions");
-  const keys = s.options ?? [];
-  const curves = [s.falloffCurve && "Falloff curve", s.rootToTip && "Root to tip"].filter(Boolean) as string[];
-  const [on, setOn] = useState<string[]>(keys.filter((k) => optionLabels[k].on));
-  const [curveOn, setCurveOn] = useState<string[]>([]);
-  if (!keys.length && !curves.length) return null;
-  const flip = (k: string) => setOn(on.includes(k) ? on.filter((x) => x !== k) : [...on, k]);
-  const flipCurve = (k: string) => setCurveOn(curveOn.includes(k) ? curveOn.filter((x) => x !== k) : [...curveOn, k]);
-  const editors = curveOn.map((c) => <Curve key={c} label={c === "Falloff curve" ? "Falloff: center to edge" : "Strength: root to tip"} />);
-
-  if (style === "grid") {
-    const order = ["selectedOnly", "pressure", "collide", "frontFacing", "stretch"] as const;
-    return (
-      <div className="flex flex-col gap-0.5 pt-1">
-        {curves.map((c) => <Toggle key={c} checked={curveOn.includes(c)} onChange={() => flipCurve(c)} label={c} />)}
-        {editors}
-        <div className="grid grid-cols-2">
-          {order.map((k) =>
-            keys.includes(k) ? <Toggle key={k} checked={on.includes(k)} onChange={() => flip(k)} label={optionLabels[k].label} /> : <span key={k} />,
-          )}
-        </div>
-      </div>
-    );
-  }
-  const chips = (
-    <div className="flex flex-wrap gap-1">
-      {keys.map((k) => (
-        <Chip key={k} on={on.includes(k)} onClick={() => flip(k)} tip={optionLabels[k].tip}>{optionLabels[k].label}</Chip>
-      ))}
-      {curves.map((c) => (
-        <Chip key={c} on={curveOn.includes(c)} onClick={() => flipCurve(c)} tip={`Shape the ${c.toLowerCase()}`}>{c}</Chip>
-      ))}
-    </div>
-  );
-  if (style === "fold") {
-    const summary = [...on.map((k) => optionLabels[k].label), ...curveOn].join(" · ") || "none";
-    return (
-      <Section title="Options" open={false} count={<span className="normal-case tracking-normal">{summary}</span>}>
-        {chips}
-        {editors}
-      </Section>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-1 pt-1">
-      {chips}
-      {editors}
-    </div>
-  );
-}
-
 function TubeFields() {
   return (
     <>
@@ -395,90 +343,148 @@ const paintTool: Tool = {
   tip: "Paint the current map: Shift smooths, Ctrl paints toward 0. Scalp maps take an alpha stamp.",
 };
 
-export function ToolCard({ tool }: { tool?: Tool }) {
-  const { tool: current } = useWS();
-  const hints = useOpt("gtHints");
-  const tubes = useOpt("gtTubes");
-  const t = tool ?? allTools.find((x) => x.id === current);
-  const s = t && toolSettings[t.id];
-  if (!t || !s) return <p className="border-t border-line py-2 text-sm-ui text-muted">Pick a tool, then drag over the groom in the viewport.</p>;
-  const split = tubes === "split";
-  return (
-    <section className="flex flex-col gap-0.5 border-t border-line pt-2">
-      <div className="flex h-row items-center gap-2">
-        <ToolIcon tool={t} size={16} />
-        <span className="flex-1 font-semibold text-fg">{t.label}</span>
-        {hints === "short" && <ToolHelp t={t} />}
-      </div>
-      <p className="pb-1 text-sm-ui leading-snug text-muted">{hints === "short" ? s.short : t.tip}</p>
+// The options a card shows as chips, split by meaning: how the stroke behaves (Brush) and where it
+// lands (Applies to). Fixed order, so a chip never moves between tools.
+const BRUSH_KEYS = ["pressure", "collide"] as const;
+const APPLY_KEYS = ["selectedOnly", "frontFacing"] as const;
 
-      {s.brush && (
-        <>
-          <Param label="Radius" init={60} min={5} max={400} step={1} suffix=" px" />
-          <Param label={s.signed ? "Strength (±)" : "Strength"} init={s.signed ? 0.5 : 1} min={s.signed ? -1 : 0} />
-          <Param label="Falloff" init={1} />
-          {s.smooth && <Param label="Smooth" init={1} max={3} />}
-        </>
+/** Chips (or checkboxes / a fold, per the lab's Brush options) for some option keys + curves. */
+function ChipSet({ keys, curves = [], foldTitle }: { keys: string[]; curves?: string[]; foldTitle: string }) {
+  const style = useOpt("gtOptions");
+  const [on, setOn] = useState<string[]>(keys.filter((k) => optionLabels[k].on));
+  const [curveOn, setCurveOn] = useState<string[]>([]);
+  if (!keys.length && !curves.length) return null;
+  const flip = (k: string) => setOn(on.includes(k) ? on.filter((x) => x !== k) : [...on, k]);
+  const flipCurve = (k: string) => setCurveOn(curveOn.includes(k) ? curveOn.filter((x) => x !== k) : [...curveOn, k]);
+  const editors = curveOn.map((c) => <Curve key={c} label={c === "Falloff curve" ? "Falloff: center to edge" : "Strength: root to tip"} />);
+
+  if (style === "grid") {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <div className="grid grid-cols-2">
+          {keys.map((k) => <Toggle key={k} checked={on.includes(k)} onChange={() => flip(k)} label={optionLabels[k].label} />)}
+          {curves.map((c) => <Toggle key={c} checked={curveOn.includes(c)} onChange={() => flipCurve(c)} label={c} />)}
+        </div>
+        {editors}
+      </div>
+    );
+  }
+  const chips = (
+    <div className="flex flex-wrap gap-1">
+      {keys.map((k) => <Chip key={k} on={on.includes(k)} onClick={() => flip(k)} tip={optionLabels[k].tip}>{optionLabels[k].label}</Chip>)}
+      {curves.map((c) => <Chip key={c} on={curveOn.includes(c)} onClick={() => flipCurve(c)} tip={`Shape the ${c.toLowerCase()}`}>{c}</Chip>)}
+    </div>
+  );
+  if (style === "fold") {
+    const summary = [...on.map((k) => optionLabels[k].label), ...curveOn].join(" · ") || "none";
+    return (
+      <Section title={foldTitle} open={false} count={<span className="normal-case tracking-normal">{summary}</span>}>
+        {chips}
+        {editors}
+      </Section>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1 pt-0.5">
+      {chips}
+      {editors}
+    </div>
+  );
+}
+
+/** One of the card's three blocks. Labeled (Brush / <tool> / Applies to) or flat, per the lab. */
+function Block({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) {
+  const labeled = useOpt("gtBlocks") === "labeled";
+  return (
+    <div className={cn("flex flex-col gap-0.5", labeled ? "mt-2 border-t border-line/60 pt-1.5" : "pt-1")}>
+      {(labeled || actions) && (
+        <div className="flex h-6 items-center">
+          <span className="flex-1 text-sm-ui font-semibold text-dim">{labeled ? title : ""}</span>
+          {actions}
+        </div>
       )}
-      {s.symmetry && (
-        <Row label="Symmetry">
-          <Toggle checked onChange={() => {}} />
-          <Select value="World X" options={["World X", "Topology"]} className="flex-1" />
-        </Row>
-      )}
-      {s.paints && <ChipRow label="Paints"><Choice items={["Width", "Flatness", "Twist"]} /></ChipRow>}
-      {s.softRadius && <Param label="Soft radius" init={0.5} max={5} suffix=" cm" />}
-      <Options s={s} />
-      {s.actsOn && <ChipRow label="Acts on"><Multi items={["Guides", "Parts", "Flow"]} init={["Guides"]} /></ChipRow>}
-      {s.erases && (
-        <>
-          <ChipRow label="Erases"><Multi items={["Guides", "Parts", "Flow"]} init={["Guides"]} /></ChipRow>
-          <p className="text-sm-ui text-muted">Erased guides take their children with them.</p>
-        </>
-      )}
-      {s.alpha && (
-        <Sub title="Alpha (scalp maps)">
+      {children}
+    </div>
+  );
+}
+
+/** What the stroke edits: the picked group / map / layer, from the list under the card. */
+function Target({ kind, name, color }: { kind: string; name: string; color?: string }) {
+  return (
+    <Row label={kind}>
+      <button className="flex h-row min-w-0 flex-1 items-center gap-2 rounded-ctl px-1.5 text-left hover:bg-hover" title="Pick another in the list below">
+        {color && <span className="size-2.5 shrink-0 rounded-full" style={{ background: color }} />}
+        <span className="truncate text-fg">{name}</span>
+      </button>
+    </Row>
+  );
+}
+
+/** The tool's own block: what this tool does, beyond the brush. */
+function ToolBlock({ id, s }: { id: string; s: ToolSettings }) {
+  switch (id) {
+    case "paint":
+      return (
+        <Block title="Paint">
+          <ChipRow label="Mode"><Choice items={["Replace", "Add", "Subtract", "Clamp"]} /></ChipRow>
+          <div className="flex gap-1 pt-1">
+            <div className="flex-1"><FillField label="Value" value={1} onChange={() => {}} /></div>
+            <Tip label="Fill the whole map with this value"><Button size="sm">Fill</Button></Tip>
+          </div>
           <Row label="Stamp">
             <span className="h-row w-8 shrink-0 rounded-ctl border border-line" style={{ background: "radial-gradient(circle, var(--gl-text) 0%, transparent 70%)" }} />
             <Select value="Fixed" options={["Fixed", "Follow Stroke", "Random"]} className="flex-1" />
           </Row>
-          <Param label="Angle" init={0} min={0} max={360} step={1} suffix="°" />
-          <Param label="Spacing" init={25} max={100} step={1} suffix="%" />
-        </Sub>
-      )}
-      {s.newGuides && (
-        <Sub title="New guides">
-          <Param label="Length" init={8} max={40} step={0.1} suffix=" cm" />
-          <Param label="Segments" init={8} min={1} max={32} step={1} />
-          {s.newGuides === "place" && <Param label="Spacing" init={1} max={5} step={0.1} suffix=" cm" />}
-          <div className="flex flex-wrap gap-1 pt-0.5">
-            <Chip on tip="New guides copy the shape of the guides around them">Match nearby</Chip>
-            <Chip on={false} tip="Show only the new guides while placing">Solo new</Chip>
-          </div>
-        </Sub>
-      )}
-      {split && s.tube === "new" && <TubeNew />}
-      {split && s.tube === "edit" && <TubeEdit />}
-      {s.parts && (
-        <Sub title="Parts" actions={<Glyph label="Parts from curves"><Spline className={ic} /></Glyph>}>
-          <Row label="Name">
-            <input defaultValue="part" className="h-row w-full rounded-ctl border border-line bg-raised px-2 text-fg outline-none focus:border-accent" />
-          </Row>
-          <ListBlock rows={[{ name: "center part", meta: "12 pts" }]} />
-          <div className="flex gap-1">
-            <Button size="sm" variant="ghost">Remove</Button>
-            <Button size="sm" variant="ghost">Clear</Button>
-          </div>
-        </Sub>
-      )}
-      {s.flow && (
-        <Sub title="Flow" actions={<Button size="sm" variant="ghost">Clear all</Button>}>
-          <Row label="Place"><Select value="Arrows" options={["Arrows", "Whorl", "Whorl clockwise", "Gather"]} className="w-full" /></Row>
-          <p className="text-sm-ui text-muted">No flow arrows yet</p>
-        </Sub>
-      )}
-      {s.lengthKeys && (
-        <Sub title="Keys" actions={<Button size="sm" variant="ghost">Clear</Button>}>
+          <Param label="Stamp angle" init={0} min={0} max={360} step={1} suffix="°" />
+          <Param label="Stamp spacing" init={25} max={100} step={1} suffix="%" />
+        </Block>
+      );
+    case "place":
+    case "draw":
+      return (
+        <>
+          <Block title="New guides">
+            <Param label="Length" init={8} max={40} step={0.1} suffix=" cm" />
+            <Param label="Segments" init={8} min={1} max={32} step={1} />
+            {id === "place" && <Param label="Spacing" init={1} max={5} step={0.1} suffix=" cm" />}
+            <div className="flex flex-wrap gap-1 pt-1">
+              <Chip on tip="New guides copy the shape of the guides around them">Match nearby</Chip>
+              <Chip on={false} tip="Show only the new guides while placing">Solo new</Chip>
+            </div>
+          </Block>
+          {useOpt("gtTubes") === "split" && <TubeNew />}
+        </>
+      );
+    case "comb":
+      return (
+        <Block title="Comb">
+          <div className="flex flex-wrap gap-1"><Chip on={false} tip="Guides get longer or shorter as you pull">Stretch while combing</Chip></div>
+        </Block>
+      );
+    case "shape":
+      return (
+        <>
+          <Block title="Paints"><Choice items={["Width", "Flatness", "Twist"]} /></Block>
+          {useOpt("gtTubes") === "split" && <TubeEdit />}
+        </>
+      );
+    case "select":
+      return (
+        <>
+          <Block title="Selection"><Param label="Soft radius" init={0.5} max={5} suffix=" cm" /></Block>
+          {useOpt("gtTubes") === "split" && <TubeEdit />}
+        </>
+      );
+    case "erase":
+      return (
+        <Block title="Erases">
+          <Multi items={["Guides", "Parts", "Flow"]} init={["Guides"]} />
+          <p className="pt-0.5 text-sm-ui text-muted">Erased guides take their children with them.</p>
+        </Block>
+      );
+    case "lengths":
+      return (
+        <Block title="Keys" actions={<Button size="sm" variant="ghost">Clear</Button>}>
           <Param label="Key scale" init={1} max={3} />
           <Param label="Key length" init={8} max={40} suffix=" cm" />
           <ChipRow label="Guides"><Choice items={["Scale", "Trim"]} /></ChipRow>
@@ -488,10 +494,84 @@ export function ToolCard({ tool }: { tool?: Tool }) {
             <Button size="sm">Cancel</Button>
             <Button size="sm" variant="primary">Apply</Button>
           </div>
-        </Sub>
+        </Block>
+      );
+    case "flow":
+      return (
+        <Block title="Flow" actions={<Button size="sm" variant="ghost">Clear all</Button>}>
+          <Row label="Place"><Select value="Arrows" options={["Arrows", "Whorl", "Whorl clockwise", "Gather"]} className="w-full" /></Row>
+          <p className="text-sm-ui text-muted">No flow arrows yet</p>
+        </Block>
+      );
+    case "part":
+      return (
+        <Block title="Parts" actions={<Glyph label="Parts from curves"><Spline className={ic} /></Glyph>}>
+          <Row label="Name">
+            <input defaultValue="part" className="h-row w-full rounded-ctl border border-line bg-raised px-2 text-fg outline-none focus:border-accent" />
+          </Row>
+          <ListBlock rows={[{ name: "center part", meta: "12 pts" }]} />
+          <div className="flex gap-1">
+            <Button size="sm" variant="ghost">Remove</Button>
+            <Button size="sm" variant="ghost">Clear</Button>
+          </div>
+        </Block>
+      );
+    default:
+      return s.paints ? null : null;
+  }
+}
+
+export function ToolCard({ tool, target }: { tool?: Tool; target?: { kind: string; name: string; color?: string } }) {
+  const { tool: current } = useWS();
+  const hints = useOpt("gtHints");
+  const t = tool ?? allTools.find((x) => x.id === current);
+  const s = t && toolSettings[t.id];
+  if (!t || !s) return <p className="border-t border-line py-2 text-sm-ui text-muted">Pick a tool, then drag over the groom in the viewport.</p>;
+  const keys = s.options ?? [];
+  const brushKeys = BRUSH_KEYS.filter((k) => keys.includes(k));
+  const applyKeys = APPLY_KEYS.filter((k) => keys.includes(k));
+  const curves = [s.falloffCurve && "Falloff curve", s.rootToTip && "Root to tip"].filter(Boolean) as string[];
+  const into = t.id === "place" || t.id === "draw";
+  const tgt = target ?? (t.id === "part" ? undefined : { kind: into ? "Adds to" : "Group", name: "primary", color: "#7C9CD4" });
+  const hasApply = tgt || s.actsOn || s.symmetry || applyKeys.length;
+
+  return (
+    <section className="flex flex-col border-t border-line pt-2">
+      <div className="flex h-row items-center gap-2">
+        <ToolIcon tool={t} size={16} />
+        <span className="flex-1 font-semibold text-fg">{t.label}</span>
+        {hints === "short" && <ToolHelp t={t} />}
+      </div>
+      <p className="text-sm-ui leading-snug text-muted">{hints === "short" ? s.short : t.tip}</p>
+
+      {s.brush && (
+        <Block title="Brush">
+          <Param label="Radius" init={60} min={5} max={400} step={1} suffix=" px" />
+          <Param label={s.signed ? "Strength (±)" : "Strength"} init={s.signed ? 0.5 : 1} min={s.signed ? -1 : 0} />
+          <Param label="Falloff" init={1} />
+          {s.smooth && <Param label="Smooth" init={1} max={3} />}
+          <ChipSet keys={[...brushKeys]} curves={curves} foldTitle="Brush options" />
+        </Block>
       )}
+
+      <ToolBlock id={t.id} s={s} />
+
+      {hasApply && (
+        <Block title="Applies to">
+          {tgt && <Target {...tgt} />}
+          {s.actsOn && <ChipRow label="Acts on"><Multi items={["Guides", "Parts", "Flow"]} init={["Guides"]} /></ChipRow>}
+          {s.symmetry && (
+            <Row label="Mirror">
+              <Toggle checked onChange={() => {}} />
+              <Select value="World X" options={["World X", "Topology"]} className="flex-1" />
+            </Row>
+          )}
+          <ChipSet keys={[...applyKeys]} foldTitle="Limits" />
+        </Block>
+      )}
+
       {hints === "full" && s.brush && (
-        <p className="pt-1 text-sm-ui leading-snug text-muted">
+        <p className="pt-2 text-sm-ui leading-snug text-muted">
           B / M + drag (or middle-drag / Shift+middle-drag): radius / strength · Ctrl: the opposite (Length shortens, Lift lays down, Shape shrinks; painting, toward 0) · Shift+drag: paint guides into the selection · Page Up / Down: the brush level · Y + click: every brush.
         </p>
       )}
@@ -551,23 +631,29 @@ export function GuideGroups() {
           </button>
         </div>
       ))}
-      <div className="flex items-center gap-1 pt-1">
-        <Button size="sm" variant="ghost">Edit guides<ChevronDown className="size-3" /></Button>
-        <div className="flex-1" />
-        <Glyph label="Rename"><Pencil className={ic} /></Glyph>
-        <Glyph label="Select the group's guides"><Link2 className={ic} /></Glyph>
-        <Glyph label="Delete"><Trash2 className={ic} /></Glyph>
-      </div>
-      <Param label="Segments" init={12} min={2} max={64} step={1} hint="Resample the group's guides" />
+      <ItemProps
+        actions={
+          <>
+            <Glyph label="Rename"><Pencil className={ic} /></Glyph>
+            <Glyph label="Select the group's guides"><Link2 className={ic} /></Glyph>
+            <Glyph label="Delete"><Trash2 className={ic} /></Glyph>
+          </>
+        }
+      >
+        <Param label="Segments" init={12} min={2} max={64} step={1} hint="Resample the group's guides" />
+        <div className="pt-0.5"><Button size="sm" variant="ghost">Edit guides<ChevronDown className="size-3" /></Button></div>
+      </ItemProps>
     </Section>
   );
 }
 
 // ---- Tabs ------------------------------------------------------------------------------------
 
+/** A list section: the things a tab works on, then the picked one's own properties. */
 function PaintTab() {
   return (
     <>
+      <ToolCard tool={paintTool} target={{ kind: "Map", name: "density" }} />
       <Section
         title="Maps"
         count={3}
@@ -579,22 +665,37 @@ function PaintTab() {
         }
       >
         <ListBlock rows={[{ name: "density", meta: "scalp" }, { name: "clump mask", meta: "guides" }, { name: "tint", meta: "color" }]} />
-        <ChipRow label="Mode"><Choice items={["Replace", "Add", "Subtract", "Clamp"]} /></ChipRow>
-        <div className="flex gap-1">
-          <div className="flex-1"><FillField label="Value" value={1} onChange={() => {}} /></div>
-          <Button size="sm">Fill</Button>
-        </div>
-        <ChipRow label="Show on"><Multi items={["Guides", "Strands", "Scalp"]} init={["Scalp"]} /></ChipRow>
-        <p className="text-sm-ui text-muted">Read by scatter.density</p>
+        <ItemProps
+          actions={
+            <>
+              <Glyph label="Rename"><Pencil className={ic} /></Glyph>
+              <Glyph label="Convert to…"><Link2 className={ic} /></Glyph>
+              <Glyph label="Delete"><Trash2 className={ic} /></Glyph>
+            </>
+          }
+        >
+          <ChipRow label="Show on"><Multi items={["Guides", "Strands", "Scalp"]} init={["Scalp"]} /></ChipRow>
+          <p className="pt-1 text-sm-ui text-muted">Read by scatter.density</p>
+        </ItemProps>
       </Section>
-      <ToolCard tool={paintTool} />
     </>
+  );
+}
+
+/** Under a list: the picked item's own settings and its actions. */
+function ItemProps({ children, actions }: { children?: ReactNode; actions?: ReactNode }) {
+  return (
+    <div className="mt-1 flex flex-col gap-0.5 rounded-ctl border border-line p-1.5">
+      {actions && <div className="-mt-0.5 flex justify-end">{actions}</div>}
+      {children}
+    </div>
   );
 }
 
 function CorrectivesTab() {
   return (
     <>
+      <ToolCard target={{ kind: "Layer", name: "fix frame 24" }} />
       <Section
         title="Layers"
         count={3}
@@ -606,13 +707,20 @@ function CorrectivesTab() {
         }
       >
         <ListBlock rows={[{ name: "fix frame 24", meta: "0.80 ◆" }, { name: "Node: sculpt1", meta: "1.00" }, { name: "Base groom" }]} />
-        <div className="flex gap-1">
-          <div className="flex-1"><FillField label="Weight" value={0.8} onChange={() => {}} /></div>
-          <Glyph label="Key the weight"><Key className={ic} /></Glyph>
-        </div>
-        <p className="text-sm-ui text-muted">Brushes from the Tools tab edit the picked layer.</p>
+        <ItemProps
+          actions={
+            <>
+              <Glyph label="Solo"><Eye className={ic} /></Glyph>
+              <Glyph label="Delete"><Trash2 className={ic} /></Glyph>
+            </>
+          }
+        >
+          <div className="flex gap-1">
+            <div className="flex-1"><FillField label="Weight" value={0.8} onChange={() => {}} /></div>
+            <Glyph label="Key the weight"><Key className={ic} /></Glyph>
+          </div>
+        </ItemProps>
       </Section>
-      <ToolCard />
     </>
   );
 }
@@ -697,7 +805,7 @@ export function ToolsPanel({ paletteOnly }: { paletteOnly?: boolean }) {
       <ToolsTabs />
     </div>
   );
-  const palette = toolsTab === "tools" ? <ToolPalette /> : null;
+  const palette = toolsTab === "tools" || toolsTab === "correctives" ? <ToolPalette /> : null;
   const body =
     toolsTab === "tools" ? (
       <>

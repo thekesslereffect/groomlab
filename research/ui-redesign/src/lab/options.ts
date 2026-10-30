@@ -189,6 +189,14 @@ export const dimensions = [
     ],
   },
   {
+    id: "gtBlocks", label: "Card blocks", group: "Groom Tools",
+    qt: "Small muted QLabel headers inside the card",
+    choices: [
+      { id: "labeled", label: "Labeled", hint: "Brush / <tool> / Applies to, each named" },
+      { id: "flat", label: "Flat", hint: "Same order, no block names" },
+    ],
+  },
+  {
     id: "gtHints", label: "Tool hints", group: "Groom Tools",
     qt: "One elided QLabel + a ? glyph with the full tip and the gestures",
     choices: [
@@ -299,7 +307,7 @@ export const directions: { id: string; label: string; hint: string; options: Par
       layout: "docks", chrome: "seams", output: "corner", onboarding: "viewport", hud: "plain",
       tools: "icons", toolIcons: "color", rows: "fields", sliders: "fill", booleans: "checkbox", sections: "caps", tabs: "underline",
       nodeHeader: "minimal", nodeBody: "ports", wires: "curved", wireColor: "type", ports: "dots", canvas: "dots", nodeStatus: "badges",
-      gtOptions: "chips", gtHints: "short", gtGroups: "list", gtPin: "tools", gtTubes: "split",
+      gtOptions: "chips", gtBlocks: "labeled", gtHints: "short", gtGroups: "list", gtPin: "tools", gtTubes: "split",
     },
   },
   {
@@ -309,7 +317,7 @@ export const directions: { id: string; label: string; hint: string; options: Par
       layout: "docks", chrome: "seams", output: "panel", onboarding: "card", hud: "pills",
       tools: "tiles", toolIcons: "color", rows: "split", sliders: "track", booleans: "checkbox", sections: "cards", tabs: "underline",
       nodeHeader: "tinted", nodeBody: "ports", wires: "curved", wireColor: "type", ports: "dots", canvas: "lines", nodeStatus: "none",
-      gtOptions: "grid", gtHints: "full", gtGroups: "combo", gtPin: "none", gtTubes: "section",
+      gtOptions: "grid", gtBlocks: "flat", gtHints: "full", gtGroups: "combo", gtPin: "none", gtTubes: "section",
     },
   },
   {
