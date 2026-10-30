@@ -947,6 +947,14 @@ TEST(LengthPathTool, KeysPreviewApplyAndCancel) {
     EXPECT_FALSE(both.keys[0].mirror);
     EXPECT_TRUE(both.keys[2].mirror);
     EXPECT_NEAR(both.keys[2].at.x, -both.keys[0].at.x, 0.02f);
+    // Topology: each key at its partner spot on the scalp (here a sphere symmetric about x = 0, so
+    // where the world plane puts it; a posed scalp: LengthPaths.TopologySymmetryFollowsAPosedScalp).
+    tool.settings.setSymmetry("topology");
+    const LengthPathTool::Overlay partner = lp.overlay(*g.host, tool.settings);
+    ASSERT_EQ(partner.keys.size(), 4u);
+    EXPECT_TRUE(partner.keys[2].mirror);
+    EXPECT_NEAR(partner.keys[2].at.x, -partner.keys[0].at.x, 0.02f);
+    EXPECT_NEAR(partner.keys[2].at.y, partner.keys[0].at.y, 0.02f);
     tool.settings.setSymmetry("none");
     EXPECT_EQ(overlay.activePath, 1);
     EXPECT_GT(overlay.keys.back().reach, 0.0f);

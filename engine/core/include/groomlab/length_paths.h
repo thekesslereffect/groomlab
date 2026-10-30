@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -77,9 +78,11 @@ LengthSample sampleLengthPath(const LengthPath& path, const Vec3f& point, const 
 // (how much the result replaces the guide's own length). Weight 0: no path reaches it.
 LengthSample sampleLengthPaths(const LengthPathSet& paths, const Vec3f& point, const ScalpMesh* scalp = nullptr);
 
-// The paths mirrored across the plane where coordinate `axis` (0 x, 1 y, 2 z) is `center` (symmetry):
-// each key's point mirrored, its root found again on `scalp` (the closest point; none: point only).
-LengthPathSet mirroredLengthPaths(const LengthPathSet& paths, const ScalpMesh* scalp, int axis = 0, float center = 0.0f);
+// The paths mirrored (symmetry): each key's point taken to `mirror(point)` (a world plane's image,
+// or topology's partner spot: StrokeSymmetry::point), its root found again on `scalp` (the closest
+// point; none: point only).
+LengthPathSet mirroredLengthPaths(const LengthPathSet& paths, const ScalpMesh* scalp,
+                                  const std::function<Vec3f(const Vec3f&)>& mirror);
 
 // A new key's length at `point`: the guides of `guides` (primary guides, by root) within `radius`,
 // their lengths averaged, the nearer ones counting more; none within it: the nearest guide's; no

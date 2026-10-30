@@ -5,6 +5,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+
+#include "groomlab/brush.h"
 #include "groomlab/curve.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/length_paths.h"
@@ -151,6 +154,34 @@ TEST(LengthPaths, AppliedToGuidesAndANewKeysDefault) {
     EXPECT_TRUE(applyLengthPaths(h, all, set, LengthChange::Scale).empty());
 }
 
+TEST(LengthPaths, TopologySymmetryFollowsAPosedScalp) {
+    // A sphere at rest, posed turned 40 degrees about y (a head turned): topology symmetry puts a
+    // key's mirror at its partner spot on the turned sphere (the turn of the rest pose's mirror
+    // image), where the world plane's image would not be.
+    const auto rest = test::makeSphere(24, 48, 1.0f);
+    const float a = 40.0f * 3.14159265f / 180.0f, c = std::cos(a), s = std::sin(a);
+    auto turn = [&](const Vec3f& p) { return Vec3f(c * p.x + s * p.z, p.y, -s * p.x + c * p.z); };
+    std::vector<Vec3f> points;
+    for (const Vec3f& p : rest->points()) points.push_back(turn(p));
+    auto posed = std::make_shared<ScalpMesh>(rest->withPoints(std::move(points)));
+    posed->setRestPoints(rest->points());
+    BrushSettings b;
+    b.mirrorTopology = true;
+    const StrokeSymmetry sym = StrokeSymmetry::of(b, posed.get());
+    ASSERT_TRUE(sym.topology());
+    const Vec3f onRest = Vec3f(0.5f, 0.6f, 0.62f).normalized();
+    LengthPathSet set;
+    LengthPath path;
+    path.keys = {key(0.0f, 0.0f, 2.0f)};
+    path.keys[0].point = turn(onRest);
+    set.paths = {path};
+    const LengthPathSet mirrored = mirroredLengthPaths(set, posed.get(), [&sym](const Vec3f& p) { return sym.point(p); });
+    const Vec3f want = turn(Vec3f(-onRest.x, onRest.y, onRest.z));
+    EXPECT_LT((mirrored.paths[0].keys[0].point - want).length(), 0.03f);
+    const Vec3f plane(-path.keys[0].point.x, path.keys[0].point.y, path.keys[0].point.z);
+    EXPECT_GT((plane - want).length(), 0.3f) << "the world plane's image misses on a posed scalp";
+}
+
 TEST(LengthPaths, MirroredAndSavedWithTheGuides) {
     const auto plane = test::makePlane(4, 2.0f);  // x and z from 0 to 2
     LengthPathSet set;
@@ -158,7 +189,7 @@ TEST(LengthPaths, MirroredAndSavedWithTheGuides) {
     path.keys = {key(-1.0f, 0.5f, 3.0f)};
     reachAll(path, 0.4f);
     set.paths = {path};
-    const LengthPathSet mirrored = mirroredLengthPaths(set, plane.get());
+    const LengthPathSet mirrored = mirroredLengthPaths(set, plane.get(), [](const Vec3f& p) { return Vec3f(-p.x, p.y, p.z); });
     EXPECT_NEAR(mirrored.paths[0].keys[0].point.x, 1.0f, 1e-5f);
     EXPECT_GE(mirrored.paths[0].keys[0].root.face, 0);
     EXPECT_EQ(mirrored.paths[0].keys[0].length, 3.0f);

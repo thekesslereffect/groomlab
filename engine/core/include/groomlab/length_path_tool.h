@@ -20,8 +20,9 @@
 //     lengthens it, down shortens it (doubles every kPixelsPerDoubling pixels).
 //   - Ctrl+click on a key deletes it (and its path with its last key).
 // The guides it changes: the selected guides, else those the brush settings target (the level or
-// group, not hidden or frozen: the soloed ones). With symmetry on (World X; topology as X) the
-// paths mirrored across x = 0 act too.
+// group, not hidden or frozen: the soloed ones). With symmetry on the mirrored paths act too:
+// across the world plane, or with topology symmetry each key at its partner spot on the scalp
+// (ScalpMirror: right for a scalp posed or not quite symmetric in world space).
 
 #include <array>
 #include <memory>

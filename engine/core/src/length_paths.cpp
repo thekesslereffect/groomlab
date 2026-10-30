@@ -173,14 +173,12 @@ LengthSample sampleLengthPaths(const LengthPathSet& paths, const Vec3f& point, c
     return {sum / weights, most};
 }
 
-LengthPathSet mirroredLengthPaths(const LengthPathSet& paths, const ScalpMesh* scalp, int axis, float center) {
+LengthPathSet mirroredLengthPaths(const LengthPathSet& paths, const ScalpMesh* scalp,
+                                  const std::function<Vec3f(const Vec3f&)>& mirror) {
     LengthPathSet out = paths;
     for (LengthPath& path : out.paths) {
         for (LengthKey& key : path.keys) {
-            Vec3f p = lengthKeyPosition(key, scalp);
-            if (axis == 1) p.y = 2.0f * center - p.y;
-            else if (axis == 2) p.z = 2.0f * center - p.z;
-            else p.x = 2.0f * center - p.x;
+            const Vec3f p = mirror(lengthKeyPosition(key, scalp));
             key.point = p;
             key.root = StrandRoot{};
             key.root.face = -1;

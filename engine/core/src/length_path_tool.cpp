@@ -24,6 +24,8 @@ MeshPtr keyMesh(StrokeHost& host) {
 
 }  // namespace
 
+LengthPathSet mirroredPaths(const LengthPathSet& paths, const BrushToolSettings& settings, const MeshPtr& mesh);
+
 void LengthPathTool::load(StrokeHost& host) {
     if (loaded_ && edited_) return;  // the edits stand until Apply or Cancel
     // Not edited: the stored paths, read again each time (an undo, a script, another groom's).
@@ -66,13 +68,17 @@ std::vector<GuideId> LengthPathTool::targets(StrokeHost& host, const BrushToolSe
     return brushTargets(h, b);
 }
 
+// The paths mirrored as the brush's symmetry mirrors (a world plane, or the scalp's topology: each
+// key at its partner spot on the scalp); none when symmetry is off.
+LengthPathSet mirroredPaths(const LengthPathSet& paths, const BrushToolSettings& settings, const MeshPtr& mesh) {
+    const StrokeSymmetry sym = StrokeSymmetry::of(settings.brush, mesh.get());
+    if (!sym.on()) return {};
+    return mirroredLengthPaths(paths, mesh.get(), [&sym](const Vec3f& p) { return sym.point(p); });
+}
+
 LengthPathSet LengthPathTool::acting(StrokeHost& host, const BrushToolSettings& settings) const {
-    const BrushSettings& b = settings.brush;
-    if (!b.mirrorTopology && b.mirrorAxis < 0) return paths_;
     LengthPathSet both = paths_;
-    const MeshPtr mesh = keyMesh(host);
-    const LengthPathSet mirrored = mirroredLengthPaths(paths_, mesh.get(), b.mirrorTopology ? 0 : b.mirrorAxis,
-                                                       b.mirrorTopology ? 0.0f : b.mirrorCenter);
+    const LengthPathSet mirrored = mirroredPaths(paths_, settings, keyMesh(host));
     both.paths.insert(both.paths.end(), mirrored.paths.begin(), mirrored.paths.end());
     return both;
 }
@@ -381,11 +387,7 @@ LengthPathTool::Overlay LengthPathTool::overlay(StrokeHost& host, const BrushToo
         }
     };
     add(paths_, false);
-    const BrushSettings& b = settings.brush;
-    if (b.mirrorTopology || b.mirrorAxis >= 0) {
-        add(mirroredLengthPaths(paths_, mesh.get(), b.mirrorTopology ? 0 : b.mirrorAxis, b.mirrorTopology ? 0.0f : b.mirrorCenter),
-            true);
-    }
+    add(mirroredPaths(paths_, settings, mesh), true);
     return out;
 }
 
