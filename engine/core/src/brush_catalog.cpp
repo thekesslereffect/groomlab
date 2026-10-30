@@ -71,6 +71,13 @@ std::vector<BrushEntry> makeCatalog() {
          with(kBrushCommon, {"targets"})},
         {"length", "Length", C::Trim, 0, "length", 1.0f, true, "Grow guides evenly (negative: shorten).",
          with(kBrushCommon, {"targets"})},
+        {"lengths", "Length Paths", C::Trim, 0, "lengths", 1.0f, false,
+         "Click on the scalp to lay keys along a path (Shift+click: a new path; a click on the path adds a key there) "
+         "and drag them to move them. Right-drag a key up or down (Maya: middle-drag) to set the length of the guides "
+         "near it; lengths blend between keys and fade out at the path's reach (the ring: Shift+drag a key to size it). "
+         "Ctrl+click deletes a key. "
+         "Apply sets the guides; the paths are kept with the groom to edit again.",
+         {"symmetry", "lengthPaths"}},
         {"erase", "Erase", C::Trim, 0, "erase", 1.0f, false,
          "Remove what the brush touches: guides (with their children), parts and flow arrows (choose below). Not the "
          "scattered hair itself: to take hair away, paint the density map holding Ctrl (Paint tab > + New Map > for a "
@@ -171,6 +178,11 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
                          "the groom's shape library (custom outlines, drawn in the shape editor), the shape new guides "
                          "take (Place, Draw), and the groom's Fill Tubes (strands fill the tubes) and Tube Blend (the "
                          "soft edge round them)"},
+        {"lengthPaths", "Paths", "The selected key's length, the path's reach (how far from it guides change) and whether "
+                                 "lengths ease smoothly between keys, how guides take a new length (scale: the shape "
+                                 "scaled, curls kept; trim: cut or extended at the tip), New Path, Delete Key, Delete Path, "
+                                 "and Apply (sets the guides, one undo step) or Cancel. Only the selected guides change, "
+                                 "else the soloed ones (those not frozen)"},
     };
     return specs;
 }

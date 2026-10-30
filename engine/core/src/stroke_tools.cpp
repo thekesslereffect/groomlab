@@ -23,6 +23,7 @@ std::array<float, 3> brushRingColor(const BrushToolSettings& s) {
     using Tool = BrushToolSettings::Tool;
     if (s.tool == Tool::Part) return {1.0f, 0.3f, 0.3f};
     if (s.tool == Tool::Flow) return {1.0f, 0.55f, 0.1f};
+    if (s.tool == Tool::Lengths) return {0.35f, 0.75f, 1.0f};  // a new path's reach
     if (s.tool != Tool::Brush) return {0.3f, 1.0f, 0.4f};  // Place and Draw make guides
     if (s.brush.mode == BrushMode::Erase) return {1.0f, 0.3f, 0.3f};
     return {1.0f, 0.8f, 0.2f};
@@ -36,8 +37,12 @@ std::array<float, 3> brushHoverColor(const BrushToolSettings& s) {
 }
 
 void BrushToolSettings::setMode(const std::string& name) {
-    if (name == "place" || name == "draw" || name == "part" || name == "flow") {
-        tool = name == "place" ? Tool::Place : name == "draw" ? Tool::Draw : name == "part" ? Tool::Part : Tool::Flow;
+    if (name == "place" || name == "draw" || name == "part" || name == "flow" || name == "lengths") {
+        tool = name == "place" ? Tool::Place
+               : name == "draw" ? Tool::Draw
+               : name == "part" ? Tool::Part
+               : name == "flow" ? Tool::Flow
+                                : Tool::Lengths;
         return;
     }
     if (name == "width" || name == "density") throw std::invalid_argument(kRemovedParamBrushes);
@@ -51,6 +56,7 @@ std::string BrushToolSettings::modeName() const {
     if (tool == Tool::Draw) return "draw";
     if (tool == Tool::Part) return "part";
     if (tool == Tool::Flow) return "flow";
+    if (tool == Tool::Lengths) return "lengths";
     if (brush.mode == BrushMode::Attribute && brush.attribute == "clump") return "clump";
     return brushModeName(brush.mode);
 }

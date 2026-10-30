@@ -525,6 +525,38 @@ class ToolsTest(unittest.TestCase):
         bpy.ops.groomlab.guides_edit(action="UNFREEZE_ALL")
         self.assertEqual(t.frozen_count, 0)
         t.group = "primary"
+        # Length Paths: a click lays a key (the Paths box shows it), a right-drag up a doubling's
+        # worth on it doubles its length in the preview, Enter applies (one undo step), the path
+        # kept with the guides; Ctrl+Z takes it back.
+        bpy.ops.groomlab.tool(tool="lengths")
+        data0 = texts(head)["guideData"]
+        depth = hcall(head, "undo_state")["undoDepth"]
+        kp = cam.pixel(th.crown_points(5)[2])
+        self.click(ts, kp[0], kp[1])
+        state = json.loads(t.length_state or "{}")
+        self.assertEqual(len(state.get("paths", [])), 1)
+        self.assertEqual(len(state["paths"][0]["lengths"]), 1)
+        first = state["paths"][0]["lengths"][0]
+        self.assertAlmostEqual(t.length_key, first, places=4)
+        self.assertEqual(texts(head)["guideData"], data0)  # previewed, not applied
+        self.send(ts, Event("RIGHTMOUSE", "PRESS", kp[0], kp[1]), Event("MOUSEMOVE", x=kp[0], y=kp[1] + 150.0),
+                  Event("RIGHTMOUSE", "RELEASE", kp[0], kp[1] + 150.0))
+        state = json.loads(t.length_state)
+        self.assertAlmostEqual(state["paths"][0]["lengths"][0], 2.0 * first, delta=1e-3 * first)
+        self.assertTrue(state["edited"])
+        self.assertEqual(self.send(ts, Event("RET", "PRESS", kp[0], kp[1])), {"RUNNING_MODAL"})
+        self.assertNotEqual(texts(head)["guideData"], data0)
+        self.assertIn("lengthPaths", texts(head)["guideData"])
+        self.assertFalse(json.loads(t.length_state)["edited"])
+        self.assertEqual(hcall(head, "undo_state")["undoDepth"], depth + 1)
+        # The box's field edits the key (a preview again); Cancel in the box drops it.
+        t.length_key = first
+        self.assertTrue(json.loads(t.length_state)["edited"])
+        self.assertEqual(bpy.ops.groomlab.length_edit(edit="cancel"), {"FINISHED"})
+        self.assertFalse(json.loads(t.length_state)["edited"])
+        self.send(ts, Event("Z", "PRESS", kp[0], kp[1], ctrl=True))
+        self.assertEqual(texts(head)["guideData"], data0)
+        bpy.ops.groomlab.tool(tool="comb")
         # Esc with nothing live: the tool is left.
         self.assertEqual(self.send(ts, Event("ESC", "PRESS")), {"FINISHED"})
         self.assertEqual(t.tool, "")

@@ -15,6 +15,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QAction>
 #include <QToolBar>
 #include <QToolButton>
@@ -672,8 +673,8 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     // on the Tools tab (Unfreeze All beside Freeze), Paint on the Paint tab; a grid that wraps to
     // the dock's width, the names under the icons (compact icon tiles without them).
     GroomTools tools;
-    EXPECT_EQ(tools.tiles().size(), 22u) << "Select, Freeze, the 19 brushes (Paint among them) and Unfreeze All";
-    for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "erase", "paint", "select", "freeze", "unfreeze"}) {
+    EXPECT_EQ(tools.tiles().size(), 23u) << "Select, Freeze, the 20 tools (Paint and Length Paths among them) and Unfreeze All";
+    for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "unfreeze"}) {
         EXPECT_NE(tools.tile(id), nullptr) << id;
     }
     std::vector<std::string> tabs;
@@ -1982,6 +1983,61 @@ public:
 };
 
 }  // namespace
+
+// The Length Paths tool in the app: a click lays a key (the Paths box shows it), a right-drag
+// (kStrokeAdjust) sets its length in the preview, Apply in the box sets the guides (one undo step).
+TEST(AppPanels, LengthPathsKeysPreviewAndApply) {
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    ViewRequest request;
+    request.density = 0.2f;
+    doc->evaluate(request);
+    BrushSession session;
+    OrbitCamera camera;
+    camera.frame(doc->sceneBounds());
+    session.setDocument(doc.get());
+    session.setView(camera, 800, 600);
+    GroomTools tools;
+    tools.setSession(&session);
+    BrushPanel& panel = *tools.card();
+    session.setTool("lengths");
+    panel.setTool("lengths");
+    EXPECT_EQ(session.settings().modeName(), "lengths");
+    auto* box = panel.findChild<QWidget*>(QStringLiteral("lengthPathsBox"));
+    auto* path = panel.findChild<QComboBox*>(QStringLiteral("lengthPath"));
+    auto* key = panel.findChild<QDoubleSpinBox*>(QStringLiteral("lengthKey"));
+    auto* apply = panel.findChild<QPushButton*>(QStringLiteral("lengthApply"));
+    ASSERT_TRUE(box && path && key && apply);
+    EXPECT_FALSE(box->isHidden());
+    EXPECT_FALSE(apply->isEnabled());
+    const std::string before = doc->session().data().hierarchyJson;
+    // A guide's root on the scalp, in widget pixels (y down).
+    const Vec3f root = doc->session().hierarchy()->guides().front().points.front();
+    float x = 0.0f, y = 0.0f;
+    ASSERT_TRUE(session.view().project(root, x, y));
+    const QPointF at(x, 600.0 - y);
+    ASSERT_TRUE(session.press(at, 1.0f, 0)) << session.lastError();
+    session.release();
+    panel.refresh();
+    ASSERT_EQ(path->count(), 1);
+    ASSERT_TRUE(key->isEnabled());
+    const double first = key->value();
+    EXPECT_GT(first, 0.0);
+    // Right-drag up a doubling's worth on the key: twice as long, previewed.
+    ASSERT_TRUE(session.press(at, 1.0f, kStrokeAdjust)) << session.lastError();
+    session.move(QPointF(at.x(), at.y() - LengthPathTool::kPixelsPerDoubling), 1.0f);
+    session.release();
+    panel.refresh();
+    EXPECT_NEAR(key->value(), 2.0 * first, 1e-3 * first);
+    EXPECT_TRUE(apply->isEnabled());
+    EXPECT_EQ(doc->session().data().hierarchyJson, before);  // previewed, not applied
+    apply->click();
+    EXPECT_NE(doc->session().data().hierarchyJson, before);
+    EXPECT_NE(doc->session().data().hierarchyJson.find("lengthPaths"), std::string::npos);
+    EXPECT_FALSE(apply->isEnabled());
+    EXPECT_EQ(doc->undo(), "");
+    EXPECT_EQ(doc->session().data().hierarchyJson, before);
+}
 
 TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     auto doc = GroomDocument::open(kSampleGroom);

@@ -17,7 +17,7 @@ groomlab_core.set_shipped_brush_alpha_dir(SHIPPED_ALPHAS)
 
 
 BRUSH_MODES = ("comb", "slide", "smooth", "straighten", "lift", "twist", "curl", "attract", "direction", "noise", "length",
-               "cut", "shape", "erase", "paint", "clump", "place", "draw", "part", "flow")
+               "cut", "shape", "erase", "paint", "clump", "place", "draw", "part", "flow", "lengths")
 # What the Shape brush paints on the guides' tubes (tube guides).
 TUBE_CHANNELS = ("width", "flatness", "twist")
 BRUSH_CONTEXT = "groomLabBrushCtx1"
@@ -92,6 +92,9 @@ def brush_stroke(groom, mode, points, radius=0.25, strength=1.0, level=0, group=
     whorls, attract gathers them, cut splits parts and erase removes them.
     """
     _check_mode(mode)
+    if mode == "lengths":
+        raise ValueError("the Length Paths tool is interactive: brush_tool(\"lengths\") and click keys on the scalp "
+                         "(length_paths_edit sets their lengths and applies)")
     kwargs = {"mode": mode, "radius": radius, "strength": strength, "level": level, "propagate": propagate,
               "point": [tuple(p) for p in points], "length": length, "segments": segments, "tubeRadius": tube_radius,
               "selectedOnly": selected_only, "symmetry": symmetry or "none", "symmetryCenter": symmetry_center,
@@ -190,6 +193,11 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
       radius); arrows under the brush turn toward the stroke. Ctrl erases them.
       With `flow_sink` (whorl, whorlcw, converge, part) a click places a sink
       of that kind the size of the brush instead; Ctrl-click removes sinks.
+    - lengths: the Length Paths tool: a click on the scalp lays a key at the end of the
+      path (Shift+click: a new path; its reach the brush ring's), a click on a path adds a key
+      there, a left drag moves a key, a middle drag on a key (up or down) sets the length of the
+      guides near it, Shift+drag from a key sizes its path's reach, Ctrl+click deletes one; length_paths_edit("apply") sets the guides
+      (length_paths_edit, length_paths_state).
     - erase: removes what the brush passes over: guides, parts and flow arrows
       (`erase_guides`, `erase_parts`, `erase_flow`). The part tool with Ctrl erases parts.
     - `pressure`: tablet pen pressure scales strength.
@@ -270,3 +278,20 @@ def brush_alpha_folder():
     if folder and not os.path.isdir(folder):
         os.makedirs(folder)
     return folder
+
+
+def length_paths_state():
+    """The Length Paths tool's paths (with brush_tool("lengths") current): {"paths": [{"reach",
+    "smooth", "lengths": [...]}], "activePath", "activeKey", "edited", "change"}, lengths and reach
+    in scene units; {} without the tool."""
+    from groomlab.ui.length_paths_box import length_state
+    return length_state()
+
+
+def length_paths_edit(words):
+    """An edit to the Length Paths tool's paths: "key 2.5" (the selected key's length), "reach 1",
+    "smooth on|off", "change scale|trim", "select <path> <key>", "newPath", "deleteKey",
+    "deletePath", "apply" (the guides set, one undo step), "cancel". Raises RuntimeError when
+    refused."""
+    from maya import cmds
+    cmds.groomLabBrushCtx(BRUSH_CONTEXT, edit=True, lengthEdit=words)

@@ -243,9 +243,12 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
             paintMoved_ = false;
             return;
         }
-        if (event->button() == Qt::LeftButton) {
+        const bool lengths = session_->settings().tool == BrushToolSettings::Tool::Lengths;
+        if (event->button() == Qt::LeftButton || (lengths && event->button() == Qt::RightButton)) {
+            // The Length Paths tool: right-drag sets a key's length (kStrokeAdjust).
             drag_ = Drag::Stroke;
-            if (!session_->press(event->position(), pressure(), strokeModifiers(event))) {
+            const unsigned adjust = event->button() == Qt::RightButton ? kStrokeAdjust : 0u;
+            if (!session_->press(event->position(), pressure(), strokeModifiers(event) | adjust)) {
                 drag_ = Drag::None;
                 if (!session_->lastError().empty()) emit message(QString::fromStdString(session_->lastError()));
                 return;
@@ -255,6 +258,8 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
             if (session_->stroking()) {
                 emit strokeStarted();
                 emit strokeDabbed();
+            } else if (lengths) {
+                emit strokeDabbed();  // the guides at their previewed lengths
             }
             return;
         }
@@ -310,7 +315,7 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
                 break;
             }
             refreshOverlay();
-            if (session_->stroking()) emit strokeDabbed();
+            if (session_->stroking() || session_->settings().tool == BrushToolSettings::Tool::Lengths) emit strokeDabbed();
             break;
         case Drag::Radius:
         case Drag::Strength: {
@@ -372,6 +377,10 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
             for (const std::string& warning : session_->takeWarnings()) emit message(QString::fromStdString(warning));
             session_->hover(event->position());
             refreshOverlay();
+            if (session_->settings().tool == BrushToolSettings::Tool::Lengths) {
+                emit brushSettingsChanged();  // the Paths box follows the key placed or dragged
+                break;
+            }
             if (released == StrokeRelease::Stroke) emit strokeEnded();
             break;
         }
@@ -445,7 +454,32 @@ void Viewport::keyPressEvent(QKeyEvent* event) {
             setToolMode(mode_ == ToolMode::Select ? ToolMode::Camera : ToolMode::Select);
             event->accept();
             return;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            // The Length Paths tool: Enter applies its preview (one undo step).
+            if (session_ && mode_ == ToolMode::Brush && session_->settings().tool == BrushToolSettings::Tool::Lengths) {
+                bool applied = false;
+                session_->editLengths("apply", [&](LengthPathTool& lp, StrokeHost& host, const BrushToolSettings& s) {
+                    applied = lp.apply(host, s);
+                });
+                refreshOverlay();
+                emit brushSettingsChanged();
+                if (applied) emit strokeEnded();
+                event->accept();
+                return;
+            }
+            break;
         case Qt::Key_Escape:
+            if (session_ && mode_ == ToolMode::Brush && session_->settings().tool == BrushToolSettings::Tool::Lengths &&
+                session_->lengths().edited()) {
+                // The Length Paths tool: Esc drops its preview first (again: leaves the brush).
+                session_->editLengths("cancel", [](LengthPathTool& lp, StrokeHost& host, const BrushToolSettings&) { lp.cancel(host); });
+                refreshOverlay();
+                emit brushSettingsChanged();
+                emit strokeDabbed();
+                event->accept();
+                return;
+            }
             if (session_ && session_->stroking()) session_->cancel();
             setToolMode(ToolMode::Camera);
             event->accept();

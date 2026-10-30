@@ -1022,6 +1022,16 @@ void rebuildOverlay(ToolState& t, float x, float y, bool withLines) {
         }
     }
     if (t.tool.stroking() && (s.tool == Tool::Part || s.tool == Tool::Flow)) appendColoredLine(t.overlay, t.tool.drawnPath(), brushPathColor(s));
+    if (s.tool == Tool::Lengths && !t.selectTool) {
+        // The Length Paths tool's paths and keys (the core's lines: the app draws the same).
+        prepareHost(t);
+        try {
+            for (const LengthPathTool::ColoredLine& line : t.tool.lengths().overlayLines(t.host, t.view, s, x, y)) {
+                appendColoredLine(t.overlay, line.points, line.color);
+            }
+        } catch (const std::exception&) {
+        }
+    }
 }
 
 json positionsToHost(Arena& arena, const std::vector<float>& xyz, const HostSpace& space) {
@@ -3216,8 +3226,32 @@ bool isToolCommand(const std::string& cmd) {
         "tube_targets", "tube_get", "tube_set", "tube_scale", "tube_smooth", "tube_shapes", "tube_shape_add", "tube_shape_set",
         "tube_shape_rename", "tube_shape_remove", "tube_shape_preview", "guides_preview", "guides_preview_end", "guide_segments",
         "parts_list", "part_add", "part_remove", "parts_clear", "flow_clear", "map_rename", "map_convert", "map_set_channels",
-        "map_fill", "map_import", "map_relink", "map_reload", "map_users"};
+        "map_fill", "map_import", "map_relink", "map_reload", "map_users",
+        // The Length Paths tool's paths (the Paths box).
+        "length_state", "length_edit"};
     return kCommands.count(cmd) > 0;
+}
+
+// The Length Paths tool's paths as the Paths box shows them: per path its smoothness and its keys'
+// lengths and reaches (host units), the selection, whether there are edits to apply, and how
+// guides take a new length.
+json lengthStateJson(ToolState& t, const HostSpace& space) {
+    LengthPathTool& lp = t.tool.lengths();
+    const LengthPathSet& set = lp.paths(t.host);
+    json paths = json::array();
+    for (const LengthPath& path : set.paths) {
+        json lengths = json::array(), reaches = json::array();
+        for (const LengthKey& k : path.keys) {
+            lengths.push_back(toHostLength(space, k.length));
+            reaches.push_back(toHostLength(space, k.reach));
+        }
+        paths.push_back({{"smooth", path.smooth}, {"lengths", lengths}, {"reaches", reaches}});
+    }
+    return {{"paths", paths},
+            {"activePath", lp.activePath()},
+            {"activeKey", lp.activeKey()},
+            {"edited", lp.edited()},
+            {"change", lengthChangeName(lp.change)}};
 }
 
 json toolStateJson(Session& s) {
@@ -3339,7 +3373,9 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         if (t.tool.stroking()) t.tool.cancel(&t.host);
         const float x = static_cast<float>(optNumber(args, "x", 0.0)), y = static_cast<float>(optNumber(args, "y", 0.0));
         const float pressure = static_cast<float>(optNumber(args, "pressure", 1.0));
-        const unsigned modifiers = (optBool(args, "ctrl", false) ? kStrokeCtrl : 0u) | (optBool(args, "shift", false) ? kStrokeShift : 0u);
+        // "adjust": the adjusting button (the Length Paths tool's right-drag: a key's length).
+        const unsigned modifiers = (optBool(args, "ctrl", false) ? kStrokeCtrl : 0u) | (optBool(args, "shift", false) ? kStrokeShift : 0u) |
+                                   (optBool(args, "adjust", false) ? kStrokeAdjust : 0u);
         prepareHost(t);
         t.host.clearWarnings();
         t.pressX = x;
@@ -3350,7 +3386,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         guarded(t, "press", [&] { t.tool.press(t.host, t.view, x, y, pressure, modifiers); });
         rebuildOverlay(t, x, y, false);
         result = overlayJson(t, optBool(args, "overlay", true));
-        result["stroking"] = t.tool.stroking();
+        result["stroking"] = t.tool.stroking() || t.tool.lengthsPressed();
         result["mode"] = t.tool.toolModeName();
         result["graphChanged"] = s.groom->data().graphJson != graphBefore;
         result["view"] = viewJson(t);
@@ -3359,7 +3395,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
     }
     if (cmd == "stroke_drag") {
         // (A Shift press has no stroke yet: its drag starts the smoothing.)
-        if (!t.tool.stroking() && !t.tool.shiftPending()) fail("state", "no stroke: stroke_begin first");
+        if (!t.tool.stroking() && !t.tool.shiftPending() && !t.tool.lengthsPressed()) fail("state", "no stroke: stroke_begin first");
         if (args.contains("view") && !args["view"].is_null()) setView(t, args["view"]);
         const float pressure = static_cast<float>(optNumber(args, "pressure", 1.0));
         std::vector<Pixel> points;
@@ -3372,7 +3408,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         if (!points.empty()) rebuildOverlay(t, points.back().x, points.back().y, false);
         result = overlayJson(t, optBool(args, "overlay", true));
         result["stroking"] = t.tool.stroking();
-        result["changed"] = t.tool.changed();
+        result["changed"] = t.tool.changed() || t.tool.lengthsPressed();  // (Length Paths: a live preview)
         result["warnings"] = warningsJson(t);
         return true;
     }
@@ -3568,6 +3604,52 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
     }
     if (cmd == "undo_state") {
         result = undoJson(t);
+        return true;
+    }
+    if (cmd == "length_state") {
+        prepareHost(t);
+        result = lengthStateJson(t, s.space);
+        return true;
+    }
+    if (cmd == "length_edit") {
+        // One edit of the Length Paths tool's paths: "key" / "reach" (value, host units), "smooth"
+        // (on), "change" (name), "select" (path, key), "newPath", "deleteKey", "deletePath",
+        // "apply" (the guides set: one undo step), "cancel".
+        prepareHost(t);
+        const std::string edit = optString(args, "edit", "");
+        LengthPathTool& lp = t.tool.lengths();
+        const BrushToolSettings& st = t.tool.settings;
+        const std::size_t before = t.host.edits().size();
+        LengthChange change = lp.change;
+        if (edit == "change") {
+            try {
+                change = lengthChangeFromName(optString(args, "name", "scale"));
+            } catch (const std::invalid_argument& e) {
+                fail("bad_request", e.what());
+            }
+        } else if (edit != "key" && edit != "reach" && edit != "smooth" && edit != "select" && edit != "newPath" &&
+                   edit != "deleteKey" && edit != "deletePath" && edit != "apply" && edit != "cancel") {
+            fail("bad_request", "length_edit takes key, reach, smooth, change, select, newPath, deleteKey, deletePath, apply or cancel");
+        }
+        guarded(t, "lengths", [&] {
+            if (edit == "key") lp.setKeyLength(t.host, st, toGroomLength(s.space, optNumber(args, "value", 0.0)));
+            else if (edit == "reach") lp.setReach(t.host, st, toGroomLength(s.space, optNumber(args, "value", 0.0)));
+            else if (edit == "smooth") lp.setSmooth(t.host, st, optBool(args, "on", true));
+            else if (edit == "change") lp.setChange(t.host, st, change);
+            else if (edit == "select") lp.select(t.host, static_cast<int>(optNumber(args, "path", 0)), static_cast<int>(optNumber(args, "key", 0)));
+            else if (edit == "newPath") lp.newPath();
+            else if (edit == "deleteKey") lp.deleteKey(t.host, st);
+            else if (edit == "deletePath") lp.deletePath(t.host, st);
+            else if (edit == "apply") lp.apply(t.host, st);
+            else lp.cancel(t.host);
+        });
+        result = lengthStateJson(t, s.space);
+        result["committed"] = t.host.edits().size() != before;
+        if (result["committed"].get<bool>()) {
+            t.redoLabels.clear();
+            t.redoMaps.clear();
+        }
+        result["undo"] = undoJson(t);
         return true;
     }
     if (cmd == "display") {

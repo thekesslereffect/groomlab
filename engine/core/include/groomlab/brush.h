@@ -164,6 +164,8 @@ std::vector<Vec3f> symmetrySeam(const ScalpMesh& scalp, const StrokeSymmetry& sy
 GuideId mirrorGuide(const GuideHierarchy& hierarchy, GuideId id, const StrokeSymmetry& sym);
 // `ids` and each one's mirror guide, each once, in order (symmetry off: `ids`).
 std::vector<GuideId> withMirrorGuides(const GuideHierarchy& hierarchy, const std::vector<GuideId>& ids, const StrokeSymmetry& sym);
+// The guides a brush of these settings edits: its level or group, its mask, not hidden or frozen.
+std::vector<GuideId> brushTargets(const GuideHierarchy& hierarchy, const BrushSettings& s);
 
 // Pushes guide points (root first) out of the scalp to at least `offset`
 // above it, keeping segment lengths. The root stays where it is.

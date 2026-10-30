@@ -228,6 +228,51 @@ def step_shape_wires():
     groomlab.brush_tool("comb", radius=260, strength=1.0)
     off = cyan_pixels("shape_put_away")
     check("another brush: the tube wires go (%d cyan pixels)" % off, off < before + 10)
+    later(step_length_paths)
+
+
+def step_length_paths():
+    # The Length Paths tool: a click lays a key (its length the guides' around it: nothing changes
+    # yet), the key dragged up a doubling's worth previews the guides near it longer, Apply sets
+    # them with the path kept on the groom (one undo step), Cancel drops an edit.
+    import json as _json
+    groomlab, groom, ctx = state["groomlab"], state["groom"], state["ctx"]
+
+    def lengths():
+        out = {}
+        for g in cmds.groomLabGuides(groom, listGuides="primary"):
+            p = cmds.groomLabGuides(groom, guidePoints=g)
+            pts = [p[i:i + 3] for i in range(0, len(p), 3)]
+            out[g] = sum(sum((a[k] - b[k]) ** 2 for k in range(3)) ** 0.5 for a, b in zip(pts, pts[1:]))
+        return out
+    data0 = cmds.getAttr(groom + ".guideData")
+    before = lengths()
+    groomlab.brush_tool("lengths", radius=120)
+    x0, y0 = to_view((0.0, 0.85, 0.5))
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="%d %d" % (x0, y0))
+    lp = _json.loads(cmds.groomLabBrushCtx(ctx, query=True, lengthState=True))
+    check("a click lays a path's first key (%s)" % lp, len(lp["paths"]) == 1 and len(lp["paths"][0]["lengths"]) == 1)
+    check("... the groom's guides not changed until Apply", cmds.getAttr(groom + ".guideData") == data0)
+    first = lp["paths"][0]["lengths"][0]
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="adjust %d %d %d %d" % (x0, y0, x0, y0 + 150))
+    lp = _json.loads(cmds.groomLabBrushCtx(ctx, query=True, lengthState=True))
+    check("the key middle-dragged up 150 pixels doubles its length (%.3f from %.3f)" % (lp["paths"][0]["lengths"][0], first),
+          abs(lp["paths"][0]["lengths"][0] - 2 * first) < 1e-3 * first and lp["edited"])
+    cmds.groomLabBrushCtx(ctx, edit=True, lengthEdit="apply")
+    after = lengths()
+    longer = [g for g in before if after[g] > before[g] * 1.05]
+    same = [g for g in before if abs(after[g] - before[g]) < 1e-5 * before[g]]
+    check("Apply lengthens the guides near the key (%d), the far ones kept (%d)" % (len(longer), len(same)),
+          longer and same)
+    check("... the path kept with the guides", "lengthPaths" in cmds.getAttr(groom + ".guideData"))
+    cmds.groomLabBrushCtx(ctx, edit=True, lengthEdit="key %r" % (first * 0.5))
+    check("an edit previews", _json.loads(cmds.groomLabBrushCtx(ctx, query=True, lengthState=True))["edited"])
+    cmds.groomLabBrushCtx(ctx, edit=True, lengthEdit="cancel")
+    lp = _json.loads(cmds.groomLabBrushCtx(ctx, query=True, lengthState=True))
+    check("Cancel drops it (the applied length back)", not lp["edited"] and abs(lp["paths"][0]["lengths"][0] - 2 * first) < 1e-3 * first)
+    cmds.undo()
+    check("Apply is one undo step", cmds.getAttr(groom + ".guideData") == data0)
+    groomlab.brush_tool("comb", radius=260, strength=1.0)
     later(step_stroke)
 
 
