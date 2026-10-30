@@ -903,10 +903,12 @@ void ParamPanel::build() {
             header->setCheckable(true);
             header->setFlat(true);
             header->setCursor(Qt::PointingHandCursor);
+            // The design's caps header: small muted capitals after a chevron, a hairline above.
             header->setStyleSheet(QStringLiteral(
-                "QPushButton { background: transparent; border: none; color: %1; font-size: 11px; font-weight: 700; "
-                "letter-spacing: 1px; text-align: left; padding: 6px 0 0 0; } QPushButton:hover { color: %2; }")
-                                      .arg(theme::textMuted().name(), theme::text().name()));
+                "QPushButton { background: transparent; border: none; border-top: 1px solid %3; border-radius: 0; color: %1; "
+                "font-size: 11px; font-weight: 600; text-align: left; padding: 6px 0 2px 0; min-height: 0; } "
+                "QPushButton:hover { color: %2; }")
+                                      .arg(theme::textMuted().name(), theme::textDim().name(), theme::divider().name()));
             header->setChecked(!folded(section));
             titleSection(header, section);
             connect(header, &QAbstractButton::toggled, this, [this, section](bool open) { setFolded(section, !open); });
@@ -925,7 +927,7 @@ void ParamPanel::build() {
 }
 
 void ParamPanel::titleSection(QAbstractButton* header, const std::string& name) const {
-    header->setText((header->isChecked() ? QStringLiteral("▾  ") : QStringLiteral("▸  ")) + QString::fromStdString(name).toUpper());
+    setSectionHeader(header, QString::fromStdString(name), header->isChecked());
 }
 
 bool ParamPanel::folded(const std::string& section) const {

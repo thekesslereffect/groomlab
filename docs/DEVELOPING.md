@@ -976,7 +976,8 @@ the UI tones, the graph's and the icons' read from the Maya host's theme files t
 both hosts; Playful by default, View > Theme saves another (QSettings `ui/theme`) for the next start,
 `--theme` picks one for a run; a glass theme keeps the app's own glass and text tones, a theme with
 `"glass": false` (Charcoal) gets solid `ui.panel` panels with a thin `ui.outline` edge and its `ui` text
-tones), the fonts (Figtree for words, JetBrains Mono for numbers, bundled
+tones), the fonts (Inter for words and, with tabular digits, numbers: the theme's `ui.font`;
+JetBrains Mono for hex colors, expressions and paths; bundled
 as resources from google/fonts under the SIL OFL, `THIRD_PARTY_NOTICES.txt`), the brush rail's
 order and categories, the layout of the floating pieces over a view of any size (pure geometry,
 tested without a window) and the style sheet the ordinary widgets inside the panels wear.
@@ -984,7 +985,7 @@ tested without a window) and the style sheet the ordinary widgets inside the pan
 icons (`hosts/app/icons/ui_*.svg`, white strokes tinted at paint time), the sliders, the segmented
 mode switcher, text with a shadow straight on the viewport, and the floating panel with a title
 row. The slider (`ValueSlider`) is every panel's number control: a rounded 8 px track with a
-colored fill, the caption in Figtree and the number in JetBrains Mono, a row (the brush bar) or
+colored fill, the caption in Inter and the number in Inter's tabular digits (`theme::numberFont`), a row (the brush bar) or
 stacked (caption and number over a track as wide as the panel: the look card, the node panel,
 the brush, display, maps, cards, export and look panels), 40 px tall stacked so it is easy to hit;
 the whole widget takes the mouse (a press on the track jumps there, anywhere else drags the value

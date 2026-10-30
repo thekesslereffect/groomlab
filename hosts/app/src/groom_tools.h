@@ -241,7 +241,7 @@ private:
     bool updating_ = false;
     QString name_;
     std::string tool_;
-    bool tileLabels_ = true;
+    bool tileLabels_ = false;  // icons alone (View > Tool Labels: the names under them)
     bool starterDismissed_ = false;
     bool guidesPlaced_ = false, lookGiven_ = false;
     QScrollArea* scroll_ = nullptr;

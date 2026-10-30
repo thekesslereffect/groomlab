@@ -233,7 +233,11 @@ QColor glassEdge() {
 QColor text() { return glassy() ? QColor(0xF3, 0xF1, 0xEC) : uiColor("text"); }
 QColor textSoft() { return glassy() ? QColor(0xD9, 0xD5, 0xCD) : mix(uiColor("text"), uiColor("textDim"), 0.33); }
 QColor textDim() { return glassy() ? QColor(0xB8, 0xB4, 0xAC) : mix(uiColor("text"), uiColor("textDim"), 0.66); }
-QColor textMuted() { return glassy() ? QColor(0x8F, 0x8B, 0x84) : uiColor("textDim"); }
+QColor textMuted() {
+    if (glassy()) return QColor(0x8F, 0x8B, 0x84);
+    const QColor muted = uiColor("textMuted");
+    return muted.isValid() ? muted : uiColor("textDim");
+}
 // The washes: white over the glass; a solid theme's own tones (the raised fields, the hover, the edge).
 QColor track() { return glassy() ? QColor(255, 255, 255, 31) : uiColor("hover"); }
 QColor chip() { return glassy() ? QColor(255, 255, 255, 20) : uiColor("raised"); }
@@ -255,8 +259,18 @@ QColor readableOn(const QColor& fill) {
     const qreal luminance = 0.299 * fill.redF() + 0.587 * fill.greenF() + 0.114 * fill.blueF();
     return luminance > 0.6 ? ink() : QColor(Qt::white);
 }
-QColor segmentFill(const QColor& own) { return glassy() ? own : uiColor("accent"); }
-QColor segmentText(const QColor& own) { return glassy() ? own : uiColor("accentText"); }
+QColor segmentFill(const QColor& own) { return checkedFill(own); }
+QColor segmentText(const QColor& own) { return checkedText(own); }
+QColor checkedFill(const QColor& own) {
+    if (glassy()) return own;
+    const QColor c = uiColor("selection");
+    return c.isValid() ? c : uiColor("accent");
+}
+QColor checkedText(const QColor& own) {
+    if (glassy()) return own;
+    const QColor c = uiColor("selectionText");
+    return c.isValid() ? c : uiColor("accentText");
+}
 QColor sliderFill(const QColor& own) {
     const auto ui = current().find("ui");
     if (ui == current().end() || !ui->is_object()) return own;
@@ -265,8 +279,8 @@ QColor sliderFill(const QColor& own) {
     const QColor one = resolve((*sliders)[0].get<std::string>());
     return one.isValid() ? one : own;
 }
-QColor actionFill(const QColor& own) { return segmentFill(own); }
-QColor actionText(const QColor& own) { return segmentText(own); }
+QColor actionFill(const QColor& own) { return glassy() ? own : uiColor("accent"); }
+QColor actionText(const QColor& own) { return glassy() ? own : uiColor("accentText"); }
 QColor errorText() {
     // The theme's ui.error, lightened on glass (the mockup's #FF7A7C over the viewport).
     const QColor c = uiColor("error");
@@ -300,13 +314,18 @@ bool fontsLoaded = false, fontsFound = false;
 bool loadFonts() {
     if (fontsLoaded) return fontsFound;
     fontsLoaded = true;
-    const int figtree = QFontDatabase::addApplicationFont(QStringLiteral(":/groomlab/fonts/Figtree[wght].ttf"));
+    const int inter = QFontDatabase::addApplicationFont(QStringLiteral(":/groomlab/fonts/Inter[opsz,wght].ttf"));
     const int mono = QFontDatabase::addApplicationFont(QStringLiteral(":/groomlab/fonts/JetBrainsMono[wght].ttf"));
-    fontsFound = figtree >= 0 && mono >= 0;
+    fontsFound = inter >= 0 && mono >= 0;
     return fontsFound;
 }
 
-QString uiFamily() { return QStringLiteral("Figtree"); }
+QString uiFamily() {
+    // The theme's ui.font (Inter, the bundled one, unless the theme names another).
+    const nlohmann::json& ui = current().value("ui", nlohmann::json::object());
+    const std::string family = ui.is_object() ? ui.value("font", std::string()) : std::string();
+    return family.empty() ? QStringLiteral("Inter") : QString::fromStdString(family);
+}
 
 QString monoFamily() { return QStringLiteral("JetBrains Mono"); }
 
@@ -326,6 +345,36 @@ QFont monoFont(int pixelSize, int weight) {
     f.setPixelSize(pixelSize);
     f.setWeight(static_cast<QFont::Weight>(weight));
     return f;
+}
+
+QFont numberFont(int pixelSize, int weight) {
+    // The UI font with tabular (fixed-width) digits: a value that changes keeps its width.
+    QFont f = uiFont(pixelSize, weight);
+    f.setFeature(QFont::Tag("tnum"), 1);
+    return f;
+}
+
+// ---- Sizes ----------------------------------------------------------------------------------------
+
+int controlRadius() {
+    // ui.radius; a glass theme's no rounder than its pills (8).
+    const int r = std::clamp(value("ui", "radius", glassy() ? 8 : 4), 0, 16);
+    return glassy() ? std::min(r, 8) : r;
+}
+int smallRadius() { return std::max(2, controlRadius() - 2); }
+int panelRadius() { return controlRadius() + 2; }
+int rowHeight() { return std::clamp(value("ui", "rowHeight", 26), 18, 40); }
+
+QString headerStyle() {
+    const nlohmann::json& graph = current().value("graph", nlohmann::json::object());
+    const std::string style = graph.is_object() ? graph.value("headerStyle", std::string("filled")) : std::string("filled");
+    return style == "tinted" || style == "minimal" ? QString::fromStdString(style) : QStringLiteral("filled");
+}
+
+QString canvasStyle() {
+    const nlohmann::json& graph = current().value("graph", nlohmann::json::object());
+    const std::string style = graph.is_object() ? graph.value("canvasStyle", std::string("lines")) : std::string("lines");
+    return style == "dots" || style == "plain" ? QString::fromStdString(style) : QStringLiteral("lines");
 }
 
 // ---- Brushes --------------------------------------------------------------------------------------
@@ -375,6 +424,18 @@ QColor categoryIconColor(BrushCategory category) {
         case BrushCategory::Guides: return text();
     }
     return blueLight();
+}
+
+QColor toolIconColor(BrushCategory category, const std::string& icon) {
+    if (category == BrushCategory::Guides) {
+        category = icon == "freeze" || icon == "unfreeze" ? BrushCategory::Paint : BrushCategory::Create;
+    }
+    return categoryIconColor(category);
+}
+
+QColor iconInk() {
+    const QColor c = themed({"icons"}, "ink");
+    return c.isValid() ? c : text();
 }
 
 QString brushTitle(const std::string& name) {
@@ -465,10 +526,7 @@ QColor graphWrites() { return graphColor("writes", QColor(0xF0, 0xA0, 0x50)); }
 
 qreal nodeRadius() { return value("graph", "cornerRadius", 14.0); }
 
-bool tintedHeaders() {
-    const nlohmann::json& graph = current().value("graph", nlohmann::json::object());
-    return graph.is_object() && graph.value("headerStyle", std::string("filled")) == "tinted";
-}
+bool tintedHeaders() { return headerStyle() == QLatin1String("tinted"); }
 
 // ---- The viewport's overlay ------------------------------------------------------------------------
 
@@ -547,7 +605,7 @@ QString styleSheet() {
     // glass panels: no frames, the raised tone (a glass theme's white wash) for fields, the accent
     // for what is on. Tokens (@name@) take the theme's tones below.
     QString sheet = QStringLiteral(R"(
-QWidget { color: @text@; font-family: "Figtree"; font-size: @fontSize@px; background: transparent; }
+QWidget { color: @text@; font-family: "@uiFamily@"; font-size: @fontSize@px; background: transparent; }
 QMainWindow { background: @background@; }
 QMainWindow::separator { background: @background@; width: 3px; height: 3px; }
 QMainWindow::separator:hover { background: @hover@; }
@@ -565,9 +623,9 @@ QDockWidget::close-button:hover, QDockWidget::float-button:hover { background: @
 QTabWidget::pane { border: none; border-top: 1px solid @edge@; background: @panel@; }
 QTabWidget::tab-bar { left: 4px; }
 QTabBar { background: transparent; qproperty-drawBase: 0; }
-QTabBar::tab { background: transparent; color: @muted@; padding: 5px 9px; margin: 0 1px; border: none; border-bottom: 2px solid transparent; font-weight: 600; }
+QTabBar::tab { background: transparent; color: @dim@; padding: 5px 2px; margin: 0 10px 0 0; border: none; border-bottom: 2px solid transparent; font-weight: 600; }
 QTabBar::tab:selected { color: @text@; border-bottom: 2px solid @accent@; }
-QTabBar::tab:hover:!selected { color: @soft@; }
+QTabBar::tab:hover:!selected { color: @text@; }
 QSplitter::handle { background: @background@; }
 QSplitter::handle:horizontal { width: 3px; }
 QSplitter::handle:vertical { height: 3px; }
@@ -581,7 +639,7 @@ QGroupBox { border: 1px solid @groupEdge@; border-radius: @radiusLarge@px; margi
 QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: @dim@; }
 QLabel { color: @soft@; }
 QAbstractSpinBox, QLineEdit, QComboBox {
-    background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; padding: 3px 6px; min-height: 18px;
+    background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; padding: 3px 6px; min-height: @fieldHeight@px;
     selection-background-color: @selection@; selection-color: @selectionText@; }
 QAbstractSpinBox:focus, QLineEdit:focus, QComboBox:focus { border: 1px solid @accent@; }
 QAbstractSpinBox:disabled, QLineEdit:disabled, QComboBox:disabled { color: @muted@; }
@@ -599,9 +657,9 @@ QCheckBox::indicator:checked { background: @accent@; border-color: @accent@; ima
 QCheckBox::indicator:disabled { background: @checkOff@; }
 QCheckBox::indicator:checked:disabled { background: @hover@; border-color: @hover@; image: url(:/groomlab/icons/ui_check_light.svg); }
 QCheckBox:disabled { color: @muted@; }
-QPushButton { background: @field@; border: 1px solid @fieldEdge@; border-radius: @radiusLarge@px; padding: 5px 12px; min-height: 16px; font-weight: 600; }
+QPushButton { background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; padding: 4px 12px; min-height: @buttonHeight@px; font-weight: 600; }
 QPushButton:hover { background: @fieldHover@; }
-QPushButton:pressed { background: @accent@; color: @accentText@; }
+QPushButton:pressed { background: @selection@; color: @selectionText@; }
 QPushButton:disabled { color: @muted@; background: @fieldOff@; }
 QSlider::groove:horizontal { height: 6px; border-radius: 3px; background: @track@; }
 QSlider::sub-page:horizontal { background: @slider@; border-radius: 3px; }
@@ -622,8 +680,9 @@ QHeaderView::section { background: transparent; color: @muted@; border: none; pa
 QTreeWidget::indicator { width: 14px; height: 14px; border-radius: @smallRadius@px; background: @check@; }
 QTreeWidget::indicator:checked { background: @emerald@; image: url(:/groomlab/icons/ui_check_dark.svg); }
 QTreeView::branch { background: transparent; }
-/* The Groom Tools (groom_tools.h), as Maya's: tiles, chips, the card, the segmented tabs, sections. */
-QLabel[role="heading"] { color: @dim@; font-size: @smallSize@px; font-weight: 700; letter-spacing: 1px; padding-top: 4px; }
+/* The Groom Tools (groom_tools.h), as Maya's: tiles, chips, the card, the tabs, sections. */
+QLabel[role="heading"] { color: @muted@; font-size: @smallSize@px; font-weight: 600; padding-top: 6px; border-top: 1px solid @edge@; }
+QLabel[role="category"] { color: @muted@; font-size: @smallSize@px; font-weight: 500; padding-top: 2px; }
 QLabel[role="subheading"] { color: @muted@; font-size: @tinySize@px; font-weight: 700; letter-spacing: 1px; }
 QLabel[role="about"] { color: @dim@; }
 QLabel[role="hint"] { color: @muted@; font-size: @smallSize@px; }
@@ -631,18 +690,15 @@ QLabel[role="title"] { color: @text@; font-size: @titleSize@px; font-weight: 700
 QLabel[role="status"] { color: @warning@; background: @field@; border-radius: @radius@px; padding: 5px 8px; }
 QFrame[role="card"], QFrame[role="empty"] { background: @card@; border: 1px solid @groupEdge@; border-radius: @radiusLarge@px; }
 QFrame[role="card"] QLabel, QFrame[role="card"] QCheckBox, QFrame[role="empty"] QLabel { background: transparent; }
-QFrame[role="segments"] { background: @card@; border: 1px solid @groupEdge@; border-radius: @radiusLarge@px; }
-QFrame[role="segments"] QTabBar::tab { background: transparent; color: @muted@; border: none; border-radius: @radius@px; padding: 4px 4px; margin: 0; font-weight: 600; }
-QFrame[role="segments"] QTabBar::tab:selected { background: @hover@; color: @text@; }
-QFrame[role="segments"] QTabBar::tab:hover:!selected { color: @soft@; }
-QToolButton[role="tool"] { background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; padding: 4px 0 4px 0;
+QToolButton[role="tool"] { background: @toolRest@; border: 1px solid @toolEdge@; border-radius: @radius@px; padding: 4px 0 4px 0;
     color: @soft@; font-size: @tinySize@px; font-weight: 600; }
+QToolButton[role="tool"][labels="true"] { background: @field@; border-color: @fieldEdge@; }
 QToolButton[role="tool"]:hover { background: @fieldHover@; color: @text@; }
-QToolButton[role="tool"]:checked { background: @accent@; border-color: @accent@; color: @accentText@; }
+QToolButton[role="tool"]:checked { background: @toolOn@; border-color: @accent@; color: @toolOnText@; }
 QToolButton[role="tool"]:disabled { color: @muted@; }
 QToolButton[role="chip"] { background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; padding: 4px 8px; font-weight: 600; }
 QToolButton[role="chip"]:hover { background: @fieldHover@; }
-QToolButton[role="chip"]:pressed, QToolButton[role="chip"]:checked { background: @accent@; color: @accentText@; }
+QToolButton[role="chip"]:pressed, QToolButton[role="chip"]:checked { background: @selection@; color: @selectionText@; }
 QToolButton[role="chip"]:disabled { color: @muted@; }
 QToolButton[role="chip"]::menu-indicator, QToolButton[role="glyph"]::menu-indicator { image: none; width: 0; }
 QToolButton[role="glyph"], QToolButton[role="glyph"]:checked { background: transparent; border: none; border-radius: @radius@px; padding: 2px; }
@@ -650,19 +706,20 @@ QToolButton[role="glyph"]:hover { background: @hover@; }
 QPushButton[role="primary"] { background: @accent@; color: @accentText@; border-color: @accent@; font-weight: 700; }
 QPushButton[role="primary"]:hover { background: @accent@; }
 QPushButton[role="section"], QPushButton[role="section"]:checked, QPushButton[role="section"]:pressed {
-    background: transparent; border: none; color: @dim@; font-size: @smallSize@px; font-weight: 700; text-align: left; padding: 6px 0 2px 0; }
-QPushButton[role="section"]:hover { color: @text@; background: transparent; }
+    background: transparent; border: none; border-top: 1px solid @edge@; border-radius: 0; color: @muted@; font-size: @smallSize@px;
+    font-weight: 600; text-align: left; padding: 6px 0 2px 0; min-height: 0; }
+QPushButton[role="section"]:hover { color: @dim@; background: transparent; }
 QPushButton[role="step"] { background: transparent; border: none; text-align: left; padding: 3px 4px; font-weight: 600; }
 QPushButton[role="step"]:hover { background: @hover@; }
 QPushButton[role="step"][done="true"] { color: @muted@; }
 #groomTools QPushButton { padding: 4px 8px; }
 #groomTools QPushButton[role="section"] { padding: 6px 0 2px 0; }
 #groomTools QPushButton[role="step"] { padding: 3px 4px; }
-/* The Properties dock (properties_panel.h), as Maya's Attribute Editor: banded section headers, a label column. */
+/* The Properties dock (properties_panel.h), as Maya's Attribute Editor: caps section headers over a hairline, a label column. */
 QPushButton[role="propSection"], QPushButton[role="propSection"]:checked, QPushButton[role="propSection"]:pressed {
-    background: @card@; border: 1px solid @groupEdge@; border-radius: @radius@px; color: @soft@; font-size: @smallSize@px;
-    font-weight: 700; text-align: left; padding: 5px 8px; }
-QPushButton[role="propSection"]:hover { color: @text@; background: @hover@; }
+    background: transparent; border: none; border-top: 1px solid @edge@; border-radius: 0; color: @muted@; font-size: @smallSize@px;
+    font-weight: 600; text-align: left; padding: 8px 2px 4px 2px; min-height: 0; }
+QPushButton[role="propSection"]:hover { color: @dim@; background: transparent; }
 QPushButton[role="propSubsection"], QPushButton[role="propSubsection"]:checked, QPushButton[role="propSubsection"]:pressed {
     background: transparent; border: none; color: @dim@; font-size: @smallSize@px; font-weight: 700; text-align: left; padding: 4px 2px; }
 QPushButton[role="propSubsection"]:hover { color: @text@; background: transparent; }
@@ -682,7 +739,16 @@ QFrame[role="propRule"] { background: @groupEdge@; border: none; }
         {QStringLiteral("@accent@"), uiColor("accent").name()},
         {QStringLiteral("@selectionText@"), (selectionText.isValid() ? selectionText : uiColor("accentText")).name()},
         {QStringLiteral("@selection@"), (selection.isValid() ? selection : uiColor("accent")).name()},
-        {QStringLiteral("@slider@"), (glass ? uiColor("accent") : textMuted()).name()},
+        {QStringLiteral("@slider@"), (glass ? uiColor("accent") : sliderFill(uiColor("accent"))).name()},
+        // The tool tiles: a glass theme's washed tiles, the accent when on; a solid theme's icons
+        // on the panel, the chosen one on the selection tone with an accent edge.
+        {QStringLiteral("@toolRest@"), glass ? wash(8) : QStringLiteral("transparent")},
+        {QStringLiteral("@toolEdge@"), QStringLiteral("transparent")},
+        {QStringLiteral("@toolOnText@"), (glass ? uiColor("accentText") : checkedText(text())).name()},
+        {QStringLiteral("@toolOn@"), (glass ? uiColor("accent") : checkedFill(uiColor("accent"))).name()},
+        {QStringLiteral("@uiFamily@"), uiFamily()},
+        {QStringLiteral("@fieldHeight@"), QString::number(rowHeight() - 8)},
+        {QStringLiteral("@buttonHeight@"), QString::number(rowHeight() - 10)},
         {QStringLiteral("@background@"), backdrop().name()},
         {QStringLiteral("@panel@"), uiColor("panel").name()},
         {QStringLiteral("@hover@"), uiColor("hover").name()},
@@ -699,9 +765,9 @@ QFrame[role="propRule"] { background: @groupEdge@; border: none; }
         {QStringLiteral("@track@"), glass ? wash(12) : uiColor("hover").name()},
         {QStringLiteral("@scrollHover@"), glass ? wash(30) : textMuted().name()},
         {QStringLiteral("@scroll@"), glass ? wash(18) : uiColor("hover").name()},
-        {QStringLiteral("@radiusLarge@"), QString::number(glass ? 10 : 5)},
-        {QStringLiteral("@radius@"), QString::number(glass ? 8 : 4)},
-        {QStringLiteral("@smallRadius@"), QString::number(glass ? 5 : 3)},
+        {QStringLiteral("@radiusLarge@"), QString::number(panelRadius())},
+        {QStringLiteral("@radius@"), QString::number(controlRadius())},
+        {QStringLiteral("@smallRadius@"), QString::number(smallRadius())},
         {QStringLiteral("@fontSize@"), QString::number(fontSize)},
         {QStringLiteral("@smallSize@"), QString::number(fontSize - 1)},
         {QStringLiteral("@tinySize@"), QString::number(fontSize - 2)},

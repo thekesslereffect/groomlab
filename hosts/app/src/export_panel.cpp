@@ -132,8 +132,8 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
         b->setPadding(12);
         b->setFontSize(13);
         b->setFontWeight(700);
-        b->setFill(theme::chip(), theme::actionFill(theme::emerald()));
-        b->setTextColor(theme::textSoft(), theme::actionText(theme::ink()));
+        b->setFill(theme::chip(), theme::checkedFill(theme::emerald()));
+        b->setTextColor(theme::textSoft(), theme::checkedText(theme::ink()));
         b->setCheckable(true);
         b->setToolTip(tr(kTargets[i].description));
         connect(b, &QAbstractButton::clicked, this, [this, i] {
@@ -159,7 +159,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto spin = [this](int min, int max, const QString& tip) {
         auto* s = new QSpinBox(this);
         s->setRange(min, max);
-        s->setFont(theme::monoFont(12));
+        s->setFont(theme::numberFont(12));
         s->setButtonSymbols(QAbstractSpinBox::NoButtons);
         s->setToolTip(tip);
         return s;
@@ -170,7 +170,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     step_->setRange(0.01, 1000.0);
     step_->setDecimals(2);
     step_->setValue(1.0);
-    step_->setFont(theme::monoFont(12));
+    step_->setFont(theme::numberFont(12));
     step_->setButtonSymbols(QAbstractSpinBox::NoButtons);
     step_->setToolTip(tr("Frames between samples (0.5: twice a frame)"));
     frames->addWidget(captionLabel(tr("From"), this), 1, 0);
@@ -214,7 +214,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     barbDensity_->setDecimals(2);
     barbDensity_->setSingleStep(0.05);
     barbDensity_->setValue(1.0);
-    barbDensity_->setFont(theme::monoFont(12));
+    barbDensity_->setFont(theme::numberFont(12));
     barbDensity_->setButtonSymbols(QAbstractSpinBox::NoButtons);
     barbDensity_->setToolTip(tr("The share of the feathers' barbs written (the same barbs every frame): a lighter groom"));
     engineLayout->addWidget(captionLabel(tr("Barb density"), engineOptions_), 2, 0);
@@ -223,7 +223,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     barbWidth_->setRange(0.01, 100.0);
     barbWidth_->setDecimals(2);
     barbWidth_->setValue(1.0);
-    barbWidth_->setFont(theme::monoFont(12));
+    barbWidth_->setFont(theme::numberFont(12));
     barbWidth_->setButtonSymbols(QAbstractSpinBox::NoButtons);
     barbWidth_->setToolTip(tr("Each barb kept this many times as wide, so the vanes keep their coverage"));
     engineLayout->addWidget(captionLabel(tr("Barb width"), engineOptions_), 3, 0);
@@ -256,14 +256,14 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     scale_->setRange(0.0001, 1000.0);
     scale_->setDecimals(4);
     scale_->setValue(1.0);
-    scale_->setFont(theme::monoFont(12));
+    scale_->setFont(theme::numberFont(12));
     scale_->setButtonSymbols(QAbstractSpinBox::NoButtons);
     scale_->setToolTip(tr("Points and widths times this (1 keeps centimeters, what Unity's importer expects; 0.01 writes meters)"));
     points_ = new QSpinBox(unityOptions_);
     points_->setRange(0, 128);
     points_->setValue(0);
     points_->setSpecialValueText(tr("as they are"));
-    points_->setFont(theme::monoFont(12));
+    points_->setFont(theme::numberFont(12));
     points_->setButtonSymbols(QAbstractSpinBox::NoButtons);
     points_->setToolTip(tr("Every strand resampled to this many points (3 to 128), so Unity can leave Resample Curves off"));
     unityLayout->addWidget(captionLabel(tr("Scale"), unityOptions_), 0, 0);
@@ -274,7 +274,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     barbPoints_->setRange(0, 128);
     barbPoints_->setValue(0);
     barbPoints_->setSpecialValueText(tr("as the rest"));
-    barbPoints_->setFont(theme::monoFont(12));
+    barbPoints_->setFont(theme::numberFont(12));
     barbPoints_->setButtonSymbols(QAbstractSpinBox::NoButtons);
     barbPoints_->setToolTip(tr("The feather groups' strands resampled to this many points (with groom groups)"));
     unityLayout->addWidget(captionLabel(tr("Barb points"), unityOptions_), 2, 0);
@@ -351,7 +351,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     mapPadding_->setSpecialValueText(tr("Auto"));
     mapPadding_->setValue(-1);
     mapPadding_->setSuffix(QStringLiteral(" px"));
-    mapPadding_->setFont(theme::monoFont(12));
+    mapPadding_->setFont(theme::numberFont(12));
     mapPadding_->setToolTip(tr("Texels the colors spread past the strands so mip maps don't bleed in black; Auto: 8 at 2K and "
                                "below, scaled above"));
     mapSupersample_ = new QComboBox(mapOptions_);

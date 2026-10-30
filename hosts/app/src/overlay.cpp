@@ -533,8 +533,8 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         b->setPadding(9);
         b->setFontSize(11);
         b->setFontWeight(700);
-        b->setFill(theme::chip(), theme::actionFill(theme::yellow()));
-        b->setTextColor(theme::textSoft(), theme::actionText(theme::ink()));
+        b->setFill(theme::chip(), theme::checkedFill(theme::yellow()));
+        b->setTextColor(theme::textSoft(), theme::checkedText(theme::ink()));
         b->setCheckable(true);
         const std::string preset = name;
         connect(b, &QAbstractButton::clicked, this, [this, preset] {
@@ -1208,7 +1208,7 @@ QString OverlayHost::statsText() const {
 
 void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& badgeColor, std::size_t guides) {
     std::vector<ShadowText::Run> runs;
-    const QFont words = theme::uiFont(12, 500), numbers = theme::monoFont(12);
+    const QFont words = theme::uiFont(12, 500), numbers = theme::numberFont(12);
     auto run = [&](const QString& text, const QFont& font, const QColor& color, int gap) {
         ShadowText::Run r;
         r.text = text;
@@ -1250,7 +1250,7 @@ void OverlayHost::setRefine(bool refining, int frames, int target, double msPerF
     runs.push_back(lead);
     ShadowText::Run numbers;
     numbers.text = refining ? QStringLiteral("%1 / %2").arg(frames).arg(target) : QStringLiteral("%1 ms").arg(msPerFrame, 0, 'f', 1);
-    numbers.font = theme::monoFont(12);
+    numbers.font = theme::numberFont(12);
     numbers.color = theme::textSoft();
     numbers.gapBefore = 6;
     runs.push_back(numbers);

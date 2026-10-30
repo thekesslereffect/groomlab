@@ -150,8 +150,8 @@ public:
     // runs, --ui-screenshot), nothing asks and only errors toast.
     // (Interactive: the saved choices it keeps, Delete Its File Too, are read.)
     void setInteractive(bool on);
-    // The Groom Tools' tool tiles with their names under the icons (View > Rail Labels, on by
-    // default; off: compact icon tiles), saved as ui/toolLabels; restoreRailLabels puts the saved
+    // The Groom Tools' tool tiles with their names under the icons (View > Tool Labels, off by
+    // default: icons alone, the names in the tool tips), saved as ui/toolLabels; restoreRailLabels puts the saved
     // choice back (the window someone sits at).
     void setRailLabels(bool shown, bool save = true);
     bool railLabels() const;

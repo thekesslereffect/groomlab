@@ -32,6 +32,16 @@ namespace groomlab::app {
 QPixmap tintedIcon(const QString& resource, const QColor& color, int size, qreal devicePixelRatio);
 // The icon as drawn (the three-strand logo keeps its colors).
 QPixmap coloredIcon(const QString& resource, int size, qreal devicePixelRatio);
+// A tool icon in two tones, as the Maya host recolors them (widgets.icon_svg): the SVG's
+// placeholder colors (tools/make_icons.py) replaced, its main color (and a darker shade and a
+// lighter tint of it) by `main`, the hair and neutral parts by `ink`, the palette's by the theme's.
+// The icon as drawn when its SVG cannot be read so.
+QPixmap duotoneIcon(const QString& resource, const QColor& main, const QColor& ink, int size, qreal devicePixelRatio);
+
+// A folding section's header button (the Groom Tools', the Properties dock's, a node's settings):
+// its title in capitals, spaced out a little, after a chevron (down: open, right: folded) in the
+// muted text color; the style sheet draws the small muted text and the hairline above it.
+void setSectionHeader(QAbstractButton* header, const QString& title, bool expanded);
 
 // A number with at most `decimals` decimals and its trailing zeros dropped ("0.35", not "0.350";
 // "1", not "1.000"), a small one with two significant digits ("0.035", up to six decimals), as
