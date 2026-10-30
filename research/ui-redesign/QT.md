@@ -72,10 +72,14 @@ brush_catalog.cpp and palette.py). One model, every tab:
    - **Brush**: how the stroke feels. Radius, Strength (±), Falloff, Smooth; chips Pressure,
      Off scalp, Falloff curve, Root to tip (a curve chip that's on shows its ramp under the row).
    - **The tool's own block**, named after what it sets: Paint (Mode, Value + Fill, Stamp),
-     New guides + Tube (Place / Draw), Comb (Stretch), Paints + Selected guides (Shape),
+     New guides + Tube (Place / Draw: the profile picked, a small preview, Width / Flatness / Twist),
+     Comb (Stretch), Paints + Profile + Selected guides (Shape: the shape picker with Apply, the
+     cross-section editor (TubeShapeEditor, ≤200 px square), Edit as custom, Mirror, Smooth, and
+     the library's new / rename / duplicate / delete glyphs in the block header),
      Selection + Selected guides (Select), Erases (Erase), Keys (Length Keys), Flow, Parts.
-   - **Applies to**: where the stroke lands. The target (Group / Adds to / Map / Layer, from the
-     list below), Acts on, Mirror (symmetry), chips Selected only, Front only.
+   - **Applies to**: where the stroke lands. Acts on, Mirror (symmetry), chips Selected only,
+     Front only. The current group / map / layer is not repeated here: it is the picked row of the
+     list below.
 3. **The list** of the tab's things: Guide groups (Tools), Maps (Paint), Layers (Correctives),
    Photos. Section header = name, count, add/import glyphs. Plain rows (dot, name, meta, eye).
    Under the list, a small box with **the picked item's own** settings and actions (rename /

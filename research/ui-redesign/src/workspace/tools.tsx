@@ -284,24 +284,82 @@ function TubeFields() {
   );
 }
 
+/** The tube's cross-section: a square with the guide at its center (the cross) and the outline's
+ *  points. Qt: the existing TubeShapeEditor (tube_shape_editor.py / tube_shape_editor.cpp). */
+function ProfileView({ editable, size = "large" }: { editable: boolean; size?: "large" | "small" }) {
+  const pts: [number, number][] = [[0, -34], [30, -18], [36, 6], [20, 30], [0, 36], [-20, 30], [-36, 6], [-30, -18]];
+  const d = "M0,-34 C18,-34 36,-16 36,6 C36,24 18,36 0,36 C-18,36 -36,24 -36,6 C-36,-16 -18,-34 0,-34 Z";
+  return (
+    <div className={cn("relative rounded-ctl border border-line bg-raised", size === "large" ? "mx-auto aspect-square w-full max-w-[200px]" : "size-16 shrink-0")}>
+      <svg viewBox="-50 -50 100 100" className="size-full">
+        <line x1="-6" y1="0" x2="6" y2="0" stroke="var(--gl-muted)" strokeWidth="0.8" />
+        <line x1="0" y1="-6" x2="0" y2="6" stroke="var(--gl-muted)" strokeWidth="0.8" />
+        {size === "large" && <line x1="0" y1="-48" x2="0" y2="48" stroke="var(--gl-border)" strokeWidth="0.6" strokeDasharray="2 2" />}
+        <path d={d} fill="color-mix(in srgb, var(--gl-accent) 14%, transparent)" stroke="var(--gl-accent)" strokeWidth={size === "large" ? 1.4 : 2.4} />
+        {size === "large" && editable && pts.map(([x, y]) => <circle key={`${x},${y}`} cx={x} cy={y} r="2.6" fill="var(--gl-text)" />)}
+      </svg>
+      {size === "large" && !editable && (
+        <span className="absolute inset-x-0 bottom-1.5 text-center text-sm-ui text-muted">Built in: Edit as custom to change it</span>
+      )}
+    </div>
+  );
+}
+
+/** The profile block: pick a shape (built-ins, then your library), see / edit its outline. */
+function Profile({ apply }: { apply?: boolean }) {
+  const [shape, setShape] = useState("Round");
+  const custom = shape.startsWith("Custom");
+  return (
+    <Sub
+      title="Profile"
+      actions={
+        <span className="flex">
+          <Glyph label="New shape"><Plus className={ic} /></Glyph>
+          <Glyph label="Rename"><Pencil className={ic} /></Glyph>
+          <Glyph label="Duplicate"><Link2 className={ic} /></Glyph>
+          <Glyph label="Delete"><Trash2 className={ic} /></Glyph>
+        </span>
+      }
+    >
+      <div className="flex gap-1">
+        <Select value={shape} options={tubeShapes} onChange={setShape} className="min-w-0 flex-1" />
+        {apply && <Tip label="Give the selected guides this profile"><Button size="sm">Apply</Button></Tip>}
+      </div>
+      <ProfileView editable={custom} />
+      <div className="flex flex-wrap items-center gap-1 pt-0.5">
+        {!custom && <Button size="sm" variant="ghost" onClick={() => setShape("Custom: lock")}>Edit as custom</Button>}
+        <Chip on tip="Keep the outline symmetric left to right">Mirror</Chip>
+        <Chip on tip="A smooth outline (off: straight edges)">Smooth</Chip>
+      </div>
+    </Sub>
+  );
+}
+
+/** Place / Draw: the tube new guides get. */
 function TubeNew() {
   return (
     <Sub title="Tube">
-      <Row label="Shape"><Select value="Round" options={tubeShapes} className="w-full" /></Row>
+      <div className="flex items-center gap-2">
+        <ProfileView editable={false} size="small" />
+        <div className="flex flex-1 flex-col gap-1">
+          <Select value="Round" options={tubeShapes} className="w-full" />
+          <span className="text-sm-ui text-muted">Edit profiles with the Shape brush.</span>
+        </div>
+      </div>
       <TubeFields />
     </Sub>
   );
 }
 
+/** Shape / Select: the selected guides' tubes. */
 function TubeEdit() {
   return (
-    <Sub title="Selected guides" actions={<Button size="sm" variant="ghost">Smooth</Button>}>
-      <div className="flex gap-1">
-        <Select value="Round" options={tubeShapes} className="flex-1" />
-        <Button size="sm">Apply</Button>
-      </div>
-      <TubeFields />
-    </Sub>
+    <>
+      <Profile apply />
+      <Sub title="Selected guides" actions={<Tip label="Smooth the painted channel along the guides"><Button size="sm" variant="ghost">Smooth</Button></Tip>}>
+        <TubeFields />
+      </Sub>
+    </>
   );
 }
 
@@ -408,18 +466,6 @@ function Block({ title, children, actions }: { title: string; children: ReactNod
   );
 }
 
-/** What the stroke edits: the picked group / map / layer, from the list under the card. */
-function Target({ kind, name, color }: { kind: string; name: string; color?: string }) {
-  return (
-    <Row label={kind}>
-      <button className="flex h-row min-w-0 flex-1 items-center gap-2 rounded-ctl px-1.5 text-left hover:bg-hover" title="Pick another in the list below">
-        {color && <span className="size-2.5 shrink-0 rounded-full" style={{ background: color }} />}
-        <span className="truncate text-fg">{name}</span>
-      </button>
-    </Row>
-  );
-}
-
 /** The tool's own block: what this tool does, beyond the brush. */
 function ToolBlock({ id, s }: { id: string; s: ToolSettings }) {
   switch (id) {
@@ -521,7 +567,7 @@ function ToolBlock({ id, s }: { id: string; s: ToolSettings }) {
   }
 }
 
-export function ToolCard({ tool, target }: { tool?: Tool; target?: { kind: string; name: string; color?: string } }) {
+export function ToolCard({ tool }: { tool?: Tool }) {
   const { tool: current } = useWS();
   const hints = useOpt("gtHints");
   const t = tool ?? allTools.find((x) => x.id === current);
@@ -531,9 +577,7 @@ export function ToolCard({ tool, target }: { tool?: Tool; target?: { kind: strin
   const brushKeys = BRUSH_KEYS.filter((k) => keys.includes(k));
   const applyKeys = APPLY_KEYS.filter((k) => keys.includes(k));
   const curves = [s.falloffCurve && "Falloff curve", s.rootToTip && "Root to tip"].filter(Boolean) as string[];
-  const into = t.id === "place" || t.id === "draw";
-  const tgt = target ?? (t.id === "part" ? undefined : { kind: into ? "Adds to" : "Group", name: "primary", color: "#7C9CD4" });
-  const hasApply = tgt || s.actsOn || s.symmetry || applyKeys.length;
+  const hasApply = s.actsOn || s.symmetry || applyKeys.length;
 
   return (
     <section className="flex flex-col border-t border-line pt-2">
@@ -558,7 +602,6 @@ export function ToolCard({ tool, target }: { tool?: Tool; target?: { kind: strin
 
       {hasApply && (
         <Block title="Applies to">
-          {tgt && <Target {...tgt} />}
           {s.actsOn && <ChipRow label="Acts on"><Multi items={["Guides", "Parts", "Flow"]} init={["Guides"]} /></ChipRow>}
           {s.symmetry && (
             <Row label="Mirror">
@@ -653,7 +696,7 @@ export function GuideGroups() {
 function PaintTab() {
   return (
     <>
-      <ToolCard tool={paintTool} target={{ kind: "Map", name: "density" }} />
+      <ToolCard tool={paintTool} />
       <Section
         title="Maps"
         count={3}
@@ -695,7 +738,7 @@ function ItemProps({ children, actions }: { children?: ReactNode; actions?: Reac
 function CorrectivesTab() {
   return (
     <>
-      <ToolCard target={{ kind: "Layer", name: "fix frame 24" }} />
+      <ToolCard />
       <Section
         title="Layers"
         count={3}
