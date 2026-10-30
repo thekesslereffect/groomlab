@@ -77,9 +77,8 @@ brush_catalog.cpp and palette.py). One model, every tab:
      cross-section editor (TubeShapeEditor, ≤200 px square), Edit as custom, Mirror, Smooth, and
      the library's new / rename / duplicate / delete glyphs in the block header),
      Selection + Selected guides (Select), Erases (Erase), Keys (Length Keys), Flow, Parts.
-   - **Applies to**: where the stroke lands. Acts on, Mirror (symmetry), chips Selected only,
-     Front only. The current group / map / layer is not repeated here: it is the picked row of the
-     list below.
+   - **Applies to**: where the stroke lands. Acts on, Mirror (symmetry). The current group / map
+     / layer is not repeated here: it is the picked row of the list below.
 3. **The list** of the tab's things: Guide groups (Tools), Maps (Paint), Layers (Correctives),
    Photos. Section header = name, count, add/import glyphs. Plain rows (dot, name, meta, eye).
    Under the list, a small box with **the picked item's own** settings and actions (rename /
@@ -90,7 +89,7 @@ Row styles: block titles are small semibold dim text over a faint rule; numbers 
 with the name inside; chip rows put their name above the chips; Row label | control only for
 combos/toggles (Mirror, Shape, Place, Stamp).
 
-Gone from the panel: the Output strip (GroomLab menu; the app's menu bar corner), While sculpting
+Gone from the panel: Selected only and Front only (the brushes keep their defaults, off and on), the Output strip (GroomLab menu; the app's menu bar corner), While sculpting
 (Attribute Editor / Properties), the Group combo (pick in the list), the gestures paragraph (?
 tooltip), the second Unfreeze All, the three-times-repeated hint, Fill Tubes / Tube Blend
 (Interpolate node settings).

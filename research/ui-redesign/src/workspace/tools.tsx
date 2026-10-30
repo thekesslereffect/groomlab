@@ -401,10 +401,10 @@ const paintTool: Tool = {
   tip: "Paint the current map: Shift smooths, Ctrl paints toward 0. Scalp maps take an alpha stamp.",
 };
 
-// The options a card shows as chips, split by meaning: how the stroke behaves (Brush) and where it
-// lands (Applies to). Fixed order, so a chip never moves between tools.
+// The options a card shows as chips (how the stroke behaves), in a fixed order so a chip never
+// moves between tools. Selected only and Front only are not in the panel: the brushes keep their
+// defaults (off and on).
 const BRUSH_KEYS = ["pressure", "collide"] as const;
-const APPLY_KEYS = ["selectedOnly", "frontFacing"] as const;
 
 /** Chips (or checkboxes / a fold, per the lab's Brush options) for some option keys + curves. */
 function ChipSet({ keys, curves = [], foldTitle }: { keys: string[]; curves?: string[]; foldTitle: string }) {
@@ -575,9 +575,8 @@ export function ToolCard({ tool }: { tool?: Tool }) {
   if (!t || !s) return <p className="border-t border-line py-2 text-sm-ui text-muted">Pick a tool, then drag over the groom in the viewport.</p>;
   const keys = s.options ?? [];
   const brushKeys = BRUSH_KEYS.filter((k) => keys.includes(k));
-  const applyKeys = APPLY_KEYS.filter((k) => keys.includes(k));
   const curves = [s.falloffCurve && "Falloff curve", s.rootToTip && "Root to tip"].filter(Boolean) as string[];
-  const hasApply = s.actsOn || s.symmetry || applyKeys.length;
+  const hasApply = s.actsOn || s.symmetry;
 
   return (
     <section className="flex flex-col border-t border-line pt-2">
@@ -609,7 +608,6 @@ export function ToolCard({ tool }: { tool?: Tool }) {
               <Select value="World X" options={["World X", "Topology"]} className="flex-1" />
             </Row>
           )}
-          <ChipSet keys={[...applyKeys]} foldTitle="Limits" />
         </Block>
       )}
 
