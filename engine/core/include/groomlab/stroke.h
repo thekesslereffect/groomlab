@@ -26,6 +26,7 @@
 #include "groomlab/flow.h"
 #include "groomlab/graph.h"
 #include "groomlab/guide_hierarchy.h"
+#include "groomlab/length_path_tool.h"
 #include "groomlab/parts.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_paint.h"
@@ -41,10 +42,10 @@ class GroomSession;
 // Everything a stroke needs besides the path: the core brush settings, the guide-creating tools,
 // the interactive (screen-space) radius and what the brush acts on.
 struct BrushToolSettings {
-    enum class Tool { Brush, Place, Draw, Part, Flow };
+    enum class Tool { Brush, Place, Draw, Part, Flow, Lengths };
     // Place: click one guide, drag to place many; Draw: draw a guide's shape; Part: draw a part
     // freehand on the scalp; Flow: lay flow arrows along the stroke and comb the ones it passes
-    // (Ctrl: erase them).
+    // (Ctrl: erase them); Lengths: the Length Paths tool (length_path_tool.h, BrushTool::lengths).
     Tool tool = Tool::Brush;
     std::string partName = "part";  // Part: the new part's name (made unique)
     // Flow: "" lays arrows along strokes; whorl, whorlcw, converge or part places a sink of that
@@ -114,9 +115,13 @@ struct BrushToolSettings {
     }
     // Whether Shift selects guides (the hosts': a drag paints the selection within the ring, a
     // click adds the guides in it, on none clears it; the rest frozen either way) rather than
-    // smoothing: the guide brushes (comb, length, cut, shape...). Painting (maps, a guide
-    // attribute such as freeze) keeps Shift's smoothing. Ctrl is every brush's opposite (pressed()).
-    bool shiftSelects() const { return tool == Tool::Brush && brush.mode != BrushMode::Attribute && !paintsScalp(); }
+    // smoothing: the guide brushes (comb, length, cut...). Painting (maps, a guide attribute such
+    // as freeze) and the Shape brush (its tube channel: useShiftSmoothing) keep Shift's smoothing.
+    // Ctrl is every brush's opposite (pressed()).
+    bool shiftSelects() const {
+        return tool == Tool::Brush && brush.mode != BrushMode::Attribute && brush.mode != BrushMode::ShapeTube &&
+               !paintsScalp();
+    }
 
     // comb, smooth... (brush.h), clump, place, draw, part, flow.
     std::string modeName() const;
@@ -528,7 +533,9 @@ private:
 // ---- The interactive tool -------------------------------------------------------------------------
 
 // Modifier keys held when a stroke starts.
-enum StrokeModifier : unsigned { kStrokeCtrl = 1u, kStrokeShift = 2u };
+// kStrokeAdjust: the press is the host's adjusting button (the Length Paths tool: a key's length
+// dragged; right in the app and Blender, middle in Maya, whose right button opens marking menus).
+enum StrokeModifier : unsigned { kStrokeCtrl = 1u, kStrokeShift = 2u, kStrokeAdjust = 4u };
 
 // Parts and flow are stored bound to the cage (parts.h, flow.h: whatever the Scalp node's subdivision
 // level); the tools draw and brush them on the scalp as the host shows it, refined when it is
@@ -601,6 +608,10 @@ public:
     bool changed() const { return changed_ || mapChanged_; }
     // Part and Flow: the path drawn so far on the scalp (the host draws it until it is committed).
     const std::vector<Vec3f>& drawnPath() const { return drawPath_; }
+    // The Length Paths tool (Tool::Lengths): press, drag and release go to it; hosts draw its
+    // overlay and give it the panel's edits, Apply and Cancel.
+    LengthPathTool& lengths() { return lengths_; }
+    bool lengthsPressed() const { return lengthsPressed_; }  // a press it took, until its release
     // The mode the tool is set to: during a Shift+drag's smoothing still the tool's own mode.
     std::string toolModeName() const;
 
@@ -640,6 +651,8 @@ private:
     void commitSculpt(StrokeHost& host);
 
     float pressure_ = 1.0f;
+    LengthPathTool lengths_;
+    bool lengthsPressed_ = false;  // a press the Length Paths tool took
     std::shared_ptr<GuideHierarchy> working_;
     // The parts and flow arrows a brush stroke shapes (or erases): working copies of the stored
     // ones, previewed live and committed with the guides.

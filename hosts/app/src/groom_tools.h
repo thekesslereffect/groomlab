@@ -210,6 +210,7 @@ signals:
     void guidesEdited();          // the card or the Tubes section changed the guides (Unfreeze All, a tube edit)
     void tubesGraphEdited();      // the Tubes section's Fill Tubes or Tube Blend changed the graph
     void tubesPreviewed();        // the tube outline editor's live preview (no undo step): evaluate and redraw
+    void lengthsPreviewed();      // the Paths box changed the Length Paths preview: evaluate and redraw
     void clearFlowRequested();
     void isolateChanged();        // Isolate or the group: the display's isolated level
     void sculptDisplayChanged();  // While sculpting: the strands' display or Full density

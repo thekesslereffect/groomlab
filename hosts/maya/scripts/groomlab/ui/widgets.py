@@ -29,7 +29,7 @@ _ranges = None  # key -> [lo, hi], loaded from the optionVar on first use
 ICON_GROUPS = {
     "create": ("place", "draw", "part", "flow", "select"),
     "shape": ("comb", "slide", "smooth", "straighten", "lift", "twist", "curl", "attract", "direction", "noise"),
-    "trim": ("cut", "length", "shape", "erase"),
+    "trim": ("cut", "length", "lengths", "shape", "erase"),
     "paint": ("paint", "freeze", "unfreeze"),
 }
 PLACEHOLDERS = {"main": "#3D7EFF", "shade": "#1F4FB3", "tint": "#A8C7FF", "ink": "#F2F2F5", "shine": "#FFFFFF",

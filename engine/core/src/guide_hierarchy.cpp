@@ -1249,6 +1249,11 @@ void GuideHierarchy::renameTubeShape(const std::string& from, const std::string&
     }
 }
 
+void GuideHierarchy::setLengthPaths(LengthPathSet paths) {
+    lengthPaths_ = std::move(paths);
+    invalidateHash();
+}
+
 std::size_t GuideHierarchy::removeTubeShape(const std::string& name) {
     if (!tubeShapes_.count(name)) throw std::invalid_argument("no tube shape named '" + name + "'");
     invalidateHash();
@@ -1465,6 +1470,7 @@ std::uint64_t GuideHierarchy::computeContentHash() const {
         h = hashCombine(h, tubeShapes_.size());
         for (const auto& [name, shape] : tubeShapes_) h = hashCombine(hashString(h, name), shape->hash);
     }
+    if (!lengthPaths_.paths.empty()) h = hashString(hashCombine(h, 0x1E6Bu), lengthPaths_.toJson());  // (none: as it always has)
     h = hashCombine(h, guides_.size());
     for (const HierarchyGuide& g : guides_) {
         h = hashCombine(hashCombine(hashCombine(h, g.id), g.group), g.parent);
@@ -1680,6 +1686,7 @@ std::string GuideHierarchy::toJson() const {
         out += guides[i];
     }
     out += ']';
+    if (!lengthPaths_.paths.empty()) out += ",\"lengthPaths\":" + lengthPaths_.toJson();
     if (boundTopology_ != 0) out += ",\"scalpTopology\":" + json(boundTopology_).dump();
     if (!tubeShapes_.empty()) {
         // The shape library: each shape's name, its control points (u, v, u, v, ...) and smooth.
@@ -1756,6 +1763,13 @@ GuideHierarchy GuideHierarchy::fromJson(const std::string& text) {
         if (root.is_object() && root.empty()) return h;
         detail::checkVersion(DocumentKind::GuideData, root);  // refuses guide data from a newer GroomLab
         h.boundTopology_ = root.value("scalpTopology", std::uint64_t{0});
+        if (root.contains("lengthPaths")) {
+            try {
+                h.lengthPaths_ = LengthPathSet::fromJson(root.at("lengthPaths").dump());
+            } catch (const std::invalid_argument& e) {
+                h.loadWarnings_.push_back(std::string(e.what()) + " (left out)");
+            }
+        }
 
         for (const json& g : root.value("groups", json::array())) {
             GuideGroup group{g.at("id").get<GroupId>(), g.at("name").get<std::string>(), g.value("parent", kNoGroup)};

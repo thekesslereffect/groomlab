@@ -143,7 +143,7 @@ public:
     // the time since it ended; a script's points come at once, so it would skip them all), each
     // step timed: debugStrokeTimes.
     bool simulateStroke(const std::vector<std::pair<short, short>>& points, bool ctrl = false, bool shift = false,
-                        bool draw = false);
+                        bool draw = false, bool adjust = false);
     // A Shift drag (or click, one point) through the given view points, as the mouse would: the
     // selection painted (a click adds the guides in the ring; on none, deselects and unfreezes
     // all). Returns how many guides are selected after it.
@@ -165,6 +165,11 @@ public:
     std::string dragSlider;
 
     BrushToolSettings& settings() { return tool_.settings; }
+    // The Length Paths tool (Tool::Lengths): an edit by words (-lengthEdit: "key 2.5", "reach 1",
+    // "smooth on", "change trim", "select 0 1", "newPath", "deleteKey", "deletePath", "apply",
+    // "cancel"; throws std::invalid_argument for others) and its state as JSON (-lengthState).
+    void lengthEdit(const std::string& words);
+    std::string lengthState();
     // The mode the tool is set to (-mode's query): during a Shift+drag's smoothing still the
     // tool's own mode, so nothing watching the tool (Groom Tools) mistakes the stroke for a
     // switch to the Smooth brush.
@@ -188,6 +193,7 @@ private:
     void unchainUnlessStroking();
     void drawCircle(MHWRender::MUIDrawManager& draw, short x, short y) const;
     void drawAffected(MHWRender::MUIDrawManager& draw, short x, short y);
+    void drawLengths(MHWRender::MUIDrawManager& draw);  // the Length Paths tool's paths and keys
 public:
     // Symmetry on: the scalp's line of symmetry (symmetrySeam) handed to the groom, which draws it
     // in red on every redraw (GroomShape::setSymmetrySeam), as Substance Painter shows it: from the

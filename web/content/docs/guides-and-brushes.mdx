@@ -169,8 +169,10 @@ The selected guides' tubes draw brighter.
   stroke on a tube gives it one section per guide point, so you shape it point by point.
   Symmetry, Selected only, frozen and soloed guides work as with every brush; each stroke is one
   undo step.
-- **Ctrl** does the opposite: it shrinks, rounds or untwists the tubes. The Tubes panel's
-  **Smooth** evens out what the brush painted along each guide.
+- **Ctrl** does the opposite: it shrinks, rounds or untwists the tubes.
+- **Shift+drag smooths** what the brush paints: the channel picked (width, flatness or twist) of
+  the sections under the brush, each evened out toward its neighbours along the guide. The
+  guides' shape stays as it is. (With the other guide brushes Shift selects.)
 - **Tubes** (a section of its own in Groom Tools > Tools, opened by the Shape brush, Place and Draw, or from its header): each guide keeps its own tube, and the
   card edits **only its targets**: the selected guides (select them with **Select**), or with none
   selected the soloed ones (left unfrozen while the rest are frozen). It follows every change of the
@@ -287,7 +289,7 @@ guides are drawn blue. Freezing does not affect the strands.
 
 - **Freeze** (a brush in the Guides category) paints the freeze mask; **Ctrl** unfreezes.
   **Unfreeze All**, next to it, clears the mask on every guide.
-- **Shift+click** with any guide brush adds the guides inside the brush ring to the selection:
+- **Shift+click** with any guide brush but Shape adds the guides inside the brush ring to the selection:
   every guide not selected freezes. **Shift+drag** paints guides into the selection with the
   ring. **Shift+click** where the ring holds no guide deselects and unfreezes all.
 - **Select** works the same way: the selected guides stay live, all others are frozen, and a
@@ -340,6 +342,7 @@ and each drag is one undo step. The brushes are the same, in the same order, in 
 | | **Noise** | Adds smooth random displacement that builds up with each stroke (a negative strength smooths it out). |
 | | **Shape** | Paints guides' [tubes](#tube-guides) near the brush: **Width**, **Flatness** or **Twist** (a negative strength: the opposite), and sets the selected guides' tube shape, Fill Tubes and Tube Blend. |
 | Trim | **Cut**, **Length**, **Erase** | Cut guides where the brush touches; lengthen or shorten them uniformly; delete guides, part lines or flow arrows (not the scattered hair: see below). |
+| | **Length Paths** | Set guide lengths from paths of keys you lay on the scalp (see [Length Paths](#length-paths)). |
 | Paint (in the Paint tab) | **Paint** | Paints the map picked in the Paint tab, including the maps that drive settings such as density and width (see below, and [Painting maps](/docs/painting-maps)). |
 | Guides | **Select**, **Freeze** | Select guides; paint the freeze mask. **Unfreeze All** is next to them. |
 
@@ -357,6 +360,35 @@ arrows, so it does nothing on a groom whose hair comes from the Scatter alone. T
 paint the density map holding **Ctrl** (Paint tab > **+ New Map** > For: **Density**); paint it
 back without Ctrl.
 
+### Length Paths
+
+**Length Paths** (Trim) sets guide lengths from lines of keys on the scalp: a fringe that runs
+from short to long, a V at the middle, a leg that is long at the top and short at the paw. Guides
+near a path take the length the keys give, blended between keys and faded back to their own length
+at the edge of the path's reach.
+
+- **Click** on the scalp to lay a key at the end of the path. A new key starts at the length of the
+  guides around it, so laying keys changes nothing until you set one. **Shift+click** starts a new
+  path (one per leg of an animal); a click on a path's line adds a key there.
+- **Drag** a key to move it over the scalp. **Ctrl+click** deletes it.
+- **Right-drag** a key up or down to set its length (Maya: **middle-drag**, since Maya's right
+  button opens its marking menus). Dragging up doubles it every 150 pixels.
+- **Shift+drag** from a key sizes its reach, the ring around it: how far from the path guides
+  change. Each key has its own reach, blended between keys, so a path can be wide at one end and
+  narrow at the other. A path's first key takes the brush ring's size.
+- The guides preview at their new lengths until you **Apply** (one undo step; **Enter** in the
+  app and Blender) or **Cancel** (**Esc**).
+
+The **Paths** box shows the selected key's **Key length** and **Key reach**, **Smooth** (lengths
+ease from key to key without overshooting a key; off: straight), **Scale** or **Trim** (a guide
+scaled about its root, so curls keep their shape, or cut and extended at the tip, so curls keep
+their size), **New Path**, **Delete Key** and **Delete Path**. Only the selected guides change,
+else the soloed ones (the ones not frozen). With symmetry on, the mirrored paths act too and show
+on the other side; topology symmetry puts each key at its partner spot on the scalp.
+
+The paths are saved with the groom, so you can come back, drag a key and apply again. Keys hold
+lengths, not percentages: applying twice gives what applying once did.
+
 ### Keys
 
 - **Ctrl** does the brush's opposite: Length shortens, Lift lays guides down, Twist and Curl
@@ -368,8 +400,8 @@ back without Ctrl.
   freeze, so the brush then works on the selection. **Shift+click** adds the guides inside the
   ring; on none it deselects and unfreezes all (see [Freeze and solo](#freeze-and-solo)). For a
   lasso, use the **Select** tool.
-- Painting maps or the freeze mask, **Shift+drag** smooths. To smooth guides, use the **Smooth**
-  brush.
+- Painting maps or the freeze mask, **Shift+drag** smooths; with the **Shape** brush it smooths
+  the tube channel it paints. To smooth guides, use the **Smooth** brush.
 - **Alt+Shift+X** turns symmetry on or off, after **GroomLab > Install GroomLab Hotkeys**.
 - **B** + drag sets the radius, **M** + drag the strength, after **GroomLab > Install GroomLab
   Hotkeys** (or middle-drag and Shift+middle-drag).

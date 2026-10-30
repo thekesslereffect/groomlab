@@ -154,6 +154,16 @@ StrokeRelease BrushSession::release() {
     return released;
 }
 
+bool BrushSession::editLengths(const char* what,
+                               const std::function<void(LengthPathTool&, StrokeHost&, const BrushToolSettings&)>& fn) {
+    if (!host_) {
+        error_ = "no groom open";
+        return false;
+    }
+    guard(what, [&] { fn(tool_.lengths(), *host_, tool_.settings); });
+    return error_.empty();
+}
+
 void BrushSession::cancel() {
     if (tool_.stroking()) tool_.cancel(host_.get());
 }
@@ -296,7 +306,14 @@ void BrushSession::rebuildOverlay(const QPointF& at, bool withLines) {
     if (tool_.stroking() && (s.tool == Tool::Part || s.tool == Tool::Flow)) {
         appendColoredLine(overlay_, tool_.drawnPath(), brushPathColor(s));
     }
+    if (s.tool == Tool::Lengths && host_) appendLengths(p);
     ++overlayVersion_;
+}
+
+void BrushSession::appendLengths(const std::array<float, 2>& p) {
+    std::vector<LengthPathTool::ColoredLine> lines;
+    guard("lengths", [&] { lines = tool_.lengths().overlayLines(*host_, view_, tool_.settings, p[0], p[1]); });
+    for (const LengthPathTool::ColoredLine& line : lines) appendColoredLine(overlay_, line.points, line.color);
 }
 
 std::shared_ptr<const GuideHierarchy> BrushSession::shownHierarchy() const {

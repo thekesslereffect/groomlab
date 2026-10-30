@@ -13,6 +13,7 @@
 
 #include "groomlab/frames.h"
 #include "groomlab/guide_set.h"
+#include "groomlab/length_paths.h"
 #include "groomlab/math.h"
 #include "groomlab/strand_set.h"
 #include "groomlab/transfer.h"
@@ -307,6 +308,12 @@ public:
     std::size_t removeTubeShape(const std::string& name);
     // How many guides take the shape.
     std::size_t tubeShapeUsers(const std::string& name) const;
+    // ---- Length paths ---------------------------------------------------
+    // The Length Paths tool's paths (length_paths.h), saved with the hierarchy (toJson) so they
+    // can be edited and applied again. They change no guide by themselves.
+    const LengthPathSet& lengthPaths() const { return lengthPaths_; }
+    void setLengthPaths(LengthPathSet paths);
+
     // What fromJson could not read as saved, said for the user: guides whose library shape was
     // missing (each loads round).
     const std::vector<std::string>& loadWarnings() const { return loadWarnings_; }
@@ -397,6 +404,7 @@ private:
     std::uint64_t boundTopology_ = 0;
     float scale_ = 1.0f;  // setScale
     TubeShapeLibrary tubeShapes_;
+    LengthPathSet lengthPaths_;
     std::vector<std::string> loadWarnings_;
 };
 

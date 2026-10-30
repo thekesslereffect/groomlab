@@ -64,7 +64,8 @@ from groomlab.guides import (  # noqa: F401
     scale_tube, smooth_tube, fill_tubes, set_fill_tubes, tube_shapes, add_tube_shape, set_tube_shape_points,
     rename_tube_shape, remove_tube_shape, preview_tube_shape, tube_targets)
 from groomlab.brushes import (BRUSH_CONTEXT, BRUSH_MODES, TUBE_CHANNELS, add_brush_alpha, brush_alpha_folder,  # noqa: F401
-                              brush_alphas, brush_stroke, brush_tool, placement_tube)
+                              brush_alphas, brush_stroke, brush_tool, length_paths_edit, length_paths_state,
+                              placement_tube)
 from groomlab.painting import (  # noqa: F401
     MAP_CHANNELS, MAP_DISPLAY_CHANNELS, MAP_KINDS, MISSING_KINDS, add_map, attribute_map, clump_paint, color_set_map,
     convert_map, export_map, expression_map, feed_map_node, fill_map, find_missing_files, freeze_guides, freeze_tool,

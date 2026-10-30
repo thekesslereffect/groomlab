@@ -35,7 +35,7 @@ SHORTCUTS = (
     ("B + drag", "The brush radius"),
     ("M + drag", "The brush strength"),
     ("Ctrl (stroke)", "The opposite: Length shortens, Lift lays down, Shape shrinks; painting, toward 0 (unfreeze, erase)"),
-    ("Shift (painting)", "Painting maps or guide attributes: smooth instead"),
+    ("Shift (painting, Shape)", "Painting maps or guide attributes, or the Shape brush: smooth instead"),
     ("S", "Select guides (Shift: toggle, Ctrl: deselect)"),
     ("Shift + drag", "A guide brush: paint guides into the selection, the rest frozen (Shift + click: add the guides in the ring; on none: deselect and unfreeze all)"),
     ("Page Up / Page Down", "The brush level (parents / children)"),
@@ -185,6 +185,23 @@ class ToolSession(object):
                 return self.release(context, scalp, event, locate_fn)
             return {"RUNNING_MODAL"} if (self.stroking or self.lasso or self.slider) else {"PASS_THROUGH"}
         busy = self.stroking is not None or self.lasso is not None or self.slider is not None
+        lengths = self.tool(context) == "lengths"
+        if lengths and kind == "RIGHTMOUSE":
+            # The Length Paths tool: right-drag sets a key's length.
+            if value == "PRESS":
+                return self.press(context, scalp, event, locate_fn, adjust=True)
+            if value == "RELEASE":
+                return self.release(context, scalp, event, locate_fn)
+            return {"RUNNING_MODAL"} if busy else {"PASS_THROUGH"}
+        if lengths and not busy and value == "PRESS" and kind in ("RET", "NUMPAD_ENTER", "ESC"):
+            # Enter applies the preview; Esc drops it (with none, Esc leaves the tool as ever).
+            state = tools.length_state(scalp)
+            if kind != "ESC" or state.get("edited"):
+                try:
+                    tools.length_edit(scalp, "cancel" if kind == "ESC" else "apply")
+                except HelperError as e:
+                    tools.status(context.scene, e.message)
+                return {"RUNNING_MODAL"}
         if kind in ("ESC", "RIGHTMOUSE") and value == "PRESS":
             if busy:
                 self.cancel(context)
@@ -262,7 +279,7 @@ class ToolSession(object):
             display.redraw(viewport_only=True)
         return {"PASS_THROUGH"}
 
-    def press(self, context, scalp, event, locate_fn):
+    def press(self, context, scalp, event, locate_fn, adjust=False):
         where = self.located(context, scalp, event, locate_fn)
         if where is None:
             return {"PASS_THROUGH"}
@@ -286,7 +303,7 @@ class ToolSession(object):
             return {"RUNNING_MODAL"}
         pressure = float(getattr(event, "pressure", 1.0) or 1.0)
         try:
-            tools.stroke_begin(scalp, view, x, y, pressure=pressure, ctrl=event.ctrl, shift=event.shift)
+            tools.stroke_begin(scalp, view, x, y, pressure=pressure, ctrl=event.ctrl, shift=event.shift, adjust=adjust)
         except HelperError as e:
             tools.status(context.scene, e.message)
             return {"RUNNING_MODAL"}
@@ -317,6 +334,9 @@ class ToolSession(object):
             stroked, self.stroking = self.stroking, None
             try:
                 tools.stroke_end(stroked)
+                if self.tool(context) == "lengths":
+                    tools.length_state(stroked)  # the Paths box follows the key placed or dragged
+                    tools.evaluate_live(stroked)  # the guides at their previewed lengths
             except HelperError as e:
                 tools.status(context.scene, e.message)
             display.apply_strand_visibility(stroked)
@@ -1392,6 +1412,36 @@ class GROOMLAB_OT_flow_clear(GroomToolOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_length_edit(GroomToolOperator):
+    """An edit of the Length Paths tool's paths (the Paths box): pick a path, New Path, Delete Key,
+    Delete Path, Cancel or Apply"""
+    bl_idname = "groomlab.length_edit"
+    bl_label = "Length Paths"
+    bl_options = {"REGISTER"}
+
+    edit: bpy.props.StringProperty(options={"SKIP_SAVE"})
+    path: bpy.props.IntProperty(options={"SKIP_SAVE"})
+
+    @classmethod
+    def description(cls, context, properties):
+        return {"select": "Edit this path", "newPath": "The next click on the scalp starts a new path (or Shift+click)",
+                "deleteKey": "Delete the selected key (or Ctrl+click it in the viewport)",
+                "deletePath": "Delete the selected path and its keys",
+                "cancel": "Drop the changes since the last Apply (Esc)",
+                "apply": "Set the guides to the lengths shown (one undo step; Enter); the paths stay with the groom to "
+                         "edit and apply again"}.get(properties.edit, cls.__doc__)
+
+    def execute(self, context):
+        try:
+            if self.edit == "select":
+                tools.length_edit(active(context), "select", path=self.path, key=0)
+            else:
+                tools.length_edit(active(context), self.edit)
+        except HelperError as e:
+            return _fail(self, e)
+        return {"FINISHED"}
+
+
 # ---- Tubes (the Tubes section) --------------------------------------------------------------------
 
 class TubeOperator(GroomToolOperator):
@@ -1925,6 +1975,7 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_alpha_add, GROOMLAB_OT_alpha_folder, GROOMLAB_OT_alpha_clear,
            GROOMLAB_OT_group_color, GROOMLAB_OT_group_promote_demote, GROOMLAB_OT_guides_mirror_group,
            GROOMLAB_OT_guides_reparent, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_flow_clear,
+           GROOMLAB_OT_length_edit,
            GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,
            GROOMLAB_OT_tube_shape_rename, GROOMLAB_OT_tube_shape_remove, GROOMLAB_OT_corrective_new,
            GROOMLAB_OT_corrective_move, GROOMLAB_OT_corrective_solo, GROOMLAB_OT_corrective_delete,

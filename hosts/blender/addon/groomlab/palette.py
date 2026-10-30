@@ -14,6 +14,7 @@ An action shows when actions.py binds it (the rest is hidden). Drawing never wri
 the lists (groups, maps, parts, tubes, correctives) are refreshed by the tools after each edit, or
 by a timer when the panel shows another groom than they were filled for."""
 
+import json
 import os
 
 import bpy
@@ -27,7 +28,7 @@ NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 # Blender's keys (palette.json's gestures are Maya's: middle-drag, the hotkey set).
 GESTURES = ("B + drag: radius · M + drag: strength · Ctrl: the opposite (Length shortens, Lift lays down, Shape shrinks; "
             "painting, toward 0) · Shift+drag: paint the selection (the rest frozen) · Shift+click: add the guides in the "
-            "ring (on none: deselect and unfreeze all) · painting maps or Freeze, Shift+drag: smooth")
+            "ring (on none: deselect and unfreeze all) · painting maps or Freeze, and Shape, Shift+drag: smooth")
 FLOW_HINTS = {"": defs.text("flowArrows"), "*": defs.text("flowSinks")}
 TABS = {"TOOLS": "tools", "PAINT": "paint", "CORRECTIVES": "correctives", "PHOTOS": "photos"}  # palette.json's ids
 STARTER = tuple((s["id"], s["label"], s["tip"]) for s in defs.get("palette/starter/steps"))
@@ -299,6 +300,53 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             row.enabled = False
             row.label(text="Weight: pick a corrective")
 
+    def draw_lengths(self, card, context, t):
+        """The Length Paths tool's Paths box: the path picked, the selected key's length and reach,
+        smooth, Scale or Trim, New Path / Delete Key / Delete Path, Cancel and Apply."""
+        try:
+            state = json.loads(t.length_state or "{}")
+        except ValueError:
+            state = {}
+        paths = state.get("paths") or []
+        path, key = state.get("activePath", -1), state.get("activeKey", -1)
+        has_path = 0 <= path < len(paths)
+        has_key = has_path and 0 <= key < len(paths[path].get("lengths", []))
+        edited = bool(state.get("edited"))
+        box = card.column()
+        box.label(text=label("lengthPaths", "Paths").upper())
+        row = box.row(align=True)
+        if has_path:
+            prev = row.operator("groomlab.length_edit", text="", icon="TRIA_LEFT")
+            prev.edit, prev.path = "select", max(0, path - 1)
+            row.label(text="Path %d of %d (%d keys)" % (path + 1, len(paths), len(paths[path].get("lengths", []))))
+            nxt = row.operator("groomlab.length_edit", text="", icon="TRIA_RIGHT")
+            nxt.edit, nxt.path = "select", min(len(paths) - 1, path + 1)
+        else:
+            row.label(text="No path yet")
+        row.operator("groomlab.length_edit", text="New Path").edit = "newPath"
+        row = box.row(align=True)
+        row.enabled = has_key
+        row.prop(t, "length_key")
+        row.operator("groomlab.length_edit", text="Delete Key").edit = "deleteKey"
+        sub = box.row(align=True)
+        sub.enabled = has_key
+        sub.prop(t, "length_reach")
+        row = box.row(align=True)
+        sub = row.row(align=True)
+        sub.enabled = has_path
+        sub.prop(t, "length_smooth")
+        row.prop(t, "length_change", text="")
+        sub = row.row(align=True)
+        sub.enabled = has_path
+        sub.operator("groomlab.length_edit", text="Delete Path").edit = "deletePath"
+        _wrap(box, "Click on the scalp to lay a path's first key." if not paths else
+              "Previewing: Apply sets the guides (Enter)." if edited else "Applied. Drag a key or change a field to edit.",
+              width=_chars(context))
+        row = box.row(align=True)
+        row.enabled = edited
+        row.operator("groomlab.length_edit", text="Cancel").edit = "cancel"
+        row.operator("groomlab.length_edit", text="Apply", icon="CHECKMARK").edit = "apply"
+
     def draw_alpha(self, card, t, label):
         """Paint's alpha on a scalp map: the library's grid (the thumbnail opens it), Add and the
         folder beside it; while one is picked, its rotation, spacing and invert."""
@@ -390,6 +438,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             sub.enabled = bool(t.flow_arrows or t.flow_sinks)
             sub.operator("groomlab.flow_clear", text="Clear All")
             _wrap(box, FLOW_HINTS["" if t.flow_sink_item == "ARROWS" else "*"], width=_chars(context))
+        if "lengthPaths" in uses:
+            self.draw_lengths(card, context, t)
         if "stretch" in uses:
             card.prop(t, "stretch", text=label("stretch", "Stretch"))
         if "erases" in uses:

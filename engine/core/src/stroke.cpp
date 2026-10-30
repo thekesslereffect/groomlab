@@ -1028,6 +1028,10 @@ void BrushTool::cancel(StrokeHost* host) {
 }
 
 void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, float pressure, unsigned modifiers) {
+    if (settings.tool == BrushToolSettings::Tool::Lengths) {
+        lengthsPressed_ = host.attach() && lengths_.press(host, view, settings, x, y, modifiers);
+        return;
+    }
     inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
     if (modifiers & kStrokeShift) {
@@ -1043,6 +1047,10 @@ void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, 
 }
 
 void BrushTool::drag(StrokeHost& host, const ToolView& view, float x, float y, float pressure) {
+    if (lengthsPressed_) {
+        lengths_.drag(host, view, settings, x, y);
+        return;
+    }
     pressure_ = pressure;
     if (shiftPending_) {
         const float moved = pm::hypot(x - pressX_, y - pressY_);
@@ -1062,6 +1070,11 @@ void BrushTool::drag(StrokeHost& host, const ToolView& view, float x, float y, f
 }
 
 StrokeRelease BrushTool::release(StrokeHost& host, const ToolView& view) {
+    if (lengthsPressed_) {
+        lengthsPressed_ = false;
+        lengths_.release(host, settings);
+        return StrokeRelease::Stroke;
+    }
     if (shiftPending_) {
         shiftPending_ = false;  // a Shift+click: nothing (no drag, no smoothing)
         return StrokeRelease::None;

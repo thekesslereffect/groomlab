@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 
 #include <maya/MTime.h>
@@ -19,6 +20,7 @@
 #include <maya/MArgList.h>
 #include <maya/MArgParser.h>
 #include <maya/MColor.h>
+#include <maya/MDistance.h>
 #include <maya/MEvent.h>
 #include <maya/MFnDagNode.h>
 #include <maya/MGlobal.h>
@@ -27,6 +29,7 @@
 #include <maya/MSelectionList.h>
 #include <maya/MStringArray.h>
 #include <maya/MToolsInfo.h>
+#include <maya/MVector.h>
 #include <maya/MUIDrawManager.h>
 
 #include "command_args.h"
@@ -104,6 +107,9 @@ const char* kAlphaAngleFlag[] = {"-ala", "-alphaAngle"};
 const char* kAlphaSpacingFlag[] = {"-als", "-alphaSpacing"};
 const char* kAlphaInvertFlag[] = {"-ali", "-alphaInvert"};
 const char* kDebugHoverFlag[] = {"-dbh", "-debugHover"};
+// The Length Paths tool: an edit by words (BrushContext::lengthEdit), and its state as JSON.
+const char* kLengthEditFlag[] = {"-led", "-lengthEdit"};
+const char* kLengthStateFlag[] = {"-lst", "-lengthState"};
 const char* kHeldBytesFlag[] = {"-hb", "-heldUndoBytes"};
 const char* kPreviewUploadFlag[] = {"-pup", "-previewUpload"};
 const char* kFileImageFlag[] = {"-fim", "-fileImage"};
@@ -879,7 +885,7 @@ void BrushContext::toolOnSetup(MEvent&) {
     setHelpString("Drag: brush the selected groom (Place: click one guide, drag for many; Draw: draw a guide "
                   "from the scalp). Ctrl: the opposite (Length shortens, Lift lays down; painting, toward 0). "
                   "Shift+drag: paint guides into the selection, the rest frozen; Shift+click: add the guides in the "
-                  "ring (on none: deselect and unfreeze all). Painting maps or guide attributes, Shift+drag smooths. "
+                  "ring (on none: deselect and unfreeze all). Painting maps or guide attributes, and with Shape, Shift+drag smooths. "
                   "B/M or middle-drag: radius/strength. Double-click the tool for its settings.");
     installPenPressure();
     active_ = true;
@@ -934,8 +940,20 @@ void BrushContext::endStroke(const ToolView& view) {
     if (shape_) M3dView::active3dView().refresh(false, true);
 }
 
-bool BrushContext::simulateStroke(const std::vector<std::pair<short, short>>& points, bool ctrl, bool shift, bool draw) {
+bool BrushContext::simulateStroke(const std::vector<std::pair<short, short>>& points, bool ctrl, bool shift, bool draw,
+                                  bool adjust) {
     const ToolView view = activeToolView();
+    if (tool_.settings.tool == BrushToolSettings::Tool::Lengths) {
+        // The Length Paths tool: a press at the first point (a key added, or one picked), a drag
+        // through the rest (its length, or the new key moved), the release.
+        if (points.empty() || !host_) return false;
+        const unsigned modifiers = (ctrl ? kStrokeCtrl : 0u) | (shift ? kStrokeShift : 0u) | (adjust ? kStrokeAdjust : 0u);
+        tool_.press(*host_, view, points[0].first, points[0].second, 1.0f, modifiers);
+        for (std::size_t i = 1; i < points.size(); ++i) tool_.drag(*host_, view, points[i].first, points[i].second, 1.0f);
+        tool_.release(*host_, view);
+        if (draw) M3dView::active3dView().refresh(false, true);
+        return tool_.lengths().edited();
+    }
     BrushToolSettings& s = tool_.settings;
     const BrushMode saved = s.brush.mode;
     if (shift) useShiftSmoothing(s.brush);  // as a Shift+drag does (the Shape brush: smooth its channel)
@@ -1042,6 +1060,10 @@ MStatus BrushContext::doPtrMoved(MEvent& event, MHWRender::MUIDrawManager& draw,
         short x = 0, y = 0;
         event.getPosition(x, y);
         showSymmetry();
+        if (tool_.settings.tool == BrushToolSettings::Tool::Lengths && host_) {
+            tool_.lengths().hover(*host_, activeToolView(), x, y);
+            drawLengths(draw);
+        }
         drawAffected(draw, x, y);
         drawCircle(draw, x, y);
         return MStatus(MS::kSuccess);
@@ -1052,6 +1074,16 @@ MStatus BrushContext::press(MEvent& event, MHWRender::MUIDrawManager& draw) {
     short x = 0, y = 0;
     event.getPosition(x, y);
     const bool slider = event.mouseButton() == MEvent::kLeftMouse && !dragSlider.empty();
+    int onPath = -1, onKey = -1;
+    if (event.mouseButton() == MEvent::kMiddleMouse && !slider && !event.isModifierShift() && host_ &&
+        tool_.settings.tool == BrushToolSettings::Tool::Lengths &&
+        tool_.lengths().keyAt(*host_, activeToolView(), x, y, &onPath, &onKey)) {
+        // Length Paths: middle-drag on a key sets its length (the app's and Blender's right-drag:
+        // Maya's right button opens marking menus); off a key it sizes the ring as ever.
+        tool_.press(*host_, activeToolView(), x, y, 1.0f, kStrokeAdjust);
+        drawLengths(draw);
+        return MS::kSuccess;
+    }
     if (event.mouseButton() == MEvent::kMiddleMouse || slider) {
         // Middle-drag left/right resizes the brush; with Shift it changes strength.
         // B / M held: the same with the left button.
@@ -1075,6 +1107,7 @@ MStatus BrushContext::press(MEvent& event, MHWRender::MUIDrawManager& draw) {
     tool_.press(*host_, activeToolView(), x, y, penPressure(), modifiers);
     unchainUnlessStroking();
     showSymmetry();
+    drawLengths(draw);
     drawCircle(draw, x, y);
     return MS::kSuccess;
 }
@@ -1121,7 +1154,9 @@ MStatus BrushContext::drag(MEvent& event, MHWRender::MUIDrawManager& draw) {
         draw.lineStrip(line, false);
         draw.endDrawable();
     }
+    if (s.tool == Tool::Lengths) refreshDuringDrag();  // the guides at their new lengths
     showSymmetry();
+    drawLengths(draw);
     drawCircle(draw, x, y);
     return MS::kSuccess;
 }
@@ -1322,11 +1357,116 @@ void BrushContext::drawCircle(MHWRender::MUIDrawManager& draw, short x, short y)
     const BrushToolSettings& s = tool_.settings;
     draw.beginDrawable();
     using Tool = BrushToolSettings::Tool;
-    const bool creating = s.tool != Tool::Brush && s.tool != Tool::Flow;
+    const bool creating = s.tool != Tool::Brush && s.tool != Tool::Flow && s.tool != Tool::Lengths;  // Lengths: a new path's reach
     draw.setColor(mayaColor(brushRingColor(s)));  // the core's, the standalone app's too
     draw.setLineWidth(1.5f);
     draw.circle2d(MPoint(x, y), creating ? 6.0 : s.screenRadius, false);
     draw.endDrawable();
+}
+
+void BrushContext::drawLengths(MHWRender::MUIDrawManager& draw) {
+    if (tool_.settings.tool != BrushToolSettings::Tool::Lengths || !host_) return;
+    const LengthPathTool::Overlay overlay = tool_.lengths().overlay(*host_, tool_.settings);
+    if (overlay.keys.empty()) return;
+    const ToolView view = activeToolView();
+    const MColor blue(0.35f, 0.75f, 1.0f), active(1.0f, 0.85f, 0.2f), hovered(1.0f, 1.0f, 1.0f);
+    draw.beginDrawable();
+    draw.setDepthPriority(7);
+    const MColor faint(0.35f, 0.75f, 1.0f, 0.45f);  // symmetry's mirrored paths
+    for (std::size_t i = 0; i < overlay.lines.size(); ++i) {
+        const bool mirror = i < overlay.mirrorLines.size() && overlay.mirrorLines[i];
+        draw.setColor(mirror ? faint : blue);
+        draw.setLineWidth(mirror ? 1.5f : 2.5f);
+        MPointArray strip;
+        for (const Vec3f& p : overlay.lines[i]) strip.append(MPoint(p.x, p.y, p.z));
+        draw.lineStrip(strip, false);
+    }
+    // The active path's keys' reaches: a ring that wide around each, facing the camera.
+    Vec3f eye, look;
+    bool ortho = false;
+    if (overlay.activePath >= 0 && view.camera(eye, look, ortho)) {
+        draw.setLineWidth(1.0f);
+        for (const LengthPathTool::Overlay::Key& k : overlay.keys) {
+            if (k.path != overlay.activePath || !(k.reach > 0.0f)) continue;
+            draw.setColor(MColor(0.35f, 0.75f, 1.0f, k.mirror ? 0.25f : 0.5f));
+            const Vec3f n = ortho ? look : (k.at - eye);
+            draw.circle(MPoint(k.at.x, k.at.y, k.at.z), MVector(n.x, n.y, n.z), k.reach, false);
+        }
+    }
+    // Each key a dot with its length (in the scene's units) beside it.
+    for (const LengthPathTool::Overlay::Key& k : overlay.keys) {
+        float x = 0.0f, y = 0.0f;
+        if (!view.project(k.at, x, y)) continue;
+        draw.setColor(k.mirror ? faint : k.active ? active : k.hovered ? hovered : blue);
+        draw.circle2d(MPoint(x, y), k.active || k.hovered ? 7.0 : k.mirror ? 4.0 : 5.0, true);
+        if (k.mirror) continue;  // its length is its key's, labelled there
+        const double shown = MDistance(k.length, MDistance::internalUnit()).asUnits(MDistance::uiUnit());
+        char label[32];
+        std::snprintf(label, sizeof label, "%.3g", shown);
+        draw.text2d(MPoint(x + 10, y + 6), label, MHWRender::MUIDrawManager::kLeft);
+    }
+    draw.endDrawable();
+}
+
+void BrushContext::lengthEdit(const std::string& words) {
+    if (!host_ && !findGroom()) throw std::invalid_argument("select a groom first");
+    LengthPathTool& lp = tool_.lengths();
+    const BrushToolSettings& s = tool_.settings;
+    std::istringstream in(words);
+    std::string verb;
+    in >> verb;
+    auto number = [&](const char* what) {
+        double v = 0.0;
+        if (!(in >> v)) throw std::invalid_argument(std::string("-lengthEdit ") + what + " takes a number");
+        return v;
+    };
+    // Lengths and reach come in the scene's units (Maya's internal centimeters inside).
+    auto internal = [](double v) { return MDistance(v, MDistance::uiUnit()).asUnits(MDistance::internalUnit()); };
+    if (verb == "key") lp.setKeyLength(*host_, s, float(internal(number("key"))));
+    else if (verb == "reach") lp.setReach(*host_, s, float(internal(number("reach"))));
+    else if (verb == "smooth") {
+        std::string on;
+        in >> on;
+        lp.setSmooth(*host_, s, on == "on" || on == "1" || on == "true");
+    } else if (verb == "change") {
+        std::string name;
+        in >> name;
+        lp.setChange(*host_, s, lengthChangeFromName(name));
+    } else if (verb == "select") {
+        const int path = int(number("select"));
+        const int key = int(number("select"));
+        lp.select(*host_, path, key);
+    } else if (verb == "newPath") lp.newPath();
+    else if (verb == "deleteKey") lp.deleteKey(*host_, s);
+    else if (verb == "deletePath") lp.deletePath(*host_, s);
+    else if (verb == "apply") lp.apply(*host_, s);
+    else if (verb == "cancel") lp.cancel(*host_);
+    else {
+        throw std::invalid_argument("-lengthEdit takes key, reach, smooth, change, select, newPath, deleteKey, deletePath, "
+                                    "apply or cancel");
+    }
+    M3dView::active3dView().refresh(false, true);
+}
+
+std::string BrushContext::lengthState() {
+    if (!host_ && !findGroom()) return "{}";
+    LengthPathTool& lp = tool_.lengths();
+    const LengthPathSet& set = lp.paths(*host_);
+    auto ui = [](float v) { return MDistance(v, MDistance::internalUnit()).asUnits(MDistance::uiUnit()); };
+    std::ostringstream out;
+    out << "{\"activePath\": " << lp.activePath() << ", \"activeKey\": " << lp.activeKey()
+        << ", \"edited\": " << (lp.edited() ? "true" : "false") << ", \"change\": \"" << lengthChangeName(lp.change)
+        << "\", \"paths\": [";
+    for (std::size_t p = 0; p < set.paths.size(); ++p) {
+        const LengthPath& path = set.paths[p];
+        out << (p ? ", " : "") << "{\"smooth\": " << (path.smooth ? "true" : "false") << ", \"lengths\": [";
+        for (std::size_t k = 0; k < path.keys.size(); ++k) out << (k ? ", " : "") << ui(path.keys[k].length);
+        out << "], \"reaches\": [";
+        for (std::size_t k = 0; k < path.keys.size(); ++k) out << (k ? ", " : "") << ui(path.keys[k].reach);
+        out << "]}";
+    }
+    out << "]}";
+    return out.str();
 }
 
 // ---------------------------------------------------------------------------
@@ -1352,6 +1492,8 @@ MStatus BrushContextCmd::appendSyntax() {
     s.addFlag(kDragSliderFlag[0], kDragSliderFlag[1], MSyntax::kString);
     s.addFlag(kDebugPickFlag[0], kDebugPickFlag[1], MSyntax::kString);
     s.addFlag(kDebugHoverFlag[0], kDebugHoverFlag[1], MSyntax::kString);
+    s.addFlag(kLengthEditFlag[0], kLengthEditFlag[1], MSyntax::kString);
+    s.addFlag(kLengthStateFlag[0], kLengthStateFlag[1]);
     s.addFlag(kHeldBytesFlag[0], kHeldBytesFlag[1]);
     s.addFlag(kPreviewUploadFlag[0], kPreviewUploadFlag[1]);
     s.addFlag(kFileImageFlag[0], kFileImageFlag[1]);
@@ -1400,6 +1542,13 @@ MStatus BrushContextCmd::doEditFlags() {
             setResult(static_cast<int>(
                 context_->affectedLines(static_cast<short>(words[0].asInt()), static_cast<short>(words[1].asInt())).size()));
         }
+        if (args.isFlagSet(kLengthEditFlag[0]) && args.getFlagArgument(kLengthEditFlag[0], 0, text)) {
+            try {
+                context_->lengthEdit(text.asChar());
+            } catch (const std::invalid_argument& e) {
+                return fail(kName, e.what());
+            }
+        }
         if (args.isFlagSet(kDebugStrokeFlag[0]) && args.getFlagArgument(kDebugStrokeFlag[0], 0, text)) {
             MStringArray words;
             text.split(' ', words);
@@ -1421,11 +1570,13 @@ MStatus BrushContextCmd::doEditFlags() {
             if (draw) words.remove(0);
             const bool ctrl = words.length() > 0 && words[0] == "ctrl";
             const bool shift = words.length() > 0 && words[0] == "shift";
+            // "adjust x y ...": the adjusting button (Length Paths: a key's length; Maya's middle drag).
+            const bool adjust = words.length() > 0 && words[0] == "adjust";
             std::vector<std::pair<short, short>> points;
-            for (unsigned i = ctrl || shift ? 1 : 0; i + 1 < words.length(); i += 2) {
+            for (unsigned i = ctrl || shift || adjust ? 1 : 0; i + 1 < words.length(); i += 2) {
                 points.emplace_back(static_cast<short>(words[i].asInt()), static_cast<short>(words[i + 1].asInt()));
             }
-            setResult(context_->simulateStroke(points, ctrl, shift, draw));
+            setResult(context_->simulateStroke(points, ctrl, shift, draw, adjust));
         }
         return MS::kSuccess;
     });
@@ -1490,6 +1641,7 @@ MStatus BrushContextCmd::doQueryFlags() {
         else if (args.isFlagSet(kAlphaSpacingFlag[0])) setResult(double(s.alphaSpacing));
         else if (args.isFlagSet(kAlphaInvertFlag[0])) setResult(s.alphaInvert);
         else if (args.isFlagSet(kDragSliderFlag[0])) setResult(MString(context_->dragSlider.empty() ? "none" : context_->dragSlider.c_str()));
+        else if (args.isFlagSet(kLengthStateFlag[0])) setResult(MString(context_->lengthState().c_str()));
         // Testing aids: what the texture strokes in the undo queue keep (bytes), and how the
         // viewport sends a stroke's texels to the map's texture.
         else if (args.isFlagSet(kHeldBytesFlag[0])) setResult(static_cast<double>(BrushStrokeCmd::heldTextureBytes()));

@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "groomlab/brush.h"
+#include "groomlab/curve.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/random.h"
@@ -295,13 +296,13 @@ TEST(Stroke, CtrlIsTheOppositeShiftSelectsWithGuideBrushesAndSmoothsPainting) {
         (ctrl ? ctrlCombed : combed) = g.guides();
     }
     EXPECT_EQ(combed, ctrlCombed);
-    // Shift selects with the guide brushes (the hosts'), smooths while painting.
-    for (const char* mode : {"comb", "smooth", "length", "cut", "erase", "noise", "shape"}) {
+    // Shift selects with the guide brushes (the hosts'), smooths while painting and with Shape.
+    for (const char* mode : {"comb", "smooth", "length", "cut", "erase", "noise"}) {
         BrushToolSettings s;
         s.setMode(mode);
         EXPECT_TRUE(s.shiftSelects()) << mode;
     }
-    for (const char* mode : {"paint", "part", "flow", "place", "draw"}) {
+    for (const char* mode : {"paint", "shape", "part", "flow", "place", "draw"}) {
         BrushToolSettings s;
         s.setMode(mode);
         EXPECT_FALSE(s.shiftSelects()) << mode;
@@ -826,6 +827,137 @@ TEST(Stroke, AlphaIsMirroredWithSymmetry) {
     }
     EXPECT_GT(mirrored, 20u);
     EXPECT_EQ(outward, 0u);
+}
+
+// The Length Paths tool: a click adds a key (its length the guides' around it: nothing changes), a
+// key dragged up lengthens the guides near it in the preview, Apply commits them with the path
+// (one undo step), Cancel drops an edit, Ctrl+click deletes a key.
+TEST(LengthPathTool, KeysPreviewApplyAndCancel) {
+    Groom g(60);
+    const ToolView view = frontView();
+    BrushTool tool;
+    tool.settings.setMode("lengths");
+    EXPECT_EQ(tool.settings.modeName(), "lengths");
+    tool.settings.screenRadius = 120.0f;
+    const std::string before = g.guides();
+    auto lengths = [&]() {
+        std::map<GuideId, float> out;
+        for (const HierarchyGuide& h : g.host->authoredHierarchy()->guides()) out[h.id] = arcLength(h.points);
+        return out;
+    };
+    const std::map<GuideId, float> start = lengths();
+    ASSERT_EQ(start.size(), 60u);
+    float x = 0, y = 0;
+    ASSERT_TRUE(view.project(Vec3f(0.0f, 0.45f, 0.89f).normalized(), x, y));
+    tool.press(*g.host, view, x, y, 1.0f, 0);
+    EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::Stroke);
+    LengthPathTool& lp = tool.lengths();
+    ASSERT_EQ(lp.paths(*g.host).paths.size(), 1u);
+    ASSERT_EQ(lp.paths(*g.host).paths[0].keys.size(), 1u);
+    const LengthPath path = lp.paths(*g.host).paths[0];
+    EXPECT_GT(path.keys[0].reach, 0.0f);
+    EXPECT_GT(path.keys[0].length, 0.5f);  // the guides' around it (about 0.6 to 0.7)
+    EXPECT_LT(path.keys[0].length, 0.9f);
+    EXPECT_TRUE(lp.edited());
+    EXPECT_EQ(g.guides(), before);  // previewed, not applied
+    // The adjusting button dragged up a doubling's worth on the key: twice as long.
+    tool.press(*g.host, view, x, y, 1.0f, kStrokeAdjust);
+    tool.drag(*g.host, view, x, y + LengthPathTool::kPixelsPerDoubling, 1.0f);
+    tool.release(*g.host, view);
+    EXPECT_NEAR(lp.paths(*g.host).paths[0].keys[0].length, 2.0f * path.keys[0].length, 1e-4f);
+    ASSERT_TRUE(lp.apply(*g.host, tool.settings));
+    EXPECT_FALSE(lp.edited());
+    const std::map<GuideId, float> applied = lengths();
+    std::size_t longer = 0, same = 0, shorter = 0;
+    for (const auto& [id, length] : start) {
+        const float now = applied.at(id);
+        if (now > length * 1.05f) ++longer;  // near the key (some fading toward its reach between)
+        else if (std::abs(now - length) < 1e-5f * length) ++same;
+        else if (now < length) ++shorter;
+    }
+    EXPECT_GT(longer, 0u);
+    EXPECT_GT(same, 0u);  // the guides out of its reach
+    EXPECT_EQ(shorter, 0u);
+    EXPECT_EQ(g.host->authoredHierarchy()->lengthPaths().paths.size(), 1u);  // saved with them
+    EXPECT_FALSE(lp.apply(*g.host, tool.settings));  // nothing more to apply
+    // Cancel: an edit dropped, the stored path back.
+    lp.setKeyLength(*g.host, tool.settings, 0.1f);
+    EXPECT_TRUE(lp.edited());
+    lp.cancel(*g.host);
+    EXPECT_FALSE(lp.edited());
+    EXPECT_NEAR(lp.paths(*g.host).paths[0].keys[0].length, 2.0f * path.keys[0].length, 1e-4f);
+    // One undo step: the guides as they were (the tool reads the stored paths again).
+    ASSERT_TRUE(g.host->undo());
+    EXPECT_EQ(g.guides(), before);
+    lp.reset(g.host.get());
+    EXPECT_TRUE(lp.paths(*g.host).paths.empty());
+    // Two keys; a click on the line between them adds one there, at the path's length (the same
+    // lengths); a left drag on a key moves it, its length kept.
+    tool.press(*g.host, view, x, y, 1.0f, 0);
+    tool.release(*g.host, view);
+    tool.press(*g.host, view, x + 60.0f, y, 1.0f, 0);
+    tool.release(*g.host, view);
+    ASSERT_EQ(lp.paths(*g.host).paths[0].keys.size(), 2u);
+    lp.select(*g.host, 0, 1);
+    lp.setKeyLength(*g.host, tool.settings, 2.0f * lp.paths(*g.host).paths[0].keys[0].length);
+    tool.press(*g.host, view, x + 30.0f, y, 1.0f, 0);
+    tool.release(*g.host, view);
+    ASSERT_EQ(lp.paths(*g.host).paths.size(), 1u);
+    ASSERT_EQ(lp.paths(*g.host).paths[0].keys.size(), 3u);
+    const auto& three = lp.paths(*g.host).paths[0].keys;
+    EXPECT_EQ(lp.activeKey(), 1);
+    EXPECT_GT(three[1].length, three[0].length);  // between the two keys' lengths
+    EXPECT_LT(three[1].length, three[2].length);
+    const Vec3f wasAt = three[1].point;
+    const float wasLength = three[1].length;
+    tool.press(*g.host, view, x + 30.0f, y, 1.0f, 0);
+    tool.drag(*g.host, view, x + 30.0f, y + 25.0f, 1.0f);
+    tool.release(*g.host, view);
+    EXPECT_GT((lp.paths(*g.host).paths[0].keys[1].point - wasAt).length(), 0.01f);
+    EXPECT_EQ(lp.paths(*g.host).paths[0].keys[1].length, wasLength);
+    lp.select(*g.host, 0, 1);
+    lp.deleteKey(*g.host, tool.settings);
+    ASSERT_EQ(lp.paths(*g.host).paths[0].keys.size(), 2u);
+    // Shift+drag from a key: its reach follows the cursor (farther: wider), the other key's kept.
+    const float reach = lp.paths(*g.host).paths[0].keys[0].reach;
+    const float other = lp.paths(*g.host).paths[0].keys[1].reach;
+    tool.press(*g.host, view, x, y, 1.0f, kStrokeShift);
+    tool.drag(*g.host, view, x, y + 40.0f, 1.0f);
+    const float near = lp.paths(*g.host).paths[0].keys[0].reach;
+    tool.drag(*g.host, view, x, y + 120.0f, 1.0f);
+    tool.release(*g.host, view);
+    const float far = lp.paths(*g.host).paths[0].keys[0].reach;
+    EXPECT_NE(near, reach);
+    EXPECT_GT(far, 2.0f * near);
+    EXPECT_EQ(lp.paths(*g.host).paths[0].keys[1].reach, other);
+    EXPECT_EQ(lp.paths(*g.host).paths[0].keys.size(), 2u);  // no key added
+    tool.press(*g.host, view, x, y, 1.0f, kStrokeCtrl);
+    tool.release(*g.host, view);
+    EXPECT_EQ(lp.paths(*g.host).paths[0].keys.size(), 1u);
+    // Shift+click starts another path.
+    tool.press(*g.host, view, x - 60.0f, y, 1.0f, kStrokeShift);
+    tool.release(*g.host, view);
+    EXPECT_EQ(lp.paths(*g.host).paths.size(), 2u);
+    const LengthPathTool::Overlay overlay = lp.overlay(*g.host, tool.settings);
+    EXPECT_EQ(overlay.keys.size(), 2u);
+    // Symmetry on: the mirrored keys drawn too, across x = 0, marked so.
+    tool.settings.setSymmetry("x");
+    const LengthPathTool::Overlay both = lp.overlay(*g.host, tool.settings);
+    ASSERT_EQ(both.keys.size(), 4u);
+    EXPECT_FALSE(both.keys[0].mirror);
+    EXPECT_TRUE(both.keys[2].mirror);
+    EXPECT_NEAR(both.keys[2].at.x, -both.keys[0].at.x, 0.02f);
+    // Topology: each key at its partner spot on the scalp (here a sphere symmetric about x = 0, so
+    // where the world plane puts it; a posed scalp: LengthPaths.TopologySymmetryFollowsAPosedScalp).
+    tool.settings.setSymmetry("topology");
+    const LengthPathTool::Overlay partner = lp.overlay(*g.host, tool.settings);
+    ASSERT_EQ(partner.keys.size(), 4u);
+    EXPECT_TRUE(partner.keys[2].mirror);
+    EXPECT_NEAR(partner.keys[2].at.x, -partner.keys[0].at.x, 0.02f);
+    EXPECT_NEAR(partner.keys[2].at.y, partner.keys[0].at.y, 0.02f);
+    tool.settings.setSymmetry("none");
+    EXPECT_EQ(overlay.activePath, 1);
+    EXPECT_GT(overlay.keys.back().reach, 0.0f);
 }
 
 }  // namespace

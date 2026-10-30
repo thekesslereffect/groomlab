@@ -558,6 +558,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     connect(card_, &BrushPanel::settingsChanged, this, &GroomTools::settingsChanged);
     connect(card_, &BrushPanel::guidesEdited, this, &GroomTools::guidesEdited);
     connect(card_, &BrushPanel::clearFlowRequested, this, &GroomTools::clearFlowRequested);
+    connect(card_, &BrushPanel::lengthsPreviewed, this, &GroomTools::lengthsPreviewed);
     work->addWidget(card_);
 
     // ---- The sections (palette.sections).

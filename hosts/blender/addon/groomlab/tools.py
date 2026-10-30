@@ -374,10 +374,11 @@ def follow_graph(scalp, r):
         status(groom.scene_of(scalp), str(e))
 
 
-def stroke_begin(scalp, view, x, y, pressure=1.0, ctrl=False, shift=False):
+def stroke_begin(scalp, view, x, y, pressure=1.0, ctrl=False, shift=False, adjust=False):
+    """`adjust`: the adjusting button (the Length Paths tool's right-drag: a key's length)."""
     from . import display
     r = call(scalp, "stroke_begin", view=view, x=float(x), y=float(y), pressure=float(pressure), ctrl=bool(ctrl),
-             shift=bool(shift))
+             shift=bool(shift), adjust=bool(adjust))
     follow_graph(scalp, r)
     display.take_overlay(scalp, r.get("overlay"), r.get("ring"))
     display.mark(scalp)
@@ -825,6 +826,60 @@ def parts_clear(scalp):
 
 def flow_clear(scalp):
     return _tube_edit(scalp, "flow_clear")
+
+
+# ---- The Length Paths tool's paths (the Paths box) ------------------------------------------------
+
+_length_syncing = [False]
+
+
+def length_syncing():
+    """The Paths box's fields are being filled from the helper (their updates send nothing)."""
+    return _length_syncing[0]
+
+
+def sync_lengths(scene, state):
+    """The Paths box's fields from the helper's state (length_state): kept on the palette's
+    properties, sending nothing back."""
+    if scene is None or not state:
+        return
+    t = scene.groomlab_tools
+    _length_syncing[0] = True
+    try:
+        t.length_state = json.dumps(state)
+        paths = state.get("paths") or []
+        path, key = state.get("activePath", -1), state.get("activeKey", -1)
+        if 0 <= path < len(paths):
+            p = paths[path]
+            t.length_smooth = bool(p.get("smooth", True))
+            if 0 <= key < len(p.get("lengths", [])):
+                t.length_key = float(p["lengths"][key])
+                t.length_reach = float(p["reaches"][key])
+        t.length_change = (state.get("change") or "scale").upper()
+    finally:
+        _length_syncing[0] = False
+
+
+def length_state(scalp):
+    r = call(scalp, "length_state")
+    sync_lengths(groom.scene_of(scalp), r)
+    return r
+
+
+def length_edit(scalp, edit, **args):
+    """One edit of the paths ("key", "reach" (value), "smooth" (on), "change" (name), "select"
+    (path, key), "newPath", "deleteKey", "deletePath", "apply", "cancel"). Apply commits the guides
+    (one undo step); the others preview."""
+    from . import display
+    scene = groom.scene_of(scalp)
+    r = call(scalp, "length_edit", edit=edit, **args)
+    if r.get("committed"):
+        after_edit(scalp, scene, r.get("undo"))
+    elif edit not in ("select", "newPath"):
+        evaluate_live(scalp)
+        display.mark(scalp)
+    sync_lengths(scene, r)
+    return r
 
 
 # ---- Correctives and Sculpt nodes (Maya's shots.py and sculpts.py) -----------------------------

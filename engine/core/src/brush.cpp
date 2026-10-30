@@ -618,6 +618,12 @@ std::vector<std::pair<GuideId, float>> collectTargets(const GuideHierarchy& h, c
 
 }  // namespace
 
+std::vector<GuideId> brushTargets(const GuideHierarchy& h, const BrushSettings& s) {
+    std::vector<GuideId> ids;
+    for (const auto& [id, weight] : collectTargets(h, s)) ids.push_back(id);
+    return ids;
+}
+
 // ---- A stroke's guides and their bounds ------------------------------------------------
 
 struct BrushStrokeCache::State {

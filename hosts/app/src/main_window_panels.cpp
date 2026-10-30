@@ -128,6 +128,10 @@ void MainWindow::buildPanels() {
     connect(groomTools_, &GroomTools::guidesEdited, this, [this] { guidesEdited(); });
     connect(groomTools_, &GroomTools::tubesGraphEdited, this, [this] { graphEdited(); });
     connect(groomTools_, &GroomTools::tubesPreviewed, this, [this] { reevaluate(); });
+    connect(groomTools_, &GroomTools::lengthsPreviewed, this, [this] {
+        viewport_->refreshOverlay();
+        reevaluate();
+    });
     connect(groomTools_, &GroomTools::unfreezeAllRequested, this, [this] {
         if (!document_) return;
         document_->editGuides("unfreeze all", [](GuideHierarchy& h) { unfreezeAll(h); });
