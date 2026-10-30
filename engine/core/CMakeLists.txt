@@ -49,8 +49,8 @@ add_library(groomlab_core_objects OBJECT
     src/graph_compound.cpp
     src/guide_hierarchy.cpp
     src/guide_selection.cpp
-    src/length_path_tool.cpp
-    src/length_paths.cpp
+    src/length_field.cpp
+    src/length_key_tool.cpp
     src/guide_set.cpp
     src/tube.cpp
     src/instances.cpp

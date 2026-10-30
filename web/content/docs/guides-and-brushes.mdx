@@ -342,7 +342,7 @@ and each drag is one undo step. The brushes are the same, in the same order, in 
 | | **Noise** | Adds smooth random displacement that builds up with each stroke (a negative strength smooths it out). |
 | | **Shape** | Paints guides' [tubes](#tube-guides) near the brush: **Width**, **Flatness** or **Twist** (a negative strength: the opposite), and sets the selected guides' tube shape, Fill Tubes and Tube Blend. |
 | Trim | **Cut**, **Length**, **Erase** | Cut guides where the brush touches; lengthen or shorten them uniformly; delete guides, part lines or flow arrows (not the scattered hair: see below). |
-| | **Length Paths** | Set guide lengths from paths of keys you lay on the scalp (see [Length Paths](#length-paths)). |
+| | **Length Keys** | Scale guide lengths from keys you place on the scalp, blended smoothly between them (see [Length Keys](#length-keys)). |
 | Paint (in the Paint tab) | **Paint** | Paints the map picked in the Paint tab, including the maps that drive settings such as density and width (see below, and [Painting maps](/docs/painting-maps)). |
 | Guides | **Select**, **Freeze** | Select guides; paint the freeze mask. **Unfreeze All** is next to them. |
 
@@ -360,34 +360,32 @@ arrows, so it does nothing on a groom whose hair comes from the Scatter alone. T
 paint the density map holding **Ctrl** (Paint tab > **+ New Map** > For: **Density**); paint it
 back without Ctrl.
 
-### Length Paths
+### Length Keys
 
-**Length Paths** (Trim) sets guide lengths from lines of keys on the scalp: a fringe that runs
-from short to long, a V at the middle, a leg that is long at the top and short at the paw. Guides
-near a path take the length the keys give, blended between keys and faded back to their own length
-at the edge of the path's reach.
+**Length Keys** (Trim) scales guide lengths from keys you place on the scalp: longer on the legs,
+shorter at the paws, a fringe that runs from short to long. Each key holds a scale (x1.5: half as
+long again). Between keys the scale blends smoothly over the whole scalp, measured along the skin,
+so a key on one side of an ear does not reach through to the other. There is no reach to set:
+each key's influence ends where its neighbours' begins, and away from all of them the scale eases
+back to x1, so guides far from your keys stay as they are.
 
-- **Click** on the scalp to lay a key at the end of the path. A new key starts at the length of the
-  guides around it, so laying keys changes nothing until you set one. **Shift+click** starts a new
-  path (one per leg of an animal); a click on a path's line adds a key there.
+- **Click** on the scalp to place a key. A new key takes the scale already there, so placing one
+  changes nothing. The first key is x1: a hold. Put x1 keys round an area to fence it in.
 - **Drag** a key to move it over the scalp. **Ctrl+click** deletes it.
-- **Right-drag** a key up or down to set its length (Maya: **middle-drag**, since Maya's right
-  button opens its marking menus). Dragging up doubles it every 150 pixels.
-- **Shift+drag** from a key sizes its reach, the ring around it: how far from the path guides
-  change. Each key has its own reach, blended between keys, so a path can be wide at one end and
-  narrow at the other. A path's first key takes the brush ring's size.
+- **Right-drag** a key up or down to scale it (Maya: **middle-drag**, since Maya's right button
+  opens its marking menus). Dragging up doubles it every 150 pixels.
 - The guides preview at their new lengths until you **Apply** (one undo step; **Enter** in the
   app and Blender) or **Cancel** (**Esc**).
 
-The **Paths** box shows the selected key's **Key length** and **Key reach**, **Smooth** (lengths
-ease from key to key without overshooting a key; off: straight), **Scale** or **Trim** (a guide
-scaled about its root, so curls keep their shape, or cut and extended at the tip, so curls keep
-their size), **New Path**, **Delete Key** and **Delete Path**. Only the selected guides change,
-else the soloed ones (the ones not frozen). With symmetry on, the mirrored paths act too and show
-on the other side; topology symmetry puts each key at its partner spot on the scalp.
+Each key is labelled with its scale and the length it gives the guide nearest it. The **Keys** box
+shows the selected key's **Key scale** and **Key length** (type a length and the scale is set to
+match), **Scale** or **Trim** (a guide scaled about its root, so curls keep their shape, or cut and
+extended at the tip, so curls keep their size), **Delete Key** and **Clear**. Only the selected
+guides change, else the soloed ones (the ones not frozen). With symmetry on, the mirrored keys act
+too and show on the other side; topology symmetry puts each key at its partner spot on the scalp.
 
-The paths are saved with the groom, so you can come back, drag a key and apply again. Keys hold
-lengths, not percentages: applying twice gives what applying once did.
+The keys are saved with the groom. Apply bakes their scales into the guides and sets the keys back
+to x1, so you can come back, drag a key and apply again without scaling twice.
 
 ### Keys
 

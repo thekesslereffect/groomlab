@@ -22,7 +22,7 @@ from groomlab.ui.qt import QtCore, QtWidgets
 
 import groomlab
 import groomlab_core
-from groomlab.ui import definitions, length_paths_box, theme, tool_tabs, widgets
+from groomlab.ui import definitions, length_keys_box, theme, tool_tabs, widgets
 
 # The tools are the core's brush catalog (brush_catalog.h), the one list both hosts build their
 # palettes from: id, label, category, default strength, whether the strength is signed, a hint
@@ -1135,9 +1135,9 @@ class ToolPalette(QtWidgets.QWidget):
         self.flow_sink_changed()
         card.addWidget(self.flow_box)
 
-        # Length Paths: the selected key, the path, Apply and Cancel
-        self.length_paths = length_paths_box.LengthPathsBox()
-        card.addWidget(self.length_paths)
+        # Length Keys: the selected key, Apply and Cancel
+        self.length_keys = length_keys_box.LengthKeysBox()
+        card.addWidget(self.length_keys)
 
         # Comb: keep lengths, or stretch
         self.stretch_box, column = self.options()
@@ -1896,8 +1896,8 @@ class ToolPalette(QtWidgets.QWidget):
         if self.tool == "flow" and (self._ticks % 2 == 0 or groom != getattr(self, "_flow_groom", None)):
             self._flow_groom = groom
             self.fill_flow_count(groom)
-        if self.length_paths.isVisible():  # the keys clicked and dragged in the viewport
-            self.length_paths.refresh()
+        if self.length_keys.isVisible():  # the keys clicked and dragged in the viewport
+            self.length_keys.refresh()
         if self.tube_panel.isVisible():  # (the Shape brush, Place, Draw) every selection or solo change
             self.tube_panel.refresh(groom, full=self._ticks % 3 == 0)
         # Weights change with the frame: read them every tick, the stack itself now and then
@@ -2140,9 +2140,9 @@ class ToolPalette(QtWidgets.QWidget):
         self.flow_box.setVisible("flow" in uses)
         if "flow" in uses:
             self.fill_flow_count(self.groom())
-        self.length_paths.setVisible("lengthPaths" in uses)
-        if "lengthPaths" in uses:
-            self.length_paths.refresh()
+        self.length_keys.setVisible("lengthKeys" in uses)
+        if "lengthKeys" in uses:
+            self.length_keys.refresh()
         self.select_box.setVisible("selection" in uses)
         self.freeze_box.setVisible("freezeMask" in uses)
         self.level.setEnabled(tool != PART)

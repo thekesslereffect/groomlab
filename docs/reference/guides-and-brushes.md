@@ -299,15 +299,19 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   - **B / M (hold) + drag:** the brush radius / strength, as in Maya's sculpt tools. Outside
     GroomLab brushes B and M do what they do in Maya. Middle-drag (Shift: strength) works
     without the hotkey set.
-- **Length Paths** (`lengths`, `length_paths.h`, `length_path_tool.h`): keys on the scalp
-  (`LengthKey`: a root on the cage, a length and a reach) in paths; a guide's root takes the length
-  at the nearest spot of the path, its share of the reach there deciding the weight (full within
-  60%, eased to 0 at it), several paths blended by weight. Smooth paths interpolate lengths with
-  Fritsch-Carlson's monotone cubic (no overshoot). `applyLengthPaths` scales guides about their
-  root (`scale`) or trims and extends them at the tip (`trim`). The paths are saved in the guide
-  data (`GuideHierarchy::lengthPaths`, "lengthPaths"). Hosts: Maya `groomLabBrushCtx -lengthEdit`
-  / `-lengthState` (groomlab.length_paths_edit / length_paths_state), the Blender helper's
-  `length_edit` / `length_state`; the press with `kStrokeAdjust` drags a key's length.
+- **Length Keys** (`lengths`, `length_field.h`, `length_key_tool.h`): keys on the scalp
+  (`LengthKey`: a root on the cage and a scale). `LengthField` blends the keys' scales over the
+  scalp: logarithms weighted 1 / distance^2, the distances along the skin (the `SurfaceFronts`
+  of surface_paths.h from each key, on the scalp's shared graph so a moved key walks again alone;
+  another piece or no scalp: straight lines). Past the keys' spacing (the largest distance from a
+  key to its nearest other) the scale eases back to x1 by twice it; one key scales everything. A
+  new key takes the field's scale where it lands, so placing one changes nothing.
+  `applyLengthField` scales guides about their root (`scale`) or trims and extends them at the tip
+  (`trim`). The keys are saved in the guide data (`GuideHierarchy::lengthKeys`, "lengthKeys"); Apply
+  bakes the scales into the guides and saves the keys back at x1. Hosts: Maya
+  `groomLabBrushCtx -lengthEdit` / `-lengthState` (groomlab.length_keys_edit / length_keys_state),
+  the Blender helper's `length_edit` / `length_state`; the press with `kStrokeAdjust` drags a key's
+  scale.
 - **Shift and Ctrl in a brush:** Ctrl is the brush's opposite (`BrushTool::pressed`: Length
   shortens, Lift lays down, Twist, Curl, Attract, Direction, Noise and Shape flip, Cut grows,
   painting goes toward 0; Comb, Slide, Smooth, Straighten and Erase have none). With a guide

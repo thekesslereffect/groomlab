@@ -245,7 +245,7 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
         }
         const bool lengths = session_->settings().tool == BrushToolSettings::Tool::Lengths;
         if (event->button() == Qt::LeftButton || (lengths && event->button() == Qt::RightButton)) {
-            // The Length Paths tool: right-drag sets a key's length (kStrokeAdjust).
+            // The Length Keys tool: right-drag sets a key's scale (kStrokeAdjust).
             drag_ = Drag::Stroke;
             const unsigned adjust = event->button() == Qt::RightButton ? kStrokeAdjust : 0u;
             if (!session_->press(event->position(), pressure(), strokeModifiers(event) | adjust)) {
@@ -456,11 +456,11 @@ void Viewport::keyPressEvent(QKeyEvent* event) {
             return;
         case Qt::Key_Return:
         case Qt::Key_Enter:
-            // The Length Paths tool: Enter applies its preview (one undo step).
+            // The Length Keys tool: Enter applies its preview (one undo step).
             if (session_ && mode_ == ToolMode::Brush && session_->settings().tool == BrushToolSettings::Tool::Lengths) {
                 bool applied = false;
-                session_->editLengths("apply", [&](LengthPathTool& lp, StrokeHost& host, const BrushToolSettings& s) {
-                    applied = lp.apply(host, s);
+                session_->editLengths("apply", [&](LengthKeyTool& lk, StrokeHost& host, const BrushToolSettings& s) {
+                    applied = lk.apply(host, s);
                 });
                 refreshOverlay();
                 emit brushSettingsChanged();
@@ -472,8 +472,8 @@ void Viewport::keyPressEvent(QKeyEvent* event) {
         case Qt::Key_Escape:
             if (session_ && mode_ == ToolMode::Brush && session_->settings().tool == BrushToolSettings::Tool::Lengths &&
                 session_->lengths().edited()) {
-                // The Length Paths tool: Esc drops its preview first (again: leaves the brush).
-                session_->editLengths("cancel", [](LengthPathTool& lp, StrokeHost& host, const BrushToolSettings&) { lp.cancel(host); });
+                // The Length Keys tool: Esc drops its preview first (again: leaves the brush).
+                session_->editLengths("cancel", [](LengthKeyTool& lk, StrokeHost& host, const BrushToolSettings&) { lk.cancel(host); });
                 refreshOverlay();
                 emit brushSettingsChanged();
                 emit strokeDabbed();

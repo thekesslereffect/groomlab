@@ -7,7 +7,7 @@ add_executable(groomlab_tests
     engine/core/test_attributes.cpp
     engine/core/test_brush.cpp
     engine/core/test_brush_alpha.cpp
-    engine/core/test_length_paths.cpp
+    engine/core/test_length_field.cpp
     engine/core/test_brush_catalog.cpp
     engine/core/test_brush_pack.cpp
     engine/core/test_budgets.cpp

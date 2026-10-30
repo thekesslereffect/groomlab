@@ -76,11 +76,11 @@ public:
     StrokeRelease release();
     void cancel();  // drops the stroke without committing it
     bool stroking() const { return tool_.stroking(); }
-    // The Length Paths tool (Tool::Lengths, length_path_tool.h): an edit of its paths through the
-    // session's host (the Paths box: a key's length, Apply...), false when no groom is open or it
-    // threw (lastError says). The overlay draws its paths and keys while it is the tool.
-    LengthPathTool& lengths() { return tool_.lengths(); }
-    bool editLengths(const char* what, const std::function<void(LengthPathTool&, StrokeHost&, const BrushToolSettings&)>& fn);
+    // The Length Keys tool (Tool::Lengths, length_key_tool.h): an edit of its keys through the
+    // session's host (the Keys box: a key's scale, Apply...), false when no groom is open or it
+    // threw (lastError says). The overlay draws its keys while it is the tool.
+    LengthKeyTool& lengths() { return tool_.lengths(); }
+    bool editLengths(const char* what, const std::function<void(LengthKeyTool&, StrokeHost&, const BrushToolSettings&)>& fn);
     // A whole stroke through press, moves and release (tests, the CLI): true when it changed something.
     bool stroke(const std::vector<QPointF>& points, float pressure = 1.0f, unsigned modifiers = 0);
     // The level (and group) of the guide under the cursor becomes the brush's; -2 when no guide
@@ -129,7 +129,7 @@ public:
 
 private:
     std::array<float, 2> port(const QPointF& at) const { return toPort(at, height_); }
-    void appendLengths(const std::array<float, 2>& p);  // the Length Paths tool's paths and keys
+    void appendLengths(const std::array<float, 2>& p);  // the Length Keys tool's keys
     void rebuildOverlay(const QPointF& at, bool withLines);
     // The world point under a port pixel at the camera target's depth; false off the view.
     bool atTargetDepth(const std::array<float, 2>& pixel, Vec3f& out) const;

@@ -12,8 +12,8 @@
 //   NEW GUIDES   Match nearby guides, Length, Segments, Spacing, Solo new guides   (Place, Draw)
 //   PARTS        Name, the parts drawn, Remove / Clear All                         (Part)
 //   FLOW         Place (Arrows, Whorl...), Clear All, what a click or drag does     (Flow)
-//   PATHS        Path, New Path, Key length / reach, Smooth, Scale or Trim, Delete
-//                Key / Path, Cancel, Apply                                         (Length Paths)
+//   KEYS         Key scale, Key length, Scale or Trim, Delete Key, Clear, Cancel,
+//                Apply                                                             (Length Keys)
 //   Stretch                                                                         (Comb)
 //   Paints       Width, Flatness, Twist (chips, choices.tubeChannel)                (Shape)
 //   ERASES       Guides, Parts, Flow, and what Erase does not take                 (Erase)
@@ -49,7 +49,7 @@ class QToolButton;
 class QVBoxLayout;
 
 namespace groomlab {
-class LengthPathTool;
+class LengthKeyTool;
 class StrokeHost;
 struct BrushToolSettings;
 }  // namespace groomlab
@@ -90,7 +90,7 @@ signals:
     void settingsChanged();
     void guidesEdited();       // Unfreeze All changed the guides: the host evaluates and redraws
     void clearFlowRequested();  // the Flow box's Clear All
-    void lengthsPreviewed();    // the Paths box changed the Length Paths preview: evaluate and redraw
+    void lengthsPreviewed();    // the Keys box changed the Length Keys preview: evaluate and redraw
 
 private:
     // A slider row (a label, then the slider) bound to a float: its span `min`..`max`, a typed
@@ -147,18 +147,16 @@ private:
     QLineEdit* partName_ = nullptr;
     QListWidget* parts_ = nullptr;
     QWidget* partButtons_ = nullptr;
-    // The Length Paths tool's box (lengthPaths); `lengthsEdit` runs an edit through the session
+    // The Length Keys tool's box (lengthKeys); `lengthsEdit` runs an edit through the session
     // and tells the host (Apply: the guides changed, else the preview did).
-    void lengthsEdit(const char* what, const std::function<void(LengthPathTool&, StrokeHost&, const BrushToolSettings&)>& fn,
+    void lengthsEdit(const char* what, const std::function<void(LengthKeyTool&, StrokeHost&, const BrushToolSettings&)>& fn,
                      bool applies = false);
     QWidget* lengthsBox_ = nullptr;
-    QComboBox* lengthPath_ = nullptr;
+    QDoubleSpinBox* lengthScale_ = nullptr;
     QDoubleSpinBox* lengthKey_ = nullptr;
-    QDoubleSpinBox* lengthReach_ = nullptr;
-    QCheckBox* lengthSmooth_ = nullptr;
     QComboBox* lengthChange_ = nullptr;
     QPushButton* lengthDeleteKey_ = nullptr;
-    QPushButton* lengthDeletePath_ = nullptr;
+    QPushButton* lengthClear_ = nullptr;
     QPushButton* lengthApply_ = nullptr;
     QPushButton* lengthCancel_ = nullptr;
     QLabel* lengthStatus_ = nullptr;

@@ -673,7 +673,7 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     // on the Tools tab (Unfreeze All beside Freeze), Paint on the Paint tab; a grid that wraps to
     // the dock's width, the names under the icons (compact icon tiles without them).
     GroomTools tools;
-    EXPECT_EQ(tools.tiles().size(), 23u) << "Select, Freeze, the 20 tools (Paint and Length Paths among them) and Unfreeze All";
+    EXPECT_EQ(tools.tiles().size(), 23u) << "Select, Freeze, the 20 tools (Paint and Length Keys among them) and Unfreeze All";
     for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "unfreeze"}) {
         EXPECT_NE(tools.tile(id), nullptr) << id;
     }
@@ -1984,9 +1984,9 @@ public:
 
 }  // namespace
 
-// The Length Paths tool in the app: a click lays a key (the Paths box shows it), a right-drag
-// (kStrokeAdjust) sets its length in the preview, Apply in the box sets the guides (one undo step).
-TEST(AppPanels, LengthPathsKeysPreviewAndApply) {
+// The Length Keys tool in the app: a click places a key (the Keys box shows it), a right-drag
+// (kStrokeAdjust) scales it in the preview, Apply in the box sets the guides (one undo step).
+TEST(AppPanels, LengthKeysPreviewAndApply) {
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
     ViewRequest request;
@@ -2003,11 +2003,11 @@ TEST(AppPanels, LengthPathsKeysPreviewAndApply) {
     session.setTool("lengths");
     panel.setTool("lengths");
     EXPECT_EQ(session.settings().modeName(), "lengths");
-    auto* box = panel.findChild<QWidget*>(QStringLiteral("lengthPathsBox"));
-    auto* path = panel.findChild<QComboBox*>(QStringLiteral("lengthPath"));
+    auto* box = panel.findChild<QWidget*>(QStringLiteral("lengthKeysBox"));
+    auto* scale = panel.findChild<QDoubleSpinBox*>(QStringLiteral("lengthScale"));
     auto* key = panel.findChild<QDoubleSpinBox*>(QStringLiteral("lengthKey"));
     auto* apply = panel.findChild<QPushButton*>(QStringLiteral("lengthApply"));
-    ASSERT_TRUE(box && path && key && apply);
+    ASSERT_TRUE(box && scale && key && apply);
     EXPECT_FALSE(box->isHidden());
     EXPECT_FALSE(apply->isEnabled());
     const std::string before = doc->session().data().hierarchyJson;
@@ -2019,21 +2019,27 @@ TEST(AppPanels, LengthPathsKeysPreviewAndApply) {
     ASSERT_TRUE(session.press(at, 1.0f, 0)) << session.lastError();
     session.release();
     panel.refresh();
-    ASSERT_EQ(path->count(), 1);
+    std::size_t keys = 0;
+    session.editLengths("keys", [&](LengthKeyTool& t, StrokeHost& h, const BrushToolSettings&) { keys = t.keys(h).keys.size(); });
+    ASSERT_EQ(keys, 1u);
     ASSERT_TRUE(key->isEnabled());
+    EXPECT_DOUBLE_EQ(scale->value(), 1.0);
     const double first = key->value();
     EXPECT_GT(first, 0.0);
-    // Right-drag up a doubling's worth on the key: twice as long, previewed.
+    // Right-drag up a doubling's worth on the key: x2, its guide twice as long, previewed.
     ASSERT_TRUE(session.press(at, 1.0f, kStrokeAdjust)) << session.lastError();
-    session.move(QPointF(at.x(), at.y() - LengthPathTool::kPixelsPerDoubling), 1.0f);
+    session.move(QPointF(at.x(), at.y() - LengthKeyTool::kPixelsPerDoubling), 1.0f);
     session.release();
     panel.refresh();
+    EXPECT_NEAR(scale->value(), 2.0, 1e-3);
     EXPECT_NEAR(key->value(), 2.0 * first, 1e-3 * first);
     EXPECT_TRUE(apply->isEnabled());
     EXPECT_EQ(doc->session().data().hierarchyJson, before);  // previewed, not applied
     apply->click();
     EXPECT_NE(doc->session().data().hierarchyJson, before);
-    EXPECT_NE(doc->session().data().hierarchyJson.find("lengthPaths"), std::string::npos);
+    EXPECT_NE(doc->session().data().hierarchyJson.find("lengthKeys"), std::string::npos);
+    panel.refresh();
+    EXPECT_DOUBLE_EQ(scale->value(), 1.0) << "applied: the key back at x1";
     EXPECT_FALSE(apply->isEnabled());
     EXPECT_EQ(doc->undo(), "");
     EXPECT_EQ(doc->session().data().hierarchyJson, before);

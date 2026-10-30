@@ -301,46 +301,33 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             row.label(text="Weight: pick a corrective")
 
     def draw_lengths(self, card, context, t):
-        """The Length Paths tool's Paths box: the path picked, the selected key's length and reach,
-        smooth, Scale or Trim, New Path / Delete Key / Delete Path, Cancel and Apply."""
+        """The Length Keys tool's Keys box: the selected key's scale and the length it gives its
+        guide, Scale or Trim, Delete Key / Clear, Cancel and Apply."""
         try:
             state = json.loads(t.length_state or "{}")
         except ValueError:
             state = {}
-        paths = state.get("paths") or []
-        path, key = state.get("activePath", -1), state.get("activeKey", -1)
-        has_path = 0 <= path < len(paths)
-        has_key = has_path and 0 <= key < len(paths[path].get("lengths", []))
+        scales = state.get("scales") or []
+        key = state.get("activeKey", -1)
+        has_key = 0 <= key < len(scales)
         edited = bool(state.get("edited"))
         box = card.column()
-        box.label(text=label("lengthPaths", "Paths").upper())
-        row = box.row(align=True)
-        if has_path:
-            prev = row.operator("groomlab.length_edit", text="", icon="TRIA_LEFT")
-            prev.edit, prev.path = "select", max(0, path - 1)
-            row.label(text="Path %d of %d (%d keys)" % (path + 1, len(paths), len(paths[path].get("lengths", []))))
-            nxt = row.operator("groomlab.length_edit", text="", icon="TRIA_RIGHT")
-            nxt.edit, nxt.path = "select", min(len(paths) - 1, path + 1)
-        else:
-            row.label(text="No path yet")
-        row.operator("groomlab.length_edit", text="New Path").edit = "newPath"
+        box.label(text=label("lengthKeys", "Keys").upper())
         row = box.row(align=True)
         row.enabled = has_key
-        row.prop(t, "length_key")
+        row.prop(t, "length_scale")
         row.operator("groomlab.length_edit", text="Delete Key").edit = "deleteKey"
         sub = box.row(align=True)
         sub.enabled = has_key
-        sub.prop(t, "length_reach")
+        sub.prop(t, "length_key")
         row = box.row(align=True)
-        sub = row.row(align=True)
-        sub.enabled = has_path
-        sub.prop(t, "length_smooth")
         row.prop(t, "length_change", text="")
         sub = row.row(align=True)
-        sub.enabled = has_path
-        sub.operator("groomlab.length_edit", text="Delete Path").edit = "deletePath"
-        _wrap(box, "Click on the scalp to lay a path's first key." if not paths else
-              "Previewing: Apply sets the guides (Enter)." if edited else "Applied. Drag a key or change a field to edit.",
+        sub.enabled = bool(scales)
+        sub.operator("groomlab.length_edit", text="Clear").edit = "clear"
+        _wrap(box, "Click on the scalp to place a key." if not scales else
+              "%d keys. Previewing: Apply sets the guides (Enter)." % len(scales) if edited else
+              "%d keys. Right-drag a key to scale the guides round it." % len(scales),
               width=_chars(context))
         row = box.row(align=True)
         row.enabled = edited
@@ -438,7 +425,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             sub.enabled = bool(t.flow_arrows or t.flow_sinks)
             sub.operator("groomlab.flow_clear", text="Clear All")
             _wrap(box, FLOW_HINTS["" if t.flow_sink_item == "ARROWS" else "*"], width=_chars(context))
-        if "lengthPaths" in uses:
+        if "lengthKeys" in uses:
             self.draw_lengths(card, context, t)
         if "stretch" in uses:
             card.prop(t, "stretch", text=label("stretch", "Stretch"))

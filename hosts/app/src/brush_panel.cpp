@@ -334,52 +334,39 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     }
     card->addWidget(flowBox_);
 
-    // Length Paths: the selected key, the path, Apply and Cancel.
-    lengthsBox_ = box(settingLabel("lengthPaths"), &column);
-    lengthsBox_->setObjectName(QStringLiteral("lengthPathsBox"));
+    // Length Keys: the selected key, Apply and Cancel.
+    lengthsBox_ = box(settingLabel("lengthKeys"), &column);
+    lengthsBox_->setObjectName(QStringLiteral("lengthKeysBox"));
     {
         auto* form = new QFormLayout();
         form->setContentsMargins(0, 0, 0, 0);
         form->setLabelAlignment(Qt::AlignRight);
-        auto* row = new QHBoxLayout();
-        row->setSpacing(6);
-        lengthPath_ = new QComboBox(lengthsBox_);
-        lengthPath_->setObjectName(QStringLiteral("lengthPath"));
-        lengthPath_->setToolTip(tr("The path the fields edit (a key clicked in the viewport picks its path)"));
-        auto* newPath = new QPushButton(tr("New Path"), lengthsBox_);
-        newPath->setObjectName(QStringLiteral("lengthNewPath"));
-        newPath->setToolTip(tr("The next click on the scalp starts a new path (or Shift+click)"));
-        row->addWidget(lengthPath_, 1);
-        row->addWidget(newPath);
-        form->addRow(tr("Path"), row);
-        auto number = [this](const char* name, const QString& tip) {
+        auto number = [this](const char* name, double low, double high, const QString& tip) {
             auto* spin = new QDoubleSpinBox(lengthsBox_);
             spin->setObjectName(QString::fromLatin1(name));
-            spin->setRange(0.0001, 1e6);
+            spin->setRange(low, high);
             spin->setDecimals(3);
             spin->setKeyboardTracking(false);
             spin->setToolTip(tip);
             return spin;
         };
-        lengthKey_ = number("lengthKey", tr("The selected key's length: guides at it take this length (right-drag the key up "
-                                            "or down in the viewport to set it there)"));
+        lengthScale_ = number("lengthScale", 0.001, 1000.0,
+                              tr("The selected key's scale: guides at it take their length times this (1: kept as they "
+                                 "are, a hold), blending smoothly toward the other keys (right-drag the key up or down in "
+                                 "the viewport to set it there)"));
+        lengthScale_->setSingleStep(0.1);
         lengthDeleteKey_ = new QPushButton(tr("Delete Key"), lengthsBox_);
         lengthDeleteKey_->setObjectName(QStringLiteral("lengthDeleteKey"));
         lengthDeleteKey_->setToolTip(tr("Delete the selected key (or Ctrl+click it in the viewport)"));
-        row = new QHBoxLayout();
+        auto* row = new QHBoxLayout();
         row->setSpacing(6);
-        row->addWidget(lengthKey_, 1);
+        row->addWidget(lengthScale_, 1);
         row->addWidget(lengthDeleteKey_);
-        form->addRow(tr("Key length"), row);
-        lengthReach_ = number("lengthReach", tr("How far from the path guides change at the selected key (its ring; between "
-                                                "keys the reach blends): full near it, fading out to their own length at the "
-                                                "edge (Shift+drag a key in the viewport to size it)"));
-        form->addRow(tr("Key reach"), lengthReach_);
+        form->addRow(tr("Key scale"), row);
+        lengthKey_ = number("lengthKey", 0.0001, 1e6, tr("The length the selected key gives the guide nearest it (its scale set to match)"));
+        form->addRow(tr("Key length"), lengthKey_);
         row = new QHBoxLayout();
         row->setSpacing(6);
-        lengthSmooth_ = new QCheckBox(tr("Smooth"), lengthsBox_);
-        lengthSmooth_->setObjectName(QStringLiteral("lengthSmooth"));
-        lengthSmooth_->setToolTip(tr("Lengths ease smoothly from key to key (never past a key); off: straight between them"));
         lengthChange_ = new QComboBox(lengthsBox_);
         lengthChange_->setObjectName(QStringLiteral("lengthChange"));
         lengthChange_->addItem(tr("Scale"), QStringLiteral("scale"));
@@ -387,13 +374,12 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         lengthChange_->setToolTip(tr("How a guide takes its new length: Scale (the whole guide scaled about its root: curls "
                                      "and bends keep their shape) or Trim (cut at the tip, or extended along its last "
                                      "direction: curls keep their size)"));
-        lengthDeletePath_ = new QPushButton(tr("Delete Path"), lengthsBox_);
-        lengthDeletePath_->setObjectName(QStringLiteral("lengthDeletePath"));
-        lengthDeletePath_->setToolTip(tr("Delete the selected path and its keys"));
-        row->addWidget(lengthSmooth_);
+        lengthClear_ = new QPushButton(tr("Clear"), lengthsBox_);
+        lengthClear_->setObjectName(QStringLiteral("lengthClear"));
+        lengthClear_->setToolTip(tr("Delete every key"));
         row->addWidget(lengthChange_, 1);
-        row->addWidget(lengthDeletePath_);
-        form->addRow(QString(), row);
+        row->addWidget(lengthClear_);
+        form->addRow(tr("Guides"), row);
         column->addLayout(form);
         row = new QHBoxLayout();
         row->setSpacing(6);
@@ -401,80 +387,68 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         lengthStatus_->setObjectName(QStringLiteral("lengthStatus"));
         lengthCancel_ = new QPushButton(tr("Cancel"), lengthsBox_);
         lengthCancel_->setObjectName(QStringLiteral("lengthCancel"));
-        lengthCancel_->setToolTip(tr("Drop the changes since the last Apply: the guides and paths as they were (Esc)"));
+        lengthCancel_->setToolTip(tr("Drop the changes since the last Apply: the guides and keys as they were (Esc)"));
         lengthApply_ = new QPushButton(tr("Apply"), lengthsBox_);
         lengthApply_->setObjectName(QStringLiteral("lengthApply"));
-        lengthApply_->setToolTip(tr("Set the guides to the lengths shown (one undo step; Enter); the paths stay with the groom "
-                                    "to edit and apply again"));
+        lengthApply_->setToolTip(tr("Set the guides to the lengths shown (one undo step; Enter); the keys stay with the groom "
+                                    "at x1 to place again"));
         row->addWidget(lengthStatus_, 1);
         row->addWidget(lengthCancel_);
         row->addWidget(lengthApply_);
         column->addLayout(row);
 
-        connect(newPath, &QPushButton::clicked, this, [this] {
-            lengthsEdit("new path", [](LengthPathTool& lp, StrokeHost&, const BrushToolSettings&) { lp.newPath(); });
-        });
-        connect(lengthPath_, &QComboBox::currentIndexChanged, this, [this](int index) {
-            if (index < 0) return;
-            lengthsEdit("select", [index](LengthPathTool& lp, StrokeHost& h, const BrushToolSettings&) { lp.select(h, index, 0); });
+        connect(lengthScale_, &QDoubleSpinBox::valueChanged, this, [this](double v) {
+            lengthsEdit("scale", [v](LengthKeyTool& lk, StrokeHost& h, const BrushToolSettings& s) { lk.setKeyScale(h, s, float(v)); });
         });
         connect(lengthKey_, &QDoubleSpinBox::valueChanged, this, [this](double v) {
-            lengthsEdit("key", [v](LengthPathTool& lp, StrokeHost& h, const BrushToolSettings& s) { lp.setKeyLength(h, s, float(v)); });
-        });
-        connect(lengthReach_, &QDoubleSpinBox::valueChanged, this, [this](double v) {
-            lengthsEdit("reach", [v](LengthPathTool& lp, StrokeHost& h, const BrushToolSettings& s) { lp.setReach(h, s, float(v)); });
-        });
-        connect(lengthSmooth_, &QCheckBox::toggled, this, [this](bool on) {
-            lengthsEdit("smooth", [on](LengthPathTool& lp, StrokeHost& h, const BrushToolSettings& s) { lp.setSmooth(h, s, on); });
+            lengthsEdit("length", [v](LengthKeyTool& lk, StrokeHost& h, const BrushToolSettings& s) { lk.setKeyLength(h, s, float(v)); });
         });
         connect(lengthChange_, &QComboBox::currentIndexChanged, this, [this](int) {
             const LengthChange change = lengthChangeFromName(lengthChange_->currentData().toString().toStdString());
-            lengthsEdit("change", [change](LengthPathTool& lp, StrokeHost& h, const BrushToolSettings& s) { lp.setChange(h, s, change); });
+            lengthsEdit("change", [change](LengthKeyTool& lk, StrokeHost& h, const BrushToolSettings& s) { lk.setChange(h, s, change); });
         });
         connect(lengthDeleteKey_, &QPushButton::clicked, this, [this] {
-            lengthsEdit("delete key", [](LengthPathTool& lp, StrokeHost& h, const BrushToolSettings& s) { lp.deleteKey(h, s); });
+            lengthsEdit("delete key", [](LengthKeyTool& lk, StrokeHost& h, const BrushToolSettings& s) { lk.deleteKey(h, s); });
         });
-        connect(lengthDeletePath_, &QPushButton::clicked, this, [this] {
-            lengthsEdit("delete path", [](LengthPathTool& lp, StrokeHost& h, const BrushToolSettings& s) { lp.deletePath(h, s); });
+        connect(lengthClear_, &QPushButton::clicked, this, [this] {
+            lengthsEdit("clear", [](LengthKeyTool& lk, StrokeHost& h, const BrushToolSettings& s) { lk.clear(h, s); });
         });
         connect(lengthCancel_, &QPushButton::clicked, this, [this] {
-            lengthsEdit("cancel", [](LengthPathTool& lp, StrokeHost& h, const BrushToolSettings&) { lp.cancel(h); });
+            lengthsEdit("cancel", [](LengthKeyTool& lk, StrokeHost& h, const BrushToolSettings&) { lk.cancel(h); });
         });
         connect(lengthApply_, &QPushButton::clicked, this, [this] {
-            lengthsEdit("apply", [](LengthPathTool& lp, StrokeHost& h, const BrushToolSettings& s) { lp.apply(h, s); }, true);
+            lengthsEdit("apply", [](LengthKeyTool& lk, StrokeHost& h, const BrushToolSettings& s) { lk.apply(h, s); }, true);
         });
         refreshers_.push_back([this] {
             if (!lengthsBox_->isVisible() && tool_ != "lengths") return;
-            LengthPathTool& lp = session_->lengths();
-            const LengthPathSet* set = nullptr;
-            session_->editLengths("paths", [&](LengthPathTool& t, StrokeHost& h, const BrushToolSettings&) { set = &t.paths(h); });
-            const int active = lp.activePath(), key = lp.activeKey();
-            lengthPath_->clear();
-            if (set) {
-                for (std::size_t i = 0; i < set->paths.size(); ++i) {
-                    lengthPath_->addItem(tr("Path %1 (%2 keys)").arg(i + 1).arg(set->paths[i].keys.size()));
+            LengthKeyTool& lk = session_->lengths();
+            std::size_t count = 0;
+            float scale = 1.0f, length = 0.0f;
+            const int key = lk.activeKey();
+            session_->editLengths("keys", [&](LengthKeyTool& t, StrokeHost& h, const BrushToolSettings& s) {
+                const LengthKeySet& set = t.keys(h);
+                count = set.keys.size();
+                if (key >= 0 && key < static_cast<int>(count)) {
+                    scale = set.keys[key].scale;
+                    length = t.keyLength(h, s, key);
                 }
-            }
-            const bool hasPath = set && active >= 0 && active < static_cast<int>(set->paths.size());
-            const bool hasKey = hasPath && key >= 0 && key < static_cast<int>(set->paths[active].keys.size());
-            if (hasPath) lengthPath_->setCurrentIndex(active);
+            });
+            const bool hasKey = key >= 0 && key < static_cast<int>(count);
             if (hasKey) {
-                lengthKey_->setValue(set->paths[active].keys[key].length);
-                lengthReach_->setValue(set->paths[active].keys[key].reach);
+                lengthScale_->setValue(scale);
+                lengthKey_->setValue(length);
             }
-            if (hasPath) lengthSmooth_->setChecked(set->paths[active].smooth);
-            lengthChange_->setCurrentIndex(std::max(0, lengthChange_->findData(QString::fromLatin1(lengthChangeName(lp.change)))));
-            for (QWidget* w : {static_cast<QWidget*>(lengthKey_), static_cast<QWidget*>(lengthReach_),
+            lengthChange_->setCurrentIndex(std::max(0, lengthChange_->findData(QString::fromLatin1(lengthChangeName(lk.change)))));
+            for (QWidget* w : {static_cast<QWidget*>(lengthScale_), static_cast<QWidget*>(lengthKey_),
                                static_cast<QWidget*>(lengthDeleteKey_)}) {
                 w->setEnabled(hasKey);
             }
-            lengthSmooth_->setEnabled(hasPath);
-            lengthDeletePath_->setEnabled(hasPath);
-            lengthApply_->setEnabled(lp.edited());
-            lengthCancel_->setEnabled(lp.edited());
-            lengthStatus_->setText(!set || set->paths.empty() ? tr("Click on the scalp to lay a path's first key.")
-                                   : lp.edited()               ? tr("Previewing: Apply sets the guides.")
-                                                               : tr("Applied. Drag a key or change a field to edit."));
+            lengthClear_->setEnabled(count > 0);
+            lengthApply_->setEnabled(lk.edited());
+            lengthCancel_->setEnabled(lk.edited());
+            lengthStatus_->setText(count == 0     ? tr("Click on the scalp to place a key.")
+                                   : lk.edited() ? tr("%1 keys. Previewing: Apply sets the guides.").arg(count)
+                                                 : tr("%1 keys. Right-drag a key to scale the guides round it.").arg(count));
         });
     }
     card->addWidget(lengthsBox_);
@@ -728,20 +702,20 @@ void BrushPanel::setTool(const std::string& id) {
     spacingLabel_->setVisible(uses("spacing"));
     partBox_->setVisible(uses("parts"));
     flowBox_->setVisible(uses("flow"));
-    lengthsBox_->setVisible(uses("lengthPaths"));
+    lengthsBox_->setVisible(uses("lengthKeys"));
     stretchBox_->setVisible(uses("stretch"));
     tubeChannelBox_->setVisible(uses("tubeChannel"));
     eraseBox_->setVisible(uses("erases"));
     targetBox_->setVisible(uses("targets"));
     freezeBox_->setVisible(uses("freezeMask"));
     gestures_->setVisible(brush);
-    hasSettings_ = brush || shown > 0 || uses("newGuides") || uses("parts") || uses("flow") || uses("lengthPaths") || uses("stretch") || uses("erases") ||
+    hasSettings_ = brush || shown > 0 || uses("newGuides") || uses("parts") || uses("flow") || uses("lengthKeys") || uses("stretch") || uses("erases") ||
                    uses("targets") || uses("freezeMask") || uses("smoothStrength") || uses("tubeChannel");
     refresh();
 }
 
 void BrushPanel::lengthsEdit(const char* what,
-                             const std::function<void(LengthPathTool&, StrokeHost&, const BrushToolSettings&)>& fn,
+                             const std::function<void(LengthKeyTool&, StrokeHost&, const BrushToolSettings&)>& fn,
                              bool applies) {
     if (updating_ || !session_) return;
     session_->editLengths(what, fn);
