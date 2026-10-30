@@ -299,6 +299,15 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   - **B / M (hold) + drag:** the brush radius / strength, as in Maya's sculpt tools. Outside
     GroomLab brushes B and M do what they do in Maya. Middle-drag (Shift: strength) works
     without the hotkey set.
+- **Length Paths** (`lengths`, `length_paths.h`, `length_path_tool.h`): keys on the scalp
+  (`LengthKey`: a root on the cage, a length and a reach) in paths; a guide's root takes the length
+  at the nearest spot of the path, its share of the reach there deciding the weight (full within
+  60%, eased to 0 at it), several paths blended by weight. Smooth paths interpolate lengths with
+  Fritsch-Carlson's monotone cubic (no overshoot). `applyLengthPaths` scales guides about their
+  root (`scale`) or trims and extends them at the tip (`trim`). The paths are saved in the guide
+  data (`GuideHierarchy::lengthPaths`, "lengthPaths"). Hosts: Maya `groomLabBrushCtx -lengthEdit`
+  / `-lengthState` (groomlab.length_paths_edit / length_paths_state), the Blender helper's
+  `length_edit` / `length_state`; the press with `kStrokeAdjust` drags a key's length.
 - **Shift and Ctrl in a brush:** Ctrl is the brush's opposite (`BrushTool::pressed`: Length
   shortens, Lift lays down, Twist, Curl, Attract, Direction, Noise and Shape flip, Cut grows,
   painting goes toward 0; Comb, Slide, Smooth, Straighten and Erase have none). With a guide
