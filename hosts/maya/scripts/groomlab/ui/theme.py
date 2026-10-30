@@ -554,9 +554,10 @@ QToolButton[role="ghost"]::menu-indicator { image: none; width: 0; }
 QToolButton { background: transparent; border: none; border-radius: %(r)dpx; padding: {{3}}px; }
 QToolButton:hover { background: %(hover)s; }
 QToolButton:checked { background: %(accent)s; color: %(accentText)s; }
-QToolButton[role="tool"] { background: transparent; border: {{1}}px solid transparent; padding: {{4}}px; }
+QToolButton[role="tool"] { background: %(raised)s; border: {{1}}px solid %(border)s; padding: {{2}}px;
+    color: %(dim)s; font-size: %(fs_small)dpx; }
 QToolButton:disabled { color: %(dim)s; }
-QToolButton[role="tool"]:hover { background: %(hover)s; }
+QToolButton[role="tool"]:hover { background: %(hover)s; color: %(text)s; }
 QToolButton[role="tool"]:pressed { background: %(selection)s; }
 QToolButton[role="tool"]:checked { background: %(selection)s; border-color: %(accent)s; color: %(text)s; }
 QToolButton[role="chip"] { color: %(dim)s; }

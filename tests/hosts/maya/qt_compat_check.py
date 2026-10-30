@@ -246,14 +246,19 @@ def main():
         tools.tabs.setCurrentIndex(0)
         row = widgets.chip_row([widgets.chip("Chip %d" % i, checked=False) for i in range(6)])
         _expect(row.hasHeightForWidth() and row.heightForWidth(80) > row.heightForWidth(800), "chips wrap")
-        tiles = [QtWidgets.QToolButton() for _ in range(10)]
-        for b in tiles:
-            b.setFixedSize(34, 34)
+        tiles = [widgets.Tile() for _ in range(10)]
+        for i, b in enumerate(tiles):
+            b.setText("A long tool name %d" % i)  # elided in the tile (its own paintEvent)
+            b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+            b.setFixedSize(56, 50)
         grid = widgets.ToolGrid(tiles)
-        _expect(grid.hasHeightForWidth() and grid.heightForWidth(38 * 5) == 2 * 34 + 4 and grid.heightForWidth(400) == 34,
-                "tiles: %d, %d" % (grid.heightForWidth(38 * 5), grid.heightForWidth(400)))
-        shown(grid, (200, 80))
-        _expect(tiles[0].size() == QtCore.QSize(34, 34) and grid.columns == 5, "five to a 200 px row: %r" % grid.columns)
+        _expect(grid.hasHeightForWidth() and grid.heightForWidth(60 * 5) == 2 * 50 + 4 and grid.heightForWidth(600) == 50,
+                "tiles: %d, %d" % (grid.heightForWidth(60 * 5), grid.heightForWidth(600)))
+        shown(grid, (300, 120))
+        _expect(tiles[0].size() == QtCore.QSize(56, 50) and grid.columns == 5, "five to a 300 px row: %r" % grid.columns)
+        _expect(tiles[6].pos() == QtCore.QPoint(60, 54), "the second row under the first: %r" % tiles[6].pos())
+        _expect(tiles[0].text() == "A long tool name 0", "a tile keeps its whole name")
+        grid.grab()  # its tiles painted (widgets.Tile.paintEvent: the binding's style option and painter)
 
     def updates_builds():
         window = updates_window.UpdatesWindow()

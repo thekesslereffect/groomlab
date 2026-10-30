@@ -242,9 +242,16 @@ def dot_icon(color, dashed=False):
     pixmap.fill(QtCore.Qt.transparent)
     painter = QtGui.QPainter(pixmap)
     painter.setRenderHint(QtGui.QPainter.Antialiasing)
-    painter.setPen(QtCore.Qt.NoPen)
-    painter.setBrush(QtGui.QColor(color or "#888888"))
     d = size * 0.72
+    if dashed:  # the automatic color: a ring
+        pen = QtGui.QPen(QtGui.QColor(color or "#888888"))
+        pen.setWidthF(max(1.0, size / 6.0))
+        painter.setPen(pen)
+        painter.setBrush(QtCore.Qt.NoBrush)
+        d -= pen.widthF()
+    else:
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(QtGui.QColor(color or "#888888"))
     painter.drawEllipse(QtCore.QRectF((size - d) / 2.0, (size - d) / 2.0, d, d))
     painter.end()
     return QtGui.QIcon(pixmap)
@@ -553,8 +560,10 @@ class GuidesTab(_GroomTab):
                 item.setForeground(1, muted)
                 if g["name"] in hidden:
                     item.setForeground(0, muted)
-                item.setToolTip(0, "%s: double-click to rename; right-click: its color%s%s"
-                                % (g["name"], "\nNamed in the graph by " + users if users else "",
+                item.setToolTip(0, "%s: double-click to rename; right-click: its color%s%s%s"
+                                % (g["name"], "\nLevel %d: a child group of %s" % (g["depth"], g["parent"])
+                                   if g.get("depth") and g["parent"] else "",
+                                   "\nNamed in the graph by " + users if users else "",
                                    "\nNew guides: %d segments" % g["segments"] if g["segments"] else ""))
                 item.setToolTip(1, "%d guides" % g["count"])
                 items[g["name"]] = item

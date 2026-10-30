@@ -1614,22 +1614,22 @@ class ToolPalette(QtWidgets.QWidget):
             if getattr(button, "glyph", None):
                 button.setIcon(widgets.glyph(button.glyph))
 
-    TILE_ICON = 20  # px at 100%: the tool tiles' icons
-    TILE = 34       # the tiles' fixed size, the border included (they never stretch with the panel)
+    TILE_ICON = 20       # px at 100%: the tool tiles' icons
+    TILE = (56, 50)      # the tiles' fixed width and height, the border included (they never stretch)
 
     def _tile_size(self, b):
         b.setIconSize(QtCore.QSize(theme.px(self.TILE_ICON), theme.px(self.TILE_ICON)))
-        b.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+        b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)  # the icon over the name (elided: widgets.Tile)
         b.setAutoRaise(True)
-        b.setFixedSize(theme.px(self.TILE), theme.px(self.TILE))
+        b.setFixedSize(theme.px(self.TILE[0]), theme.px(self.TILE[1]))
         b.setProperty("role", "tool")  # a rounded tile: the theme colors it (checked: the selection, an accent border)
 
     def unfreeze_tile(self):
-        """Unfreeze All as an icon tile beside the Freeze tool's (a button, not a tool: never
-        checked): every guide brushable again."""
-        b = QtWidgets.QToolButton()
+        """Unfreeze All as a tile beside the Freeze tool's (a button, not a tool: never checked):
+        every guide brushable again."""
+        b = widgets.Tile()
         b.setObjectName("unfreezeAllTile")
-        b.setText("Unfreeze All")  # not shown (icon only): its name for scripts and accessibility
+        b.setText("Unfreeze All")
         b.setIcon(widgets.icon("unfreeze"))
         self._tile_size(b)
         b.setToolTip("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again "
@@ -1639,13 +1639,13 @@ class ToolPalette(QtWidgets.QWidget):
         return b
 
     def tool_grid(self, tools, extra=()):
-        """Icon tiles (tool, label, tooltip: the name and the hint in the tooltip) of a fixed size,
-        as many to a row as the panel's width holds, and any `extra` buttons after them; one tool
-        is active across every tab."""
+        """Labeled tiles (tool, label, tooltip: the icon over the name, the name and the hint in the
+        tooltip) of a fixed size, as many to a row as the panel's width holds, and any `extra`
+        buttons after them; one tool is active across every tab."""
         tiles = []
         for tool, label, tip in tools:
-            b = QtWidgets.QToolButton()
-            b.setText(label)  # not shown (icon only): its name for scripts and accessibility
+            b = widgets.Tile()
+            b.setText(label)
             b.setIcon(widgets.icon(tool))
             b.setCheckable(True)
             self._tile_size(b)

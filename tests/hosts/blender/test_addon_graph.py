@@ -749,8 +749,8 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(bpy.ops.groomlab.graph_open(), {"FINISHED"})  # no interface here: the tree is made
 
     def test_8c_node_status_overlay(self):
-        """The overlay's status on the headers (the redesign's badges, as Maya's cards): the category's
-        dot before the title (the label leaves room), and in the header row a warning triangle for a
+        """The overlay's status on the headers (the redesign's badges, as Maya's cards): no category dot
+        (the node's color carries it, as Maya's filled headers), and in the header row a warning triangle for a
         note, the cook time (muted, yellow from 10 ms) and the View eye; an error keeps its red "!".
         Drawn into stand-in blf and gpu modules (a headless Blender draws nothing)."""
         import types
@@ -768,7 +768,7 @@ class GraphEditorTest(unittest.TestCase):
             graph.refresh(self.head)
             tree = self.tree()
         node = node_of(tree, "interpolate")
-        self.assertTrue(node.draw_label().startswith(gt.LABEL_LEAD) and node.draw_label().endswith(node.name))
+        self.assertEqual(node.draw_label(), node.name)
         names = [n.gl_name for n in tree.nodes if gt.ours(n)]
         slow, noted, failed = "interpolate", next(n for n in names if n not in ("interpolate", "scalp")), "scalp"
 
@@ -822,7 +822,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertIn(rounded(ge.FOCUS), colors)
         self.assertIn(rounded(ge.ERROR), colors)
         accent = rounded(gt._rgb(gt.CATEGORY_COLORS[gt.category_of(node.gl_type)]))
-        self.assertIn(accent, colors)  # the category's dot
+        self.assertNotIn(accent, colors)  # no category dot: the node's color says it
 
     def test_8b_preset_makes_the_maps_it_reads(self):
         # A preset reading a painted map the groom lacks (flow_with_guides' guideAreas): the map is

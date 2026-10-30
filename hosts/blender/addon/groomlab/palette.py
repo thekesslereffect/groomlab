@@ -85,20 +85,22 @@ def section_shown(section_id, context):
 
 
 def tile(layout, tool, active):
-    """A tool's icon tile (its name and hint in the tooltip: GROOMLAB_OT_tool.description)."""
-    op = layout.operator("groomlab.tool", text="", icon_value=icons.icon(tool), depress=active == tool)
+    """A tool's tile: its icon and name (the name and hint in the tooltip: GROOMLAB_OT_tool.description)."""
+    info = tools.tool_info(tool)
+    op = layout.operator("groomlab.tool", text=info["label"] if info else tool, icon_value=icons.icon(tool),
+                         depress=active == tool)
     op.tool = tool
     return op
 
 
-TILE_SCALE = 1.4  # the tiles a little larger than a row, square
+TILE_SCALE = 1.4  # the tiles a little taller than a row
 
 
 def tool_grid(layout, tool_ids, active, columns=0):
-    """Icon tiles of one size, as many to a row as the sidebar's width holds (Blender's automatic
-    columns), as Maya's and the app's tool palettes."""
+    """Labeled tiles of one size, as many to a row as the sidebar's width holds (Blender's
+    automatic columns), as Maya's and the app's tool palettes."""
     grid = layout.grid_flow(row_major=True, columns=columns, even_columns=True, even_rows=True, align=True)
-    grid.scale_x = grid.scale_y = TILE_SCALE
+    grid.scale_y = TILE_SCALE
     for t in tool_ids:
         tile(grid, t, active)
     return grid
@@ -272,10 +274,11 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                     continue  # the painting brush lives on the Paint tab, beside the maps it paints
                 layout.label(text=category)
                 grid = tool_grid(layout, ids, t.tool)
-                if "freeze" in ids:  # beside Freeze, an icon: every guide brushable again (its tooltip says so)
+                if "freeze" in ids:  # beside Freeze, a tile: every guide brushable again (its tooltip says so)
                     sub = grid.row(align=True)
-                    sub.scale_x = sub.scale_y = TILE_SCALE
-                    sub.operator("groomlab.guides_edit", text="", icon_value=icons.icon("unfreeze")).action = "UNFREEZE_ALL"
+                    sub.scale_y = TILE_SCALE
+                    sub.operator("groomlab.guides_edit", text="Unfreeze All",
+                                 icon_value=icons.icon("unfreeze")).action = "UNFREEZE_ALL"
         elif t.tab == "PAINT":
             tool_grid(layout, ["paint"], t.tool)
         if t.tab == "PHOTOS":

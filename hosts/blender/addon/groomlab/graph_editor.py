@@ -1378,10 +1378,8 @@ class GROOMLAB_PT_graph_presets(bpy.types.Panel):
 
 _draw_handle = [None]
 
-# The status on a node's header (the 2026-10-30 redesign's badges, Maya's and the app's): a dot in the
-# category's color before the title (minimal headers: the label leaves room for it, graph_tree's
-# draw_label), and right-aligned in the header row a warning triangle (a note: the node does nothing
-# as set), the cook time (muted, the warning color from SLOW_MS) and the View eye in the blue. An
+# The status on a node's header (the 2026-10-30 redesign's badges, Maya's and the app's): right-aligned
+# in the header row a warning triangle (a note: the node does nothing as set), the cook time (muted, the warning color from SLOW_MS) and the View eye in the blue. An
 # error keeps its red "!" on the corner.
 SLOW_MS = 10.0
 MUTED = (0.62, 0.62, 0.62, 1.0)       # the cook time under SLOW_MS (Blender's headers are lighter than Maya's cards)
@@ -1510,14 +1508,8 @@ def _draw_overlay_now():
         bx, by = ax + w * zoom, ay - h * zoom
         if bx < 0 or ax > region.width or ay < 0 or by > region.height:
             continue
-        category = "Output" if node.gl_is_output else graph_tree.category_of(node.gl_type)
-        accent = graph_tree._rgb(graph_tree.CATEGORY_COLORS.get(category, (142, 150, 158)))
         size = 11 * zoom * scale
         mid = ay - 0.5 * unit  # the header row's middle
-        # The category's dot in the room the label leaves before the name (Blender's title starts
-        # 1.6 units in: its margin and text padding).
-        lead = width(graph_tree.LABEL_LEAD, size)
-        disc(ax + 1.6 * unit + 0.5 * lead, mid, 0.18 * unit, accent)
         r = 8 * zoom * scale
         name = node.gl_name
         if name in errors:
