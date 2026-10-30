@@ -13,6 +13,33 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.37.0 (October 30, 2026)
+
+- **A cleaner, more modern UI** in Maya, the app and Blender. Charcoal is now the default theme
+  everywhere (a blue accent, the Inter font, underlined tabs, quiet uppercase section headers), and
+  the Graph Editor's nodes have filled headers with their status on the card: the cook time (yellow
+  from 10 ms), a warning triangle, bypassed nodes faded with dashed wires. Pick a theme in
+  **GroomLab > Theme** (the app: **View > Theme**); a theme you picked before stays.
+- **Sliders you can type into.** Every number is one field with its name inside: drag to scrub
+  (Shift: finer, Ctrl: coarser), or click and type a value or a little arithmetic (`0.5*2`, `1/3`);
+  Enter or Tab keeps it, Esc puts it back, the arrow keys nudge it. A typed value may go past the
+  slider's range.
+- **The Groom Tools, reorganized.** The header, tabs and tool tiles stay put; the picked tool's
+  settings sit right under the tiles, always in the same order: **Brush** (radius, strength,
+  falloff and its toggles), the tool's own settings (Paint's mode, value and Fill; Place's new
+  guides and tube; the Shape brush's profile editor; Erase, Length Keys, Flow, Parts), then
+  **Applies to** (Acts on, Mirror). A **?** on the card shows the tool's full hint and the
+  gestures. Under it, the tab's list: guide groups (click one to pick it; Isolate is the eye in its
+  header), maps, correctives or photos, with the picked one's own settings under the list.
+- **Moved:** Selected only and Front only are no longer in the panel (brushes keep their defaults);
+  the Output buttons are in the GroomLab menu (the app: **Render** and **Export** at the right of the
+  menu bar); While sculpting is in the groom's settings; Fill Tubes and Tube Blend are the
+  Interpolate node's settings.
+- **Length Keys replace Length Paths.** Click the scalp to drop a key (it changes nothing yet),
+  right-drag a key (Maya: middle-drag) to scale the guide lengths around it; the keys' scales blend
+  over the scalp along the skin and ease back past their spacing. **Apply** bakes the lengths (one
+  undo step) and the keys stay, back at x1. In Maya, the app and Blender.
+
 ## 0.36.0 (October 30, 2026)
 
 - **Length Paths.** A new tool (Trim) that sets guide lengths from paths of keys you lay on the
