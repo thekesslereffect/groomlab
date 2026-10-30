@@ -121,7 +121,7 @@ export const dimensions = [
     id: "tools", label: "Tool palette", group: "Controls",
     qt: "QToolButton grid (ToolButtonTextUnderIcon / IconOnly) or a QListWidget",
     choices: [
-      { id: "tiles", label: "Tiles", hint: "Icon + label grid (today)" },
+      { id: "tiles", label: "Tiles", hint: "Icon + name, fixed size; the width decides the columns" },
       { id: "icons", label: "Icons", hint: "Icon grid, names in tooltips" },
       { id: "list", label: "List", hint: "Rows: icon, name, shortcut" },
     ],
@@ -301,12 +301,12 @@ export type Options = { [K in DimId]: string };
 // Curated combinations: starting points to compare, not the only ones.
 export const directions: { id: string; label: string; hint: string; options: Partial<Options> }[] = [
   {
-    id: "chosen", label: "Chosen", hint: "Picked 2026-10-30: Quiet docks, duotone icons, underline tabs, minimal nodes",
+    id: "chosen", label: "Chosen", hint: "Picked 2026-10-30: Quiet docks, labeled tiles, underline tabs, filled node headers",
     options: {
       theme: "charcoal", accent: "blue", font: "inter", numbers: "tabular", density: "default", radius: "6",
       layout: "docks", chrome: "seams", output: "corner", onboarding: "viewport", hud: "plain",
-      tools: "icons", toolIcons: "color", rows: "fields", sliders: "fill", booleans: "checkbox", sections: "caps", tabs: "underline",
-      nodeHeader: "minimal", nodeBody: "ports", wires: "curved", wireColor: "type", ports: "dots", canvas: "dots", nodeStatus: "badges",
+      tools: "tiles", toolIcons: "color", rows: "fields", sliders: "fill", booleans: "checkbox", sections: "caps", tabs: "underline",
+      nodeHeader: "filled", nodeBody: "ports", wires: "curved", wireColor: "type", ports: "dots", canvas: "dots", nodeStatus: "badges",
       gtOptions: "chips", gtBlocks: "labeled", gtHints: "short", gtGroups: "list", gtPin: "tools", gtTubes: "split",
     },
   },

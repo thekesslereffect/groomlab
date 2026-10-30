@@ -103,7 +103,7 @@ function ToolButton({ tool, style }: { tool: Tool; style: string }) {
       onClick={() => tool.id !== "unfreeze" && setTool(tool.id)}
       title={tool.tip}
       className={cn(
-        "flex flex-col items-center justify-center gap-1 rounded-ctl border py-1.5 outline-none",
+        "flex h-[50px] w-[56px] flex-col items-center justify-center gap-1 rounded-ctl border outline-none",
         on ? "border-accent bg-selection text-fg" : "border-line bg-raised text-dim hover:bg-hover hover:text-fg",
       )}
     >
@@ -125,7 +125,7 @@ export function ToolPalette({ columns }: { columns?: number }) {
               columns = width / (tile + spacing), tiles fixed, left-aligned). */}
           <div
             className={cn("grid gap-1", style === "list" && "gap-0")}
-            style={{ gridTemplateColumns: style === "icons" ? "repeat(auto-fill, 34px)" : style === "tiles" ? "repeat(auto-fill, minmax(60px, 1fr))" : `repeat(${cols}, minmax(0, 1fr))` }}
+            style={{ gridTemplateColumns: style === "icons" ? "repeat(auto-fill, 34px)" : style === "tiles" ? "repeat(auto-fill, 56px)" : `repeat(${cols}, minmax(0, 1fr))` }}
           >
             {g.tools.map((tool) => <ToolButton key={tool.id} tool={tool} style={style} />)}
           </div>

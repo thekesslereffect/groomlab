@@ -398,7 +398,7 @@ void MainWindow::setRailLabels(bool shown, bool save) {
 
 bool MainWindow::railLabels() const { return shell_->railLabels(); }
 
-void MainWindow::restoreRailLabels() { setRailLabels(QSettings().value(QStringLiteral("ui/toolLabels"), false).toBool(), false); }
+void MainWindow::restoreRailLabels() { setRailLabels(QSettings().value(QStringLiteral("ui/toolLabels"), true).toBool(), false); }
 
 void MainWindow::checkForUpdates() {
     const QString current = QCoreApplication::applicationVersion().isEmpty() ? QStringLiteral("0") : QCoreApplication::applicationVersion();

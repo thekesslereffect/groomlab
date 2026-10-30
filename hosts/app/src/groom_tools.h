@@ -207,7 +207,7 @@ private:
     bool updating_ = false;
     QString name_;
     std::string tool_;
-    bool tileLabels_ = false;  // icons alone (View > Tool Labels: the names under them)
+    bool tileLabels_ = true;  // the names under the icons (View > Tool Labels off: icons alone)
     std::vector<GroupRow> groups_;
     // Pinned.
     QWidget* pinned_ = nullptr;

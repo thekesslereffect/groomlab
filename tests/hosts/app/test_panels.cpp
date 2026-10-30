@@ -824,9 +824,11 @@ TEST(AppPanels, ValueSliderPaintsItsFillStateAndDisabledLook) {
 TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     // The Groom Tools' tiles (the core's catalog, Maya's grouping): Create, Shape, Trim and Guides
     // on the Tools tab (Unfreeze All beside Freeze), Paint on the Paint tab; a grid that wraps to
-    // the dock's width, icons alone (the names in the tool tips; Tool Labels: under the icons).
+    // the dock's width, the names under the icons (Tool Labels off: icons alone, the names in the
+    // tool tips).
     GroomTools tools;
-    EXPECT_FALSE(tools.tileLabels()) << "icons alone by default";
+    EXPECT_TRUE(tools.tileLabels()) << "labeled tiles by default";
+    tools.setTileLabels(false);
     EXPECT_EQ(tools.tiles().size(), 23u) << "Select, Freeze, the 20 tools (Paint and Length Keys among them) and Unfreeze All";
     for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "unfreeze"}) {
         EXPECT_NE(tools.tile(id), nullptr) << id;
@@ -4062,10 +4064,10 @@ TEST(AppPanels, ToolLabelsUnderTheTilesAndCompactTiles) {
     window.show();
     AppShell* host = window.shell();
     ASSERT_TRUE(window.openGroom(QString::fromStdString(kSampleGroom)));
-    EXPECT_FALSE(host->railLabels()) << "icons alone by default, the names in the tool tips";
+    EXPECT_TRUE(host->railLabels()) << "labeled tiles by default";
     QAction* toggle = window.findChild<QAction*>(QStringLiteral("railLabels"));
     ASSERT_NE(toggle, nullptr);
-    EXPECT_FALSE(toggle->isChecked());
+    EXPECT_TRUE(toggle->isChecked());
     // Docked in the Groom Tools: the tiles stay within the dock's width with their names (the
     // column scrolls up and down).
     window.setRailLabels(true, false);

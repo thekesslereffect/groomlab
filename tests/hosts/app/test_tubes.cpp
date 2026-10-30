@@ -12,6 +12,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QResizeEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMouseEvent>
@@ -429,8 +430,8 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
 }
 
 TEST(AppGroomTools, TilesKeepTheirSizeAndTheColumnsFollowTheWidth) {
-    // The pinned grid: every tile one fixed size (34 px, 20 px icons), left-aligned, never
-    // stretched; as many to a row as (width + spacing) / (tile + spacing).
+    // The pinned grid: every tile one fixed size (labeled 56 x 50, icons alone 34 x 34; 20 px
+    // icons), left-aligned, never stretched; as many to a row as (width + spacing) / (tile + spacing).
     GroomTools tools;
     tools.setGroomName(QStringLiteral("sample"));
     EXPECT_TRUE(tools.pinned()->isAncestorOf(tools.tabBar()));
@@ -439,21 +440,27 @@ TEST(AppGroomTools, TilesKeepTheirSizeAndTheColumnsFollowTheWidth) {
     EXPECT_TRUE(tools.scrollArea()->isAncestorOf(tools.card()));
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);
-    EXPECT_EQ(grid->tile(), QSize(34, 34));
-    for (const int width : {120, 200, 252, 320, 480}) {
-        const int columns = grid->columnsFor(width);
-        EXPECT_EQ(columns, (width + grid->spacing()) / (34 + grid->spacing())) << width;
-        grid->resize(width, grid->heightForWidth(width));
-        int lefts = 0;
-        for (QAbstractButton* t : grid->findChildren<QAbstractButton*>()) {
-            EXPECT_EQ(t->size(), QSize(34, 34)) << "a tile stretched at " << width;
-            EXPECT_EQ((t->x()) % (34 + grid->spacing()), 0) << "on the grid's columns, from the left";
-            EXPECT_LE(t->geometry().right(), width);
-            if (t->x() == 0) ++lefts;
+    for (const bool labels : {true, false}) {
+        tools.setTileLabels(labels);
+        const QSize tile = labels ? QSize(56, 50) : QSize(34, 34);
+        EXPECT_EQ(grid->tile(), tile) << "labels " << labels;
+        for (const int width : {120, 200, 252, 320, 480}) {
+            const int columns = grid->columnsFor(width);
+            EXPECT_EQ(columns, (width + grid->spacing()) / (tile.width() + grid->spacing())) << width;
+            grid->resize(width, grid->heightForWidth(width));
+            QResizeEvent resized(grid->size(), QSize());  // a hidden widget gets its resize event on show
+            QCoreApplication::sendEvent(grid, &resized);
+            int lefts = 0;
+            for (QAbstractButton* t : grid->findChildren<QAbstractButton*>()) {
+                EXPECT_EQ(t->size(), tile) << "a tile stretched at " << width;
+                EXPECT_EQ((t->x()) % (tile.width() + grid->spacing()), 0) << "on the grid's columns, from the left";
+                EXPECT_LE(t->geometry().right(), width);
+                if (t->x() == 0) ++lefts;
+            }
+            EXPECT_GT(lefts, 0);
         }
-        EXPECT_GT(lefts, 0);
+        EXPECT_GT(grid->heightForWidth(120), grid->heightForWidth(480)) << "narrower: more rows";
     }
-    EXPECT_GT(grid->heightForWidth(120), grid->heightForWidth(480)) << "narrower: more rows";
     QAbstractButton* comb = tools.tile("comb");
     EXPECT_EQ(qobject_cast<QToolButton*>(comb)->iconSize(), QSize(20, 20));
 }

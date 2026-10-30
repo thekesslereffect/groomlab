@@ -555,7 +555,7 @@ void GroomTools::groupPicked(const std::string& name) {
 
 void GroomTools::refreshTiles() {
     const qreal dpr = devicePixelRatioF();
-    const int iconSize = tileLabels_ ? 22 : 20;
+    const int iconSize = 20;
     // The icons in their two tones (the group's color and the ink, as Maya's); checked, a glass
     // theme's in the accent's text (on the accent), a solid theme's as at rest (on the selection).
     const bool glass = theme::glassy();

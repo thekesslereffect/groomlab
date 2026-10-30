@@ -66,7 +66,7 @@ brush_catalog.cpp and palette.py). One model, every tab:
 **Pick a tool → its card right under the grid → the list of things you work on.**
 
 1. **Pinned top** (outside the QScrollArea): groom header, tabs, the tool grid. Tool tiles keep a
-   fixed size (34 px); columns = `(width + spacing) / (tile + spacing)`, left-aligned, never stretched.
+   fixed size (labeled tiles 56 x 50 px: 20 px icon over the name, ToolButtonTextUnderIcon; icon-only 34 px); columns = `(width + spacing) / (tile + spacing)`, left-aligned, never stretched.
 2. **The tool card**, always the same blocks in the same order (a block only shows when it has rows):
    - Title row: icon, name, a **?** glyph (tooltip: the full hint + the gestures), then one short line.
    - **Brush**: how the stroke feels. Radius, Strength (±), Falloff, Smooth; chips Pressure,
