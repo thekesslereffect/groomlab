@@ -58,6 +58,37 @@ artifacts this starts from: a theme JSON for `hosts/maya/themes/` (same `ui` / `
 | HUD chips | `QLabel`s with `border-radius` over the viewport | |
 | Graph node card | the app's node graph painter: header tinted 16% with the category color, dot, 1px border | colors from theme `graph` keys |
 
+## Groom Tools layout (the full panel)
+
+The lab's Groom Tools hold every control each tool has today (src/data/toolSettings.ts, from
+brush_catalog.cpp and palette.py), arranged by these rules:
+
+- **Pinned top**: groom header, tabs and the tool grid sit outside the QScrollArea; the tool card
+  and the lists scroll under them (Scrolling: Pin tools).
+- **Tool grid**: icon tiles keep a fixed size (34 px); the column count is
+  `(width + spacing) / (tile + spacing)`, tiles left-aligned. Tiles never stretch with the panel.
+- **Tool card**: icon + name + a ? glyph (its tooltip: the full hint and the gestures), one short
+  line, then Radius / Strength / Falloff, Symmetry (only tools that mirror), the tool's own rows.
+- **Options as chips**: Selected only, Pressure, Off scalp, Front only, Stretch, Falloff curve,
+  Root to tip as one wrapping row of checkable chips (QToolButton[role="chip"] in a flow layout),
+  always in the same order; a curve chip that's on shows its ramp editor under the row.
+- **Chip rows** (Acts on, Erases, Paints, Mode, Show on, Guides Scale/Trim) put their name above
+  the chips, never in the label column.
+- **Sub-blocks** (New guides, Tube, Selected guides, Keys, Flow, Parts, Alpha): a small muted name
+  with its one action on the right (Clear, Smooth, Clear all), then fill fields.
+- **Tubes split by job**: the shape new guides take lives in the Place / Draw card (Tube); edits to
+  the selected guides live in the Shape / Select card (Selected guides: shape + Apply, Width,
+  Flatness, Twist, Smooth). Fill Tubes and Tube Blend belong to the Interpolate node, not the panel.
+- **Guide groups**: one always-open list section under the card (color dot, name, count, eye; the
+  header has Isolate and +), then Edit guides ▾, rename / select / delete glyphs and Segments. No
+  Group combo at the top: clicking a row picks the group.
+- **Other tabs** use the same list look: Maps (Paint), Layers (Correctives), Photos — a section
+  whose header holds the add/import glyphs, a plain list, then the picked item's fields. The Paint
+  tab ends with the Paint brush card; Correctives with the active tool's card.
+- **Gone from the panel**: the Output strip (GroomLab menu; the app's menu bar corner), While
+  sculpting (Attribute Editor / Properties), the gestures paragraph (? tooltip), duplicate
+  Unfreeze All button (the tile stays), the repeated hint text.
+
 ## Graph nodes
 
 The app (`hosts/app/src/node_graph.cpp`) and Maya (`ui/graph_editor.py`) paint nodes with QPainter,

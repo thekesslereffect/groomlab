@@ -73,7 +73,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     save(KEY, options);
-    const keep = window.location.hash.match(/(lab|graph|page)=[^&]*/g) ?? [];
+    const keep = window.location.hash.match(/(lab|graph|page|tool|tab)=[^&]*/g) ?? [];
     const h = [toHash(options), ...keep].filter(Boolean).join("&");
     history.replaceState(null, "", h ? `#${h}` : window.location.pathname);
   }, [options]);

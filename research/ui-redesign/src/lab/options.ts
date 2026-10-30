@@ -178,6 +178,50 @@ export const dimensions = [
     ],
   },
 
+  // ---- Groom Tools layout (the full panel: every control each tool has today) ----
+  {
+    id: "gtOptions", label: "Brush options", group: "Groom Tools",
+    qt: "Checkable QToolButtons in a flow row (chips), a fold Section, or a fixed QGridLayout",
+    choices: [
+      { id: "chips", label: "Chips", hint: "Pressure / Front only / Off scalp… as one row of toggles" },
+      { id: "fold", label: "Fold", hint: "Behind a collapsed 'Options' row that lists what's on" },
+      { id: "grid", label: "Checkboxes", hint: "Today's checkboxes, in fixed places per tool" },
+    ],
+  },
+  {
+    id: "gtHints", label: "Tool hints", group: "Groom Tools",
+    qt: "One elided QLabel + a ? glyph with the full tip and the gestures",
+    choices: [
+      { id: "short", label: "One line + ?", hint: "A short line; the full text and gestures behind ?" },
+      { id: "full", label: "Full text", hint: "Today: the whole hint and the gestures paragraph" },
+    ],
+  },
+  {
+    id: "gtGroups", label: "Guide groups", group: "Groom Tools",
+    qt: "A QListView section under the brush (or today's combo + folded section)",
+    choices: [
+      { id: "list", label: "Open list", hint: "Always-open list: click picks the group" },
+      { id: "combo", label: "Combo + fold", hint: "Today: Group combo at the top, list folded at the bottom" },
+    ],
+  },
+  {
+    id: "gtPin", label: "Scrolling", group: "Groom Tools",
+    qt: "Header + tabs (+ tool grid) outside the QScrollArea",
+    choices: [
+      { id: "tools", label: "Pin tools", hint: "Header, tabs and the tool grid stay; settings scroll" },
+      { id: "header", label: "Pin header", hint: "Header and tabs stay; the rest scrolls" },
+      { id: "none", label: "All scroll", hint: "Today" },
+    ],
+  },
+  {
+    id: "gtTubes", label: "Tubes", group: "Groom Tools",
+    qt: "Split TubePanel: new-guide shape in Place/Draw, edits in Shape/Select, Fill/Blend to Interpolate",
+    choices: [
+      { id: "split", label: "Split by job", hint: "New-guide shape in Place/Draw; selected-guide edits in Shape/Select" },
+      { id: "section", label: "One section", hint: "Today: one Tubes section for everything" },
+    ],
+  },
+
   // ---- Graph (painted with QPainter in both hosts: none of QSS's limits apply) ----
   {
     id: "nodeHeader", label: "Node header", group: "Graph",
@@ -255,6 +299,7 @@ export const directions: { id: string; label: string; hint: string; options: Par
       layout: "docks", chrome: "seams", output: "corner", onboarding: "viewport", hud: "plain",
       tools: "icons", toolIcons: "color", rows: "fields", sliders: "fill", booleans: "checkbox", sections: "caps", tabs: "underline",
       nodeHeader: "minimal", nodeBody: "ports", wires: "curved", wireColor: "type", ports: "dots", canvas: "dots", nodeStatus: "badges",
+      gtOptions: "chips", gtHints: "short", gtGroups: "list", gtPin: "tools", gtTubes: "split",
     },
   },
   {
@@ -264,6 +309,7 @@ export const directions: { id: string; label: string; hint: string; options: Par
       layout: "docks", chrome: "seams", output: "panel", onboarding: "card", hud: "pills",
       tools: "tiles", toolIcons: "color", rows: "split", sliders: "track", booleans: "checkbox", sections: "cards", tabs: "underline",
       nodeHeader: "tinted", nodeBody: "ports", wires: "curved", wireColor: "type", ports: "dots", canvas: "lines", nodeStatus: "none",
+      gtOptions: "grid", gtHints: "full", gtGroups: "combo", gtPin: "none", gtTubes: "section",
     },
   },
   {

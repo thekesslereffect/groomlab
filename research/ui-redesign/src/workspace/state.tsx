@@ -13,10 +13,10 @@ type WS = {
 const Ctx = createContext<WS | null>(null);
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [tool, setTool] = useState("comb");
+  const [tool, setTool] = useState(() => window.location.hash.match(/tool=(\w+)/)?.[1] ?? "comb");
   const [graphOpen, setGraphOpen] = useState(() => /(^|[#&])graph=[12]/.test(window.location.hash));
   const [graphMax, setGraphMax] = useState(() => /(^|[#&])graph=2/.test(window.location.hash));
-  const [toolsTab, setToolsTab] = useState("tools");
+  const [toolsTab, setToolsTab] = useState(() => window.location.hash.match(/tab=(\w+)/)?.[1] ?? "tools");
   const [propsTab, setPropsTab] = useState("attributes");
   const [railPanel, setRailPanel] = useState<"tools" | "properties">("properties");
   return (
