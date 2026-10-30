@@ -3895,9 +3895,10 @@ class DockableWindowsTest(unittest.TestCase):
         finally:
             updates.close()
 
-    def test_output_strip_and_alembic_curves_import(self):
-        """Groom Tools' Output strip runs the GroomLab menu's items (one table); Import > Alembic
-        Curves... makes the file's curves the groom's guides in one undo step."""
+    def test_output_menu_and_alembic_curves_import(self):
+        """The steps after grooming are the GroomLab menu's (the Groom Tools have no Output strip any
+        more; the empty state keeps Import); Import > Alembic Curves... makes the file's curves the
+        groom's guides in one undo step."""
         import tempfile
         from PySide2 import QtWidgets
         from groomlab import sim
@@ -3905,28 +3906,15 @@ class DockableWindowsTest(unittest.TestCase):
         cmds.select(self.groom)
         tools = palette.show()
         try:
-            self.assertTrue(tools.output_section.expanded())
-            self.assertTrue(tools.output_strip.isVisibleTo(tools))
-            labels = [c.text() for c in tools.output_chips]
-            self.assertEqual([t.split("  ")[0] for t in labels], ["Simulate Range", "Export", "Render", "Studio",
-                                                                  "Transfer...", "Import"])
-
-            def actions(kind):
-                chip = tools.findChild(QtWidgets.QToolButton, "output_" + kind)
-                return [a.text() for a in chip.menu().actions() if not a.isSeparator()]
-            exports = actions("export")
-            for label in ("Alembic...", "USD...", "Unreal Groom...", "Unity Strands (.abc)...", "glTF Cards..."):
-                self.assertIn(label, exports)
-            self.assertNotIn("Scales Mesh (FBX)...", exports)  # the menu's long list only
-            self.assertIn("Alembic Curves...", actions("import"))
-            self.assertIn("Render Turntable...", actions("render"))
-            self.assertIn("Portrait", actions("studio"))
-            self.assertIn("Remove Studio", actions("studio"))
-            # The menu shows the same table, without the strip's shortcuts.
+            self.assertIsNone(tools.findChild(QtWidgets.QWidget, "groomToolsOutput"))
+            self.assertIsNotNone(tools.empty_import.menu())
             menu_exports = [i[0] for i in menu.shown_items("export", menu.MENU_ONLY) if i]
-            self.assertIn("Scales Mesh (FBX)...", menu_exports)
+            for label in ("Alembic...", "USD...", "Unreal Groom...", "Unity Strands (.abc)...", "glTF Cards...",
+                          "Scales Mesh (FBX)..."):
+                self.assertIn(label, menu_exports)
             self.assertNotIn("Save Groom File As...", menu_exports)
             self.assertIn("Alembic Curves...", [i[0] for i in menu.shown_items("import", menu.MENU_ONLY) if i])
+            self.assertIn("Portrait", [i[0] for i in menu.shown_items("studio", menu.MENU_ONLY) if i])
             self.assertIsNot(menu.shown_items("render", menu.MENU_ONLY)[-1], None)  # no trailing divider
         finally:
             tools.close()
@@ -3972,17 +3960,19 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertIn("shape", [t for t, _, _ in dict(palette.SECTIONS)["Shape"]])
             self.assertNotIn("tube", window.buttons)
             self.assertEqual(palette.NAMES["straighten"], "Straighten")
-            self.assertEqual(window.mask_scalp.text(), "Front facing only")
+            # Selected only and Front only left the panel (the brushes keep their defaults).
+            self.assertFalse(hasattr(window, "mask_scalp") or hasattr(window, "selected_only"))
             self.assertEqual(window.falloff.label(), "Falloff")  # the name inside its fill field
             window.buttons["paint"].click()
             self.assertFalse(window.collide.isVisibleTo(window))  # painting: no collide, as the catalog says
+            self.assertEqual(window.tabs.currentIndex(), palette.TABS.index("paint"))  # Paint shows its maps
             window.buttons["comb"].click()  # Comb: keep lengths or stretch
+            self.assertEqual(window.tabs.currentIndex(), palette.TABS.index("tools"))  # another brush: its card
             self.assertTrue(window.stretch_box.isVisibleTo(window))
             window.stretch.setChecked(True)
             self.assertTrue(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, stretch=True))
             window.stretch.setChecked(False)
             self.assertFalse(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, stretch=True))
-            self.assertEqual(window.tabs.currentIndex(), palette.TABS.index("paint"))  # Paint shows its maps
             self.assertEqual(window.paint_tab.current(), "fur")
             window.buttons["freeze"].click()  # Freeze is a brush on the Tools tab
             self.assertEqual(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, attribute=True), "freeze")
@@ -4033,27 +4023,24 @@ class DockableWindowsTest(unittest.TestCase):
             window.buttons["part"].click()  # parts are drawn from the palette too
             self.assertEqual(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, mode=True), "part")
             self.assertTrue(window.part_box.isVisibleTo(window))
-            # Only the sections the tool uses (palette.json's "tools"): Part draws no tubes and strokes no
-            # strands; the guide groups (Tools tab) and Output always there.
-            self.assertFalse(window.tubes_section.isVisibleTo(window))
-            self.assertFalse(window.display_section.isVisibleTo(window))
+            # Only the blocks the tool uses: Part draws no tubes; the guide groups on the Tools tab.
+            panel = window.tube_panel
+            self.assertFalse(any(b.isVisibleTo(window) for b in panel.blocks))
             self.assertEqual(window.guides_section.isVisibleTo(window),
                              palette.TABS[window.tabs.currentIndex()] == "tools")  # (the Tools tab's)
-            self.assertTrue(window.output_section.isVisibleTo(window))
             window.buttons["twist"].click()
             self.assertEqual(window.strength.lo, -1.0)  # signed tools get a signed strength
-            self.assertTrue(window.display_section.isVisibleTo(window))  # While sculpting: with the brushes
-            self.assertFalse(window.tubes_section.isVisibleTo(window))
-            # The Shape brush: what it paints (Width, Flatness, Twist), and the selected guides' tubes
-            # as a whole with the groom's Fill Tubes (each change one undo step).
+            self.assertFalse(any(b.isVisibleTo(window) for b in panel.blocks))
+            # The Shape brush: what it paints (Width, Flatness, Twist), its profile and the selected
+            # guides' tubes as a whole (each change one undo step).
             window.groom_picked(window.grooms.findData(self.groom))
             window.buttons["shape"].click()
             self.assertEqual(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, mode=True), "shape")
             self.assertEqual(window.strength.lo, -1.0)  # Ctrl does the opposite
             self.assertTrue(window.tube_channel_box.isVisibleTo(window))
-            self.assertTrue(window.tubes_section.expanded())  # its own section, opened by the Shape brush
-            self.assertTrue(window.tubes_section.isVisibleTo(window))
-            self.assertTrue(window.tube_panel.isVisibleTo(window))
+            self.assertTrue(window.tube_panel.profile_block.isVisibleTo(window))  # in the Shape brush's card
+            self.assertTrue(window.tube_panel.selected_block.isVisibleTo(window))
+            self.assertFalse(window.tube_panel.tube_block.isVisibleTo(window))  # (Place's and Draw's)
             self.assertFalse(window.collide.isVisibleTo(window))  # it moves no guide point
             window.tube_channel_buttons["flatness"].click()
             self.assertEqual(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, tubeChannel=True), "flatness")
@@ -4106,14 +4093,9 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertAlmostEqual(groomlab.get_tube(self.groom, guide)["twist"][0], math.pi / 2, places=4)  # not smoothed
             cmds.undo()
             self.assertEqual(len(groomlab.get_tube(self.groom, guide)["aspect"]), 5)
-            self.assertTrue(panel.fill.isEnabled())  # the default graph's Interpolate
-            panel.fill.setChecked(True)
-            self.assertTrue(groomlab.fill_tubes(self.groom)["fillTubes"])
-            panel.blend.committed.emit(40.0)
-            self.assertAlmostEqual(groomlab.fill_tubes(self.groom)["tubeBlend"], 0.4, places=5)
-            cmds.undo()
-            cmds.undo()
-            self.assertFalse(groomlab.fill_tubes(self.groom)["fillTubes"])
+            # Fill Tubes and Tube Blend are the Interpolate node's (its settings in the Graph Editor),
+            # not the panel's.
+            self.assertFalse(hasattr(panel, "fill") or hasattr(panel, "blend"))
             groomlab.clear_guide_selection(self.groom)
             groomlab.set_current_groom(None)  # the selected groom leads again
             window.radius.setValue(150)
@@ -4168,7 +4150,8 @@ class DockableWindowsTest(unittest.TestCase):
             groomlab.flow_stroke(self.groom, [(-0.3 + 0.1 * i, 0.9, 0.3) for i in range(7)], radius=0.2)
             window.buttons["flow"].click()
             self.assertTrue(window.flow_box.isVisibleTo(window))
-            self.assertFalse(window.tubes_section.isVisibleTo(window))
+            self.assertFalse(any(b.isVisibleTo(window) for b in window.tube_panel.blocks))
+            self.assertFalse(window.symmetry_row.isVisibleTo(window))  # Flow doesn't mirror
             arrows = len(groomlab.flow_arrows(self.groom))
             self.assertEqual(window.flow_count.text(), palette.flow_count_text(arrows, 0))
             self.assertEqual(window.clear_flow_button.isEnabled(), arrows > 0)
@@ -4179,7 +4162,7 @@ class DockableWindowsTest(unittest.TestCase):
             window.buttons["select"].click()
             self.assertEqual(cmds.currentCtx(), groomlab.SELECT_CONTEXT)
             self.assertFalse(window.radius.isEnabled())
-            self.assertTrue(window.tubes_section.isVisibleTo(window))  # the selected guides' tubes
+            self.assertTrue(window.tube_panel.selected_block.isVisibleTo(window))  # the selected guides' tubes
             self.assertFalse(window.flow_box.isVisibleTo(window))
             self.assertTrue(widgets.icon("comb").availableSizes() or not widgets.icon("comb").isNull())
             # Guide groups (a Tools section): the groups, and edits on many guides.
@@ -4218,7 +4201,7 @@ class DockableWindowsTest(unittest.TestCase):
             window.close()
 
     def test_tube_shape_editor_and_library(self):
-        # The Tubes panel's shape editor: a built-in shown read-only, Edit as Custom copying it into
+        # The Profile block's shape editor: a built-in shown read-only, Edit as custom copying it into
         # the library (the targets take it), points dragged (mirrored), added and removed, each a
         # commit every guide taking the shape follows; New, Duplicate, Rename in place, Delete on a
         # second click (no dialogs); the panel following a Shift+click solo; Place's tube.
@@ -4318,7 +4301,8 @@ class DockableWindowsTest(unittest.TestCase):
             groomlab.set_guide_attribute(self.groom, "freeze", 0.0, guides=guides)
             groomlab.clear_guide_selection(self.groom)
             window.buttons["place"].click()
-            self.assertTrue(panel.isVisibleTo(window))
+            self.assertTrue(panel.tube_block.isVisibleTo(window))  # Place's Tube block: what new guides get
+            self.assertFalse(panel.profile_block.isVisibleTo(window))
             panel.refresh(self.groom)
             panel.shape.setCurrentIndex(panel.shape.findData("teardrop"))
             panel.shape.activated.emit(panel.shape.currentIndex())

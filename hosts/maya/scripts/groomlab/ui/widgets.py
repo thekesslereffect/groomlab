@@ -488,7 +488,250 @@ GLYPHS = {
                   'fill="{c}"/><path d="M11.6 7.2 L16.8 12.4" stroke="{c}" stroke-width="1.8" stroke-linecap="round"/>'
                   '<path d="M13.4 9.8 L6.2 17 L5 19 L7 17.8 L14.2 10.6" fill="none" stroke="{c}" stroke-width="1.8" '
                   'stroke-linejoin="round"/>',
+    # The Groom Tools' lists and cards: add, import, key, help, duplicate, curves.
+    "plus": '<path d="M12 5 V19 M5 12 H19" fill="none" stroke="{c}" stroke-width="1.9" stroke-linecap="round"/>',
+    "import": '<rect x="3.5" y="6" width="13" height="13" rx="2" fill="none" stroke="{c}" stroke-width="1.7"/>'
+              '<path d="M3.8 16 L8.2 11.8 L12.5 16" fill="none" stroke="{c}" stroke-width="1.7" stroke-linejoin="round"/>'
+              '<path d="M18.5 3 V9.5 M15.25 6.25 H21.75" fill="none" stroke="{c}" stroke-width="1.8" stroke-linecap="round"/>',
+    "key": '<path d="M12 4.5 L19.5 12 L12 19.5 L4.5 12 Z" fill="none" stroke="{c}" stroke-width="1.8" '
+           'stroke-linejoin="round"/>',
+    "keyed": '<path d="M12 4.5 L19.5 12 L12 19.5 L4.5 12 Z" fill="{c}" stroke="{c}" stroke-width="1.8" '
+             'stroke-linejoin="round"/>',
+    "help": '<circle cx="12" cy="12" r="8.6" fill="none" stroke="{c}" stroke-width="1.7"/>'
+            '<path d="M9.6 9.6 A2.5 2.5 0 1 1 13.2 11.9 C12.4 12.3 12 12.8 12 13.8" fill="none" stroke="{c}" '
+            'stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="16.7" r="1.1" fill="{c}"/>',
+    "duplicate": '<rect x="8" y="8" width="11.5" height="11.5" rx="2" fill="none" stroke="{c}" stroke-width="1.7"/>'
+                 '<path d="M15.5 5.2 V5 A1.5 1.5 0 0 0 14 3.5 H6 A1.5 1.5 0 0 0 4.5 5 V14 A1.5 1.5 0 0 0 6 15.5 H6.2" '
+                 'fill="none" stroke="{c}" stroke-width="1.7" stroke-linecap="round"/>',
+    "curves": '<path d="M4 19 C8 19 7 5 12 5 C17 5 16 19 20 19" fill="none" stroke="{c}" stroke-width="1.8" '
+              'stroke-linecap="round"/><circle cx="4" cy="19" r="1.8" fill="{c}"/><circle cx="20" cy="19" r="1.8" '
+              'fill="{c}"/>',
 }
+
+
+def glyph_button(name, tip="", slot=None, checkable=False, menu=None):
+    """A small borderless button showing a line glyph (GLYPHS; it follows the theme's text color):
+    the Groom Tools' header and list actions. `slot` runs on a click; `menu` opens instead."""
+    from groomlab.ui import theme
+    b = QtWidgets.QToolButton()
+    b.setIcon(glyph(name))
+    b.glyph = name
+    b.setIconSize(QtCore.QSize(theme.px(16), theme.px(16)))
+    b.setFixedSize(theme.px(24), theme.px(24))
+    b.setAutoRaise(True)
+    b.setCheckable(checkable)
+    b.setProperty("role", "glyph")
+    b.setToolTip(tip)
+    if menu is not None:
+        b.setMenu(menu)
+        b.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+    elif slot is not None:
+        b.clicked.connect(lambda _=False: slot())
+    return b
+
+
+def chip(text, tip="", checked=None, name=None):
+    """A chip: a small rounded button (QToolButton[role="chip"]); toggles when `checked` is given
+    (its state), else a plain action."""
+    b = QtWidgets.QToolButton()
+    b.setText(text)
+    b.setToolTip(tip)
+    b.setProperty("role", "chip")
+    if name:
+        b.setObjectName(name)
+    if checked is not None:
+        b.setCheckable(True)
+        b.setChecked(bool(checked))
+    return b
+
+
+class FlowLayout(QtWidgets.QLayout):
+    """Items left to right, wrapping onto a new line when the width runs out (the chips' rows)."""
+
+    def __init__(self, parent=None, spacing=None):
+        super(FlowLayout, self).__init__(parent)
+        from groomlab.ui import theme
+        self._items = []
+        self._gap = theme.px(4) if spacing is None else spacing
+        self.setContentsMargins(0, 0, 0, 0)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._arrange(QtCore.QRect(0, 0, width, 0), move=False)
+
+    def setGeometry(self, rect):
+        super(FlowLayout, self).setGeometry(rect)
+        self._arrange(rect, move=True)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QtCore.QSize()
+        for item in self._items:
+            if not item.isEmpty():
+                size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        return size + QtCore.QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _arrange(self, rect, move):
+        m = self.contentsMargins()
+        x, y = rect.x() + m.left(), rect.y() + m.top()
+        right = rect.right() - m.right()
+        line = 0
+        for item in self._items:
+            if item.isEmpty():
+                continue
+            hint = item.sizeHint()
+            if x > rect.x() + m.left() and x + hint.width() - 1 > right:
+                x = rect.x() + m.left()
+                y += line + self._gap
+                line = 0
+            if move:
+                item.setGeometry(QtCore.QRect(QtCore.QPoint(x, y), hint))
+            x += hint.width() + self._gap
+            line = max(line, hint.height())
+        return y + line - rect.y() + m.bottom()
+
+
+def chip_row(buttons, parent=None):
+    """A wrapping row of chips (FlowLayout)."""
+    row = QtWidgets.QWidget(parent)
+    flow = FlowLayout(row)
+    for b in buttons:
+        flow.addWidget(b)
+    row.flow = flow
+    return row
+
+
+def hairline(faint=False):
+    """A 1px rule across the column (QFrame[role="rule"]; faint: the blocks' lighter one)."""
+    from groomlab.ui import theme
+    line = QtWidgets.QFrame()
+    line.setProperty("role", "ruleFaint" if faint else "rule")
+    line.setFixedHeight(max(1, theme.px(1)))
+    return line
+
+
+def small_label(text, role="muted", wrap=False):
+    label = QtWidgets.QLabel(text)
+    label.setProperty("role", role)
+    label.setWordWrap(wrap)
+    return label
+
+
+class Block(QtWidgets.QWidget):
+    """One of a tool card's labeled blocks: a small semibold dim title over a faint hairline, any
+    action glyphs on the title's right, then its rows (add())."""
+
+    def __init__(self, title, actions=(), name=None, parent=None):
+        super(Block, self).__init__(parent)
+        from groomlab.ui import theme
+        self.setProperty("role", "options")
+        if name:
+            self.setObjectName(name)
+        column = QtWidgets.QVBoxLayout(self)
+        column.setContentsMargins(0, theme.px(4), 0, 0)
+        column.setSpacing(theme.px(4))
+        column.addWidget(hairline(faint=True))
+        head = QtWidgets.QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(theme.px(2))
+        self.title = QtWidgets.QLabel(title)
+        self.title.setProperty("role", "block")
+        head.addWidget(self.title, 1)
+        self.head = head
+        for a in actions:
+            head.addWidget(a)
+        column.addLayout(head)
+        self.body = QtWidgets.QVBoxLayout()
+        self.body.setContentsMargins(0, 0, 0, 0)
+        self.body.setSpacing(theme.px(4))
+        column.addLayout(self.body)
+
+    def add(self, item, stretch=0):
+        """A widget or a layout as the next row."""
+        if isinstance(item, QtWidgets.QLayout):
+            self.body.addLayout(item)
+        else:
+            self.body.addWidget(item, stretch)
+        return item
+
+    def add_action(self, button):
+        self.head.addWidget(button)
+        return button
+
+    def labeled(self, text, *controls, **kwargs):
+        """A "name | control" row (combos and toggles): the name in the dim text, ~38% wide."""
+        from groomlab.ui import theme
+        row = QtWidgets.QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.px(6))
+        label = QtWidgets.QLabel(text)
+        label.setProperty("role", "rowLabel")
+        label.setMinimumWidth(theme.px(kwargs.get("label_width", 84)))
+        row.addWidget(label)
+        for c in controls:
+            if isinstance(c, QtWidgets.QLayout):
+                row.addLayout(c, 1)
+            else:
+                row.addWidget(c, 1 if isinstance(c, (QtWidgets.QComboBox, QtWidgets.QLineEdit)) else 0)
+        self.body.addLayout(row)
+        row.label = label
+        return label
+
+    def named(self, text, widget):
+        """A row with its name above it (chips don't fit a label column)."""
+        self.body.addWidget(small_label(text))
+        self.body.addWidget(widget)
+        return widget
+
+
+class ItemBox(QtWidgets.QFrame):
+    """Under a list: the picked item's own actions (glyphs, on the right) and settings, in a small
+    bordered box."""
+
+    def __init__(self, actions=(), parent=None):
+        super(ItemBox, self).__init__(parent)
+        from groomlab.ui import theme
+        self.setProperty("role", "itemBox")
+        column = QtWidgets.QVBoxLayout(self)
+        pad = theme.px(6)
+        column.setContentsMargins(pad, theme.px(3), pad, pad)
+        column.setSpacing(theme.px(4))
+        self.head = QtWidgets.QHBoxLayout()
+        self.head.setContentsMargins(0, 0, 0, 0)
+        self.head.setSpacing(theme.px(2))
+        self.head.addStretch(1)
+        for a in actions:
+            self.head.addWidget(a)
+        column.addLayout(self.head)
+        self.body = column
+
+    def add(self, item):
+        if isinstance(item, QtWidgets.QLayout):
+            self.body.addLayout(item)
+        else:
+            self.body.addWidget(item)
+        return item
+
+    def add_action(self, button):
+        self.head.addWidget(button)
+        return button
 
 
 def glyph(name, color=None, size=48):
@@ -501,63 +744,72 @@ def glyph(name, color=None, size=48):
 
 
 class ToolGrid(QtWidgets.QWidget):
-    """Square icon tiles that reflow to the panel's width: up to `columns` a row, at least two, so
-    a narrow dock shows every tile instead of clipping the last column; each tile as tall as its
-    column is wide."""
+    """Icon tiles of a fixed size (they never stretch with the panel), left aligned, as many to a
+    row as the width holds: columns = (width + spacing) // (tile + spacing), at least one (and up
+    to `columns`, when given)."""
 
-    def __init__(self, buttons, columns=6, parent=None):
+    def __init__(self, buttons, columns=None, parent=None):
         super(ToolGrid, self).__init__(parent)
         from groomlab.ui import theme
         self.buttons = list(buttons)
         self.max_columns = columns
         self.columns = None
-        self.grid = QtWidgets.QGridLayout(self)
-        self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setSpacing(theme.px(4))
-        self.grid.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)  # the width may go below 4 tiles
-        self._place(columns)
+        # No layout: the tiles are placed by hand (a layout would answer the height for a width in
+        # this widget's place, and a grid layout has no such answer).
+        self.spacing = theme.px(4)
+        for b in self.buttons:
+            b.setParent(self)
+        policy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+        self._place(len(self.buttons) or 1)
 
     def _tile(self):
         return max(b.minimumWidth() for b in self.buttons) if self.buttons else 0
 
-    def _place(self, columns):
-        columns = max(1, min(columns, self.max_columns))  # a short row keeps the tiles' size
-        if columns == self.columns:
+    def _place(self, columns, force=False):
+        columns = max(1, columns if not self.max_columns else min(columns, self.max_columns))
+        if columns == self.columns and not force:
             return
+        changed = columns != self.columns
         self.columns = columns
-        for b in self.buttons:
-            self.grid.removeWidget(b)
+        step = self._tile() + self.spacing
         for i, b in enumerate(self.buttons):
-            self.grid.addWidget(b, i // columns, i % columns)
-        for c in range(self.max_columns):
-            self.grid.setColumnStretch(c, 1 if c < columns else 0)
-        self.updateGeometry()
+            b.move((i % columns) * step, (i // columns) * step)
+        if changed:
+            self.updateGeometry()
 
     def columns_for(self, width):
-        spacing = self.grid.spacing()
-        return max(2, (width + spacing) // max(1, self._tile() + spacing))
+        return max(1, (width + self.spacing) // max(1, self._tile() + self.spacing))
 
-    def _square(self, width):
-        """Each tile as tall as a column is wide (a short row's tiles too: the columns stretch alike)."""
-        spacing = self.grid.spacing()
-        columns = max(1, self.columns or 1)
-        side = max(self._tile(), (width - (columns - 1) * spacing) // columns)
-        for b in self.buttons:
-            if b.minimumHeight() != side or b.maximumHeight() != side:
-                b.setFixedHeight(side)
+    def rows_for(self, width):
+        columns = self.columns_for(width)
+        if self.max_columns:
+            columns = min(columns, self.max_columns)
+        return max(1, -(-len(self.buttons) // max(1, columns)))
 
     def resizeEvent(self, event):
-        self._place(self.columns_for(event.size().width()))
-        self._square(event.size().width())
+        self._place(self.columns_for(event.size().width()), force=True)
         super(ToolGrid, self).resizeEvent(event)
 
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        if not self.buttons:
+            return 0
+        rows = self.rows_for(width)
+        return rows * self._tile() + (rows - 1) * self.spacing
+
     def minimumSizeHint(self):
-        spacing = self.grid.spacing()
-        columns = min(2, len(self.buttons) or 1)
-        return QtCore.QSize(columns * self._tile() + (columns - 1) * spacing, self.grid.minimumSize().height())
+        # (one row: the height a width needs comes from heightForWidth)
+        return QtCore.QSize(self._tile(), self._tile() if self.buttons else 0)
 
     def sizeHint(self):
-        return QtCore.QSize(self.grid.sizeHint().width(), self.grid.minimumSize().height())
+        columns = max(1, self.columns or 1)
+        spacing = self.spacing
+        width = columns * self._tile() + (columns - 1) * spacing
+        return QtCore.QSize(width, self.heightForWidth(max(width, self.width())))
 
 
 class Pages(QtWidgets.QWidget):
@@ -575,6 +827,7 @@ class Pages(QtWidgets.QWidget):
         layout.setSpacing(theme.px(8))
         track = QtWidgets.QFrame()
         track.setProperty("role", "segments")  # the hairline under the tabs
+        self.track = track  # the bar's row: a window may put it elsewhere (the Groom Tools pin it)
         row = QtWidgets.QHBoxLayout(track)
         row.setContentsMargins(0, 0, 0, 0)
         self.bar = QtWidgets.QTabBar()
@@ -634,8 +887,9 @@ class Section(QtWidgets.QWidget):
     """A titled section that folds away: click its header to show or hide `content`. The header:
     a chevron and the title in small spaced capitals, muted, under a hairline (no card)."""
 
-    def __init__(self, title, content, expanded=False, parent=None):
+    def __init__(self, title, content, expanded=False, parent=None, count=False, actions=()):
         super(Section, self).__init__(parent)
+        from groomlab.ui import theme
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -649,9 +903,39 @@ class Section(QtWidgets.QWidget):
         self.header.setFont(font)
         self.header.toggled.connect(self.set_expanded)
         self.content = content
-        layout.addWidget(self.header)
+        self.count = None
+        if count or actions:
+            # A list's section: the title, how many, then its glyphs (add, import...) on the right,
+            # all on one row under the hairline.
+            self.header.setProperty("inRow", "true")
+            self.header.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
+            self.row = QtWidgets.QFrame()
+            self.row.setProperty("role", "sectionRow")
+            line = QtWidgets.QHBoxLayout(self.row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(theme.px(2))
+            line.addWidget(self.header)
+            if count:
+                self.count = QtWidgets.QLabel()
+                self.count.setProperty("role", "count")
+                line.addWidget(self.count)
+            line.addStretch(1)
+            for a in actions:
+                line.addWidget(a)
+            self.actions_row = line
+            layout.addWidget(self.row)
+        else:
+            layout.addWidget(self.header)
         layout.addWidget(content)
         self.set_expanded(expanded)
+
+    def set_count(self, n):
+        if self.count is not None:
+            self.count.setText("" if n is None else str(n))
+
+    def add_action(self, button):
+        self.actions_row.addWidget(button)
+        return button
 
     def set_expanded(self, on):
         self.header.blockSignals(True)

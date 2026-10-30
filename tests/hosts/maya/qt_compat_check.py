@@ -228,6 +228,33 @@ def main():
     def palette_builds():
         shown(palette.ToolPalette(), (420, 900))
 
+    def palette_cards():
+        """Every tool's card and every tab painted; chips wrap (FlowLayout), tiles keep their size
+        (ToolGrid's height for a width), the binding's virtuals reached from Python."""
+        tools = shown(palette.ToolPalette(), (380, 900))
+        tools.empty.setVisible(False)
+        tools.work.setVisible(True)
+        for tool in [None] + list(palette.TOOL_SETTINGS):
+            tools.tool = tool
+            tools.show_tool_settings()
+            settle(5)
+            tools.grab()
+        for tab in palette.TABS:
+            tools.tabs.setCurrentIndex(palette.TABS.index(tab))
+            settle(5)
+            tools.grab()
+        tools.tabs.setCurrentIndex(0)
+        row = widgets.chip_row([widgets.chip("Chip %d" % i, checked=False) for i in range(6)])
+        _expect(row.hasHeightForWidth() and row.heightForWidth(80) > row.heightForWidth(800), "chips wrap")
+        tiles = [QtWidgets.QToolButton() for _ in range(10)]
+        for b in tiles:
+            b.setFixedSize(34, 34)
+        grid = widgets.ToolGrid(tiles)
+        _expect(grid.hasHeightForWidth() and grid.heightForWidth(38 * 5) == 2 * 34 + 4 and grid.heightForWidth(400) == 34,
+                "tiles: %d, %d" % (grid.heightForWidth(38 * 5), grid.heightForWidth(400)))
+        shown(grid, (200, 80))
+        _expect(tiles[0].size() == QtCore.QSize(34, 34) and grid.columns == 5, "five to a 200 px row: %r" % grid.columns)
+
     def updates_builds():
         window = updates_window.UpdatesWindow()
         shown(window, (520, 420))
@@ -289,6 +316,7 @@ def main():
                       ("Graph Editor's parameter panel for every node", graph_editor_params),
                       ("Graph Editor's keys, pan and zoom", graph_editor_events),
                       ("Groom Tools builds and paints", palette_builds),
+                      ("Groom Tools' tool cards and tabs; chips wrap, tiles keep their size", palette_cards),
                       ("Updates window builds", updates_builds),
                       ("Expression editor builds", expression_builds),
                       ("Ramp editor takes mouse events", ramp_events),

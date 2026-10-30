@@ -394,15 +394,20 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(palette.flow_count_text(34, 2), "34 arrows \u00b7 2 sinks")
         self.assertEqual(palette.flow_count_text(1, 1), "1 arrow \u00b7 1 sink")
         self.assertEqual(bpy.ops.groomlab.flow_clear(), {"FINISHED"})
-        # Only the sections the tool uses (palette.json's "tools"): Flow draws no tubes; Select does.
-        self.assertFalse(palette.VIEW3D_PT_groomlab_tools_tubes.poll(bpy.context))
+        # Only the blocks the tool uses: Flow draws no tubes and no Mirror (it doesn't mirror); the
+        # guide groups under the card; While sculpting with the brushes that stroke.
+        self.assertNotIn(("prop", "tube_shape"), log)
+        self.assertNotIn(("prop", "symmetry"), log)
         self.assertTrue(palette.VIEW3D_PT_groomlab_tools_sculpting.poll(bpy.context))
         self.assertTrue(palette.VIEW3D_PT_groomlab_tools_guides.poll(bpy.context))
-        self.assertTrue(palette.VIEW3D_PT_groomlab_tools_output.poll(bpy.context))
+        for gone in ("VIEW3D_PT_groomlab_tools_tubes", "VIEW3D_PT_groomlab_tools_output"):
+            self.assertFalse(hasattr(palette, gone))  # their items: the cards, the GroomLab menu
         bpy.ops.groomlab.tool(tool="part")
         self.assertFalse(palette.VIEW3D_PT_groomlab_tools_sculpting.poll(bpy.context))
         bpy.ops.groomlab.tool(tool="comb")
-        self.assertFalse(palette.VIEW3D_PT_groomlab_tools_tubes.poll(bpy.context))
+        log = drawn(palette.VIEW3D_PT_groomlab_tools)
+        self.assertNotIn(("prop", "tube_shape"), log)
+        self.assertIn(("prop", "symmetry"), log)  # Applies to: Mirror
         self.assertTrue(palette.VIEW3D_PT_groomlab_tools_sculpting.poll(bpy.context))
 
     def test_3_maps(self):
@@ -412,9 +417,11 @@ class ToolsTest(unittest.TestCase):
         log = drawn(palette.VIEW3D_PT_groomlab_tools)
         self.assertIn(("list", "maps"), log)
         bar = texts(log, "groomlab.map_new") + texts(log, "groomlab.map_import")
-        self.assertEqual(bar, ["New Map", "Import..."])
+        self.assertEqual(bar, ["", ""])  # icons in the Maps header
         self.assertIn(("menu", "GROOMLAB_MT_mapsbar_mapconvert", ""), log)
-        self.assertTrue(any(e[0] == "label" and e[1].startswith("Read by: nothing") for e in log))
+        self.assertTrue(any(e[0] == "label" and e[1].startswith("Read by nothing") for e in log))
+        self.assertIn(("prop", "paint_mode"), log)  # the Paint card's own block: Mode, Value and Fill
+        self.assertIn("Fill", texts(log, "groomlab.map_fill"))
         ctx = drawn(bpy.types.GROOMLAB_MT_map_context)
         self.assertEqual(texts(ctx), ["New Map...", "Import Image as Map...", "Rename...", "Make Color (r g b a)",
                                       "Relink Image...", "Delete"])
@@ -521,8 +528,8 @@ class ToolsTest(unittest.TestCase):
 
     def test_4_tubes(self):
         head, t = self.head, self.t
-        bpy.ops.groomlab.tool(tool="select")  # the Tubes section shows with Place, Draw, Shape and Select
-        log = drawn(palette.VIEW3D_PT_groomlab_tools_tubes)
+        bpy.ops.groomlab.tool(tool="select")  # Select's card: Selection, Profile, Selected guides
+        log = drawn(palette.VIEW3D_PT_groomlab_tools)
         self.assertIn(("prop", "tube_shape"), log)
         self.assertIn("Edit as Custom", texts(log))
         # No targets: the shape and values go to the guides Place and Draw make (the placement tube).
@@ -577,9 +584,10 @@ class ToolsTest(unittest.TestCase):
         node = tools._interpolate_nodes(head)[0]
         self.assertTrue(hcall(head, "get_param", node=node, param="fillTubes")["value"])
         t.tube_fill = False
-        log = drawn(palette.VIEW3D_PT_groomlab_tools_tubes)
+        log = drawn(palette.VIEW3D_PT_groomlab_tools)
         self.assertIn(("list", "tube_shapes"), log)
-        self.assertIn("Apply to Selected", texts(log))
+        self.assertIn("Apply", texts(log, "groomlab.tube_apply"))
+        self.assertNotIn(("prop", "tube_fill"), log)  # the Interpolate node's settings have it
         tools.selection_set(head, ids=[], mode="replace")
         bpy.ops.groomlab.tool(tool="comb")
 
@@ -588,7 +596,7 @@ class ToolsTest(unittest.TestCase):
         scene = bpy.context.scene
         t.tab = "CORRECTIVES"
         log = drawn(palette.VIEW3D_PT_groomlab_tools)
-        self.assertEqual(texts(log, "groomlab.corrective_new"), ["New", "◆ Fix Frame"])
+        self.assertEqual(texts(log, "groomlab.corrective_new"), ["", ""])  # Fix Frame and New: header icons
         self.assertIn(("list", "correctives"), log)
         self.assertEqual([r.kind for r in t.correctives], ["base"])
         self.assertEqual(bpy.ops.groomlab.corrective_new(), {"FINISHED"})
@@ -686,21 +694,28 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(d.strand_color, "density")
         bpy.ops.groomlab.review_heatmap()
         self.assertEqual(d.strand_color, "solid")
-        # Every panel of the Groom Tools draws on every tab, the sections in palette.json's order.
+        # Every panel of the Groom Tools draws on every tab: the card, then the Guide groups (open,
+        # palette.json's one section), While sculpting and Display.
         order = [c.bl_label for c in palette.classes if getattr(c, "bl_parent_id", "") == "VIEW3D_PT_groomlab_tools"]
-        self.assertEqual(order, ["Tubes", "While sculpting", "Guide groups & edits", "Output", "Display"])
-        self.assertNotIn("DEFAULT_CLOSED", palette.VIEW3D_PT_groomlab_tools_output.bl_options)
+        self.assertEqual(order, ["Guide groups", "While sculpting", "Display"])
+        self.assertNotIn("DEFAULT_CLOSED", palette.VIEW3D_PT_groomlab_tools_guides.bl_options)
         for tab in ("TOOLS", "PAINT", "CORRECTIVES", "PHOTOS"):
             t.tab = tab
             drawn(*[c for c in palette.classes if issubclass(c, bpy.types.Panel)])
         t.tab = "TOOLS"
-        log = drawn(palette.VIEW3D_PT_groomlab_tools_output)
-        self.assertEqual([e[2] for e in log if e[0] == "menu"], ["Export", "Import"])
-        self.assertEqual(texts(log), ["Simulate Range", "Transfer..."])
+        # The Output strip's steps: in the GroomLab menu (Simulate, Utilities, Export, Import).
+        main = drawn(bpy.types.GROOMLAB_MT_main)
+        self.assertTrue({"Simulate", "Export", "Import"} <= set(e[2] for e in main if e[0] == "menu"), main)
+        everything = []
+        for e in main:
+            if e[0] == "menu" and e[1].startswith("GROOMLAB_MT_main_"):
+                everything += texts(drawn(getattr(bpy.types, e[1])))
+        for item in ("Simulate Range", "Transfer Groom to Scalp...", "Alembic...", "Alembic Curves..."):
+            self.assertIn(item, everything)
         log = drawn(palette.VIEW3D_PT_groomlab_tools_guides)
         self.assertIn(("menu", "GROOMLAB_MT_guide_edits", "Edit Guides"), log)
         self.assertIn(("menu", "GROOMLAB_MT_group_context", ""), log)
-        self.assertEqual(texts(log, "groomlab.group_new"), ["New Group"])
+        self.assertNotIn(("prop", "group"), drawn(palette.VIEW3D_PT_groomlab_tools))  # the list picks the group
         self.assertIn(("prop", "resample_segments"), log)
         self.assertNotIn(("prop", "guide_color_mode"), log)  # every group its own color: Display has the mode
         # The More menu and the empty state.

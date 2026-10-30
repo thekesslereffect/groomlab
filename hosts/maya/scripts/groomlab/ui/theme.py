@@ -429,6 +429,16 @@ def _lighter(color, f):
     return "#%02X%02X%02X" % tuple(int(round(c + (255 - c) * f)) for c in rgb)
 
 
+def _blend(a, b, f):
+    """Hex color a moved toward b by f (0-1): the blocks' faint hairline."""
+    ha, hb = a.lstrip("#"), b.lstrip("#")
+    if len(ha) < 6 or len(hb) < 6:
+        return a
+    ra = [int(ha[i:i + 2], 16) for i in (0, 2, 4)]
+    rb = [int(hb[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#%02X%02X%02X" % tuple(int(round(x + (y - x) * f)) for x, y in zip(ra, rb))
+
+
 def stylesheet(t=None):
     """Qt style sheet for GroomLab's windows (made once per loaded theme)."""
     t = t or current()
@@ -522,6 +532,25 @@ QPushButton[role="section"], QPushButton[role="section"]:checked, QPushButton[ro
     background: transparent; border: none; border-top: {{1}}px solid %(border)s; border-radius: 0; color: %(muted)s;
     font-size: %(fs_small)dpx; font-weight: bold; letter-spacing: {{1}}px; text-align: left; padding: {{6}}px 0; }
 QPushButton[role="section"]:hover { color: %(dim)s; background: transparent; }
+QFrame[role="sectionRow"] { background: transparent; border: none; border-top: {{1}}px solid %(border)s; border-radius: 0; }
+QPushButton[role="section"][inRow="true"], QPushButton[role="section"][inRow="true"]:checked,
+QPushButton[role="section"][inRow="true"]:pressed, QPushButton[role="section"][inRow="true"]:hover { border: none; }
+QLabel[role="count"] { color: %(muted)s; font-size: %(fs_small)dpx; }
+QFrame[role="rule"] { background: %(border)s; border: none; }
+QFrame[role="ruleFaint"] { background: %(faint)s; border: none; }
+QLabel[role="block"] { color: %(dim)s; font-size: %(fs_small)dpx; font-weight: 600; }
+QLabel[role="muted"] { color: %(muted)s; font-size: %(fs_small)dpx; }
+QLabel[role="rowLabel"] { color: %(dim)s; }
+QLabel[role="cardTitle"] { color: %(text)s; font-weight: 600; }
+QFrame[role="itemBox"] { background: transparent; border: {{1}}px solid %(border)s; border-radius: %(r)dpx; }
+QFrame[role="itemBox"] QLabel { background: transparent; }
+QListWidget[role="rows"], QTreeWidget[role="rows"] { background: transparent; border: none; padding: 0; }
+QListWidget[role="rows"]::item { border-radius: %(small)dpx; padding: {{2}}px {{4}}px; }
+QTreeWidget[role="rows"]::item { border-radius: 0; padding: {{2}}px {{2}}px; }
+QToolButton[role="glyph"][toggle="true"]:checked { background: %(selection)s; }
+QToolButton[role="ghost"] { color: %(dim)s; padding: {{3}}px {{6}}px; }
+QToolButton[role="ghost"]:hover { color: %(text)s; }
+QToolButton[role="ghost"]::menu-indicator { image: none; width: 0; }
 QToolButton { background: transparent; border: none; border-radius: %(r)dpx; padding: {{3}}px; }
 QToolButton:hover { background: %(hover)s; }
 QToolButton:checked { background: %(accent)s; color: %(accentText)s; }
@@ -530,6 +559,8 @@ QToolButton:disabled { color: %(dim)s; }
 QToolButton[role="tool"]:hover { background: %(hover)s; }
 QToolButton[role="tool"]:pressed { background: %(selection)s; }
 QToolButton[role="tool"]:checked { background: %(selection)s; border-color: %(accent)s; color: %(text)s; }
+QToolButton[role="chip"] { color: %(dim)s; }
+QToolButton[role="chip"]:checked { background: %(selection)s; color: %(selectionText)s; }
 QTabWidget::pane { border: none; background: transparent; }
 QTabWidget, QTabBar { background: transparent; }
 QTabWidget > QWidget, QScrollArea > QWidget > QWidget { background: %(bg)s; }
@@ -593,6 +624,7 @@ QScrollArea { border: none; }
 %(outline_rules)s%(row_rules)s""" % {
         "bg": c("ui.background"), "panel": c("ui.panel"), "raised": c("ui.raised"), "hover": c("ui.hover"),
         "border": c("ui.border"), "text": c("ui.text"), "dim": c("ui.textDim"), "accent": t.hex("accent"),
+        "faint": _blend(c("ui.border"), c("ui.background"), 0.4),
         "muted": c("ui.textMuted") if t.get("ui.textMuted") else c("ui.textDim"),
         "accentText": c("ui.accentText"), "warning": t.hex(t.get("ui.warning", "yellow")),
         "white": t.hex("white"), "r": r, "small": small, "panel_r": panel, "check": max(px(3), min(px(8), r // 2)), "fs": fs,

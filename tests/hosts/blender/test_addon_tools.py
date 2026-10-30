@@ -288,13 +288,21 @@ class ToolsTest(unittest.TestCase):
         tools.catalog()
         log = draw_classes(palette.classes)
         self.assertIn(("op_text", "groomlab.tool", "▶  Place some guides"), log)
-        self.assertTrue(any(e[0] == "label" and e[1] == "CREATE" for e in log))
+        self.assertTrue(any(e[0] == "label" and e[1] == "Create" for e in log))  # a category's tiles under its name
         self.assertTrue(any(e[0] == "label" and "Pick a tool" in e[1] for e in log))
-        # The tiles: icons (no text) six to a row, each tool's name and hint in its tooltip.
+        # The tiles: icons (no text) of one size, as many to a row as fit (Blender's automatic
+        # columns), each tool's name and hint in its tooltip.
         tiles = [getattr(e[2], "tool", None) for e in log if e[0] == "op_props" and e[1] == "groomlab.tool"]
-        for tool in ("place", "draw", "part", "flow", "comb", "smooth", "cut", "erase", "paint", "select", "freeze"):
+        for tool in ("place", "draw", "part", "flow", "comb", "smooth", "cut", "erase", "select", "freeze"):
             self.assertIn(tool, tiles)
-        self.assertEqual(palette.tool_grid.__defaults__, (6,))
+        self.assertNotIn("paint", tiles)  # the Paint tile alone on the Paint tab, beside the maps
+        t.tab = "PAINT"
+        painting = draw_classes([palette.VIEW3D_PT_groomlab_tools])
+        painted = [getattr(e[2], "tool", None) for e in painting if e[0] == "op_props" and e[1] == "groomlab.tool"]
+        self.assertIn("paint", painted)
+        self.assertNotIn("comb", painted)
+        t.tab = "TOOLS"
+        self.assertEqual(palette.tool_grid.__defaults__, (0,))
         tile_texts = [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.tool"]
         self.assertEqual([x for x in tile_texts if x], ["▶  Place some guides"])  # the starter's step, not a tile
         unfreeze = [e[2] for e in log if e[0] == "op_props" and e[1] == "groomlab.guides_edit"
@@ -349,7 +357,11 @@ class ToolsTest(unittest.TestCase):
         log = draw_classes([palette.VIEW3D_PT_groomlab_tools])
         self.assertIn(("prop", "radius"), log)
         self.assertNotIn(("prop", "stretch"), log)
-        self.assertTrue(any(e[0] == "label" and e[1] == "LIFT" for e in log))
+        self.assertTrue(any(e[0] == "label" and e[1] == "Lift" for e in log))  # the card's title
+        short = palette.short_text("lift")  # its one line (wrapped to the sidebar)
+        self.assertTrue(short and any(e[0] == "label" and e[1] and short.startswith(e[1]) for e in log), short)
+        for gone in ("selected_only", "front_facing"):  # not in the panel: the brushes' defaults
+            self.assertNotIn(("prop", gone), log)
         bpy.ops.groomlab.tool(tool="place")
         log = draw_classes([palette.VIEW3D_PT_groomlab_tools])
         self.assertNotIn(("prop", "radius"), log)

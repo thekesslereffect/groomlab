@@ -318,10 +318,26 @@ def main():
                     "icon-only tool tiles")
             _expect(all(b.toolTip().startswith("<b>") and "<br>" in b.toolTip() for b in tiles), "name + hint tooltips")
             shown = [b for b in tiles if b.isVisibleTo(tools)]
-            _expect(shown and all(abs(b.width() - b.height()) <= 2 for b in shown),
-                    "square tiles: %r" % sorted({(b.width(), b.height()) for b in shown}))
+            side = theme.px(palette.ToolPalette.TILE)
+            _expect(shown and all(b.width() == side and b.height() == side for b in shown),
+                    "fixed %d px tiles: %r" % (side, sorted({(b.width(), b.height()) for b in shown})))
             grids = [g for g in tools.findChildren(widgets.ToolGrid) if g.isVisibleTo(tools)]
-            _expect(grids and all(g.columns == 6 for g in grids), "six to a row: %r" % [g.columns for g in grids])
+
+            def fitting(g):
+                return (g.width() + g.spacing) // (side + g.spacing)
+            _expect(grids and all(g.columns == fitting(g) for g in grids),
+                    "as many to a row as fit: %r" % [(g.columns, fitting(g)) for g in grids])
+            # Wider: more to a row, the tiles the same size, left aligned (the first at the left edge).
+            before = [g.columns for g in grids]
+            tools.resize(theme.px(600), theme.px(1000))
+            settle()
+            _expect(all(g.columns >= c for g, c in zip(grids, before)) and any(g.columns > c for g, c in zip(grids, before)
+                                                                               if len(g.buttons) > c),
+                    "wider, more to a row: %r -> %r" % (before, [g.columns for g in grids]))
+            _expect(all(b.width() == side for b in shown), "the tiles never stretch")
+            _expect(all(g.buttons[0].x() == 0 for g in grids), "left aligned")
+            tools.resize(theme.px(380), theme.px(1000))
+            settle()
             unfreeze = tools.findChild(QtWidgets.QToolButton, "unfreezeAllTile")
             _expect(unfreeze in tiles and not unfreeze.isCheckable() and "Unfreeze All" in unfreeze.toolTip(),
                     "Unfreeze All: an icon tile, a button")
@@ -335,7 +351,8 @@ def main():
             _expect("border-bottom-color: %s" % t.hex("accent") in sheet, "the current tab underlined in the accent")
             _expect("QFrame[role=\"card\"] { background: transparent; border: none; }" in sheet, "no card box")
             _expect(tools.settings.layout().contentsMargins().left() == 0, "the brush settings unpadded")
-            _expect(tools.settings_heading.property("rule") == "true", "the brush heading under a hairline")
+            rule = tools.settings.layout().itemAt(0).widget()
+            _expect(rule is not None and rule.property("role") == "rule", "the tool's card under a hairline")
         finally:
             widgets.dispose(tools)
         # The node painters: every header and canvas style, a theme's unknown ones as the defaults.
@@ -371,6 +388,121 @@ def main():
             widgets.dispose(editor)
             theme.set_theme("playful")
     check.run("the new look: icon tiles, underlined tabs, plain sections, minimal node headers", redesign_look)
+
+    # The Groom Tools layout (research/ui-redesign/QT.md, "Groom Tools layout"): the header, the
+    # tabs and the tool grid pinned over the scrolling column; the tool's card right under the grid
+    # with its blocks (Brush, the tool's own, Applies to) in that order; then the tab's list; what
+    # left the panel stays out of it.
+    def groom_tools_layout():
+        tools = palette.ToolPalette()
+        tools.timer.stop()  # the stand-in has no groom: keep the work area as set here
+        tools.resize(theme.px(380), theme.px(900))
+        tools.show()
+        settle()
+        tools.empty.setVisible(False)
+        tools.work.setVisible(True)
+        settle()
+
+        def shown_blocks():
+            found = [b for b in tools.settings.findChildren(widgets.Block) if b.isVisibleTo(tools)]
+            return [b.title.text() for b in sorted(found, key=lambda b: b.mapTo(tools.settings, b.rect().topLeft()).y())]
+
+        def texts():
+            out = []
+            for w in tools.findChildren(QtWidgets.QWidget):
+                if w.isVisibleTo(tools) and isinstance(w, (QtWidgets.QLabel, QtWidgets.QAbstractButton)):
+                    out.append(w.text().lower())
+            for s in tools.findChildren(widgets.SoftSlider):
+                if s.isVisibleTo(tools):
+                    out.append(s.label().lower())
+            return out
+
+        try:
+            content = tools.scroll.widget()
+            _expect(tools.pinned.isAncestorOf(tools.tabs.bar) and tools.pinned.isAncestorOf(tools.tool_palette)
+                    and tools.pinned.isAncestorOf(tools.grooms), "pinned: the header, the tabs, the tool grid")
+            _expect(not tools.scroll.isAncestorOf(tools.pinned), "the pinned part outside the scroll area")
+            _expect(content.isAncestorOf(tools.settings) and content.isAncestorOf(tools.guides_section),
+                    "the card and the list scroll")
+            _expect(tools.settings.mapTo(content, tools.settings.rect().topLeft()).y()
+                    < tools.guides_section.mapTo(content, tools.guides_section.rect().topLeft()).y(),
+                    "the card right under the grid, the list after it")
+            _expect(not tools.level.isVisibleTo(tools), "no Group combo: the list picks the group")
+            _expect(tools.guides_section.row.isAncestorOf(tools.isolate) and tools.isolate.isCheckable(),
+                    "Isolate: an eye in the Guide groups header")
+            _expect(tools.guides_section.expanded(), "Guide groups open")
+            expected = [
+                (None, []),
+                ("comb", ["Brush", "Comb", "Applies to"]),
+                ("place", ["New guides", "Tube", "Applies to"]),
+                ("draw", ["New guides", "Tube", "Applies to"]),
+                ("shape", ["Brush", "Paints", "Profile", "Selected guides", "Applies to"]),
+                ("select", ["Selection", "Profile", "Selected guides", "Applies to"]),
+                ("lengths", ["Keys", "Applies to"]),
+                ("erase", ["Brush", "Erases", "Applies to"]),
+                ("flow", ["Brush", "Flow"]),
+                ("part", ["Parts", "Applies to"]),
+                ("freeze", ["Brush", "Applies to"]),
+            ]
+            for tool, want in expected:
+                tools.tool = tool
+                tools.show_tool_settings()
+                settle()
+                got = shown_blocks()
+                _expect(got == want, "%s's card: %r, not %r" % (tool, got, want))
+                if tool is None:
+                    _expect(tools.hint.text() == palette.NO_TOOL and not tools.title_row.isVisibleTo(tools),
+                            "no tool: one line on how to start")
+                    continue
+                _expect(tools.hint.text() == palette.SHORT[tool], "%s: its one line" % tool)
+                tip = tools.card_help.toolTip()
+                _expect(palette.NAMES[tool] in tip and palette.HINTS[tool][:30] in tip.replace("&#x27;", "'"),
+                        "%s: the ? carries the hint" % tool)
+                if "radius" in palette.TOOL_SETTINGS[tool]:
+                    _expect("Middle-drag" in tip and "<table" in tip, "%s: the ? lists the gestures" % tool)
+                words = texts()
+                for gone in ("selected only", "front facing only", "while sculpting", "fill tubes", "tube blend",
+                             "output", "tubes", "isolate", "group"):
+                    _expect(not any(w.startswith(gone) or w.endswith(gone) for w in words if w),
+                            "%s: %r left the panel: %r" % (tool, gone, [w for w in words if gone in w]))
+                _expect(not [b for b in tools.settings.findChildren(QtWidgets.QCheckBox) if b.isVisibleTo(tools)
+                             and b is not tools.symmetry], "%s: options are chips, not checkboxes" % tool)
+            # The brush's chips in one order whatever the tool: Pressure, Off scalp, the two curves.
+            tools.tool = "comb"
+            tools.show_tool_settings()
+            settle()
+            flow = tools.brush_chips.flow
+            order = [flow.itemAt(i).widget().text() for i in range(flow.count())]
+            _expect(order == ["Pressure", "Off scalp", "Falloff curve", "Root to tip"], "brush chips: %r" % order)
+            tools.strength_curve_box.setChecked(True)
+            settle()
+            _expect(tools.strength_curve.isVisibleTo(tools), "a curve chip on: its ramp under the chips")
+            tools.strength_curve_box.setChecked(False)
+            _expect(isinstance(tools.length_keys.scale, widgets.SoftSlider)
+                    and isinstance(tools.length_keys.length, widgets.SoftSlider), "Length Keys: fill fields")
+            # The tabs: Paint's card and its tile alone; Correctives' grid and card; Photos no card.
+            tools.tool = None
+            tools.tabs.setCurrentIndex(palette.TABS.index("paint"))
+            settle()
+            _expect(shown_blocks() == ["Brush", "Paint", "Applies to"], "the Paint tab's card: %r" % shown_blocks())
+            _expect(tools.paint_block.isAncestorOf(tools.paint_tab.value), "Value and Fill in the Paint block")
+            _expect(tools.paint_tiles.isVisibleTo(tools) and not tools.tool_palette.isVisibleTo(tools),
+                    "the Paint tile alone pinned")
+            _expect(tools.paint_tab.section.isVisibleTo(tools) and tools.paint_tab.box.isVisibleTo(tools),
+                    "the Maps list and the picked map's box")
+            tools.tabs.setCurrentIndex(palette.TABS.index("correctives"))
+            settle()
+            _expect(tools.tool_palette.isVisibleTo(tools) and tools.settings.isVisibleTo(tools)
+                    and tools.correctives.section.isVisibleTo(tools), "Correctives: the grid, the card, the layers")
+            tools.tabs.setCurrentIndex(palette.TABS.index("photos"))
+            settle()
+            _expect(not tools.settings.isVisibleTo(tools) and not tools.tool_palette.isVisibleTo(tools)
+                    and tools.reference_tab.section.isVisibleTo(tools), "Photos: the photos, no card")
+            _expect(not tools.reference_tab.generate_section.expanded(), "Guides from photos folded")
+            tools.tabs.setCurrentIndex(palette.TABS.index("tools"))
+        finally:
+            widgets.dispose(tools)
+    check.run("the Groom Tools layout: pinned top, the tool's card blocks, the tab's list", groom_tools_layout)
 
     # Round 3: Inter in GroomLab's windows (the theme's ui.font, loaded from the fonts folder; Maya's own
     # font everywhere else), and the cards' status badges: the cook time and a warning triangle in the
@@ -575,10 +707,15 @@ def main():
         try:
             titles = [tools.tabs.bar.tabText(i) for i in range(tools.tabs.bar.count())]
             _expect(titles == ["Tools", "Paint", "Correctives", "Photos"], "Groom Tools tabs: %r" % titles)
-            _expect(tools.symmetry_row.parent() is tools.target_row, "symmetry sits in the Group row")
+            _expect(tools.applies_block.isAncestorOf(tools.symmetry_row), "Mirror sits in the card's Applies to")
             tools.work.setVisible(True)
-            tools.show_tool_settings()  # no tool: the symmetry row stays (it isn't the tool's)
-            _expect(not tools.symmetry_row.isHidden(), "symmetry shown with no brush picked")
+            tools.show_tool_settings()  # no tool: no Mirror (nothing mirrors)
+            _expect(tools.symmetry_row.isHidden() and tools.applies_block.isHidden(), "no Mirror with no tool")
+            for tool, shown in (("comb", True), ("flow", False), ("place", True), ("select", True)):
+                tools.tool = tool
+                tools.show_tool_settings()
+                _expect(tools.symmetry_row.isHidden() != shown, "%s: Mirror %s" % (tool, "shown" if shown else "hidden"))
+            tools.tool = None
             _expect("Alt+Shift+X" in tools.symmetry.toolTip(), "symmetry's tooltip names its key")
         finally:
             widgets.dispose(tools)
@@ -625,18 +762,22 @@ def main():
         widgets.dispose(label)
     check.run("one name per thing; the core's categories and keys; units and decimals", names_keys_and_units)
 
-    # UX batch 3: the Groom Tools' Output strip (the menu's table), one Theme menu list, themed status
-    # colors, Tab wiring after the selection, a refused link saying why, the Paint chip.
+    # UX batch 3: the Output steps in the GroomLab menu (no strip in the Groom Tools any more), one
+    # Theme menu list, themed status colors, Tab wiring after the selection, a refused link saying
+    # why, the Paint chip.
     def batch3():
         from groomlab.ui import menu
         tools = palette.ToolPalette()
         try:
-            chips = [c.text().split("  ")[0] for c in tools.output_chips]
-            _expect(chips == ["Simulate Range", "Export", "Render", "Studio", "Transfer...", "Import"], "Output strip: %r" % chips)
-            export = tools.findChild(QtWidgets.QToolButton, "output_export").menu()
-            labels = [a.text() for a in export.actions() if not a.isSeparator()]
-            _expect("Alembic..." in labels and "glTF Cards..." in labels and "Scales Mesh (FBX)..." not in labels,
-                    "Output > Export: %r" % labels)
+            _expect(tools.findChild(QtWidgets.QWidget, "groomToolsOutput") is None, "no Output strip in the Groom Tools")
+            from groomlab.ui import definitions
+            for kind, want in (("export", "Alembic..."), ("render", "Render from Groom File..."), ("studio", "Portrait"),
+                               ("import", "Alembic Curves...")):
+                labels = [i[0] for i in menu.shown_items(kind, menu.MENU_ONLY) if i]
+                _expect(want in labels, "GroomLab > %s has %r: %r" % (kind.title(), want, labels))
+            ids = set(definitions.listed_ids(definitions.get("menus/main"), generators=[("studioPresets", "studio.preset")]))
+            for item in ("sim.range", "groom.transfer"):  # the strip's two plain items
+                _expect(item in ids, "GroomLab's menu has %s" % item)
             _expect(tools.empty_import.menu() is not None, "the empty state offers Import")
             imports = [a.text() for a in tools.empty_import.menu().actions() if not a.isSeparator()]
             _expect("Alembic Curves..." in imports, "Import offers Alembic Curves...: %r" % imports)

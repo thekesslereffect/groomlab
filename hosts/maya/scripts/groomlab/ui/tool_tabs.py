@@ -209,6 +209,69 @@ def _bar(entries, bind, owner):
     return _action_bar(chips, glyphs)
 
 
+# The lists' labelled actions (+ New, Import..., Fix Frame) as glyphs in their section's header.
+HEADER_GLYPHS = {"group.new": "plus", "map.new": "plus", "map.import": "import", "corrective.new": "plus",
+                 "corrective.fixFrame": "key", "photo.import": "import"}
+
+
+def _glyphs(entries, bind, owner):
+    """A list's bar (engine/ui/lists.json) as glyph buttons, {action id: button}: the labelled ones
+    with HEADER_GLYPHS' glyph (for the section's header), the rest with their own (for the picked
+    item's box); a submenu entry's button opens its menu (filled from the definitions)."""
+    made = {}
+    for item in definitions.resolve(entries, None):
+        name = HEADER_GLYPHS.get(item["id"]) or item["glyph"]
+        if not name:
+            continue
+        tip = item["label"] + ": " + item["tip"] if item["label"] and item["tip"] else item["tip"] or item["label"]
+        if item["kind"] == "submenu":
+            menu_ = QtWidgets.QMenu(owner)
+            widgets.fill_menu(menu_, definitions.items_of(item["entry"]), bind, None)
+            menu_.setToolTipsVisible(True)
+            made[item["id"]] = widgets.glyph_button(name, tip, menu=menu_)
+        else:
+            made[item["id"]] = widgets.glyph_button(name, tip, bind(item))
+    return made
+
+
+def dot_icon(color, dashed=False):
+    """A list row's color dot (a group's): `color` filled; dashed: its automatic one, in a ring."""
+    from groomlab.ui.qt import QtGui
+    size = theme.px(12)
+    pixmap = QtGui.QPixmap(size, size)
+    pixmap.fill(QtCore.Qt.transparent)
+    painter = QtGui.QPainter(pixmap)
+    painter.setRenderHint(QtGui.QPainter.Antialiasing)
+    painter.setPen(QtCore.Qt.NoPen)
+    painter.setBrush(QtGui.QColor(color or "#888888"))
+    d = size * 0.72
+    painter.drawEllipse(QtCore.QRectF((size - d) / 2.0, (size - d) / 2.0, d, d))
+    painter.end()
+    return QtGui.QIcon(pixmap)
+
+
+def fit_rows(view, minimum=1, maximum=12):
+    """A list (QListWidget / QTreeWidget) as tall as its rows, between `minimum` and `maximum`
+    rows: plain rows in the column, no box of their own to scroll."""
+    if view.property("role") != "rows":
+        view.setProperty("role", "rows")
+        widgets.repolish(view)
+    if isinstance(view, QtWidgets.QTreeWidget):
+        count, it = 0, QtWidgets.QTreeWidgetItemIterator(view)
+        while it.value():
+            count += 1
+            it += 1
+        row = view.sizeHintForRow(0) if count else 0
+    else:
+        count = view.count()
+        row = view.sizeHintForRow(0) if count else 0
+    row = max(row, theme.px(22))
+    rows = min(max(count, minimum), maximum)
+    view.setFixedHeight(rows * row + 2 * view.frameWidth() + theme.px(2))
+    view.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded if count > maximum else QtCore.Qt.ScrollBarAlwaysOff)
+
+
+
 def _missing_map_files(groom, entries):
     """groomlab.missing_map_files from the maps already read (groomlab.maps)."""
     from groomlab import presets
@@ -233,13 +296,6 @@ def _group_users(groom):
                 seen.add(name)
                 users.setdefault(name, []).append((node["name"], "exclude"))
     return users
-
-
-def _about(text):
-    label = QtWidgets.QLabel(text)
-    label.setWordWrap(True)
-    label.setProperty("role", "about")
-    return label
 
 
 # ---------------------------------------------------------------------------
@@ -271,49 +327,55 @@ class GuidesTab(_GroomTab):
     def __init__(self, owner):
         super(GuidesTab, self).__init__(owner)
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 0)
-        layout.setSpacing(theme.px(6))
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         lists = definitions.get("lists/groups")
-        layout.addWidget(_about(lists["about"]))
         bind = definitions.binder(self.ACTIONS, self)
-        bar, _ = _bar(lists["bar"], bind, self)
-        layout.addLayout(bar)
+        glyphs = _glyphs(lists["bar"], bind, self)
+        # The header: the title, how many, Isolate (the picked group at full color, the others
+        # dimmed) and + (a new group).
+        self.isolate = widgets.glyph_button("eye", "Isolate the picked group: it (and its child groups) at full "
+                                            "color, the others dimmed", checkable=True)
+        self.isolate.setObjectName("isolateGroup")
+        self.isolate.setProperty("toggle", "true")
+        self.isolate.toggled.connect(lambda _: self.owner.apply_isolation())
+        body = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(body)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(theme.px(6))
+        section = next((s for s in definitions.get("palette/sections") if s["id"] == "groups"), {})
+        self.section = widgets.Section(section.get("label", "Guide groups"), body, expanded=section.get("expanded", True),
+                                       count=True, actions=(self.isolate, glyphs["group.new"]))
+        self.section.setObjectName("guideGroups")
+        layout.addWidget(self.section)
 
+        # The groups: plain rows (a color dot, the name, the guide count, an eye); a click picks
+        # the group brushes edit and new guides go into (the picked row again: all groups).
         self.tree = QtWidgets.QTreeWidget()
-        self.tree.setHeaderLabels(["Group", "", "Guides", "Level"])
+        self.tree.setObjectName("guideGroupList")
+        self.tree.setColumnCount(3)
+        self.tree.setHeaderHidden(True)
+        self.tree.setRootIsDecorated(False)
+        self.tree.setIndentation(theme.px(14))
         self.tree.header().setStretchLastSection(False)
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-        self.tree.setMinimumHeight(theme.px(120))
+        self.tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        self.tree.header().setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)
+        self.tree.header().resizeSection(2, theme.px(26))
         self.tree.setEditTriggers(QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed)
-        self.tree.itemClicked.connect(lambda item, _: self.owner.pick_group(item.data(0, QtCore.Qt.UserRole)))
-        self.tree.setToolTip("Click: brushes and new guides use this group. Double-click the name: rename. "
-                             "Checkbox: show or hide. Swatch: its color. Right-click: more")
+        self.tree.itemClicked.connect(lambda item, _: self.row_clicked(item))
+        self.tree.setToolTip("Click: brushes and new guides use this group (again: all groups). Double-click the "
+                             "name: rename. The eye: show or hide. Right-click: its color, and more")
         self.tree.itemChanged.connect(self.item_changed)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.context_menu)
-        layout.addWidget(self.tree, 1)
+        column.addWidget(self.tree)
 
-        # Edits on many guides: one menu.
-        edits = QtWidgets.QPushButton(lists["edits"]["label"] + "  \u25be")
-        edits.setToolTip(lists["edits"]["tip"])
-        self.edits_menu = QtWidgets.QMenu(edits)
-        widgets.fill_menu(self.edits_menu, lists["edits"]["items"], bind)
-        self.edits_menu.setToolTipsVisible(True)
-        edits.setMenu(self.edits_menu)
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(edits, 1)
-        # Generate Children's count, inline (no prompt): children per guide for the selected
-        # guides, else for the picked group.
-        self.children_count = QtWidgets.QSpinBox()
-        self.children_count.setRange(1, 500)
-        self.children_count.setValue(menu.CHILDREN_COUNT)
-        self.children_count.setPrefix("x ")
-        self.children_count.setToolTip("Children per guide for Edit Guides > Children (the selected guides, else the "
-                                       "picked group)")
-        self.children_count.valueChanged.connect(lambda v: setattr(menu, "CHILDREN_COUNT", int(v)))
-        row.addWidget(self.children_count)
-        layout.addLayout(row)
-
+        # The picked group's box: rename, select, delete, then its Segments and Edit guides.
+        self.box = widgets.ItemBox([glyphs[k] for k in ("group.rename", "group.select", "group.delete") if k in glyphs])
+        self.box.setObjectName("guideGroupBox")
+        self.box_glyphs = [glyphs[k] for k in ("group.rename", "group.select", "group.delete") if k in glyphs]
+        column.addWidget(self.box)
         # Segments: the selected guides' (else the picked group's, else every guide's) point count,
         # resampled live while dragging (a preview from the stored guides) and committed as one
         # undo step on release; a whole group's new guides get it too.
@@ -326,7 +388,33 @@ class GuidesTab(_GroomTab):
                                  "value) to apply it as one undo step. More segments let a guide curl tighter.")
         self.segments.dragged.connect(self.segments_dragged)
         self.segments.committed.connect(self.segments_committed)
-        layout.addWidget(self.segments)
+        self.box.add(self.segments)
+        # Edits on many guides: one menu; Generate Children's count beside it, inline (no prompt):
+        # children per guide for the selected guides, else for the picked group.
+        edits = QtWidgets.QToolButton()
+        edits.setText(lists["edits"]["label"] + "  ▾")
+        edits.setObjectName("editGuides")
+        edits.setAutoRaise(True)
+        edits.setProperty("role", "ghost")
+        edits.setToolTip(lists["edits"]["tip"])
+        edits.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.edits_menu = QtWidgets.QMenu(edits)
+        widgets.fill_menu(self.edits_menu, lists["edits"]["items"], bind)
+        self.edits_menu.setToolTipsVisible(True)
+        edits.setMenu(self.edits_menu)
+        row = QtWidgets.QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(edits)
+        row.addStretch(1)
+        self.children_count = QtWidgets.QSpinBox()
+        self.children_count.setRange(1, 500)
+        self.children_count.setValue(menu.CHILDREN_COUNT)
+        self.children_count.setPrefix("x ")
+        self.children_count.setToolTip("Children per guide for Edit Guides > Children (the selected guides, else the "
+                                       "picked group)")
+        self.children_count.valueChanged.connect(lambda v: setattr(menu, "CHILDREN_COUNT", int(v)))
+        row.addWidget(self.children_count)
+        self.box.add(row)
         self._preview_segments = None
         self._previewing = False
 
@@ -430,17 +518,21 @@ class GuidesTab(_GroomTab):
         return item.data(0, QtCore.Qt.UserRole) if item else None
 
     def refresh(self):
-        # The palette's group stays highlighted (a new group is picked there before the list is
-        # filled again); with none picked there ("all groups"), the row that was.
-        picked = getattr(self.owner, "current_group", None)
-        current = (picked() if picked else "") or self.group()
+        # The palette's group stays picked (a new group is picked there before the list is filled
+        # again); with all groups picked there, no row is highlighted (the last one stays current
+        # for the box's actions).
+        before = self.group()
         self.tree.clear()
+        self._rows = {}
         if not self.groom:
+            self.section.set_count(None)
+            fit_rows(self.tree)
             self.sync_segments()
             return
-        items = {}
+        items = self._rows
         hidden = set(groomlab.hidden_guide_groups(self.groom))
         colors = groomlab.guide_group_colors(self.groom)
+        muted = theme.current().qcolor("ui.textMuted" if theme.current().get("ui.textMuted") else "ui.textDim")
         self.tree.blockSignals(True)
         groups = groomlab.list_guide_groups(self.groom)
         named = _group_users(self.groom)
@@ -453,48 +545,76 @@ class GuidesTab(_GroomTab):
                     left.append(g)
                     continue
                 users = ", ".join("%s (%s)" % u for u in named.get(g["name"], []))
-                item = QtWidgets.QTreeWidgetItem(parent, [g["name"], "", str(g["count"]), str(g["depth"])])
+                item = QtWidgets.QTreeWidgetItem(parent, [g["name"], str(g["count"]), ""])
                 item.setData(0, QtCore.Qt.UserRole, g["name"])
-                item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEditable)
-                item.setCheckState(0, QtCore.Qt.Unchecked if g["name"] in hidden else QtCore.Qt.Checked)
-                item.setToolTip(0, "%s: checked shows it in the viewport; double-click to rename%s%s"
+                item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
+                item.setIcon(0, dot_icon(colors.get(g["name"]) or g["color"], dashed=not colors.get(g["name"])))
+                item.setTextAlignment(1, int(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter))
+                item.setForeground(1, muted)
+                if g["name"] in hidden:
+                    item.setForeground(0, muted)
+                item.setToolTip(0, "%s: double-click to rename; right-click: its color%s%s"
                                 % (g["name"], "\nNamed in the graph by " + users if users else "",
                                    "\nNew guides: %d segments" % g["segments"] if g["segments"] else ""))
+                item.setToolTip(1, "%d guides" % g["count"])
                 items[g["name"]] = item
-                self.tree.setItemWidget(item, 1, self._swatch(g["name"], colors.get(g["name"]), g["color"]))
+                self.tree.setItemWidget(item, 2, self._eye(g["name"], g["name"] not in hidden))
             if len(left) == len(pending):
                 break
             pending = left
         self.tree.blockSignals(False)
         self.tree.expandAll()
-        for column in (1, 2, 3):
-            self.tree.resizeColumnToContents(column)
+        self.section.set_count(len(groups))
+        fit_rows(self.tree)
+        picked = getattr(self.owner, "current_group", None)
+        current = (picked() if picked else "") or before
         if current in items:
             self.tree.setCurrentItem(items[current])
         elif items:
             self.tree.setCurrentItem(self.tree.topLevelItem(0))
-        self.sync_segments()
         # The palette's group choice follows the groups (this runs when the guides change).
         fill = getattr(self.owner, "fill_levels", None)
         if fill is not None and getattr(self.owner, "groom", lambda: None)() == self.groom:
             fill(self.groom, select=self.owner.current_group(), groups=groups)
+        self.show_picked()
 
-    def _swatch(self, name, color, drawn):
-        """A small button in the color the group draws in: its own `color` filled, else its automatic
-        one (`drawn`) inside a dashed outline. Click to pick one."""
-        b = QtWidgets.QToolButton()
-        b.setFixedSize(theme.px(18), theme.px(18))
-        b.setToolTip("%s's color in the viewport: click to pick%s" % (
-            name, ", right-click to clear" if color else " (automatic: its own hue from the groom's)"))
-        if color:
-            b.setStyleSheet("QToolButton { background: %s; border-radius: %dpx; border: none; }" % (color, theme.px(4)))
+    def show_picked(self):
+        """The palette's picked group highlighted in the list (all groups: none), the box's
+        actions on it, Segments on it."""
+        picked = getattr(self.owner, "current_group", None)
+        name = picked() if picked else ""
+        found = getattr(self, "_rows", {}).get(name)
+        self.tree.blockSignals(True)
+        if found is not None:
+            self.tree.setCurrentItem(found)
         else:
-            b.setStyleSheet("QToolButton { background: %s; border: %dpx dashed %s; border-radius: %dpx; }"
-                            % (drawn, max(1, theme.px(1)), theme.current().color("ui.textDim"), theme.px(4)))
-        b.clicked.connect(lambda _=False, n=name: self.pick_color(n))
-        b.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-        b.customContextMenuRequested.connect(lambda _pos, n=name: self.set_color(n, None))
+            self.tree.clearSelection()
+        self.tree.blockSignals(False)
+        for b in self.box_glyphs:
+            b.setEnabled(self.group() is not None)
+        self.sync_segments()
+
+    def row_clicked(self, item):
+        """A row clicked: its group picked for the brushes and new guides; the picked one again:
+        all groups."""
+        name = item.data(0, QtCore.Qt.UserRole)
+        picked = getattr(self.owner, "current_group", lambda: "")()
+        if name == picked:
+            name = ""
+        self.owner.pick_group(name)
+        self.show_picked()
+
+    def _eye(self, name, shown):
+        """A row's eye: show or hide the group in the viewport."""
+        b = widgets.glyph_button("eye" if shown else "eyeOff", "Show or hide %s in the viewport" % name,
+                                 lambda: self.set_shown(name, not shown))
+        b.setFixedSize(theme.px(22), theme.px(22))
+        b.setIconSize(QtCore.QSize(theme.px(14), theme.px(14)))
         return b
+
+    def set_shown(self, name, on):
+        if self.run(groomlab.show_guide_group, self.groom, name, on):
+            QtCore.QTimer.singleShot(0, self.refresh)  # not from inside the eye's own click
 
     def pick_color(self, name):
         if not self.need():
@@ -507,10 +627,10 @@ class GuidesTab(_GroomTab):
 
     def set_color(self, name, color):
         if self.run(groomlab.set_guide_group_color, self.groom, name, color):
-            QtCore.QTimer.singleShot(0, self.refresh)  # not from inside the swatch's own click
+            QtCore.QTimer.singleShot(0, self.refresh)  # not from inside a menu's own click
 
     def item_changed(self, item, column):
-        """The checkbox (show or hide) or the name (rename) of a group row changed."""
+        """A group row's name changed (rename in place)."""
         if column != 0 or not self.groom:
             return
         name = item.data(0, QtCore.Qt.UserRole)
@@ -520,8 +640,6 @@ class GuidesTab(_GroomTab):
                 item.setData(0, QtCore.Qt.UserRole, text)
                 self.owner.fill_levels(self.groom, select=text)
             QtCore.QTimer.singleShot(0, self.refresh)
-            return
-        self.run(groomlab.show_guide_group, self.groom, name, item.checkState(0) == QtCore.Qt.Checked)
 
     def context_menu(self, pos):
         item = self.tree.itemAt(pos)
@@ -817,16 +935,19 @@ class PaintTab(_GroomTab):
         self.paint_channels = CHANNELS          # the channels it changes
         self.paint_mode = "replace"
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 0)
-        layout.setSpacing(theme.px(6))
-        from groomlab.ui import palette  # the painting brushes (the catalog's Paint ones), beside the maps they paint
-        layout.addWidget(owner.tool_grid(dict(palette.SECTIONS).get("Paint", [])))
-        bar, made = _bar(definitions.get("lists/maps/bar"), definitions.binder(self.ACTIONS, self), self)
-        made[3].setObjectName("paintConvert")
-        self.convert_menu = made[3].menu()
-        layout.addLayout(bar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        bind = definitions.binder(self.ACTIONS, self)
+        glyphs = _glyphs(definitions.get("lists/maps/bar"), bind, self)
+        body = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(body)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(theme.px(6))
+        self.section = widgets.Section("Maps", body, expanded=True, count=True,
+                                       actions=(glyphs["map.import"], glyphs["map.new"]))
+        self.section.setObjectName("mapsSection")
+        layout.addWidget(self.section)
         self.list = QtWidgets.QListWidget()
-        self.list.setMinimumHeight(theme.px(110))
         self.list.setToolTip("A map is a 0-1 value painted on the scalp that any param can read (in the Graph "
                              "Editor, right-click a param > Paint). Double-click: rename; right-click: more")
         self.list.currentItemChanged.connect(lambda item, _: self.map_changed(item.data(QtCore.Qt.UserRole) if item else ""))
@@ -834,46 +955,78 @@ class PaintTab(_GroomTab):
         self.list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(
             lambda pos: self.list_menu(self.list.viewport().mapToGlobal(pos)))
-        layout.addWidget(self.list, 1)
-        form = QtWidgets.QFormLayout()
-        form.setLabelAlignment(QtCore.Qt.AlignRight)
+        column.addWidget(self.list)
+        fit_rows(self.list)
+
+        # The picked map's box: rename, convert, delete; where it shows, and what reads it.
+        glyphs["map.convert"].setObjectName("paintConvert")
+        self.convert_menu = glyphs["map.convert"].menu()
+        self.box_glyphs = [glyphs[k] for k in ("map.rename", "map.convert", "map.delete")]
+        self.box = widgets.ItemBox(self.box_glyphs)
+        self.box.setObjectName("mapBox")
+        column.addWidget(self.box)
+        self.view_guides = widgets.chip("Guides", "Color the guides by the map", False, "paintShowOnGuides")
+        self.view_guides.toggled.connect(self.toggle_view_guides)
+        self.view_strands = widgets.chip("Strands", "Color the strands by the map", False, "paintShowOnStrands")
+        self.view_strands.toggled.connect(self.toggle_view_strands)
+        self.view_scalp = widgets.chip("Scalp", "Show the map on the scalp (black to white), whatever its kind",
+                                       False, "paintShowOnScalp")
+        self.view_scalp.toggled.connect(self.toggle_view_scalp)
+        self.view_channel = QtWidgets.QComboBox()
+        self.view_channel.setObjectName("paintScalpChannel")
+        for c in definitions.choices("scalpChannel"):
+            self.view_channel.addItem(c["label"], c["value"])
+        self.view_channel.setToolTip(definitions.get("choices/scalpChannel")["tip"])
+        self.view_channel.currentIndexChanged.connect(lambda _i: self.view_channel_changed())
+        self.box.add(widgets.small_label("Show on"))
+        views = QtWidgets.QHBoxLayout()
+        views.setContentsMargins(0, 0, 0, 0)
+        views.setSpacing(theme.px(4))
+        for b in (self.view_guides, self.view_strands, self.view_scalp):
+            views.addWidget(b)
+        views.addStretch(1)
+        views.addWidget(self.view_channel)
+        self.box.add(views)
+        self.users = widgets.small_label("", wrap=True)
+        self.box.add(self.users)
+
+        # The Paint card's own block (the Groom Tools put it there): the mode, the value painted
+        # and Fill; a color map: the color, its channels and Fill.
+        self.paint_controls = QtWidgets.QWidget()
+        self.paint_controls.setObjectName("paintControls")
+        self.paint_controls.setProperty("role", "options")
+        controls = QtWidgets.QVBoxLayout(self.paint_controls)
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(theme.px(4))
         self.mode_group = QtWidgets.QButtonGroup(self)
         self.mode_group.setExclusive(True)
-        mode_row = QtWidgets.QHBoxLayout()
-        mode_row.setContentsMargins(0, 0, 0, 0)
-        mode_row.setSpacing(theme.px(3))
         self.mode_buttons = {}
         for choice in definitions.choices("paintMode"):
-            button = QtWidgets.QToolButton()
-            button.setText(choice["label"])
-            button.setToolTip(choice.get("tip", ""))
-            button.setCheckable(True)
-            button.setProperty("role", "chip")
-            button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            label = choice["label"].replace(" Maximum", "")  # "Clamp Maximum": Clamp (its tooltip says the rest)
+            button = widgets.chip(label, choice.get("tip", ""), choice["value"] == "replace", "paintMode_" + choice["value"])
             button.clicked.connect(lambda _checked=False, value=choice["value"]: self.paint_mode_changed(value))
             self.mode_group.addButton(button)
             self.mode_buttons[choice["value"]] = button
-            mode_row.addWidget(button)
-        self.mode_buttons["replace"].setChecked(True)
-        mode_widget = QtWidgets.QWidget()
-        mode_widget.setToolTip(definitions.get("choices/paintMode")["tip"])
-        mode_widget.setLayout(mode_row)
-        form.addRow("Mode", mode_widget)
+        modes = widgets.chip_row(self.mode_buttons.values())
+        modes.setToolTip(definitions.get("choices/paintMode")["tip"])
+        controls.addWidget(widgets.small_label("Mode"))
+        controls.addWidget(modes)
         self.value = widgets.SoftSlider(1.0, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None, label="Value")
         self.value.setToolTip("What the Paint brush paints toward, and what Fill sets")
         self.value.committed.connect(lambda v: self.owner.push(value=v))
         fill = QtWidgets.QPushButton("Fill")
+        fill.setObjectName("paintFill")
         fill.setToolTip("Set the map to the value: on the selected guides when some are (a guide map), else "
                         "everywhere")
         fill.clicked.connect(lambda: self.fill())
         row = QtWidgets.QHBoxLayout()
-        row.setSpacing(theme.px(6))
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.px(4))
         row.addWidget(self.value, 1)
         row.addWidget(fill)
         self.value_row = QtWidgets.QWidget()
         self.value_row.setLayout(row)
-        row.setContentsMargins(0, 0, 0, 0)
-        form.addRow(self.value_row)  # the name inside the field
+        controls.addWidget(self.value_row)  # the name inside the field
         # A color map: the color painted, the channels it goes into, and Fill with it.
         color_row = QtWidgets.QHBoxLayout()
         color_row.setContentsMargins(0, 0, 0, 0)
@@ -886,13 +1039,8 @@ class PaintTab(_GroomTab):
         color_row.addWidget(self.swatch)
         self.channel_buttons = {}
         for letter in CHANNELS:
-            b = QtWidgets.QToolButton()
-            b.setText(letter.upper())
-            b.setObjectName("paintChannel_" + letter)
-            b.setCheckable(True)
-            b.setChecked(True)
-            b.setProperty("role", "chip")
-            b.setToolTip(definitions.choice("paintChannel", letter)["tip"])
+            b = widgets.chip(letter.upper(), definitions.choice("paintChannel", letter)["tip"], True,
+                             "paintChannel_" + letter)
             b.toggled.connect(lambda _on, toggled=letter: self.channels_changed(toggled))
             color_row.addWidget(b)
             self.channel_buttons[letter] = b
@@ -902,42 +1050,12 @@ class PaintTab(_GroomTab):
         fill_color.setToolTip("Fill the map with the color, in the channels ticked")
         fill_color.clicked.connect(lambda: self.fill())
         color_row.addWidget(fill_color)
+        self.color_label = widgets.small_label("Color")
+        controls.addWidget(self.color_label)
         self.color_row = QtWidgets.QWidget()
         self.color_row.setLayout(color_row)
-        self.color_label = QtWidgets.QLabel("Color")
-        form.addRow(self.color_label, self.color_row)
-        layout.addLayout(form)
+        controls.addWidget(self.color_row)
         self._show_swatch()
-        views = QtWidgets.QHBoxLayout()
-        self.view_guides = QtWidgets.QCheckBox("Guides")
-        self.view_guides.setToolTip("Color the guides by the map")
-        self.view_guides.toggled.connect(self.toggle_view_guides)
-        self.view_strands = QtWidgets.QCheckBox("Strands")
-        self.view_strands.setToolTip("Color the strands by the map")
-        self.view_strands.toggled.connect(self.toggle_view_strands)
-        self.view_scalp = QtWidgets.QCheckBox("Scalp")
-        self.view_scalp.setObjectName("paintShowOnScalp")
-        self.view_scalp.setToolTip("Show the map on the scalp (black to white), whatever its kind")
-        self.view_scalp.toggled.connect(self.toggle_view_scalp)
-        show = QtWidgets.QLabel("Show on")
-        show.setProperty("role", "about")
-        views.addWidget(show)
-        views.addWidget(self.view_guides)
-        views.addWidget(self.view_strands)
-        views.addWidget(self.view_scalp)
-        self.view_channel = QtWidgets.QComboBox()
-        self.view_channel.setObjectName("paintScalpChannel")
-        for c in definitions.choices("scalpChannel"):
-            self.view_channel.addItem(c["label"], c["value"])
-        self.view_channel.setToolTip(definitions.get("choices/scalpChannel")["tip"])
-        self.view_channel.currentIndexChanged.connect(lambda _i: self.view_channel_changed())
-        views.addWidget(self.view_channel)
-        views.addStretch(1)
-        layout.addLayout(views)
-        self.users = QtWidgets.QLabel()
-        self.users.setWordWrap(True)
-        self.users.setProperty("role", "hint")
-        layout.addWidget(self.users)
 
     def menu_state(self):
         """The conditions the list menu's entries need (engine/ui/lists.json's maps): a map picked, on
@@ -1028,6 +1146,7 @@ class PaintTab(_GroomTab):
             item = QtWidgets.QListWidgetItem("%s%s   (%s%s)" % ("\u26a0 " if lost else "", m["name"],
                                                                KIND_LABELS.get(m["kind"], m["kind"]),
                                                                ", color" if color else ""))
+            item.setSizeHint(QtCore.QSize(0, theme.px(24)))
             item.setIcon(_map_icon(4 if color else 1))
             item.setData(QtCore.Qt.UserRole, m["name"])
             item.setData(QtCore.Qt.UserRole + 1, m["kind"])
@@ -1045,6 +1164,10 @@ class PaintTab(_GroomTab):
         if not (current and self.select(current)) and self.list.count():
             self.list.setCurrentItem(self.list.item(0))
         self.list.blockSignals(False)
+        self.section.set_count(self.list.count() if self.groom else None)
+        fit_rows(self.list)
+        for b in self.box_glyphs:
+            b.setEnabled(self.list.currentItem() is not None)
         self.map_changed(self.current(), push=False)
         self.push_paint_flags()
 
@@ -1214,11 +1337,11 @@ class PaintTab(_GroomTab):
             self.show_while_painting(name)
         self._sync_views()
         users = groomlab.map_users(self.groom, name) if name else []
-        self.users.setText("Read by: " + ", ".join("%s.%s" % u for u in users) if users else
-                           ("Not read by the graph yet: + New Map > For a setting makes a map a setting reads; or in "
-                            "the Graph Editor, right-click a param > Paint, or add a Map node." if name else
-                            "No maps yet: + New Map (For: a setting such as Density, or blank), or in the Graph "
-                            "Editor right-click a param > Paint."))
+        self.users.setText("Read by " + ", ".join("%s.%s" % u for u in users) if users else
+                           "Not read by the graph yet" if name else "No maps yet: + (a new map) above")
+        self.users.setToolTip("" if users else
+                              "+ (New Map) > For a setting makes a map a setting reads; or in the Graph Editor, "
+                              "right-click a param > Paint, or add a Map node.")
 
     def _sync_views(self):
         from maya import cmds
@@ -1489,18 +1612,26 @@ class CorrectivesBox(_GroomTab):
         self.sculpts = sculpts
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(theme.px(6))
+        layout.setSpacing(0)
         lists = definitions.get("lists/correctives")
-        layout.addWidget(_about(lists["about"]))
-        bar, _ = _bar(lists["bar"], definitions.binder(self.ACTIONS, self), self)
-        layout.addLayout(bar)
+        glyphs = _glyphs(lists["bar"], definitions.binder(self.ACTIONS, self), self)
+        body = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(body)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(theme.px(6))
+        self.section = widgets.Section("Layers", body, expanded=True, count=True,
+                                       actions=(glyphs["corrective.fixFrame"], glyphs["corrective.new"]))
+        self.section.setObjectName("layersSection")
+        self.section.setToolTip(lists["about"].replace("<b>", "").replace("</b>", ""))
+        layout.addWidget(self.section)
 
         self.tree = QtWidgets.QTreeWidget()
+        self.tree.setObjectName("correctivesList")
         self.tree.setHeaderLabels(["Layer", "Weight", "Keys"])
+        self.tree.setHeaderHidden(True)
         self.tree.setRootIsDecorated(False)
         self.tree.header().setStretchLastSection(False)
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-        self.tree.setMinimumHeight(theme.px(110))
         self.tree.setEditTriggers(QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed)
         self.tree.setToolTip("Click: what brushes edit. Checkbox: show or hide. Double-click the name: rename. "
                              "Weight: now, on this frame. Right-click: more")
@@ -1508,22 +1639,27 @@ class CorrectivesBox(_GroomTab):
         self.tree.itemChanged.connect(self.item_changed)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.context_menu)
-        layout.addWidget(self.tree, 1)
+        column.addWidget(self.tree)
+        fit_rows(self.tree)
 
+        # The picked layer's box: solo, up, down, delete; its weight and the key.
+        self.box_glyphs = [glyphs[k] for k in ("corrective.solo", "corrective.up", "corrective.down", "corrective.delete")]
+        self.box = widgets.ItemBox(self.box_glyphs)
+        self.box.setObjectName("layerBox")
+        column.addWidget(self.box)
         row = QtWidgets.QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.px(4))
         self.weight = widgets.SoftSlider(1.0, 0.0, 1.0, minimum=0.0, key=None, label="Weight")
         self.weight.setToolTip("The corrective's weight on this frame (above 1 exaggerates). A keyed weight is "
                                "keyed here as you change it")
         self.weight.committed.connect(self.set_weight)
         self.weight.dragged.connect(self.set_weight)
         row.addWidget(self.weight, 1)
-        self.key = QtWidgets.QToolButton()
-        self.key.setText("◆")
-        self.key.setToolTip(definitions.action("corrective.keyWeight")["tip"])
-        self.key.setFixedSize(theme.px(28), theme.px(26))
-        self.key.clicked.connect(self.key_weight)
+        self.key = widgets.glyph_button("key", definitions.action("corrective.keyWeight")["tip"], self.key_weight)
+        self.key.setObjectName("correctiveKey")
         row.addWidget(self.key)
-        layout.addLayout(row)
+        self.box.add(row)
         self._state = None
 
     # -- helpers
@@ -1664,6 +1800,8 @@ class CorrectivesBox(_GroomTab):
         from maya import cmds
         if not self.groom or not cmds.objExists(self.groom):
             self.tree.clear()
+            self.section.set_count(None)
+            fit_rows(self.tree)
             self._state = None
             self._layers = None
             return
@@ -1727,6 +1865,8 @@ class CorrectivesBox(_GroomTab):
         self.tree.blockSignals(False)
         for column in (1, 2):
             self.tree.resizeColumnToContents(column)
+        self.section.set_count(len(layers))
+        fit_rows(self.tree)
         layer = next((l for l in layers if l["name"] == target), None)
         self.weight.setEnabled(layer is not None)
         self.key.setEnabled(layer is not None)
@@ -1770,58 +1910,72 @@ class ReferenceTab(_GroomTab):
         # No scroll area of its own: the Groom Tools' column scrolls (a second one inside it clipped
         # the sections below and scrolled apart from the rest).
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(theme.px(6))
         lists = definitions.get("lists/photos")
         bind = definitions.binder(self.ACTIONS, self)
-        layout.addWidget(_about(lists["about"]))
-        bar, made = _bar(lists["bar"], bind, self)
-        made[0].setObjectName("referenceImport")
-        layout.addLayout(bar)
+        glyphs = _glyphs(lists["bar"], bind, self)
+        glyphs["photo.import"].setObjectName("referenceImport")
+        body = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(body)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(theme.px(6))
+        self.section = widgets.Section("Photos", body, expanded=True, count=True, actions=(glyphs["photo.import"],))
+        self.section.setObjectName("photosSection")
+        self.section.setToolTip(lists["about"].replace("<b>", "").replace("</b>", ""))
+        layout.addWidget(self.section)
 
         self.list = QtWidgets.QListWidget()
         self.list.setObjectName("referenceList")
-        self.list.setIconSize(QtCore.QSize(theme.px(48), theme.px(36)))
-        self.list.setMinimumHeight(theme.px(96))
+        self.list.setIconSize(QtCore.QSize(theme.px(32), theme.px(24)))
         self.list.setToolTip("The reference photos. Double-click: look through it; right-click: more")
         self.list.currentItemChanged.connect(lambda *_: self.picked())
         self.list.itemDoubleClicked.connect(lambda _: self.look_through())
         self.list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(
             lambda pos: self.list_menu(self.list.viewport().mapToGlobal(pos)))
-        layout.addWidget(self.list, 1)
+        column.addWidget(self.list)
+        fit_rows(self.list)
 
-        # How it shows: looking through, locked, the photo's visibility, opacity and side.
-        row = QtWidgets.QHBoxLayout()
-        row.setSpacing(theme.px(6))
-        self.look = QtWidgets.QPushButton("Look Through")
-        self.look.setObjectName("referenceLook")
-        self.look.setCheckable(True)
-        self.look.setToolTip("Show the photo's camera in the viewport (again: back to the camera it showed before)")
+        # The picked photo: rename, show or hide, delete; how it shows (looking through, locked,
+        # its side, opacity), its lens and Align Photo....
+        self.visible = QtWidgets.QToolButton()  # the eye, as the groom's in the header
+        self.visible.setObjectName("referenceVisible")
+        self.visible.setCheckable(True)
+        self.visible.setAutoRaise(True)
+        self.visible.setProperty("role", "glyph")
+        self.visible.setFixedSize(theme.px(24), theme.px(24))
+        self.visible.setIconSize(QtCore.QSize(theme.px(16), theme.px(16)))
+        self.visible.setToolTip("Show or hide the photo (the camera stays)")
+        self.visible.toggled.connect(self.set_visible)
+        self._eye(True)
+        self.box = widgets.ItemBox([glyphs["photo.rename"], self.visible, glyphs["photo.remove"]])
+        self.box.setObjectName("photoBox")
+        column.addWidget(self.box)
+        self.look = widgets.chip("Look through", "Show the photo's camera in the viewport (again: back to the camera "
+                                 "it showed before)", False, "referenceLook")
         self.look.clicked.connect(lambda on: self.look_through() if on else self.look_back())
-        row.addWidget(self.look, 1)
-        self.lock = QtWidgets.QToolButton()
-        self.lock.setText("Lock")
-        self.lock.setObjectName("referenceLock")
-        self.lock.setCheckable(True)
-        self.lock.setProperty("role", "chip")
-        self.lock.setToolTip("Lock the camera where it is: its position, rotation, focal length and the photo on it "
-                             "(tumbling through it does nothing)")
+        self.lock = widgets.chip("Lock", "Lock the camera where it is: its position, rotation, focal length and the "
+                                 "photo on it (tumbling through it does nothing)", False, "referenceLock")
         self.lock.toggled.connect(self.set_locked)
-        row.addWidget(self.lock)
-        layout.addLayout(row)
-        form = QtWidgets.QFormLayout()
-        form.setLabelAlignment(QtCore.Qt.AlignRight)
-        form.setContentsMargins(0, 0, 0, 0)
+        self.side_buttons = {}
+        sides = []
+        for key, label, tip in [(c["value"], c["label"], c["tip"]) for c in definitions.choices("photoDepth")]:
+            b = widgets.chip(label, tip, False, "referenceDepth_" + key)
+            b.setAutoExclusive(True)
+            b.clicked.connect(lambda _=False, k=key: self.set_depth(k))
+            sides.append(b)
+            self.side_buttons[key] = b
+        self.box.add(widgets.chip_row([self.look, self.lock] + sides))
         self.opacity = widgets.SoftSlider(reference.DEFAULT_OPACITY, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None,
                                           label="Opacity")
         self.opacity.setObjectName("referenceOpacity")
         self.opacity.setToolTip("How opaque the photo is: see the mesh through it")
         self.opacity.committed.connect(self.set_opacity)
         self.opacity.dragged.connect(self.set_opacity)
-        form.addRow(self.opacity)  # the name inside the field
+        self.box.add(self.opacity)  # the name inside the field
         self.focal = widgets.SoftSlider(reference.DEFAULT_FOCAL, reference.FOCAL_RANGE[0], reference.FOCAL_RANGE[1],
-                                        minimum=2.5, maximum=3500.0, key=None, label="Focal Length", suffix="mm")
+                                        minimum=2.5, maximum=3500.0, key=None, label="Focal length", suffix="mm")
         self.focal.setObjectName("referenceFocal")
         self.focal.setToolTip("The photo camera's focal length (mm): Align Photo works it out from the point pairs; set "
                               "it by hand when you know the lens (Keep focal length turns on, so the alignment keeps "
@@ -1830,73 +1984,46 @@ class ReferenceTab(_GroomTab):
         self.focal.dragged.connect(self.set_focal)
         self.focal.menu_hook = lambda menu_: menu_.addAction(
             "Reset Focal Length (%g mm)" % reference.DEFAULT_FOCAL, self.reset_focal)
-        form.addRow(self.focal)
-        sides = QtWidgets.QHBoxLayout()
-        sides.setSpacing(theme.px(4))
-        self.side_buttons = {}
-        for key, label, tip in [(c["value"], c["label"], c["tip"]) for c in definitions.choices("photoDepth")]:
-            b = QtWidgets.QToolButton()
-            b.setText(label)
-            b.setObjectName("referenceDepth_" + key)
-            b.setCheckable(True)
-            b.setAutoExclusive(True)
-            b.setProperty("role", "chip")
-            b.setToolTip(tip)
-            b.clicked.connect(lambda _=False, k=key: self.set_depth(k))
-            sides.addWidget(b)
-            self.side_buttons[key] = b
-        sides.addStretch(1)
-        self.visible = QtWidgets.QToolButton()  # the eye, as the groom's in the header
-        self.visible.setObjectName("referenceVisible")
-        self.visible.setCheckable(True)
-        self.visible.setAutoRaise(True)
-        self.visible.setProperty("role", "glyph")
-        self.visible.setIconSize(QtCore.QSize(theme.px(20), theme.px(20)))
-        self.visible.setToolTip("Show or hide the photo (the camera stays)")
-        self.visible.toggled.connect(self.set_visible)
-        self._eye(True)
-        sides.addWidget(self.visible)
-        form.addRow(definitions.get("choices/photoDepth")["label"], sides)
-        layout.addLayout(form)
-
+        self.box.add(self.focal)
         # Align Photo...: the Photos window (the photo and the mesh side by side), and where it stands.
         item = definitions.resolve(lists["alignBar"], None)[0]
-        align = QtWidgets.QPushButton(item["label"])  # a full-width button, as Look Through
+        align = QtWidgets.QPushButton(item["label"])
         align.setObjectName("referenceAlign")
         align.setToolTip(item["tip"])
         align.clicked.connect(lambda _=False, s=bind(item): s())
-        layout.addWidget(align)
-        self.align_about = QtWidgets.QLabel()
+        self.box.add(align)
+        self.align_about = widgets.small_label("", wrap=True)
         self.align_about.setObjectName("referenceAlignAbout")
-        self.align_about.setWordWrap(True)
-        self.align_about.setProperty("role", "hint")
-        layout.addWidget(self.align_about)
+        self.box.add(self.align_about)
+        self.box_glyphs = [glyphs["photo.rename"], glyphs["photo.remove"]]
         self._controls = (self.look, self.lock, self.opacity, self.focal, self.visible, align) + \
-            tuple(self.side_buttons.values())
+            tuple(self.side_buttons.values()) + tuple(self.box_glyphs)
         self._build_generate(layout)
         self.refresh()
 
     # -- Guides from Photos (experimental) -------------------------------------------
 
     def _build_generate(self, layout):
-        """The Guides from Photos section: the Reference window does the work (the photo and the
-        mesh side by side: landmarks, flow arrows, the mask, Generate, the measured look); here, a
-        way in and where things stand."""
-        heading = QtWidgets.QLabel("GUIDES FROM PHOTOS (EXPERIMENTAL)")
-        heading.setProperty("role", "subheading")
-        heading.setObjectName("referenceGuidesHeading")
-        layout.addWidget(heading)
-        self.gen_hint = QtWidgets.QLabel()
+        """The Guides from Photos section (folded): the Reference window does the work (the photo
+        and the mesh side by side: landmarks, flow arrows, the mask, Generate, the measured look);
+        here, a way in and where things stand."""
+        body = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(body)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(theme.px(6))
+        self.generate_section = widgets.Section("Guides from photos", body, expanded=False)
+        self.generate_section.setObjectName("referenceGuidesHeading")
+        self.generate_section.setToolTip("Experimental")
+        layout.addWidget(self.generate_section)
+        self.gen_hint = widgets.small_label("", wrap=True)
         self.gen_hint.setObjectName("referenceGuidesHint")
-        self.gen_hint.setWordWrap(True)
-        self.gen_hint.setProperty("role", "hint")
-        layout.addWidget(self.gen_hint)
+        column.addWidget(self.gen_hint)
         self.cameras_menu = QtWidgets.QMenu(self)
         self.cameras_menu.aboutToShow.connect(lambda m=self.cameras_menu: self._fill_cameras_menu(m))
         bar, made = _bar(definitions.get("lists/photos/guidesBar"), definitions.binder(self.ACTIONS, self), self)
         made[0].setObjectName("referenceOpenWindow")
         made[1].setObjectName("referenceAddView")
-        layout.addLayout(bar)
+        column.addLayout(bar)
 
     def open_window(self, stage="align"):
         """The Photos window on this groom (on the picked photo): its Align stage (line the photo up)
@@ -2001,8 +2128,9 @@ class ReferenceTab(_GroomTab):
             self.list.blockSignals(True)
             self.list.clear()
             for name, path, width, height, locked in rows:
-                item = QtWidgets.QListWidgetItem("%s\n%d x %d%s" % (name.split("|")[-1], width, height,
-                                                                    "  ·  locked" if locked else ""))
+                item = QtWidgets.QListWidgetItem("%s   %d x %d%s" % (name.split("|")[-1], width, height,
+                                                                   "  ·  locked" if locked else ""))
+                item.setSizeHint(QtCore.QSize(0, theme.px(28)))
                 item.setData(QtCore.Qt.UserRole, name)
                 item.setIcon(self._thumbnail(path))
                 item.setToolTip(path)
@@ -2011,6 +2139,8 @@ class ReferenceTab(_GroomTab):
                 self.list.setCurrentRow(0)
             self.list.blockSignals(False)
             self._shown = None
+            self.section.set_count(len(rows))
+            fit_rows(self.list)
         self.show_controls()
         self.show_generate()
 
@@ -2103,7 +2233,8 @@ class ReferenceTab(_GroomTab):
             self.look.blockSignals(True)
             self.look.setChecked(on)
             self.look.blockSignals(False)
-        self.look.setText("Back to Perspective" if self.look.isChecked() else "Look Through")
+        self.look.setToolTip("Looking through the photo: click to go back to the camera before" if self.look.isChecked()
+                             else "Show the photo's camera in the viewport (again: back to the camera it showed before)")
 
     # -- Actions ----------------------------------------------------------------------
 
