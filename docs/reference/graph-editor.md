@@ -67,7 +67,8 @@ file, as curves, a turntable), **Transfer...** and **Import** (the GroomLab menu
 - **Tools:** every tool as an icon, in groups (the core's brush catalog, `brush_catalog.h`):
   Create (Place, Draw, Part, Flow), Shape (Comb, Slide, Smooth, Straighten, Lift, Twist, Curl,
   Attract, Direction, Noise, Tube), Trim (Cut, Length, Erase), Paint (Paint, Width, Density) and
-  Guides (Select, Freeze, with the Unfreeze All tile beside Freeze). The tiles reflow to the
+  Guides (Select, Freeze, with the Unfreeze All tile beside Freeze): square icon tiles, up to
+  six to a row (each one's name and what it does in its tooltip). The tiles reflow to the
   panel's width. Click one and drag in the viewport over the groom.
 - **Guide groups & edits** (a section of the Tools tab; click its title to open it): the guide
   groups, each row with a visibility checkbox, its name (double-click to rename; graph params

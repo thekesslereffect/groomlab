@@ -952,18 +952,18 @@ class ToolPalette(QtWidgets.QWidget):
         self.tabs.currentChanged.connect(self.tab_changed)
         work.addWidget(self.tabs)
 
-        # The active tool: its name, what it does, and its settings in one card.
+        # The active tool: its name (a section's header, under a hairline), what it does, and its settings.
         self.settings_heading = self.heading("Brush")
+        self.settings_heading.setProperty("rule", "true")
         work.addWidget(self.settings_heading)
         self.hint = QtWidgets.QLabel()
         self.hint.setWordWrap(True)
         self.hint.setProperty("role", "about")
         work.addWidget(self.hint)
         self.settings = QtWidgets.QFrame()
-        self.settings.setProperty("role", "card")
+        self.settings.setProperty("role", "card")  # a plain section: no box, the hairline above says where it starts
         card = QtWidgets.QVBoxLayout(self.settings)
-        pad = theme.px(12)
-        card.setContentsMargins(pad, pad, pad, pad)
+        card.setContentsMargins(0, 0, 0, 0)
         card.setSpacing(theme.px(10))
         self.brush_form = QtWidgets.QWidget()
         self.brush_form.setProperty("role", "options")
@@ -1585,17 +1585,21 @@ class ToolPalette(QtWidgets.QWidget):
             if getattr(button, "glyph", None):
                 button.setIcon(widgets.glyph(button.glyph))
 
+    TILE_ICON = 20  # px at 100%: the tool tiles' icons (the tiles: square, as wide as their column)
+    TILE_MIN = 32
+
     def unfreeze_tile(self):
-        """Unfreeze All as a tile beside the Freeze tool's: every guide brushable again."""
+        """Unfreeze All as an icon tile beside the Freeze tool's (a button, not a tool: never
+        checked): every guide brushable again."""
         b = QtWidgets.QToolButton()
         b.setObjectName("unfreezeAllTile")
-        b.setText("Unfreeze All")
+        b.setText("Unfreeze All")  # not shown (icon only): its name for scripts and accessibility
         b.setIcon(widgets.icon("unfreeze"))
-        b.setIconSize(QtCore.QSize(theme.px(28), theme.px(28)))
-        b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+        b.setIconSize(QtCore.QSize(theme.px(self.TILE_ICON), theme.px(self.TILE_ICON)))
+        b.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
         b.setAutoRaise(True)
         b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        b.setMinimumSize(theme.px(64), theme.px(56))
+        b.setMinimumSize(theme.px(self.TILE_MIN), theme.px(self.TILE_MIN))
         b.setProperty("role", "tool")
         b.setToolTip("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again "
                      "(a brush's Shift+click where no guide is does the same)")
@@ -1603,21 +1607,22 @@ class ToolPalette(QtWidgets.QWidget):
         self.buttons.setdefault("unfreeze", b)  # its icon follows the theme
         return b
 
-    def tool_grid(self, tools, columns=4, extra=()):
-        """Tool tiles (tool, label, tooltip) that reflow to the panel's width, and any `extra`
-        buttons after them; one tool is active across every tab."""
+    def tool_grid(self, tools, columns=6, extra=()):
+        """Square icon tiles (tool, label, tooltip: the name and the hint in the tooltip) that
+        reflow to the panel's width, and any `extra` buttons after them; one tool is active
+        across every tab."""
         tiles = []
         for tool, label, tip in tools:
             b = QtWidgets.QToolButton()
-            b.setText(label)
+            b.setText(label)  # not shown (icon only): its name for scripts and accessibility
             b.setIcon(widgets.icon(tool))
-            b.setIconSize(QtCore.QSize(theme.px(28), theme.px(28)))
-            b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+            b.setIconSize(QtCore.QSize(theme.px(self.TILE_ICON), theme.px(self.TILE_ICON)))
+            b.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
             b.setCheckable(True)
             b.setAutoRaise(True)
             b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-            b.setMinimumSize(theme.px(64), theme.px(56))
-            b.setProperty("role", "tool")  # a rounded tile: the theme colors it
+            b.setMinimumSize(theme.px(self.TILE_MIN), theme.px(self.TILE_MIN))
+            b.setProperty("role", "tool")  # a rounded tile: the theme colors it (checked: the selection, an accent border)
             b.setToolTip("<b>%s</b><br>%s" % (NAMES.get(tool, label), tip))
             b.clicked.connect(lambda _=False, t=tool: self.activate(t))
             self.group.addButton(b)

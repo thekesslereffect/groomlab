@@ -83,14 +83,14 @@ def section_shown(section_id, context):
 
 
 def tile(layout, tool, active):
-    info = tools.tool_info(tool)
-    op = layout.operator("groomlab.tool", text=info["label"] if info else tool, icon_value=icons.icon(tool),
-                         depress=active == tool)
+    """A tool's icon tile (its name and hint in the tooltip: GROOMLAB_OT_tool.description)."""
+    op = layout.operator("groomlab.tool", text="", icon_value=icons.icon(tool), depress=active == tool)
     op.tool = tool
     return op
 
 
-def tool_grid(layout, tool_ids, active, columns=4):
+def tool_grid(layout, tool_ids, active, columns=6):
+    """Icon tiles six to a row, as Maya's and the app's tool palettes."""
     grid = layout.grid_flow(row_major=True, columns=columns, even_columns=True, even_rows=True, align=True)
     grid.scale_y = 1.4
     for t in tool_ids:
@@ -203,8 +203,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 heading(layout, category)
                 ids = [x["id"] for x in tlist]
                 grid = tool_grid(layout, ids, t.tool)
-                if "freeze" in ids:  # beside Freeze: every guide brushable again
-                    grid.operator("groomlab.guides_edit", text="Unfreeze All",
+                if "freeze" in ids:  # beside Freeze, an icon: every guide brushable again (its tooltip says so)
+                    grid.operator("groomlab.guides_edit", text="",
                                   icon_value=icons.icon("unfreeze")).action = "UNFREEZE_ALL"
         elif t.tab == "PAINT":
             self.draw_paint(layout, context, t)
@@ -358,13 +358,14 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
     def draw_card(self, layout, context, t, scalp):
         tool = t.tool
         info = tools.tool_info(tool) if tool else None
+        layout.separator(type="LINE")  # a plain section: a hairline and its heading, no box
         heading(layout, info["label"] if info else "Tool")
         if info is None:
             _wrap(layout, NO_TOOL, width=_chars(context))
             return
         _wrap(layout, info["hint"], width=_chars(context))
         uses = set(info["settings"])
-        card = layout.box()
+        card = layout.column()
         label = tools.setting_label
         if "radius" in uses:
             col = card.column(align=True)

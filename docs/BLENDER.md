@@ -1121,8 +1121,9 @@ is read-only there): a timer writes them.
 
 Deviations Blender forces:
 
-- The palette is a sidebar panel, not a floating dockable window; tiles are icon + label buttons
-  (Blender buttons cannot put the label under the icon); the More menu has no theme menu.
+- The palette is a sidebar panel, not a floating dockable window; tiles are icon buttons six to a
+  row, as Maya's (the tooltip's title is Blender's operator name, "GroomLab Tool", with the tool's
+  name and hint under it); the More menu has no theme menu.
 - No middle-drag radius/strength (Blender's view rotation): B / M + drag only, as Maya's hotkeys.
 - Blender postpones its autosave while a modal operator runs: the tool's does too; leave the tool
   (Esc) now and then in long sessions, or save.

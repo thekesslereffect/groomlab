@@ -146,7 +146,11 @@ def guides_shape(model, name):
     return False
 
 
-HEADER_STYLE = "tinted"  # "filled": the header in the category color; "tinted": a wash and an accent bar
+HEADER_STYLE = "tinted"  # "filled": the header in the category color; "tinted": a wash and an accent bar;
+#                          "minimal": no header, a category-colored dot by the title
+HEADER_STYLES = ("tinted", "filled", "minimal")
+CANVAS_STYLE = "dots"   # the canvas: "dots" (a dot per grid step), "lines" (grid lines) or "plain"
+CANVAS_STYLES = ("dots", "lines", "plain")
 SHADOW = True
 
 UNDO_KEYS = [QtGui.QKeySequence("Ctrl+Z")]
@@ -197,7 +201,7 @@ def load_model(groom, catalog=None):
 def apply_theme(t=None):
     """Take the graph's colors and shapes from a theme (the active one by default)."""
     global NODE_BG, NODE_BG_TOP, NODE_BORDER, TEXT, MUTED, SELECTED, CANVAS, GRID_DOT, CORNER, HEADER_STYLE, SHADOW
-    global ERROR, WARNING, NOTE, DRIVEN, READS, WRITES, FOCUS, FAST, SLOW
+    global CANVAS_STYLE, ERROR, WARNING, NOTE, DRIVEN, READS, WRITES, FOCUS, FAST, SLOW
     t = t or theme.current()
     NODE_BG = t.qcolor("graph.node")
     NODE_BG_TOP = t.qcolor(t.get("graph.nodeTop") or "graph.node") if t.get("graph.nodeTop") else QtGui.QColor(NODE_BG)
@@ -209,6 +213,11 @@ def apply_theme(t=None):
     GRID_DOT = t.qcolor("graph.grid")
     CORNER = float(t.get("graph.cornerRadius", 9))
     HEADER_STYLE = t.get("graph.headerStyle", "tinted")
+    if HEADER_STYLE not in HEADER_STYLES:  # a style this GroomLab doesn't paint (a newer theme's)
+        HEADER_STYLE = "tinted"
+    CANVAS_STYLE = t.get("graph.canvasStyle", "dots")
+    if CANVAS_STYLE not in CANVAS_STYLES:
+        CANVAS_STYLE = "dots"
     SHADOW = bool(t.get("graph.shadow", True))
     ERROR = t.qcolor(t.get("graph.error", "red"))
     WARNING = t.qcolor(t.get("graph.warning", t.get("ui.warning", "yellow")))
@@ -687,22 +696,25 @@ class NodeItem(QtWidgets.QGraphicsItem):
         painter.setBrush(gradient)
         painter.drawRoundedRect(rect, CORNER, CORNER)
 
-        # The header: filled with the category color, or a wash under an accent bar.
+        # The header: filled with the category color, a wash under an accent bar, or (minimal)
+        # none at all: a dot in the category color beside the name says the category.
         header = QtCore.QRectF(0, 0, NODE_W, HEADER_H)
         filled = HEADER_STYLE == "filled"
-        clip = QtGui.QPainterPath()
-        clip.addRoundedRect(rect, CORNER, CORNER)
-        painter.save()
-        painter.setClipPath(clip)
-        if filled:
-            painter.fillRect(header, accent)
-        else:
-            tint = QtGui.QColor(accent)
-            tint.setAlpha(34)
-            painter.fillRect(header, tint)
-            painter.fillRect(QtCore.QRectF(0, 0, NODE_W, 3), accent)
-        painter.restore()
-        if not filled:
+        minimal = HEADER_STYLE == "minimal"
+        if not minimal:
+            clip = QtGui.QPainterPath()
+            clip.addRoundedRect(rect, CORNER, CORNER)
+            painter.save()
+            painter.setClipPath(clip)
+            if filled:
+                painter.fillRect(header, accent)
+            else:
+                tint = QtGui.QColor(accent)
+                tint.setAlpha(34)
+                painter.fillRect(header, tint)
+                painter.fillRect(QtCore.QRectF(0, 0, NODE_W, 3), accent)
+            painter.restore()
+        if not filled and not minimal:
             painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 14), 1))
             painter.drawLine(QtCore.QPointF(10, HEADER_H), QtCore.QPointF(NODE_W - 10, HEADER_H))
         on_header = readable_on(accent) if filled else TEXT
@@ -717,22 +729,31 @@ class NodeItem(QtWidgets.QGraphicsItem):
         small.setPixelSize(10)
         small.setLetterSpacing(QtGui.QFont.AbsoluteSpacing, 0.6)
         name_h = QtGui.QFontMetrics(font).height()
+        left = 12.0
+        if minimal:
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.setBrush(accent)
+            painter.drawEllipse(QtCore.QPointF(left + 3.5, 5 + name_h / 2.0), 3.5, 3.5)
+            painter.setBrush(QtCore.Qt.NoBrush)
+            left += 13.0
         painter.setFont(font)
         painter.setPen(on_header)
-        room = NODE_W - 24 - TOGGLE_ROOM
-        painter.drawText(QtCore.QRectF(12, 5, room, name_h), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+        room = NODE_W - left - 12 - TOGGLE_ROOM
+        painter.drawText(QtCore.QRectF(left, 5, room, name_h), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
                          QtGui.QFontMetrics(font).elidedText(self.name, QtCore.Qt.ElideRight, room))
         painter.setFont(small)
         if filled:
             kind = QtGui.QColor(on_header)
             kind.setAlpha(165)
             painter.setPen(kind)
+        elif minimal:
+            painter.setPen(MUTED)
         else:
             painter.setPen(accent.lighter(115))
         label = label_of(self.op_type, self.editor.catalog).upper() if self.category != "Output" else "OUTPUT"
         if self.library and self.category != "Output":
             label = self.library["label"].upper()
-        painter.drawText(QtCore.QRectF(12, 5 + name_h, NODE_W - 24, QtGui.QFontMetrics(small).height()),
+        painter.drawText(QtCore.QRectF(left, 5 + name_h, NODE_W - left - 12, QtGui.QFontMetrics(small).height()),
                          QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, label)
 
         # Port labels.
@@ -1549,19 +1570,24 @@ class GraphScene(QtWidgets.QGraphicsScene):
     GRID_STEP = GRID
 
     def grid_brush(self, zoom):
-        """A brush tiling one dot per GRID_STEP scene units, drawn at device resolution for
-        `zoom` (so the dots stay crisp); made once per zoom level."""
-        key = (round(zoom, 3), GRID_DOT.rgba())
+        """A brush tiling one dot (or, with the theme's canvasStyle "lines", one grid line each
+        way) per GRID_STEP scene units, drawn at device resolution for `zoom` (so the dots stay
+        crisp); made once per zoom level."""
+        key = (round(zoom, 3), GRID_DOT.rgba(), CANVAS_STYLE)
         brush = self._grid.get(key)
         if brush is None:
             size = max(1, int(round(self.GRID_STEP * zoom)))
             tile = QtGui.QPixmap(size, size)
             tile.fill(QtCore.Qt.transparent)
             painter = QtGui.QPainter(tile)
-            painter.setRenderHint(QtGui.QPainter.Antialiasing)
-            painter.setPen(QtCore.Qt.NoPen)
-            painter.setBrush(GRID_DOT)
-            painter.drawEllipse(QtCore.QPointF(size / 2.0, size / 2.0), 0.9, 0.9)  # one dot, whole, per tile
+            if CANVAS_STYLE == "lines":  # through the tile's middle, where the dots sit
+                painter.fillRect(QtCore.QRectF(0, size // 2, size, 1), GRID_DOT)
+                painter.fillRect(QtCore.QRectF(size // 2, 0, 1, size), GRID_DOT)
+            else:
+                painter.setRenderHint(QtGui.QPainter.Antialiasing)
+                painter.setPen(QtCore.Qt.NoPen)
+                painter.setBrush(GRID_DOT)
+                painter.drawEllipse(QtCore.QPointF(size / 2.0, size / 2.0), 0.9, 0.9)  # one dot, whole, per tile
             painter.end()
             brush = QtGui.QBrush(tile)
             brush.setTransform(QtGui.QTransform.fromScale(self.GRID_STEP / float(size), self.GRID_STEP / float(size)))
@@ -1573,7 +1599,7 @@ class GraphScene(QtWidgets.QGraphicsScene):
     def drawBackground(self, painter, rect):
         super(GraphScene, self).drawBackground(painter, rect)
         zoom = painter.worldTransform().m11()
-        if self.GRID_STEP * zoom < 4:  # zoomed far out: the dots would merge into a haze
+        if CANVAS_STYLE == "plain" or self.GRID_STEP * zoom < 4:  # zoomed far out: the dots would merge into a haze
             return
         painter.save()
         painter.setPen(QtCore.Qt.NoPen)

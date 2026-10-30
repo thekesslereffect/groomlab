@@ -58,6 +58,7 @@ class Layout(bu.FakeLayout):
     def operator(self, idname, **kwargs):
         props = bu.FakeLayout.operator(self, idname, **kwargs)
         self.log.append(("op_text", idname, kwargs.get("text", "")))
+        self.log.append(("op_props", idname, props))  # what the caller sets on it (a tile's tool)
         return props
 
 
@@ -289,9 +290,20 @@ class ToolsTest(unittest.TestCase):
         self.assertIn(("op_text", "groomlab.tool", "▶  Place some guides"), log)
         self.assertTrue(any(e[0] == "label" and e[1] == "CREATE" for e in log))
         self.assertTrue(any(e[0] == "label" and "Pick a tool" in e[1] for e in log))
-        tiles = [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.tool"]
-        for label in ("Place", "Draw", "Part", "Flow", "Comb", "Smooth", "Cut", "Erase", "Paint", "Select", "Freeze"):
-            self.assertIn(label, tiles)
+        # The tiles: icons (no text) six to a row, each tool's name and hint in its tooltip.
+        tiles = [getattr(e[2], "tool", None) for e in log if e[0] == "op_props" and e[1] == "groomlab.tool"]
+        for tool in ("place", "draw", "part", "flow", "comb", "smooth", "cut", "erase", "paint", "select", "freeze"):
+            self.assertIn(tool, tiles)
+        self.assertEqual(palette.tool_grid.__defaults__, (6,))
+        tile_texts = [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.tool"]
+        self.assertEqual([x for x in tile_texts if x], ["▶  Place some guides"])  # the starter's step, not a tile
+        unfreeze = [e[2] for e in log if e[0] == "op_props" and e[1] == "groomlab.guides_edit"
+                    and getattr(e[2], "action", None) == "UNFREEZE_ALL"]
+        self.assertTrue(unfreeze)  # Unfreeze All beside Freeze: an icon tile
+        self.assertIn("", [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.guides_edit"])
+        comb = type("Props", (), {"tool": "comb"})()
+        self.assertEqual(tool_ops.GROOMLAB_OT_tool.description(bpy.context, comb),
+                         "%s: %s" % (tools.tool_info("comb")["label"], tools.tool_info("comb")["hint"]))
         # Free for any use: no Learning mode note.
         self.assertFalse(any(e[0] == "label" and "Learning" in e[1] for e in log))
 

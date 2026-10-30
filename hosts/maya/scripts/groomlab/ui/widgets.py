@@ -386,8 +386,9 @@ def _mix(a, b, f):
                         int(round(ca.blue() + (cb.blue() - ca.blue()) * f))).name().upper()
 
 
-def icon_colors(name, active=False, t=None):
-    """{placeholder role: hex} for an icon in the theme; `active` for one on the accent (a checked tool)."""
+def icon_colors(name, t=None):
+    """{placeholder role: hex} for an icon in the theme (a checked tool keeps them: its tile is marked
+    by the selection fill and an accent border, not by recoloring the icon)."""
     from groomlab.ui import theme
     t = t or theme.current()
     group = next((g for g, names in ICON_GROUPS.items() if name in names), "app")
@@ -396,15 +397,10 @@ def icon_colors(name, active=False, t=None):
               "ink": t.hex(t.get("icons.ink", "white")), "shine": "#FFFFFF"}
     for name_ in ("red", "yellow", "blue", "emerald"):
         colors[name_] = t.hex(name_)
-    if active:  # on the accent: the icon in the accent's text color, its highlights in the accent
-        on, accent = t.color("ui.accentText", "#FFFFFF"), t.hex("accent")
-        colors = {role: on for role in colors}
-        colors["shade"] = _mix(on, accent, 0.3)
-        colors["shine"] = accent
     return colors
 
 
-def icon_svg(name, active=False, t=None):
+def icon_svg(name, t=None):
     """The icon's SVG text in the theme's colors; None if there is no such icon."""
     path = os.path.join(ICON_DIR, "groomLab_%s.svg" % name)
     if path not in _svg_cache:
@@ -413,7 +409,7 @@ def icon_svg(name, active=False, t=None):
         with open(path, encoding="utf-8") as f:
             _svg_cache[path] = f.read()
     svg = _svg_cache[path]
-    colors = icon_colors(name, active, t)
+    colors = icon_colors(name, t)
     for role, placeholder in PLACEHOLDERS.items():
         svg = svg.replace(placeholder, "\0%s\0" % role)  # two passes: a color may equal another placeholder
     for role, color in colors.items():
@@ -431,21 +427,19 @@ def _pixmap(svg, size):
     return QtGui.QPixmap.fromImage(image)
 
 
-_icon_cache = {}  # (svg text, active svg text, size) -> QIcon: rendered once per theme colors
+_icon_cache = {}  # (svg text, size) -> QIcon: rendered once per theme colors
 
 
 def icon(name, size=64):
-    """QIcon for "comb", "place", ... in the active theme's colors (checked: the active look); empty if missing."""
+    """QIcon for "comb", "place", ... in the active theme's colors (the same checked or not); empty if missing."""
     svg = icon_svg(name)
     if svg is None:
         return QtGui.QIcon()
-    active = icon_svg(name, active=True)
-    key = (svg, active, size)
+    key = (svg, size)
     result = _icon_cache.get(key)
     if result is None:
         result = QtGui.QIcon()
         result.addPixmap(_pixmap(svg, size), QtGui.QIcon.Normal, QtGui.QIcon.Off)
-        result.addPixmap(_pixmap(active, size), QtGui.QIcon.Normal, QtGui.QIcon.On)
         _icon_cache[key] = result
     return result
 
@@ -506,10 +500,11 @@ def glyph(name, color=None, size=48):
 
 
 class ToolGrid(QtWidgets.QWidget):
-    """Tool tiles that reflow to the panel's width: up to `columns` a row, at least two, so a
-    narrow dock shows every tile instead of clipping the last column."""
+    """Square icon tiles that reflow to the panel's width: up to `columns` a row, at least two, so
+    a narrow dock shows every tile instead of clipping the last column; each tile as tall as its
+    column is wide."""
 
-    def __init__(self, buttons, columns=4, parent=None):
+    def __init__(self, buttons, columns=6, parent=None):
         super(ToolGrid, self).__init__(parent)
         from groomlab.ui import theme
         self.buttons = list(buttons)
@@ -517,7 +512,7 @@ class ToolGrid(QtWidgets.QWidget):
         self.columns = None
         self.grid = QtWidgets.QGridLayout(self)
         self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setSpacing(theme.px(6))
+        self.grid.setSpacing(theme.px(4))
         self.grid.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)  # the width may go below 4 tiles
         self._place(columns)
 
@@ -541,8 +536,18 @@ class ToolGrid(QtWidgets.QWidget):
         spacing = self.grid.spacing()
         return max(2, (width + spacing) // max(1, self._tile() + spacing))
 
+    def _square(self, width):
+        """Each tile as tall as a column is wide (a short row's tiles too: the columns stretch alike)."""
+        spacing = self.grid.spacing()
+        columns = max(1, self.columns or 1)
+        side = max(self._tile(), (width - (columns - 1) * spacing) // columns)
+        for b in self.buttons:
+            if b.minimumHeight() != side or b.maximumHeight() != side:
+                b.setFixedHeight(side)
+
     def resizeEvent(self, event):
         self._place(self.columns_for(event.size().width()))
+        self._square(event.size().width())
         super(ToolGrid, self).resizeEvent(event)
 
     def minimumSizeHint(self):
@@ -555,9 +560,9 @@ class ToolGrid(QtWidgets.QWidget):
 
 
 class Pages(QtWidgets.QWidget):
-    """A segmented control over pages, as tabs: only the page showing takes room, so what sits
-    under it follows right below (the QTabWidget API: addTab, currentIndex, setCurrentIndex,
-    currentChanged, count, widget)."""
+    """Underlined tabs over pages (a hairline under the bar, the current tab's name underlined in
+    the accent): only the page showing takes room, so what sits under it follows right below
+    (the QTabWidget API: addTab, currentIndex, setCurrentIndex, currentChanged, count, widget)."""
 
     currentChanged = QtCore.Signal(int)
 
@@ -568,17 +573,17 @@ class Pages(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(theme.px(8))
         track = QtWidgets.QFrame()
-        track.setProperty("role", "segments")
+        track.setProperty("role", "segments")  # the hairline under the tabs
         row = QtWidgets.QHBoxLayout(track)
-        pad = theme.px(3)
-        row.setContentsMargins(pad, pad, pad, pad)
+        row.setContentsMargins(0, 0, 0, 0)
         self.bar = QtWidgets.QTabBar()
-        self.bar.setExpanding(True)
+        self.bar.setExpanding(False)  # each tab as wide as its name, left aligned
         self.bar.setUsesScrollButtons(False)  # a narrow panel shortens the names rather than scroll them
         self.bar.setElideMode(QtCore.Qt.ElideRight)
         self.bar.setDrawBase(False)
         self.bar.setDocumentMode(True)
         row.addWidget(self.bar)
+        row.addStretch(1)
         layout.addWidget(track)
         self._pages = []
         self.bar.currentChanged.connect(self._show)
@@ -625,7 +630,8 @@ class StatusLabel(QtWidgets.QLabel):
 
 
 class Section(QtWidgets.QWidget):
-    """A titled section that folds away: click its header to show or hide `content`."""
+    """A titled section that folds away: click its header to show or hide `content`. The header:
+    a chevron and the title in small spaced capitals, muted, under a hairline (no card)."""
 
     def __init__(self, title, content, expanded=False, parent=None):
         super(Section, self).__init__(parent)
@@ -637,6 +643,9 @@ class Section(QtWidgets.QWidget):
         self.header.setCheckable(True)
         self.header.setFlat(True)
         self.header.setProperty("role", "section")
+        font = QtGui.QFont(self.header.font())
+        font.setLetterSpacing(QtGui.QFont.PercentageSpacing, 108)  # the style sheet sets its size and weight
+        self.header.setFont(font)
         self.header.toggled.connect(self.set_expanded)
         self.content = content
         layout.addWidget(self.header)

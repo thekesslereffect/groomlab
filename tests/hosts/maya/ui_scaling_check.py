@@ -288,13 +288,88 @@ def main():
             _expect("solid %s" % charcoal.color("ui.outline") in sheet, "Charcoal: thin outlines")
             _expect("background: %s; color: %s" % (charcoal.color("ui.selection"), charcoal.color("ui.selectionText")) in sheet,
                     "Charcoal: a grey selection, not the off-white accent")
+            outline = charcoal.color("ui.outline")
             playful = theme.set_theme("playful")
-            _expect("solid %s" % "#2E2E2E" not in tools.styleSheet() and not playful.get("ui.outline"), "Playful: no outlines")
+            _expect("solid %s" % outline not in tools.styleSheet() and not playful.get("ui.outline"), "Playful: no outlines")
         finally:
             theme.set_theme("playful")
             widgets.dispose(tools)
             widgets.dispose(editor)
     check.run("every shipped theme restyles the Groom Tools and the Graph Editor", every_theme_styles_the_windows)
+
+    # The 2026-10-30 look (research/ui-redesign, "chosen"): square icon-only tool tiles six to a row
+    # (name and hint in the tooltip, the checked one in the selection with an accent border, its icon
+    # in its own colors), underlined tabs left aligned, sections under a hairline without a card, and
+    # the Graph Editor's minimal headers and canvas styles painted.
+    def redesign_look():
+        from groomlab.ui.qt import QtCore, QtGui
+        t = theme.set_theme("charcoal")
+        tools = palette.ToolPalette()
+        tools.resize(theme.px(380), theme.px(1000))
+        tools.show()
+        settle()
+        tools.empty.setVisible(False)  # as with a groom (the stand-in Maya has none)
+        tools.work.setVisible(True)
+        settle()
+        try:
+            tiles = [b for b in tools.findChildren(QtWidgets.QToolButton) if b.property("role") == "tool"]
+            _expect(len(tiles) > 10 and all(b.toolButtonStyle() == QtCore.Qt.ToolButtonIconOnly for b in tiles),
+                    "icon-only tool tiles")
+            _expect(all(b.toolTip().startswith("<b>") and "<br>" in b.toolTip() for b in tiles), "name + hint tooltips")
+            shown = [b for b in tiles if b.isVisibleTo(tools)]
+            _expect(shown and all(abs(b.width() - b.height()) <= 2 for b in shown),
+                    "square tiles: %r" % sorted({(b.width(), b.height()) for b in shown}))
+            grids = [g for g in tools.findChildren(widgets.ToolGrid) if g.isVisibleTo(tools)]
+            _expect(grids and all(g.columns == 6 for g in grids), "six to a row: %r" % [g.columns for g in grids])
+            unfreeze = tools.findChild(QtWidgets.QToolButton, "unfreezeAllTile")
+            _expect(unfreeze in tiles and not unfreeze.isCheckable() and "Unfreeze All" in unfreeze.toolTip(),
+                    "Unfreeze All: an icon tile, a button")
+            comb = tools.buttons["comb"].icon()
+            _expect(comb.pixmap(32, 32, QtGui.QIcon.Normal, QtGui.QIcon.On).toImage()
+                    == comb.pixmap(32, 32, QtGui.QIcon.Normal, QtGui.QIcon.Off).toImage(), "a checked tile's icon: the same")
+            _expect(not tools.tabs.bar.expanding(), "tabs as wide as their names")
+            sheet = tools.styleSheet()
+            _expect("QToolButton[role=\"tool\"]:checked { background: %s; border-color: %s;"
+                    % (t.hex(t.get("ui.selection") or "accent"), t.hex("accent")) in sheet, "checked tile: selection + accent")
+            _expect("border-bottom-color: %s" % t.hex("accent") in sheet, "the current tab underlined in the accent")
+            _expect("QFrame[role=\"card\"] { background: transparent; border: none; }" in sheet, "no card box")
+            _expect(tools.settings.layout().contentsMargins().left() == 0, "the brush settings unpadded")
+            _expect(tools.settings_heading.property("rule") == "true", "the brush heading under a hairline")
+        finally:
+            widgets.dispose(tools)
+        # The node painters: every header and canvas style, a theme's unknown ones as the defaults.
+        specs = gm.OperatorCatalog.from_json(groomlab_core.operator_specs_json())
+        editor = graph_editor.GraphEditor()
+        editor.catalog = specs
+        editor.model = gm.GraphModel(specs, groomlab_core.default_graph())
+        editor.rebuild()
+        node = editor.items["scatter"]
+        accent = graph_editor.CATEGORY_COLORS.get(node.category)
+        try:
+            bars = {}
+            for header in ("tinted", "filled", "minimal"):
+                for canvas in ("dots", "lines", "plain"):
+                    graph_editor.HEADER_STYLE, graph_editor.CANVAS_STYLE = header, canvas
+                    image = QtGui.QImage(int(graph_editor.NODE_W) + 40, int(node.height) + 40, QtGui.QImage.Format_ARGB32)
+                    image.fill(0)
+                    painter = QtGui.QPainter(image)
+                    editor.scene.drawBackground(painter, QtCore.QRectF(image.rect()))
+                    painter.translate(20, 20)
+                    node.paint(painter, QtWidgets.QStyleOptionGraphicsItem(), None)
+                    painter.end()
+                    bars[header] = QtGui.QColor(image.pixel(int(20 + graph_editor.NODE_W / 2), 22))
+            _expect(bars["tinted"].name() == accent.name(), "tinted: the accent bar (%s)" % bars["tinted"].name())
+            _expect(bars["minimal"].name() != accent.name() and bars["minimal"].name() != bars["tinted"].name(),
+                    "minimal: no bar, no fill (%s)" % bars["minimal"].name())
+            data = dict(t.data, graph=dict(t.data["graph"], headerStyle="ribbon", canvasStyle="hex"))
+            graph_editor.apply_theme(theme.Theme("future", data))
+            _expect((graph_editor.HEADER_STYLE, graph_editor.CANVAS_STYLE) == ("tinted", "dots"),
+                    "unknown styles: tinted, dots")
+        finally:
+            graph_editor.apply_theme(theme.current())
+            widgets.dispose(editor)
+            theme.set_theme("playful")
+    check.run("the new look: icon tiles, underlined tabs, plain sections, minimal node headers", redesign_look)
 
     def fits(widget, screen, label):
         minimum = widget.minimumSizeHint().expandedTo(widget.minimumSize())

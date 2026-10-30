@@ -3535,6 +3535,9 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual(graph_editor.HEADER_STYLE, "tinted")
             self.assertEqual(editor.scene.backgroundBrush().color().name().upper(), "#212224")
             self.assertIn("border-radius: %dpx" % theme.px(4), tools.styleSheet())
+            theme.set_theme("charcoal")
+            self.assertEqual(graph_editor.HEADER_STYLE, "minimal")      # a dot by the title, no header fill
+            self.assertIn("border-radius: %dpx" % theme.px(6), tools.styleSheet())
             theme.set_theme("playful")
             self.assertEqual(graph_editor.HEADER_STYLE, "filled")
             self.assertIn("border-radius: %dpx" % theme.px(12), editor.styleSheet())

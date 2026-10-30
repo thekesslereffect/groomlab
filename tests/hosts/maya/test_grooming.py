@@ -4061,7 +4061,7 @@ class ControlsAndExamplesTest(unittest.TestCase):
                 self.assertTrue(theme.stylesheet(t))
             charcoal = theme.Theme("charcoal", theme.load("charcoal"))
             self.assertIs(charcoal.get("ui.glass"), False)
-            self.assertEqual(charcoal.get("graph.headerStyle"), "tinted")
+            self.assertEqual(charcoal.get("graph.headerStyle"), "minimal")
             self.assertIs(charcoal.get("graph.shadow"), False)
             self.assertIn("solid %s" % charcoal.color("ui.outline"), theme.stylesheet(charcoal))
             polar = theme.Theme("polar", theme.load("polar"))
@@ -4077,6 +4077,29 @@ class ControlsAndExamplesTest(unittest.TestCase):
             mine = theme.Theme("mine", theme.load("mine"))
             self.assertEqual(mine.hex("blue"), "#112233")
             self.assertEqual(mine.get("ui.radius"), 4)                # from studio
+            # Radii: controls the theme's, small parts 2px less (never under 2), panels 2px more.
+            with open(os.path.join(folder, "round.json"), "w") as f:
+                json.dump({"extends": "studio", "ui": {"radius": 6}}, f)
+            sheet = theme.stylesheet(theme.Theme("round", theme.load("round")))
+            for radius in (6, 4, 8):
+                self.assertIn("border-radius: %dpx" % theme.px(radius), sheet)
+            # textMuted and rowHeight: the quietest text and one row's height where a theme sets
+            # them; without them, textDim and the controls' own heights.
+            dim = theme.Theme("studio", theme.load("studio")).color("ui.textDim")
+            with open(os.path.join(folder, "dense.json"), "w") as f:
+                json.dump({"extends": "studio", "ui": {"textMuted": "#737373", "rowHeight": 26}}, f)
+            sheet = theme.stylesheet(theme.Theme("dense", theme.load("dense")))
+            self.assertIn("border-radius: 0; color: #737373", sheet)  # the section headers
+            self.assertIn("min-height: %dpx; padding-top: 0" % (theme.px(26) - 2 * theme.px(1)), sheet)
+            with open(os.path.join(folder, "loose.json"), "w") as f:
+                json.dump({"extends": "studio", "ui": {"textMuted": None, "rowHeight": None}}, f)
+            sheet = theme.stylesheet(theme.Theme("loose", theme.load("loose")))
+            self.assertIn("border-radius: 0; color: %s" % dim, sheet)
+            self.assertNotIn("padding-top: 0; padding-bottom: 0", sheet)
+            # Who never picked a theme gets Charcoal; every theme still extends Playful.
+            cmds.optionVar(remove=theme.THEME_VAR)
+            theme._current = None
+            self.assertEqual((theme.DEFAULT, theme.BASE, theme.current().key), ("charcoal", "playful", "charcoal"))
             path = theme.create_theme("copy", base="playful")
             self.assertTrue(os.path.isfile(path))
             with self.assertRaises(ValueError):
