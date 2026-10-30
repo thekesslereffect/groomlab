@@ -269,8 +269,8 @@ Add a **Clump**. By default it picks its own clump centers among the strands (`c
   what you paint.
 - **Parting around whiskers, horns, eyes:** a negative `strength` (down to -1) pushes strands
   within `repelRadius` away from the centers. Feed the whiskers' guides as `centers` with
-  `centersFrom` `inputCurves`, and keep the radius small. Type a negative value, or right-click the
-  slider for **Set Range**.
+  `centersFrom` `inputCurves`, and keep the radius small. Click the field and type a negative value,
+  or right-click it for **Set Range**.
 - **Locks and ribbons:** `lockRadius` gathers strands into round locks instead of onto the center
   (dreads, wet strings); a **Twist** node after it turns them into ropes. `flatness` squashes clumps
   into flat ribbons (wet hair); `flatten` says which way they lie.

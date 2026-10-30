@@ -351,8 +351,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             col.row(align=True).prop(t, "alpha_rotation", expand=True)
             angle = col.row(align=True)
             angle.enabled = t.alpha_rotation != "RANDOM"
-            angle.prop(t, "alpha_angle")
-            col.prop(t, "alpha_spacing")
+            angle.prop(t, "alpha_angle", slider=True)
+            col.prop(t, "alpha_spacing", slider=True)
             col.prop(t, "alpha_invert")
 
     def draw_card(self, layout, context, t, scalp):
@@ -369,7 +369,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         label = tools.setting_label
         if "radius" in uses:
             col = card.column(align=True)
-            col.prop(t, "radius", text=label("radius", "Radius"))
+            col.prop(t, "radius", text=label("radius", "Radius"), slider=True)
             col.prop(t, "strength", text="Strength (±)" if info.get("signed") else label("strength", "Strength"),
                      slider=True)
             col.prop(t, "falloff", text=label("falloff", "Falloff"), slider=True)
@@ -378,7 +378,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             if "strengthProfile" in uses:
                 col.prop(t, "strength_profile", text=label("strengthProfile", "Root to tip"))
             if "smoothStrength" in uses:
-                col.prop(t, "smooth_strength", text=label("smoothStrength", "Smooth"))
+                col.prop(t, "smooth_strength", text=label("smoothStrength", "Smooth"), slider=True)
         m = tools.current_map(context.scene) if "alpha" in uses else None
         if m is not None and m.kind in ("vertices", "texture"):  # a guide map takes no alpha
             self.draw_alpha(card, t, label)
@@ -399,10 +399,10 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             box = card.column()
             box.label(text=label("newGuides", "New guides").upper())
             box.prop(t, "match_neighbors")
-            box.prop(t, "length")
-            box.prop(t, "segments")
+            box.prop(t, "length", slider=True)
+            box.prop(t, "segments", slider=True)
             if "spacing" in uses:
-                box.prop(t, "spacing")
+                box.prop(t, "spacing", slider=True)
             if "soloNewGuides" in uses:
                 box.prop(t, "solo_new_guides", text=label("soloNewGuides", "Solo new guides"))
         if "parts" in uses:
@@ -449,7 +449,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             box = card.column()
             box.label(text=label("selection", "Selection").upper())
             box.prop(t, "select_shape", expand=True)
-            box.prop(t, "soft_radius")
+            box.prop(t, "soft_radius", slider=True)
             row = box.row(align=True)
             row.label(text="%d selected" % t.selected_count)
             row.operator("groomlab.guides_edit", text="All").action = "SELECT_ALL"
@@ -522,9 +522,9 @@ class VIEW3D_PT_groomlab_tools_tubes(GroomToolsSubpanel, bpy.types.Panel):
         sub.enabled = t.tube_targets > 0
         sub.operator("groomlab.tube_apply", text="Apply to Selected")
         col = layout.column(align=True)
-        col.prop(t, "tube_width")
+        col.prop(t, "tube_width", slider=True)
         col.prop(t, "tube_flatness", slider=True)
-        col.prop(t, "tube_twist")
+        col.prop(t, "tube_twist", slider=True)
         row = layout.row(align=True)
         row.enabled = t.tube_targets > 0
         row.operator("groomlab.tube_smooth", text="Smooth")
@@ -624,7 +624,8 @@ class VIEW3D_PT_groomlab_tools_guides(GroomToolsSubpanel, bpy.types.Panel):
         row = layout.row(align=True)
         row.menu("GROOMLAB_MT_guide_edits", text=lists["edits"]["label"])
         row.prop(t, "children_count", text="x")
-        layout.prop(t, "resample_segments", text="Segments (%s)" % t.segments_scope if t.segments_scope else "Segments")
+        layout.prop(t, "resample_segments", text="Segments (%s)" % t.segments_scope if t.segments_scope else "Segments",
+                    slider=True)
         layout.label(text="%d guides, %d selected, %d frozen" % (t.guide_count, t.selected_count, t.frozen_count))
 
 

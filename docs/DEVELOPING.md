@@ -567,7 +567,10 @@ stands on:
   module of the `groomlab` package and builds, shows, paints and drives the Graph Editor (the
   default graph, every node's parameters, keys, pan and zoom), the Groom Tools, the updates
   and expression windows, the ramp, sliders, dialogs and menus, with a stand-in `maya`
-  (every command answers empty). Under a venv of that Python with PySide from pip (PySide2
+  (every command answers empty). The sliders are fill fields (`widgets.SoftSlider`):
+  `fill_field_check.py` (run by this check and by `maya.ui_scaling`) paints, types, drags and
+  nudges them and checks the names inside them in the Groom Tools and the Graph Editor; `--shots
+  <folder>` saves PNGs of them. Under a venv of that Python with PySide from pip (PySide2
   5.15.2.1 for 3.9 and 3.10; PySide6-Essentials 6.5.3 for 3.11, 6.8.3 for 3.13: the versions
   Maya 2025 to 2027 ship):
 

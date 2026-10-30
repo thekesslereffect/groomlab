@@ -315,24 +315,24 @@ class TubePanel(QtWidgets.QWidget):
         from groomlab import units
         self.length_factor = units.factor("length")  # shown in real units, stored in scene units
         self.width = widgets.SoftSlider(0.1 * self.length_factor, 0.0, 1.0 * self.length_factor, minimum=0.0,
-                                        key="palette.tubeWidth@" + units.unit("length")[0])
+                                        key="palette.tubeWidth@" + units.unit("length")[0], label="Width",
+                                        suffix=units.label("length"))
         self.width.setObjectName("tubeWidth")
         self.width.setToolTip("The widest section's half-width (a round tube's radius): the targeted tubes scaled "
                               "to it, their taper and what the brush painted kept; new guides' where none are near")
         self.width.committed.connect(self.set_width)
-        self.flatness = widgets.SoftSlider(0.0, 0.0, 1.0, minimum=0.0, maximum=0.99, key=None)
+        self.flatness = widgets.SoftSlider(0.0, 0.0, 1.0, minimum=0.0, maximum=0.99, key=None, label="Flatness")
         self.flatness.setObjectName("tubeFlatness")
         self.flatness.setToolTip("0: as the shape is drawn; toward 1 a flat ribbon (the sections' aspect 1 - this, "
                                  "the same root to tip)")
         self.flatness.committed.connect(lambda v: self.apply(aspect=max(1.0 - v, 0.01)))
-        self.twist = widgets.SoftSlider(0.0, -180.0, 180.0, key=None)
+        self.twist = widgets.SoftSlider(0.0, -180.0, 180.0, key=None, label="Twist", suffix=u"°")
         self.twist.setObjectName("tubeTwist")
         self.twist.setToolTip("Degrees: the sections turned about the guide from lying flat on the scalp, the same "
                               "root to tip (the brush's Twist paints it along the guide)")
         self.twist.committed.connect(lambda v: self.apply(twist=v * 3.14159265358979 / 180.0))
-        sections.addRow("Width (%s)" % units.label("length"), self.width)
-        sections.addRow("Flatness", self.flatness)
-        sections.addRow("Twist (°)", self.twist)
+        for field in (self.width, self.flatness, self.twist):
+            sections.addRow(field)  # the name inside the field
         # Smooth: the targeted tubes' painted sections evened out along each guide (one undo step).
         smooth_row = QtWidgets.QHBoxLayout()
         smooth_row.setSpacing(theme.px(6))
@@ -348,7 +348,7 @@ class TubePanel(QtWidgets.QWidget):
         self.smooth_what.setToolTip(definitions.get("choices/tubeSmooth")["tip"])
         smooth_row.addWidget(self.smooth)
         smooth_row.addWidget(self.smooth_what, 1)
-        sections.addRow("", smooth_row)
+        sections.addRow(smooth_row)
         # What needs targets (the rest also sets the placement tube, targets or not).
         self.edits = (self.smooth, self.smooth_what, self.apply_shape)
         self.fill = QtWidgets.QCheckBox("Fill Tubes")
@@ -357,18 +357,14 @@ class TubePanel(QtWidgets.QWidget):
                              "tapering with it (the Interpolate nodes' fillTubes; the tubes of every guide level fill, "
                              "the deepest winning)")
         self.fill.toggled.connect(self.set_fill)
-        self.blend = widgets.SoftSlider(25.0, 0.0, 100.0, minimum=0.0, maximum=100.0, key=None)
+        self.blend = widgets.SoftSlider(25.0, 0.0, 100.0, minimum=0.0, maximum=100.0, key=None, label="Tube Blend",
+                                        suffix="%")
         self.blend.setObjectName("tubeBlend")
         self.blend.setToolTip("Tube Blend: the tubes' soft edge, a share of each tube's half-width. Strands rooted "
                               "just outside a tube lean toward riding it, so no seam shows round it (0: a hard edge)")
         self.blend.committed.connect(lambda v: self.set_fill_tubes(blend=v / 100.0))
-        self.blend_label = QtWidgets.QLabel("Tube Blend")
-        fill_form = QtWidgets.QFormLayout()
-        fill_form.setContentsMargins(0, 0, 0, 0)
-        fill_form.setLabelAlignment(QtCore.Qt.AlignRight)
-        fill_form.addRow(self.fill)
-        fill_form.addRow(self.blend_label, widgets.with_unit(self.blend, "%"))
-        column.addLayout(fill_form)
+        column.addWidget(self.fill)
+        column.addWidget(self.blend)
         self._selection = []
         self._source = "none"
         self._reference = 0.0  # the first target's widest section (scene units)
@@ -385,7 +381,7 @@ class TubePanel(QtWidgets.QWidget):
     def busy(self):
         """A slider held, a field being typed in or a point dragged: refresh() leaves the panel as it is."""
         for slider in (self.width, self.flatness, self.twist, self.blend):
-            if slider.slider.isSliderDown() or slider.field.hasFocus():
+            if slider.busy():
                 return True
         return self.editor.busy() or self.rename_field.isVisible()
 
@@ -455,7 +451,6 @@ class TubePanel(QtWidgets.QWidget):
             if state is None:
                 self.fill.setToolTip("The groom's graph has no Interpolate node: nothing to fill the tubes")
             self.blend.setEnabled(bool(state and state["fillTubes"]))
-            self.blend_label.setEnabled(self.blend.isEnabled())
             if state is not None:
                 self.blend.setValue(state["tubeBlend"] * 100.0)
 
@@ -973,31 +968,27 @@ class ToolPalette(QtWidgets.QWidget):
         form.setHorizontalSpacing(theme.px(10))
         form.setLabelAlignment(QtCore.Qt.AlignRight)
         form.setRowWrapPolicy(QtWidgets.QFormLayout.DontWrapRows)
-        self.radius = widgets.SoftSlider(60, 5, 400, integer=True, minimum=1, key="palette.radius")
+        self.radius = widgets.SoftSlider(60, 5, 400, integer=True, minimum=1, key="palette.radius",
+                                         label=SETTINGS["radius"]["label"], suffix="px")
+        self.radius.unit_tip = "Screen pixels: the circle's radius on screen, whatever the zoom"
         self.radius.committed.connect(lambda v: self.push(radius=v))
         self.radius.dragged.connect(lambda v: self.push(radius=v))
-        self.strength = widgets.SoftSlider(1.0, 0.0, 1.0, key=None)
+        self.strength = widgets.SoftSlider(1.0, 0.0, 1.0, key=None, label=SETTINGS["strength"]["label"])
         self.strength.committed.connect(self.set_strength)
         self.strength.dragged.connect(self.set_strength)
         # Falloff as the catalog names it in both hosts: 0 hard (full strength to the edge), 1 soft
         # (fading from the center out); the brush's hardness is 1 - falloff.
-        self.falloff = widgets.SoftSlider(1.0, 0.0, 1.0, key="palette.falloff")
+        self.falloff = widgets.SoftSlider(1.0, 0.0, 1.0, key="palette.falloff", label=SETTINGS["falloff"]["label"])
         self.falloff.setToolTip(SETTINGS["falloff"]["hint"])
         self.falloff.committed.connect(lambda v: self.push(hardness=1.0 - v))
         self.falloff.dragged.connect(lambda v: self.push(hardness=1.0 - v))
-        self.smooth_strength = widgets.SoftSlider(1.0, 0.0, 3.0, key="palette.smoothStrength")
+        self.smooth_strength = widgets.SoftSlider(1.0, 0.0, 3.0, key="palette.smoothStrength",
+                                                  label=SETTINGS["smoothStrength"]["label"])
         self.smooth_strength.setToolTip(SETTINGS["smoothStrength"]["hint"])
         self.smooth_strength.committed.connect(lambda v: self.push(smoothStrength=v))
         self.smooth_strength.dragged.connect(lambda v: self.push(smoothStrength=v))
-        self.radius_label = QtWidgets.QLabel(SETTINGS["radius"]["label"])
-        self.strength_label = QtWidgets.QLabel(SETTINGS["strength"]["label"])
-        self.falloff_label = QtWidgets.QLabel(SETTINGS["falloff"]["label"])
-        self.smooth_label = QtWidgets.QLabel(SETTINGS["smoothStrength"]["label"])
-        self.radius_row = widgets.with_unit(self.radius, "px", "Screen pixels: the circle's radius on screen, "
-                                                               "whatever the zoom")
-        for label, slider in ((self.radius_label, self.radius_row), (self.strength_label, self.strength),
-                              (self.falloff_label, self.falloff), (self.smooth_label, self.smooth_strength)):
-            form.addRow(label, slider)
+        for slider in (self.radius, self.strength, self.falloff, self.smooth_strength):
+            form.addRow(slider)  # the name inside the field
         card.addWidget(self.brush_form)
         # The brush's curves (the catalog's falloffProfile and strengthProfile): each off until its
         # box is ticked, then drawn in a curve editor (right-click: presets).
@@ -1062,18 +1053,19 @@ class ToolPalette(QtWidgets.QWidget):
         from groomlab import units
         self.length_factor = units.factor("length")  # shown in real units, stored in scene units
         length_key = "palette.length@" + units.unit("length")[0]
-        self.length = widgets.SoftSlider(0.5 * self.length_factor, minimum=0.001 * self.length_factor, key=length_key)
+        self.length = widgets.SoftSlider(0.5 * self.length_factor, minimum=0.001 * self.length_factor, key=length_key,
+                                         label="Length", suffix=units.label("length"))
         self.length.committed.connect(lambda v: self.push(length=v / self.length_factor))
-        self.segments = widgets.SoftSlider(12, 1, 32, integer=True, minimum=1, maximum=256, key="palette.segments")
+        self.segments = widgets.SoftSlider(12, 1, 32, integer=True, minimum=1, maximum=256, key="palette.segments",
+                                           label="Segments")
         self.segments.committed.connect(lambda v: self.push(segments=v))
         self.spacing = widgets.SoftSlider(0.1 * self.length_factor, minimum=0.0,
-                                          key="palette.spacing@" + units.unit("length")[0])
+                                          key="palette.spacing@" + units.unit("length")[0], label="Spacing",
+                                          suffix=units.label("length"))
         self.spacing.committed.connect(lambda v: self.push(spacing=v / self.length_factor))
-        self.spacing_label = QtWidgets.QLabel("Spacing (%s)" % units.label("length"))
         form.addRow(self.match)
-        form.addRow("Length (%s)" % units.label("length"), self.length)
-        form.addRow("Segments", self.segments)
-        form.addRow(self.spacing_label, self.spacing)
+        for field in (self.length, self.segments, self.spacing):
+            form.addRow(field)  # the name inside the field
         self.solo_new = self.setting_box("soloNewGuides")
         self.solo_new.setChecked(False)  # (off by default: placing freezes nothing unless asked)
         self.solo_new.toggled.connect(lambda on: self.push(soloNewGuides=on))
@@ -1216,11 +1208,12 @@ class ToolPalette(QtWidgets.QWidget):
         from groomlab import units
         self.soft_factor = units.factor("length")  # shown in real units (View > Units), kept in scene units
         self.soft = widgets.SoftSlider(0.0, 0.0, 1.0 * self.soft_factor, minimum=0.0, key="palette.soft",
-                                       shown_decimals=widgets.display_decimals(3, self.soft_factor))
+                                       shown_decimals=widgets.display_decimals(3, self.soft_factor),
+                                       label="Soft radius", suffix=units.label("length"))
         self.soft.setToolTip("Soft selection radius: guides near the selection are partly selected; "
                              "brushes with Selected only fade out over it")
         self.soft.committed.connect(lambda v: self.set_soft_selection(v / self.soft_factor))
-        form.addRow("Soft radius", widgets.with_unit(self.soft, units.label("length")))
+        form.addRow(self.soft)
         card.addWidget(self.select_box)
 
         # Freeze: the mask as a whole
@@ -1441,19 +1434,20 @@ class ToolPalette(QtWidgets.QWidget):
             self.alpha_rotation.addItem(label_text, name)
             self.alpha_rotation.setItemData(self.alpha_rotation.count() - 1, tip, QtCore.Qt.ToolTipRole)
         self.alpha_rotation.currentIndexChanged.connect(self.alpha_rotation_changed)
-        self.alpha_angle = widgets.SoftSlider(0, 0, 360, integer=True, minimum=-360, maximum=360)
+        self.alpha_angle = widgets.SoftSlider(0, 0, 360, integer=True, minimum=-360, maximum=360, label="Angle",
+                                              suffix=u"°")
         self.alpha_angle.setToolTip("The alpha's angle in degrees, counterclockwise (Follow Stroke: added to the stroke's way)")
         self.alpha_angle.committed.connect(lambda v: self.push(alphaAngle=v))
         self.alpha_angle.dragged.connect(lambda v: self.push(alphaAngle=v))
         rotation_row.addWidget(self.alpha_rotation)
         rotation_row.addWidget(self.alpha_angle, 1)
         form.addRow("Rotation", rotation_row)
-        self.alpha_spacing = widgets.SoftSlider(25, 5, 100, integer=True, minimum=2, maximum=400, key="palette.alphaSpacing")
+        self.alpha_spacing = widgets.SoftSlider(25, 5, 100, integer=True, minimum=2, maximum=400, key="palette.alphaSpacing",
+                                                label="Spacing", suffix="%")
+        self.alpha_spacing.setToolTip("How far apart the stamps fall along a stroke, in percent of the brush's "
+                                      "diameter: low for a smooth trail, 100 and up for separate stamps")
         self.alpha_spacing.committed.connect(lambda v: self.push(alphaSpacing=v / 100.0))
-        spacing = widgets.with_unit(self.alpha_spacing, "%", "How far apart the stamps fall along a stroke, in percent of "
-                                                             "the brush's diameter: low for a smooth trail, 100 and up "
-                                                             "for separate stamps")
-        form.addRow("Spacing", spacing)
+        form.addRow(self.alpha_spacing)
         self.alpha_invert = QtWidgets.QCheckBox("Invert")
         self.alpha_invert.setToolTip("Paint where the alpha is black instead")
         self.alpha_invert.toggled.connect(lambda on: self.push(alphaInvert=on))
@@ -1926,7 +1920,7 @@ class ToolPalette(QtWidgets.QWidget):
                 self.tool = mode
                 self.buttons[mode].setChecked(True)
                 self.show_tool_settings()
-            if not self.radius.slider.isSliderDown():
+            if not self.radius.busy():
                 self.radius.setValue(cmds.groomLabBrushCtx(ctx, query=True, radius=True))
             # The group or level picked from the viewport (the level keys) shows here too.
             if self.tool != PART:
@@ -1942,7 +1936,7 @@ class ToolPalette(QtWidgets.QWidget):
                     self.level.blockSignals(False)
                     self._target = (self.current_group(), self.level.currentData())
                     self.apply_isolation()
-            if not self.strength.slider.isSliderDown():
+            if not self.strength.busy():
                 strength = cmds.groomLabBrushCtx(ctx, query=True, strength=True)
                 self.strength.setValue(strength)
                 if self.tool in self.strengths:
@@ -2106,16 +2100,12 @@ class ToolPalette(QtWidgets.QWidget):
                           if tool else "Pick a tool, then drag over the groom in the viewport.")
         self.settings.setVisible(tool is not None)
         brush = "radius" in uses
-        for label, slider in ((self.radius_label, self.radius), (self.strength_label, self.strength),
-                              (self.falloff_label, self.falloff)):
-            label.setVisible(brush)
+        for slider in (self.radius, self.strength, self.falloff):
             slider.setVisible(brush)
             slider.setEnabled(brush)
-        self.radius_row.setVisible(brush)
         self.falloff_curve_box.setVisible("falloffProfile" in uses)
         self.strength_curve_box.setVisible("strengthProfile" in uses)
         self.smooth_strength.setVisible("smoothStrength" in uses)
-        self.smooth_label.setVisible("smoothStrength" in uses)
         self.sync_alpha()
         self.selected_only.setVisible("selectedOnly" in uses)
         self.pressure.setVisible("pressure" in uses)
@@ -2133,7 +2123,6 @@ class ToolPalette(QtWidgets.QWidget):
         self.gestures.setVisible(brush)
         self.create_box.setVisible("newGuides" in uses)
         self.spacing.setVisible("spacing" in uses)
-        self.spacing_label.setVisible("spacing" in uses)
         self.part_box.setVisible("parts" in uses)
         self.erase_box.setVisible("erases" in uses)
         self.target_box.setVisible("targets" in uses)
@@ -2156,7 +2145,7 @@ class ToolPalette(QtWidgets.QWidget):
             signed = tool in SIGNED
             self.strength.setRange(-1.0 if signed else 0.0, 1.0)
             self.strength.setValue(self.strengths[tool])
-            self.strength_label.setText("Strength (±)" if signed else "Strength")
+            self.strength.setLabel("Strength (±)" if signed else "Strength")
 
     def push(self, **flags):
         """Send changed settings to the active tool."""

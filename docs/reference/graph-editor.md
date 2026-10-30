@@ -147,11 +147,16 @@ The **Graph Editor** is a dockable node editor for the selected groom:
 - **Parameters:** the side panel edits the selected node, under its name, its type (in its
   category's color) and a line on what it does. Params read as words ("Guide radius"); the
   tooltip gives the param's name for scripts.
-  - **Numbers:** each has a slider and a field. The slider covers a soft range guessed from the
-    default: 0–1 for fractions, or a round number above larger values.
-  - **Stretching the range:** type a value outside the range and it stretches to reach it.
-    Right-click the slider to fit, set or reset the range. Stretched ranges are remembered per
-    operator parameter across sessions.
+  - **Numbers:** each is one field with its name inside on the left and its value (and unit) on
+    the right, filled by where the value sits in a soft range guessed from the default: 0–1 for
+    fractions, or a round number above larger values. Drag across it to scrub (relative to where
+    you pressed; **Shift** finer, **Ctrl** in steps of ten), or click it to type a value: a number
+    or simple arithmetic (`0.5*2`, `1/3`, a comma as the decimal point). Enter, Tab or clicking
+    away commits, Esc puts the old value back. With the field focused, Enter or F2 types and the
+    arrow keys nudge it (Shift: ten steps).
+  - **Stretching the range:** type a value outside the range and it stretches to reach it (a drag
+    stays inside it). Right-click the field to fit, set or reset the range. Ranges set there are
+    remembered per operator parameter across sessions.
   - **Dragging:** the groom updates live while you drag; releasing makes one undo step.
   - **Keys:** right-click a param > **Set Key**, or **S** with the mouse over it, keys it at the
     current frame. The first key links it to its own keyable attribute on the groom,

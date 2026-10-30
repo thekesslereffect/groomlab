@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Shared widgets for GroomLab's panels (Qt: groomlab.ui.qt).
 
-SoftSlider: a slider with a number field. The slider covers a soft range
-guessed from the value (0-1 for fractions, a round number above larger
-values); typing a value outside it stretches the range to reach it, and the
-right-click menu fits or resets it. Stretched ranges are remembered per key
-(for example "Clump.strength") across Maya sessions.
+SoftSlider: a number as a fill field (its label inside, filled by where the
+value is in a soft range; drag to scrub, click to type). The range is guessed
+from the value (0-1 for fractions, a round number above larger values); typing
+a value outside it stretches the range to reach it, and the right-click menu
+fits or resets it. Ranges set there are remembered per key (for example
+"Clump.strength") across Maya sessions.
 
 icon(name): a GroomLab icon, in the theme's colors (see ICON_GROUPS).
 theme_menu(parent): the Theme menu (pick, make, reload, open the folder).
@@ -956,25 +957,6 @@ def format_number(value, decimals=None):
     return "0" if text in ("-0", "") else text
 
 
-def with_unit(field, unit, tip=None):
-    """`field` with its unit after it (px, cm, %...), as the Graph Editor shows units; the field
-    itself when there is no unit. The row keeps the field as .field."""
-    if not unit:
-        return field
-    w = QtWidgets.QWidget()
-    row = QtWidgets.QHBoxLayout(w)
-    row.setContentsMargins(0, 0, 0, 0)
-    row.setSpacing(4)
-    row.addWidget(field, 1)
-    label = QtWidgets.QLabel(unit)
-    label.setProperty("role", "about")
-    if tip:
-        label.setToolTip(tip)
-    row.addWidget(label)
-    w.field, w.unit = field, label
-    return w
-
-
 def display_decimals(spec_decimals, factor=1.0):
     """The decimals for a value shown `factor` times larger than the spec's (a fraction as a
     percentage, a width in micrometers): fewer by the factor's decades, 0 to 6."""
@@ -985,64 +967,127 @@ def display_decimals(spec_decimals, factor=1.0):
     return max(0, min(6, int(spec_decimals) - shift))
 
 
-class SoftSlider(QtWidgets.QWidget):
-    """Slider + number field with a soft, stretchable range.
+def parse_number(text):
+    """A typed value: a number or simple arithmetic ("0.5*2", "1/3", "-(2+3)", "," as the decimal
+    point), as Maya's and Blender's fields take it; None when it is neither. Only numbers, + - * /,
+    parentheses and a sign are read (ast, never eval)."""
+    import ast
+    s = (text or "").strip().replace(",", ".")
+    if not s or len(s) > 200:
+        return None
+    try:
+        tree = ast.parse(s, mode="eval")
+    except (SyntaxError, ValueError):
+        return None
+    num = getattr(ast, "Num", None)  # Python 3.7 (Maya 2022) parses numbers as ast.Num
+    binary = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+              ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b}
 
-    Signals: dragged(value) while the slider moves under the mouse (for live
-    previews), committed(value) when a value is settled (slider released,
-    track clicked, field edited).
+    def value(node):
+        if isinstance(node, ast.Expression):
+            return value(node.body)
+        if isinstance(node, ast.BinOp) and type(node.op) in binary:
+            return binary[type(node.op)](value(node.left), value(node.right))
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+            v = value(node.operand)
+            return -v if isinstance(node.op, ast.USub) else v
+        if isinstance(node, getattr(ast, "Constant", ())):
+            constant = node.value
+        elif num is not None and isinstance(node, num):
+            constant = node.n
+        else:
+            constant = None
+        if isinstance(constant, (int, float)) and not isinstance(constant, bool):
+            return float(constant)
+        raise ValueError("not a number")
+
+    try:
+        v = value(tree)
+    except (ValueError, ZeroDivisionError, OverflowError, RecursionError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _mix_color(a, b, f):
+    """QColor a blended toward b by f (0-1)."""
+    return QtGui.QColor(int(round(a.red() + (b.red() - a.red()) * f)), int(round(a.green() + (b.green() - a.green()) * f)),
+                        int(round(a.blue() + (b.blue() - a.blue()) * f)))
+
+
+def _readable_on(color):
+    """Dark or light text, whichever reads on `color`."""
+    luma = 0.2126 * color.redF() + 0.7152 * color.greenF() + 0.0722 * color.blueF()
+    return QtGui.QColor(28, 29, 33) if luma > 0.55 else QtGui.QColor(255, 255, 255)
+
+
+def _has(modifiers, flag):
+    return bool(qt.to_int(modifiers) & qt.to_int(flag))
+
+
+class SoftSlider(QtWidgets.QWidget):
+    """A number as a fill field (the redesign's slider): one painted rounded field, its label inside
+    on the left and the value (and unit) on the right, filled left to right by where the value is
+    in its soft range.
+
+    - Drag (past 3 px) scrubs relative to the press: the field's width is the whole range
+      (Shift: a tenth as fast, Ctrl: steps of 10x); dragging stays inside the range.
+    - A click without a drag types: an inline field over it, the value selected. Enter, Tab or
+      clicking away commits, Esc puts the old value back. A number or simple arithmetic (0.5*2,
+      1/3, "," as the decimal point); a typed value past the range stretches it to reach it.
+    - Focused: Enter or F2 types, the arrows nudge by a step (Shift: 10).
+    - Right-click: Reset to Default, the range (fit, set, reset) and menu_hook's actions (keys).
+    - set_key_color: the Channel Box's key colors (keyed, animated, driven) tint the field.
+
+    The range is soft, guessed from the value (0-1 for fractions, a round number above larger
+    values), stretched by typed values and remembered per key ("Clump.strength") once set from the
+    menu. minimum / maximum are hard limits (the core clamps there).
+
+    Signals: dragged(value) while dragged (for live previews), committed(value) when a value is
+    settled (the drag released, a value typed, an arrow, Reset to Default).
     """
 
     dragged = QtCore.Signal(float)
     committed = QtCore.Signal(float)
-    STEPS = 1000
+    DRAG_PX = 3  # a press moving less than this is a click (types a value)
+    TIGHT_SUFFIXES = ("%", u"°", u"×")  # units written right after the number
 
     def __init__(self, value=0.0, lo=None, hi=None, integer=False, minimum=None, maximum=None, decimals=3,
-                 key=None, default=None, parent=None, accent=None, shown_decimals=None):
+                 key=None, default=None, parent=None, accent=None, shown_decimals=None, label=None, suffix=None):
         super(SoftSlider, self).__init__(parent)
         self.integer = integer
         self.key = key
         self.minimum = minimum
         self.maximum = maximum
         self.default = default  # the param's default, for Reset to Default
+        self.decimals = decimals
+        self.shown_decimals = shown_decimals  # the spec's, as every host shows it (None: decimals)
+        self.accent = accent  # a theme color name filling the field (None: the theme's selection)
         self.menu_hook = None  # fn(menu): more actions atop the right-click menu (the Graph Editor's keys)
+        self.unit_tip = ""     # what the unit means, in the tooltip
         base = default if default is not None else value
         self.default_range = (lo, hi) if lo is not None and hi is not None else default_range(base, integer)
         self.lo, self.hi = remembered_range(key) or self.default_range
         self._value = float(value)
         self._stretch_to(self._value)  # a value set elsewhere may be outside
+        self._label = label or ""
+        self._suffix = suffix or ""
+        self._key_color = None
+        self._press = None  # [x at the press, value at the press, moved past DRAG_PX] while the button is down
+        self._hover = False
+        self._editing = False
+        self._typed_from = ""  # the inline field's text when opened: unchanged, nothing is committed
 
-        row = QtWidgets.QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        self.field = QtWidgets.QSpinBox() if integer else CompactSpinBox()
-        if not integer:
-            self.field.setDecimals(max(decimals, 6))
-            self.field.setSingleStep(0.01)
-            self.field.display_decimals = shown_decimals  # the spec's, as every host shows it
-        low = minimum if minimum is not None else -1e9
-        high = maximum if maximum is not None else 1e9
-        if integer:
-            self.field.setRange(int(max(low, -2 ** 31 + 1)), int(min(high, 2 ** 31 - 1)))
-        else:
-            self.field.setRange(low, high)
-        self.field.setKeyboardTracking(False)
-        from groomlab.ui import theme
-        self.field.setFixedWidth(theme.px(70))
-        self.field.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
-        self.field.setAlignment(QtCore.Qt.AlignRight)
-        self.slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.slider.setProperty("accent", accent or theme.slider_accent())  # the theme colors its fill
-        self.slider.setRange(0, self.STEPS)
-        self.slider.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-        self.slider.customContextMenuRequested.connect(self._menu)
-        row.addWidget(self.field)
-        row.addWidget(self.slider, 1)
-
-        self._sync()
-        self.field.editingFinished.connect(self._typed)
-        self.slider.valueChanged.connect(self._slid)
-        self.slider.sliderReleased.connect(lambda: self.committed.emit(self._value))
+        self.setFocusPolicy(QtCore.Qt.StrongFocus)
+        self.setCursor(QtCore.Qt.SizeHorCursor)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._menu)
+        self.editor = QtWidgets.QLineEdit(self)  # the inline field, shown while typing
+        self.editor.setObjectName("fillFieldEditor")
+        self.editor.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        self.editor.editingFinished.connect(self._typed)
+        self.editor.installEventFilter(self)
+        self.editor.hide()
 
     # -- Value and range -------------------------------------------------------
 
@@ -1056,11 +1101,63 @@ class SoftSlider(QtWidgets.QWidget):
         self._value = float(v)
         if stretch:
             self._stretch_to(self._value)
-        self._sync()
+        self.update()
 
     def setRange(self, lo, hi):
         self.lo, self.hi = float(lo), float(hi)
-        self._sync()
+        self.update()
+
+    def label(self):
+        return self._label
+
+    def setLabel(self, text):
+        """The name inside the field, on the left."""
+        self._label = text or ""
+        self.updateGeometry()
+        self.update()
+
+    def suffix(self):
+        return self._suffix
+
+    def setSuffix(self, text, tip=None):
+        """The unit after the value (px, cm, %, °...); `tip` says what it means in the tooltip."""
+        self._suffix = text or ""
+        if tip is not None:
+            self.unit_tip = tip
+        self.updateGeometry()
+        self.update()
+
+    def key_color(self):
+        return self._key_color
+
+    def set_key_color(self, color):
+        """Tint the field with a key state's color (QColor; None: the theme's own look)."""
+        self._key_color = QtGui.QColor(color) if color is not None else None
+        self.update()
+
+    def fraction(self):
+        """Where the value is in the range, 0 to 1: how much of the field is filled."""
+        span = self.hi - self.lo
+        return max(0.0, min(1.0, (self._value - self.lo) / span)) if span > 0 else 0.0
+
+    def step(self):
+        """An arrow's nudge, and what a drag snaps to: 1 for whole numbers, else a round
+        hundredth of the range (0.01 over 0-1, 1 over 0-400)."""
+        if self.integer:
+            return 1.0
+        span = self.hi - self.lo
+        return 10.0 ** math.floor(math.log10(span / 100.0)) if span > 0 else 0.01
+
+    def text(self):
+        """The value as the field shows it, with its unit."""
+        if self.integer:
+            number = "%d" % self.value()
+        else:
+            number = format_number(self._value, self.shown_decimals if self.shown_decimals is not None
+                                   else self.decimals)
+        if not self._suffix:
+            return number
+        return number + ("" if self._suffix in self.TIGHT_SUFFIXES else " ") + self._suffix
 
     def _stretch_to(self, v):
         if v > self.hi:
@@ -1068,48 +1165,308 @@ class SoftSlider(QtWidgets.QWidget):
         if v < self.lo:
             self.lo = -nice_ceil(-v) if v < 0 else 0.0
 
-    def _sync(self):
-        for w in (self.field, self.slider):
-            w.blockSignals(True)
-        self.field.setValue(int(round(self._value)) if self.integer else self._value)
-        span = self.hi - self.lo
-        t = (self._value - self.lo) / span if span > 0 else 0.0
-        self.slider.setValue(int(round(max(0.0, min(1.0, t)) * self.STEPS)))
-        self.slider.setToolTip("%g to %g (type a value past it to stretch; right-click to set the range)" % (self.lo, self.hi))
-        for w in (self.field, self.slider):
-            w.blockSignals(False)
+    def _limited(self, v, soft=False):
+        """v within the hard limits (and the soft range with `soft`: a drag or an arrow), a whole
+        number for an integer field."""
+        if soft:
+            v = max(self.lo, min(self.hi, v))
+        if self.minimum is not None:
+            v = max(v, self.minimum)
+        if self.maximum is not None:
+            v = min(v, self.maximum)
+        return float(int(round(v))) if self.integer else float("%.12g" % v)
 
-    # -- Signals -----------------------------------------------------------------
+    @staticmethod
+    def _snapped(v, step):
+        return round(v / step) * step if step > 0 else v
 
-    def _typed(self):
-        v = float(self.field.value())
+    # -- Settling a value ---------------------------------------------------------
+
+    def _commit(self, v, stretch=True):
+        """Take a value the user settled (typed, nudged) and say so."""
         if v == self._value:
             return
         self._value = v
         # This slider stretches to reach it; the range every node of the type starts from
         # stays (one unusual value must not rescale them all). Set Range... keeps one.
-        self._stretch_to(v)
-        self._sync()
+        if stretch:
+            self._stretch_to(v)
+        self.update()
         self.committed.emit(self.value())
 
-    def _slid(self, position):
-        v = self.lo + (self.hi - self.lo) * position / float(self.STEPS)
-        if self.integer:
-            v = float(int(round(v)))
-        if self.minimum is not None:
-            v = max(v, self.minimum)
-        if self.maximum is not None:
-            v = min(v, self.maximum)
-        if v == self._value:
+    def commit_text(self, text):
+        """Take a typed value (a number or simple arithmetic, the unit allowed after it): True when
+        it reads as one."""
+        text = (text or "").strip()
+        if self._suffix and text.endswith(self._suffix):
+            text = text[:-len(self._suffix)]
+        v = parse_number(text)
+        if v is None:
+            return False
+        self._commit(self._limited(v))
+        return True
+
+    def isSliderDown(self):
+        """The mouse button held on the field (a drag, or a click not yet released)."""
+        return self._press is not None
+
+    def setSliderDown(self, down):
+        """Hold the field as a drag does (scripts and tests: then scrub()); releasing commits."""
+        if down and self._press is None:
+            self._press = [0, self._value, True]
+        elif not down and self._press is not None:
+            moved = self._press[2]
+            self._press = None
+            self.update()
+            if moved:
+                self.committed.emit(self.value())
+
+    def scrub(self, v):
+        """Move to v as a drag does, inside the range: a preview (dragged) while held, else committed."""
+        v = self._limited(float(v), soft=True)
+        if self._press is None:
+            self._commit(v, stretch=False)
             return
-        self._value = v
-        self.field.blockSignals(True)
-        self.field.setValue(int(v) if self.integer else v)
-        self.field.blockSignals(False)
-        if self.slider.isSliderDown():
+        if v != self._value:
+            self._value = v
+            self.update()
             self.dragged.emit(self.value())
+
+    def busy(self):
+        """Being dragged or typed in: a refresh leaves it alone."""
+        return self.isSliderDown() or self._editing
+
+    # -- Typing --------------------------------------------------------------------
+
+    def isEditing(self):
+        return self._editing
+
+    def edit(self):
+        """Open the inline field over the field, its value selected; returns it (None when disabled)."""
+        if not self.isEnabled():
+            return None
+        if self.integer:
+            self._typed_from = "%d" % self.value()
         else:
-            self.committed.emit(self.value())  # track click or keyboard: settled at once
+            self._typed_from = "%.10g" % self._value
+        e = self.editor
+        e.setGeometry(self.rect())
+        e.setText(self._typed_from)
+        self._editing = True
+        e.show()
+        e.raise_()
+        e.setFocus(QtCore.Qt.OtherFocusReason)
+        e.selectAll()
+        self.update()
+        return e
+
+    def _close_editor(self):
+        self._editing = False
+        if self.editor.hasFocus():
+            self.setFocus(QtCore.Qt.OtherFocusReason)  # back to the field, not the next widget
+        self.editor.hide()
+        self.update()
+
+    def _typed(self):
+        """Enter, Tab or clicking away: the typed value committed (unchanged text: nothing)."""
+        if not self._editing or not alive(self):  # (a field deleted while typed in: its focus leaving)
+            return
+        text = self.editor.text()
+        self._close_editor()
+        if text.strip() != self._typed_from:
+            self.commit_text(text)
+
+    def cancel_edit(self):
+        """Esc: the field closed, the value as it was."""
+        if self._editing:
+            self._close_editor()
+
+    def eventFilter(self, obj, event):
+        if obj is self.editor and event.type() in (QtCore.QEvent.KeyPress, QtCore.QEvent.ShortcutOverride):
+            key = event.key()
+            if key in (QtCore.Qt.Key_Escape, QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                if event.type() == QtCore.QEvent.ShortcutOverride:
+                    event.accept()  # the field's keys, not a shortcut's
+                elif key == QtCore.Qt.Key_Escape:
+                    self.cancel_edit()
+                else:
+                    self._typed()  # here, not passed on to the field (whose Enter would type again)
+                return True
+        return super(SoftSlider, self).eventFilter(obj, event)
+
+    # -- Mouse and keys ------------------------------------------------------------------
+
+    def mousePressEvent(self, event):
+        if event.button() != QtCore.Qt.LeftButton or self._editing:
+            return super(SoftSlider, self).mousePressEvent(event)
+        self.setFocus(QtCore.Qt.MouseFocusReason)
+        self._press = [qt.event_pos(event).x(), self._value, False]
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        press = self._press
+        if press is None:
+            return super(SoftSlider, self).mouseMoveEvent(event)
+        from groomlab.ui import theme
+        dx = qt.event_pos(event).x() - press[0]
+        if not press[2] and abs(dx) < theme.px(self.DRAG_PX):
+            return
+        press[2] = True
+        mods = event.modifiers()
+        speed = 0.1 if _has(mods, QtCore.Qt.ShiftModifier) else 1.0
+        v = press[1] + dx / float(max(1, self.width())) * (self.hi - self.lo) * speed
+        self.scrub(self._snapped(v, self.step() * (10.0 if _has(mods, QtCore.Qt.ControlModifier) else 1.0)))
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != QtCore.Qt.LeftButton or self._press is None:
+            return super(SoftSlider, self).mouseReleaseEvent(event)
+        moved = self._press[2]
+        self._press = None
+        self.update()
+        if moved:
+            self.committed.emit(self.value())  # the drag settled: one undo step
+        else:
+            self.edit()  # a click: type a value
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter, QtCore.Qt.Key_F2):
+            self.edit()
+            return
+        nudge = {QtCore.Qt.Key_Right: 1, QtCore.Qt.Key_Up: 1, QtCore.Qt.Key_Left: -1, QtCore.Qt.Key_Down: -1}
+        if key in nudge:
+            steps = nudge[key] * (10 if _has(event.modifiers(), QtCore.Qt.ShiftModifier) else 1)
+            step = self.step()
+            self._commit(self._limited(self._snapped(self._value + steps * step, step), soft=True), stretch=False)
+            return
+        super(SoftSlider, self).keyPressEvent(event)
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+        super(SoftSlider, self).enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+        super(SoftSlider, self).leaveEvent(event)
+
+    def focusInEvent(self, event):
+        self.update()
+        super(SoftSlider, self).focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        self.update()
+        super(SoftSlider, self).focusOutEvent(event)
+
+    def resizeEvent(self, event):
+        if self._editing:
+            self.editor.setGeometry(self.rect())
+        super(SoftSlider, self).resizeEvent(event)
+
+    def changeEvent(self, event):
+        if event.type() in (QtCore.QEvent.StyleChange, QtCore.QEvent.FontChange):
+            self.updateGeometry()  # a theme's row height or font
+        super(SoftSlider, self).changeEvent(event)
+
+    def event(self, event):
+        if event.type() == QtCore.QEvent.ToolTip:
+            tip = "\n".join(t for t in (self.toolTip(), self.unit_tip, self.range_tip()) if t)
+            QtWidgets.QToolTip.showText(qt.event_global_pos(event), tip, self)
+            return True
+        return super(SoftSlider, self).event(event)
+
+    def range_tip(self):
+        return ("%g to %g: drag (Shift: finer, Ctrl: steps of 10) or click to type (a value past it stretches "
+                "it); right-click to set the range" % (self.lo, self.hi))
+
+    # -- Painting ------------------------------------------------------------------
+
+    @staticmethod
+    def row_height():
+        """The theme's row height (ui.rowHeight; 26 without one), at Maya's interface scale."""
+        from groomlab.ui import theme
+        return theme.px(float(theme.current().get("ui.rowHeight") or 26))
+
+    def sizeHint(self):
+        from groomlab.ui import theme
+        fm = self.fontMetrics()
+        advance = getattr(fm, "horizontalAdvance", None) or fm.width
+        width = advance(self._label) + advance(self.text()) + theme.px(32)
+        return QtCore.QSize(max(theme.px(120), width), self.row_height())
+
+    def minimumSizeHint(self):
+        from groomlab.ui import theme
+        return QtCore.QSize(theme.px(48), self.row_height())
+
+    def colors(self):
+        """(background, fill, border, text, label) as the field paints them now."""
+        from groomlab.ui import theme
+        t = theme.current()
+        raised = QtGui.QColor(t.color("ui.raised"))
+        hovered = self._hover and self.isEnabled() and not self._editing
+        background = QtGui.QColor(t.color("ui.hover")) if hovered else raised
+        if self.accent:
+            fill = _mix_color(raised, QtGui.QColor(t.hex(self.accent)), 0.5)
+        elif t.get("ui.selection"):
+            fill = QtGui.QColor(t.color("ui.selection"))
+        else:  # a theme without a selection color: the accent, quietened under the text
+            fill = _mix_color(raised, QtGui.QColor(t.hex("accent")), 0.35)
+        border = QtGui.QColor(t.color("ui.border"))
+        text, label = QtGui.QColor(t.color("ui.text")), QtGui.QColor(t.color("ui.textDim"))
+        if self._key_color is not None:  # keyed, animated, driven: the Channel Box's colors
+            key = self._key_color
+            background = _mix_color(raised, key, 0.6 if hovered else 0.45)
+            fill, border = QtGui.QColor(key), QtGui.QColor(key)
+            text = _readable_on(key)
+            label = QtGui.QColor(text)
+            label.setAlpha(200)
+        if self.hasFocus() and not self._editing:
+            border = QtGui.QColor(t.hex("accent"))
+        return background, fill, border, text, label
+
+    def paintEvent(self, _event):
+        from groomlab.ui import theme
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        if not self.isEnabled():
+            p.setOpacity(0.45)
+        background, fill, border, text, label = self.colors()
+        line = max(1, theme.px(1))
+        box = QtCore.QRectF(self.rect()).adjusted(line / 2.0, line / 2.0, -line / 2.0, -line / 2.0)
+        radius = min(float(theme.px(int(theme.current().get("ui.radius", 6)))), box.height() / 2.0)
+        path = QtGui.QPainterPath()
+        path.addRoundedRect(box, radius, radius)
+        p.fillPath(path, background)
+        share = self.fraction()
+        if share > 0.0:
+            p.save()
+            p.setClipPath(path)
+            p.fillRect(QtCore.QRectF(box.left(), box.top(), box.width() * share, box.height()), fill)
+            p.restore()
+        p.setPen(QtGui.QPen(border, line))
+        p.setBrush(QtCore.Qt.NoBrush)
+        p.drawPath(path)
+        if self._editing:
+            return  # the inline field shows the text
+        pad = theme.px(8)
+        inner = self.rect().adjusted(pad, 0, -pad, 0)
+        fm = self.fontMetrics()
+        advance = getattr(fm, "horizontalAdvance", None) or fm.width
+        value_text = self.text()
+        p.setPen(text)
+        if not self._label:
+            p.drawText(inner, QtCore.Qt.AlignCenter, value_text)
+            return
+        p.drawText(inner, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, value_text)
+        room = inner.width() - advance(value_text) - pad
+        if room > 0:
+            p.setPen(label)
+            p.drawText(QtCore.QRect(inner.left(), inner.top(), room, inner.height()),
+                       QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+                       fm.elidedText(self._label, QtCore.Qt.ElideRight, room))
+
+    # -- The right-click menu ----------------------------------------------------------
 
     def _menu(self, pos):
         menu = QtWidgets.QMenu(self)
@@ -1124,7 +1481,7 @@ class SoftSlider(QtWidgets.QWidget):
         menu.addAction("Fit Range to Value", self._fit)
         menu.addAction("Set Range...", self._ask_range)
         menu.addAction("Reset Range", self._reset)
-        qt.exec_(menu, self.slider.mapToGlobal(pos))
+        qt.exec_(menu, self.mapToGlobal(pos))
 
     def _reset_value(self):
         self.setValue(self.default)
@@ -1134,7 +1491,7 @@ class SoftSlider(QtWidgets.QWidget):
         lo, hi = default_range(self._value if self._value != 0 else 1.0, self.integer)
         self.lo, self.hi = lo, hi
         remember_range(self.key, lo, hi)
-        self._sync()
+        self.update()
 
     def _ask_range(self):
         text, ok = QtWidgets.QInputDialog.getText(self, "Slider Range", "Minimum and maximum:",
@@ -1148,13 +1505,13 @@ class SoftSlider(QtWidgets.QWidget):
         if hi > lo:
             self.lo, self.hi = lo, hi
             remember_range(self.key, lo, hi)
-            self._sync()
+            self.update()
 
     def _reset(self):
         forget_range(self.key)
         self.lo, self.hi = self.default_range
         self._stretch_to(self._value)
-        self._sync()
+        self.update()
 
 
 def _unit(x):

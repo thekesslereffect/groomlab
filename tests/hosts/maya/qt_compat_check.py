@@ -120,9 +120,14 @@ def main():
     parser.add_argument("--api", choices=("PySide2", "PySide6"), required=True)
     parser.add_argument("--core", required=True, help="the folder of the groomlab_core module for this Python")
     parser.add_argument("--dll-dir", action="append", default=[], help="a folder of DLLs the module needs (TBB)")
+    parser.add_argument("--shots", help="a folder for PNGs of the fill fields (fill_field_check)")
     args = parser.parse_args()
 
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    # Qt 5's offscreen platform finds no fonts by itself (text then isn't drawn): the system's.
+    fonts = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+    if os.path.isdir(fonts):
+        os.environ.setdefault("QT_QPA_FONTDIR", fonts)
     os.environ["GROOMLAB_QT_API"] = args.api
     os.environ["GROOMLAB_NO_UPDATES"] = "1"
     prefs = tempfile.mkdtemp(prefix="groomlab-qt-check-")
@@ -249,7 +254,12 @@ def main():
         _expect(len(ramp.keys) == 3, "a key added: %r" % ramp.keys)
 
     def slider_builds():
-        shown(widgets.SoftSlider(0.5, 0.0, 1.0), (300, 40))
+        slider = shown(widgets.SoftSlider(0.5, 0.0, 1.0), (300, 26))
+        QTest.mouseClick(slider, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, QtCore.QPoint(150, 13))
+        _expect(slider.isEditing(), "a click types")
+        slider.editor.setText("0.25*2+0.25")
+        QTest.keyClick(slider.editor, QtCore.Qt.Key_Return)
+        _expect(slider.value() == 0.75, "typed arithmetic: %r" % slider.value())
 
     def new_map_dialog():
         dialog = tool_tabs.NewMapDialog(None)
@@ -287,21 +297,30 @@ def main():
                       ("Menus, actions, shortcuts", menu_exec),
                       ("shiboken and QtSvg", shiboken_helpers)]:
         check.run(label, fn)
+    import fill_field_check  # the fill field's behavior, in both bindings
+    if args.shots and not os.path.isdir(args.shots):
+        os.makedirs(args.shots)
+    fill_field_check.run(check, args.shots)
 
     print("\n%d passed, %d failed (%s, Qt %s, Python %s)" % (check.passed, len(check.failures), args.api,
                                                            QtCore.qVersion(), sys.version.split()[0]))
     for label, _ in check.failures:
         print("FAILED: " + label)
-    # The windows go before the process does (PySide2's wheels can crash or hang in an exit that
-    # finds them still up); no Python teardown of the half-mocked Maya.
-    for widget in QtWidgets.QApplication.topLevelWidgets():
-        widget.close()
-        widget.deleteLater()
-    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
-    application.processEvents()
+    # The process ends without Qt's or Python's teardown of the half-mocked Maya, the windows left as
+    # they are: PySide2's wheels can crash or hang in an exit that deletes them, and deleting them
+    # here, or os._exit (Windows still unloads Qt's DLLs then), crashed now and then too once a
+    # second Graph Editor had had a node picked (with the old sliders as well). On Windows the
+    # process is ended as it is, no DLL unloaded.
     sys.stdout.flush()
     sys.stderr.flush()
-    os._exit(1 if check.failures else 0)
+    code = 1 if check.failures else 0
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.TerminateProcess.argtypes = (ctypes.c_void_p, ctypes.c_uint)
+        kernel32.TerminateProcess(kernel32.GetCurrentProcess(), code)
+    os._exit(code)
 
 
 def _expect(condition, what):
