@@ -76,7 +76,8 @@ public:
     explicit PropertiesPanel(QWidget* parent = nullptr);
 
     // The control of the item whose app key is `key`, in its row (its label at left, the item's tip
-    // on both unless the control has its own). False when no item has that key.
+    // on both unless the control has its own); a number field (ValueSlider) takes the whole row with
+    // the label as its caption, inside it. False when no item has that key.
     bool setControl(const std::string& key, QWidget* control);
     // A custom block's widget, spanning its row (no label column).
     bool setBlock(const std::string& key, QWidget* block);
@@ -105,6 +106,7 @@ private:
         QWidget* rule = nullptr;  // a divider row
         Item item;
         bool wanted = true;
+        bool inField = false;  // the label is the number field's caption (its own stays hidden)
     };
     void build(const ui::json& sections, QVBoxLayout* into, PropertySection* parent);
     QScrollArea* scroll_ = nullptr;

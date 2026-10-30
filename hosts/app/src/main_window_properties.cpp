@@ -44,14 +44,13 @@ namespace {
 
 QString qs(const std::string& s) { return QString::fromStdString(s); }
 
-// A slider in a row (the label is the row's): its track as wide as the row leaves, the value after.
+// A number field for a row: the row's label goes inside it (PropertiesPanel::setControl, or the
+// caption set by the block that holds it), the row's whole width.
 ValueSlider* rowSlider(double min, double max, int decimals, double step, const QColor& fill) {
     auto* s = new ValueSlider();
     s->setRange(min, max);
     s->setDecimals(decimals);
     s->setStep(step);
-    s->setTrackWidth(0);
-    s->setValueWidth(52);
     s->setFill(fill);
     s->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     return s;
@@ -160,7 +159,6 @@ void MainWindow::buildProperties() {
     budget_->setInteger(true);
     budget_->setLimits(0.0, 1000000.0);
     budget_->setValue(kDefaultPointBudget);
-    budget_->setValueWidth(64);
     budget_->setFormat([](double v) { return v < 0.5 ? tr("no limit") : QString::number(std::lround(v)) + tr(" k"); });
     p->setControl("budget", budget_);
     strandCount_ = valueLabel(QStringLiteral("0"));
@@ -670,17 +668,16 @@ void MainWindow::refreshControlSliders() {
     }
     int row = 0;
     for (const auto& c : sliders) {
-        auto* label = new QLabel(qs(c.name), controlsBlock_);
-        label->setProperty("role", "propLabel");
-        label->setToolTip(tr("The Control node %1's value (its slider spans %2 to %3; values past it are not clamped)")
-                              .arg(qs(c.node))
-                              .arg(c.min)
-                              .arg(c.max));
+        // The control's name inside its field, the block's whole width.
         auto* s = rowSlider(c.min, c.max, 3, (c.max - c.min) / 100.0, theme::purple());
         s->setParent(controlsBlock_);
         s->setObjectName(QStringLiteral("control_") + qs(c.name));
+        s->setCaption(qs(c.name));
         s->setValue(c.value);
-        s->setToolTip(label->toolTip());
+        s->setToolTip(tr("The Control node %1's value (its slider spans %2 to %3; values past it are not clamped)")
+                          .arg(qs(c.node))
+                          .arg(c.min)
+                          .arg(c.max));
         const std::string name = c.name;
         connect(s, &ValueSlider::valueChanged, this, [this, name](double v) {
             if (!document_ || !document_->setControlValue(name, v)) return;
@@ -690,8 +687,7 @@ void MainWindow::refreshControlSliders() {
         connect(s, &ValueSlider::released, this, [this] {
             if (document_) reevaluate();
         });
-        grid->addWidget(label, row, 0);
-        grid->addWidget(s, row, 1);
+        grid->addWidget(s, row, 0, 1, 2);
         ++row;
     }
 }
@@ -788,6 +784,13 @@ void MainWindow::refreshHairColorRows() {
             control->setParent(hairColorBlock_);
             control->setObjectName(QStringLiteral("hairColor_") + qs(param));
             control->setToolTip(tip);
+            if (auto* field = qobject_cast<ValueSlider*>(control)) {
+                // A number field: its label inside, the row's whole width.
+                field->setCaption(label);
+                delete l;
+                grid->addWidget(control, row++, 0, 1, 2);
+                continue;
+            }
             grid->addWidget(l, row, 0);
             grid->addWidget(control, row++, 1);
         }

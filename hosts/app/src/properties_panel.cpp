@@ -205,7 +205,15 @@ bool PropertiesPanel::setControl(const std::string& key, QWidget* control) {
     control->setParent(r.section->body());
     control->setObjectName(control->objectName().isEmpty() ? QStringLiteral("prop_") + qs(key) : control->objectName());
     control->setToolTip(qs(r.item.tip));
-    r.section->grid()->addWidget(control, r.row, 1);
+    if (auto* field = qobject_cast<ValueSlider*>(control)) {
+        // A number field carries its label inside: the whole row, the label column's text in it.
+        if (field->caption().isEmpty()) field->setCaption(qs(r.item.label));
+        r.label->hide();
+        r.inField = true;
+        r.section->grid()->addWidget(control, r.row, 0, 1, 2);
+    } else {
+        r.section->grid()->addWidget(control, r.row, 1);
+    }
     r.control = control;
     return true;
 }
@@ -288,7 +296,7 @@ void PropertiesPanel::setRowVisible(const std::string& key, bool visible) {
     Row& r = rows_[it->second];
     r.wanted = visible;
     if (r.control) r.control->setVisible(visible);
-    if (!r.item.custom) r.label->setVisible(visible && r.control);
+    if (!r.item.custom && !r.inField) r.label->setVisible(visible && r.control);
 }
 
 void PropertiesPanel::expandAll(bool expanded) {

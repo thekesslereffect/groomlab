@@ -182,7 +182,6 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     newColor_->setToolTip(choiceTip("mapValues", "color"));
     newForm->addRow(QString(), newColor_);
     newValue_ = new ValueSlider(newBox_);
-    newValue_->setStacked(true);
     newValue_->setCaption(tr("Fill"));
     newValue_->setRange(0.0, 1.0);
     newValue_->setLimits(0.0, 1.0);
@@ -248,7 +247,6 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     valueLine->setContentsMargins(0, 0, 0, 0);
     valueLine->setSpacing(6);
     paintValue_ = new ValueSlider(valueRow_);
-    paintValue_->setStacked(true);
     paintValue_->setCaption(tr("Value"));
     paintValue_->setRange(0.0, 1.0);
     paintValue_->setLimits(0.0, 1.0);
@@ -261,7 +259,7 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     auto* fillValue = new QPushButton(tr("Fill"), valueRow_);
     fillValue->setObjectName(QStringLiteral("paintFill"));
     fillValue->setToolTip(tr("Set the map to the value: on the selected guides when some are (a guide map), else everywhere"));
-    valueLine->addWidget(fillValue, 0, Qt::AlignBottom);
+    valueLine->addWidget(fillValue);
     paintLayout->addWidget(valueRow_);
     colorRow_ = new QWidget(paintBox);
     auto* colorLayout = new QVBoxLayout(colorRow_);

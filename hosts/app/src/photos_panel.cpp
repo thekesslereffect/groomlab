@@ -139,19 +139,14 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
     row->addWidget(lock_);
     layout->addLayout(row);
 
-    auto* form = new QHBoxLayout();
-    form->setSpacing(6);
-    auto* opacityLabel = new QLabel(tr("Opacity"), this);
-    opacityLabel->setProperty("role", "propLabel");
-    form->addWidget(opacityLabel);
     opacity_ = new ValueSlider(this);
     opacity_->setObjectName(QStringLiteral("referenceOpacity"));
+    opacity_->setCaption(tr("Opacity"));
     opacity_->setRange(0.0, 1.0);
     opacity_->setLimits(0.0, 1.0);
     opacity_->setDecimals(2);
     opacity_->setStep(0.05);
     opacity_->setValue(0.6);
-    opacity_->setTrackWidth(0);
     opacity_->setFill(theme::blue());
     opacity_->setToolTip(tr("How opaque the photo is: see the mesh through it"));
     opacity_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -161,24 +156,18 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
         d.opacity = v;
         setDisplay(current(), d);
     });
-    form->addWidget(opacity_, 1);
-    layout->addLayout(form);
+    layout->addWidget(opacity_);
 
     // The photo camera's focal length (mm on a 36 mm film back), by hand: Keep focal length turns on,
     // so a solve keeps it. A locked camera keeps its own.
-    auto* focalRow = new QHBoxLayout();
-    focalRow->setSpacing(6);
-    auto* focalLabel = new QLabel(tr("Focal length"), this);
-    focalLabel->setProperty("role", "propLabel");
-    focalRow->addWidget(focalLabel);
     focal_ = new ValueSlider(this);
     focal_->setObjectName(QStringLiteral("referenceFocal"));
+    focal_->setCaption(tr("Focal length"));
     focal_->setRange(10.0, 200.0);
     focal_->setLimits(2.5, 3500.0);
     focal_->setDecimals(1);
     focal_->setStep(1.0);
     focal_->setValue(50.0);
-    focal_->setTrackWidth(0);
     focal_->setFill(theme::blue());
     focal_->setToolTip(tr("The photo camera's focal length (mm): Align Photo works it out from the point pairs; set it by hand when "
                           "you know the lens (Keep focal length turns on, so the alignment keeps it). A locked camera keeps its own"));
@@ -206,8 +195,7 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
         menu->addAction(tr("Reset Focal Length (%1 mm)").arg(kDefaultFocalMm), this, [this] { resetFocal(); });
         menu->popup(focal_->mapToGlobal(pos));
     });
-    focalRow->addWidget(focal_, 1);
-    layout->addLayout(focalRow);
+    layout->addWidget(focal_);
 
     auto* sides = new QHBoxLayout();
     sides->setSpacing(4);

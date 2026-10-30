@@ -39,6 +39,7 @@
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QTimer>
+#include <QWheelEvent>
 #include <QSize>
 #include <QTabBar>
 #include <QToolButton>
@@ -606,15 +607,18 @@ TEST(AppPanels, MapsPanelMakesPaintsShowsAndUndoesMaps) {
     EXPECT_GT(sumAgain, 0.0f) << "the painted values survived the file";
 }
 
-TEST(AppPanels, ValueSliderEditsInlineDragsAnywhereAndWidensItsRange) {
+TEST(AppPanels, ValueSliderIsOneFillFieldThatTypesAndWidensItsRange) {
+    // One field a row tall, the caption inside (no separate label), typed values set as one change.
     ValueSlider slider;
-    slider.setStacked(true);
     slider.setCaption("Length");
     slider.setRange(0.0, 10.0);
     slider.setLimits(0.0, 100.0);
     slider.setDecimals(2);
+    EXPECT_EQ(slider.sizeHint().height(), theme::rowHeight()) << "a row tall, the caption inside";
+    EXPECT_EQ(slider.minimumSizeHint().height(), theme::rowHeight());
+    EXPECT_EQ(slider.caption(), QStringLiteral("Length"));
+    EXPECT_EQ(slider.focusPolicy(), Qt::StrongFocus) << "Tab reaches it";
     slider.resize(200, slider.sizeHint().height());
-    EXPECT_GE(slider.sizeHint().height(), 40) << "a comfortable hit area, not a hairline";
     slider.setValue(2.5);
     EXPECT_DOUBLE_EQ(slider.value(), 2.5);
     int presses = 0, changes = 0, releases = 0;
@@ -622,7 +626,7 @@ TEST(AppPanels, ValueSliderEditsInlineDragsAnywhereAndWidensItsRange) {
     QObject::connect(&slider, &ValueSlider::pressed, [&] { ++presses; });
     QObject::connect(&slider, &ValueSlider::valueChanged, [&](double v) { ++changes; last = v; });
     QObject::connect(&slider, &ValueSlider::released, [&] { ++releases; });
-    // Typed inline: one change between a press and a release; past the span, the span widens.
+    // Typed inline: one change between a press and a release; past the range, the range widens.
     slider.beginEdit();
     EXPECT_TRUE(slider.editing());
     slider.setEditText("42");
@@ -646,26 +650,173 @@ TEST(AppPanels, ValueSliderEditsInlineDragsAnywhereAndWidensItsRange) {
     slider.cancelEdit();
     EXPECT_FALSE(slider.editing());
     EXPECT_DOUBLE_EQ(slider.value(), 100.0);
-    // A press on the track jumps there; a press on the caption drags relatively, no jump.
-    const int y = slider.height() - 10;
-    presses = changes = releases = 0;
-    mouse(&slider, QEvent::MouseButtonPress, QPoint(100, y));
-    EXPECT_EQ(presses, 1);
-    EXPECT_NEAR(slider.value(), 50.0, 1.0) << "the middle of the track";
-    mouse(&slider, QEvent::MouseButtonRelease, QPoint(100, y));
-    EXPECT_EQ(releases, 1);
-    const double before = slider.value();
-    mouse(&slider, QEvent::MouseButtonPress, QPoint(10, 8));
-    EXPECT_DOUBLE_EQ(slider.value(), before) << "no jump from the caption";
-    mouse(&slider, QEvent::MouseMove, QPoint(30, 8));
-    EXPECT_GT(slider.value(), before) << "the travel moves it";
-    mouse(&slider, QEvent::MouseButtonRelease, QPoint(30, 8));
+    // Arithmetic, and "," as the decimal point.
+    slider.beginEdit();
+    slider.setEditText("0.5*2 + 1/4");
+    EXPECT_TRUE(slider.commitEdit());
+    EXPECT_DOUBLE_EQ(slider.value(), 1.25);
+    slider.beginEdit();
+    slider.setEditText("3,5");
+    EXPECT_TRUE(slider.commitEdit());
+    EXPECT_DOUBLE_EQ(slider.value(), 3.5);
     // An integer slider snaps.
     ValueSlider count;
     count.setInteger(true);
     count.setRange(0.0, 10.0);
     count.setValue(3.4);
     EXPECT_DOUBLE_EQ(count.value(), 3.0);
+    count.beginEdit();
+    count.setEditText("7/2");
+    EXPECT_TRUE(count.commitEdit());
+    EXPECT_DOUBLE_EQ(count.value(), 4.0);
+}
+
+TEST(AppPanels, NumberExpressionsTakeArithmeticAndNothingElse) {
+    double v = 0.0;
+    auto parsed = [&](const char* text) { return parseNumberExpression(QString::fromUtf8(text), &v); };
+    ASSERT_TRUE(parsed("0.5*2"));
+    EXPECT_DOUBLE_EQ(v, 1.0);
+    ASSERT_TRUE(parsed("1/3"));
+    EXPECT_DOUBLE_EQ(v, 1.0 / 3.0);
+    ASSERT_TRUE(parsed(" 0,25 "));
+    EXPECT_DOUBLE_EQ(v, 0.25);
+    ASSERT_TRUE(parsed("-(2+1)*2"));
+    EXPECT_DOUBLE_EQ(v, -6.0);
+    ASSERT_TRUE(parsed("2 - -3"));
+    EXPECT_DOUBLE_EQ(v, 5.0);
+    ASSERT_TRUE(parsed("1 + 2 * 3"));
+    EXPECT_DOUBLE_EQ(v, 7.0) << "* before +";
+    ASSERT_TRUE(parsed("2e3"));
+    EXPECT_DOUBLE_EQ(v, 2000.0);
+    ASSERT_TRUE(parsed(".5"));
+    EXPECT_DOUBLE_EQ(v, 0.5);
+    v = 9.0;
+    for (const char* bad : {"", "ten", "2+", "(1", "1)", "1/0", "1 2", "2^3", "abs(1)", "0x10", "1;2", "."}) {
+        EXPECT_FALSE(parsed(bad)) << bad;
+    }
+    EXPECT_DOUBLE_EQ(v, 9.0) << "a failed parse leaves the value";
+}
+
+TEST(AppPanels, ValueSliderClickTypesDragScrubsAndKeysNudge) {
+    ValueSlider slider;
+    slider.setCaption("Width");
+    slider.setRange(0.0, 10.0);
+    slider.setDecimals(3);
+    slider.resize(200, slider.sizeHint().height());  // 0.05 a pixel
+    slider.setValue(2.5);
+    const int y = slider.height() / 2;
+    int presses = 0, changes = 0, releases = 0;
+    QObject::connect(&slider, &ValueSlider::pressed, [&] { ++presses; });
+    QObject::connect(&slider, &ValueSlider::valueChanged, [&](double) { ++changes; });
+    QObject::connect(&slider, &ValueSlider::released, [&] { ++releases; });
+
+    // A click (under 3 px of travel): no change, the edit opens with the number selected.
+    mouse(&slider, QEvent::MouseButtonPress, QPoint(100, y));
+    mouse(&slider, QEvent::MouseMove, QPoint(102, y));
+    EXPECT_DOUBLE_EQ(slider.value(), 2.5) << "2 px is no drag";
+    mouse(&slider, QEvent::MouseButtonRelease, QPoint(102, y));
+    EXPECT_TRUE(slider.editing()) << "a click types";
+    auto* editor = slider.findChild<QLineEdit*>();
+    ASSERT_NE(editor, nullptr);
+    EXPECT_EQ(editor->text(), QStringLiteral("2.5"));
+    EXPECT_EQ(editor->selectedText(), editor->text()) << "the number selected: typing replaces it";
+    EXPECT_EQ(presses + changes + releases, 0) << "a click alone changes nothing";
+    // Escape puts the old value back.
+    slider.setEditText("7");
+    QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &escape);
+    EXPECT_FALSE(slider.editing());
+    EXPECT_DOUBLE_EQ(slider.value(), 2.5);
+    EXPECT_EQ(changes, 0);
+    // Enter (the line edit's returnPressed) sets it.
+    slider.beginEdit();
+    slider.setEditText("4");
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &enter);
+    EXPECT_FALSE(slider.editing());
+    EXPECT_DOUBLE_EQ(slider.value(), 4.0);
+    slider.setValue(2.5);
+
+    // A drag: relative to the press (no jump to the mouse), the field's width the range.
+    presses = changes = releases = 0;
+    mouse(&slider, QEvent::MouseButtonPress, QPoint(20, y));
+    EXPECT_DOUBLE_EQ(slider.value(), 2.5) << "a press does not jump";
+    EXPECT_EQ(presses, 0);
+    mouse(&slider, QEvent::MouseMove, QPoint(60, y));
+    EXPECT_EQ(presses, 1) << "the drag starts past the threshold";
+    EXPECT_NEAR(slider.value(), 4.5, 1e-9) << "40 px of a 200 px field over 0-10";
+    mouse(&slider, QEvent::MouseButtonRelease, QPoint(60, y));
+    EXPECT_EQ(releases, 1);
+    EXPECT_FALSE(slider.editing()) << "a drag does not type";
+    // Shift: a tenth of the speed.
+    mouseAt(&slider, QEvent::MouseButtonPress, QPointF(20, y), Qt::ShiftModifier);
+    mouseAt(&slider, QEvent::MouseMove, QPointF(60, y), Qt::ShiftModifier);
+    EXPECT_NEAR(slider.value(), 4.7, 1e-9);
+    mouseAt(&slider, QEvent::MouseButtonRelease, QPointF(60, y), Qt::ShiftModifier);
+    // Ctrl: steps of ten (the step a 100th of the range, rounded: 0.1, so whole numbers).
+    mouseAt(&slider, QEvent::MouseButtonPress, QPointF(20, y), Qt::ControlModifier);
+    mouseAt(&slider, QEvent::MouseMove, QPointF(33, y), Qt::ControlModifier);
+    EXPECT_NEAR(slider.value(), 5.0, 1e-9) << "4.7 + 0.65 to the nearest 1";
+    mouseAt(&slider, QEvent::MouseButtonRelease, QPointF(33, y), Qt::ControlModifier);
+    // The drag stays inside the range (a typed value may go past it).
+    mouse(&slider, QEvent::MouseButtonPress, QPoint(20, y));
+    mouse(&slider, QEvent::MouseMove, QPoint(800, y));
+    EXPECT_DOUBLE_EQ(slider.value(), 10.0);
+    mouse(&slider, QEvent::MouseMove, QPoint(790, y));
+    EXPECT_LT(slider.value(), 10.0) << "back the moment the mouse turns: the travel past the end is not banked";
+    mouse(&slider, QEvent::MouseButtonRelease, QPoint(790, y));
+
+    // Keys (focused): the arrows nudge one step (Shift ten), Enter and F2 type.
+    slider.setStep(0.5);
+    slider.setValue(2.0);
+    auto press = [&](int k, Qt::KeyboardModifiers mods = Qt::NoModifier) {
+        QKeyEvent event(QEvent::KeyPress, k, mods);
+        QCoreApplication::sendEvent(&slider, &event);
+    };
+    press(Qt::Key_Right);
+    EXPECT_DOUBLE_EQ(slider.value(), 2.5);
+    press(Qt::Key_Up, Qt::ShiftModifier);
+    EXPECT_DOUBLE_EQ(slider.value(), 7.5);
+    press(Qt::Key_Down);
+    press(Qt::Key_Left);
+    EXPECT_DOUBLE_EQ(slider.value(), 6.5);
+    press(Qt::Key_Right, Qt::ShiftModifier);
+    EXPECT_DOUBLE_EQ(slider.value(), 10.0) << "nudged to the range's end, no further";
+    press(Qt::Key_F2);
+    EXPECT_TRUE(slider.editing());
+    slider.cancelEdit();
+    press(Qt::Key_Return);
+    EXPECT_TRUE(slider.editing());
+    slider.cancelEdit();
+    // The wheel over a field that is not focused scrolls the panel, not the value.
+    QWheelEvent wheel(QPointF(50, y), slider.mapToGlobal(QPointF(50, y)), QPoint(), QPoint(0, 120), Qt::NoButton, Qt::NoModifier,
+                      Qt::NoScrollPhase, false);
+    QCoreApplication::sendEvent(&slider, &wheel);
+    EXPECT_FALSE(wheel.isAccepted()) << "left to the scroll area";
+    EXPECT_DOUBLE_EQ(slider.value(), 10.0);
+}
+
+TEST(AppPanels, ValueSliderPaintsItsFillStateAndDisabledLook) {
+    ValueSlider slider;
+    slider.setCaption("Strength");
+    slider.setRange(0.0, 1.0);
+    slider.setValue(0.5);
+    slider.resize(200, theme::rowHeight());
+    const QImage shot = slider.grab().toImage();
+    ASSERT_FALSE(shot.isNull());
+    const int y = 3;  // above the texts, inside the edge
+    const QColor filled = shot.pixelColor(12, y), empty = shot.pixelColor(188, y);
+    EXPECT_NE(filled.rgb(), empty.rgb()) << "the fill covers the value's share from the left";
+    if (!theme::glassy()) EXPECT_EQ(slider.fillColor(), theme::uiColor("selection")) << "a solid theme fills with its selection tone";
+    // A driven param: tinted; disabled: faded.
+    slider.setStateColor(QColor(0xCF, 0xC2, 0x7A));
+    EXPECT_NE(slider.grab().toImage().pixelColor(188, y).rgb(), empty.rgb()) << "the state color shows";
+    slider.setStateColor(QColor());
+    slider.setEnabled(false);
+    EXPECT_NE(slider.grab().toImage().pixelColor(12, y).rgb(), filled.rgb()) << "disabled, it is drawn faded";
+    slider.setEnabled(true);
+    slider.beginEdit();
+    EXPECT_NE(slider.grab().toImage().pixelColor(12, y).rgb(), filled.rgb()) << "editing: the field, no fill";
 }
 
 TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {

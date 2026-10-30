@@ -23,7 +23,6 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QShortcut>
-#include <QSlider>
 #include <QSpinBox>
 #include <QTabBar>
 #include <QToolButton>
@@ -557,23 +556,29 @@ void ReferenceWindow::buildPanel(QWidget* panel) {
         photoView_->update();
     });
     form->addRow(tr("Mesh over photo"), overlayBox_);
-    opacity_ = new QSlider(Qt::Horizontal);
-    opacity_->setRange(0, 100);
-    opacity_->setValue(70);
-    connect(opacity_, &QSlider::valueChanged, photoView_, [this] { photoView_->update(); });
-    form->addRow(tr("Opacity"), opacity_);
+    opacity_ = new ValueSlider;
+    opacity_->setObjectName(QStringLiteral("referenceOverlayOpacity"));
+    opacity_->setCaption(tr("Opacity"));
+    opacity_->setRange(0.0, 1.0);
+    opacity_->setLimits(0.0, 1.0);
+    opacity_->setDecimals(2);
+    opacity_->setStep(0.05);
+    opacity_->setValue(0.7);
+    opacity_->setToolTip(tr("How opaque the mesh over the photo is"));
+    connect(opacity_, &ValueSlider::valueChanged, photoView_, [this] { photoView_->update(); });
+    form->addRow(opacity_);
     layout->addLayout(form);
 
     heading(tr("CAMERA"));
     form = new QFormLayout;
     focal_ = new ValueSlider;
     focal_->setObjectName(QStringLiteral("referenceFocal"));
+    focal_->setCaption(tr("Focal Length"));
     focal_->setRange(10.0, 200.0);
     focal_->setLimits(2.5, 3500.0);
     focal_->setDecimals(1);
     focal_->setStep(1.0);
     focal_->setValue(50.0);
-    focal_->setTrackWidth(0);
     focal_->setFill(theme::blue());
     focal_->setToolTip(tr("The photo camera's focal length (mm): the landmarks solve it (6 or more pairs); set it by hand when you "
                           "know the lens (Keep focal length turns on, the camera follows)"));
@@ -587,7 +592,7 @@ void ReferenceWindow::buildPanel(QWidget* panel) {
         menu->addAction(tr("Reset Focal Length (50 mm)"), this, [this] { resetFocal(); });
         menu->popup(focal_->mapToGlobal(pos));
     });
-    form->addRow(tr("Focal Length"), focal_);
+    form->addRow(focal_);
     layout->addLayout(form);
     row = new QHBoxLayout;
     keepFocal_ = new QCheckBox(tr("Keep focal length"));
@@ -644,10 +649,16 @@ void ReferenceWindow::buildPanel(QWidget* panel) {
     row->addStretch(1);
     layout->addLayout(row);
     form = new QFormLayout;
-    brush_ = new QSlider(Qt::Horizontal);
-    brush_->setRange(2, 120);
-    brush_->setValue(14);
-    form->addRow(tr("Brush"), brush_);
+    brush_ = new ValueSlider;
+    brush_->setObjectName(QStringLiteral("referenceBrush"));
+    brush_->setCaption(tr("Brush"));
+    brush_->setRange(2.0, 120.0);
+    brush_->setLimits(1.0, 1000.0);
+    brush_->setInteger(true);
+    brush_->setValue(14.0);
+    brush_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral(" px"); });
+    brush_->setToolTip(tr("The touch-up brush's radius on the photo (pixels)"));
+    form->addRow(brush_);
     layout->addLayout(form);
 
     heading(tr("GENERATE"));
@@ -1051,7 +1062,7 @@ void ReferenceWindow::setHover(MarkerHover hover) {
 
 void ReferenceWindow::setOverlay(Overlay overlay) { overlayBox_->setCurrentIndex(static_cast<int>(overlay)); }
 ReferenceWindow::Overlay ReferenceWindow::overlay() const { return static_cast<Overlay>(overlayBox_->currentIndex()); }
-double ReferenceWindow::overlayOpacity() const { return opacity_->value() / 100.0; }
+double ReferenceWindow::overlayOpacity() const { return opacity_->value(); }
 void ReferenceWindow::setMaskTint(bool on) { maskTint_->setChecked(on); }
 void ReferenceWindow::setFieldLines(bool on) { fieldLines_->setChecked(on); }
 bool ReferenceWindow::maskTint() const { return maskTint_->isChecked(); }

@@ -368,13 +368,12 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     auto* center = new QHBoxLayout(centerRow_);
     center->setContentsMargins(0, 0, 0, 0);
     center->setSpacing(8);
-    center->addWidget(label(tr("Center"), "about", centerRow_));
     symmetryCenter_ = new ValueSlider(centerRow_);
     symmetryCenter_->setObjectName(QStringLiteral("symmetryCenter"));
+    symmetryCenter_->setCaption(tr("Center"));
     symmetryCenter_->setRange(-10.0, 10.0);
     symmetryCenter_->setLimits(-1e6, 1e6);
     symmetryCenter_->setDecimals(3);
-    symmetryCenter_->setValueWidth(46);
     symmetryCenter_->setFill(theme::sliderFill(theme::blue()));
     symmetryCenter_->setToolTip(tr("Where the world plane sits along its axis (0: the origin)"));
     connect(symmetryCenter_, &ValueSlider::valueChanged, this, [this](double v) {

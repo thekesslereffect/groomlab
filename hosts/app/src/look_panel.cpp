@@ -29,10 +29,9 @@ void anglesOf(const std::array<float, 3>& d, double& azimuth, double& elevation)
     azimuth = std::atan2(d[0], d[2]) * 180.0 / kPi;
 }
 
-// A stacked slider (glass.h): the caption and the number on its line, the number edited inline.
+// A fill field (glass.h): the caption and the number inside it, the number edited inline.
 ValueSlider* makeSlider(const QString& caption, double min, double max, double step, int decimals, QWidget* parent) {
     auto* s = new ValueSlider(parent);
-    s->setStacked(true);
     s->setCaption(caption);
     s->setRange(min, max);
     s->setLimits(min, max);

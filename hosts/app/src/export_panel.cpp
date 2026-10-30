@@ -181,7 +181,6 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     frames->addWidget(step_, 2, 1);
     layout->addLayout(frames);
     density_ = new ValueSlider(this);
-    density_->setStacked(true);
     density_->setCaption(tr("Density"));
     density_->setRange(0.01, 1.0);
     density_->setValue(1.0);
@@ -298,7 +297,6 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     resolutionRow->addWidget(binary_);
     cardLayout->addLayout(resolutionRow);
     occlusion_ = new ValueSlider(cardOptions_);
-    occlusion_->setStacked(true);
     occlusion_->setCaption(tr("Occlusion"));
     occlusion_->setRange(0.0, 1.0);
     occlusion_->setValue(1.0);

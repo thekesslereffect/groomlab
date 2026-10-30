@@ -94,22 +94,18 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
                                   "brush.radius"));
     radius_->setObjectName(QStringLiteral("radius"));
     radius_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral(" px"); });
-    radiusLabel_ = qobject_cast<QLabel*>(form->labelForField(radius_));
     strength_ = slider(form, settingLabel("strength"), 0.0, 1.0, -10.0, 10.0, 2, [this] { return session_->settings().brush.strength; },
                        [this](double v) { session_->settings().brush.strength = static_cast<float>(v); },
                        withShortcut(settingHint("strength") + tr(" (Shift+middle-drag sets it too)"), "brush.strength"));
     strength_->setObjectName(QStringLiteral("strength"));
-    strengthLabel_ = qobject_cast<QLabel*>(form->labelForField(strength_));
     // Falloff as the catalog names it in both hosts: 0 hard to the edge, 1 soft from the center
     // (the core's hardness is 1 - falloff).
     falloff_ = slider(form, settingLabel("falloff"), 0.0, 1.0, 0.0, 1.0, 2, [this] { return 1.0 - session_->settings().brush.hardness; },
                       [this](double v) { session_->settings().setHardness(static_cast<float>(1.0 - v)); }, settingHint("falloff"));
     falloff_->setObjectName(QStringLiteral("falloff"));
-    falloffLabel_ = qobject_cast<QLabel*>(form->labelForField(falloff_));
     smooth_ = slider(form, settingLabel("smoothStrength"), 0.0, 3.0, 0.0, 100.0, 2, [this] { return session_->settings().smoothStrength; },
                      [this](double v) { session_->settings().setSmoothStrength(static_cast<float>(v)); }, settingHint("smoothStrength"));
     smooth_->setObjectName(QStringLiteral("smoothStrength"));
-    smoothLabel_ = qobject_cast<QLabel*>(form->labelForField(smooth_));
     card->addWidget(brushForm_);
 
     // The curves: the falloff drawn instead of the slider's, and the strength root to tip.
@@ -246,7 +242,6 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     spacing_ = slider(createForm, settingLabel("spacing"), 0.0, 10.0, 0.0, 1e4, 3, [this] { return session_->settings().place.spacing; },
                       [this](double v) { session_->settings().place.spacing = static_cast<float>(v); },
                       tr("Place many: no new root closer than this to another of the group"));
-    spacingLabel_ = qobject_cast<QLabel*>(createForm->labelForField(spacing_));
     QCheckBox* solo = setting("soloNewGuides", [this] { return session_->settings().place.soloNewGuides; },
                               [this](bool on) { session_->settings().place.soloNewGuides = on; });
     solo->setObjectName(QStringLiteral("soloNewGuides"));
@@ -568,11 +563,9 @@ ValueSlider* BrushPanel::slider(QFormLayout* form, const QString& label, double 
     editor->setLimits(limitMin, limitMax);
     editor->setDecimals(decimals);
     editor->setFill(theme::sliderFill(theme::blue()));
-    editor->setValueWidth(46);
+    editor->setCaption(label);
     if (!tip.isEmpty()) editor->setToolTip(tip);
-    auto* caption = new QLabel(label, this);
-    if (!tip.isEmpty()) caption->setToolTip(tip);
-    form->addRow(caption, editor);
+    form->addRow(editor);
     connect(editor, &ValueSlider::valueChanged, this, [this, set](double v) {
         if (updating_ || !session_) return;
         set(v);
@@ -669,11 +662,7 @@ void BrushPanel::setTool(const std::string& id) {
     const groomlab::BrushEntry* entry = id.empty() ? nullptr : brushEntry(id);
     auto uses = [entry](const char* setting) { return entry && entry->hasSetting(setting); };
     const bool brush = uses("radius");
-    for (QWidget* w : {static_cast<QWidget*>(radiusLabel_), static_cast<QWidget*>(radius_), static_cast<QWidget*>(strengthLabel_),
-                       static_cast<QWidget*>(strength_), static_cast<QWidget*>(falloffLabel_), static_cast<QWidget*>(falloff_)}) {
-        w->setVisible(brush);
-    }
-    smoothLabel_->setVisible(uses("smoothStrength"));
+    for (ValueSlider* s : {radius_, strength_, falloff_}) s->setVisible(brush);
     smooth_->setVisible(uses("smoothStrength"));
     brushForm_->setVisible(brush || uses("smoothStrength"));
     falloffCurve_->setVisible(uses("falloffProfile"));
@@ -681,7 +670,7 @@ void BrushPanel::setTool(const std::string& id) {
     // The strength's span: -1..1 for the tools that work both ways, else 0..1 (Maya's).
     if (entry) {
         strength_->setRange(entry->signedStrength ? -1.0 : 0.0, 1.0);
-        strengthLabel_->setText(entry->signedStrength ? tr("Strength (±)") : settingLabel("strength"));
+        strength_->setCaption(entry->signedStrength ? tr("Strength (±)") : settingLabel("strength"));
     }
     selectedOnly_->setVisible(uses("selectedOnly"));
     pressure_->setVisible(uses("pressure"));
@@ -699,7 +688,6 @@ void BrushPanel::setTool(const std::string& id) {
     }
     createBox_->setVisible(uses("newGuides"));
     spacing_->setVisible(uses("spacing"));
-    spacingLabel_->setVisible(uses("spacing"));
     partBox_->setVisible(uses("parts"));
     flowBox_->setVisible(uses("flow"));
     lengthsBox_->setVisible(uses("lengthKeys"));
