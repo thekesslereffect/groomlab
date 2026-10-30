@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "Figtree";
+  src: url("../../../hosts/app/fonts/Figtree[wght].ttf") format("truetype");
+  font-weight: 300 900;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../../../hosts/app/fonts/JetBrainsMono[wght].ttf") format("truetype");
+  font-weight: 100 800;
+}
+
+/* The design tokens (src/theme/tokens.ts writes the --gl-* values on the root). Components use
+   only these colors: bg-panel, bg-raised, text-dim, border-line ... never raw palette colors, so
+   every pixel traces back to a theme key the Qt app has. */
+@theme inline {
+  --color-background: var(--gl-background);
+  --color-viewport: var(--gl-viewport);
+  --color-panel: var(--gl-panel);
+  --color-raised: var(--gl-raised);
+  --color-hover: var(--gl-hover);
+  --color-line: var(--gl-border);
+  --color-fg: var(--gl-text);
+  --color-dim: var(--gl-dim);
+  --color-muted: var(--gl-muted);
+  --color-accent: var(--gl-accent);
+  --color-on-accent: var(--gl-on-accent);
+  --color-selection: var(--gl-selection);
+  --color-track: var(--gl-track);
+  --radius-ctl: var(--gl-radius);
+  --radius-pnl: var(--gl-radius-lg);
+  --font-sans: var(--gl-sans);
+  --font-num: var(--gl-num);
+  --spacing-row: var(--gl-row);
+  --spacing-pad: var(--gl-pad);
+  --spacing-gap: var(--gl-gap);
+  --text-ui: var(--gl-font);
+  --text-sm-ui: var(--gl-small);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--gl-background);
+  color: var(--gl-text);
+  font-family: var(--gl-sans);
+  font-size: var(--gl-font);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+
+/* Qt draws no transitions or shadows on its widgets: keep the mock honest. */
+.gl-ui *,
+.gl-ui *::before,
+.gl-ui *::after {
+  transition: none !important;
+  box-shadow: none !important;
+}
+
+.num {
+  font-family: var(--gl-num);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mono tool icons: the SVG's shape, one tone (the app recolors icons from theme.icons). */
+.icon-mono {
+  background-color: currentColor;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+
+.gl-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--gl-hover) transparent;
+}
