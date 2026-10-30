@@ -274,6 +274,10 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(self.param("noise", "space"), "world")
         noise.p_octaves = 3
         self.assertEqual(self.param("noise", "octaves"), 3)
+        # Numbers with a soft range draw as fill sliders (the name inside); a seed (no range) as a field.
+        specs = noise.gl_param_specs
+        for name, slider in (("amplitude", True), ("frequency", True), ("octaves", True), ("seed", False)):
+            self.assertEqual(ge.fill_slider(noise, gt.prop_name(name), specs[name]), slider, name)
         clump = node_of(tree, "clump")
         clump.p_respectParts = False
         self.assertIs(self.param("clump", "respectParts"), False)

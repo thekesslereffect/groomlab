@@ -140,8 +140,10 @@ class GraphEditorTest(unittest.TestCase):
         slider = self.editor.params.findChildren(widgets.SoftSlider)[0]
         self.assertEqual((slider.lo, slider.hi), (0.0, 400.0))  # density: centered on real hair's 200/cm²
         try:
-            slider.field.setValue(750)
-            slider.field.editingFinished.emit()
+            field = slider.edit()  # a click on the fill field: its inline field, the value selected
+            field.setText("700+50")  # arithmetic, as Maya's fields take
+            field.editingFinished.emit()
+            self.assertFalse(slider.isEditing())
             self.assertEqual((slider.lo, slider.hi), (0.0, 1000.0))  # stretched to reach the typed value
             self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 750)
             # Only this slider: other Scatter nodes still start from the typical range.
@@ -152,12 +154,12 @@ class GraphEditorTest(unittest.TestCase):
 
             # Dragging previews outside undo; releasing commits one undo step.
             settle_undo()
-            slider.slider.setSliderDown(True)
-            slider.slider.setValue(300)
+            slider.setSliderDown(True)
+            slider.scrub(300)
             wait(80)  # previews are coalesced: written within 40 ms
             self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 300)
-            slider.slider.setValue(400)
-            slider.slider.setSliderDown(False)
+            slider.scrub(400)
+            slider.setSliderDown(False)
             self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 400)
             cmds.undo()
             self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 750)
@@ -1026,7 +1028,6 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(groomlab.errors(self.groom), [])
 
     def test_real_units(self):
-        from PySide2 import QtWidgets
         from groomlab import units
         from groomlab.ui import widgets
         units.set_unit("width", "um")
@@ -1041,8 +1042,8 @@ class GraphEditorTest(unittest.TestCase):
             self.assertTrue(shown, [s.value() for s in sliders])  # widths in micrometers
             shown[0].committed.emit(60.0)
             self.assertAlmostEqual(self.editor.model.param("width", "width"), 0.006, places=9)
-            labels = [l.text() for l in self.editor.params.findChildren(QtWidgets.QLabel)]
-            self.assertIn(u"µm", labels)
+            self.assertIn(u"µm", [s.suffix() for s in sliders])  # the unit inside the fill field
+            self.assertTrue(shown[0].text().endswith(u" µm"), shown[0].text())
             self.assertAlmostEqual(units.to_display("length", 1.5), 15.0)
             self.assertAlmostEqual(units.from_display("density", 200.0), 200.0)  # per cm2 is per scene unit2
             with self.assertRaises(ValueError):
@@ -1056,8 +1057,19 @@ class GraphEditorTest(unittest.TestCase):
         body = self.editor.params.widget()
         return next(w for w in body.findChildren(QtWidgets.QLabel) if w.property("glParam") == param)
 
+    def _param_target(self, param):
+        """What the mouse goes to for a param: its label, else (a number) its fill field, which holds the name."""
+        label = self._param_label(param)
+        return label if not label.isHidden() else self.editor.params.inside_fields[param]
+
     def _shown(self, param):
-        return self._param_label(param).isVisibleTo(self.editor.params.widget())
+        row = next(row for _section, _header, entries in self.editor.params.sections
+                   for spec, row in entries if spec["name"] == param)
+        return row.isVisibleTo(self.editor.params.widget())
+
+    def _suffixes(self, root):
+        from groomlab.ui import widgets
+        return [s.suffix() for s in root.findChildren(widgets.SoftSlider)]
 
     def test_param_sections_show_when_units_and_upgrade(self):
         from PySide2 import QtWidgets
@@ -1091,9 +1103,9 @@ class GraphEditorTest(unittest.TestCase):
             self.assertFalse(self._shown("melaninRandom"))
             self.assertTrue(self._shown("seed"))
             # S over a param inside a group: the hovered param is still its own.
-            panel.ensureWidgetVisible(self._param_label("melanin"))
+            panel.ensureWidgetVisible(self._param_target("melanin"))
             wait(30)
-            self.assertTrue(hover(self._param_label("melanin")))
+            self.assertTrue(hover(self._param_target("melanin")))
             wait(30)
             self.assertEqual(panel.hovered_param(), "melanin")
             # showWhen follows an edit without a rebuild.
@@ -1103,7 +1115,7 @@ class GraphEditorTest(unittest.TestCase):
             self.assertTrue(self._shown("color"))
             self.assertFalse(self._shown("melanin"))
             self.editor.set_param(color, "mode", "melanin")
-            self.assertIn("%", [l.text() for l in body.findChildren(QtWidgets.QLabel)])
+            self.assertIn("%", self._suffixes(body))  # the unit inside the fill field
 
             # One group or none: no group headers (Advanced alone); a fraction shows as a percentage.
             self.editor.scene.clearSelection()
@@ -1127,7 +1139,7 @@ class GraphEditorTest(unittest.TestCase):
             self.assertFalse(self._shown("maxAngle"))
             self.editor.set_param("resample", "mode", "curvature")
             self.assertTrue(self._shown("maxAngle"))
-            self.assertIn(u"°", [l.text() for l in panel.widget().findChildren(QtWidgets.QLabel)])
+            self.assertIn(u"°", self._suffixes(panel.widget()))
 
             # A node saved with an older behaviour: Upgrade in the header raises it, the badge goes.
             self.assertIsNone(panel.widget().findChild(QtWidgets.QToolButton, "upgradeNode"))
@@ -1704,7 +1716,7 @@ class GraphEditorTest(unittest.TestCase):
         # A text field with typing to undo keeps Ctrl+Z for itself; with nothing left, it is Maya's.
         self.editor.scene.clearSelection()
         self.editor.items["length"].setSelected(True)
-        field = self.editor.params.findChildren(widgets.SoftSlider)[0].field
+        field = self.editor.params.findChildren(widgets.SoftSlider)[0].edit()  # its inline field, as a click opens it
         original = field.text()
         self.assertTrue(activate(field))
         field.selectAll()
@@ -1722,15 +1734,15 @@ class GraphEditorTest(unittest.TestCase):
         # During a slider drag (previews outside undo) the keys do nothing. The panel was rebuilt by
         # the undo: its live slider (the old panel's may linger until Qt deletes it).
         slider = self.editor.params.key_widgets["keep"]
-        slider.slider.setSliderDown(True)
-        slider.slider.setValue(250 if slider.slider.value() > 500 else 750)  # a move it can make (not past its end)
+        slider.setSliderDown(True)
+        slider.scrub(slider.lo + (slider.hi - slider.lo) * (0.25 if slider.fraction() > 0.5 else 0.75))  # a move it can make
         wait(80)
         self.assertTrue(self.editor.previewing())
         stored = cmds.getAttr(self.groom + ".graph")
         press(view, QtCore.Qt.Key_Z, QtCore.Qt.ControlModifier)
         wait(60)
         self.assertEqual(cmds.getAttr(self.groom + ".graph"), stored)
-        slider.slider.setSliderDown(False)
+        slider.setSliderDown(False)
         self.editor.hide()
 
     def test_undo_after_a_node_move_shows_the_undone_graph(self):
@@ -1810,12 +1822,14 @@ class GraphEditorTest(unittest.TestCase):
         field = panel.key_widgets["keep"]
         self.assertEqual(field.property("keyState"), "keyed")
         keyed = QtGui.QColor(self.ge.theme.current().color(*self.ge.KEY_COLORS["keyed"])).name()
-        self.assertIn(keyed, field.field.styleSheet().lower())
+        self.assertEqual(field.key_color().name(), keyed)  # the fill field painted in it
+        self.assertEqual(field.colors()[2].name(), keyed)  # its border
         cmds.undo()  # attribute, link and key: one step
         wait(60)
         self.assertFalse(cmds.attributeQuery("ctl_length_keep", node=self.groom, exists=True))
         self.assertIsNone(self.editor.model.control_of("length", "keep"))
         self.assertEqual(panel.key_widgets["keep"].property("keyState"), "")
+        self.assertIsNone(panel.key_widgets["keep"].key_color())
         cmds.redo()
         wait(60)
         self.assertEqual(self.editor.model.control_of("length", "keep"), "length_keep")
@@ -1824,11 +1838,10 @@ class GraphEditorTest(unittest.TestCase):
         at_frame(10)
         field = panel.key_widgets["keep"]
         self.assertEqual(field.property("keyState"), "animated")
-        field.field.setValue(40.0)  # keep is a share: its field shows a percentage
-        field.field.editingFinished.emit()
+        self.assertTrue(field.commit_text("40%"))  # keep is a share: its field shows a percentage
         self.assertAlmostEqual(cmds.getAttr(attr), 0.4)
         # S over the field keys it here (the editor's view has the keyboard focus).
-        self.assertTrue(hover(field.field))  # the mouse over the field (Qt's, not the real cursor)
+        self.assertTrue(hover(field))  # the mouse over the field (Qt's, not the real cursor)
         wait(30)
         self.assertEqual(panel.hovered_param(), "keep")
         press(self.editor.view, QtCore.Qt.Key_S)
@@ -1859,7 +1872,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertFalse(action.isEnabled())
         self.assertIn("strands", action.toolTip())
         density = panel.key_widgets["density"]
-        self.assertTrue(hover(density.field))
+        self.assertTrue(hover(density))
         wait(30)
         press(self.editor.view, QtCore.Qt.Key_S)
         wait(30)
@@ -1891,13 +1904,14 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(cmds.getAttr(attr), 1.0)
         self.assertTrue(self.editor.keyed("length", "keep"))
         before = groomlab.viewport_points(self.groom)
-        slider = self.editor.params.key_widgets["keep"].slider
+        slider = self.editor.params.key_widgets["keep"]  # the fill field: a drag scrubs from where it is
         y = slider.rect().center().y()
         start, end = QtCore.QPoint(int(slider.width() * 0.9), y), QtCore.QPoint(int(slider.width() * 0.2), y)
         keyed_step = settle_undo()  # Maya's idle work done: only the drag's steps come after this
         QtTest.QTest.mousePress(slider, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, start)
         wait(30)
-        pressed = cmds.getAttr(attr)  # a press off the handle jumps there (a step of its own)
+        pressed = cmds.getAttr(attr)
+        self.assertEqual(pressed, 1.0)  # a press alone changes nothing (a drag is relative to it)
         for k in range(1, 9):
             at = QtCore.QPoint(int(start.x() + (end.x() - start.x()) * k / 8.0), y)
             self.app.sendEvent(slider, QtGui.QMouseEvent(QtCore.QEvent.MouseMove, at, QtCore.Qt.LeftButton,
@@ -1913,11 +1927,8 @@ class GraphEditorTest(unittest.TestCase):
         wait(60)
         self.assertFalse(self.editor.previewing())
         self.assertAlmostEqual(cmds.getAttr(attr) * 100.0, self.editor.params.key_widgets["keep"].value(), places=3)  # a percentage
-        if pressed == 1.0:  # the press was on the handle (no step): the release is one
-            self.assertEqual(undo_name, keyed_step)  # the drag itself made none (previews are outside undo)
-            self.assertNotEqual(cmds.undoInfo(query=True, undoName=True), undo_name)
-        else:  # the press jumped (a "set param" step): the release is another of that name
-            self.assertNotEqual(undo_name, keyed_step)  # so undoing the release alone gives the jump's value, below
+        self.assertEqual(undo_name, keyed_step)  # the drag itself made no step (previews are outside undo)
+        self.assertNotEqual(cmds.undoInfo(query=True, undoName=True), undo_name)  # the release is one
         cmds.undo()
         self.assertAlmostEqual(cmds.getAttr(attr), pressed, places=5)  # back to before the drag, in one step
         self.assertEqual(cmds.keyframe(attr, query=True, valueChange=True), [1.0])  # Auto Key off: no key
@@ -2624,7 +2635,7 @@ class GuidesTabTest(unittest.TestCase):
         self.events()
         tab = self.tab
         self.assertEqual(tab.segments.value(), 12)
-        self.assertIn("primary: 2", tab.segments_label.text())
+        self.assertIn("primary: 2", tab.segments.label())
         stored = cmds.getAttr(self.groom + ".guideData")
         settle_undo()
         undo_before = cmds.undoInfo(query=True, undoName=True)
@@ -2647,14 +2658,14 @@ class GuidesTabTest(unittest.TestCase):
         # All groups picked: every guide.
         self.tools.level.setCurrentIndex(0)
         self.events()
-        self.assertIn("all 2", tab.segments_label.text())
+        self.assertIn("all 2", tab.segments.label())
         # A selected guide: its own count, and only it is resampled.
         first = groomlab.guide_ids(self.groom, "primary")[0]
         groomlab.select_guides(self.groom, guides=[first])
         groomlab.resample_guides(self.groom, 7)
         self.events()
         self.assertEqual(tab.segments.value(), 7)
-        self.assertIn("1 selected", tab.segments_label.text())
+        self.assertIn("1 selected", tab.segments.label())
         self.assertEqual(sorted(groomlab.guide_segments(self.groom, group="primary")), [7, 12])
         self.assertEqual(groomlab.errors(self.groom), [])
 
@@ -3957,7 +3968,7 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertNotIn("tube", window.buttons)
             self.assertEqual(palette.NAMES["straighten"], "Straighten")
             self.assertEqual(window.mask_scalp.text(), "Front facing only")
-            self.assertEqual(window.falloff_label.text(), "Falloff")
+            self.assertEqual(window.falloff.label(), "Falloff")  # the name inside its fill field
             window.buttons["paint"].click()
             self.assertFalse(window.collide.isVisibleTo(window))  # painting: no collide, as the catalog says
             window.buttons["comb"].click()  # Comb: keep lengths or stretch

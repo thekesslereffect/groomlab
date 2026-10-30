@@ -45,6 +45,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--core", required=True, help="the folder of the groomlab_core module for this Python")
     parser.add_argument("--dll-dir", action="append", default=[], help="a folder of DLLs the module needs (TBB)")
+    parser.add_argument("--shots", help="a folder for PNGs of the fill fields (fill_field_check)")
     args = parser.parse_args()
 
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -370,6 +371,12 @@ def main():
             widgets.dispose(editor)
             theme.set_theme("playful")
     check.run("the new look: icon tiles, underlined tabs, plain sections, minimal node headers", redesign_look)
+
+    # Round 2: the sliders as fill fields (label inside, filled by the value; drag, click to type).
+    import fill_field_check
+    if args.shots and not os.path.isdir(args.shots):
+        os.makedirs(args.shots)
+    fill_field_check.run(check, args.shots)
 
     def fits(widget, screen, label):
         minimum = widget.minimumSizeHint().expandedTo(widget.minimumSize())

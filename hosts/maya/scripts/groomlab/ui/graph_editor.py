@@ -262,9 +262,7 @@ def key_state(groom, node, param, model):
 
 
 def _key_fields(field):
-    """The editable boxes of a param's field: a slider's number, a vector's three, a checkbox."""
-    if isinstance(field, widgets.SoftSlider):
-        return [field.field]
+    """The editable boxes of a param's field: a slider (a fill field), a vector's three, a checkbox."""
     return list(getattr(field, "boxes", None) or [field])
 
 
@@ -295,7 +293,9 @@ def paint_key_state(field, state):
         path, fallback = KEY_COLORS[state]
         color = QtGui.QColor(theme.current().color(path, fallback))
     for box in _key_fields(field):
-        if color is None:
+        if isinstance(box, widgets.SoftSlider):
+            box.set_key_color(color)  # painted: the field tinted, its border in the color
+        elif color is None:
             box.setStyleSheet("")
         else:
             box.setStyleSheet("background-color: %s; color: %s;" % (color.name(), readable_on(color).name()))
@@ -2220,6 +2220,9 @@ class ParamPanel(QtWidgets.QScrollArea):
         self.key_widgets = {}  # param -> its number field(s): keyed params show their state and value per frame
         self.sections = []  # [(section, its header or None, [(spec, row)])]: update_visibility's
         self.row_labels = []
+        self.row_label_of = {}   # param -> its label (hidden while its fill field shows the name)
+        self.inside_labels = {}  # param -> (name, tip) its fill field shows (a number's row)
+        self.inside_fields = {}  # param -> the fill field showing its name
         self.built_units = {}  # param -> the unit its row shows, for a param whose unit depends on another
         body = QtWidgets.QWidget()
         form = QtWidgets.QFormLayout(body)
@@ -2286,7 +2289,12 @@ class ParamPanel(QtWidgets.QScrollArea):
                 driver = model.driver_of(name, spec["name"])
                 if driver and len(model.output_names(driver)) > 1:  # which output: "mask.r"
                     driver = "%s.%s" % (driver, model.output_of(name, spec["name"]))
-                if driver and (spec.get("mappable") or spec.get("colorField")) and not gm.value_port(spec):
+                text, tip = self.param_label_and_tip(name, spec)
+                field_driven = driver and (spec.get("mappable") or spec.get("colorField")) and not gm.value_port(spec)
+                if spec["kind"] in ("int", "float") and (field_driven or not driver):
+                    # A number: a fill field with the name inside it (plain_editor), no label column.
+                    self.inside_labels[spec["name"]] = (text, tip)
+                if field_driven:
                     # Driven by a field node: the param's own value multiplies the field (a 0-1
                     # mask on a density of 100 gives 0-100), so it stays editable, with the driver named.
                     widget = QtWidgets.QWidget()
@@ -2322,21 +2330,7 @@ class ParamPanel(QtWidgets.QScrollArea):
                     row.addWidget(self.paint_chip(name, spec["name"]), 0, QtCore.Qt.AlignTop)
                 else:
                     widget = self.editor_for(name, spec)
-                label = QtWidgets.QLabel(pretty(spec["name"]) + (" ◆" if spec["name"] in model.param_inputs(name) else ""))
-                tip = "%s: %s" % (spec["name"], spec["description"])
-                if spec.get("channel") in ATTRIBUTE_TIPS:
-                    tip = ATTRIBUTE_TIPS[spec["channel"]] + "\n" + tip
-                if spec.get("colorField"):
-                    tip += "\nRight-click: expose as an input, so a Map node's rgb output colors it per strand."
-                elif gm.value_port(spec):
-                    tip += ("\nRight-click: expose as an input, so a Value node (or an Expression set to give a value) "
-                            "sets it for the whole node.")
-                elif gm.linkable(spec):
-                    tip += "\nRight-click: expose as an input, so a field node (Field, FieldNoise, ...) can drive it."
-                if spec.get("kind") in KEYABLE_KINDS:
-                    why = model.keyable(name, spec["name"])
-                    tip += ("\nRight-click > Set Key, or S over it: key it (red: a key on this frame, pink: animated, "
-                            "yellow: driven)" if why is None else "\nNot keyable: " + why)
+                label = QtWidgets.QLabel(text)
                 label.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
                 label.customContextMenuRequested.connect(
                     lambda pos, p=spec["name"], l=label: self.param_menu(name, p, l.mapToGlobal(pos)))
@@ -2344,6 +2338,11 @@ class ParamPanel(QtWidgets.QScrollArea):
                     w.setProperty("glParam", spec["name"])  # S over it keys this param
                 label.setToolTip(tip)
                 widget.setToolTip(tip)
+                self.row_label_of[spec["name"]] = label
+                # The fill field carries the name (and the ◆ of an exposed param): the label column
+                # stays only for the rows without one (a map's fields, a driven param, a checkbox...).
+                if self.label_inside(spec["name"]):
+                    label.hide()
                 rows.append((spec, label, widget))
             self.add_sections(form, op_type, rows)
             if not model.node_spec(name)["params"]:
@@ -2379,9 +2378,44 @@ class ParamPanel(QtWidgets.QScrollArea):
         line.setToolTip(text)
         line.setStyleSheet("color: %s; font-weight: bold;" % (ERROR if error else WARNING).name())
 
+    def param_label_and_tip(self, name, spec):
+        """A param's row name (with a ◆ when exposed as an input) and its tooltip: what it does and
+        what its right-click offers."""
+        model = self.editor.model
+        text = pretty(spec["name"]) + (" ◆" if spec["name"] in model.param_inputs(name) else "")
+        tip = "%s: %s" % (spec["name"], spec["description"])
+        if spec.get("channel") in ATTRIBUTE_TIPS:
+            tip = ATTRIBUTE_TIPS[spec["channel"]] + "\n" + tip
+        if spec.get("colorField"):
+            tip += "\nRight-click: expose as an input, so a Map node's rgb output colors it per strand."
+        elif gm.value_port(spec):
+            tip += ("\nRight-click: expose as an input, so a Value node (or an Expression set to give a value) "
+                    "sets it for the whole node.")
+        elif gm.linkable(spec):
+            tip += "\nRight-click: expose as an input, so a field node (Field, FieldNoise, ...) can drive it."
+        if spec.get("kind") in KEYABLE_KINDS:
+            why = model.keyable(name, spec["name"])
+            tip += ("\nRight-click > Set Key, or S over it: key it (red: a key on this frame, pink: animated, "
+                    "yellow: driven)" if why is None else "\nNot keyable: " + why)
+        return text, tip
+
+    def label_inside(self, param):
+        """Whether the param's fill field shows its name now (a mappable param's does while it is a
+        plain value, not while a map drives it)."""
+        field = getattr(self, "inside_fields", {}).get(param)
+        return field is not None and widgets.alive(field) and bool(field.label())
+
+    def update_row_label(self, param):
+        """Show the row's label again when its fill field is gone (a map picked), hide it when back."""
+        label = getattr(self, "row_label_of", {}).get(param)
+        if label is not None and widgets.alive(label) and label.parent() is not None:
+            label.setVisible(not self.label_inside(param))
+            self.align_labels()
+
     def align_labels(self):
-        """The param labels in one column: each as wide as the widest, styled as the panel styles them."""
-        labels = [l for l in getattr(self, "row_labels", []) if widgets.alive(l)]
+        """The param labels in one column: each as wide as the widest, styled as the panel styles them
+        (the labels shown: a fill field holds its own name)."""
+        labels = [l for l in getattr(self, "row_labels", []) if widgets.alive(l) and not l.isHidden()]
         for label in labels:
             label.ensurePolished()
         width = max([l.sizeHint().width() for l in labels] or [0])
@@ -2486,6 +2520,7 @@ class ParamPanel(QtWidgets.QScrollArea):
         self.key_widgets = {}
         self.sections = []
         self.row_labels = []
+        self.row_label_of, self.inside_labels, self.inside_fields = {}, {}, {}
         self.built_units = {}
         self.error_line = None
         self.expression = None
@@ -3374,9 +3409,15 @@ class ParamPanel(QtWidgets.QScrollArea):
                 "param.driveWithSlider": b(lambda: self.add_control(node, param))}
 
     def build_param_menu(self, name, param):
-        exposed = param in self.editor.model.param_inputs(name)
         menu = QtWidgets.QMenu(self)
         menu.setToolTipsVisible(True)  # why a param cannot be keyed
+        self.fill_param_menu(menu, name, param)
+        return menu
+
+    def fill_param_menu(self, menu, name, param):
+        """The param's menu (graph_ui.json's paramMenu: keys, expose, paint, drive) into `menu`: the
+        label's, and atop a fill field's own (Reset to Default, its range)."""
+        exposed = param in self.editor.model.param_inputs(name)
         spec = self.editor.model.param_spec(name, param)
         state, values = set(), {}
         if spec and spec.get("kind") in KEYABLE_KINDS:
@@ -3390,7 +3431,6 @@ class ParamPanel(QtWidgets.QScrollArea):
             state.add("groom")
         widgets.fill_menu(menu, definitions.get("graph/paramMenu"), definitions.binder(self.param_actions(name, param)),
                           state, values, generators=self.key_generators(name, param), checked=lambda item: exposed)
-        return menu
 
     PAINT_TIP = definitions.get("graph/paintMenu")["tip"]
 
@@ -3665,22 +3705,23 @@ class ParamPanel(QtWidgets.QScrollArea):
             if name == self.node:
                 self.key_widgets[spec["name"]] = slider
                 slider.menu_hook = lambda menu, p=spec["name"]: self.add_key_actions(menu, name, p)
+                inside = getattr(self, "inside_labels", {}).get(spec["name"])
+                if inside:  # the row's name inside the field; its right-click the label's menu, then the range
+                    slider.setLabel(inside[0])
+                    slider.setToolTip(inside[1])
+                    slider.setProperty("glParam", spec["name"])  # S over it keys this param
+                    slider.menu_hook = lambda menu, p=spec["name"]: self.fill_param_menu(menu, name, p)
+                    self.inside_fields[spec["name"]] = slider
             w = slider
             unit_text = units.param_label(kind_of_unit, self.editor.model.node_type(name), spec["name"])
-            if unit_text:  # the unit after the field: cm, %, °, turns, s, px, cm/s²...
-                w = QtWidgets.QWidget()
-                row = QtWidgets.QHBoxLayout(w)
-                row.setContentsMargins(0, 0, 0, 0)
-                row.setSpacing(4)
-                row.addWidget(slider, 1)
-                suffix = QtWidgets.QLabel(unit_text)
-                suffix.setProperty("role", "about")
+            if unit_text:  # the unit after the value: cm, %, °, turns, s, px, cm/s²...
                 if kind_of_unit == "fraction":
-                    suffix.setToolTip("A percentage: 100% is 1 (the node stores 0 to 1)")
+                    unit_tip = "A percentage: 100% is 1 (the node stores 0 to 1)"
                 elif kind_of_unit not in units.FIXED:
-                    suffix.setToolTip("Units: View > Units in the graph editor")
-                row.addWidget(suffix)
-                w.slider = slider
+                    unit_tip = "Units: View > Units in the graph editor"
+                else:
+                    unit_tip = ""
+                slider.setSuffix(unit_text, unit_tip)
         elif kind == "vec3" and (spec.get("vectorExpression") or isinstance(value, dict)):
             w = self.vector_expression_editor(spec, value, set_value)
             if name == self.node and getattr(w, "boxes", None):
@@ -4023,7 +4064,9 @@ class MappableEditor(QtWidgets.QWidget):
         self.layout().replaceWidget(old, self.body)
         old.hide()  # gone once the event loop gets to it; until then it must not cover the row
         old.deleteLater()
+        getattr(self.panel, "inside_fields", {}).pop(self.spec["name"], None)  # a value's field makes its own
         self._fill(source)
+        self.panel.update_row_label(self.spec["name"])  # a map's fields need the row's label; a value's holds it
         self.panel.editor.watch_text_edits(self.body)  # Ctrl+Z in a new text field: its typing first
 
     def _fill(self, source):

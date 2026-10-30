@@ -317,11 +317,8 @@ class GuidesTab(_GroomTab):
         # Segments: the selected guides' (else the picked group's, else every guide's) point count,
         # resampled live while dragging (a preview from the stored guides) and committed as one
         # undo step on release; a whole group's new guides get it too.
-        seg_row = QtWidgets.QHBoxLayout()
-        self.segments_label = QtWidgets.QLabel("Segments")
-        seg_row.addWidget(self.segments_label)
         self.segments = widgets.SoftSlider(12, lo=2, hi=64, integer=True, minimum=1, maximum=256,
-                                           key="guides.segments")
+                                           key="guides.segments", label="Segments")  # its scope added on refresh
         self.segments.setToolTip("Points along the guides, kept on their smooth curve: the selected guides (their own "
                                  "count from then on, kept when the group's changes; the group's count makes them "
                                  "follow it again), else the picked group's (its new guides get as many too), else "
@@ -329,8 +326,7 @@ class GuidesTab(_GroomTab):
                                  "value) to apply it as one undo step. More segments let a guide curl tighter.")
         self.segments.dragged.connect(self.segments_dragged)
         self.segments.committed.connect(self.segments_committed)
-        seg_row.addWidget(self.segments, 1)
-        layout.addLayout(seg_row)
+        layout.addWidget(self.segments)
         self._preview_segments = None
         self._previewing = False
 
@@ -367,10 +363,11 @@ class GuidesTab(_GroomTab):
             common = max(set(counts), key=counts.count)
             mixed = min(counts) != max(counts)
             self.segments.setValue(common)
-            self.segments_label.setText("Segments (%s%s)" % (scope, ", mixed" if mixed else ""))
-            self.segments_label.setToolTip("%d to %d segments" % (min(counts), max(counts)) if mixed else "")
+            self.segments.setLabel("Segments (%s%s)" % (scope, ", mixed" if mixed else ""))
+            self.segments.unit_tip = "%d to %d segments" % (min(counts), max(counts)) if mixed else ""
         else:
-            self.segments_label.setText("Segments")
+            self.segments.setLabel("Segments")
+            self.segments.unit_tip = ""
         self.segments.setEnabled(bool(counts))
 
     def segments_dragged(self, value):
@@ -862,7 +859,7 @@ class PaintTab(_GroomTab):
         mode_widget.setToolTip(definitions.get("choices/paintMode")["tip"])
         mode_widget.setLayout(mode_row)
         form.addRow("Mode", mode_widget)
-        self.value = widgets.SoftSlider(1.0, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None)
+        self.value = widgets.SoftSlider(1.0, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None, label="Value")
         self.value.setToolTip("What the Paint brush paints toward, and what Fill sets")
         self.value.committed.connect(lambda v: self.owner.push(value=v))
         fill = QtWidgets.QPushButton("Fill")
@@ -876,8 +873,7 @@ class PaintTab(_GroomTab):
         self.value_row = QtWidgets.QWidget()
         self.value_row.setLayout(row)
         row.setContentsMargins(0, 0, 0, 0)
-        self.value_label = QtWidgets.QLabel("Value")
-        form.addRow(self.value_label, self.value_row)
+        form.addRow(self.value_row)  # the name inside the field
         # A color map: the color painted, the channels it goes into, and Fill with it.
         color_row = QtWidgets.QHBoxLayout()
         color_row.setContentsMargins(0, 0, 0, 0)
@@ -1150,8 +1146,7 @@ class PaintTab(_GroomTab):
         color = self.current_channels() == 4
         for widget in (self.color_label, self.color_row, self.view_channel):
             widget.setVisible(color)
-        for widget in (self.value_label, self.value_row):
-            widget.setVisible(not color)
+        self.value_row.setVisible(not color)
         if self.groom:
             from maya import cmds
             try:
@@ -1516,8 +1511,7 @@ class CorrectivesBox(_GroomTab):
         layout.addWidget(self.tree, 1)
 
         row = QtWidgets.QHBoxLayout()
-        row.addWidget(QtWidgets.QLabel("Weight"))
-        self.weight = widgets.SoftSlider(1.0, 0.0, 1.0, minimum=0.0, key=None)
+        self.weight = widgets.SoftSlider(1.0, 0.0, 1.0, minimum=0.0, key=None, label="Weight")
         self.weight.setToolTip("The corrective's weight on this frame (above 1 exaggerates). A keyed weight is "
                                "keyed here as you change it")
         self.weight.committed.connect(self.set_weight)
@@ -1736,7 +1730,7 @@ class CorrectivesBox(_GroomTab):
         layer = next((l for l in layers if l["name"] == target), None)
         self.weight.setEnabled(layer is not None)
         self.key.setEnabled(layer is not None)
-        if layer is not None and not self.weight.slider.isSliderDown():
+        if layer is not None and not self.weight.busy():
             self.weight.setValue(layer["weight"])
 
 
@@ -1819,14 +1813,15 @@ class ReferenceTab(_GroomTab):
         form = QtWidgets.QFormLayout()
         form.setLabelAlignment(QtCore.Qt.AlignRight)
         form.setContentsMargins(0, 0, 0, 0)
-        self.opacity = widgets.SoftSlider(reference.DEFAULT_OPACITY, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None)
+        self.opacity = widgets.SoftSlider(reference.DEFAULT_OPACITY, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None,
+                                          label="Opacity")
         self.opacity.setObjectName("referenceOpacity")
         self.opacity.setToolTip("How opaque the photo is: see the mesh through it")
         self.opacity.committed.connect(self.set_opacity)
         self.opacity.dragged.connect(self.set_opacity)
-        form.addRow("Opacity", self.opacity)
+        form.addRow(self.opacity)  # the name inside the field
         self.focal = widgets.SoftSlider(reference.DEFAULT_FOCAL, reference.FOCAL_RANGE[0], reference.FOCAL_RANGE[1],
-                                        minimum=2.5, maximum=3500.0, key=None)
+                                        minimum=2.5, maximum=3500.0, key=None, label="Focal Length", suffix="mm")
         self.focal.setObjectName("referenceFocal")
         self.focal.setToolTip("The photo camera's focal length (mm): Align Photo works it out from the point pairs; set "
                               "it by hand when you know the lens (Keep focal length turns on, so the alignment keeps "
@@ -1835,7 +1830,7 @@ class ReferenceTab(_GroomTab):
         self.focal.dragged.connect(self.set_focal)
         self.focal.menu_hook = lambda menu_: menu_.addAction(
             "Reset Focal Length (%g mm)" % reference.DEFAULT_FOCAL, self.reset_focal)
-        form.addRow("Focal Length", self.focal)
+        form.addRow(self.focal)
         sides = QtWidgets.QHBoxLayout()
         sides.setSpacing(theme.px(4))
         self.side_buttons = {}
@@ -2043,7 +2038,7 @@ class ReferenceTab(_GroomTab):
         info = self.ref.reference_info(camera)
         state = (camera, info["locked"], info["visible"], round(info["opacity"], 4), info["depth"])
         self.focal.setEnabled(not info["locked"])  # (a locked camera keeps its focal length)
-        if not self.focal.slider.isSliderDown() and abs(self.focal.value() - info["focal"]) > 1e-4:
+        if not self.focal.busy() and abs(self.focal.value() - info["focal"]) > 1e-4:
             self.focal.setValue(info["focal"])
         if state != (self._shown or (None,))[0:5]:
             for widget, value in ((self.lock, info["locked"]), (self.visible, info["visible"])):
@@ -2051,7 +2046,7 @@ class ReferenceTab(_GroomTab):
                 widget.setChecked(value)
                 widget.blockSignals(False)
             self._eye(info["visible"])
-            if not self.opacity.slider.isSliderDown():
+            if not self.opacity.busy():
                 self.opacity.setValue(info["opacity"])
             self.side_buttons[info["depth"]].setChecked(True)
         self.show_alignment(info)

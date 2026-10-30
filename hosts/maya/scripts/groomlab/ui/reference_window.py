@@ -582,20 +582,20 @@ class ReferenceWindow(QtWidgets.QWidget):
         self.overlay_box.setToolTip("The mesh drawn over the photo through the camera: its outline or its wireframe")
         self.overlay_box.currentIndexChanged.connect(lambda *_: self._overlay_changed())
         form.addRow("Mesh over photo", self.overlay_box)
-        self.opacity = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.opacity = widgets.SoftSlider(70, 0, 100, integer=True, minimum=0, maximum=100, key=None,
+                                          label="Opacity", suffix="%")
         self.opacity.setObjectName("referenceOverlayOpacity")
-        self.opacity.setRange(0, 100)
-        self.opacity.setValue(70)
         self.opacity.setToolTip("How opaque the mesh over the photo is")
-        self.opacity.valueChanged.connect(lambda *_: self.photo_view.update())
-        form.addRow("Opacity", self.opacity)
+        self.opacity.dragged.connect(lambda *_: self.photo_view.update())
+        self.opacity.committed.connect(lambda *_: self.photo_view.update())
+        form.addRow(self.opacity)  # the name inside the field
         layout.addLayout(form)
 
         self._heading(layout, "CAMERA")
         form = QtWidgets.QFormLayout()
         form.setLabelAlignment(QtCore.Qt.AlignRight)
         self.focal = widgets.SoftSlider(self.ref.DEFAULT_FOCAL, self.ref.FOCAL_RANGE[0], self.ref.FOCAL_RANGE[1],
-                                        minimum=2.5, maximum=3500.0, key=None)
+                                        minimum=2.5, maximum=3500.0, key=None, label="Focal Length", suffix="mm")
         self.focal.setObjectName("referenceFocal")
         self.focal.setToolTip("The photo camera's focal length (mm): the landmarks solve it (6 or more pairs); set it "
                               "by hand when you know the lens (Keep focal length turns on, the camera follows)")
@@ -603,7 +603,7 @@ class ReferenceWindow(QtWidgets.QWidget):
         self.focal.committed.connect(lambda v: self.set_focal(v))
         self.focal.menu_hook = lambda menu_: menu_.addAction(
             "Reset Focal Length (%g mm)" % self.ref.DEFAULT_FOCAL, self.reset_focal)
-        form.addRow("Focal Length", self.focal)
+        form.addRow(self.focal)
         layout.addLayout(form)
         row = QtWidgets.QHBoxLayout()
         self.keep_focal = QtWidgets.QCheckBox("Keep focal length")
@@ -672,12 +672,11 @@ class ReferenceWindow(QtWidgets.QWidget):
         layout.addLayout(row)
         form = QtWidgets.QFormLayout()
         form.setLabelAlignment(QtCore.Qt.AlignRight)
-        self.brush = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.brush = widgets.SoftSlider(14, 2, 120, integer=True, minimum=2, maximum=120, key=None,
+                                        label="Brush", suffix="px")
         self.brush.setObjectName("referenceBrushSize")
-        self.brush.setRange(2, 120)
-        self.brush.setValue(14)
         self.brush.setToolTip("The mask brush's radius on screen")
-        form.addRow("Brush", self.brush)
+        form.addRow(self.brush)
         masks = QtWidgets.QHBoxLayout()
         self.mask_label = QtWidgets.QLabel()
         self.mask_label.setObjectName("referenceMaskLabel")
@@ -1041,7 +1040,7 @@ class ReferenceWindow(QtWidgets.QWidget):
         for widget in (self.keep_focal, self.lock, self.focal):
             widget.setEnabled(bool(camera))
         self.focal.setEnabled(bool(camera) and not locked)
-        if camera and not self.focal.slider.isSliderDown():
+        if camera and not self.focal.busy():
             focal = cmds.getAttr(self.ref._shape(camera) + ".focalLength")
             if abs(self.focal.value() - focal) > 1e-4:
                 self.focal.setValue(focal)

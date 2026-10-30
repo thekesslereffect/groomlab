@@ -1223,8 +1223,7 @@ def draw_param(layout, node, spec, scene, mapped, inputs, drivers, collection, c
         draw_param_menu(head, context, node, spec)
         col.row(align=True).prop(node, prop, text="")
     else:
-        slider = spec.get("kind") in ("float", "int") and ("softMax" in spec or "max" in spec)
-        row.prop(node, prop, text=label + suffix, slider=slider)
+        row.prop(node, prop, text=label + suffix, slider=fill_slider(node, prop, spec))
     if driver:
         src = next((n for n in node.id_data.nodes if ours(n) and n.gl_name == driver), None)
         row.label(text="x %s" % driver, icon=KEY_ICONS["driven"] if src is not None and src.gl_type == "Control" else "LINKED")
@@ -1233,6 +1232,20 @@ def draw_param(layout, node, spec, scene, mapped, inputs, drivers, collection, c
         op.node, op.param = node.gl_name, name
     if not (spec.get("kind") == "vec3" and unit != "color"):
         draw_param_menu(row, context, node, spec)
+
+
+SOFT_LIMIT = 1e9  # past this a property's soft range is Blender's "none" (FLT_MAX, INT_MAX)
+
+
+def fill_slider(node, prop, spec):
+    """Whether a number param draws as a fill slider (the name inside, filled by the value): when its
+    property has a soft range to fill (the spec's softMin/softMax or min/max, a fraction's 0-1). Blender's
+    number fields drag and take typed values either way."""
+    if spec.get("kind") not in ("float", "int"):
+        return False
+    rna = node.bl_rna.properties.get(prop)
+    lo, hi = getattr(rna, "soft_min", None), getattr(rna, "soft_max", None)
+    return lo is not None and hi is not None and -SOFT_LIMIT < lo < hi < SOFT_LIMIT
 
 
 def draw_attribute_param(layout, node, spec, prop, label):
