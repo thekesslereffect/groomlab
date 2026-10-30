@@ -930,8 +930,10 @@ and params are its own (`node_spec`): its exposed params are a list of the 3D pa
 the node. Ramps are drawn with Blender's curve widget: a Float Curve node per ramp in a hidden
 shader node group (`.GroomLab Ramps`), points and handle types (all Vector: `"linear"`) read back
 into the ramp. Node bodies carry their category's color (Blender draws a custom node's header in
-its theme's color: the category tint is on the body, with Maya's accent bar drawn over the header
-by the editor's overlay, beside the error "!", note "i", View eye and evaluation times).
+its theme's color: the category tint is on the body, with the category's dot drawn before the title
+by the editor's overlay (the label starts with room for it, `graph_tree.LABEL_LEAD`), and in the
+header row a yellow warning triangle for a note, the evaluation time (grey, yellow from 10 ms) and the
+View eye in blue; an error keeps its red "!" on the corner).
 
 **Two-way sync.** The tree mirrors the helper's graph; node names are the graph's.
 - Tree to helper (`NodeTree.update`, after any edit of the tree): the tree's structure (nodes,
@@ -1056,7 +1058,7 @@ tooltip), F frame the selection or all, V View (Focus), B Bypass, Ctrl+D duplica
 Ctrl+Shift+G ungroup; Blender's Shift+A, X/Delete, Shift+D, M, F2, Ctrl+J and Home work as ever.
 
 What differs from Maya's editor (Blender's node editor): the header color is the theme's (the
-category is the body tint and the accent bar); a "strands or guides" port is grey, not half and
+category is the body tint and the dot before the title); a "strands or guides" port is grey, not half and
 half; compounds are not entered (as in Maya); Tab over a wire does not insert (drop the node on
 it); keys are Blender's (I over a property), not S; the GPU drag preview is not in Blender; the A key keeps Blender's select-all (Home
 frames all); no Live/Apply switch (every edit applies).

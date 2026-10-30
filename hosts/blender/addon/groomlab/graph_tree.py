@@ -199,6 +199,11 @@ def _linear(c):
     return tuple(one(v) for v in c)
 
 
+# A node header's title starts with this much room: the editor's overlay puts the category's dot there
+# (the minimal headers of Maya and the app: a dot before the name, no accent bar).
+LABEL_LEAD = "    "
+
+
 def tinted(category):
     """A node's body: Maya's node color with a wash of its category's (Blender draws headers in its
     theme's color: the body carries the category)."""
@@ -327,7 +332,8 @@ class GroomLabNodeBase(object):
         self.gl_name = ""
 
     def draw_label(self):
-        return self.name
+        # Room before the name for the overlay's dot in the category's color (a minimal header).
+        return LABEL_LEAD + self.name
 
     def draw_buttons(self, context, layout):
         linkable = [p["name"] for p in node_param_specs(self) if p.get("port")]

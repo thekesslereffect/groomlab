@@ -215,11 +215,13 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   - **V:** views a node; the viewport shows its strands, while renders and exports still
     use the output (`viewNode`).
   - **B:** bypasses a node; it passes its input through, for a with/without comparison.
-- **Node feedback:** a node that fails shows a red badge with the error in its tooltip, and a red
-  line under its header in the param panel when it is selected (in plain words). Each
-  node shows how long it took the last time it ran (`groomLabGraphStats`). A warning badge
-  flags a Cards node whose baked maps are stale, and a node with a note (a Jiggle with no scalp
-  motion to react to). `cmds.groomLabGraphStats(groom, points=True)` (`groomlab.viewport_points`)
+- **Node feedback:** a node that fails gets a red outline and a red "!" on its corner, with the
+  error in its tooltip, and a red line under its header in the param panel when it is selected
+  (in plain words). Each node's title row shows how long it took the last time it ran
+  (`groomLabGraphStats`), beside the header toggles: grey, yellow from 10 ms. A yellow warning
+  triangle there flags a Cards node whose baked maps are stale, and a node with a note (a Jiggle
+  with no scalp motion to react to); hover the card for the text. A bypassed node is half
+  transparent and its wires are dotted; a viewed node's eye is lit blue. `cmds.groomLabGraphStats(groom, points=True)` (`groomlab.viewport_points`)
   returns the points of the strands the viewport shows, to compare exports with.
 - **Backdrops:** right-click a node and choose Add Backdrop Around Selection to frame nodes.
   Moving the backdrop moves them, and double-click renames it. Backdrops are layout only.

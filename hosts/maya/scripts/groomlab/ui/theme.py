@@ -24,8 +24,10 @@ around buttons, cards and lists; none by default), "selection" and
 "selectionText" (selected rows, menu items and the active tool; the accent by
 default), "textMuted" (the quietest text: section headers; textDim by
 default), "rowHeight" (the height of fields, combo boxes and buttons; their
-text's by default) and "glass" (the standalone app's translucent panels, true
-by default; false: solid panels with a thin border). Graph keys:
+text's by default), "font" (the font family of GroomLab's windows, "Inter"
+in the shipped themes: loaded from the module's fonts folder; Maya's own font
+when that family can't be had) and "glass" (the standalone app's translucent
+panels, true by default; false: solid panels with a thin border). Graph keys:
 "headerStyle" ("tinted", "filled" or "minimal") and "canvasStyle" ("dots",
 "lines" or "plain").
 """
@@ -40,10 +42,16 @@ THEME_VAR = "groomLabTheme"
 DEFAULT = "charcoal"  # the theme a user who never picked one gets
 BASE = "playful"      # the theme every theme extends unless it says otherwise (it sets every key)
 SHIPPED_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, "themes"))
+# The fonts GroomLab's windows use (Inter, SIL OFL 1.1, its license beside it): the installed module's
+# fonts folder, else the source tree's (hosts/app/fonts, the app's own) for runs from a checkout.
+FONT_DIRS = (os.path.normpath(os.path.join(SHIPPED_DIR, os.pardir, "fonts")),
+             os.path.normpath(os.path.join(SHIPPED_DIR, os.pardir, os.pardir, "app", "fonts")))
 
 _current = None
 _listeners = []  # (weakref to object, method name)
 _slider_count = [0]
+_font_families = []  # the families the shipped fonts gave (loaded once, with a QApplication)
+_fonts_loaded = [False]
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +313,79 @@ def px(value):
     return int(round(value * scale()))
 
 
+def _load_fonts():
+    """The shipped fonts added to this Qt's (Maya's own windows keep their font: only GroomLab's
+    name the family), once; [] until there is a QApplication (tried again then)."""
+    if _fonts_loaded[0]:
+        return _font_families
+    try:
+        from groomlab.ui.qt import QtGui
+    except ImportError:
+        return []
+    if QtGui.QGuiApplication.instance() is None:
+        return []
+    _fonts_loaded[0] = True
+    for folder in FONT_DIRS:
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        loaded = False
+        for name in names:
+            if not name.lower().endswith((".ttf", ".otf")):
+                continue
+            font_id = QtGui.QFontDatabase.addApplicationFont(os.path.join(folder, name))
+            if font_id < 0:
+                continue
+            loaded = True
+            for family in QtGui.QFontDatabase.applicationFontFamilies(font_id):
+                if family not in _font_families:
+                    _font_families.append(family)
+        if loaded:  # the installed module's: the source tree's is only for runs from a checkout
+            break
+    return _font_families
+
+
+def ui_font(t=None):
+    """The font family GroomLab's windows and the Graph Editor's cards use: the theme's ui.font
+    ("Inter") when it loaded from the shipped fonts or the system has it, else None (Maya's font)."""
+    t = t or current()
+    family = t.get("ui.font")
+    if not family or not isinstance(family, str):
+        return None
+    if family in _load_fonts():
+        return family
+    if not _fonts_loaded[0]:
+        return None  # no QApplication yet
+    from groomlab.ui.qt import QtGui
+    return family if QtGui.QFontInfo(QtGui.QFont(family)).family().lower() == family.lower() else None
+
+
+def tabular_digits(f):
+    """Fixed-width digits (OpenType tnum) on a QFont, so a value that changes keeps its width:
+    QFont.setFeature is Qt 6.7 and later (Maya 2027); before, the font's own digits."""
+    from groomlab.ui.qt import QtGui
+    tag = getattr(QtGui.QFont, "Tag", None)
+    if tag is not None and hasattr(f, "setFeature"):
+        try:
+            f.setFeature(tag("tnum"), 1)
+        except (TypeError, ValueError, AttributeError):
+            pass
+    return f
+
+
+def font(pixels, bold=False, tabular=False, base=None):
+    """A QFont in the UI family (ui_font) at a pixel size; `tabular`: fixed-width digits, for numbers."""
+    from groomlab.ui.qt import QtGui
+    f = QtGui.QFont(base) if base is not None else QtGui.QFont()
+    family = ui_font()
+    if family:
+        f.setFamily(family)
+    f.setPixelSize(max(1, int(round(pixels))))
+    f.setBold(bold)
+    return tabular_digits(f) if tabular else f
+
+
 def slider_accent():
     """The next slider's color name: sliders cycle through the theme's list."""
     names = current().get("ui.sliders", ["accent"]) or ["accent"]
@@ -401,13 +482,14 @@ def _stylesheet(t):
     small = max(px(2), r - px(2))         # small parts: chips, list rows, menu items
     panel = r + px(2)                     # panels: lists, group boxes, the empty state
     fs = px(float(t.get("ui.fontSize", 12)))
+    family = ui_font(t)
     colors = {name: t.hex(name) for name in (t.get("palette") or {})}
     colors["accent"] = t.hex("accent")
     slider_rules = "\n".join(
         'QSlider[accent="%s"]::sub-page:horizontal { background: %s; border-radius: {{3}}px; }' % (name, value)
         for name, value in colors.items())
     sheet = """
-QWidget { background: %(bg)s; color: %(text)s; font-size: %(fs)dpx; }
+QWidget { background: %(bg)s; color: %(text)s; %(family)sfont-size: %(fs)dpx; }
 QLabel { background: transparent; }
 QLabel[role="heading"] { color: %(muted)s; font-size: %(fs_small)dpx; font-weight: bold; letter-spacing: {{1}}px; padding-top: {{6}}px; }
 QLabel[role="heading"][rule="true"] { border-top: {{1}}px solid %(border)s; padding-top: {{8}}px; }
@@ -518,6 +600,8 @@ QScrollArea { border: none; }
         "accentHover": _lighter(t.hex("accent"), 0.12), "slider_rules": slider_rules, "arrow": _arrow_icon(c("ui.textDim")),
         "selection": t.hex(t.get("ui.selection") or "accent"),
         "selectionText": c("ui.selectionText") if t.get("ui.selectionText") else c("ui.accentText"),
-        "outline_rules": _outline_rules(t), "row_rules": _row_rules(t)}
+        "outline_rules": _outline_rules(t), "row_rules": _row_rules(t),
+        # The theme's font (ui.font) for GroomLab's windows, which this sheet styles (Maya's keep theirs).
+        "family": 'font-family: "%s"; ' % family if family else ""}
     # Fixed sizes ({{N}}px in the template) at Maya's interface scale.
     return re.sub(r"\{\{(-?\d+(?:\.\d+)?)\}\}px", lambda m: "%dpx" % round(float(m.group(1)) * scale()), sheet)

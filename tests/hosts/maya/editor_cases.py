@@ -656,6 +656,8 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 80.0)
         self.assertEqual(self.editor.node_errors, {})
         self.assertTrue(self.editor.node_times)  # timing tags
+        # The cook time in each card's title row (muted, the warning color from 10 ms).
+        self.assertTrue(any(self.ge.time_text(ms) for ms in self.editor.node_times.values()))
 
         # View a node, bypass one.
         self.editor.view_node("scatter")
@@ -663,7 +665,10 @@ class GraphEditorTest(unittest.TestCase):
         self.editor.view_node(None)
         self.editor.set_bypass(["length"], True)
         self.assertTrue(self.editor.model.bypassed("length"))
+        bypassed = self.editor.items["length"].edges  # the rebuilt card's wires: dashed
+        self.assertTrue(bypassed and all(e.bypassed() for e in bypassed))
         self.editor.set_bypass(["length"], False)
+        self.assertFalse(any(e.bypassed() for e in self.editor.items["length"].edges))
 
         # When it runs (the node's Evaluate menu): render only, on the groom's graph; back to always.
         def evaluation():

@@ -372,6 +372,131 @@ def main():
             theme.set_theme("playful")
     check.run("the new look: icon tiles, underlined tabs, plain sections, minimal node headers", redesign_look)
 
+    # Round 3: Inter in GroomLab's windows (the theme's ui.font, loaded from the fonts folder; Maya's own
+    # font everywhere else), and the cards' status badges: the cook time and a warning triangle in the
+    # title row left of the header toggles (muted, the warning color from 10 ms), an error's red
+    # outline and "!", a viewed node's eye lit in the blue, a bypassed card at half opacity with its
+    # wires dashed.
+    def status_badges_and_font():
+        from groomlab.ui.qt import QtCore, QtGui
+        if args.shots and not os.path.isdir(args.shots):
+            os.makedirs(args.shots)
+        t = theme.set_theme("charcoal")
+        _expect(theme.ui_font(t) == "Inter", "Inter from the fonts folder: %r" % theme.ui_font(t))
+        _expect('font-family: "Inter"; ' in theme.stylesheet(t), "the windows' sheet names Inter")
+        _expect(application.font().family() != "Inter", "Maya's own font is left alone: %s" % application.font().family())
+        made_up = theme.Theme("madeup", dict(t.data, ui=dict(t.data["ui"], font="No Such Font Anywhere")))
+        _expect(theme.ui_font(made_up) is None and "font-family" not in theme.stylesheet(made_up),
+                "a family that can't be had: Maya's font")
+        f = theme.font(10, tabular=True)
+        _expect(f.family() == "Inter" and f.pixelSize() == 10, "the painters' font: %s %d" % (f.family(), f.pixelSize()))
+        if hasattr(QtGui.QFont, "Tag"):  # Qt 6.7+: fixed-width digits
+            _expect(QtGui.QFont.Tag("tnum") in f.featureTags(), "tabular digits")
+        tools = palette.ToolPalette()
+        tools.resize(theme.px(380), theme.px(700))
+        tools.show()
+        settle()
+        labels = [w for w in tools.findChildren(QtWidgets.QLabel) if w.isVisibleTo(tools) and w.text()]
+        _expect(labels and all(QtGui.QFontInfo(w.font()).family() == "Inter" for w in labels[:5]),
+                "the Groom Tools' text in Inter: %r" % sorted({QtGui.QFontInfo(w.font()).family() for w in labels}))
+        if args.shots:
+            tools.empty.setVisible(False)
+            tools.work.setVisible(True)
+            settle()
+            tools.grab().save(os.path.join(args.shots, "groom_tools_inter.png"))
+        widgets.dispose(tools)
+
+        specs = gm.OperatorCatalog.from_json(groomlab_core.operator_specs_json())
+        editor = graph_editor.GraphEditor()
+        editor.catalog = specs
+        editor.model = gm.GraphModel(specs, groomlab_core.default_graph())
+        editor.model.auto_layout()
+        order = [n for n in editor.model.order if n != editor.model.output]
+        quick, slow, warned, noted, failed, off = order[2], order[3], order[4], order[5], order[6], order[1]
+        print("      status cards: %s 3.2 ms, %s 24 ms, %s warning, %s note, %s error, %s bypassed"
+              % (quick, slow, warned, noted, failed, off))
+        editor.model.set_bypass(off, True)
+        editor.rebuild()
+        editor.node_times = {quick: 3.24, slow: 24.0, warned: 0.01}
+        editor.node_warnings = {warned: "the baked maps are out of date"}
+        editor.node_notes = {noted: "does nothing as set"}
+        editor.node_errors = {failed: "it failed"}
+        editor.viewed = quick if editor.items[quick].viewable() else None
+        warning, muted = graph_editor.WARNING, graph_editor.TIME_MUTED
+        _expect(muted.name().upper() == t.color("ui.textMuted").upper(), "muted times: ui.textMuted")
+
+        def card(name):
+            item = editor.items[name]
+            image = QtGui.QImage(int(graph_editor.NODE_W) + 40, int(item.height) + 40, QtGui.QImage.Format_ARGB32)
+            image.fill(graph_editor.CANVAS)
+            painter = QtGui.QPainter(image)
+            painter.translate(20, 20)
+            item.paint(painter, QtWidgets.QStyleOptionGraphicsItem(), None)
+            painter.end()
+            return item, image
+
+        def colored(image, rect, color, tolerance=28):
+            """How many pixels in an item-space rect are close to `color`."""
+            count = 0
+            for x in range(int(rect.left()) + 20, int(rect.right()) + 20):
+                for y in range(int(rect.top()) + 20, int(rect.bottom()) + 20):
+                    c = QtGui.QColor(image.pixel(x, y))
+                    if all(abs(a - b) <= tolerance for a, b in zip(c.getRgb()[:3], color.getRgb()[:3])):
+                        count += 1
+            return count
+
+        try:
+            for name in (quick, slow, warned, noted, failed, off):
+                editor.items[name].update()
+            title = lambda item: QtCore.QRectF(60, 2, min(r.left() for r in item.toggle_rects().values()) - 60, 22)
+            item, image = card(quick)
+            _expect(colored(image, title(item), muted) > 6 and colored(image, title(item), warning) == 0,
+                    "3.2 ms: muted, in the title row")
+            item, image = card(slow)
+            _expect(colored(image, title(item), warning) > 6, "24 ms: the warning color")
+            _expect(colored(image, QtCore.QRectF(0, item.height, graph_editor.NODE_W, 14), warning) == 0,
+                    "no time under the card any more")
+            item, image = card(warned)
+            _expect(colored(image, title(item), warning) > 6, "a warning: the triangle in the title row")
+            _expect(colored(image, QtCore.QRectF(graph_editor.NODE_W - 8, -8, 16, 8), warning) == 0,
+                    "a warning: no corner disc")
+            item, image = card(noted)
+            _expect(colored(image, title(item), warning) > 6, "a note: the triangle too")
+            item, image = card(failed)
+            _expect(colored(image, QtCore.QRectF(graph_editor.NODE_W - 6, -6, 12, 4), graph_editor.ERROR) > 6,
+                    "an error: its red corner badge")
+            _expect(colored(image, title(item), warning) == 0, "an error: no triangle")
+            if editor.viewed:
+                item, image = card(quick)
+                eye = item.toggle_rects()["focus"]
+                _expect(colored(image, eye, graph_editor.FOCUS, 20) > 8, "viewed: the eye lit in the blue")
+            item = editor.items[off]
+            _expect(all(e.bypassed() for e in item.edges) and item.edges, "a bypassed node's wires dashed")
+            _expect(not any(e.bypassed() for e in editor.items[slow].edges if off not in (e.src_item.name, e.dst_item.name)),
+                    "others' solid")
+            painted = []
+            real = QtGui.QPainter.setOpacity
+            try:
+                QtGui.QPainter.setOpacity = lambda self, o: (painted.append(o), real(self, o))[1]
+                card(off)
+            finally:
+                QtGui.QPainter.setOpacity = real
+            _expect(graph_editor.BYPASSED_OPACITY in painted, "a bypassed card at half opacity: %r" % painted)
+            if args.shots:
+                rect = editor.scene.itemsBoundingRect().adjusted(-30, -30, 30, 30)
+                scale = 2.0
+                picture = QtGui.QImage(int(rect.width() * scale), int(rect.height() * scale), QtGui.QImage.Format_ARGB32)
+                picture.fill(graph_editor.CANVAS)
+                painter = QtGui.QPainter(picture)
+                painter.setRenderHint(QtGui.QPainter.Antialiasing)
+                editor.scene.render(painter, QtCore.QRectF(picture.rect()), rect)
+                painter.end()
+                picture.save(os.path.join(args.shots, "graph_status_badges.png"))
+        finally:
+            widgets.dispose(editor)
+            theme.set_theme("playful")
+    check.run("Inter in GroomLab's windows; the cards' status badges", status_badges_and_font)
+
     # Round 2: the sliders as fill fields (label inside, filled by the value; drag, click to type).
     import fill_field_check
     if args.shots and not os.path.isdir(args.shots):

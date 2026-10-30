@@ -119,6 +119,24 @@ class GraphApiTest(unittest.TestCase):
             self.assertFalse(taken)
         cmds.groomLabGpuPreview(self.groom, endDrag=True)
 
+    def test_node_cook_times_read_as_the_cards_show_them(self):
+        # The cook time badge in a card's title row (the redesign's status): a tenth of a millisecond
+        # under 10 ms, whole ones after; muted, then the warning color from SLOW_MS; nothing for a
+        # node that took no time (as the app's cards).
+        from groomlab.ui import graph_editor as ge, theme
+        self.assertEqual(ge.SLOW_MS, 10.0)
+        self.assertEqual(ge.BYPASSED_OPACITY, 0.5)
+        self.assertIsNone(ge.time_text(None))
+        self.assertIsNone(ge.time_text(0.01))
+        self.assertEqual(ge.time_text(0.42), "0.4 ms")
+        self.assertEqual(ge.time_text(9.94), "9.9 ms")
+        self.assertEqual(ge.time_text(12.6), "13 ms")
+        ge.apply_theme(theme.Theme("charcoal", theme.load("charcoal")))
+        t = theme.Theme("charcoal", theme.load("charcoal"))
+        self.assertEqual(ge.time_color(9.9).name().upper(), t.color("ui.textMuted").upper())
+        self.assertEqual(ge.time_color(10.0).name().upper(), t.color("graph.warning").upper())
+        self.assertEqual(ge.time_color(250.0).name(), ge.WARNING.name())  # slow is a warning, not an error
+
     def test_scatters_length_says_when_guides_set_it(self):
         # Scatter's length beside the Length node confused a tester: the panel says "guides set it"
         # while an Interpolate with guides wired in comes after the Scatter (the default graph).

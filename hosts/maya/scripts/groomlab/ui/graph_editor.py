@@ -76,7 +76,6 @@ PORT_R = 5.5      # drawn radius
 PORT_HIT = 11.0   # picking radius: ports are easy to grab
 SNAP = 28.0       # a dragged link snaps to a compatible port this close (scene units)
 CORNER = 9.0
-TOGGLE_ROOM = 66.0  # header space for Expand Inputs, Focus and Bypass
 
 # The port types' and the node categories' colors, every host's (engine/ui/graph_ui.json; a theme's
 # graph.ports and graph.categories override them: apply_theme).
@@ -98,7 +97,11 @@ DRIVEN = QtGui.QColor(214, 122, 214)
 READS = QtGui.QColor(90, 150, 220)
 WRITES = QtGui.QColor(214, 150, 70)
 FOCUS = QtGui.QColor(90, 210, 240)   # the Focus toggle on (the palette's blue)
-FAST, SLOW = QtGui.QColor(120, 200, 120), QtGui.QColor(230, 190, 80)  # a node's time under 5 ms, 25 ms
+# A node's cook time in its title row: muted (the theme's ui.textMuted), in the warning color from
+# SLOW_MS (the redesign's status badges, as the app's cards). Bypassed cards paint at BYPASSED_OPACITY.
+TIME_MUTED = QtGui.QColor(115, 115, 115)
+SLOW_MS = 10.0
+BYPASSED_OPACITY = 0.5
 
 # The Add Node menu (its categories, their order, each node's label and search words) is the core's
 # (node_catalog.h, in every operator spec): Maya, the app and Blender list the same nodes the same way.
@@ -201,7 +204,7 @@ def load_model(groom, catalog=None):
 def apply_theme(t=None):
     """Take the graph's colors and shapes from a theme (the active one by default)."""
     global NODE_BG, NODE_BG_TOP, NODE_BORDER, TEXT, MUTED, SELECTED, CANVAS, GRID_DOT, CORNER, HEADER_STYLE, SHADOW
-    global CANVAS_STYLE, ERROR, WARNING, NOTE, DRIVEN, READS, WRITES, FOCUS, FAST, SLOW
+    global CANVAS_STYLE, ERROR, WARNING, NOTE, DRIVEN, READS, WRITES, FOCUS, TIME_MUTED
     t = t or theme.current()
     NODE_BG = t.qcolor("graph.node")
     NODE_BG_TOP = t.qcolor(t.get("graph.nodeTop") or "graph.node") if t.get("graph.nodeTop") else QtGui.QColor(NODE_BG)
@@ -226,7 +229,7 @@ def apply_theme(t=None):
     READS = t.qcolor(t.get("graph.reads", "blue"))
     WRITES = t.qcolor(t.get("graph.writes", "#D6964A"))
     FOCUS = t.qcolor("blue")
-    FAST, SLOW = t.qcolor("emerald"), t.qcolor("yellow")
+    TIME_MUTED = t.qcolor("ui.textMuted") if t.get("ui.textMuted") else QtGui.QColor(MUTED)
     for name, value in (t.get("graph.categories") or {}).items():
         CATEGORY_COLORS[name] = t.qcolor(value)
     for name, value in (t.get("graph.ports") or {}).items():
@@ -237,6 +240,36 @@ def readable_on(color):
     """Dark or light text, whichever reads on `color`."""
     luma = 0.2126 * color.redF() + 0.7152 * color.greenF() + 0.0722 * color.blueF()
     return QtGui.QColor(28, 29, 33) if luma > 0.55 else QtGui.QColor(255, 255, 255)
+
+
+def time_text(ms):
+    """A node's cook time as its card shows it ("0.4 ms", "12 ms"); None under a twentieth of a
+    millisecond (nothing worth a badge), as the app's cards."""
+    if ms is None or ms < 0.05:
+        return None
+    return ("%.1f ms" % ms) if ms < 10.0 else ("%d ms" % int(round(ms)))
+
+
+def time_color(ms):
+    """Its color: muted, the warning color from SLOW_MS."""
+    return QtGui.QColor(WARNING if ms >= SLOW_MS else TIME_MUTED)
+
+
+def warning_triangle(painter, center, color, size=11.0):
+    """The status badge of a node with a warning or a note: an outlined triangle with a "!"."""
+    h = size * 0.9
+    top, left, right = (center + QtCore.QPointF(0, -h / 2.0), center + QtCore.QPointF(-size / 2.0, h / 2.0),
+                        center + QtCore.QPointF(size / 2.0, h / 2.0))
+    pen = QtGui.QPen(color, 1.4)
+    pen.setJoinStyle(QtCore.Qt.RoundJoin)
+    pen.setCapStyle(QtCore.Qt.RoundCap)
+    painter.setPen(pen)
+    painter.setBrush(QtCore.Qt.NoBrush)
+    painter.drawPolygon(QtGui.QPolygonF([top, right, left]))
+    painter.drawLine(center + QtCore.QPointF(0, -h * 0.12), center + QtCore.QPointF(0, h * 0.18))
+    painter.setPen(QtCore.Qt.NoPen)
+    painter.setBrush(color)
+    painter.drawEllipse(center + QtCore.QPointF(0, h * 0.34), 0.8, 0.8)
 
 
 # -- Keyed params: the param fields in the Channel Box's colors ------------------------------------
@@ -678,7 +711,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
         rect = QtCore.QRectF(0, 0, NODE_W, self.height)
         accent = CATEGORY_COLORS.get(self.category, MUTED)
         bypassed, viewed, error, ms, warning, note = self.status()
-        painter.setOpacity(0.45 if bypassed else 1.0)
+        painter.setOpacity(BYPASSED_OPACITY if bypassed else 1.0)
 
         # Soft drop shadow (flat themes go without).
         for i, alpha in enumerate((40, 24, 12) if SHADOW else ()):
@@ -720,16 +753,32 @@ class NodeItem(QtWidgets.QGraphicsItem):
         on_header = readable_on(accent) if filled else TEXT
         self.header_ink = on_header if filled else None
 
-        # Name, and the type underneath (pixel sizes: the same at any screen scale).
-        font = QtGui.QFont(painter.font())
-        font.setPixelSize(13)
-        font.setBold(True)
+        # Name, and the type underneath (pixel sizes: the same at any screen scale), in the theme's
+        # font (ui.font: Inter).
+        font = theme.font(13, bold=True, base=painter.font())
         small = QtGui.QFont(font)
         small.setBold(False)
         small.setPixelSize(10)
         small.setLetterSpacing(QtGui.QFont.AbsoluteSpacing, 0.6)
         name_h = QtGui.QFontMetrics(font).height()
         left = 12.0
+        # The status badges in the title row, left of the header toggles (the redesign's): a warning
+        # triangle (a warning or a note; an error keeps its red outline and corner "!") and the
+        # cook time. Laid out right to left; the name gets the room left of them.
+        badges_right = min(r.left() for r in self.toggle_rects().values()) - 6.0
+        row_center = 5 + name_h / 2.0
+        stamp = time_text(ms)
+        number = theme.font(10, tabular=True, base=painter.font())
+        x = badges_right
+        stamp_rect = alert_center = None
+        if stamp:
+            width = QtGui.QFontMetricsF(number).horizontalAdvance(stamp)
+            x -= width
+            stamp_rect = QtCore.QRectF(x, row_center - 8, width + 1, 16)
+            x -= 6.0
+        if (warning or note) and not error:
+            alert_center = QtCore.QPointF(x - 5.5, row_center)
+            x -= 15.0
         if minimal:
             painter.setPen(QtCore.Qt.NoPen)
             painter.setBrush(accent)
@@ -738,7 +787,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
             left += 13.0
         painter.setFont(font)
         painter.setPen(on_header)
-        room = NODE_W - left - 12 - TOGGLE_ROOM
+        room = max(24.0, x - left - 2)
         painter.drawText(QtCore.QRectF(left, 5, room, name_h), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
                          QtGui.QFontMetrics(font).elidedText(self.name, QtCore.Qt.ElideRight, room))
         painter.setFont(small)
@@ -771,8 +820,20 @@ class NodeItem(QtWidgets.QGraphicsItem):
                              QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight, name)
         small.setLetterSpacing(QtGui.QFont.AbsoluteSpacing, 0.0)
 
+        # The status badges (dimmed with a bypassed card, as the design's).
+        ink = getattr(self, "header_ink", None)  # on a filled header: its readable color
+        if stamp_rect is not None:
+            color = QtGui.QColor(ink) if ink is not None else time_color(ms)
+            if ink is not None:
+                color.setAlpha(190)
+            painter.setFont(number)
+            painter.setPen(color)
+            painter.drawText(stamp_rect, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, stamp)
+        if alert_center is not None:
+            warning_triangle(painter, alert_center, QtGui.QColor(ink) if ink is not None else WARNING)
+
         painter.setOpacity(1.0)
-        # Badges: viewed (eye), bypassed, error, evaluation time.
+        # The header toggles (Expand Inputs, View, Bypass), the error badge, a library update.
         badge = QtGui.QFont(small)
         badge.setBold(True)
         painter.setFont(badge)
@@ -786,21 +847,6 @@ class NodeItem(QtWidgets.QGraphicsItem):
             painter.drawEllipse(QtCore.QPointF(NODE_W, 0), 8, 8)
             painter.setPen(readable_on(ERROR))
             painter.drawText(QtCore.QRectF(NODE_W - 8, -8, 16, 16), QtCore.Qt.AlignCenter, "!")
-        elif warning:  # e.g. a Cards node whose baked maps are out of date: rebake
-            painter.setPen(QtGui.QPen(WARNING, 2.0))
-            painter.setBrush(QtCore.Qt.NoBrush)
-            painter.drawRoundedRect(rect.adjusted(-2, -2, 2, 2), CORNER + 2, CORNER + 2)
-            painter.setBrush(WARNING)
-            painter.setPen(QtCore.Qt.NoPen)
-            painter.drawEllipse(QtCore.QPointF(NODE_W, 0), 8, 8)
-            painter.setPen(readable_on(WARNING))
-            painter.drawText(QtCore.QRectF(NODE_W - 8, -8, 16, 16), QtCore.Qt.AlignCenter, "!")
-        elif note:  # it does nothing as set (a Clump with no centers): a grey "i", informational
-            painter.setBrush(NOTE)
-            painter.setPen(QtCore.Qt.NoPen)
-            painter.drawEllipse(QtCore.QPointF(NODE_W, 0), 8, 8)
-            painter.setPen(readable_on(NOTE))
-            painter.drawText(QtCore.QRectF(NODE_W - 8, -8, 16, 16), QtCore.Qt.AlignCenter, "i")
         if self.library and self.library.get("updateAvailable"):
             # The library has a newer copy of this node: a mark on its left corner (Update Node).
             painter.setBrush(SELECTED)
@@ -815,13 +861,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
             painter.setFont(small)
             painter.drawText(QtCore.QRectF(4, self.height + 1, NODE_W * 0.6, 14),
                              QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, tag)
-        if ms is not None:
-            heat = FAST if ms < 5 else (SLOW if ms < 25 else ERROR)
-            painter.setPen(heat)
-            painter.setFont(small)
-            painter.drawText(QtCore.QRectF(0, self.height + 1, NODE_W - 4, 14),
-                             QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, "%.1f ms" % ms)
-        painter.setOpacity(0.45 if bypassed else 1.0)
+        painter.setOpacity(BYPASSED_OPACITY if bypassed else 1.0)
 
         if self.summary:
             painter.setPen(MUTED)
@@ -862,13 +902,13 @@ class NodeItem(QtWidgets.QGraphicsItem):
                 idle.setAlpha(150)
             active = FOCUS if kind in ("focus", "inputs") else WARNING
             color = (ink if ink is not None else active) if on else idle
-            if on:
+            if on:  # lit: a tile of its color under a bolder glyph (View in the blue: plainly on)
                 fill = QtGui.QColor(color)
-                fill.setAlpha(45)
+                fill.setAlpha(70)
                 painter.setPen(QtCore.Qt.NoPen)
                 painter.setBrush(fill)
                 painter.drawRoundedRect(rect, 4, 4)
-            painter.setPen(QtGui.QPen(color, 1.6))
+            painter.setPen(QtGui.QPen(color, 1.8 if on else 1.6))
             painter.setBrush(QtCore.Qt.NoBrush)
             c = rect.center()
             if kind == "focus":  # an eye
@@ -1176,6 +1216,14 @@ class EdgeItem(QtWidgets.QGraphicsPathItem):
         later(lambda: editor.add_pin(link, at, index))()
         event.accept()
 
+    def bypassed(self):
+        """Whether either end's node is bypassed (its wires dashed, as the card dims)."""
+        model = self.dst_item.editor.model
+        try:
+            return bool(model.bypassed(self.src_item.name) or model.bypassed(self.dst_item.name))
+        except (gm.GraphError, KeyError):
+            return False
+
     def link(self):
         """(src, output, dst, input): the link this draws, as add_node and insert_on_wire take it."""
         return self.src_item.name, self.output, self.dst_item.name, self.input_name
@@ -1189,7 +1237,12 @@ class EdgeItem(QtWidgets.QGraphicsPathItem):
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
         color = ERROR if self.cutting else SELECTED if self.isSelected() else (self.color.lighter(125) if self.hovered else self.color)
         width = 3.0 if self.isSelected() or self.hovered or self.cutting else 2.2
-        if self.dst_item.inputs[self.input_name].is_param:
+        if self.bypassed():  # into or out of a bypassed node: short dashes at the card's opacity
+            color = QtGui.QColor(color)
+            color.setAlphaF(color.alphaF() * BYPASSED_OPACITY)
+            pen = QtGui.QPen(color, width, QtCore.Qt.CustomDashLine)
+            pen.setDashPattern([1.5, 2.0])
+        elif self.dst_item.inputs[self.input_name].is_param:
             pen = QtGui.QPen(color, width, QtCore.Qt.DashLine)
         else:
             pen = QtGui.QPen(color, width)
@@ -1470,10 +1523,7 @@ class BackdropItem(QtWidgets.QGraphicsItem):
         painter.setClipPath(clip)
         painter.fillRect(QtCore.QRectF(0, 0, self.data["w"], 28), header)
         painter.restore()
-        font = QtGui.QFont(painter.font())
-        font.setPixelSize(14)
-        font.setBold(True)
-        painter.setFont(font)
+        painter.setFont(theme.font(14, bold=True, base=painter.font()))
         painter.setPen(TEXT)
         painter.drawText(QtCore.QRectF(12, 0, self.data["w"] - 24, 28), QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft,
                          self.data.get("title", "Backdrop"))
@@ -4354,8 +4404,8 @@ class GraphEditor(QtWidgets.QWidget):
         splitter.addWidget(self.params)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
-        # The param panel's share: about 360 px of the default 1200 (sliders, units and notes fit).
-        splitter.setSizes([theme.px(840), theme.px(360)])
+        # The param panel's share: about 372 px of the default 1200 (sliders, units and notes fit, in Inter too).
+        splitter.setSizes([theme.px(828), theme.px(372)])
         splitter.setCollapsible(1, False)
         self.splitter = splitter
 
