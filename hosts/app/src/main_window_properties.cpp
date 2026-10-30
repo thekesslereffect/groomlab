@@ -502,7 +502,6 @@ void MainWindow::buildProperties() {
     });
     connect(sculptDisplay_, &QComboBox::currentIndexChanged, this, [this](int v) {
         settings_.sculptDisplay = v;
-        groomTools_->setSculptDisplay(v);
         redisplay();
     });
     connect(sculptDensity_, &ValueSlider::valueChanged, this, [this](double v) { brush_.sculptDensity = static_cast<float>(v); });

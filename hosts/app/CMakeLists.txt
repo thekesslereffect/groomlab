@@ -219,6 +219,8 @@ qt_add_library(groomlab_app_ui STATIC
     src/alpha_picker.h
     src/brush_panel.cpp
     src/brush_panel.h
+    src/card_parts.cpp
+    src/card_parts.h
     src/groom_tools.cpp
     src/groom_tools.h
     src/tube_panel.cpp

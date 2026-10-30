@@ -30,6 +30,7 @@
 #include "list_bar.h"
 #include "main_window.h"
 #include "overlay.h"
+#include "card_parts.h"
 #include "photos_panel.h"
 #include "reference_window.h"
 #include "prman_render.h"
@@ -323,7 +324,9 @@ TEST(AppPhotos, LookThroughLockOpacityDepthAndAlignPhoto) {
     auto* viewport = window.findChild<Viewport*>();
     ASSERT_TRUE(photos && viewport);
     const ui::Bindings bindings = AppActions::bindings(window);
-    EXPECT_EQ(photos->bar()->ids(), (std::vector<std::string>{"photo.import", "photo.rename", "photo.remove"}));
+    EXPECT_EQ(photos->bar()->ids(), (std::vector<std::string>{"photo.import"}));
+    EXPECT_EQ(photos->itemBar()->ids(), (std::vector<std::string>{"photo.rename", "photo.remove"}));
+    EXPECT_FALSE(photos->guidesSection()->expanded()) << "Guides from photos: folded";
 
     // Import: the photo as a camera in front of the groom, 50 mm on 36, shown at 60%, in front.
     const int W = 400, H = 300;

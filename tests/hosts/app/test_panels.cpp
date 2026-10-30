@@ -836,14 +836,14 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     EXPECT_EQ(tabs, (std::vector<std::string>{"Tools", "Paint", "Correctives", "Photos"})) << "palette.json's tabs";
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);
-    EXPECT_EQ(grid->columnsFor(300), 6) << "six icons to a row";
+    EXPECT_EQ(grid->columnsFor(260), 6) << "six 34 px icons to a row in a 260 px column";
     EXPECT_EQ(qobject_cast<QToolButton*>(tools.tile("comb"))->toolButtonStyle(), Qt::ToolButtonIconOnly);
     EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Comb"))) << "the name in the tool tip";
     const int icons = grid->heightForWidth(260);
     tools.setTileLabels(true);
     const int wide = grid->heightForWidth(300);
     EXPECT_GT(grid->heightForWidth(140), wide) << "a narrower dock wraps to more rows";
-    EXPECT_EQ(grid->columnsFor(300), 4) << "labeled tiles four to a row, as Maya's";
+    EXPECT_EQ(grid->columnsFor(300), 5) << "labeled tiles (56 px) as many as fit";
     grid->resize(260, grid->heightForWidth(260));
     for (QAbstractButton* t : grid->findChildren<QAbstractButton*>()) {
         EXPECT_LE(t->geometry().right(), 260) << "a tile past the dock's width";
@@ -859,7 +859,7 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     tools.setTool("comb");
     EXPECT_TRUE(tools.tile("comb")->isChecked());
     EXPECT_FALSE(tools.tile("cut")->isChecked());
-    EXPECT_EQ(tools.toolHeading()->text(), QStringLiteral("COMB"));
+    EXPECT_EQ(tools.card()->titleLabel()->text(), QStringLiteral("Comb"));
     // The mode switcher says when any segment is clicked, the current one too.
     Segmented modes;
     modes.setItems({{"A", Qt::red, Qt::white}, {"B", Qt::blue, Qt::white}});
@@ -2160,8 +2160,8 @@ TEST(AppPanels, LengthKeysPreviewAndApply) {
     panel.setTool("lengths");
     EXPECT_EQ(session.settings().modeName(), "lengths");
     auto* box = panel.findChild<QWidget*>(QStringLiteral("lengthKeysBox"));
-    auto* scale = panel.findChild<QDoubleSpinBox*>(QStringLiteral("lengthScale"));
-    auto* key = panel.findChild<QDoubleSpinBox*>(QStringLiteral("lengthKey"));
+    auto* scale = panel.findChild<ValueSlider*>(QStringLiteral("lengthScale"));
+    auto* key = panel.findChild<ValueSlider*>(QStringLiteral("lengthKey"));
     auto* apply = panel.findChild<QPushButton*>(QStringLiteral("lengthApply"));
     ASSERT_TRUE(box && scale && key && apply);
     EXPECT_FALSE(box->isHidden());
@@ -2218,8 +2218,9 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     BrushPanel& panel = *tools.card();
 
     // The curves: off until ticked, then the editor's keys; unticked, none again.
-    auto* strength = panel.findChild<QCheckBox*>(QStringLiteral("strengthProfile"));
-    auto* falloff = panel.findChild<QCheckBox*>(QStringLiteral("falloffProfile"));
+    // (Chips: Falloff curve and Root to tip, each showing its ramp under the chips while on.)
+    auto* strength = panel.findChild<QAbstractButton*>(QStringLiteral("strengthProfile"));
+    auto* falloff = panel.findChild<QAbstractButton*>(QStringLiteral("falloffProfile"));
     ASSERT_TRUE(strength && falloff);
     EXPECT_FALSE(strength->isChecked());
     strength->setChecked(true);
@@ -2232,7 +2233,8 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     session.settings().setFalloffProfile("");
     panel.refresh();
     EXPECT_FALSE(falloff->isChecked()) << "the panel follows the settings";
-    // Symmetry (the Groom Tools' row, always shown): on, and across World X, Y, Z or Topology.
+    // Symmetry (Applies to's Mirror row): on, and across World X, Y, Z or Topology.
+    tools.setTool("comb");
     QComboBox* symmetry = tools.symmetryMode();
     EXPECT_FALSE(symmetry->isEnabled()) << "off: the choice waits";
     symmetry->setCurrentIndex(symmetry->findText(QStringLiteral("Topology")));
@@ -2251,7 +2253,7 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     // new guides; Place's new guides, no radius; no duplicate radius anywhere.
     tools.setTool("comb");
     EXPECT_TRUE(panel.findChild<QWidget*>(QStringLiteral("radius"))->isVisibleTo(&panel));
-    EXPECT_TRUE(panel.findChild<QCheckBox*>(QStringLiteral("stretch"))->isVisibleTo(&panel));
+    EXPECT_TRUE(panel.findChild<QAbstractButton*>(QStringLiteral("stretch"))->isVisibleTo(&panel));
     EXPECT_FALSE(panel.findChild<QWidget*>(QStringLiteral("newGuidesBox"))->isVisibleTo(&panel));
     EXPECT_EQ(tools.findChildren<ValueSlider*>(QStringLiteral("radius")).size(), 1);
     tools.setTool("place");
@@ -2348,7 +2350,7 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     // freezes the guides not selected (an undo step), a pick of nothing unfreezes them; Unfreeze All
     // in the panel.
     EXPECT_FALSE(session.settings().place.soloNewGuides);
-    ASSERT_TRUE(panel.findChild<QCheckBox*>(QStringLiteral("soloNewGuides")));
+    ASSERT_TRUE(panel.findChild<QAbstractButton*>(QStringLiteral("soloNewGuides")));
     const QPointF at(x, 600.0 - y);
     ASSERT_EQ(session.select({at}, SelectMode::Replace, true), 1u);
     const auto frozenCount = [&] {
@@ -2366,9 +2368,15 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     session.select({QPointF(2.0, 2.0)}, SelectMode::Replace, true);
     EXPECT_EQ(frozenCount(), 0u) << "a pick of nothing unfreezes every guide";
     session.select({at}, SelectMode::Replace, true);
-    auto* unfreeze = panel.findChild<QPushButton*>(QStringLiteral("unfreezeAll"));
-    ASSERT_TRUE(unfreeze);
-    unfreeze->click();
+    // Unfreeze All: the tile beside Freeze (the card has no second one); the window unfreezes.
+    EXPECT_EQ(panel.findChild<QPushButton*>(QStringLiteral("unfreezeAll")), nullptr);
+    int unfreezes = 0;
+    QObject::connect(&tools, &GroomTools::unfreezeAllRequested, [&] {
+        ++unfreezes;
+        doc->editGuides("unfreeze all", [](GuideHierarchy& h) { unfreezeAll(h); });
+    });
+    tools.tile("unfreeze")->click();
+    EXPECT_EQ(unfreezes, 1);
     EXPECT_EQ(frozenCount(), 0u);
     EXPECT_EQ(doc->undoText(), "Undo unfreeze all");
 }
@@ -4151,7 +4159,6 @@ TEST(AppPanels, GroomToolsTilesPickToolsAndTheEyeHidesTheGroom) {
     // bar's corner, the rest in the GroomLab menu.
     EXPECT_EQ(tools->findChild<QWidget*>(QStringLiteral("section_output")), nullptr);
     EXPECT_EQ(tools->findChild<QWidget*>(QStringLiteral("outputStrip")), nullptr);
-    EXPECT_EQ(tools->section("output"), nullptr);
 }
 
 TEST(AppPanels, MenuBarCornerHasTheFileNameRenderAndExport) {

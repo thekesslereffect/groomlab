@@ -84,18 +84,22 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
     const ui::Bindings bindings = AppActions::bindings(window);
 
     // The bar and Edit Guides as lists.json writes them (From Curves is Maya's).
-    EXPECT_EQ(panel->bar()->ids(), (std::vector<std::string>{"group.new", "group.rename", "group.select", "group.delete"}));
+    // + New Group in the header (a + glyph), the picked group's glyphs in its box.
+    EXPECT_EQ(panel->bar()->ids(), (std::vector<std::string>{"group.new"}));
+    EXPECT_EQ(panel->itemBar()->ids(), (std::vector<std::string>{"group.rename", "group.select", "group.delete"}));
     EXPECT_EQ(panel->bar()->button("group.new")->text(), QStringLiteral("+ New Group"));
-    EXPECT_FALSE(panel->bar()->button("group.delete")->icon().isNull()) << "a glyph";
+    EXPECT_FALSE(panel->bar()->button("group.new")->icon().isNull()) << "a glyph in the header";
+    EXPECT_FALSE(panel->itemBar()->button("group.delete")->icon().isNull()) << "a glyph";
     EXPECT_EQ(shown(panel->editsMenu()),
               (std::vector<std::string>{"Children", "-", "Sync +X → -X", "Sync -X → +X", "Mirror Selection", "Mirror Group...", "-", "Reparent...",
                                         "Promote / Demote...", "Clear Selection"}));
 
-    // The tree: Group, swatch, Guides, Level; a group picked, the right-click menu for it.
+    // The rows: the color dot and name, the guides it holds, the eye; a group picked, the
+    // right-click menu for it.
     panel->refresh();
     QTreeWidget* tree = panel->tree();
     ASSERT_GT(tree->topLevelItemCount(), 0);
-    EXPECT_EQ(tree->columnCount(), 4);
+    EXPECT_EQ(tree->columnCount(), 3);
     const std::string root = panel->currentGroup();
     ASSERT_FALSE(root.empty());
     EXPECT_EQ(panel->menuState(), (std::set<std::string>{"group"}));
@@ -148,7 +152,7 @@ TEST(AppLists, GuideGroupsBarMenusAndEdits) {
         panel->refresh();
         auto swatchAt = [&](const std::string& name) {
             const QList<QTreeWidgetItem*> found = tree->findItems(QString::fromStdString(name), Qt::MatchExactly | Qt::MatchRecursive, 0);
-            return found.isEmpty() ? QColor() : found.front()->icon(1).pixmap(QSize(16, 16)).toImage().pixelColor(8, 8);
+            return found.isEmpty() ? QColor() : found.front()->icon(0).pixmap(QSize(12, 12)).toImage().pixelColor(6, 6);
         };
         const QColor want(QString::fromStdString(guideColorHex(automatic.at(child->id)))), got = swatchAt(child->name);
         EXPECT_NEAR(got.red(), want.red(), 3);
@@ -218,8 +222,9 @@ TEST(AppLists, MapsBarMenuAndOperations) {
     MapsPanel* panel = window.mapsPanel();
     const std::filesystem::path folder = std::filesystem::u8path(path).parent_path();
 
-    EXPECT_EQ(panel->bar()->ids(), (std::vector<std::string>{"map.new", "map.import", "map.rename", "map.convert", "map.delete"}));
-    QToolButton* convert = panel->bar()->button("map.convert");
+    EXPECT_EQ(panel->bar()->ids(), (std::vector<std::string>{"map.new", "map.import"}));
+    EXPECT_EQ(panel->itemBar()->ids(), (std::vector<std::string>{"map.rename", "map.convert", "map.delete"}));
+    QToolButton* convert = panel->itemBar()->button("map.convert");
     ASSERT_TRUE(convert && convert->menu());
     EXPECT_EQ(shown(convert->menu()).size(), 3u) << "the three kinds";
 
@@ -341,8 +346,8 @@ TEST(AppLists, CorrectivesStackBarMenuAndKeys) {
     auto* panel = window.findChild<CorrectivesPanel*>();
     ASSERT_TRUE(panel);
     const ui::Bindings bindings = AppActions::bindings(window);
-    EXPECT_EQ(panel->bar()->ids(), (std::vector<std::string>{"corrective.new", "corrective.fixFrame", "corrective.up", "corrective.down",
-                                                             "corrective.solo", "corrective.delete"}));
+    EXPECT_EQ(panel->bar()->ids(), (std::vector<std::string>{"corrective.new", "corrective.fixFrame"}));
+    EXPECT_EQ(panel->itemBar()->ids(), (std::vector<std::string>{"corrective.up", "corrective.down", "corrective.solo", "corrective.delete"}));
     // Two correctives: the stack top first, the base groom at the bottom.
     bindings.at("corrective.new").trigger(nullptr, false);
     doc->setFrame(10.0);
