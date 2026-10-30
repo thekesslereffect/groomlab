@@ -64,7 +64,7 @@ public:
     void setWidth(double shown);            // the targets scaled so the first one's widest section is this
     // Width's unit again (Edit > Units: the lengths' unit; its label "Width (mm)", the slider in it).
     void refreshUnits();
-    QLabel* widthLabel() const { return widthLabel_; }
+    QString widthCaption() const;  // "Width (mm)": the field's caption, in the length unit chosen
     void setFlatness(double flatness);      // 0 as drawn .. 0.99 a flat ribbon
     void setTwist(double degrees);
     void smoothTargets();                   // Smooth: the current channel (the brush's) or all
@@ -160,14 +160,12 @@ private:
     QLineEdit* renameField_ = nullptr;
     QPushButton* apply_ = nullptr;
     ValueSlider* width_ = nullptr;
-    QLabel* widthLabel_ = nullptr;
     double lengthFactor_ = 1.0;  // Width shown per scene unit (refreshUnits)
     ValueSlider* flatness_ = nullptr;
     ValueSlider* twist_ = nullptr;
     QPushButton* smooth_ = nullptr;
     QComboBox* smoothWhat_ = nullptr;
     QCheckBox* fill_ = nullptr;
-    QLabel* blendLabel_ = nullptr;
     ValueSlider* blend_ = nullptr;
     QTimer* disarm_ = nullptr;
     QTimer* preview_ = nullptr;

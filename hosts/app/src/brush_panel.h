@@ -115,13 +115,9 @@ private:
     std::vector<std::function<void()>> refreshers_;
     // The rows that come and go with the tool.
     QWidget* brushForm_ = nullptr;
-    QLabel* radiusLabel_ = nullptr;
     ValueSlider* radius_ = nullptr;
-    QLabel* strengthLabel_ = nullptr;
     ValueSlider* strength_ = nullptr;
-    QLabel* falloffLabel_ = nullptr;
     ValueSlider* falloff_ = nullptr;
-    QLabel* smoothLabel_ = nullptr;
     ValueSlider* smooth_ = nullptr;
     QWidget* falloffCurve_ = nullptr;
     QWidget* strengthCurve_ = nullptr;
@@ -141,7 +137,6 @@ private:
     QCheckBox* pointwise_ = nullptr;
     std::vector<QCheckBox*> checkOrder_;
     QWidget* createBox_ = nullptr;
-    QLabel* spacingLabel_ = nullptr;
     ValueSlider* spacing_ = nullptr;
     QWidget* partBox_ = nullptr;
     QLineEdit* partName_ = nullptr;

@@ -987,14 +987,19 @@ tested without a window) and the style sheet the ordinary widgets inside the pan
 `glass.h` paints what a style sheet cannot: glass panels, round and pill buttons with tinted
 icons (`hosts/app/icons/ui_*.svg`, white strokes tinted at paint time), the sliders, the segmented
 mode switcher, text with a shadow straight on the viewport, and the floating panel with a title
-row. The slider (`ValueSlider`) is every panel's number control: a rounded 8 px track with a
-colored fill, the caption in Inter and the number in Inter's tabular digits (`theme::numberFont`), a row (the brush bar) or
-stacked (caption and number over a track as wide as the panel: the look card, the node panel,
-the brush, display, maps, cards, export and look panels), 40 px tall stacked so it is easy to hit;
-the whole widget takes the mouse (a press on the track jumps there, anywhere else drags the value
-relatively, Shift a tenth as fast; the wheel steps), a double click or a click on the number edits
-it inline (Enter sets, Escape keeps), and a number typed past the track's span widens the span
-within the limits (a Maya soft range: the node panel's spans fit each param's default). `overlay.h`'s
+row. The number field (`ValueSlider`) is every panel's number control, one fill field (the UI
+redesign's FillField, Blender's number fields): a rounded rect a row tall (`ui.rowHeight`, the
+raised tone, a 1 px edge, `ui.radius`), the caption inside at the left in the dim text and the
+number at the right in Inter's tabular digits (`theme::numberFont`), filled from the left by the
+value's place in the range with `ui.selection`. No separate label: the Properties rows, the brush
+card's form rows, the node panel and the other panels put the name in the field. A drag past 3 px
+scrubs relative to the press (the field's width is the range; Shift a tenth as fast, Ctrl steps
+of ten; the drag stays in the range); a click opens the inline edit with the number selected
+(Enter, Tab or clicking away sets, Escape restores; it takes arithmetic, `parseNumberExpression`:
+`0.5*2`, `1/3`, `,` as the decimal point); focused, Enter or F2 types and the arrows nudge a step
+(Shift ten), and the wheel steps only a focused field (it never steals a panel's scrolling). A
+number typed past the range widens it within the limits (a Maya soft range: the node panel's
+ranges fit each param's default). A driven param's field takes `ui.driven` (`setStateColor`). `overlay.h`'s
 `OverlayHost` is the central widget: the
 viewport fills it, the pieces are its children placed on every resize, and where no piece is the
 mouse reaches the viewport. Top-left the menu button (every File, Edit, View, Tools and Help

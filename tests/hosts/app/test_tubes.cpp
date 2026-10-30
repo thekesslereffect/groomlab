@@ -463,16 +463,16 @@ TEST(AppTubes, WidthFollowsTheLengthUnit) {
     const std::string before = unitChoice("length");
     setUnitChoice("length", "scene");
     TubePanel panel;
-    EXPECT_EQ(panel.widthLabel()->text(), QStringLiteral("Width (units)"));
+    EXPECT_EQ(panel.widthCaption(), QStringLiteral("Width (units)"));
     EXPECT_DOUBLE_EQ(panel.widthSlider()->value(), 0.1);
     setUnitChoice("length", "mm");
     panel.refreshUnits();
-    EXPECT_EQ(panel.widthLabel()->text(), QStringLiteral("Width (mm)"));
+    EXPECT_EQ(panel.widthCaption(), QStringLiteral("Width (mm)"));
     EXPECT_NEAR(panel.widthSlider()->value(), 1.0, 1e-9) << "0.1 cm shown as 1 mm";
     EXPECT_NEAR(json::parse(panel.placement()).at("width").get<double>(), 0.1, 1e-9);
     setUnitChoice("length", "cm");
     panel.refreshUnits();
-    EXPECT_EQ(panel.widthLabel()->text(), QStringLiteral("Width (cm)"));
+    EXPECT_EQ(panel.widthCaption(), QStringLiteral("Width (cm)"));
     EXPECT_NEAR(panel.widthSlider()->value(), 0.1, 1e-9);
     setUnitChoice("length", before);
 }

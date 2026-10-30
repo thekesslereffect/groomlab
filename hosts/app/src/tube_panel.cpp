@@ -179,14 +179,14 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
     twist_->setValue(0.0);
     twist_->setToolTip(tr("Degrees: the sections turned about the guide from lying flat on the scalp, the same root to tip (the "
                           "brush's Twist paints it along the guide)"));
-    widthLabel_ = new QLabel(tr("Width"), this);
-    sections->addRow(widthLabel_, width_);
+    // The names inside the fields (the whole row each).
+    width_->setCaption(tr("Width"));
+    sections->addRow(width_);
     refreshUnits();
-    sections->addRow(tr("Flatness"), flatness_);
-    sections->addRow(tr("Twist (°)"), twist_);
-    for (ValueSlider* s : {width_, flatness_, twist_}) {
-        if (auto* label = qobject_cast<QLabel*>(sections->labelForField(s))) label->setToolTip(s->toolTip());
-    }
+    flatness_->setCaption(tr("Flatness"));
+    sections->addRow(flatness_);
+    twist_->setCaption(tr("Twist (°)"));
+    sections->addRow(twist_);
     // Smooth: the targeted tubes' painted sections evened out along each guide (one undo step).
     auto* smoothRow = new QHBoxLayout();
     smoothRow->setSpacing(6);
@@ -220,15 +220,16 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
     blend_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral(" %"); });
     blend_->setToolTip(tr("Tube Blend: the tubes' soft edge, a share of each tube's half-width. Strands rooted just outside a tube "
                           "lean toward riding it, so no seam shows round it (0: a hard edge)"));
-    blendLabel_ = new QLabel(tr("Tube Blend"), this);
-    blendLabel_->setToolTip(blend_->toolTip());
+    blend_->setCaption(tr("Tube Blend"));
     sections->addRow(QString(), fill_);
-    sections->addRow(blendLabel_, blend_);
+    sections->addRow(blend_);
 
     fillShapes();
     showChoice();
     refresh();
 }
+
+QString TubePanel::widthCaption() const { return width_->caption(); }
 
 ValueSlider* TubePanel::committingSlider(double min, double max, double limitMin, double limitMax, int decimals,
                                          void (TubePanel::*commit)(double)) {
@@ -340,7 +341,6 @@ void TubePanel::refresh(bool force) {
         fill_->setToolTip(tr("The groom's graph has no Interpolate node: nothing to fill the tubes"));
     }
     blend_->setEnabled(fill && fill->fill);
-    blendLabel_->setEnabled(blend_->isEnabled());
     updating_ = false;
     showChoice(info.tube.has_value() && shapes_.size() > 1);
     pushPlacement();
@@ -474,7 +474,7 @@ void TubePanel::refreshUnits() {
         factor = c.factor;
         if (key != "scene") unit = QString::fromStdString(c.label);
     }
-    widthLabel_->setText(tr("Width (%1)").arg(unit));
+    width_->setCaption(tr("Width (%1)").arg(unit));
     if (factor == lengthFactor_) return;
     const double scene = width_->value() / lengthFactor_;
     lengthFactor_ = factor;

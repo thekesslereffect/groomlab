@@ -105,7 +105,6 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
     auto* row = new QHBoxLayout();
     row->setSpacing(6);
     weight_ = new ValueSlider(this);
-    weight_->setStacked(true);
     weight_->setCaption(tr("Weight"));
     weight_->setRange(0.0, 1.0);
     weight_->setLimits(0.0, 1.0);
@@ -118,7 +117,7 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
     key_->setText(QStringLiteral("◆"));
     key_->setProperty("role", "chip");
     key_->setToolTip(qs(defs().action("corrective.keyWeight").value("tip", std::string())));
-    row->addWidget(key_, 0, Qt::AlignBottom);
+    row->addWidget(key_);
     layout->addLayout(row);
     connect(weight_, &ValueSlider::released, this, [this] {
         if (updating_) return;

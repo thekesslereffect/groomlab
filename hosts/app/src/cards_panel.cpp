@@ -220,7 +220,6 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
 void CardsPanel::addSlider(const QString& caption, const std::string& param, double min, double max, bool integer, const QColor& fill,
                            const QString& tip) {
     auto* s = new ValueSlider(settings_);
-    s->setStacked(true);
     s->setCaption(caption);
     s->setRange(min, max);
     s->setFill(fill);

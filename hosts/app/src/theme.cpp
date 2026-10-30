@@ -364,6 +364,7 @@ int controlRadius() {
 int smallRadius() { return std::max(2, controlRadius() - 2); }
 int panelRadius() { return controlRadius() + 2; }
 int rowHeight() { return std::clamp(value("ui", "rowHeight", 26), 18, 40); }
+int fontSize() { return glassy() ? 13 : std::clamp(value("ui", "fontSize", 12), 11, 14); }
 
 QString headerStyle() {
     const nlohmann::json& graph = current().value("graph", nlohmann::json::object());
@@ -732,7 +733,7 @@ QFrame[role="propRule"] { background: @groupEdge@; border: none; }
     const QColor selection = uiColor("selection"), selectionText = uiColor("selectionText"), edge = glassEdge();
     const QColor border = uiColor("border");
     const QString edgeName = edge.isValid() ? edge.name() : border.isValid() ? border.name() : QStringLiteral("#2E2E2E");
-    const int fontSize = glass ? 13 : std::clamp(value("ui", "fontSize", 12), 11, 14);
+    const int fontSize = theme::fontSize();
     const auto wash = [](int alphaPercent) { return QStringLiteral("rgba(255,255,255,%1)").arg(alphaPercent / 100.0); };
     const std::vector<std::pair<QString, QString>> tokens = {
         {QStringLiteral("@accentText@"), uiColor("accentText").name()},

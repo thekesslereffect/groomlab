@@ -238,7 +238,6 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto groomSlider = [this, materialLayout](const QString& caption, const QColor& fill, double min, double max, const char* param,
                                               float GroomColor::* member, auto materialSet) {
         auto* s = new ValueSlider(materialPage_);
-        s->setStacked(true);
         s->setCaption(caption);
         s->setRange(min, max);
         s->setFill(fill);
@@ -574,7 +573,6 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         v->addLayout(head);
         auto lightSlider = [&](const QString& name, const QColor& fill, double min, double max, int decimals) {
             auto* s = new ValueSlider(row.host);
-            s->setStacked(true);
             s->setCaption(name);
             s->setRange(min, max);
             s->setFill(fill);
@@ -711,7 +709,6 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
 ValueSlider* LookCard::slider(QBoxLayout* into, const QString& text, const QColor& fill, double min, double max, int decimals,
                               std::function<double()> get, std::function<void(double)> set, Target target, int kinds) {
     auto* s = new ValueSlider(into->parentWidget());
-    s->setStacked(true);
     s->setCaption(text);
     s->setRange(min, max);
     s->setFill(fill);

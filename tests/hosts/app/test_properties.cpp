@@ -108,6 +108,11 @@ TEST(AppProperties, TheDockFollowsTheDefinitionsInMayasOrder) {
             ASSERT_TRUE(panel->label(item.key)) << item.id;
             EXPECT_EQ(panel->label(item.key)->text().toStdString(), item.label) << item.id;
             EXPECT_EQ(control->toolTip().toStdString(), item.tip) << item.id;
+            if (auto* field = qobject_cast<ValueSlider*>(control)) {
+                // A number field: the label inside it, the row's own label hidden.
+                EXPECT_EQ(field->caption().toStdString(), item.label) << item.id;
+                EXPECT_TRUE(panel->label(item.key)->isHidden()) << item.id;
+            }
         }
         if (!control) EXPECT_FALSE(panel->shown(item.key)) << item.id << ": hidden";
     }

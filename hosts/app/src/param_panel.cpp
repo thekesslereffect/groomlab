@@ -453,12 +453,11 @@ QWidget* ParamPanel::attributeEditor(Row& row, const json& p, const json& value,
 }
 
 QWidget* ParamPanel::numberEditor(Row& row, const json& p, const json& value, const QString& caption) {
-    // One slider with the caption and the number on its line (the number edited inline, a value
+    // One fill field with the caption and the number inside (the number edited inline, a value
     // typed past the span widening it): the span fits the default, the value may go anywhere.
     const std::string name = row.name;
     const bool integer = row.kind == "int";
     auto* slider = new ValueSlider(formHost_);
-    slider->setStacked(true);
     slider->setCaption(caption);
     slider->setFill(integer ? theme::purple() : theme::blue());
     // Shown in the spec's unit: a fraction as a percentage (the slider holds the value x 100, the
@@ -878,6 +877,11 @@ void ParamPanel::build() {
             rowHost->setObjectName(QStringLiteral("paramRow_") + QString::fromStdString(name));
             if (exposed && !fedBy.empty()) {
                 field->setEnabled(false);
+                // Driven: the field in the theme's driven color (Maya's driven attribute), resting.
+                if (auto* s = qobject_cast<ValueSlider*>(field)) {
+                    const QColor driven = theme::uiColor("driven");
+                    s->setStateColor(driven.isValid() ? driven : theme::graphDriven());
+                }
                 auto* fed = new QLabel(tr("← set by %1").arg(QString::fromStdString(fedBy)), rowHost);
                 fed->setObjectName(QStringLiteral("paramFed_") + QString::fromStdString(name));
                 fed->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));

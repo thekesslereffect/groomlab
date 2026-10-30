@@ -3,7 +3,7 @@
 
 // The painted widgets the app's UI is made of, where a style sheet is not enough: glass panels
 // (a translucent rounded rectangle over the viewport, or nothing at all docked), round and pill
-// buttons with tinted icons, sliders with a colored fill and a mono value, the segmented mode
+// buttons with tinted icons, number fields filled by their value, the segmented mode
 // switcher, and text drawn straight on the viewport with a shadow. Every widget paints with alpha and no background of
 // its own, so whatever is under it shows: a true blur of the 3D frame is not possible for
 // widgets over a QRhiWidget (they cannot sample its texture), so the glass is translucency alone.
@@ -153,49 +153,63 @@ private:
 };
 
 // ---- ValueSlider ----------------------------------------------------------------------------------
-// A rounded 8 px track with a colored fill from the left, the caption in the UI font and the
-// value in the mono font. Two layouts: a row (caption, track, value: the brush bar) and stacked
-// (caption and value on a line over a track as wide as the widget: the panels). The whole widget
-// is the hit area: a press on the track jumps there and drags, a press anywhere else drags the
-// value relatively (no jump), the wheel steps it, and a double click (or a click on the value)
-// edits the number inline (Enter sets it, Escape keeps the old one). A value typed past the
-// range widens the range (within the limits), as Maya's soft ranges do.
+// A number typed or arithmetic ("0.5*2", "1/3", "-(2+1)"; "," as the decimal point): numbers,
+// + - * /, parentheses and unary signs, nothing else (no names, no scripting). False (and *value
+// untouched) for anything else, a division by zero included.
+bool parseNumberExpression(const QString& text, double* value);
+
+// A numeric param as one fill field (the design's FillField, Blender's and Maya's number fields):
+// a rounded rect a row tall (the theme's raised tone, a 1 px edge, the control radius), the
+// caption inside at the left (dim) and the value at the right (tabular digits, the format's unit),
+// filled from the left by the value's place in the range (the theme's selection tone).
+//   - A drag (past 3 px) scrubs relative to the press: the field's width is the range; Shift a
+//     tenth of the speed, Ctrl steps of ten; the drag stays inside the range.
+//   - A click (no drag) opens the inline edit with the number selected: Enter, Tab or clicking
+//     away sets it, Escape puts the old one back; it takes arithmetic (parseNumberExpression). A
+//     value typed past the range widens the range (within the limits), as Maya's soft ranges do.
+//   - Focused (a click or Tab): Enter or F2 types, the arrows nudge one step (Shift: ten); the
+//     wheel steps it only while focused, so it never steals the panel's scrolling.
+// A state color (a driven param) tints the field and its edge; disabled, it is drawn faded.
 class ValueSlider : public QWidget {
     Q_OBJECT
 public:
     explicit ValueSlider(QWidget* parent = nullptr);
-    void setRange(double min, double max);   // the track's span (a typed value may widen it)
+    void setRange(double min, double max);   // the fill's span, the drag's (a typed value may widen it)
     void setLimits(double min, double max);  // what a typed value may reach (unbounded by default)
     void setValue(double value);  // clamped to the limits (the range widens to show it); no signal
     double value() const { return value_; }
     QString shownText() const { return format_(value_); }  // the value as drawn (its format)
     double minimum() const { return min_; }
     double maximum() const { return max_; }
-    void setFill(const QColor& color);
-    void setTrackWidth(int width);  // a row's track alone (0: as wide as the row leaves); the value text comes after
-    void setValueWidth(int width);  // room for the text (0: none shown)
+    void setFill(const QColor& color);  // a glass theme's fill (a solid theme fills with ui.selection)
+    QColor fillColor() const;           // the fill as drawn
+    void setTrackWidth(int width);  // the field's preferred width (0: what its texts need)
+    void setValueWidth(int width);  // the room the value's text keeps at least
     void setFormat(std::function<QString(double)> format);
     void setDecimals(int decimals);  // the default format's and the inline edit's precision
-    void setStep(double step);       // the wheel's step
-    void setInteger(bool integer);   // whole values only (the wheel steps by 1)
-    // A caption before the track ("Radius"), dim.
+    void setStep(double step);       // the arrows' and the wheel's step, what a drag snaps to (0: a 100th of the range, rounded)
+    double step() const;             // as used
+    void setInteger(bool integer);   // whole values only (the step at least 1)
+    // The name inside the field at the left ("Radius"), dim.
     void setCaption(const QString& caption);
-    // Stacked: the caption and the value on a line above a track as wide as the widget (the
-    // panels' sliders) instead of all in one row (the brush bar's).
-    void setStacked(bool stacked);
+    QString caption() const { return caption_; }
+    // A param's state shown on the field (Maya's keyed, animated or driven colors: ui.keyed,
+    // ui.animated, ui.driven); invalid: none.
+    void setStateColor(const QColor& color);
+    QColor stateColor() const { return state_; }
     bool editing() const;  // the inline edit is open
-    void beginEdit();      // opens the inline edit (a double click, a click on the value)
+    void beginEdit();      // opens the inline edit (a click, Enter, F2), the number selected
     // Enter: the text parsed and set as one change (pressed, valueChanged, released); false
     // when the text is no number (the edit stays open).
     bool commitEdit();
-    void cancelEdit();
+    void cancelEdit();         // Escape: closed, the value as it was
     QString editText() const;  // what the inline edit holds ("" when closed)
     void setEditText(const QString& text);
     QSize sizeHint() const override;
-    // As tall as the hint: a layout squeezed into a scroll area keeps the caption line.
-    QSize minimumSizeHint() const override { return QSize(48, sizeHint().height()); }
+    QSize minimumSizeHint() const override;
 
 signals:
+    // A drag's or a step's start, each change, its end; a click that only opens the edit sends none.
     void valueChanged(double value);
     void pressed();
     void released();
@@ -207,31 +221,39 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
+    void focusInEvent(QFocusEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
+    void enterEvent(QEnterEvent* event) override;
+    void leaveEvent(QEvent* event) override;
+    void changeEvent(QEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;  // the inline edit's keys and focus
 
 private:
-    QRect trackRect() const;
-    QRect valueRect() const;
+    int captionAdvance() const;
+    int valueAdvance() const;
     double snapped(double value) const;  // to the limits, and to whole numbers for an integer slider
-    void setFromX(qreal x);
-    void setLive(double value);  // a step of a drag or the wheel: signalled when it changed
+    void setLive(double value);          // a step of a drag: signalled when it changed
+    void stepBy(double steps);           // an arrow or the wheel: one change of its own
     void placeEditor();
+    void closeEditor();
     double min_ = 0.0, max_ = 1.0, value_ = 0.5, step_ = 0.0;
     double lowLimit_ = -1e300, highLimit_ = 1e300;
     int decimals_ = 2;
     bool integer_ = false;
     QColor fill_;
-    int trackWidth_ = 96, valueWidth_ = 36;
-    int captionWidth_ = 0;
+    QColor state_;
+    int trackWidth_ = 0, valueWidth_ = 0;
     QString caption_;
     std::function<QString(double)> format_;
     bool dragging_ = false;
-    bool relative_ = false;  // the drag moves the value by the mouse's travel, not to its position
-    bool moved_ = false;     // the press moved before the release (else it was a click)
-    bool pressOnValue_ = false;
-    qreal lastX_ = 0.0;
-    bool stacked_ = false;
+    bool moved_ = false;  // the press went past the threshold (a drag, not a click)
+    qreal pressX_ = 0.0, lastX_ = 0.0;
+    double raw_ = 0.0;    // the drag's value before snapping (small moves add up)
+    bool hover_ = false;
+    bool keyFocus_ = false;  // focused by the keyboard (the edge shows it)
+    bool closing_ = false;   // the edit closing (its focus-out is not a commit)
     QLineEdit* editor_ = nullptr;
 };
 

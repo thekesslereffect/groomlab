@@ -137,6 +137,9 @@ int controlRadius();
 int smallRadius();
 int panelRadius();
 int rowHeight();
+// The UI's text size in pixels: ui.fontSize (11-14, 12 unless the theme says; a glass theme's 13),
+// the style sheet's and the painted fields'.
+int fontSize();
 
 // ---- Brushes --------------------------------------------------------------------------------------
 // The rail's tools are the core's brush catalog (brush_catalog.h: the ids, labels, categories
