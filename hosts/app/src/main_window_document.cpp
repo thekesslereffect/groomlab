@@ -891,7 +891,7 @@ void MainWindow::refreshStarter() {
             if (std::find(types.begin(), types.end(), n.type) != types.end()) look = true;
         }
     }
-    groomTools_->setStarterProgress(guides, look);
+    host_->setStarterProgress(guides, look);
 }
 
 void MainWindow::refreshGroups() {

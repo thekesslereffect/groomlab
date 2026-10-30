@@ -157,7 +157,8 @@ void MainWindow::buildPanels() {
             viewport_->setToolMode(Viewport::ToolMode::Camera);
         }
     });
-    connect(groomTools_, &GroomTools::starterStepRequested, this, [this](const QString& step) {
+    // The first-groom card over the viewport (overlay.h): its steps pick their tools.
+    connect(host_, &OverlayHost::starterStepRequested, this, [this](const QString& step) {
         if (step == QLatin1String("guides")) {
             groomTools_->showTab(QStringLiteral("tools"));
             chooseTool(QStringLiteral("place"));
@@ -165,13 +166,13 @@ void MainWindow::buildPanels() {
             setGraphShown(true);
         }
     });
-    connect(groomTools_, &GroomTools::starterDismissRequested, this, [this] {
+    connect(host_, &OverlayHost::starterDismissRequested, this, [this] {
         starterDismissed_ = true;
         if (interactive_) QSettings().setValue(QStringLiteral("ui/hideStarter"), true);
-        groomTools_->setStarterDismissed(true);
+        host_->setStarterDismissed(true);
     });
     starterDismissed_ = interactive_ && QSettings().value(QStringLiteral("ui/hideStarter"), false).toBool();
-    groomTools_->setStarterDismissed(starterDismissed_);
+    host_->setStarterDismissed(starterDismissed_);
     groomTools_->setSculptDisplay(settings_.sculptDisplay);
     guidesPanel_ = new GuidesPanel();
     guidesPanel_->setPartsShown(false);  // (the Part tool's card lists them, as Maya's)

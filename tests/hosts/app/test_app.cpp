@@ -794,9 +794,31 @@ TEST(AppTheme, ViewportOverlayFollowsTheCorners) {
     EXPECT_NEAR(l.prompt.center().x(), 500, 1);
     EXPECT_LT(l.prompt.center().y(), 350) << "a little above the middle";
     EXPECT_NEAR(l.emptyCard.center().y(), 350, 1);
+    EXPECT_TRUE(l.starter.isNull()) << "not asked";
+    // The first-groom card bottom-left, stacked above the stats; the toast above it where they
+    // would meet.
+    request.starter = QSize(256, 110);
+    request.toast = QSize(600, 36);
+    const theme::ViewportOverlayLayout s = theme::layoutViewportOverlay(request);
+    EXPECT_EQ(s.starter.left(), 12);
+    EXPECT_EQ(s.starter.bottom(), s.stats.top() - 1 - 8);
+    EXPECT_FALSE(s.starter.intersects(s.stats));
+    EXPECT_FALSE(s.toast.intersects(s.starter)) << "the toast over the first-groom card";
+    EXPECT_LT(s.toast.bottom(), s.starter.top());
+    // A narrow toast clear of it stays down on the bottom line's level.
+    request.toast = QSize(200, 36);
+    const theme::ViewportOverlayLayout narrow = theme::layoutViewportOverlay(request);
+    EXPECT_FALSE(narrow.toast.intersects(narrow.starter));
+    EXPECT_LT(narrow.toast.bottom(), narrow.stats.top());
+    EXPECT_GT(narrow.toast.top(), narrow.starter.top()) << "beside the card, not above it";
+    // No stats (the HUD off): the card on the bottom line.
+    request.stats = QSize();
+    request.toast = QSize();
+    const theme::ViewportOverlayLayout bare = theme::layoutViewportOverlay(request);
+    EXPECT_EQ(bare.starter.bottom(), 700 - 12 - 1);
     // Nothing asked, nothing placed.
     const theme::ViewportOverlayLayout none = theme::layoutViewportOverlay({QSize(1000, 700)});
-    EXPECT_TRUE(none.toolLabel.isNull() && none.history.isNull() && none.stats.isNull() && none.toast.isNull());
+    EXPECT_TRUE(none.toolLabel.isNull() && none.history.isNull() && none.stats.isNull() && none.toast.isNull() && none.starter.isNull());
 }
 
 TEST(AppTheme, ViewportOverlayHasNoOverlapsAtSmallSizes) {
@@ -811,17 +833,23 @@ TEST(AppTheme, ViewportOverlayHasNoOverlapsAtSmallSizes) {
         request.stats = QSize(300, 18);
         request.refine = QSize(160, 18);
         request.toast = QSize(std::min(560, size.width() - 48), 36);
+        request.starter = QSize(256, 110);
         const theme::ViewportOverlayLayout l = theme::layoutViewportOverlay(request);
         const QRect view(QPoint(0, 0), size);
-        for (const QRect& r : {l.toolLabel, l.history, l.stats, l.refine, l.toast}) {
-            EXPECT_TRUE(view.contains(r)) << r.x() << "," << r.y() << " " << r.width() << "x" << r.height();
+        for (const QRect& r : {l.toolLabel, l.history, l.stats, l.refine, l.toast, l.starter}) {
+            if (!r.isNull()) EXPECT_TRUE(view.contains(r)) << r.x() << "," << r.y() << " " << r.width() << "x" << r.height();
         }
-        for (const QRect& r : {l.toolLabel, l.stats, l.refine, l.toast}) {
+        for (const QRect& r : {l.toolLabel, l.stats, l.refine, l.toast, l.starter}) {
             EXPECT_FALSE(l.history.intersects(r)) << "Undo and Redo over another piece at " << r.x() << "," << r.y();
         }
         EXPECT_FALSE(l.stats.intersects(l.refine)) << "the refine line over the stats";
         EXPECT_FALSE(l.toast.intersects(l.stats)) << "the toast over the stats";
         EXPECT_FALSE(l.toast.intersects(l.refine)) << "the toast over the refine line";
+        // The first-groom card (left out when there is no room for it) never meets the rest.
+        for (const QRect& r : {l.toolLabel, l.stats, l.refine, l.toast}) {
+            EXPECT_FALSE(l.starter.intersects(r)) << "the first-groom card over a piece at " << r.x() << "," << r.y();
+        }
+        if (size.height() >= 420) EXPECT_FALSE(l.starter.isNull()) << "room for it";
     }
 }
 

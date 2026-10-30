@@ -22,6 +22,7 @@
 #include <QLineEdit>
 #include <QSpinBox>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include "groomlab/hair_color.h"
@@ -96,6 +97,25 @@ QLabel* valueLabel(const QString& text = {}) {
     return l;
 }
 
+// A ghost icon button for an input's row (the Groom Tools' glyph role): the ui_<icon>.svg tinted
+// the dim text, brighter while hovered or pressed.
+QToolButton* inputAction(const char* icon, const QString& tip, const QString& name) {
+    auto* b = new QToolButton();
+    b->setObjectName(name);
+    b->setProperty("role", "glyph");
+    b->setAutoRaise(true);
+    b->setToolTip(tip);
+    b->setIconSize(QSize(14, 14));
+    const QString resource = QStringLiteral(":/groomlab/icons/ui_%1.svg").arg(QLatin1String(icon));
+    QIcon tinted;
+    tinted.addPixmap(tintedIcon(resource, theme::textDim(), 14, 2.0), QIcon::Normal);
+    tinted.addPixmap(tintedIcon(resource, theme::text(), 14, 2.0), QIcon::Active);
+    tinted.addPixmap(tintedIcon(resource, theme::textMuted(), 14, 2.0), QIcon::Disabled);
+    b->setIcon(tinted);
+    b->setFixedSize(22, 22);
+    return b;
+}
+
 QWidget* hbox(std::initializer_list<QWidget*> widgets, int stretchFirst = 1) {
     auto* w = new QWidget();
     auto* row = new QHBoxLayout(w);
@@ -139,18 +159,8 @@ void MainWindow::buildProperties() {
     properties_ = new PropertiesPanel();
     PropertiesPanel* p = properties_;
 
-    // ---- Groom: the two windows, the preview's density and budget, the strand count, Locked.
-    {
-        auto* tools = smallButton(PropertiesPanel::partLabel("groomButtons", "groomTools"), PropertiesPanel::partTip("groomButtons", "groomTools"));
-        auto* graph = smallButton(PropertiesPanel::partLabel("groomButtons", "graphEditor"), PropertiesPanel::partTip("groomButtons", "graphEditor"));
-        tools->setObjectName(QStringLiteral("propGroomTools"));
-        graph->setObjectName(QStringLiteral("propGraphEditor"));
-        connect(tools, &QPushButton::clicked, this, [this] { showUiPanel(QStringLiteral("brush")); });
-        connect(graph, &QPushButton::clicked, this, [this] { setGraphShown(true); });
-        auto* row = hbox({tools, graph}, 0);
-        static_cast<QHBoxLayout*>(row->layout())->addStretch(1);
-        p->setBlock("groomButtons", row);
-    }
+    // ---- Groom: the preview's density and budget, the strand count, Locked. (properties.json's
+    // groomButtons, Maya's two window buttons, are not the app's: its docks are the windows.)
     density_ = rowSlider(0.001, 1.0, 3, 0.01, theme::purple());
     density_->setLimits(0.001, 1.0);
     density_->setValue(1.0);
@@ -169,49 +179,66 @@ void MainWindow::buildProperties() {
     connect(density_, &ValueSlider::released, this, [this] { reevaluate(); });
     connect(budget_, &ValueSlider::released, this, [this] { reevaluate(); });
 
-    // ---- Inputs: the scalp, its rest pose, the other scalps, the guides, the colliders, the file.
+    // ---- Inputs: the scalp, its rest pose, the other scalps, the guides, the colliders, the file;
+    // a row each (the design's): a muted icon, the name, what it is, and its one action as a
+    // ghost icon button (the File row's two: Reload and Save).
     {
         inputsBlock_ = new QWidget();
         auto* grid = new QGridLayout(inputsBlock_);
         grid->setContentsMargins(0, 0, 0, 0);
-        grid->setHorizontalSpacing(10);
-        grid->setVerticalSpacing(5);
-        grid->setColumnStretch(0, 2);
-        grid->setColumnStretch(1, 3);
+        grid->setHorizontalSpacing(8);
+        grid->setVerticalSpacing(2);
+        grid->setColumnStretch(2, 1);
         int row = 0;
-        auto add = [&](const char* part, std::initializer_list<QPushButton*> buttons) {
+        auto add = [&](const char* part, const char* icon, std::initializer_list<QToolButton*> buttons) {
+            auto* mark = new QLabel();
+            mark->setObjectName(QStringLiteral("inputsIcon_") + QLatin1String(part));
+            mark->setPixmap(tintedIcon(QStringLiteral(":/groomlab/icons/ui_%1.svg").arg(QLatin1String(icon)), theme::textMuted(), 14,
+                                       inputsBlock_->devicePixelRatioF()));
+            mark->setFixedSize(16, 22);
+            mark->setAlignment(Qt::AlignCenter);
             auto* label = new QLabel(PropertiesPanel::partLabel("inputs", part));
             label->setProperty("role", "propLabel");
             label->setToolTip(PropertiesPanel::partTip("inputs", part));
+            label->setMinimumWidth(56);
+            // One line (the row's height; the whole text in the tip when it is cut).
             auto* value = valueLabel();
+            value->setWordWrap(false);
+            value->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
             value->setObjectName(QStringLiteral("inputs_") + QLatin1String(part));
             value->setToolTip(label->toolTip());
-            auto* host = new QWidget();
-            auto* line = new QHBoxLayout(host);
+            auto* actions = new QWidget();
+            actions->setObjectName(QStringLiteral("inputsActions_") + QLatin1String(part));
+            auto* line = new QHBoxLayout(actions);
             line->setContentsMargins(0, 0, 0, 0);
-            line->setSpacing(4);
-            line->addWidget(value, 1);
-            for (QPushButton* b : buttons) line->addWidget(b);
-            grid->addWidget(label, row, 0, Qt::AlignTop);
-            grid->addWidget(host, row, 1);
+            line->setSpacing(0);
+            for (QToolButton* b : buttons) line->addWidget(b);
+            grid->addWidget(mark, row, 0, Qt::AlignTop);
+            grid->addWidget(label, row, 1, Qt::AlignVCenter);
+            grid->addWidget(value, row, 2, Qt::AlignVCenter);
+            grid->addWidget(actions, row, 3, Qt::AlignRight | Qt::AlignVCenter);
+            grid->setRowMinimumHeight(row, 22);
             ++row;
         };
-        auto* transfer = smallButton(tr("Transfer..."), tr("Move the groom onto another mesh (guides, parts and flow re-rooted, the maps projected)"));
-        connect(transfer, &QPushButton::clicked, this, [this] { openTransferWindow(); });
-        add("scalp", {transfer});
-        add("rest", {});
-        add("scalps", {});
-        auto* edit = smallButton(tr("Edit"), tr("Edit the guides in the Groom Tools"));
-        connect(edit, &QPushButton::clicked, this, [this] { showUiPanel(QStringLiteral("guides")); });
-        add("guides", {edit});
-        auto* prop = smallButton(tr("Add..."), tr("Add a prop mesh beside the groom (an .obj): a collider by its name for ColliderMesh nodes"));
-        connect(prop, &QPushButton::clicked, this, [this] { chooseProp(); });
-        add("colliders", {prop});
-        auto* reload = smallButton(tr("Reload"), tr("Read the groom file again (another host's edits); unsaved edits are asked about first"));
-        auto* save = smallButton(tr("Save"), tr("Write the groom to its file"));
-        connect(reload, &QPushButton::clicked, this, [this] { askReload(); });
-        connect(save, &QPushButton::clicked, this, [this] { this->save(); });
-        add("file", {reload, save});
+        auto* transfer = inputAction("link", tr("Transfer to another mesh: the guides, parts and flow re-rooted, the maps projected"),
+                                     QStringLiteral("inputs_scalp_transfer"));
+        connect(transfer, &QToolButton::clicked, this, [this] { openTransferWindow(); });
+        add("scalp", "box", {transfer});
+        add("rest", "box", {});
+        add("scalps", "box", {});
+        auto* edit = inputAction("glyph_rename", tr("Edit the guides in the Groom Tools"), QStringLiteral("inputs_guides_edit"));
+        connect(edit, &QToolButton::clicked, this, [this] { showUiPanel(QStringLiteral("guides")); });
+        add("guides", "spline", {edit});
+        auto* prop = inputAction("plus", tr("Add a collider: a prop mesh beside the groom (an .obj), by its name for ColliderMesh nodes"),
+                                 QStringLiteral("inputs_colliders_add"));
+        connect(prop, &QToolButton::clicked, this, [this] { chooseProp(); });
+        add("colliders", "shield", {prop});
+        auto* reload = inputAction("reload", tr("Reload: read the groom file again (another host's edits); unsaved edits are asked about first"),
+                                   QStringLiteral("inputs_file_reload"));
+        auto* save = inputAction("save", tr("Save: write the groom to its file (Ctrl+S)"), QStringLiteral("inputs_file_save"));
+        connect(reload, &QToolButton::clicked, this, [this] { askReload(); });
+        connect(save, &QToolButton::clicked, this, [this] { this->save(); });
+        add("file", "file", {reload, save});
         p->setBlock("inputs", inputsBlock_);
     }
     // Scalp Subdivision: the scalp's Catmull-Clark levels, and the triangles that makes.
@@ -509,8 +536,14 @@ void MainWindow::refreshProperties() {
     const bool open = document_ != nullptr;
     properties_->setEnabled(true);
     // The inputs.
+    // An input it has: the soft text; none (yet): italic and muted, as the design's.
     auto set = [this](const char* part, const QString& text) {
-        if (auto* l = inputsBlock_->findChild<QLabel*>(QStringLiteral("inputs_") + QLatin1String(part))) l->setText(text);
+        auto* l = inputsBlock_->findChild<QLabel*>(QStringLiteral("inputs_") + QLatin1String(part));
+        if (!l) return;
+        l->setText(text);
+        const bool none = text == tr("none") || text.startsWith(tr("none yet")) || text == QStringLiteral("—");
+        l->setStyleSheet(none ? QStringLiteral("color: %1; font-style: italic;").arg(theme::textMuted().name())
+                              : QStringLiteral("color: %1;").arg(theme::textSoft().name()));
     };
     if (open) {
         const GroomFile& file = document_->file();
@@ -526,7 +559,7 @@ void MainWindow::refreshProperties() {
             groups = h->groups().size();
         }
         set("guides", guides ? tr("%1 guides in %2 group%3").arg(guides).arg(groups).arg(groups == 1 ? QString() : QStringLiteral("s"))
-                             : tr("none yet: place or draw them"));
+                             : tr("none yet: place them"));
         QStringList colliders;
         for (const auto& [name, mesh] : file.data.meshes) colliders << qs(name);
         for (const SurfacePtr& prop : props_) {

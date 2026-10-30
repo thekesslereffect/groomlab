@@ -584,13 +584,41 @@ ViewportOverlayLayout layoutViewportOverlay(const ViewportOverlayRequest& r, int
         out.refine = QRect(QPoint(w - m - refine.width(), h - m - refine.height()), refine);
         if (out.refine.intersects(out.stats)) out.refine.moveBottom(out.stats.top() - 1 - 6);
     }
-    // The toast centered above the bottom lines.
+    // The first-groom card bottom-left above the stats (and above the refine line when that one
+    // sits under it); left out when it would reach the top row.
+    const QSize starter = fit(r.starter);
+    if (!starter.isEmpty()) {
+        int above = h - m;
+        for (const QRect& r2 : {out.stats, out.refine}) {
+            if (!r2.isNull() && r2.left() < m + starter.width()) above = std::min(above, r2.top() - 8);
+        }
+        const QRect card(QPoint(m, above - starter.height()), starter);
+        int top = m;
+        for (const QRect& r2 : {out.toolLabel, out.history}) {
+            if (!r2.isNull() && r2.left() < card.right()) top = std::max(top, r2.bottom() + 1 + 8);
+        }
+        if (card.top() >= top) out.starter = card;
+    }
+    // The toast centered above the bottom lines (and above the first-groom card where they would meet).
     int bottom = h - m;
     for (const QRect& r2 : {out.stats, out.refine}) {
         if (!r2.isNull()) bottom = std::min(bottom, r2.top() - 8);
     }
     const QSize toast = fit(r.toast);
-    if (!toast.isEmpty()) out.toast = QRect(QPoint((w - toast.width()) / 2, std::max(m, bottom - toast.height())), toast);
+    if (!toast.isEmpty()) {
+        const int left = (w - toast.width()) / 2;
+        if (!out.starter.isNull() && left <= out.starter.right()) {
+            // No room for the toast above the card, under the top row (a short view): the toast
+            // wins for its seconds.
+            int below = m;
+            for (const QRect& r2 : {out.toolLabel, out.history}) {
+                if (!r2.isNull()) below = std::max(below, r2.bottom() + 1 + 8);
+            }
+            if (out.starter.top() - 8 - toast.height() < below) out.starter = QRect();
+            else bottom = std::min(bottom, out.starter.top() - 8);
+        }
+        out.toast = QRect(QPoint(left, std::max(m, bottom - toast.height())), toast);
+    }
     // The prompt a little above the middle, the card in the middle.
     const QSize prompt = fit(r.prompt), card = fit(r.emptyCard);
     if (!prompt.isEmpty()) out.prompt = QRect(QPoint((w - prompt.width()) / 2, std::max(m, (h - prompt.height()) / 2 - 40)), prompt);
@@ -704,6 +732,15 @@ QToolButton[role="chip"]:disabled { color: @muted@; }
 QToolButton[role="chip"]::menu-indicator, QToolButton[role="glyph"]::menu-indicator { image: none; width: 0; }
 QToolButton[role="glyph"], QToolButton[role="glyph"]:checked { background: transparent; border: none; border-radius: @radius@px; padding: 2px; }
 QToolButton[role="glyph"]:hover { background: @hover@; }
+/* The menu bar's corner (MainWindow::buildMenuCorner): the file name, Render (ghost), Export (the accent). */
+QLabel[role="cornerName"] { color: @muted@; font-size: @smallSize@px; }
+QToolButton[role="cornerGhost"], QToolButton[role="cornerPrimary"] { border: 1px solid transparent; border-radius: @radius@px; padding: 2px 10px;
+    font-weight: 600; min-height: 18px; }
+QToolButton[role="cornerGhost"] { background: transparent; color: @soft@; }
+QToolButton[role="cornerGhost"]:hover, QToolButton[role="cornerGhost"]:pressed { background: @hover@; color: @text@; }
+QToolButton[role="cornerPrimary"] { background: @accent@; color: @accentText@; border-color: @accent@; }
+QToolButton[role="cornerPrimary"]:hover { background: @accent@; }
+QToolButton[role="cornerGhost"]::menu-indicator, QToolButton[role="cornerPrimary"]::menu-indicator { image: none; width: 0; }
 QPushButton[role="primary"] { background: @accent@; color: @accentText@; border-color: @accent@; font-weight: 700; }
 QPushButton[role="primary"]:hover { background: @accent@; }
 QPushButton[role="section"], QPushButton[role="section"]:checked, QPushButton[role="section"]:pressed {

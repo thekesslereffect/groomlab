@@ -12,7 +12,6 @@
 //                 others dimmed); Symmetry and across what (World X, Y, Z, Topology)
 //   status        a line that takes no room while it has nothing to say
 //   no groom      palette.empty: Start a groom (New Groom on Mesh, Import ▾)
-//   first groom   palette.starter: Place some guides, Give it a look (ticked as the groom gets there)
 //   tabs          palette.tabs: Tools (the tiles by category: Create, Shape, Trim, Guides; Unfreeze
 //                 All beside Freeze), Paint (the Paint tile over the maps panel), Correctives (the
 //                 correctives panel), Photos (reference photos as cameras: photos_panel.h)
@@ -20,8 +19,9 @@
 //   sections      palette.sections: Tubes (tube_panel.h: the targets' tube shape and sections, the shape
 //                 library and its outline editor, Fill Tubes; opened by Place, Draw and Shape), While sculpting (how the strands draw
 //                 while a stroke is live, Full density), Guide groups & edits (the guides panel,
-//                 Tools tab), Output (palette.output: Simulate Range, Export ▾, Render ▾, Studio ▾,
-//                 Transfer..., Import ▾)
+//                 Tools tab). palette.output (Maya's and Blender's Output strip) is not the app's:
+//                 Export ▾ and Render ▾ sit in the menu bar's corner (MainWindow), the rest in the
+//                 GroomLab menu; the first-groom steps float over the viewport (overlay.h).
 //
 // The window (MainWindow) owns what the tools run: the dock asks (toolChosen, the signals below),
 // the window does it and tells the dock back (setTool, setGroups, refresh).
@@ -113,9 +113,9 @@ public:
 
     // ---- What it works on ----------------------------------------------------------------------
     void setSession(BrushSession* session);
-    // The window's bindings (app_actions.h): the More menu, the empty state's buttons, the Output
-    // strip and the Parts box's buttons are filled from the definitions with them (ids without a
-    // binding hidden, as in the menus).
+    // The window's bindings (app_actions.h): the More menu, the empty state's buttons and the Parts
+    // box's buttons are filled from the definitions with them (ids without a binding hidden, as in
+    // the menus).
     void setBindings(const ui::Bindings& bindings, const ui::FillOptions& options);
     // The open groom's name ("" none: the empty state alone shows).
     void setGroomName(const QString& name);
@@ -132,11 +132,12 @@ public:
     // Whether a section (palette.sections) shows for a tool on a tab: its "tools" (the tool one of
     // them) and "tabs" (the tab one of them); one with neither always shows. Maya's and Blender's rule.
     static bool sectionShown(const ui::json& section, const std::string& tool, const std::string& tab);
-    // The first-groom steps' progress (palette.starter): shown while a groom is open, a step is
-    // left and they were not dismissed.
-    void setStarterProgress(bool guidesPlaced, bool lookGiven);
-    void setStarterDismissed(bool dismissed);
-    bool starterShown() const;
+    // A button with a definitions menu (`ref`, e.g. "menus/output.export") that runs the window's
+    // bindings: the empty state's Import ▾, the menu bar corner's Export ▾ and Render ▾. Its menu's
+    // actions take `prefix` before their names, so the window's actions (found by name: tests,
+    // scripts) stay the menu bar's own.
+    static QToolButton* menuButton(const std::string& ref, const QString& text, const QString& tip, const ui::Bindings& bindings,
+                                   const ui::FillOptions& options, QWidget* parent, const QString& prefix = QStringLiteral("groomTools_"));
 
     // ---- The tool ------------------------------------------------------------------------------
     // The active tool: a catalog id ("" none, the camera), its tiles lit and its card shown.
@@ -199,7 +200,6 @@ public:
     QTabBar* tabBar() const { return tabs_; }
     QCheckBox* fullDensityBox() const { return fullDensity_; }
     QComboBox* sculptDisplayBox() const { return sculpt_; }
-    const std::vector<QToolButton*>& outputChips() const { return outputChips_; }
     QScrollArea* scrollArea() const { return scroll_; }
 
 signals:
@@ -218,8 +218,6 @@ signals:
     void guidesVisibilityToggled(bool visible);  // the guides' eye: every guide group (Properties > Guides)
     void graphRequested();
     void tabChanged(const QString& id);
-    void starterStepRequested(const QString& id);  // "guides" or "look"
-    void starterDismissRequested();
 
 private:
     QToolButton* makeTile(const std::string& id, const QString& label, const QString& tip);
@@ -229,12 +227,9 @@ private:
     void groupPicked();
     void symmetryEdited();
     void refreshCard();           // the heading, hint and card for the tool
-    void refreshStarter();
     void refreshVisibility();     // empty state vs the work, the sections (refreshSections)
     void refreshSections();       // the sections the tool and tab use (palette.sections' tools, tabs)
-    QWidget* outputStrip(const ui::Bindings& bindings, const ui::FillOptions& options);
     QToolButton* menuChip(const ui::Item& item, const ui::Bindings& bindings, const ui::FillOptions& options, QWidget* parent);
-    QToolButton* actionChip(const ui::Item& item, const ui::Bindings& bindings, QWidget* parent);
     void fitScroll(QWidget* content);  // a hosted panel's own scroll area as tall as its content
 
     BrushSession* session_ = nullptr;
@@ -242,8 +237,6 @@ private:
     QString name_;
     std::string tool_;
     bool tileLabels_ = false;  // icons alone (View > Tool Labels: the names under them)
-    bool starterDismissed_ = false;
-    bool guidesPlaced_ = false, lookGiven_ = false;
     QScrollArea* scroll_ = nullptr;
     QVBoxLayout* outer_ = nullptr;
     // Header.
@@ -262,12 +255,9 @@ private:
     QWidget* centerRow_ = nullptr;
     ValueSlider* symmetryCenter_ = nullptr;
     QLabel* status_ = nullptr;
-    // No groom; a first groom.
+    // No groom.
     QFrame* empty_ = nullptr;
     QVBoxLayout* emptyItems_ = nullptr;
-    QFrame* starter_ = nullptr;
-    std::map<std::string, QPushButton*> starterRows_;
-    QLabel* starterTip_ = nullptr;
     // The work: tabs, the tool, the sections.
     QWidget* work_ = nullptr;
     QTabBar* tabs_ = nullptr;
@@ -289,8 +279,6 @@ private:
     QWidget* groupsHolder_ = nullptr;
     QComboBox* sculpt_ = nullptr;
     QCheckBox* fullDensity_ = nullptr;
-    QWidget* outputHolder_ = nullptr;
-    std::vector<QToolButton*> outputChips_;
     // The buttons that run a binding, with the binding's enabled state (refresh).
     std::vector<std::pair<QPointer<QAbstractButton>, std::function<bool()>>> enables_;
 };

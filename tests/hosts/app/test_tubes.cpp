@@ -394,7 +394,8 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndOpensTheTubesSection) {
 
 TEST(AppGroomTools, SectionsFollowTheToolAndTheTab) {
     // palette.json's sections: Tubes with Place, Draw, Shape and Select; While sculpting with the
-    // brushes that stroke; the guide groups on the Tools tab; Output always (Maya's and Blender's rule).
+    // brushes that stroke; the guide groups on the Tools tab (Maya's and Blender's rule). Output is theirs:
+    // the app has Export and Render in the menu bar's corner.
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
     BrushSession session;
@@ -405,13 +406,12 @@ TEST(AppGroomTools, SectionsFollowTheToolAndTheTab) {
     Section* tubes = tools.section("tubes");
     Section* sculpting = tools.section("sculptDisplay");
     Section* groups = tools.section("groups");
-    Section* output = tools.section("output");
-    ASSERT_TRUE(tubes && sculpting && groups && output);
+    EXPECT_EQ(tools.section("output"), nullptr) << "palette.output: Maya's and Blender's strip";
+    ASSERT_TRUE(tubes && sculpting && groups);
     tools.setTool({});
     EXPECT_TRUE(tubes->isHidden());
     EXPECT_TRUE(sculpting->isHidden());
     EXPECT_FALSE(groups->isHidden());
-    EXPECT_FALSE(output->isHidden());
     tools.setTool("part");
     EXPECT_TRUE(tubes->isHidden());
     EXPECT_TRUE(sculpting->isHidden());
@@ -423,7 +423,6 @@ TEST(AppGroomTools, SectionsFollowTheToolAndTheTab) {
     EXPECT_TRUE(sculpting->isHidden());
     ASSERT_TRUE(tools.showTab(QStringLiteral("paint")));
     EXPECT_TRUE(groups->isHidden()) << "the guide groups: the Tools tab's";
-    EXPECT_FALSE(output->isHidden());
     ASSERT_TRUE(tools.showTab(QStringLiteral("tools")));
     EXPECT_FALSE(groups->isHidden());
     const ui::json rule = {{"id", "x"}, {"tools", {"place"}}, {"tabs", {"tools"}}};

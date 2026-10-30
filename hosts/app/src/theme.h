@@ -209,9 +209,10 @@ struct OverlayMetrics {
 };
 // What stays over the viewport once the window has docks (overlay.h): the active tool's name
 // (top-left), Undo and Redo (top-right), the stats (bottom-left, Groom) and the refine line
-// (bottom-right, Look), the toast above them, the prompt and the empty-state card centered. Each
-// size is the piece's hint; the rects stay inside the view and never meet each other (except the
-// prompt and the card, which sit over the rest).
+// (bottom-right, Look), the first-groom card above the stats (bottom-left), the toast above them,
+// the prompt and the empty-state card centered. Each size is the piece's hint; the rects stay
+// inside the view and never meet each other (except the prompt and the card, which sit over the
+// rest). A first-groom card with no room (it would meet the top row) is left out: a null rect.
 struct ViewportOverlayRequest {
     QSize view;
     QSize toolLabel;  // empty: none
@@ -221,9 +222,10 @@ struct ViewportOverlayRequest {
     QSize toast;
     QSize prompt;
     QSize emptyCard;
+    QSize starter;  // the first-groom steps (bottom-left, above the stats)
 };
 struct ViewportOverlayLayout {
-    QRect toolLabel, history, stats, refine, toast, prompt, emptyCard;
+    QRect toolLabel, history, stats, refine, toast, prompt, emptyCard, starter;
 };
 ViewportOverlayLayout layoutViewportOverlay(const ViewportOverlayRequest& request, int margin = 12);
 

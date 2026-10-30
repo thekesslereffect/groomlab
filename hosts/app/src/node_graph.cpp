@@ -506,6 +506,9 @@ void NodeGraphView::fitAll() {
     // Never so small that the names cannot be read: a bigger graph is centered at a readable size.
     scale_ = std::clamp(std::min(view.width() / bounds.width(), view.height() / bounds.height()), kReadableScale, 1.0);
     pan_ = view.center() - bounds.center() * scale_;
+    // Taller than the view at a readable size (a docked strip): the top rows from the top (the
+    // main chain and its headers), not the middle of the graph with the cards cut in half.
+    if (bounds.height() * scale_ > view.height()) pan_.setY(view.top() - bounds.top() * scale_);
     fitted_ = true;
     update();
 }
@@ -801,31 +804,64 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.drawEllipse(QPointF(rect.x() + 14, rect.y() + kHeader / 2.0), 4.0, 4.0);
         titleX = rect.x() + 24;
     }
+    // The status badges in the title row, right to left before the header toggles (Expand Inputs,
+    // Bypass): the cook time, the View eye, a warning triangle; the name gets the room left of them.
+    const NodeBadges badges = nodeBadges(node.name);
+    const bool filled = header == QLatin1String("filled");
+    const qreal row = rect.y() + kHeader / 2.0;
+    qreal x = (node.linkableParams.empty() ? bypassButtonRect(node) : inputsButtonRect(node)).left() - 4.0;
+    const QFont number = theme::numberFont(10);
+    if (!badges.time.isEmpty()) {
+        const qreal w = QFontMetricsF(number).horizontalAdvance(badges.time);
+        QColor ink = badges.timeColor;
+        if (filled) {  // on a filled header: its readable color, softer
+            ink = headerText(color);
+            ink.setAlpha(190);
+        }
+        painter.setFont(number);
+        painter.setPen(ink);
+        painter.drawText(QRectF(x - w - 1.0, rect.y(), w + 1.0, kHeader), Qt::AlignVCenter | Qt::AlignRight, badges.time);
+        x -= w + 6.0;
+    }
+    if (badges.viewed) {
+        // An eye: the viewport shows the graph up to here (View Up to Here).
+        const QPointF c(x - 7.0, row);
+        QPainterPath eye;
+        eye.moveTo(c + QPointF(-6.5, 0.0));
+        eye.quadTo(c + QPointF(0.0, -6.5), c + QPointF(6.5, 0.0));
+        eye.quadTo(c + QPointF(0.0, 6.5), c + QPointF(-6.5, 0.0));
+        const QColor blue = filled ? headerText(color) : theme::blue();
+        QPen pen(blue, 1.4);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPath(eye);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(blue);
+        painter.drawEllipse(c, 2.0, 2.0);
+        x -= 18.0;
+    }
+    if (badges.warning) {
+        // A warning triangle: the node does nothing as set (its note in the tool tip and the panel).
+        const QPointF c(x - 6.0, row);
+        const qreal size = 12.0, h = size * 0.9;
+        QPen pen(filled ? headerText(color) : theme::graphWarning(), 1.4);
+        pen.setJoinStyle(Qt::RoundJoin);
+        pen.setCapStyle(Qt::RoundCap);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPolygon(QPolygonF({c + QPointF(0.0, -h / 2.0), c + QPointF(size / 2.0, h / 2.0), c + QPointF(-size / 2.0, h / 2.0)}));
+        painter.drawLine(c + QPointF(0.0, -h * 0.12), c + QPointF(0.0, h * 0.18));
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(pen.color());
+        painter.drawEllipse(c + QPointF(0.0, h * 0.34), 0.9, 0.9);
+        x -= 17.0;
+    }
     painter.setFont(theme::uiFont(13, minimal ? 700 : 800));
     painter.setPen(headerText(color));
-    const QRectF title(titleX, rect.y(), rect.right() - titleX - (node.linkableParams.empty() ? 28 : 50), kHeader);
-    painter.drawText(title, Qt::AlignVCenter | Qt::AlignLeft, QString::fromStdString(node.name));
-    // The node's time in its last run, before the bypass toggle (a tenth of a millisecond and up).
-    if (const auto t = times_.find(node.name); t != times_.end() && t->second >= 0.05) {
-        painter.setFont(theme::numberFont(9));
-        QColor dim = headerText(color);
-        dim.setAlpha(170);
-        painter.setPen(dim);
-        const QString ms = t->second < 10.0 ? QString::number(t->second, 'f', 1) : QString::number(std::lround(t->second));
-        painter.drawText(QRectF(rect.x(), rect.y(), rect.width() - (node.linkableParams.empty() ? 30 : 55), kHeader),
-                         Qt::AlignVCenter | Qt::AlignRight, ms + QStringLiteral(" ms"));
-    }
-    // A note (the node does nothing as set): a grey "i" on the node's corner (left of the error
-    // badge when the node failed too).
-    if (notes_.count(node.name)) {
-        const QPointF corner(rect.right() - (failed ? 20.0 : 0.0), rect.top());
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(theme::graphNote());
-        painter.drawEllipse(corner, 8.0, 8.0);
-        painter.setFont(theme::uiFont(10, 800));
-        painter.setPen(theme::readableOn(theme::graphNote()));
-        painter.drawText(QRectF(corner.x() - 8.0, corner.y() - 8.0, 16.0, 16.0), Qt::AlignCenter, QStringLiteral("i"));
-    }
+    const QRectF title(titleX, rect.y(), std::max(24.0, x - titleX - 2.0), kHeader);
+    painter.drawText(title, Qt::AlignVCenter | Qt::AlignLeft,
+                     QFontMetricsF(painter.font()).elidedText(QString::fromStdString(node.name), Qt::ElideRight, title.width()));
     // When it runs, unless always: a tag under the card.
     if (node.evaluation == "viewportOnly" || node.evaluation == "renderOnly") {
         painter.setFont(theme::uiFont(10, 600));
@@ -833,11 +869,29 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.drawText(QRectF(rect.x() + 4, rect.bottom() + 2, rect.width() - 8, 16), Qt::AlignLeft | Qt::AlignVCenter,
                          node.evaluation == "viewportOnly" ? tr("viewport only") : tr("render only"));
     }
-    // The bypass toggle in the header's corner.
+    // The bypass toggle in the header's corner: a bypass glyph (a slashed circle), dim until the
+    // node is bypassed, then lit on a tile of its ink.
     const QRectF bypass = bypassButtonRect(node);
-    painter.setPen(QPen(headerText(color), 1.6));
-    painter.setBrush(node.bypass ? headerText(color) : Qt::NoBrush);
-    painter.drawEllipse(bypass.adjusted(3, 3, -3, -3));
+    {
+        QColor ink = headerText(color);
+        if (node.bypass) {
+            QColor tile = ink;
+            tile.setAlpha(46);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(tile);
+            painter.drawRoundedRect(bypass, 4.0, 4.0);
+        } else {
+            ink.setAlpha(120);
+        }
+        QPen pen(ink, node.bypass ? 1.8 : 1.5);
+        pen.setCapStyle(Qt::RoundCap);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        const QRectF ring = bypass.adjusted(4, 4, -4, -4);
+        painter.drawEllipse(ring);
+        const qreal k = ring.width() / 2.0 * 0.7071;
+        painter.drawLine(ring.center() + QPointF(-k, k), ring.center() + QPointF(k, -k));
+    }
     if (!node.linkableParams.empty()) {
         const QRectF inputs = inputsButtonRect(node);
         const bool expanded = std::all_of(node.linkableParams.begin(), node.linkableParams.end(), [&](const std::string& p) {
@@ -900,21 +954,6 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.setFont(theme::uiFont(12, 900));
         painter.setPen(theme::readableOn(theme::graphError()));
         painter.drawText(QRectF(corner.x() - 9.0, corner.y() - 9.0, 18.0, 18.0), Qt::AlignCenter, QStringLiteral("!"));
-    }
-    // Viewed (View Up to Here): a tag over the card, the viewport shows the graph up to here.
-    if (node.name == viewed_) {
-        painter.setFont(theme::uiFont(10, 800));
-        const QString tag = tr("VIEWING");
-        const qreal w = QFontMetricsF(painter.font()).horizontalAdvance(tag) + 14.0;
-        const QRectF pill(rect.x() + 10, rect.y() - 20, w, 16);
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(theme::blueLight());
-        painter.drawRoundedRect(pill, 8, 8);
-        painter.setPen(theme::readableOn(theme::blueLight()));
-        painter.drawText(pill, Qt::AlignCenter, tag);
-        painter.setPen(QPen(theme::blueLight(), 1.5, Qt::DashLine));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawRoundedRect(rect.adjusted(-5, -5, 5, 5), radius + 5, radius + 5);
     }
     if (selected) {
         painter.setPen(QPen(theme::nodeSelected(), node.name == selected_ ? 2.5 : 1.5));
@@ -1019,7 +1058,15 @@ void NodeGraphView::paintEvent(QPaintEvent* /*event*/) {
         const bool selected = static_cast<int>(i) == selectedWire_ || static_cast<int>(i) == dropWire_ || static_cast<int>(i) == searchWire_;
         QColor color = theme::portColor(nodes_[w.from].outputs[w.output].type);
         color.setAlpha(selected ? 255 : 220);
-        painter.setPen(QPen(selected ? theme::nodeSelected() : color, selected ? 3.0 : 2.0));
+        QPen pen(selected ? theme::nodeSelected() : color, selected ? 3.0 : 2.0);
+        if (wireDashed(static_cast<int>(i))) {
+            // Into or out of a bypassed node: short dashes at the card's opacity.
+            QColor faded = pen.color();
+            faded.setAlphaF(faded.alphaF() * 0.5f);
+            pen.setColor(faded);
+            pen.setDashPattern({2.0, 1.5});
+        }
+        painter.setPen(pen);
         painter.setBrush(Qt::NoBrush);
         painter.drawPath(w.path);
     }
@@ -1580,6 +1627,32 @@ void NodeGraphView::setNodeTimes(const std::vector<std::pair<std::string, double
     times_.clear();
     for (const auto& [name, ms] : times) times_[name] = ms;
     update();
+}
+
+QString NodeGraphView::timeText(double ms) {
+    if (!(ms >= 0.05)) return {};
+    return (ms < 10.0 ? QString::number(ms, 'f', 1) : QString::number(std::lround(ms))) + QStringLiteral(" ms");
+}
+
+QColor NodeGraphView::timeColor(double ms) { return ms >= kSlowNodeMs ? theme::graphWarning() : theme::textMuted(); }
+
+NodeGraphView::NodeBadges NodeGraphView::nodeBadges(const std::string& name) const {
+    NodeBadges b;
+    if (const auto t = times_.find(name); t != times_.end()) {
+        b.time = timeText(t->second);
+        b.timeColor = timeColor(t->second);
+    }
+    b.failed = errors_.count(name) > 0;
+    b.warning = notes_.count(name) > 0 && !b.failed;
+    b.viewed = !name.empty() && name == viewed_;
+    if (const int i = nodeIndex(name); i >= 0) b.bypassed = nodes_[i].bypass;
+    return b;
+}
+
+bool NodeGraphView::wireDashed(int index) const {
+    if (index < 0 || index >= static_cast<int>(wires_.size())) return false;
+    const Wire& w = wires_[index];
+    return nodes_[w.from].bypass || nodes_[w.to].bypass;
 }
 
 void NodeGraphView::setNodeErrors(const std::vector<std::pair<std::string, std::string>>& errors) {

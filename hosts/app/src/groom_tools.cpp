@@ -82,25 +82,25 @@ QToolButton* glyphButton(const char* icon, const QString& tip, QWidget* parent) 
 // The dock's menus run the menu bar's actions: their QActions take another name, so the
 // window's actions (found by name: tests, scripts) stay the menu bar's own. Kept so as the
 // menus fill again when they open (a generator's entries).
-void renameActions(QMenu* menu) {
+void renameActions(QMenu* menu, const QString& prefix) {
     for (QAction* a : menu->findChildren<QAction*>()) {
         const QString name = a->objectName();
-        if (!name.isEmpty() && !name.startsWith(QLatin1String("groomTools_"))) a->setObjectName(QStringLiteral("groomTools_") + name);
+        if (!name.isEmpty() && !name.startsWith(prefix)) a->setObjectName(prefix + name);
     }
     for (QMenu* sub : menu->findChildren<QMenu*>()) {
         const QString name = sub->objectName();
-        if (!name.isEmpty() && !name.startsWith(QLatin1String("groomTools_"))) sub->setObjectName(QStringLiteral("groomTools_") + name);
+        if (!name.isEmpty() && !name.startsWith(prefix)) sub->setObjectName(prefix + name);
         if (sub->property("renames").toBool()) continue;
         sub->setProperty("renames", true);
-        QObject::connect(sub, &QMenu::aboutToShow, sub, [sub] { renameActions(sub); });
+        QObject::connect(sub, &QMenu::aboutToShow, sub, [sub, prefix] { renameActions(sub, prefix); });
     }
 }
 
-void keepRenamed(QMenu* menu) {
-    renameActions(menu);
+void keepRenamed(QMenu* menu, const QString& prefix = QStringLiteral("groomTools_")) {
+    renameActions(menu, prefix);
     if (menu->property("renames").toBool()) return;
     menu->setProperty("renames", true);
-    QObject::connect(menu, &QMenu::aboutToShow, menu, [menu] { renameActions(menu); });
+    QObject::connect(menu, &QMenu::aboutToShow, menu, [menu, prefix] { renameActions(menu, prefix); });
 }
 
 // A hosted panel's own scroll area kept as tall as its content (the dock scrolls as one column):
@@ -402,43 +402,6 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     emptyItems_->addWidget(label(tr("Open a groom (File > Open Groom, or drop a .groom on the window), or make one on a mesh."), "about", empty_));
     outer_->addWidget(empty_);
 
-    // ---- A first groom, step by step (palette.starter).
-    starter_ = new QFrame(content);
-    starter_->setObjectName(QStringLiteral("starter"));
-    starter_->setProperty("role", "empty");
-    {
-        const ui::json& starter = palette.at("starter");
-        auto* column = new QVBoxLayout(starter_);
-        column->setContentsMargins(12, 8, 6, 10);
-        column->setSpacing(2);
-        auto* titleRow = new QHBoxLayout();
-        titleRow->addWidget(label(qs(starter.value("title", std::string())).toUpper(), "subheading", starter_), 1);
-        auto* close = new QToolButton(starter_);
-        close->setObjectName(QStringLiteral("starterDismiss"));
-        close->setProperty("role", "glyph");
-        close->setAutoRaise(true);
-        close->setText(QStringLiteral("✕"));
-        close->setToolTip(qs(starter.value("dismissTip", std::string())));
-        connect(close, &QToolButton::clicked, this, &GroomTools::starterDismissRequested);
-        titleRow->addWidget(close);
-        column->addLayout(titleRow);
-        for (const ui::json& step : starter.at("steps")) {
-            const std::string id = step.value("id", std::string());
-            auto* b = new QPushButton(qs(step.value("label", std::string())), starter_);
-            b->setObjectName(QStringLiteral("starter_") + qs(id));
-            b->setFlat(true);
-            b->setProperty("role", "step");
-            b->setToolTip(qs(step.value("tip", std::string())));
-            connect(b, &QPushButton::clicked, this, [this, id] { emit starterStepRequested(qs(id)); });
-            column->addWidget(b);
-            starterRows_[id] = b;
-        }
-        starterTip_ = label(QString(), "hint", starter_);
-        column->addWidget(starterTip_);
-    }
-    starter_->setVisible(false);
-    outer_->addWidget(starter_);
-
     // ---- The work: everything that needs a groom.
     work_ = new QWidget(content);
     work_->setObjectName(QStringLiteral("groomToolsWork"));
@@ -608,13 +571,11 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     groupsHolder_->setLayout(new QVBoxLayout());
     groupsHolder_->layout()->setContentsMargins(0, 0, 0, 0);
     bodies["groups"] = groupsHolder_;
-    outputHolder_ = new QWidget();
-    outputHolder_->setObjectName(QStringLiteral("groomToolsOutput"));
-    outputHolder_->setLayout(new QVBoxLayout());
-    outputHolder_->layout()->setContentsMargins(0, 0, 0, 0);
-    bodies["output"] = outputHolder_;
     for (const ui::json& s : palette.at("sections")) {
         const std::string id = s.value("id", std::string());
+        // Output (palette.output) is Maya's and Blender's strip: the app has Export and Render in
+        // the menu bar's corner and the rest in the GroomLab menu (MainWindow::buildMenuBar).
+        if (id == "output") continue;
         const auto body = bodies.find(id);
         if (body == bodies.end()) continue;
         auto* section = new Section(qs(s.value("label", std::string())), body->second, s.value("expanded", false), work_);
@@ -690,75 +651,38 @@ void GroomTools::setBindings(const ui::Bindings& bindings, const ui::FillOptions
             emptyItems_->addWidget(menuChip(item, bindings, options, empty_));
         }
     }
-    // ---- The Output strip.
-    while (QLayoutItem* item = outputHolder_->layout()->takeAt(0)) {
-        if (item->widget()) item->widget()->deleteLater();
-        delete item;
-    }
-    outputChips_.clear();
-    outputHolder_->layout()->addWidget(outputStrip(bindings, options));
     // ---- The Parts box.
     card_->setBindings(bindings);
     refresh();
 }
 
-QToolButton* GroomTools::actionChip(const ui::Item& item, const ui::Bindings& bindings, QWidget* parent) {
-    auto* chip = new QToolButton(parent);
-    chip->setObjectName(QStringLiteral("output_") + qs(item.id));
-    chip->setProperty("role", "chip");
-    chip->setText(qs(item.label));
-    chip->setToolTip(qs(item.tip));
-    chip->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    const ui::Binding binding = bindings.at(item.id);
-    connect(chip, &QToolButton::clicked, this, [binding, value = item.value] { binding.trigger(value, false); });
-    if (binding.enabled) enables_.emplace_back(chip, binding.enabled);
-    return chip;
+QToolButton* GroomTools::menuButton(const std::string& ref, const QString& text, const QString& tip, const ui::Bindings& bindings,
+                                    const ui::FillOptions& options, QWidget* parent, const QString& prefix) {
+    auto* button = new QToolButton(parent);
+    button->setText(text);
+    button->setToolTip(tip);
+    button->setPopupMode(QToolButton::InstantPopup);
+    auto* popup = new QMenu(button);
+    if (!ref.empty() && defs().find(ref)) ui::fillMenu(popup, defs().get(ref), bindings, options);
+    keepRenamed(popup, prefix);
+    button->setMenu(popup);
+    return button;
 }
 
 QToolButton* GroomTools::menuChip(const ui::Item& item, const ui::Bindings& bindings, const ui::FillOptions& options, QWidget* parent) {
-    auto* chip = new QToolButton(parent);
+    QToolButton* chip = menuButton(item.entry.value("ref", std::string()), qs(item.label) + QStringLiteral("  ▾"), qs(item.tip), bindings,
+                                   options, parent);
     chip->setObjectName(QStringLiteral("output_") + qs(item.id));
     chip->setProperty("role", "chip");
-    chip->setText(qs(item.label) + QStringLiteral("  ▾"));
-    chip->setToolTip(qs(item.tip));
-    chip->setPopupMode(QToolButton::InstantPopup);
     chip->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    auto* popup = new QMenu(chip);
-    popup->setObjectName(QStringLiteral("outputMenu_") + qs(item.id));
-    const std::string ref = item.entry.value("ref", std::string());
-    if (!ref.empty() && defs().find(ref)) ui::fillMenu(popup, defs().get(ref), bindings, options);
-    keepRenamed(popup);
-    chip->setMenu(popup);
+    chip->menu()->setObjectName(QStringLiteral("outputMenu_") + qs(item.id));
     return chip;
-}
-
-QWidget* GroomTools::outputStrip(const ui::Bindings& bindings, const ui::FillOptions& options) {
-    // palette.output: the steps after grooming one click away (the GroomLab menu's actions), as
-    // chips that reflow to the dock's width.
-    auto* grid = new ToolGrid();
-    grid->setObjectName(QStringLiteral("outputStrip"));
-    ui::ResolveOptions resolve = options.resolve;
-    resolve.keep = [&bindings](const std::string& id) { return bindings.count(id) > 0; };
-    resolve.dropGenerators = false;
-    std::vector<QAbstractButton*> chips;
-    for (const ui::Item& item : defs().resolve(defs().get("palette/output"), resolve)) {
-        QToolButton* chip = nullptr;
-        if (item.kind == ui::Item::Kind::Action) chip = actionChip(item, bindings, grid);
-        else if (item.kind == ui::Item::Kind::Submenu) chip = menuChip(item, bindings, options, grid);
-        if (!chip) continue;
-        chip->setMinimumSize(100, 28);  // two to a row in a narrow dock, three in a wider one
-        outputChips_.push_back(chip);
-        chips.push_back(chip);
-    }
-    grid->setButtons(std::move(chips), 3);
-    return grid;
 }
 
 void GroomTools::setGroomName(const QString& name) {
     name_ = name;
     groomName_->setText(name.isEmpty() ? tr("No groom open") : name);
     groomName_->setToolTip(name.isEmpty() ? tr("No groom open") : tr("The groom every tool works on: %1").arg(name));
-    refreshStarter();
     refreshVisibility();
     refresh();
 }
@@ -780,42 +704,6 @@ void GroomTools::setGroups(const std::vector<GroupRow>& groups) {
 void GroomTools::setParts(const std::vector<std::string>& names) { card_->setParts(names); }
 
 void GroomTools::setFlowCount(std::size_t arrows, std::size_t sinks) { card_->setFlowCount(arrows, sinks); }
-
-void GroomTools::setStarterProgress(bool guidesPlaced, bool lookGiven) {
-    guidesPlaced_ = guidesPlaced;
-    lookGiven_ = lookGiven;
-    refreshStarter();
-}
-
-void GroomTools::setStarterDismissed(bool dismissed) {
-    starterDismissed_ = dismissed;
-    refreshStarter();
-}
-
-bool GroomTools::starterShown() const { return !starter_->isHidden(); }
-
-void GroomTools::refreshStarter() {
-    const bool shown = groomOpen() && !starterDismissed_ && !(guidesPlaced_ && lookGiven_);
-    starter_->setVisible(shown);
-    if (!shown) return;
-    QString next;
-    for (const ui::json& step : defs().get("palette/starter/steps")) {
-        const std::string id = step.value("id", std::string());
-        QPushButton* b = starterRows_.at(id);
-        const bool done = id == "guides" ? guidesPlaced_ : lookGiven_;
-        const QString text = qs(step.value("label", std::string()));
-        if (done) {
-            b->setText(QStringLiteral("✓  ") + text);
-        } else {
-            b->setText((next.isEmpty() ? QStringLiteral("▶  ") : QStringLiteral("○  ")) + text);
-            if (next.isEmpty()) next = qs(step.value("tip", std::string()));
-        }
-        b->setProperty("done", done);
-        b->style()->unpolish(b);
-        b->style()->polish(b);
-    }
-    starterTip_->setText(next);
-}
 
 void GroomTools::setTool(const std::string& id) {
     tool_ = id;
@@ -1105,7 +993,7 @@ bool GroomTools::sectionShown(const ui::json& section, const std::string& tool, 
 
 void GroomTools::refreshSections() {
     // Tubes with Place, Draw, Shape and Select, While sculpting with the brushes that stroke, the guide
-    // groups on the Tools tab, Output always (palette.json's tools and tabs, as Maya and Blender).
+    // groups on the Tools tab (palette.json's tools and tabs, as Maya and Blender).
     const std::string tab = currentTab().toStdString();
     for (auto& [id, section] : sections_) {
         const auto rule = sectionRules_.find(id);

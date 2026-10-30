@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <memory>
 #include <set>
@@ -35,6 +36,7 @@
 #include <QScrollBar>
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QPointF>
 #include <QMouseEvent>
 #include <QKeyEvent>
@@ -3957,16 +3959,93 @@ TEST(AppPanels, EmptyStateDisablesWhatNeedsAGroomAndSaysWhatEachModeDoes) {
     EXPECT_TRUE(shell->graphAddButton()->isEnabled());
     EXPECT_TRUE(shell->graphEditButton()->isEnabled());
     EXPECT_TRUE(shell->cardsPanel()->isVisibleTo(&window)) << "Cards mode's panel once a groom is open";
-    // New Groom on Mesh: the next step in the Groom Tools' first-groom steps (no card over the
-    // viewport); Place some guides picks the Place brush.
+    // New Groom on Mesh: the first-groom steps in a small card over the viewport, bottom-left above
+    // the stats (not in the Groom Tools); Place some guides picks the Place brush.
     ASSERT_TRUE(window.setUiMode(QStringLiteral("groom")));
     ASSERT_TRUE(window.newGroomOnMesh(mesh));
-    EXPECT_TRUE(shell->groomTools()->starterShown());
-    EXPECT_EQ(host->findChild<QWidget*>(QStringLiteral("startHint")), nullptr) << "no start card over the viewport";
-    auto* place = shell->groomTools()->findChild<QPushButton*>(QStringLiteral("starter_guides"));
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(host->starterShown());
+    EXPECT_EQ(shell->groomTools()->findChild<QWidget*>(QStringLiteral("starter")), nullptr) << "not in the Groom Tools";
+    EXPECT_EQ(host->findChild<QWidget*>(QStringLiteral("startHint")), nullptr);
+    GlassPanel* card = host->starterCard();
+    ASSERT_NE(card, nullptr);
+    EXPECT_EQ(card->parentWidget(), host) << "over the viewport";
+    EXPECT_LT(card->geometry().center().x(), host->width() / 2) << "bottom-left";
+    EXPECT_GT(card->geometry().center().y(), host->height() / 2);
+    for (QWidget* top : {static_cast<QWidget*>(host->history())}) {
+        if (top->isVisible()) EXPECT_FALSE(card->geometry().intersects(top->geometry()));
+    }
+    // A toast never covers it.
+    host->toast(QStringLiteral("A message long enough to reach across the bottom of a narrow view, and then some more words"), false);
+    QCoreApplication::processEvents();
+    ASSERT_TRUE(host->toastShown());
+    QWidget* toast = nullptr;
+    for (GlassPanel* g : host->findChildren<GlassPanel*>(Qt::FindDirectChildrenOnly)) {
+        if (!g->isVisible() || g == card) continue;
+        for (QLabel* l : g->findChildren<QLabel*>()) {
+            if (l->text() == host->toastText()) toast = g;
+        }
+    }
+    ASSERT_NE(toast, nullptr);
+    if (host->starterShown()) EXPECT_FALSE(toast->geometry().intersects(card->geometry())) << "the toast over the first-groom card";
+    auto* place = host->findChild<QPushButton*>(QStringLiteral("starter_guides"));
     ASSERT_NE(place, nullptr);
     place->click();
     EXPECT_EQ(window.brush().toolId(), "place");
+    // Other modes leave it out; Groom brings it back.
+    ASSERT_TRUE(window.setUiMode(QStringLiteral("look")));
+    EXPECT_FALSE(host->starterShown());
+    ASSERT_TRUE(window.setUiMode(QStringLiteral("groom")));
+    EXPECT_TRUE(host->starterShown());
+    // Its x hides it (for good: ui/hideStarter in an interactive window).
+    auto* dismiss = host->findChild<QToolButton*>(QStringLiteral("starterDismiss"));
+    ASSERT_NE(dismiss, nullptr);
+    dismiss->click();
+    EXPECT_FALSE(host->starterShown());
+}
+
+TEST(AppPanels, FirstGroomCardTicksItsStepsAndGoesWhenDone) {
+    MainWindow window;
+    window.resize(1280, 720);
+    window.show();
+    OverlayHost* host = window.overlay();
+    const QString mesh = QString::fromStdString(std::string(GROOMLAB_TEST_DATA) + "/app/head_scalp.obj");
+    ASSERT_TRUE(window.newGroomOnMesh(mesh));
+    QCoreApplication::processEvents();
+    ASSERT_TRUE(host->starterShown());
+    auto* guides = host->findChild<QPushButton*>(QStringLiteral("starter_guides"));
+    auto* look = host->findChild<QPushButton*>(QStringLiteral("starter_look"));
+    auto* tip = host->findChild<QLabel*>(QStringLiteral("starterTip"));
+    ASSERT_TRUE(guides && look && tip);
+    EXPECT_FALSE(guides->property("done").toBool());
+    EXPECT_FALSE(tip->text().isEmpty()) << "the next step's tip";
+    // Steps ticked as the groom gets there; both done: the card goes.
+    host->setStarterProgress(true, false);
+    EXPECT_TRUE(guides->property("done").toBool());
+    EXPECT_FALSE(look->property("done").toBool());
+    EXPECT_TRUE(host->starterShown());
+    host->setStarterProgress(true, true);
+    EXPECT_FALSE(host->starterShown());
+    host->setStarterProgress(false, false);
+    EXPECT_TRUE(host->starterShown());
+    // Stacked over the stats line, never on it.
+    if (host->statsShown()) {
+        const ShadowText* stats = nullptr;
+        for (ShadowText* t : host->findChildren<ShadowText*>(Qt::FindDirectChildrenOnly)) {
+            if (t->isVisible() && !t->runs().empty() && t->runs().front().text.contains(QStringLiteral("strands"))) stats = t;
+        }
+        ASSERT_NE(stats, nullptr);
+        EXPECT_LT(host->starterCard()->geometry().bottom(), stats->geometry().top());
+        EXPECT_EQ(host->starterCard()->geometry().left(), stats->geometry().left());
+    }
+    // Give it a look: the Graph Editor.
+    look->click();
+    EXPECT_TRUE(window.graphShown());
+    // A view too short for it: left out until there is room.
+    host->setStarterDismissed(false);
+    window.resize(1280, 330);
+    QCoreApplication::processEvents();
+    if (host->height() < host->starterCard()->sizeHint().height() + 80) EXPECT_FALSE(host->starterShown());
 }
 
 TEST(AppPanels, ToolLabelsUnderTheTilesAndCompactTiles) {
@@ -4068,10 +4147,85 @@ TEST(AppPanels, GroomToolsTilesPickToolsAndTheEyeHidesTheGroom) {
     ASSERT_NE(open, nullptr);
     open->trigger();
     EXPECT_TRUE(window.shell()->groomToolsDock()->isVisibleTo(&window));
-    // The Output strip: palette.json's chips the app runs, in order.
-    std::vector<std::string> chips;
-    for (QToolButton* chip : tools->outputChips()) chips.push_back(chip->text().section(QStringLiteral("  "), 0, 0).toStdString());
-    EXPECT_EQ(chips, (std::vector<std::string>{"Simulate Range", "Export", "Render", "Studio", "Transfer...", "Import"}));
+    // No Output strip (palette.output is Maya's and Blender's): Export and Render sit in the menu
+    // bar's corner, the rest in the GroomLab menu.
+    EXPECT_EQ(tools->findChild<QWidget*>(QStringLiteral("section_output")), nullptr);
+    EXPECT_EQ(tools->findChild<QWidget*>(QStringLiteral("outputStrip")), nullptr);
+    EXPECT_EQ(tools->section("output"), nullptr);
+}
+
+TEST(AppPanels, MenuBarCornerHasTheFileNameRenderAndExport) {
+    MainWindow window;
+    window.resize(1280, 720);
+    window.show();
+    QWidget* corner = window.menuCorner();
+    ASSERT_NE(corner, nullptr);
+    EXPECT_EQ(window.menuBar()->cornerWidget(Qt::TopRightCorner), corner);
+    EXPECT_FALSE(window.cornerFileName()->isVisibleTo(&window)) << "no groom, no name";
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(kSampleGroom)));
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(window.cornerFileName()->isVisibleTo(&window));
+    EXPECT_EQ(window.cornerFileName()->text(), QFileInfo(QString::fromStdString(kSampleGroom)).fileName());
+    EXPECT_EQ(window.cornerFileName()->property("role").toString(), QStringLiteral("cornerName"));
+    // Render (a ghost button) left of Export (the accent), at the bar's right.
+    QToolButton* render = window.cornerRender();
+    QToolButton* exportButton = window.cornerExport();
+    ASSERT_TRUE(render && exportButton);
+    EXPECT_EQ(render->property("role").toString(), QStringLiteral("cornerGhost"));
+    EXPECT_EQ(exportButton->property("role").toString(), QStringLiteral("cornerPrimary"));
+    EXPECT_TRUE(render->text().startsWith(QStringLiteral("Render")));
+    EXPECT_TRUE(exportButton->text().startsWith(QStringLiteral("Export")));
+    EXPECT_LT(render->mapTo(&window, QPoint(0, 0)).x(), exportButton->mapTo(&window, QPoint(0, 0)).x());
+    EXPECT_GT(exportButton->mapTo(&window, QPoint(0, 0)).x(), window.width() / 2);
+    EXPECT_FALSE(render->toolTip().isEmpty());
+    EXPECT_FALSE(exportButton->toolTip().isEmpty());
+    // Whole, never cut short: the bar lays the corner out again as the name changes.
+    for (QWidget* w : {static_cast<QWidget*>(window.cornerFileName()), static_cast<QWidget*>(render), static_cast<QWidget*>(exportButton)}) {
+        EXPECT_GE(w->width(), w->sizeHint().width()) << w->objectName().toStdString();
+    }
+    EXPECT_GE(corner->width(), corner->sizeHint().width());
+    // Their menus: menus.json's output.export and output.render, the window's actions under
+    // another name (the menu bar's keep theirs).
+    auto texts = [](QMenu* menu) {
+        std::vector<std::string> out;
+        for (QAction* a : menu->actions()) {
+            if (!a->isSeparator() && a->isVisible()) out.push_back(a->text().section(QLatin1Char('\t'), 0, 0).toStdString());
+        }
+        return out;
+    };
+    ASSERT_NE(exportButton->menu(), nullptr);
+    ASSERT_NE(render->menu(), nullptr);
+    const std::vector<std::string> exports = texts(exportButton->menu());
+    ASSERT_GE(exports.size(), 4u);
+    EXPECT_TRUE(std::any_of(exports.begin(), exports.end(), [](const std::string& t) { return t.find("Groom File") != std::string::npos; }))
+        << "the groom file too: " << json(exports).dump();
+    EXPECT_FALSE(texts(render->menu()).empty());
+    for (QAction* a : exportButton->menu()->actions()) {
+        if (!a->objectName().isEmpty()) EXPECT_TRUE(a->objectName().startsWith(QStringLiteral("corner_"))) << a->objectName().toStdString();
+    }
+    // What the Groom Tools' Output strip had stays one menu away: the GroomLab menu holds Simulate
+    // Range, Studio, Transfer and Import.
+    QMenu* groomlab = nullptr;
+    for (QAction* a : window.menuBar()->actions()) {
+        if (a->menu() && a->text().remove(QLatin1Char('&')) == QStringLiteral("GroomLab")) groomlab = a->menu();
+    }
+    ASSERT_NE(groomlab, nullptr);
+    std::set<std::string> submenus, actions;
+    std::function<void(QMenu*)> walk = [&](QMenu* menu) {
+        for (QAction* a : menu->actions()) {
+            const std::string text = a->text().remove(QLatin1Char('&')).section(QLatin1Char('\t'), 0, 0).toStdString();
+            if (a->menu()) {
+                if (menu == groomlab) submenus.insert(text);
+                walk(a->menu());
+            } else if (!a->isSeparator()) {
+                actions.insert(text);
+            }
+        }
+    };
+    walk(groomlab);
+    for (const char* sub : {"Simulate", "Studio", "Import", "Render", "Export", "Utilities"}) EXPECT_TRUE(submenus.count(sub)) << sub;
+    EXPECT_TRUE(actions.count("Simulate Range"));
+    EXPECT_TRUE(std::any_of(actions.begin(), actions.end(), [](const std::string& t) { return t.rfind("Transfer", 0) == 0; }));
 }
 
 TEST(AppPanels, FileMenuAddsPropsAndEyesAndSavesAnImage) {

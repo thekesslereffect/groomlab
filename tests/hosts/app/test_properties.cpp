@@ -86,6 +86,7 @@ const std::set<std::string> ALLOWED_MISSING_PROPERTIES = {
     "displayRibbons",          // Lookdev draws ribbons; no ribbons on the line path
     "softSelectRadius",        // no soft selection in the app yet
     "displayCardTextures",     // Cards mode shows the bake when there is one
+    "groomButtons",            // Maya's two window buttons: the app's docks are the windows (View > Panels)
 };
 
 TEST(AppProperties, TheDockFollowsTheDefinitionsInMayasOrder) {
@@ -150,6 +151,48 @@ TEST(AppProperties, TheDockFollowsTheDefinitionsInMayasOrder) {
     ASSERT_TRUE(guides);
     EXPECT_TRUE(guides->text().contains(QStringLiteral("guides in"))) << guides->text().toStdString();
     EXPECT_EQ(panel->findChild<QLabel*>(QStringLiteral("inputs_file"))->text(), QStringLiteral("sample.groom"));
+}
+
+TEST(AppProperties, InputsRowsHaveAnIconTheValueAndOneGhostAction) {
+    // The design's Inputs: a muted icon, the name, what it is, and its action as a ghost icon button
+    // with a tip (the File row's two: Reload and Save); no Groom Tools / Graph Editor buttons.
+    MainWindow window;
+    window.resize(1280, 800);
+    window.show();
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(sampleCopy("groomlab_app_properties_inputs"))));
+    auto* panel = window.findChild<PropertiesPanel*>();
+    ASSERT_TRUE(panel);
+    EXPECT_EQ(panel->findChild<QWidget*>(QStringLiteral("propGroomTools")), nullptr);
+    EXPECT_EQ(panel->findChild<QWidget*>(QStringLiteral("propGraphEditor")), nullptr);
+    EXPECT_FALSE(panel->shown("groomButtons"));
+    const std::vector<std::pair<const char*, std::vector<const char*>>> rows = {
+        {"scalp", {"transfer"}}, {"rest", {}}, {"scalps", {}}, {"guides", {"edit"}}, {"colliders", {"add"}}, {"file", {"reload", "save"}}};
+    for (const auto& [part, actions] : rows) {
+        SCOPED_TRACE(part);
+        auto* icon = panel->findChild<QLabel*>(QStringLiteral("inputsIcon_") + QLatin1String(part));
+        ASSERT_TRUE(icon);
+        EXPECT_FALSE(icon->pixmap().isNull());
+        ASSERT_TRUE(panel->findChild<QLabel*>(QStringLiteral("inputs_") + QLatin1String(part)));
+        auto* holder = panel->findChild<QWidget*>(QStringLiteral("inputsActions_") + QLatin1String(part));
+        ASSERT_TRUE(holder);
+        const QList<QToolButton*> buttons = holder->findChildren<QToolButton*>();
+        ASSERT_EQ(static_cast<std::size_t>(buttons.size()), actions.size());
+        for (std::size_t i = 0; i < actions.size(); ++i) {
+            auto* b = panel->findChild<QToolButton*>(QStringLiteral("inputs_%1_%2").arg(QLatin1String(part), QLatin1String(actions[i])));
+            ASSERT_TRUE(b) << actions[i];
+            EXPECT_EQ(b->property("role").toString(), QStringLiteral("glyph")) << "a ghost icon button";
+            EXPECT_TRUE(b->text().isEmpty());
+            EXPECT_FALSE(b->icon().isNull());
+            EXPECT_FALSE(b->toolTip().isEmpty());
+            EXPECT_TRUE(b->isEnabled());
+        }
+    }
+    // Edit: the guides' panel in the Groom Tools.
+    panel->findChild<QToolButton*>(QStringLiteral("inputs_guides_edit"))->click();
+    QCoreApplication::processEvents();
+    // Save: the groom written (no unsaved edits after).
+    panel->findChild<QToolButton*>(QStringLiteral("inputs_file_save"))->click();
+    EXPECT_FALSE(window.document()->dirty());
 }
 
 TEST(AppProperties, ControlsHairColorLockedAndRenderOverrides) {
