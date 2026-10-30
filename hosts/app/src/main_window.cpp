@@ -335,7 +335,7 @@ void MainWindow::setRailLabels(bool shown, bool save) {
 
 bool MainWindow::railLabels() const { return shell_->railLabels(); }
 
-void MainWindow::restoreRailLabels() { setRailLabels(QSettings().value(QStringLiteral("ui/toolLabels"), true).toBool(), false); }
+void MainWindow::restoreRailLabels() { setRailLabels(QSettings().value(QStringLiteral("ui/toolLabels"), false).toBool(), false); }
 
 void MainWindow::checkForUpdates() {
     const QString current = QCoreApplication::applicationVersion().isEmpty() ? QStringLiteral("0") : QCoreApplication::applicationVersion();
@@ -385,7 +385,7 @@ bool MainWindow::showHelp(const QString& page) {
         text = tr("<p><b>GroomLab</b> %1</p><p>Hair, fur and feather grooming: the Maya plugin and this standalone app share "
                   "one core, and a .groom file travels between them.</p><p>Free for any use, commercial included. "
                   "<a style='color:@link@' href='%2'>Support GroomLab</a> with a donation.</p><p>Open source (Apache-2.0): "
-                  "<a style='color:@link@' href='%3'>github.com/thekesslereffect/groomlab</a></p><p>Fonts: Figtree and "
+                  "<a style='color:@link@' href='%3'>github.com/thekesslereffect/groomlab</a></p><p>Fonts: Inter and "
                   "JetBrains Mono (SIL OFL). Qt 6 (LGPL). See THIRD_PARTY_NOTICES.txt beside the executable.</p>")
                    .arg(QCoreApplication::applicationVersion().isEmpty() ? tr("(development build)") : QCoreApplication::applicationVersion(),
                         QString::fromLatin1(kDonateUrl), QString::fromLatin1(kRepoUrl));

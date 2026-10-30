@@ -10,6 +10,8 @@
 #include <QScrollArea>
 #include <QVBoxLayout>
 
+#include "glass.h"
+
 namespace groomlab::app {
 
 namespace {
@@ -99,7 +101,12 @@ void PropertySection::setExpanded(bool expanded) {
         const QSignalBlocker block(header_);
         header_->setChecked(expanded);
     }
-    header_->setText((expanded ? QStringLiteral("▾   ") : QStringLiteral("▸   ")) + QString(title_).replace(QLatin1Char('&'), QStringLiteral("&&")));
+    if (property("nested").toBool()) {
+        // A section inside a section: its title as it is, a smaller fold.
+        header_->setText((expanded ? QStringLiteral("▾   ") : QStringLiteral("▸   ")) + QString(title_).replace(QLatin1Char('&'), QStringLiteral("&&")));
+    } else {
+        setSectionHeader(header_, title_, expanded);
+    }
     body_->setVisible(expanded);
 }
 

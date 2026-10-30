@@ -60,9 +60,9 @@ SPDX-License-Identifier = "MIT OR Unlicense"
 
 # The app's fonts.
 [[annotations]]
-path = ["hosts/app/fonts/Figtree*", "hosts/app/fonts/OFL-Figtree.txt"]
+path = ["hosts/app/fonts/Inter*", "hosts/app/fonts/OFL-Inter.txt"]
 precedence = "override"
-SPDX-FileCopyrightText = "2022 The Figtree Project Authors"
+SPDX-FileCopyrightText = "2020 The Inter Project Authors"
 SPDX-License-Identifier = "OFL-1.1"
 
 [[annotations]]

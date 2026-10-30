@@ -241,7 +241,7 @@ void Section::setExpanded(bool expanded) {
         const QSignalBlocker blocker(header_);
         header_->setChecked(expanded);
     }
-    header_->setText((expanded ? QStringLiteral("▾  ") : QStringLiteral("▸  ")) + title_.toUpper().replace(QLatin1Char('&'), QStringLiteral("&&")));
+    setSectionHeader(header_, title_, expanded);
     content_->setVisible(expanded);
 }
 
@@ -448,20 +448,16 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     work->setSpacing(8);
     outer_->addWidget(work_);
 
-    // The tabs (palette.tabs), a segmented bar over the pages: only the current page takes room.
-    auto* track = new QFrame(work_);
-    track->setProperty("role", "segments");
-    auto* trackRow = new QHBoxLayout(track);
-    trackRow->setContentsMargins(3, 3, 3, 3);
-    tabs_ = new QTabBar(track);
+    // The tabs (palette.tabs), underlined as the Properties dock's, over the pages: only the
+    // current page takes room.
+    tabs_ = new QTabBar(work_);
     tabs_->setObjectName(QStringLiteral("groomTabs"));
-    tabs_->setExpanding(true);
+    tabs_->setExpanding(false);
     tabs_->setUsesScrollButtons(false);
     tabs_->setElideMode(Qt::ElideRight);
     tabs_->setDrawBase(false);
     tabs_->setDocumentMode(true);
-    trackRow->addWidget(tabs_);
-    work->addWidget(track);
+    work->addWidget(tabs_);
 
     // Tools: the tiles by category (Paint's in its own tab), Unfreeze All beside Freeze.
     auto* toolsPage = new QWidget(work_);
@@ -478,8 +474,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
                 auto* b = new QToolButton(parent);
                 b->setObjectName(QStringLiteral("unfreezeAllTile"));
                 b->setProperty("role", "tool");
-                b->setText(tr("Unfreeze All"));
-                b->setIcon(tinted(iconPath("unfreeze"), theme::text(), theme::text(), 22, devicePixelRatioF()));
+                b->setText(tr("Unfreeze All"));  // (its icon: refreshTiles)
                 b->setToolTip(tr("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again (Shift+click with a "
                                  "brush where no guide is does the same)"));
                 connect(b, &QToolButton::clicked, this, &GroomTools::unfreezeAllRequested);
@@ -494,7 +489,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     };
     for (BrushCategory category : brushCategories()) {
         if (category == BrushCategory::Paint) continue;  // beside the maps they paint
-        tools->addWidget(label(QString::fromLatin1(brushCategoryName(category)).toUpper(), "heading", toolsPage));
+        tools->addWidget(label(QString::fromLatin1(brushCategoryName(category)), "category", toolsPage));
         tools->addWidget(tileGrid(category, toolsPage));
     }
     // Paint: the Paint tile over the maps (MainWindow's MapsPanel, setPaintContent).
@@ -838,24 +833,50 @@ std::string GroomTools::isolatedGroup() const {
 void GroomTools::refreshTiles() {
     const qreal dpr = devicePixelRatioF();
     const int iconSize = tileLabels_ ? 22 : 20;
+    // The icons in their two tones (the group's color and the ink, as Maya's); checked, a glass
+    // theme's in the accent's text (on the accent), a solid theme's as at rest (on the selection).
+    const bool glass = theme::glassy();
+    auto toolIcon = [&](const std::string& stem, BrushCategory category) {
+        const QString resource = iconPath(stem);
+        const QPixmap rest = duotoneIcon(resource, theme::toolIconColor(category, stem), theme::iconInk(), iconSize, dpr);
+        const QPixmap on = glass ? tintedIcon(resource, theme::uiColor("accentText"), iconSize, dpr) : rest;
+        const QPixmap off = tintedIcon(resource, theme::textMuted(), iconSize, dpr);
+        QIcon icon;
+        icon.addPixmap(rest, QIcon::Normal, QIcon::Off);
+        icon.addPixmap(on, QIcon::Normal, QIcon::On);
+        icon.addPixmap(on, QIcon::Active, QIcon::On);
+        icon.addPixmap(off, QIcon::Disabled, QIcon::Off);
+        icon.addPixmap(off, QIcon::Disabled, QIcon::On);
+        return icon;
+    };
+    // Drawn again when the labels or the theme change.
+    const QString look = QStringLiteral("%1:%2").arg(theme::currentTheme()).arg(tileLabels_);
     for (auto& [id, buttons] : tiles_) {
         const groomlab::BrushEntry* e = brushEntry(id);
         for (QToolButton* b : buttons) {
             b->setChecked(id == tool_);
-            if (b->property("iconLabels").isValid() && b->property("iconLabels").toBool() == tileLabels_) continue;
-            b->setProperty("iconLabels", tileLabels_);
-            const QColor rest = e ? theme::categoryIconColor(e->category) : theme::text();
-            b->setIcon(tinted(iconPath(e ? e->icon : id), rest, theme::uiColor("accentText"), iconSize, dpr));
+            if (b->property("iconLook").toString() == look) continue;
+            b->setProperty("iconLook", look);
+            b->setIcon(toolIcon(e ? e->icon : id, e ? e->category : BrushCategory::Guides));
         }
     }
-    // Labeled: the name under the icon (Maya's tiles); else compact icon tiles, more to a row.
+    // Labeled: the name under the icon on a raised tile (Maya's tiles); else icons alone, more to
+    // a row, on the panel (the names in the tool tips).
     for (QToolButton* b : allTiles_) {
         b->setIconSize(QSize(iconSize, iconSize));
         b->setToolButtonStyle(tileLabels_ ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonIconOnly);
         // One size for every tile (the grids line up): four to a row in a ~280 px dock.
         b->setMinimumSize(tileLabels_ ? QSize(54, 50) : QSize(34, 34));
+        if (b->objectName() == QLatin1String("unfreezeAllTile") && b->property("iconLook").toString() != look) {
+            b->setProperty("iconLook", look);
+            b->setIcon(toolIcon("unfreeze", BrushCategory::Guides));
+        }
+        if (b->property("labels").isValid() && b->property("labels").toBool() == tileLabels_) continue;
+        b->setProperty("labels", tileLabels_);
+        b->style()->unpolish(b);
+        b->style()->polish(b);
     }
-    for (ToolGrid* g : grids_) g->setMaxColumns(tileLabels_ ? 4 : 7);
+    for (ToolGrid* g : grids_) g->setMaxColumns(tileLabels_ ? 4 : 6);
 }
 
 void GroomTools::setTileLabels(bool shown) {

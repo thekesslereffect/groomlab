@@ -22,8 +22,8 @@ QString iconPath(const char* name) { return QStringLiteral(":/groomlab/icons/ui_
 RoundButton* transportButton(const char* icon, int size, const QString& tip, QWidget* parent) {
     auto* b = new RoundButton(parent);
     b->setIcon(iconPath(icon), size);
-    b->setIconColor(theme::text(), theme::actionText(theme::ink()));
-    b->setFill(theme::chip(), theme::actionFill(theme::yellow()));
+    b->setIconColor(theme::text(), theme::checkedText(theme::ink()));
+    b->setFill(theme::chip(), theme::checkedFill(theme::yellow()));
     b->setDiameter(32);
     b->setToolTip(tip);
     return b;
@@ -174,7 +174,7 @@ Timeline::Timeline(QWidget* parent) : GlassPanel(parent, 24.0) {
     layout->addWidget(scrubber_, 1);
 
     frameLabel_ = new QLabel(this);
-    frameLabel_->setFont(theme::monoFont(14, 600));
+    frameLabel_->setFont(theme::numberFont(14, 600));
     frameLabel_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::text().name()));
     frameLabel_->setMinimumWidth(44);
     frameLabel_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -183,7 +183,7 @@ Timeline::Timeline(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto rangeBox = [this](const QString& tip) {
         auto* box = new QSpinBox(this);
         box->setRange(-100000, 1000000);
-        box->setFont(theme::monoFont(12));
+        box->setFont(theme::numberFont(12));
         box->setFixedWidth(64);
         box->setButtonSymbols(QAbstractSpinBox::NoButtons);
         box->setToolTip(tip);

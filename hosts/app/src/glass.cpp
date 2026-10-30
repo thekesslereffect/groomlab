@@ -3,8 +3,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
+#include <vector>
 
+#include <QBuffer>
 #include <QEnterEvent>
+#include <QFile>
+#include <QImageReader>
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QHelpEvent>
@@ -75,6 +80,72 @@ QPixmap tintedIcon(const QString& resource, const QColor& color, int size, qreal
     painter.end();
     QPixmapCache::insert(key, pixmap);
     return pixmap;
+}
+
+QPixmap duotoneIcon(const QString& resource, const QColor& main, const QColor& ink, int size, qreal devicePixelRatio) {
+    const QString key = QStringLiteral("groomlab-duotone:%1:%2:%3:%4:%5")
+                            .arg(resource)
+                            .arg(main.rgba(), 8, 16, QLatin1Char('0'))
+                            .arg(ink.rgba(), 8, 16, QLatin1Char('0'))
+                            .arg(size)
+                            .arg(devicePixelRatio);
+    QPixmap pixmap;
+    if (QPixmapCache::find(key, &pixmap)) return pixmap;
+    QFile file(resource);
+    if (!file.open(QIODevice::ReadOnly)) return coloredIcon(resource, size, devicePixelRatio);
+    QString svg = QString::fromUtf8(file.readAll());
+    auto mixed = [](const QColor& a, const QColor& b, double t) {
+        return QColor(static_cast<int>(std::lround(a.red() + (b.red() - a.red()) * t)), static_cast<int>(std::lround(a.green() + (b.green() - a.green()) * t)),
+                      static_cast<int>(std::lround(a.blue() + (b.blue() - a.blue()) * t)));
+    };
+    // widgets.py's PLACEHOLDERS, in two passes (a new color may equal another placeholder).
+    const std::vector<std::pair<QString, QColor>> roles = {
+        {QStringLiteral("#3D7EFF"), main},
+        {QStringLiteral("#1F4FB3"), mixed(main, Qt::black, 0.38)},
+        {QStringLiteral("#A8C7FF"), mixed(main, Qt::white, 0.5)},
+        {QStringLiteral("#F2F2F5"), ink},
+        {QStringLiteral("#FF4D50"), theme::red()},
+        {QStringLiteral("#FFC53E"), theme::yellow()},
+        {QStringLiteral("#2F7BF7"), theme::blue()},
+        {QStringLiteral("#2ECC90"), theme::emerald()},
+    };
+    for (std::size_t i = 0; i < roles.size(); ++i) svg.replace(roles[i].first, QStringLiteral("@role%1@").arg(i), Qt::CaseInsensitive);
+    for (std::size_t i = 0; i < roles.size(); ++i) {
+        const QColor& c = roles[i].second;
+        svg.replace(QStringLiteral("@role%1@").arg(i), c.isValid() ? c.name() : roles[i].first);
+    }
+    QByteArray bytes = svg.toUtf8();
+    QBuffer buffer(&bytes);
+    QImageReader reader(&buffer, "svg");
+    const int pixels = std::max(1, static_cast<int>(std::lround(size * devicePixelRatio)));
+    reader.setScaledSize(QSize(pixels, pixels));
+    const QImage image = reader.read();
+    if (image.isNull()) return coloredIcon(resource, size, devicePixelRatio);
+    pixmap = QPixmap::fromImage(image);
+    pixmap.setDevicePixelRatio(devicePixelRatio);
+    QPixmapCache::insert(key, pixmap);
+    return pixmap;
+}
+
+void setSectionHeader(QAbstractButton* header, const QString& title, bool expanded) {
+    header->setText(title.toUpper().replace(QLatin1Char('&'), QStringLiteral("&&")));
+    const qreal dpr = header->devicePixelRatioF();
+    const QString chevron = expanded ? QStringLiteral(":/groomlab/icons/ui_chevron_down.svg") : QStringLiteral(":/groomlab/icons/ui_chevron_right.svg");
+    QIcon icon;
+    const QPixmap rest = tintedIcon(chevron, theme::textMuted(), 10, dpr);
+    for (const QIcon::Mode mode : {QIcon::Normal, QIcon::Active, QIcon::Selected}) {
+        icon.addPixmap(rest, mode, QIcon::Off);
+        icon.addPixmap(rest, mode, QIcon::On);
+    }
+    header->setIcon(icon);
+    header->setIconSize(QSize(10, 10));
+    // The capitals spaced out (0.08 em), as the design's caps headers; the size and weight are the
+    // style sheet's.
+    QFont font = header->font();
+    if (font.letterSpacingType() != QFont::PercentageSpacing || font.letterSpacing() != 108.0) {
+        font.setLetterSpacing(QFont::PercentageSpacing, 108.0);
+        header->setFont(font);
+    }
 }
 
 void paintGlass(QPainter& painter, const QRectF& rect, qreal radius, const QColor& color, const QColor& edge) {
@@ -457,7 +528,7 @@ QRect ValueSlider::valueRect() const {
     // half stacked, after the track in a row.
     if (stacked_) {
         // The number's width (at least a third of the line): the caption takes the rest.
-        const int w = std::max(width() / 3, QFontMetrics(theme::monoFont(13)).horizontalAdvance(format_(value_)) + 12);
+        const int w = std::max(width() / 3, QFontMetrics(theme::numberFont(13)).horizontalAdvance(format_(value_)) + 12);
         return QRect(width() - w, 0, w, kCaptionLine);
     }
     if (valueWidth_ <= 0) return {};
@@ -479,7 +550,7 @@ void ValueSlider::paintEvent(QPaintEvent* /*event*/) {
         painter.setPen(theme::textDim());
         painter.drawText(QRect(0, 0, valueRect().left() - 6, kCaptionLine), Qt::AlignVCenter | Qt::AlignLeft, caption_);
         if (!editingNow) {
-            painter.setFont(theme::monoFont(13));
+            painter.setFont(theme::numberFont(13));
             painter.setPen(theme::text());
             painter.drawText(valueRect(), Qt::AlignVCenter | Qt::AlignRight, format_(value_));
         }
@@ -499,7 +570,7 @@ void ValueSlider::paintEvent(QPaintEvent* /*event*/) {
         painter.drawRoundedRect(QRect(track.x(), track.y(), std::max(filled, kTrack), track.height()), kTrack / 2.0, kTrack / 2.0);
     }
     if (valueWidth_ > 0 && !stacked_ && !editingNow) {
-        painter.setFont(theme::monoFont(13));
+        painter.setFont(theme::numberFont(13));
         painter.setPen(theme::text());
         painter.drawText(valueRect(), Qt::AlignVCenter | Qt::AlignLeft, format_(value_));
     }
@@ -601,7 +672,7 @@ void ValueSlider::placeEditor() {
 void ValueSlider::beginEdit() {
     if (!editor_) {
         editor_ = new QLineEdit(this);
-        editor_->setFont(theme::monoFont(13));
+        editor_->setFont(theme::numberFont(13));
         editor_->setAlignment(stacked_ ? Qt::AlignRight : Qt::AlignLeft);
         editor_->setStyleSheet(QStringLiteral("QLineEdit { background: rgba(255,255,255,0.10); border: 1px solid %1; border-radius: 6px; "
                                               "padding: 0 4px; color: %2; }")

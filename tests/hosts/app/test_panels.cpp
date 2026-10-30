@@ -671,8 +671,9 @@ TEST(AppPanels, ValueSliderEditsInlineDragsAnywhereAndWidensItsRange) {
 TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     // The Groom Tools' tiles (the core's catalog, Maya's grouping): Create, Shape, Trim and Guides
     // on the Tools tab (Unfreeze All beside Freeze), Paint on the Paint tab; a grid that wraps to
-    // the dock's width, the names under the icons (compact icon tiles without them).
+    // the dock's width, icons alone (the names in the tool tips; Tool Labels: under the icons).
     GroomTools tools;
+    EXPECT_FALSE(tools.tileLabels()) << "icons alone by default";
     EXPECT_EQ(tools.tiles().size(), 23u) << "Select, Freeze, the 20 tools (Paint and Length Keys among them) and Unfreeze All";
     for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "unfreeze"}) {
         EXPECT_NE(tools.tile(id), nullptr) << id;
@@ -682,18 +683,20 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     EXPECT_EQ(tabs, (std::vector<std::string>{"Tools", "Paint", "Correctives", "Photos"})) << "palette.json's tabs";
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);
+    EXPECT_EQ(grid->columnsFor(300), 6) << "six icons to a row";
+    EXPECT_EQ(qobject_cast<QToolButton*>(tools.tile("comb"))->toolButtonStyle(), Qt::ToolButtonIconOnly);
+    EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Comb"))) << "the name in the tool tip";
+    const int icons = grid->heightForWidth(260);
+    tools.setTileLabels(true);
     const int wide = grid->heightForWidth(300);
     EXPECT_GT(grid->heightForWidth(140), wide) << "a narrower dock wraps to more rows";
-    EXPECT_EQ(grid->columnsFor(300), 4) << "four to a row, as Maya's";
+    EXPECT_EQ(grid->columnsFor(300), 4) << "labeled tiles four to a row, as Maya's";
     grid->resize(260, grid->heightForWidth(260));
     for (QAbstractButton* t : grid->findChildren<QAbstractButton*>()) {
         EXPECT_LE(t->geometry().right(), 260) << "a tile past the dock's width";
         EXPECT_EQ(qobject_cast<QToolButton*>(t)->toolButtonStyle(), Qt::ToolButtonTextUnderIcon);
     }
-    tools.setTileLabels(false);
-    EXPECT_LT(grid->heightForWidth(260), wide) << "compact icon tiles: more to a row";
-    EXPECT_EQ(qobject_cast<QToolButton*>(tools.tile("comb"))->toolButtonStyle(), Qt::ToolButtonIconOnly);
-    tools.setTileLabels(true);
+    EXPECT_LT(icons, grid->heightForWidth(260)) << "icons alone: more to a row";
     // A tile asks for its tool; the window lights it (setTool) and the card shows its settings.
     QString chosen;
     QObject::connect(&tools, &GroomTools::toolChosen, [&](const QString& id) { chosen = id; });
@@ -3821,12 +3824,15 @@ TEST(AppPanels, ToolLabelsUnderTheTilesAndCompactTiles) {
     window.show();
     AppShell* host = window.shell();
     ASSERT_TRUE(window.openGroom(QString::fromStdString(kSampleGroom)));
-    EXPECT_TRUE(host->railLabels()) << "the names under the tiles, as Maya's";
+    EXPECT_FALSE(host->railLabels()) << "icons alone by default, the names in the tool tips";
     QAction* toggle = window.findChild<QAction*>(QStringLiteral("railLabels"));
     ASSERT_NE(toggle, nullptr);
-    EXPECT_TRUE(toggle->isChecked());
+    EXPECT_FALSE(toggle->isChecked());
     // Docked in the Groom Tools: the tiles stay within the dock's width with their names (the
     // column scrolls up and down).
+    window.setRailLabels(true, false);
+    EXPECT_TRUE(host->railLabels());
+    EXPECT_TRUE(toggle->isChecked());
     QCoreApplication::processEvents();
     const QRect dock(host->groomToolsDock()->mapTo(&window, QPoint(0, 0)), host->groomToolsDock()->size());
     for (const QAbstractButton* tile : host->groomTools()->tiles()) {

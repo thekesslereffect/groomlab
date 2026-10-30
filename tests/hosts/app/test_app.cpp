@@ -584,6 +584,13 @@ TEST(AppTheme, FontsBrushesAndColors) {
     EXPECT_TRUE(theme::loadFonts());
     EXPECT_EQ(theme::uiFont(14, 800).family(), theme::uiFamily());
     EXPECT_EQ(theme::monoFont(13).family(), theme::monoFamily());
+    // The UI font is the theme's ui.font, Inter (bundled): the font Qt resolves, not a fallback.
+    EXPECT_EQ(theme::uiFamily(), QStringLiteral("Inter"));
+    EXPECT_EQ(QFontInfo(theme::uiFont(14, 600)).family(), QStringLiteral("Inter"));
+    // Numbers in the UI font with tabular digits (a changing value keeps its width), not mono.
+    EXPECT_EQ(theme::numberFont(13).family(), theme::uiFamily());
+    EXPECT_EQ(theme::numberFont(13).featureValue(QFont::Tag("tnum")), 1u);
+    EXPECT_TRUE(theme::styleSheet().contains(QStringLiteral("font-family: \"%1\"").arg(theme::uiFamily())));
     // The rail's brushes are the core's catalog (brush_catalog.h) without Select (the rail's own
     // tool), in its order: Create first, then Shape, Trim, Paint, and Freeze among the guide tools.
     const std::vector<theme::BrushEntry>& brushes = theme::brushes();
@@ -647,8 +654,8 @@ TEST(AppTheme, FontsBrushesAndColors) {
 
 TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     // Every theme file the Maya host ships is a resource; Charcoal is the app's default, solid:
-    // opaque panels with a thin edge, its own text tones, an accent pill for the chosen segment and
-    // the Render button, tinted node headers; Playful (glass, round filled headers) is still the
+    // opaque panels with a thin edge, its own text tones, the selection tone for the chosen segment,
+    // the blue accent pill for the primary actions, minimal node headers on a dot grid; Playful (glass, round filled headers) is still the
     // theme the others extend.
     const std::string folder = std::string(GROOMLAB_TEST_DATA) + "/../../hosts/maya/themes";
     QStringList files;
@@ -668,6 +675,9 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     EXPECT_FALSE(theme::glassEdge().isValid());
     EXPECT_EQ(theme::nodeRadius(), 14.0);
     EXPECT_FALSE(theme::tintedHeaders());
+    EXPECT_EQ(theme::headerStyle(), QStringLiteral("filled"));
+    EXPECT_EQ(theme::canvasStyle(), QStringLiteral("lines"));
+    EXPECT_EQ(theme::controlRadius(), 8) << "a glass theme's controls no rounder than its pills";
     EXPECT_EQ(theme::segmentFill(theme::red()), theme::red());
     EXPECT_EQ(theme::sliderFill(theme::purple()), theme::purple()) << "Playful's slider cycle: each slider its own color";
     EXPECT_EQ(theme::actionFill(theme::yellow()), theme::yellow());
@@ -687,21 +697,35 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     EXPECT_EQ(theme::glassPanel(), hex(charcoal["ui"]["panel"]));
     EXPECT_EQ(theme::glassEdge(), hex(charcoal["ui"]["outline"]));
     EXPECT_EQ(theme::text(), hex(charcoal["ui"]["text"]));
-    EXPECT_EQ(theme::textMuted(), hex(charcoal["ui"]["textDim"]));
+    EXPECT_EQ(theme::textMuted(), hex(charcoal["ui"]["textMuted"]));
     EXPECT_EQ(theme::backdrop(), hex(charcoal["ui"]["background"]));
-    EXPECT_EQ(theme::renderRed(), hex(charcoal["ui"]["accent"])) << "the primary action: the off-white pill";
-    EXPECT_EQ(theme::readableOn(theme::renderRed()), theme::ink());
-    EXPECT_EQ(theme::segmentFill(theme::red()), hex(charcoal["ui"]["accent"]));
-    EXPECT_EQ(theme::segmentText(Qt::white), hex(charcoal["ui"]["accentText"]));
-    // Every slider takes the theme's one slider color (ui.sliders ["silver"]), as in Maya; filled
+    EXPECT_EQ(theme::renderRed(), hex(charcoal["ui"]["accent"])) << "the primary action: the blue pill";
+    EXPECT_EQ(theme::readableOn(theme::renderRed()), QColor(Qt::white));
+    // A chosen segment and a checked chip: the selection tone, not the accent.
+    EXPECT_EQ(theme::segmentFill(theme::red()), hex(charcoal["ui"]["selection"]));
+    EXPECT_EQ(theme::segmentText(Qt::white), hex(charcoal["ui"]["selectionText"]));
+    EXPECT_EQ(theme::checkedFill(theme::yellow()), hex(charcoal["ui"]["selection"]));
+    // Every slider takes the theme's one slider color (ui.sliders ["accent"]), as in Maya; filled
     // actions (Export, Bake, Paint) are the accent pill.
-    const QColor silver = hex(charcoal["palette"][charcoal["ui"]["sliders"][0].get<std::string>()]);
-    EXPECT_EQ(theme::sliderFill(theme::yellow()), silver);
-    EXPECT_EQ(theme::sliderFill(theme::purple()), silver);
+    ASSERT_EQ(charcoal["ui"]["sliders"][0].get<std::string>(), "accent");
+    EXPECT_EQ(theme::sliderFill(theme::yellow()), hex(charcoal["ui"]["accent"]));
+    EXPECT_EQ(theme::sliderFill(theme::purple()), hex(charcoal["ui"]["accent"]));
     EXPECT_EQ(theme::actionFill(theme::emerald()), hex(charcoal["ui"]["accent"]));
     EXPECT_EQ(theme::actionText(theme::ink()), hex(charcoal["ui"]["accentText"]));
     EXPECT_EQ(theme::nodeRadius(), charcoal["graph"]["cornerRadius"].get<double>());
-    EXPECT_TRUE(theme::tintedHeaders());
+    EXPECT_FALSE(theme::tintedHeaders());
+    EXPECT_EQ(theme::headerStyle(), QStringLiteral("minimal")) << "a dot by the title, no header fill";
+    EXPECT_EQ(theme::canvasStyle(), QStringLiteral("dots"));
+    // ui.radius for the controls, two less for the small ones, two more for panels and cards;
+    // ui.rowHeight for every control's height.
+    const int radius = charcoal["ui"]["radius"].get<int>();
+    EXPECT_EQ(theme::controlRadius(), radius);
+    EXPECT_EQ(theme::smallRadius(), std::max(2, radius - 2));
+    EXPECT_EQ(theme::panelRadius(), radius + 2);
+    EXPECT_EQ(theme::rowHeight(), charcoal["ui"]["rowHeight"].get<int>());
+    // The tool icons in their two tones (the accent and the ink), as the design's.
+    EXPECT_EQ(theme::toolIconColor(theme::BrushCategory::Shape, "comb"), hex(charcoal["ui"]["accent"]));
+    EXPECT_EQ(theme::iconInk(), hex(charcoal["icons"]["ink"]));
     EXPECT_EQ(theme::nodeBorder(), hex(charcoal["graph"]["nodeBorder"]));
     EXPECT_EQ(theme::nodeCategoryColor("shape"), hex(charcoal["graph"]["categories"]["Shape"]));
     EXPECT_EQ(theme::portColor("guides"), hex(charcoal["graph"]["ports"]["Guides"]));

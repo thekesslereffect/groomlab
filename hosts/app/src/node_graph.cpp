@@ -69,7 +69,8 @@ constexpr qreal kMinScale = 0.1, kMaxScale = 3.0;  // the view's zoom (the wheel
 
 // Dark words on a bright header (yellow, white, emerald), white on the others; a tinted header
 // (a wash of the category color) takes the theme's text.
-QColor headerText(const QColor& fill) { return theme::tintedHeaders() ? theme::text() : theme::readableOn(fill); }
+// The header's words and marks: the text color over a wash or no fill, readable over a filled one.
+QColor headerText(const QColor& fill) { return theme::headerStyle() == QLatin1String("filled") ? theme::readableOn(fill) : theme::text(); }
 
 // Where pasted and duplicated nodes go: beside what they were copied from (Maya's paste offset).
 constexpr qreal kPasteOffsetX = 40.0, kPasteOffsetY = 60.0;
@@ -767,9 +768,13 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     painter.setPen(Qt::NoPen);
     painter.setBrush(theme::nodeBody());
     painter.drawPath(body);
+    const QString header = theme::headerStyle();
+    const bool minimal = header == QLatin1String("minimal");
     painter.save();
     painter.setClipPath(body);
-    if (theme::tintedHeaders()) {
+    if (minimal) {
+        // No header fill (the design's minimal cards): the category is the dot by the title.
+    } else if (header == QLatin1String("tinted")) {
         QColor wash = color;
         wash.setAlpha(34);
         painter.setBrush(wash);
@@ -787,14 +792,22 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.setBrush(Qt::NoBrush);
         painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius - 0.5, radius - 0.5);
     }
-    // The name, with the type after it when the name says something else.
-    painter.setFont(theme::uiFont(13, 800));
+    // The name, with the type after it when the name says something else; on a minimal card
+    // after a dot of the category's color.
+    qreal titleX = rect.x() + 12;
+    if (minimal) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(color);
+        painter.drawEllipse(QPointF(rect.x() + 14, rect.y() + kHeader / 2.0), 4.0, 4.0);
+        titleX = rect.x() + 24;
+    }
+    painter.setFont(theme::uiFont(13, minimal ? 700 : 800));
     painter.setPen(headerText(color));
-    const QRectF title(rect.x() + 12, rect.y(), rect.width() - (node.linkableParams.empty() ? 40 : 62), kHeader);
+    const QRectF title(titleX, rect.y(), rect.right() - titleX - (node.linkableParams.empty() ? 28 : 50), kHeader);
     painter.drawText(title, Qt::AlignVCenter | Qt::AlignLeft, QString::fromStdString(node.name));
     // The node's time in its last run, before the bypass toggle (a tenth of a millisecond and up).
     if (const auto t = times_.find(node.name); t != times_.end() && t->second >= 0.05) {
-        painter.setFont(theme::monoFont(9));
+        painter.setFont(theme::numberFont(9));
         QColor dim = headerText(color);
         dim.setAlpha(170);
         painter.setPen(dim);
@@ -920,32 +933,53 @@ void NodeGraphView::paintEvent(QPaintEvent* /*event*/) {
         dim.setAlpha(110);
         painter.fillRect(rect(), dim);
     } else {
-        // Docked: the theme's opaque canvas and its grid (a line every 24 scene units, a stronger
-        // one every 5), thinned out as the view zooms out so it never turns to a wash.
+        // Docked: the theme's opaque canvas and its grid (graph.canvasStyle: lines, a line every 24
+        // scene units and a stronger one every 5; dots, one at every crossing; or plain), thinned
+        // out as the view zooms out so it never turns to a wash.
         painter.fillRect(rect(), theme::graphCanvas());
-        qreal step = 24.0 * scale_;
+        const QString canvas = theme::canvasStyle();
+        const bool dots = canvas == QLatin1String("dots");
+        qreal step = (dots ? 20.0 : 24.0) * scale_;
         int every = 5;
-        while (step < 10.0) {
-            step *= 5.0;
+        while (step < (dots ? 12.0 : 10.0)) {
+            step *= dots ? 2.0 : 5.0;
             every = 1;
         }
         const QColor major = theme::graphGrid();
         QColor minor = major;
         minor.setAlphaF(major.alphaF() * 0.45f);
-        painter.setRenderHint(QPainter::Antialiasing, false);
-        // Line k sits at pan + k * step; the first on screen is k = ceil(-pan / step).
-        auto lines = [&](qreal pan, int extent, bool vertical) {
-            for (long long k = static_cast<long long>(std::ceil(-pan / step));; ++k) {
-                const qreal at = pan + static_cast<qreal>(k) * step;
-                if (at > extent) break;
-                painter.setPen(QPen(k % every == 0 ? major : minor, 1));
-                if (vertical) painter.drawLine(QPointF(at, 0), QPointF(at, height()));
-                else painter.drawLine(QPointF(0, at), QPointF(width(), at));
+        // Line (or dot) k sits at pan + k * step; the first on screen is k = ceil(-pan / step).
+        auto first = [&](qreal pan) { return static_cast<long long>(std::ceil(-pan / step)); };
+        if (dots) {
+            // A dot of the grid's color at each crossing, as the design's canvas (1 px at 100%).
+            const qreal r = std::clamp(scale_, 0.75, 1.5);
+            QList<QPointF> points;
+            for (long long i = first(pan_.x());; ++i) {
+                const qreal x = pan_.x() + static_cast<qreal>(i) * step;
+                if (x > width() + r) break;
+                for (long long j = first(pan_.y());; ++j) {
+                    const qreal y = pan_.y() + static_cast<qreal>(j) * step;
+                    if (y > height() + r) break;
+                    points.push_back(QPointF(x, y));
+                }
             }
-        };
-        lines(pan_.x(), width(), true);
-        lines(pan_.y(), height(), false);
-        painter.setRenderHint(QPainter::Antialiasing, true);
+            painter.setPen(QPen(major, 2.0 * r, Qt::SolidLine, Qt::RoundCap));
+            painter.drawPoints(points.constData(), static_cast<int>(points.size()));
+        } else if (canvas == QLatin1String("lines")) {
+            painter.setRenderHint(QPainter::Antialiasing, false);
+            auto lines = [&](qreal pan, int extent, bool vertical) {
+                for (long long k = first(pan);; ++k) {
+                    const qreal at = pan + static_cast<qreal>(k) * step;
+                    if (at > extent) break;
+                    painter.setPen(QPen(k % every == 0 ? major : minor, 1));
+                    if (vertical) painter.drawLine(QPointF(at, 0), QPointF(at, height()));
+                    else painter.drawLine(QPointF(0, at), QPointF(width(), at));
+                }
+            };
+            lines(pan_.x(), width(), true);
+            lines(pan_.y(), height(), false);
+            painter.setRenderHint(QPainter::Antialiasing, true);
+        }
     }
     painter.save();
     painter.translate(pan_);

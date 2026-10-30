@@ -96,10 +96,11 @@ qt_add_library(groomlab_app_lib STATIC
     src/tool_view.h
     src/update_check.cpp
     src/update_check.h)
-# The UI fonts (Figtree for the words, JetBrains Mono for the numbers: google/fonts, SIL OFL 1.1,
-# THIRD_PARTY_NOTICES.txt) as resources, so the app looks the same on every machine.
+# The UI fonts (Inter for the words and, with tabular digits, the numbers; JetBrains Mono for code,
+# hex colors and paths: google/fonts, SIL OFL 1.1, THIRD_PARTY_NOTICES.txt) as resources, so the
+# app looks the same on every machine.
 qt_add_resources(groomlab_app_lib "groomlab_app_fonts" PREFIX "/groomlab" BASE "${CMAKE_CURRENT_SOURCE_DIR}"
-    FILES "fonts/Figtree[wght].ttf" "fonts/JetBrainsMono[wght].ttf")
+    FILES "fonts/Inter[opsz,wght].ttf" "fonts/JetBrainsMono[wght].ttf")
 # The Maya host's themes (Playful, Charcoal, Polar, Studio), read by theme.cpp: one set of files for
 # both hosts' colors.
 file(GLOB _groomlab_themes CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/hosts/maya/themes/*.json")
