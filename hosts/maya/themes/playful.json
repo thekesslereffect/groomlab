@@ -42,7 +42,7 @@
     "selected": "white",
     "cornerRadius": 14,
     "headerStyle": "filled",
-    "canvasStyle": "lines",
+    "canvasStyle": "dots",
     "shadow": false,
     "error": "red",
     "warning": "yellow",

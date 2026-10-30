@@ -676,7 +676,7 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     EXPECT_EQ(theme::nodeRadius(), 14.0);
     EXPECT_FALSE(theme::tintedHeaders());
     EXPECT_EQ(theme::headerStyle(), QStringLiteral("filled"));
-    EXPECT_EQ(theme::canvasStyle(), QStringLiteral("lines"));
+    EXPECT_EQ(theme::canvasStyle(), QStringLiteral("dots"));
     EXPECT_EQ(theme::controlRadius(), 8) << "a glass theme's controls no rounder than its pills";
     EXPECT_EQ(theme::segmentFill(theme::red()), theme::red());
     EXPECT_EQ(theme::sliderFill(theme::purple()), theme::purple()) << "Playful's slider cycle: each slider its own color";
