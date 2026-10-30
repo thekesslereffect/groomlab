@@ -714,7 +714,7 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     EXPECT_EQ(theme::actionText(theme::ink()), hex(charcoal["ui"]["accentText"]));
     EXPECT_EQ(theme::nodeRadius(), charcoal["graph"]["cornerRadius"].get<double>());
     EXPECT_FALSE(theme::tintedHeaders());
-    EXPECT_EQ(theme::headerStyle(), QStringLiteral("minimal")) << "a dot by the title, no header fill";
+    EXPECT_EQ(theme::headerStyle(), QStringLiteral("filled")) << "the category color behind the title";
     EXPECT_EQ(theme::canvasStyle(), QStringLiteral("dots"));
     // ui.radius for the controls, two less for the small ones, two more for panels and cards;
     // ui.rowHeight for every control's height.
