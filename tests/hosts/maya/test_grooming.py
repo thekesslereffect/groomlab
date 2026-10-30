@@ -4061,7 +4061,7 @@ class ControlsAndExamplesTest(unittest.TestCase):
                 self.assertTrue(theme.stylesheet(t))
             charcoal = theme.Theme("charcoal", theme.load("charcoal"))
             self.assertIs(charcoal.get("ui.glass"), False)
-            self.assertEqual(charcoal.get("graph.headerStyle"), "minimal")
+            self.assertEqual(charcoal.get("graph.headerStyle"), "filled")
             self.assertIs(charcoal.get("graph.shadow"), False)
             self.assertIn("solid %s" % charcoal.color("ui.outline"), theme.stylesheet(charcoal))
             polar = theme.Theme("polar", theme.load("polar"))

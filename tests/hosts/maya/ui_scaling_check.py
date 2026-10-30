@@ -285,6 +285,7 @@ def main():
                         "%s: the Graph Editor's canvas" % name)
                 _expect(graph_editor.HEADER_STYLE == t.get("graph.headerStyle"), "%s: the header style" % name)
             charcoal = theme.set_theme("charcoal")
+            _expect(graph_editor.HEADER_STYLE == "filled", "Charcoal: filled node headers")
             sheet = tools.styleSheet()
             _expect("solid %s" % charcoal.color("ui.outline") in sheet, "Charcoal: thin outlines")
             _expect("background: %s; color: %s" % (charcoal.color("ui.selection"), charcoal.color("ui.selectionText")) in sheet,
@@ -298,10 +299,11 @@ def main():
             widgets.dispose(editor)
     check.run("every shipped theme restyles the Groom Tools and the Graph Editor", every_theme_styles_the_windows)
 
-    # The 2026-10-30 look (research/ui-redesign, "chosen"): square icon-only tool tiles six to a row
-    # (name and hint in the tooltip, the checked one in the selection with an accent border, its icon
-    # in its own colors), underlined tabs left aligned, sections under a hairline without a card, and
-    # the Graph Editor's minimal headers and canvas styles painted.
+    # The 2026-10-30 look (research/ui-redesign, "chosen"): labeled tool tiles of a fixed 56 x 50 px,
+    # the icon over the name, as many to a row as fit (name and hint in the tooltip, the checked one in
+    # the selection with an accent border, its icon in its own colors), underlined tabs left aligned,
+    # sections under a hairline without a card, and the Graph Editor's node headers (Charcoal's
+    # filled) and canvas styles painted.
     def redesign_look():
         from groomlab.ui.qt import QtCore, QtGui
         t = theme.set_theme("charcoal")
@@ -314,13 +316,18 @@ def main():
         settle()
         try:
             tiles = [b for b in tools.findChildren(QtWidgets.QToolButton) if b.property("role") == "tool"]
-            _expect(len(tiles) > 10 and all(b.toolButtonStyle() == QtCore.Qt.ToolButtonIconOnly for b in tiles),
-                    "icon-only tool tiles")
+            _expect(len(tiles) > 10 and all(b.toolButtonStyle() == QtCore.Qt.ToolButtonTextUnderIcon and b.text()
+                                            for b in tiles), "labeled tool tiles: the icon over the name")
+            _expect(all(isinstance(b, widgets.Tile) for b in tiles), "tiles elide their names (widgets.Tile)")
             _expect(all(b.toolTip().startswith("<b>") and "<br>" in b.toolTip() for b in tiles), "name + hint tooltips")
             shown = [b for b in tiles if b.isVisibleTo(tools)]
-            side = theme.px(palette.ToolPalette.TILE)
-            _expect(shown and all(b.width() == side and b.height() == side for b in shown),
-                    "fixed %d px tiles: %r" % (side, sorted({(b.width(), b.height()) for b in shown})))
+            side, tall = theme.px(palette.ToolPalette.TILE[0]), theme.px(palette.ToolPalette.TILE[1])
+            _expect(shown and all(b.width() == side and b.height() == tall for b in shown),
+                    "fixed %d x %d px tiles: %r" % (side, tall, sorted({(b.width(), b.height()) for b in shown})))
+            grid = next(g for g in tools.findChildren(widgets.ToolGrid) if g.isVisibleTo(tools) and len(g.buttons) > 1)
+            _expect(grid.buttons[1].x() == side + grid.spacing and grid.heightForWidth(side) ==
+                    len(grid.buttons) * tall + (len(grid.buttons) - 1) * grid.spacing,
+                    "tiles placed by their width and height")
             grids = [g for g in tools.findChildren(widgets.ToolGrid) if g.isVisibleTo(tools)]
 
             def fitting(g):
@@ -340,7 +347,9 @@ def main():
             settle()
             unfreeze = tools.findChild(QtWidgets.QToolButton, "unfreezeAllTile")
             _expect(unfreeze in tiles and not unfreeze.isCheckable() and "Unfreeze All" in unfreeze.toolTip(),
-                    "Unfreeze All: an icon tile, a button")
+                    "Unfreeze All: a labeled tile, a button")
+            _expect(unfreeze.text() == "Unfreeze All" and unfreeze.toolButtonStyle() == QtCore.Qt.ToolButtonTextUnderIcon,
+                    "Unfreeze All's name under its icon")
             comb = tools.buttons["comb"].icon()
             _expect(comb.pixmap(32, 32, QtGui.QIcon.Normal, QtGui.QIcon.On).toImage()
                     == comb.pixmap(32, 32, QtGui.QIcon.Normal, QtGui.QIcon.Off).toImage(), "a checked tile's icon: the same")
@@ -364,7 +373,7 @@ def main():
         node = editor.items["scatter"]
         accent = graph_editor.CATEGORY_COLORS.get(node.category)
         try:
-            bars = {}
+            bars, inks = {}, {}
             for header in ("tinted", "filled", "minimal"):
                 for canvas in ("dots", "lines", "plain"):
                     graph_editor.HEADER_STYLE, graph_editor.CANVAS_STYLE = header, canvas
@@ -376,9 +385,18 @@ def main():
                     node.paint(painter, QtWidgets.QStyleOptionGraphicsItem(), None)
                     painter.end()
                     bars[header] = QtGui.QColor(image.pixel(int(20 + graph_editor.NODE_W / 2), 22))
+                    inks[header] = node.header_ink
             _expect(bars["tinted"].name() == accent.name(), "tinted: the accent bar (%s)" % bars["tinted"].name())
             _expect(bars["minimal"].name() != accent.name() and bars["minimal"].name() != bars["tinted"].name(),
                     "minimal: no bar, no fill (%s)" % bars["minimal"].name())
+            _expect(bars["filled"].name() == accent.name(), "filled: the category color (%s)" % bars["filled"].name())
+            # On a filled header the title, the badges and the View / Expand / Bypass toggles take the
+            # color readable on the fill; the other styles keep the theme's.
+            ink = inks["filled"]
+            _expect(ink is not None and ink.name() == graph_editor.readable_on(accent).name()
+                    and abs(ink.lightness() - accent.lightness()) > 90,
+                    "filled: readable title and toggles (%s on %s)" % (ink and ink.name(), accent.name()))
+            _expect(inks["tinted"] is None and inks["minimal"] is None, "the theme's ink off a filled header")
             data = dict(t.data, graph=dict(t.data["graph"], headerStyle="ribbon", canvasStyle="hex"))
             graph_editor.apply_theme(theme.Theme("future", data))
             _expect((graph_editor.HEADER_STYLE, graph_editor.CANVAS_STYLE) == ("tinted", "dots"),
@@ -387,7 +405,7 @@ def main():
             graph_editor.apply_theme(theme.current())
             widgets.dispose(editor)
             theme.set_theme("playful")
-    check.run("the new look: icon tiles, underlined tabs, plain sections, minimal node headers", redesign_look)
+    check.run("the new look: labeled tiles, underlined tabs, plain sections, filled node headers", redesign_look)
 
     # The Groom Tools layout (research/ui-redesign/QT.md, "Groom Tools layout"): the header, the
     # tabs and the tool grid pinned over the scrolling column; the tool's card right under the grid
@@ -577,7 +595,10 @@ def main():
                         count += 1
             return count
 
+        style = graph_editor.HEADER_STYLE
         try:
+            # Off a filled header (minimal: Charcoal's before): the badges in their own colors.
+            graph_editor.HEADER_STYLE = "minimal"
             for name in (quick, slow, warned, noted, failed, off):
                 editor.items[name].update()
             title = lambda item: QtCore.QRectF(60, 2, min(r.left() for r in item.toggle_rects().values()) - 60, 22)
@@ -614,6 +635,29 @@ def main():
             finally:
                 QtGui.QPainter.setOpacity = real
             _expect(graph_editor.BYPASSED_OPACITY in painted, "a bypassed card at half opacity: %r" % painted)
+            # On a filled header (Charcoal's now): the time and the View / Expand / Bypass toggles in the
+            # color readable on the category's (as the title), never the theme's own on the fill.
+            graph_editor.HEADER_STYLE = "filled"
+
+            def over(fill, ink, alpha):
+                f = alpha / 255.0
+                return QtGui.QColor(*[int(round(x + (y - x) * f)) for x, y in zip(fill.getRgb()[:3], ink.getRgb()[:3])])
+            for name in (quick, slow):
+                item, image = card(name)
+                accent = graph_editor.CATEGORY_COLORS.get(item.category)
+                ink = graph_editor.readable_on(accent)
+                _expect(item.header_ink is not None and item.header_ink.name() == ink.name(),
+                        "filled: %s's ink readable on its header (%s on %s)" % (name, item.header_ink, accent.name()))
+                rects = item.toggle_rects()
+                left = min(r.left() for r in rects.values())
+                stamp = QtCore.QRectF(left - 36, 4, 30, 18)
+                _expect(colored(image, stamp, over(accent, ink, 190), 40) > 6,
+                        "filled: %s's time in the header's ink" % name)
+                _expect(colored(image, rects["disable"], over(accent, ink, 150), 40) > 4,
+                        "filled: %s's Bypass toggle in the header's ink" % name)
+                if "inputs" in rects:
+                    _expect(colored(image, rects["inputs"], over(accent, ink, 150), 40) > 4,
+                            "filled: %s's Expand Inputs toggle in the header's ink" % name)
             if args.shots:
                 rect = editor.scene.itemsBoundingRect().adjusted(-30, -30, 30, 30)
                 scale = 2.0
@@ -625,6 +669,7 @@ def main():
                 painter.end()
                 picture.save(os.path.join(args.shots, "graph_status_badges.png"))
         finally:
+            graph_editor.HEADER_STYLE = style
             widgets.dispose(editor)
             theme.set_theme("playful")
     check.run("Inter in GroomLab's windows; the cards' status badges", status_badges_and_font)

@@ -290,7 +290,7 @@ class ToolsTest(unittest.TestCase):
         self.assertIn(("op_text", "groomlab.tool", "▶  Place some guides"), log)
         self.assertTrue(any(e[0] == "label" and e[1] == "Create" for e in log))  # a category's tiles under its name
         self.assertTrue(any(e[0] == "label" and "Pick a tool" in e[1] for e in log))
-        # The tiles: icons (no text) of one size, as many to a row as fit (Blender's automatic
+        # The tiles: icon and name, of one size, as many to a row as fit (Blender's automatic
         # columns), each tool's name and hint in its tooltip.
         tiles = [getattr(e[2], "tool", None) for e in log if e[0] == "op_props" and e[1] == "groomlab.tool"]
         for tool in ("place", "draw", "part", "flow", "comb", "smooth", "cut", "erase", "select", "freeze"):
@@ -304,11 +304,14 @@ class ToolsTest(unittest.TestCase):
         t.tab = "TOOLS"
         self.assertEqual(palette.tool_grid.__defaults__, (0,))
         tile_texts = [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.tool"]
-        self.assertEqual([x for x in tile_texts if x], ["▶  Place some guides"])  # the starter's step, not a tile
+        self.assertIn("▶  Place some guides", tile_texts)  # the starter's step
+        for tool in ("comb", "freeze"):  # the tiles' names
+            self.assertIn(tools.tool_info(tool)["label"], tile_texts)
+        self.assertNotIn("", tile_texts)
         unfreeze = [e[2] for e in log if e[0] == "op_props" and e[1] == "groomlab.guides_edit"
                     and getattr(e[2], "action", None) == "UNFREEZE_ALL"]
-        self.assertTrue(unfreeze)  # Unfreeze All beside Freeze: an icon tile
-        self.assertIn("", [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.guides_edit"])
+        self.assertTrue(unfreeze)  # Unfreeze All beside Freeze: a labeled tile
+        self.assertIn("Unfreeze All", [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.guides_edit"])
         comb = type("Props", (), {"tool": "comb"})()
         self.assertEqual(tool_ops.GROOMLAB_OT_tool.description(bpy.context, comb),
                          "%s: %s" % (tools.tool_info("comb")["label"], tools.tool_info("comb")["hint"]))

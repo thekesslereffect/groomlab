@@ -18,7 +18,7 @@ from maya import cmds
 import groomlab
 from groomlab.ui import menu as _menu
 
-from gui_support import CLASSIC_GRAPH, activate, drag, hover, settle_undo
+from gui_support import CLASSIC_GRAPH, activate, clear_of_cursor, drag, hover, settle_undo, under_point
 
 _menu.ASK_TO_SAVE = False  # no save prompt in tests (scenes stay untitled here)
 
@@ -1108,9 +1108,11 @@ class GraphEditorTest(unittest.TestCase):
             self.assertFalse(self._shown("melaninRandom"))
             self.assertTrue(self._shown("seed"))
             # S over a param inside a group: the hovered param is still its own.
-            panel.ensureWidgetVisible(self._param_target("melanin"))
+            target = self._param_target("melanin")
+            panel.ensureWidgetVisible(target)
+            clear_of_cursor(self.editor)
             wait(30)
-            self.assertTrue(hover(self._param_target("melanin")))
+            self.assertTrue(hover(target), under_point(target))
             wait(30)
             self.assertEqual(panel.hovered_param(), "melanin")
             # showWhen follows an edit without a rebuild.
@@ -2705,7 +2707,7 @@ class GuidesTabTest(unittest.TestCase):
         top = {tree.topLevelItem(i).text(0): tree.topLevelItem(i) for i in range(tree.topLevelItemCount())}
         self.assertEqual(set(top), {"primary", "braids"})
         self.assertEqual(top["primary"].child(0).text(0), "kids")  # child groups nest under their parents
-        self.assertEqual(top["primary"].child(0).text(3), "1")  # level
+        self.assertIn("Level 1: a child group of primary", top["primary"].child(0).toolTip(0))  # its level
         self.assertIn("guides (exclude)", top["braids"].toolTip(0))  # the graph nodes naming it
         self.assertIn("braidPaths (group)", top["braids"].toolTip(0))
         groomlab.rename_guide_group(self.groom, "braids", "rows")  # the graph follows
@@ -2717,12 +2719,19 @@ class GuidesTabTest(unittest.TestCase):
         tree.setCurrentItem(tree.findItems("kids", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0])
         self.tab.select_group()
         self.assertEqual(len(groomlab.selected_guides(self.groom)), 2)
-        # Each group's swatch in the color it draws in (its automatic one, dashed: none of its own).
+        # Each group's dot in the color it draws in (its automatic one, a ring: none of its own).
+        from groomlab.ui import tool_tabs
+
+        def dot(item):
+            return item.icon(0).pixmap(24, 24).toImage()
+
+        def drawn(color, dashed):
+            return tool_tabs.dot_icon(color, dashed=dashed).pixmap(24, 24).toImage()
         self.assertEqual(cmds.getAttr(self.groom + ".guideColorMode"), 0)
         automatic = dict((g["name"], g["color"]) for g in groomlab.list_guide_groups(self.groom))
         kids = tree.findItems("kids", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
-        self.assertIn(automatic["kids"], tree.itemWidget(kids, 1).styleSheet())
-        self.assertIn("dashed", tree.itemWidget(kids, 1).styleSheet())
+        self.assertEqual(dot(kids), drawn(automatic["kids"], True))
+        self.assertNotEqual(dot(kids), drawn(automatic["kids"], False))
         self.assertNotEqual(automatic["kids"], automatic["primary"])
         # A group's own color, from its swatch; renaming keeps it; clearing goes back.
         self.tab.set_color("kids", "#ff8800")
@@ -2731,7 +2740,7 @@ class GuidesTabTest(unittest.TestCase):
         self.assertEqual(groomlab.errors(self.groom), [])
         self.events()
         kids = tree.findItems("kids", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
-        self.assertIn("#ff8800", tree.itemWidget(kids, 1).styleSheet())
+        self.assertEqual(dot(kids), drawn("#ff8800", False))
         kids.setText(0, "fringe")  # renamed in place (double-click)
         self.events()
         self.assertIn("fringe", [g["name"] for g in groomlab.list_guide_groups(self.groom)])
@@ -2775,9 +2784,13 @@ class GuidesTabTest(unittest.TestCase):
         from PySide2 import QtCore
         self.tab.refresh()
         item = self.tab.tree.findItems("primary", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
-        self.assertEqual(item.checkState(0), QtCore.Qt.Checked)
-        item.setCheckState(0, QtCore.Qt.Unchecked)  # the eye: hide it
+        eye = self.tab.tree.itemWidget(item, 2)  # the row's eye glyph
+        self.assertEqual(eye.glyph, "eye")
+        eye.click()  # hide it
         self.assertEqual(groomlab.hidden_guide_groups(self.groom), ["primary"])
+        self.events()  # the list again: the row's eye closed
+        item = self.tab.tree.findItems("primary", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
+        self.assertEqual(self.tab.tree.itemWidget(item, 2).glyph, "eyeOff")
         cmds.refresh(force=True)
         guides = cmds.groomLabGuides(self.groom, listGuides="primary")
         points = lambda: [cmds.groomLabGuides(self.groom, guidePoints=g) for g in guides]
@@ -3552,7 +3565,7 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual(editor.scene.backgroundBrush().color().name().upper(), "#212224")
             self.assertIn("border-radius: %dpx" % theme.px(4), tools.styleSheet())
             theme.set_theme("charcoal")
-            self.assertEqual(graph_editor.HEADER_STYLE, "minimal")      # a dot by the title, no header fill
+            self.assertEqual(graph_editor.HEADER_STYLE, "filled")       # the header in the category color
             self.assertIn("border-radius: %dpx" % theme.px(6), tools.styleSheet())
             theme.set_theme("playful")
             self.assertEqual(graph_editor.HEADER_STYLE, "filled")
@@ -4794,7 +4807,8 @@ class ReferenceTabTest(unittest.TestCase):
         self.tab.look.click()
         self.assertEqual(reference.current_reference(self.panel), cam)
         self.assertTrue(self.tab.look.isChecked())
-        self.assertEqual(self.tab.look.text(), "Back to Perspective")
+        self.assertEqual(self.tab.look.text(), "Look through")  # a chip: its name stays, checked while looking
+        self.assertIn("go back", self.tab.look.toolTip())
         self.tab.look.click()
         self.assertEqual(cmds.modelPanel(self.panel, query=True, camera=True), "persp")
         self.assertFalse(self.tab.look.isChecked())

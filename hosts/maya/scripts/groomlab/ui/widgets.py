@@ -743,10 +743,24 @@ def glyph(name, color=None, size=48):
     return QtGui.QIcon(_pixmap(svg, size))
 
 
+class Tile(QtWidgets.QToolButton):
+    """A tool tile: its icon over its name, the name elided to the tile's width (text() keeps the
+    whole name, for scripts and accessibility)."""
+
+    def paintEvent(self, event):
+        option = QtWidgets.QStyleOptionToolButton()
+        self.initStyleOption(option)
+        if option.text:
+            room = option.rect.width() - 2 * max(2, self.width() // 14)
+            option.text = self.fontMetrics().elidedText(option.text, QtCore.Qt.ElideRight, max(0, room))
+        painter = QtWidgets.QStylePainter(self)
+        painter.drawComplexControl(QtWidgets.QStyle.CC_ToolButton, option)
+
+
 class ToolGrid(QtWidgets.QWidget):
-    """Icon tiles of a fixed size (they never stretch with the panel), left aligned, as many to a
-    row as the width holds: columns = (width + spacing) // (tile + spacing), at least one (and up
-    to `columns`, when given)."""
+    """Tiles of a fixed size (they never stretch with the panel), left aligned, as many to a row as
+    the width holds: columns = (width + spacing) // (tile width + spacing), at least one (and up to
+    `columns`, when given)."""
 
     def __init__(self, buttons, columns=None, parent=None):
         super(ToolGrid, self).__init__(parent)
@@ -765,7 +779,11 @@ class ToolGrid(QtWidgets.QWidget):
         self._place(len(self.buttons) or 1)
 
     def _tile(self):
+        """The tiles' width (the widest one's)."""
         return max(b.minimumWidth() for b in self.buttons) if self.buttons else 0
+
+    def _tile_height(self):
+        return max(b.minimumHeight() for b in self.buttons) if self.buttons else 0
 
     def _place(self, columns, force=False):
         columns = max(1, columns if not self.max_columns else min(columns, self.max_columns))
@@ -773,9 +791,9 @@ class ToolGrid(QtWidgets.QWidget):
             return
         changed = columns != self.columns
         self.columns = columns
-        step = self._tile() + self.spacing
+        across, down = self._tile() + self.spacing, self._tile_height() + self.spacing
         for i, b in enumerate(self.buttons):
-            b.move((i % columns) * step, (i // columns) * step)
+            b.move((i % columns) * across, (i // columns) * down)
         if changed:
             self.updateGeometry()
 
@@ -799,11 +817,11 @@ class ToolGrid(QtWidgets.QWidget):
         if not self.buttons:
             return 0
         rows = self.rows_for(width)
-        return rows * self._tile() + (rows - 1) * self.spacing
+        return rows * self._tile_height() + (rows - 1) * self.spacing
 
     def minimumSizeHint(self):
         # (one row: the height a width needs comes from heightForWidth)
-        return QtCore.QSize(self._tile(), self._tile() if self.buttons else 0)
+        return QtCore.QSize(self._tile(), self._tile_height() if self.buttons else 0)
 
     def sizeHint(self):
         columns = max(1, self.columns or 1)

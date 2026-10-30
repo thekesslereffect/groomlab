@@ -45,7 +45,7 @@
     "textDim": "#A3A3A3",
     "selected": "#EDEDED",
     "cornerRadius": 8,
-    "headerStyle": "minimal",
+    "headerStyle": "filled",
     "canvasStyle": "dots",
     "shadow": false,
     "error": "red",
