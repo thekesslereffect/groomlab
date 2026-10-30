@@ -36,8 +36,12 @@ class ListBar : public QWidget {
     Q_OBJECT
 public:
     explicit ListBar(QWidget* parent = nullptr);
+    // Which of a bar's entries a row takes: every one; the labeled ones alone (a list's header:
+    // + New..., Import..., Fix Frame as line glyphs, the others as chips); the glyphs alone (the
+    // picked item's box: rename, convert, delete...).
+    enum class Part { All, Labeled, Glyphs };
     // The row from a bar's entries (made again: an earlier build goes).
-    void build(const ui::json& entries, const ui::Bindings& bindings, const ui::FillOptions& options);
+    void build(const ui::json& entries, const ui::Bindings& bindings, const ui::FillOptions& options, Part part = Part::All);
     // The button of an action id (a submenu's by its "id"); null when the bar has none.
     QToolButton* button(const std::string& id) const;
     std::vector<std::string> ids() const;  // in the row's order

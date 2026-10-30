@@ -8,6 +8,7 @@
 #include <QMenu>
 #include <QToolButton>
 
+#include "card_parts.h"
 #include "glass.h"
 #include "theme.h"
 
@@ -37,7 +38,21 @@ QLabel* aboutLabel(const std::string& html, QWidget* parent) {
 
 ListBar::ListBar(QWidget* parent) : QWidget(parent) { setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed); }
 
-void ListBar::build(const ui::json& entries, const ui::Bindings& bindings, const ui::FillOptions& given) {
+namespace {
+// A header's glyph for a labeled entry (+ New..., Import..., Fix Frame); none: a chip.
+QString headerIcon(const std::string& id) {
+    auto ends = [&id](const char* tail) {
+        const std::string t(tail);
+        return id.size() >= t.size() && id.compare(id.size() - t.size(), t.size(), t) == 0;
+    };
+    if (ends(".new")) return QStringLiteral("plus");
+    if (ends(".import")) return QStringLiteral("image_plus");
+    if (ends(".fixFrame")) return QStringLiteral("key");
+    return {};
+}
+}  // namespace
+
+void ListBar::build(const ui::json& entries, const ui::Bindings& bindings, const ui::FillOptions& given, Part part) {
     for (auto& [id, b] : buttons_) b->deleteLater();
     buttons_.clear();
     enables_.clear();
@@ -51,17 +66,34 @@ void ListBar::build(const ui::json& entries, const ui::Bindings& bindings, const
     std::vector<QToolButton*> chips, glyphs;
     for (const ui::Item& item : d.resolve(entries, resolve)) {
         if (item.kind != ui::Item::Kind::Action && item.kind != ui::Item::Kind::Submenu) continue;
+        const bool drawn = !item.glyph.empty();
+        if ((part == Part::Labeled && drawn) || (part == Part::Glyphs && !drawn)) continue;
         auto* b = new QToolButton(this);
         b->setObjectName(QStringLiteral("listBar_") + qs(item.id));
         b->setToolTip(qs(item.tip));
-        if (!item.glyph.empty()) {
+        const QString header = part == Part::Labeled ? headerIcon(item.id) : QString();
+        if (drawn) {
             // A drawn glyph on the right, in the theme's text color.
             b->setProperty("role", "glyph");
             b->setAutoRaise(true);
-            b->setFixedSize(28, 26);
-            b->setIcon(glyphIcon(item.glyph, devicePixelRatioF()));
-            b->setIconSize(QSize(18, 18));
+            b->setFixedSize(24, 24);
+            b->setIcon(glyphIcon(item.glyph, devicePixelRatioF(), 16));
+            b->setIconSize(QSize(16, 16));
             b->setProperty("glyph", qs(item.glyph));
+            glyphs.push_back(b);
+        } else if (!header.isEmpty()) {
+            // A list header's: the entry as a line glyph, its name in the tip (and its text).
+            b->setProperty("role", "glyph");
+            b->setAutoRaise(true);
+            b->setFixedSize(24, 24);
+            b->setText(qs(item.label));
+            b->setToolButtonStyle(Qt::ToolButtonIconOnly);
+            b->setIcon(lineIcon(header, devicePixelRatioF(), 15));
+            b->setIconSize(QSize(15, 15));
+            b->setProperty("glyph", header);
+            QString name = qs(item.label);
+            name.remove(QStringLiteral("+ ")).remove(QString::fromUtf8("\u25C6 "));
+            b->setToolTip(item.tip.empty() ? name : QStringLiteral("<b>%1</b><br>%2").arg(name.toHtmlEscaped(), qs(item.tip).toHtmlEscaped()));
             glyphs.push_back(b);
         } else {
             b->setProperty("role", "chip");

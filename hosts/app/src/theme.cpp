@@ -732,6 +732,40 @@ QToolButton[role="chip"]:disabled { color: @muted@; }
 QToolButton[role="chip"]::menu-indicator, QToolButton[role="glyph"]::menu-indicator { image: none; width: 0; }
 QToolButton[role="glyph"], QToolButton[role="glyph"]:checked { background: transparent; border: none; border-radius: @radius@px; padding: 2px; }
 QToolButton[role="glyph"]:hover { background: @hover@; }
+QToolButton[role="glyph"]:checked { background: @selection@; }
+QToolButton[role="glyph"][armed="true"] { color: @warning@; padding: 2px 6px; }
+/* The tool card (brush_panel.h): blocks under a faint rule, small semibold dim titles, chips that wrap. */
+QFrame[role="toolCard"] { background: transparent; border: none; border-top: 1px solid @edge@; border-radius: 0; }
+QFrame[role="block"] { background: transparent; border: none; border-top: 1px solid @groupEdge@; border-radius: 0; }
+QFrame[role="toolCard"] QLabel, QFrame[role="block"] QLabel { background: transparent; }
+QLabel[role="cardTitle"] { color: @text@; font-weight: 700; }
+QLabel[role="blockTitle"] { color: @dim@; font-size: @smallSize@px; font-weight: 600; }
+QLabel[role="chipLabel"] { color: @muted@; font-size: @smallSize@px; }
+QLabel[role="rowLabel"] { color: @dim@; }
+QFrame[role="toolCard"] QToolButton[role="chip"], QFrame[role="itemBox"] QToolButton[role="chip"], #paintControls QToolButton[role="chip"],
+#photosPanel QToolButton[role="chip"] {
+    background: transparent; border: 1px solid @fieldEdge@; color: @dim@; padding: 2px 7px; font-weight: 500; font-size: @smallSize@px; }
+QFrame[role="toolCard"] QToolButton[role="chip"]:hover, QFrame[role="itemBox"] QToolButton[role="chip"]:hover, #paintControls QToolButton[role="chip"]:hover,
+#photosPanel QToolButton[role="chip"]:hover { background: @hover@; color: @text@; }
+QFrame[role="toolCard"] QToolButton[role="chip"]:checked, QFrame[role="itemBox"] QToolButton[role="chip"]:checked, #paintControls QToolButton[role="chip"]:checked,
+#photosPanel QToolButton[role="chip"]:checked { background: @selection@; border-color: @selection@; color: @selectionText@; }
+QPushButton[role="ghost"], QToolButton[role="ghost"] { background: transparent; border: 1px solid transparent; color: @soft@; padding: 2px 6px;
+    min-height: 0; font-weight: 600; }
+QPushButton[role="ghost"]:hover, QToolButton[role="ghost"]:hover { background: @hover@; color: @text@; }
+QPushButton[role="ghost"]:disabled, QToolButton[role="ghost"]:disabled { color: @muted@; background: transparent; }
+QPushButton[role="ghost"]::menu-indicator { image: none; width: 0; }
+QToolButton[role="ghost"][popupMode="1"] { padding-right: 16px; }
+QToolButton[role="ghost"]::menu-button { border: none; background: transparent; width: 14px; }
+QToolButton[role="ghost"]::menu-arrow { image: url(:/groomlab/icons/ui_chevron_down.svg); width: 9px; height: 9px; }
+/* The lists under the card: a caps header, plain rows, the picked item's box. */
+QLabel[role="listTitle"] { color: @muted@; font-size: @smallSize@px; font-weight: 600; }
+QLabel[role="listCount"] { color: @muted@; font-size: @smallSize@px; }
+QWidget[role="listHeader"] { border-top: 1px solid @edge@; }
+QTreeWidget[role="rows"], QListWidget[role="rows"] { background: transparent; border: none; padding: 0; }
+QTreeWidget[role="rows"]::item, QListWidget[role="rows"]::item { padding: 3px 2px; }
+QTreeWidget[role="rows"]::item { border-radius: 0; margin: 0; }
+QFrame[role="itemBox"] { background: transparent; border: 1px solid @groupEdge@; border-radius: @radius@px; }
+QFrame[role="itemBox"] QLabel { background: transparent; }
 /* The menu bar's corner (MainWindow::buildMenuCorner): the file name, Render (ghost), Export (the accent). */
 QLabel[role="cornerName"] { color: @muted@; font-size: @smallSize@px; }
 QToolButton[role="cornerGhost"], QToolButton[role="cornerPrimary"] { border: 1px solid transparent; border-radius: @radius@px; padding: 2px 10px;

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// The guide groups list (the Groom Tools' Guide groups & edits section), as Maya's GuidesTab
-// lays it out from the shared definitions (engine/ui/lists.json's groups): the about line, the
-// bar (+ New Group, Rename, Select, Delete), the groups as a tree (Group, its color swatch, Guides,
-// Level; the check box shows or hides a group, a double-click renames it in place, a click on the
-// swatch picks its color, a right-click opens lists.groups.context), Edit Guides ▾ (Children,
-// Sync +X → -X and -X → +X, Mirror Selection, Mirror Group, Reparent, Promote / Demote, Clear
-// Selection) with the children count beside it, and Segments (resample).
+// The guide groups list (the Groom Tools' Tools tab: Guide groups, always open), from the shared
+// definitions (engine/ui/lists.json's groups), as the redesign lays it out: the header (Guide
+// groups, how many, + New Group; the Groom Tools put Isolate's eye there), the groups as plain rows
+// (the color dot and name, children under their parents, the guides it holds, the eye that shows or
+// hides it; a click picks the group brushes edit, a double-click renames it in place, a right-click
+// opens lists.groups.context: its color...), then the picked group's box: Rename, Select, Delete,
+// Segments (resample), Edit Guides ▾ (Children, Sync +X → -X and -X → +X, Mirror Selection, Mirror
+// Group, Reparent, Promote / Demote, Clear Selection) with the children count beside it.
 //
 // The edits go through the document, each one undo step; what the bar and menus run is the
 // window's (app_actions.h: the prompts over the viewport), which calls the functions below. The
@@ -27,6 +28,7 @@
 #include "groomlab/guide_hierarchy.h"
 
 class QCheckBox;
+class QFrame;
 class QLabel;
 class QListWidget;
 class QMenu;
@@ -39,6 +41,8 @@ namespace groomlab::app {
 
 class GroomDocument;
 class ListBar;
+class ListHeader;
+class ValueSlider;
 
 class GuidesPanel : public QWidget {
     Q_OBJECT
@@ -111,7 +115,10 @@ public:
 
     // The pieces (tests, screenshots).
     QTreeWidget* tree() const { return tree_; }
-    ListBar* bar() const { return bar_; }
+    ListHeader* header() const { return header_; }
+    ListBar* bar() const { return bar_; }          // the header's: + New Group
+    ListBar* itemBar() const { return itemBar_; }  // the picked group's: Rename, Select, Delete
+    QFrame* groupBox() const { return box_; }
     QPushButton* editsButton() const { return edits_; }
     QMenu* editsMenu() const { return editsMenu_; }
 
@@ -140,14 +147,17 @@ private:
     bool stale_ = false, pending_ = false;
     int rebuilds_ = 0;
     std::string shownKey_;  // what the tree was built from (rebuilt only when it changes)
-    QLabel* about_ = nullptr;
+    ListHeader* header_ = nullptr;
     ListBar* bar_ = nullptr;
     QTreeWidget* tree_ = nullptr;
+    QFrame* box_ = nullptr;
+    QLabel* empty_ = nullptr;  // no groups yet
+    ListBar* itemBar_ = nullptr;
     QLabel* selection_ = nullptr;
     QPushButton* edits_ = nullptr;
     QMenu* editsMenu_ = nullptr;
     QSpinBox* count_ = nullptr;
-    QSpinBox* segments_ = nullptr;
+    ValueSlider* segments_ = nullptr;
     QWidget* overlays_ = nullptr;  // the parts and flow box
     QListWidget* parts_ = nullptr;
     QLabel* flow_ = nullptr;

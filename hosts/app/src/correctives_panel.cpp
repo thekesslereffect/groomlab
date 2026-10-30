@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QSignalBlocker>
+#include <QRegularExpression>
 #include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
@@ -18,6 +19,7 @@
 #include "glass.h"
 #include "groom_document.h"
 #include "groomlab/correctives.h"
+#include "card_parts.h"
 #include "list_bar.h"
 #include "theme.h"
 
@@ -57,30 +59,34 @@ void keyAt(CorrectiveLayer& l, double seconds, float w) {
 }  // namespace
 
 CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
+    setObjectName(QStringLiteral("correctivesPanel"));
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(6, 6, 6, 6);
-    layout->setSpacing(6);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(2);
     const ui::json& lists = defs().get("lists/correctives");
-    about_ = aboutLabel(lists.value("about", std::string()), this);
-    layout->addWidget(about_);
-    bar_ = new ListBar(this);
+    // The header: Layers, how many, ◆ Fix Frame and + New (glyphs); the about line in its tip.
+    header_ = new ListHeader(tr("Layers"), this);
+    header_->setObjectName(QStringLiteral("correctivesHeader"));
+    header_->setToolTip(QString::fromStdString(lists.value("about", std::string())).remove(QRegularExpression(QStringLiteral("<[^>]*>"))));
+    bar_ = new ListBar(header_);
     bar_->setObjectName(QStringLiteral("correctivesBar"));
-    layout->addWidget(bar_);
+    header_->addGlyph(bar_);
+    layout->addWidget(header_);
 
     tree_ = new QTreeWidget(this);
     tree_->setObjectName(QStringLiteral("correctivesTree"));
     tree_->setHeaderLabels({tr("Layer"), tr("Weight"), tr("Keys")});
+    plainRows(tree_);
     tree_->setRootIsDecorated(false);
     tree_->header()->setStretchLastSection(false);
     tree_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     tree_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     tree_->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    tree_->setMinimumHeight(110);
     tree_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     tree_->setToolTip(tr("Click: what brushes edit. Checkbox: show or hide. Double-click the name: rename. Weight: now, on this "
                          "frame. Right-click: more"));
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
-    layout->addWidget(tree_, 1);
+    layout->addWidget(tree_);
     connect(tree_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* item, QTreeWidgetItem*) {
         if (!updating_) picked(item);
     });
@@ -102,9 +108,16 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
         if (QMenu* menu = contextMenu(pos)) menu->popup(tree_->viewport()->mapToGlobal(pos));
     });
 
+    // The picked layer's box: up, down, solo, delete; its weight and the key.
+    QVBoxLayout* rows = nullptr;
+    box_ = itemBox(this, &rows);
+    box_->setObjectName(QStringLiteral("layerBox"));
+    itemBar_ = new ListBar(box_);
+    itemBar_->setObjectName(QStringLiteral("layerItemBar"));
+    rows->addWidget(itemBar_);
     auto* row = new QHBoxLayout();
-    row->setSpacing(6);
-    weight_ = new ValueSlider(this);
+    row->setSpacing(4);
+    weight_ = new ValueSlider(box_);
     weight_->setCaption(tr("Weight"));
     weight_->setRange(0.0, 1.0);
     weight_->setLimits(0.0, 1.0);
@@ -112,13 +125,11 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
     weight_->setFill(theme::purple());
     weight_->setToolTip(tr("The corrective's weight on this frame. A keyed weight is keyed here as you change it"));
     row->addWidget(weight_, 1);
-    key_ = new QToolButton(this);
+    key_ = makeGlyph(QStringLiteral("key"), qs(defs().action("corrective.keyWeight").value("tip", std::string())), box_);
     key_->setObjectName(QStringLiteral("correctiveKey"));
-    key_->setText(QStringLiteral("◆"));
-    key_->setProperty("role", "chip");
-    key_->setToolTip(qs(defs().action("corrective.keyWeight").value("tip", std::string())));
     row->addWidget(key_);
-    layout->addLayout(row);
+    rows->addLayout(row);
+    layout->addWidget(box_);
     connect(weight_, &ValueSlider::released, this, [this] {
         if (updating_) return;
         setLayerWeight(currentLayer(), static_cast<float>(weight_->value()));
@@ -127,8 +138,9 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
 
     hint_ = new QLabel(tr("Strokes edit the guides."), this);
     hint_->setWordWrap(true);
-    hint_->setProperty("role", "about");
+    hint_->setProperty("role", "hint");
     layout->addWidget(hint_);
+    fitRows(tree_);
     setEnabled(false);
 }
 
@@ -136,7 +148,9 @@ void CorrectivesPanel::setActions(const ui::Bindings& bindings, const ui::FillOp
     bindings_ = bindings;
     options_ = options;
     options_.liveShortcuts = false;
-    bar_->build(defs().get("lists/correctives/bar"), bindings_, options_);
+    // + New and Fix Frame in the header (glyphs), the picked layer's up, down, solo, delete in its box.
+    bar_->build(defs().get("lists/correctives/bar"), bindings_, options_, ListBar::Part::Labeled);
+    itemBar_->build(defs().get("lists/correctives/bar"), bindings_, options_, ListBar::Part::Glyphs);
 }
 
 void CorrectivesPanel::setDocument(GroomDocument* document) {
@@ -255,12 +269,19 @@ void CorrectivesPanel::refresh() {
         QFont font = base->font(0);
         font.setBold(true);
         base->setFont(0, font);
+        for (QTreeWidgetItem* row : tree_->findItems(QStringLiteral("*"), Qt::MatchWildcard)) {
+            row->setForeground(1, theme::textMuted());
+            row->setForeground(2, theme::textMuted());
+        }
         updating_ = false;
+        header_->setCount(tree_->topLevelItemCount());
+        fitRows(tree_);
     }
     selectTargetRow();
     refreshWeights();
     applyTarget();
     bar_->refresh();
+    itemBar_->refresh();
 }
 
 void CorrectivesPanel::refreshWeights() {

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// The maps panel (the Groom Tools' Paint tab), as Maya's PaintTab lays it out from the shared
-// definitions (engine/ui/lists.json's maps): the bar (+ New Map, Import..., Rename, Convert to ▾,
-// Delete), the groom's painted maps (vertex maps and texture maps on the scalp, guide layers on
+// The maps panel (the Groom Tools' Paint tab: Maps, under the Paint card), from the shared
+// definitions (engine/ui/lists.json's maps), as the redesign lays it out: the header (Maps, how
+// many, + New Map and Import... glyphs), the groom's painted maps as plain rows (vertex maps and texture maps on the scalp, guide layers on
 // the guides; a gray ramp or r g b swatch each, ⚠ and the warning color for a texture whose image
 // is missing; a double-click renames in place, a right-click opens lists.maps.context), the new
-// map's form (+ New Map shows it), what Paint paints toward (the value, or a color map's color and
-// channels) with Fill, Show on scalp and the channel shown, and what reads the picked map ("Read
-// by"). Every edit goes to the document as one undo step. Painting: the Paint brush set on the
+// map's form (+ New Map shows it), and the picked map's box: Rename, Convert to ▾, Delete, Show on
+// (the scalp, the channel shown) and what reads it ("Read by"). What Paint paints toward (the mode,
+// the value or a color map's color and channels, Fill) is paintControls(): the Paint card holds it. Every edit goes to the document as one undo step. Painting: the Paint brush set on the
 // picked map (its kind, its file, the value or color and channels) and the viewport put in brush
 // mode. A new map may be for a setting (Density, Width... or any mappable param): made, linked and
 // painted at once (paintParamRequested).
@@ -28,6 +28,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QFrame;
 class QGroupBox;
 class QLineEdit;
 class QLabel;
@@ -46,6 +47,7 @@ class BrushSession;
 class ColorEditor;
 class GroomDocument;
 class ListBar;
+class ListHeader;
 class RoundButton;
 
 class MapsPanel : public QWidget {
@@ -110,7 +112,11 @@ public:
 
     // The pieces (tests, screenshots).
     QListWidget* list() const { return list_; }
-    ListBar* bar() const { return bar_; }
+    ListBar* bar() const { return bar_; }          // the header's: + New Map, Import...
+    ListBar* itemBar() const { return itemBar_; }  // the picked map's: Rename, Convert to, Delete
+    QFrame* mapBox() const { return box_; }
+    // Mode, Value + Fill and the color (its channels, Fill): the Paint card's (brush_panel.h).
+    QWidget* paintControls() const { return paintControls_; }
 
 signals:
     void edited();          // the document changed (maps made, renamed, removed): evaluate, undo, redisplay
@@ -141,7 +147,11 @@ private:
     int rebuilds_ = 0;
     std::string shownKey_, targetsKey_;
     bool deleteFiles_ = true;
+    ListHeader* header_ = nullptr;
     ListBar* bar_ = nullptr;
+    ListBar* itemBar_ = nullptr;
+    QFrame* box_ = nullptr;
+    QWidget* paintControls_ = nullptr;
     QListWidget* list_ = nullptr;
     QLabel* hint_ = nullptr;  // shown while the list is empty
     QLabel* users_ = nullptr;  // Read by
@@ -153,13 +163,13 @@ private:
     QCheckBox* newColor_ = nullptr;
     ValueSlider* newValue_ = nullptr;
     QSpinBox* newResolution_ = nullptr;
-    QCheckBox* show_ = nullptr;
+    QToolButton* show_ = nullptr;
     QComboBox* channel_ = nullptr;
     ValueSlider* paintValue_ = nullptr;
     QWidget* valueRow_ = nullptr;
     ColorEditor* paintColor_ = nullptr;
     ValueSlider* paintAlpha_ = nullptr;
-    std::vector<QCheckBox*> paintChannels_;
+    std::vector<QToolButton*> paintChannels_;
     std::vector<QToolButton*> paintModes_;
     QWidget* colorRow_ = nullptr;
     RoundButton* paint_ = nullptr;

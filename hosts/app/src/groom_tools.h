@@ -1,27 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// The Groom Tools dock, as Maya's Groom Tools window (hosts/maya/scripts/groomlab/ui/palette.py
-// ToolPalette, tool_tabs.py) and Blender's Groom Tools panel lay it out, built from the shared UI
-// definitions (engine/ui/palette.json through definitions.h): one column that scrolls,
+// The Groom Tools dock, as the redesign lays it out (research/ui-redesign/QT.md, "Groom Tools
+// layout"; Maya's palette.py and Blender's Groom Tools panel follow the same shared definitions,
+// engine/ui/palette.json through definitions.h). One model on every tab: pick a tool, its card
+// right under the grid, then the list of things the tab works on with the picked one's own
+// settings under it.
 //
-//   header        the groom's name, the eye (show or hide the groom), the Graph Editor, ⋯ More
+//   pinned        (outside the scroll area)
+//     header      the groom's name, the eyes (its hair, its guides), the Graph Editor, ⋯ More
 //                 (palette.header.more: New Groom on Mesh, Theme)
-//   Group         the guide group brushes edit and new guides go into (All groups, then each
-//                 group, children under their parents), Isolate (its level at full color, the
-//                 others dimmed); Symmetry and across what (World X, Y, Z, Topology)
-//   status        a line that takes no room while it has nothing to say
-//   no groom      palette.empty: Start a groom (New Groom on Mesh, Import ▾)
-//   tabs          palette.tabs: Tools (the tiles by category: Create, Shape, Trim, Guides; Unfreeze
-//                 All beside Freeze), Paint (the Paint tile over the maps panel), Correctives (the
-//                 correctives panel), Photos (reference photos as cameras: photos_panel.h)
-//   the tool      its name, what it does and its card (brush_panel.h: the settings it uses)
-//   sections      palette.sections: Tubes (tube_panel.h: the targets' tube shape and sections, the shape
-//                 library and its outline editor, Fill Tubes; opened by Place, Draw and Shape), While sculpting (how the strands draw
-//                 while a stroke is live, Full density), Guide groups & edits (the guides panel,
-//                 Tools tab). palette.output (Maya's and Blender's Output strip) is not the app's:
-//                 Export ▾ and Render ▾ sit in the menu bar's corner (MainWindow), the rest in the
-//                 GroomLab menu; the first-groom steps float over the viewport (overlay.h).
+//     status      a line that takes no room while it has nothing to say
+//     tabs        palette.tabs: Tools, Paint, Correctives, Photos
+//     the grid    the tool tiles at a fixed size, as many to a row as the width takes (Tools and
+//                 Correctives: Create, Shape, Trim, Guides, Unfreeze All beside Freeze; Paint: the
+//                 Paint tile)
+//   scrolls
+//     no groom    palette.empty: Start a groom (New Groom on Mesh, Import ▾)
+//     the card    the tool's card (brush_panel.h; the tubes' blocks, tube_panel.h, inside it); the
+//                 Paint tab's is Paint's; none on Photos. With no tool: one muted line
+//     the list    Tools: Guide groups (the guides panel, always open; Isolate is the eye in its
+//                 header); Paint: Maps (the maps panel); Correctives: Layers (the correctives
+//                 panel); Photos: the photos panel
+//
+// palette.output (Maya's and Blender's Output strip) is not the app's: Export ▾ and Render ▾ sit in
+// the menu bar's corner (MainWindow), the rest in the GroomLab menu; the first-groom steps float
+// over the viewport (overlay.h). How the strands draw while sculpting is Properties > Sculpting.
 //
 // The window (MainWindow) owns what the tools run: the dock asks (toolChosen, the signals below),
 // the window does it and tells the dock back (setTool, setGroups, refresh).
@@ -36,6 +40,7 @@
 #include <QString>
 #include <QWidget>
 
+#include "card_parts.h"
 #include "definitions.h"
 
 class QAbstractButton;
@@ -54,12 +59,12 @@ namespace groomlab::app {
 
 class BrushPanel;
 class BrushSession;
+class GuidesPanel;
 class TubePanel;
-class ValueSlider;
 
 // ---- ToolGrid --------------------------------------------------------------------------------------
-// Tiles that reflow to the width: as many a row as fit (at most `maxColumns`, at least two), each
-// as wide as the row allows (Maya's widgets.ToolGrid).
+// Tiles at a fixed size (the largest button's minimum), left-aligned and never stretched: as many to
+// a row as fit, (width + spacing) / (tile + spacing), at most `maxColumns`.
 class ToolGrid : public QWidget {
     Q_OBJECT
 public:
@@ -67,6 +72,8 @@ public:
     void setButtons(std::vector<QAbstractButton*> buttons, int maxColumns);
     void setMaxColumns(int maxColumns);
     int columnsFor(int width) const;
+    int spacing() const { return spacing_; }
+    QSize tile() const;  // the widest and tallest button's minimum
     bool hasHeightForWidth() const override { return true; }
     int heightForWidth(int width) const override;
     QSize sizeHint() const override;
@@ -77,32 +84,10 @@ protected:
     bool event(QEvent* event) override;
 
 private:
-    QSize tile() const;  // the widest and tallest button's minimum
     void place();
     std::vector<QAbstractButton*> buttons_;
-    int maxColumns_ = 4;
-    int spacing_ = 6;
-};
-
-// ---- Section ---------------------------------------------------------------------------------------
-// A titled section that folds away: its header shows or hides the content (Maya's widgets.Section).
-class Section : public QWidget {
-    Q_OBJECT
-public:
-    Section(const QString& title, QWidget* content, bool expanded = false, QWidget* parent = nullptr);
-    void setExpanded(bool expanded);
-    bool expanded() const { return expanded_; }
-    QPushButton* header() const { return header_; }
-    QWidget* content() const { return content_; }
-
-signals:
-    void toggled(bool expanded);
-
-private:
-    QString title_;
-    QPushButton* header_ = nullptr;
-    QWidget* content_ = nullptr;
-    bool expanded_ = false;
+    int maxColumns_ = 64;
+    int spacing_ = 4;
 };
 
 // ---- GroomTools ------------------------------------------------------------------------------------
@@ -114,7 +99,7 @@ public:
     // ---- What it works on ----------------------------------------------------------------------
     void setSession(BrushSession* session);
     // The window's bindings (app_actions.h): the More menu, the empty state's buttons and the Parts
-    // box's buttons are filled from the definitions with them (ids without a binding hidden, as in
+    // block's buttons are filled from the definitions with them (ids without a binding hidden, as in
     // the menus).
     void setBindings(const ui::Bindings& bindings, const ui::FillOptions& options);
     // The open groom's name ("" none: the empty state alone shows).
@@ -127,11 +112,8 @@ public:
     };
     void setGroups(const std::vector<GroupRow>& groups);
     void setParts(const std::vector<std::string>& names);
-    // The flow arrows and sinks the groom keeps (the Flow card's count, beside Clear All).
+    // The flow arrows and sinks the groom keeps (the Flow block's count, beside Clear all).
     void setFlowCount(std::size_t arrows, std::size_t sinks);
-    // Whether a section (palette.sections) shows for a tool on a tab: its "tools" (the tool one of
-    // them) and "tabs" (the tab one of them); one with neither always shows. Maya's and Blender's rule.
-    static bool sectionShown(const ui::json& section, const std::string& tool, const std::string& tab);
     // A button with a definitions menu (`ref`, e.g. "menus/output.export") that runs the window's
     // bindings: the empty state's Import ▾, the menu bar corner's Export ▾ and Render ▾. Its menu's
     // actions take `prefix` before their names, so the window's actions (found by name: tests,
@@ -143,7 +125,9 @@ public:
     // The active tool: a catalog id ("" none, the camera), its tiles lit and its card shown.
     void setTool(const std::string& id);
     const std::string& tool() const { return tool_; }
-    // The group Isolate shows at full color with its child groups ("": Isolate off, or All groups).
+    // The group brushes edit (the session's: its group, else the first group at its level; "" every
+    // level), and the one Isolate shows at full color with its child groups ("": Isolate off).
+    std::string currentGroup() const;
     std::string isolatedGroup() const;
     // Everything takes the session's settings again (a radius drag, a picked level, a script).
     void refresh();
@@ -158,62 +142,53 @@ public:
     void setStatus(const QString& text);
     QString status() const;
 
-    // ---- Tabs and sections --------------------------------------------------------------------
+    // ---- Tabs and lists -----------------------------------------------------------------------
     // The tab by palette.json's id or an alias ("tools", "paint", "correctives" or "sculpt",
-    // "photos" or "reference"; "guides": the Tools tab with its guide groups open). False for
-    // another word.
+    // "photos" or "reference"; "guides": the Tools tab, its guide groups). False for another word.
     bool showTab(const QString& id);
     QString currentTab() const;
-    // The pages the window fills: the Paint tab's maps panel, the Correctives tab's panel, the
-    // Guide groups & edits section's guides panel (their own scroll areas fit their content
-    // here: the whole dock scrolls as one column).
+    // The lists the window fills: the Paint tab's maps panel (its Mode, Value + Fill and color go
+    // into the Paint card), the Correctives tab's panel, the Tools tab's guides panel (Isolate in
+    // its header), the Photos tab's panel. Their own scroll areas fit their content here: the
+    // column scrolls as one.
     void setPaintContent(QWidget* content);
     void setCorrectivesContent(QWidget* content);
     void setGroupsContent(QWidget* content);
-    void setPhotosContent(QWidget* content);  // the Photos tab's panel (photos_panel.h)
-    Section* section(const std::string& id) const;  // palette.sections' ids: tubes, sculptDisplay, groups, output
-    // The strands while a stroke is live (DisplaySettings::sculptDisplay: 0 as they are, 1 dimmed,
-    // 2 guides only) and Full density.
-    int sculptDisplay() const;
-    void setSculptDisplay(int display);  // no signal
-    // The Tubes section reads the groom again (the selection or the solo changed, an undo, a
-    // graph edit): only while it is open (opening it reads it).
+    void setPhotosContent(QWidget* content);
+    // The tubes' blocks read the groom again (the selection or the solo changed, an undo, a graph
+    // edit): now while a tool that shows them is on, else when one is picked.
     void refreshTubes();
 
     // ---- The pieces (tests) ---------------------------------------------------------------------
     QAbstractButton* tile(const std::string& id) const;  // the tool's first tile (the Paint tab's for Paint)
     std::vector<QAbstractButton*> tiles() const;         // every tool tile, Unfreeze All among them
+    std::vector<ToolGrid*> grids() const { return grids_; }
     BrushPanel* card() const { return card_; }
     TubePanel* tubePanel() const { return tubes_; }
-    QLabel* toolHeading() const { return heading_; }
-    QLabel* toolHint() const { return hint_; }
-    QComboBox* groupBox() const { return group_; }
-    QCheckBox* isolateBox() const { return isolate_; }
-    QCheckBox* symmetryBox() const { return symmetry_; }
-    QComboBox* symmetryMode() const { return symmetryMode_; }
+    QLabel* noToolLabel() const { return noTool_; }
+    QToolButton* isolateButton() const { return isolate_; }
+    QCheckBox* symmetryBox() const;
+    QComboBox* symmetryMode() const;
     QToolButton* eyeButton() const { return eye_; }
     QToolButton* guidesEyeButton() const { return guidesEye_; }
     QToolButton* graphButton() const { return graph_; }
     QMenu* moreMenu() const { return moreMenu_; }
     QWidget* emptyState() const { return empty_; }
+    QWidget* pinned() const { return pinned_; }
     QWidget* work() const { return work_; }
     QTabBar* tabBar() const { return tabs_; }
-    QCheckBox* fullDensityBox() const { return fullDensity_; }
-    QComboBox* sculptDisplayBox() const { return sculpt_; }
     QScrollArea* scrollArea() const { return scroll_; }
 
 signals:
     // A tile: the catalog id ("select", "freeze", "paint", "comb"...).
     void toolChosen(const QString& id);
     void unfreezeAllRequested();  // the Unfreeze All tile
-    void settingsChanged();       // the card, the group or the symmetry edited the brush settings
-    void guidesEdited();          // the card or the Tubes section changed the guides (Unfreeze All, a tube edit)
-    void tubesGraphEdited();      // the Tubes section's Fill Tubes or Tube Blend changed the graph
+    void settingsChanged();       // the card or a picked group edited the brush settings
+    void guidesEdited();          // the card or the tubes changed the guides (a tube edit, Apply)
     void tubesPreviewed();        // the tube outline editor's live preview (no undo step): evaluate and redraw
-    void lengthsPreviewed();      // the Keys box changed the Length Keys preview: evaluate and redraw
+    void lengthsPreviewed();      // the Keys block changed the Length Keys preview: evaluate and redraw
     void clearFlowRequested();
     void isolateChanged();        // Isolate or the group: the display's isolated level
-    void sculptDisplayChanged();  // While sculpting: the strands' display or Full density
     void hairVisibilityToggled(bool visible);    // the hair's eye: the strands alone
     void guidesVisibilityToggled(bool visible);  // the guides' eye: every guide group (Properties > Guides)
     void graphRequested();
@@ -221,14 +196,10 @@ signals:
 
 private:
     QToolButton* makeTile(const std::string& id, const QString& label, const QString& tip);
-    void refreshTiles();          // checked state and the icons' tint
-    void refreshGroupChoice();    // the Group combo from the settings' group and level
-    void refreshSymmetry();
-    void groupPicked();
-    void symmetryEdited();
-    void refreshCard();           // the heading, hint and card for the tool
-    void refreshVisibility();     // empty state vs the work, the sections (refreshSections)
-    void refreshSections();       // the sections the tool and tab use (palette.sections' tools, tabs)
+    void refreshTiles();       // checked state and the icons' tint
+    void refreshCard();        // the card for the tool and the tab
+    void refreshVisibility();  // empty state vs the work, the tab's grid, card and list
+    void groupPicked(const std::string& name);  // a guide groups row clicked
     QToolButton* menuChip(const ui::Item& item, const ui::Bindings& bindings, const ui::FillOptions& options, QWidget* parent);
     void fitScroll(QWidget* content);  // a hosted panel's own scroll area as tall as its content
 
@@ -237,48 +208,35 @@ private:
     QString name_;
     std::string tool_;
     bool tileLabels_ = false;  // icons alone (View > Tool Labels: the names under them)
-    QScrollArea* scroll_ = nullptr;
-    QVBoxLayout* outer_ = nullptr;
-    // Header.
+    std::vector<GroupRow> groups_;
+    // Pinned.
+    QWidget* pinned_ = nullptr;
     QLabel* groomName_ = nullptr;
     QToolButton* eye_ = nullptr;
     QToolButton* guidesEye_ = nullptr;
     QToolButton* graph_ = nullptr;
     QToolButton* more_ = nullptr;
     QMenu* moreMenu_ = nullptr;
-    // Group and symmetry.
-    QWidget* targetRow_ = nullptr;
-    QComboBox* group_ = nullptr;
-    QCheckBox* isolate_ = nullptr;
-    QCheckBox* symmetry_ = nullptr;
-    QComboBox* symmetryMode_ = nullptr;
-    QWidget* centerRow_ = nullptr;
-    ValueSlider* symmetryCenter_ = nullptr;
     QLabel* status_ = nullptr;
-    // No groom.
-    QFrame* empty_ = nullptr;
-    QVBoxLayout* emptyItems_ = nullptr;
-    // The work: tabs, the tool, the sections.
-    QWidget* work_ = nullptr;
     QTabBar* tabs_ = nullptr;
     std::vector<std::string> tabIds_;
-    std::vector<QWidget*> pages_;
-    QWidget* paintHolder_ = nullptr;
-    QWidget* correctivesHolder_ = nullptr;
-    QWidget* photosHolder_ = nullptr;
+    QWidget* toolsGrid_ = nullptr;  // the categories' grids (Tools, Correctives)
+    QWidget* paintGrid_ = nullptr;  // the Paint tile (Paint)
     std::map<std::string, std::vector<QToolButton*>> tiles_;
     std::vector<QToolButton*> allTiles_;
     std::vector<ToolGrid*> grids_;
-    QLabel* heading_ = nullptr;
-    QLabel* hint_ = nullptr;
+    // Scrolls.
+    QScrollArea* scroll_ = nullptr;
+    QFrame* empty_ = nullptr;
+    QVBoxLayout* emptyItems_ = nullptr;
+    QWidget* work_ = nullptr;
     BrushPanel* card_ = nullptr;
-    std::map<std::string, Section*> sections_;
-    std::map<std::string, ui::json> sectionRules_;  // palette.sections by id: the tools and tabs each shows with
+    QLabel* noTool_ = nullptr;
     TubePanel* tubes_ = nullptr;
-    std::string tubesOpenedFor_;  // the tool that last opened the Tubes section
-    QWidget* groupsHolder_ = nullptr;
-    QComboBox* sculpt_ = nullptr;
-    QCheckBox* fullDensity_ = nullptr;
+    bool tubesStale_ = false;
+    std::map<std::string, QWidget*> lists_;  // by tab id: the holder of its list
+    QPointer<GuidesPanel> guides_;
+    QToolButton* isolate_ = nullptr;
     // The buttons that run a binding, with the binding's enabled state (refresh).
     std::vector<std::pair<QPointer<QAbstractButton>, std::function<bool()>>> enables_;
 };
