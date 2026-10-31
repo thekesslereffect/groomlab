@@ -60,6 +60,7 @@ const char* kStyle[] = {"-st", "-style"};
 const char* kSides[] = {"-sds", "-sides"};
 const char* kWidthScale[] = {"-ws", "-widthScale"};
 const char* kStrandUVs[] = {"-suv", "-strandUVs"};
+const char* kMake[] = {"-mk", "-make"};
 
 // "colorR" -> "glColorR"; anything but letters, digits and _ becomes _.
 MString attributeName(const std::string& channel) {
@@ -139,6 +140,7 @@ MSyntax ConvertCmd::newSyntax() {
     s.addFlag(kSides[0], kSides[1], MSyntax::kLong);
     s.addFlag(kWidthScale[0], kWidthScale[1], MSyntax::kDouble);
     s.addFlag(kStrandUVs[0], kStrandUVs[1]);
+    s.addFlag(kMake[0], kMake[1], MSyntax::kString);
     s.setObjectType(MSyntax::kSelectionList, 1, 1);
     s.useSelectionAsDefault(true);
     s.enableQuery(false);
@@ -249,6 +251,11 @@ MStatus ConvertCmd::doIt(const MArgList& args) {
 
             if (db.isFlagSet(kStrandMesh[0])) {
                 StrandMeshOptions o;
+                const std::string make = flagString(db, kMake[0], "auto").asChar();
+                if (make == "strands") o.make = StrandMeshOptions::Make::Strands;
+                else if (make == "scales") o.make = StrandMeshOptions::Make::Scales;
+                else if (make == "feathers") o.make = StrandMeshOptions::Make::Feathers;
+                else if (make != "auto") return fail(kName, "-make is auto, strands, scales or feathers");
                 const std::string style = flagString(db, kStyle[0], "tube").asChar();
                 if (style != "tube" && style != "ribbon") return fail(kName, "-style is tube or ribbon");
                 o.style = style == "ribbon" ? StrandMeshOptions::Style::Ribbon : StrandMeshOptions::Style::Tube;
@@ -260,8 +267,11 @@ MStatus ConvertCmd::doIt(const MArgList& args) {
                 if (o.widthScale <= 0.0f) return fail(kName, "-widthScale is above 0");
                 o.strandUVs = db.isFlagSet(kStrandUVs[0]);
                 const MeshPtr scalp = joinedScalpFromNode(groomPath.node());  // roots on every scalp of the groom
-                strandMesh_ = buildStrandMesh(kept, scalp.get(), o);
-                if (strandMesh_.mesh.faceCounts.empty()) return fail(kName, "the strands make no faces");
+                // Scales and feathers whole (their plates and rachis are the strand set's); tubes thinned.
+                const bool whole = resolveMeshMake(*strands, o) != StrandMeshOptions::Make::Strands;
+                if (whole) made_ = total_;
+                strandMesh_ = buildStrandMesh(whole ? *strands : kept, scalp.get(), o);
+                if (strandMesh_.mesh.faceCounts.empty()) return fail(kName, "nothing to make a mesh of (no faces)");
                 mesh_ = true;
                 rootName_ = flagString(db, kNameFlag[0], (prefix + "_strandMesh").c_str());
             } else {

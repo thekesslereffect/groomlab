@@ -37,7 +37,7 @@ bool takesAffect(const Operator& op) {
     // two sets themselves: their result is not the same strands as their input to mix with.
     static const std::set<std::string> kNot = {
         op::kOutput, op::kResample, op::kCull,  op::kMerge,       op::kSwitch,   op::kBlend, op::kMirror,
-        op::kCards,  op::kStrandMesh, op::kInstance, op::kScales, op::kSplit, op::kInterpolate, op::kCompound, op::kInput, op::kGroup,
+        op::kCards,  op::kToMesh, op::kInstance, op::kScales, op::kSplit, op::kInterpolate, op::kCompound, op::kInput, op::kGroup,
     };
     if (kNot.count(op.typeName())) return false;
     const std::vector<PortSpec> inputs = op.inputs();

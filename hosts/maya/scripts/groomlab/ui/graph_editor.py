@@ -3336,22 +3336,32 @@ class ParamPanel(QtWidgets.QScrollArea):
                 action.setToolTip(info["description"])
             preset.setMenu(preset_menu)
             buttons.append(preset)
-        elif node_type == "StrandMesh":
+        elif node_type == "ToMesh":
             show = QtWidgets.QCheckBox("Show mesh")
-            show.setObjectName("nodeAction_ShowStrandMesh")
-            show.setToolTip("The StrandMesh nodes' meshes instead of the strands in the viewport (the groom's "
-                            "displayStrandMesh)")
-            show.setChecked(bool(groom) and bool(cmds.getAttr(groom + ".displayStrandMesh")))
-            show.toggled.connect(lambda on: groom and cmds.setAttr(groom + ".displayStrandMesh", bool(on)))
+            show.setObjectName("nodeAction_ShowMesh")
+            show.setToolTip("The ToMesh nodes' meshes instead of the strands in the viewport (the groom's displayMesh)")
+            show.setChecked(bool(groom) and bool(cmds.getAttr(groom + ".displayMesh")))
+            show.toggled.connect(lambda on: groom and cmds.setAttr(groom + ".displayMesh", bool(on)))
             buttons.append(show)
 
             def mesh_in_scene():
-                shape = groomlab.strand_mesh_shape(groom)
+                shape = groomlab.to_mesh_shape(groom)
                 cmds.select(shape)
-                self.editor.report("%s: the StrandMesh nodes' live mesh (export it with Alembic)" % shape.split("|")[-1])
-            buttons.append(("Mesh in Scene", "A Maya mesh on the groom's outStrandMesh (selected if there is one): "
-                            "the StrandMesh nodes' meshes, following the animation, for Alembic export or "
-                            "other tools (one undo step)", lambda _=False: later(mesh_in_scene)))
+                self.editor.report("%s: the ToMesh nodes' live mesh (export it with Alembic)" % shape.split("|")[-1])
+            buttons.append(("Mesh in Scene", "A Maya mesh on the groom's outMesh (selected if there is one): the ToMesh "
+                            "nodes' meshes, following the animation, to sculpt, model or export (one undo step)",
+                            lambda _=False: later(mesh_in_scene)))
+
+            def export_mesh():
+                from groomlab.ui import menu
+                path = cmds.fileDialog2(fileFilter="OBJ (*.obj);;FBX (*.fbx);;Alembic, this frame (*.abc)",
+                                        dialogStyle=2, fileMode=0, caption="Export Mesh",
+                                        startingDirectory=menu.default_file(groom, "exports", "_%s.obj" % name))
+                if path:
+                    written = groomlab.export_mesh(groom, path[0], node=name)
+                    self.editor.report("%s: wrote %s" % (name, written))
+            buttons.append(("Export Mesh...", "This node's mesh at the current frame as an OBJ, FBX or Alembic file "
+                            "(for ZBrush, baking or printing)", lambda _=False: later(export_mesh)))
         elif node_type == "HairColor":
             buttons.append(("Create Hair Shader", "An aiStandardHair rendering this node's colors (its melanin, or "
                             "with mode color or a tip color its RGB), assigned to the groom; it follows later "

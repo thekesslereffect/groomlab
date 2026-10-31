@@ -876,10 +876,15 @@ json exportUnityFeathers(Session& s, const json& args) {
 #endif
 }
 
-// ---- Strands as a mesh (Maya's strands_to_mesh, StrandMesh nodes) --------------------------------
+// ---- The groom as a mesh (Maya's to_mesh, ToMesh nodes) -------------------------------------------
 
 StrandMeshOptions meshOptions(const json& args) {
     StrandMeshOptions o;
+    const std::string make = optString(args, "make", "auto");
+    if (make == "strands") o.make = StrandMeshOptions::Make::Strands;
+    else if (make == "scales") o.make = StrandMeshOptions::Make::Scales;
+    else if (make == "feathers") o.make = StrandMeshOptions::Make::Feathers;
+    else if (make != "auto") fail("bad_request", "make is auto, strands, scales or feathers");
     const std::string style = optString(args, "style", "tube");
     if (style != "tube" && style != "ribbon") fail("bad_request", "style is tube or ribbon");
     o.style = style == "tube" ? StrandMeshOptions::Style::Tube : StrandMeshOptions::Style::Ribbon;
@@ -909,7 +914,7 @@ json strandMesh(Session& s, const json& args) {
     std::vector<MeshOut> meshes;
     json r;
     if (optBool(args, "nodes", false)) {
-        // Every StrandMesh node making the output, each its own mesh by its node's options.
+        // Every ToMesh node making the output, each its own mesh by its node's options.
         feedSessionTime(s);
         std::vector<StrandMeshSource> sources;
         try {
@@ -927,7 +932,7 @@ json strandMesh(Session& s, const json& args) {
         r["nodes"] = json::array();
         for (const MeshOut& m : meshes) r["nodes"].push_back(m.key);
     } else {
-        // The groom's strands (Strands to Mesh): at `density`, at most `maxStrands` (thinned by ID).
+        // The groom's strands (To Mesh): at `density`, at most `maxStrands` (thinned by ID).
         ViewRequest request;
         request.density = static_cast<float>(optNumber(args, "density", 1.0));
         if (!(request.density > 0.0f && request.density <= 1.0f)) fail("bad_request", "density must be above 0, at most 1");
@@ -940,7 +945,10 @@ json strandMesh(Session& s, const json& args) {
         const StrandSet& all = *view.strands;
         const double most = optNumber(args, "maxStrands", 100000.0);
         if (most < 1.0) fail("bad_request", "maxStrands must be 1 or more");
-        const std::vector<std::size_t> keep = thinStrandsById(all, static_cast<std::size_t>(most));
+        // Scales and feathers whole (their plates and rachis are the strand set's); tubes thinned.
+        const StrandMeshOptions options = meshOptions(args);
+        const bool whole = resolveMeshMake(all, options) != StrandMeshOptions::Make::Strands;
+        const std::vector<std::size_t> keep = thinStrandsById(all, whole ? all.strandCount() : static_cast<std::size_t>(most));
         StrandSet kept;
         const StrandSet* strands = &all;
         if (keep.size() < all.strandCount()) {
@@ -953,7 +961,7 @@ json strandMesh(Session& s, const json& args) {
             }
             strands = &kept;
         }
-        meshes.push_back(strandMeshOut(*strands, scalpOf(s, view).get(), meshOptions(args), "strands"));
+        meshes.push_back(strandMeshOut(*strands, scalpOf(s, view).get(), options, "strands"));
         r["strands"] = keep.size();
         r["total"] = all.strandCount();
         r["capped"] = keep.size() < all.strandCount();

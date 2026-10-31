@@ -760,15 +760,16 @@ class GraphEditorTest(unittest.TestCase):
             self.assertTrue(panel.pinned.isAncestorOf(self._action(label)), label)
         self._action("Clear Simulation").click()
         wait(50)
-        # StrandMesh: its mesh shows (displayStrandMesh); Mesh in Scene puts a Maya mesh on outStrandMesh.
-        strand_mesh = self.editor.add_node("StrandMesh")
+        # ToMesh: its mesh shows (displayMesh); Mesh in Scene puts a Maya mesh on outMesh; Export Mesh is there.
+        strand_mesh = self.editor.add_node("ToMesh")
         self._select_node(strand_mesh)
-        shown = [b for b in self.editor.params.findChildren(_qw.QCheckBox) if b.objectName() == "nodeAction_ShowStrandMesh"]
+        shown = [b for b in self.editor.params.findChildren(_qw.QCheckBox) if b.objectName() == "nodeAction_ShowMesh"]
         self.assertEqual(len(shown), 1)
         self.assertTrue(shown[0].isChecked())
         self._action("Mesh in Scene").click()
         wait(50)
-        self.assertTrue(cmds.listConnections(self.groom + ".outStrandMesh", destination=True, source=False))
+        self.assertTrue(cmds.listConnections(self.groom + ".outMesh", destination=True, source=False))
+        self.assertIsNotNone(self._action("Export Mesh..."))  # (a file dialog: not clicked here)
         self._select_node("length")
         wait(10)  # (the last node's pinned actions go once the event is over)
         from PySide2 import QtWidgets
@@ -3757,7 +3758,7 @@ class DockableWindowsTest(unittest.TestCase):
             entries = [utilities + "|" + i for i in cmds.menu(utilities, query=True, itemArray=True)
                        if not cmds.menuItem(i, query=True, divider=True)]
             self.assertEqual([cmds.menuItem(i, query=True, label=True) for i in entries],
-                             ["Guides to Curves", "Curves to Guides...", "Strands to Curves...", "Strands to Mesh...",
+                             ["Guides to Curves", "Curves to Guides...", "Strands to Curves...", "To Mesh...",
                               "Bake Node to Guides...", "Bake Scale Maps", "Delete All Flow Arrows",
                               "Transfer Groom to Scalp...",
                               "Copy Graph to Other Grooms...", "Find Missing Files...", "Collect Files"])

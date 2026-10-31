@@ -671,9 +671,9 @@ DisplaySettings GroomSubSceneOverride::readSettings() {
     // which shows them itself).
     s.cardsView = shape_->cardsView();
     s.drawCards = s.cardsView && !shape_->cardMeshConnected();
-    // The StrandMesh nodes' meshes instead of the strands (drawn here unless a mesh on
-    // outStrandMesh shows them).
-    s.strandMeshView = displayFlag(GroomShape::aDisplayStrandMesh);
+    // The ToMesh nodes' meshes instead of the strands (drawn here unless a mesh on
+    // outMesh shows them).
+    s.strandMeshView = displayFlag(GroomShape::aDisplayMesh);
     s.drawStrandMesh = s.strandMeshView && !shape_->strandMeshConnected();
     s.instances = displayFlag(GroomShape::aDisplayInstances);
     s.hair = displayFlag(GroomShape::aDisplayHair);  // (the eye: the guides draw either way)

@@ -267,7 +267,7 @@ TEST(AppUi, MenuBarFromTheDefinitionsHidesWhatTheAppDoesNotRun) {
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Simulate"))),
               (std::vector<std::string>{"Add Simulate Node", "Simulate Range", "Bake Simulation", "Clear Simulation"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Utilities"))),
-              (std::vector<std::string>{"Strands to Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "-", "Delete All Flow Arrows", "-",
+              (std::vector<std::string>{"To Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "-", "Delete All Flow Arrows", "-",
                                         "Transfer Groom to Scalp...", "-", "Find Missing Files..."}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Export"))),
               (std::vector<std::string>{"Alembic...", "USD...", "V-Ray Scene...", "-", "Unreal Groom...", "Unity Strands (.abc)...", "glTF Cards...",

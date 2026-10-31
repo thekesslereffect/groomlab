@@ -3,7 +3,7 @@
 written as FBX with Blender's exporter from the meshes the helper answers, strands as a mesh object,
 colliders and other scalps from Blender objects, a transfer onto another mesh undone and redone, and the
 sample meshes added at their real size. Then the operators the GroomLab menu and the Output strip run
-(pipeline_ops.py): the engine exports with their file and folder browsers' properties, Strands to Mesh,
+(pipeline_ops.py): the engine exports with their file and folder browsers' properties, To Mesh,
 Bake Scale Maps, Simulate (Add, Range, Bake, Clear), Add (Cards, a Collider kept posed, Feathers, Braid on
 curve objects, samples), Transfer Groom to Scalp with the new mesh owning the groom (GroomLab's undo and
 Blender's both taking it back), the strand count HUD, a turntable, Find Missing Files and Copy Graph."""
@@ -74,8 +74,8 @@ class PipelineTest(unittest.TestCase):
         glb = self.tmp("head.glb")
         r = pipeline.export(self.head, "gltfCards", path=glb, name="head", resolution=32)
         self.assertTrue(os.path.isfile(glb))
-        # Strands to Mesh: an object under the scalp.
-        obj, r = pipeline.strands_to_mesh(self.head, sides=3, max_strands=25, density=0.2)
+        # To Mesh: an object under the scalp.
+        obj, r = pipeline.to_mesh(self.head, sides=3, max_strands=25, density=0.2)
         self.assertEqual(obj.parent, self.head)
         self.assertEqual(r["strands"], 25)
         self.assertGreater(len(obj.data.polygons), 25)
@@ -385,8 +385,8 @@ class PipelineOpsTest(unittest.TestCase):
         self.assertEqual(bpy.ops.groomlab.export_unity_cards(directory=self.tmp("unity"), resolution=32), {"FINISHED"})
         self.assertTrue(any(f.endswith(".fbx") for f in os.listdir(self.tmp("unity"))))
         self.assertEqual(set(bpy.data.objects), before)
-        # Strands to Mesh: a mesh under the scalp, selected.
-        self.assertEqual(bpy.ops.groomlab.strands_to_mesh(sides=3, max_strands=20), {"FINISHED"})
+        # To Mesh: a mesh under the scalp, selected.
+        self.assertEqual(bpy.ops.groomlab.to_mesh(sides=3, max_strands=20), {"FINISHED"})
         mesh = bpy.context.view_layer.objects.active
         self.assertEqual(mesh.parent, head)
         self.assertGreater(len(mesh.data.polygons), 20)

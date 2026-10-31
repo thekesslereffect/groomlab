@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // The GroomLab menu's output and housekeeping in the app (app_output_actions.cpp,
 // main_window_output.cpp, groom_document_output.cpp): Add Sample Mesh, the Add menu's nodes before
-// the output, Simulate > Add Simulate Node, Import > Alembic Curves, the Utilities (Strands to Mesh,
+// the output, Simulate > Add Simulate Node, Import > Alembic Curves, the Utilities (To Mesh,
 // Bake Scale Maps, Find Missing Files), Export > Scales Instancer (USD), the Strand Count HUD, the
 // themes switched live with the user's themes folder, File > Open Recent and autosave. The
 // offscreen platform; the glass prompts answered by their labels, no dialog ever opens.
@@ -375,7 +375,7 @@ TEST(AppOutput, ImportUtilitiesAndScales) {
     EXPECT_EQ(fs::u8path(doc->param("guides", "path").get<std::string>()), moved);
     EXPECT_EQ(doc->undoText(), "Undo relink missing files");
 
-    // Strands to Mesh: tubes in an OBJ (a few strands), read back as a mesh.
+    // To Mesh: tubes in an OBJ (a few strands), read back as a mesh.
     const std::string obj = (dir / "strands.obj").u8string();
     ASSERT_TRUE(window.strandsToMesh(QString::fromStdString(obj), false, 4, 50));
     const std::string text = readText(obj);

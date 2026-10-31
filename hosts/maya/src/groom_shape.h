@@ -247,15 +247,15 @@ public:
     // "map1": u around, v root to tip; "featherId": u the feather's index, v its groom group), from
     // an evaluation at full density while connected, to skin into the character.
     static MObject aOutRachis;
-    // The StrandMesh nodes' strands as one polygon mesh (tubes or ribbons; strand_geometry.h), made
+    // The ToMesh nodes' meshes as one polygon mesh (tubes, ribbons, scales, feathers; strand_geometry.h), made
     // while connected from an evaluation at each node's density at the current time: it follows
     // the scalp, Simulate and keys. A frame whose strands are the same ones with the same point
     // counts changes the points alone, so caches (Alembic) see a deforming mesh.
-    static MObject aOutStrandMesh;
+    static MObject aOutMesh;
     static MObject aDisplayCards;  // cards view: the Cards nodes' cards instead of the strands
-    // The StrandMesh nodes' meshes instead of the strands (on by default; drawn by the groom unless
-    // a mesh on outStrandMesh shows them).
-    static MObject aDisplayStrandMesh;
+    // The ToMesh nodes' meshes instead of the strands (on by default; drawn by the groom unless
+    // a mesh on outMesh shows them).
+    static MObject aDisplayMesh;
     static MObject aCardMaps;      // the last bake's maps ("<map>=<path>;..."): the cards view shows them
     static MObject aScalpMaps;     // maps painted on the scalp (scalp_maps.h): vertex maps and texture maps (stored JSON)
     static MObject aScalpMapDisplay;  // the map the viewport shows on the scalp ("": none)
@@ -412,8 +412,8 @@ public:
     // The Cards nodes' cards (laid out in one atlas) while displayCards is on
     // or outCards is connected; null otherwise.
     std::shared_ptr<const CardMesh> evaluatedCards();
-    // The StrandMesh nodes' strands the viewport shows (displayStrandMesh; empty without), and
-    // whether outStrandMesh is connected (a Maya mesh shows them).
+    // The ToMesh nodes' strands the viewport shows (displayMesh; empty without), and
+    // whether outMesh is connected (a Maya mesh shows them).
     std::vector<StrandMeshSource> evaluatedStrandMeshes();
     std::uint64_t strandMeshVersion();
     bool strandMeshConnected() const;
@@ -653,7 +653,7 @@ private:
         StrandsPtr rachisMeshFrom;
         bool rachisMeshMade = false;
         MObject unusedRachisData;  // an empty mesh: outRachis while nothing is connected to it
-        // outStrandMesh: the mesh, what it was made from (each StrandMesh node's strands and
+        // outMesh: the mesh, what it was made from (each ToMesh node's strands and
         // widthScale), its topology key and points (strandMeshTopologyKey of each, joined).
         MObject strandMeshData;
         std::vector<StrandsPtr> strandMeshFrom;
@@ -661,7 +661,7 @@ private:
         std::uint64_t strandMeshKey = 0;
         unsigned strandMeshPoints = 0;
         bool strandMeshMade = false;
-        MObject unusedStrandMeshData;  // an empty mesh: outStrandMesh while nothing is connected to it
+        MObject unusedStrandMeshData;  // an empty mesh: outMesh while nothing is connected to it
         // Its last frame, and the session's versions it was made at (the next frame's versions
         // move for what changed since).
         FramePtr frame;

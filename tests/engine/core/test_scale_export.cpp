@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -16,6 +17,7 @@
 #include "groomlab/operators.h"
 #include "groomlab/scale_maps.h"
 #include "groomlab/scales.h"
+#include "groomlab/strand_geometry.h"
 #include "groomlab/texture.h"
 #include "groomlab/usd_writer.h"
 #include "test_helpers.h"
@@ -344,5 +346,41 @@ TEST(ScaleExport, GroomFilesCarryTheirOwnPrototypes) {
     broken.replace(broken.find("\"triangles\":[0,1,3"), 18, "\"triangles\":[9,1,3");
     EXPECT_THROW(groomFileFromJson(broken), GroomFileError);
 }
+TEST(ScaleExport, ToMeshMakesTheScalesPlates) {
+    // A ToMesh node on scaled strands: auto picks the scales; the mesh is their plates, bent as
+    // buildScaleMesh bends them, in quads (the plates' triangle pairs), each face naming its scale.
+    Scaled sc(uvSkin(5.0f), 0.6);
+    const StrandsPtr strands = sc.eval();
+    StrandMeshOptions o;
+    EXPECT_EQ(resolveMeshMake(*strands, o), StrandMeshOptions::Make::Scales);
+    const auto plates = buildScaleMesh(*strands, sc.skin);
+    ASSERT_TRUE(plates);
+    const StrandMesh mesh = buildStrandMesh(*strands, sc.skin.get(), o);
+    ASSERT_EQ(mesh.mesh.points.size(), plates->points.size());
+    for (std::size_t i = 0; i < plates->points.size(); ++i) EXPECT_LT((mesh.mesh.points[i] - plates->points[i]).length(), 1e-6f);
+    // Every triangle in one face: two in each quad.
+    std::size_t triangles = 0, quads = 0;
+    for (int n : mesh.mesh.faceCounts) {
+        triangles += static_cast<std::size_t>(n - 2);
+        quads += n == 4 ? 1 : 0;
+    }
+    EXPECT_EQ(triangles, plates->triangleCount());
+    EXPECT_GT(quads * 10, mesh.mesh.faceCount() * 9) << "the plates are quads, nearly all";
+    EXPECT_TRUE(std::all_of(mesh.mesh.faceCounts.begin(), mesh.mesh.faceCounts.end(), [](int n) { return n == 3 || n == 4; }));
+    EXPECT_EQ(mesh.mesh.featherCount, plates->scales.size());
+    EXPECT_EQ(mesh.faceParts, std::vector<int>(mesh.mesh.faceCount(), static_cast<int>(MeshPart::Scales)));
+    EXPECT_EQ(mesh.mesh.faceFeather.back(), static_cast<int>(plates->scales.size()) - 1);
+    // The points alone (a host's per-frame update) are the same ones.
+    ASSERT_EQ(strandMeshPointCount(*strands, o), plates->points.size());
+    std::vector<Vec3f> points(plates->points.size());
+    strandMeshPoints(*strands, sc.skin.get(), o, points.data());
+    EXPECT_LT((points.back() - plates->points.back()).length(), 1e-6f);
+    // Strands asked for: tubes round the strands instead.
+    o.make = StrandMeshOptions::Make::Strands;
+    const StrandMesh tubes = buildStrandMesh(*strands, sc.skin.get(), o);
+    EXPECT_EQ(tubes.faceParts.front(), static_cast<int>(MeshPart::Strands));
+    EXPECT_NE(tubes.mesh.points.size(), plates->points.size());
+}
+
 }  // namespace
 }  // namespace groomlab

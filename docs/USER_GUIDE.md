@@ -556,7 +556,7 @@ the scales out and the **Scales** node puts a plate on each.
 - **Edit guides with Maya's own tools:** **GroomLab > Utilities > Guides to Curves** makes a curve
   per guide. Reshape them any way you like (CVs, deformers, a sculpt), select them and choose
   **Curves to Guides...**: each curve reshapes its own guide, and any other curve becomes a new one.
-- **Hair as geometry:** **Strands to Curves...** and **Strands to Mesh...** turn the strands into
+- **Hair as geometry:** **Strands to Curves...** and **To Mesh...** turn the strands into
   Maya curves or one mesh (capped at 20,000 strands by default). **Bake Node to Guides...** turns a
   node's strands into guides you can brush.
 - **The same look on other grooms:** select the groom you like first, then the others, and choose

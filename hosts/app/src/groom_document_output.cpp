@@ -758,7 +758,9 @@ std::string GroomDocument::writeStrandMesh(const std::string& objPath, const Str
     try {
         MeshPtr scalp;
         const StrandsPtr all = exportFrame(time_, 1.0f, &scalp);
-        const std::vector<std::size_t> keep = thinStrandsById(*all, maxStrands);
+        // Scales and feathers whole (their plates and rachis are the strand set's); tubes thinned.
+        const bool whole = resolveMeshMake(*all, options) != StrandMeshOptions::Make::Strands;
+        const std::vector<std::size_t> keep = thinStrandsById(*all, whole ? all->strandCount() : maxStrands);
         StrandSet kept;
         const StrandSet* strands = all.get();
         if (keep.size() < all->strandCount()) {
@@ -775,7 +777,7 @@ std::string GroomDocument::writeStrandMesh(const std::string& objPath, const Str
             strands = &kept;
         }
         const StrandMesh mesh = buildStrandMesh(*strands, scalp.get(), options);
-        if (mesh.mesh.faceCount() == 0) return "the strands made no faces (each needs two points)";
+        if (mesh.mesh.faceCount() == 0) return "nothing to make a mesh of (no faces)";
         const bool second = options.strandUVs && mesh.u2.size() == mesh.mesh.u.size();
         const std::vector<float>& us = second ? mesh.u2 : mesh.mesh.u;
         const std::vector<float>& vs = second ? mesh.v2 : mesh.mesh.v;

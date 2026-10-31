@@ -376,7 +376,7 @@ TEST(ParamUse, EveryDeclaredParamIsReadWhereItShows) {
                             (void)op->note(*c);
                         }
                         // StrandMesh's settings are read by the session and the hosts making its mesh.
-                        if (type == op::kStrandMesh) (void)strandMeshSettings(op->params());
+                        if (type == op::kToMesh) (void)strandMeshSettings(op->params());
                         // Simulate's settings are read by the session's solver (simulation.h).
                         if (type == op::kSimulate) {
                             (void)SimSettings::fromParams(op->params());

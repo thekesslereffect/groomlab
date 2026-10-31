@@ -8,7 +8,7 @@ fill them in), and each is one undo step.
     ...edit the curves (CVs, deformers, a sculpt)...
     utils.curves_to_guides(groom, curves["group"])          # the tagged ones reshape their guides
     utils.strands_to_curves(groom, max_curves=20000)        # the evaluated strands as curves
-    utils.strands_to_mesh(groom, style="ribbon")            # ... or as one polygon mesh
+    utils.to_mesh(groom, style="ribbon")            # ... or as one polygon mesh
     utils.bake_guides(groom, "scatter", group="baked")      # a node's output as editable guides
     utils.transfer_to_scalp(groom, "newHead", fit=True)     # the groom onto another scalp, maps projected
     utils.transfer_to_scalp(groom, "newHead", method="markersWarp",
@@ -32,6 +32,7 @@ from groomlab.bake import bake_guides  # noqa: F401  (Node to Guides: part of th
 DEFAULT_MAX_CURVES = 20000
 DEFAULT_MAX_STRANDS = 20000
 MESH_STYLES = ("tube", "ribbon")
+MESH_MAKES = ("auto", "strands", "scales", "feathers")  # what to_mesh and a ToMesh node make
 GUIDE_MODES = ("keep", "replace")
 
 
@@ -183,30 +184,35 @@ def strands_to_curves(groom, node=None, density=None, max_curves=DEFAULT_MAX_CUR
     return {"group": root, "curves": _curve_transforms(root), "count": made, "total": total, "capped": capped}
 
 
-def strands_to_mesh(groom, node=None, style="tube", sides=4, width_scale=1.0, max_strands=DEFAULT_MAX_STRANDS,
-                    density=None, strand_uvs=False, name=None):
-    """The groom's strands as one polygon mesh.
+def to_mesh(groom, node=None, make="auto", style="tube", sides=4, width_scale=1.0, max_strands=DEFAULT_MAX_STRANDS,
+            density=None, strand_uvs=False, name=None):
+    """The groom (or a node's output) as one polygon mesh.
 
-    `style` "tube": `sides`-sided tubes along each strand, as wide as its widths (times
-    `width_scale`), the tip closed; "ribbon": flat strips as wide as the strand, lying along
-    the scalp (their faces turned by the scalp's normal at the root, carried along the strand).
-    UVs: u across, v root (0) to tip (1); with `strand_uvs` a second UV set "strandUVs" gives
-    every strand its own cell of a grid. `node`, `density` and the cap (`max_strands`, thinned
-    by strand ID with a warning) as strands_to_curves. The mesh gets the default shader. One
-    undo step. A snapshot of the current frame: for a mesh that follows the animation, a
-    StrandMesh node (add_strand_mesh) and its mesh in the scene (strand_mesh_shape).
+    `make` "strands": the strands as tubes or ribbons; "scales": the scales' plates bent onto the
+    skin; "feathers": the barbs as tubes or ribbons and the rachis tubes; "auto" (default): the
+    scales when there are some, else feathers, else the strands. For tubes, `style` "tube":
+    `sides`-sided tubes along each strand, as wide as its widths (times `width_scale`), the tip
+    closed; "ribbon": flat strips as wide as the strand, lying along the scalp (their faces turned
+    by the scalp's normal at the root, carried along the strand). UVs: u across, v root (0) to tip
+    (1); with `strand_uvs` a second UV set "strandUVs" gives every strand its own cell of a grid.
+    `node`, `density` and the cap (`max_strands`, thinned by strand ID with a warning; scales and
+    feathers are never thinned) as strands_to_curves. The mesh gets the default shader. One undo
+    step. A snapshot of the current frame: for a mesh that follows the animation, a ToMesh node
+    (add_to_mesh) and its mesh in the scene (to_mesh_shape).
 
     Returns {"mesh": the transform, "strands", "total", "capped", "vertices", "faces"}.
     """
+    if make not in MESH_MAKES:
+        raise ValueError("make is %s, not %r" % (", ".join(MESH_MAKES), make))
     if style not in MESH_STYLES:
         raise ValueError("style is tube or ribbon, not %r" % style)
     flags = {"strandMesh": True, "node": node or "", "density": float(density or 1.0), "maxCount": int(max_strands),
-             "style": style, "sides": int(sides), "widthScale": float(width_scale)}
+             "make": make, "style": style, "sides": int(sides), "widthScale": float(width_scale)}
     if strand_uvs:
         flags["strandUVs"] = True
     if name:
         flags["name"] = name
-    with groomlab.undo_chunk("strands to mesh"):
+    with groomlab.undo_chunk("to mesh"):
         root, made, total = _convert(groom, **flags)
         # The command gives the mesh the default shader itself: a sets command here, in the same
         # undo step, would hold the node its undo deletes and its redo makes anew.
@@ -219,73 +225,75 @@ def strands_to_mesh(groom, node=None, style="tube", sides=4, width_scale=1.0, ma
             "vertices": cmds.polyEvaluate(mesh, vertex=True), "faces": cmds.polyEvaluate(mesh, face=True)}
 
 
-def strand_mesh_nodes(groom):
-    """The groom's StrandMesh nodes (its own, not those inside compounds), in graph order."""
+def to_mesh_nodes(groom):
+    """The groom's ToMesh nodes (its own, not those inside compounds), in graph order."""
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
-    return [n for n in model.order if model.node_type(n) == "StrandMesh"]
+    return [n for n in model.order if model.node_type(n) == "ToMesh"]
 
 
-@groomlab.undoable("add strand mesh")
-def add_strand_mesh(groom, after=None, style="tube", sides=4, width_scale=1.0, density=None,
-                    max_strands=DEFAULT_MAX_STRANDS, strand_uvs=False):
-    """A StrandMesh node: the strands it is handed as a live polygon mesh, drawn by the groom
-    instead of the strands (its displayStrandMesh) and given on its outStrandMesh
-    (strand_mesh_shape connects a Maya mesh to it, for Alembic export). It goes right after node `after` (a
-    node making strands: what it makes is what the mesh shows, e.g. after a Simulate's
-    Interpolate, before Noise) or, by default, just before the output; one already reading that
-    node takes the settings instead. The node hands its strands on as they are. Its settings:
-    `style` "tube" (`sides` around) or "ribbon", `width_scale` times the strands' widths,
-    `density` (0-1) of the strands evaluated, at most `max_strands` (0: all; thinned by strand
-    ID) and `strand_uvs` (a second UV set, "strandUVs"). Every StrandMesh node making the output
-    joins the one mesh. Returns the node's name."""
+@groomlab.undoable("add to mesh")
+def add_to_mesh(groom, after=None, make="auto", style="tube", sides=4, width_scale=1.0, density=None,
+                max_strands=DEFAULT_MAX_STRANDS, strand_uvs=False):
+    """A ToMesh node: what it is handed as a live polygon mesh (`make` as to_mesh: auto, strands,
+    scales or feathers), drawn by the groom instead of the strands (its displayMesh) and given on
+    its outMesh (to_mesh_shape connects a Maya mesh to it; export_mesh writes it). It goes right
+    after node `after` (a node making strands: what it makes is what the mesh shows, e.g. after a
+    Simulate's Interpolate, before Noise) or, by default, just before the output; one already
+    reading that node takes the settings instead. The node hands its strands on as they are. Its
+    settings: `style` "tube" (`sides` around) or "ribbon", `width_scale` times the strands'
+    widths, `density` (0-1) of the strands evaluated, at most `max_strands` (0: all; thinned by
+    strand ID) and `strand_uvs` (a second UV set, "strandUVs"). Every ToMesh node making the
+    output joins the one mesh. Returns the node's name."""
     from groomlab import graph as gm
+    if make not in MESH_MAKES:
+        raise ValueError("make is %s, not %r" % (", ".join(MESH_MAKES), make))
     if style not in MESH_STYLES:
         raise ValueError("style is tube or ribbon, not %r" % style)
-    params = {"style": style, "sides": int(sides), "widthScale": float(width_scale),
+    params = {"make": make, "style": style, "sides": int(sides), "widthScale": float(width_scale),
               "density": float(1.0 if density is None else density), "maxStrands": int(max_strands),
               "strandUVs": bool(strand_uvs)}
     model = gm.GraphModel.from_groom(groom)
     if after is None:
         anchor = model.output
         source = model.source_of(anchor, "strands")
-        if source is not None and model.node_type(source) == "StrandMesh":
+        if source is not None and model.node_type(source) == "ToMesh":
             node = source
         else:
-            node = model.add_node("StrandMesh", name=model.unique_name("strandMesh"), params=params)
+            node = model.add_node("ToMesh", name=model.unique_name("toMesh"), params=params)
             model.insert_before(anchor, node)
     else:
         if after not in model.nodes:
             raise ValueError("%s's graph has no node %r" % (groom, after))
         if model.output_type(after) != "Strands":
-            raise ValueError("%r does not make strands (a StrandMesh node reads strands)" % after)
-        readers = [d for d, i in model.downstream_of(after) if model.node_type(d) == "StrandMesh" and i == "strands"]
+            raise ValueError("%r does not make strands (a ToMesh node reads strands)" % after)
+        readers = [d for d, i in model.downstream_of(after) if model.node_type(d) == "ToMesh" and i == "strands"]
         if readers:
             node = readers[0]
         else:
-            node = model.add_node("StrandMesh", name=model.unique_name("strandMesh"), params=params)
+            node = model.add_node("ToMesh", name=model.unique_name("toMesh"), params=params)
             model.insert_after(after, node)
     for key, value in params.items():
         model.set_param(node, key, value)
     if node not in model.feeding_output():
-        cmds.warning("GroomLab: %s does not make the output (it ends a branch): its strands make no mesh" % node)
+        cmds.warning("GroomLab: %s does not make the output (it ends a branch): it makes no mesh" % node)
     model.save(groom)
     return node
 
 
-@groomlab.undoable("strand mesh in scene")
-def strand_mesh_shape(groom, name=None):
-    """The StrandMesh nodes' mesh in the scene: a mesh connected to the groom's outStrandMesh,
-    following the animation with the same vertices and faces on every frame (export it with
+@groomlab.undoable("mesh in scene")
+def to_mesh_shape(groom, name=None):
+    """The ToMesh nodes' mesh in the scene: a mesh connected to the groom's outMesh, following the
+    animation (a tube mesh keeps the same vertices and faces on every frame: export it with
     Alembic), with the default shader; returns its transform. The one already there when there is
     one. While it exists the groom leaves drawing the meshes to it. One undo step."""
-    existing = cmds.listConnections(groom + ".outStrandMesh", destination=True, source=False, shapes=True) or []
+    existing = cmds.listConnections(groom + ".outMesh", destination=True, source=False, shapes=True) or []
     if existing:
         return cmds.listRelatives(existing[0], parent=True, fullPath=True)[0]
     transform = cmds.listRelatives(groom, parent=True)[0]
-    root = cmds.createNode("transform", name=name or (transform.split(":")[-1] + "_strandMesh"))
+    root = cmds.createNode("transform", name=name or (transform.split(":")[-1] + "_mesh"))
     mesh = cmds.createNode("mesh", name=root.split("|")[-1] + "Shape", parent=root)
-    cmds.connectAttr(groom + ".outStrandMesh", mesh + ".inMesh")
+    cmds.connectAttr(groom + ".outMesh", mesh + ".inMesh")
     cmds.sets(mesh, edit=True, forceElement="initialShadingGroup")
     return cmds.ls(root, long=True)[0]
 

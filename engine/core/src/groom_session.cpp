@@ -1922,7 +1922,7 @@ std::vector<GroomSession::StrandMeshSource> GroomSession::evaluateStrandMeshes(d
     // The nodes making the output (a compound's inner ones are left out: their paths have a '/').
     std::vector<std::string> names;
     parsed_->graph.forEachActiveUpstream(parsed_->output, [&](const std::string& path, const Operator& op) {
-        if (op.typeName() == op::kStrandMesh && path.find('/') == std::string::npos &&
+        if (op.typeName() == op::kToMesh && path.find('/') == std::string::npos &&
             parsed_->nodesByName.count(path) != 0) {
             names.push_back(path);
         }
@@ -2304,7 +2304,7 @@ bool GroomSession::hasStrandMeshNode() const {
     if (!doc_) return false;
     bool found = false;
     doc_->graph.forEachActiveUpstream(doc_->output, [&](const std::string& path, const Operator& op) {
-        found = op.typeName() == op::kStrandMesh && path.find('/') == std::string::npos;
+        found = op.typeName() == op::kToMesh && path.find('/') == std::string::npos;
         return !found;
     });
     return found;

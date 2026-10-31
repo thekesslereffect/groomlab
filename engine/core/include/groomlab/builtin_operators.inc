@@ -83,7 +83,7 @@ GROOMLAB_OPERATOR(RenderData)            // Strands -> Strands (the opacity chan
 // [convert]
 GROOMLAB_OPERATOR(ToGuides)              // Strands -> Guides (procedural guide curves)
 GROOMLAB_OPERATOR(ToStrands)             // Guides -> Strands (each guide a strand)
-GROOMLAB_OPERATOR(StrandMesh)            // Strands -> Strands (as they came; hosts make a tube mesh of them)
+GROOMLAB_OPERATOR(ToMesh)                // Strands -> Strands (as they came; hosts make a mesh of them: tubes, scales, feathers)
 // [field]
 GROOMLAB_OPERATOR(Map)                   // -> Field (a map painted on the scalp: guide layer, vertex map or texture; or an image)
 GROOMLAB_OPERATOR(Expression)            // -> Field (a per-strand expression)

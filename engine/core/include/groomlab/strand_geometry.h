@@ -26,6 +26,12 @@ using StrandsPtr = std::shared_ptr<const StrandSet>;
 std::vector<std::size_t> thinStrandsById(const StrandSet& strands, std::size_t maxCount);
 
 struct StrandMeshOptions {
+    // What the mesh is made of (a ToMesh node's `make`): Auto picks by what the strands carry
+    // (scales, else feathers with a rachis, else the strands); Strands: tubes or ribbons round
+    // every strand; Scales: the scales' plates bent onto the skin (scales.h buildScaleMesh);
+    // Feathers: the barbs as tubes or ribbons and the rachis tubes (buildRachisMesh).
+    enum class Make { Auto, Strands, Scales, Feathers };
+    Make make = Make::Auto;
     enum class Style { Tube, Ribbon };
     Style style = Style::Tube;
     int sides = 4;            // a tube's sides (3 or more)
@@ -44,16 +50,25 @@ struct StrandMeshOptions {
 // strand (its index in `strands`), `faceFeather` each face's. With strandUVs, u2/v2 (parallel
 // to mesh.u/v, the same faceUVs) put strand k in cell k of a ceil(sqrt(n)) square grid.
 // Strands with fewer than two points are skipped.
+// Each face's part of the mesh (StrandMesh::faceParts): a host's face sets or groups.
+enum class MeshPart : int { Strands = 0, Scales = 1, Rachis = 2 };
 struct StrandMesh {
     RachisMesh mesh;
     std::vector<float> u2, v2;
+    std::vector<int> faceParts;  // per face: its MeshPart
 };
+// What `options.make` makes of these strands (Auto resolved; never Auto).
+StrandMeshOptions::Make resolveMeshMake(const StrandSet& strands, const StrandMeshOptions& options);
+// The mesh `options.make` asks for. Scales: their plates (a scale whose prototype is a host's
+// scene mesh draws as a quad here), quads where a plate's triangles pair into them (the built-in
+// plates are quads but for a tip), featherIndex and faceFeather the scale's index. Feathers: the barbs' tubes, then the rachis tubes.
 StrandMesh buildStrandMesh(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options);
 
 // buildStrandMesh's points alone, for a frame where only the strands' points moved (the same
 // strands, the same point counts: the topology and UVs stay): the very values buildStrandMesh
 // gives mesh.points, in its order, the strands in parallel. `out` holds
-// strandMeshPointCount(strands, options) of them.
+// strandMeshPointCount(strands, options) of them. (For scales and feathers these build the whole
+// mesh: their key changes with every new strand set.)
 std::size_t strandMeshPointCount(const StrandSet& strands, const StrandMeshOptions& options);
 void strandMeshPoints(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options, Vec3f* out);
 // What makes the mesh's topology and UVs: the style and sides, strandUVs, each strand's ID and point

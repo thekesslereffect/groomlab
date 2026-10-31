@@ -1383,17 +1383,20 @@ def strands_to_curves_dialog(node=None, density=None, max_curves=None, attribute
     return result
 
 
-def strands_to_mesh_dialog(node=None, style=None, sides=None, width_scale=None, max_strands=None, strand_uvs=None,
-                           groom=None):
-    """Strands to Mesh: tubes or ribbons along the strands, one mesh: a snapshot of this frame (a
-    mesh following the animation: a StrandMesh node's Mesh in Scene)."""
+def to_mesh_dialog(node=None, make=None, style=None, sides=None, width_scale=None, max_strands=None, strand_uvs=None,
+                   groom=None):
+    """To Mesh: the strands as tubes or ribbons, the scales as plates or feathers as barbs and
+    rachis, one mesh: a snapshot of this frame (a mesh following the animation: a ToMesh node's
+    Mesh in Scene)."""
     from groomlab import utils
     groom = groom or _selected_groom()
     if not groom:
         return None
-    if None in (node, style, sides, width_scale, max_strands, strand_uvs):
-        answer = _ask("Strands to Mesh", [
-            ("node", "Strands of", "choice", node or _OUTPUT, _node_choices(groom), "The groom's output, or any node's"),
+    if None in (node, make, style, sides, width_scale, max_strands, strand_uvs):
+        answer = _ask("To Mesh", [
+            ("node", "Of", "choice", node or _OUTPUT, _node_choices(groom), "The groom's output, or any node's"),
+            ("make", "Make", "choice", make or "auto", list(utils.MESH_MAKES),
+             "auto: the scales when there are some, else feathers, else the strands"),
             ("style", "Style", "choice", style or "tube", list(utils.MESH_STYLES),
              "Tubes round each strand, or flat ribbons lying along the scalp"),
             ("sides", "Tube sides", "int", sides or 4),
@@ -1404,12 +1407,12 @@ def strands_to_mesh_dialog(node=None, style=None, sides=None, width_scale=None, 
              "A second UV set, strandUVs: each strand in its own cell of a grid")])
         if not answer:
             return None
-        node, style, sides = answer["node"], answer["style"], answer["sides"]
+        node, make, style, sides = answer["node"], answer["make"], answer["style"], answer["sides"]
         width_scale, max_strands, strand_uvs = answer["width_scale"], answer["max_strands"], answer["strand_uvs"]
-    result = utils.strands_to_mesh(groom, node=None if node in (None, _OUTPUT) else node, style=style, sides=sides,
-                                   width_scale=width_scale, max_strands=max_strands, strand_uvs=strand_uvs)
+    result = utils.to_mesh(groom, node=None if node in (None, _OUTPUT) else node, make=make, style=style, sides=sides,
+                           width_scale=width_scale, max_strands=max_strands, strand_uvs=strand_uvs)
     cmds.select(result["mesh"])
-    _say("%s: %d strands as %ss, %d faces" % (result["mesh"].split("|")[-1], result["strands"], style, result["faces"]))
+    _say("%s: %d faces, %d vertices" % (result["mesh"].split("|")[-1], result["faces"], result["vertices"]))
     return result
 
 
@@ -2010,7 +2013,7 @@ ACTIONS = {
     "guides.toCurves": guides_to_curves_action,
     "guides.curvesToGuides": curves_to_guides_dialog,
     "strands.toCurves": strands_to_curves_dialog,
-    "strands.toMesh": strands_to_mesh_dialog,
+    "strands.toMesh": to_mesh_dialog,
     "node.bakeToGuides": bake_node_dialog,
     "scales.bakeMaps": bake_scale_maps_action,
     "flow.deleteAll": delete_all_flow_arrows,

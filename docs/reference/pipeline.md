@@ -387,7 +387,7 @@ from groomlab import utils
 made = utils.guides_to_curves(groom)                      # selection=True, group="primary", degree=3...
 utils.curves_to_guides(groom, made["group"])              # edited curves back into their guides
 utils.strands_to_curves(groom, node=None, max_curves=20000, attributes=True)
-utils.strands_to_mesh(groom, style="tube", sides=4, width_scale=1.0, max_strands=20000)
+utils.to_mesh(groom, make="auto", style="tube", sides=4, width_scale=1.0, max_strands=20000)
 utils.bake_guides(groom, "toGuides", group="baked")       # = groomlab.bake.bake_guides
 utils.transfer_to_scalp(groom, "newHead", fit=True, maps=True, color_sets=False)  # transfer_groom, with a report
 utils.copy_graph(groom, ["hair2", "hair3"], guides="keep", maps=False)
@@ -414,7 +414,8 @@ utils.copy_graph(groom, ["hair2", "hair3"], guides="keep", maps=False)
   `glStrandId`, `glWidth` (a value per point) and the strands' channels (`glColorR`, `glClumpId`,
   `glMask`...: a number per strand channel, an array per point channel). The curves are made in
   one go through the API: 20,000 in about 4 s.
-- **Strands to Mesh...:** the strands as one polygon mesh with the default shader: **tube**
+- **To Mesh...:** the groom as one polygon mesh with the default shader (**Make**: auto, strands,
+  scales or feathers; scales are their plates, feathers their barbs and rachis); strands as **tube**
   (`sides` around each strand, as wide as its widths times `width_scale`, the tip closed) or
   **ribbon** (a flat strip as wide as the strand, lying along the scalp: turned by the scalp's
   normal at the root and carried along the strand). UVs: u across, v root (0) to tip (1); **Per-
