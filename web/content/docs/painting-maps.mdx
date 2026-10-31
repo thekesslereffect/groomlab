@@ -6,11 +6,10 @@ description: Painting maps that drive node parameters - guide, vertex and textur
 <Example name="paint-maps.png" alt="A painted clump-strength map shown on the scalp, with the Paint tab" caption="Groom Tools > Paint: a map of clump strength, displayed on the scalp" />
 
 <Callout title="In the app and in Blender">
-  **App:** open **Maps** on the right rail (Groom mode). **New map** has the same **For** list;
-  **Create** makes the map and starts the brush on it. **Paint this map** paints any other map, and
-  **Show on scalp** shows it. A mappable param's **Paint** pill in **Node Settings** works like the
-  Graph Editor's **Paint** chip below. Convert, Fill on an existing map and image import or relink
-  are in Maya only for now ([GroomLab app](/docs/app#painting-maps)).
+  **App:** **Groom Tools > Paint** (Groom mode) has the same Paint card and maps list. **+ New
+  Map > for a setting** makes the map and starts the brush on it; **Paint this map** paints any
+  other map, and **Show on** shows it. A mappable param's **Paint** pill in **Node Settings** works
+  like the Graph Editor's **Paint** chip below ([GroomLab app](/docs/app#painting-maps)).
 
   **Blender:** **N** > **GroomLab** tab > **Groom Tools** > **Paint** tab: **New Map** (with
   **For**), the **Paint** tool, **Fill** and **Show on**. A mappable param's **Paint** button in the
@@ -103,12 +102,15 @@ a swatch and **R G B A** toggles, and the brush paints only the enabled channels
 
 ## Settings
 
-- **Value** (or **Color**) is what the brush paints toward; **Fill** sets the whole map to it (for
-  a guide map with guides selected, only the selected guides).
-- **Show on** Guides, Strands or Scalp displays the map from black to white; "Read by" lists the
-  parameters it drives.
-- In the brush settings, **Falloff** sets the brush edge softness and **Smooth** sets how strongly
-  Shift+drag blurs.
+The Paint tab shows Paint's card (its **Brush** and **Paint** blocks) over the maps list; the
+picked map's own settings are in the box under the list.
+
+- **Value** (or **Color**, in the card's Paint block) is what the brush paints toward; **Fill**
+  sets the whole map to it (for a guide map with guides selected, only the selected guides).
+- **Show on** Guides, Strands or Scalp (under the list) displays the map from black to white;
+  "Read by" lists the parameters it drives.
+- In the card's Brush block, **Falloff** sets the brush edge softness and **Smooth** sets how
+  strongly Shift+drag blurs.
 
 ## Brush alphas
 

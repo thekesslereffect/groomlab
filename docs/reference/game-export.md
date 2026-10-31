@@ -56,8 +56,8 @@ Game cards as glTF, below).
   the atlas out afresh.
 - **Cards follow the brush:** while a stroke is live the cards rebuild with it when a rebuild
   (the groom at `cardDensity` with its cards) takes a quarter second or less; heavier grooms
-  catch up when the stroke ends. **Full density while sculpting** (Groom Tools > Tools; the
-  groom's `sculptDensity` 1.0) keeps every strand of the preview up during a stroke instead of
+  catch up when the stroke ends. **Sculpt Density** 1.0 (the groom's Attribute Editor > Sculpting;
+  the app: Properties > Sculpting; Blender: Full density; `sculptDensity`) keeps every strand of the preview up during a stroke instead of
   a lighter share, so nothing pops at the end of it.
 - **A mesh only to export:** Export Unreal Cards makes a card mesh for the FBX and removes it.
   `groomlab.create_card_mesh(groom)` makes a live one on `outCards` for exporting by hand; while

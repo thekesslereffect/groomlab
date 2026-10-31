@@ -55,8 +55,8 @@ groomlab.brush_stroke(groom, "place", [point], level=1)            # a child pla
   parent by parent who has children, at any level.
 - **Placing by hand:** Place and Draw at a child level add a child to the nearest guide one
   level up. The first ones copy their parents' shape, and later ones copy nearby children. In
-  the Groom Tools, pick a child group in **Group** (New Group... under Guide groups & edits
-  starts a deeper level) and use Place or Draw.
+  the Groom Tools, click a child group in the **Guide groups** list (its **+** starts a deeper
+  level) and use Place or Draw.
 - **Individual edits:** brush at a child level to shape children one by one. They keep that
   shape relative to their parent, so moving the parent still carries them.
 
@@ -100,7 +100,7 @@ groomlab.set_guide_attribute(groom, "clump", 0.5, group="primary")
 ```
 
 - **Mirroring:** `mirror_group` mirrors one root group; generate children after it.
-  `symmetry_sync` (**Sync +X → -X** / **Sync -X → +X** under Guide groups & edits in the Groom Tools)
+  `symmetry_sync` (**Sync +X → -X** / **Sync -X → +X** in Edit Guides, under the Groom Tools' Guide groups)
   mirrors every root group and copies each guide's children, grandchildren and so on with it,
   hand edits, locks and painted attributes included. Guides on the plane are left alone.
 - **Per-guide attributes:** children inherit them from their ancestors unless they set their
@@ -177,9 +177,10 @@ groomlab.selected_guides(groom)
 - **Selection as a mask:** brushes take it with `selected_only=True`, with soft-selected guides
   weighted.
 - **Hierarchy tools:** they act on the selection when no guides are given.
-- **In the Groom Tools:** **Select** (Tools tab) lassoes, its Selection box sets the **Soft
-  radius**, and Guide groups & edits has **Mirror Selection**, **Clear Selection** and the hierarchy
-  tools.
+- **In the Groom Tools:** **Select** (Tools tab) lassoes, its card's Selection block sets the
+  **Soft radius**, and **Edit Guides** (under Guide groups) has **Mirror Selection**, **Clear
+  Selection** and the hierarchy tools. The brushes themselves keep `selected_only` off: Shift+drag
+  paints guides into the selection and freezes the rest instead.
 
 ## Brushes
 
@@ -232,10 +233,10 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   Python, `apply_brush_stroke_to_flow` / `apply_brush_stroke_to_parts`.
 - **Root to tip:** the shaping brushes (comb, smooth, straighten, lift, twist, curl, attract,
   direction, noise) take a curve of their strength along each guide, root to tip
-  (`strength_profile=[[0, 0], [1, 1]]`: tips only; the **Root to tip** box in the brush
-  settings). Flat (or none) is the brush as always, bit for bit.
+  (`strength_profile=[[0, 0], [1, 1]]`: tips only; the **Root to tip** chip in the tool card's
+  Brush block). Flat (or none) is the brush as always, bit for bit.
 - **Falloff curve:** the falloff drawn as a curve, the weight from the brush's center to its edge
-  (`falloff_profile=[[0, 1], [1, 0]]`, the **Falloff curve** box), in place of the Falloff
+  (`falloff_profile=[[0, 1], [1, 0]]`, the **Falloff curve** chip), in place of the Falloff
   slider's smooth falloff; every brush, map paint included.
 - **Symmetry:** `symmetry="x"` (or y, z) mirrors every stroke across a world plane at
   `symmetry_center`; `symmetry="topology"` mirrors it across the scalp's own surface instead:
@@ -266,10 +267,12 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
 - **Ctrl while stroking:** reverses the brush. Signed brushes flip, paint goes toward
   1 − value (unfreeze or erase a map), and Cut grows.
 - **Hover:** the guides the brush would touch light up before you press.
-- **While sculpting:** by default the strands stay as they are, every strand of the preview
-  (`sculptDisplay` normal, `sculptDensity` 1: **Full density** on). Dim or hide them, or turn
-  Full density off (the strands drop to 0.35 × the preview density) to keep heavy grooms fast.
-- **Isolate** (beside the Group choice): the brushed group and its child groups stay at full
+- **While sculpting** (the groom's settings: Attribute Editor > **Sculpting**; the app:
+  Properties > **Sculpting**; Blender: the Groom Tools' folded **While sculpting**): by default the
+  strands stay as they are, every strand of the preview (`sculptDisplay` normal, **Sculpt
+  Density** `sculptDensity` 1; Blender: **Full density** on). Dim or hide them, or lower Sculpt
+  Density (Blender: Full density off, 0.35 × the preview density) to keep heavy grooms fast.
+- **Isolate** (the eye in the Guide groups header): the brushed group and its child groups stay at full
   color and the rest dim (`groomlab.isolate_group`).
 - **Guides by map:** guides can be colored by a painted map, black 0 to white 1
   (`color_guides_by_map`, or **Show on guides** in Groom Tools > Paint).

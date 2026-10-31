@@ -456,7 +456,7 @@ draws round dots on each guide, in the guide's own color: `all` (the default), `
 tips`, or `off`: one dot on each point the guide has. Dots are `guideWidth` plus the theme's `pointSize` across, keep their size
 on screen and hide behind the head; on a groom with many guides they thin to about 2,500
 (roots and tips always). To rebuild the guides themselves to a point count, use
-the **Segments** slider (Groom Tools > Tools, Guide groups & edits) or `groomlab.resample_guides` (points spaced along
+the **Segments** field (Groom Tools > Tools, the picked group's box under Guide groups) or `groomlab.resample_guides` (points spaced along
 the smooth curve through the old ones, so bends stay round).
 
 ## Themes
@@ -466,8 +466,9 @@ style, slider colors) and the viewport's guide, dot, selection, part and flow co
 the **Theme** menu (in the **...** menu of the Groom Tools or of the Graph Editor); the
 choice is remembered.
 
-- **Charcoal** (the default): calm neutral greys with one blue accent, thin borders, small
-  corners; nodes with a colored dot by the title (no header fill) on a dot grid.
+- **Charcoal** (the default, in Maya and the app): calm neutral greys with one blue
+  accent, thin borders, small corners; the Inter font, underlined tabs, uppercase section
+  headers; nodes with headers filled in their category's color on a dot grid.
 - **Playful**: charcoal with red, yellow, blue, emerald and white; flat, round, nodes with
   solid colored headers; tool icons emerald (create), blue (shape), red (trim) and yellow
   (paint). Every theme extends it.

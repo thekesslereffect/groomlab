@@ -34,8 +34,8 @@ Steps:
 1. Select the scalp mesh and choose **GroomLab > Create Groom from Selection**
    (`groomlab.create_groom(scalp, fit=True)`). You get hair out of the box.
 2. Open the Groom Tools (or click **Edit** on the Guides row of the Attribute Editor's Inputs). It
-   docks beside the viewport. The **Tools** tab has every grooming tool as an icon, with its
-   settings below.
+   docks beside the viewport. The **Tools** tab has every grooming tool as a labeled tile, the
+   picked tool's card (its settings) under them, then the guide groups.
 3. Pick **Place** and click on the scalp to add a guide, or drag to lay down many. New guides copy
    the shape of the guides near them. The strands follow as you work.
 
@@ -85,13 +85,13 @@ Steps:
 1. **Place primaries** with **Place** (click, or drag to scatter) and **Draw** (draw a guide's
    shape from the scalp).
 2. **Generate children:** select some guides with **Select**, set the count beside **Edit
-   Guides** (in **Guide groups & edits**, Tools tab) and choose **Edit Guides > Children**. With
-   nothing selected it uses the group picked in **Group** at the top of the Groom Tools. Do it again
-   on children for grandchildren.
+   Guides** (in the picked group's box under **Guide groups**, Tools tab) and choose **Edit Guides >
+   Children**. With nothing selected it uses the group picked in the list. Do it again on children
+   for grandchildren.
 3. **Shape them** with the brushes. **Comb** is the main tool: drag over guides and they follow
    the stroke, roots pinned.
-4. **Pick what you brush** in **Group** at the top of the Groom Tools: a group (primaries, a child
-   group) or **All groups**. Children always follow their parents, and with a child group picked
+4. **Pick what you brush** by clicking its row in **Guide groups**: a group (primaries, a child
+   group); click the picked row again for **All groups**. Children always follow their parents, and with a child group picked
    the brushes shape children one by one. Place and Draw then add children by hand, each following
    the nearest parent.
 
@@ -103,8 +103,8 @@ The tools are the same in Maya, the standalone app and Blender, in the same orde
 | --- | --- |
 | Create | Place, Draw, Part, Flow |
 | Shape | Comb, Slide, Smooth, Straighten, Lift, Twist, Curl, Attract, Direction, Noise, Shape |
-| Trim | Cut, Length, Erase |
-| Paint | Paint, Width, Density |
+| Trim | Cut, Length, Length Keys, Erase |
+| Paint | Paint (on the Paint tab) |
 | Guides | Select, Freeze (and **Unfreeze All** beside it) |
 
 - **Comb** drags guides along the stroke (**Stretch** lets them lengthen or shorten). **Slide**
@@ -117,27 +117,32 @@ The tools are the same in Maya, the standalone app and Blender, in the same orde
   negative strength smooths it out.
 - **Cut** trims where the brush touches, **Length** grows or shortens evenly, and
   **Erase** removes guides (with their children), parts or flow arrows.
-- **Width** paints how thick the hair is and **Density** where it grows. Each paints the map its
-  node reads (the Width node's `width`, the Scatter node's `density`). The first stroke makes that
-  map (white, so nothing changes yet) and wires it up; undo once for the stroke, once more for the
-  wiring. Strokes paint toward **Value**; Ctrl paints thinner hair, or takes hair away.
-- **Paint** paints the map picked in the Paint tab (see Paint maps in section 3).
+- **Paint** paints the map picked in the Paint tab (see Paint maps in section 3). To paint how
+  thick the hair is or where it grows, make the map with **+ New Map > for a setting** (Width,
+  Density...); Ctrl paints toward 0, so it thins the hair or takes it away.
 
 ### Brush settings
 
-They sit below the tabs and change with the tool.
+They sit in the picked tool's card, right under the tool tiles, in the same blocks for every
+tool: **Brush** (how the stroke feels), the tool's own block (New guides, Paints, Erases...), then
+**Applies to** (Acts on, Mirror). The **?** beside the tool's name shows its whole hint and the
+gestures. Every number is a field with its name inside: drag it to scrub (Shift fine, Ctrl
+coarse), or click it and type a value or a sum (`0.5*2`); Enter keeps it, Esc cancels, and a typed
+value may go past the field's range.
 - **Radius and strength:** hold B (radius) or M (strength) and drag, once the GroomLab hotkeys are
   installed (**GroomLab > Install GroomLab Hotkeys**). Or middle-drag for the radius and
   Shift+middle-drag for the strength. Tablet pressure scales the strength. **GroomLab > Help >
   Keyboard Shortcuts** lists every key and marks the ones that need the GroomLab hotkey set;
   installing the hotkeys shows which keys changed.
-- **Falloff:** 0 is hard to the brush's edge, 1 soft from the center. Tick **Falloff curve** to
+- **Falloff:** 0 is hard to the brush's edge, 1 soft from the center. Turn on **Falloff curve** to
   draw the falloff instead, center on the left, edge on the right.
-- **Root to tip:** tick it and draw how much of the strength each part of a guide gets, root on the
-  left, tip on the right. Use it to style the ends without disturbing the roots, or the reverse.
-  Right-click the curve for presets.
-- **Front facing only:** what the head hides gets no stroke. **Keep off scalp:** guides never dip
-  into the skin.
+- **Root to tip:** turn it on and draw how much of the strength each part of a guide gets, root on
+  the left, tip on the right. Use it to style the ends without disturbing the roots, or the
+  reverse. Right-click the curve for presets.
+- **Off scalp:** guides never dip into the skin. **Pressure:** a tablet's pressure scales the
+  strength. What the head hides from the camera never gets a stroke.
+- **How the strands draw while you sculpt** is the groom's setting, in its Attribute Editor's
+  **Sculpting** section.
 - **Ctrl** does the brush's opposite (Length shortens, Lift lays down; painting, toward 0).
   **Shift** selects guides with the guide brushes (below); painting maps or Freeze, and with the
   Shape brush, **Shift+drag** smooths. To smooth guides, use the **Smooth** brush.
@@ -159,16 +164,15 @@ Frozen guides draw blue and brushes leave them alone.
 - **Select** lassoes or clicks guides: Shift toggles, Ctrl deselects, Ctrl+Shift adds. What you
   select stays live and the rest freeze, so brushes work on the selection. A click on nothing
   unfreezes every guide.
-- **Soft radius** (in the Selection box) gives the selection a falloff. **Selected only** in the
-  brush settings limits a brush to the selection.
+- **Soft radius** (in the Select card's Selection block) gives the selection a falloff.
 - **Edit Guides** has **Mirror Selection** and **Clear Selection**.
 
 ### Symmetry
 
 - **Mirror a finished side:** **Edit Guides > Sync +X → -X** (or **-X → +X**), or **Mirror
   Group...**.
-- **Keep it symmetric as you work:** turn on **Symmetry** in the **Group** row at the top of the
-  Groom Tools (or **Alt+Shift+X** with the GroomLab hotkey set). Every stroke is
+- **Keep it symmetric as you work:** turn on **Mirror** in the tool card's **Applies to** block
+  (or **Alt+Shift+X** with the GroomLab hotkey set). Every stroke is
   mirrored across world X, or, with **Topology** picked, across the scalp's own left and right. Use
   Topology for a head that is turned, tilted, animated or not quite symmetric. Brushes, Place, Draw,
   Part, Flow, Select and map painting all follow it.
@@ -190,11 +194,13 @@ Frozen guides draw blue and brushes leave them alone.
 
 ### Groups and restructuring
 
-**Guide groups & edits** (Tools tab) lists the groups your guides live in: `primary`, the child
-groups, `braids` for braid paths. It shows each group's count, level and the graph nodes that read
-it, and can select, rename (the graph follows), hide or delete a group. **+ New Group** makes your
-own (say `bangs`); pick it in **Group** and Place and Draw put new guides there. Each group is drawn in a
-color of its own (its swatch; click it to pick another). In the Graph Editor, a Guides node's `group` and `exclude` pick
+**Guide groups** (Tools tab, always open under the tool card) lists the groups your guides live
+in: `primary`, the child groups, `braids` for braid paths. Each row shows the group's color dot,
+name, guide count and eye (hide or show it); its tooltip names the graph nodes that read it. The
+picked group's box under the list selects, renames (the graph follows) or deletes it. **+** in the
+section header makes your own group (say `bangs`); click its row and Place and Draw put new guides
+there. **Isolate** (the eye in the header) dims the other groups. Each group is drawn in a color
+of its own (right-click its row > **Color...** to pick another). In the Graph Editor, a Guides node's `group` and `exclude` pick
 from these names.
 - **Reparent...** makes selected children follow another parent.
 - **Promote / Demote...** moves a whole group up or down a level, keeping every guide's shape.
@@ -689,9 +695,9 @@ Simulate has no loop.
 | Symptom | Cause and fix |
 | --- | --- |
 | No strands | `groomlab.errors(groom)` says why. Also check the scalp is connected (`inMesh`) and the graph has an Output. |
-| A node shows a grey **i** | It does nothing as set: a Part with no parts drawn, a Flow with no arrows, a Clump in an input mode with nothing connected, Interpolate without guides. Its note says why. Not an error. |
+| A node shows a yellow warning triangle | It does nothing as set: a Part with no parts drawn, a Flow with no arrows, a Clump in an input mode with nothing connected, Interpolate without guides. Its note says why. Not an error. |
 | Strands pop on a deforming scalp | No rest mesh: **Set** on the Rest row of the Attribute Editor's Inputs. |
-| Brush does nothing | Select the groom first. Check **Group** at the top of the Groom Tools, frozen guides (blue: Shift+click where no guide is to unfreeze them all), and **Selected only** with an empty selection. |
+| Brush does nothing | Select the groom first. Check the group picked in **Guide groups** (and whether it is hidden), and frozen guides (blue: Shift+click where no guide is to unfreeze them all). |
 | Cached Playback leaves a groom out | Its graph has a Simulate node without a bake over the playback range, or a Jiggle node. Bake the simulation to have it cached. |
 | A texture map does nothing | The scalp needs UVs, and the path must resolve: `groomlab.resolve_path("sourceimages/map.png")`. |
 | A map says "no map named" or "does not fit this scalp" | The Map node names a map the Paint tab doesn't list (make or rename it there), or a vertex map from a scalp with another vertex count (convert it to a guide layer or a texture on the old scalp first). |
