@@ -400,6 +400,10 @@ groomlab.auto_strand_color_range(groom)         # strandColorMin/Max over the so
 groomlab.auto_strand_color_range(groom, "length")
 ```
 
+While a painted map shows on the scalp, the scalp's wireframe is drawn over it as Maya draws a
+mesh's: with Shading > Wireframe on Shaded (or in Wireframe), and always while the scalp is
+selected, so the face stays readable while you paint.
+
 `displayRibbons` (off by default) draws strands at their true width: ribbons facing the camera as
 wide as their `Width`, times `ribbonWidthScale`, never thinner than a pixel, the parts thinner than
 a pixel fading with their width as the lines do. Use it for width and density look checks; it is

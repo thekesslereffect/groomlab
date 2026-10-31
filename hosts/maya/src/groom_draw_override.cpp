@@ -37,6 +37,9 @@
 #include <maya/MDagPathArray.h>
 #include <maya/MFnDagNode.h>
 #include <maya/MFnDependencyNode.h>
+#include <maya/MFloatPointArray.h>
+#include <maya/MFloatVectorArray.h>
+#include <maya/MFnMesh.h>
 #include <maya/MHWGeometry.h>
 #include <maya/MMessage.h>
 #include <maya/MPlug.h>
@@ -273,6 +276,11 @@ bool GroomSubSceneOverride::requiresUpdate(const MHWRender::MSubSceneContainer&,
         if (lodWanted() && frameContext.getPostEffectEnabled(MHWRender::MFrameContext::kAntiAliasing) != lodAntiAliased_) return true;
         // The cards' wireframe in the groom's wireframe color: selected or not, recolored.
         if (cardWiresShown_ && wireColor() != cardWireColor_) return true;
+        // The scalp's wireframe over its map: the scalp selected or not, recolored and shown so.
+        if (mapWiresShown_) {
+            bool selected = false;
+            if (scalpWireColor(&selected) != mapWireColor_ || selected != mapWiresSelected_) return true;
+        }
         return needsUpdate();
     } catch (const std::exception&) {
         return true;  // update() reports it
@@ -394,6 +402,96 @@ void GroomSubSceneOverride::updateCardWires(MHWRender::MSubSceneContainer& conta
         item->enable(true);
     }
     cardsItem->setDrawMode(static_cast<MHWRender::MGeometry::DrawMode>(MHWRender::MGeometry::kShaded | MHWRender::MGeometry::kTextured));
+}
+
+namespace {
+
+// The mesh feeding the groom's inMesh (its worldMesh): the scalp as Maya draws it.
+bool scalpMeshPath(const MObject& groom, MDagPath& path) {
+    const MPlug source = MPlug(groom, GroomShape::aInMesh).source();
+    return !source.isNull() && MDagPath::getAPathTo(source.node(), path) == MS::kSuccess && path.hasFn(MFn::kMesh);
+}
+
+// The mesh's edges in world space, each end lifted along its vertex normal by `liftShare` of the
+// mesh's size: lines over a surface drawn that much off the mesh.
+std::shared_ptr<const DisplayGeometry> liftedEdges(const MDagPath& path, float liftShare) {
+    MStatus status;
+    MFnMesh mesh(path, &status);
+    if (!status) return nullptr;
+    MFloatPointArray points;
+    MFloatVectorArray normals;
+    if (mesh.getPoints(points, MSpace::kWorld) != MS::kSuccess || mesh.getVertexNormals(false, normals, MSpace::kWorld) != MS::kSuccess ||
+        normals.length() != points.length() || points.length() == 0) {
+        return nullptr;
+    }
+    MFloatPoint lo = points[0], hi = points[0];
+    for (unsigned i = 1; i < points.length(); ++i) {
+        lo = MFloatPoint(std::min(lo.x, points[i].x), std::min(lo.y, points[i].y), std::min(lo.z, points[i].z));
+        hi = MFloatPoint(std::max(hi.x, points[i].x), std::max(hi.y, points[i].y), std::max(hi.z, points[i].z));
+    }
+    const float lift = liftShare * std::max((hi - lo).length(), 1e-6f);
+    auto wire = std::make_shared<DisplayGeometry>();
+    wire->positions.reserve(points.length() * 3);
+    for (unsigned i = 0; i < points.length(); ++i) {
+        const MFloatPoint p = points[i] + normals[i] * lift;
+        wire->positions.insert(wire->positions.end(), {p.x, p.y, p.z});
+    }
+    const int edges = mesh.numEdges();
+    wire->indices.reserve(static_cast<std::size_t>(edges) * 2);
+    for (int e = 0; e < edges; ++e) {
+        int2 ends;
+        if (mesh.getEdgeVertices(e, ends) != MS::kSuccess) continue;
+        wire->indices.push_back(static_cast<std::uint32_t>(ends[0]));
+        wire->indices.push_back(static_cast<std::uint32_t>(ends[1]));
+    }
+    return wire;
+}
+
+}  // namespace
+
+std::array<float, 4> GroomSubSceneOverride::scalpWireColor(bool* selected) const {
+    MDagPath path;
+    if (!scalpMeshPath(object_, path)) {
+        if (selected) *selected = false;
+        return {0.0f, 0.0f, 0.0f, 1.0f};
+    }
+    const MHWRender::DisplayStatus status = MHWRender::MGeometryUtilities::displayStatus(path);
+    if (selected) *selected = status == MHWRender::kLead || status == MHWRender::kActive || status == MHWRender::kHilite;
+    const MColor c = MHWRender::MGeometryUtilities::wireframeColor(path);
+    return {c.r, c.g, c.b, 1.0f};
+}
+
+void GroomSubSceneOverride::updateMapWires(MHWRender::MSubSceneContainer& container, bool rebuilt) {
+    const auto map = items_.find(kScalpMapItem.asChar());
+    const bool mapShown = map != items_.end() && map->second.shown && container.find(kScalpMapItem);
+    if (rebuilt || (mapShown && !mapWires_)) {
+        // Above the map (lifted 0.0015 of the refined scalp's size: scalpMapGeometry), where the
+        // refined surface bulges past the mesh too.
+        MDagPath path;
+        mapWires_ = mapShown && scalpMeshPath(object_, path) ? liftedEdges(path, 0.004f) : nullptr;
+    }
+    mapWiresShown_ = mapShown && mapWires_ && !mapWires_->indices.empty();
+    if (!mapWiresShown_) {
+        if (!mapShown) {
+            const float none[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            if (container.find(kScalpMapWiresItem)) updateItem(container, kScalpMapWiresItem, none, 0, nullptr, 1.0f);  // given back
+            mapWires_ = nullptr;
+        } else if (container.find(kScalpMapWiresItem)) {
+            hideItem(container, kScalpMapWiresItem);
+        }
+        return;
+    }
+    mapWireColor_ = scalpWireColor(&mapWiresSelected_);
+    const auto wire = items_.find(kScalpMapWiresItem.asChar());
+    if (rebuilt || !container.find(kScalpMapWiresItem) || wire == items_.end() || !wire->second.shown) {
+        updateItem(container, kScalpMapWiresItem, mapWireColor_.data(), MHWRender::MRenderItem::sDormantWireDepthPriority, mapWires_, 1.0f);
+    } else {
+        restyleItem(container, kScalpMapWiresItem, mapWireColor_.data(), 1.0f);
+    }
+    if (MHWRender::MRenderItem* item = container.find(kScalpMapWiresItem)) {
+        item->setDrawMode(mapWiresSelected_ ? MHWRender::MGeometry::kAll : MHWRender::MGeometry::kWireframe);
+        item->enable(true);
+    }
 }
 
 void GroomSubSceneOverride::addTubeWires(MHWRender::MUIDrawManager& draw) {
@@ -798,11 +896,12 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
         lastDots().clumpCenters = static_cast<std::size_t>(
             std::count(pointColors_.begin(), pointColors_.end(), theme.clumpCenters));
     }
-    bool cardsRebuilt = false;
+    bool cardsRebuilt = false, mapRebuilt = false;
     std::shared_ptr<const DisplayGeometry> cards;
     for (const DisplayItem& item : frame.items) {
         const MString& name = kItemNames[static_cast<std::size_t>(item.id)];
         if (item.id == DisplayItemId::Cards && item.rebuilt && !item.keep) cardsRebuilt = true, cards = item.geometry;
+        if (item.id == DisplayItemId::ScalpMap && item.rebuilt && !item.keep) mapRebuilt = true;
         // The strand lines as built, for the level of detail (the builder keeps none).
         if (item.rebuilt && (item.id == DisplayItemId::Strands || item.id == DisplayItemId::ColoredStrands)) {
             lodLines_[item.id == DisplayItemId::Strands ? 0 : 1] =
@@ -827,6 +926,7 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
         }
     }
     updateCardWires(container, cardsRebuilt, cards);
+    updateMapWires(container, mapRebuilt);
     currentDraw().uploadMs = lap();
     // The maps (reloaded above when rewritten) go to the shader every time: cheap, and a
     // rebake with the same paths shows without rebuilding the cards. Without them: solid.

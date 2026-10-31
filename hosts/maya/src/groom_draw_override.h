@@ -194,6 +194,17 @@ private:
     std::shared_ptr<const DisplayGeometry> cardWires_;
     std::array<float, 4> cardWireColor_{};
     bool cardWiresShown_ = false;
+    // The scalp's wireframe over a painted map shown on it (the map is drawn lifted off the scalp,
+    // hiding Maya's own wireframe of the mesh): the scalp mesh's edges, lifted above the map, drawn
+    // as Maya draws the mesh's: in wireframe and wireframe on shaded, and in every mode while the
+    // scalp is selected, in the scalp's wireframe color. `rebuilt`: the map was built again (the
+    // scalp moved, another map); else only shown, hidden or recolored with it.
+    void updateMapWires(MHWRender::MSubSceneContainer& container, bool rebuilt);
+    // Maya's wireframe color for the scalp mesh now (`selected`: lead, active or hilited).
+    std::array<float, 4> scalpWireColor(bool* selected) const;
+    std::shared_ptr<const DisplayGeometry> mapWires_;
+    std::array<float, 4> mapWireColor_{};
+    bool mapWiresShown_ = false, mapWiresSelected_ = false;
     // The colored strand lines take new colors (their range or source changed), their positions
     // and indices kept.
     void recolorStrands(MHWRender::MSubSceneContainer& container, const StrandColors& colors, const float color[4]);
