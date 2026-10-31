@@ -13,6 +13,12 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.37.2 (October 31, 2026)
+
+- **Fixes:** a ToMesh scale (or instance) is one closed piece: its top, rim and underside share
+  their edge points instead of three loose pieces with unmerged points along the edges, ready to
+  sculpt. Scales of size 0 (a strand without width or length) are left out of the mesh.
+
 ## 0.37.1 (October 31, 2026)
 
 - **ToMesh replaces StrandMesh**, and makes a mesh of anything the groom grows. Its **Make** picks
