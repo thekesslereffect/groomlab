@@ -77,21 +77,6 @@ QHBoxLayout* labeledRow(QVBoxLayout* into, const QString& name, QWidget* parent)
     return row;
 }
 
-// The ? glyph's tip: the catalog's full hint, then the gestures (palette texts.gestures, the
-// app's words) as a small list, each "keys: what".
-QString helpTip(const groomlab::BrushEntry& e, bool gestures) {
-    QString html = QStringLiteral("<p style='margin:0'><b>%1</b></p><p style='margin:4px 0 0 0'>%2</p>").arg(qs(e.label).toHtmlEscaped(), qs(e.hint).toHtmlEscaped());
-    if (!gestures) return html;
-    html += QStringLiteral("<table style='margin-top:6px' cellspacing='0' cellpadding='1'>");
-    for (const QString& part : text("gestures").split(QStringLiteral(" · "), Qt::SkipEmptyParts)) {
-        const int colon = part.indexOf(QStringLiteral(": "));
-        const QString keys = colon > 0 ? part.left(colon) : part, what = colon > 0 ? part.mid(colon + 2) : QString();
-        html += QStringLiteral("<tr><td style='padding-right:8px; white-space:nowrap'><b>%1</b></td><td>%2</td></tr>")
-                    .arg(keys.trimmed().toHtmlEscaped(), what.trimmed().toHtmlEscaped());
-    }
-    return html + QStringLiteral("</table>");
-}
-
 void collectBlocks(const QLayout* layout, const QWidget* top, std::vector<std::string>& out) {
     for (int i = 0; i < layout->count(); ++i) {
         QLayoutItem* item = layout->itemAt(i);
@@ -113,26 +98,6 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     card_ = new QVBoxLayout(this);
     card_->setContentsMargins(0, 8, 0, 2);
     card_->setSpacing(4);
-
-    // ---- The title: the tool's icon and name, the ? (hint and gestures), the short line.
-    auto* titleRow = new QHBoxLayout();
-    titleRow->setContentsMargins(0, 0, 0, 0);
-    titleRow->setSpacing(6);
-    icon_ = new QLabel(this);
-    icon_->setObjectName(QStringLiteral("toolCardIcon"));
-    icon_->setFixedSize(16, 16);
-    titleRow->addWidget(icon_);
-    title_ = new QLabel(this);
-    title_->setObjectName(QStringLiteral("toolCardTitle"));
-    title_->setProperty("role", "cardTitle");
-    titleRow->addWidget(title_, 1);
-    help_ = makeGlyph(QStringLiteral("help"), QString(), this);
-    help_->setObjectName(QStringLiteral("toolCardHelp"));
-    titleRow->addWidget(help_);
-    card_->addLayout(titleRow);
-    short_ = hintLabel(QString(), this);
-    short_->setObjectName(QStringLiteral("toolCardShort"));
-    card_->addWidget(short_);
 
     // ---- Brush: how the stroke feels.
     brush_ = new CardBlock(text("brushBlock"), this);
@@ -732,23 +697,11 @@ void BrushPanel::setPaintControls(QWidget* controls) {
     controls->show();
 }
 
-void BrushPanel::refreshTitle() {
-    const groomlab::BrushEntry* e = tool_.empty() ? nullptr : brushEntry(tool_);
-    if (!e) return;
-    title_->setText(qs(e->label));
-    const ui::json* line = defs().find("palette/tools/" + tool_ + "/short");
-    short_->setText(line && line->is_string() ? qs(line->get<std::string>()) : qs(e->hint));
-    help_->setToolTip(helpTip(*e, e->hasSetting("radius")));
-    const QString resource = QStringLiteral(":/groomlab/icons/groomLab_%1.svg").arg(qs(e->icon));
-    icon_->setPixmap(duotoneIcon(resource, theme::toolIconColor(e->category, e->icon), theme::iconInk(), 16, devicePixelRatioF()));
-}
-
 void BrushPanel::setTool(const std::string& id) {
     tool_ = id;
     const groomlab::BrushEntry* entry = id.empty() ? nullptr : brushEntry(id);
     auto uses = [entry](const char* setting) { return entry && entry->hasSetting(setting); };
     hasSettings_ = entry != nullptr;
-    refreshTitle();
     // Brush.
     const bool brush = uses("radius");
     for (ValueSlider* s : {radius_, strength_, falloff_}) s->setVisible(brush);

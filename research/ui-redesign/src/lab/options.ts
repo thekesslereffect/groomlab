@@ -218,7 +218,7 @@ export const dimensions = [
     choices: [
       { id: "tools", label: "Pin tools", hint: "Header, tabs and the tool grid stay; settings scroll" },
       { id: "header", label: "Pin header", hint: "Header and tabs stay; the rest scrolls" },
-      { id: "none", label: "All scroll", hint: "Today" },
+      { id: "none", label: "All scroll", hint: "The whole panel is one scroll area (chosen)" },
     ],
   },
   {
@@ -307,7 +307,7 @@ export const directions: { id: string; label: string; hint: string; options: Par
       layout: "docks", chrome: "seams", output: "corner", onboarding: "viewport", hud: "plain",
       tools: "tiles", toolIcons: "color", rows: "fields", sliders: "fill", booleans: "checkbox", sections: "caps", tabs: "underline",
       nodeHeader: "filled", nodeBody: "ports", wires: "curved", wireColor: "type", ports: "dots", canvas: "dots", nodeStatus: "badges",
-      gtOptions: "chips", gtBlocks: "labeled", gtHints: "short", gtGroups: "list", gtPin: "tools", gtTubes: "split",
+      gtOptions: "chips", gtBlocks: "labeled", gtHints: "short", gtGroups: "list", gtPin: "none", gtTubes: "split",
     },
   },
   {

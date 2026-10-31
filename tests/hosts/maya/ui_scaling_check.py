@@ -315,11 +315,12 @@ def main():
         tools.work.setVisible(True)
         settle()
         try:
-            tiles = [b for b in tools.findChildren(QtWidgets.QToolButton) if b.property("role") == "tool"]
+            tiles = [b for b in tools.findChildren(QtWidgets.QToolButton) if b.property("role") == "tool"
+                     and not b.property("wide")]  # (Paint's full-width button: checked on the Paint tab)
             _expect(len(tiles) > 10 and all(b.toolButtonStyle() == QtCore.Qt.ToolButtonTextUnderIcon and b.text()
                                             for b in tiles), "labeled tool tiles: the icon over the name")
             _expect(all(isinstance(b, widgets.Tile) for b in tiles), "tiles elide their names (widgets.Tile)")
-            _expect(all(b.toolTip().startswith("<b>") and "<br>" in b.toolTip() for b in tiles), "name + hint tooltips")
+            _expect(all("<b>" in b.toolTip() and "<br>" in b.toolTip() for b in tiles), "name + hint tooltips")
             shown = [b for b in tiles if b.isVisibleTo(tools)]
             side, tall = theme.px(palette.ToolPalette.TILE[0]), theme.px(palette.ToolPalette.TILE[1])
             _expect(shown and all(b.width() == side and b.height() == tall for b in shown),
@@ -331,16 +332,14 @@ def main():
             grids = [g for g in tools.findChildren(widgets.ToolGrid) if g.isVisibleTo(tools)]
 
             def fitting(g):
-                return (g.width() + g.spacing) // (side + g.spacing)
+                return min(palette.ToolPalette.MAX_COLUMNS, (g.width() + g.spacing) // (side + g.spacing))
             _expect(grids and all(g.columns == fitting(g) for g in grids),
-                    "as many to a row as fit: %r" % [(g.columns, fitting(g)) for g in grids])
-            # Wider: more to a row, the tiles the same size, left aligned (the first at the left edge).
-            before = [g.columns for g in grids]
+                    "as many to a row as fit, at most four: %r" % [(g.columns, fitting(g)) for g in grids])
+            # Wider: at most four, the tiles the same size, left aligned (the first at the left edge).
             tools.resize(theme.px(600), theme.px(1000))
             settle()
-            _expect(all(g.columns >= c for g, c in zip(grids, before)) and any(g.columns > c for g, c in zip(grids, before)
-                                                                               if len(g.buttons) > c),
-                    "wider, more to a row: %r -> %r" % (before, [g.columns for g in grids]))
+            _expect(all(g.columns == min(palette.ToolPalette.MAX_COLUMNS, len(g.buttons)) or g.columns == palette.ToolPalette.MAX_COLUMNS
+                        for g in grids), "wide, at most four to a row: %r" % [g.columns for g in grids])
             _expect(all(b.width() == side for b in shown), "the tiles never stretch")
             _expect(all(g.buttons[0].x() == 0 for g in grids), "left aligned")
             tools.resize(theme.px(380), theme.px(1000))
@@ -437,14 +436,14 @@ def main():
 
         try:
             content = tools.scroll.widget()
-            _expect(tools.pinned.isAncestorOf(tools.tabs.bar) and tools.pinned.isAncestorOf(tools.tool_palette)
-                    and tools.pinned.isAncestorOf(tools.grooms), "pinned: the header, the tabs, the tool grid")
-            _expect(not tools.scroll.isAncestorOf(tools.pinned), "the pinned part outside the scroll area")
+            _expect(tools.top_part.isAncestorOf(tools.tabs.bar) and tools.top_part.isAncestorOf(tools.tool_palette)
+                    and tools.top_part.isAncestorOf(tools.grooms), "the top: the header, the tabs, the tool grid")
+            _expect(tools.scroll.isAncestorOf(tools.top_part), "the whole panel scrolls, the top too")
             _expect(content.isAncestorOf(tools.settings) and content.isAncestorOf(tools.guides_section),
                     "the card and the list scroll")
-            _expect(tools.settings.mapTo(content, tools.settings.rect().topLeft()).y()
-                    < tools.guides_section.mapTo(content, tools.guides_section.rect().topLeft()).y(),
-                    "the card right under the grid, the list after it")
+            _expect(tools.guides_section.mapTo(content, tools.guides_section.rect().topLeft()).y()
+                    < tools.settings.mapTo(content, tools.settings.rect().topLeft()).y(),
+                    "the list right under the grid, the card after it")
             _expect(not tools.level.isVisibleTo(tools), "no Group combo: the list picks the group")
             _expect(tools.guides_section.row.isAncestorOf(tools.isolate) and tools.isolate.isCheckable(),
                     "Isolate: an eye in the Guide groups header")
@@ -469,15 +468,15 @@ def main():
                 got = shown_blocks()
                 _expect(got == want, "%s's card: %r, not %r" % (tool, got, want))
                 if tool is None:
-                    _expect(tools.hint.text() == palette.NO_TOOL and not tools.title_row.isVisibleTo(tools),
+                    _expect(tools.hint.text() == palette.NO_TOOL and tools.hint.isVisibleTo(tools),
                             "no tool: one line on how to start")
                     continue
-                _expect(tools.hint.text() == palette.SHORT[tool], "%s: its one line" % tool)
-                tip = tools.card_help.toolTip()
+                _expect(not tools.hint.isVisibleTo(tools), "%s: the card is only its settings" % tool)
+                tip = tools.buttons[tool].toolTip()
                 _expect(palette.NAMES[tool] in tip and palette.HINTS[tool][:30] in tip.replace("&#x27;", "'"),
-                        "%s: the ? carries the hint" % tool)
+                        "%s: the tile carries the hint" % tool)
                 if "radius" in palette.TOOL_SETTINGS[tool]:
-                    _expect("Middle-drag" in tip and "<table" in tip, "%s: the ? lists the gestures" % tool)
+                    _expect("Middle-drag" in tip and "<table" in tip, "%s: the tile lists the gestures" % tool)
                 words = texts()
                 for gone in ("selected only", "front facing only", "while sculpting", "fill tubes", "tube blend",
                              "output", "tubes", "isolate", "group"):
@@ -505,7 +504,12 @@ def main():
             _expect(shown_blocks() == ["Brush", "Paint", "Applies to"], "the Paint tab's card: %r" % shown_blocks())
             _expect(tools.paint_block.isAncestorOf(tools.paint_tab.value), "Value and Fill in the Paint block")
             _expect(tools.paint_tiles.isVisibleTo(tools) and not tools.tool_palette.isVisibleTo(tools),
-                    "the Paint tile alone pinned")
+                    "the Paint button alone on top")
+            from groomlab.ui.qt import QtCore
+            paint = tools.tiles["paint"][-1]
+            _expect(paint.toolButtonStyle() == QtCore.Qt.ToolButtonTextBesideIcon
+                    and paint.width() > tools.paint_tiles.width() - theme.px(4),
+                    "Paint: one full-width button over the maps (%d of %d px)" % (paint.width(), tools.paint_tiles.width()))
             _expect(tools.paint_tab.section.isVisibleTo(tools) and tools.paint_tab.box.isVisibleTo(tools),
                     "the Maps list and the picked map's box")
             tools.tabs.setCurrentIndex(palette.TABS.index("correctives"))

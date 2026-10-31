@@ -123,9 +123,9 @@ The tools are the same in Maya, the standalone app and Blender, in the same orde
 
 ### Brush settings
 
-They sit in the picked tool's card, right under the tool tiles, in the same blocks for every
-tool: **Brush** (how the stroke feels), the tool's own block (New guides, Paints, Erases...), then
-**Applies to** (Acts on, Mirror). The **?** beside the tool's name shows its whole hint and the
+They sit in the picked tool's card, under the tab's list (guide groups, maps, layers), in the same
+blocks for every tool: **Brush** (how the stroke feels), the tool's own block (New guides, Paints,
+Erases...), then **Applies to** (Acts on, Mirror). A tool tile's tooltip has its whole hint and the
 gestures. Every number is a field with its name inside: drag it to scrub (Shift fine, Ctrl
 coarse), or click it and type a value or a sum (`0.5*2`); Enter keeps it, Esc cancels, and a typed
 value may go past the field's range.

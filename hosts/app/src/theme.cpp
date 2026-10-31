@@ -738,7 +738,6 @@ QToolButton[role="glyph"][armed="true"] { color: @warning@; padding: 2px 6px; }
 QFrame[role="toolCard"] { background: transparent; border: none; border-top: 1px solid @edge@; border-radius: 0; }
 QFrame[role="block"] { background: transparent; border: none; border-top: 1px solid @groupEdge@; border-radius: 0; }
 QFrame[role="toolCard"] QLabel, QFrame[role="block"] QLabel { background: transparent; }
-QLabel[role="cardTitle"] { color: @text@; font-weight: 700; }
 QLabel[role="blockTitle"] { color: @dim@; font-size: @smallSize@px; font-weight: 600; }
 QLabel[role="chipLabel"] { color: @muted@; font-size: @smallSize@px; }
 QLabel[role="rowLabel"] { color: @dim@; }
@@ -757,7 +756,7 @@ QPushButton[role="ghost"]::menu-indicator { image: none; width: 0; }
 QToolButton[role="ghost"][popupMode="1"] { padding-right: 16px; }
 QToolButton[role="ghost"]::menu-button { border: none; background: transparent; width: 14px; }
 QToolButton[role="ghost"]::menu-arrow { image: url(:/groomlab/icons/ui_chevron_down.svg); width: 9px; height: 9px; }
-/* The lists under the card: a caps header, plain rows, the picked item's box. */
+/* The tabs' lists (over the card): a caps header, plain rows, the picked item's box. */
 QLabel[role="listTitle"] { color: @muted@; font-size: @smallSize@px; font-weight: 600; }
 QLabel[role="listCount"] { color: @muted@; font-size: @smallSize@px; }
 QWidget[role="listHeader"] { border-top: 1px solid @edge@; }

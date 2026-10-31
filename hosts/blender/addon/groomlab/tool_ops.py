@@ -623,8 +623,8 @@ class GROOMLAB_OT_tool(bpy.types.Operator):
 
     @classmethod
     def description(cls, context, properties):
-        info = tools.tool_info(properties.tool)
-        return "%s: %s" % (info["label"], info["hint"]) if info else "Use this GroomLab tool"
+        from . import palette  # the tile's tooltip: the name, the whole hint, a brush's gestures
+        return palette.help_text(properties.tool) if tools.tool_info(properties.tool) else "Use this GroomLab tool"
 
     def execute(self, context):
         try:
@@ -642,26 +642,6 @@ class GROOMLAB_OT_tool(bpy.types.Operator):
             return _fail(self, e)
         if s is not None:
             start_modal(context)
-        return {"FINISHED"}
-
-
-class GROOMLAB_OT_tool_help(bpy.types.Operator):
-    """The tool card's ?: the tool's whole hint and the gestures (its tooltip; a click says the hint)"""
-    bl_idname = "groomlab.tool_help"
-    bl_label = "Tool Help"
-    bl_options = {"INTERNAL"}
-
-    tool: StringProperty(name="Tool")
-
-    @classmethod
-    def description(cls, context, properties):
-        from . import palette
-        return palette.help_text(properties.tool)
-
-    def execute(self, context):
-        info = tools.tool_info(self.tool)
-        if info:
-            self.report({"INFO"}, "%s: %s" % (info["label"], info["hint"]))
         return {"FINISHED"}
 
 
@@ -1981,7 +1961,7 @@ def unregister_keymaps():
     _keymaps.clear()
 
 
-classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_help, GROOMLAB_OT_tool_exit, GROOMLAB_OT_tool_undo,
+classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROOMLAB_OT_tool_undo,
            GROOMLAB_OT_step_level, GROOMLAB_OT_group_new, GROOMLAB_OT_group_edit, GROOMLAB_OT_guides_edit,
            GROOMLAB_OT_map_new, GROOMLAB_OT_paint_param, GROOMLAB_OT_map_remove, GROOMLAB_OT_map_fill,
            GROOMLAB_OT_map_import, GROOMLAB_OT_map_relink, GROOMLAB_OT_map_rename, GROOMLAB_OT_map_convert,

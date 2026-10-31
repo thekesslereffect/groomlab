@@ -541,7 +541,6 @@ QFrame[role="ruleFaint"] { background: %(faint)s; border: none; }
 QLabel[role="block"] { color: %(dim)s; font-size: %(fs_small)dpx; font-weight: 600; }
 QLabel[role="muted"] { color: %(muted)s; font-size: %(fs_small)dpx; }
 QLabel[role="rowLabel"] { color: %(dim)s; }
-QLabel[role="cardTitle"] { color: %(text)s; font-weight: 600; }
 QFrame[role="itemBox"] { background: transparent; border: {{1}}px solid %(border)s; border-radius: %(r)dpx; }
 QFrame[role="itemBox"] QLabel { background: transparent; }
 QListWidget[role="rows"], QTreeWidget[role="rows"] { background: transparent; border: none; padding: 0; }

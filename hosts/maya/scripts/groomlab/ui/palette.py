@@ -52,16 +52,13 @@ GESTURES = definitions.text("gestures")
 SYMMETRY_TIP = definitions.text("symmetryTip")
 # What the Erase brush does not do, said under its settings: the hair itself goes with the density map.
 ERASE_NOTE = definitions.text("eraseNote")
-# The tool card's one line under the tool's name (palette.json's palette.tools); the ? beside the
-# name has the catalog's whole hint and the gestures.
-SHORT = dict((k, v["short"]) for k, v in definitions.get("palette/tools").items() if isinstance(v, dict))
 NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 # The brush block's chips: a short name each (their tooltips: the catalog's hints).
 CHIP_LABELS = {"pressure": "Pressure", "collide": "Off scalp"}
 
 
 def help_tip(tool):
-    """The card's ? tooltip: the tool's name and its whole hint, then (for the brushes) the
+    """A tool tile's tooltip: the tool's name and its whole hint, then (for the brushes) the
     gestures as a small list of key and what it does."""
     import html
     parts = ["<b>%s</b>" % html.escape(NAMES.get(tool, tool)), html.escape(HINTS.get(tool, ""))]
@@ -867,7 +864,7 @@ class TubePanel(QtWidgets.QWidget):
 
 
 class _Work(QtWidgets.QWidget):
-    """The Groom Tools' work area (the card and the tab's list): shown and hidden with the pinned
+    """The Groom Tools' work area (the tab's list and the card): shown and hidden with the top's
     part that goes with it (the tabs and the tool grid)."""
 
     def __init__(self, partner):
@@ -890,17 +887,11 @@ class ToolPalette(QtWidgets.QWidget):
         self.buttons = {}  # tool -> its tile (the first made; a tool with tiles on two tabs: tiles)
         self.tiles = {}    # tool -> every tile of it
 
-        # Pinned (the header, the tabs, the tool grid) over one scrolling column (the tool's card,
-        # then the list the tab works on); the window paints the theme's background.
+        # One scrolling column, the whole panel: the top (the header, the tabs, the tool grid), then
+        # the list the tab works on, then the tool's card; the window paints the theme's background.
         frame = QtWidgets.QVBoxLayout(self)
         frame.setContentsMargins(0, 0, 0, 0)
         frame.setSpacing(0)
-        self.pinned = QtWidgets.QWidget()
-        self.pinned.setObjectName("groomToolsPinned")
-        pinned = QtWidgets.QVBoxLayout(self.pinned)
-        pinned.setContentsMargins(theme.px(12), theme.px(10), theme.px(12), theme.px(6))
-        pinned.setSpacing(theme.px(8))
-        frame.addWidget(self.pinned)
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
@@ -911,8 +902,14 @@ class ToolPalette(QtWidgets.QWidget):
         content.setObjectName("groomToolsContent")
         scroll.setWidget(content)
         outer = QtWidgets.QVBoxLayout(content)
-        outer.setContentsMargins(theme.px(12), theme.px(2), theme.px(12), theme.px(12))
+        outer.setContentsMargins(theme.px(12), theme.px(10), theme.px(12), theme.px(12))
         outer.setSpacing(theme.px(10))
+        self.top_part = QtWidgets.QWidget()
+        self.top_part.setObjectName("groomToolsTop")
+        top_column = QtWidgets.QVBoxLayout(self.top_part)
+        top_column.setContentsMargins(0, 0, 0, 0)
+        top_column.setSpacing(theme.px(8))
+        outer.addWidget(self.top_part)
 
         # What the tools work on: the current groom (groomlab.active_groom: the Graph Editor's too
         # unless pinned).
@@ -950,11 +947,11 @@ class ToolPalette(QtWidgets.QWidget):
                           generators=self.generators())
         more.setMenu(self.more_menu)
         top.addWidget(more)
-        pinned.addLayout(top)
+        top_column.addLayout(top)
         # A newer GroomLab (the startup check's): a quiet note linking to GroomLab > Help > Check for Updates.
         from groomlab.ui import updates_window
         self.update_note = updates_window.UpdateNote()
-        pinned.addWidget(self.update_note)
+        top_column.addWidget(self.update_note)
 
         # The group brushes edit and Place and Draw add to: picked in the Guide groups list (its
         # picked row; the viewport's level keys too). The choice itself, not shown: the groups as
@@ -965,7 +962,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.level.currentIndexChanged.connect(self.target_changed)
 
         self.status = widgets.StatusLabel()  # made early: the tabs report into it
-        pinned.addWidget(self.status)
+        top_column.addWidget(self.status)
 
         # No groom to work on: how to start one.
         self.empty = QtWidgets.QFrame()
@@ -1007,16 +1004,16 @@ class ToolPalette(QtWidgets.QWidget):
         self.starter.setVisible(False)
         outer.addWidget(self.starter)
 
-        # Everything that works on a groom (pinned: the tabs and the tool grid; scrolling: the
-        # tool's card and the tab's list): hidden while there is none, so the empty state shows
+        # Everything that works on a groom (in the top: the tabs and the tool grid; under it: the
+        # tab's list and the tool's card): hidden while there is none, so the empty state shows
         # only "Start a groom" (fill_grooms).
-        self.pinned_work = QtWidgets.QWidget()
-        self.pinned_work.setObjectName("groomToolsPinnedWork")
-        pinned_work = QtWidgets.QVBoxLayout(self.pinned_work)
-        pinned_work.setContentsMargins(0, 0, 0, 0)
-        pinned_work.setSpacing(theme.px(6))
-        pinned.addWidget(self.pinned_work)
-        self.work = _Work(self.pinned_work)
+        self.top_work = QtWidgets.QWidget()
+        self.top_work.setObjectName("groomToolsTopWork")
+        top_work = QtWidgets.QVBoxLayout(self.top_work)
+        top_work.setContentsMargins(0, 0, 0, 0)
+        top_work.setSpacing(theme.px(6))
+        top_column.addWidget(self.top_work)
+        self.work = _Work(self.top_work)
         self.work.setObjectName("groomToolsWork")
         work = QtWidgets.QVBoxLayout(self.work)
         work.setContentsMargins(0, 0, 0, 0)
@@ -1026,7 +1023,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.group = QtWidgets.QButtonGroup(self)
         self.group.setExclusive(False)  # the active tool's tiles are checked by hand (one tool, maybe two tiles)
         self.tabs = widgets.Pages()
-        pinned_work.addWidget(self.tabs.track)  # the tab bar, pinned; the pages scroll
+        top_work.addWidget(self.tabs.track)  # the tab bar over the grid; its pages under it
         # The tool grid (Tools and Correctives), each category's tiles under its name; the Paint
         # tile alone on the Paint tab.
         self.tool_palette = QtWidgets.QWidget()
@@ -1041,9 +1038,9 @@ class ToolPalette(QtWidgets.QWidget):
             # Beside Freeze: Unfreeze All, a button (not a tool).
             extra = [self.unfreeze_tile()] if any(t[0] == "freeze" for t in tools) else []
             grids.addWidget(self.tool_grid(tools, extra=extra))
-        pinned_work.addWidget(self.tool_palette)
-        self.paint_tiles = self.tool_grid(dict(SECTIONS).get("Paint", []))
-        pinned_work.addWidget(self.paint_tiles)
+        top_work.addWidget(self.tool_palette)
+        self.paint_tiles = self.wide_tools(dict(SECTIONS).get("Paint", []))
+        top_work.addWidget(self.paint_tiles)
 
         self.paint_tab = tool_tabs.PaintTab(self)
         self.reference_tab = tool_tabs.ReferenceTab(self)
@@ -1062,9 +1059,9 @@ class ToolPalette(QtWidgets.QWidget):
         pages = {"tools": tools_tab, "paint": self.paint_tab, "correctives": self.correctives,
                  "photos": self.reference_tab}
 
-        # The tool's card (right under the grid, before the tab's list): its name, a ? with the
-        # whole hint and the gestures, one short line, then its blocks: Brush, the tool's own,
-        # Applies to.
+        # The tool's card (under the tab's list): only its settings, in blocks: Brush, the tool's
+        # own, Applies to (the name, the hint and the gestures are its tile's tooltip). With no
+        # tool, one line on how to start.
         self.settings = QtWidgets.QFrame()
         self.settings.setObjectName("toolCard")
         self.settings.setProperty("role", "card")  # a plain section: no box, the hairline above says where it starts
@@ -1072,25 +1069,8 @@ class ToolPalette(QtWidgets.QWidget):
         card.setContentsMargins(0, 0, 0, 0)
         card.setSpacing(theme.px(6))
         card.addWidget(widgets.hairline())
-        title_row = QtWidgets.QHBoxLayout()
-        title_row.setContentsMargins(0, theme.px(2), 0, 0)
-        title_row.setSpacing(theme.px(6))
-        self.card_icon = QtWidgets.QLabel()
-        self.card_icon.setFixedSize(theme.px(16), theme.px(16))
-        title_row.addWidget(self.card_icon)
-        self.card_title = QtWidgets.QLabel()
-        self.card_title.setProperty("role", "cardTitle")
-        title_row.addWidget(self.card_title, 1)
-        self.card_help = widgets.glyph_button("help", "")
-        self.card_help.setObjectName("toolHelp")
-        self.card_help.setFocusPolicy(QtCore.Qt.NoFocus)
-        title_row.addWidget(self.card_help)
-        self.title_row = QtWidgets.QWidget()
-        self.title_row.setLayout(title_row)
-        card.addWidget(self.title_row)
-        self.settings_heading = self.card_title  # (the old name)
-        self.hint = widgets.small_label("", wrap=True)
-        self.hint.setObjectName("toolShort")
+        self.hint = widgets.small_label(NO_TOOL, wrap=True)
+        self.hint.setObjectName("noTool")
         card.addWidget(self.hint)
 
         # Brush: how the stroke feels.
@@ -1335,13 +1315,14 @@ class ToolPalette(QtWidgets.QWidget):
         row.addWidget(self.symmetry_mode, 1)
         self.applies_block.add(self.symmetry_row)
         card.addWidget(self.applies_block)
-        work.addWidget(self.settings)
 
-        # Under the card: the list the tab works on (Guide groups, Maps, Layers, Photos).
+        # Right under the grid: the list the tab works on (Guide groups, Maps, Layers, Photos);
+        # the tool's card under it.
         for tab in definitions.get("palette/tabs"):
             self.tabs.addTab(pages[tab["id"]], tab["label"])
         self.tabs.currentChanged.connect(self.tab_changed)
         work.addWidget(self.tabs)
+        work.addWidget(self.settings)
         outer.addStretch(1)
 
         theme.style(self)
@@ -1616,6 +1597,7 @@ class ToolPalette(QtWidgets.QWidget):
 
     TILE_ICON = 20       # px at 100%: the tool tiles' icons
     TILE = (56, 50)      # the tiles' fixed width and height, the border included (they never stretch)
+    MAX_COLUMNS = 4      # at most this many tiles to a row, however wide the panel
 
     def _tile_size(self, b):
         b.setIconSize(QtCore.QSize(theme.px(self.TILE_ICON), theme.px(self.TILE_ICON)))
@@ -1638,6 +1620,33 @@ class ToolPalette(QtWidgets.QWidget):
         self.buttons.setdefault("unfreeze", b)  # its icon follows the theme
         return b
 
+    def wide_tools(self, tools):
+        """The Paint tab's tools as full-width buttons, the name beside the icon (Paint, over the
+        maps); one tool is active across every tab."""
+        holder = QtWidgets.QWidget()
+        column = QtWidgets.QVBoxLayout(holder)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(theme.px(4))
+        for tool, label, tip in tools:
+            b = widgets.Tile()
+            b.setText(label)
+            b.setIcon(widgets.icon(tool))
+            b.setCheckable(True)
+            b.setIconSize(QtCore.QSize(theme.px(self.TILE_ICON), theme.px(self.TILE_ICON)))
+            b.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            b.setAutoRaise(True)
+            b.setFixedHeight(theme.px(34))
+            b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            b.setProperty("role", "tool")
+            b.setProperty("wide", True)
+            b.setToolTip(help_tip(tool) if tool in HINTS else "<b>%s</b><br>%s" % (NAMES.get(tool, label), tip))
+            b.clicked.connect(lambda _=False, t=tool: self.activate(t))
+            self.group.addButton(b)
+            self.buttons.setdefault(tool, b)
+            self.tiles.setdefault(tool, []).append(b)
+            column.addWidget(b)
+        return holder
+
     def tool_grid(self, tools, extra=()):
         """Labeled tiles (tool, label, tooltip: the icon over the name, the name and the hint in the
         tooltip) of a fixed size, as many to a row as the panel's width holds, and any `extra`
@@ -1649,14 +1658,14 @@ class ToolPalette(QtWidgets.QWidget):
             b.setIcon(widgets.icon(tool))
             b.setCheckable(True)
             self._tile_size(b)
-            b.setToolTip("<b>%s</b><br>%s" % (NAMES.get(tool, label), tip))
+            b.setToolTip(help_tip(tool) if tool in HINTS else "<b>%s</b><br>%s" % (NAMES.get(tool, label), tip))
             b.clicked.connect(lambda _=False, t=tool: self.activate(t))
             self.group.addButton(b)
             self.buttons.setdefault(tool, b)
             self.tiles.setdefault(tool, []).append(b)
             tiles.append(b)
         tiles.extend(extra)
-        return widgets.ToolGrid(tiles)
+        return widgets.ToolGrid(tiles, columns=self.MAX_COLUMNS)
 
     def check_tiles(self, tool):
         """The active tool's tiles on, every other off."""
@@ -1686,7 +1695,7 @@ class ToolPalette(QtWidgets.QWidget):
         return self.tool if self.tool != "paint" else None
 
     def show_sections(self):
-        """The pinned tool grid and the sections the tab uses (palette.json's "tabs"): the sculpt
+        """The tool grid and the sections the tab uses (palette.json's "tabs"): the sculpt
         tools on Tools and Correctives, the Paint tile on Paint; the guide groups on Tools."""
         tab = self.current_tab()
         self.tool_palette.setVisible(tab in ("tools", "correctives"))
@@ -2143,14 +2152,7 @@ class ToolPalette(QtWidgets.QWidget):
         tool = self.card_tool()
         uses = TOOL_SETTINGS.get(tool, set())
         self.settings.setVisible(self.current_tab() != "photos")
-        self.title_row.setVisible(tool is not None)
-        if tool:
-            self.card_title.setText(NAMES.get(tool, tool))
-            self.card_icon.setPixmap(widgets.icon(tool).pixmap(theme.px(16), theme.px(16)))
-            self.card_help.setToolTip(help_tip(tool))
-            self.hint.setText(SHORT.get(tool) or HINTS.get(tool, ""))
-        else:
-            self.hint.setText(NO_TOOL)
+        self.hint.setVisible(tool is None)
         brush = "radius" in uses
         self.brush_block.setVisible(brush)
         for slider in (self.radius, self.strength, self.falloff):

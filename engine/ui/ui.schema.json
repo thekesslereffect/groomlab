@@ -38,9 +38,6 @@
                          "tools": {"type": "array", "minItems": 1, "items": {"type": "string"}},
                          "tabs": {"type": "array", "minItems": 1, "items": {"type": "string"}}}}},
         "output": {"$ref": "#/$defs/entries"},
-        "tools": {"type": "object", "properties": {"about": {"type": "string"}}, "additionalProperties": {
-          "type": "object", "additionalProperties": false, "required": ["short"],
-          "properties": {"short": {"type": "string"}}}},
         "starter": {
           "type": "object", "additionalProperties": false, "required": ["steps"],
           "properties": {

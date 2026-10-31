@@ -6,8 +6,6 @@
 // says which settings each tool uses). Always the same blocks in the same order, a block only
 // when it has rows:
 //
-//   title        the tool's icon and name, a ? (its tip: the catalog's full hint and the gestures),
-//                then one short line (palette.tools.<id>.short)
 //   Brush        Radius (px), Strength (± for the tools that work both ways), Falloff, Smooth (Paint);
 //                chips Pressure, Off scalp, Falloff curve, Root to tip (a curve chip that is on shows
 //                its ramp under the chips), and the app's own Propagate (the shaping brushes) and
@@ -73,7 +71,7 @@ public:
     // The tool whose card shows (a catalog id: comb, place, freeze, paint, select...; "" none).
     void setTool(const std::string& id);
     const std::string& tool() const { return tool_; }
-    bool hasSettings() const { return hasSettings_; }  // a tool is set (its title, at least)
+    bool hasSettings() const { return hasSettings_; }  // a tool is set
     // The editors take the settings' values again (after a radius drag, a scripted edit).
     void refresh();
     AlphaPicker* alphaPicker() const { return alpha_; }
@@ -94,9 +92,6 @@ public:
     void setPaintControls(QWidget* controls);
 
     // ---- The pieces (tests, screenshots) -------------------------------------------------------
-    QLabel* titleLabel() const { return title_; }
-    QLabel* shortLabel() const { return short_; }
-    QToolButton* helpButton() const { return help_; }
     QCheckBox* symmetryBox() const { return symmetry_; }
     QComboBox* symmetryMode() const { return symmetryMode_; }
     // The titles of the blocks shown, top to bottom (Brush, the tool's own, the tubes', Applies to).
@@ -122,7 +117,6 @@ private:
     // and `set` are the settings' JSON ("" for none).
     void curve(FlowLayout* chips, QVBoxLayout* editors, const std::string& setting, const QString& label, const std::string& start,
                std::function<std::string()> get, std::function<void(const std::string&)> set);
-    void refreshTitle();
     void refreshSymmetry();
     void symmetryEdited();
     void edited();  // a setting changed by hand: the host follows
@@ -133,11 +127,6 @@ private:
     bool updating_ = false;
     std::vector<std::function<void()>> refreshers_;
     QVBoxLayout* card_ = nullptr;
-    // The title.
-    QLabel* icon_ = nullptr;
-    QLabel* title_ = nullptr;
-    QToolButton* help_ = nullptr;
-    QLabel* short_ = nullptr;
     // Brush.
     CardBlock* brush_ = nullptr;
     ValueSlider* radius_ = nullptr;

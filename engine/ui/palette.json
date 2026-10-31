@@ -26,31 +26,6 @@
     "sections": [
       {"id": "groups", "label": "Guide groups", "expanded": true, "tabs": ["tools"]}
     ],
-    "tools": {
-      "about": "The tool card's one line under the tool's name (the full hint stays in the brush catalog: the card's ? tooltip shows it with the gestures)",
-      "place": {"short": "Click the scalp to plant a guide; drag to lay down many."},
-      "draw": {"short": "Press on the scalp and draw a guide's shape."},
-      "part": {"short": "Draw a line the strands split along."},
-      "flow": {"short": "Paint the direction the fur lies."},
-      "comb": {"short": "Drag guides along the stroke, roots pinned."},
-      "slide": {"short": "Slide guides over the scalp."},
-      "smooth": {"short": "Even out kinks."},
-      "straighten": {"short": "Pull guides toward straight."},
-      "lift": {"short": "Raise guides off the scalp (Ctrl: lay down)."},
-      "twist": {"short": "Twist guides around their root."},
-      "curl": {"short": "Wind guides into curls."},
-      "attract": {"short": "Pull guide tips together."},
-      "direction": {"short": "Point guides along the stroke."},
-      "noise": {"short": "Add a little disorder."},
-      "shape": {"short": "Grow or shrink the tube (Shift: smooth)."},
-      "cut": {"short": "Trim guides where the brush touches them."},
-      "length": {"short": "Grow guides evenly (Ctrl: shorten)."},
-      "lengths": {"short": "Keys on the scalp set guide lengths; click to add one."},
-      "erase": {"short": "Remove guides, parts or flow under the brush."},
-      "paint": {"short": "Paint the current map (Shift: smooth, Ctrl: toward 0)."},
-      "select": {"short": "Click or box guides; the rest freeze."},
-      "freeze": {"short": "Protect guides from brushes."}
-    },
     "output": [
       {"id": "sim.range", "tip": "Step the Simulate nodes over the playback range into their cache (Simulate > Add Simulate Node first); Esc stops", "tips": {"app": "Step the Simulate nodes over the timeline's range into their cache (Simulate > Add Simulate Node first); Esc stops"}},
       {"submenu": "Export", "id": "export", "tip": "The strands, cards or a groom file for other apps and engines", "ref": "menus/output.export"},

@@ -14,6 +14,7 @@
 #include <QCoreApplication>
 #include <QResizeEvent>
 #include <QLabel>
+#include <QLayout>
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QPushButton>
@@ -430,13 +431,14 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
 }
 
 TEST(AppGroomTools, TilesKeepTheirSizeAndTheColumnsFollowTheWidth) {
-    // The pinned grid: every tile one fixed size (labeled 56 x 50, icons alone 34 x 34; 20 px
-    // icons), left-aligned, never stretched; as many to a row as (width + spacing) / (tile + spacing).
+    // The grid: every tile one fixed size (labeled 56 x 50, icons alone 34 x 34; 20 px
+    // icons), left-aligned, never stretched; as many to a row as (width + spacing) / (tile + spacing),
+    // at most four.
     GroomTools tools;
     tools.setGroomName(QStringLiteral("sample"));
-    EXPECT_TRUE(tools.pinned()->isAncestorOf(tools.tabBar()));
-    EXPECT_TRUE(tools.pinned()->isAncestorOf(tools.tile("comb")));
-    EXPECT_FALSE(tools.scrollArea()->isAncestorOf(tools.tile("comb"))) << "the grid stays put while the card scrolls";
+    EXPECT_TRUE(tools.topPart()->isAncestorOf(tools.tabBar()));
+    EXPECT_TRUE(tools.topPart()->isAncestorOf(tools.tile("comb")));
+    EXPECT_TRUE(tools.scrollArea()->isAncestorOf(tools.topPart())) << "the whole panel scrolls: the header, the tabs and the grid too";
     EXPECT_TRUE(tools.scrollArea()->isAncestorOf(tools.card()));
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);
@@ -446,7 +448,7 @@ TEST(AppGroomTools, TilesKeepTheirSizeAndTheColumnsFollowTheWidth) {
         EXPECT_EQ(grid->tile(), tile) << "labels " << labels;
         for (const int width : {120, 200, 252, 320, 480}) {
             const int columns = grid->columnsFor(width);
-            EXPECT_EQ(columns, (width + grid->spacing()) / (tile.width() + grid->spacing())) << width;
+            EXPECT_EQ(columns, std::min(4, (width + grid->spacing()) / (tile.width() + grid->spacing()))) << width << ": as many as fit, at most four";
             grid->resize(width, grid->heightForWidth(width));
             QResizeEvent resized(grid->size(), QSize());  // a hidden widget gets its resize event on show
             QCoreApplication::sendEvent(grid, &resized);
@@ -463,6 +465,13 @@ TEST(AppGroomTools, TilesKeepTheirSizeAndTheColumnsFollowTheWidth) {
     }
     QAbstractButton* comb = tools.tile("comb");
     EXPECT_EQ(qobject_cast<QToolButton*>(comb)->iconSize(), QSize(20, 20));
+    // The Paint tab: Paint is one full-width button over the maps, not a tile in a grid.
+    auto* paint = qobject_cast<QToolButton*>(tools.tile("paint"));
+    ASSERT_NE(paint, nullptr);
+    EXPECT_EQ(qobject_cast<ToolGrid*>(paint->parentWidget()), nullptr);
+    EXPECT_EQ(paint->toolButtonStyle(), Qt::ToolButtonTextBesideIcon);
+    EXPECT_EQ(paint->sizePolicy().horizontalPolicy(), QSizePolicy::Expanding);
+    EXPECT_EQ(paint->maximumWidth(), QWIDGETSIZE_MAX);
 }
 
 TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
@@ -496,14 +505,14 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
         EXPECT_FALSE(card->isHidden()) << tool;
         EXPECT_TRUE(tools.noToolLabel()->isHidden()) << tool;
         const groomlab::BrushEntry* e = brushEntry(tool);
-        EXPECT_EQ(card->titleLabel()->text(), QString::fromStdString(e->label)) << tool;
-        EXPECT_TRUE(card->helpButton()->toolTip().contains(QString::fromStdString(e->hint).left(20).toHtmlEscaped())) << tool << ": the ? has the hint";
-        EXPECT_FALSE(card->shortLabel()->text().isEmpty()) << tool;
-        EXPECT_LT(card->shortLabel()->text().size(), 80) << tool << ": one short line (palette.tools.<id>.short)";
+        EXPECT_TRUE(tools.tile(tool)->toolTip().contains(QString::fromStdString(e->hint).left(20).toHtmlEscaped())) << tool << ": the tile has the hint";
     }
-    // The gestures are the ?'s (a brush's), not a paragraph in the card.
+    // The card is only the settings: no title, no hint line; the gestures are a brush tile's tip.
     tools.setTool("comb");
-    EXPECT_TRUE(card->helpButton()->toolTip().contains(QStringLiteral("Page Up / Down")));
+    EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr);
+    EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardShort")), nullptr);
+    EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Page Up / Down")));
+    EXPECT_FALSE(tools.tile("part")->toolTip().contains(QStringLiteral("Page Up / Down"))) << "not a brush";
     EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("gestures")), nullptr);
     // Mirror: Symmetry and its mode inside Applies to (not for Flow).
     auto* applies = card->findChild<CardBlock*>(QStringLiteral("appliesBlock"));
@@ -575,9 +584,13 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     bool value = false;
     for (ValueSlider* s : block->findChildren<ValueSlider*>()) value = value || s->caption() == QStringLiteral("Value");
     EXPECT_TRUE(value);
-    // The Maps list under the card: the header's + New Map and Import glyphs, the picked map's box.
+    // The Maps list over the card, right under the grid: the header's + New Map and Import glyphs,
+    // the picked map's box.
     EXPECT_EQ(maps.bar()->ids(), (std::vector<std::string>{"map.new", "map.import"}));
-    EXPECT_TRUE(tools.card()->y() < tools.findChild<QWidget*>(QStringLiteral("list_paint"))->y() || !tools.isVisible());
+    QLayout* work = tools.card()->parentWidget()->layout();
+    ASSERT_NE(work, nullptr);
+    for (const char* tab : {"tools", "paint", "correctives", "photos"})
+        EXPECT_LT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_") + QLatin1String(tab))), work->indexOf(tools.card())) << tab;
     // Photos: no card.
     ASSERT_TRUE(tools.showTab(QStringLiteral("photos")));
     EXPECT_TRUE(card->isHidden());

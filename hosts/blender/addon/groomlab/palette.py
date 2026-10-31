@@ -6,11 +6,11 @@ lists.json's bars and right-click menus; choices.json's option lists), in the re
 (research/ui-redesign/QT.md, "Groom Tools layout"): the groom picker with its eyes, the Graph
 Editor and a More menu; how to start a groom, then the first-groom steps; the Tools, Paint,
 Correctives and Photos tabs; the tool grid (tiles by the catalog's categories, with Maya's icons;
-the Paint tile alone on Paint); the tool's card right under it (its name, a ? with the whole hint,
-one line, then its blocks: Brush, the tool's own, Applies to, exactly the settings the catalog lists
-for it); then the tab's list (Paint's maps, Correctives' layers, the photos; the Tools tab's Guide
-groups as the subpanel under the card) with the picked item's own settings under it; GroomLab's
-undo; While sculpting (folded) and the groom's Display (Blender's own).
+the Paint tile alone on Paint); the tab's list right under it (the Tools tab's Guide groups,
+Paint's maps, Correctives' layers, the photos) with the picked item's own settings under it; then
+the tool's card (its name, a ? with the whole hint, one line, then its blocks: Brush, the tool's own,
+Applies to, exactly the settings the catalog lists for it); GroomLab's undo; While sculpting
+(folded) and the groom's Display (Blender's own).
 
 An action shows when actions.py binds it (the rest is hidden). Drawing never writes Blender data:
 the lists (groups, maps, parts, tubes, correctives) are refreshed by the tools after each edit, or
@@ -96,9 +96,9 @@ def tile(layout, tool, active):
 TILE_SCALE = 1.4  # the tiles a little taller than a row
 
 
-def tool_grid(layout, tool_ids, active, columns=0):
-    """Labeled tiles of one size, as many to a row as the sidebar's width holds (Blender's
-    automatic columns), as Maya's and the app's tool palettes."""
+def tool_grid(layout, tool_ids, active, columns=4):
+    """Labeled tiles of one size, four to a row (Maya's and the app's tool palettes hold at most
+    four)."""
     grid = layout.grid_flow(row_major=True, columns=columns, even_columns=True, even_rows=True, align=True)
     grid.scale_y = TILE_SCALE
     for t in tool_ids:
@@ -192,7 +192,7 @@ HEADER_ICONS = {"group.new": "ADD", "map.new": "ADD", "map.import": "IMPORT", "c
 
 
 def help_text(tool):
-    """The card's ? tooltip: the tool's name and whole hint, then (the brushes) the gestures, one
+    """A tool tile's tooltip: the tool's name and whole hint, then (the brushes) the gestures, one
     a line."""
     info = tools.tool_info(tool)
     if not info:
@@ -201,12 +201,6 @@ def help_text(tool):
     if "radius" in info.get("settings", []):
         text += "\n\n" + "\n".join(GESTURES.split(" · "))
     return text
-
-
-def short_text(tool):
-    """The card's one line under the tool's name (palette.json's palette.tools)."""
-    entry = (defs.get("palette/tools") or {}).get(tool)
-    return entry["short"] if isinstance(entry, dict) else ""
 
 
 class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
@@ -264,8 +258,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             self.draw_starter(layout, context)
         if t.status:
             _wrap(layout, t.status, icon="INFO", width=_chars(context))
-        # The tabs, then the tool grid (the Tools and Correctives tabs; the Paint tile alone on
-        # Paint), the tool's card right under it, then the list the tab works on.
+        # The tabs, then the tool grid (the Tools and Correctives tabs; on Paint, one full-width
+        # Paint button), the list the tab works on right under it, then the tool's card.
         layout.row().prop(t, "tab", expand=True)
         if t.tab in ("TOOLS", "CORRECTIVES"):
             for category, tlist in tools.sections():
@@ -279,17 +273,21 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                     sub.scale_y = TILE_SCALE
                     sub.operator("groomlab.guides_edit", text="Unfreeze All",
                                  icon_value=icons.icon("unfreeze")).action = "UNFREEZE_ALL"
-        elif t.tab == "PAINT":
-            tool_grid(layout, ["paint"], t.tool)
+        elif t.tab == "PAINT":  # Paint: one full-width button over the maps
+            row = layout.row()
+            row.scale_y = TILE_SCALE
+            tile(row, "paint", t.tool)
         if t.tab == "PHOTOS":
             photos.draw_tab(layout, context, _chars(context))
         else:
-            self.draw_card(layout, context, t, scalp, "paint" if t.tab == "PAINT" else
-                           (t.tool if t.tool != "paint" else ""))
-            if t.tab == "PAINT":
+            if section_shown("groups", context):
+                self.draw_groups(layout, context, t)
+            elif t.tab == "PAINT":
                 self.draw_maps(layout, context, t)
             elif t.tab == "CORRECTIVES":
                 self.draw_correctives(layout, context, t, scalp)
+            self.draw_card(layout, context, t, scalp, "paint" if t.tab == "PAINT" else
+                           (t.tool if t.tool != "paint" else ""))
         row = layout.row(align=True)
         undo, redo = tools.undo_label(scalp), tools.undo_label(scalp, redo=True)
         sub = row.row(align=True)
@@ -326,8 +324,30 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 _wrap(box, tip, width=_chars(context))
             first = False
 
+    def draw_groups(self, layout, context, t):
+        """The Tools tab's list (palette.json's one section, Guide groups): the groups (a click picks
+        the one brushes edit and new guides go into), Isolate and + in the header; the picked
+        group's box: rename, select, delete, its Segments and Edit Guides."""
+        head = section_header(layout, defs.section("groups")["label"], len(t.groups))
+        sub = head.row(align=True)
+        sub.alignment = "RIGHT"
+        sub.prop(t, "isolate", text="", icon="RESTRICT_VIEW_OFF" if t.isolate else "RESTRICT_VIEW_ON", emboss=False)
+        bar_icons(sub, "lists/groups/bar", "groupsbar", context, ("group.new",))
+        lists = defs.get("lists/groups")
+        list_with_menu(layout, "GROOMLAB_UL_groups", t, "groups", "group_index", "GROOMLAB_MT_group_context", rows=3)
+        box = layout.box()
+        row = box.row(align=True)
+        row.alignment = "RIGHT"
+        bar_icons(row, "lists/groups/bar", "groupsbar", context, ("group.rename", "group.select", "group.delete"))
+        box.prop(t, "resample_segments", text="Segments (%s)" % t.segments_scope if t.segments_scope else "Segments",
+                 slider=True)
+        row = box.row(align=True)
+        row.menu("GROOMLAB_MT_guide_edits", text=lists["edits"]["label"])
+        row.prop(t, "children_count", text="x")
+        box.label(text="%d guides, %d selected, %d frozen" % (t.guide_count, t.selected_count, t.frozen_count))
+
     def draw_maps(self, layout, context, t):
-        """The Paint tab's list (under the Paint card): the maps, then the picked map's box: its
+        """The Paint tab's list (right under the Paint tile, over the Paint card): the maps, then the picked map's box: its
         actions, where it shows, what reads it."""
         head = section_header(layout, "Maps", len(t.maps))
         sub = head.row(align=True)
@@ -350,7 +370,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                   width=_chars(context))
 
     def draw_correctives(self, layout, context, t, scalp):
-        """The Correctives tab's list (Maya's CorrectivesBox): the stack, top first, the Sculpt
+        """The Correctives tab's list (Maya's CorrectivesBox; over the card): the stack, top first, the Sculpt
         nodes, the base groom; the picked row is what brushes edit; its box: solo, up, down,
         delete, the weight keyed with Blender's keyframes."""
         head = section_header(layout, "Layers", sum(1 for r in t.correctives if r.kind == "layer"))
@@ -437,17 +457,13 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         col.prop(t, "tube_twist", slider=True)
 
     def draw_card(self, layout, context, t, scalp, tool):
-        """The tool's card: its name, a ? (the whole hint and the gestures in its tooltip) and one
-        line, then its blocks in order: Brush, the tool's own, Applies to."""
+        """The tool's card: only its settings, in blocks: Brush, the tool's own, Applies to (the
+        name, the hint and the gestures are its tile's tooltip)."""
         info = tools.tool_info(tool) if tool else None
         layout.separator(type="LINE")  # a plain section: a hairline, no box
         if info is None:
             _wrap(layout, NO_TOOL, width=_chars(context))
             return
-        row = layout.row(align=True)
-        row.label(text=info["label"], icon_value=icons.icon(tool))
-        row.operator("groomlab.tool_help", text="", icon="QUESTION", emboss=False).tool = tool
-        _wrap(layout, short_text(tool) or info["hint"], width=_chars(context))
         uses = set(info["settings"])
         card = layout.column()
         if "radius" in uses:  # Brush: how the stroke feels
@@ -609,19 +625,10 @@ class GroomToolsSubpanel(object):
     bl_category = "GroomLab"
     bl_parent_id = "VIEW3D_PT_groomlab_tools"
 
-    section_id = None  # palette.json's: shown with the tools and tabs it lists (section_shown)
-
     @classmethod
     def poll(cls, context):
         s = active_groom(context)
-        return (s is not None and tools.is_hierarchy(s)
-                and (cls.section_id is None or section_shown(cls.section_id, context)))
-
-
-def _section(section_id):
-    """A section's label and fold from palette.json."""
-    s = defs.section(section_id)
-    return s["label"], (set() if s.get("expanded") else {"DEFAULT_CLOSED"})
+        return s is not None and tools.is_hierarchy(s)
 
 
 class GROOMLAB_UL_groups(bpy.types.UIList):
@@ -690,37 +697,6 @@ class GROOMLAB_UL_correctives(bpy.types.UIList):
             row.label(text=item.name, icon="OUTLINER_OB_CURVES")
 
 
-class VIEW3D_PT_groomlab_tools_guides(GroomToolsSubpanel, bpy.types.Panel):
-    """Guide groups, right under the Tools tab's card: the groups (a click picks the one brushes
-    edit and new guides go into), Isolate and + in the header; the picked group's box: rename,
-    select, delete, its Segments and Edit Guides."""
-    bl_label, bl_options = _section("groups")
-    section_id = "groups"
-
-    def draw_header_preset(self, context):
-        t = context.scene.groomlab_tools
-        row = self.layout.row(align=True)
-        row.label(text="%d" % len(t.groups))
-        row.prop(t, "isolate", text="", icon="RESTRICT_VIEW_OFF" if t.isolate else "RESTRICT_VIEW_ON", emboss=False)
-        bar_icons(row, "lists/groups/bar", "groupsbar", context, ("group.new",))
-
-    def draw(self, context):
-        layout = self.layout
-        t = context.scene.groomlab_tools
-        lists = defs.get("lists/groups")
-        list_with_menu(layout, "GROOMLAB_UL_groups", t, "groups", "group_index", "GROOMLAB_MT_group_context", rows=3)
-        box = layout.box()
-        row = box.row(align=True)
-        row.alignment = "RIGHT"
-        bar_icons(row, "lists/groups/bar", "groupsbar", context, ("group.rename", "group.select", "group.delete"))
-        box.prop(t, "resample_segments", text="Segments (%s)" % t.segments_scope if t.segments_scope else "Segments",
-                 slider=True)
-        row = box.row(align=True)
-        row.menu("GROOMLAB_MT_guide_edits", text=lists["edits"]["label"])
-        row.prop(t, "children_count", text="x")
-        box.label(text="%d guides, %d selected, %d frozen" % (t.guide_count, t.selected_count, t.frozen_count))
-
-
 # The strokes that draw the strands while live (While sculpting): every brush that strokes, Place
 # and Draw (palette.json's old section; Blender has no other place for these two settings).
 SCULPTING_TOOLS = ("place", "draw", "flow", "comb", "slide", "smooth", "straighten", "lift", "twist", "curl", "attract",
@@ -767,10 +743,10 @@ class VIEW3D_PT_groomlab_tools_display(GroomToolsSubpanel, bpy.types.Panel):
             layout.operator("groomlab.show_strand_colors", icon="SHADING_SOLID")
 
 
-# Under the main panel (Blender draws subpanels in their registration order): the guide groups
-# (palette.json's one section, the Tools tab's list), While sculpting, then Blender's Display.
+# Under the main panel (Blender draws subpanels in their registration order): While sculpting, then
+# Blender's Display (the guide groups are the main panel's, the Tools tab's list over the card).
 classes = (VIEW3D_PT_groomlab_tools, GROOMLAB_UL_groups, GROOMLAB_UL_maps, GROOMLAB_UL_parts, GROOMLAB_UL_tube_shapes,
-           GROOMLAB_UL_correctives, VIEW3D_PT_groomlab_tools_guides, VIEW3D_PT_groomlab_tools_sculpting,
+           GROOMLAB_UL_correctives, VIEW3D_PT_groomlab_tools_sculpting,
            VIEW3D_PT_groomlab_tools_display)
 
 

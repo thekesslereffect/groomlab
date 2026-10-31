@@ -1167,7 +1167,7 @@ def step_brush_pack():
           all(t in tools.buttons for t in ("direction", "noise")) and not any(t in tools.buttons for t in ("width", "density")))
     check("the new tiles have icons", all(not tools.buttons[t].icon().isNull() for t in ("direction", "noise")))
     check("Unfreeze All sits beside the Freeze tile", "unfreeze" in tools.buttons and not tools.buttons["unfreeze"].isCheckable())
-    gestures = palette.help_tip("comb").split("<table", 1)[-1]  # the card's ? tooltip: the gestures' list
+    gestures = palette.help_tip("comb").split("<table", 1)[-1]  # a brush tile's tooltip: the gestures' list
     check("the hints name the Shift selection and Ctrl's opposite",
           "Shift+drag" in gestures and "paint the selection" in gestures and "Ctrl" in gestures
           and "the opposite" in gestures and "lasso" not in gestures)

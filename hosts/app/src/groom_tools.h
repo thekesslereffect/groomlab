@@ -3,25 +3,24 @@
 
 // The Groom Tools dock, as the redesign lays it out (research/ui-redesign/QT.md, "Groom Tools
 // layout"; Maya's palette.py and Blender's Groom Tools panel follow the same shared definitions,
-// engine/ui/palette.json through definitions.h). One model on every tab: pick a tool, its card
-// right under the grid, then the list of things the tab works on with the picked one's own
-// settings under it.
+// engine/ui/palette.json through definitions.h). One model on every tab: pick a tool; right under
+// the grid, the list of things the tab works on with the picked one's own settings under it;
+// then the tool's card.
 //
-//   pinned        (outside the scroll area)
+//   one scroll area, the whole panel:
 //     header      the groom's name, the eyes (its hair, its guides), the Graph Editor, ⋯ More
 //                 (palette.header.more: New Groom on Mesh, Theme)
 //     status      a line that takes no room while it has nothing to say
 //     tabs        palette.tabs: Tools, Paint, Correctives, Photos
 //     the grid    the tool tiles at a fixed size, as many to a row as the width takes (Tools and
-//                 Correctives: Create, Shape, Trim, Guides, Unfreeze All beside Freeze; Paint: the
-//                 Paint tile)
-//   scrolls
+//                 Correctives: Create, Shape, Trim, Guides, Unfreeze All beside Freeze; Paint: one
+//                 full-width Paint button)
 //     no groom    palette.empty: Start a groom (New Groom on Mesh, Import ▾)
-//     the card    the tool's card (brush_panel.h; the tubes' blocks, tube_panel.h, inside it); the
-//                 Paint tab's is Paint's; none on Photos. With no tool: one muted line
 //     the list    Tools: Guide groups (the guides panel, always open; Isolate is the eye in its
 //                 header); Paint: Maps (the maps panel); Correctives: Layers (the correctives
 //                 panel); Photos: the photos panel
+//     the card    the tool's card (brush_panel.h; the tubes' blocks, tube_panel.h, inside it); the
+//                 Paint tab's is Paint's; none on Photos. With no tool: one muted line
 //
 // palette.output (Maya's and Blender's Output strip) is not the app's: Export ▾ and Render ▾ sit in
 // the menu bar's corner (MainWindow), the rest in the GroomLab menu; the first-groom steps float
@@ -174,7 +173,7 @@ public:
     QToolButton* graphButton() const { return graph_; }
     QMenu* moreMenu() const { return moreMenu_; }
     QWidget* emptyState() const { return empty_; }
-    QWidget* pinned() const { return pinned_; }
+    QWidget* topPart() const { return top_; }
     QWidget* work() const { return work_; }
     QTabBar* tabBar() const { return tabs_; }
     QScrollArea* scrollArea() const { return scroll_; }
@@ -209,8 +208,8 @@ private:
     std::string tool_;
     bool tileLabels_ = true;  // the names under the icons (View > Tool Labels off: icons alone)
     std::vector<GroupRow> groups_;
-    // Pinned.
-    QWidget* pinned_ = nullptr;
+    // The top: the header, the status, the tabs, the grid.
+    QWidget* top_ = nullptr;
     QLabel* groomName_ = nullptr;
     QToolButton* eye_ = nullptr;
     QToolButton* guidesEye_ = nullptr;
