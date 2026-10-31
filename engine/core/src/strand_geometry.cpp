@@ -190,8 +190,92 @@ void pairedFaces(RachisMesh& m, const std::uint32_t* tri, std::size_t first, std
     }
 }
 
+// Points of one piece (a scale, an instance: the same featherIndex, in a run) that sit together in
+// its prototype, welded into one: a prototype keeps its parts' own vertices for hard edges and seams
+// (the built-in plates' top, rim and underside), which a mesh for sculpting wants joined. `rest`:
+// each point where its prototype has it, so the weld is the prototype's whatever the skin bends
+// (and the point count with or without a scalp the same). Within a piece only, closer than
+// `share` of its size. A piece that collapsed (a scale of size 0: a strand without width or
+// length) is left out. The uvs stay each corner's own (faceUVs keeps the old indices); a face
+// whose corners merge loses them (fewer than three: it goes).
+void weldPieces(RachisMesh& m, const std::vector<Vec3f>& rest, float share) {
+    const std::size_t n = m.points.size();
+    if (n == 0) return;
+    std::vector<int> remap(n, -1);
+    std::vector<Vec3f> points;
+    std::vector<float> featherIndex, groupIds;
+    points.reserve(n);
+    for (std::size_t begin = 0; begin < n;) {
+        std::size_t end = begin + 1;
+        while (end < n && m.featherIndex[end] == m.featherIndex[begin]) ++end;
+        Vec3f lo = rest[begin], hi = lo, bentLo = m.points[begin], bentHi = bentLo;
+        for (std::size_t v = begin; v < end; ++v) {
+            const Vec3f& p = rest[v];
+            lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
+            hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+            const Vec3f& q = m.points[v];
+            bentLo = Vec3f(std::min(bentLo.x, q.x), std::min(bentLo.y, q.y), std::min(bentLo.z, q.z));
+            bentHi = Vec3f(std::max(bentHi.x, q.x), std::max(bentHi.y, q.y), std::max(bentHi.z, q.z));
+        }
+        const float size = (hi - lo).length();
+        if (size > 0.0f && (bentHi - bentLo).length() <= 1e-6f * size * std::max(1.0f, (bentHi + bentLo).length())) {
+            begin = end;  // collapsed to a point: no faces (its corners stay unmapped)
+            continue;
+        }
+        const float tolerance = share * size;
+        std::vector<std::size_t> kept;  // this piece's points kept, by their old index
+        for (std::size_t v = begin; v < end; ++v) {
+            for (std::size_t k = 0; k < kept.size() && remap[v] < 0; ++k) {
+                if ((rest[kept[k]] - rest[v]).length() <= tolerance) remap[v] = remap[kept[k]];
+            }
+            if (remap[v] >= 0) continue;
+            kept.push_back(v);
+            remap[v] = static_cast<int>(points.size());
+            points.push_back(m.points[v]);
+            featherIndex.push_back(m.featherIndex[v]);
+            groupIds.push_back(v < m.groupIds.size() ? m.groupIds[v] : 0.0f);
+        }
+        begin = end;
+    }
+    // The faces on the welded points, without the corners that merged into the one before.
+    std::vector<int> counts, vertices, uvs, feathers;
+    std::size_t corner = 0;
+    for (std::size_t f = 0; f < m.faceCounts.size(); ++f) {
+        const int count = m.faceCounts[f];
+        std::vector<int> fv, fu;
+        bool gone = false;
+        for (int c = 0; c < count; ++c) {
+            const int v = remap[static_cast<std::size_t>(m.faceVertices[corner + static_cast<std::size_t>(c)])];
+            gone = gone || v < 0;
+            if (!fv.empty() && fv.back() == v) continue;
+            fv.push_back(v);
+            fu.push_back(m.faceUVs[corner + static_cast<std::size_t>(c)]);
+        }
+        while (fv.size() > 1 && fv.back() == fv.front()) {
+            fv.pop_back();
+            fu.pop_back();
+        }
+        corner += static_cast<std::size_t>(std::max(count, 0));
+        if (gone || fv.size() < 3) continue;
+        counts.push_back(static_cast<int>(fv.size()));
+        vertices.insert(vertices.end(), fv.begin(), fv.end());
+        uvs.insert(uvs.end(), fu.begin(), fu.end());
+        feathers.push_back(f < m.faceFeather.size() ? m.faceFeather[f] : 0);
+    }
+    m.points = std::move(points);
+    m.featherIndex = std::move(featherIndex);
+    m.groupIds = std::move(groupIds);
+    m.faceCounts = std::move(counts);
+    m.faceVertices = std::move(vertices);
+    m.faceUVs = std::move(uvs);
+    m.faceFeather = std::move(feathers);
+}
+
+// Points closer than this share of their piece's size are one (weldPieces).
+constexpr float kWeldShare = 1e-5f;
+
 // The scales' plates as one mesh: quads where two triangles in a row make one (quadOf), else
-// triangles; each vertex its own uv.
+// triangles; each plate's points welded (weldPieces), each corner its own uv.
 StrandMesh scalePlates(const StrandSet& strands, const ScalpMesh* scalp, const PrototypeLookup& prototypes) {
     StrandMesh out;
     // (buildScaleMesh keeps no pointer: the scalp only while it builds.)
@@ -217,6 +301,19 @@ StrandMesh scalePlates(const StrandSet& strands, const ScalpMesh* scalp, const P
         pairedFaces(m, tri, scale.firstTriangle, scale.triangleCount, 0, static_cast<int>(s));
     }
     m.faceUVs = m.faceVertices;
+    // Welded where the plates' prototypes have points together (a quad scale: none).
+    std::vector<Vec3f> rest = m.points;
+    if (const std::shared_ptr<const InstanceSet>& set = strands.instances()) {
+        for (const ScaleMesh::Scale& scale : scales->scales) {
+            if (scale.quad || scale.prototype >= set->prototypes.size()) continue;
+            const std::string& name = set->prototypes[scale.prototype];
+            const InstancePrototype* proto = builtinPrototype(name);
+            if (!proto && prototypes) proto = prototypes(name);
+            if (!proto || proto->points.size() != scale.vertexCount) continue;
+            std::copy(proto->points.begin(), proto->points.end(), rest.begin() + scale.firstVertex);
+        }
+    }
+    weldPieces(m, rest, kWeldShare);
     m.featherCount = scales->scales.size();
     out.faceParts.assign(m.faceCounts.size(), static_cast<int>(MeshPart::Scales));
     return out;
@@ -226,6 +323,7 @@ StrandMesh scalePlates(const StrandSet& strands, const ScalpMesh* scalp, const P
 // prototype mesh (built in, else `prototypes`) moved to where it sits; one without a mesh is left out.
 RachisMesh placedInstances(const StrandSet& strands, const ScalpMesh* scalp, const PrototypeLookup& prototypes) {
     RachisMesh m;
+    std::vector<Vec3f> rest;  // each point where its prototype has it (weldPieces)
     if (!strands.instances()) return m;
     const InstanceSet& set = *strands.instances();
     const std::vector<InstanceSet::Placed> placed = set.resolve(strands, scalp);
@@ -237,6 +335,7 @@ RachisMesh placedInstances(const StrandSet& strands, const ScalpMesh* scalp, con
         if (!mesh && prototypes) mesh = prototypes(name);
         if (!mesh || mesh->points.empty() || mesh->triangles.empty()) continue;
         const auto offset = static_cast<std::uint32_t>(m.points.size());
+        rest.insert(rest.end(), mesh->points.begin(), mesh->points.end());
         for (std::size_t v = 0; v < mesh->points.size(); ++v) {
             const Vec3f& q = mesh->points[v];
             m.points.push_back(p.origin + p.x * q.x + p.y * q.y + p.z * q.z);
@@ -250,6 +349,7 @@ RachisMesh placedInstances(const StrandSet& strands, const ScalpMesh* scalp, con
         ++m.featherCount;
     }
     m.faceUVs = m.faceVertices;
+    weldPieces(m, rest, kWeldShare);  // (a scene mesh's split normals and uv seams: one point each)
     return m;
 }
 
