@@ -337,7 +337,14 @@ void MainWindow::buildProperties() {
     colorMax_->setValue(1.0);
     colorMax_->setKeyboardTracking(false);
     colorMax_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
-    p->setControl("colorMax", colorMax_);
+    {
+        // Auto Range: Min and Max at the lowest and highest value of the source on the strands shown.
+        auto* autoRange = smallButton(tr("Auto Range"), tr("Min and Max set to the lowest and highest value of the source on the "
+                                                          "strands shown"));
+        autoRange->setObjectName(QStringLiteral("propColorAutoRange"));
+        connect(autoRange, &QPushButton::clicked, this, [this] { autoColorRange(); });
+        p->setControl("colorMax", hbox({colorMax_, autoRange}));
+    }
     // A painted map drawn on the scalp (the Maya plugin's show_map_on_scalp).
     scalpMap_ = combo({});
     p->setControl("scalpMap", scalpMap_);
@@ -588,11 +595,27 @@ void MainWindow::refreshProperties() {
     }
     // Source applies to the modes that read one (a color set, a channel).
     const int mode = colorMode_->currentData().toInt();
-    properties_->setRowVisible("colorSource", mode == kColorSetColors || mode == kAttributeColors);
+    properties_->setRowVisible("colorSource", mode == kColorSetColors || mode == kAttributeColors || mode == kClumpColors);
     properties_->setRowVisible("colorMin", mode == kAttributeColors);
     properties_->setRowVisible("colorMax", mode == kAttributeColors);
     refreshControlSliders();
     refreshHairColorRows();
+}
+
+bool MainWindow::autoColorRange() {
+    float lo = 0.0f, hi = 0.0f;
+    const StrandsPtr strands = document_ ? document_->lastView().strands : nullptr;
+    if (!strands || !strandChannelRange(*strands, colorSource_->currentText().trimmed().toStdString(), lo, hi)) {
+        report(tr("The strands shown have no channel %1").arg(colorSource_->currentText().trimmed()));
+        return false;
+    }
+    {
+        const QSignalBlocker a(colorMin_), b(colorMax_);
+        colorMin_->setValue(lo);
+        colorMax_->setValue(hi);
+    }
+    applyDisplayOptions();
+    return true;
 }
 
 namespace {

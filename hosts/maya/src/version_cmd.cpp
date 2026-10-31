@@ -13,12 +13,14 @@
 #include <maya/MGlobal.h>
 #include <maya/MSelectionList.h>
 #include <maya/MStringArray.h>
+#include <nlohmann/json.hpp>
 
 #include "asset_files.h"
 #include "groom_draw_override.h"
 #include "guarded.h"
 #include "groom_shape.h"
 #include "groomlab/card_maps.h"
+#include "groomlab/display.h"
 #include "groomlab/expression.h"
 #include "groomlab/flow.h"
 #include "groomlab/graph_io.h"
@@ -166,6 +168,8 @@ MSyntax GraphStatsCmd::newSyntax() {
     s.addFlag("-ov", "-overlays");
     s.addFlag("-hs", "-hairShading");
     s.addFlag("-hl", "-hairLook");
+    s.addFlag("-scs", "-strandColorSources");
+    s.addFlag("-chr", "-channelRange", MSyntax::kString);
     s.setObjectType(MSyntax::kStringObjects, 1, 1);
     return s;
 }
@@ -223,7 +227,36 @@ MStatus GraphStatsCmd::doIt(const MArgList& args) {
         }
         // The queries below (the strands' points, the instances, the overlays) are the committed
         // groom's: a commit evaluating off the UI thread is waited for first.
-        if (db.isFlagSet("-overlays") || db.isFlagSet("-points") || db.isFlagSet("-instances")) shape->settleCommit("groomLabGraphStats");
+        if (db.isFlagSet("-overlays") || db.isFlagSet("-points") || db.isFlagSet("-instances") ||
+            db.isFlagSet("-strandColorSources") || db.isFlagSet("-channelRange")) {
+            shape->settleCommit("groomLabGraphStats");
+        }
+        if (db.isFlagSet("-strandColorSources")) {
+            // What the strand colors can read in the frame drawn (the viewed node's): {"channels":
+            // the strands' channels (the attribute colors), "colorSets": the scalp's color sets,
+            // painted vertex maps among them (the color set colors)}, each sorted.
+            const FramePtr frame = shape->frame();
+            nlohmann::json out = {{"channels", nlohmann::json::array()}, {"colorSets", nlohmann::json::array()}};
+            if (frame && frame->view.strands) out["channels"] = frame->view.strands->strandChannelNames();
+            if (frame && frame->view.scalp) out["colorSets"] = frame->view.scalp->colorSetNames();
+            setResult(MString(out.dump().c_str()));
+            return MS::kSuccess;
+        }
+        if (db.isFlagSet("-channelRange")) {
+            // A strand channel's lowest and highest value in the frame drawn (Auto Range): [lo, hi],
+            // empty without the channel.
+            MString name;
+            db.getFlagArgument("-channelRange", 0, name);
+            const FramePtr frame = shape->frame();
+            MDoubleArray range;
+            float lo = 0.0f, hi = 0.0f;
+            if (frame && frame->view.strands && strandChannelRange(*frame->view.strands, name.asChar(), lo, hi)) {
+                range.append(lo);
+                range.append(hi);
+            }
+            setResult(range);
+            return MS::kSuccess;
+        }
         if (db.isFlagSet("-overlays")) {
             // The parts and flow of the frame drawn (world space, on the scalp as evaluated):
             // {"parts": [[[x, y, z], ...], ...], "pins": [[x, y, z], ...], "directions": [...],

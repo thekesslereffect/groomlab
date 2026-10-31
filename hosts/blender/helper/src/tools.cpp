@@ -3028,6 +3028,13 @@ json display(ToolState& t, const json& args) {
             t.colorsOut.begin(Arena::reserve(flat.size() * 4));
             colors["colors"] = put(t.colorsOut, flat.data(), count, 3);
             colors["changed"] = true;
+            // What the Source offers (the strands' channels, the scalp's color sets) and the source's
+            // range (Auto Range), with the colors they go with.
+            colors["channels"] = strands->strandChannelNames();
+            const ScalpMesh* scalp = last.scalp ? last.scalp.get() : in.scalp.get();
+            colors["colorSets"] = scalp ? scalp->colorSetNames() : std::vector<std::string>{};
+            float low = 0.0f, high = 0.0f;
+            if (strandChannelRange(*strands, source, low, high)) colors["range"] = {low, high};
         } else {
             colors["changed"] = false;
         }

@@ -732,11 +732,13 @@ class VIEW3D_PT_groomlab_tools_display(GroomToolsSubpanel, bpy.types.Panel):
         if d.guide_color_mode == "layer":
             layout.prop(d, "guide_color_layer")
         layout.prop(d, "strand_color")
-        if d.strand_color in ("colorSet", "attribute"):
+        if d.strand_color in ("colorSet", "attribute", "clump"):
             layout.prop(d, "strand_color_source")
+        if d.strand_color == "attribute":
             row = layout.row(align=True)
             row.prop(d, "strand_color_min")
             row.prop(d, "strand_color_max")
+            layout.operator("groomlab.auto_strand_color_range")
         if d.strand_color != "solid":
             layout.operator("groomlab.show_strand_colors", icon="SHADING_SOLID")
 

@@ -630,6 +630,9 @@ private:
     void refreshSurfaces();  // the look panel's surface list: the scalp and the props
     void refreshDisplayChoices();  // the color sources and the maps the display panel offers
     void applyDisplayOptions();    // the display panel's choices into the settings and the renderer
+    // Auto Range: the color range at the lowest and highest value of the source on the strands
+    // shown (false: they have no such channel).
+    bool autoColorRange();
     void applyProps();       // the props (and the textured cards) to the renderer
     void setRendererProps();  // ... the renderers' part alone (the textured cards while the hair shows)
     Bounds sceneBounds() const;  // the document's with the props'

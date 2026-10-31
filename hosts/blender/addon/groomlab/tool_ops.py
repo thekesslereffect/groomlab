@@ -1873,6 +1873,22 @@ class GROOMLAB_OT_show_strand_colors(GroomToolOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_auto_strand_color_range(GroomToolOperator):
+    """Min and Max set to the lowest and highest value of the source on the strands shown"""
+    bl_idname = "groomlab.auto_strand_color_range"
+    bl_label = "Auto Range"
+
+    def execute(self, context):
+        s = active(context)
+        d = s.groomlab_tools
+        found = display.state(s).strand_range
+        if not found:
+            self.report({"WARNING"}, "The strands shown have no channel %r" % d.strand_color_source)
+            return {"CANCELLED"}
+        d.strand_color_min, d.strand_color_max = found
+        return {"FINISHED"}
+
+
 # ---- The pie menu (Maya's marking menu) ----------------------------------------------------------
 
 def _tool_button(layout, tool, label=None):
@@ -1975,7 +1991,7 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_corrective_move, GROOMLAB_OT_corrective_solo, GROOMLAB_OT_corrective_delete,
            GROOMLAB_OT_corrective_go_to, GROOMLAB_OT_corrective_key, GROOMLAB_OT_corrective_clear_keys,
            GROOMLAB_OT_corrective_rename, GROOMLAB_OT_sculpt_target, GROOMLAB_OT_sculpt_clear,
-           GROOMLAB_OT_show_strand_colors, GROOMLAB_MT_pie)
+           GROOMLAB_OT_show_strand_colors, GROOMLAB_OT_auto_strand_color_range, GROOMLAB_MT_pie)
 
 
 def register():

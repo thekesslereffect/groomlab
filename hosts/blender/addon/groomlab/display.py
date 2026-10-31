@@ -69,6 +69,8 @@ class GroomDisplay(object):
         self.overlay_pull = 0.0
         self.strand_version = 0
         self.strand_mode = "solid"
+        # From the colors last taken: the Source's choices and the source's range (Auto Range).
+        self.strand_channels, self.strand_color_sets, self.strand_range = [], [], None
         self.pending_colors = None   # (colors, perPoint) for the hair, written outside drawing
         self.serial = None
         self.dirty = True
@@ -247,6 +249,9 @@ def take_display(scalp, r):
         elif sc.get("changed") and "colors" in sc:
             gd.pending_colors = (_copy(client, sc["colors"], np.float32), bool(sc.get("perPoint")))
             gd.strand_version = sc.get("version", 0)
+            gd.strand_channels = list(sc.get("channels") or [])
+            gd.strand_color_sets = list(sc.get("colorSets") or [])
+            gd.strand_range = tuple(sc["range"]) if sc.get("range") else None
 
 
 def take_overlay(scalp, overlay, ring=None):

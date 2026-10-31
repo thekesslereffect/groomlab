@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -328,6 +329,21 @@ std::vector<std::array<float, 3>> strandColors(const StrandSet& s, const ScalpMe
         }
     }, kStrandGrain);
     return out;
+}
+
+bool strandChannelRange(const StrandSet& s, const std::string& channel, float& lo, float& hi) {
+    const std::vector<float>* values = s.strandChannel(channel);
+    if (!values) return false;
+    float low = std::numeric_limits<float>::infinity(), high = -low;
+    for (const float v : *values) {
+        if (!std::isfinite(v)) continue;
+        low = std::min(low, v);
+        high = std::max(high, v);
+    }
+    if (low > high) return false;
+    lo = low;
+    hi = high;
+    return true;
 }
 
 void writeStrandPointColors(const StrandSet& s, const std::vector<std::array<float, 3>>& colors, float* rgba) {

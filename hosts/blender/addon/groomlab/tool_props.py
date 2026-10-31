@@ -38,6 +38,18 @@ def _strength(self, context):
     tools.push_safely(context)
 
 
+def _strand_sources(self, context, edit_text):
+    """The Source's choices: the strands' channels (Attribute), the scalp's color sets (Color Set), as
+    the colors last shown had them."""
+    from . import display
+    scalp = self.id_data if isinstance(self.id_data, bpy.types.Object) else None
+    if scalp is None:
+        return []
+    gd = display.state(scalp)
+    names = gd.strand_color_sets if self.strand_color == "colorSet" else gd.strand_channels
+    return [n for n in names if edit_text.lower() in n.lower()]
+
+
 def _display(self, context):
     if props.is_quiet():
         return
@@ -564,7 +576,7 @@ class GroomLabGroomDisplay(bpy.types.PropertyGroup):
     strand_color: EnumProperty(name=defs.get("choices/strandColor")["label"], items=STRAND_COLORS,
                                default=defs.enum_default("strandColor"), update=_display,
                                description=defs.get("choices/strandColor")["tip"])
-    strand_color_source: StringProperty(name="Source", default="clumpId", update=_display,
+    strand_color_source: StringProperty(name="Source", default="clumpId", update=_display, search=_strand_sources,
                                         description="The color set or channel the strands show")
     strand_color_min: FloatProperty(name="Min", default=0.0, update=_display)
     strand_color_max: FloatProperty(name="Max", default=1.0, update=_display)

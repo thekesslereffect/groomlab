@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <set>
 
 #include <nlohmann/json.hpp>
@@ -966,6 +967,23 @@ TEST(Display, LitLinesCarryTheWetness) {
 // per strand, else its melanin's) as a colors stream beside their frames, and none (the item's
 // one color: no memory for it) when every strand reads the same, or when the host says the
 // color is a material's.
+TEST(Display, AutoRangeSpansAStrandChannel) {
+    const Fixture& f = fixture();
+    StrandSet s = *f.view.strands;
+    ASSERT_GE(s.strandCount(), 3u);
+    std::vector<float>& values = s.addStrandChannel("probe", 2.0f);
+    values[0] = -1.5f;
+    values[1] = 7.25f;
+    values[2] = std::numeric_limits<float>::quiet_NaN();  // skipped
+    float lo = 0.0f, hi = 1.0f;
+    ASSERT_TRUE(strandChannelRange(s, "probe", lo, hi));
+    EXPECT_FLOAT_EQ(lo, -1.5f);
+    EXPECT_FLOAT_EQ(hi, 7.25f);
+    // No such channel: the range is kept.
+    EXPECT_FALSE(strandChannelRange(s, "missing", lo, hi));
+    EXPECT_FLOAT_EQ(lo, -1.5f);
+}
+
 TEST(Display, LitLinesTakeTheStrandsOwnColors) {
     const StrandsPtr plain = fixture().view.strands;
     const std::size_t count = plain->strandCount();

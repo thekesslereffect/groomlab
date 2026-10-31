@@ -781,6 +781,18 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(cmds.getAttr(self.groom + ".strandColorMode"), 5)
         groomlab.density_heatmap(self.groom, False)
         self.assertEqual(cmds.getAttr(self.groom + ".strandColorMode"), 0)
+        # Strand colors by a channel: what they can read, and Auto Range over its values.
+        sources = groomlab.strand_color_sources(self.groom)
+        self.assertIn("clumpId", sources["channels"])
+        self.assertEqual(sources["channels"], sorted(sources["channels"]))
+        self.assertIsInstance(sources["colorSets"], list)
+        lo, hi = groomlab.auto_strand_color_range(self.groom, "clumpId")
+        self.assertLessEqual(lo, hi)
+        self.assertGreater(hi, 0.0)
+        self.assertAlmostEqual(cmds.getAttr(self.groom + ".strandColorMin"), lo, places=4)
+        self.assertAlmostEqual(cmds.getAttr(self.groom + ".strandColorMax"), hi, places=4)
+        with self.assertRaises(ValueError):
+            groomlab.auto_strand_color_range(self.groom, "noSuchChannel")
 
         stats = groomlab.groom_stats(self.groom)
         self.assertEqual(stats["strands"], cmds.getAttr(self.groom + ".outStrandCount"))

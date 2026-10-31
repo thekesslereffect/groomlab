@@ -2085,6 +2085,31 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(len(ours()), count, ours())
         cmds.deleteUI(window)
 
+    def test_attribute_editor_strand_colors_source_and_auto_range(self):
+        # Under Strand Color Mode: no rows for the solid colors; for Attribute the strands' channels
+        # to pick, Min and Max, and Auto Range setting them from the channel's values.
+        from groomlab.ui import ae
+        window = cmds.window()
+        cmds.columnLayout()
+        ae.strand_colors_new(self.groom + ".strandColorSource")
+        self.assertEqual(cmds.columnLayout(ae.STRAND_COLORS, query=True, childArray=True) or [], [])
+        cmds.setAttr(self.groom + ".strandColorMode", 2)
+        cmds.setAttr(self.groom + ".strandColorMin", -5.0)
+        cmds.setAttr(self.groom + ".strandColorMax", -4.0)
+        ae.strand_colors_replace(self.groom + ".strandColorSource")
+        menus = [c for c in cmds.lsUI(type="optionMenu", long=True) or [] if ae.STRAND_COLORS in c]
+        self.assertEqual(len(menus), 1)
+        items = [cmds.menuItem(i, query=True, label=True) for i in cmds.optionMenu(menus[0], query=True, itemListLong=True)]
+        self.assertIn("clumpId", items)
+        self.assertEqual(cmds.optionMenu(menus[0], query=True, value=True), cmds.getAttr(self.groom + ".strandColorSource"))
+        buttons = [c for c in cmds.lsUI(type="button", long=True) or [] if ae.STRAND_COLORS in c
+                   and cmds.button(c, query=True, label=True) == "Auto Range"]
+        self.assertEqual(len(buttons), 1)
+        cmds.setAttr(self.groom + ".strandColorSource", "clumpId", type="string")
+        groomlab.auto_strand_color_range(self.groom)
+        self.assertGreaterEqual(cmds.getAttr(self.groom + ".strandColorMax"), 0.0)
+        cmds.deleteUI(window)
+
     def test_attribute_editor_pick_takes_the_next_selected_mesh(self):
         # Pick arms: the next mesh selected (viewport or Outliner: a selection change) becomes a
         # collider through Maya's own SelectionChanged scriptJob, and the groom is selected again.

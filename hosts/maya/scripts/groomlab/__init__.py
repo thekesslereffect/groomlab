@@ -112,7 +112,8 @@ from groomlab.files import (  # noqa: F401
     save_groom)
 
 # Review tools (density heatmap, HUD, turntable) live in their own module.
-from groomlab.review import density_heatmap, groom_stats, render_turntable, show_hud, turntable  # noqa: F401
+from groomlab.review import (  # noqa: F401
+    auto_strand_color_range, density_heatmap, groom_stats, render_turntable, show_hud, strand_color_sources, turntable)
 # Studio lighting (a backdrop, Arnold area lights, a camera and a mannequin material): groomlab.studio.
 from groomlab import studio  # noqa: F401
 from groomlab.studio import remove_studio, studio as add_studio  # noqa: F401
