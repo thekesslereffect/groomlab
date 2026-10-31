@@ -1,17 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Metadata, Viewport } from 'next';
-import { Google_Sans_Flex } from 'next/font/google';
+import localFont from 'next/font/local';
 import { Provider } from '@/components/provider';
 import { siteConfig } from '@/site.config';
 import './global.css';
 
-// Google Sans Flex (SIL Open Font License), self-hosted by next/font. Only the optical-size axis
-// beside weight: big headlines get the tighter display cut, body text the text cut.
-const sans = Google_Sans_Flex({
-  subsets: ['latin'],
+// Google Sans Flex (SIL Open Font License; app/fonts/README.md), its latin subset in the repo so the
+// build never fetches it (next/font/google broke the Vercel build on 2026-10-31). The variable
+// font: weight 1-1000 and the optical-size axis (big headlines the tighter display cut, body text
+// the text cut).
+const sans = localFont({
+  src: './fonts/GoogleSansFlex-latin.woff2',
+  weight: '1 1000',
+  style: 'normal',
+  display: 'swap',
   variable: '--font-site',
-  axes: ['opsz'],
-  // Next has no fallback metrics for this family; the system stack in global.css covers the swap.
+  // No fallback metrics for this family; the system stack in global.css covers the swap.
   adjustFontFallback: false,
 });
 
