@@ -381,6 +381,9 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                            "guides, parts, flow arrows or paint on the far side of the head")
     stretch: BoolProperty(name="Stretch", default=False, update=_push(),
                           description="On: guides get longer (or shorter) as you pull them. Off: they keep their length")
+    straighten: BoolProperty(name="Straighten", default=False, update=_push(),
+                             description="On: guides relax toward the straight line along their root direction. "
+                                         "Off: only their kinks are taken out")
     target_guides: BoolProperty(name="Guides", default=True, update=_push(), description="The brush shapes guides")
     target_parts: BoolProperty(name="Parts", default=False, update=_push(), description="The brush shapes part lines")
     target_flow: BoolProperty(name="Flow", default=False, update=_push(), description="The brush shapes flow arrows and sinks")
@@ -461,7 +464,7 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # Tubes (the Tubes section; what Place and Draw give new guides, the Shape brush's channel)
     tube_channel: EnumProperty(name=defs.get("choices/tubeChannel")["label"], items=defs.enum_items("tubeChannel"),
                                default=defs.enum_default("tubeChannel"), update=_push(),
-                               description="What the Shape brush paints on the tubes")
+                               description="What the Tube brush paints on the tubes")
     tube_shape: EnumProperty(name=defs.get("choices/tubeShape")["label"], items=_tube_shape_items, update=_tube_shape,
                              description="The tube shape: picked, it goes to the targeted guides and to the guides Place "
                                          "and Draw make. The built-ins, then the groom's library of custom shapes")

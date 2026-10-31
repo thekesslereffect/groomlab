@@ -116,6 +116,9 @@ struct BrushSettings {
     // Comb: guides stretch with the drag (longer or shorter, points respaced
     // evenly) instead of keeping their length.
     bool stretch = false;
+    // Smooth: relax guides toward the straight line along their root direction
+    // (Straighten) instead of only taking kinks out.
+    bool straighten = false;
 
     // Shape (ShapeTube): what it paints on the tubes.
     TubeChannel tubeChannel = TubeChannel::Width;
@@ -132,6 +135,11 @@ struct BrushSettings {
     // Groups hidden in the viewport: their guides are left alone.
     std::set<std::string> hiddenGroups;
 };
+
+// The mode a stroke runs: Smooth with `straighten` on runs Straighten.
+inline BrushMode strokeMode(const BrushSettings& s) {
+    return s.mode == BrushMode::Smooth && s.straighten ? BrushMode::Straighten : s.mode;
+}
 
 // A stroke's symmetry as one thing: off, a world plane (mirrorAxis, mirrorCenter) or the scalp's
 // own topology (mirrorTopology, on `scalp`: without one it is off).

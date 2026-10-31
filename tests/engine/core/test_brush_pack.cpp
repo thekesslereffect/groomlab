@@ -237,7 +237,7 @@ TEST(BrushPack, CurlDirectionAndNoiseBrushesAreGone) {
         EXPECT_THROW(s.setMode(brush), std::invalid_argument) << brush;
         EXPECT_EQ(brushEntry(brush), nullptr) << brush;
     }
-    for (const char* shaping : {"comb", "smooth", "straighten", "lift", "twist", "attract"}) {
+    for (const char* shaping : {"comb", "smooth", "lift", "twist", "attract"}) {
         EXPECT_TRUE(brushEntry(shaping)->hasSetting("strengthProfile")) << shaping;
         EXPECT_TRUE(brushEntry(shaping)->hasSetting("falloffProfile")) << shaping;
     }

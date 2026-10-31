@@ -76,14 +76,14 @@ brush_catalog.cpp and palette.py). One model, every tab:
    - No title or hint line: only the settings. The tile's tooltip has the name, the full hint and
      (a brush's) the gestures.
    - **Brush**: how the stroke feels. Radius, Strength (±), Falloff, Smooth; chips Pressure,
-     Off scalp, Stretch (Comb), Falloff curve, Root to tip (a curve chip that's on shows its ramp under the row).
+     Keep off scalp, Stretch (Comb), Straighten (Smooth), Falloff curve, Root to tip (a curve chip that's on shows its ramp under the row).
    - **The tool's own block**, named after what it sets: Paint (Mode, Value + Fill, Stamp),
      New guides + Tube (Place / Draw: the profile picked, a small preview, Width / Flatness / Twist),
      Paints + Profile + Selected guides (Shape: the shape picker with Apply, the
-     cross-section editor (TubeShapeEditor, ≤200 px square), Edit as custom, Mirror, Smooth, and
+     cross-section editor (TubeShapeEditor, ≤200 px square), Mirror and Smooth (a library shape's; Duplicate edits a built-in), and
      the library's new / rename / duplicate / delete glyphs in the block header),
      Selection + Selected guides (Select), Erases (Erase), Keys (Length Keys), Flow, Parts.
-   - **Applies to**: where the stroke lands. Acts on, Mirror (symmetry). The current group / map
+   - **Applies to**: where the stroke lands. Guides / Parts / Flow, Mirror (symmetry). The current group / map
      / layer is not repeated here: it is the picked row of the list above.
 
 Row styles: block titles are small semibold dim text over a faint rule; numbers are fill fields

@@ -634,7 +634,7 @@ void bindHierarchy(py::module_& m) {
         .value("Slide", BrushMode::Slide);
     m.def("brush_mode_from_string", &brushModeFromString, py::arg("name"), "Parses a mode name (comb, smooth, lift, ...).");
     m.def("brush_mode_name", &brushModeName, py::arg("mode"));
-    py::enum_<TubeChannel>(m, "TubeChannel", "What the Shape brush paints on tube sections.")
+    py::enum_<TubeChannel>(m, "TubeChannel", "What the Tube brush paints on tube sections.")
         .value("Width", TubeChannel::Width)
         .value("Flatness", TubeChannel::Flatness)
         .value("Twist", TubeChannel::Twist);
@@ -668,7 +668,8 @@ void bindHierarchy(py::module_& m) {
         .def_readwrite("collide", &PyBrushSettings::collide)
         .def_readwrite("collide_offset", &PyBrushSettings::collideOffset)
         .def_readwrite("stretch", &PyBrushSettings::stretch)
-        .def_readwrite("tube_channel", &PyBrushSettings::tubeChannel, "Shape brush: width, flatness or twist.")
+        .def_readwrite("straighten", &PyBrushSettings::straighten, "Smooth: relax toward the straight line along the root direction.")
+        .def_readwrite("tube_channel", &PyBrushSettings::tubeChannel, "Tube brush: width, flatness or twist.")
         .def_readwrite("freeze", &PyBrushSettings::freeze)
         .def_readwrite("hidden_groups", &PyBrushSettings::hiddenGroups);
 

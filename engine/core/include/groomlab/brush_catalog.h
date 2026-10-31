@@ -44,6 +44,10 @@ struct BrushEntry {
     bool signedStrength;    // the strength runs -1..1 (negative: the other way)
     std::string hint;       // one line: what the tool does, shown under its name
     std::vector<std::string> settings;  // the settings its card shows (BrushSettingSpec ids)
+    // It works on a corrective (the Correctives tab shows it): the shaping brushes, whose strokes
+    // record as point offsets, and Select. Not the tools that add or remove things, paint
+    // attributes or tubes (BrushTool refuses those while a corrective is picked).
+    bool corrective = false;
     bool hasSetting(const std::string& setting) const;
 };
 

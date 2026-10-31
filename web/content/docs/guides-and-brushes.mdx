@@ -113,7 +113,7 @@ keep their children's roots as before, and plain round tubes keep theirs.
 
 **Setting up.** Fill Tubes on the Interpolate node is all it takes (the **Tube locks (anime)**
 preset, under Hair in the Presets menu, has it on, with soft clumps that follow the tubes): place
-guides, then shape their tubes with the Shape brush. A Clump after it follows the tubes by itself.
+guides, then shape their tubes with the Tube brush. A Clump after it follows the tubes by itself.
 
 **Fill Tubes.** Turn on Interpolate's `fillTubes` and every strand rooted inside a guide's tube's
 **footprint** (the root section laid flat on the scalp round the guide's root, so it covers the
@@ -155,7 +155,7 @@ round a guide with a shaped tube that means its footprint (the root section laid
 its root, so a wide blade's or a ribbon's footprint fills evenly at the scatter's density, upright
 or lying low. Guides without a shaped tube keep the disc of guideRadius.
 
-**Shaping tubes in Maya.** Pick the **Shape** brush (**Groom Tools > Tools > Shape**). While it is
+**Shaping tubes in Maya.** Pick the **Tube** brush (**Groom Tools > Tools > Tube**). While it is
 on, the tubes of every guide it can shape (shown and not frozen) draw as wires: the outline of each
 section at every guide point, where the brush paints, and lines along the tube through the shape's
 corners (a blade's points and crests, a ribbon's corners, a teardrop's point), so the shape reads.
@@ -185,12 +185,12 @@ The selected guides' tubes draw brighter.
     the **Current channel** (the one the brush paints) or **All channels** (its arrow's menu).
   - **Tube** (the Place and Draw cards): the shape new guides get, with a small preview, and its
     **Width**, **Flatness** and **Twist** (used where no guides are near to blend from). Profiles
-    are edited with the Shape brush.
+    are edited with the Tube brush.
 
   Each change is one undo step. **Fill Tubes** and **Tube Blend** are the Interpolate node's
   settings (`fillTubes`, `tubeBlend`), in the Graph Editor.
 - **The shape editor** (in the Profile block): a square showing the chosen shape's outline, the guide
-  at the cross, its height (off the scalp) up. A built-in shows read-only: **Edit as custom** copies
+  at the cross, its height (off the scalp) up. A built-in shows read-only: **Duplicate** (in the block's header) copies
   it into the library as a new shape (the targets take it). A library shape's points drag (the
   groom shows the change live while you drag; letting go saves it, one undo step, every guide using
   it following); **click the outline** between two points to add one; **right-click** a point to
@@ -342,10 +342,10 @@ and each drag is one undo step. The brushes are the same, in the same order, in 
 | | **Flow** | Draw direction arrows and whorls for short hair without guides (see below). |
 | Shape | **Comb** | The main shaping brush: drags guides along the stroke with roots pinned. With **Stretch** on, combing also lengthens or shortens them. |
 | | **Slide** | Moves roots along the scalp; the guides keep their shape. |
-| | **Smooth**, **Straighten** | Remove kinks; relax guides toward a straight line. |
-| | **Lift**, **Twist** | Raise guides off the scalp; rotate them around their root. |
+| | **Smooth** | Removes kinks (**Straighten**: relaxes guides toward a straight line instead). |
+| | **Lift**, **Swing** | Raise guides off the scalp; turn them around their root. |
 | | **Attract** | Pulls tips together (negative strength pushes them apart). |
-| | **Shape** | Paints guides' [tubes](#tube-guides) near the brush: **Width**, **Flatness** or **Twist** (a negative strength: the opposite); its card's **Profile** and **Selected guides** set the selected guides' tube shape, width, flatness and twist. |
+| | **Tube** | Paints guides' [tubes](#tube-guides) near the brush: **Width**, **Flatness** or **Twist** (a negative strength: the opposite); its card's **Profile** and **Selected guides** set the selected guides' tube shape, width, flatness and twist. |
 | Trim | **Cut**, **Length**, **Erase** | Cut guides where the brush touches; lengthen or shorten them uniformly; delete guides, part lines or flow arrows (not the scattered hair: see below). |
 | | **Length Keys** | Scale guide lengths from keys you place on the scalp, blended smoothly between them (see [Length Keys](#length-keys)). |
 | Paint (in the Paint tab) | **Paint** | Paints the map picked in the Paint tab, including the maps that drive settings such as density and width (see below, and [Painting maps](/docs/painting-maps)). |
@@ -396,13 +396,13 @@ to x1, so you can come back, drag a key and apply again without scaling twice.
 
 - **Ctrl** does the brush's opposite: Length shortens, Lift lays guides down, Twist turns the
   other way, Attract pushes apart, Shape shrinks, Cut grows. Painting, it paints toward 0 (Ctrl+Paint on the density map removes hair,
-  Ctrl+Freeze unfreezes). Comb, Slide, Smooth, Straighten and Erase have no opposite.
+  Ctrl+Freeze unfreezes). Comb, Slide, Smooth and Erase have no opposite.
 - **Shift+drag** paints the selection with the brush ring, without leaving the brush: every
   guide the ring passes over is selected as you go, and when you let go the guides not selected
   freeze, so the brush then works on the selection. **Shift+click** adds the guides inside the
   ring; on none it deselects and unfreezes all (see [Freeze and solo](#freeze-and-solo)). For a
   lasso, use the **Select** tool.
-- Painting maps or the freeze mask, **Shift+drag** smooths; with the **Shape** brush it smooths
+- Painting maps or the freeze mask, **Shift+drag** smooths; with the **Tube** brush it smooths
   the tube channel it paints. To smooth guides, use the **Smooth** brush.
 - **Alt+Shift+X** turns symmetry on or off, after **GroomLab > Install GroomLab Hotkeys**.
 - **B** + drag sets the radius, **M** + drag the strength, after **GroomLab > Install GroomLab
@@ -484,11 +484,11 @@ With no tool picked, the card says how to start.
 | **Falloff** | Brush | How the effect fades toward the brush edge: 0 hard, 1 soft from the center out. |
 | **Smooth** | Brush | Painting: how much Shift+drag smooths per stamp (past 1: several passes). |
 | **Pressure** | Brush | A tablet's pen pressure scales the strength. |
-| **Off scalp** | Brush | Guides never go below the scalp; points pushed under it slide along it. |
+| **Keep off scalp** | Brush | Guides never go below the scalp; points pushed under it slide along it. |
 | **Stretch** | Brush (Comb) | Combing lengthens or shortens guides as you pull, instead of keeping their length. |
 | **Falloff curve** | Brush | The falloff as a curve, center (left) to edge (right), shown under the chips while it is on. Right-click it for presets. |
 | **Root to tip** | Brush | How much of the strength each part of a guide receives, root (left) to tip (right); for example, style the ends and leave the roots. |
-| **Acts on** | Applies to | What a shaping brush moves: guides, part lines, flow arrows. |
+| **Guides / Parts / Flow** | Applies to | What a shaping brush moves: guides, part lines, flow arrows. |
 | **Mirror** | Applies to | Symmetry: mirrors every stroke across world **X**, or with **Topology** across the scalp's own left and right (for a head that is rotated, animated or not quite symmetric). **Alt+Shift+X** toggles it (in Maya, with the GroomLab hotkey set). |
 
 A stroke never reaches what is on the far side of the head from the camera (guides, parts, flow

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "size": 20.0,
-  "about": {"title": "Tube locks (anime)", "description": "Stylized locks shaped as a whole (anime, cartoon): strands fill each guide's tube and stay inside it to the tip, soft clumps follow the tubes, a little noise, tapered tips. Hair grows only on the guides' tubes (Scatter's guide radius). Place guides, then shape their tubes with the Shape brush (width, flatness, twist) and pick a shape in its Tubes panel.", "category": "Hair"},
+  "about": {"title": "Tube locks (anime)", "description": "Stylized locks shaped as a whole (anime, cartoon): strands fill each guide's tube and stay inside it to the tip, soft clumps follow the tubes, a little noise, tapered tips. Hair grows only on the guides' tubes (Scatter's guide radius). Place guides, then shape their tubes with the Tube brush (width, flatness, twist) and pick a shape in its Tubes panel.", "category": "Hair"},
   "exposed": [
     {"node": "clump", "param": "size", "name": "clumpSize"},
     {"node": "clump", "param": "strength", "name": "clumpStrength"},

@@ -69,6 +69,9 @@ class ToolGrid : public QWidget {
 public:
     explicit ToolGrid(QWidget* parent = nullptr);
     void setButtons(std::vector<QAbstractButton*> buttons, int maxColumns);
+    // Show the buttons `keep` is true for, placed in order without gaps; hide the rest.
+    void setShown(const std::function<bool(QAbstractButton*)>& keep);
+    const std::vector<QAbstractButton*>& shown() const { return buttons_; }
     void setMaxColumns(int maxColumns);
     int columnsFor(int width) const;
     int spacing() const { return spacing_; }
@@ -84,7 +87,8 @@ protected:
 
 private:
     void place();
-    std::vector<QAbstractButton*> buttons_;
+    std::vector<QAbstractButton*> all_;
+    std::vector<QAbstractButton*> buttons_;  // the ones shown
     int maxColumns_ = 64;
     int spacing_ = 4;
 };
@@ -192,6 +196,7 @@ signals:
     void guidesVisibilityToggled(bool visible);  // the guides' eye: every guide group (Properties > Guides)
     void graphRequested();
     void tabChanged(const QString& id);
+    void toolStopRequested();  // the Correctives tab hid the tool's tile: no tool (the camera)
 
 private:
     QToolButton* makeTile(const std::string& id, const QString& label, const QString& tip);
@@ -224,6 +229,7 @@ private:
     std::map<std::string, std::vector<QToolButton*>> tiles_;
     std::vector<QToolButton*> allTiles_;
     std::vector<ToolGrid*> grids_;
+    std::vector<QWidget*> gridLabels_;  // each grid's category name (hidden with an empty grid)
     // Scrolls.
     QScrollArea* scroll_ = nullptr;
     QFrame* empty_ = nullptr;

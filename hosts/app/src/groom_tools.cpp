@@ -169,9 +169,22 @@ ToolGrid::ToolGrid(QWidget* parent) : QWidget(parent) {
 }
 
 void ToolGrid::setButtons(std::vector<QAbstractButton*> buttons, int maxColumns) {
-    buttons_ = std::move(buttons);
-    for (QAbstractButton* b : buttons_) b->setParent(this);
+    all_ = std::move(buttons);
+    buttons_ = all_;
+    for (QAbstractButton* b : all_) b->setParent(this);
     maxColumns_ = std::max(1, maxColumns);
+    place();
+    updateGeometry();
+}
+
+void ToolGrid::setShown(const std::function<bool(QAbstractButton*)>& keep) {
+    std::vector<QAbstractButton*> shown;
+    for (QAbstractButton* b : all_) {
+        if (keep(b)) shown.push_back(b);
+    }
+    if (shown == buttons_) return;
+    buttons_ = std::move(shown);
+    for (QAbstractButton* b : all_) b->setVisible(std::find(buttons_.begin(), buttons_.end(), b) != buttons_.end());
     place();
     updateGeometry();
 }
@@ -360,7 +373,9 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     tools->setSpacing(3);
     for (BrushCategory category : brushCategories()) {
         if (category == BrushCategory::Paint) continue;  // beside the maps they paint
-        tools->addWidget(label(QString::fromLatin1(brushCategoryName(category)), "category", toolsGrid_));
+        QLabel* name = label(QString::fromLatin1(brushCategoryName(category)), "category", toolsGrid_);
+        tools->addWidget(name);
+        gridLabels_.push_back(name);
         tools->addWidget(tileGrid(category, toolsGrid_));
     }
     top->addWidget(toolsGrid_);
@@ -432,11 +447,16 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
 
     connect(tabs_, &QTabBar::currentChanged, this, [this](int index) {
         refreshVisibility();
-        if (index >= 0 && index < static_cast<int>(tabIds_.size())) emit tabChanged(qs(tabIds_[static_cast<std::size_t>(index)]));
+        if (index < 0 || index >= static_cast<int>(tabIds_.size())) return;
+        const std::string tab = tabIds_[static_cast<std::size_t>(index)];
+        emit tabChanged(qs(tab));
+        // Correctives: a tool whose tile is gone here (it can't record into a corrective) stops.
+        const groomlab::BrushEntry* e = brushEntry(tool_);
+        if (tab == "correctives" && !tool_.empty() && !(e && e->corrective)) emit toolStopRequested();
     });
     // Isolate: the picked group (and its child groups) at full color, the others dimmed (the eye
     // in the Guide groups header).
-    isolate_ = makeGlyph(QStringLiteral("eye"), tr("Isolate: show the picked group (and its child groups) at full color and dim the others"),
+    isolate_ = makeGlyph(QStringLiteral("glyph_solo"), tr("Isolate: show the picked group (and its child groups) at full color and dim the others"),
                          this, true);
     isolate_->setObjectName(QStringLiteral("isolate"));
     connect(isolate_, &QToolButton::toggled, this, [this](bool) {
@@ -790,6 +810,15 @@ void GroomTools::refreshVisibility() {
     tabs_->setVisible(open);
     // The grid: the categories' on Tools and Correctives, the Paint tile on Paint, none on Photos.
     toolsGrid_->setVisible(open && (tab == "tools" || tab == "correctives"));
+    // Correctives: only the tools that work on a corrective (a category with none of them goes).
+    const bool layers = tab == "correctives";
+    for (std::size_t i = 0; i < grids_.size(); ++i) {
+        grids_[i]->setShown([layers](QAbstractButton* b) {
+            const groomlab::BrushEntry* e = brushEntry(b->property("tool").toString().toStdString());
+            return !layers || (e && e->corrective);
+        });
+        if (i < gridLabels_.size()) gridLabels_[i]->setVisible(!grids_[i]->shown().empty());
+    }
     paintGrid_->setVisible(open && tab == "paint");
     for (auto& [id, holder] : lists_) holder->setVisible(id == tab);
     eye_->setEnabled(open);

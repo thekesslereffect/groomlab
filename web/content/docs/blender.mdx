@@ -84,21 +84,21 @@ build their menus and panels from one set of definitions):
 - **Your first groom** walks you through placing guides and giving the groom a look.
 - **Tools**, **Paint**, **Correctives** and **Photos** tabs. The tools come by category as
   labeled tiles with Maya's icons, four to a row (on the Paint tab, one full-width **Paint** button):
-  **Create** (Place, Draw, Part, Flow), **Shape** (Comb, Slide, Smooth, Straighten, Lift, Twist,
+  **Create** (Place, Draw, Part, Flow), **Shape** (Comb, Slide, Smooth, Lift, Swing,
   Attract, Shape), **Trim** (Cut, Length, Length Keys, Erase), **Paint**
   (Paint, on the Paint tab) and **Guides** (Select, Freeze, and Unfreeze All beside them). Shift+drag with a
   guide brush paints guides into the selection (the rest freeze); Shift+click adds the guides in
   the brush ring, and where it holds none deselects and unfreezes them all. Ctrl does the brush's
   opposite; painting maps, Shift+drag smooths.
 - Right under the tiles, the tab's list: **Guide groups** (Tools tab), the maps (Paint tab: the picked
-  map's **Show on**, channel and what reads it under the list) or the layers (Correctives tab).
+  map's **Show on**, channel and what reads it under the list) or the correctives (Correctives tab, which shows only the tools that work on a corrective).
 - The picked tool's **card**, under the list: only its settings (a tile's tooltip has the tool's
   whole hint and the gestures), in blocks in Maya's order, by Maya's names. **Brush**:
   **Radius** (pixels), **Strength** (±: tools that work both ways go negative), **Falloff**,
-  **Smooth** (painting), the toggles **Pressure**, **Off scalp** and **Stretch** (Comb), **Falloff curve** and **Root
+  **Smooth** (painting), the toggles **Pressure**, **Keep off scalp**, **Stretch** (Comb) and **Straighten** (Smooth), **Falloff curve** and **Root
   to tip**. Then the tool's own block: Paint's **Mode**, value or color and **Fill** and its stamp;
   Place and Draw's **New guides** (Length, Segments, Spacing, Match nearby, Solo new) and **Tube**;
-  what the Shape brush **Paints** on the tubes (Width, Flatness
+  what the Tube brush **Paints** on the tubes (Width, Flatness
   or Twist) with **Profile** and **Selected guides**; the Select tool's **Selection** (lasso or
   box, soft radius, All / None); what Erase erases; Length Keys' **Keys**; Flow's arrows or sinks
   (Whorl, Gather, Part out), how many the groom keeps and **Clear All** (also **GroomLab >
@@ -145,11 +145,11 @@ shape, **Width**, **Flatness** and **Twist**):
 - **Profile**: Round, Ribbon, Teardrop, Blade, then the groom's library of custom shapes (**Mixed**
   while the targets differ). Picking one gives it to the targets; **Apply** gives them the shape
   picked again. The header's icons add, duplicate, rename and delete library shapes (deleted: its
-  guides go round); **Edit as Custom** copies a built-in into the library. (The outline editor is
+  guides go round); **Duplicate** on a built-in copies it into the library to edit. (The outline editor is
   in Maya and the app.)
 - **Selected guides**: the targets' **Width**, **Flatness** and **Twist**, applied as one undo step
   when you stop dragging (Width scales the tube, its taper kept). **Smooth** in its header evens
-  out what the brush painted along each guide: the channel the Shape brush paints, or all three.
+  out what the brush painted along each guide: the channel the Tube brush paints, or all three.
 - **Fill Tubes** and **Tube Blend** (strands rooted in a guide's tube ride it to the tip) are the
   Interpolate node's settings, in the Graph Editor.
 

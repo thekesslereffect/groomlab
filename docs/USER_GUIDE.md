@@ -102,15 +102,17 @@ The tools are the same in Maya, the standalone app and Blender, in the same orde
 | Section | Tools |
 | --- | --- |
 | Create | Place, Draw, Part, Flow |
-| Shape | Comb, Slide, Smooth, Straighten, Lift, Twist, Attract, Shape |
+| Shape | Comb, Slide, Smooth, Lift, Swing, Attract, Tube |
 | Trim | Cut, Length, Length Keys, Erase |
 | Paint | Paint (on the Paint tab) |
 | Guides | Select, Freeze (and **Unfreeze All** beside it) |
 
 - **Comb** drags guides along the stroke (**Stretch** lets them lengthen or shorten). **Slide**
-  moves roots and keeps the shape. **Smooth**, **Straighten**, **Lift**, **Twist** and
-  **Attract** refine; a negative strength reverses the ones that work both ways. **Shape** paints
-  guides' tubes near the brush: their width, their flatness or their twist (negative: the opposite).
+  moves roots and keeps the shape. **Smooth** takes kinks out (**Straighten** relaxes guides toward
+  the straight line along their root direction instead). **Lift** stands guides up, **Swing** turns
+  them around their roots and **Attract** pulls tips together; a negative strength reverses the ones
+  that work both ways. **Tube** paints guides' tubes near the brush: their width, their flatness or
+  their twist (negative: the opposite).
 - **Cut** trims where the brush touches, **Length** grows or shortens evenly, and
   **Erase** removes guides (with their children), parts or flow arrows.
 - **Paint** paints the map picked in the Paint tab (see Paint maps in section 3). To paint how
@@ -119,9 +121,11 @@ The tools are the same in Maya, the standalone app and Blender, in the same orde
 
 ### Brush settings
 
-They sit in the picked tool's card, under the tab's list (guide groups, maps, layers), in the same
-blocks for every tool: **Brush** (how the stroke feels), the tool's own block (New guides, Paints,
-Erases...), then **Applies to** (Acts on, Mirror). A tool tile's tooltip has its whole hint and the
+They sit in the picked tool's card, under the tab's list (guide groups, maps, correctives), in the
+same blocks for every tool: **Brush** (how the stroke feels), the tool's own block (New guides,
+Paints, Erases...), then **Applies to** (what a shaping brush moves: Guides, Parts, Flow; Mirror).
+The box under each list names the picked item (a group, map, corrective or photo): its glyphs act
+on that item. A tool tile's tooltip has its whole hint and the
 gestures. Every number is a field with its name inside: drag it to scrub (Shift fine, Ctrl
 coarse), or click it and type a value or a sum (`0.5*2`); Enter keeps it, Esc cancels, and a typed
 value may go past the field's range.
@@ -135,13 +139,13 @@ value may go past the field's range.
 - **Root to tip:** turn it on and draw how much of the strength each part of a guide gets, root on
   the left, tip on the right. Use it to style the ends without disturbing the roots, or the
   reverse. Right-click the curve for presets.
-- **Off scalp:** guides never dip into the skin. **Pressure:** a tablet's pressure scales the
+- **Keep off scalp:** guides never dip into the skin. **Pressure:** a tablet's pressure scales the
   strength. What the head hides from the camera never gets a stroke.
 - **How the strands draw while you sculpt** is the groom's setting, in its Attribute Editor's
   **Sculpting** section.
 - **Ctrl** does the brush's opposite (Length shortens, Lift lays down; painting, toward 0).
   **Shift** selects guides with the guide brushes (below); painting maps or Freeze, and with the
-  Shape brush, **Shift+drag** smooths. To smooth guides, use the **Smooth** brush.
+  Tube brush, **Shift+drag** smooths. To smooth guides, use the **Smooth** brush.
 
 ### Solo and freeze: work on one guide at a time
 
@@ -212,7 +216,9 @@ from these names.
   guides keep their hooks and combs on top of the new shapes. **Clear Edits** (the node's panel or
   menu) drops them. In the app: the Correctives panel's **Sculpt into** lists the Sculpt nodes.
 - **Correctives** (Correctives tab) are sculpt layers over the base groom, like Yeti's: pick a
-  corrective and strokes are recorded on it, leaving the guides alone. Each weight is keyable;
+  corrective and strokes are recorded on it, leaving the guides alone. The tab shows only the
+  tools that record into one (Comb, Slide, Smooth, Lift, Swing, Attract, Cut, Length, Select);
+  place, draw, erase, paint and the tubes on the Tools tab, with the base groom picked. Each weight is keyable;
   **Fix Frame** makes a shot fix that blends in and out around the current frame. See
   https://getgroomlab.com/docs/motion-and-simulation.
 - **Groom to photos** (Photos tab): **Import Photo...** makes each photo a camera aimed at the

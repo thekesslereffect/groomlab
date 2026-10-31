@@ -235,7 +235,7 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
     const std::vector<float> rootToTip = profileAlong(pts, s);
     const bool profiled = !rootToTip.empty();
 
-    switch (s.mode) {
+    switch (strokeMode(s)) {
         case BrushMode::Comb: {
             if (drag.length() == 0.0f) return e;
             std::vector<Vec3f> moved;  // the points, copied once one moves
@@ -1145,7 +1145,7 @@ TubeChannel tubeChannelFromString(const std::string& name) {
     if (name == "width") return TubeChannel::Width;
     if (name == "flatness") return TubeChannel::Flatness;
     if (name == "twist") return TubeChannel::Twist;
-    throw std::invalid_argument("the Shape brush paints width, flatness or twist, not '" + name + "'");
+    throw std::invalid_argument("the Tube brush paints width, flatness or twist, not '" + name + "'");
 }
 
 std::vector<Vec3f> keepOffScalp(const std::vector<Vec3f>& points, const ScalpMesh& scalp, float offset) {
@@ -1401,7 +1401,7 @@ std::size_t flowStamp(FlowSet& flow, const ScalpMesh& scalp, const BrushSettings
         sinkChanged(i);
     };
 
-    switch (s.mode) {
+    switch (strokeMode(s)) {
         case BrushMode::Comb: {
             if (drag.length() == 0.0f) return 0;
             const Vec3f dragDir = drag.normalized();
@@ -1691,7 +1691,7 @@ std::size_t partStamp(PartSet& set, const ScalpMesh& scalp, const BrushSettings&
         };
         std::vector<Vec3f> moved(n);
         std::vector<bool> move(n, false);
-        switch (s.mode) {
+        switch (strokeMode(s)) {
             case BrushMode::Comb: {
                 if (drag.length() == 0.0f) return 0;
                 for (std::size_t i = 0; i < n; ++i) {

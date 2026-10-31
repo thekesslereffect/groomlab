@@ -965,10 +965,12 @@ class ToolsTest(HelperTestCase):
     def test_tool_catalog_and_settings_in_host_units(self):
         cat = self.h.call("tool_catalog")
         ids = [t["id"] for t in cat["tools"]]
-        for tool in ("place", "draw", "part", "flow", "comb", "slide", "smooth", "straighten", "lift", "twist",
+        for tool in ("place", "draw", "part", "flow", "comb", "slide", "smooth", "lift", "twist",
                      "attract", "shape", "cut", "length", "erase", "paint", "select", "freeze"):
             self.assertIn(tool, ids)
-        self.assertFalse({"curl", "direction", "noise"} & set(ids))  # removed brushes
+        self.assertFalse({"curl", "direction", "noise", "straighten"} & set(ids))  # removed (Straighten: Smooth's chip)
+        corrective = set(t["id"] for t in cat["tools"] if t.get("corrective"))
+        self.assertEqual(corrective, {"comb", "slide", "smooth", "lift", "twist", "attract", "cut", "length", "select"})
         self.assertIn("falloff", [s["id"] for s in cat["settings"]])
         r = self.call("tool_set", tool="comb", settings={"radius": 42, "falloff": 0.25, "symmetry": "y", "symmetryCenter": 0.01,
                                                         "length": 0.03, "frontFacingOnly": False, "targets": ["guides", "parts"]})

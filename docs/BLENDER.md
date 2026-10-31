@@ -285,7 +285,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `collide`, `frontFacingOnly` (alias `maskByScalp`), `stretch` (Comb) | |
 | `length`, `segments`, `tubeRadius`, `spacing` (host units), `matchNeighbors` | Place and Draw's new guides |
 | `tube` {`shape` (round, ribbon, teardrop, blade or a library shape), `width` (host units, a number or a list root to tip), `aspect`, `twist` (radians)} | Place and Draw's new guides' tube (Maya's `placeTube`; `tool_get` answers it whole) |
-| `tubeChannel` (width, flatness, twist) | what the Shape brush paints on the tubes |
+| `tubeChannel` (width, flatness, twist) | what the Tube brush paints on the tubes |
 | `targets` ("guides,parts,flow" or a list), `eraseGuides`, `eraseParts`, `eraseFlow` | what shaping brushes and Erase act on |
 | `partName`, `flowSink` ("", whorl, whorlcw, converge, part) | Part and Flow |
 | `attribute`, `value`, `pointwise`, `paintKind` (guides, vertices, texture), `paintTexture`, `paintResolution`, `paintColor` [r,g,b(,a)], `paintChannels` ("rgba"...), `smoothStrength` | Paint (and Smooth on a map) |
@@ -294,7 +294,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | Command | Arguments | Result |
 |---|---|---|
 | `tool_catalog` | (no session) | `{"tools": [{id, label, category, order, icon, defaultStrength, signed, hint, settings}], "categories", "settings": [{id, label, hint}], "paintable": [{id, label, type, param, hint}]}` (brush_catalog.h: every host's palette; paintable: what New Map > For offers first, stroke.h paintableSettings) |
-| `tool_set` | `tool` (a catalog id: place, draw, part, flow, comb, slide, smooth, straighten, lift, twist, attract, shape, cut, length, erase, paint, select, freeze; or clump), `settings` {...} | `tool_get`'s answer |
+| `tool_set` | `tool` (a catalog id: place, draw, part, flow, comb, slide, smooth, lift, twist, attract, shape, cut, length, erase, paint, select, freeze; or clump; `straighten` as a script mode), `settings` {...} | `tool_get`'s answer |
 | `tool_get` | | `{"tool", "mode", "settings" (all, host units), "shows" (the catalog's settings for the card), "ringColor", "pathColor", "hoverColor"}` |
 | `stroke_begin` | `view`, `x`, `y`, `pressure` (1), `ctrl`, `shift`, `overlay` (true) | `{"stroking", "mode", "ring", "overlay", "view", "warnings"}` (BrushTool::press: Ctrl the opposite action, Shift a click picks the level or a drag smooths) |
 | `stroke_drag` | `points` [[x, y] or [x, y, pressure], ...] (or `x`, `y`), `pressure`, `view`? | `{"stroking", "changed", "ring", "overlay", "warnings"}` |

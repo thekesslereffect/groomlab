@@ -548,6 +548,7 @@ void applySettings(ToolState& t, const json& settings) {
             else if (key == "collide") s.brush.collide = settingBool(v, k);
             else if (key == "frontFacingOnly" || key == "maskByScalp") s.maskByScalp = settingBool(v, k);
             else if (key == "stretch") s.brush.stretch = settingBool(v, k);
+            else if (key == "straighten") s.brush.straighten = settingBool(v, k);
             else if (key == "pressure") s.pressure = settingBool(v, k);
             else if (key == "partName") s.partName = settingString(v, k).empty() ? std::string("part") : settingString(v, k);
             else if (key == "flowSink") {
@@ -641,6 +642,7 @@ json settingsJson(const ToolState& t) {
     j["collide"] = s.brush.collide;
     j["frontFacingOnly"] = s.maskByScalp;
     j["stretch"] = s.brush.stretch;
+    j["straighten"] = s.brush.straighten;
     j["pressure"] = s.pressure;
     j["partName"] = s.partName;
     j["flowSink"] = s.flowSink;
@@ -3151,7 +3153,8 @@ json toolCatalogJson() {
                          {"defaultStrength", e.defaultStrength},
                          {"signed", e.signedStrength},
                          {"hint", e.hint},
-                         {"settings", e.settings}});
+                         {"settings", e.settings},
+                         {"corrective", e.corrective}});
     }
     json categories = json::array();
     for (const BrushCategory c : brushCategories()) categories.push_back(brushCategoryName(c));

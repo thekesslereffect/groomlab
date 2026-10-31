@@ -175,7 +175,8 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
                paint_kind="guides", paint_texture="", paint_resolution=1024, hardness=0.0, smooth_strength=1.0,
                segments=12, tube_radius=0.1, selected_only=False, symmetry=None, symmetry_center=0.0,
                attribute=None, value=1.0, match_neighbors=True, spacing=0.1, collide=True, pressure=True,
-               part_name="part", erase_guides=True, erase_parts=True, erase_flow=True, stretch=False, flow_sink="",
+               part_name="part", erase_guides=True, erase_parts=True, erase_flow=True, stretch=False, straighten=False,
+               flow_sink="",
                targets="guides", paint_color=None, paint_channels="rgba", mask_by_scalp=True, strength_profile=None,
                falloff_profile=None, solo_new_guides=False, tube_channel="width", tube=None, activate=True,
                paint_mode="replace", alpha="", alpha_rotation="fixed", alpha_angle=0.0, alpha_spacing=0.25,
@@ -184,6 +185,8 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
 
     Select the groom first; then drag over it in the viewport. Each drag is one undo step.
     Options as in brush_stroke, plus:
+    - smooth with `straighten`: relaxes guides toward the straight line along their root
+      direction (the straighten mode) instead of only taking kinks out.
     - place: click for one guide; drag to place many, no closer than `spacing`
       (scene units) to any root of the group.
     - draw: press on the scalp and draw the guide's shape.
@@ -214,7 +217,7 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
       stroke goes plus it, "random" a random angle per stamp. Stamps fall `alpha_spacing` x the
       brush's diameter apart; `alpha_invert` paints where the image is black. Guide maps and
       Shift+drag smoothing take no alpha.
-    - `tube_channel` (shape): what the Shape brush paints on the tubes near it: "width",
+    - `tube_channel` (shape): what the Tube brush paints on the tubes near it: "width",
       "flatness" or "twist" (a negative strength does the opposite).
     - `tube` (place, draw): the new guides' tube, as in brush_stroke (the Groom Tools' Tubes panel
       sets it to its shape and Width, Flatness and Twist); placement_tube() reads it back.
@@ -222,7 +225,7 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
       guide is frozen, so the brushes after work on them alone (the Groom Tools turn it on).
     - Ctrl is the opposite: Length shortens, Lift lays down, Twist and Curl turn back, Attract
       pushes apart, Direction turns away, Noise smooths, Shape shrinks, rounds or untwists, Cut
-      grows; painting, toward 0 (Comb, Slide, Smooth, Straighten and Erase have none).
+      grows; painting, toward 0 (Comb, Slide, Smooth and Erase have none).
     - Shift with a guide brush selects guides: a drag paints them into the selection with the
       ring, a click adds the guides in the ring; every guide not selected freezes (one undo step).
       A Shift+click where no guide is deselects and unfreezes every guide. Painting (maps,
@@ -252,7 +255,8 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
                           selectedOnly=selected_only, symmetry=symmetry or "none", symmetryCenter=symmetry_center,
                           value=value, matchNeighbors=match_neighbors, spacing=spacing, collide=collide,
                           pressure=pressure, partName=part_name, eraseGuides=erase_guides, eraseParts=erase_parts,
-                          eraseFlow=erase_flow, stretch=stretch, flowSink=flow_sink or "", targets=targets,
+                          eraseFlow=erase_flow, stretch=stretch, straighten=straighten, flowSink=flow_sink or "",
+                          targets=targets,
                           maskByScalp=mask_by_scalp, **kwargs)
     if activate:
         cmds.setToolTo(BRUSH_CONTEXT)

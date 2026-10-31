@@ -35,7 +35,7 @@ SHORTCUTS = (
     ("B + drag", "The brush radius"),
     ("M + drag", "The brush strength"),
     ("Ctrl (stroke)", "The opposite: Length shortens, Lift lays down, Shape shrinks; painting, toward 0 (unfreeze, erase)"),
-    ("Shift (painting, Shape)", "Painting maps or guide attributes, or the Shape brush: smooth instead"),
+    ("Shift (painting, Tube)", "Painting maps or guide attributes, or the Tube brush: smooth instead"),
     ("S", "Select guides (Shift: toggle, Ctrl: deselect)"),
     ("Shift + drag", "A guide brush: paint guides into the selection, the rest frozen (Shift + click: add the guides in the ring; on none: deselect and unfreeze all)"),
     ("Page Up / Page Down", "The brush level (parents / children)"),
@@ -1518,11 +1518,12 @@ class GROOMLAB_OT_tube_shape_new(TubeOperator):
     bl_label = "New Shape"
 
     duplicate: BoolProperty(name="Duplicate", default=False, options={"SKIP_SAVE"},
-                            description="A copy of the shape picked in the list, to change on its own")
+                            description="A copy of the shape picked, to change on its own")
 
     @classmethod
     def description(cls, context, properties):
-        return ("A copy of this shape in the library, to change on its own" if properties.duplicate
+        return ("A copy of this shape in the groom's library, to change on its own (the targeted guides take "
+                "it): how a built-in shape is edited" if properties.duplicate
                 else "A new library shape (a circle to start from)")
 
     def execute(self, context):
@@ -1532,9 +1533,8 @@ class GROOMLAB_OT_tube_shape_new(TubeOperator):
         try:
             if self.duplicate:
                 picked = _library_pick(context)
-                if picked is None:
-                    self.report({"ERROR"}, "No library shape picked")
-                    return {"CANCELLED"}
+                if picked is None:  # a built-in: copied into the library to edit
+                    return bpy.ops.groomlab.tube_shape_custom()
                 points, smooth = tools.shape_points(scalp, picked.name)
                 name = tools.unique_shape_name(scene, picked.name)
             else:

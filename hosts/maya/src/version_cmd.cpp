@@ -232,6 +232,9 @@ MStatus GraphStatsCmd::doIt(const MArgList& args) {
             shape->settleCommit("groomLabGraphStats");
         }
         if (db.isFlagSet("-strandColorSources")) {
+            // (A groom nothing has drawn yet is evaluated first: its output pulled.)
+            MPlug(shape->thisMObject(), GroomShape::aOutStrandCount).asInt();
+            shape->settleCommit("groomLabGraphStats");
             // What the strand colors can read in the frame drawn (the viewed node's): {"channels":
             // the strands' channels (the attribute colors), "colorSets": the scalp's color sets,
             // painted vertex maps among them (the color set colors)}, each sorted.
@@ -247,6 +250,8 @@ MStatus GraphStatsCmd::doIt(const MArgList& args) {
             // empty without the channel.
             MString name;
             db.getFlagArgument("-channelRange", 0, name);
+            MPlug(shape->thisMObject(), GroomShape::aOutStrandCount).asInt();
+            shape->settleCommit("groomLabGraphStats");
             const FramePtr frame = shape->frame();
             MDoubleArray range;
             float lo = 0.0f, hi = 0.0f;

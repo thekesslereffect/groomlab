@@ -2089,25 +2089,32 @@ class GraphEditorTest(unittest.TestCase):
         # Under Strand Color Mode: no rows for the solid colors; for Attribute the strands' channels
         # to pick, Min and Max, and Auto Range setting them from the channel's values.
         from groomlab.ui import ae
+        # The default look (its Clump and HairColor write channels; the class's graph has none).
+        groom = groomlab.create_groom(cmds.polySphere(radius=1, subdivisionsX=24, subdivisionsY=12)[0])
         window = cmds.window()
         cmds.columnLayout()
-        ae.strand_colors_new(self.groom + ".strandColorSource")
+        ae.strand_colors_new(groom + ".strandColorSource")
         self.assertEqual(cmds.columnLayout(ae.STRAND_COLORS, query=True, childArray=True) or [], [])
-        cmds.setAttr(self.groom + ".strandColorMode", 2)
-        cmds.setAttr(self.groom + ".strandColorMin", -5.0)
-        cmds.setAttr(self.groom + ".strandColorMax", -4.0)
-        ae.strand_colors_replace(self.groom + ".strandColorSource")
-        menus = [c for c in cmds.lsUI(type="optionMenu", long=True) or [] if ae.STRAND_COLORS in c]
-        self.assertEqual(len(menus), 1)
-        items = [cmds.menuItem(i, query=True, label=True) for i in cmds.optionMenu(menus[0], query=True, itemListLong=True)]
-        self.assertIn("clumpId", items)
-        self.assertEqual(cmds.optionMenu(menus[0], query=True, value=True), cmds.getAttr(self.groom + ".strandColorSource"))
-        buttons = [c for c in cmds.lsUI(type="button", long=True) or [] if ae.STRAND_COLORS in c
-                   and cmds.button(c, query=True, label=True) == "Auto Range"]
+        cmds.setAttr(groom + ".strandColorMode", 2)
+        cmds.setAttr(groom + ".strandColorMin", -5.0)
+        cmds.setAttr(groom + ".strandColorMax", -4.0)
+        ae.strand_colors_replace(groom + ".strandColorSource")
+        rows = cmds.columnLayout(ae.STRAND_COLORS, query=True, childArray=True) or []
+        menus = [r for r in rows if cmds.optionMenuGrp(r, exists=True)]
+        self.assertEqual(len(menus), 1)  # Source
+        items = [cmds.menuItem(i, query=True, label=True)
+                 for i in cmds.optionMenuGrp(menus[0], query=True, itemListLong=True) or []]
+        channels = groomlab.strand_color_sources(groom)["channels"]
+        self.assertTrue(channels)
+        self.assertTrue(set(channels) <= set(items), (channels, items))
+        self.assertEqual(cmds.optionMenuGrp(menus[0], query=True, value=True), cmds.getAttr(groom + ".strandColorSource"))
+        layout = [r for r in rows if cmds.rowLayout(r, exists=True)]
+        buttons = [c for r in layout for c in cmds.rowLayout(r, query=True, childArray=True) or []
+                   if cmds.button(c, exists=True) and cmds.button(c, query=True, label=True) == "Auto Range"]
         self.assertEqual(len(buttons), 1)
-        cmds.setAttr(self.groom + ".strandColorSource", "clumpId", type="string")
-        groomlab.auto_strand_color_range(self.groom)
-        self.assertGreaterEqual(cmds.getAttr(self.groom + ".strandColorMax"), 0.0)
+        cmds.setAttr(groom + ".strandColorSource", channels[0], type="string")
+        lo, hi = groomlab.auto_strand_color_range(groom)
+        self.assertAlmostEqual(cmds.getAttr(groom + ".strandColorMax"), hi, places=4)
         cmds.deleteUI(window)
 
     def test_attribute_editor_pick_takes_the_next_selected_mesh(self):
@@ -3997,7 +4004,8 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertNotIn("clump", window.buttons)
             self.assertIn("shape", [t for t, _, _ in dict(palette.SECTIONS)["Shape"]])
             self.assertNotIn("tube", window.buttons)
-            self.assertEqual(palette.NAMES["straighten"], "Straighten")
+            self.assertNotIn("straighten", palette.NAMES)  # Smooth's Straighten chip
+            self.assertEqual((palette.NAMES["shape"], palette.NAMES["twist"]), ("Tube", "Swing"))
             # Selected only and Front only left the panel (the brushes keep their defaults).
             self.assertFalse(hasattr(window, "mask_scalp") or hasattr(window, "selected_only"))
             self.assertEqual(window.falloff.label(), "Falloff")  # the name inside its fill field
@@ -4200,7 +4208,7 @@ class DockableWindowsTest(unittest.TestCase):
             window.buttons["select"].click()
             self.assertEqual(cmds.currentCtx(), groomlab.SELECT_CONTEXT)
             self.assertFalse(window.radius.isEnabled())
-            self.assertTrue(window.tube_panel.selected_block.isVisibleTo(window))  # the selected guides' tubes
+            self.assertFalse(window.tube_panel.selected_block.isVisibleTo(window))  # the tubes: the Tube brush's card
             self.assertFalse(window.flow_box.isVisibleTo(window))
             self.assertTrue(widgets.icon("comb").availableSizes() or not widgets.icon("comb").isNull())
             # Guide groups (a Tools section): the groups, and edits on many guides.
@@ -4208,6 +4216,9 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertTrue(window.guides_section.isVisibleTo(window))
             tree = window.guides_tab.tree
             self.assertEqual(tree.topLevelItem(0).text(0), "primary")
+            # The box under the list names what its glyphs act on: the picked group, else every group.
+            window.guides_tab.show_picked()
+            self.assertEqual(window.guides_tab.box.title.full_text(), window.current_group() or "All groups")
             window.guides_tab.select_group()
             self.assertEqual(len(groomlab.selected_guides(self.groom)), 1)
             # Paint tab: maps follow the groom.
@@ -4217,6 +4228,7 @@ class DockableWindowsTest(unittest.TestCase):
             self.app_events()
             from PySide2 import QtCore as _qc
             self.assertIn("density", [window.paint_tab.list.item(i).data(_qc.Qt.UserRole) for i in range(window.paint_tab.list.count())])
+            self.assertEqual(window.paint_tab.box.title.full_text(), window.paint_tab.current())  # the picked map's box
             window.paint_tab.value.setValue(0.3)
             window.paint_tab.fill(False)
             stored = groomlab.get_hierarchy(self.groom)["guides"]
@@ -4239,7 +4251,7 @@ class DockableWindowsTest(unittest.TestCase):
             window.close()
 
     def test_tube_shape_editor_and_library(self):
-        # The Profile block's shape editor: a built-in shown read-only, Edit as custom copying it into
+        # The Profile block's shape editor: a built-in shown read-only, Duplicate copying it into
         # the library (the targets take it), points dragged (mirrored), added and removed, each a
         # commit every guide taking the shape follows; New, Duplicate, Rename in place, Delete on a
         # second click (no dialogs); the panel following a Shift+click solo; Place's tube.
@@ -4258,15 +4270,16 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertIn("1 guide selected", panel.targets.text())
             self.assertEqual(panel.shape.currentData(), "round")
             self.assertFalse(editor.editable)  # a built-in: read-only
-            self.assertTrue(panel.edit_custom.isVisible())
+            self.assertFalse(panel.shape_options.isVisible())  # a built-in: no outline options
+            self.assertTrue(panel.duplicate_shape.isEnabled())
             panel.shape.setCurrentIndex(panel.shape.findData("ribbon"))
             panel.shape.activated.emit(panel.shape.currentIndex())
             self.assertEqual(groomlab.get_tube(self.groom, guides[0])["shape"], "ribbon")
-            panel.edit_custom.click()  # a copy in the library, the selected guide taking it
+            panel.duplicate_shape.click()  # a copy in the library, the selected guide taking it
             self.assertEqual(panel._choice, "ribbon 1")
             self.assertEqual(groomlab.get_tube(self.groom, guides[0])["shape"], "ribbon 1")
             self.assertTrue(editor.editable)
-            self.assertFalse(panel.edit_custom.isVisible())
+            self.assertTrue(panel.shape_options.isVisible())
             self.assertEqual([s["name"] for s in groomlab.tube_shapes(self.groom) if not s["builtin"]], ["ribbon 1"])
             panel.refresh(self.groom)
             self.assertEqual(panel._choice, "ribbon 1")

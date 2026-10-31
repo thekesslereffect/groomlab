@@ -950,8 +950,7 @@ def draw_tab(layout, context, chars):
     else:
         p = cam.groomlab_photo
         box = layout.box()
-        row = box.row(align=True)
-        row.alignment = "RIGHT"
+        row = palette.item_bar(box, cam.name)
         palette.bar_icons(row, "lists/photos/bar", "photosbar", context, ("photo.rename", "photo.remove"))
         row = box.row(align=True)
         row.operator("groomlab.photo_look_through", text="Look Through", depress=looking_through(context, cam),

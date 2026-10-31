@@ -199,14 +199,22 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     edits_->setMenu(editsMenu_);
     row->addWidget(edits_);
     row->addStretch(1);
+    rows->addLayout(row);
+    // Edit Guides > Children's count, on a line of its own (beside the menu it would widen a
+    // narrow dock).
+    auto* countRow = new QHBoxLayout();
+    countRow->setSpacing(4);
+    auto* countLabel = new QLabel(tr("Children per guide"), box_);
+    countLabel->setProperty("role", "hint");
+    countRow->addWidget(countLabel);
+    countRow->addStretch(1);
     count_ = new QSpinBox(box_);
     count_->setObjectName(QStringLiteral("childrenCount"));
     count_->setRange(1, 500);
     count_->setValue(5);
-    count_->setPrefix(tr("x "));
     count_->setToolTip(tr("Children per guide for Edit Guides > Children (the selected guides, else the picked group)"));
-    row->addWidget(count_);
-    rows->addLayout(row);
+    countRow->addWidget(count_);
+    rows->addLayout(countRow);
     layout->addWidget(box_);
 
     // The parts and flow the brushes laid (parts.h, flow.h): listed by name, removed, cleared
@@ -406,6 +414,9 @@ void GuidesPanel::refreshRows() {
     selection_->setText(n == 0 ? tr("No guides selected") : tr("%n guide(s) selected", "", static_cast<int>(n)));
     bar_->refresh();
     itemBar_->refresh();
+    // The box is the picked group's (none picked: every group's, Segments on every guide).
+    const std::string group = currentGroup();
+    itemBar_->setTitle(group.empty() ? tr("All groups") : qs(group));
     box_->setVisible(tree_->topLevelItemCount() > 0);
     tree_->setVisible(tree_->topLevelItemCount() > 0);
     empty_->setVisible(document_ && tree_->topLevelItemCount() == 0);

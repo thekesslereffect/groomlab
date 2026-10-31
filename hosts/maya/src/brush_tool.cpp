@@ -82,6 +82,7 @@ const char* kSpacingFlag[] = {"-sp", "-spacing"};
 const char* kCollideFlag[] = {"-col", "-collide"};
 const char* kMaskScalpFlag[] = {"-msk", "-maskByScalp"};
 const char* kStretchFlag[] = {"-sr", "-stretch"};
+const char* kStraightenFlag[] = {"-stn", "-straighten"};
 const char* kTubeChannelFlag[] = {"-tch", "-tubeChannel"};
 const char* kPressureFlag[] = {"-prs", "-pressure"};
 const char* kPartNameFlag[] = {"-pn", "-partName"};
@@ -245,6 +246,7 @@ void addBrushFlags(MSyntax& s) {
     s.addFlag(kCollideFlag[0], kCollideFlag[1], MSyntax::kBoolean);
     s.addFlag(kMaskScalpFlag[0], kMaskScalpFlag[1], MSyntax::kBoolean);
     s.addFlag(kStretchFlag[0], kStretchFlag[1], MSyntax::kBoolean);
+    s.addFlag(kStraightenFlag[0], kStraightenFlag[1], MSyntax::kBoolean);
     s.addFlag(kTubeChannelFlag[0], kTubeChannelFlag[1], MSyntax::kString);
     s.addFlag(kPartNameFlag[0], kPartNameFlag[1], MSyntax::kString);
     s.addFlag(kFlowSinkFlag[0], kFlowSinkFlag[1], MSyntax::kString);
@@ -331,6 +333,7 @@ MStatus applyBrushFlags(const Args& args, BrushToolSettings& s, const char* comm
     if (args.isFlagSet(kCollideFlag[0]) && args.getFlagArgument(kCollideFlag[0], 0, b)) s.brush.collide = b;
     if (args.isFlagSet(kMaskScalpFlag[0]) && args.getFlagArgument(kMaskScalpFlag[0], 0, b)) s.maskByScalp = b;
     if (args.isFlagSet(kStretchFlag[0]) && args.getFlagArgument(kStretchFlag[0], 0, b)) s.brush.stretch = b;
+    if (args.isFlagSet(kStraightenFlag[0]) && args.getFlagArgument(kStraightenFlag[0], 0, b)) s.brush.straighten = b;
     if (args.isFlagSet(kSelectedOnlyFlag[0]) && args.getFlagArgument(kSelectedOnlyFlag[0], 0, b)) s.selectedOnly = b;
     if (args.isFlagSet(kSymmetryCenterFlag[0]) && args.getFlagArgument(kSymmetryCenterFlag[0], 0, d)) s.brush.mirrorCenter = float(d);
     if (args.isFlagSet(kAttributeFlag[0]) && args.getFlagArgument(kAttributeFlag[0], 0, text)) s.brush.attribute = text.asChar();
@@ -1569,6 +1572,7 @@ MStatus BrushContextCmd::doQueryFlags() {
         else if (args.isFlagSet(kCollideFlag[0])) setResult(s.brush.collide);
         else if (args.isFlagSet(kMaskScalpFlag[0])) setResult(s.maskByScalp);
         else if (args.isFlagSet(kStretchFlag[0])) setResult(s.brush.stretch);
+        else if (args.isFlagSet(kStraightenFlag[0])) setResult(s.brush.straighten);
         else if (args.isFlagSet(kTubeChannelFlag[0])) setResult(MString(tubeChannelName(s.brush.tubeChannel)));
         else if (args.isFlagSet(kPressureFlag[0])) setResult(s.pressure);
         else if (args.isFlagSet(kPartNameFlag[0])) setResult(MString(s.partName.c_str()));

@@ -121,18 +121,21 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
                      [this](double v) { session_->settings().setSmoothStrength(static_cast<float>(v)); }, settingHint("smoothStrength"));
     smooth_->setObjectName(QStringLiteral("smoothStrength"));
     {
-        // The chips, in a fixed order (a chip never moves between tools): Pressure, Off scalp,
-        // Stretch (Comb: lengths change with the pull), Falloff curve, Root to tip, then the app's
-        // own Propagate and Pointwise.
+        // The chips, in a fixed order (a chip never moves between tools): Pressure, Keep off scalp,
+        // Stretch (Comb: lengths change with the pull), Straighten (Smooth: toward the straight
+        // line), Falloff curve, Root to tip, then the app's own Propagate and Pointwise.
         FlowLayout* chips = nullptr;
         rows->addWidget(chipRow(brush_, &chips));
         pressure_ = settingChip(chips, "pressure", tr("Pressure"), [this] { return session_->settings().pressure; },
                                 [this](bool on) { session_->settings().pressure = on; });
-        collide_ = settingChip(chips, "collide", tr("Off scalp"), [this] { return session_->settings().brush.collide; },
+        collide_ = settingChip(chips, "collide", tr("Keep off scalp"), [this] { return session_->settings().brush.collide; },
                                [this](bool on) { session_->settings().brush.collide = on; });
         stretch_ = settingChip(chips, "stretch", tr("Stretch"), [this] { return session_->settings().brush.stretch; },
                                [this](bool on) { session_->settings().brush.stretch = on; });
         stretch_->setObjectName(QStringLiteral("stretch"));
+        straighten_ = settingChip(chips, "straighten", tr("Straighten"), [this] { return session_->settings().brush.straighten; },
+                                  [this](bool on) { session_->settings().brush.straighten = on; });
+        straighten_->setObjectName(QStringLiteral("straighten"));
         auto* ramps = new QVBoxLayout();
         ramps->setContentsMargins(0, 0, 0, 0);
         ramps->setSpacing(4);
@@ -267,7 +270,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         QToolButton* solo = settingChip(chips, "soloNewGuides", tr("Solo new"), [this] { return session_->settings().place.soloNewGuides; },
                                         [this](bool on) { session_->settings().place.soloNewGuides = on; });
         solo->setObjectName(QStringLiteral("soloNewGuides"));
-        placeCollide_ = chip(chips, tr("Off scalp"), [this] { return session_->settings().brush.collide; },
+        placeCollide_ = chip(chips, tr("Keep off scalp"), [this] { return session_->settings().brush.collide; },
                              [this](bool on) { session_->settings().brush.collide = on; }, settingHint("collide"));
         placeCollide_->setObjectName(QStringLiteral("placeCollide"));
     }
@@ -320,9 +323,6 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
                                   [this, field = field](bool on) { session_->settings().*field = on; });
             c->setObjectName(QStringLiteral("erase") + label);
         }
-        QLabel* note = hintLabel(tr("Erased guides take their children with them; the scattered hair stays."), erases_);
-        note->setToolTip(text("eraseNote"));
-        erases_->rows()->addWidget(note);
     }
     card_->addWidget(erases_);
 
@@ -519,16 +519,16 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     tubeSlot_->setSpacing(0);
     card_->addLayout(tubeSlot_);
 
-    // ---- Applies to: Acts on, Mirror.
+    // ---- Applies to: what the brush shapes (no heading of its own), Mirror.
     applies_ = new CardBlock(text("appliesBlock"), this);
     applies_->setObjectName(QStringLiteral("appliesBlock"));
     {
         FlowLayout* chips = nullptr;
-        actsOn_ = chipRow(applies_, &chips, settingLabel("targets"));
+        actsOn_ = chipRow(applies_, &chips);
         actsOn_->setObjectName(QStringLiteral("targetsBox"));
         actsOn_->setToolTip(tr("What the brush shapes where it passes: guides, part lines, flow arrows and sinks (Comb slides and lays "
-                               "arrows along the stroke; Twist turns arrows and whorls; Length sizes whorls; Smooth, Straighten and "
-                               "Attract shape both; Cut splits parts)"));
+                               "arrows along the stroke; Swing turns arrows and whorls; Length sizes whorls; Smooth and Attract "
+                               "shape both; Cut splits parts)"));
         for (const auto& [label, field] : std::vector<std::pair<QString, bool BrushToolSettings::*>>{
                  {tr("Guides"), &BrushToolSettings::brushGuides}, {tr("Parts"), &BrushToolSettings::brushParts}, {tr("Flow"), &BrushToolSettings::brushFlow}}) {
             QToolButton* c = chip(chips, label, [this, field = field] { return session_->settings().*field; },
@@ -718,14 +718,15 @@ void BrushPanel::setTool(const std::string& id) {
     spacing_->setVisible(uses("spacing"));
     placeCollide_->setVisible(uses("newGuides") && uses("collide"));
     stretch_->setVisible(uses("stretch"));
+    straighten_->setVisible(uses("straighten"));
     paints_->setVisible(uses("tubeChannel"));
     erases_->setVisible(uses("erases"));
     keys_->setVisible(uses("lengthKeys"));
     flow_->setVisible(uses("flow"));
     parts_->setVisible(uses("parts"));
-    // The tubes: the tube new guides get (Place, Draw), the selected guides' (Shape, Select).
+    // The tubes: the tube new guides get (Place, Draw), the selected guides' (Tube).
     if (tubes_) {
-        const bool edits = id == "shape" || id == "select";
+        const bool edits = id == "shape";
         tubes_->setVisible(uses("newGuides") || edits);
         tubes_->setMode(edits ? TubePanel::Mode::Edit : TubePanel::Mode::New);
     }

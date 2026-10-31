@@ -462,7 +462,7 @@ def main():
                 ("place", ["New guides", "Tube", "Applies to"]),
                 ("draw", ["New guides", "Tube", "Applies to"]),
                 ("shape", ["Brush", "Paints", "Profile", "Selected guides", "Applies to"]),
-                ("select", ["Selection", "Profile", "Selected guides", "Applies to"]),
+                ("select", ["Selection", "Applies to"]),
                 ("lengths", ["Keys", "Applies to"]),
                 ("erase", ["Brush", "Erases", "Applies to"]),
                 ("flow", ["Brush", "Flow"]),
@@ -492,13 +492,14 @@ def main():
                             "%s: %r left the panel: %r" % (tool, gone, [w for w in words if gone in w]))
                 _expect(not [b for b in tools.settings.findChildren(QtWidgets.QCheckBox) if b.isVisibleTo(tools)
                              and b is not tools.symmetry], "%s: options are chips, not checkboxes" % tool)
-            # The brush's chips in one order whatever the tool: Pressure, Off scalp, the two curves.
+            # The brush's chips in one order whatever the tool: Pressure, Keep off scalp, the two curves.
             tools.tool = "comb"
             tools.show_tool_settings()
             settle()
             flow = tools.brush_chips.flow
             order = [flow.itemAt(i).widget().text() for i in range(flow.count())]
-            _expect(order == ["Pressure", "Off scalp", "Stretch", "Falloff curve", "Root to tip"], "brush chips: %r" % order)
+            _expect(order == ["Pressure", "Keep off scalp", "Stretch", "Straighten", "Falloff curve", "Root to tip"],
+                    "brush chips: %r" % order)
             tools.strength_curve_box.setChecked(True)
             settle()
             _expect(tools.strength_curve.isVisibleTo(tools), "a curve chip on: its ramp under the chips")

@@ -40,6 +40,8 @@ DEFAULT_STRENGTH = dict((t["id"], t["default_strength"]) for t in CATALOG)
 CREATORS = set(t for t, s in TOOL_SETTINGS.items() if "newGuides" in s)
 # Brushes that also shape part lines and flow arrows (the Brushes box picks what they act on).
 TARGETABLE = set(t for t, s in TOOL_SETTINGS.items() if "targets" in s)
+# The tools that work on a corrective: the Correctives tab shows only these.
+CORRECTIVE = set(t["id"] for t in CATALOG if t.get("corrective"))
 PART = "part"
 # The tabs, the texts and the option lists: the UI definitions every host shares (engine/ui:
 # palette.json, choices.json; groomlab.ui.definitions).
@@ -50,11 +52,9 @@ HINTS = dict((t["id"], t["hint"]) for t in CATALOG)
 NAMES = dict((t["id"], t["label"]) for t in CATALOG)
 GESTURES = definitions.text("gestures")
 SYMMETRY_TIP = definitions.text("symmetryTip")
-# What the Erase brush does not do, said under its settings: the hair itself goes with the density map.
-ERASE_NOTE = definitions.text("eraseNote")
 NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 # The brush block's chips: a short name each (their tooltips: the catalog's hints).
-CHIP_LABELS = {"pressure": "Pressure", "collide": "Off scalp"}
+CHIP_LABELS = {"pressure": "Pressure", "collide": "Keep off scalp"}
 
 
 def help_tip(tool):
@@ -75,8 +75,7 @@ def help_tip(tool):
 
 # The block titles a core older than these definitions may not name yet.
 SETTING_LABELS = {"lengthKeys": "Keys", "newGuides": "New guides", "tube": "Tube", "tubeChannel": "Paints",
-                  "selection": "Selection", "erases": "Erases", "flow": "Flow", "parts": "Parts",
-                  "targets": "Acts on"}
+                  "selection": "Selection", "erases": "Erases", "flow": "Flow", "parts": "Parts"}
 
 
 def _setting(setting, field):
@@ -237,14 +236,14 @@ class TubePanel(QtWidgets.QWidget):
                      glyphs in the block's header
     Selected guides  (Shape, Select) the targets' Width, Flatness and Twist, Smooth in the header
     Tube             (Place, Draw) the tube new guides get: a small preview, the shape picker and
-                     Width / Flatness / Twist (the library is edited with the Shape brush)
+                     Width / Flatness / Twist (the library is edited with the Tube brush)
 
     The shape picker and the three fields are one set of widgets that set_mode() moves between
     the blocks: "edit" (the targets' tubes: each change one undo step) or "new" (the placement
     tube the brush gives new guides). Follows the groom through refresh().
 
     The targets: the selected guides, else the soloed ones (those left unfrozen:
-    groomlab.tube_targets). The editor shows the chosen shape: a built-in read-only (Edit as custom
+    groomlab.tube_targets). The editor shows the chosen shape: a built-in read-only (Duplicate
     copies it into the library), a library shape editable: dragging previews live on the groom (no
     undo step), the release commits (one undo step, every guide taking it following)."""
 
@@ -289,8 +288,9 @@ class TubePanel(QtWidgets.QWidget):
         self.rename_shape = widgets.glyph_button("rename", "Rename this library shape (its guides keep it)",
                                                  self.start_rename)
         self.rename_shape.setObjectName("tubeShapeRename")
-        self.duplicate_shape = widgets.glyph_button("duplicate", "A copy of this shape in the library, to change on "
-                                                    "its own", self.duplicate_library_shape)
+        self.duplicate_shape = widgets.glyph_button("duplicate", "A copy of this shape in the groom's library, to "
+                                                    "change on its own (the selected guides take it): how a built-in "
+                                                    "shape is edited", self.duplicate_library_shape)
         self.duplicate_shape.setObjectName("tubeShapeDuplicate")
         self.delete_shape = widgets.glyph_button("delete", self.DELETE_TIP, self.delete_library_shape)
         self.delete_shape.setObjectName("tubeShapeDelete")
@@ -316,27 +316,21 @@ class TubePanel(QtWidgets.QWidget):
         holder.addWidget(self.editor)
         holder.addStretch(1)
         self.profile_block.add(holder)
-        self.edit_custom = QtWidgets.QToolButton()
-        self.edit_custom.setText("Edit as custom")
-        self.edit_custom.setObjectName("tubeEditAsCustom")
-        self.edit_custom.setProperty("role", "ghost")
-        self.edit_custom.setToolTip("Copy this built-in shape into the groom's library as a new shape you can edit "
-                                    "(the selected guides take it)")
-        self.edit_custom.clicked.connect(self.edit_as_custom)
         self.mirror = widgets.chip("Mirror", "Keep the outline's left and right sides alike (about the up axis): a "
                                    "point and its mirror image move, come and go together", True, "tubeShapeMirror")
         self.mirror.toggled.connect(self.set_mirror)
         self.smooth_shape = widgets.chip("Smooth", "A smooth curve through the points; off: straight edges and sharp "
                                          "corners", True, "tubeShapeSmooth")
         self.smooth_shape.toggled.connect(self.set_smooth)
-        options = QtWidgets.QHBoxLayout()
+        # The outline's options: a library shape's (a built-in is read-only).
+        self.shape_options = QtWidgets.QWidget()
+        options = QtWidgets.QHBoxLayout(self.shape_options)
         options.setContentsMargins(0, 0, 0, 0)
         options.setSpacing(theme.px(4))
-        options.addWidget(self.edit_custom)
         options.addWidget(self.mirror)
         options.addWidget(self.smooth_shape)
         options.addStretch(1)
-        self.profile_block.add(options)
+        self.profile_block.add(self.shape_options)
         self.rename_field = QtWidgets.QLineEdit()
         self.rename_field.setObjectName("tubeShapeName")
         self.rename_field.setPlaceholderText("New name, then Enter (Esc: keep it)")
@@ -589,16 +583,15 @@ class TubePanel(QtWidgets.QWidget):
                 self.shape_committed(self.editor.points)  # made symmetric: saved so
         else:
             points, smooth = self._outline(self._choice)
-            self.editor.set_shape(points, smooth, editable=False, note="Built in: Edit as custom to change it")
+            self.editor.set_shape(points, smooth, editable=False, note="Built in: Duplicate it to edit a copy")
         self.smooth_shape.blockSignals(True)
         self.smooth_shape.setChecked(self.editor.smooth)
         self.smooth_shape.blockSignals(False)
         has_groom = bool(self._groom)
-        self.edit_custom.setVisible(custom is None)
-        self.edit_custom.setEnabled(has_groom)
-        self.smooth_shape.setEnabled(custom is not None)
+        self.shape_options.setVisible(custom is not None)
         self.new_shape.setEnabled(has_groom)
-        for b in (self.rename_shape, self.duplicate_shape, self.delete_shape):
+        self.duplicate_shape.setEnabled(has_groom)
+        for b in (self.rename_shape, self.delete_shape):
             b.setEnabled(custom is not None)
         self.apply_shape.setEnabled(bool(self._selection))
 
@@ -740,9 +733,13 @@ class TubePanel(QtWidgets.QWidget):
             self.refresh(groom, force=True)
 
     def duplicate_library_shape(self):
+        """A copy of the shape in the library, chosen: a built-in's is how it is edited."""
         groom = self.owner.groom()
         custom = self.library_shape(self._choice)
-        if not groom or custom is None:
+        if groom and custom is None:
+            self.edit_as_custom()
+            return
+        if not groom:
             return
         name = self.unique_name(custom["name"])
         if self.run(groomlab.add_tube_shape, groom, name, custom["points"], smooth=custom["smooth"]):
@@ -1031,13 +1028,17 @@ class ToolPalette(QtWidgets.QWidget):
         grids = QtWidgets.QVBoxLayout(self.tool_palette)
         grids.setContentsMargins(0, 0, 0, 0)
         grids.setSpacing(theme.px(2))
+        self.tool_grids = []  # (the category's label, its grid)
         for section, tools in SECTIONS:
             if section == "Paint":
                 continue  # the painting brushes live in the Paint tab, beside the maps they paint
-            grids.addWidget(widgets.small_label(section))
+            label = widgets.small_label(section)
+            grids.addWidget(label)
             # Beside Freeze: Unfreeze All, a button (not a tool).
             extra = [self.unfreeze_tile()] if any(t[0] == "freeze" for t in tools) else []
-            grids.addWidget(self.tool_grid(tools, extra=extra))
+            grid = self.tool_grid(tools, extra=extra)
+            grids.addWidget(grid)
+            self.tool_grids.append((label, grid))
         top_work.addWidget(self.tool_palette)
         self.paint_tiles = self.wide_tools(dict(SECTIONS).get("Paint", []))
         top_work.addWidget(self.paint_tiles)
@@ -1105,7 +1106,8 @@ class ToolPalette(QtWidgets.QWidget):
             fields.addWidget(slider)  # the name inside the field
         self.brush_block.add(self.brush_form)
         # The stroke's options as chips, in a fixed order (a chip never moves between tools):
-        # Pressure, Off scalp, Stretch (Comb: lengths change with the pull), then the brush's curves (each off until its chip is on, then drawn
+        # Pressure, Keep off scalp, Stretch (Comb: lengths change with the pull), Straighten (Smooth: toward the
+        # straight line), then the brush's curves (each off until its chip is on, then drawn
         # in a curve editor under the chips; right-click: presets). Selected only and Front only
         # are not in the panel: the brushes keep their defaults (off and on).
         self.pressure = self.setting_chip("pressure", True)
@@ -1114,12 +1116,14 @@ class ToolPalette(QtWidgets.QWidget):
         self.collide.toggled.connect(lambda on: self.push(collide=on))
         self.stretch = widgets.chip("Stretch", _setting("stretch", "hint"), False, "stretch")
         self.stretch.toggled.connect(lambda on: self.push(stretch=on))
+        self.straighten = widgets.chip("Straighten", _setting("straighten", "hint"), False, "straighten")
+        self.straighten.toggled.connect(lambda on: self.push(straighten=on))
         self.falloff_curve_box, self.falloff_curve = self.curve_setting(
             "falloffProfile", [[0, 1], [0.5, 0.56], [1, 0]], ("center", "edge"))
         self.strength_curve_box, self.strength_curve = self.curve_setting(
             "strengthProfile", [[0, 0.25], [1, 1]], ("root", "tip"))
-        self.brush_chips = widgets.chip_row((self.pressure, self.collide, self.stretch, self.falloff_curve_box,
-                                             self.strength_curve_box))
+        self.brush_chips = widgets.chip_row((self.pressure, self.collide, self.stretch, self.straighten,
+                                             self.falloff_curve_box, self.strength_curve_box))
         self.brush_chips.setObjectName("brushChips")
         self.brush_block.add(self.brush_chips)
         self.brush_block.add(self.falloff_curve)
@@ -1202,7 +1206,6 @@ class ToolPalette(QtWidgets.QWidget):
                           (self.erase_flow, "eraseFlow")):
             box.toggled.connect(lambda on, f=flag: self.push(**{f: on}))
         self.erase_box.add(widgets.chip_row((self.erase_guides, self.erase_parts, self.erase_flow)))
-        self.erase_box.add(widgets.small_label(ERASE_NOTE, wrap=True))
         card.addWidget(self.erase_box)
 
         # Length Keys: the selected key, Apply and Cancel (Clear in the block's header).
@@ -1275,11 +1278,10 @@ class ToolPalette(QtWidgets.QWidget):
         targets = QtWidgets.QVBoxLayout(self.target_box)
         targets.setContentsMargins(0, 0, 0, 0)
         targets.setSpacing(theme.px(4))
-        targets.addWidget(widgets.small_label(_setting("targets", "label")))
         targets.addWidget(widgets.chip_row((self.target_guides, self.target_parts, self.target_flow)))
         self.target_box.setToolTip("What the brush shapes where it passes: guides, part lines, flow arrows and sinks "
-                                   "(Comb slides and lays arrows along the stroke; Twist turns arrows and whorls; "
-                                   "Length sizes whorls; Smooth, Straighten and Attract shape both; Cut splits parts)")
+                                   "(Comb slides and lays arrows along the stroke; Swing turns arrows and whorls; "
+                                   "Length sizes whorls; Smooth and Attract shape both; Cut splits parts)")
         self.applies_block.add(self.target_box)
         # Mirror: Symmetry, and across what: world X, or the scalp's own topology (a head turned,
         # or not quite symmetric).
@@ -1655,6 +1657,7 @@ class ToolPalette(QtWidgets.QWidget):
             b.setCheckable(True)
             self._tile_size(b)
             b.setToolTip(help_tip(tool) if tool in HINTS else "<b>%s</b><br>%s" % (NAMES.get(tool, label), tip))
+            b.setProperty("toolId", tool)
             b.clicked.connect(lambda _=False, t=tool: self.activate(t))
             self.group.addButton(b)
             self.buttons.setdefault(tool, b)
@@ -1695,11 +1698,19 @@ class ToolPalette(QtWidgets.QWidget):
         tools on Tools and Correctives, the Paint tile on Paint; the guide groups on Tools."""
         tab = self.current_tab()
         self.tool_palette.setVisible(tab in ("tools", "correctives"))
+        # Correctives: only the tools that work on a corrective (a category with none of them goes).
+        layers = tab == "correctives"
+        for label, grid in self.tool_grids:
+            grid.set_shown(lambda b: not layers or b.property("toolId") in CORRECTIVE)
+            label.setVisible(bool(grid.buttons))
         self.paint_tiles.setVisible(tab == "paint")
         self.guides_section.setVisible(section_shown(self.section_rules["groups"], self.tool, tab))
 
     def tab_changed(self, index):
         self.show_sections()
+        if TABS[index] == "correctives" and self.tool and self.tool not in CORRECTIVE:
+            self.stop_tool()  # its tile is gone here: no tool left on that can't record into a corrective
+            return
         if TABS[index] != "paint" and self.tool == "paint":
             # Leaving the Paint tab (back to the tools) is done painting: the Paint brush stops and
             # the strands and scalp stop showing the map, as the Paint tile pressed again does.
@@ -2082,6 +2093,7 @@ class ToolPalette(QtWidgets.QWidget):
                       group=self.current_group(), selected_only=False,
                       erase_guides=self.erase_guides.isChecked(), erase_parts=self.erase_parts.isChecked(),
                       erase_flow=self.erase_flow.isChecked(), stretch=self.stretch.isChecked(),
+                      straighten=self.straighten.isChecked(),
                       tube_channel=self.tube_channel_name(),
                       flow_sink=self.flow_sink.currentData() or "",
                       symmetry=self.symmetry_name(), pressure=self.pressure.isChecked(),
@@ -2168,7 +2180,7 @@ class ToolPalette(QtWidgets.QWidget):
         # The tubes: Place and Draw give new guides one (Tube); Shape and Select edit the selected
         # guides' (Profile, Selected guides).
         new_tube = "tube" in uses and "newGuides" in uses
-        edit_tube = "tubeChannel" in uses or "selection" in uses
+        edit_tube = "tubeChannel" in uses
         panel = self.tube_panel
         panel.tube_block.setVisible(new_tube)
         panel.profile_block.setVisible(edit_tube)
@@ -2177,6 +2189,7 @@ class ToolPalette(QtWidgets.QWidget):
             panel.set_mode("new" if new_tube else "edit")
             panel.refresh(self.groom())
         self.stretch.setVisible("stretch" in uses)
+        self.straighten.setVisible("straighten" in uses)
         self.tube_channel_box.setVisible("tubeChannel" in uses)
         self.select_box.setVisible("selection" in uses)
         self.erase_box.setVisible("erases" in uses)

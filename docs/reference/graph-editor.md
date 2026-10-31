@@ -68,12 +68,13 @@ works on in the list right under the tool grid, set the tool in its card under t
   `"reference"`).
 - **The tool grid** (Tools and Correctives; on Paint one full-width Paint button over the maps,
   none on Photos): every
-  tool as a labeled tile (a 20 px icon over its name, 56 x 50 px), in groups (the core's brush
-  catalog, `brush_catalog.h`): Create (Place, Draw, Part, Flow), Shape (Comb, Slide, Smooth,
-  Straighten, Lift, Twist, Attract, Shape), Trim (Cut, Length, Length
-  Keys, Erase), Paint (Paint) and Guides (Select, Freeze, with the Unfreeze All tile beside
-  Freeze). Every tile keeps its size: the panel's width sets how many fit in a row (at most four),
-  left aligned.
+  tool as a labeled tile (a 24 px icon over its name, at least 56 x 54 px), in groups (the core's
+  brush catalog, `brush_catalog.h`): Create (Place, Draw, Part, Flow), Shape (Comb, Slide, Smooth,
+  Lift, Swing, Attract, Tube), Trim (Cut, Length, Length Keys, Erase), Paint (Paint) and Guides
+  (Select, Freeze, with the Unfreeze All tile beside Freeze). The panel's width sets how many fit
+  in a row (at most four) and the row's width is split evenly between them. The Correctives tab
+  shows only the tools that work on a corrective (the catalog's `corrective`): Comb, Slide,
+  Smooth, Lift, Swing, Attract, Cut, Length and Select.
   Each tile's tooltip has its name and what it does. Click one and drag in the viewport over the
   groom.
 - **The tab's list** (right under the grid), each with a header (its name, how many, add / import
@@ -102,21 +103,21 @@ works on in the list right under the tool grid, set the tool in its card under t
   tool's whole hint and the gestures), in blocks, always in
   this order and each only when the tool has rows for it (the catalog's settings for the tool):
   - **Brush:** how the stroke feels. Radius, Strength (signed, "Strength (±)", for tools that work
-    both ways), Falloff, Smooth (Paint: how much Shift+drag smooths); the chips Pressure, Off
-    scalp (keep off scalp), Falloff curve and Root to tip (a curve chip that is on shows its curve
+    both ways), Falloff, Smooth (Paint: how much Shift+drag smooths); the chips Pressure, Keep
+    off scalp, Stretch (Comb), Straighten (Smooth), Falloff curve and Root to tip (a curve chip that is on shows its curve
     under the row; right-click it for presets).
   - **The tool's own block**, named after what it sets: Paint (Mode, Value and Fill or the color
     and its channels, the stamp), New guides (Place and Draw: Length, Segments, Spacing, Match
     nearby, Solo new) and Tube (the shape new guides get, a small preview, Width / Flatness /
-    Twist), Paints (Shape: Width, Flatness or Twist) with Profile
-    (the shape picker and Apply, the cross-section editor, Edit as custom, Mirror, Smooth; the
-    library's new / rename / duplicate / delete glyphs in its header) and Selected guides (their
-    Width, Flatness, Twist; Smooth in the header), Selection (Select: Soft radius, then Profile
-    and Selected guides), Erases (Guides, Parts, Flow), Keys (Length Keys), Flow (Place arrows or
+    Twist), Paints (Tube: Width, Flatness or Twist) with Profile
+    (the shape picker and Apply, the cross-section editor, Mirror and Smooth for a library shape;
+    the library's new / rename / duplicate / delete glyphs in its header, Duplicate on a built-in
+    being how it is edited) and Selected guides (their Width, Flatness, Twist; Smooth in the
+    header), Selection (Select: Soft radius), Erases (Guides, Parts, Flow), Keys (Length Keys), Flow (Place arrows or
     a sink, the count, Clear all) and Parts (the next name, the list, From Curves, Remove, Clear
     All).
-  - **Applies to:** where the stroke lands. Acts on (Guides, Parts, Flow for the shaping brushes)
-    and Mirror (Symmetry: World X or Topology; Alt+Shift+X with the hotkey set). The group a
+  - **Applies to:** where the stroke lands. Guides, Parts, Flow (what a shaping brush moves) and
+    Mirror (Symmetry: World X or Topology; Alt+Shift+X with the hotkey set). The group a
     stroke works on is not repeated here: it is the picked row of the list above.
 
   Not in the panel: selected only and mask by scalp (the brushes keep their defaults: off, and

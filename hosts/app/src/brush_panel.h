@@ -7,12 +7,12 @@
 // when it has rows:
 //
 //   Brush        Radius (px), Strength (± for the tools that work both ways), Falloff, Smooth (Paint);
-//                chips Pressure, Off scalp, Stretch (Comb), Falloff curve, Root to tip (a curve chip that is on shows
+//                chips Pressure, Keep off scalp, Stretch (Comb), Straighten (Smooth), Falloff curve, Root to tip (a curve chip that is on shows
 //                its ramp under the chips), and the app's own Propagate (the shaping brushes) and
 //                Pointwise (Paint)
 //   the tool's own block, named for what it sets:
 //     Paint        the maps panel's Mode, Value + Fill and color (setPaintControls), the alpha stamp
-//     New guides   Length, Segments, Spacing (Place); Match nearby, Solo new, Off scalp
+//     New guides   Length, Segments, Spacing (Place); Match nearby, Solo new, Keep off scalp
 //     Paints       Width, Flatness, Twist (Shape)
 //     Erases       Guides, Parts, Flow, a short note
 //     Keys         Key scale, Key length, Guides Scale / Trim, Delete key, Clear, Cancel, Apply (Length Keys)
@@ -20,7 +20,7 @@
 //     Parts        Name, the parts drawn, Parts from Curves / Remove / Clear
 //   the tubes    tube_panel.h's blocks (setTubes): Tube (Place, Draw), Profile and Selected guides
 //                (Shape, Select)
-//   Applies to   Acts on (Guides, Parts, Flow) where the tool has targets; Mirror (Symmetry and
+//   Applies to   Guides, Parts, Flow (what it shapes) where the tool has targets; Mirror (Symmetry and
 //                across what, the world plane's center) for the tools that mirror
 //
 // Selected only and Front only are not in the card: the brushes keep their defaults (off and on).
@@ -135,6 +135,7 @@ private:
     QToolButton* pressure_ = nullptr;
     QToolButton* collide_ = nullptr;
     QToolButton* stretch_ = nullptr;
+    QToolButton* straighten_ = nullptr;
     QToolButton* falloffCurve_ = nullptr;
     QToolButton* strengthCurve_ = nullptr;
     QToolButton* propagate_ = nullptr;

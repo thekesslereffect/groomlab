@@ -268,7 +268,8 @@ TEST(AppTubes, TubesSectionPicksShapesEditsTheLibraryAndFillsTubes) {
     EXPECT_EQ(guideEdits, 0);
     EXPECT_EQ(json::parse(placementTubeJson(session.settings().place))["shape"], "blade") << "the placement tube";
     EXPECT_FALSE(panel.editor()->editable()) << "a built-in shows read-only";
-    EXPECT_TRUE(panel.editAsCustomButton()->isVisibleTo(&panel));
+    EXPECT_FALSE(panel.shapeOptions()->isVisibleTo(&panel)) << "a built-in: no outline options";
+    EXPECT_TRUE(panel.duplicateButton()->isEnabled()) << "Duplicate: how a built-in is edited";
 
     // Targets: the selection; the shape picked goes to them (one step).
     const std::vector<GuideId> ids = primaryGuides(*doc, 2);
@@ -295,13 +296,13 @@ TEST(AppTubes, TubesSectionPicksShapesEditsTheLibraryAndFillsTubes) {
     panel.smoothTargets();
     EXPECT_EQ(doc->undoText(), "Undo smooth tube");
 
-    // Edit as Custom: a library copy the targets take, editable; Rename in place; Duplicate.
-    panel.editAsCustom();
+    // Duplicate on a built-in: a library copy the targets take, editable; Rename in place; Duplicate.
+    panel.duplicateButton()->click();
     EXPECT_EQ(panel.choice(), "ribbon 1");
     EXPECT_TRUE(panel.libraryShape("ribbon 1"));
     EXPECT_TRUE(panel.editor()->editable());
     EXPECT_EQ(guideOf(*doc, ids[0]).tube.shapeName(), "ribbon 1");
-    EXPECT_FALSE(panel.editAsCustomButton()->isVisibleTo(&panel));
+    EXPECT_TRUE(panel.shapeOptions()->isVisibleTo(&panel)) << "a library shape: Mirror and Smooth";
     EXPECT_TRUE(panel.renameButton()->isEnabled());
     panel.startRename();
     EXPECT_TRUE(panel.renameField()->isVisibleTo(&panel));
@@ -380,7 +381,7 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     EXPECT_FALSE(tubes->isHidden());
     EXPECT_EQ(tubes->mode(), TubePanel::Mode::Edit);
     // Shape's Profile block: the picker with Apply beside it, the outline editor (at most 200 px
-    // square), Edit as custom, Mirror and Smooth; the library's glyphs in its header.
+    // square), Mirror and Smooth (a library shape's); the library's glyphs in its header.
     CardBlock* profile = tubes->profileBlock();
     EXPECT_FALSE(profile->isHidden());
     EXPECT_TRUE(profile->isAncestorOf(tubes->editor()));
@@ -415,7 +416,7 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     // Another tool hides the chips and the tubes; Place shows the Tube block: the new guides'.
     tools.setTool("comb");
     EXPECT_TRUE(box->isHidden());
-    EXPECT_TRUE(tubes->isHidden()) << "the tubes only with Place, Draw, Shape and Select";
+    EXPECT_TRUE(tubes->isHidden()) << "the tubes only with Place, Draw and Tube";
     tools.setTool("place");
     EXPECT_FALSE(tubes->isHidden());
     EXPECT_EQ(tubes->mode(), TubePanel::Mode::New);
@@ -426,8 +427,7 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     EXPECT_TRUE(tubes->tubeBlock()->isAncestorOf(tubes->preview()));
     EXPECT_FALSE(tubes->preview()->editable()) << "a small read-only preview";
     tools.setTool("select");
-    EXPECT_EQ(tubes->mode(), TubePanel::Mode::Edit) << "Select: the selected guides' profile too";
-    EXPECT_TRUE(tubes->profileBlock()->isAncestorOf(tubes->shapeBox()));
+    EXPECT_TRUE(tubes->isHidden()) << "Select's card is the selection's: the tubes are the Tube brush's";
 }
 
 TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
@@ -497,7 +497,7 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
         {"place", {"New guides", "Tube", "Applies to"}},
         {"draw", {"New guides", "Tube", "Applies to"}},
         {"shape", {"Brush", "Paints", "Profile", "Selected guides", "Applies to"}},
-        {"select", {"Profile", "Selected guides", "Applies to"}},
+        {"select", {"Applies to"}},
         {"erase", {"Brush", "Erases", "Applies to"}},
         {"lengths", {"Keys", "Applies to"}},
         {"part", {"Parts", "Applies to"}},

@@ -527,10 +527,12 @@ class ToolsTest(unittest.TestCase):
 
     def test_4_tubes(self):
         head, t = self.head, self.t
-        bpy.ops.groomlab.tool(tool="select")  # Select's card: Selection, Profile, Selected guides
+        bpy.ops.groomlab.tool(tool="select")  # Select's card: the selection only (the tubes: Tube's)
+        self.assertNotIn(("prop", "tube_shape"), drawn(palette.VIEW3D_PT_groomlab_tools))
+        bpy.ops.groomlab.tool(tool="shape")  # Tube's: Profile (Duplicate edits a built-in), Selected guides
         log = drawn(palette.VIEW3D_PT_groomlab_tools)
         self.assertIn(("prop", "tube_shape"), log)
-        self.assertIn("Edit as Custom", texts(log))
+        self.assertNotIn("Edit as Custom", texts(log))
         # No targets: the shape and values go to the guides Place and Draw make (the placement tube).
         t.tube_shape = "ribbon"
         bpy.ops.groomlab.tool(tool="place")

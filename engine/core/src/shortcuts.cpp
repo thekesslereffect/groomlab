@@ -27,7 +27,7 @@ const std::vector<Shortcut>& shortcuts() {
         {"brush.strength", "Brush", "M + drag", "The brush strength", kAll, kSet},
         {"brush.strengthMiddle", "Brush", "Shift + middle-drag", "The brush strength", kMaya | kApp},
         {"brush.invert", "Brush", "Ctrl (stroke)", "The opposite: Length shortens, Lift lays down, Shape shrinks; painting, toward 0 (unfreeze, erase)", kAll},
-        {"brush.smooth", "Brush", "Shift (painting, Shape)", "Painting maps or guide attributes, or the Shape brush: smooth instead", kAll},
+        {"brush.smooth", "Brush", "Shift (painting, Tube)", "Painting maps or guide attributes, or the Tube brush: smooth instead", kAll},
         {"brush.select", "Brush", "S", "Select guides (Shift: toggle, Ctrl: deselect)", kApp | kBlender},
         {"brush.selectAdd", "Brush", "Shift + drag", "A guide brush: paint guides into the selection, the rest frozen (Shift + click: add the guides in the ring; on none: deselect and unfreeze all)", kAll},
         {"brush.level", "Brush", "Page Up / Page Down", "The brush level (parents / children)", kAll, kSet},
