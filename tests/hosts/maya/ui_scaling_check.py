@@ -323,24 +323,32 @@ def main():
             _expect(all("<b>" in b.toolTip() and "<br>" in b.toolTip() for b in tiles), "name + hint tooltips")
             shown = [b for b in tiles if b.isVisibleTo(tools)]
             side, tall = theme.px(palette.ToolPalette.TILE[0]), theme.px(palette.ToolPalette.TILE[1])
-            _expect(shown and all(b.width() == side and b.height() == tall for b in shown),
-                    "fixed %d x %d px tiles: %r" % (side, tall, sorted({(b.width(), b.height()) for b in shown})))
+            _expect(shown and all(b.width() >= side and b.height() == tall for b in shown),
+                    "%d px tall tiles, at least %d px wide: %r" % (tall, side, sorted({(b.width(), b.height()) for b in shown})))
             grid = next(g for g in tools.findChildren(widgets.ToolGrid) if g.isVisibleTo(tools) and len(g.buttons) > 1)
-            _expect(grid.buttons[1].x() == side + grid.spacing and grid.heightForWidth(side) ==
+            _expect(grid.buttons[1].x() == grid.buttons[0].width() + grid.spacing and grid.heightForWidth(side) ==
                     len(grid.buttons) * tall + (len(grid.buttons) - 1) * grid.spacing,
                     "tiles placed by their width and height")
             grids = [g for g in tools.findChildren(widgets.ToolGrid) if g.isVisibleTo(tools)]
+
+            def filled(g):
+                """Every tile within a pixel of an even share of the row, a full row to the edge."""
+                even = (g.width() - (g.columns - 1) * g.spacing) // g.columns
+                return (all(abs(b.width() - even) <= 1 for b in g.buttons)
+                        and (len(g.buttons) < g.columns or any(b.geometry().right() == g.width() - 1
+                                                               for b in g.buttons)))
 
             def fitting(g):
                 return min(palette.ToolPalette.MAX_COLUMNS, (g.width() + g.spacing) // (side + g.spacing))
             _expect(grids and all(g.columns == fitting(g) for g in grids),
                     "as many to a row as fit, at most four: %r" % [(g.columns, fitting(g)) for g in grids])
-            # Wider: at most four, the tiles the same size, left aligned (the first at the left edge).
+            _expect(all(filled(g) for g in grids), "the tiles fill the rows evenly")
+            # Wider: at most four, the tiles wider, still filling the rows (the first at the left edge).
             tools.resize(theme.px(600), theme.px(1000))
             settle()
             _expect(all(g.columns == min(palette.ToolPalette.MAX_COLUMNS, len(g.buttons)) or g.columns == palette.ToolPalette.MAX_COLUMNS
                         for g in grids), "wide, at most four to a row: %r" % [g.columns for g in grids])
-            _expect(all(b.width() == side for b in shown), "the tiles never stretch")
+            _expect(all(filled(g) for g in grids) and all(b.width() > side for b in shown), "the tiles stretch to the width")
             _expect(all(g.buttons[0].x() == 0 for g in grids), "left aligned")
             tools.resize(theme.px(380), theme.px(1000))
             settle()

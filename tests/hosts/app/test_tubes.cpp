@@ -430,10 +430,10 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     EXPECT_TRUE(tubes->profileBlock()->isAncestorOf(tubes->shapeBox()));
 }
 
-TEST(AppGroomTools, TilesKeepTheirSizeAndTheColumnsFollowTheWidth) {
-    // The grid: every tile one fixed size (labeled 56 x 50, icons alone 34 x 34; 20 px
-    // icons), left-aligned, never stretched; as many to a row as (width + spacing) / (tile + spacing),
-    // at most four.
+TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
+    // The grid: every tile one height and minimum width (labeled 56 x 54, icons alone 38 x 38; 24 px
+    // icons); as many to a row as (width + spacing) / (tile + spacing), at most four, the row's
+    // width split evenly between them.
     GroomTools tools;
     tools.setGroomName(QStringLiteral("sample"));
     EXPECT_TRUE(tools.topPart()->isAncestorOf(tools.tabBar()));
@@ -444,7 +444,7 @@ TEST(AppGroomTools, TilesKeepTheirSizeAndTheColumnsFollowTheWidth) {
     ASSERT_NE(grid, nullptr);
     for (const bool labels : {true, false}) {
         tools.setTileLabels(labels);
-        const QSize tile = labels ? QSize(56, 50) : QSize(34, 34);
+        const QSize tile = labels ? QSize(56, 54) : QSize(38, 38);
         EXPECT_EQ(grid->tile(), tile) << "labels " << labels;
         for (const int width : {120, 200, 252, 320, 480}) {
             const int columns = grid->columnsFor(width);
@@ -452,19 +452,23 @@ TEST(AppGroomTools, TilesKeepTheirSizeAndTheColumnsFollowTheWidth) {
             grid->resize(width, grid->heightForWidth(width));
             QResizeEvent resized(grid->size(), QSize());  // a hidden widget gets its resize event on show
             QCoreApplication::sendEvent(grid, &resized);
-            int lefts = 0;
+            const int even = (width - (columns - 1) * grid->spacing()) / columns;
+            int lefts = 0, rights = 0;
             for (QAbstractButton* t : grid->findChildren<QAbstractButton*>()) {
-                EXPECT_EQ(t->size(), tile) << "a tile stretched at " << width;
-                EXPECT_EQ((t->x()) % (tile.width() + grid->spacing()), 0) << "on the grid's columns, from the left";
-                EXPECT_LE(t->geometry().right(), width);
+                EXPECT_EQ(t->height(), tile.height());
+                EXPECT_GE(t->width(), tile.width());
+                EXPECT_LE(std::abs(t->width() - even), 1) << "the row split evenly at " << width;
+                EXPECT_LE(t->geometry().right(), width - 1);
                 if (t->x() == 0) ++lefts;
+                if (t->geometry().right() == width - 1) ++rights;
             }
             EXPECT_GT(lefts, 0);
+            EXPECT_GT(rights, 0) << "a full row reaches the grid's right edge at " << width;
         }
         EXPECT_GT(grid->heightForWidth(120), grid->heightForWidth(480)) << "narrower: more rows";
     }
     QAbstractButton* comb = tools.tile("comb");
-    EXPECT_EQ(qobject_cast<QToolButton*>(comb)->iconSize(), QSize(20, 20));
+    EXPECT_EQ(qobject_cast<QToolButton*>(comb)->iconSize(), QSize(24, 24));
     // The Paint tab: Paint is one full-width button over the maps, not a tile in a grid.
     auto* paint = qobject_cast<QToolButton*>(tools.tile("paint"));
     ASSERT_NE(paint, nullptr);

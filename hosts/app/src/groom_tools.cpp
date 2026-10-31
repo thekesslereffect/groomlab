@@ -213,12 +213,15 @@ QSize ToolGrid::minimumSizeHint() const { return {tile().width(), heightForWidth
 
 void ToolGrid::place() {
     if (buttons_.empty()) return;
-    // Every tile the same fixed size, left-aligned: the width says how many fit in a row.
+    // The width says how many fit in a row (at the tiles' minimum); the row's width is then split
+    // evenly between them, the leftover pixels spread so every row ends at the grid's edge.
     const QSize t = tile();
-    const int columns = columnsFor(std::max(width(), t.width()));
+    const int across = std::max(width(), t.width());
+    const int columns = columnsFor(across);
     for (std::size_t i = 0; i < buttons_.size(); ++i) {
         const int row = static_cast<int>(i) / columns, column = static_cast<int>(i) % columns;
-        buttons_[i]->setGeometry(column * (t.width() + spacing_), row * (t.height() + spacing_), t.width(), t.height());
+        const int left = column * (across + spacing_) / columns, right = (column + 1) * (across + spacing_) / columns - spacing_;
+        buttons_[i]->setGeometry(left, row * (t.height() + spacing_), std::max(right - left, t.width()), t.height());
     }
 }
 
@@ -584,7 +587,7 @@ void GroomTools::groupPicked(const std::string& name) {
 
 void GroomTools::refreshTiles() {
     const qreal dpr = devicePixelRatioF();
-    const int iconSize = 20;
+    const int iconSize = 24;
     // The icons in their two tones (the group's color and the ink, as Maya's); checked, a glass
     // theme's in the accent's text (on the accent), a solid theme's as at rest (on the selection).
     const bool glass = theme::glassy();
@@ -613,14 +616,15 @@ void GroomTools::refreshTiles() {
         }
     }
     // Labeled: the name under the icon on a raised tile (Maya's tiles); else icons alone (the
-    // names in the tool tips). Either way one fixed size for every tile.
+    // names in the tool tips). Either way one height and minimum width for every tile; the grid
+    // stretches them to fill its rows.
     for (QToolButton* b : allTiles_) {
         b->setIconSize(QSize(iconSize, iconSize));
         const bool wide = b->property("wide").toBool();  // Paint's: the panel's width, the name beside the icon
         b->setToolButtonStyle(wide ? Qt::ToolButtonTextBesideIcon : tileLabels_ ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonIconOnly);
-        const QSize size = tileLabels_ ? QSize(56, 50) : QSize(34, 34);
-        b->setMinimumSize(wide ? QSize(0, 34) : size);
-        b->setMaximumSize(wide ? QSize(QWIDGETSIZE_MAX, 34) : size);
+        const QSize size = tileLabels_ ? QSize(56, 54) : QSize(38, 38);
+        b->setMinimumSize(wide ? QSize(0, 38) : size);
+        b->setMaximumSize(QWIDGETSIZE_MAX, wide ? 38 : size.height());
         if (b->objectName() == QLatin1String("unfreezeAllTile") && b->property("iconLook").toString() != look) {
             b->setProperty("iconLook", look);
             b->setIcon(toolIcon("unfreeze", BrushCategory::Guides));

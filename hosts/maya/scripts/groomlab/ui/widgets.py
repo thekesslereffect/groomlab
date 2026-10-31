@@ -758,9 +758,9 @@ class Tile(QtWidgets.QToolButton):
 
 
 class ToolGrid(QtWidgets.QWidget):
-    """Tiles of a fixed size (they never stretch with the panel), left aligned, as many to a row as
-    the width holds: columns = (width + spacing) // (tile width + spacing), at least one (and up to
-    `columns`, when given)."""
+    """Tiles in rows, as many to a row as the width holds at the tiles' minimum width: columns =
+    (width + spacing) // (tile width + spacing), at least one (and up to `columns`, when given);
+    the row's width is split evenly between them."""
 
     def __init__(self, buttons, columns=None, parent=None):
         super(ToolGrid, self).__init__(parent)
@@ -785,15 +785,20 @@ class ToolGrid(QtWidgets.QWidget):
     def _tile_height(self):
         return max(b.minimumHeight() for b in self.buttons) if self.buttons else 0
 
-    def _place(self, columns, force=False):
+    def _place(self, columns, force=False, width=None):
         columns = max(1, columns if not self.max_columns else min(columns, self.max_columns))
         if columns == self.columns and not force:
             return
         changed = columns != self.columns
         self.columns = columns
-        across, down = self._tile() + self.spacing, self._tile_height() + self.spacing
+        # The row's width split evenly, the leftover pixels spread so every row ends at the edge.
+        tile, height = self._tile(), self._tile_height()
+        across = max(self.width() if width is None else width, tile)
         for i, b in enumerate(self.buttons):
-            b.move((i % columns) * across, (i // columns) * down)
+            column = i % columns
+            left = column * (across + self.spacing) // columns
+            right = (column + 1) * (across + self.spacing) // columns - self.spacing
+            b.setGeometry(left, (i // columns) * (height + self.spacing), max(right - left, tile), height)
         if changed:
             self.updateGeometry()
 
@@ -807,7 +812,7 @@ class ToolGrid(QtWidgets.QWidget):
         return max(1, -(-len(self.buttons) // max(1, columns)))
 
     def resizeEvent(self, event):
-        self._place(self.columns_for(event.size().width()), force=True)
+        self._place(self.columns_for(event.size().width()), force=True, width=event.size().width())
         super(ToolGrid, self).resizeEvent(event)
 
     def hasHeightForWidth(self):

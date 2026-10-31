@@ -62,8 +62,8 @@ class GuidesPanel;
 class TubePanel;
 
 // ---- ToolGrid --------------------------------------------------------------------------------------
-// Tiles at a fixed size (the largest button's minimum), left-aligned and never stretched: as many to
-// a row as fit, (width + spacing) / (tile + spacing), at most `maxColumns`.
+// Tiles in rows: as many to a row as fit at the largest button's minimum, (width + spacing) /
+// (tile + spacing), at most `maxColumns`; the row's width split evenly between them.
 class ToolGrid : public QWidget {
     Q_OBJECT
 public:

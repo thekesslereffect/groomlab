@@ -1590,15 +1590,16 @@ class ToolPalette(QtWidgets.QWidget):
             if getattr(button, "glyph", None):
                 button.setIcon(widgets.glyph(button.glyph))
 
-    TILE_ICON = 20       # px at 100%: the tool tiles' icons
-    TILE = (56, 50)      # the tiles' fixed width and height, the border included (they never stretch)
+    TILE_ICON = 24       # px at 100%: the tool tiles' icons
+    TILE = (56, 54)      # the tiles' minimum width and fixed height, the border included (the grid stretches them)
     MAX_COLUMNS = 4      # at most this many tiles to a row, however wide the panel
 
     def _tile_size(self, b):
         b.setIconSize(QtCore.QSize(theme.px(self.TILE_ICON), theme.px(self.TILE_ICON)))
         b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)  # the icon over the name (elided: widgets.Tile)
         b.setAutoRaise(True)
-        b.setFixedSize(theme.px(self.TILE[0]), theme.px(self.TILE[1]))
+        b.setMinimumSize(theme.px(self.TILE[0]), theme.px(self.TILE[1]))
+        b.setMaximumHeight(theme.px(self.TILE[1]))
         b.setProperty("role", "tool")  # a rounded tile: the theme colors it (checked: the selection, an accent border)
 
     def unfreeze_tile(self):
@@ -1630,7 +1631,7 @@ class ToolPalette(QtWidgets.QWidget):
             b.setIconSize(QtCore.QSize(theme.px(self.TILE_ICON), theme.px(self.TILE_ICON)))
             b.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
             b.setAutoRaise(True)
-            b.setFixedHeight(theme.px(34))
+            b.setFixedHeight(theme.px(38))
             b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             b.setProperty("role", "tool")
             b.setProperty("wide", True)
@@ -1644,7 +1645,7 @@ class ToolPalette(QtWidgets.QWidget):
 
     def tool_grid(self, tools, extra=()):
         """Labeled tiles (tool, label, tooltip: the icon over the name, the name and the hint in the
-        tooltip) of a fixed size, as many to a row as the panel's width holds, and any `extra`
+        tooltip) filling the panel's width, as many to a row as it holds, and any `extra`
         buttons after them; one tool is active across every tab."""
         tiles = []
         for tool, label, tip in tools:

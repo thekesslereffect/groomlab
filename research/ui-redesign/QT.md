@@ -66,7 +66,7 @@ brush_catalog.cpp and palette.py). One model, every tab:
 **Pick a tool → the list of things you work on → the tool's card.**
 
 1. **Top** (the whole panel is one QScrollArea): groom header, tabs, the tool grid. Tool tiles keep a
-   fixed size (labeled tiles 56 x 50 px: 20 px icon over the name, ToolButtonTextUnderIcon; icon-only 34 px); columns = `min((width + spacing) / (tile + spacing), 4)`, left-aligned, never stretched. The Paint tab has no grid: one full-width Paint button (ToolButtonTextBesideIcon, Expanding, 34 px) over the maps.
+   minimum size (labeled tiles 56 x 54 px: 24 px icon over the name, ToolButtonTextUnderIcon; icon-only 38 px); columns = `min((width + spacing) / (tile + spacing), 4)`, the row's width split evenly between them (every row ends at the edge). The Paint tab has no grid: one full-width Paint button (ToolButtonTextBesideIcon, Expanding, 38 px) over the maps.
 2. **The list** of the tab's things, right under the grid: Guide groups (Tools), Maps (Paint),
    Layers (Correctives), Photos. Section header = name, count, add/import glyphs. Plain rows
    (dot, name, meta, eye). Under the list, a small box with **the picked item's own** settings
