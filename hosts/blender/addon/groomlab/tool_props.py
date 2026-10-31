@@ -312,7 +312,7 @@ def curve_of(items, key):
 
 
 def _length_edit(edit, value_of):
-    """A Paths box field edited by hand: the edit sent to the helper (not while the box is filled)."""
+    """A Keys box field edited by hand: the edit sent to the helper (not while the box is filled)."""
     def update(self, context):
         from . import tools
         if tools.length_syncing():
@@ -510,21 +510,17 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # The flow arrows and sinks the groom keeps (the Flow card's count; refresh_parts fills them)
     flow_arrows: IntProperty()
     flow_sinks: IntProperty()
-    # The Length Paths tool's Paths box: the helper's state (JSON) and the selected key's fields
+    # The Length Keys tool's Keys box: the helper's state (JSON) and the selected key's fields
     length_state: StringProperty()
+    length_scale: FloatProperty(name="Key scale", min=0.001, max=1000.0, soft_max=10.0, precision=2, step=10,
+                                description="The selected key's scale: guides at it take their length times this (1: "
+                                            "kept as they are, a hold), blending smoothly toward the other keys "
+                                            "(right-drag the key up or down in the viewport to set it there)",
+                                update=_length_edit("scale", lambda t: {"value": t.length_scale}))
     length_key: FloatProperty(name="Key length", min=0.0001, subtype="DISTANCE", unit="LENGTH", precision=3,
-                              description="The selected key's length: guides at it take this length (right-drag the key "
-                                          "up or down in the viewport to set it there)",
-                              update=_length_edit("key", lambda t: {"value": t.length_key}))
-    length_reach: FloatProperty(name="Key reach", min=0.0001, subtype="DISTANCE", unit="LENGTH", precision=3,
-                                description="How far from the path guides change at the selected key (its ring; between "
-                                            "keys the reach blends): full near it, fading out to their own length at the "
-                                            "edge (Shift+drag a key in the viewport to size it)",
-                                update=_length_edit("reach", lambda t: {"value": t.length_reach}))
-    length_smooth: BoolProperty(name="Smooth", default=True,
-                                description="Lengths ease smoothly from key to key (never past a key); off: straight "
-                                            "between them",
-                                update=_length_edit("smooth", lambda t: {"on": t.length_smooth}))
+                              description="The length the selected key gives the guide nearest it (its scale set to "
+                                          "match)",
+                              update=_length_edit("length", lambda t: {"value": t.length_key}))
     length_change: EnumProperty(name="New length", default="SCALE",
                                 items=[("SCALE", "Scale", "The whole guide scaled about its root: curls and bends keep "
                                                           "their shape"),

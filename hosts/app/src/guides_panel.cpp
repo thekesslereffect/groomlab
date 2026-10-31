@@ -16,6 +16,7 @@
 #include <QMenu>
 #include <QPainter>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -29,6 +30,8 @@
 #include "groomlab/flow.h"
 #include "groomlab/guide_selection.h"
 #include "groomlab/parts.h"
+#include "card_parts.h"
+#include "glass.h"
 #include "list_bar.h"
 #include "theme.h"
 
@@ -61,7 +64,7 @@ QColor shownColor(const std::array<float, 3>& linear) {
 // The swatch: the color the group draws in, filled; a dashed outline when it is the automatic one
 // (Maya's dashed swatch: no color of its own).
 QIcon swatchIcon(const QColor& color, bool own, qreal dpr) {
-    const int size = 16;
+    const int size = 12;
     QPixmap pixmap(QSize(size, size) * dpr);
     pixmap.setDevicePixelRatio(dpr);
     pixmap.fill(Qt::transparent);
@@ -71,12 +74,12 @@ QIcon swatchIcon(const QColor& color, bool own, qreal dpr) {
     if (own) {
         p.setPen(Qt::NoPen);
         p.setBrush(color);
-        p.drawRoundedRect(r, 4.0, 4.0);
+        p.drawEllipse(r);
     } else {
         p.setBrush(color);
-        QPen pen(theme::textDim(), 1.0, Qt::DashLine);
+        QPen pen(theme::textDim(), 1.0, Qt::DotLine);
         p.setPen(pen);
-        p.drawRoundedRect(r, 4.0, 4.0);
+        p.drawEllipse(r);
     }
     p.end();
     return QIcon(pixmap);
@@ -85,48 +88,59 @@ QIcon swatchIcon(const QColor& color, bool own, qreal dpr) {
 }  // namespace
 
 GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
-    // The rows in a scroll area: a short window scrolls them rather than squeezing the tree.
-    auto* outer = new QVBoxLayout(this);
-    outer->setContentsMargins(0, 0, 0, 0);
-    auto* scroll = new QScrollArea(this);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    auto* host = new QWidget(scroll);
-    scroll->setWidget(host);
-    outer->addWidget(scroll);
-    auto* layout = new QVBoxLayout(host);
-    layout->setContentsMargins(6, 6, 6, 6);
-    layout->setSpacing(6);
+    setObjectName(QStringLiteral("guidesPanel"));
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(2);
     const ui::json& lists = defs().get("lists/groups");
-    about_ = aboutLabel(lists.value("about", std::string()), host);
-    layout->addWidget(about_);
-    bar_ = new ListBar(host);
+    // The header: Guide groups (palette.sections' label), how many, Isolate (the Groom Tools'),
+    // + New Group.
+    QString title = tr("Guide groups");
+    for (const ui::json& s : defs().get("palette/sections")) {
+        if (s.value("id", std::string()) == "groups") title = qs(s.value("label", title.toStdString()));
+    }
+    header_ = new ListHeader(title, this);
+    header_->setObjectName(QStringLiteral("groupsHeader"));
+    header_->setToolTip(QString::fromStdString(lists.value("about", std::string())).remove(QRegularExpression(QStringLiteral("<[^>]*>"))));
+    bar_ = new ListBar(header_);
     bar_->setObjectName(QStringLiteral("groupsBar"));
-    layout->addWidget(bar_);
+    header_->addGlyph(bar_);
+    layout->addWidget(header_);
 
-    tree_ = new QTreeWidget(host);
+    // The groups as plain rows: the color dot and name, the guides it holds, the eye.
+    tree_ = new QTreeWidget(this);
     tree_->setObjectName(QStringLiteral("groupsTree"));
-    tree_->setMinimumHeight(120);
-    tree_->setHeaderLabels({tr("Group"), QString(), tr("Guides"), tr("Level")});
+    tree_->setColumnCount(3);
+    plainRows(tree_);
+    tree_->setIndentation(12);
+    tree_->setRootIsDecorated(false);
     tree_->header()->setStretchLastSection(false);
     tree_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int c = 1; c < 4; ++c) tree_->header()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
+    tree_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    tree_->header()->setSectionResizeMode(2, QHeaderView::Fixed);
+    tree_->header()->resizeSection(2, 24);
     tree_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
-    tree_->setToolTip(tr("Click: brushes and new guides use this group. Double-click the name: rename. Checkbox: show or hide. "
-                         "Swatch: its color. Right-click: more"));
+    tree_->setToolTip(tr("Click: brushes and new guides use this group. Double-click the name: rename. Eye: show or hide. "
+                         "Right-click: more (its color...)"));
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
-    layout->addWidget(tree_, 1);
+    layout->addWidget(tree_);
+    empty_ = new QLabel(tr("No guide groups yet: Place or Draw starts the first (primary)."), this);
+    empty_->setObjectName(QStringLiteral("groupsEmpty"));
+    empty_->setProperty("role", "hint");
+    empty_->setWordWrap(true);
+    layout->addWidget(empty_);
     connect(tree_, &QTreeWidget::itemChanged, this, &GuidesPanel::itemChanged);
     connect(tree_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int column) {
         const std::string name = groupOf(item);
         if (name.empty()) return;
-        emit groupClicked(name);
-        // The swatch: its color picked (the window's Color..., never a modal dialog).
-        if (column == 1) {
-            const auto it = bindings_.find("group.color");
-            if (it != bindings_.end() && it->second.trigger) it->second.trigger(nullptr, false);
+        // The eye: shown or hidden (not a pick).
+        if (column == 2) {
+            if (!document_) return;
+            document_->setGroupHidden(name, !document_->hiddenGroups().count(name));
+            emit displayChanged();
+            return;
         }
+        emit groupClicked(name);
     });
     connect(tree_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem*, QTreeWidgetItem*) {
         if (!updating_) refreshRows();
@@ -135,53 +149,69 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
         if (QMenu* menu = contextMenu(pos)) menu->popup(tree_->viewport()->mapToGlobal(pos));
     });
 
-    selection_ = new QLabel(tr("No guides selected"), host);
-    selection_->setProperty("role", "about");
-    layout->addWidget(selection_);
+    // The picked group's box: rename, select, delete; Segments; Edit Guides ▾ and its children count.
+    QVBoxLayout* rows = nullptr;
+    box_ = itemBox(this, &rows);
+    box_->setObjectName(QStringLiteral("groupBox"));
+    itemBar_ = new ListBar(box_);
+    itemBar_->setObjectName(QStringLiteral("groupItemBar"));
+    rows->addWidget(itemBar_);
+    selection_ = new QLabel(tr("No guides selected"), box_);
+    selection_->setProperty("role", "hint");
+    selection_->hide();  // (the viewport's status says it)
+
+    // Segments: the selected guides (else the picked group's, else every guide) resampled to a
+    // point count, one undo step; a whole group's new guides get it too.
+    auto* segRow = new QHBoxLayout();
+    segRow->setSpacing(4);
+    segments_ = new ValueSlider(box_);
+    segments_->setObjectName(QStringLiteral("groupSegments"));
+    segments_->setCaption(tr("Segments"));
+    segments_->setRange(2.0, 64.0);
+    segments_->setLimits(1.0, 256.0);
+    segments_->setInteger(true);
+    segments_->setDecimals(0);
+    segments_->setValue(12.0);
+    segments_->setFill(theme::sliderFill(theme::blue()));
+    segments_->setToolTip(tr("Points along the guides, kept on their smooth curve: the selected guides (their own count from "
+                             "then on, kept when the group's changes; their group's count makes them follow it again), else the "
+                             "picked group's (its new guides get as many too). Frozen guides keep theirs. More segments let a "
+                             "guide curl tighter. Resample applies it."));
+    segRow->addWidget(segments_, 1);
+    auto* resample = new QPushButton(tr("Resample"), box_);
+    resample->setObjectName(QStringLiteral("resampleGuides"));
+    resample->setToolTip(segments_->toolTip());
+    segRow->addWidget(resample);
+    rows->addLayout(segRow);
+    connect(resample, &QPushButton::clicked, this, [this] { resampleGuides(static_cast<int>(std::lround(segments_->value()))); });
 
     // Edits on many guides: one menu, the children count beside it.
     auto* row = new QHBoxLayout();
-    row->setSpacing(6);
+    row->setSpacing(4);
     const ui::json& edits = lists.at("edits");
-    edits_ = new QPushButton(qs(edits.value("label", std::string())) + QStringLiteral("  ▾"), host);
+    edits_ = new QPushButton(qs(edits.value("label", std::string())) + QStringLiteral("  ▾"), box_);
     edits_->setObjectName(QStringLiteral("editGuides"));
+    edits_->setProperty("role", "ghost");
+    edits_->setFlat(true);
     edits_->setToolTip(qs(edits.value("tip", std::string())));
     editsMenu_ = new QMenu(edits_);
     editsMenu_->setObjectName(QStringLiteral("editGuidesMenu"));
     edits_->setMenu(editsMenu_);
-    row->addWidget(edits_, 1);
-    count_ = new QSpinBox(host);
+    row->addWidget(edits_);
+    row->addStretch(1);
+    count_ = new QSpinBox(box_);
     count_->setObjectName(QStringLiteral("childrenCount"));
     count_->setRange(1, 500);
     count_->setValue(5);
     count_->setPrefix(tr("x "));
     count_->setToolTip(tr("Children per guide for Edit Guides > Children (the selected guides, else the picked group)"));
     row->addWidget(count_);
-    layout->addLayout(row);
+    rows->addLayout(row);
+    layout->addWidget(box_);
 
-    // Segments: the selected guides (else the picked group's, else every guide) resampled to a
-    // point count, one undo step; a whole group's new guides get it too.
-    auto* segRow = new QHBoxLayout();
-    segRow->setSpacing(6);
-    auto* segLabel = new QLabel(tr("Segments"), host);
-    segRow->addWidget(segLabel);
-    segments_ = new QSpinBox(host);
-    segments_->setRange(1, 256);
-    segments_->setValue(12);
-    segments_->setToolTip(tr("Points along the guides, kept on their smooth curve: the selected guides (their own count from "
-                             "then on, kept when the group's changes; their group's count makes them follow it again), else the "
-                             "picked group's (its new guides get as many too). Frozen guides keep theirs. More segments let a "
-                             "guide curl tighter."));
-    segRow->addWidget(segments_, 1);
-    auto* resample = new QPushButton(tr("Resample"), host);
-    resample->setObjectName(QStringLiteral("resampleGuides"));
-    resample->setToolTip(segments_->toolTip());
-    segRow->addWidget(resample);
-    layout->addLayout(segRow);
-    connect(resample, &QPushButton::clicked, this, [this] { resampleGuides(segments_->value()); });
-
-    // The parts and flow the brushes laid (parts.h, flow.h): listed by name, removed, cleared.
-    auto* overlays = new QGroupBox(tr("Parts and flow"), host);
+    // The parts and flow the brushes laid (parts.h, flow.h): listed by name, removed, cleared
+    // (off in the Groom Tools: the Part and Flow tools' cards hold them).
+    auto* overlays = new QGroupBox(tr("Parts and flow"), this);
     overlays_ = overlays;
     auto* overlaysLayout = new QGridLayout(overlays);
     parts_ = new QListWidget(overlays);
@@ -203,6 +233,7 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     });
     connect(clearParts_, &QPushButton::clicked, this, [this] { clearParts(); });
     connect(clearFlow_, &QPushButton::clicked, this, [this] { clearFlow(); });
+    fitRows(tree_);
     setEnabled(false);
 }
 
@@ -212,7 +243,9 @@ void GuidesPanel::setActions(const ui::Bindings& bindings, const ui::FillOptions
     bindings_ = bindings;
     options_ = options;
     options_.liveShortcuts = false;
-    bar_->build(defs().get("lists/groups/bar"), bindings_, options_);
+    // + New Group in the header (a + glyph), the picked group's glyphs in its box.
+    bar_->build(defs().get("lists/groups/bar"), bindings_, options_, ListBar::Part::Labeled);
+    itemBar_->build(defs().get("lists/groups/bar"), bindings_, options_, ListBar::Part::Glyphs);
     editsMenu_->clear();
     ui::FillOptions edits = options_;
     edits.resolve.state.reset();  // every entry; the bindings say what is enabled
@@ -322,22 +355,25 @@ void GuidesPanel::refresh() {
             for (const GuideGroup& group : h->groups()) {  // parents before children
                 const auto parent = items.find(group.parent);
                 auto* item = parent == items.end() ? new QTreeWidgetItem(tree_) : new QTreeWidgetItem(parent->second);
-                const int depth = h->groupDepth(group.id);
+                const bool off = hidden.count(group.name) > 0;
                 item->setText(0, qs(group.name));
-                item->setText(2, QString::number(counts[group.id]));
-                item->setText(3, QString::number(depth));
+                item->setText(1, QString::number(counts[group.id]));
+                item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
+                item->setForeground(1, theme::textMuted());
+                if (off) item->setForeground(0, theme::textMuted());
+                item->setIcon(2, lineIcon(off ? QStringLiteral("eye_off") : QStringLiteral("eye"), devicePixelRatioF(), 14));
+                item->setToolTip(2, off ? tr("%1 is hidden: click to show it").arg(qs(group.name)) : tr("Hide %1 in the viewport").arg(qs(group.name)));
                 item->setData(0, Qt::UserRole, qs(group.name));
-                item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
-                item->setCheckState(0, hidden.count(group.name) ? Qt::Unchecked : Qt::Checked);
+                item->setFlags(item->flags() | Qt::ItemIsEditable);
                 const auto own = colors.find(group.name);
                 const auto shown = automatic.find(group.id);
                 const QColor color = own != colors.end() ? QColor(qs(own->second))
                                      : group.hasColor    ? shownColor(group.color)
                                      : shownColor(shown != automatic.end() ? shown->second : std::array<float, 3>{0.5f, 0.5f, 0.5f});
-                item->setIcon(1, swatchIcon(color, own != colors.end() || group.hasColor, devicePixelRatioF()));
-                item->setToolTip(1, own != colors.end() ? tr("%1's color: click to pick, right-click > Default Color to clear").arg(qs(group.name))
-                                                        : tr("%1's color is automatic (a hue of its own, from the groom's): click to pick one").arg(qs(group.name)));
-                QString tip = tr("%1: checked shows it in the viewport; double-click to rename").arg(qs(group.name));
+                item->setIcon(0, swatchIcon(color, own != colors.end() || group.hasColor, devicePixelRatioF()));
+                QString tip = tr("%1: click to brush it and place into it; double-click to rename").arg(qs(group.name));
+                tip += own != colors.end() ? tr("\nIts own color (right-click > Default Color to clear)")
+                                           : tr("\nAn automatic color (right-click > Color... to pick one)");
                 QStringList users;
                 for (const auto& [node, param] : document_->groupUsers(group.name)) users << QStringLiteral("%1 (%2)").arg(qs(node), qs(param));
                 if (!users.isEmpty()) tip += tr("\nNamed in the graph by %1").arg(users.join(QStringLiteral(", ")));
@@ -351,6 +387,8 @@ void GuidesPanel::refresh() {
         if (select) tree_->setCurrentItem(select);
         else if (tree_->topLevelItemCount() > 0) tree_->setCurrentItem(tree_->topLevelItem(0));
         updating_ = false;
+        header_->setCount(document_ ? (h ? static_cast<int>(h->groups().size()) : 0) : -1);
+        fitRows(tree_);
     }
     // The parts by name and the flow's count, as the brushes left them.
     parts_->clear();
@@ -367,6 +405,10 @@ void GuidesPanel::refreshRows() {
     const std::size_t n = document_ ? document_->selection().size() : 0;
     selection_->setText(n == 0 ? tr("No guides selected") : tr("%n guide(s) selected", "", static_cast<int>(n)));
     bar_->refresh();
+    itemBar_->refresh();
+    box_->setVisible(tree_->topLevelItemCount() > 0);
+    tree_->setVisible(tree_->topLevelItemCount() > 0);
+    empty_->setVisible(document_ && tree_->topLevelItemCount() == 0);
     ui::refreshActions(editsMenu_);
 }
 
@@ -381,11 +423,6 @@ void GuidesPanel::itemChanged(QTreeWidgetItem* item, int column) {
             updating_ = false;
         }
         return;
-    }
-    const bool hidden = item->checkState(0) == Qt::Unchecked;
-    if (document_->hiddenGroups().count(name) != (hidden ? 1u : 0u)) {
-        document_->setGroupHidden(name, hidden);
-        emit displayChanged();
     }
 }
 

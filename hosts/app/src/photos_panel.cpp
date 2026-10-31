@@ -11,6 +11,7 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -18,6 +19,7 @@
 
 #include "glass.h"
 #include "groom_document.h"
+#include "card_parts.h"
 #include "list_bar.h"
 #include "theme.h"
 
@@ -85,19 +87,21 @@ QLabel* hint(QWidget* parent, const char* role = "hint") {
 PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("photosPanel"));
     const ui::json& lists = defs().get("lists/photos");
-    auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 4, 0, 0);
-    layout->setSpacing(6);
-    about_ = aboutLabel(lists.value("about", std::string()), this);
-    layout->addWidget(about_);
-    bar_ = new ListBar(this);
-    layout->addWidget(bar_);
+    auto* outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(2);
+    // The header: Photos, how many, Import Photo... (a glyph); the about line in its tip.
+    header_ = new ListHeader(tr("Photos"), this);
+    header_->setObjectName(QStringLiteral("photosHeader"));
+    header_->setToolTip(QString::fromStdString(lists.value("about", std::string())).remove(QRegularExpression(QStringLiteral("<[^>]*>"))));
+    bar_ = new ListBar(header_);
+    header_->addGlyph(bar_);
+    outer->addWidget(header_);
 
     list_ = new QListWidget(this);
     list_->setObjectName(QStringLiteral("referenceList"));
+    plainRows(list_);
     list_->setIconSize(QSize(48, 36));
-    list_->setMinimumHeight(96);
-    list_->setMaximumHeight(132);
     list_->setToolTip(tr("The reference photos. Double-click: look through it; right-click: more"));
     list_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(list_, &QListWidget::currentRowChanged, this, [this](int) {
@@ -113,9 +117,21 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
     connect(list_, &QListWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         if (QMenu* menu = contextMenu(pos)) menu->popup(list_->viewport()->mapToGlobal(pos));
     });
-    layout->addWidget(list_);
+    outer->addWidget(list_);
+    empty_ = new QLabel(tr("No photos yet: import one to groom to (each photo is a camera)."), this);
+    empty_->setProperty("role", "hint");
+    empty_->setWordWrap(true);
+    outer->addWidget(empty_);
 
-    // How it shows: looking through, locked, the photo's opacity, side and visibility.
+    // The picked photo's box: rename, delete; how it shows: looking through, locked, the photo's
+    // opacity, side and visibility; its focal length; Align Photo...
+    QVBoxLayout* layout = nullptr;
+    box_ = itemBox(this, &layout);
+    box_->setObjectName(QStringLiteral("photoBox"));
+    itemBar_ = new ListBar(box_);
+    itemBar_->setObjectName(QStringLiteral("photoItemBar"));
+    layout->addWidget(itemBar_);
+    outer->addWidget(box_);
     auto* row = new QHBoxLayout();
     row->setSpacing(6);
     look_ = new QPushButton(tr("Look Through"), this);
@@ -139,19 +155,14 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
     row->addWidget(lock_);
     layout->addLayout(row);
 
-    auto* form = new QHBoxLayout();
-    form->setSpacing(6);
-    auto* opacityLabel = new QLabel(tr("Opacity"), this);
-    opacityLabel->setProperty("role", "propLabel");
-    form->addWidget(opacityLabel);
     opacity_ = new ValueSlider(this);
     opacity_->setObjectName(QStringLiteral("referenceOpacity"));
+    opacity_->setCaption(tr("Opacity"));
     opacity_->setRange(0.0, 1.0);
     opacity_->setLimits(0.0, 1.0);
     opacity_->setDecimals(2);
     opacity_->setStep(0.05);
     opacity_->setValue(0.6);
-    opacity_->setTrackWidth(0);
     opacity_->setFill(theme::blue());
     opacity_->setToolTip(tr("How opaque the photo is: see the mesh through it"));
     opacity_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -161,24 +172,18 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
         d.opacity = v;
         setDisplay(current(), d);
     });
-    form->addWidget(opacity_, 1);
-    layout->addLayout(form);
+    layout->addWidget(opacity_);
 
     // The photo camera's focal length (mm on a 36 mm film back), by hand: Keep focal length turns on,
     // so a solve keeps it. A locked camera keeps its own.
-    auto* focalRow = new QHBoxLayout();
-    focalRow->setSpacing(6);
-    auto* focalLabel = new QLabel(tr("Focal length"), this);
-    focalLabel->setProperty("role", "propLabel");
-    focalRow->addWidget(focalLabel);
     focal_ = new ValueSlider(this);
     focal_->setObjectName(QStringLiteral("referenceFocal"));
+    focal_->setCaption(tr("Focal length"));
     focal_->setRange(10.0, 200.0);
     focal_->setLimits(2.5, 3500.0);
     focal_->setDecimals(1);
     focal_->setStep(1.0);
     focal_->setValue(50.0);
-    focal_->setTrackWidth(0);
     focal_->setFill(theme::blue());
     focal_->setToolTip(tr("The photo camera's focal length (mm): Align Photo works it out from the point pairs; set it by hand when "
                           "you know the lens (Keep focal length turns on, so the alignment keeps it). A locked camera keeps its own"));
@@ -206,8 +211,7 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
         menu->addAction(tr("Reset Focal Length (%1 mm)").arg(kDefaultFocalMm), this, [this] { resetFocal(); });
         menu->popup(focal_->mapToGlobal(pos));
     });
-    focalRow->addWidget(focal_, 1);
-    layout->addLayout(focalRow);
+    layout->addWidget(focal_);
 
     auto* sides = new QHBoxLayout();
     sides->setSpacing(4);
@@ -269,16 +273,21 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
     alignAbout_->setObjectName(QStringLiteral("referenceAlignAbout"));
     layout->addWidget(alignAbout_);
 
-    // Guides from Photos (experimental): the Photos window's Guides stage does the work.
-    auto* heading = new QLabel(tr("GUIDES FROM PHOTOS (EXPERIMENTAL)"), this);
-    heading->setProperty("role", "subheading");
-    layout->addWidget(heading);
-    guidesHint_ = hint(this);
+    // Guides from photos (experimental, folded): the Photos window's Guides stage does the work.
+    auto* guides = new QWidget(this);
+    auto* guidesColumn = new QVBoxLayout(guides);
+    guidesColumn->setContentsMargins(0, 0, 0, 0);
+    guidesColumn->setSpacing(4);
+    guidesHint_ = hint(guides);
     guidesHint_->setObjectName(QStringLiteral("referenceGuidesHint"));
-    layout->addWidget(guidesHint_);
-    guidesBar_ = new ListBar(this);
-    layout->addWidget(guidesBar_);
-    layout->addStretch(1);
+    guidesColumn->addWidget(guidesHint_);
+    guidesBar_ = new ListBar(guides);
+    guidesColumn->addWidget(guidesBar_);
+    guidesSection_ = new Section(tr("Guides from photos"), guides, false, this);
+    guidesSection_->setObjectName(QStringLiteral("photosGuidesSection"));
+    guidesSection_->header()->setToolTip(tr("Experimental: trace guides from two or more aligned photos"));
+    outer->addWidget(guidesSection_);
+    outer->addStretch(1);
     refresh();
 }
 
@@ -292,7 +301,9 @@ void PhotosPanel::setActions(const ui::Bindings& bindings, const ui::FillOptions
     bindings_ = bindings;
     options_ = options;
     options_.liveShortcuts = false;
-    bar_->build(defs().get("lists/photos/bar"), bindings_, options_);
+    // Import Photo... in the header (a glyph), the picked photo's rename and delete in its box.
+    bar_->build(defs().get("lists/photos/bar"), bindings_, options_, ListBar::Part::Labeled);
+    itemBar_->build(defs().get("lists/photos/bar"), bindings_, options_, ListBar::Part::Glyphs);
     guidesBar_->build(defs().get("lists/photos/guidesBar"), bindings_, options_);
     if (QToolButton* b = bar_->button("photo.import")) b->setObjectName(QStringLiteral("referenceImport"));
     if (QToolButton* b = guidesBar_->button("photos.guides")) b->setObjectName(QStringLiteral("referenceOpenWindow"));
@@ -568,7 +579,12 @@ void PhotosPanel::refresh() {
     }
     if (list_->count() > 0) list_->setCurrentRow(std::clamp(was, 0, list_->count() - 1));
     updating_ = false;
+    header_->setCount(list_->count());
+    empty_->setVisible(list_->count() == 0);
+    box_->setVisible(list_->count() > 0);
+    fitRows(list_);
     bar_->refresh();
+    itemBar_->refresh();
     guidesBar_->refresh();
     refreshControls();
 }
@@ -597,6 +613,7 @@ void PhotosPanel::refreshControls() {
     look_->setText(looking ? tr("Back to Perspective") : tr("Look Through"));
     updating_ = false;
     bar_->refresh();
+    itemBar_->refresh();
     alignAbout_->setText(alignText());
     // Where Guides from Photos stands: the photos, their landmarks and arrows, the next step.
     const json all = photos();

@@ -1,30 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// The active tool's card in the Groom Tools (groom_tools.h), as Maya's Groom Tools show it
-// (palette.py show_tool_settings): only the settings the tool uses (the core's brush catalog,
-// brush_catalog.h, names them for every host), in Maya's order:
+// The active tool's card in the Groom Tools (groom_tools.h), as the redesign lays it out
+// (research/ui-redesign/QT.md, "Groom Tools layout"; the core's brush catalog, brush_catalog.h,
+// says which settings each tool uses). Always the same blocks in the same order, a block only
+// when it has rows:
 //
-//   Radius (px), Strength (± for the tools that work both ways), Falloff, Smooth
-//   Falloff curve, Root to tip                    (each a check box over its curve editor)
-//   Alpha        the picker; Rotation, Angle, Spacing, Invert while one is picked  (Paint on a scalp map)
-//   Selected only, Pen pressure, Keep off scalp, Front facing only   (two to a row)
-//   NEW GUIDES   Match nearby guides, Length, Segments, Spacing, Solo new guides   (Place, Draw)
-//   PARTS        Name, the parts drawn, Remove / Clear All                         (Part)
-//   FLOW         Place (Arrows, Whorl...), Clear All, what a click or drag does     (Flow)
-//   PATHS        Path, New Path, Key length / reach, Smooth, Scale or Trim, Delete
-//                Key / Path, Cancel, Apply                                         (Length Paths)
-//   Stretch                                                                         (Comb)
-//   Paints       Width, Flatness, Twist (chips, choices.tubeChannel)                (Shape)
-//   ERASES       Guides, Parts, Flow, and what Erase does not take                 (Erase)
-//   ACTS ON      Guides, Parts, Flow                                               (the shaping brushes)
-//   FREEZE MASK  Unfreeze All                                                      (Freeze)
-//   the gestures (middle-drag: radius...)
+//   title        the tool's icon and name, a ? (its tip: the catalog's full hint and the gestures),
+//                then one short line (palette.tools.<id>.short)
+//   Brush        Radius (px), Strength (± for the tools that work both ways), Falloff, Smooth (Paint);
+//                chips Pressure, Off scalp, Falloff curve, Root to tip (a curve chip that is on shows
+//                its ramp under the chips), and the app's own Propagate (the shaping brushes) and
+//                Pointwise (Paint)
+//   the tool's own block, named for what it sets:
+//     Paint        the maps panel's Mode, Value + Fill and color (setPaintControls), the alpha stamp
+//     New guides   Length, Segments, Spacing (Place); Match nearby, Solo new, Off scalp
+//     Comb         Stretch
+//     Paints       Width, Flatness, Twist (Shape)
+//     Erases       Guides, Parts, Flow, a short note
+//     Keys         Key scale, Key length, Guides Scale / Trim, Delete key, Clear, Cancel, Apply (Length Keys)
+//     Flow         Place (Arrows, Whorl...), the count, Clear all
+//     Parts        Name, the parts drawn, Parts from Curves / Remove / Clear
+//   the tubes    tube_panel.h's blocks (setTubes): Tube (Place, Draw), Profile and Selected guides
+//                (Shape, Select)
+//   Applies to   Acts on (Guides, Parts, Flow) where the tool has targets; Mirror (Symmetry and
+//                across what, the world plane's center) for the tools that mirror
 //
-// and the app's own: Propagate (the locked descendants edited too) with the brushes, Pointwise
-// with Paint. Every edit goes straight into the session's settings; the viewport's own edits (a
-// radius drag) come back through refresh. The tool's name and hint, the group, the symmetry and
-// the strands while sculpting live around the card (groom_tools.h).
+// Selected only and Front only are not in the card: the brushes keep their defaults (off and on).
+// Every edit goes straight into the session's settings; the viewport's own edits (a radius drag)
+// come back through refresh.
 
 #include <functional>
 #include <string>
@@ -35,21 +39,18 @@
 
 #include "definitions.h"
 
+class QAbstractButton;
 class QCheckBox;
 class QComboBox;
-class QDoubleSpinBox;
-class QFormLayout;
-class QGridLayout;
 class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
-class QSpinBox;
 class QToolButton;
 class QVBoxLayout;
 
 namespace groomlab {
-class LengthPathTool;
+class LengthKeyTool;
 class StrokeHost;
 struct BrushToolSettings;
 }  // namespace groomlab
@@ -57,8 +58,11 @@ struct BrushToolSettings;
 namespace groomlab::app {
 
 class AlphaPicker;
-class ValueSlider;
 class BrushSession;
+class CardBlock;
+class FlowLayout;
+class TubePanel;
+class ValueSlider;
 
 class BrushPanel : public QFrame {
     Q_OBJECT
@@ -66,46 +70,61 @@ public:
     explicit BrushPanel(QWidget* parent = nullptr);
 
     void setSession(BrushSession* session);  // null: nothing to edit
-    // The tool whose settings show (a catalog id: comb, place, freeze, paint...; "select" for the
-    // Select tool; "" none: nothing shows).
+    // The tool whose card shows (a catalog id: comb, place, freeze, paint, select...; "" none).
     void setTool(const std::string& id);
     const std::string& tool() const { return tool_; }
-    // Whether the tool shows any setting (the Select tool's card is empty in the app).
-    bool hasSettings() const { return hasSettings_; }
+    bool hasSettings() const { return hasSettings_; }  // a tool is set (its title, at least)
     // The editors take the settings' values again (after a radius drag, a scripted edit).
     void refresh();
     AlphaPicker* alphaPicker() const { return alpha_; }
-    // The parts the Part brush drew (the Parts box's list) and the one picked ("" none).
+    // The parts the Part brush drew (the Parts block's list) and the one picked ("" none).
     void setParts(const std::vector<std::string>& names);
     std::string selectedPart() const;
-    // The Flow box's count of the arrows and sinks the groom keeps ("34 arrows · 2 sinks"; Clear All
-    // off with none), and its words (every host's).
+    // The Flow block's count of the arrows and sinks the groom keeps ("34 arrows · 2 sinks"; Clear
+    // all off with none), and its words (every host's).
     void setFlowCount(std::size_t arrows, std::size_t sinks);
     static QString flowCountText(std::size_t arrows, std::size_t sinks);
-    // The Parts box's buttons from lists.json's parts bar and the window's bindings (parts.remove,
+    // The Parts block's buttons from lists.json's parts bar and the window's bindings (parts.remove,
     // parts.clear; an id without a binding is left out).
     void setBindings(const ui::Bindings& bindings);
+    // The tubes' blocks (tube_panel.h), placed after the tool's own block: Tube for Place and
+    // Draw, Profile and Selected guides for Shape and Select.
+    void setTubes(TubePanel* tubes);
+    // The Paint block's first rows: the maps panel's Mode, Value + Fill and color (maps_panel.h).
+    void setPaintControls(QWidget* controls);
+
+    // ---- The pieces (tests, screenshots) -------------------------------------------------------
+    QLabel* titleLabel() const { return title_; }
+    QLabel* shortLabel() const { return short_; }
+    QToolButton* helpButton() const { return help_; }
+    QCheckBox* symmetryBox() const { return symmetry_; }
+    QComboBox* symmetryMode() const { return symmetryMode_; }
+    // The titles of the blocks shown, top to bottom (Brush, the tool's own, the tubes', Applies to).
+    std::vector<std::string> blockTitles() const;
 
 signals:
     void settingsChanged();
-    void guidesEdited();       // Unfreeze All changed the guides: the host evaluates and redraws
-    void clearFlowRequested();  // the Flow box's Clear All
-    void lengthsPreviewed();    // the Paths box changed the Length Paths preview: evaluate and redraw
+    void guidesEdited();        // Unfreeze All changed the guides: the host evaluates and redraws
+    void clearFlowRequested();  // the Flow block's Clear all
+    void lengthsPreviewed();    // the Keys block changed the Length Keys preview: evaluate and redraw
 
 private:
-    // A slider row (a label, then the slider) bound to a float: its span `min`..`max`, a typed
-    // value reaching `limitMin`..`limitMax`.
-    ValueSlider* slider(QFormLayout* form, const QString& label, double min, double max, double limitMin, double limitMax,
-                        int decimals, std::function<double()> get, std::function<void(double)> set, const QString& tip = {});
-    QCheckBox* check(const QString& label, std::function<bool()> get, std::function<void(bool)> set, const QString& tip = {});
-    QCheckBox* setting(const char* id, std::function<bool()> get, std::function<void(bool)> set);
-    // A box of the card: a small heading (if any) over a column.
-    QWidget* box(const QString& title, QVBoxLayout** column);
-    // A brush curve of the catalog's (falloffProfile, strengthProfile): a check box over a curve
-    // editor shown while it is ticked (starting at the keys of `start`, a ramp's JSON); `get` and
-    // `set` are the settings' JSON ("" for none).
-    QWidget* curve(const std::string& setting, const std::string& start, std::function<std::string()> get,
-                   std::function<void(const std::string&)> set);
+    // A fill field (the name inside) bound to a float: its span `min`..`max`, a typed value
+    // reaching `limitMin`..`limitMax`.
+    ValueSlider* slider(QVBoxLayout* into, const QString& label, double min, double max, double limitMin, double limitMax, int decimals,
+                        std::function<double()> get, std::function<void(double)> set, const QString& tip = {});
+    // A chip bound to a bool.
+    QToolButton* chip(FlowLayout* into, const QString& label, std::function<bool()> get, std::function<void(bool)> set,
+                      const QString& tip = {});
+    QToolButton* settingChip(FlowLayout* into, const char* id, const QString& label, std::function<bool()> get, std::function<void(bool)> set);
+    // A brush curve of the catalog's (falloffProfile, strengthProfile): a chip, and a ramp editor
+    // shown under the chips while it is on (starting at the keys of `start`, a ramp's JSON); `get`
+    // and `set` are the settings' JSON ("" for none).
+    void curve(FlowLayout* chips, QVBoxLayout* editors, const std::string& setting, const QString& label, const std::string& start,
+               std::function<std::string()> get, std::function<void(const std::string&)> set);
+    void refreshTitle();
+    void refreshSymmetry();
+    void symmetryEdited();
     void edited();  // a setting changed by hand: the host follows
 
     BrushSession* session_ = nullptr;
@@ -113,67 +132,76 @@ private:
     bool hasSettings_ = false;
     bool updating_ = false;
     std::vector<std::function<void()>> refreshers_;
-    // The rows that come and go with the tool.
-    QWidget* brushForm_ = nullptr;
-    QLabel* radiusLabel_ = nullptr;
+    QVBoxLayout* card_ = nullptr;
+    // The title.
+    QLabel* icon_ = nullptr;
+    QLabel* title_ = nullptr;
+    QToolButton* help_ = nullptr;
+    QLabel* short_ = nullptr;
+    // Brush.
+    CardBlock* brush_ = nullptr;
     ValueSlider* radius_ = nullptr;
-    QLabel* strengthLabel_ = nullptr;
     ValueSlider* strength_ = nullptr;
-    QLabel* falloffLabel_ = nullptr;
     ValueSlider* falloff_ = nullptr;
-    QLabel* smoothLabel_ = nullptr;
     ValueSlider* smooth_ = nullptr;
-    QWidget* falloffCurve_ = nullptr;
-    QWidget* strengthCurve_ = nullptr;
-    QWidget* alphaBox_ = nullptr;  // Paint on a scalp map: the alpha and its rows
+    QToolButton* pressure_ = nullptr;
+    QToolButton* collide_ = nullptr;
+    QToolButton* falloffCurve_ = nullptr;
+    QToolButton* strengthCurve_ = nullptr;
+    QToolButton* propagate_ = nullptr;
+    QToolButton* pointwise_ = nullptr;
+    QWidget* falloffRamp_ = nullptr;
+    QWidget* strengthRamp_ = nullptr;
+    // Paint.
+    CardBlock* paint_ = nullptr;
+    QVBoxLayout* paintSlot_ = nullptr;
+    QWidget* alphaBox_ = nullptr;  // Paint on a scalp map: the stamp and its rows
     AlphaPicker* alpha_ = nullptr;
     QWidget* alphaOptions_ = nullptr;
     QComboBox* alphaRotation_ = nullptr;
     ValueSlider* alphaAngle_ = nullptr;
     ValueSlider* alphaSpacing_ = nullptr;
-    QCheckBox* alphaInvert_ = nullptr;
-    QGridLayout* checks_ = nullptr;
-    QCheckBox* selectedOnly_ = nullptr;
-    QCheckBox* pressure_ = nullptr;
-    QCheckBox* collide_ = nullptr;
-    QCheckBox* frontFacing_ = nullptr;
-    QCheckBox* propagate_ = nullptr;
-    QCheckBox* pointwise_ = nullptr;
-    std::vector<QCheckBox*> checkOrder_;
-    QWidget* createBox_ = nullptr;
-    QLabel* spacingLabel_ = nullptr;
+    // New guides.
+    CardBlock* newGuides_ = nullptr;
     ValueSlider* spacing_ = nullptr;
-    QWidget* partBox_ = nullptr;
+    QToolButton* placeCollide_ = nullptr;
+    // The others.
+    CardBlock* comb_ = nullptr;
+    CardBlock* paints_ = nullptr;
+    std::vector<QToolButton*> tubeChannels_;
+    CardBlock* erases_ = nullptr;
+    CardBlock* parts_ = nullptr;
     QLineEdit* partName_ = nullptr;
-    QListWidget* parts_ = nullptr;
+    QListWidget* partList_ = nullptr;
     QWidget* partButtons_ = nullptr;
-    // The Length Paths tool's box (lengthPaths); `lengthsEdit` runs an edit through the session
+    // The Length Keys tool's block (lengthKeys); `lengthsEdit` runs an edit through the session
     // and tells the host (Apply: the guides changed, else the preview did).
-    void lengthsEdit(const char* what, const std::function<void(LengthPathTool&, StrokeHost&, const BrushToolSettings&)>& fn,
+    void lengthsEdit(const char* what, const std::function<void(LengthKeyTool&, StrokeHost&, const BrushToolSettings&)>& fn,
                      bool applies = false);
-    QWidget* lengthsBox_ = nullptr;
-    QComboBox* lengthPath_ = nullptr;
-    QDoubleSpinBox* lengthKey_ = nullptr;
-    QDoubleSpinBox* lengthReach_ = nullptr;
-    QCheckBox* lengthSmooth_ = nullptr;
-    QComboBox* lengthChange_ = nullptr;
+    CardBlock* keys_ = nullptr;
+    ValueSlider* lengthScale_ = nullptr;
+    ValueSlider* lengthKey_ = nullptr;
+    std::vector<QToolButton*> lengthChanges_;
     QPushButton* lengthDeleteKey_ = nullptr;
-    QPushButton* lengthDeletePath_ = nullptr;
+    QPushButton* lengthClear_ = nullptr;
     QPushButton* lengthApply_ = nullptr;
     QPushButton* lengthCancel_ = nullptr;
     QLabel* lengthStatus_ = nullptr;
-    QWidget* flowBox_ = nullptr;
+    CardBlock* flow_ = nullptr;
     QComboBox* flowSink_ = nullptr;
     QLabel* flowHint_ = nullptr;
     QLabel* flowCount_ = nullptr;
     QPushButton* clearFlow_ = nullptr;
-    QWidget* stretchBox_ = nullptr;
-    QWidget* tubeChannelBox_ = nullptr;          // Shape: Paints Width / Flatness / Twist
-    std::vector<QToolButton*> tubeChannels_;
-    QWidget* eraseBox_ = nullptr;
-    QWidget* targetBox_ = nullptr;
-    QWidget* freezeBox_ = nullptr;
-    QLabel* gestures_ = nullptr;
+    // The tubes' blocks (another panel's).
+    QVBoxLayout* tubeSlot_ = nullptr;
+    TubePanel* tubes_ = nullptr;
+    // Applies to.
+    CardBlock* applies_ = nullptr;
+    QWidget* actsOn_ = nullptr;
+    QWidget* mirrorRow_ = nullptr;
+    QCheckBox* symmetry_ = nullptr;
+    QComboBox* symmetryMode_ = nullptr;
+    ValueSlider* symmetryCenter_ = nullptr;
 };
 
 }  // namespace groomlab::app

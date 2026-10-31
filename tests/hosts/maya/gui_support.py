@@ -239,6 +239,40 @@ def hover(widget, pos=None):
     return widget.underMouse()
 
 
+def clear_of_cursor(window):
+    """Move a test's window off the real cursor (the user's own mouse moves would otherwise reach
+    it between hover()'s events and the checks): to the side of its screen the cursor is not on."""
+    from PySide2 import QtGui, QtWidgets
+    cursor = QtGui.QCursor.pos()
+    frame = window.frameGeometry()
+    if not frame.contains(cursor):
+        return
+    screen = QtWidgets.QApplication.desktop().availableGeometry(window)
+    x = screen.left() if cursor.x() > screen.center().x() else max(screen.left(), screen.right() - frame.width())
+    window.move(x, window.y())
+    QtWidgets.QApplication.processEvents()
+
+
+def under_point(widget, pos=None):
+    """Why hover(widget) may have missed, for an assertion's message: what the window has at the
+    widget's point, a popup taking the mouse, the real cursor over the window (its moves win)."""
+    from PySide2 import QtGui, QtWidgets
+    pos = widget.rect().center() if pos is None else pos
+    window = widget.window()
+    local = widget.mapTo(window, pos)
+
+    def name(w):
+        if w is None:
+            return "nothing"
+        return "%s %r glParam=%r" % (type(w).__name__, w.objectName(), w.property("glParam"))
+    cursor = QtGui.QCursor.pos()
+    return ("%s (visible %s, %dx%d at %s): the window has %s there; popup %s; real cursor %s, over the "
+            "window: %s; under the cursor: %s"
+            % (name(widget), widget.isVisible(), widget.width(), widget.height(), local, name(window.childAt(local)),
+               name(QtWidgets.QApplication.activePopupWidget()), cursor,
+               window.frameGeometry().contains(cursor), name(QtWidgets.QApplication.widgetAt(cursor))))
+
+
 def drag(widget, start, end, steps=2, button=None, modifiers=None):
     """A left-button drag on widget from start to end (widget coordinates), sent as events (QTest's
     mouseMove would move the real cursor)."""

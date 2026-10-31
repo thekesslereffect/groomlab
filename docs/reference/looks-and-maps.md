@@ -456,7 +456,7 @@ draws round dots on each guide, in the guide's own color: `all` (the default), `
 tips`, or `off`: one dot on each point the guide has. Dots are `guideWidth` plus the theme's `pointSize` across, keep their size
 on screen and hide behind the head; on a groom with many guides they thin to about 2,500
 (roots and tips always). To rebuild the guides themselves to a point count, use
-the **Segments** slider (Groom Tools > Tools, Guide groups & edits) or `groomlab.resample_guides` (points spaced along
+the **Segments** field (Groom Tools > Tools, the picked group's box under Guide groups) or `groomlab.resample_guides` (points spaced along
 the smooth curve through the old ones, so bends stay round).
 
 ## Themes
@@ -466,9 +466,12 @@ style, slider colors) and the viewport's guide, dot, selection, part and flow co
 the **Theme** menu (in the **...** menu of the Groom Tools or of the Graph Editor); the
 choice is remembered.
 
-- **Playful** (the default): charcoal with red, yellow, blue, emerald and white; flat, round,
-  nodes with solid colored headers; tool icons emerald (create), blue (shape), red (trim) and
-  yellow (paint).
+- **Charcoal** (the default, in Maya and the app): calm neutral greys with one blue
+  accent, thin borders, small corners; the Inter font, underlined tabs, uppercase section
+  headers; nodes with headers filled in their category's color on a dot grid.
+- **Playful**: charcoal with red, yellow, blue, emerald and white; flat, round, nodes with
+  solid colored headers; tool icons emerald (create), blue (shape), red (trim) and yellow
+  (paint). Every theme extends it.
 - **Studio**: low-key greys with one quiet accent; small corners, tinted nodes, muted guides.
 - **Polar**: near-black and monochrome after polar.sh (Night, Ash, Mist and Snow) with Ether
   indigo as the one accent; soft corners, tinted nodes, grey tool icons.
@@ -490,12 +493,16 @@ choice is remembered.
 ```
 
 The keys: `palette` (named colors); `ui` (`background`, `panel`, `raised`, `hover`, `border`,
-`text`, `textDim`, `accent`, `accentText`, `warning`, `error`, `keyed`, `animated`, `driven`,
-`radius`, `fontSize`, `sliders`: the colors sliders cycle through); `graph` (`canvas`, `grid`,
-`node`, `nodeBorder`, `text`, `textDim`, `selected`, `cornerRadius`, `headerStyle` `filled` or
-`tinted`, `shadow`, `error`, `warning` and `note` for node badges and status lines, `driven` for a
+`text`, `textDim`, `textMuted` (the quietest text, section headers; `textDim` without it),
+`accent`, `accentText`, `selection` (selected rows and the active tool's tile; the accent
+without it), `warning`, `error`, `keyed`, `animated`, `driven`, `radius` (buttons and fields;
+small parts 2 px less, panels 2 px more), `fontSize`, `rowHeight` (the height of every field,
+combo box and button; their text's without it), `sliders`: the colors sliders cycle through);
+`graph` (`canvas`, `grid`, `node`, `nodeBorder`, `text`, `textDim`, `selected`, `cornerRadius`,
+`headerStyle` `filled`, `tinted` or `minimal` (a dot by the title), `canvasStyle` `dots`, `lines`
+or `plain`, `shadow`, `error`, `warning` and `note` for node badges and status lines, `driven` for a
 param a field or another node drives, `reads` and `writes` for the attribute chips, `categories`
-by node category, `ports` by port type); `icons` (a color per tool group: `create`, `shape`, `trim`, `paint`, and `app` for the window icons; `ink` for hair and neutral parts; a shade and a tint of each come with it, and a checked tool's icon turns to `accentText` on the accent); `viewport` (`pointSize`,
+by node category, `ports` by port type); `icons` (a color per tool group: `create`, `shape`, `trim`, `paint`, and `app` for the window icons; `ink` for hair and neutral parts; a shade and a tint of each come with it; a checked tool keeps its icon, its tile in the selection color with an accent border); `viewport` (`pointSize`,
 `selected`, `softSelected`, `frozen`, `parts`, `flow`, `flowField`, `tubes`, `instances`).
 
 ```python

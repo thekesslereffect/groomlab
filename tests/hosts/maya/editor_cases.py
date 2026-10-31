@@ -18,7 +18,7 @@ from maya import cmds
 import groomlab
 from groomlab.ui import menu as _menu
 
-from gui_support import CLASSIC_GRAPH, activate, drag, hover, settle_undo
+from gui_support import CLASSIC_GRAPH, activate, clear_of_cursor, drag, hover, settle_undo, under_point
 
 _menu.ASK_TO_SAVE = False  # no save prompt in tests (scenes stay untitled here)
 
@@ -140,8 +140,10 @@ class GraphEditorTest(unittest.TestCase):
         slider = self.editor.params.findChildren(widgets.SoftSlider)[0]
         self.assertEqual((slider.lo, slider.hi), (0.0, 400.0))  # density: centered on real hair's 200/cm²
         try:
-            slider.field.setValue(750)
-            slider.field.editingFinished.emit()
+            field = slider.edit()  # a click on the fill field: its inline field, the value selected
+            field.setText("700+50")  # arithmetic, as Maya's fields take
+            field.editingFinished.emit()
+            self.assertFalse(slider.isEditing())
             self.assertEqual((slider.lo, slider.hi), (0.0, 1000.0))  # stretched to reach the typed value
             self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 750)
             # Only this slider: other Scatter nodes still start from the typical range.
@@ -152,12 +154,12 @@ class GraphEditorTest(unittest.TestCase):
 
             # Dragging previews outside undo; releasing commits one undo step.
             settle_undo()
-            slider.slider.setSliderDown(True)
-            slider.slider.setValue(300)
+            slider.setSliderDown(True)
+            slider.scrub(300)
             wait(80)  # previews are coalesced: written within 40 ms
             self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 300)
-            slider.slider.setValue(400)
-            slider.slider.setSliderDown(False)
+            slider.scrub(400)
+            slider.setSliderDown(False)
             self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 400)
             cmds.undo()
             self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 750)
@@ -654,6 +656,8 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 80.0)
         self.assertEqual(self.editor.node_errors, {})
         self.assertTrue(self.editor.node_times)  # timing tags
+        # The cook time in each card's title row (muted, the warning color from 10 ms).
+        self.assertTrue(any(self.ge.time_text(ms) for ms in self.editor.node_times.values()))
 
         # View a node, bypass one.
         self.editor.view_node("scatter")
@@ -661,7 +665,10 @@ class GraphEditorTest(unittest.TestCase):
         self.editor.view_node(None)
         self.editor.set_bypass(["length"], True)
         self.assertTrue(self.editor.model.bypassed("length"))
+        bypassed = self.editor.items["length"].edges  # the rebuilt card's wires: dashed
+        self.assertTrue(bypassed and all(e.bypassed() for e in bypassed))
         self.editor.set_bypass(["length"], False)
+        self.assertFalse(any(e.bypassed() for e in self.editor.items["length"].edges))
 
         # When it runs (the node's Evaluate menu): render only, on the groom's graph; back to always.
         def evaluation():
@@ -1026,7 +1033,6 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(groomlab.errors(self.groom), [])
 
     def test_real_units(self):
-        from PySide2 import QtWidgets
         from groomlab import units
         from groomlab.ui import widgets
         units.set_unit("width", "um")
@@ -1041,8 +1047,8 @@ class GraphEditorTest(unittest.TestCase):
             self.assertTrue(shown, [s.value() for s in sliders])  # widths in micrometers
             shown[0].committed.emit(60.0)
             self.assertAlmostEqual(self.editor.model.param("width", "width"), 0.006, places=9)
-            labels = [l.text() for l in self.editor.params.findChildren(QtWidgets.QLabel)]
-            self.assertIn(u"µm", labels)
+            self.assertIn(u"µm", [s.suffix() for s in sliders])  # the unit inside the fill field
+            self.assertTrue(shown[0].text().endswith(u" µm"), shown[0].text())
             self.assertAlmostEqual(units.to_display("length", 1.5), 15.0)
             self.assertAlmostEqual(units.from_display("density", 200.0), 200.0)  # per cm2 is per scene unit2
             with self.assertRaises(ValueError):
@@ -1056,8 +1062,19 @@ class GraphEditorTest(unittest.TestCase):
         body = self.editor.params.widget()
         return next(w for w in body.findChildren(QtWidgets.QLabel) if w.property("glParam") == param)
 
+    def _param_target(self, param):
+        """What the mouse goes to for a param: its label, else (a number) its fill field, which holds the name."""
+        label = self._param_label(param)
+        return label if not label.isHidden() else self.editor.params.inside_fields[param]
+
     def _shown(self, param):
-        return self._param_label(param).isVisibleTo(self.editor.params.widget())
+        row = next(row for _section, _header, entries in self.editor.params.sections
+                   for spec, row in entries if spec["name"] == param)
+        return row.isVisibleTo(self.editor.params.widget())
+
+    def _suffixes(self, root):
+        from groomlab.ui import widgets
+        return [s.suffix() for s in root.findChildren(widgets.SoftSlider)]
 
     def test_param_sections_show_when_units_and_upgrade(self):
         from PySide2 import QtWidgets
@@ -1091,9 +1108,11 @@ class GraphEditorTest(unittest.TestCase):
             self.assertFalse(self._shown("melaninRandom"))
             self.assertTrue(self._shown("seed"))
             # S over a param inside a group: the hovered param is still its own.
-            panel.ensureWidgetVisible(self._param_label("melanin"))
+            target = self._param_target("melanin")
+            panel.ensureWidgetVisible(target)
+            clear_of_cursor(self.editor)
             wait(30)
-            self.assertTrue(hover(self._param_label("melanin")))
+            self.assertTrue(hover(target), under_point(target))
             wait(30)
             self.assertEqual(panel.hovered_param(), "melanin")
             # showWhen follows an edit without a rebuild.
@@ -1103,7 +1122,7 @@ class GraphEditorTest(unittest.TestCase):
             self.assertTrue(self._shown("color"))
             self.assertFalse(self._shown("melanin"))
             self.editor.set_param(color, "mode", "melanin")
-            self.assertIn("%", [l.text() for l in body.findChildren(QtWidgets.QLabel)])
+            self.assertIn("%", self._suffixes(body))  # the unit inside the fill field
 
             # One group or none: no group headers (Advanced alone); a fraction shows as a percentage.
             self.editor.scene.clearSelection()
@@ -1127,7 +1146,7 @@ class GraphEditorTest(unittest.TestCase):
             self.assertFalse(self._shown("maxAngle"))
             self.editor.set_param("resample", "mode", "curvature")
             self.assertTrue(self._shown("maxAngle"))
-            self.assertIn(u"°", [l.text() for l in panel.widget().findChildren(QtWidgets.QLabel)])
+            self.assertIn(u"°", self._suffixes(panel.widget()))
 
             # A node saved with an older behaviour: Upgrade in the header raises it, the badge goes.
             self.assertIsNone(panel.widget().findChild(QtWidgets.QToolButton, "upgradeNode"))
@@ -1704,7 +1723,7 @@ class GraphEditorTest(unittest.TestCase):
         # A text field with typing to undo keeps Ctrl+Z for itself; with nothing left, it is Maya's.
         self.editor.scene.clearSelection()
         self.editor.items["length"].setSelected(True)
-        field = self.editor.params.findChildren(widgets.SoftSlider)[0].field
+        field = self.editor.params.findChildren(widgets.SoftSlider)[0].edit()  # its inline field, as a click opens it
         original = field.text()
         self.assertTrue(activate(field))
         field.selectAll()
@@ -1722,15 +1741,15 @@ class GraphEditorTest(unittest.TestCase):
         # During a slider drag (previews outside undo) the keys do nothing. The panel was rebuilt by
         # the undo: its live slider (the old panel's may linger until Qt deletes it).
         slider = self.editor.params.key_widgets["keep"]
-        slider.slider.setSliderDown(True)
-        slider.slider.setValue(250 if slider.slider.value() > 500 else 750)  # a move it can make (not past its end)
+        slider.setSliderDown(True)
+        slider.scrub(slider.lo + (slider.hi - slider.lo) * (0.25 if slider.fraction() > 0.5 else 0.75))  # a move it can make
         wait(80)
         self.assertTrue(self.editor.previewing())
         stored = cmds.getAttr(self.groom + ".graph")
         press(view, QtCore.Qt.Key_Z, QtCore.Qt.ControlModifier)
         wait(60)
         self.assertEqual(cmds.getAttr(self.groom + ".graph"), stored)
-        slider.slider.setSliderDown(False)
+        slider.setSliderDown(False)
         self.editor.hide()
 
     def test_undo_after_a_node_move_shows_the_undone_graph(self):
@@ -1810,12 +1829,14 @@ class GraphEditorTest(unittest.TestCase):
         field = panel.key_widgets["keep"]
         self.assertEqual(field.property("keyState"), "keyed")
         keyed = QtGui.QColor(self.ge.theme.current().color(*self.ge.KEY_COLORS["keyed"])).name()
-        self.assertIn(keyed, field.field.styleSheet().lower())
+        self.assertEqual(field.key_color().name(), keyed)  # the fill field painted in it
+        self.assertEqual(field.colors()[2].name(), keyed)  # its border
         cmds.undo()  # attribute, link and key: one step
         wait(60)
         self.assertFalse(cmds.attributeQuery("ctl_length_keep", node=self.groom, exists=True))
         self.assertIsNone(self.editor.model.control_of("length", "keep"))
         self.assertEqual(panel.key_widgets["keep"].property("keyState"), "")
+        self.assertIsNone(panel.key_widgets["keep"].key_color())
         cmds.redo()
         wait(60)
         self.assertEqual(self.editor.model.control_of("length", "keep"), "length_keep")
@@ -1824,11 +1845,10 @@ class GraphEditorTest(unittest.TestCase):
         at_frame(10)
         field = panel.key_widgets["keep"]
         self.assertEqual(field.property("keyState"), "animated")
-        field.field.setValue(40.0)  # keep is a share: its field shows a percentage
-        field.field.editingFinished.emit()
+        self.assertTrue(field.commit_text("40%"))  # keep is a share: its field shows a percentage
         self.assertAlmostEqual(cmds.getAttr(attr), 0.4)
         # S over the field keys it here (the editor's view has the keyboard focus).
-        self.assertTrue(hover(field.field))  # the mouse over the field (Qt's, not the real cursor)
+        self.assertTrue(hover(field))  # the mouse over the field (Qt's, not the real cursor)
         wait(30)
         self.assertEqual(panel.hovered_param(), "keep")
         press(self.editor.view, QtCore.Qt.Key_S)
@@ -1859,7 +1879,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertFalse(action.isEnabled())
         self.assertIn("strands", action.toolTip())
         density = panel.key_widgets["density"]
-        self.assertTrue(hover(density.field))
+        self.assertTrue(hover(density))
         wait(30)
         press(self.editor.view, QtCore.Qt.Key_S)
         wait(30)
@@ -1891,13 +1911,14 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(cmds.getAttr(attr), 1.0)
         self.assertTrue(self.editor.keyed("length", "keep"))
         before = groomlab.viewport_points(self.groom)
-        slider = self.editor.params.key_widgets["keep"].slider
+        slider = self.editor.params.key_widgets["keep"]  # the fill field: a drag scrubs from where it is
         y = slider.rect().center().y()
         start, end = QtCore.QPoint(int(slider.width() * 0.9), y), QtCore.QPoint(int(slider.width() * 0.2), y)
         keyed_step = settle_undo()  # Maya's idle work done: only the drag's steps come after this
         QtTest.QTest.mousePress(slider, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, start)
         wait(30)
-        pressed = cmds.getAttr(attr)  # a press off the handle jumps there (a step of its own)
+        pressed = cmds.getAttr(attr)
+        self.assertEqual(pressed, 1.0)  # a press alone changes nothing (a drag is relative to it)
         for k in range(1, 9):
             at = QtCore.QPoint(int(start.x() + (end.x() - start.x()) * k / 8.0), y)
             self.app.sendEvent(slider, QtGui.QMouseEvent(QtCore.QEvent.MouseMove, at, QtCore.Qt.LeftButton,
@@ -1913,11 +1934,8 @@ class GraphEditorTest(unittest.TestCase):
         wait(60)
         self.assertFalse(self.editor.previewing())
         self.assertAlmostEqual(cmds.getAttr(attr) * 100.0, self.editor.params.key_widgets["keep"].value(), places=3)  # a percentage
-        if pressed == 1.0:  # the press was on the handle (no step): the release is one
-            self.assertEqual(undo_name, keyed_step)  # the drag itself made none (previews are outside undo)
-            self.assertNotEqual(cmds.undoInfo(query=True, undoName=True), undo_name)
-        else:  # the press jumped (a "set param" step): the release is another of that name
-            self.assertNotEqual(undo_name, keyed_step)  # so undoing the release alone gives the jump's value, below
+        self.assertEqual(undo_name, keyed_step)  # the drag itself made no step (previews are outside undo)
+        self.assertNotEqual(cmds.undoInfo(query=True, undoName=True), undo_name)  # the release is one
         cmds.undo()
         self.assertAlmostEqual(cmds.getAttr(attr), pressed, places=5)  # back to before the drag, in one step
         self.assertEqual(cmds.keyframe(attr, query=True, valueChange=True), [1.0])  # Auto Key off: no key
@@ -2624,7 +2642,7 @@ class GuidesTabTest(unittest.TestCase):
         self.events()
         tab = self.tab
         self.assertEqual(tab.segments.value(), 12)
-        self.assertIn("primary: 2", tab.segments_label.text())
+        self.assertIn("primary: 2", tab.segments.label())
         stored = cmds.getAttr(self.groom + ".guideData")
         settle_undo()
         undo_before = cmds.undoInfo(query=True, undoName=True)
@@ -2647,14 +2665,14 @@ class GuidesTabTest(unittest.TestCase):
         # All groups picked: every guide.
         self.tools.level.setCurrentIndex(0)
         self.events()
-        self.assertIn("all 2", tab.segments_label.text())
+        self.assertIn("all 2", tab.segments.label())
         # A selected guide: its own count, and only it is resampled.
         first = groomlab.guide_ids(self.groom, "primary")[0]
         groomlab.select_guides(self.groom, guides=[first])
         groomlab.resample_guides(self.groom, 7)
         self.events()
         self.assertEqual(tab.segments.value(), 7)
-        self.assertIn("1 selected", tab.segments_label.text())
+        self.assertIn("1 selected", tab.segments.label())
         self.assertEqual(sorted(groomlab.guide_segments(self.groom, group="primary")), [7, 12])
         self.assertEqual(groomlab.errors(self.groom), [])
 
@@ -2689,7 +2707,7 @@ class GuidesTabTest(unittest.TestCase):
         top = {tree.topLevelItem(i).text(0): tree.topLevelItem(i) for i in range(tree.topLevelItemCount())}
         self.assertEqual(set(top), {"primary", "braids"})
         self.assertEqual(top["primary"].child(0).text(0), "kids")  # child groups nest under their parents
-        self.assertEqual(top["primary"].child(0).text(3), "1")  # level
+        self.assertIn("Level 1: a child group of primary", top["primary"].child(0).toolTip(0))  # its level
         self.assertIn("guides (exclude)", top["braids"].toolTip(0))  # the graph nodes naming it
         self.assertIn("braidPaths (group)", top["braids"].toolTip(0))
         groomlab.rename_guide_group(self.groom, "braids", "rows")  # the graph follows
@@ -2701,12 +2719,19 @@ class GuidesTabTest(unittest.TestCase):
         tree.setCurrentItem(tree.findItems("kids", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0])
         self.tab.select_group()
         self.assertEqual(len(groomlab.selected_guides(self.groom)), 2)
-        # Each group's swatch in the color it draws in (its automatic one, dashed: none of its own).
+        # Each group's dot in the color it draws in (its automatic one, a ring: none of its own).
+        from groomlab.ui import tool_tabs
+
+        def dot(item):
+            return item.icon(0).pixmap(24, 24).toImage()
+
+        def drawn(color, dashed):
+            return tool_tabs.dot_icon(color, dashed=dashed).pixmap(24, 24).toImage()
         self.assertEqual(cmds.getAttr(self.groom + ".guideColorMode"), 0)
         automatic = dict((g["name"], g["color"]) for g in groomlab.list_guide_groups(self.groom))
         kids = tree.findItems("kids", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
-        self.assertIn(automatic["kids"], tree.itemWidget(kids, 1).styleSheet())
-        self.assertIn("dashed", tree.itemWidget(kids, 1).styleSheet())
+        self.assertEqual(dot(kids), drawn(automatic["kids"], True))
+        self.assertNotEqual(dot(kids), drawn(automatic["kids"], False))
         self.assertNotEqual(automatic["kids"], automatic["primary"])
         # A group's own color, from its swatch; renaming keeps it; clearing goes back.
         self.tab.set_color("kids", "#ff8800")
@@ -2715,7 +2740,7 @@ class GuidesTabTest(unittest.TestCase):
         self.assertEqual(groomlab.errors(self.groom), [])
         self.events()
         kids = tree.findItems("kids", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
-        self.assertIn("#ff8800", tree.itemWidget(kids, 1).styleSheet())
+        self.assertEqual(dot(kids), drawn("#ff8800", False))
         kids.setText(0, "fringe")  # renamed in place (double-click)
         self.events()
         self.assertIn("fringe", [g["name"] for g in groomlab.list_guide_groups(self.groom)])
@@ -2759,9 +2784,13 @@ class GuidesTabTest(unittest.TestCase):
         from PySide2 import QtCore
         self.tab.refresh()
         item = self.tab.tree.findItems("primary", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
-        self.assertEqual(item.checkState(0), QtCore.Qt.Checked)
-        item.setCheckState(0, QtCore.Qt.Unchecked)  # the eye: hide it
+        eye = self.tab.tree.itemWidget(item, 2)  # the row's eye glyph
+        self.assertEqual(eye.glyph, "eye")
+        eye.click()  # hide it
         self.assertEqual(groomlab.hidden_guide_groups(self.groom), ["primary"])
+        self.events()  # the list again: the row's eye closed
+        item = self.tab.tree.findItems("primary", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
+        self.assertEqual(self.tab.tree.itemWidget(item, 2).glyph, "eyeOff")
         cmds.refresh(force=True)
         guides = cmds.groomLabGuides(self.groom, listGuides="primary")
         points = lambda: [cmds.groomLabGuides(self.groom, guidePoints=g) for g in guides]
@@ -3535,6 +3564,9 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual(graph_editor.HEADER_STYLE, "tinted")
             self.assertEqual(editor.scene.backgroundBrush().color().name().upper(), "#212224")
             self.assertIn("border-radius: %dpx" % theme.px(4), tools.styleSheet())
+            theme.set_theme("charcoal")
+            self.assertEqual(graph_editor.HEADER_STYLE, "filled")       # the header in the category color
+            self.assertIn("border-radius: %dpx" % theme.px(6), tools.styleSheet())
             theme.set_theme("playful")
             self.assertEqual(graph_editor.HEADER_STYLE, "filled")
             self.assertIn("border-radius: %dpx" % theme.px(12), editor.styleSheet())
@@ -3876,9 +3908,10 @@ class DockableWindowsTest(unittest.TestCase):
         finally:
             updates.close()
 
-    def test_output_strip_and_alembic_curves_import(self):
-        """Groom Tools' Output strip runs the GroomLab menu's items (one table); Import > Alembic
-        Curves... makes the file's curves the groom's guides in one undo step."""
+    def test_output_menu_and_alembic_curves_import(self):
+        """The steps after grooming are the GroomLab menu's (the Groom Tools have no Output strip any
+        more; the empty state keeps Import); Import > Alembic Curves... makes the file's curves the
+        groom's guides in one undo step."""
         import tempfile
         from PySide2 import QtWidgets
         from groomlab import sim
@@ -3886,28 +3919,15 @@ class DockableWindowsTest(unittest.TestCase):
         cmds.select(self.groom)
         tools = palette.show()
         try:
-            self.assertTrue(tools.output_section.expanded())
-            self.assertTrue(tools.output_strip.isVisibleTo(tools))
-            labels = [c.text() for c in tools.output_chips]
-            self.assertEqual([t.split("  ")[0] for t in labels], ["Simulate Range", "Export", "Render", "Studio",
-                                                                  "Transfer...", "Import"])
-
-            def actions(kind):
-                chip = tools.findChild(QtWidgets.QToolButton, "output_" + kind)
-                return [a.text() for a in chip.menu().actions() if not a.isSeparator()]
-            exports = actions("export")
-            for label in ("Alembic...", "USD...", "Unreal Groom...", "Unity Strands (.abc)...", "glTF Cards..."):
-                self.assertIn(label, exports)
-            self.assertNotIn("Scales Mesh (FBX)...", exports)  # the menu's long list only
-            self.assertIn("Alembic Curves...", actions("import"))
-            self.assertIn("Render Turntable...", actions("render"))
-            self.assertIn("Portrait", actions("studio"))
-            self.assertIn("Remove Studio", actions("studio"))
-            # The menu shows the same table, without the strip's shortcuts.
+            self.assertIsNone(tools.findChild(QtWidgets.QWidget, "groomToolsOutput"))
+            self.assertIsNotNone(tools.empty_import.menu())
             menu_exports = [i[0] for i in menu.shown_items("export", menu.MENU_ONLY) if i]
-            self.assertIn("Scales Mesh (FBX)...", menu_exports)
+            for label in ("Alembic...", "USD...", "Unreal Groom...", "Unity Strands (.abc)...", "glTF Cards...",
+                          "Scales Mesh (FBX)..."):
+                self.assertIn(label, menu_exports)
             self.assertNotIn("Save Groom File As...", menu_exports)
             self.assertIn("Alembic Curves...", [i[0] for i in menu.shown_items("import", menu.MENU_ONLY) if i])
+            self.assertIn("Portrait", [i[0] for i in menu.shown_items("studio", menu.MENU_ONLY) if i])
             self.assertIsNot(menu.shown_items("render", menu.MENU_ONLY)[-1], None)  # no trailing divider
         finally:
             tools.close()
@@ -3953,17 +3973,19 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertIn("shape", [t for t, _, _ in dict(palette.SECTIONS)["Shape"]])
             self.assertNotIn("tube", window.buttons)
             self.assertEqual(palette.NAMES["straighten"], "Straighten")
-            self.assertEqual(window.mask_scalp.text(), "Front facing only")
-            self.assertEqual(window.falloff_label.text(), "Falloff")
+            # Selected only and Front only left the panel (the brushes keep their defaults).
+            self.assertFalse(hasattr(window, "mask_scalp") or hasattr(window, "selected_only"))
+            self.assertEqual(window.falloff.label(), "Falloff")  # the name inside its fill field
             window.buttons["paint"].click()
             self.assertFalse(window.collide.isVisibleTo(window))  # painting: no collide, as the catalog says
+            self.assertEqual(window.tabs.currentIndex(), palette.TABS.index("paint"))  # Paint shows its maps
             window.buttons["comb"].click()  # Comb: keep lengths or stretch
+            self.assertEqual(window.tabs.currentIndex(), palette.TABS.index("tools"))  # another brush: its card
             self.assertTrue(window.stretch_box.isVisibleTo(window))
             window.stretch.setChecked(True)
             self.assertTrue(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, stretch=True))
             window.stretch.setChecked(False)
             self.assertFalse(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, stretch=True))
-            self.assertEqual(window.tabs.currentIndex(), palette.TABS.index("paint"))  # Paint shows its maps
             self.assertEqual(window.paint_tab.current(), "fur")
             window.buttons["freeze"].click()  # Freeze is a brush on the Tools tab
             self.assertEqual(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, attribute=True), "freeze")
@@ -4014,27 +4036,24 @@ class DockableWindowsTest(unittest.TestCase):
             window.buttons["part"].click()  # parts are drawn from the palette too
             self.assertEqual(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, mode=True), "part")
             self.assertTrue(window.part_box.isVisibleTo(window))
-            # Only the sections the tool uses (palette.json's "tools"): Part draws no tubes and strokes no
-            # strands; the guide groups (Tools tab) and Output always there.
-            self.assertFalse(window.tubes_section.isVisibleTo(window))
-            self.assertFalse(window.display_section.isVisibleTo(window))
+            # Only the blocks the tool uses: Part draws no tubes; the guide groups on the Tools tab.
+            panel = window.tube_panel
+            self.assertFalse(any(b.isVisibleTo(window) for b in panel.blocks))
             self.assertEqual(window.guides_section.isVisibleTo(window),
                              palette.TABS[window.tabs.currentIndex()] == "tools")  # (the Tools tab's)
-            self.assertTrue(window.output_section.isVisibleTo(window))
             window.buttons["twist"].click()
             self.assertEqual(window.strength.lo, -1.0)  # signed tools get a signed strength
-            self.assertTrue(window.display_section.isVisibleTo(window))  # While sculpting: with the brushes
-            self.assertFalse(window.tubes_section.isVisibleTo(window))
-            # The Shape brush: what it paints (Width, Flatness, Twist), and the selected guides' tubes
-            # as a whole with the groom's Fill Tubes (each change one undo step).
+            self.assertFalse(any(b.isVisibleTo(window) for b in panel.blocks))
+            # The Shape brush: what it paints (Width, Flatness, Twist), its profile and the selected
+            # guides' tubes as a whole (each change one undo step).
             window.groom_picked(window.grooms.findData(self.groom))
             window.buttons["shape"].click()
             self.assertEqual(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, mode=True), "shape")
             self.assertEqual(window.strength.lo, -1.0)  # Ctrl does the opposite
             self.assertTrue(window.tube_channel_box.isVisibleTo(window))
-            self.assertTrue(window.tubes_section.expanded())  # its own section, opened by the Shape brush
-            self.assertTrue(window.tubes_section.isVisibleTo(window))
-            self.assertTrue(window.tube_panel.isVisibleTo(window))
+            self.assertTrue(window.tube_panel.profile_block.isVisibleTo(window))  # in the Shape brush's card
+            self.assertTrue(window.tube_panel.selected_block.isVisibleTo(window))
+            self.assertFalse(window.tube_panel.tube_block.isVisibleTo(window))  # (Place's and Draw's)
             self.assertFalse(window.collide.isVisibleTo(window))  # it moves no guide point
             window.tube_channel_buttons["flatness"].click()
             self.assertEqual(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, tubeChannel=True), "flatness")
@@ -4087,14 +4106,9 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertAlmostEqual(groomlab.get_tube(self.groom, guide)["twist"][0], math.pi / 2, places=4)  # not smoothed
             cmds.undo()
             self.assertEqual(len(groomlab.get_tube(self.groom, guide)["aspect"]), 5)
-            self.assertTrue(panel.fill.isEnabled())  # the default graph's Interpolate
-            panel.fill.setChecked(True)
-            self.assertTrue(groomlab.fill_tubes(self.groom)["fillTubes"])
-            panel.blend.committed.emit(40.0)
-            self.assertAlmostEqual(groomlab.fill_tubes(self.groom)["tubeBlend"], 0.4, places=5)
-            cmds.undo()
-            cmds.undo()
-            self.assertFalse(groomlab.fill_tubes(self.groom)["fillTubes"])
+            # Fill Tubes and Tube Blend are the Interpolate node's (its settings in the Graph Editor),
+            # not the panel's.
+            self.assertFalse(hasattr(panel, "fill") or hasattr(panel, "blend"))
             groomlab.clear_guide_selection(self.groom)
             groomlab.set_current_groom(None)  # the selected groom leads again
             window.radius.setValue(150)
@@ -4149,7 +4163,8 @@ class DockableWindowsTest(unittest.TestCase):
             groomlab.flow_stroke(self.groom, [(-0.3 + 0.1 * i, 0.9, 0.3) for i in range(7)], radius=0.2)
             window.buttons["flow"].click()
             self.assertTrue(window.flow_box.isVisibleTo(window))
-            self.assertFalse(window.tubes_section.isVisibleTo(window))
+            self.assertFalse(any(b.isVisibleTo(window) for b in window.tube_panel.blocks))
+            self.assertFalse(window.symmetry_row.isVisibleTo(window))  # Flow doesn't mirror
             arrows = len(groomlab.flow_arrows(self.groom))
             self.assertEqual(window.flow_count.text(), palette.flow_count_text(arrows, 0))
             self.assertEqual(window.clear_flow_button.isEnabled(), arrows > 0)
@@ -4160,7 +4175,7 @@ class DockableWindowsTest(unittest.TestCase):
             window.buttons["select"].click()
             self.assertEqual(cmds.currentCtx(), groomlab.SELECT_CONTEXT)
             self.assertFalse(window.radius.isEnabled())
-            self.assertTrue(window.tubes_section.isVisibleTo(window))  # the selected guides' tubes
+            self.assertTrue(window.tube_panel.selected_block.isVisibleTo(window))  # the selected guides' tubes
             self.assertFalse(window.flow_box.isVisibleTo(window))
             self.assertTrue(widgets.icon("comb").availableSizes() or not widgets.icon("comb").isNull())
             # Guide groups (a Tools section): the groups, and edits on many guides.
@@ -4199,7 +4214,7 @@ class DockableWindowsTest(unittest.TestCase):
             window.close()
 
     def test_tube_shape_editor_and_library(self):
-        # The Tubes panel's shape editor: a built-in shown read-only, Edit as Custom copying it into
+        # The Profile block's shape editor: a built-in shown read-only, Edit as custom copying it into
         # the library (the targets take it), points dragged (mirrored), added and removed, each a
         # commit every guide taking the shape follows; New, Duplicate, Rename in place, Delete on a
         # second click (no dialogs); the panel following a Shift+click solo; Place's tube.
@@ -4299,7 +4314,8 @@ class DockableWindowsTest(unittest.TestCase):
             groomlab.set_guide_attribute(self.groom, "freeze", 0.0, guides=guides)
             groomlab.clear_guide_selection(self.groom)
             window.buttons["place"].click()
-            self.assertTrue(panel.isVisibleTo(window))
+            self.assertTrue(panel.tube_block.isVisibleTo(window))  # Place's Tube block: what new guides get
+            self.assertFalse(panel.profile_block.isVisibleTo(window))
             panel.refresh(self.groom)
             panel.shape.setCurrentIndex(panel.shape.findData("teardrop"))
             panel.shape.activated.emit(panel.shape.currentIndex())
@@ -4791,7 +4807,8 @@ class ReferenceTabTest(unittest.TestCase):
         self.tab.look.click()
         self.assertEqual(reference.current_reference(self.panel), cam)
         self.assertTrue(self.tab.look.isChecked())
-        self.assertEqual(self.tab.look.text(), "Back to Perspective")
+        self.assertEqual(self.tab.look.text(), "Look through")  # a chip: its name stays, checked while looking
+        self.assertIn("go back", self.tab.look.toolTip())
         self.tab.look.click()
         self.assertEqual(cmds.modelPanel(self.panel, query=True, camera=True), "persp")
         self.assertFalse(self.tab.look.isChecked())

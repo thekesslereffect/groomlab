@@ -1223,8 +1223,7 @@ def draw_param(layout, node, spec, scene, mapped, inputs, drivers, collection, c
         draw_param_menu(head, context, node, spec)
         col.row(align=True).prop(node, prop, text="")
     else:
-        slider = spec.get("kind") in ("float", "int") and ("softMax" in spec or "max" in spec)
-        row.prop(node, prop, text=label + suffix, slider=slider)
+        row.prop(node, prop, text=label + suffix, slider=fill_slider(node, prop, spec))
     if driver:
         src = next((n for n in node.id_data.nodes if ours(n) and n.gl_name == driver), None)
         row.label(text="x %s" % driver, icon=KEY_ICONS["driven"] if src is not None and src.gl_type == "Control" else "LINKED")
@@ -1233,6 +1232,20 @@ def draw_param(layout, node, spec, scene, mapped, inputs, drivers, collection, c
         op.node, op.param = node.gl_name, name
     if not (spec.get("kind") == "vec3" and unit != "color"):
         draw_param_menu(row, context, node, spec)
+
+
+SOFT_LIMIT = 1e9  # past this a property's soft range is Blender's "none" (FLT_MAX, INT_MAX)
+
+
+def fill_slider(node, prop, spec):
+    """Whether a number param draws as a fill slider (the name inside, filled by the value): when its
+    property has a soft range to fill (the spec's softMin/softMax or min/max, a fraction's 0-1). Blender's
+    number fields drag and take typed values either way."""
+    if spec.get("kind") not in ("float", "int"):
+        return False
+    rna = node.bl_rna.properties.get(prop)
+    lo, hi = getattr(rna, "soft_min", None), getattr(rna, "soft_max", None)
+    return lo is not None and hi is not None and -SOFT_LIMIT < lo < hi < SOFT_LIMIT
 
 
 def draw_attribute_param(layout, node, spec, prop, label):
@@ -1361,9 +1374,45 @@ class GROOMLAB_PT_graph_presets(bpy.types.Panel):
         layout.label(text="Click: apply. Insert: as a Compound after the selected node", icon="INFO")
 
 
-# ---- The overlay: Maya's accent bars, badges and timings on the nodes -----------------------------
+# ---- The overlay: the cards' status, as Maya's and the app's --------------------------------------
 
 _draw_handle = [None]
+
+# The status on a node's header (the 2026-10-30 redesign's badges, Maya's and the app's): right-aligned
+# in the header row a warning triangle (a note: the node does nothing as set), the cook time (muted, the warning color from SLOW_MS) and the View eye in the blue. An
+# error keeps its red "!" on the corner.
+SLOW_MS = 10.0
+MUTED = (0.62, 0.62, 0.62, 1.0)       # the cook time under SLOW_MS (Blender's headers are lighter than Maya's cards)
+WARNING = (0.831, 0.698, 0.416, 1.0)  # Charcoal's yellow (#D4B26A), Maya's graph.warning
+FOCUS = (0.486, 0.612, 0.831, 1.0)    # Charcoal's blue (#7C9CD4): View on
+ERROR = (0.94, 0.31, 0.27, 1.0)
+INK = (0.1, 0.1, 0.12, 1.0)           # glyphs on those colors
+
+
+def time_text(ms):
+    """A node's cook time as its header shows it ("0.4 ms", "12 ms"); None under a twentieth of a
+    millisecond, as Maya's and the app's cards."""
+    if ms is None or ms < 0.05:
+        return None
+    return ("%.1f ms" % ms) if ms < 10.0 else ("%d ms" % int(round(ms)))
+
+
+def time_color(ms):
+    return WARNING if ms >= SLOW_MS else MUTED
+
+
+def header_badges(name, errors, notes, times, viewed):
+    """The badges right-aligned in a node's header, left to right: ("warning", note), ("time", text,
+    color), ("view",). An error's "!" is on the corner instead (and takes the warning's place)."""
+    badges = []
+    if notes.get(name) and name not in errors:
+        badges.append(("warning", notes[name]))
+    stamp = time_text(times.get(name))
+    if stamp:
+        badges.append(("time", stamp, time_color(times[name])))
+    if viewed:
+        badges.append(("view",))
+    return badges
 
 
 def _node_times(scalp):
@@ -1392,6 +1441,8 @@ def _draw_overlay():
 
 
 def _draw_overlay_now():
+    import math
+
     import blf
     import gpu
     from gpu_extras.batch import batch_for_shader
@@ -1411,25 +1462,40 @@ def _draw_overlay_now():
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")
     gpu.state.blend_set("ALPHA")
     font = 0
+    unit = 20.0 * scale * zoom  # Blender's widget unit on screen: the header is one tall
 
-    def rect(ax, ay, bx, by, color):
-        batch = batch_for_shader(shader, "TRIS", {"pos": [(ax, ay), (bx, ay), (bx, by), (ax, by)]},
-                                 indices=[(0, 1, 2), (0, 2, 3)])
+    def fan(points, color):
+        """A convex shape filled: its outline, fanned from the first point."""
+        batch = batch_for_shader(shader, "TRIS", {"pos": points},
+                                 indices=[(0, i, i + 1) for i in range(1, len(points) - 1)])
         shader.uniform_float("color", color)
         batch.draw(shader)
 
     def disc(cx, cy, r, color):
-        import math
-        pts = [(cx, cy)] + [(cx + r * math.cos(a * math.pi / 8), cy + r * math.sin(a * math.pi / 8)) for a in range(17)]
-        batch = batch_for_shader(shader, "TRIS", {"pos": pts}, indices=[(0, i, i + 1) for i in range(1, 17)])
-        shader.uniform_float("color", color)
-        batch.draw(shader)
+        fan([(cx, cy)] + [(cx + r * math.cos(a * math.pi / 8), cy + r * math.sin(a * math.pi / 8))
+                          for a in range(17)], color)
 
     def text(x, y, s, color, size):
         blf.size(font, max(6.0, size))
         blf.color(font, *color)
         blf.position(font, x, y, 0)
         blf.draw(font, s)
+
+    def width(s, size):
+        blf.size(font, max(6.0, size))
+        return blf.dimensions(font, s)[0]
+
+    def triangle(cx, cy, r):
+        """The warning sign: a triangle in the warning color, a dark "!" on it."""
+        fan([(cx - r, cy - 0.85 * r), (cx + r, cy - 0.85 * r), (cx, cy + r)], WARNING)
+        size = 1.3 * r
+        text(cx - 0.5 * width("!", size), cy - 0.7 * r, "!", INK, size)
+
+    def eye(cx, cy, r):
+        """View on: an almond in the blue with a dark pupil."""
+        top = [(cx + r * (2 * t - 1), cy + 0.62 * r * 4 * t * (1 - t)) for t in (i / 10.0 for i in range(11))]
+        fan([(cx, cy)] + top + [(x, 2 * cy - y) for x, y in reversed(top)], FOCUS)
+        disc(cx, cy, 0.3 * r, INK)
 
     for node in tree.nodes:
         if not ours(node) or node.hide:
@@ -1442,32 +1508,31 @@ def _draw_overlay_now():
         bx, by = ax + w * zoom, ay - h * zoom
         if bx < 0 or ax > region.width or ay < 0 or by > region.height:
             continue
-        category = "Output" if node.gl_is_output else graph_tree.category_of(node.gl_type)
-        accent = graph_tree._rgb(graph_tree.CATEGORY_COLORS.get(category, (142, 150, 158)))
-        rect(ax + 2 * zoom, ay, bx - 2 * zoom, ay - 3 * zoom * scale, accent)  # the category's accent bar
-        r = 8 * zoom * scale
         size = 11 * zoom * scale
+        mid = ay - 0.5 * unit  # the header row's middle
+        r = 8 * zoom * scale
         name = node.gl_name
         if name in errors:
-            disc(bx, ay, r, (0.94, 0.31, 0.27, 1.0))
+            disc(bx, ay, r, ERROR)
             text(bx - 0.18 * size, ay - 0.36 * size, "!", (1, 1, 1, 1), size)
-        elif name in notes:
-            disc(bx, ay, r, (0.5, 0.52, 0.55, 1.0))
-            text(bx - 0.14 * size, ay - 0.36 * size, "i", (0.96, 0.96, 0.96, 1), size)
         if node.gl_library_info and graph_authoring.library_info(node).get("updateAvailable"):
             # The library has a newer copy of this node: a mark on its left corner (Update Node), as Maya's.
             disc(ax, ay, r, (0.96, 0.69, 0.26, 1.0))
             text(ax - 0.24 * size, ay - 0.36 * size, "↑", (0.1, 0.1, 0.12, 1), size)
-        if node.gl_viewed:
-            disc(bx - 2.6 * r, ay, r * 0.8, (0.35, 0.82, 0.94, 1.0))
-            disc(bx - 2.6 * r, ay, r * 0.3, (0.1, 0.1, 0.12, 1.0))
-        ms = times.get(name)
-        if ms is not None:
-            heat = (0.47, 0.78, 0.47, 1) if ms < 5 else ((0.9, 0.75, 0.31, 1) if ms < 25 else (0.94, 0.39, 0.31, 1))
-            label = "%.1f ms" % ms
-            blf.size(font, max(6.0, 10 * zoom * scale))
-            tw, _ = blf.dimensions(font, label)
-            text(bx - tw - 4 * zoom, by - 13 * zoom * scale, label, heat, 10 * zoom * scale)
+        # The header badges, right to left from the header's right end.
+        x = bx - 0.5 * unit
+        small = 10 * zoom * scale
+        for badge in reversed(header_badges(name, errors, notes, times, node.gl_viewed)):
+            if badge[0] == "view":
+                eye(x - 0.4 * unit, mid, 0.4 * unit)
+                x -= 0.8 * unit + 0.3 * unit
+            elif badge[0] == "time":
+                tw = width(badge[1], small)
+                text(x - tw, mid - 0.36 * small, badge[1], badge[2], small)
+                x -= tw + 0.3 * unit
+            else:
+                triangle(x - 0.32 * unit, mid, 0.32 * unit)
+                x -= 0.64 * unit + 0.3 * unit
     gpu.state.blend_set("NONE")
 
 

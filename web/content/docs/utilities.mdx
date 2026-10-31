@@ -70,17 +70,16 @@ grooms) or hair cards instead ([Game export](/docs/game-export)).
 ## Start from existing curves
 
 - **Maya curves:** select the scalp and the curves, then **Create Groom from Selection**. Or add
-  them later with **From Curves** under Guide groups & edits.
-- **Alembic curves** (from Houdini or XGen): **GroomLab > Import > Alembic Curves...** (also
-  under **Import** in the Groom Tools' **Output** section), or
+  them later with **Edit Guides > From Curves** under Guide groups.
+- **Alembic curves** (from Houdini or XGen): **GroomLab > Import > Alembic Curves...**, or
   `groomlab.import_guides_from_alembic(groom, path)`. In the app and Blender, an **ImportCurves**
   node reads an Alembic file's curves.
 
 ## Transfer to a new scalp
 
 To move a groom to a new sculpt, a retopologized head or another character, open **Utilities >
-Transfer Groom to Scalp...** (or **Transfer...** in the Groom Tools' **Output** section; in the
-app, **Tools > Transfer Groom to Scalp...**). The groom's scalp is shown on the left and the mesh picked in **New
+Transfer Groom to Scalp...** (the same in the app and Blender; the app's **Properties > Inputs**
+Scalp row has a transfer button too). The groom's scalp is shown on the left and the mesh picked in **New
 scalp** on the right, each in its own view (Alt moves the camera).
 
 Pick a **Method**:
@@ -204,8 +203,8 @@ menu or the Graph Editor's **Edit** menu. It applies at once and is remembered a
 
 | Theme | Look |
 | --- | --- |
-| **Playful** (default) | Charcoal with bright primaries, flat and round. |
-| **Charcoal** | Calm neutral greys, an off-white primary button, thin borders, muted color only where it means something. |
+| **Charcoal** (default) | Calm neutral greys, one blue accent for the primary buttons and what is on, thin borders, muted color only where it means something; the Inter font, underlined tabs, uppercase section headers, node headers filled with their category's color. |
+| **Playful** | Charcoal with bright primaries, flat and round. |
 | **Polar** | Near-black and monochrome with one indigo accent. |
 | **Studio** | Low-key greys with one accent. |
 

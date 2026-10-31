@@ -43,6 +43,7 @@
 #include "export_panel.h"
 #include "graph_presets.h"
 #include "maps_panel.h"
+#include "tube_panel.h"
 #include "marking_menu.h"
 #include "node_graph.h"
 #include "overlay.h"
@@ -114,13 +115,12 @@ bool MainWindow::showUiPanel(const QString& name) {
     else if (n == QStringLiteral("brush")) panel = AppShell::Panel::Brush;
     else if (n == QStringLiteral("shortcuts") || n == QStringLiteral("help")) return showHelp(QStringLiteral("shortcuts"));
     else if (n == QStringLiteral("tubes")) {
-        // The Groom Tools' Tubes section, open and scrolled to (Tools tab).
+        // The tool card's tube blocks (the Shape brush's when no tool shows them), scrolled to (Tools tab).
         setUiMode(QStringLiteral("groom"));
         shell_->groomToolsDock()->show();
         groomTools_->showTab(QStringLiteral("tools"));
-        Section* tubes = groomTools_->section("tubes");
-        if (!tubes) return false;
-        tubes->setExpanded(true);
+        QWidget* tubes = groomTools_->tubePanel();
+        if (tubes->isHidden()) chooseTool(QStringLiteral("shape"));
         groomTools_->refreshTubes();
         // Scrolled to its header once laid out (the section's top at the dock's top).
         auto scroll = [this, tubes] {

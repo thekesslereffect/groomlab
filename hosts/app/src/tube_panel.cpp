@@ -5,7 +5,8 @@
 #include <cmath>
 #include <set>
 
-#include <QCheckBox>
+#include <QAction>
+#include <QActionGroup>
 #include <QComboBox>
 #include <QEvent>
 #include <QFormLayout>
@@ -13,10 +14,12 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QStyle>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <nlohmann/json.hpp>
@@ -25,6 +28,7 @@
 #include "groomlab/tube.h"
 
 #include "brush_session.h"
+#include "card_parts.h"
 #include "definitions.h"
 #include "glass.h"
 #include "groom_document.h"
@@ -71,164 +75,241 @@ void restyle(QWidget* w) {
 TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
     setObjectName(QStringLiteral("tubePanel"));
     auto* column = new QVBoxLayout(this);
-    column->setContentsMargins(0, 4, 0, 0);
-    column->setSpacing(6);
+    column->setContentsMargins(0, 0, 0, 0);
+    column->setSpacing(4);
     targetsLabel_ = new QLabel(this);
     targetsLabel_->setObjectName(QStringLiteral("tubeTargets"));
     targetsLabel_->setWordWrap(true);
     targetsLabel_->setProperty("role", "hint");
-    column->addWidget(targetsLabel_);
+    targetsLabel_->hide();  // (its words are the fields' tips)
 
-    auto* form = makeForm();
-    column->addLayout(form);
     shape_ = new QComboBox(this);
     shape_->setObjectName(QStringLiteral("tubeShape"));
     shape_->setToolTip(tr("The tube shape: picked, it goes to the targeted guides and to the guides Place and Draw make. The "
                           "built-ins, then the groom's library of custom shapes"));
+    shape_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    shape_->setMinimumContentsLength(6);
     connect(shape_, &QComboBox::activated, this, [this](int) { pick(shape_->currentData().toString().toStdString()); });
-    form->addRow(qs(defs().get("choices/tubeShape").value("label", std::string("Shape"))), shape_);
 
-    // The editor: the chosen shape's outline, and the library's edits.
-    editor_ = new TubeShapeEditor(this);
-    connect(editor_, &TubeShapeEditor::dragged, this, [this](const std::vector<SectionPoint>&) {
-        if (!preview_->isActive()) preview_->start();
-    });
-    connect(editor_, &TubeShapeEditor::committed, this, [this](const std::vector<SectionPoint>& points) { shapeCommitted(points); });
-    column->addWidget(editor_);
-    auto* options = new QHBoxLayout();
-    options->setSpacing(6);
-    editCustom_ = new QPushButton(tr("Edit as Custom"), this);
-    editCustom_->setObjectName(QStringLiteral("tubeEditAsCustom"));
-    editCustom_->setToolTip(tr("Copy this built-in shape into the groom's library as a new shape you can edit (the targeted guides "
-                               "take it)"));
-    connect(editCustom_, &QPushButton::clicked, this, [this] { editAsCustom(); });
-    mirror_ = new QCheckBox(tr("Mirror"), this);
-    mirror_->setObjectName(QStringLiteral("tubeShapeMirror"));
-    mirror_->setChecked(true);
-    mirror_->setToolTip(tr("Keep the outline's left and right sides alike (about the up axis): a point and its mirror image move, "
-                           "come and go together"));
-    connect(mirror_, &QCheckBox::toggled, this, [this](bool on) {
-        if (!updating_) setMirror(on);
-    });
-    shapeSmooth_ = new QCheckBox(tr("Smooth"), this);
-    shapeSmooth_->setObjectName(QStringLiteral("tubeShapeSmooth"));
-    shapeSmooth_->setChecked(true);
-    shapeSmooth_->setToolTip(tr("A smooth curve through the points; off: straight edges and sharp corners"));
-    connect(shapeSmooth_, &QCheckBox::toggled, this, [this](bool on) {
-        if (!updating_) setShapeSmooth(on);
-    });
-    options->addWidget(editCustom_);
-    options->addStretch(1);
-    options->addWidget(mirror_);
-    options->addWidget(shapeSmooth_);
-    column->addLayout(options);
-    auto* libraryRow = new QHBoxLayout();
-    libraryRow->setSpacing(4);
-    auto button = [this, libraryRow](const QString& text, const char* name, const QString& tip, void (TubePanel::*run)()) {
-        auto* b = new QPushButton(text, this);
+    // Width, Flatness, Twist: the sections the same root to tip (in New's block or Edit's).
+    fields_ = new QWidget(this);
+    auto* fields = new QVBoxLayout(fields_);
+    fields->setContentsMargins(0, 0, 0, 0);
+    fields->setSpacing(4);
+    width_ = committingSlider(0.0, 1.0, 0.0, 1e4, 3, &TubePanel::setWidth);
+    width_->setObjectName(QStringLiteral("tubeWidth"));
+    width_->setValue(0.1);
+    flatness_ = committingSlider(0.0, 0.99, 0.0, 0.99, 2, &TubePanel::setFlatness);
+    flatness_->setObjectName(QStringLiteral("tubeFlatness"));
+    flatness_->setValue(0.0);
+    twist_ = committingSlider(-180.0, 180.0, -180.0, 180.0, 1, &TubePanel::setTwist);
+    twist_->setObjectName(QStringLiteral("tubeTwist"));
+    twist_->setValue(0.0);
+    // The names inside the fields.
+    width_->setCaption(tr("Width"));
+    fields->addWidget(width_);
+    refreshUnits();
+    flatness_->setCaption(tr("Flatness"));
+    fields->addWidget(flatness_);
+    twist_->setCaption(tr("Twist (°)"));
+    fields->addWidget(twist_);
+    refreshTips();
+
+    // ---- New (Place, Draw): the tube new guides get.
+    tubeBlock_ = new CardBlock(tr("Tube"), this);
+    tubeBlock_->setObjectName(QStringLiteral("tubeBlock"));
+    {
+        auto* row = new QHBoxLayout();
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(8);
+        preview_ = new TubeShapeEditor(tubeBlock_);
+        preview_->setObjectName(QStringLiteral("tubePreview"));
+        preview_->setMinimumSize(56, 56);
+        preview_->setFixedSize(56, 56);
+        preview_->setAttribute(Qt::WA_TransparentForMouseEvents);
+        preview_->setFocusPolicy(Qt::NoFocus);
+        preview_->setToolTip(QString());
+        row->addWidget(preview_);
+        newPicker_ = new QVBoxLayout();
+        newPicker_->setContentsMargins(0, 0, 0, 0);
+        newPicker_->setSpacing(4);
+        auto* hint = new QLabel(qs(defs().get("palette/texts").value("profileHint", std::string())), tubeBlock_);
+        hint->setObjectName(QStringLiteral("tubeProfileHint"));
+        hint->setProperty("role", "hint");
+        hint->setWordWrap(true);
+        newPicker_->addWidget(hint);
+        newPicker_->addStretch(1);
+        row->addLayout(newPicker_, 1);
+        tubeBlock_->rows()->addLayout(row);
+        newFields_ = new QVBoxLayout();
+        newFields_->setContentsMargins(0, 0, 0, 0);
+        tubeBlock_->rows()->addLayout(newFields_);
+    }
+    column->addWidget(tubeBlock_);
+
+    // ---- Edit (Shape, Select): the profile, the library's glyphs in the header.
+    profileBlock_ = new CardBlock(tr("Profile"), this);
+    profileBlock_->setObjectName(QStringLiteral("profileBlock"));
+    auto glyph = [this](const char* icon, const char* name, const QString& tip, void (TubePanel::*run)()) {
+        QToolButton* b = makeGlyph(QLatin1String(icon), tip, profileBlock_);
         b->setObjectName(QLatin1String(name));
-        b->setToolTip(tip);
-        b->setMinimumWidth(0);
-        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        connect(b, &QPushButton::clicked, this, [this, run] { (this->*run)(); });
-        libraryRow->addWidget(b);
+        connect(b, &QToolButton::clicked, this, [this, run] { (this->*run)(); });
+        profileBlock_->addAction(b);
         return b;
     };
-    new_ = button(tr("New"), "tubeShapeNew", tr("A new library shape (a circle to start from)"), &TubePanel::newShape);
-    rename_ = button(tr("Rename"), "tubeShapeRename", tr("Rename this library shape (its guides keep it)"), &TubePanel::startRename);
-    duplicate_ = button(tr("Duplicate"), "tubeShapeDuplicate", tr("A copy of this shape in the library, to change on its own"),
-                        &TubePanel::duplicateShape);
-    delete_ = button(tr("Delete"), "tubeShapeDelete", tr("Remove this shape from the library: click twice (its guides become round)"),
-                     &TubePanel::deleteShape);
-    column->addLayout(libraryRow);
-    renameField_ = new QLineEdit(this);
-    renameField_->setObjectName(QStringLiteral("tubeShapeName"));
-    renameField_->setPlaceholderText(tr("New name, then Enter (Esc: keep it)"));
-    connect(renameField_, &QLineEdit::returnPressed, this, [this] { finishRename(); });
-    renameField_->installEventFilter(this);
-    renameField_->hide();
-    column->addWidget(renameField_);
-    apply_ = new QPushButton(tr("Apply to Selected"), this);
-    apply_->setObjectName(QStringLiteral("tubeShapeApply"));
-    apply_->setToolTip(tr("Give the targeted guides this shape"));
-    connect(apply_, &QPushButton::clicked, this, [this] { applyShape(); });
-    column->addWidget(apply_);
+    new_ = glyph("plus", "tubeShapeNew", tr("New shape: a library shape (a circle to start from)"), &TubePanel::newShape);
+    rename_ = glyph("glyph_rename", "tubeShapeRename", tr("Rename this library shape (its guides keep it)"), &TubePanel::startRename);
+    duplicate_ = glyph("copy", "tubeShapeDuplicate", tr("Duplicate: a copy of this shape in the library, to change on its own"),
+                       &TubePanel::duplicateShape);
+    delete_ = glyph("glyph_delete", "tubeShapeDelete", tr("Delete this shape from the library: click twice (its guides become round)"),
+                    &TubePanel::deleteShape);
+    delete_->setText(tr("Delete"));
+    {
+        editPicker_ = new QHBoxLayout();
+        editPicker_->setContentsMargins(0, 0, 0, 0);
+        editPicker_->setSpacing(4);
+        apply_ = new QPushButton(tr("Apply"), profileBlock_);
+        apply_->setObjectName(QStringLiteral("tubeShapeApply"));
+        apply_->setToolTip(tr("Give the selected guides this profile"));
+        connect(apply_, &QPushButton::clicked, this, [this] { applyShape(); });
+        editPicker_->addWidget(apply_);
+        profileBlock_->rows()->addLayout(editPicker_);
+        // The editor: the chosen shape's outline (at most 200 px square), and the library's edits.
+        editor_ = new TubeShapeEditor(profileBlock_);
+        editor_->setMaximumWidth(200);
+        connect(editor_, &TubeShapeEditor::dragged, this, [this](const std::vector<SectionPoint>&) {
+            if (!previewTimer_->isActive()) previewTimer_->start();
+        });
+        connect(editor_, &TubeShapeEditor::committed, this, [this](const std::vector<SectionPoint>& points) { shapeCommitted(points); });
+        profileBlock_->rows()->addWidget(editor_, 0, Qt::AlignHCenter);
+        auto* options = new QHBoxLayout();
+        options->setContentsMargins(0, 0, 0, 0);
+        options->setSpacing(4);
+        editCustom_ = makeGhost(tr("Edit as custom"),
+                                tr("Copy this built-in shape into the groom's library as a new shape you can edit (the targeted guides take it)"),
+                                profileBlock_);
+        editCustom_->setObjectName(QStringLiteral("tubeEditAsCustom"));
+        connect(editCustom_, &QPushButton::clicked, this, [this] { editAsCustom(); });
+        mirror_ = makeChip(tr("Mirror"),
+                           tr("Keep the outline's left and right sides alike (about the up axis): a point and its mirror image move, come "
+                              "and go together"),
+                           profileBlock_);
+        mirror_->setObjectName(QStringLiteral("tubeShapeMirror"));
+        mirror_->setChecked(true);
+        connect(mirror_, &QToolButton::toggled, this, [this](bool on) {
+            if (!updating_) setMirror(on);
+        });
+        shapeSmooth_ = makeChip(tr("Smooth"), tr("A smooth curve through the points; off: straight edges and sharp corners"), profileBlock_);
+        shapeSmooth_->setObjectName(QStringLiteral("tubeShapeSmooth"));
+        shapeSmooth_->setChecked(true);
+        connect(shapeSmooth_, &QToolButton::toggled, this, [this](bool on) {
+            if (!updating_) setShapeSmooth(on);
+        });
+        options->addWidget(editCustom_);
+        options->addWidget(mirror_);
+        options->addWidget(shapeSmooth_);
+        options->addStretch(1);
+        profileBlock_->rows()->addLayout(options);
+        renameField_ = new QLineEdit(profileBlock_);
+        renameField_->setObjectName(QStringLiteral("tubeShapeName"));
+        renameField_->setPlaceholderText(tr("New name, then Enter (Esc: keep it)"));
+        connect(renameField_, &QLineEdit::returnPressed, this, [this] { finishRename(); });
+        renameField_->installEventFilter(this);
+        renameField_->hide();
+        profileBlock_->rows()->addWidget(renameField_);
+    }
+    column->addWidget(profileBlock_);
+
+    // ---- Edit: the selected guides' sections; Smooth evens out what the brush painted.
+    selectedBlock_ = new CardBlock(tr("Selected guides"), this);
+    selectedBlock_->setObjectName(QStringLiteral("selectedGuidesBlock"));
+    {
+        smooth_ = new QToolButton(selectedBlock_);
+        smooth_->setObjectName(QStringLiteral("tubeSmooth"));
+        smooth_->setProperty("role", "ghost");
+        smooth_->setText(tr("Smooth"));
+        smooth_->setAutoRaise(true);
+        smooth_->setPopupMode(QToolButton::MenuButtonPopup);
+        smooth_->setToolTip(tr("Smooth the targeted guides' tubes along each guide: what the brush painted evened out, the root's and "
+                               "tip's sections kept (Shift+drag with the brush smooths under it). Its arrow: which channels"));
+        auto* menu = new QMenu(smooth_);
+        menu->setObjectName(QStringLiteral("tubeSmoothChannels"));
+        menu->setToolTipsVisible(true);
+        auto* group = new QActionGroup(menu);
+        group->setExclusive(true);
+        const QString channelsTip = qs(defs().get("choices/tubeSmooth").value("tip", std::string()));
+        for (const ui::json& item : defs().choices("tubeSmooth")) {
+            const std::string value = item.value("value", std::string());
+            QAction* a = menu->addAction(qs(item.value("label", std::string())));
+            a->setCheckable(true);
+            a->setChecked(value == smoothChannels_);
+            a->setToolTip(channelsTip);
+            group->addAction(a);
+            connect(a, &QAction::triggered, this, [this, value] { smoothChannels_ = value; });
+        }
+        smooth_->setMenu(menu);
+        connect(smooth_, &QToolButton::clicked, this, [this] { smoothTargets(); });
+        selectedBlock_->addAction(smooth_);
+        editFields_ = new QVBoxLayout();
+        editFields_->setContentsMargins(0, 0, 0, 0);
+        selectedBlock_->rows()->addLayout(editFields_);
+    }
+    column->addWidget(selectedBlock_);
+
     disarm_ = new QTimer(this);
     disarm_->setSingleShot(true);
     disarm_->setInterval(4000);
     connect(disarm_, &QTimer::timeout, this, [this] { disarmDelete(); });
-    preview_ = new QTimer(this);
-    preview_->setSingleShot(true);
-    preview_->setInterval(kPreviewMs);
-    connect(preview_, &QTimer::timeout, this, [this] { sendPreview(); });
+    previewTimer_ = new QTimer(this);
+    previewTimer_->setSingleShot(true);
+    previewTimer_->setInterval(kPreviewMs);
+    connect(previewTimer_, &QTimer::timeout, this, [this] { sendPreview(); });
 
-    // Width, Flatness, Twist: the sections the same root to tip.
-    auto* sections = makeForm();
-    column->addLayout(sections);
-    width_ = committingSlider(0.0, 1.0, 0.0, 1e4, 3, &TubePanel::setWidth);
-    width_->setObjectName(QStringLiteral("tubeWidth"));
-    width_->setValue(0.1);
-    width_->setToolTip(tr("The widest section's half-width (a round tube's radius): the targeted tubes scaled to it, their taper "
-                          "and what the brush painted kept; new guides' where none are near"));
-    flatness_ = committingSlider(0.0, 0.99, 0.0, 0.99, 2, &TubePanel::setFlatness);
-    flatness_->setObjectName(QStringLiteral("tubeFlatness"));
-    flatness_->setValue(0.0);
-    flatness_->setToolTip(tr("0: as the shape is drawn; toward 1 a flat ribbon (the sections' aspect 1 - this, the same root to tip)"));
-    twist_ = committingSlider(-180.0, 180.0, -180.0, 180.0, 1, &TubePanel::setTwist);
-    twist_->setObjectName(QStringLiteral("tubeTwist"));
-    twist_->setValue(0.0);
-    twist_->setToolTip(tr("Degrees: the sections turned about the guide from lying flat on the scalp, the same root to tip (the "
-                          "brush's Twist paints it along the guide)"));
-    widthLabel_ = new QLabel(tr("Width"), this);
-    sections->addRow(widthLabel_, width_);
-    refreshUnits();
-    sections->addRow(tr("Flatness"), flatness_);
-    sections->addRow(tr("Twist (°)"), twist_);
-    for (ValueSlider* s : {width_, flatness_, twist_}) {
-        if (auto* label = qobject_cast<QLabel*>(sections->labelForField(s))) label->setToolTip(s->toolTip());
-    }
-    // Smooth: the targeted tubes' painted sections evened out along each guide (one undo step).
-    auto* smoothRow = new QHBoxLayout();
-    smoothRow->setSpacing(6);
-    smooth_ = new QPushButton(tr("Smooth"), this);
-    smooth_->setObjectName(QStringLiteral("tubeSmooth"));
-    smooth_->setToolTip(tr("Smooth the targeted guides' tubes along each guide: what the brush painted evened out, the root's and "
-                           "tip's sections kept (Shift+drag with the brush smooths under it)"));
-    connect(smooth_, &QPushButton::clicked, this, [this] { smoothTargets(); });
-    smoothWhat_ = new QComboBox(this);
-    smoothWhat_->setObjectName(QStringLiteral("tubeSmoothChannels"));
-    for (const ui::json& item : defs().choices("tubeSmooth")) {
-        smoothWhat_->addItem(qs(item.value("label", std::string())), qs(item.value("value", std::string())));
-    }
-    smoothWhat_->setToolTip(qs(defs().get("choices/tubeSmooth").value("tip", std::string())));
-    smoothRow->addWidget(smooth_);
-    smoothRow->addWidget(smoothWhat_, 1);
-    sections->addRow(QString(), smoothRow);
-
-    // Fill Tubes and Tube Blend: the groom's Interpolate nodes'.
-    // (in the sections' form: the labels line up)
-    fill_ = new QCheckBox(tr("Fill Tubes"), this);
-    fill_->setObjectName(QStringLiteral("fillTubes"));
-    fill_->setToolTip(tr("Strands rooted inside a guide's tube ride it to the tip, flattening, twisting and tapering with it (the "
-                         "Interpolate nodes' fillTubes; the tubes of every guide level fill, the deepest winning)"));
-    connect(fill_, &QCheckBox::toggled, this, [this](bool on) {
-        if (!updating_) setFill(on);
-    });
-    blend_ = committingSlider(0.0, 100.0, 0.0, 100.0, 0, &TubePanel::setBlend);
-    blend_->setObjectName(QStringLiteral("tubeBlend"));
-    blend_->setValue(25.0);
-    blend_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral(" %"); });
-    blend_->setToolTip(tr("Tube Blend: the tubes' soft edge, a share of each tube's half-width. Strands rooted just outside a tube "
-                          "lean toward riding it, so no seam shows round it (0: a hard edge)"));
-    blendLabel_ = new QLabel(tr("Tube Blend"), this);
-    blendLabel_->setToolTip(blend_->toolTip());
-    sections->addRow(QString(), fill_);
-    sections->addRow(blendLabel_, blend_);
-
+    placed_ = true;
+    setMode(Mode::Edit);
     fillShapes();
     showChoice();
     refresh();
 }
+
+void TubePanel::setMode(Mode mode) {
+    const bool edit = mode == Mode::Edit;
+    if (mode != mode_ || placed_) {
+        placed_ = false;
+        // The picker and the fields move to the mode's block.
+        if (edit) {
+            editPicker_->insertWidget(0, shape_, 1);
+            editFields_->addWidget(fields_);
+        } else {
+            newPicker_->insertWidget(0, shape_);
+            newFields_->addWidget(fields_);
+        }
+        shape_->show();
+        fields_->show();
+    }
+    mode_ = mode;
+    tubeBlock_->setVisible(!edit);
+    profileBlock_->setVisible(edit);
+    selectedBlock_->setVisible(edit);
+    refreshTips();
+}
+
+void TubePanel::refreshTips() {
+    // What the fields change: the targets' tubes, else the tube new guides get.
+    const QString targets = targetsLabel_->text();
+    auto tip = [&targets](const QString& own) { return targets.isEmpty() ? own : own + QStringLiteral("\n\n") + targets; };
+    width_->setToolTip(tip(tr("The widest section's half-width (a round tube's radius): the targeted tubes scaled to it, their taper "
+                              "and what the brush painted kept; new guides' where none are near")));
+    flatness_->setToolTip(tip(tr("0: as the shape is drawn; toward 1 a flat ribbon (the sections' aspect 1 - this, the same root to tip)")));
+    twist_->setToolTip(tip(tr("Degrees: the sections turned about the guide from lying flat on the scalp, the same root to tip (the "
+                              "brush's Twist paints it along the guide)")));
+    if (selectedBlock_) selectedBlock_->titleLabel()->setToolTip(targets);
+}
+
+QAbstractButton* TubePanel::mirrorBox() const { return mirror_; }
+QAbstractButton* TubePanel::shapeSmoothBox() const { return shapeSmooth_; }
+
+QString TubePanel::widthCaption() const { return width_->caption(); }
 
 ValueSlider* TubePanel::committingSlider(double min, double max, double limitMin, double limitMax, int decimals,
                                          void (TubePanel::*commit)(double)) {
@@ -282,20 +363,18 @@ void TubePanel::refresh(bool force) {
     GroomDocument* doc = document();
     GroomDocument::TubeTargets info;
     library_.clear();
-    std::optional<GroomDocument::FillTubes> fill;
     if (doc) {
         info = doc->tubeTargets();
         for (const GroomDocument::TubeShapeInfo& s : doc->tubeShapes()) {
             if (!s.builtin) library_.push_back({s.name, s.points, s.smooth, s.users});
         }
-        fill = doc->fillTubes();
     }
     targets_ = info.guides;
     source_ = info.source;
     shapes_ = info.shapes;
     updating_ = true;
     fillShapes();
-    for (QWidget* w : {static_cast<QWidget*>(smooth_), static_cast<QWidget*>(smoothWhat_), static_cast<QWidget*>(apply_)}) {
+    for (QWidget* w : {static_cast<QWidget*>(smooth_), static_cast<QWidget*>(apply_)}) {
         w->setEnabled(info.tube.has_value());
     }
     if (!info.tube) {
@@ -328,20 +407,8 @@ void TubePanel::refresh(bool force) {
         flatness_->setValue(std::clamp(1.0 - aspect, 0.0, 0.99));
         twist_->setValue(twist * 180.0 / kPi);
     }
-    if (fill) {
-        fill_->setEnabled(true);
-        fill_->setChecked(fill->fill);
-        fill_->setToolTip(tr("Strands rooted inside a guide's tube ride it to the tip, flattening, twisting and tapering with it (the "
-                             "Interpolate nodes' fillTubes; the tubes of every guide level fill, the deepest winning)"));
-        blend_->setValue(fill->blend * 100.0);
-    } else {
-        fill_->setEnabled(false);
-        fill_->setChecked(false);
-        fill_->setToolTip(tr("The groom's graph has no Interpolate node: nothing to fill the tubes"));
-    }
-    blend_->setEnabled(fill && fill->fill);
-    blendLabel_->setEnabled(blend_->isEnabled());
     updating_ = false;
+    refreshTips();
     showChoice(info.tube.has_value() && shapes_.size() > 1);
     pushPlacement();
 }
@@ -383,6 +450,7 @@ void TubePanel::showChoice(bool mixed) {
     }
     if (const LibraryShape* custom = library(choice_)) {
         editor_->setShape(custom->points, custom->smooth, true);
+        preview_->setShape(custom->points, custom->smooth, false);
         if (mirror_->isChecked() && editor_->setMirror(true)) {
             const std::vector<SectionPoint> made = editor_->points();
             shapeCommitted(made);  // made symmetric: saved so
@@ -393,7 +461,8 @@ void TubePanel::showChoice(bool mixed) {
         parseTubeShape(choice_, &shape);
         bool smooth = true;
         const std::vector<SectionPoint> points = builtinTubeShapePoints(shape, &smooth);
-        editor_->setShape(points, smooth, false, tr("Built in: Edit as Custom to change it"));
+        editor_->setShape(points, smooth, false, tr("Built in: Edit as custom to change it"));
+        preview_->setShape(points, smooth, false);
     }
     updating_ = true;
     shapeSmooth_->setChecked(editor_->smooth());
@@ -404,7 +473,7 @@ void TubePanel::showChoice(bool mixed) {
     editCustom_->setEnabled(hasGroom);
     shapeSmooth_->setEnabled(custom);
     new_->setEnabled(hasGroom);
-    for (QPushButton* b : {rename_, duplicate_, delete_}) b->setEnabled(custom);
+    for (QToolButton* b : {rename_, duplicate_, delete_}) b->setEnabled(custom);
     apply_->setEnabled(!targets_.empty());
 }
 
@@ -474,7 +543,7 @@ void TubePanel::refreshUnits() {
         factor = c.factor;
         if (key != "scene") unit = QString::fromStdString(c.label);
     }
-    widthLabel_->setText(tr("Width (%1)").arg(unit));
+    width_->setCaption(tr("Width (%1)").arg(unit));
     if (factor == lengthFactor_) return;
     const double scene = width_->value() / lengthFactor_;
     lengthFactor_ = factor;
@@ -500,7 +569,7 @@ void TubePanel::setTwist(double degrees) {
 void TubePanel::smoothTargets() {
     GroomDocument* doc = document();
     if (!doc || targets_.empty()) return;
-    const std::string channel = smoothWhat_->currentData().toString() == QLatin1String("current") && session_
+    const std::string channel = smoothChannels_ == "current" && session_
                                     ? std::string(tubeChannelName(session_->settings().brush.tubeChannel))
                                     : std::string("all");
     edited(doc->smoothTubes(targets_, channel));
@@ -604,7 +673,10 @@ void TubePanel::deleteShape() {
         armed_ = true;
         const std::size_t users = custom->users;
         delete_->setText(tr("Delete? %1 go%2 round").arg(users).arg(users == 1 ? QStringLiteral("es") : QString()));
-        delete_->setProperty("role", "danger");
+        delete_->setProperty("armed", true);
+        delete_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        delete_->setMinimumSize(24, 24);
+        delete_->setMaximumSize(QWIDGETSIZE_MAX, 24);
         restyle(delete_);
         disarm_->start();
         return;
@@ -621,7 +693,9 @@ void TubePanel::disarmDelete() {
     armed_ = false;
     disarm_->stop();
     delete_->setText(tr("Delete"));
-    delete_->setProperty("role", QVariant());
+    delete_->setProperty("armed", QVariant());
+    delete_->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    delete_->setFixedSize(24, 24);
     restyle(delete_);
 }
 
@@ -635,7 +709,7 @@ void TubePanel::sendPreview() {
 }
 
 void TubePanel::shapeCommitted(const std::vector<SectionPoint>& points) {
-    preview_->stop();
+    previewTimer_->stop();
     GroomDocument* doc = document();
     if (!doc || !library(choice_)) return;
     const std::string error = doc->setTubeShape(choice_, &points, editor_->smooth());
@@ -662,24 +736,6 @@ void TubePanel::setShapeSmooth(bool on) {
     GroomDocument* doc = document();
     if (!doc || !library(choice_)) return;
     edited(doc->setTubeShape(choice_, nullptr, on));
-}
-
-void TubePanel::setFill(bool on) {
-    GroomDocument* doc = document();
-    if (!doc) return;
-    const std::string error = doc->setFillTubes(on, std::nullopt);
-    emit message(qs(error));
-    refresh(true);
-    if (error.empty()) emit graphEdited();
-}
-
-void TubePanel::setBlend(double percent) {
-    GroomDocument* doc = document();
-    if (!doc) return;
-    const std::string error = doc->setFillTubes(std::nullopt, static_cast<float>(percent / 100.0));
-    emit message(qs(error));
-    refresh(true);
-    if (error.empty()) emit graphEdited();
 }
 
 }  // namespace groomlab::app

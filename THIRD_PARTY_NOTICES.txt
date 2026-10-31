@@ -23,7 +23,7 @@ Contents:
   4. pybind11 2.13.6
   5. stb_image 2.30
   6. Intel(R) Threading Building Blocks (TBB) 2020.2
-  7. Figtree (font)
+  7. Inter (font)
   8. JetBrains Mono (font)
   9. Slang C++ prelude 2026.19
 
@@ -445,17 +445,17 @@ Parallel evaluation. tbb.dll is distributed beside groomlab-cli, groomlab-helper
    limitations under the License.
 
 ==============================================================================
-7. Figtree (font)
-https://github.com/erikdkennedy/figtree
+7. Inter (font)
+https://github.com/rsms/inter
 ==============================================================================
 
-The standalone app's UI typeface, embedded as a resource (hosts/app/fonts/Figtree[wght].ttf, the variable font as google/fonts ships it). Licensed under the SIL Open Font License, Version 1.1, reproduced below.
+The standalone app's UI typeface, embedded as a resource (hosts/app/fonts/Inter[opsz,wght].ttf, the variable font as google/fonts ships it), and the font of GroomLab's own windows in Maya, installed with OFL-Inter.txt in the Maya module's fonts folder. Licensed under the SIL Open Font License, Version 1.1, reproduced below.
 
-Copyright 2022 The Figtree Project Authors (https://github.com/erikdkennedy/figtree)
+Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
-http://scripts.sil.org/OFL
+https://scripts.sil.org/OFL
 
 
 -----------------------------------------------------------

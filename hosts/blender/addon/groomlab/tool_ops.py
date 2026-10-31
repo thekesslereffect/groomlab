@@ -187,7 +187,7 @@ class ToolSession(object):
         busy = self.stroking is not None or self.lasso is not None or self.slider is not None
         lengths = self.tool(context) == "lengths"
         if lengths and kind == "RIGHTMOUSE":
-            # The Length Paths tool: right-drag sets a key's length.
+            # The Length Keys tool: right-drag sets a key's scale.
             if value == "PRESS":
                 return self.press(context, scalp, event, locate_fn, adjust=True)
             if value == "RELEASE":
@@ -335,7 +335,7 @@ class ToolSession(object):
             try:
                 tools.stroke_end(stroked)
                 if self.tool(context) == "lengths":
-                    tools.length_state(stroked)  # the Paths box follows the key placed or dragged
+                    tools.length_state(stroked)  # the Keys box follows the key placed or dragged
                     tools.evaluate_live(stroked)  # the guides at their previewed lengths
             except HelperError as e:
                 tools.status(context.scene, e.message)
@@ -642,6 +642,26 @@ class GROOMLAB_OT_tool(bpy.types.Operator):
             return _fail(self, e)
         if s is not None:
             start_modal(context)
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_tool_help(bpy.types.Operator):
+    """The tool card's ?: the tool's whole hint and the gestures (its tooltip; a click says the hint)"""
+    bl_idname = "groomlab.tool_help"
+    bl_label = "Tool Help"
+    bl_options = {"INTERNAL"}
+
+    tool: StringProperty(name="Tool")
+
+    @classmethod
+    def description(cls, context, properties):
+        from . import palette
+        return palette.help_text(properties.tool)
+
+    def execute(self, context):
+        info = tools.tool_info(self.tool)
+        if info:
+            self.report({"INFO"}, "%s: %s" % (info["label"], info["hint"]))
         return {"FINISHED"}
 
 
@@ -1413,30 +1433,24 @@ class GROOMLAB_OT_flow_clear(GroomToolOperator):
 
 
 class GROOMLAB_OT_length_edit(GroomToolOperator):
-    """An edit of the Length Paths tool's paths (the Paths box): pick a path, New Path, Delete Key,
-    Delete Path, Cancel or Apply"""
+    """An edit of the Length Keys tool's keys (the Keys box): Delete Key, Clear, Cancel or Apply"""
     bl_idname = "groomlab.length_edit"
-    bl_label = "Length Paths"
+    bl_label = "Length Keys"
     bl_options = {"REGISTER"}
 
     edit: bpy.props.StringProperty(options={"SKIP_SAVE"})
-    path: bpy.props.IntProperty(options={"SKIP_SAVE"})
 
     @classmethod
     def description(cls, context, properties):
-        return {"select": "Edit this path", "newPath": "The next click on the scalp starts a new path (or Shift+click)",
-                "deleteKey": "Delete the selected key (or Ctrl+click it in the viewport)",
-                "deletePath": "Delete the selected path and its keys",
+        return {"deleteKey": "Delete the selected key (or Ctrl+click it in the viewport)",
+                "clear": "Delete every key",
                 "cancel": "Drop the changes since the last Apply (Esc)",
-                "apply": "Set the guides to the lengths shown (one undo step; Enter); the paths stay with the groom to "
-                         "edit and apply again"}.get(properties.edit, cls.__doc__)
+                "apply": "Set the guides to the lengths shown (one undo step; Enter); the keys stay with the groom at "
+                         "x1 to place again"}.get(properties.edit, cls.__doc__)
 
     def execute(self, context):
         try:
-            if self.edit == "select":
-                tools.length_edit(active(context), "select", path=self.path, key=0)
-            else:
-                tools.length_edit(active(context), self.edit)
+            tools.length_edit(active(context), self.edit)
         except HelperError as e:
             return _fail(self, e)
         return {"FINISHED"}
@@ -1967,7 +1981,7 @@ def unregister_keymaps():
     _keymaps.clear()
 
 
-classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROOMLAB_OT_tool_undo,
+classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_help, GROOMLAB_OT_tool_exit, GROOMLAB_OT_tool_undo,
            GROOMLAB_OT_step_level, GROOMLAB_OT_group_new, GROOMLAB_OT_group_edit, GROOMLAB_OT_guides_edit,
            GROOMLAB_OT_map_new, GROOMLAB_OT_paint_param, GROOMLAB_OT_map_remove, GROOMLAB_OT_map_fill,
            GROOMLAB_OT_map_import, GROOMLAB_OT_map_relink, GROOMLAB_OT_map_rename, GROOMLAB_OT_map_convert,

@@ -59,8 +59,11 @@ follow it.
 - **Units:** lengths are shown in cm, widths in µm, densities in strands per cm² (**...** >
   **Units**). Internally all lengths are in scene units, which GroomLab keeps in centimeters in
   Maya.
-- A node that has no effect with its current settings (a Clump with no centers, an Instance whose
-  mesh is missing) shows a grey **i** badge with the reason.
+- **Node status** sits on each node's title row, beside its header toggles: how long it took the
+  last time it ran (grey, yellow from 10 ms), and a yellow warning triangle on a node that has no
+  effect with its current settings (a Clump with no centers, an Instance whose mesh is missing):
+  hover the node for the reason. A bypassed node is faded and its wires are dashed. In the Charcoal
+  theme the headers are filled with the node's category color.
 - **Node actions** sit at the top of the node's settings, above its parameters, and stay there
   however far the parameters scroll: a Cards node's bakes and exports, a Simulate node's
   **Simulate Range**, **Bake Simulation** and **Clear Simulation**, a ToGuides node's **Bake Node
@@ -300,7 +303,7 @@ how to read it in a shader.
 The editors indicate which parameters read and which write. A parameter that writes shows
 **Writes** and a name field, with a warning when it overwrites an attribute written upstream. A
 parameter that reads shows **Reads** and lists only the attributes available at that node, with
-the node that writes each; a name that nothing upstream writes gets the grey **i** badge. Give
+the node that writes each; a name that nothing upstream writes gets the warning triangle. Give
 chained Clumps different names (for example `lockId`, then `clumpId`) so later nodes can choose
 which one to follow.
 
@@ -422,6 +425,23 @@ The node shows a tag, and the setting is saved with the groom.
 - **Copy Graph to Other Grooms...** (Utilities) applies one graph to several grooms.
 - **Copy Graph** and **Paste Graph** copy a whole graph as JSON text, to paste in a chat or save
   as a `.json` file ([Presets](/docs/presets#share-a-look-as-text)).
+
+## Number fields
+
+Every number in GroomLab's panels (the node settings, the Groom Tools, the app's Properties) is
+one field with its name inside and its value on the right, filled to where the value sits in its
+range:
+
+- **Drag** across it to scrub, relative to where you pressed: **Shift** for fine steps, **Ctrl**
+  for steps of ten.
+- **Click** it to type a value: a number or simple arithmetic (`0.5*2`, `1/3`; a comma works as the
+  decimal point). **Enter**, **Tab** or clicking away keeps it; **Esc** puts the old value back.
+- With the field focused, **Enter** (or **F2**) starts typing and the **arrow keys** nudge the value
+  (**Shift**: ten steps).
+- A typed value may go past the field's range (dragging stays inside it). In Maya, right-click the
+  field to fit, set or reset its range.
+
+Blender's own number fields work the same way, with Blender's keys.
 
 ## Ranges and versions
 

@@ -2,12 +2,13 @@
 #pragma once
 
 // The correctives panel (the Groom Tools' Correctives tab), as Maya's CorrectivesBox lays it out
-// from the shared definitions (engine/ui/lists.json's correctives): the about line, the bar
-// (+ New, ◆ Fix Frame, Up, Down, Solo, Delete), the groom as a stack, as Yeti's layers (the
+// from the shared definitions (engine/ui/lists.json's correctives), as the redesign lays it out
+// under the tool card: the header (Layers, how many, + New and ◆ Fix Frame glyphs; the about line
+// its tip), the groom as a stack, as Yeti's layers (the
 // correctives top first, the graph's Sculpt nodes as "Node: sculpt1", the Base groom at the
 // bottom; the check box turns a corrective on or off, a double-click renames it, a right-click
-// opens lists.correctives.context, or nodeContext on a node's row), and the picked corrective's
-// weight with ◆ (key it here). The picked row is what the brushes edit: the base groom (the
+// opens lists.correctives.context, or nodeContext on a node's row), and the picked row's box (Up,
+// Down, Solo, Delete; the corrective's weight with ◆, key it here). The picked row is what the brushes edit: the base groom (the
 // guides), a corrective at the timeline's frame (a shot sculpt: the core's correctives through the
 // brush session, so a correction on one frame rides along with the motion around it), or a Sculpt
 // node's guides (sculpt.h; the document's sculpt target). A corrective's weight is its envelope's,
@@ -29,6 +30,7 @@
 
 #include "definitions.h"
 
+class QFrame;
 class QLabel;
 class QMenu;
 class QToolButton;
@@ -44,6 +46,7 @@ namespace groomlab::app {
 class BrushSession;
 class GroomDocument;
 class ListBar;
+class ListHeader;
 class ValueSlider;
 
 class CorrectivesPanel : public QWidget {
@@ -95,7 +98,8 @@ public:
     std::optional<double> layerFrame(const std::string& name) const;
 
     QTreeWidget* tree() const { return tree_; }
-    ListBar* bar() const { return bar_; }
+    ListBar* bar() const { return bar_; }          // the header's: + New, Fix Frame
+    ListBar* itemBar() const { return itemBar_; }  // the picked layer's: Up, Down, Solo, Delete
 
 signals:
     void edited();          // the document's correctives changed: the host evaluates and redraws
@@ -116,8 +120,10 @@ private:
     BrushSession* session_ = nullptr;
     ui::Bindings bindings_;
     ui::FillOptions options_;
-    QLabel* about_ = nullptr;
+    ListHeader* header_ = nullptr;
     ListBar* bar_ = nullptr;
+    ListBar* itemBar_ = nullptr;
+    QFrame* box_ = nullptr;
     QTreeWidget* tree_ = nullptr;
     ValueSlider* weight_ = nullptr;
     QToolButton* key_ = nullptr;

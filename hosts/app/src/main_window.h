@@ -52,6 +52,7 @@ class QListWidget;
 class QMenu;
 class QProcessEnvironment;
 class QShowEvent;
+class QToolButton;
 class QLineEdit;
 class QSpinBox;
 class QTemporaryDir;
@@ -150,8 +151,8 @@ public:
     // runs, --ui-screenshot), nothing asks and only errors toast.
     // (Interactive: the saved choices it keeps, Delete Its File Too, are read.)
     void setInteractive(bool on);
-    // The Groom Tools' tool tiles with their names under the icons (View > Rail Labels, on by
-    // default; off: compact icon tiles), saved as ui/toolLabels; restoreRailLabels puts the saved
+    // The Groom Tools' tool tiles with their names under the icons (View > Tool Labels, off by
+    // default: icons alone, the names in the tool tips), saved as ui/toolLabels; restoreRailLabels puts the saved
     // choice back (the window someone sits at).
     void setRailLabels(bool shown, bool save = true);
     bool railLabels() const;
@@ -353,6 +354,13 @@ public:
     MapsPanel* mapsPanel() { return maps_; }
     // What stays over the viewport (the central widget), and the docked shell around it.
     OverlayHost* overlay() { return host_; }
+    // The menu bar's corner (the design's, in place of a tool bar): the groom's file name, muted,
+    // then Render ▾ (a ghost button) and Export ▾ (the accent), with menus.json's output.render and
+    // output.export menus.
+    QWidget* menuCorner() const { return menuCorner_; }
+    QLabel* cornerFileName() const { return cornerName_; }
+    QToolButton* cornerRender() const { return cornerRender_; }
+    QToolButton* cornerExport() const { return cornerExport_; }
     AppShell* shell() { return shell_; }
     // The marking menu (marking_menu.h; Y + click over the viewport): opened at `at` (the overlay
     // host's coordinates) with its items as the definitions and bindings give them now, `held`
@@ -527,6 +535,8 @@ private:
     // The menu bar, the one place it is built: File, Edit, View, Tools, Render, Help (their
     // actions' objectNames and shortcuts are what the tests and scripts find them by).
     void buildMenuBar();
+    void buildMenuCorner();
+    void fitMenuCorner();
     // View > Panels (menus.json's "panels" filler, app_actions.cpp): the docks' toggles, the sections.
     void fillPanelsMenu(QMenu* menu);
     void buildPanels();
@@ -785,6 +795,10 @@ private:
     QAction* save_ = nullptr;
     QAction* saveAs_ = nullptr;
     QAction* export_ = nullptr;
+    QWidget* menuCorner_ = nullptr;
+    QLabel* cornerName_ = nullptr;
+    QToolButton* cornerRender_ = nullptr;
+    QToolButton* cornerExport_ = nullptr;
     QAction* saveImage_ = nullptr;
     QAction* cameraMode_ = nullptr;
     QAction* brushMode_ = nullptr;

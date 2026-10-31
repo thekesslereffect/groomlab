@@ -17,6 +17,7 @@
 // Tools' (groom_tools.h).
 
 #include <functional>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,6 +35,7 @@ class QCheckBox;
 class QComboBox;
 class QLabel;
 class QMenu;
+class QPushButton;
 class QScrollArea;
 class QTimer;
 class QVariantAnimation;
@@ -271,6 +273,14 @@ public:
     RoundButton* undoButton() const { return undo_; }
     RoundButton* redoButton() const { return redo_; }
     GlassPanel* history() const { return history_; }
+    // A first groom, step by step (engine/ui palette.starter): a small card bottom-left over the
+    // viewport, above the stats (Groom mode, a groom open, not dismissed, a step to go). Each step
+    // ticks as the groom gets there; its x hides the card for good (starterDismissRequested: the
+    // window keeps that). With no room for it (a view too short) it waits until there is.
+    void setStarterProgress(bool guidesPlaced, bool lookGiven);
+    void setStarterDismissed(bool dismissed);
+    bool starterShown() const;
+    GlassPanel* starterCard() const { return starter_; }
 
 signals:
     // The empty-state card: Open groom, New groom on mesh, Start from a preset, a recent file; and
@@ -281,6 +291,8 @@ signals:
     void fileDropped(const QString& path);
     void undoRequested();
     void redoRequested();
+    void starterStepRequested(const QString& id);  // "guides" or "look"
+    void starterDismissRequested();
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
@@ -293,6 +305,9 @@ private:
     void placeViewport();
     void refreshEmptyCard();
     void refreshToolLabel();
+    void buildStarter();
+    void refreshStarter();
+    bool starterWanted() const;
 
     Viewport* viewport_;
     bool built_ = false;  // every piece exists: relayout may place them
@@ -326,6 +341,13 @@ private:
     QTimer* toastTimer_ = nullptr;
     bool toastError_ = false;
     void sizeToast();
+    // Bottom-left, above the stats: the first-groom steps.
+    GlassPanel* starter_ = nullptr;
+    std::map<std::string, QPushButton*> starterRows_;
+    QLabel* starterTip_ = nullptr;
+    bool guidesPlaced_ = false;
+    bool lookGiven_ = false;
+    bool starterDismissed_ = false;
     // The prompt (showPrompt): centered, over everything.
     GlassPanel* prompt_ = nullptr;
 };

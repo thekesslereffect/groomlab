@@ -932,13 +932,15 @@ class GROOMLAB_UL_photo_pairs(bpy.types.UIList):
 def draw_tab(layout, context, chars):
     """The Photos tab (Maya's ReferenceTab): the photos (bar, list, right-click menu), how the picked
     one shows, Align by Points, and Guides from Photos."""
-    from . import definitions as defs
     from . import palette
     scene = context.scene
     s = scene.groomlab_photos
-    lists = defs.get("lists/photos")
-    _wrap(layout, defs.plain(lists["about"]).replace("Align Photo", "Pick Points and Solve"), width=chars)
-    palette.draw_bar(layout, "lists/photos/bar", "photosbar", context)
+    # The photos (a header: how many, Import), the list, then the picked photo's box: rename and
+    # delete, how it shows, its lens; Align by Points; Guides from Photos.
+    head = palette.section_header(layout, "Photos", len(list_photos(scene)))
+    sub = head.row(align=True)
+    sub.alignment = "RIGHT"
+    palette.bar_icons(sub, "lists/photos/bar", "photosbar", context, ("photo.import",))
     row = layout.row()  # the list (bpy.data.objects, the photos shown) with its right-click menu beside it
     row.template_list("GROOMLAB_UL_photos", "", bpy.data, "objects", s, "photo_index", rows=3)
     row.column(align=True).menu("GROOMLAB_MT_photo_context", text="", icon="DOWNARROW_HLT")
@@ -947,20 +949,24 @@ def draw_tab(layout, context, chars):
         _wrap(layout, "Import a photo to start.", width=chars)
     else:
         p = cam.groomlab_photo
-        row = layout.row(align=True)
+        box = layout.box()
+        row = box.row(align=True)
+        row.alignment = "RIGHT"
+        palette.bar_icons(row, "lists/photos/bar", "photosbar", context, ("photo.rename", "photo.remove"))
+        row = box.row(align=True)
         row.operator("groomlab.photo_look_through", text="Look Through", depress=looking_through(context, cam),
                      icon="VIEW_CAMERA")
         row.prop(p, "locked", toggle=True, icon="LOCKED" if p.locked else "UNLOCKED")
         bg = background(cam)
         if bg is not None:
-            col = layout.column(align=True)
+            row = box.row(align=True)
+            row.prop(bg, "display_depth", expand=True)
+            row.prop(bg, "show_background_image", text="", icon="HIDE_OFF" if bg.show_background_image else "HIDE_ON")
+            col = box.column(align=True)
             col.prop(bg, "alpha", text="Opacity", slider=True)
             lens = col.row(align=True)
             lens.enabled = not p.locked  # (a locked camera keeps its focal length)
             lens.prop(cam.data, "lens", text="Focal Length")
-            row = col.row(align=True)
-            row.prop(bg, "display_depth", expand=True)
-            row.prop(bg, "show_background_image", text="", icon="HIDE_OFF" if bg.show_background_image else "HIDE_ON")
         layout.label(text="ALIGN BY POINTS")
         _wrap(layout, "Pairs: a feature clicked on the photo (looking through its camera) and the same feature on the "
                       "mesh (in another view). 6 pairs solve the focal length too; 4 with it kept.", width=chars)
@@ -977,10 +983,17 @@ def draw_tab(layout, context, chars):
         if p.rms >= 0.0 and not s.result:
             text += " (last solve %.2f px)" % p.rms
         _wrap(layout, text, width=chars)
-    layout.label(text="GUIDES FROM PHOTOS (EXPERIMENTAL)")
-    _wrap(layout, "Every photo lined up with the mesh grows guides into the %s group (replaced each time); flow "
-                  "follows the strands the photos show." % GROUP, width=chars)
-    palette.draw_bar(layout, "lists/photos/guidesBar", "photosguides", context)
+    # Guides from Photos (experimental): folded (Blender 4.1+'s layout panels; a heading before).
+    body = layout
+    if hasattr(layout, "panel"):
+        header, body = layout.panel("groomlab_photos_guides", default_closed=True)
+        header.label(text="Guides from photos (experimental)")
+    else:
+        layout.label(text="GUIDES FROM PHOTOS (EXPERIMENTAL)")
+    if body is not None:
+        _wrap(body, "Every photo lined up with the mesh grows guides into the %s group (replaced each time); flow "
+                    "follows the strands the photos show." % GROUP, width=chars)
+        palette.draw_bar(body, "lists/photos/guidesBar", "photosguides", context)
 
 
 classes = (GroomLabPhotoPair, GroomLabPhoto, GroomLabPhotos, GROOMLAB_OT_photo_import, GROOMLAB_OT_photo_look_through,

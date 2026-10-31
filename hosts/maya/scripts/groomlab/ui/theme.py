@@ -2,12 +2,13 @@
 """GroomLab UI themes: colors and shapes for the Groom Tools, the Graph Editor
 and the viewport's guides, from JSON files.
 
-Four ship with GroomLab: "playful" (charcoal and primaries, flat and round;
-the default), "charcoal" (calm neutral greys, an off-white primary, thin
-borders, muted color only where it means something), "studio" (low-key
-greys, one accent) and "polar" (near-black and monochrome with one indigo
-accent, after polar.sh). Pick one in GroomLab > Theme, or Theme in the Groom
-Tools' More menu or the Graph Editor's Edit menu. Make your own:
+Four ship with GroomLab: "charcoal" (calm neutral greys, one blue accent,
+thin borders, muted color only where it means something; the default),
+"playful" (charcoal and primaries, flat and round; the base every theme
+extends), "studio" (low-key greys, one accent) and "polar" (near-black and
+monochrome with one indigo accent, after polar.sh). Pick one in GroomLab >
+Theme, or Theme in the Groom Tools' More menu or the Graph Editor's Edit menu
+(a pick is remembered: a user who made one keeps it). Make your own:
 
     from groomlab.ui import theme
     path = theme.create_theme("mine")      # a copy of the current theme, to edit
@@ -19,10 +20,16 @@ the user's folder (<Maya user app dir>/groomlab/themes) and the shipped
 folder. A theme names colors as hex ("#2F7BF6"), by its palette ("blue"), or
 "accent"; it may set only some keys: the rest come from the theme it
 "extends" (default "playful"). Optional ui keys: "outline" (a thin border
-around buttons, cards, tabs and lists; none by default), "selection" and
-"selectionText" (selected rows and menu items; the accent by default) and
-"glass" (the standalone app's translucent panels, true by default; false:
-solid panels with a thin border).
+around buttons, cards and lists; none by default), "selection" and
+"selectionText" (selected rows, menu items and the active tool; the accent by
+default), "textMuted" (the quietest text: section headers; textDim by
+default), "rowHeight" (the height of fields, combo boxes and buttons; their
+text's by default), "font" (the font family of GroomLab's windows, "Inter"
+in the shipped themes: loaded from the module's fonts folder; Maya's own font
+when that family can't be had) and "glass" (the standalone app's translucent
+panels, true by default; false: solid panels with a thin border). Graph keys:
+"headerStyle" ("tinted", "filled" or "minimal") and "canvasStyle" ("dots",
+"lines" or "plain").
 """
 
 import copy
@@ -32,12 +39,19 @@ import re
 import weakref
 
 THEME_VAR = "groomLabTheme"
-DEFAULT = "playful"
+DEFAULT = "charcoal"  # the theme a user who never picked one gets
+BASE = "playful"      # the theme every theme extends unless it says otherwise (it sets every key)
 SHIPPED_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, "themes"))
+# The fonts GroomLab's windows use (Inter, SIL OFL 1.1, its license beside it): the installed module's
+# fonts folder, else the source tree's (hosts/app/fonts, the app's own) for runs from a checkout.
+FONT_DIRS = (os.path.normpath(os.path.join(SHIPPED_DIR, os.pardir, "fonts")),
+             os.path.normpath(os.path.join(SHIPPED_DIR, os.pardir, os.pardir, "app", "fonts")))
 
 _current = None
 _listeners = []  # (weakref to object, method name)
 _slider_count = [0]
+_font_families = []  # the families the shipped fonts gave (loaded once, with a QApplication)
+_fonts_loaded = [False]
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +115,7 @@ def load(name, _seen=None):
             data = json.load(f)
         except ValueError as e:
             raise ValueError("theme %r is not valid JSON: %s" % (name, e))
-    base = data.get("extends", DEFAULT if name != DEFAULT else None)
+    base = data.get("extends", BASE if name != BASE else None)
     return _merge(load(base, seen), data) if base else data
 
 
@@ -299,6 +313,79 @@ def px(value):
     return int(round(value * scale()))
 
 
+def _load_fonts():
+    """The shipped fonts added to this Qt's (Maya's own windows keep their font: only GroomLab's
+    name the family), once; [] until there is a QApplication (tried again then)."""
+    if _fonts_loaded[0]:
+        return _font_families
+    try:
+        from groomlab.ui.qt import QtGui
+    except ImportError:
+        return []
+    if QtGui.QGuiApplication.instance() is None:
+        return []
+    _fonts_loaded[0] = True
+    for folder in FONT_DIRS:
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        loaded = False
+        for name in names:
+            if not name.lower().endswith((".ttf", ".otf")):
+                continue
+            font_id = QtGui.QFontDatabase.addApplicationFont(os.path.join(folder, name))
+            if font_id < 0:
+                continue
+            loaded = True
+            for family in QtGui.QFontDatabase.applicationFontFamilies(font_id):
+                if family not in _font_families:
+                    _font_families.append(family)
+        if loaded:  # the installed module's: the source tree's is only for runs from a checkout
+            break
+    return _font_families
+
+
+def ui_font(t=None):
+    """The font family GroomLab's windows and the Graph Editor's cards use: the theme's ui.font
+    ("Inter") when it loaded from the shipped fonts or the system has it, else None (Maya's font)."""
+    t = t or current()
+    family = t.get("ui.font")
+    if not family or not isinstance(family, str):
+        return None
+    if family in _load_fonts():
+        return family
+    if not _fonts_loaded[0]:
+        return None  # no QApplication yet
+    from groomlab.ui.qt import QtGui
+    return family if QtGui.QFontInfo(QtGui.QFont(family)).family().lower() == family.lower() else None
+
+
+def tabular_digits(f):
+    """Fixed-width digits (OpenType tnum) on a QFont, so a value that changes keeps its width:
+    QFont.setFeature is Qt 6.7 and later (Maya 2027); before, the font's own digits."""
+    from groomlab.ui.qt import QtGui
+    tag = getattr(QtGui.QFont, "Tag", None)
+    if tag is not None and hasattr(f, "setFeature"):
+        try:
+            f.setFeature(tag("tnum"), 1)
+        except (TypeError, ValueError, AttributeError):
+            pass
+    return f
+
+
+def font(pixels, bold=False, tabular=False, base=None):
+    """A QFont in the UI family (ui_font) at a pixel size; `tabular`: fixed-width digits, for numbers."""
+    from groomlab.ui.qt import QtGui
+    f = QtGui.QFont(base) if base is not None else QtGui.QFont()
+    family = ui_font()
+    if family:
+        f.setFamily(family)
+    f.setPixelSize(max(1, int(round(pixels))))
+    f.setBold(bold)
+    return tabular_digits(f) if tabular else f
+
+
 def slider_accent():
     """The next slider's color name: sliders cycle through the theme's list."""
     names = current().get("ui.sliders", ["accent"]) or ["accent"]
@@ -342,6 +429,16 @@ def _lighter(color, f):
     return "#%02X%02X%02X" % tuple(int(round(c + (255 - c) * f)) for c in rgb)
 
 
+def _blend(a, b, f):
+    """Hex color a moved toward b by f (0-1): the blocks' faint hairline."""
+    ha, hb = a.lstrip("#"), b.lstrip("#")
+    if len(ha) < 6 or len(hb) < 6:
+        return a
+    ra = [int(ha[i:i + 2], 16) for i in (0, 2, 4)]
+    rb = [int(hb[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#%02X%02X%02X" % tuple(int(round(x + (y - x) * f)) for x, y in zip(ra, rb))
+
+
 def stylesheet(t=None):
     """Qt style sheet for GroomLab's windows (made once per loaded theme)."""
     t = t or current()
@@ -353,39 +450,63 @@ def stylesheet(t=None):
 
 
 def _outline_rules(t):
-    """With ui.outline, thin borders where the flat themes have none (buttons, cards, tabs, lists)."""
+    """With ui.outline, thin borders where the flat themes have none (buttons, chips, lists).
+    Tabs are underlined, tool tiles bordered only when checked and sections ruled in every theme."""
     if not t.get("ui.outline"):
         return ""
     return """
-QPushButton, QToolButton[role="tool"], QToolButton[role="chip"], QTabBar::tab, QFrame[role="card"], QFrame[role="empty"],
-QFrame[role="segments"], QGroupBox, QListWidget, QTreeWidget, QTableWidget, QListView, QTreeView, QLabel[role="status"] {
+QPushButton, QToolButton[role="chip"], QFrame[role="empty"],
+QGroupBox, QListWidget, QTreeWidget, QTableWidget, QListView, QTreeView, QLabel[role="status"] {
     border: {{1}}px solid %(outline)s; }
-QPushButton:hover, QToolButton[role="tool"]:hover, QToolButton[role="chip"]:hover, QTabBar::tab:hover { border-color: %(hover)s; }
-QPushButton:checked, QPushButton:pressed, QPushButton[role="primary"], QToolButton[role="tool"]:checked,
-QTabBar::tab:selected { border-color: %(accent)s; }
-QPushButton[role="step"], QPushButton[role="section"], QPushButton[role="section"]:checked,
-QPushButton[role="section"]:pressed, QFrame[role="segments"] QTabBar::tab { border: none; }
-""" % {"outline": t.hex(t.get("ui.outline")), "accent": t.hex("accent"), "hover": _lighter(t.color("ui.hover"), 0.08)}
+QPushButton:hover, QToolButton[role="chip"]:hover { border-color: %(hover)s; }
+QPushButton:checked, QPushButton:pressed, QPushButton[role="primary"] { border-color: %(accent)s; }
+QPushButton[role="step"] { border: none; }
+QPushButton[role="section"], QPushButton[role="section"]:hover, QPushButton[role="section"]:checked,
+QPushButton[role="section"]:pressed { border: none; border-top: {{1}}px solid %(border)s; }
+""" % {"border": t.color("ui.border"), "outline": t.hex(t.get("ui.outline")), "accent": t.hex("accent"), "hover": _lighter(t.color("ui.hover"), 0.08)}
+
+
+def _row_rules(t):
+    """With ui.rowHeight, every field, combo box and button one row tall (their padding then
+    only sideways)."""
+    row = t.get("ui.rowHeight")
+    if not row:
+        return ""
+    # min-height leaves out the borders: the fields' 1px, the buttons' only with ui.outline
+    inner = max(px(12), px(float(row)) - 2 * px(1))
+    button = max(px(12), px(float(row)) - (2 * px(1) if t.get("ui.outline") else 0))
+    return """
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QComboBox:editable {
+    min-height: %(inner)dpx; padding-top: 0; padding-bottom: 0; }
+QPushButton, QPushButton[role="primary"] { min-height: %(button)dpx; padding-top: 0; padding-bottom: 0; }
+QComboBox QLineEdit { min-height: 0; }
+QPushButton[role="section"], QPushButton[role="section"]:checked, QPushButton[role="section"]:pressed {
+    padding-top: 0; padding-bottom: 0; }
+QPushButton[role="step"] { min-height: 0; padding-top: {{4}}px; padding-bottom: {{4}}px; }
+""" % {"inner": inner, "button": button}
 
 
 def _stylesheet(t):
     c = t.color
-    r = px(int(t.get("ui.radius", 10)))
-    small = max(px(2), r - px(4))
+    r = px(int(t.get("ui.radius", 10)))  # controls: buttons, fields, tool tiles
+    small = max(px(2), r - px(2))         # small parts: chips, list rows, menu items
+    panel = r + px(2)                     # panels: lists, group boxes, the empty state
     fs = px(float(t.get("ui.fontSize", 12)))
+    family = ui_font(t)
     colors = {name: t.hex(name) for name in (t.get("palette") or {})}
     colors["accent"] = t.hex("accent")
     slider_rules = "\n".join(
         'QSlider[accent="%s"]::sub-page:horizontal { background: %s; border-radius: {{3}}px; }' % (name, value)
         for name, value in colors.items())
     sheet = """
-QWidget { background: %(bg)s; color: %(text)s; font-size: %(fs)dpx; }
+QWidget { background: %(bg)s; color: %(text)s; %(family)sfont-size: %(fs)dpx; }
 QLabel { background: transparent; }
-QLabel[role="heading"] { color: %(dim)s; font-size: %(fs_small)dpx; font-weight: bold; letter-spacing: {{1}}px; padding-top: {{6}}px; }
+QLabel[role="heading"] { color: %(muted)s; font-size: %(fs_small)dpx; font-weight: bold; letter-spacing: {{1}}px; padding-top: {{6}}px; }
+QLabel[role="heading"][rule="true"] { border-top: {{1}}px solid %(border)s; padding-top: {{8}}px; }
 QLabel[role="about"] { color: %(dim)s; }
 QLabel[role="hint"] { color: %(dim)s; font-size: %(fs_small)dpx; }
 QLabel[role="title"] { font-size: %(fs_title)dpx; font-weight: bold; }
-QLabel[role="subheading"] { color: %(dim)s; font-size: %(fs_small)dpx; font-weight: bold; letter-spacing: {{1}}px; }
+QLabel[role="subheading"] { color: %(muted)s; font-size: %(fs_small)dpx; font-weight: bold; letter-spacing: {{1}}px; }
 QLabel[role="status"] { color: %(warning)s; background: %(panel)s; border-radius: %(small)dpx; padding: {{6}}px {{10}}px; }
 QPushButton { background: %(raised)s; border: none; border-radius: %(r)dpx; padding: {{6}}px {{10}}px; }
 QPushButton:hover { background: %(hover)s; }
@@ -393,13 +514,9 @@ QPushButton:pressed, QPushButton:checked { background: %(accent)s; color: %(acce
 QPushButton:disabled { color: %(dim)s; }
 QPushButton[role="primary"] { background: %(accent)s; color: %(accentText)s; font-weight: bold; padding: {{8}}px {{14}}px; }
 QPushButton[role="primary"]:hover { background: %(accentHover)s; }
-QFrame[role="empty"] { background: %(panel)s; border-radius: %(r)dpx; }
+QFrame[role="empty"] { background: %(panel)s; border-radius: %(panel_r)dpx; }
 QFrame[role="empty"] QLabel { background: transparent; }
-QFrame[role="segments"] { background: %(panel)s; border-radius: %(r)dpx; }
-QFrame[role="segments"] QTabBar::tab { background: transparent; color: %(dim)s; border-radius: %(small)dpx;
-    padding: {{6}}px {{8}}px; margin: 0; }
-QFrame[role="segments"] QTabBar::tab:hover { color: %(text)s; background: transparent; }
-QFrame[role="segments"] QTabBar::tab:selected { background: %(hover)s; color: %(text)s; font-weight: bold; }
+QFrame[role="segments"] { background: transparent; border: none; border-bottom: {{1}}px solid %(border)s; border-radius: 0; }
 QWidget[role="options"] { background: transparent; }
 QToolButton[role="glyph"], QToolButton[role="glyph"]:checked { background: transparent; }
 QToolButton[role="glyph"]:hover { background: %(hover)s; }
@@ -412,28 +529,50 @@ QToolButton[role="chip"]:hover { background: %(hover)s; }
 QToolButton[role="chip"]::menu-indicator { image: none; width: 0; }
 QPushButton::menu-indicator, QToolBar QToolButton::menu-indicator { image: none; width: 0; }
 QPushButton[role="section"], QPushButton[role="section"]:checked, QPushButton[role="section"]:pressed {
-    background: transparent; border: none; color: %(dim)s; font-size: %(fs_small)dpx; font-weight: bold;
-    text-align: left; padding: {{6}}px 0; }
-QPushButton[role="section"]:hover { color: %(text)s; background: transparent; }
+    background: transparent; border: none; border-top: {{1}}px solid %(border)s; border-radius: 0; color: %(muted)s;
+    font-size: %(fs_small)dpx; font-weight: bold; letter-spacing: {{1}}px; text-align: left; padding: {{6}}px 0; }
+QPushButton[role="section"]:hover { color: %(dim)s; background: transparent; }
+QFrame[role="sectionRow"] { background: transparent; border: none; border-top: {{1}}px solid %(border)s; border-radius: 0; }
+QPushButton[role="section"][inRow="true"], QPushButton[role="section"][inRow="true"]:checked,
+QPushButton[role="section"][inRow="true"]:pressed, QPushButton[role="section"][inRow="true"]:hover { border: none; }
+QLabel[role="count"] { color: %(muted)s; font-size: %(fs_small)dpx; }
+QFrame[role="rule"] { background: %(border)s; border: none; }
+QFrame[role="ruleFaint"] { background: %(faint)s; border: none; }
+QLabel[role="block"] { color: %(dim)s; font-size: %(fs_small)dpx; font-weight: 600; }
+QLabel[role="muted"] { color: %(muted)s; font-size: %(fs_small)dpx; }
+QLabel[role="rowLabel"] { color: %(dim)s; }
+QLabel[role="cardTitle"] { color: %(text)s; font-weight: 600; }
+QFrame[role="itemBox"] { background: transparent; border: {{1}}px solid %(border)s; border-radius: %(r)dpx; }
+QFrame[role="itemBox"] QLabel { background: transparent; }
+QListWidget[role="rows"], QTreeWidget[role="rows"] { background: transparent; border: none; padding: 0; }
+QListWidget[role="rows"]::item { border-radius: %(small)dpx; padding: {{2}}px {{4}}px; }
+QTreeWidget[role="rows"]::item { border-radius: 0; padding: {{2}}px {{2}}px; }
+QToolButton[role="glyph"][toggle="true"]:checked { background: %(selection)s; }
+QToolButton[role="ghost"] { color: %(dim)s; padding: {{3}}px {{6}}px; }
+QToolButton[role="ghost"]:hover { color: %(text)s; }
+QToolButton[role="ghost"]::menu-indicator { image: none; width: 0; }
 QToolButton { background: transparent; border: none; border-radius: %(r)dpx; padding: {{3}}px; }
 QToolButton:hover { background: %(hover)s; }
 QToolButton:checked { background: %(accent)s; color: %(accentText)s; }
-QToolButton[role="tool"] { background: %(raised)s; padding: {{4}}px 0 {{5}}px 0; font-size: %(fs_small)dpx; }
+QToolButton[role="tool"] { background: %(raised)s; border: {{1}}px solid %(border)s; padding: {{2}}px;
+    color: %(dim)s; font-size: %(fs_small)dpx; }
 QToolButton:disabled { color: %(dim)s; }
-QToolButton[role="tool"]:hover { background: %(hover)s; }
-QToolButton[role="tool"]:checked { background: %(accent)s; color: %(accentText)s; }
+QToolButton[role="tool"]:hover { background: %(hover)s; color: %(text)s; }
+QToolButton[role="tool"]:pressed { background: %(selection)s; }
+QToolButton[role="tool"]:checked { background: %(selection)s; border-color: %(accent)s; color: %(text)s; }
+QToolButton[role="chip"] { color: %(dim)s; }
+QToolButton[role="chip"]:checked { background: %(selection)s; color: %(selectionText)s; }
 QTabWidget::pane { border: none; background: transparent; }
 QTabWidget, QTabBar { background: transparent; }
 QTabWidget > QWidget, QScrollArea > QWidget > QWidget { background: %(bg)s; }
-QFrame[role="card"] { background: %(panel)s; border-radius: %(r)dpx; }
+QFrame[role="card"] { background: transparent; border: none; }
 QFrame[role="card"] QLabel, QFrame[role="card"] QCheckBox { background: transparent; }
-QFrame[role="card"] QLineEdit, QFrame[role="card"] QSpinBox, QFrame[role="card"] QDoubleSpinBox,
-QFrame[role="card"] QComboBox { background: %(raised)s; border-color: %(raised)s; }
-QTabBar::tab { background: %(panel)s; color: %(dim)s; border-radius: %(r)dpx; padding: {{7}}px {{16}}px; margin: {{2}}px {{3}}px; }
-QTabBar::tab:hover { background: %(hover)s; color: %(text)s; }
-QTabBar::tab:selected { background: %(accent)s; color: %(accentText)s; }
+QTabBar::tab { background: transparent; color: %(dim)s; border: none; border-bottom: {{2}}px solid transparent; border-radius: 0;
+    padding: {{5}}px 0; margin: 0 {{12}}px 0 0; }
+QTabBar::tab:hover { background: transparent; color: %(text)s; }
+QTabBar::tab:selected { background: transparent; color: %(text)s; border-bottom-color: %(accent)s; }
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit {
-    background: %(panel)s; border: {{1}}px solid %(border)s; border-radius: %(small)dpx; padding: {{3}}px {{6}}px;
+    background: %(panel)s; border: {{1}}px solid %(border)s; border-radius: %(r)dpx; padding: {{3}}px {{6}}px;
     selection-background-color: %(selection)s; selection-color: %(selectionText)s; }
 QComboBox { padding-right: {{22}}px; }
 QComboBox:editable { min-height: {{24}}px; }  /* room for its field's text, descenders included */
@@ -443,7 +582,7 @@ QComboBox::down-arrow { image: url(%(arrow)s); width: {{10}}px; height: {{10}}px
 QComboBox QAbstractItemView { background: %(panel)s; border: {{1}}px solid %(border)s; selection-background-color: %(selection)s;
     selection-color: %(selectionText)s; }
 QListWidget, QTreeWidget, QTableWidget, QListView, QTreeView {
-    background: %(panel)s; border: none; border-radius: %(r)dpx; padding: {{4}}px; outline: none; }
+    background: %(panel)s; border: none; border-radius: %(panel_r)dpx; padding: {{4}}px; outline: none; }
 QListWidget::item { border-radius: %(small)dpx; padding: {{3}}px; }
 QTreeWidget::item { border-radius: 0; padding: {{3}}px; }
 QTreeWidget::branch:selected { background: %(selection)s; }
@@ -453,7 +592,7 @@ QTreeView { show-decoration-selected: 1; }
 QTreeView::branch { background: transparent; }
 QTreeView::branch:selected { background: %(selection)s; }
 QHeaderView::section { background: %(panel)s; color: %(dim)s; border: none; padding: {{4}}px; }
-QGroupBox { background: %(panel)s; border: none; border-radius: %(r)dpx; margin-top: {{20}}px; padding: {{12}}px {{10}}px {{10}}px {{10}}px; }
+QGroupBox { background: %(panel)s; border: none; border-radius: %(panel_r)dpx; margin-top: {{20}}px; padding: {{12}}px {{10}}px {{10}}px {{10}}px; }
 QGroupBox QLineEdit, QGroupBox QSpinBox, QGroupBox QDoubleSpinBox, QGroupBox QComboBox, QGroupBox QListWidget {
     background: %(raised)s; border-color: %(raised)s; }
 QGroupBox::title { subcontrol-origin: margin; left: {{8}}px; padding: 0 {{2}}px; color: %(dim)s; }
@@ -462,7 +601,7 @@ QCheckBox::indicator { width: {{16}}px; height: {{16}}px; border-radius: %(check
 QCheckBox::indicator:checked { background: %(accent)s; }
 QSlider::groove:horizontal { height: {{6}}px; border-radius: {{3}}px; background: %(raised)s; }
 QSlider::sub-page:horizontal { background: %(accent)s; border-radius: {{3}}px; }
-QFrame[role="card"] QSlider::groove:horizontal, QGroupBox QSlider::groove:horizontal { background: %(bg)s; }
+QGroupBox QSlider::groove:horizontal { background: %(bg)s; }
 QSlider::handle:horizontal { background: %(white)s; width: {{14}}px; height: {{14}}px; margin: {{-4}}px 0; border-radius: {{7}}px; }
 %(slider_rules)s
 QSlider::sub-page:horizontal:disabled, QSlider[accent]::sub-page:horizontal:disabled { background: %(hover)s; }
@@ -483,15 +622,19 @@ QMenu::item:selected { background: %(selection)s; color: %(selectionText)s; }
 QToolBar { background: %(bg)s; border: none; spacing: {{4}}px; }
 QSplitter::handle { background: %(bg)s; }
 QScrollArea { border: none; }
-%(outline_rules)s""" % {
+%(outline_rules)s%(row_rules)s""" % {
         "bg": c("ui.background"), "panel": c("ui.panel"), "raised": c("ui.raised"), "hover": c("ui.hover"),
         "border": c("ui.border"), "text": c("ui.text"), "dim": c("ui.textDim"), "accent": t.hex("accent"),
+        "faint": _blend(c("ui.border"), c("ui.background"), 0.4),
+        "muted": c("ui.textMuted") if t.get("ui.textMuted") else c("ui.textDim"),
         "accentText": c("ui.accentText"), "warning": t.hex(t.get("ui.warning", "yellow")),
-        "white": t.hex("white"), "r": r, "small": small, "check": max(px(3), min(px(8), r // 2)), "fs": fs,
+        "white": t.hex("white"), "r": r, "small": small, "panel_r": panel, "check": max(px(3), min(px(8), r // 2)), "fs": fs,
         "fs_small": max(px(9), fs - px(2)), "fs_title": fs + px(3),
         "accentHover": _lighter(t.hex("accent"), 0.12), "slider_rules": slider_rules, "arrow": _arrow_icon(c("ui.textDim")),
         "selection": t.hex(t.get("ui.selection") or "accent"),
         "selectionText": c("ui.selectionText") if t.get("ui.selectionText") else c("ui.accentText"),
-        "outline_rules": _outline_rules(t)}
+        "outline_rules": _outline_rules(t), "row_rules": _row_rules(t),
+        # The theme's font (ui.font) for GroomLab's windows, which this sheet styles (Maya's keep theirs).
+        "family": 'font-family: "%s"; ' % family if family else ""}
     # Fixed sizes ({{N}}px in the template) at Maya's interface scale.
     return re.sub(r"\{\{(-?\d+(?:\.\d+)?)\}\}px", lambda m: "%dpx" % round(float(m.group(1)) * scale()), sheet)

@@ -13,14 +13,18 @@
 #include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHBoxLayout>
 #include <QKeySequence>
+#include <QLabel>
 #include <QDockWidget>
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
+#include <QResizeEvent>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QToolButton>
 #include <QUrl>
 
 #include "app_actions.h"
@@ -179,6 +183,9 @@ void MainWindow::setInteractive(bool on) {
     if (on) {
         maps_->setDeleteFiles(QSettings().value(QStringLiteral("maps/deleteFiles"), true).toBool());
         setHud(QSettings().value(QStringLiteral("ui/hud"), true).toBool());  // Review > Strand Count HUD as left
+        // The first-groom card stays away once its x was clicked (buildPanels ran before this).
+        starterDismissed_ = QSettings().value(QStringLiteral("ui/hideStarter"), false).toBool();
+        host_->setStarterDismissed(starterDismissed_);
     }
     restartAutosave();  // (an interactive window's alone)
 }
@@ -206,8 +213,9 @@ void MainWindow::buildMenuBar() {
     reference_ = made.at("photos.guides");
     deleteGuides_ = made.at("guides.deleteSelected");
     symmetryAction_ = made.at("brush.symmetry");
-    // The Groom Tools' More menu, empty state, Output strip and Parts buttons: the same bindings.
+    // The Groom Tools' More menu, empty state and Parts buttons: the same bindings.
     groomTools_->setBindings(AppActions::bindings(*this), AppActions::fillOptions(*this));
+    buildMenuCorner();
     // The lists' bars and right-click menus (lists.json: guide groups, maps, correctives).
     {
         const ui::Bindings bindings = AppActions::bindings(*this);
@@ -220,6 +228,60 @@ void MainWindow::buildMenuBar() {
     // The Graph Editor's bar and menus (graph_ui.json: Add Node, Presets, Edit, the right-click
     // menus), once every binding they read exists.
     AppActions::wireGraphEditor(*this);
+}
+
+void MainWindow::buildMenuCorner() {
+    // The design's corner of the menu bar: the groom's file name (muted), Render ▾ (ghost) and
+    // Export ▾ (the accent): what comes after grooming one click away, where Maya's and Blender's
+    // Groom Tools have their Output strip (palette.output, which the app's Groom Tools leave out;
+    // its Simulate Range, Studio, Transfer and Import are in the GroomLab menu). The menus are
+    // menus.json's output.render and output.export, with the window's bindings; the tips are
+    // palette.output's.
+    const ui::Bindings bindings = AppActions::bindings(*this);
+    ui::FillOptions options = AppActions::fillOptions(*this);
+    options.liveShortcuts = false;  // the menu bar holds the keys; here they show as text
+    auto tipOf = [](const char* id) {
+        for (const ui::json& entry : ui::Definitions::shipped().get("palette/output")) {
+            if (entry.is_object() && entry.value("id", std::string()) == id) return QString::fromStdString(ui::hostText("tip", ui::kHost, {&entry}));
+        }
+        return QString();
+    };
+    menuCorner_ = new QWidget(menuBar());
+    menuCorner_->setObjectName(QStringLiteral("menuCorner"));
+    auto* row = new QHBoxLayout(menuCorner_);
+    row->setContentsMargins(0, 2, 6, 2);
+    row->setSpacing(4);
+    cornerName_ = new QLabel(menuCorner_);
+    cornerName_->setObjectName(QStringLiteral("cornerFileName"));
+    cornerName_->setProperty("role", "cornerName");
+    row->addWidget(cornerName_);
+    row->addSpacing(8);
+    auto button = [&](const char* ref, const QString& text, const char* tipId, const char* role, const char* name) {
+        QToolButton* b = GroomTools::menuButton(ref, text + QStringLiteral("  ▾"), tipOf(tipId), bindings, options, menuCorner_,
+                                                QStringLiteral("corner_"));
+        b->setObjectName(QLatin1String(name));
+        b->menu()->setObjectName(QLatin1String(name) + QStringLiteral("Menu"));
+        b->setProperty("role", role);
+        b->setCursor(Qt::PointingHandCursor);
+        row->addWidget(b);
+        return b;
+    };
+    cornerRender_ = button("menus/output.render", tr("Render"), "render", "cornerGhost", "cornerRender");
+    cornerExport_ = button("menus/output.export", tr("Export"), "export", "cornerPrimary", "cornerExport");
+    menuBar()->setCornerWidget(menuCorner_, Qt::TopRightCorner);
+    fitMenuCorner();
+}
+
+void MainWindow::fitMenuCorner() {
+    // The menu bar sizes its corner widget when it lays itself out (a resize), not when the
+    // corner's content changes: the name or the theme's font. Lay it out again at its new size.
+    if (!menuCorner_) return;
+    menuCorner_->ensurePolished();
+    for (QWidget* w : menuCorner_->findChildren<QWidget*>()) w->ensurePolished();
+    if (menuCorner_->layout()) menuCorner_->layout()->invalidate();
+    menuCorner_->adjustSize();
+    QResizeEvent relayout(menuBar()->size(), menuBar()->size());
+    QCoreApplication::sendEvent(menuBar(), &relayout);
 }
 
 void MainWindow::fillPanelsMenu(QMenu* menu) {
@@ -318,6 +380,7 @@ bool MainWindow::chooseTheme(const QString& name) {
         const QString sheet = theme::styleSheet();
         theme::setTheme(name);
         restyle(before, sheet);
+        fitMenuCorner();  // (the new theme's font and padding)
     }
     theme::saveTheme(name);
     for (QAction* a : findChildren<QAction*>()) {
@@ -385,7 +448,7 @@ bool MainWindow::showHelp(const QString& page) {
         text = tr("<p><b>GroomLab</b> %1</p><p>Hair, fur and feather grooming: the Maya plugin and this standalone app share "
                   "one core, and a .groom file travels between them.</p><p>Free for any use, commercial included. "
                   "<a style='color:@link@' href='%2'>Support GroomLab</a> with a donation.</p><p>Open source (Apache-2.0): "
-                  "<a style='color:@link@' href='%3'>github.com/thekesslereffect/groomlab</a></p><p>Fonts: Figtree and "
+                  "<a style='color:@link@' href='%3'>github.com/thekesslereffect/groomlab</a></p><p>Fonts: Inter and "
                   "JetBrains Mono (SIL OFL). Qt 6 (LGPL). See THIRD_PARTY_NOTICES.txt beside the executable.</p>")
                    .arg(QCoreApplication::applicationVersion().isEmpty() ? tr("(development build)") : QCoreApplication::applicationVersion(),
                         QString::fromLatin1(kDonateUrl), QString::fromLatin1(kRepoUrl));
@@ -442,6 +505,12 @@ void MainWindow::refreshTitle() {
     }
     setWindowTitle(title);
     shell_->setFileName(name, dirty);
+    if (cornerName_) {
+        cornerName_->setText(name + (dirty ? QStringLiteral(" *") : QString()));
+        cornerName_->setToolTip(document_ && !document_->path().empty() ? QString::fromStdString(document_->path()) : QString());
+        cornerName_->setVisible(!name.isEmpty());
+        fitMenuCorner();
+    }
     refreshExportState();
 }
 

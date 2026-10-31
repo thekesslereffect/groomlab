@@ -189,10 +189,29 @@ public:
     int nodeCount() const { return static_cast<int>(nodes_.size()); }
     int backdropCount() const { return static_cast<int>(backdrops_.size()); }
     int wireCount() const { return static_cast<int>(wires_.size()); }  // the links drawn
-    // Each node's time in its last run (ms, by name): a badge in its header (Maya's heat badges).
+    // Each node's time in its last run (ms, by name): a badge in its title row.
     void setNodeTimes(const std::vector<std::pair<std::string, double>>& times);
+    // The status badges a node's title row shows (the design's, as Maya's Graph Editor), right to
+    // left before the header toggles: its cook time ("0.4 ms", "12 ms"; none under a twentieth of a
+    // millisecond) muted, in graph.warning from kSlowNodeMs; the View eye in the theme's blue; a
+    // warning triangle (graph.warning) for a note. Bypassed: the card at half opacity, the bypass
+    // toggle lit, its wires dashed. Failed: the red ring and corner "!" (no triangle).
+    static constexpr double kSlowNodeMs = 10.0;
+    struct NodeBadges {
+        QString time;      // "" none
+        QColor timeColor;
+        bool viewed = false;
+        bool warning = false;
+        bool bypassed = false;
+        bool failed = false;
+    };
+    NodeBadges nodeBadges(const std::string& node) const;
+    static QString timeText(double ms);
+    static QColor timeColor(double ms);
+    // A wire into or out of a bypassed node: drawn dashed (index as wireLink's).
+    bool wireDashed(int index) const;
     // Each node's note from the last evaluation (it does nothing as set: a Clump with no centers):
-    // a grey badge on its corner.
+    // a warning triangle in its title row.
     void setNodeNotes(const std::vector<std::pair<std::string, std::string>>& notes);
     std::string nodeNote(const std::string& node) const;
     // Each failing node's error from the last evaluation (GroomDocument::nodeErrors): a red badge.

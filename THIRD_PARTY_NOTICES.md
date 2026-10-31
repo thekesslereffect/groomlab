@@ -13,7 +13,7 @@ package installs beside the binaries.
 | Component | Where | License | Notes |
 | --- | --- | --- | --- |
 | stb_image 2.30 (Sean Barrett) | `third_party/stb/stb_image.h` (commit in `COMMIT`) | MIT or public domain (Unlicense), at your choice | Texture maps. Keep the license block at the end of the header. |
-| Figtree (font) | `hosts/app/fonts/Figtree[wght].ttf` | SIL OFL 1.1 (`OFL-Figtree.txt`) | The app's UI font. The OFL text must travel with the font; the font may not be sold on its own. |
+| Inter (font) | `hosts/app/fonts/Inter[opsz,wght].ttf` | SIL OFL 1.1 (`OFL-Inter.txt`) | The app's UI font (numbers too, with tabular digits), and the font of GroomLab's own windows in Maya: installed with its license in the Maya module's `fonts/`. The OFL text must travel with the font; the font may not be sold on its own. |
 | JetBrains Mono (font) | `hosts/app/fonts/JetBrainsMono[wght].ttf` | SIL OFL 1.1 (`OFL-JetBrainsMono.txt`) | The app's monospace font. Same terms. |
 | License texts | `hosts/app/package/licenses/`, `hosts/app/package/spdx/` | the texts themselves | Copied into the app package for Qt and its third-party code. |
 

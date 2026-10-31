@@ -155,7 +155,7 @@ StrokeRelease BrushSession::release() {
 }
 
 bool BrushSession::editLengths(const char* what,
-                               const std::function<void(LengthPathTool&, StrokeHost&, const BrushToolSettings&)>& fn) {
+                               const std::function<void(LengthKeyTool&, StrokeHost&, const BrushToolSettings&)>& fn) {
     if (!host_) {
         error_ = "no groom open";
         return false;
@@ -279,7 +279,7 @@ void BrushSession::rebuildOverlay(const QPointF& at, bool withLines) {
             have = atTargetDepth(p, center);
         }
         if (have) {
-            const bool creating = s.tool == Tool::Place || s.tool == Tool::Draw;
+            const bool creating = s.tool == Tool::Place || s.tool == Tool::Draw || s.tool == Tool::Lengths;  // (Lengths: the keys' rings)
             const float radius = worldRadiusAt(view_, center, p[0], p[1], creating ? 6.0f : s.screenRadius);
             if (radius > 0.0f) {
                 Vec3f eye, along;
@@ -311,9 +311,9 @@ void BrushSession::rebuildOverlay(const QPointF& at, bool withLines) {
 }
 
 void BrushSession::appendLengths(const std::array<float, 2>& p) {
-    std::vector<LengthPathTool::ColoredLine> lines;
+    std::vector<LengthKeyTool::ColoredLine> lines;
     guard("lengths", [&] { lines = tool_.lengths().overlayLines(*host_, view_, tool_.settings, p[0], p[1]); });
-    for (const LengthPathTool::ColoredLine& line : lines) appendColoredLine(overlay_, line.points, line.color);
+    for (const LengthKeyTool::ColoredLine& line : lines) appendColoredLine(overlay_, line.points, line.color);
 }
 
 std::shared_ptr<const GuideHierarchy> BrushSession::shownHierarchy() const {

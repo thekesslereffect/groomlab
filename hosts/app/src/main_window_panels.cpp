@@ -126,7 +126,6 @@ void MainWindow::buildPanels() {
     });
     connect(groomTools_, &GroomTools::toolChosen, this, [this](const QString& id) { chooseTool(id); });
     connect(groomTools_, &GroomTools::guidesEdited, this, [this] { guidesEdited(); });
-    connect(groomTools_, &GroomTools::tubesGraphEdited, this, [this] { graphEdited(); });
     connect(groomTools_, &GroomTools::tubesPreviewed, this, [this] { reevaluate(); });
     connect(groomTools_, &GroomTools::lengthsPreviewed, this, [this] {
         viewport_->refreshOverlay();
@@ -143,11 +142,6 @@ void MainWindow::buildPanels() {
         refreshProperties();  // (Isolate Group follows)
         redisplay();
     });
-    connect(groomTools_, &GroomTools::sculptDisplayChanged, this, [this] {
-        settings_.sculptDisplay = groomTools_->sculptDisplay();
-        refreshProperties();  // (Sculpt Display and Sculpt Density follow)
-        redisplay();
-    });
     connect(groomTools_, &GroomTools::hairVisibilityToggled, this, [this](bool on) { setHairVisible(on); });
     connect(groomTools_, &GroomTools::guidesVisibilityToggled, this, [this](bool on) { setGuidesVisible(on); });
     connect(groomTools_, &GroomTools::graphRequested, this, [this] { setGraphShown(true); });
@@ -157,7 +151,8 @@ void MainWindow::buildPanels() {
             viewport_->setToolMode(Viewport::ToolMode::Camera);
         }
     });
-    connect(groomTools_, &GroomTools::starterStepRequested, this, [this](const QString& step) {
+    // The first-groom card over the viewport (overlay.h): its steps pick their tools.
+    connect(host_, &OverlayHost::starterStepRequested, this, [this](const QString& step) {
         if (step == QLatin1String("guides")) {
             groomTools_->showTab(QStringLiteral("tools"));
             chooseTool(QStringLiteral("place"));
@@ -165,14 +160,13 @@ void MainWindow::buildPanels() {
             setGraphShown(true);
         }
     });
-    connect(groomTools_, &GroomTools::starterDismissRequested, this, [this] {
+    connect(host_, &OverlayHost::starterDismissRequested, this, [this] {
         starterDismissed_ = true;
         if (interactive_) QSettings().setValue(QStringLiteral("ui/hideStarter"), true);
-        groomTools_->setStarterDismissed(true);
+        host_->setStarterDismissed(true);
     });
     starterDismissed_ = interactive_ && QSettings().value(QStringLiteral("ui/hideStarter"), false).toBool();
-    groomTools_->setStarterDismissed(starterDismissed_);
-    groomTools_->setSculptDisplay(settings_.sculptDisplay);
+    host_->setStarterDismissed(starterDismissed_);
     guidesPanel_ = new GuidesPanel();
     guidesPanel_->setPartsShown(false);  // (the Part tool's card lists them, as Maya's)
     shell_->setPanelContent(AppShell::Panel::Guides, tr("Guide groups"), theme::emerald(), guidesPanel_);
@@ -199,21 +193,8 @@ void MainWindow::buildPanels() {
         guidesPanel_->invalidate();  // (not now: a row's check box may be what changed)
         refreshUndoActions();        // (a group's color is a step)
     });
-    // A row clicked: the group the brushes edit and new guides go into (Maya's pick_group).
-    connect(guidesPanel_, &GuidesPanel::groupClicked, this, [this](const std::string& name) {
-        if (!document_) return;
-        const HierarchyPtr h = document_->session().authoredHierarchy();
-        const GroupId id = h ? h->findGroup(name) : kNoGroup;
-        if (id == kNoGroup) return;
-        BrushSettings& brush = brush_.settings().brush;
-        brush.group = name;
-        brush.level = h->groupDepth(id);
-        groomTools_->refresh();
-        settings_.isolateGroup = groomTools_->isolatedGroup();
-        refreshProperties();
-        redisplay();
-        refreshTool();
-    });
+    // A row clicked: the group the brushes edit and new guides go into (Maya's pick_group): the
+    // Groom Tools set it (settingsChanged, isolateChanged).
     connect(guidesPanel_, &GuidesPanel::message, this, [this](const QString& text) { report(text); });
     connect(look_, &LookPanel::materialChanged, this, [this] {
         if (updatingLook_) return;

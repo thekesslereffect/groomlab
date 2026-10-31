@@ -29,6 +29,7 @@
 #include "glass.h"
 #include "groom_document.h"
 #include "groomlab/stroke.h"
+#include "card_parts.h"
 #include "list_bar.h"
 #include "param_editors.h"
 #include "theme.h"
@@ -101,23 +102,22 @@ QString choiceTip(const char* list, const std::string& value) {
 }  // namespace
 
 MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
-    auto* outer = new QVBoxLayout(this);
-    outer->setContentsMargins(0, 0, 0, 0);
-    auto* scroll = new QScrollArea(this);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    auto* host = new QWidget(scroll);
-    auto* layout = new QVBoxLayout(host);
-    layout->setContentsMargins(6, 6, 6, 6);
-    layout->setSpacing(8);
+    setObjectName(QStringLiteral("mapsPanel"));
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(2);
+    QWidget* host = this;
 
-    bar_ = new ListBar(host);
+    // The header: Maps, how many, + New Map and Import (glyphs).
+    header_ = new ListHeader(tr("Maps"), host);
+    header_->setObjectName(QStringLiteral("mapsHeader"));
+    bar_ = new ListBar(header_);
     bar_->setObjectName(QStringLiteral("mapsBar"));
-    layout->addWidget(bar_);
+    header_->addGlyph(bar_);
+    layout->addWidget(header_);
     list_ = new QListWidget(host);
     list_->setObjectName(QStringLiteral("mapsList"));
-    list_->setMinimumHeight(110);
-    list_->setFixedHeight(130);
+    plainRows(list_);
     list_->setToolTip(tr("A map is a 0-1 value painted on the scalp that any param can read (in the Graph Editor, right-click a "
                          "param > Paint). Double-click: rename; right-click: more"));
     list_->setEditTriggers(QAbstractItemView::NoEditTriggers);  // a double-click edits the name alone (editSelectedName)
@@ -127,7 +127,7 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
                           "param > Paint."),
                        host);
     hint_->setWordWrap(true);
-    hint_->setProperty("role", "about");
+    hint_->setProperty("role", "hint");
     layout->addWidget(hint_);
     connect(list_, &QListWidget::currentItemChanged, this, [this](QListWidgetItem*, QListWidgetItem*) {
         if (updating_) return;
@@ -182,7 +182,6 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     newColor_->setToolTip(choiceTip("mapValues", "color"));
     newForm->addRow(QString(), newColor_);
     newValue_ = new ValueSlider(newBox_);
-    newValue_->setStacked(true);
     newValue_->setCaption(tr("Fill"));
     newValue_->setRange(0.0, 1.0);
     newValue_->setLimits(0.0, 1.0);
@@ -214,13 +213,17 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
         else setNewMapFormShown(false);
     });
 
-    // ---- Painting the picked map: the value (a gray map) or the color and channels, Fill.
-    auto* paintBox = new QGroupBox(tr("Paint"), host);
+    // ---- Painting the picked map: the mode, the value (a gray map) or the color and channels, Fill
+    // (paintControls: the Groom Tools' Paint card shows them).
+    paintControls_ = new QWidget(host);
+    paintControls_->setObjectName(QStringLiteral("paintControls"));
+    QWidget* paintBox = paintControls_;
     auto* paintLayout = new QVBoxLayout(paintBox);
-    paintLayout->setSpacing(6);
+    paintLayout->setContentsMargins(0, 0, 0, 0);
+    paintLayout->setSpacing(4);
     {
-        auto* row = new QHBoxLayout();
-        row->setSpacing(3);
+        FlowLayout* row = nullptr;
+        paintLayout->addWidget(chipRow(paintBox, &row, tr("Mode")));
         auto* group = new QButtonGroup(paintBox);
         group->setExclusive(true);
         for (const ui::json& choice : defs().choices("paintMode")) {
@@ -231,7 +234,6 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
             button->setCheckable(true);
             button->setProperty("role", "chip");
             button->setProperty("paintMode", qs(value));
-            button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
             group->addButton(button);
             paintModes_.push_back(button);
             row->addWidget(button);
@@ -241,14 +243,12 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
             });
             if (value == "replace") button->setChecked(true);
         }
-        paintLayout->addLayout(row);
     }
     valueRow_ = new QWidget(paintBox);
     auto* valueLine = new QHBoxLayout(valueRow_);
     valueLine->setContentsMargins(0, 0, 0, 0);
     valueLine->setSpacing(6);
     paintValue_ = new ValueSlider(valueRow_);
-    paintValue_->setStacked(true);
     paintValue_->setCaption(tr("Value"));
     paintValue_->setRange(0.0, 1.0);
     paintValue_->setLimits(0.0, 1.0);
@@ -261,7 +261,7 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     auto* fillValue = new QPushButton(tr("Fill"), valueRow_);
     fillValue->setObjectName(QStringLiteral("paintFill"));
     fillValue->setToolTip(tr("Set the map to the value: on the selected guides when some are (a guide map), else everywhere"));
-    valueLine->addWidget(fillValue, 0, Qt::AlignBottom);
+    valueLine->addWidget(fillValue);
     paintLayout->addWidget(valueRow_);
     colorRow_ = new QWidget(paintBox);
     auto* colorLayout = new QVBoxLayout(colorRow_);
@@ -272,7 +272,7 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     colorLayout->addWidget(paintColor_);
     auto* channelsRow = new QHBoxLayout();
     channelsRow->setContentsMargins(0, 0, 0, 0);
-    channelsRow->setSpacing(8);
+    channelsRow->setSpacing(3);
     paintAlpha_ = new ValueSlider(colorRow_);
     paintAlpha_->setCaption(tr("a"));
     paintAlpha_->setRange(0.0, 1.0);
@@ -285,13 +285,12 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     paintAlpha_->setToolTip(tr("The alpha painted toward"));
     channelsRow->addWidget(paintAlpha_);
     for (const char* c : {"r", "g", "b", "a"}) {
-        auto* box = new QCheckBox(QString::fromLatin1(c).toUpper(), colorRow_);
+        QToolButton* box = makeChip(QString::fromLatin1(c).toUpper(), choiceTip("paintChannel", c), colorRow_);
         box->setObjectName(QStringLiteral("paintChannel_") + QLatin1String(c));
         box->setChecked(true);
-        box->setToolTip(choiceTip("paintChannel", c));
         channelsRow->addWidget(box);
         paintChannels_.push_back(box);
-        connect(box, &QCheckBox::toggled, this, [this] { applyPaintSettings(); });
+        connect(box, &QToolButton::toggled, this, [this] { applyPaintSettings(); });
     }
     channelsRow->addStretch(1);
     auto* fillColor = new QPushButton(tr("Fill"), colorRow_);
@@ -304,7 +303,7 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     paint_->setToolTip(tr("The Paint brush on this map, the viewport in brush mode (B): drag to paint, Ctrl the opposite, Shift "
                           "smooths"));
     paintLayout->addWidget(paint_);
-    layout->addWidget(paintBox);
+    paint_->hide();  // (the Paint tile over the card does it)
     connect(paintValue_, &ValueSlider::valueChanged, this, [this] { applyPaintSettings(); });
     connect(paintAlpha_, &ValueSlider::valueChanged, this, [this] { applyPaintSettings(); });
     connect(paintColor_, &ColorEditor::edited, this, [this](bool) { applyPaintSettings(); });
@@ -316,21 +315,24 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
         });
     }
 
-    // ---- Showing the picked map on the scalp.
-    auto* showRow = new QHBoxLayout();
-    showRow->setSpacing(8);
-    show_ = new QCheckBox(tr("Show on scalp"), host);
+    // ---- The picked map's box: rename, convert, delete; where it shows; what reads it.
+    QVBoxLayout* boxRows = nullptr;
+    box_ = itemBox(host, &boxRows);
+    box_->setObjectName(QStringLiteral("mapBox"));
+    itemBar_ = new ListBar(box_);
+    itemBar_->setObjectName(QStringLiteral("mapItemBar"));
+    boxRows->addWidget(itemBar_);
+    FlowLayout* showChips = nullptr;
+    boxRows->addWidget(chipRow(box_, &showChips, tr("Show on")));
+    show_ = makeChip(tr("Scalp"), tr("Show the map on the scalp (black to white), whatever its kind"), box_);
     show_->setObjectName(QStringLiteral("paintShowOnScalp"));
-    show_->setToolTip(tr("Show the map on the scalp (black to white), whatever its kind"));
-    showRow->addWidget(show_);
-    channel_ = new QComboBox(host);
+    showChips->addWidget(show_);
+    channel_ = new QComboBox(box_);
     channel_->setObjectName(QStringLiteral("paintScalpChannel"));
     for (const ui::json& c : defs().choices("scalpChannel")) channel_->addItem(qs(c.value("label", std::string())), qs(c.value("value", std::string())));
     channel_->setToolTip(qs(defs().get("choices/scalpChannel").value("tip", std::string())));
-    showRow->addWidget(channel_);
-    showRow->addStretch(1);
-    layout->addLayout(showRow);
-    connect(show_, &QCheckBox::toggled, this, [this](bool on) {
+    showChips->addWidget(channel_);
+    connect(show_, &QToolButton::toggled, this, [this](bool on) {
         if (updating_) return;
         showSelected(on);
     });
@@ -338,15 +340,13 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
         if (updating_ || !show_->isChecked()) return;
         showSelected(true);
     });
-    users_ = new QLabel(host);
+    users_ = new QLabel(box_);
     users_->setObjectName(QStringLiteral("mapUsers"));
     users_->setWordWrap(true);
-    users_->setProperty("role", "about");
-    layout->addWidget(users_);
-    layout->addStretch(1);
-
-    scroll->setWidget(host);
-    outer->addWidget(scroll);
+    users_->setProperty("role", "hint");
+    boxRows->addWidget(users_);
+    layout->addWidget(box_);
+    fitRows(list_);
     setEnabled(false);
 }
 
@@ -354,8 +354,10 @@ void MapsPanel::setActions(const ui::Bindings& bindings, const ui::FillOptions& 
     bindings_ = bindings;
     options_ = options;
     options_.liveShortcuts = false;
-    bar_->build(defs().get("lists/maps/bar"), bindings_, options_);
-    if (QToolButton* convert = bar_->button("map.convert")) convert->setObjectName(QStringLiteral("paintConvert"));
+    // + New Map and Import in the header (glyphs), the picked map's rename, convert, delete in its box.
+    bar_->build(defs().get("lists/maps/bar"), bindings_, options_, ListBar::Part::Labeled);
+    itemBar_->build(defs().get("lists/maps/bar"), bindings_, options_, ListBar::Part::Glyphs);
+    if (QToolButton* convert = itemBar_->button("map.convert")) convert->setObjectName(QStringLiteral("paintConvert"));
 }
 
 void MapsPanel::setDocument(GroomDocument* document) {
@@ -528,6 +530,8 @@ void MapsPanel::refresh() {
         updating_ = false;
     }
     hint_->setVisible(list_->count() == 0);
+    header_->setCount(list_->count());
+    fitRows(list_);
     refreshTargets();
     refreshRows();
 }
@@ -649,10 +653,13 @@ void MapsPanel::refreshRows() {
         if (!picked.empty()) {
             for (const auto& [node, param] : document_->mapUsers(picked)) users << qs(node) + QLatin1Char('.') + qs(param);
         }
-        users_->setText(!users.isEmpty() ? tr("Read by: %1").arg(users.join(QStringLiteral(", ")))
-                        : !picked.empty() ? tr("Not read by the graph yet: + New Map > For a setting makes a map a setting reads; or in "
-                                               "the Graph Editor, right-click a param > Paint, or add a Map node.")
+        users_->setText(!users.isEmpty() ? tr("Read by %1").arg(users.join(QStringLiteral(", ")))
+                        : !picked.empty() ? tr("Not read by the graph yet")
                                           : QString());
+        users_->setToolTip(users.isEmpty() && !picked.empty()
+                               ? tr("+ New Map > For a setting makes a map a setting reads; or in the Graph Editor, right-click a param > "
+                                    "Paint, or add a Map node.")
+                               : QString());
     } else {
         users_->clear();
     }
@@ -661,7 +668,9 @@ void MapsPanel::refreshRows() {
     show_->setEnabled(has);
     valueRow_->setEnabled(has);
     colorRow_->setEnabled(has);
+    box_->setVisible(has);
     bar_->refresh();
+    itemBar_->refresh();
     updating_ = false;
 }
 

@@ -165,9 +165,9 @@ public:
     std::string dragSlider;
 
     BrushToolSettings& settings() { return tool_.settings; }
-    // The Length Paths tool (Tool::Lengths): an edit by words (-lengthEdit: "key 2.5", "reach 1",
-    // "smooth on", "change trim", "select 0 1", "newPath", "deleteKey", "deletePath", "apply",
-    // "cancel"; throws std::invalid_argument for others) and its state as JSON (-lengthState).
+    // The Length Keys tool (Tool::Lengths): an edit by words (-lengthEdit: "scale 1.5", "length 2.5",
+    // "change trim", "select 1", "deleteKey", "clear", "apply", "cancel"; throws
+    // std::invalid_argument for others) and its state as JSON (-lengthState).
     void lengthEdit(const std::string& words);
     std::string lengthState();
     // The mode the tool is set to (-mode's query): during a Shift+drag's smoothing still the
@@ -193,7 +193,7 @@ private:
     void unchainUnlessStroking();
     void drawCircle(MHWRender::MUIDrawManager& draw, short x, short y) const;
     void drawAffected(MHWRender::MUIDrawManager& draw, short x, short y);
-    void drawLengths(MHWRender::MUIDrawManager& draw);  // the Length Paths tool's paths and keys
+    void drawLengths(MHWRender::MUIDrawManager& draw);  // the Length Keys tool's keys
 public:
     // Symmetry on: the scalp's line of symmetry (symmetrySeam) handed to the groom, which draws it
     // in red on every redraw (GroomShape::setSymmetrySeam), as Substance Painter shows it: from the

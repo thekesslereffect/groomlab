@@ -998,7 +998,7 @@ void rebuildOverlay(ToolState& t, float x, float y, bool withLines) {
             have = atTargetDepth(t, x, y, center);
         }
         if (have) {
-            const bool creating = s.tool == Tool::Place || s.tool == Tool::Draw;
+            const bool creating = s.tool == Tool::Place || s.tool == Tool::Draw || s.tool == Tool::Lengths;  // (Lengths: the keys' rings)
             const float radius = worldRadiusAt(t.view, center, x, y, creating ? 6.0f : s.screenRadius);
             if (radius > 0.0f) {
                 Vec3f eye, along;
@@ -1023,10 +1023,10 @@ void rebuildOverlay(ToolState& t, float x, float y, bool withLines) {
     }
     if (t.tool.stroking() && (s.tool == Tool::Part || s.tool == Tool::Flow)) appendColoredLine(t.overlay, t.tool.drawnPath(), brushPathColor(s));
     if (s.tool == Tool::Lengths && !t.selectTool) {
-        // The Length Paths tool's paths and keys (the core's lines: the app draws the same).
+        // The Length Keys tool's keys (the core's lines: the app draws the same).
         prepareHost(t);
         try {
-            for (const LengthPathTool::ColoredLine& line : t.tool.lengths().overlayLines(t.host, t.view, s, x, y)) {
+            for (const LengthKeyTool::ColoredLine& line : t.tool.lengths().overlayLines(t.host, t.view, s, x, y)) {
                 appendColoredLine(t.overlay, line.points, line.color);
             }
         } catch (const std::exception&) {
@@ -3227,31 +3227,27 @@ bool isToolCommand(const std::string& cmd) {
         "tube_shape_rename", "tube_shape_remove", "tube_shape_preview", "guides_preview", "guides_preview_end", "guide_segments",
         "parts_list", "part_add", "part_remove", "parts_clear", "flow_clear", "map_rename", "map_convert", "map_set_channels",
         "map_fill", "map_import", "map_relink", "map_reload", "map_users",
-        // The Length Paths tool's paths (the Paths box).
+        // The Length Keys tool's keys (the Keys box).
         "length_state", "length_edit"};
     return kCommands.count(cmd) > 0;
 }
 
-// The Length Paths tool's paths as the Paths box shows them: per path its smoothness and its keys'
-// lengths and reaches (host units), the selection, whether there are edits to apply, and how
+// The Length Keys tool's keys as the Keys box shows them: each key's scale and the length it gives
+// the guide nearest it (host units), the selection, whether there are edits to apply, and how
 // guides take a new length.
 json lengthStateJson(ToolState& t, const HostSpace& space) {
-    LengthPathTool& lp = t.tool.lengths();
-    const LengthPathSet& set = lp.paths(t.host);
-    json paths = json::array();
-    for (const LengthPath& path : set.paths) {
-        json lengths = json::array(), reaches = json::array();
-        for (const LengthKey& k : path.keys) {
-            lengths.push_back(toHostLength(space, k.length));
-            reaches.push_back(toHostLength(space, k.reach));
-        }
-        paths.push_back({{"smooth", path.smooth}, {"lengths", lengths}, {"reaches", reaches}});
+    LengthKeyTool& lk = t.tool.lengths();
+    const LengthKeySet& set = lk.keys(t.host);
+    json scales = json::array(), lengths = json::array();
+    for (std::size_t k = 0; k < set.keys.size(); ++k) {
+        scales.push_back(set.keys[k].scale);
+        lengths.push_back(toHostLength(space, lk.keyLength(t.host, t.tool.settings, static_cast<int>(k))));
     }
-    return {{"paths", paths},
-            {"activePath", lp.activePath()},
-            {"activeKey", lp.activeKey()},
-            {"edited", lp.edited()},
-            {"change", lengthChangeName(lp.change)}};
+    return {{"scales", scales},
+            {"lengths", lengths},
+            {"activeKey", lk.activeKey()},
+            {"edited", lk.edited()},
+            {"change", lengthChangeName(lk.change)}};
 }
 
 json toolStateJson(Session& s) {
@@ -3373,7 +3369,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         if (t.tool.stroking()) t.tool.cancel(&t.host);
         const float x = static_cast<float>(optNumber(args, "x", 0.0)), y = static_cast<float>(optNumber(args, "y", 0.0));
         const float pressure = static_cast<float>(optNumber(args, "pressure", 1.0));
-        // "adjust": the adjusting button (the Length Paths tool's right-drag: a key's length).
+        // "adjust": the adjusting button (the Length Keys tool's right-drag: a key's scale).
         const unsigned modifiers = (optBool(args, "ctrl", false) ? kStrokeCtrl : 0u) | (optBool(args, "shift", false) ? kStrokeShift : 0u) |
                                    (optBool(args, "adjust", false) ? kStrokeAdjust : 0u);
         prepareHost(t);
@@ -3408,7 +3404,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         if (!points.empty()) rebuildOverlay(t, points.back().x, points.back().y, false);
         result = overlayJson(t, optBool(args, "overlay", true));
         result["stroking"] = t.tool.stroking();
-        result["changed"] = t.tool.changed() || t.tool.lengthsPressed();  // (Length Paths: a live preview)
+        result["changed"] = t.tool.changed() || t.tool.lengthsPressed();  // (Length Keys: a live preview)
         result["warnings"] = warningsJson(t);
         return true;
     }
@@ -3612,36 +3608,34 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         return true;
     }
     if (cmd == "length_edit") {
-        // One edit of the Length Paths tool's paths: "key" / "reach" (value, host units), "smooth"
-        // (on), "change" (name), "select" (path, key), "newPath", "deleteKey", "deletePath",
-        // "apply" (the guides set: one undo step), "cancel".
+        // One edit of the Length Keys tool's keys: "scale" (value), "length" (value, host units),
+        // "change" (name), "select" (key), "deleteKey", "clear", "apply" (the guides set: one undo
+        // step), "cancel".
         prepareHost(t);
         const std::string edit = optString(args, "edit", "");
-        LengthPathTool& lp = t.tool.lengths();
+        LengthKeyTool& lk = t.tool.lengths();
         const BrushToolSettings& st = t.tool.settings;
         const std::size_t before = t.host.edits().size();
-        LengthChange change = lp.change;
+        LengthChange change = lk.change;
         if (edit == "change") {
             try {
                 change = lengthChangeFromName(optString(args, "name", "scale"));
             } catch (const std::invalid_argument& e) {
                 fail("bad_request", e.what());
             }
-        } else if (edit != "key" && edit != "reach" && edit != "smooth" && edit != "select" && edit != "newPath" &&
-                   edit != "deleteKey" && edit != "deletePath" && edit != "apply" && edit != "cancel") {
-            fail("bad_request", "length_edit takes key, reach, smooth, change, select, newPath, deleteKey, deletePath, apply or cancel");
+        } else if (edit != "scale" && edit != "length" && edit != "select" && edit != "deleteKey" && edit != "clear" &&
+                   edit != "apply" && edit != "cancel") {
+            fail("bad_request", "length_edit takes scale, length, change, select, deleteKey, clear, apply or cancel");
         }
         guarded(t, "lengths", [&] {
-            if (edit == "key") lp.setKeyLength(t.host, st, toGroomLength(s.space, optNumber(args, "value", 0.0)));
-            else if (edit == "reach") lp.setReach(t.host, st, toGroomLength(s.space, optNumber(args, "value", 0.0)));
-            else if (edit == "smooth") lp.setSmooth(t.host, st, optBool(args, "on", true));
-            else if (edit == "change") lp.setChange(t.host, st, change);
-            else if (edit == "select") lp.select(t.host, static_cast<int>(optNumber(args, "path", 0)), static_cast<int>(optNumber(args, "key", 0)));
-            else if (edit == "newPath") lp.newPath();
-            else if (edit == "deleteKey") lp.deleteKey(t.host, st);
-            else if (edit == "deletePath") lp.deletePath(t.host, st);
-            else if (edit == "apply") lp.apply(t.host, st);
-            else lp.cancel(t.host);
+            if (edit == "scale") lk.setKeyScale(t.host, st, static_cast<float>(optNumber(args, "value", 0.0)));
+            else if (edit == "length") lk.setKeyLength(t.host, st, toGroomLength(s.space, optNumber(args, "value", 0.0)));
+            else if (edit == "change") lk.setChange(t.host, st, change);
+            else if (edit == "select") lk.select(t.host, static_cast<int>(optNumber(args, "key", 0)));
+            else if (edit == "deleteKey") lk.deleteKey(t.host, st);
+            else if (edit == "clear") lk.clear(t.host, st);
+            else if (edit == "apply") lk.apply(t.host, st);
+            else lk.cancel(t.host);
         });
         result = lengthStateJson(t, s.space);
         result["committed"] = t.host.edits().size() != before;

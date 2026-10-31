@@ -58,6 +58,7 @@ class Layout(bu.FakeLayout):
     def operator(self, idname, **kwargs):
         props = bu.FakeLayout.operator(self, idname, **kwargs)
         self.log.append(("op_text", idname, kwargs.get("text", "")))
+        self.log.append(("op_props", idname, props))  # what the caller sets on it (a tile's tool)
         return props
 
 
@@ -287,11 +288,33 @@ class ToolsTest(unittest.TestCase):
         tools.catalog()
         log = draw_classes(palette.classes)
         self.assertIn(("op_text", "groomlab.tool", "▶  Place some guides"), log)
-        self.assertTrue(any(e[0] == "label" and e[1] == "CREATE" for e in log))
+        self.assertTrue(any(e[0] == "label" and e[1] == "Create" for e in log))  # a category's tiles under its name
         self.assertTrue(any(e[0] == "label" and "Pick a tool" in e[1] for e in log))
-        tiles = [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.tool"]
-        for label in ("Place", "Draw", "Part", "Flow", "Comb", "Smooth", "Cut", "Erase", "Paint", "Select", "Freeze"):
-            self.assertIn(label, tiles)
+        # The tiles: icon and name, of one size, as many to a row as fit (Blender's automatic
+        # columns), each tool's name and hint in its tooltip.
+        tiles = [getattr(e[2], "tool", None) for e in log if e[0] == "op_props" and e[1] == "groomlab.tool"]
+        for tool in ("place", "draw", "part", "flow", "comb", "smooth", "cut", "erase", "select", "freeze"):
+            self.assertIn(tool, tiles)
+        self.assertNotIn("paint", tiles)  # the Paint tile alone on the Paint tab, beside the maps
+        t.tab = "PAINT"
+        painting = draw_classes([palette.VIEW3D_PT_groomlab_tools])
+        painted = [getattr(e[2], "tool", None) for e in painting if e[0] == "op_props" and e[1] == "groomlab.tool"]
+        self.assertIn("paint", painted)
+        self.assertNotIn("comb", painted)
+        t.tab = "TOOLS"
+        self.assertEqual(palette.tool_grid.__defaults__, (0,))
+        tile_texts = [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.tool"]
+        self.assertIn("▶  Place some guides", tile_texts)  # the starter's step
+        for tool in ("comb", "freeze"):  # the tiles' names
+            self.assertIn(tools.tool_info(tool)["label"], tile_texts)
+        self.assertNotIn("", tile_texts)
+        unfreeze = [e[2] for e in log if e[0] == "op_props" and e[1] == "groomlab.guides_edit"
+                    and getattr(e[2], "action", None) == "UNFREEZE_ALL"]
+        self.assertTrue(unfreeze)  # Unfreeze All beside Freeze: a labeled tile
+        self.assertIn("Unfreeze All", [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.guides_edit"])
+        comb = type("Props", (), {"tool": "comb"})()
+        self.assertEqual(tool_ops.GROOMLAB_OT_tool.description(bpy.context, comb),
+                         "%s: %s" % (tools.tool_info("comb")["label"], tools.tool_info("comb")["hint"]))
         # Free for any use: no Learning mode note.
         self.assertFalse(any(e[0] == "label" and "Learning" in e[1] for e in log))
 
@@ -337,7 +360,11 @@ class ToolsTest(unittest.TestCase):
         log = draw_classes([palette.VIEW3D_PT_groomlab_tools])
         self.assertIn(("prop", "radius"), log)
         self.assertNotIn(("prop", "stretch"), log)
-        self.assertTrue(any(e[0] == "label" and e[1] == "LIFT" for e in log))
+        self.assertTrue(any(e[0] == "label" and e[1] == "Lift" for e in log))  # the card's title
+        short = palette.short_text("lift")  # its one line (wrapped to the sidebar)
+        self.assertTrue(short and any(e[0] == "label" and e[1] and short.startswith(e[1]) for e in log), short)
+        for gone in ("selected_only", "front_facing"):  # not in the panel: the brushes' defaults
+            self.assertNotIn(("prop", gone), log)
         bpy.ops.groomlab.tool(tool="place")
         log = draw_classes([palette.VIEW3D_PT_groomlab_tools])
         self.assertNotIn(("prop", "radius"), log)
@@ -525,32 +552,35 @@ class ToolsTest(unittest.TestCase):
         bpy.ops.groomlab.guides_edit(action="UNFREEZE_ALL")
         self.assertEqual(t.frozen_count, 0)
         t.group = "primary"
-        # Length Paths: a click lays a key (the Paths box shows it), a right-drag up a doubling's
-        # worth on it doubles its length in the preview, Enter applies (one undo step), the path
-        # kept with the guides; Ctrl+Z takes it back.
+        # Length Keys: a click places a key at x1 (the Keys box shows it), a right-drag up a
+        # doubling's worth on it makes it x2 in the preview, Enter applies (one undo step), the keys
+        # kept with the guides back at x1; Ctrl+Z takes it back.
         bpy.ops.groomlab.tool(tool="lengths")
         data0 = texts(head)["guideData"]
         depth = hcall(head, "undo_state")["undoDepth"]
         kp = cam.pixel(th.crown_points(5)[2])
         self.click(ts, kp[0], kp[1])
         state = json.loads(t.length_state or "{}")
-        self.assertEqual(len(state.get("paths", [])), 1)
-        self.assertEqual(len(state["paths"][0]["lengths"]), 1)
-        first = state["paths"][0]["lengths"][0]
+        self.assertEqual(state.get("scales"), [1.0])
+        first = state["lengths"][0]
         self.assertAlmostEqual(t.length_key, first, places=4)
         self.assertEqual(texts(head)["guideData"], data0)  # previewed, not applied
         self.send(ts, Event("RIGHTMOUSE", "PRESS", kp[0], kp[1]), Event("MOUSEMOVE", x=kp[0], y=kp[1] + 150.0),
                   Event("RIGHTMOUSE", "RELEASE", kp[0], kp[1] + 150.0))
         state = json.loads(t.length_state)
-        self.assertAlmostEqual(state["paths"][0]["lengths"][0], 2.0 * first, delta=1e-3 * first)
+        self.assertAlmostEqual(state["scales"][0], 2.0, delta=1e-3)
+        self.assertAlmostEqual(state["lengths"][0], 2.0 * first, delta=1e-3 * first)
+        self.assertAlmostEqual(t.length_scale, 2.0, delta=1e-3)
         self.assertTrue(state["edited"])
         self.assertEqual(self.send(ts, Event("RET", "PRESS", kp[0], kp[1])), {"RUNNING_MODAL"})
         self.assertNotEqual(texts(head)["guideData"], data0)
-        self.assertIn("lengthPaths", texts(head)["guideData"])
-        self.assertFalse(json.loads(t.length_state)["edited"])
+        self.assertIn("lengthKeys", texts(head)["guideData"])
+        state = json.loads(t.length_state)
+        self.assertFalse(state["edited"])
+        self.assertEqual(state["scales"], [1.0])
         self.assertEqual(hcall(head, "undo_state")["undoDepth"], depth + 1)
         # The box's field edits the key (a preview again); Cancel in the box drops it.
-        t.length_key = first
+        t.length_scale = 0.5
         self.assertTrue(json.loads(t.length_state)["edited"])
         self.assertEqual(bpy.ops.groomlab.length_edit(edit="cancel"), {"FINISHED"})
         self.assertFalse(json.loads(t.length_state)["edited"])

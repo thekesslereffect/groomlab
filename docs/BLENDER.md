@@ -311,7 +311,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `guide_segments` | `ids`, `group` or `level` (else the selection, else every guide) | `{"ids", "segments"}`: each guide's points - 1 (the Segments slider) |
 | `guides_preview` | `segments`, targets as resample | `{"previewed"}`: the guides shown resampled (`setPreviewHierarchy`, from the stored guides each time), no change, no undo step; `guides_edit resample` commits |
 | `guides_preview_end` | | `{"ended"}`: the stored guides shown again (after `guides_preview` or `tube_shape_preview`) |
-| `tube_targets` | | `{"source" (selection, solo, none), "guides", "shapes", "tube" (the first's, or null)}`: what the Tubes section edits (Maya's `-tubeTargets`: the selection, else the soloed guides) |
+| `tube_targets` | | `{"source" (selection, solo, none), "guides", "shapes", "tube" (the first's, or null)}`: what the Shape and Select cards' Profile and Selected guides edit (Maya's `-tubeTargets`: the selection, else the soloed guides) |
 | `tube_get` | `guide` (an ID) | `{"tube": {"shape", "width" (host units), "aspect", "twist" (radians)}}`, lists evenly spaced root to tip |
 | `tube_set` | `shape`, `width` (host units), `aspect`, `twist` (each a number or a list root to tip), `samples`; targets `ids`, `group` or `level`, else the selection | `{"changed", "undo"}` (Maya's `-setTube`, `editedTube`) |
 | `tube_scale` | `factor` (0 or more), targets | `{"changed", "undo"}`: every width times it, the taper kept |
@@ -930,8 +930,10 @@ and params are its own (`node_spec`): its exposed params are a list of the 3D pa
 the node. Ramps are drawn with Blender's curve widget: a Float Curve node per ramp in a hidden
 shader node group (`.GroomLab Ramps`), points and handle types (all Vector: `"linear"`) read back
 into the ramp. Node bodies carry their category's color (Blender draws a custom node's header in
-its theme's color: the category tint is on the body, with Maya's accent bar drawn over the header
-by the editor's overlay, beside the error "!", note "i", View eye and evaluation times).
+its theme's color: the category tint is on the body, with the category's dot drawn before the title
+by the editor's overlay (the label starts with room for it, `graph_tree.LABEL_LEAD`), and in the
+header row a yellow warning triangle for a note, the evaluation time (grey, yellow from 10 ms) and the
+View eye in blue; an error keeps its red "!" on the corner).
 
 **Two-way sync.** The tree mirrors the helper's graph; node names are the graph's.
 - Tree to helper (`NodeTree.update`, after any edit of the tree): the tree's structure (nodes,
@@ -1056,7 +1058,7 @@ tooltip), F frame the selection or all, V View (Focus), B Bypass, Ctrl+D duplica
 Ctrl+Shift+G ungroup; Blender's Shift+A, X/Delete, Shift+D, M, F2, Ctrl+J and Home work as ever.
 
 What differs from Maya's editor (Blender's node editor): the header color is the theme's (the
-category is the body tint and the accent bar); a "strands or guides" port is grey, not half and
+category is the body tint and the dot before the title); a "strands or guides" port is grey, not half and
 half; compounds are not entered (as in Maya); Tab over a wire does not insert (drop the node on
 it); keys are Blender's (I over a property), not S; the GPU drag preview is not in Blender; the A key keeps Blender's select-all (Home
 frames all); no Live/Apply switch (every edit applies).
@@ -1073,7 +1075,7 @@ display, menu and keys.
 | `tool_props.py` | `Scene.groomlab_tools` (the palette's settings by the catalog's labels and hints; saved with the .blend as Maya keeps them in optionVars), `Object.groomlab_tools` (the groom's display, Maya's groom attributes; its kept state), the add-on preferences (the pie's key) |
 | `tool_ops.py` | the tool (`groomlab.tool` picks one, `groomlab.tool_modal` runs it in the viewport: `ToolSession` turns events into the helper's commands), undo, groups, guide edits, maps, the pie menu `GROOMLAB_MT_pie` and its keymap item (hotkeys.py, tool_tabs.py) |
 | `display.py` | `display` into draw lists (numpy) and gpu batches, a POST_VIEW handler; strand color modes as the hair's `groomlab_display` color attribute (groom_draw_override.cpp) |
-| `palette.py` | the sidebar's **Groom Tools** panel (Tools, Paint, Correctives and Photos tabs; Photos is `photos.py`'s, section 3 "Photos") and its folded subpanels in palette.json's order: Tubes, While sculpting, Guide groups & edits, Output, then Display (palette.py, tool_tabs.py) |
+| `palette.py` | the sidebar's **Groom Tools** panel (Tools, Paint, Correctives and Photos tabs; Photos is `photos.py`'s, section 3 "Photos") the tool grid, the tool's card (Brush, the tool's own blocks, Applies to) and the Paint and Correctives lists; then its subpanels: Guide groups (open, palette.json's one section), While sculpting and Display, folded (palette.py, tool_tabs.py) |
 | `menu.py` | every menu the UI definitions describe, built from them: the top bar's **GroomLab** menu (menus.json "main"), the Groom Tools' More menu, Output and empty-state submenus, the lists' right-click menus (Blender's list item context menu, and a button beside each list); the shortcuts, the About popup (menu.py) |
 | `definitions.py`, `actions.py` | the shared UI definitions (`engine/ui/*.json`, docs/UI_DEFINITIONS.md) read with no helper running, as Maya's definitions.py (host "blender"); `actions.BINDINGS` maps each action id to an operator and its properties. An id without a binding is hidden; `blender.addon_ui` lists the ones left (its ALLOWED_MISSING: the parity checklist) |
 | `icons.py`, `icons/*.png` | Maya's icons (hosts/maya/icons/*.svg) as previews; the PNGs are rendered by `tools/make_blender_icons.py` (Pillow, the Playful theme's colors as widgets.icon gives them) and committed |
@@ -1121,8 +1123,9 @@ is read-only there): a timer writes them.
 
 Deviations Blender forces:
 
-- The palette is a sidebar panel, not a floating dockable window; tiles are icon + label buttons
-  (Blender buttons cannot put the label under the icon); the More menu has no theme menu.
+- The palette is a sidebar panel, not a floating dockable window; tiles are icon buttons six to a
+  row, as Maya's (the tooltip's title is Blender's operator name, "GroomLab Tool", with the tool's
+  name and hint under it); the More menu has no theme menu.
 - No middle-drag radius/strength (Blender's view rotation): B / M + drag only, as Maya's hotkeys.
 - Blender postpones its autosave while a modal operator runs: the tool's does too; leave the tool
   (Esc) now and then in long sessions, or save.

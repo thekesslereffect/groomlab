@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <memory>
 #include <set>
@@ -35,10 +36,12 @@
 #include <QScrollBar>
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QFileInfo>
 #include <QPointF>
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QTimer>
+#include <QWheelEvent>
 #include <QSize>
 #include <QTabBar>
 #include <QToolButton>
@@ -606,15 +609,18 @@ TEST(AppPanels, MapsPanelMakesPaintsShowsAndUndoesMaps) {
     EXPECT_GT(sumAgain, 0.0f) << "the painted values survived the file";
 }
 
-TEST(AppPanels, ValueSliderEditsInlineDragsAnywhereAndWidensItsRange) {
+TEST(AppPanels, ValueSliderIsOneFillFieldThatTypesAndWidensItsRange) {
+    // One field a row tall, the caption inside (no separate label), typed values set as one change.
     ValueSlider slider;
-    slider.setStacked(true);
     slider.setCaption("Length");
     slider.setRange(0.0, 10.0);
     slider.setLimits(0.0, 100.0);
     slider.setDecimals(2);
+    EXPECT_EQ(slider.sizeHint().height(), theme::rowHeight()) << "a row tall, the caption inside";
+    EXPECT_EQ(slider.minimumSizeHint().height(), theme::rowHeight());
+    EXPECT_EQ(slider.caption(), QStringLiteral("Length"));
+    EXPECT_EQ(slider.focusPolicy(), Qt::StrongFocus) << "Tab reaches it";
     slider.resize(200, slider.sizeHint().height());
-    EXPECT_GE(slider.sizeHint().height(), 40) << "a comfortable hit area, not a hairline";
     slider.setValue(2.5);
     EXPECT_DOUBLE_EQ(slider.value(), 2.5);
     int presses = 0, changes = 0, releases = 0;
@@ -622,7 +628,7 @@ TEST(AppPanels, ValueSliderEditsInlineDragsAnywhereAndWidensItsRange) {
     QObject::connect(&slider, &ValueSlider::pressed, [&] { ++presses; });
     QObject::connect(&slider, &ValueSlider::valueChanged, [&](double v) { ++changes; last = v; });
     QObject::connect(&slider, &ValueSlider::released, [&] { ++releases; });
-    // Typed inline: one change between a press and a release; past the span, the span widens.
+    // Typed inline: one change between a press and a release; past the range, the range widens.
     slider.beginEdit();
     EXPECT_TRUE(slider.editing());
     slider.setEditText("42");
@@ -646,34 +652,184 @@ TEST(AppPanels, ValueSliderEditsInlineDragsAnywhereAndWidensItsRange) {
     slider.cancelEdit();
     EXPECT_FALSE(slider.editing());
     EXPECT_DOUBLE_EQ(slider.value(), 100.0);
-    // A press on the track jumps there; a press on the caption drags relatively, no jump.
-    const int y = slider.height() - 10;
-    presses = changes = releases = 0;
-    mouse(&slider, QEvent::MouseButtonPress, QPoint(100, y));
-    EXPECT_EQ(presses, 1);
-    EXPECT_NEAR(slider.value(), 50.0, 1.0) << "the middle of the track";
-    mouse(&slider, QEvent::MouseButtonRelease, QPoint(100, y));
-    EXPECT_EQ(releases, 1);
-    const double before = slider.value();
-    mouse(&slider, QEvent::MouseButtonPress, QPoint(10, 8));
-    EXPECT_DOUBLE_EQ(slider.value(), before) << "no jump from the caption";
-    mouse(&slider, QEvent::MouseMove, QPoint(30, 8));
-    EXPECT_GT(slider.value(), before) << "the travel moves it";
-    mouse(&slider, QEvent::MouseButtonRelease, QPoint(30, 8));
+    // Arithmetic, and "," as the decimal point.
+    slider.beginEdit();
+    slider.setEditText("0.5*2 + 1/4");
+    EXPECT_TRUE(slider.commitEdit());
+    EXPECT_DOUBLE_EQ(slider.value(), 1.25);
+    slider.beginEdit();
+    slider.setEditText("3,5");
+    EXPECT_TRUE(slider.commitEdit());
+    EXPECT_DOUBLE_EQ(slider.value(), 3.5);
     // An integer slider snaps.
     ValueSlider count;
     count.setInteger(true);
     count.setRange(0.0, 10.0);
     count.setValue(3.4);
     EXPECT_DOUBLE_EQ(count.value(), 3.0);
+    count.beginEdit();
+    count.setEditText("7/2");
+    EXPECT_TRUE(count.commitEdit());
+    EXPECT_DOUBLE_EQ(count.value(), 4.0);
+}
+
+TEST(AppPanels, NumberExpressionsTakeArithmeticAndNothingElse) {
+    double v = 0.0;
+    auto parsed = [&](const char* text) { return parseNumberExpression(QString::fromUtf8(text), &v); };
+    ASSERT_TRUE(parsed("0.5*2"));
+    EXPECT_DOUBLE_EQ(v, 1.0);
+    ASSERT_TRUE(parsed("1/3"));
+    EXPECT_DOUBLE_EQ(v, 1.0 / 3.0);
+    ASSERT_TRUE(parsed(" 0,25 "));
+    EXPECT_DOUBLE_EQ(v, 0.25);
+    ASSERT_TRUE(parsed("-(2+1)*2"));
+    EXPECT_DOUBLE_EQ(v, -6.0);
+    ASSERT_TRUE(parsed("2 - -3"));
+    EXPECT_DOUBLE_EQ(v, 5.0);
+    ASSERT_TRUE(parsed("1 + 2 * 3"));
+    EXPECT_DOUBLE_EQ(v, 7.0) << "* before +";
+    ASSERT_TRUE(parsed("2e3"));
+    EXPECT_DOUBLE_EQ(v, 2000.0);
+    ASSERT_TRUE(parsed(".5"));
+    EXPECT_DOUBLE_EQ(v, 0.5);
+    v = 9.0;
+    for (const char* bad : {"", "ten", "2+", "(1", "1)", "1/0", "1 2", "2^3", "abs(1)", "0x10", "1;2", "."}) {
+        EXPECT_FALSE(parsed(bad)) << bad;
+    }
+    EXPECT_DOUBLE_EQ(v, 9.0) << "a failed parse leaves the value";
+}
+
+TEST(AppPanels, ValueSliderClickTypesDragScrubsAndKeysNudge) {
+    ValueSlider slider;
+    slider.setCaption("Width");
+    slider.setRange(0.0, 10.0);
+    slider.setDecimals(3);
+    slider.resize(200, slider.sizeHint().height());  // 0.05 a pixel
+    slider.setValue(2.5);
+    const int y = slider.height() / 2;
+    int presses = 0, changes = 0, releases = 0;
+    QObject::connect(&slider, &ValueSlider::pressed, [&] { ++presses; });
+    QObject::connect(&slider, &ValueSlider::valueChanged, [&](double) { ++changes; });
+    QObject::connect(&slider, &ValueSlider::released, [&] { ++releases; });
+
+    // A click (under 3 px of travel): no change, the edit opens with the number selected.
+    mouse(&slider, QEvent::MouseButtonPress, QPoint(100, y));
+    mouse(&slider, QEvent::MouseMove, QPoint(102, y));
+    EXPECT_DOUBLE_EQ(slider.value(), 2.5) << "2 px is no drag";
+    mouse(&slider, QEvent::MouseButtonRelease, QPoint(102, y));
+    EXPECT_TRUE(slider.editing()) << "a click types";
+    auto* editor = slider.findChild<QLineEdit*>();
+    ASSERT_NE(editor, nullptr);
+    EXPECT_EQ(editor->text(), QStringLiteral("2.5"));
+    EXPECT_EQ(editor->selectedText(), editor->text()) << "the number selected: typing replaces it";
+    EXPECT_EQ(presses + changes + releases, 0) << "a click alone changes nothing";
+    // Escape puts the old value back.
+    slider.setEditText("7");
+    QKeyEvent escape(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &escape);
+    EXPECT_FALSE(slider.editing());
+    EXPECT_DOUBLE_EQ(slider.value(), 2.5);
+    EXPECT_EQ(changes, 0);
+    // Enter (the line edit's returnPressed) sets it.
+    slider.beginEdit();
+    slider.setEditText("4");
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QCoreApplication::sendEvent(editor, &enter);
+    EXPECT_FALSE(slider.editing());
+    EXPECT_DOUBLE_EQ(slider.value(), 4.0);
+    slider.setValue(2.5);
+
+    // A drag: relative to the press (no jump to the mouse), the field's width the range.
+    presses = changes = releases = 0;
+    mouse(&slider, QEvent::MouseButtonPress, QPoint(20, y));
+    EXPECT_DOUBLE_EQ(slider.value(), 2.5) << "a press does not jump";
+    EXPECT_EQ(presses, 0);
+    mouse(&slider, QEvent::MouseMove, QPoint(60, y));
+    EXPECT_EQ(presses, 1) << "the drag starts past the threshold";
+    EXPECT_NEAR(slider.value(), 4.5, 1e-9) << "40 px of a 200 px field over 0-10";
+    mouse(&slider, QEvent::MouseButtonRelease, QPoint(60, y));
+    EXPECT_EQ(releases, 1);
+    EXPECT_FALSE(slider.editing()) << "a drag does not type";
+    // Shift: a tenth of the speed.
+    mouseAt(&slider, QEvent::MouseButtonPress, QPointF(20, y), Qt::ShiftModifier);
+    mouseAt(&slider, QEvent::MouseMove, QPointF(60, y), Qt::ShiftModifier);
+    EXPECT_NEAR(slider.value(), 4.7, 1e-9);
+    mouseAt(&slider, QEvent::MouseButtonRelease, QPointF(60, y), Qt::ShiftModifier);
+    // Ctrl: steps of ten (the step a 100th of the range, rounded: 0.1, so whole numbers).
+    mouseAt(&slider, QEvent::MouseButtonPress, QPointF(20, y), Qt::ControlModifier);
+    mouseAt(&slider, QEvent::MouseMove, QPointF(33, y), Qt::ControlModifier);
+    EXPECT_NEAR(slider.value(), 5.0, 1e-9) << "4.7 + 0.65 to the nearest 1";
+    mouseAt(&slider, QEvent::MouseButtonRelease, QPointF(33, y), Qt::ControlModifier);
+    // The drag stays inside the range (a typed value may go past it).
+    mouse(&slider, QEvent::MouseButtonPress, QPoint(20, y));
+    mouse(&slider, QEvent::MouseMove, QPoint(800, y));
+    EXPECT_DOUBLE_EQ(slider.value(), 10.0);
+    mouse(&slider, QEvent::MouseMove, QPoint(790, y));
+    EXPECT_LT(slider.value(), 10.0) << "back the moment the mouse turns: the travel past the end is not banked";
+    mouse(&slider, QEvent::MouseButtonRelease, QPoint(790, y));
+
+    // Keys (focused): the arrows nudge one step (Shift ten), Enter and F2 type.
+    slider.setStep(0.5);
+    slider.setValue(2.0);
+    auto press = [&](int k, Qt::KeyboardModifiers mods = Qt::NoModifier) {
+        QKeyEvent event(QEvent::KeyPress, k, mods);
+        QCoreApplication::sendEvent(&slider, &event);
+    };
+    press(Qt::Key_Right);
+    EXPECT_DOUBLE_EQ(slider.value(), 2.5);
+    press(Qt::Key_Up, Qt::ShiftModifier);
+    EXPECT_DOUBLE_EQ(slider.value(), 7.5);
+    press(Qt::Key_Down);
+    press(Qt::Key_Left);
+    EXPECT_DOUBLE_EQ(slider.value(), 6.5);
+    press(Qt::Key_Right, Qt::ShiftModifier);
+    EXPECT_DOUBLE_EQ(slider.value(), 10.0) << "nudged to the range's end, no further";
+    press(Qt::Key_F2);
+    EXPECT_TRUE(slider.editing());
+    slider.cancelEdit();
+    press(Qt::Key_Return);
+    EXPECT_TRUE(slider.editing());
+    slider.cancelEdit();
+    // The wheel over a field that is not focused scrolls the panel, not the value.
+    QWheelEvent wheel(QPointF(50, y), slider.mapToGlobal(QPointF(50, y)), QPoint(), QPoint(0, 120), Qt::NoButton, Qt::NoModifier,
+                      Qt::NoScrollPhase, false);
+    QCoreApplication::sendEvent(&slider, &wheel);
+    EXPECT_FALSE(wheel.isAccepted()) << "left to the scroll area";
+    EXPECT_DOUBLE_EQ(slider.value(), 10.0);
+}
+
+TEST(AppPanels, ValueSliderPaintsItsFillStateAndDisabledLook) {
+    ValueSlider slider;
+    slider.setCaption("Strength");
+    slider.setRange(0.0, 1.0);
+    slider.setValue(0.5);
+    slider.resize(200, theme::rowHeight());
+    const QImage shot = slider.grab().toImage();
+    ASSERT_FALSE(shot.isNull());
+    const int y = 3;  // above the texts, inside the edge
+    const QColor filled = shot.pixelColor(12, y), empty = shot.pixelColor(188, y);
+    EXPECT_NE(filled.rgb(), empty.rgb()) << "the fill covers the value's share from the left";
+    if (!theme::glassy()) EXPECT_EQ(slider.fillColor(), theme::uiColor("selection")) << "a solid theme fills with its selection tone";
+    // A driven param: tinted; disabled: faded.
+    slider.setStateColor(QColor(0xCF, 0xC2, 0x7A));
+    EXPECT_NE(slider.grab().toImage().pixelColor(188, y).rgb(), empty.rgb()) << "the state color shows";
+    slider.setStateColor(QColor());
+    slider.setEnabled(false);
+    EXPECT_NE(slider.grab().toImage().pixelColor(12, y).rgb(), filled.rgb()) << "disabled, it is drawn faded";
+    slider.setEnabled(true);
+    slider.beginEdit();
+    EXPECT_NE(slider.grab().toImage().pixelColor(12, y).rgb(), filled.rgb()) << "editing: the field, no fill";
 }
 
 TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     // The Groom Tools' tiles (the core's catalog, Maya's grouping): Create, Shape, Trim and Guides
     // on the Tools tab (Unfreeze All beside Freeze), Paint on the Paint tab; a grid that wraps to
-    // the dock's width, the names under the icons (compact icon tiles without them).
+    // the dock's width, the names under the icons (Tool Labels off: icons alone, the names in the
+    // tool tips).
     GroomTools tools;
-    EXPECT_EQ(tools.tiles().size(), 23u) << "Select, Freeze, the 20 tools (Paint and Length Paths among them) and Unfreeze All";
+    EXPECT_TRUE(tools.tileLabels()) << "labeled tiles by default";
+    tools.setTileLabels(false);
+    EXPECT_EQ(tools.tiles().size(), 23u) << "Select, Freeze, the 20 tools (Paint and Length Keys among them) and Unfreeze All";
     for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "unfreeze"}) {
         EXPECT_NE(tools.tile(id), nullptr) << id;
     }
@@ -682,18 +838,20 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     EXPECT_EQ(tabs, (std::vector<std::string>{"Tools", "Paint", "Correctives", "Photos"})) << "palette.json's tabs";
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);
+    EXPECT_EQ(grid->columnsFor(260), 6) << "six 34 px icons to a row in a 260 px column";
+    EXPECT_EQ(qobject_cast<QToolButton*>(tools.tile("comb"))->toolButtonStyle(), Qt::ToolButtonIconOnly);
+    EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Comb"))) << "the name in the tool tip";
+    const int icons = grid->heightForWidth(260);
+    tools.setTileLabels(true);
     const int wide = grid->heightForWidth(300);
     EXPECT_GT(grid->heightForWidth(140), wide) << "a narrower dock wraps to more rows";
-    EXPECT_EQ(grid->columnsFor(300), 4) << "four to a row, as Maya's";
+    EXPECT_EQ(grid->columnsFor(300), 5) << "labeled tiles (56 px) as many as fit";
     grid->resize(260, grid->heightForWidth(260));
     for (QAbstractButton* t : grid->findChildren<QAbstractButton*>()) {
         EXPECT_LE(t->geometry().right(), 260) << "a tile past the dock's width";
         EXPECT_EQ(qobject_cast<QToolButton*>(t)->toolButtonStyle(), Qt::ToolButtonTextUnderIcon);
     }
-    tools.setTileLabels(false);
-    EXPECT_LT(grid->heightForWidth(260), wide) << "compact icon tiles: more to a row";
-    EXPECT_EQ(qobject_cast<QToolButton*>(tools.tile("comb"))->toolButtonStyle(), Qt::ToolButtonIconOnly);
-    tools.setTileLabels(true);
+    EXPECT_LT(icons, grid->heightForWidth(260)) << "icons alone: more to a row";
     // A tile asks for its tool; the window lights it (setTool) and the card shows its settings.
     QString chosen;
     QObject::connect(&tools, &GroomTools::toolChosen, [&](const QString& id) { chosen = id; });
@@ -703,7 +861,7 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     tools.setTool("comb");
     EXPECT_TRUE(tools.tile("comb")->isChecked());
     EXPECT_FALSE(tools.tile("cut")->isChecked());
-    EXPECT_EQ(tools.toolHeading()->text(), QStringLiteral("COMB"));
+    EXPECT_EQ(tools.card()->titleLabel()->text(), QStringLiteral("Comb"));
     // The mode switcher says when any segment is clicked, the current one too.
     Segmented modes;
     modes.setItems({{"A", Qt::red, Qt::white}, {"B", Qt::blue, Qt::white}});
@@ -1984,9 +2142,9 @@ public:
 
 }  // namespace
 
-// The Length Paths tool in the app: a click lays a key (the Paths box shows it), a right-drag
-// (kStrokeAdjust) sets its length in the preview, Apply in the box sets the guides (one undo step).
-TEST(AppPanels, LengthPathsKeysPreviewAndApply) {
+// The Length Keys tool in the app: a click places a key (the Keys box shows it), a right-drag
+// (kStrokeAdjust) scales it in the preview, Apply in the box sets the guides (one undo step).
+TEST(AppPanels, LengthKeysPreviewAndApply) {
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
     ViewRequest request;
@@ -2003,11 +2161,11 @@ TEST(AppPanels, LengthPathsKeysPreviewAndApply) {
     session.setTool("lengths");
     panel.setTool("lengths");
     EXPECT_EQ(session.settings().modeName(), "lengths");
-    auto* box = panel.findChild<QWidget*>(QStringLiteral("lengthPathsBox"));
-    auto* path = panel.findChild<QComboBox*>(QStringLiteral("lengthPath"));
-    auto* key = panel.findChild<QDoubleSpinBox*>(QStringLiteral("lengthKey"));
+    auto* box = panel.findChild<QWidget*>(QStringLiteral("lengthKeysBox"));
+    auto* scale = panel.findChild<ValueSlider*>(QStringLiteral("lengthScale"));
+    auto* key = panel.findChild<ValueSlider*>(QStringLiteral("lengthKey"));
     auto* apply = panel.findChild<QPushButton*>(QStringLiteral("lengthApply"));
-    ASSERT_TRUE(box && path && key && apply);
+    ASSERT_TRUE(box && scale && key && apply);
     EXPECT_FALSE(box->isHidden());
     EXPECT_FALSE(apply->isEnabled());
     const std::string before = doc->session().data().hierarchyJson;
@@ -2019,21 +2177,27 @@ TEST(AppPanels, LengthPathsKeysPreviewAndApply) {
     ASSERT_TRUE(session.press(at, 1.0f, 0)) << session.lastError();
     session.release();
     panel.refresh();
-    ASSERT_EQ(path->count(), 1);
+    std::size_t keys = 0;
+    session.editLengths("keys", [&](LengthKeyTool& t, StrokeHost& h, const BrushToolSettings&) { keys = t.keys(h).keys.size(); });
+    ASSERT_EQ(keys, 1u);
     ASSERT_TRUE(key->isEnabled());
+    EXPECT_DOUBLE_EQ(scale->value(), 1.0);
     const double first = key->value();
     EXPECT_GT(first, 0.0);
-    // Right-drag up a doubling's worth on the key: twice as long, previewed.
+    // Right-drag up a doubling's worth on the key: x2, its guide twice as long, previewed.
     ASSERT_TRUE(session.press(at, 1.0f, kStrokeAdjust)) << session.lastError();
-    session.move(QPointF(at.x(), at.y() - LengthPathTool::kPixelsPerDoubling), 1.0f);
+    session.move(QPointF(at.x(), at.y() - LengthKeyTool::kPixelsPerDoubling), 1.0f);
     session.release();
     panel.refresh();
+    EXPECT_NEAR(scale->value(), 2.0, 1e-3);
     EXPECT_NEAR(key->value(), 2.0 * first, 1e-3 * first);
     EXPECT_TRUE(apply->isEnabled());
     EXPECT_EQ(doc->session().data().hierarchyJson, before);  // previewed, not applied
     apply->click();
     EXPECT_NE(doc->session().data().hierarchyJson, before);
-    EXPECT_NE(doc->session().data().hierarchyJson.find("lengthPaths"), std::string::npos);
+    EXPECT_NE(doc->session().data().hierarchyJson.find("lengthKeys"), std::string::npos);
+    panel.refresh();
+    EXPECT_DOUBLE_EQ(scale->value(), 1.0) << "applied: the key back at x1";
     EXPECT_FALSE(apply->isEnabled());
     EXPECT_EQ(doc->undo(), "");
     EXPECT_EQ(doc->session().data().hierarchyJson, before);
@@ -2056,8 +2220,9 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     BrushPanel& panel = *tools.card();
 
     // The curves: off until ticked, then the editor's keys; unticked, none again.
-    auto* strength = panel.findChild<QCheckBox*>(QStringLiteral("strengthProfile"));
-    auto* falloff = panel.findChild<QCheckBox*>(QStringLiteral("falloffProfile"));
+    // (Chips: Falloff curve and Root to tip, each showing its ramp under the chips while on.)
+    auto* strength = panel.findChild<QAbstractButton*>(QStringLiteral("strengthProfile"));
+    auto* falloff = panel.findChild<QAbstractButton*>(QStringLiteral("falloffProfile"));
     ASSERT_TRUE(strength && falloff);
     EXPECT_FALSE(strength->isChecked());
     strength->setChecked(true);
@@ -2070,7 +2235,8 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     session.settings().setFalloffProfile("");
     panel.refresh();
     EXPECT_FALSE(falloff->isChecked()) << "the panel follows the settings";
-    // Symmetry (the Groom Tools' row, always shown): on, and across World X, Y, Z or Topology.
+    // Symmetry (Applies to's Mirror row): on, and across World X, Y, Z or Topology.
+    tools.setTool("comb");
     QComboBox* symmetry = tools.symmetryMode();
     EXPECT_FALSE(symmetry->isEnabled()) << "off: the choice waits";
     symmetry->setCurrentIndex(symmetry->findText(QStringLiteral("Topology")));
@@ -2089,7 +2255,7 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     // new guides; Place's new guides, no radius; no duplicate radius anywhere.
     tools.setTool("comb");
     EXPECT_TRUE(panel.findChild<QWidget*>(QStringLiteral("radius"))->isVisibleTo(&panel));
-    EXPECT_TRUE(panel.findChild<QCheckBox*>(QStringLiteral("stretch"))->isVisibleTo(&panel));
+    EXPECT_TRUE(panel.findChild<QAbstractButton*>(QStringLiteral("stretch"))->isVisibleTo(&panel));
     EXPECT_FALSE(panel.findChild<QWidget*>(QStringLiteral("newGuidesBox"))->isVisibleTo(&panel));
     EXPECT_EQ(tools.findChildren<ValueSlider*>(QStringLiteral("radius")).size(), 1);
     tools.setTool("place");
@@ -2186,7 +2352,7 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     // freezes the guides not selected (an undo step), a pick of nothing unfreezes them; Unfreeze All
     // in the panel.
     EXPECT_FALSE(session.settings().place.soloNewGuides);
-    ASSERT_TRUE(panel.findChild<QCheckBox*>(QStringLiteral("soloNewGuides")));
+    ASSERT_TRUE(panel.findChild<QAbstractButton*>(QStringLiteral("soloNewGuides")));
     const QPointF at(x, 600.0 - y);
     ASSERT_EQ(session.select({at}, SelectMode::Replace, true), 1u);
     const auto frozenCount = [&] {
@@ -2204,9 +2370,15 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     session.select({QPointF(2.0, 2.0)}, SelectMode::Replace, true);
     EXPECT_EQ(frozenCount(), 0u) << "a pick of nothing unfreezes every guide";
     session.select({at}, SelectMode::Replace, true);
-    auto* unfreeze = panel.findChild<QPushButton*>(QStringLiteral("unfreezeAll"));
-    ASSERT_TRUE(unfreeze);
-    unfreeze->click();
+    // Unfreeze All: the tile beside Freeze (the card has no second one); the window unfreezes.
+    EXPECT_EQ(panel.findChild<QPushButton*>(QStringLiteral("unfreezeAll")), nullptr);
+    int unfreezes = 0;
+    QObject::connect(&tools, &GroomTools::unfreezeAllRequested, [&] {
+        ++unfreezes;
+        doc->editGuides("unfreeze all", [](GuideHierarchy& h) { unfreezeAll(h); });
+    });
+    tools.tile("unfreeze")->click();
+    EXPECT_EQ(unfreezes, 1);
     EXPECT_EQ(frozenCount(), 0u);
     EXPECT_EQ(doc->undoText(), "Undo unfreeze all");
 }
@@ -3797,16 +3969,93 @@ TEST(AppPanels, EmptyStateDisablesWhatNeedsAGroomAndSaysWhatEachModeDoes) {
     EXPECT_TRUE(shell->graphAddButton()->isEnabled());
     EXPECT_TRUE(shell->graphEditButton()->isEnabled());
     EXPECT_TRUE(shell->cardsPanel()->isVisibleTo(&window)) << "Cards mode's panel once a groom is open";
-    // New Groom on Mesh: the next step in the Groom Tools' first-groom steps (no card over the
-    // viewport); Place some guides picks the Place brush.
+    // New Groom on Mesh: the first-groom steps in a small card over the viewport, bottom-left above
+    // the stats (not in the Groom Tools); Place some guides picks the Place brush.
     ASSERT_TRUE(window.setUiMode(QStringLiteral("groom")));
     ASSERT_TRUE(window.newGroomOnMesh(mesh));
-    EXPECT_TRUE(shell->groomTools()->starterShown());
-    EXPECT_EQ(host->findChild<QWidget*>(QStringLiteral("startHint")), nullptr) << "no start card over the viewport";
-    auto* place = shell->groomTools()->findChild<QPushButton*>(QStringLiteral("starter_guides"));
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(host->starterShown());
+    EXPECT_EQ(shell->groomTools()->findChild<QWidget*>(QStringLiteral("starter")), nullptr) << "not in the Groom Tools";
+    EXPECT_EQ(host->findChild<QWidget*>(QStringLiteral("startHint")), nullptr);
+    GlassPanel* card = host->starterCard();
+    ASSERT_NE(card, nullptr);
+    EXPECT_EQ(card->parentWidget(), host) << "over the viewport";
+    EXPECT_LT(card->geometry().center().x(), host->width() / 2) << "bottom-left";
+    EXPECT_GT(card->geometry().center().y(), host->height() / 2);
+    for (QWidget* top : {static_cast<QWidget*>(host->history())}) {
+        if (top->isVisible()) EXPECT_FALSE(card->geometry().intersects(top->geometry()));
+    }
+    // A toast never covers it.
+    host->toast(QStringLiteral("A message long enough to reach across the bottom of a narrow view, and then some more words"), false);
+    QCoreApplication::processEvents();
+    ASSERT_TRUE(host->toastShown());
+    QWidget* toast = nullptr;
+    for (GlassPanel* g : host->findChildren<GlassPanel*>(Qt::FindDirectChildrenOnly)) {
+        if (!g->isVisible() || g == card) continue;
+        for (QLabel* l : g->findChildren<QLabel*>()) {
+            if (l->text() == host->toastText()) toast = g;
+        }
+    }
+    ASSERT_NE(toast, nullptr);
+    if (host->starterShown()) EXPECT_FALSE(toast->geometry().intersects(card->geometry())) << "the toast over the first-groom card";
+    auto* place = host->findChild<QPushButton*>(QStringLiteral("starter_guides"));
     ASSERT_NE(place, nullptr);
     place->click();
     EXPECT_EQ(window.brush().toolId(), "place");
+    // Other modes leave it out; Groom brings it back.
+    ASSERT_TRUE(window.setUiMode(QStringLiteral("look")));
+    EXPECT_FALSE(host->starterShown());
+    ASSERT_TRUE(window.setUiMode(QStringLiteral("groom")));
+    EXPECT_TRUE(host->starterShown());
+    // Its x hides it (for good: ui/hideStarter in an interactive window).
+    auto* dismiss = host->findChild<QToolButton*>(QStringLiteral("starterDismiss"));
+    ASSERT_NE(dismiss, nullptr);
+    dismiss->click();
+    EXPECT_FALSE(host->starterShown());
+}
+
+TEST(AppPanels, FirstGroomCardTicksItsStepsAndGoesWhenDone) {
+    MainWindow window;
+    window.resize(1280, 720);
+    window.show();
+    OverlayHost* host = window.overlay();
+    const QString mesh = QString::fromStdString(std::string(GROOMLAB_TEST_DATA) + "/app/head_scalp.obj");
+    ASSERT_TRUE(window.newGroomOnMesh(mesh));
+    QCoreApplication::processEvents();
+    ASSERT_TRUE(host->starterShown());
+    auto* guides = host->findChild<QPushButton*>(QStringLiteral("starter_guides"));
+    auto* look = host->findChild<QPushButton*>(QStringLiteral("starter_look"));
+    auto* tip = host->findChild<QLabel*>(QStringLiteral("starterTip"));
+    ASSERT_TRUE(guides && look && tip);
+    EXPECT_FALSE(guides->property("done").toBool());
+    EXPECT_FALSE(tip->text().isEmpty()) << "the next step's tip";
+    // Steps ticked as the groom gets there; both done: the card goes.
+    host->setStarterProgress(true, false);
+    EXPECT_TRUE(guides->property("done").toBool());
+    EXPECT_FALSE(look->property("done").toBool());
+    EXPECT_TRUE(host->starterShown());
+    host->setStarterProgress(true, true);
+    EXPECT_FALSE(host->starterShown());
+    host->setStarterProgress(false, false);
+    EXPECT_TRUE(host->starterShown());
+    // Stacked over the stats line, never on it.
+    if (host->statsShown()) {
+        const ShadowText* stats = nullptr;
+        for (ShadowText* t : host->findChildren<ShadowText*>(Qt::FindDirectChildrenOnly)) {
+            if (t->isVisible() && !t->runs().empty() && t->runs().front().text.contains(QStringLiteral("strands"))) stats = t;
+        }
+        ASSERT_NE(stats, nullptr);
+        EXPECT_LT(host->starterCard()->geometry().bottom(), stats->geometry().top());
+        EXPECT_EQ(host->starterCard()->geometry().left(), stats->geometry().left());
+    }
+    // Give it a look: the Graph Editor.
+    look->click();
+    EXPECT_TRUE(window.graphShown());
+    // A view too short for it: left out until there is room.
+    host->setStarterDismissed(false);
+    window.resize(1280, 330);
+    QCoreApplication::processEvents();
+    if (host->height() < host->starterCard()->sizeHint().height() + 80) EXPECT_FALSE(host->starterShown());
 }
 
 TEST(AppPanels, ToolLabelsUnderTheTilesAndCompactTiles) {
@@ -3815,12 +4064,15 @@ TEST(AppPanels, ToolLabelsUnderTheTilesAndCompactTiles) {
     window.show();
     AppShell* host = window.shell();
     ASSERT_TRUE(window.openGroom(QString::fromStdString(kSampleGroom)));
-    EXPECT_TRUE(host->railLabels()) << "the names under the tiles, as Maya's";
+    EXPECT_TRUE(host->railLabels()) << "labeled tiles by default";
     QAction* toggle = window.findChild<QAction*>(QStringLiteral("railLabels"));
     ASSERT_NE(toggle, nullptr);
     EXPECT_TRUE(toggle->isChecked());
     // Docked in the Groom Tools: the tiles stay within the dock's width with their names (the
     // column scrolls up and down).
+    window.setRailLabels(true, false);
+    EXPECT_TRUE(host->railLabels());
+    EXPECT_TRUE(toggle->isChecked());
     QCoreApplication::processEvents();
     const QRect dock(host->groomToolsDock()->mapTo(&window, QPoint(0, 0)), host->groomToolsDock()->size());
     for (const QAbstractButton* tile : host->groomTools()->tiles()) {
@@ -3905,10 +4157,84 @@ TEST(AppPanels, GroomToolsTilesPickToolsAndTheEyeHidesTheGroom) {
     ASSERT_NE(open, nullptr);
     open->trigger();
     EXPECT_TRUE(window.shell()->groomToolsDock()->isVisibleTo(&window));
-    // The Output strip: palette.json's chips the app runs, in order.
-    std::vector<std::string> chips;
-    for (QToolButton* chip : tools->outputChips()) chips.push_back(chip->text().section(QStringLiteral("  "), 0, 0).toStdString());
-    EXPECT_EQ(chips, (std::vector<std::string>{"Simulate Range", "Export", "Render", "Studio", "Transfer...", "Import"}));
+    // No Output strip (palette.output is Maya's and Blender's): Export and Render sit in the menu
+    // bar's corner, the rest in the GroomLab menu.
+    EXPECT_EQ(tools->findChild<QWidget*>(QStringLiteral("section_output")), nullptr);
+    EXPECT_EQ(tools->findChild<QWidget*>(QStringLiteral("outputStrip")), nullptr);
+}
+
+TEST(AppPanels, MenuBarCornerHasTheFileNameRenderAndExport) {
+    MainWindow window;
+    window.resize(1280, 720);
+    window.show();
+    QWidget* corner = window.menuCorner();
+    ASSERT_NE(corner, nullptr);
+    EXPECT_EQ(window.menuBar()->cornerWidget(Qt::TopRightCorner), corner);
+    EXPECT_FALSE(window.cornerFileName()->isVisibleTo(&window)) << "no groom, no name";
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(kSampleGroom)));
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(window.cornerFileName()->isVisibleTo(&window));
+    EXPECT_EQ(window.cornerFileName()->text(), QFileInfo(QString::fromStdString(kSampleGroom)).fileName());
+    EXPECT_EQ(window.cornerFileName()->property("role").toString(), QStringLiteral("cornerName"));
+    // Render (a ghost button) left of Export (the accent), at the bar's right.
+    QToolButton* render = window.cornerRender();
+    QToolButton* exportButton = window.cornerExport();
+    ASSERT_TRUE(render && exportButton);
+    EXPECT_EQ(render->property("role").toString(), QStringLiteral("cornerGhost"));
+    EXPECT_EQ(exportButton->property("role").toString(), QStringLiteral("cornerPrimary"));
+    EXPECT_TRUE(render->text().startsWith(QStringLiteral("Render")));
+    EXPECT_TRUE(exportButton->text().startsWith(QStringLiteral("Export")));
+    EXPECT_LT(render->mapTo(&window, QPoint(0, 0)).x(), exportButton->mapTo(&window, QPoint(0, 0)).x());
+    EXPECT_GT(exportButton->mapTo(&window, QPoint(0, 0)).x(), window.width() / 2);
+    EXPECT_FALSE(render->toolTip().isEmpty());
+    EXPECT_FALSE(exportButton->toolTip().isEmpty());
+    // Whole, never cut short: the bar lays the corner out again as the name changes.
+    for (QWidget* w : {static_cast<QWidget*>(window.cornerFileName()), static_cast<QWidget*>(render), static_cast<QWidget*>(exportButton)}) {
+        EXPECT_GE(w->width(), w->sizeHint().width()) << w->objectName().toStdString();
+    }
+    EXPECT_GE(corner->width(), corner->sizeHint().width());
+    // Their menus: menus.json's output.export and output.render, the window's actions under
+    // another name (the menu bar's keep theirs).
+    auto texts = [](QMenu* menu) {
+        std::vector<std::string> out;
+        for (QAction* a : menu->actions()) {
+            if (!a->isSeparator() && a->isVisible()) out.push_back(a->text().section(QLatin1Char('\t'), 0, 0).toStdString());
+        }
+        return out;
+    };
+    ASSERT_NE(exportButton->menu(), nullptr);
+    ASSERT_NE(render->menu(), nullptr);
+    const std::vector<std::string> exports = texts(exportButton->menu());
+    ASSERT_GE(exports.size(), 4u);
+    EXPECT_TRUE(std::any_of(exports.begin(), exports.end(), [](const std::string& t) { return t.find("Groom File") != std::string::npos; }))
+        << "the groom file too: " << json(exports).dump();
+    EXPECT_FALSE(texts(render->menu()).empty());
+    for (QAction* a : exportButton->menu()->actions()) {
+        if (!a->objectName().isEmpty()) EXPECT_TRUE(a->objectName().startsWith(QStringLiteral("corner_"))) << a->objectName().toStdString();
+    }
+    // What the Groom Tools' Output strip had stays one menu away: the GroomLab menu holds Simulate
+    // Range, Studio, Transfer and Import.
+    QMenu* groomlab = nullptr;
+    for (QAction* a : window.menuBar()->actions()) {
+        if (a->menu() && a->text().remove(QLatin1Char('&')) == QStringLiteral("GroomLab")) groomlab = a->menu();
+    }
+    ASSERT_NE(groomlab, nullptr);
+    std::set<std::string> submenus, actions;
+    std::function<void(QMenu*)> walk = [&](QMenu* menu) {
+        for (QAction* a : menu->actions()) {
+            const std::string text = a->text().remove(QLatin1Char('&')).section(QLatin1Char('\t'), 0, 0).toStdString();
+            if (a->menu()) {
+                if (menu == groomlab) submenus.insert(text);
+                walk(a->menu());
+            } else if (!a->isSeparator()) {
+                actions.insert(text);
+            }
+        }
+    };
+    walk(groomlab);
+    for (const char* sub : {"Simulate", "Studio", "Import", "Render", "Export", "Utilities"}) EXPECT_TRUE(submenus.count(sub)) << sub;
+    EXPECT_TRUE(actions.count("Simulate Range"));
+    EXPECT_TRUE(std::any_of(actions.begin(), actions.end(), [](const std::string& t) { return t.rfind("Transfer", 0) == 0; }));
 }
 
 TEST(AppPanels, FileMenuAddsPropsAndEyesAndSavesAnImage) {

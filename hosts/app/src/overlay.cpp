@@ -23,9 +23,12 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QStyle>
 #include <QTimer>
+#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QVariantAnimation>
@@ -34,6 +37,7 @@
 
 #include "groomlab/brush_catalog.h"
 #include "groomlab/graph_io.h"
+#include "definitions.h"
 
 #include "param_editors.h"
 #include "param_panel.h"
@@ -238,7 +242,6 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto groomSlider = [this, materialLayout](const QString& caption, const QColor& fill, double min, double max, const char* param,
                                               float GroomColor::* member, auto materialSet) {
         auto* s = new ValueSlider(materialPage_);
-        s->setStacked(true);
         s->setCaption(caption);
         s->setRange(min, max);
         s->setFill(fill);
@@ -533,8 +536,8 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         b->setPadding(9);
         b->setFontSize(11);
         b->setFontWeight(700);
-        b->setFill(theme::chip(), theme::actionFill(theme::yellow()));
-        b->setTextColor(theme::textSoft(), theme::actionText(theme::ink()));
+        b->setFill(theme::chip(), theme::checkedFill(theme::yellow()));
+        b->setTextColor(theme::textSoft(), theme::checkedText(theme::ink()));
         b->setCheckable(true);
         const std::string preset = name;
         connect(b, &QAbstractButton::clicked, this, [this, preset] {
@@ -574,7 +577,6 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         v->addLayout(head);
         auto lightSlider = [&](const QString& name, const QColor& fill, double min, double max, int decimals) {
             auto* s = new ValueSlider(row.host);
-            s->setStacked(true);
             s->setCaption(name);
             s->setRange(min, max);
             s->setFill(fill);
@@ -711,7 +713,6 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
 ValueSlider* LookCard::slider(QBoxLayout* into, const QString& text, const QColor& fill, double min, double max, int decimals,
                               std::function<double()> get, std::function<void(double)> set, Target target, int kinds) {
     auto* s = new ValueSlider(into->parentWidget());
-    s->setStacked(true);
     s->setCaption(text);
     s->setRange(min, max);
     s->setFill(fill);
@@ -1018,7 +1019,10 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
     toast_->hide();
     toastTimer_ = new QTimer(this);
     toastTimer_->setSingleShot(true);
-    connect(toastTimer_, &QTimer::timeout, toast_, &QWidget::hide);
+    connect(toastTimer_, &QTimer::timeout, this, [this] {
+        toast_->hide();
+        relayout();  // (a first-groom card the toast pushed out comes back)
+    });
 
     // The prompt (showPrompt): filled when asked, centered over everything.
     prompt_ = overlayPanel(this, 18.0);
@@ -1074,6 +1078,7 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
         card->addWidget(recent);
     }
     emptyCard_->hide();
+    buildStarter();
     setAcceptDrops(true);
 
     built_ = true;
@@ -1171,6 +1176,7 @@ void OverlayHost::setFileName(const QString& name, bool dirty) {
     dirty_ = dirty;
     refreshEmptyCard();
     refreshToolLabel();
+    refreshStarter();
     relayout();
 }
 
@@ -1206,38 +1212,24 @@ QString OverlayHost::statsText() const {
     return words.join(QLatin1Char(' '));
 }
 
-void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& badgeColor, std::size_t guides) {
-    std::vector<ShadowText::Run> runs;
-    const QFont words = theme::uiFont(12, 500), numbers = theme::monoFont(12);
-    auto run = [&](const QString& text, const QFont& font, const QColor& color, int gap) {
-        ShadowText::Run r;
-        r.text = text;
-        r.font = font;
-        r.color = color;
-        r.gapBefore = gap;
-        return r;
-    };
-    ShadowText::Run count = run(QLocale(QLocale::English).toString(static_cast<qulonglong>(strands)), numbers, theme::textSoft(), 0);
-    count.dot = theme::emerald();
-    runs.push_back(count);
-    runs.push_back(run(tr("strands"), words, theme::textSoft(), 5));
+void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& /*badgeColor*/, std::size_t guides) {
+    // One quiet line in the number font: "25,843 strands · 104 guides · 63 ms per dab · GPU".
+    const QLocale english(QLocale::English);
+    QStringList parts;
+    parts << english.toString(static_cast<qulonglong>(strands)) + tr(" strands");
     if (guides != static_cast<std::size_t>(-1)) {
-        runs.push_back(run(QStringLiteral("·"), words, theme::textMuted(), 10));
-        runs.push_back(run(QLocale(QLocale::English).toString(static_cast<qulonglong>(guides)), numbers, theme::textSoft(), 10));
-        runs.push_back(run(guides == 1 ? tr("guide") : tr("guides"), words, theme::textSoft(), 5));
+        parts << english.toString(static_cast<qulonglong>(guides)) + (guides == 1 ? tr(" guide") : tr(" guides"));
     }
-    runs.push_back(run(QStringLiteral("·"), words, theme::textMuted(), 10));
-    runs.push_back(run(QString::number(msPerDab, 'f', msPerDab < 10.0 ? 1 : 0) + tr(" ms"), numbers, theme::textSoft(), 10));
-    runs.push_back(run(tr("per dab"), words, theme::textSoft(), 5));
-    if (!badge.isEmpty()) {
-        ShadowText::Run pill = run(badge, theme::uiFont(11, 700), badgeColor.lighter(150), 10);
-        pill.pill = QColor(badgeColor.red(), badgeColor.green(), badgeColor.blue(), 72);
-        runs.push_back(pill);
-    }
+    parts << QString::number(msPerDab, 'f', msPerDab < 10.0 ? 1 : 0) + tr(" ms per dab");
+    if (!badge.isEmpty()) parts << badge;
+    ShadowText::Run line;
+    line.text = parts.join(QStringLiteral(" · "));
+    line.font = theme::numberFont(12);
+    line.color = theme::textMuted();
     // Set after every frame: the same line changes nothing, and a new one lays the overlay out
     // again only when its size changed.
     const QSize before = stats_->sizeHint();
-    if (stats_->setRuns(runs) && stats_->sizeHint() != before) relayout();
+    if (stats_->setRuns({line}) && stats_->sizeHint() != before) relayout();
 }
 
 void OverlayHost::setRefine(bool refining, int frames, int target, double msPerFrame) {
@@ -1250,7 +1242,7 @@ void OverlayHost::setRefine(bool refining, int frames, int target, double msPerF
     runs.push_back(lead);
     ShadowText::Run numbers;
     numbers.text = refining ? QStringLiteral("%1 / %2").arg(frames).arg(target) : QStringLiteral("%1 ms").arg(msPerFrame, 0, 'f', 1);
-    numbers.font = theme::monoFont(12);
+    numbers.font = theme::numberFont(12);
     numbers.color = theme::textSoft();
     numbers.gapBefore = 6;
     runs.push_back(numbers);
@@ -1420,10 +1412,135 @@ bool OverlayHost::choosePrompt(const QString& label) {
     return false;
 }
 
+void OverlayHost::buildStarter() {
+    // palette.starter: the title and its x, a row per step (a click: that step's tool), the next
+    // step's tip under them.
+    const ui::json& starter = ui::Definitions::shipped().get("palette/starter");
+    starter_ = overlayPanel(this, 10.0);
+    starter_->setObjectName(QStringLiteral("starter"));
+    starter_->setFixedWidth(256);
+    auto* column = new QVBoxLayout(starter_);
+    column->setContentsMargins(12, 8, 6, 10);
+    column->setSpacing(2);
+    auto* titleRow = new QHBoxLayout();
+    titleRow->setSpacing(4);
+    auto* title = new QLabel(QString::fromStdString(starter.value("title", std::string())), starter_);
+    title->setObjectName(QStringLiteral("starterTitle"));
+    title->setFont(theme::uiFont(12, 600));
+    title->setStyleSheet(QStringLiteral("color: %1; font-weight: 600;").arg(theme::text().name()));
+    titleRow->addWidget(title, 1);
+    auto* close = new QToolButton(starter_);
+    close->setObjectName(QStringLiteral("starterDismiss"));
+    close->setProperty("role", "glyph");
+    close->setAutoRaise(true);
+    close->setIconSize(QSize(12, 12));
+    close->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_close.svg"), theme::textMuted(), 12, devicePixelRatioF())));
+    close->setFixedSize(22, 22);
+    close->setToolTip(QString::fromStdString(starter.value("dismissTip", std::string())));
+    connect(close, &QToolButton::clicked, this, &OverlayHost::starterDismissRequested);
+    titleRow->addWidget(close);
+    column->addLayout(titleRow);
+    for (const ui::json& step : starter.at("steps")) {
+        const std::string id = step.value("id", std::string());
+        auto* b = new QPushButton(QString::fromStdString(step.value("label", std::string())), starter_);
+        b->setObjectName(QStringLiteral("starter_") + QString::fromStdString(id));
+        b->setFlat(true);
+        b->setProperty("role", "step");
+        b->setToolTip(QString::fromStdString(step.value("tip", std::string())));
+        b->setCursor(Qt::PointingHandCursor);
+        connect(b, &QPushButton::clicked, this, [this, id] { emit starterStepRequested(QString::fromStdString(id)); });
+        column->addWidget(b);
+        starterRows_[id] = b;
+    }
+    starterTip_ = new QLabel(starter_);
+    starterTip_->setObjectName(QStringLiteral("starterTip"));
+    starterTip_->setWordWrap(true);
+    starterTip_->setProperty("role", "hint");
+    starterTip_->setContentsMargins(4, 2, 4, 0);
+    column->addWidget(starterTip_);
+    starter_->hide();
+}
+
+void OverlayHost::setStarterProgress(bool guidesPlaced, bool lookGiven) {
+    if (guidesPlaced == guidesPlaced_ && lookGiven == lookGiven_) return;
+    guidesPlaced_ = guidesPlaced;
+    lookGiven_ = lookGiven;
+    refreshStarter();
+    relayout();
+}
+
+void OverlayHost::setStarterDismissed(bool dismissed) {
+    starterDismissed_ = dismissed;
+    refreshStarter();
+    relayout();
+}
+
+bool OverlayHost::starterWanted() const {
+    return groomOpen() && mode_ == Mode::Groom && !starterDismissed_ && !(guidesPlaced_ && lookGiven_);
+}
+
+bool OverlayHost::starterShown() const { return starter_ && starter_->isVisibleTo(this); }
+
+void OverlayHost::refreshStarter() {
+    if (!starter_) return;
+    if (!starterWanted()) {
+        starter_->hide();
+        return;
+    }
+    // Each step numbered in a small circle: the next one's filled with the accent, the others
+    // outlined; a done step struck through and dim. The next one's tip below them.
+    auto badge = [this](int n, bool filled) {
+        const qreal dpr = devicePixelRatioF();
+        QPixmap pm(QSize(16, 16) * dpr);
+        pm.setDevicePixelRatio(dpr);
+        pm.fill(Qt::transparent);
+        QPainter p(&pm);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        const QRectF ring(0.75, 0.75, 14.5, 14.5);
+        if (filled) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(theme::uiColor("accent"));
+        } else {
+            QColor edge = theme::textMuted();
+            edge.setAlphaF(0.6f);
+            p.setPen(QPen(edge, 1.0));
+            p.setBrush(Qt::NoBrush);
+        }
+        p.drawEllipse(ring);
+        p.setFont(theme::numberFont(9, 700));
+        p.setPen(filled ? theme::uiColor("accentText") : theme::textMuted());
+        p.drawText(QRectF(0, 0, 16, 16), Qt::AlignCenter, QString::number(n));
+        return QIcon(pm);
+    };
+    QString next;
+    int n = 0;
+    for (const ui::json& step : ui::Definitions::shipped().get("palette/starter/steps")) {
+        const std::string id = step.value("id", std::string());
+        QPushButton* b = starterRows_.at(id);
+        const bool done = id == "guides" ? guidesPlaced_ : lookGiven_;
+        const bool isNext = !done && next.isEmpty();
+        if (isNext) next = QString::fromStdString(step.value("tip", std::string()));
+        b->setText(QString::fromStdString(step.value("label", std::string())));
+        b->setIcon(badge(++n, isNext));
+        b->setIconSize(QSize(16, 16));
+        QFont font = theme::uiFont(12, isNext ? 600 : 500);
+        font.setStrikeOut(done);
+        b->setFont(font);
+        b->setProperty("done", done);
+        b->setProperty("next", isNext);
+        b->style()->unpolish(b);
+        b->style()->polish(b);
+    }
+    starterTip_->setText(next);
+    if (starter_->layout()) starter_->layout()->activate();
+    starter_->adjustSize();
+}
+
 void OverlayHost::setMode(Mode mode) {
     mode_ = mode;
     refreshEmptyCard();
     refreshToolLabel();
+    refreshStarter();
     relayout();
 }
 
@@ -1474,7 +1591,12 @@ void OverlayHost::relayout() {
     if (toast_->isVisibleTo(this)) request.toast = toast_->size();
     if (prompt_->isVisibleTo(this)) request.prompt = prompt_->size();
     if (emptyCard_->isVisibleTo(this)) request.emptyCard = emptyCard_->size();
+    const bool starter = starterWanted();
+    if (starter) request.starter = starter_->sizeHint();
     const theme::ViewportOverlayLayout layout = theme::layoutViewportOverlay(request);
+    // The first-groom card where there is room for it (a short view: not until there is).
+    const bool starterFits = starter && !layout.starter.isNull();
+    if (starter_->isVisibleTo(this) != starterFits) starter_->setVisible(starterFits);
     auto place = [](QWidget* w, const QRect& r) {
         if (!r.isNull() && w->geometry() != r) w->setGeometry(r);
     };
@@ -1485,6 +1607,7 @@ void OverlayHost::relayout() {
     place(toast_, layout.toast);
     place(prompt_, layout.prompt);
     place(emptyCard_, layout.emptyCard);
+    place(starter_, layout.starter);
 }
 
 }  // namespace groomlab::app

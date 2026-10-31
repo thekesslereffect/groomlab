@@ -200,8 +200,8 @@ def _linear(c):
 
 
 def tinted(category):
-    """A node's body: Maya's node color with a wash of its category's (Blender draws headers in its
-    theme's color: the body carries the category)."""
+    """A node's color: Maya's node color with a wash of its category's (Maya's and the app's filled
+    headers say the category with its color; here the node's custom color carries it)."""
     accent = CATEGORY_COLORS.get(category, (142, 150, 158))
     mix = [NODE_BG[i] + (accent[i] - NODE_BG[i]) * 0.22 for i in range(3)]
     return _linear(mix)
@@ -327,6 +327,8 @@ class GroomLabNodeBase(object):
         self.gl_name = ""
 
     def draw_label(self):
+        # The name alone: the node's color carries its category (no dot before it, as Maya's and the
+        # app's filled headers).
         return self.name
 
     def draw_buttons(self, context, layout):

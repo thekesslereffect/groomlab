@@ -17,6 +17,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QImage>
 #include <QScrollArea>
 #include <QToolButton>
 
@@ -30,6 +31,7 @@
 #include "node_graph.h"
 #include "overlay.h"
 #include "param_panel.h"
+#include "theme.h"
 
 namespace groomlab::app {
 namespace {
@@ -180,6 +182,84 @@ TEST(AppGraphEditor, TheNodeMenuFollowsTheNodesKind) {
     EXPECT_TRUE(brush->isCheckable());
     brush->trigger();
     EXPECT_EQ(w.doc()->sculptTarget(), sculpt);
+}
+
+TEST(AppGraphEditor, NodeStatusBadgesInTheTitleRow) {
+    // The design's status badges: the cook time muted, in the warning color from 10 ms; the View eye;
+    // a warning triangle for a note (an error keeps its red ring instead); a bypassed node dimmed,
+    // its toggle lit and its wires dashed.
+    Window w;
+    NodeGraphView* graph = w.graph();
+    GroomDocument* doc = w.doc();
+    const std::string scatter = nodeOf(*doc, "Scatter");
+    const std::string interpolate = nodeOf(*doc, "Interpolate");
+    ASSERT_FALSE(scatter.empty());
+    ASSERT_FALSE(interpolate.empty());
+    EXPECT_EQ(NodeGraphView::timeText(0.01), QString()) << "nothing worth a badge";
+    EXPECT_EQ(NodeGraphView::timeText(0.42), QStringLiteral("0.4 ms"));
+    EXPECT_EQ(NodeGraphView::timeText(9.94), QStringLiteral("9.9 ms"));
+    EXPECT_EQ(NodeGraphView::timeText(12.4), QStringLiteral("12 ms"));
+    EXPECT_EQ(NodeGraphView::timeColor(9.9), theme::textMuted());
+    EXPECT_EQ(NodeGraphView::timeColor(NodeGraphView::kSlowNodeMs), theme::graphWarning());
+    graph->setNodeTimes({{scatter, 0.4}, {interpolate, 25.0}});
+    EXPECT_EQ(graph->nodeBadges(scatter).time, QStringLiteral("0.4 ms"));
+    EXPECT_EQ(graph->nodeBadges(scatter).timeColor, theme::textMuted());
+    EXPECT_EQ(graph->nodeBadges(interpolate).time, QStringLiteral("25 ms"));
+    EXPECT_EQ(graph->nodeBadges(interpolate).timeColor, theme::graphWarning()) << "slow: the warning color";
+    // View Up to Here: an eye on that node alone.
+    graph->setViewedNode(scatter);
+    EXPECT_TRUE(graph->nodeBadges(scatter).viewed);
+    EXPECT_FALSE(graph->nodeBadges(interpolate).viewed);
+    graph->setViewedNode({});
+    EXPECT_FALSE(graph->nodeBadges(scatter).viewed);
+    // A note: the warning triangle; an error over it: the red ring alone.
+    graph->setNodeNotes({{interpolate, "does nothing as set"}});
+    EXPECT_TRUE(graph->nodeBadges(interpolate).warning);
+    EXPECT_FALSE(graph->nodeBadges(scatter).warning);
+    graph->setNodeErrors({{interpolate, "failed"}});
+    EXPECT_TRUE(graph->nodeBadges(interpolate).failed);
+    EXPECT_FALSE(graph->nodeBadges(interpolate).warning);
+    graph->setNodeErrors({});
+    // The wires into and out of a bypassed node dashed, the others solid.
+    auto checkWires = [&](const std::string& node) {
+        int touching = 0;
+        for (int i = 0; i < graph->wireCount(); ++i) {
+            std::string from, output, to, input;
+            EXPECT_TRUE(graph->wireLink(i, &from, &output, &to, &input));
+            const bool touches = from == node || to == node;
+            if (touches) ++touching;
+            EXPECT_EQ(graph->wireDashed(i), touches && graph->nodeBadges(node).bypassed) << from << " -> " << to;
+        }
+        return touching;
+    };
+    EXPECT_GT(checkWires(scatter), 0);
+    // The header's bypass toggle still clicks where it was (the title row's right end).
+    const QRectF card = graph->nodeRect(scatter);
+    const qreal scale = graph->viewScale();
+    const QPointF toggle(card.right() - 17.0 * scale, card.top() + 14.0 * scale);
+    auto bypassed = [&] {
+        for (const GroomDocument::NodeInfo& n : doc->nodes()) {
+            if (n.name == scatter) return n.bypass;
+        }
+        return false;
+    };
+    ASSERT_FALSE(bypassed());
+    mouse(graph, QEvent::MouseButtonPress, toggle, Qt::LeftButton);
+    mouse(graph, QEvent::MouseButtonRelease, toggle, Qt::LeftButton);
+    QCoreApplication::processEvents();
+    ASSERT_TRUE(bypassed()) << "the bypass toggle";
+    graph->refresh();
+    EXPECT_TRUE(graph->nodeBadges(scatter).bypassed);
+    EXPECT_GT(checkWires(scatter), 0);
+    // Every badge at once paints.
+    graph->setNodeNotes({{scatter, "note"}});
+    graph->setViewedNode(scatter);
+    QImage canvas(graph->size(), QImage::Format_ARGB32_Premultiplied);
+    canvas.fill(Qt::transparent);
+    graph->render(&canvas);
+    EXPECT_EQ(qAlpha(canvas.pixel(2, 2)), 255);
+    graph->setViewedNode({});
+    EXPECT_EQ(doc->setBypass(scatter, false), "");
 }
 
 TEST(AppGraphEditor, ExpandInputsButtonTogglesEveryConnectableParam) {

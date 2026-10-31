@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-// The Groom Tools' Photos tab, as Maya's tool_tabs.py ReferenceTab lays it out (engine/ui/lists.json's
-// photos: the about line, the bar, the right-click menus): reference photos to groom to, each a
-// camera.
+// The Groom Tools' Photos tab, from engine/ui/lists.json's photos (the bar, the right-click menus)
+// as the redesign lays it out: Photos (the header: how many, Import Photo...; the list), the picked
+// photo's box (Rename, Delete and the rows below), then Guides from photos, folded. Reference photos
+// to groom to, each a camera.
 //
 //   list          the photos (a thumbnail, the name, the size, locked); double-click: Look Through
 //   Look Through  the viewport shows the photo's camera with the photo fitted in the frame (again:
@@ -35,6 +36,7 @@
 #include "definitions.h"
 #include "groomlab/reference_guides.h"
 
+class QFrame;
 class QLabel;
 class QListWidget;
 class QMenu;
@@ -45,6 +47,8 @@ namespace groomlab::app {
 
 class GroomDocument;
 class ListBar;
+class ListHeader;
+class Section;
 class ValueSlider;
 
 // A camera for a photo never lined up (Import Photo's, Maya's reference._place): in front (+Z) of
@@ -116,7 +120,9 @@ public:
     QToolButton* depthButton(bool front) const { return front ? front_ : behind_; }
     QToolButton* visibleButton() const { return visible_; }
     QPushButton* alignButton() const { return align_; }
-    ListBar* bar() const { return bar_; }
+    ListBar* bar() const { return bar_; }          // the header's: Import Photo...
+    ListBar* itemBar() const { return itemBar_; }  // the picked photo's: Rename, Delete
+    Section* guidesSection() const { return guidesSection_; }  // Guides from photos (folded)
 
 signals:
     void lookThroughRequested(int index, bool on);
@@ -137,8 +143,12 @@ private:
     QString looking_;
     bool updating_ = false;
     mutable QMap<QString, QImage> pictures_;  // by file
-    QLabel* about_ = nullptr;
+    ListHeader* header_ = nullptr;
     ListBar* bar_ = nullptr;
+    ListBar* itemBar_ = nullptr;
+    QFrame* box_ = nullptr;
+    QLabel* empty_ = nullptr;
+    Section* guidesSection_ = nullptr;
     QListWidget* list_ = nullptr;
     QPushButton* look_ = nullptr;
     QToolButton* lock_ = nullptr;

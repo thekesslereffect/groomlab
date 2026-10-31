@@ -274,6 +274,10 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(self.param("noise", "space"), "world")
         noise.p_octaves = 3
         self.assertEqual(self.param("noise", "octaves"), 3)
+        # Numbers with a soft range draw as fill sliders (the name inside); a seed (no range) as a field.
+        specs = noise.gl_param_specs
+        for name, slider in (("amplitude", True), ("frequency", True), ("octaves", True), ("seed", False)):
+            self.assertEqual(ge.fill_slider(noise, gt.prop_name(name), specs[name]), slider, name)
         clump = node_of(tree, "clump")
         clump.p_respectParts = False
         self.assertIs(self.param("clump", "respectParts"), False)
@@ -743,6 +747,82 @@ class GraphEditorTest(unittest.TestCase):
             self.assertNotIn(c.bl_label, ("Presets", "Graph"), c)
         self.assertFalse(hasattr(bpy.types, "VIEW3D_PT_groomlab_presets") or hasattr(bpy.types, "VIEW3D_PT_groomlab_graph"))
         self.assertEqual(bpy.ops.groomlab.graph_open(), {"FINISHED"})  # no interface here: the tree is made
+
+    def test_8c_node_status_overlay(self):
+        """The overlay's status on the headers (the redesign's badges, as Maya's cards): no category dot
+        (the node's color carries it, as Maya's filled headers), and in the header row a warning triangle for a
+        note, the cook time (muted, yellow from 10 ms) and the View eye; an error keeps its red "!".
+        Drawn into stand-in blf and gpu modules (a headless Blender draws nothing)."""
+        import types
+        self.assertEqual(ge.SLOW_MS, 10.0)
+        self.assertIsNone(ge.time_text(0.01))
+        self.assertEqual(ge.time_text(3.24), "3.2 ms")
+        self.assertEqual(ge.time_text(24.4), "24 ms")
+        self.assertEqual(ge.time_color(9.9), ge.MUTED)
+        self.assertEqual(ge.time_color(10.0), ge.WARNING)
+        self.assertEqual(ge.header_badges("a", {}, {"a": "does nothing"}, {"a": 12.0}, True),
+                         [("warning", "does nothing"), ("time", "12 ms", ge.WARNING), ("view",)])
+        self.assertEqual(ge.header_badges("a", {"a": "failed"}, {"a": "note"}, {}, False), [])  # the error's "!" instead
+        tree = self.tree()
+        if tree is None or not len(tree.nodes):
+            graph.refresh(self.head)
+            tree = self.tree()
+        node = node_of(tree, "interpolate")
+        self.assertEqual(node.draw_label(), node.name)
+        names = [n.gl_name for n in tree.nodes if gt.ours(n)]
+        slow, noted, failed = "interpolate", next(n for n in names if n not in ("interpolate", "scalp")), "scalp"
+
+        class Shown(object):  # a node as the editor draws it: laid out, View on for `slow`
+            def __init__(self, n):
+                self._n = n
+
+            def __getattr__(self, name):
+                return getattr(self._n, name)
+            dimensions = (140.0, 100.0)
+            hide = False
+
+            @property
+            def gl_viewed(self):
+                return self._n.gl_name == slow
+        shown = types.SimpleNamespace(nodes=[Shown(n) for n in tree.nodes], gl_scalp=self.head)
+        drawn, colors = [], []
+        blf = types.SimpleNamespace(size=lambda f, s: None, color=lambda f, *c: None, position=lambda f, x, y, z: None,
+                                    draw=lambda f, s: drawn.append(s), dimensions=lambda f, s: (6.0 * len(s), 8.0))
+        shader = types.SimpleNamespace(uniform_float=lambda name, c: colors.append(tuple(round(v, 3) for v in c)))
+        gpu = types.SimpleNamespace(shader=types.SimpleNamespace(from_builtin=lambda name: shader),
+                                    state=types.SimpleNamespace(blend_set=lambda mode: None))
+        batch = types.SimpleNamespace(batch_for_shader=lambda *a, **k: types.SimpleNamespace(draw=lambda s: None))
+        view2d = types.SimpleNamespace(view_to_region=lambda x, y, clip=False: (x + 20000.0, y + 20000.0))
+        context = types.SimpleNamespace(region=types.SimpleNamespace(view2d=view2d, width=40000, height=40000),
+                                        preferences=bpy.context.preferences)
+        saved = {k: sys.modules.get(k) for k in ("blf", "gpu", "gpu_extras.batch")}
+        patched = {"bpy": ge.bpy, "editor_tree": ge.editor_tree, "node_errors": ge.node_errors,
+                   "node_notes": ge.node_notes, "_node_times": ge._node_times}
+        sys.modules.update({"blf": blf, "gpu": gpu, "gpu_extras.batch": batch})
+        ge.bpy = types.SimpleNamespace(context=context)
+        ge.editor_tree = lambda ctx: shown
+        ge.node_errors = lambda scalp: {failed: "it failed"}
+        ge.node_notes = lambda scalp: {noted: "does nothing as set", failed: "a note too"}
+        ge._node_times = lambda scalp: {slow: 24.0, noted: 3.24}
+        try:
+            ge._draw_overlay_now()
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
+            for k, v in patched.items():
+                setattr(ge, k, v)
+        self.assertIn("24 ms", drawn)
+        self.assertIn("3.2 ms", drawn)
+        self.assertEqual(drawn.count("!"), 2)  # the note's triangle, the error's corner (not its note)
+        rounded = lambda c: tuple(round(v, 3) for v in c)
+        self.assertIn(rounded(ge.WARNING), colors)
+        self.assertIn(rounded(ge.FOCUS), colors)
+        self.assertIn(rounded(ge.ERROR), colors)
+        accent = rounded(gt._rgb(gt.CATEGORY_COLORS[gt.category_of(node.gl_type)]))
+        self.assertNotIn(accent, colors)  # no category dot: the node's color says it
 
     def test_8b_preset_makes_the_maps_it_reads(self):
         # A preset reading a painted map the groom lacks (flow_with_guides' guideAreas): the map is

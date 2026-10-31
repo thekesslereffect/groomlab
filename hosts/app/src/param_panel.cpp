@@ -453,12 +453,11 @@ QWidget* ParamPanel::attributeEditor(Row& row, const json& p, const json& value,
 }
 
 QWidget* ParamPanel::numberEditor(Row& row, const json& p, const json& value, const QString& caption) {
-    // One slider with the caption and the number on its line (the number edited inline, a value
+    // One fill field with the caption and the number inside (the number edited inline, a value
     // typed past the span widening it): the span fits the default, the value may go anywhere.
     const std::string name = row.name;
     const bool integer = row.kind == "int";
     auto* slider = new ValueSlider(formHost_);
-    slider->setStacked(true);
     slider->setCaption(caption);
     slider->setFill(integer ? theme::purple() : theme::blue());
     // Shown in the spec's unit: a fraction as a percentage (the slider holds the value x 100, the
@@ -878,6 +877,11 @@ void ParamPanel::build() {
             rowHost->setObjectName(QStringLiteral("paramRow_") + QString::fromStdString(name));
             if (exposed && !fedBy.empty()) {
                 field->setEnabled(false);
+                // Driven: the field in the theme's driven color (Maya's driven attribute), resting.
+                if (auto* s = qobject_cast<ValueSlider*>(field)) {
+                    const QColor driven = theme::uiColor("driven");
+                    s->setStateColor(driven.isValid() ? driven : theme::graphDriven());
+                }
                 auto* fed = new QLabel(tr("← set by %1").arg(QString::fromStdString(fedBy)), rowHost);
                 fed->setObjectName(QStringLiteral("paramFed_") + QString::fromStdString(name));
                 fed->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
@@ -903,10 +907,12 @@ void ParamPanel::build() {
             header->setCheckable(true);
             header->setFlat(true);
             header->setCursor(Qt::PointingHandCursor);
+            // The design's caps header: small muted capitals after a chevron, a hairline above.
             header->setStyleSheet(QStringLiteral(
-                "QPushButton { background: transparent; border: none; color: %1; font-size: 11px; font-weight: 700; "
-                "letter-spacing: 1px; text-align: left; padding: 6px 0 0 0; } QPushButton:hover { color: %2; }")
-                                      .arg(theme::textMuted().name(), theme::text().name()));
+                "QPushButton { background: transparent; border: none; border-top: 1px solid %3; border-radius: 0; color: %1; "
+                "font-size: 11px; font-weight: 600; text-align: left; padding: 6px 0 2px 0; min-height: 0; } "
+                "QPushButton:hover { color: %2; }")
+                                      .arg(theme::textMuted().name(), theme::textDim().name(), theme::divider().name()));
             header->setChecked(!folded(section));
             titleSection(header, section);
             connect(header, &QAbstractButton::toggled, this, [this, section](bool open) { setFolded(section, !open); });
@@ -925,7 +931,7 @@ void ParamPanel::build() {
 }
 
 void ParamPanel::titleSection(QAbstractButton* header, const std::string& name) const {
-    header->setText((header->isChecked() ? QStringLiteral("▾  ") : QStringLiteral("▸  ")) + QString::fromStdString(name).toUpper());
+    setSectionHeader(header, QString::fromStdString(name), header->isChecked());
 }
 
 bool ParamPanel::folded(const std::string& section) const {

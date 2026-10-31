@@ -3,8 +3,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
+#include <vector>
 
+#include <QBuffer>
 #include <QEnterEvent>
+#include <QFile>
+#include <QImageReader>
+#include <QFocusEvent>
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QHelpEvent>
@@ -75,6 +81,72 @@ QPixmap tintedIcon(const QString& resource, const QColor& color, int size, qreal
     painter.end();
     QPixmapCache::insert(key, pixmap);
     return pixmap;
+}
+
+QPixmap duotoneIcon(const QString& resource, const QColor& main, const QColor& ink, int size, qreal devicePixelRatio) {
+    const QString key = QStringLiteral("groomlab-duotone:%1:%2:%3:%4:%5")
+                            .arg(resource)
+                            .arg(main.rgba(), 8, 16, QLatin1Char('0'))
+                            .arg(ink.rgba(), 8, 16, QLatin1Char('0'))
+                            .arg(size)
+                            .arg(devicePixelRatio);
+    QPixmap pixmap;
+    if (QPixmapCache::find(key, &pixmap)) return pixmap;
+    QFile file(resource);
+    if (!file.open(QIODevice::ReadOnly)) return coloredIcon(resource, size, devicePixelRatio);
+    QString svg = QString::fromUtf8(file.readAll());
+    auto mixed = [](const QColor& a, const QColor& b, double t) {
+        return QColor(static_cast<int>(std::lround(a.red() + (b.red() - a.red()) * t)), static_cast<int>(std::lround(a.green() + (b.green() - a.green()) * t)),
+                      static_cast<int>(std::lround(a.blue() + (b.blue() - a.blue()) * t)));
+    };
+    // widgets.py's PLACEHOLDERS, in two passes (a new color may equal another placeholder).
+    const std::vector<std::pair<QString, QColor>> roles = {
+        {QStringLiteral("#3D7EFF"), main},
+        {QStringLiteral("#1F4FB3"), mixed(main, Qt::black, 0.38)},
+        {QStringLiteral("#A8C7FF"), mixed(main, Qt::white, 0.5)},
+        {QStringLiteral("#F2F2F5"), ink},
+        {QStringLiteral("#FF4D50"), theme::red()},
+        {QStringLiteral("#FFC53E"), theme::yellow()},
+        {QStringLiteral("#2F7BF7"), theme::blue()},
+        {QStringLiteral("#2ECC90"), theme::emerald()},
+    };
+    for (std::size_t i = 0; i < roles.size(); ++i) svg.replace(roles[i].first, QStringLiteral("@role%1@").arg(i), Qt::CaseInsensitive);
+    for (std::size_t i = 0; i < roles.size(); ++i) {
+        const QColor& c = roles[i].second;
+        svg.replace(QStringLiteral("@role%1@").arg(i), c.isValid() ? c.name() : roles[i].first);
+    }
+    QByteArray bytes = svg.toUtf8();
+    QBuffer buffer(&bytes);
+    QImageReader reader(&buffer, "svg");
+    const int pixels = std::max(1, static_cast<int>(std::lround(size * devicePixelRatio)));
+    reader.setScaledSize(QSize(pixels, pixels));
+    const QImage image = reader.read();
+    if (image.isNull()) return coloredIcon(resource, size, devicePixelRatio);
+    pixmap = QPixmap::fromImage(image);
+    pixmap.setDevicePixelRatio(devicePixelRatio);
+    QPixmapCache::insert(key, pixmap);
+    return pixmap;
+}
+
+void setSectionHeader(QAbstractButton* header, const QString& title, bool expanded) {
+    header->setText(title.toUpper().replace(QLatin1Char('&'), QStringLiteral("&&")));
+    const qreal dpr = header->devicePixelRatioF();
+    const QString chevron = expanded ? QStringLiteral(":/groomlab/icons/ui_chevron_down.svg") : QStringLiteral(":/groomlab/icons/ui_chevron_right.svg");
+    QIcon icon;
+    const QPixmap rest = tintedIcon(chevron, theme::textMuted(), 10, dpr);
+    for (const QIcon::Mode mode : {QIcon::Normal, QIcon::Active, QIcon::Selected}) {
+        icon.addPixmap(rest, mode, QIcon::Off);
+        icon.addPixmap(rest, mode, QIcon::On);
+    }
+    header->setIcon(icon);
+    header->setIconSize(QSize(10, 10));
+    // The capitals spaced out (0.08 em), as the design's caps headers; the size and weight are the
+    // style sheet's.
+    QFont font = header->font();
+    if (font.letterSpacingType() != QFont::PercentageSpacing || font.letterSpacing() != 108.0) {
+        font.setLetterSpacing(QFont::PercentageSpacing, 108.0);
+        header->setFont(font);
+    }
 }
 
 void paintGlass(QPainter& painter, const QRectF& rect, qreal radius, const QColor& color, const QColor& edge) {
@@ -354,19 +426,148 @@ void RoundButton::leaveEvent(QEvent* /*event*/) {
 
 namespace {
 
-// The metrics: a row 28 px tall with the 8 px track in the middle; stacked, a 20 px caption
-// line, the track under it and 6 px below, 40 in all (a comfortable target, not a hairline).
-constexpr int kTrack = 8;
-constexpr int kRowHeight = 28;
-constexpr int kCaptionLine = 20;
-constexpr int kStackedHeight = kCaptionLine + 6 + kTrack + 6;
+// A recursive descent over the text: expr = term (+|- term)*, term = factor (*|/ factor)*,
+// factor = (+|-) factor | number | ( expr ).
+class Arithmetic {
+public:
+    explicit Arithmetic(const QString& text) : s_(text) {}
+    bool parse(double* out) {
+        double v = 0.0;
+        if (!expr(&v)) return false;
+        skip();
+        if (i_ != s_.size() || !std::isfinite(v)) return false;
+        *out = v;
+        return true;
+    }
+
+private:
+    void skip() {
+        while (i_ < s_.size() && s_[i_].isSpace()) ++i_;
+    }
+    bool peek(QChar c) {
+        skip();
+        return i_ < s_.size() && s_[i_] == c;
+    }
+    bool expr(double* out) {
+        if (!term(out)) return false;
+        while (peek(QLatin1Char('+')) || peek(QLatin1Char('-'))) {
+            const bool plus = s_[i_++] == QLatin1Char('+');
+            double r = 0.0;
+            if (!term(&r)) return false;
+            *out = plus ? *out + r : *out - r;
+        }
+        return true;
+    }
+    bool term(double* out) {
+        if (!factor(out)) return false;
+        while (peek(QLatin1Char('*')) || peek(QLatin1Char('/'))) {
+            const bool times = s_[i_++] == QLatin1Char('*');
+            double r = 0.0;
+            if (!factor(&r)) return false;
+            if (!times && r == 0.0) return false;
+            *out = times ? *out * r : *out / r;
+        }
+        return true;
+    }
+    bool factor(double* out) {
+        if (++depth_ > 64) return false;  // (a pathological nesting)
+        bool ok = false;
+        if (peek(QLatin1Char('+')) || peek(QLatin1Char('-'))) {
+            const bool minus = s_[i_++] == QLatin1Char('-');
+            ok = factor(out);
+            if (ok && minus) *out = -*out;
+        } else if (peek(QLatin1Char('('))) {
+            ++i_;
+            ok = expr(out) && peek(QLatin1Char(')'));
+            if (ok) ++i_;
+        } else {
+            ok = number(out);
+        }
+        --depth_;
+        return ok;
+    }
+    bool number(double* out) {
+        skip();
+        const qsizetype start = i_;
+        bool digits = false;
+        while (i_ < s_.size() && s_[i_].isDigit()) {
+            ++i_;
+            digits = true;
+        }
+        if (i_ < s_.size() && s_[i_] == QLatin1Char('.')) {
+            ++i_;
+            while (i_ < s_.size() && s_[i_].isDigit()) {
+                ++i_;
+                digits = true;
+            }
+        }
+        if (!digits) return false;
+        if (i_ < s_.size() && (s_[i_] == QLatin1Char('e') || s_[i_] == QLatin1Char('E'))) {
+            qsizetype j = i_ + 1;
+            if (j < s_.size() && (s_[j] == QLatin1Char('+') || s_[j] == QLatin1Char('-'))) ++j;
+            if (j < s_.size() && s_[j].isDigit()) {
+                while (j < s_.size() && s_[j].isDigit()) ++j;
+                i_ = j;
+            }
+        }
+        bool ok = false;
+        *out = s_.mid(start, i_ - start).toDouble(&ok);
+        return ok;
+    }
+    QString s_;
+    qsizetype i_ = 0;
+    int depth_ = 0;
+};
+
+constexpr int kPad = 8;            // the texts' inset from the field's sides
+constexpr int kGap = 8;            // between the caption and the value
+constexpr qreal kThreshold = 3.0;  // the travel that makes a press a drag
+
+// A step of 1, 2 or 5 times a power of ten near `raw`.
+double niceStep(double raw) {
+    if (!(raw > 0.0) || !std::isfinite(raw)) return 1.0;
+    const double p = std::pow(10.0, std::floor(std::log10(raw)));
+    const double m = raw / p;
+    return (m < 1.5 ? 1.0 : m < 3.5 ? 2.0 : m < 7.5 ? 5.0 : 10.0) * p;
+}
+
+QColor withAlpha(QColor c, int alpha) {
+    c.setAlpha(alpha);
+    return c;
+}
+
+QColor mixed(const QColor& a, const QColor& b, double t) {
+    const auto lerp = [t](float x, float y) { return static_cast<float>(x + (y - x) * t); };
+    return QColor::fromRgbF(lerp(a.redF(), b.redF()), lerp(a.greenF(), b.greenF()), lerp(a.blueF(), b.blueF()), lerp(a.alphaF(), b.alphaF()));
+}
+
+// The field's tones: a solid theme's raised field, hover and edge; a glass theme's white washes.
+QColor fieldBase() { return theme::glassy() ? QColor(255, 255, 255, 20) : theme::uiColor("raised"); }
+QColor fieldHover() { return theme::glassy() ? QColor(255, 255, 255, 36) : theme::uiColor("hover"); }
+QColor fieldEdge() {
+    const QColor edge = theme::glassEdge();
+    return edge.isValid() ? edge : QColor(255, 255, 255, 26);
+}
+QColor fieldAccent() {
+    const QColor accent = theme::uiColor("accent");
+    return accent.isValid() ? accent : theme::blue();
+}
 
 }  // namespace
 
-ValueSlider::ValueSlider(QWidget* parent) : QWidget(parent), fill_(theme::sliderFill(theme::blue())) {
+bool parseNumberExpression(const QString& text, double* value) {
+    QString s = text.trimmed();
+    s.replace(QLatin1Char(','), QLatin1Char('.'));
+    if (s.isEmpty() || !value) return false;
+    return Arithmetic(s).parse(value);
+}
+
+ValueSlider::ValueSlider(QWidget* parent) : QWidget(parent), fill_(theme::blue()) {
     setAttribute(Qt::WA_NoSystemBackground, true);
+    setAttribute(Qt::WA_Hover, true);
     setCursor(Qt::SizeHorCursor);
-    setFocusPolicy(Qt::NoFocus);
+    setFocusPolicy(Qt::StrongFocus);
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     format_ = [this](double v) { return integer_ ? QString::number(std::lround(v)) : trimmedNumber(v, decimals_); };
 }
 
@@ -385,30 +586,39 @@ void ValueSlider::setLimits(double min, double max) {
 }
 
 void ValueSlider::setValue(double value) {
-    value_ = snapped(value);
-    // A value past the track's span (typed, or set by the host): the span grows to show it.
+    value = snapped(value);
+    // A value past the range (typed, or set by the host): the range grows to show it.
+    if (value == value_ && value >= min_ && value <= max_) return;
+    value_ = value;
     if (value_ < min_) min_ = value_;
     if (value_ > max_) max_ = value_;
     update();
 }
 
 void ValueSlider::setFill(const QColor& color) {
-    fill_ = theme::sliderFill(color);  // the theme's one slider color, if it has one
+    fill_ = color;
     update();
 }
 
+QColor ValueSlider::fillColor() const {
+    if (theme::glassy()) return withAlpha(theme::sliderFill(fill_), 120);
+    const QColor selection = theme::uiColor("selection");
+    return selection.isValid() ? selection : withAlpha(theme::sliderFill(fill_), 90);
+}
+
 void ValueSlider::setTrackWidth(int width) {
-    trackWidth_ = width;
+    trackWidth_ = std::max(0, width);
     updateGeometry();
 }
 
 void ValueSlider::setValueWidth(int width) {
-    valueWidth_ = width;
+    valueWidth_ = std::max(0, width);
     updateGeometry();
 }
 
 void ValueSlider::setFormat(std::function<QString(double)> format) {
     format_ = std::move(format);
+    updateGeometry();
     update();
 }
 
@@ -417,52 +627,48 @@ void ValueSlider::setDecimals(int decimals) {
     update();
 }
 
-void ValueSlider::setStep(double step) { step_ = step; }
+void ValueSlider::setStep(double step) { step_ = std::max(0.0, step); }
+
+double ValueSlider::step() const {
+    double s = step_ > 0.0 ? step_ : niceStep((max_ - min_) / 100.0);
+    if (integer_) s = std::max(1.0, std::round(s));
+    return s;
+}
 
 void ValueSlider::setInteger(bool integer) {
     integer_ = integer;
-    if (integer) {
-        if (step_ <= 0.0) step_ = 1.0;
-        value_ = snapped(value_);
-    }
+    if (integer) value_ = snapped(value_);
     update();
 }
 
 void ValueSlider::setCaption(const QString& caption) {
+    if (caption == caption_) return;
     caption_ = caption;
-    captionWidth_ = caption.isEmpty() ? 0 : QFontMetrics(theme::uiFont(14, 600)).horizontalAdvance(caption) + 10;
     updateGeometry();
+    update();
+    placeEditor();
 }
 
-void ValueSlider::setStacked(bool stacked) {
-    stacked_ = stacked;
-    updateGeometry();
+void ValueSlider::setStateColor(const QColor& color) {
+    if (color == state_) return;
+    state_ = color;
     update();
 }
 
+int ValueSlider::captionAdvance() const {
+    return caption_.isEmpty() ? 0 : QFontMetrics(theme::uiFont(theme::fontSize(), QFont::Normal)).horizontalAdvance(caption_);
+}
+
+int ValueSlider::valueAdvance() const {
+    return std::max(valueWidth_, QFontMetrics(theme::numberFont(theme::fontSize())).horizontalAdvance(format_(value_)));
+}
+
 QSize ValueSlider::sizeHint() const {
-    if (stacked_) return QSize(trackWidth_, kStackedHeight);
-    return QSize(captionWidth_ + (trackWidth_ > 0 ? trackWidth_ : 96) + (valueWidth_ > 0 ? 10 + valueWidth_ : 0), kRowHeight);
+    const int texts = kPad + captionAdvance() + (caption_.isEmpty() ? 0 : kGap) + valueAdvance() + kPad;
+    return QSize(std::max({trackWidth_, texts, 64}), theme::rowHeight());
 }
 
-QRect ValueSlider::trackRect() const {
-    if (stacked_) return QRect(0, kCaptionLine + 6, width(), kTrack);
-    // A track width of 0: the track takes the row's width the caption and the value leave.
-    const int track = trackWidth_ > 0 ? trackWidth_ : std::max(24, width() - captionWidth_ - (valueWidth_ > 0 ? 10 + valueWidth_ : 0));
-    return QRect(captionWidth_, (height() - kTrack) / 2, track, kTrack);
-}
-
-QRect ValueSlider::valueRect() const {
-    // Where the number is drawn (and where the inline edit opens): the caption line's right
-    // half stacked, after the track in a row.
-    if (stacked_) {
-        // The number's width (at least a third of the line): the caption takes the rest.
-        const int w = std::max(width() / 3, QFontMetrics(theme::monoFont(13)).horizontalAdvance(format_(value_)) + 12);
-        return QRect(width() - w, 0, w, kCaptionLine);
-    }
-    if (valueWidth_ <= 0) return {};
-    return QRect(trackRect().right() + 10, 0, valueWidth_, height());
-}
+QSize ValueSlider::minimumSizeHint() const { return QSize(48, theme::rowHeight()); }
 
 double ValueSlider::snapped(double value) const {
     value = std::clamp(value, lowLimit_, highLimit_);
@@ -473,35 +679,57 @@ double ValueSlider::snapped(double value) const {
 void ValueSlider::paintEvent(QPaintEvent* /*event*/) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
+    const bool enabled = isEnabled();
     const bool editingNow = editing();
-    if (stacked_) {
-        painter.setFont(theme::uiFont(13, 600));
-        painter.setPen(theme::textDim());
-        painter.drawText(QRect(0, 0, valueRect().left() - 6, kCaptionLine), Qt::AlignVCenter | Qt::AlignLeft, caption_);
-        if (!editingNow) {
-            painter.setFont(theme::monoFont(13));
-            painter.setPen(theme::text());
-            painter.drawText(valueRect(), Qt::AlignVCenter | Qt::AlignRight, format_(value_));
+    const bool focusShown = keyFocus_ && hasFocus();
+    if (!enabled) painter.setOpacity(0.45);
+    const QRectF field = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+    const qreal radius = theme::controlRadius();
+    QPainterPath shape;
+    shape.addRoundedRect(field, radius, radius);
+
+    // The field, the fill clipped to its corners, then the edge over both.
+    QColor base = editingNow ? theme::backdrop() : (hover_ && enabled ? fieldHover() : fieldBase());
+    QColor fill = fillColor();
+    QColor edge = editingNow || focusShown ? fieldAccent() : fieldEdge();
+    if (state_.isValid() && !editingNow) {
+        base = mixed(base, withAlpha(state_, 255), 0.22);
+        fill = mixed(fill, withAlpha(state_, 255), 0.45);
+        if (!focusShown) edge = state_;
+    }
+    painter.fillPath(shape, base);
+    if (!editingNow) {
+        const double t = std::clamp((value_ - min_) / (max_ - min_), 0.0, 1.0);
+        const qreal filled = std::round(width() * t);
+        if (filled > 0.0) {
+            painter.save();
+            painter.setClipPath(shape);
+            painter.fillRect(QRectF(0.0, 0.0, filled, height()), fill);
+            painter.restore();
         }
-    } else if (!caption_.isEmpty()) {
-        painter.setFont(theme::uiFont(14, 600));
+    }
+    painter.setPen(QPen(edge, 1.0));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPath(shape);
+
+    // The texts: the caption at the left (elided to what the value leaves), the value at the right
+    // (centered without a caption); the inline edit takes the value's place.
+    const QString shown = format_(value_);
+    const QFont numbers = theme::numberFont(theme::fontSize());
+    const int valueW = QFontMetrics(numbers).horizontalAdvance(shown);
+    const QRect inner = rect().adjusted(kPad, 0, -kPad, 0);
+    if (!caption_.isEmpty()) {
+        const QFont words = theme::uiFont(theme::fontSize(), QFont::Normal);
+        const int room = editingNow ? std::max(0, inner.width() / 2 - kGap) : std::max(0, inner.width() - valueW - kGap);
+        painter.setFont(words);
         painter.setPen(theme::textDim());
-        painter.drawText(QRect(0, 0, captionWidth_ - 10, height()), Qt::AlignVCenter | Qt::AlignLeft, caption_);
+        painter.drawText(QRect(inner.x(), 0, room, height()), Qt::AlignVCenter | Qt::AlignLeft,
+                         QFontMetrics(words).elidedText(caption_, Qt::ElideRight, room));
     }
-    const QRect track = trackRect();
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(theme::track());
-    painter.drawRoundedRect(track, kTrack / 2.0, kTrack / 2.0);
-    const double t = (value_ - min_) / (max_ - min_);
-    const int filled = static_cast<int>(std::lround(track.width() * std::clamp(t, 0.0, 1.0)));
-    if (filled > 0) {
-        painter.setBrush(fill_);
-        painter.drawRoundedRect(QRect(track.x(), track.y(), std::max(filled, kTrack), track.height()), kTrack / 2.0, kTrack / 2.0);
-    }
-    if (valueWidth_ > 0 && !stacked_ && !editingNow) {
-        painter.setFont(theme::monoFont(13));
+    if (!editingNow) {
+        painter.setFont(numbers);
         painter.setPen(theme::text());
-        painter.drawText(valueRect(), Qt::AlignVCenter | Qt::AlignLeft, format_(value_));
+        painter.drawText(inner, Qt::AlignVCenter | (caption_.isEmpty() ? Qt::AlignHCenter : Qt::AlignRight), shown);
     }
 }
 
@@ -513,77 +741,135 @@ void ValueSlider::setLive(double value) {
     emit valueChanged(value_);
 }
 
-void ValueSlider::setFromX(qreal x) {
-    const QRect track = trackRect();
-    const double t = std::clamp((x - track.x()) / static_cast<double>(std::max(track.width(), 1)), 0.0, 1.0);
-    double value = min_ + (max_ - min_) * t;
-    if (step_ > 0.0) value = min_ + std::round((value - min_) / step_) * step_;
-    setLive(value);
+void ValueSlider::stepBy(double steps) {
+    const double s = step();
+    double value = std::round((value_ + steps * s) / s) * s;  // (on the step's grid)
+    value = snapped(std::clamp(value, min_, max_));
+    if (value == value_) return;
+    value_ = value;
+    update();
+    emit pressed();
+    emit valueChanged(value_);
+    emit released();
 }
 
 void ValueSlider::mousePressEvent(QMouseEvent* event) {
-    if (event->button() != Qt::LeftButton) return;
+    if (event->button() != Qt::LeftButton) {
+        QWidget::mousePressEvent(event);
+        return;
+    }
     if (editing()) commitEdit();
     dragging_ = true;
     moved_ = false;
-    lastX_ = event->position().x();
-    const QRect track = trackRect().adjusted(0, -6, 0, 6);
-    pressOnValue_ = valueRect().contains(event->position().toPoint());
-    // On the track the value jumps to the mouse; anywhere else (the caption, the number) it
-    // follows the mouse's travel, so pressing a label never kicks the value away.
-    relative_ = !track.contains(event->position().toPoint());
-    emit pressed();
-    if (!relative_) setFromX(lastX_);
+    pressX_ = lastX_ = event->position().x();
+    raw_ = value_;
     event->accept();
 }
 
 void ValueSlider::mouseMoveEvent(QMouseEvent* event) {
     if (!dragging_) return;
     const qreal x = event->position().x();
-    if (std::abs(x - lastX_) >= 1.0) moved_ = true;
-    if (relative_) {
-        const double perPixel = (max_ - min_) / static_cast<double>(std::max(trackRect().width(), 1));
-        // Shift: a tenth of the travel, for fine values.
-        const double scale = event->modifiers().testFlag(Qt::ShiftModifier) ? 0.1 : 1.0;
-        double value = value_ + (x - lastX_) * perPixel * scale;
-        if (step_ > 0.0 && !integer_) value = min_ + std::round((value - min_) / step_) * step_;
-        setLive(value);
-    } else {
-        setFromX(x);
+    if (!moved_) {
+        if (std::abs(x - pressX_) < kThreshold) return;
+        moved_ = true;  // (the travel counts from the press: the threshold is no dead zone in the value)
+        emit pressed();
     }
+    // The field's width is the range, Shift a tenth of the speed: the value moves by the mouse's
+    // travel (no jump to where it is), kept unsnapped in raw_ so small moves add up.
+    const Qt::KeyboardModifiers mods = event->modifiers();
+    const bool fine = mods.testFlag(Qt::ShiftModifier), coarse = mods.testFlag(Qt::ControlModifier);
+    const double perPixel = (max_ - min_) / static_cast<double>(std::max(width(), 1));
+    raw_ = std::clamp(raw_ + (x - lastX_) * perPixel * (fine ? 0.1 : 1.0), min_, max_);
     lastX_ = x;
+    // Ctrl: steps of ten; else the step set (a tenth of it with Shift), none for a free slider.
+    double snap = coarse ? step() * 10.0 : step_ > 0.0 ? (fine ? step_ / 10.0 : step_) : 0.0;
+    double value = snap > 0.0 ? std::round(raw_ / snap) * snap : raw_;
+    setLive(value);
     event->accept();
 }
 
 void ValueSlider::mouseReleaseEvent(QMouseEvent* event) {
-    if (!dragging_) return;
+    if (!dragging_ || event->button() != Qt::LeftButton) return;
     dragging_ = false;
-    emit released();
-    // A click on the number (no travel) edits it.
-    if (pressOnValue_ && !moved_) beginEdit();
+    if (moved_) emit released();
+    else beginEdit();  // a click: type the value
     event->accept();
 }
 
 void ValueSlider::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() != Qt::LeftButton) return;
     dragging_ = false;
-    beginEdit();
+    if (!editing()) beginEdit();
     event->accept();
 }
 
 void ValueSlider::wheelEvent(QWheelEvent* event) {
+    // Only a focused field takes the wheel: over a panel it scrolls the panel.
     const int steps = event->angleDelta().y() / 120;
-    if (steps == 0) return;
-    const double step = step_ > 0.0 ? step_ : (max_ - min_) / 50.0;
-    const double value = snapped(std::clamp(value_ + steps * step, min_, max_));
-    if (value != value_) {
-        value_ = value;
-        update();
-        emit pressed();
-        emit valueChanged(value_);
-        emit released();
+    if (!hasFocus() || editing() || steps == 0) {
+        event->ignore();
+        return;
+    }
+    stepBy(event->modifiers().testFlag(Qt::ShiftModifier) ? steps * 10.0 : steps);
+    event->accept();
+}
+
+void ValueSlider::keyPressEvent(QKeyEvent* event) {
+    const double times = event->modifiers().testFlag(Qt::ShiftModifier) ? 10.0 : 1.0;
+    switch (event->key()) {
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+    case Qt::Key_F2:
+        beginEdit();
+        break;
+    case Qt::Key_Right:
+    case Qt::Key_Up:
+        stepBy(times);
+        break;
+    case Qt::Key_Left:
+    case Qt::Key_Down:
+        stepBy(-times);
+        break;
+    default:
+        QWidget::keyPressEvent(event);
+        return;
     }
     event->accept();
+}
+
+void ValueSlider::focusInEvent(QFocusEvent* event) {
+    // The accent edge for a field reached by the keyboard (as :focus-visible), kept when the edit
+    // hands the focus back.
+    const Qt::FocusReason reason = event->reason();
+    keyFocus_ = reason == Qt::TabFocusReason || reason == Qt::BacktabFocusReason || reason == Qt::ShortcutFocusReason ||
+                (reason == Qt::OtherFocusReason && keyFocus_);
+    QWidget::focusInEvent(event);
+    update();
+}
+
+void ValueSlider::focusOutEvent(QFocusEvent* event) {
+    QWidget::focusOutEvent(event);
+    update();
+}
+
+void ValueSlider::enterEvent(QEnterEvent* event) {
+    hover_ = true;
+    update();
+    QWidget::enterEvent(event);
+}
+
+void ValueSlider::leaveEvent(QEvent* event) {
+    hover_ = false;
+    update();
+    QWidget::leaveEvent(event);
+}
+
+void ValueSlider::changeEvent(QEvent* event) {
+    if (event->type() == QEvent::EnabledChange) {
+        if (!isEnabled() && editing()) cancelEdit();
+        update();
+    }
+    QWidget::changeEvent(event);
 }
 
 // ---- The inline edit ------------------------------------------------------------------------------
@@ -592,58 +878,70 @@ bool ValueSlider::editing() const { return editor_ && !editor_->isHidden(); }  /
 
 void ValueSlider::placeEditor() {
     if (!editor_) return;
-    QRect at = valueRect();
-    if (stacked_) at = QRect(width() / 2, 0, width() / 2, kCaptionLine);
-    else at = QRect(at.x() - 4, (height() - 22) / 2, std::max(valueWidth_ + 8, 56), 22);
+    // Over the value's half (the caption keeps the left one), else the whole field; inside the edge.
+    const QRect inner = rect().adjusted(kPad - 2, 2, -(kPad - 2), -2);
+    QRect at = inner;
+    if (!caption_.isEmpty()) at.setLeft(inner.x() + inner.width() / 2);
     editor_->setGeometry(at);
 }
 
 void ValueSlider::beginEdit() {
+    if (!isEnabled()) return;
     if (!editor_) {
         editor_ = new QLineEdit(this);
-        editor_->setFont(theme::monoFont(13));
-        editor_->setAlignment(stacked_ ? Qt::AlignRight : Qt::AlignLeft);
-        editor_->setStyleSheet(QStringLiteral("QLineEdit { background: rgba(255,255,255,0.10); border: 1px solid %1; border-radius: 6px; "
-                                              "padding: 0 4px; color: %2; }")
-                                   .arg(fill_.name(), theme::text().name()));
+        editor_->setFrame(false);
         editor_->installEventFilter(this);
         connect(editor_, &QLineEdit::returnPressed, this, [this] { commitEdit(); });
     }
+    // The theme's now (a theme switch restyles the next edit).
+    editor_->setFont(theme::numberFont(theme::fontSize()));
+    editor_->setAlignment((caption_.isEmpty() ? Qt::AlignHCenter : Qt::AlignRight) | Qt::AlignVCenter);
+    const QColor accent = fieldAccent();
+    editor_->setStyleSheet(QStringLiteral("QLineEdit { background: transparent; border: none; padding: 0 2px; color: %1; "
+                                          "selection-background-color: %2; selection-color: %3; }")
+                               .arg(theme::text().name(), accent.name(), theme::readableOn(accent).name()));
     // The value as held (no rounding to the shown decimals: what is typed back is what was there).
     editor_->setText(integer_ ? QString::number(std::lround(value_)) : trimmedNumber(value_, std::max(decimals_, 6)));
     placeEditor();
     editor_->show();
     editor_->raise();
     editor_->selectAll();
-    editor_->setFocus();
+    editor_->setFocus(Qt::OtherFocusReason);
+    update();
+}
+
+void ValueSlider::closeEditor() {
+    if (!editor_) return;
+    // The focus back on the field (after Enter or Escape the arrows go on working) before the edit
+    // hides, so it does not wander to the next widget; that focus-out is no commit.
+    closing_ = true;
+    if (editor_->hasFocus()) setFocus(Qt::OtherFocusReason);
+    editor_->hide();
+    closing_ = false;
     update();
 }
 
 bool ValueSlider::commitEdit() {
     if (!editing()) return false;
-    bool ok = false;
-    const double typed = editor_->text().trimmed().toDouble(&ok);
-    if (!ok) return false;
-    editor_->hide();
+    double typed = 0.0;
+    if (!parseNumberExpression(editor_->text(), &typed)) return false;
+    closeEditor();
     const double value = snapped(typed);
     if (value != value_) {
-        // Typed past the span: the span grows to hold it (within the limits).
+        // Typed past the range: the range grows to hold it (within the limits).
         if (value < min_) min_ = value;
         if (value > max_) max_ = value;
         value_ = value;
+        updateGeometry();
         update();
         emit pressed();
         emit valueChanged(value_);
         emit released();
     }
-    update();
     return true;
 }
 
-void ValueSlider::cancelEdit() {
-    if (editor_) editor_->hide();
-    update();
-}
+void ValueSlider::cancelEdit() { closeEditor(); }
 
 QString ValueSlider::editText() const { return editing() ? editor_->text() : QString(); }
 
@@ -653,12 +951,19 @@ void ValueSlider::setEditText(const QString& text) {
 
 bool ValueSlider::eventFilter(QObject* watched, QEvent* event) {
     if (watched == editor_) {
-        if (event->type() == QEvent::KeyPress && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
-            cancelEdit();
-            return true;
+        if (event->type() == QEvent::KeyPress) {
+            const int key = static_cast<QKeyEvent*>(event)->key();
+            if (key == Qt::Key_Escape) {
+                cancelEdit();
+                return true;
+            }
+            if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+                commitEdit();  // (no number: the edit stays open)
+                return true;
+            }
         }
-        if (event->type() == QEvent::FocusOut) {
-            // Leaving the field keeps a number typed, drops anything else.
+        if (event->type() == QEvent::FocusOut && !closing_ && editing()) {
+            // Leaving the field (Tab, a click elsewhere) keeps a number typed, drops anything else.
             if (!commitEdit()) cancelEdit();
         }
     }

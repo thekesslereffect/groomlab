@@ -22,7 +22,7 @@ from groomlab.ui.qt import QtCore, QtWidgets
 
 import groomlab
 import groomlab_core
-from groomlab.ui import definitions, length_paths_box, theme, tool_tabs, widgets
+from groomlab.ui import definitions, length_keys_box, theme, tool_tabs, widgets
 
 # The tools are the core's brush catalog (brush_catalog.h), the one list both hosts build their
 # palettes from: id, label, category, default strength, whether the strength is signed, a hint
@@ -52,6 +52,43 @@ GESTURES = definitions.text("gestures")
 SYMMETRY_TIP = definitions.text("symmetryTip")
 # What the Erase brush does not do, said under its settings: the hair itself goes with the density map.
 ERASE_NOTE = definitions.text("eraseNote")
+# The tool card's one line under the tool's name (palette.json's palette.tools); the ? beside the
+# name has the catalog's whole hint and the gestures.
+SHORT = dict((k, v["short"]) for k, v in definitions.get("palette/tools").items() if isinstance(v, dict))
+NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
+# The brush block's chips: a short name each (their tooltips: the catalog's hints).
+CHIP_LABELS = {"pressure": "Pressure", "collide": "Off scalp"}
+
+
+def help_tip(tool):
+    """The card's ? tooltip: the tool's name and its whole hint, then (for the brushes) the
+    gestures as a small list of key and what it does."""
+    import html
+    parts = ["<b>%s</b>" % html.escape(NAMES.get(tool, tool)), html.escape(HINTS.get(tool, ""))]
+    if "radius" in TOOL_SETTINGS.get(tool, set()):
+        rows = []
+        for entry in GESTURES.split(u" · "):
+            key, sep, what = entry.partition(": ")
+            rows.append(u"<tr><td style='padding-right:8px'><b>%s</b></td><td>%s</td></tr>"
+                        % ((html.escape(key), html.escape(what)) if sep else ("", html.escape(entry))))
+        parts.append(u"<table cellspacing='0' cellpadding='1'>%s</table>" % "".join(rows))
+    return u"<p style='white-space:pre-wrap'>%s</p>" % u"<br>".join(parts[:2]) + (parts[2] if len(parts) > 2 else "")
+
+
+
+# The block titles a core older than these definitions may not name yet.
+SETTING_LABELS = {"lengthKeys": "Keys", "newGuides": "New guides", "tube": "Tube", "tubeChannel": "Paints",
+                  "selection": "Selection", "erases": "Erases", "flow": "Flow", "parts": "Parts",
+                  "targets": "Acts on"}
+
+
+def _setting(setting, field):
+    """A catalog setting's label or hint (brush_settings); "" (a label: SETTING_LABELS') when the
+    core doesn't have it."""
+    value = SETTINGS.get(setting, {}).get(field)
+    if value is None:
+        return SETTING_LABELS.get(setting, setting) if field == "label" else ""
+    return value
 
 
 def _options(name):
@@ -196,18 +233,23 @@ class StarterCard(QtWidgets.QFrame):
 
 
 class TubePanel(QtWidgets.QWidget):
-    """The tubes as a whole, Groom Tools' Tubes section (opened by the Shape brush, Place and Draw): the targets' shape,
-    width, flatness and twist (each change one undo step), the groom's shape library with its
-    editor, the shape new guides take, and the groom's Fill Tubes and Tube Blend (its Interpolate
-    nodes' fillTubes and tubeBlend). Follows the groom through refresh().
+    """The tubes in the tool card, as three blocks (the panel itself is never shown: it owns them):
+
+    Profile          (Shape, Select) the shape picker with Apply, the cross-section editor, Edit as
+                     custom, Mirror and Smooth; the library's New / Rename / Duplicate / Delete as
+                     glyphs in the block's header
+    Selected guides  (Shape, Select) the targets' Width, Flatness and Twist, Smooth in the header
+    Tube             (Place, Draw) the tube new guides get: a small preview, the shape picker and
+                     Width / Flatness / Twist (the library is edited with the Shape brush)
+
+    The shape picker and the three fields are one set of widgets that set_mode() moves between
+    the blocks: "edit" (the targets' tubes: each change one undo step) or "new" (the placement
+    tube the brush gives new guides). Follows the groom through refresh().
 
     The targets: the selected guides, else the soloed ones (those left unfrozen:
-    groomlab.tube_targets). The shape picker lists the built-ins and the library; its choice (and
-    Width, Flatness and Twist as shown) is also what Place and Draw give new guides (the brush's
-    placement tube: the shape always, the sections where no guides are near to blend them from).
-    The editor shows the chosen shape: a built-in read-only (Edit as Custom copies it into the
-    library), a library shape editable: dragging previews live on the groom (no undo step), the
-    release commits (one undo step, every guide taking it following)."""
+    groomlab.tube_targets). The editor shows the chosen shape: a built-in read-only (Edit as custom
+    copies it into the library), a library shape editable: dragging previews live on the groom (no
+    undo step), the release commits (one undo step, every guide taking it following)."""
 
     PREVIEW_MS = 60  # a drag's live preview at most this often
 
@@ -215,88 +257,154 @@ class TubePanel(QtWidgets.QWidget):
         super(TubePanel, self).__init__()
         self.owner = owner
         self.setObjectName("tubePanel")
-        self.setProperty("role", "options")
-        self.setToolTip(SETTINGS["tube"]["hint"])
-        column = QtWidgets.QVBoxLayout(self)
-        column.setContentsMargins(0, theme.px(4), 0, 0)
-        column.setSpacing(theme.px(6))
-        self.targets = QtWidgets.QLabel()
-        self.targets.setWordWrap(True)
-        self.targets.setProperty("role", "hint")
-        column.addWidget(self.targets)
-        form = QtWidgets.QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setLabelAlignment(QtCore.Qt.AlignRight)
-        form.setRowWrapPolicy(QtWidgets.QFormLayout.DontWrapRows)
-        column.addLayout(form)
+        self.setVisible(False)  # a holder: its blocks go in the tool card
+        from groomlab.ui.tube_shape_editor import TubeShapeEditor
+        from groomlab import units
+        self.mode = "edit"
         self.shape = QtWidgets.QComboBox()
         self.shape.setObjectName("tubeShape")
-        self.shape.setToolTip("The tube shape: picked, it goes to the targeted guides and to the guides Place and Draw "
-                              "make. The built-ins, then the groom's library of custom shapes")
+        self.shape.setToolTip("The tube shape: the built-ins, then the groom's library of custom shapes")
         self.shape.activated.connect(lambda _i: self.pick(self.shape.currentData()))
-        form.addRow("Shape", self.shape)
-        # The editor: the chosen shape's outline, and the library's edits.
-        from groomlab.ui.tube_shape_editor import TubeShapeEditor
+        self.length_factor = units.factor("length")  # shown in real units, stored in scene units
+        self.width = widgets.SoftSlider(0.1 * self.length_factor, 0.0, 1.0 * self.length_factor, minimum=0.0,
+                                        key="palette.tubeWidth@" + units.unit("length")[0], label="Width",
+                                        suffix=units.label("length"))
+        self.width.setObjectName("tubeWidth")
+        self.width.setToolTip("The widest section's half-width (a round tube's radius): the selected tubes scaled "
+                              "to it, their taper and what the brush painted kept; new guides' where none are near")
+        self.width.committed.connect(self.set_width)
+        self.flatness = widgets.SoftSlider(0.0, 0.0, 1.0, minimum=0.0, maximum=0.99, key=None, label="Flatness")
+        self.flatness.setObjectName("tubeFlatness")
+        self.flatness.setToolTip("0: as the shape is drawn; toward 1 a flat ribbon (the sections' aspect 1 - this, "
+                                 "the same root to tip)")
+        self.flatness.committed.connect(lambda v: self.apply(aspect=max(1.0 - v, 0.01)))
+        self.twist = widgets.SoftSlider(0.0, -180.0, 180.0, key=None, label="Twist", suffix=u"°")
+        self.twist.setObjectName("tubeTwist")
+        self.twist.setToolTip("Degrees: the sections turned about the guide from lying flat on the scalp, the same "
+                              "root to tip (the brush's Twist paints it along the guide)")
+        self.twist.committed.connect(lambda v: self.apply(twist=v * 3.14159265358979 / 180.0))
+        self.fields = (self.width, self.flatness, self.twist)
+
+        # Profile: the library's actions as glyphs in the header.
+        self.new_shape = widgets.glyph_button("plus", "A new library shape (a circle to start from)",
+                                              self.new_library_shape)
+        self.new_shape.setObjectName("tubeShapeNew")
+        self.rename_shape = widgets.glyph_button("rename", "Rename this library shape (its guides keep it)",
+                                                 self.start_rename)
+        self.rename_shape.setObjectName("tubeShapeRename")
+        self.duplicate_shape = widgets.glyph_button("duplicate", "A copy of this shape in the library, to change on "
+                                                    "its own", self.duplicate_library_shape)
+        self.duplicate_shape.setObjectName("tubeShapeDuplicate")
+        self.delete_shape = widgets.glyph_button("delete", self.DELETE_TIP, self.delete_library_shape)
+        self.delete_shape.setObjectName("tubeShapeDelete")
+        self.profile_block = widgets.Block("Profile", (self.new_shape, self.rename_shape, self.duplicate_shape,
+                                                       self.delete_shape), name="tubeProfile")
+        self.profile_block.setToolTip(_setting("tube", "hint"))
+        self.profile_row = QtWidgets.QHBoxLayout()
+        self.profile_row.setContentsMargins(0, 0, 0, 0)
+        self.profile_row.setSpacing(theme.px(4))
+        self.apply_shape = QtWidgets.QPushButton("Apply")
+        self.apply_shape.setObjectName("tubeShapeApply")
+        self.apply_shape.setToolTip("Give the selected guides this profile")
+        self.apply_shape.clicked.connect(lambda: self.apply(shape=self._choice))
+        self.profile_row.addWidget(self.apply_shape)
+        self.profile_block.add(self.profile_row)
         self.editor = TubeShapeEditor()
+        self.editor.setFixedSize(theme.px(190), theme.px(190))  # at most ~200 px square
         self.editor.dragged.connect(self.shape_dragged)
         self.editor.committed.connect(self.shape_committed)
-        column.addWidget(self.editor)
-        options = QtWidgets.QHBoxLayout()
-        options.setSpacing(theme.px(6))
-        self.edit_custom = QtWidgets.QPushButton("Edit as Custom")
+        holder = QtWidgets.QHBoxLayout()
+        holder.setContentsMargins(0, 0, 0, 0)
+        holder.addStretch(1)
+        holder.addWidget(self.editor)
+        holder.addStretch(1)
+        self.profile_block.add(holder)
+        self.edit_custom = QtWidgets.QToolButton()
+        self.edit_custom.setText("Edit as custom")
         self.edit_custom.setObjectName("tubeEditAsCustom")
+        self.edit_custom.setProperty("role", "ghost")
         self.edit_custom.setToolTip("Copy this built-in shape into the groom's library as a new shape you can edit "
-                                    "(the targeted guides take it)")
+                                    "(the selected guides take it)")
         self.edit_custom.clicked.connect(self.edit_as_custom)
-        self.mirror = QtWidgets.QCheckBox("Mirror")
-        self.mirror.setObjectName("tubeShapeMirror")
-        self.mirror.setChecked(True)
-        self.mirror.setToolTip("Keep the outline's left and right sides alike (about the up axis): a point and its "
-                               "mirror image move, come and go together")
+        self.mirror = widgets.chip("Mirror", "Keep the outline's left and right sides alike (about the up axis): a "
+                                   "point and its mirror image move, come and go together", True, "tubeShapeMirror")
         self.mirror.toggled.connect(self.set_mirror)
-        self.smooth_shape = QtWidgets.QCheckBox("Smooth")
-        self.smooth_shape.setObjectName("tubeShapeSmooth")
-        self.smooth_shape.setChecked(True)
-        self.smooth_shape.setToolTip("A smooth curve through the points; off: straight edges and sharp corners")
+        self.smooth_shape = widgets.chip("Smooth", "A smooth curve through the points; off: straight edges and sharp "
+                                         "corners", True, "tubeShapeSmooth")
         self.smooth_shape.toggled.connect(self.set_smooth)
+        options = QtWidgets.QHBoxLayout()
+        options.setContentsMargins(0, 0, 0, 0)
+        options.setSpacing(theme.px(4))
         options.addWidget(self.edit_custom)
-        options.addStretch(1)
         options.addWidget(self.mirror)
         options.addWidget(self.smooth_shape)
-        column.addLayout(options)
-        library = QtWidgets.QHBoxLayout()
-        library.setSpacing(theme.px(4))
-        self.new_shape = QtWidgets.QPushButton("New")
-        self.new_shape.setObjectName("tubeShapeNew")
-        self.new_shape.setToolTip("A new library shape (a circle to start from)")
-        self.new_shape.clicked.connect(self.new_library_shape)
-        self.rename_shape = QtWidgets.QPushButton("Rename")
-        self.rename_shape.setObjectName("tubeShapeRename")
-        self.rename_shape.setToolTip("Rename this library shape (its guides keep it)")
-        self.rename_shape.clicked.connect(self.start_rename)
-        self.duplicate_shape = QtWidgets.QPushButton("Duplicate")
-        self.duplicate_shape.setObjectName("tubeShapeDuplicate")
-        self.duplicate_shape.setToolTip("A copy of this shape in the library, to change on its own")
-        self.duplicate_shape.clicked.connect(self.duplicate_library_shape)
-        self.delete_shape = QtWidgets.QPushButton("Delete")
-        self.delete_shape.setObjectName("tubeShapeDelete")
-        self.delete_shape.setToolTip("Remove this shape from the library: click twice (its guides become round)")
-        self.delete_shape.clicked.connect(self.delete_library_shape)
-        for b in (self.new_shape, self.rename_shape, self.duplicate_shape, self.delete_shape):
-            library.addWidget(b)
-        column.addLayout(library)
+        options.addStretch(1)
+        self.profile_block.add(options)
         self.rename_field = QtWidgets.QLineEdit()
         self.rename_field.setObjectName("tubeShapeName")
         self.rename_field.setPlaceholderText("New name, then Enter (Esc: keep it)")
         self.rename_field.returnPressed.connect(self.finish_rename)
         self.rename_field.installEventFilter(self)
         self.rename_field.hide()
-        column.addWidget(self.rename_field)
-        self.apply_shape = QtWidgets.QPushButton("Apply to Selected")
-        self.apply_shape.setObjectName("tubeShapeApply")
-        self.apply_shape.setToolTip("Give the targeted guides this shape")
-        self.apply_shape.clicked.connect(lambda: self.apply(shape=self._choice))
-        column.addWidget(self.apply_shape)
+        self.profile_block.add(self.rename_field)
+
+        # Selected guides: their Width, Flatness and Twist; Smooth (the channel the brush paints, or
+        # all three: its arrow's menu) in the header.
+        self.smooth_what = QtWidgets.QComboBox(self)  # the choice Smooth's menu sets (not shown)
+        self.smooth_what.setObjectName("tubeSmoothChannels")
+        self.smooth_what.setVisible(False)
+        self.smooth = QtWidgets.QToolButton()
+        self.smooth.setText("Smooth")
+        self.smooth.setObjectName("tubeSmooth")
+        self.smooth.setProperty("role", "chip")
+        self.smooth.setToolTip("Smooth the selected guides' tubes along each guide: what the brush painted evened "
+                               "out, the root's and tip's sections kept. " + definitions.get("choices/tubeSmooth")["tip"])
+        self.smooth.clicked.connect(self.smooth_selected)
+        smooth_menu = QtWidgets.QMenu(self.smooth)
+        for value, label, _tip in _options("tubeSmooth"):
+            self.smooth_what.addItem(label, value)
+            action = smooth_menu.addAction(label)
+            action.setCheckable(True)
+            action.setData(value)
+            action.triggered.connect(lambda _=False, v=value: self.smooth_what.setCurrentIndex(self.smooth_what.findData(v)))
+        self.smooth_what.currentIndexChanged.connect(
+            lambda i: [a.setChecked(a.data() == self.smooth_what.itemData(i)) for a in smooth_menu.actions()])
+        if smooth_menu.actions():
+            smooth_menu.actions()[0].setChecked(True)
+        self.smooth.setMenu(smooth_menu)
+        self.smooth.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
+        self.smooth_menu = smooth_menu
+        self.selected_block = widgets.Block("Selected guides", (self.smooth,), name="tubeSelected")
+        self.targets = widgets.small_label("", wrap=True)
+        self.selected_block.add(self.targets)
+
+        # Tube (Place, Draw): what new guides get.
+        self.tube_block = widgets.Block(_setting("tube", "label"), name="tubeNew")
+        self.tube_block.setToolTip("The tube new guides get: the shape always, the sections where no guides are "
+                                   "near to blend them from")
+        self.preview = TubeShapeEditor()
+        self.preview.setObjectName("tubePreview")
+        self.preview.setMinimumSize(theme.px(56), theme.px(56))
+        self.preview.setFixedSize(theme.px(56), theme.px(56))
+        self.preview.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+        self.preview.setToolTip("")
+        top = QtWidgets.QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(theme.px(8))
+        top.addWidget(self.preview)
+        self.tube_column = QtWidgets.QVBoxLayout()
+        self.tube_column.setContentsMargins(0, 0, 0, 0)
+        self.tube_column.setSpacing(theme.px(4))
+        self.profile_hint = widgets.small_label(definitions.text("profileHint"), wrap=True)
+        self.tube_column.addWidget(self.profile_hint)
+        top.addLayout(self.tube_column, 1)
+        self.tube_block.add(top)
+        self.tube_fields = QtWidgets.QVBoxLayout()
+        self.tube_fields.setContentsMargins(0, 0, 0, 0)
+        self.tube_fields.setSpacing(theme.px(4))
+        self.tube_block.add(self.tube_fields)
+
+        self.blocks = (self.profile_block, self.selected_block, self.tube_block)
         self._disarm = QtCore.QTimer(self)
         self._disarm.setSingleShot(True)
         self._disarm.setInterval(4000)
@@ -307,99 +415,64 @@ class TubePanel(QtWidgets.QWidget):
         self._preview.setInterval(self.PREVIEW_MS)
         self._preview.timeout.connect(self.send_preview)
         self._previewing = False
-        sections = QtWidgets.QFormLayout()
-        sections.setContentsMargins(0, 0, 0, 0)
-        sections.setLabelAlignment(QtCore.Qt.AlignRight)
-        sections.setRowWrapPolicy(QtWidgets.QFormLayout.DontWrapRows)
-        column.addLayout(sections)
-        from groomlab import units
-        self.length_factor = units.factor("length")  # shown in real units, stored in scene units
-        self.width = widgets.SoftSlider(0.1 * self.length_factor, 0.0, 1.0 * self.length_factor, minimum=0.0,
-                                        key="palette.tubeWidth@" + units.unit("length")[0])
-        self.width.setObjectName("tubeWidth")
-        self.width.setToolTip("The widest section's half-width (a round tube's radius): the targeted tubes scaled "
-                              "to it, their taper and what the brush painted kept; new guides' where none are near")
-        self.width.committed.connect(self.set_width)
-        self.flatness = widgets.SoftSlider(0.0, 0.0, 1.0, minimum=0.0, maximum=0.99, key=None)
-        self.flatness.setObjectName("tubeFlatness")
-        self.flatness.setToolTip("0: as the shape is drawn; toward 1 a flat ribbon (the sections' aspect 1 - this, "
-                                 "the same root to tip)")
-        self.flatness.committed.connect(lambda v: self.apply(aspect=max(1.0 - v, 0.01)))
-        self.twist = widgets.SoftSlider(0.0, -180.0, 180.0, key=None)
-        self.twist.setObjectName("tubeTwist")
-        self.twist.setToolTip("Degrees: the sections turned about the guide from lying flat on the scalp, the same "
-                              "root to tip (the brush's Twist paints it along the guide)")
-        self.twist.committed.connect(lambda v: self.apply(twist=v * 3.14159265358979 / 180.0))
-        sections.addRow("Width (%s)" % units.label("length"), self.width)
-        sections.addRow("Flatness", self.flatness)
-        sections.addRow("Twist (°)", self.twist)
-        # Smooth: the targeted tubes' painted sections evened out along each guide (one undo step).
-        smooth_row = QtWidgets.QHBoxLayout()
-        smooth_row.setSpacing(theme.px(6))
-        self.smooth = QtWidgets.QPushButton("Smooth")
-        self.smooth.setObjectName("tubeSmooth")
-        self.smooth.setToolTip("Smooth the targeted guides' tubes along each guide: what the brush painted evened "
-                               "out, the root's and tip's sections kept")
-        self.smooth.clicked.connect(self.smooth_selected)
-        self.smooth_what = QtWidgets.QComboBox()
-        self.smooth_what.setObjectName("tubeSmoothChannels")
-        for value, label, _tip in _options("tubeSmooth"):
-            self.smooth_what.addItem(label, value)
-        self.smooth_what.setToolTip(definitions.get("choices/tubeSmooth")["tip"])
-        smooth_row.addWidget(self.smooth)
-        smooth_row.addWidget(self.smooth_what, 1)
-        sections.addRow("", smooth_row)
-        # What needs targets (the rest also sets the placement tube, targets or not).
-        self.edits = (self.smooth, self.smooth_what, self.apply_shape)
-        self.fill = QtWidgets.QCheckBox("Fill Tubes")
-        self.fill.setObjectName("fillTubes")
-        self.fill.setToolTip("Strands rooted inside a guide's tube ride it to the tip, flattening, twisting and "
-                             "tapering with it (the Interpolate nodes' fillTubes; the tubes of every guide level fill, "
-                             "the deepest winning)")
-        self.fill.toggled.connect(self.set_fill)
-        self.blend = widgets.SoftSlider(25.0, 0.0, 100.0, minimum=0.0, maximum=100.0, key=None)
-        self.blend.setObjectName("tubeBlend")
-        self.blend.setToolTip("Tube Blend: the tubes' soft edge, a share of each tube's half-width. Strands rooted "
-                              "just outside a tube lean toward riding it, so no seam shows round it (0: a hard edge)")
-        self.blend.committed.connect(lambda v: self.set_fill_tubes(blend=v / 100.0))
-        self.blend_label = QtWidgets.QLabel("Tube Blend")
-        fill_form = QtWidgets.QFormLayout()
-        fill_form.setContentsMargins(0, 0, 0, 0)
-        fill_form.setLabelAlignment(QtCore.Qt.AlignRight)
-        fill_form.addRow(self.fill)
-        fill_form.addRow(self.blend_label, widgets.with_unit(self.blend, "%"))
-        column.addLayout(fill_form)
+        # What needs targets (Selected guides' edits and Apply).
+        self.edits = (self.smooth, self.apply_shape) + self.fields
         self._selection = []
         self._source = "none"
         self._reference = 0.0  # the first target's widest section (scene units)
-        self._choice = "round"  # the shape picked: the targets', else the last picked
+        self._choice = "round"  # the profile picked: the targets', else the last picked
+        # The tube Place and Draw give new guides (the Tube block's: a shape, its width in scene
+        # units, the sections' aspect and twist in radians).
+        self._placement = {"shape": "round", "width": 0.1, "aspect": 1.0, "twist": 0.0}
         self._library = []      # the groom's custom shapes (groomlab.tube_shapes' non-built-ins)
         self._groom = None
         self._pushed = None     # the placement tube last sent to the brush
         self._targets_key = None  # the targets and their shapes as last read
+        self.set_mode("edit")
         self.fill_shapes()
+        self.show_choice()
+
+    DELETE_TIP = "Remove this shape from the library: click twice (its guides become round)"
+
+    def set_mode(self, mode):
+        """"new" (Place, Draw: the Tube block) or "edit" (Shape, Select: Profile and Selected
+        guides): the picker and the fields move to that block."""
+        if mode == self.mode and self.shape.parent() is not None and self.shape.parent() is not self:
+            return
+        self.mode = mode
+        if mode == "new":
+            self.tube_column.insertWidget(0, self.shape)
+            for field in self.fields:
+                self.tube_fields.addWidget(field)
+        else:
+            self.profile_row.insertWidget(0, self.shape, 1)
+            for field in self.fields:
+                self.selected_block.add(field)
+        self._targets_key = None
+        self.show_values()
         self.show_choice()
 
     # -- Reading the groom ---------------------------------------------------------
 
     def busy(self):
         """A slider held, a field being typed in or a point dragged: refresh() leaves the panel as it is."""
-        for slider in (self.width, self.flatness, self.twist, self.blend):
-            if slider.slider.isSliderDown() or slider.field.hasFocus():
+        for slider in self.fields:
+            if slider.busy():
                 return True
         return self.editor.busy() or self.rename_field.isVisible()
 
     def refresh(self, groom, full=True, force=False):
-        """The targets' tubes (each guide has its own: the panel edits the targets only), the shape
-        library and, with `full`, the groom's Fill Tubes. The shape shown is the targets', "Mixed"
-        when they differ; width, flatness and twist are the first target's. Left alone while the
-        artist is busy in it (busy()); `force` (after the panel's own edit): only not mid-drag."""
+        """The shape library and, editing ("edit"), the targets' tubes (each guide has its own: the
+        blocks edit the targets only): the shape shown is the targets', "Mixed" when they differ;
+        width, flatness and twist the first target's. Left alone while the artist is busy in it
+        (busy()); `force` (after the panel's own edit): only not mid-drag."""
         if self.editor.busy() if force else self.busy():
             return
         info = {"source": "none", "guides": [], "tube": None, "shapes": []}
         if groom:
             try:
-                info = groomlab.tube_targets(groom)
+                if self.mode == "edit":
+                    info = groomlab.tube_targets(groom)
                 if full or groom != self._groom:
                     self._library = [s for s in groomlab.tube_shapes(groom) if not s["builtin"]]
             except (RuntimeError, ValueError):
@@ -412,20 +485,23 @@ class TubePanel(QtWidgets.QWidget):
         tube = info["tube"]
         shapes = info["shapes"]
         self.fill_shapes()
+        if self.mode == "new":
+            self.show_values()
+            self.show_choice()
+            self.push_placement()
+            return
         for w in self.edits:
             w.setEnabled(tube is not None)
         if tube is None:
-            self.targets.setText("No guides selected or soloed: the shape and values here go to the guides Place and "
-                                 "Draw make. Select guides (Select tool, or Shift with a brush) to set theirs.")
+            self.targets.setText("No guides selected or soloed: select some (Select, or Shift with a brush).")
             self.show_mixed(False)
         else:
             count = len(self._selection)
             how = "selected" if self._source == "selection" else "soloed"
-            self.targets.setText("%d guide%s %s: changes here go to %s, and to the guides Place and Draw make." %
-                                 (count, "" if count == 1 else "s", how, "it" if count == 1 else "them"))
+            self.targets.setText("%d guide%s %s." % (count, "" if count == 1 else "s", how))
             widths, aspects, twists = tube.get("width") or [0.1], tube.get("aspect") or [1.0], tube.get("twist") or [0.0]
             self._reference = max(widths)
-            for w in (self.shape, self.width, self.flatness, self.twist):
+            for w in (self.shape,) + self.fields:
                 w.blockSignals(True)
             self.show_mixed(len(shapes) > 1)
             # The choice follows the targets when they (or their shapes) change, and is left alone
@@ -437,27 +513,25 @@ class TubePanel(QtWidgets.QWidget):
             self.width.setValue(self._reference * self.length_factor)
             self.flatness.setValue(min(max(1.0 - sum(aspects) / len(aspects), 0.0), 0.99))
             self.twist.setValue(sum(twists) / len(twists) * 180.0 / 3.14159265358979)
-            for w in (self.shape, self.width, self.flatness, self.twist):
+            for w in (self.shape,) + self.fields:
                 w.blockSignals(False)
         self.show_choice(mixed=tube is not None and len(shapes) > 1)
         self.push_placement()
-        if full:
-            state = None
-            if groom:
-                try:
-                    state = groomlab.fill_tubes(groom)
-                except (RuntimeError, ValueError):
-                    state = None
-            self.fill.blockSignals(True)
-            self.fill.setEnabled(state is not None)
-            self.fill.setChecked(bool(state and state["fillTubes"]))
-            self.fill.blockSignals(False)
-            if state is None:
-                self.fill.setToolTip("The groom's graph has no Interpolate node: nothing to fill the tubes")
-            self.blend.setEnabled(bool(state and state["fillTubes"]))
-            self.blend_label.setEnabled(self.blend.isEnabled())
-            if state is not None:
-                self.blend.setValue(state["tubeBlend"] * 100.0)
+
+    def show_values(self):
+        """New guides' tube ("new"): the fields show the placement tube."""
+        if self.mode != "new":
+            return
+        p = self._placement
+        for w in self.fields:
+            w.blockSignals(True)
+        self.width.setValue(p["width"] * self.length_factor)
+        self.flatness.setValue(min(max(1.0 - p["aspect"], 0.0), 0.99))
+        self.twist.setValue(p["twist"] * 180.0 / 3.14159265358979)
+        for w in self.fields:
+            w.blockSignals(False)
+            w.setEnabled(True)
+        self.show_mixed(False)
 
     def fill_shapes(self):
         """The shape picker: the built-ins, then the library (rebuilt only when that changes)."""
@@ -487,23 +561,38 @@ class TubePanel(QtWidgets.QWidget):
                 return s
         return None
 
+    def _known(self, name):
+        return self.library_shape(name) is not None or name in [n for n, _, _ in TUBE_SHAPES]
+
+    def _outline(self, name):
+        """(points, smooth) of a shape: the library's, else the built-in's."""
+        custom = self.library_shape(name)
+        if custom is not None:
+            return custom["points"], custom["smooth"]
+        import groomlab_core
+        return groomlab_core.builtin_tube_shape_points(name)
+
     def show_choice(self, mixed=False):
-        """The picker, the editor and the library buttons on the chosen shape."""
-        if self.library_shape(self._choice) is None and self._choice not in [n for n, _, _ in TUBE_SHAPES]:
+        """The picker, the editor (or the Tube block's preview) and the library glyphs on the
+        chosen shape."""
+        if not self._known(self._choice):
             self._choice = "round"  # (a library shape gone: renamed, deleted, another groom)
+        if not self._known(self._placement["shape"]):
+            self._placement["shape"] = "round"
+        shown = self._placement["shape"] if self.mode == "new" else self._choice
         self.shape.blockSignals(True)
-        self.shape.setCurrentIndex(0 if mixed else max(0, self.shape.findData(self._choice)))
+        self.shape.setCurrentIndex(0 if mixed else max(0, self.shape.findData(shown)))
         self.shape.blockSignals(False)
+        points, smooth = self._outline(self._placement["shape"])
+        self.preview.set_shape(points, smooth, editable=False)
         custom = self.library_shape(self._choice)
         if custom is not None:
             self.editor.set_shape(custom["points"], custom["smooth"], editable=True)
             if self.mirror.isChecked() and self.editor.set_mirror(True):
                 self.shape_committed(self.editor.points)  # made symmetric: saved so
         else:
-            import groomlab_core
-            points, smooth = groomlab_core.builtin_tube_shape_points(self._choice)
-            self.editor.set_shape(points, smooth, editable=False,
-                                  note="Built in: Edit as Custom to change it")
+            points, smooth = self._outline(self._choice)
+            self.editor.set_shape(points, smooth, editable=False, note="Built in: Edit as custom to change it")
         self.smooth_shape.blockSignals(True)
         self.smooth_shape.setChecked(self.editor.smooth)
         self.smooth_shape.blockSignals(False)
@@ -522,7 +611,7 @@ class TubePanel(QtWidgets.QWidget):
         has = self.shape.count() > 0 and self.shape.itemData(0) == ""
         if on and not has:
             self.shape.insertItem(0, "Mixed", "")
-            self.shape.setItemData(0, "The targeted guides have different shapes: pick one to give them all",
+            self.shape.setItemData(0, "The selected guides have different shapes: pick one to give them all",
                                    QtCore.Qt.ToolTipRole)
         elif not on and has:
             self.shape.removeItem(0)
@@ -530,9 +619,8 @@ class TubePanel(QtWidgets.QWidget):
     # -- The placement tube ------------------------------------------------------------
 
     def placement(self):
-        """The tube Place and Draw give new guides: the chosen shape, Width, Flatness and Twist as shown."""
-        return {"shape": self._choice, "width": self.width.value() / self.length_factor,
-                "aspect": max(1.0 - self.flatness.value(), 0.01), "twist": self.twist.value() * 3.14159265358979 / 180.0}
+        """The tube Place and Draw give new guides: the Tube block's shape, Width, Flatness and Twist."""
+        return dict(self._placement)
 
     def push_placement(self):
         """The placement tube sent to the brush (when it changed)."""
@@ -564,34 +652,46 @@ class TubePanel(QtWidgets.QWidget):
         return ok
 
     def pick(self, name):
-        """A shape picked: given to the targets (one undo step) and to the guides Place and Draw make."""
+        """A shape picked: new guides' ("new"), else given to the targets (one undo step)."""
         if name == "":  # "Mixed": nothing to give
+            return
+        if self.mode == "new":
+            self._placement["shape"] = name
+            self.show_choice()
+            self.push_placement()
             return
         self._choice = name
         if self._selection:
             self.apply(shape=name)
         self.show_choice()
-        self.push_placement()
 
     def apply(self, **edit):
-        """An edit of the targets' tubes (set_tube: one undo step); with none, the placement tube's."""
-        groom = self.owner.groom()
+        """An edit of the targets' tubes (set_tube: one undo step); for new guides ("new"), the
+        placement tube's."""
         if edit.get("shape") == "":
             return
-        if groom and self._selection:
-            self.run(groomlab.set_tube, groom, guides=self._selection, **edit)
-        self.push_placement()
-
-    def set_width(self, value):
-        """The width slider: the targets scaled so the first one's widest section is `value`."""
+        if self.mode == "new":
+            self._placement.update(edit)
+            self.push_placement()
+            return
         groom = self.owner.groom()
         if groom and self._selection:
-            width = value / self.length_factor
+            self.run(groomlab.set_tube, groom, guides=self._selection, **edit)
+
+    def set_width(self, value):
+        """The width field: the targets scaled so the first one's widest section is `value` (new
+        guides: their width)."""
+        width = value / self.length_factor
+        if self.mode == "new":
+            self._placement["width"] = width
+            self.push_placement()
+            return
+        groom = self.owner.groom()
+        if groom and self._selection:
             if self._reference > 0.0:
                 self.run(groomlab.scale_tube, groom, width / self._reference, guides=self._selection)
             else:
                 self.run(groomlab.set_tube, groom, guides=self._selection, width=width)
-        self.push_placement()
 
     def smooth_selected(self):
         """Smooth: the targets' channel the brush paints (or all three) evened out along each
@@ -629,7 +729,6 @@ class TubePanel(QtWidgets.QWidget):
             return
         self._choice = name
         self.refresh(groom, force=True)
-        self.push_placement()
         self.owner.status.setText("%s: a copy of the built-in to edit (drag its points)." % name)
 
     def new_library_shape(self):
@@ -642,7 +741,6 @@ class TubePanel(QtWidgets.QWidget):
         if self.run(groomlab.add_tube_shape, groom, name, points, smooth=True):
             self._choice = name
             self.refresh(groom, force=True)
-            self.push_placement()
 
     def duplicate_library_shape(self):
         groom = self.owner.groom()
@@ -653,7 +751,6 @@ class TubePanel(QtWidgets.QWidget):
         if self.run(groomlab.add_tube_shape, groom, name, custom["points"], smooth=custom["smooth"]):
             self._choice = name
             self.refresh(groom, force=True)
-            self.push_placement()
 
     def start_rename(self):
         """Rename: a name field in place (Enter renames, Esc or leaving it keeps the name); no dialog."""
@@ -673,8 +770,9 @@ class TubePanel(QtWidgets.QWidget):
             return
         if self.run(groomlab.rename_tube_shape, groom, old, new):
             self._choice = new
+            if self._placement["shape"] == old:
+                self._placement["shape"] = new
             self.refresh(groom, force=True)
-            self.push_placement()
 
     def eventFilter(self, obj, event):
         if obj is self.rename_field and event.type() == QtCore.QEvent.KeyPress and event.key() == QtCore.Qt.Key_Escape:
@@ -691,8 +789,8 @@ class TubePanel(QtWidgets.QWidget):
         self.rename_field.hide()
 
     def delete_library_shape(self):
-        """Delete: the first click arms the button (it says how many guides go round), a second one
-        within a few seconds deletes (one undo step); no dialog."""
+        """Delete: the first click arms the glyph (its tooltip, and the status line, say how many
+        guides go round), a second one within a few seconds deletes (one undo step); no dialog."""
         groom = self.owner.groom()
         custom = self.library_shape(self._choice)
         if not groom or custom is None:
@@ -700,25 +798,26 @@ class TubePanel(QtWidgets.QWidget):
         if not self._armed:
             self._armed = True
             users = custom["users"]
-            self.delete_shape.setText("Delete? %d go%s round" % (users, "es" if users == 1 else ""))
+            text = "Delete? %d go%s round" % (users, "es" if users == 1 else "")
+            self.delete_shape.setText(text)
+            self.delete_shape.setToolTip(text + ": click again to delete")
             self.delete_shape.setProperty("role", "danger")
-            self.delete_shape.style().unpolish(self.delete_shape)
-            self.delete_shape.style().polish(self.delete_shape)
+            widgets.repolish(self.delete_shape)
+            self.owner.status.setText(text + ": click the delete glyph again.")
             self._disarm.start()
             return
         self.disarm_delete()
         if self.run(groomlab.remove_tube_shape, groom, custom["name"]):
             self._choice = "round"
             self.refresh(groom, force=True)
-            self.push_placement()
 
     def disarm_delete(self):
         self._armed = False
         self._disarm.stop()
         self.delete_shape.setText("Delete")
-        self.delete_shape.setProperty("role", None)
-        self.delete_shape.style().unpolish(self.delete_shape)
-        self.delete_shape.style().polish(self.delete_shape)
+        self.delete_shape.setToolTip(self.DELETE_TIP)
+        self.delete_shape.setProperty("role", "glyph")
+        widgets.repolish(self.delete_shape)
 
     # -- The editor ------------------------------------------------------------------
 
@@ -766,20 +865,19 @@ class TubePanel(QtWidgets.QWidget):
         if groom and custom is not None:
             self.run(groomlab.set_tube_shape_points, groom, custom["name"], smooth=on)
 
-    # -- Fill Tubes ------------------------------------------------------------------
 
-    def set_fill(self, on):
-        self.set_fill_tubes(on=on)
+class _Work(QtWidgets.QWidget):
+    """The Groom Tools' work area (the card and the tab's list): shown and hidden with the pinned
+    part that goes with it (the tabs and the tool grid)."""
 
-    def set_fill_tubes(self, **kwargs):
-        groom = self.owner.groom()
-        if not groom:
-            return
-        try:
-            groomlab.set_fill_tubes(groom, **kwargs)
-        except (RuntimeError, ValueError) as e:
-            self.owner.status.setText(str(e).strip())
-        self.refresh(groom, force=True)
+    def __init__(self, partner):
+        super(_Work, self).__init__()
+        self.partner = partner
+
+    def setVisible(self, on):
+        super(_Work, self).setVisible(on)
+        self.partner.setVisible(on)
+
 
 
 class ToolPalette(QtWidgets.QWidget):
@@ -792,23 +890,32 @@ class ToolPalette(QtWidgets.QWidget):
         self.buttons = {}  # tool -> its tile (the first made; a tool with tiles on two tabs: tiles)
         self.tiles = {}    # tool -> every tile of it
 
-        # Everything scrolls in one themed column; the window paints the theme's background.
+        # Pinned (the header, the tabs, the tool grid) over one scrolling column (the tool's card,
+        # then the list the tab works on); the window paints the theme's background.
         frame = QtWidgets.QVBoxLayout(self)
         frame.setContentsMargins(0, 0, 0, 0)
+        frame.setSpacing(0)
+        self.pinned = QtWidgets.QWidget()
+        self.pinned.setObjectName("groomToolsPinned")
+        pinned = QtWidgets.QVBoxLayout(self.pinned)
+        pinned.setContentsMargins(theme.px(12), theme.px(10), theme.px(12), theme.px(6))
+        pinned.setSpacing(theme.px(8))
+        frame.addWidget(self.pinned)
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        frame.addWidget(scroll)
+        self.scroll = scroll
+        frame.addWidget(scroll, 1)
         content = QtWidgets.QWidget()
         content.setObjectName("groomToolsContent")
         scroll.setWidget(content)
         outer = QtWidgets.QVBoxLayout(content)
-        outer.setContentsMargins(theme.px(12), theme.px(10), theme.px(12), theme.px(12))
+        outer.setContentsMargins(theme.px(12), theme.px(2), theme.px(12), theme.px(12))
         outer.setSpacing(theme.px(10))
 
         # What the tools work on: the current groom (groomlab.active_groom: the Graph Editor's too
-        # unless pinned) and its group.
+        # unless pinned).
         top = QtWidgets.QHBoxLayout()
         top.setSpacing(theme.px(4))
         self.grooms = QtWidgets.QComboBox()
@@ -843,39 +950,22 @@ class ToolPalette(QtWidgets.QWidget):
                           generators=self.generators())
         more.setMenu(self.more_menu)
         top.addWidget(more)
-        outer.addLayout(top)
+        pinned.addLayout(top)
         # A newer GroomLab (the startup check's): a quiet note linking to GroomLab > Help > Check for Updates.
         from groomlab.ui import updates_window
         self.update_note = updates_window.UpdateNote()
-        outer.addWidget(self.update_note)
+        pinned.addWidget(self.update_note)
 
-        # The group brushes edit and Place and Draw add to (children follow their parents).
-        # Two lines: the group, then Symmetry (added below, with the brush settings it belongs to).
-        self.target_row = QtWidgets.QWidget()
-        lines = QtWidgets.QVBoxLayout(self.target_row)
-        lines.setContentsMargins(0, 0, 0, 0)
-        lines.setSpacing(theme.px(6))
-        row = QtWidgets.QHBoxLayout()
-        lines.addLayout(row)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(theme.px(8))
-        group_label = QtWidgets.QLabel("Group")
-        group_label.setProperty("role", "about")
-        row.addWidget(group_label)
-        self.level = QtWidgets.QComboBox()
-        self.level.setToolTip("The guide group brushes edit and new guides go into; All groups: every guide")
-        self.level.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.level.setMinimumContentsLength(8)
+        # The group brushes edit and Place and Draw add to: picked in the Guide groups list (its
+        # picked row; the viewport's level keys too). The choice itself, not shown: the groups as
+        # the brushes take them ("All groups" first), what the list, the poll and Page Up / Down set.
+        self.level = QtWidgets.QComboBox(self)
+        self.level.setObjectName("groupChoice")
+        self.level.setVisible(False)
         self.level.currentIndexChanged.connect(self.target_changed)
-        row.addWidget(self.level, 1)
-        self.isolate = QtWidgets.QCheckBox("Isolate")
-        self.isolate.setToolTip("Show the group (and its child groups) at full color and dim the others")
-        self.isolate.toggled.connect(lambda _: self.apply_isolation())
-        row.addWidget(self.isolate)
-        outer.addWidget(self.target_row)
 
         self.status = widgets.StatusLabel()  # made early: the tabs report into it
-        outer.addWidget(self.status)
+        pinned.addWidget(self.status)
 
         # No groom to work on: how to start one.
         self.empty = QtWidgets.QFrame()
@@ -893,7 +983,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.empty_text.setProperty("role", "about")
         column.addWidget(self.empty_text)
         # Make one on the selected mesh, add a sample mesh, or bring one in from XGen, Yeti, Alembic
-        # curves or a groom file (the chip: the Output strip's Import list).
+        # curves or a groom file (the chip: the GroomLab menu's Import list).
         bind = definitions.binder(self.ACTIONS, self)
         for item in definitions.resolve(empty["items"]):
             if item["kind"] == "action":
@@ -917,9 +1007,16 @@ class ToolPalette(QtWidgets.QWidget):
         self.starter.setVisible(False)
         outer.addWidget(self.starter)
 
-        # Everything that works on a groom (the tabs, the tool's settings, the sections below): hidden
-        # while there is none, so the empty state shows only "Start a groom" (fill_grooms).
-        self.work = QtWidgets.QWidget()
+        # Everything that works on a groom (pinned: the tabs and the tool grid; scrolling: the
+        # tool's card and the tab's list): hidden while there is none, so the empty state shows
+        # only "Start a groom" (fill_grooms).
+        self.pinned_work = QtWidgets.QWidget()
+        self.pinned_work.setObjectName("groomToolsPinnedWork")
+        pinned_work = QtWidgets.QVBoxLayout(self.pinned_work)
+        pinned_work.setContentsMargins(0, 0, 0, 0)
+        pinned_work.setSpacing(theme.px(6))
+        pinned.addWidget(self.pinned_work)
+        self.work = _Work(self.pinned_work)
         self.work.setObjectName("groomToolsWork")
         work = QtWidgets.QVBoxLayout(self.work)
         work.setContentsMargins(0, 0, 0, 0)
@@ -929,359 +1026,322 @@ class ToolPalette(QtWidgets.QWidget):
         self.group = QtWidgets.QButtonGroup(self)
         self.group.setExclusive(False)  # the active tool's tiles are checked by hand (one tool, maybe two tiles)
         self.tabs = widgets.Pages()
-        tools_tab = QtWidgets.QWidget()
-        tools_layout = QtWidgets.QVBoxLayout(tools_tab)
-        tools_layout.setContentsMargins(0, 0, 0, 0)
-        tools_layout.setSpacing(theme.px(6))
+        pinned_work.addWidget(self.tabs.track)  # the tab bar, pinned; the pages scroll
+        # The tool grid (Tools and Correctives), each category's tiles under its name; the Paint
+        # tile alone on the Paint tab.
+        self.tool_palette = QtWidgets.QWidget()
+        self.tool_palette.setObjectName("toolGrid")
+        grids = QtWidgets.QVBoxLayout(self.tool_palette)
+        grids.setContentsMargins(0, 0, 0, 0)
+        grids.setSpacing(theme.px(2))
         for section, tools in SECTIONS:
             if section == "Paint":
                 continue  # the painting brushes live in the Paint tab, beside the maps they paint
-            tools_layout.addWidget(self.heading(section))
+            grids.addWidget(widgets.small_label(section))
             # Beside Freeze: Unfreeze All, a button (not a tool).
             extra = [self.unfreeze_tile()] if any(t[0] == "freeze" for t in tools) else []
-            tools_layout.addWidget(self.tool_grid(tools, extra=extra))
-        self.paint_tab = tool_tabs.PaintTab(self)
-        sculpt_tab = QtWidgets.QWidget()
-        self.sculpt_layout = QtWidgets.QVBoxLayout(sculpt_tab)
-        self.sculpt_layout.setContentsMargins(0, 0, 0, 0)
-        self.sculpt_layout.setSpacing(theme.px(8))
-        self.reference_tab = tool_tabs.ReferenceTab(self)
-        pages = {"tools": tools_tab, "paint": self.paint_tab, "correctives": sculpt_tab, "photos": self.reference_tab}
-        for tab in definitions.get("palette/tabs"):
-            self.tabs.addTab(pages[tab["id"]], tab["label"])
-        self.tabs.currentChanged.connect(self.tab_changed)
-        work.addWidget(self.tabs)
+            grids.addWidget(self.tool_grid(tools, extra=extra))
+        pinned_work.addWidget(self.tool_palette)
+        self.paint_tiles = self.tool_grid(dict(SECTIONS).get("Paint", []))
+        pinned_work.addWidget(self.paint_tiles)
 
-        # The active tool: its name, what it does, and its settings in one card.
-        self.settings_heading = self.heading("Brush")
-        work.addWidget(self.settings_heading)
-        self.hint = QtWidgets.QLabel()
-        self.hint.setWordWrap(True)
-        self.hint.setProperty("role", "about")
-        work.addWidget(self.hint)
+        self.paint_tab = tool_tabs.PaintTab(self)
+        self.reference_tab = tool_tabs.ReferenceTab(self)
+        # Correctives: the groom as a stack (base groom + correctives); the picked row is what brushes edit.
+        self.correctives = tool_tabs.CorrectivesBox(self)
+        # Guide groups and edits on many guides (Tools tab).
+        sections = dict((section["id"], section) for section in definitions.get("palette/sections"))
+        self.section_rules = sections  # which tool and tab each section shows with (show_sections)
+        self.guides_tab = tool_tabs.GuidesTab(self)
+        self.guides_section = self.guides_tab.section
+        self.isolate = self.guides_tab.isolate  # the eye in the list's header: the picked group at full color
+        tools_tab = QtWidgets.QWidget()
+        tools_layout = QtWidgets.QVBoxLayout(tools_tab)
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+        tools_layout.addWidget(self.guides_section)
+        pages = {"tools": tools_tab, "paint": self.paint_tab, "correctives": self.correctives,
+                 "photos": self.reference_tab}
+
+        # The tool's card (right under the grid, before the tab's list): its name, a ? with the
+        # whole hint and the gestures, one short line, then its blocks: Brush, the tool's own,
+        # Applies to.
         self.settings = QtWidgets.QFrame()
-        self.settings.setProperty("role", "card")
+        self.settings.setObjectName("toolCard")
+        self.settings.setProperty("role", "card")  # a plain section: no box, the hairline above says where it starts
         card = QtWidgets.QVBoxLayout(self.settings)
-        pad = theme.px(12)
-        card.setContentsMargins(pad, pad, pad, pad)
-        card.setSpacing(theme.px(10))
+        card.setContentsMargins(0, 0, 0, 0)
+        card.setSpacing(theme.px(6))
+        card.addWidget(widgets.hairline())
+        title_row = QtWidgets.QHBoxLayout()
+        title_row.setContentsMargins(0, theme.px(2), 0, 0)
+        title_row.setSpacing(theme.px(6))
+        self.card_icon = QtWidgets.QLabel()
+        self.card_icon.setFixedSize(theme.px(16), theme.px(16))
+        title_row.addWidget(self.card_icon)
+        self.card_title = QtWidgets.QLabel()
+        self.card_title.setProperty("role", "cardTitle")
+        title_row.addWidget(self.card_title, 1)
+        self.card_help = widgets.glyph_button("help", "")
+        self.card_help.setObjectName("toolHelp")
+        self.card_help.setFocusPolicy(QtCore.Qt.NoFocus)
+        title_row.addWidget(self.card_help)
+        self.title_row = QtWidgets.QWidget()
+        self.title_row.setLayout(title_row)
+        card.addWidget(self.title_row)
+        self.settings_heading = self.card_title  # (the old name)
+        self.hint = widgets.small_label("", wrap=True)
+        self.hint.setObjectName("toolShort")
+        card.addWidget(self.hint)
+
+        # Brush: how the stroke feels.
+        self.brush_block = widgets.Block(definitions.text("brushBlock"), name="brushBlock")
         self.brush_form = QtWidgets.QWidget()
         self.brush_form.setProperty("role", "options")
-        form = QtWidgets.QFormLayout(self.brush_form)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setVerticalSpacing(theme.px(8))
-        form.setHorizontalSpacing(theme.px(10))
-        form.setLabelAlignment(QtCore.Qt.AlignRight)
-        form.setRowWrapPolicy(QtWidgets.QFormLayout.DontWrapRows)
-        self.radius = widgets.SoftSlider(60, 5, 400, integer=True, minimum=1, key="palette.radius")
+        fields = QtWidgets.QVBoxLayout(self.brush_form)
+        fields.setContentsMargins(0, 0, 0, 0)
+        fields.setSpacing(theme.px(4))
+        self.radius = widgets.SoftSlider(60, 5, 400, integer=True, minimum=1, key="palette.radius",
+                                         label=_setting("radius", "label"), suffix="px")
+        self.radius.unit_tip = "Screen pixels: the circle's radius on screen, whatever the zoom"
+        self.radius.setToolTip(_setting("radius", "hint"))
         self.radius.committed.connect(lambda v: self.push(radius=v))
         self.radius.dragged.connect(lambda v: self.push(radius=v))
-        self.strength = widgets.SoftSlider(1.0, 0.0, 1.0, key=None)
+        self.strength = widgets.SoftSlider(1.0, 0.0, 1.0, key=None, label=_setting("strength", "label"))
+        self.strength.setToolTip(_setting("strength", "hint"))
         self.strength.committed.connect(self.set_strength)
         self.strength.dragged.connect(self.set_strength)
         # Falloff as the catalog names it in both hosts: 0 hard (full strength to the edge), 1 soft
         # (fading from the center out); the brush's hardness is 1 - falloff.
-        self.falloff = widgets.SoftSlider(1.0, 0.0, 1.0, key="palette.falloff")
-        self.falloff.setToolTip(SETTINGS["falloff"]["hint"])
+        self.falloff = widgets.SoftSlider(1.0, 0.0, 1.0, key="palette.falloff", label=_setting("falloff", "label"))
+        self.falloff.setToolTip(_setting("falloff", "hint"))
         self.falloff.committed.connect(lambda v: self.push(hardness=1.0 - v))
         self.falloff.dragged.connect(lambda v: self.push(hardness=1.0 - v))
-        self.smooth_strength = widgets.SoftSlider(1.0, 0.0, 3.0, key="palette.smoothStrength")
-        self.smooth_strength.setToolTip(SETTINGS["smoothStrength"]["hint"])
+        self.smooth_strength = widgets.SoftSlider(1.0, 0.0, 3.0, key="palette.smoothStrength",
+                                                  label=_setting("smoothStrength", "label"))
+        self.smooth_strength.setToolTip(_setting("smoothStrength", "hint"))
         self.smooth_strength.committed.connect(lambda v: self.push(smoothStrength=v))
         self.smooth_strength.dragged.connect(lambda v: self.push(smoothStrength=v))
-        self.radius_label = QtWidgets.QLabel(SETTINGS["radius"]["label"])
-        self.strength_label = QtWidgets.QLabel(SETTINGS["strength"]["label"])
-        self.falloff_label = QtWidgets.QLabel(SETTINGS["falloff"]["label"])
-        self.smooth_label = QtWidgets.QLabel(SETTINGS["smoothStrength"]["label"])
-        self.radius_row = widgets.with_unit(self.radius, "px", "Screen pixels: the circle's radius on screen, "
-                                                               "whatever the zoom")
-        for label, slider in ((self.radius_label, self.radius_row), (self.strength_label, self.strength),
-                              (self.falloff_label, self.falloff), (self.smooth_label, self.smooth_strength)):
-            form.addRow(label, slider)
-        card.addWidget(self.brush_form)
-        # The brush's curves (the catalog's falloffProfile and strengthProfile): each off until its
-        # box is ticked, then drawn in a curve editor (right-click: presets).
+        for slider in (self.radius, self.strength, self.falloff, self.smooth_strength):
+            fields.addWidget(slider)  # the name inside the field
+        self.brush_block.add(self.brush_form)
+        # The stroke's options as chips, in a fixed order (a chip never moves between tools):
+        # Pressure, Off scalp, then the brush's curves (each off until its chip is on, then drawn
+        # in a curve editor under the chips; right-click: presets). Selected only and Front only
+        # are not in the panel: the brushes keep their defaults (off and on).
+        self.pressure = self.setting_chip("pressure", True)
+        self.pressure.toggled.connect(lambda on: self.push(pressure=on))
+        self.collide = self.setting_chip("collide", True)
+        self.collide.toggled.connect(lambda on: self.push(collide=on))
         self.falloff_curve_box, self.falloff_curve = self.curve_setting(
             "falloffProfile", [[0, 1], [0.5, 0.56], [1, 0]], ("center", "edge"))
         self.strength_curve_box, self.strength_curve = self.curve_setting(
             "strengthProfile", [[0, 0.25], [1, 1]], ("root", "tip"))
-        for box in (self.falloff_curve_box, self.strength_curve_box):
-            card.addWidget(box)
+        self.brush_chips = widgets.chip_row((self.pressure, self.collide, self.falloff_curve_box,
+                                             self.strength_curve_box))
+        self.brush_chips.setObjectName("brushChips")
+        self.brush_block.add(self.brush_chips)
+        self.brush_block.add(self.falloff_curve)
+        self.brush_block.add(self.strength_curve)
+        card.addWidget(self.brush_block)
+
+        # -- The tool's own blocks, named for what they set --------------------------
+        # Paint: the mode, the value (or color) and Fill (the map's: the Paint tab's), the alpha stamp.
+        self.paint_block = widgets.Block(NAMES.get("paint", "Paint"), name="paintBlock")
+        self.paint_block.add(self.paint_tab.paint_controls)
         self.alpha_box = self.alpha_setting()
-        card.addWidget(self.alpha_box)
-        # Symmetry, and across what: world X, or the scalp's own topology (a head turned, or not
-        # quite symmetric).
+        self.paint_block.add(self.alpha_box)
+        card.addWidget(self.paint_block)
+
+        # Place and Draw: the new guides, and the tube they get.
+        from groomlab import units
+        self.create_box = widgets.Block(_setting("newGuides", "label"), name="newGuides")
+        self.create_box.setToolTip(_setting("newGuides", "hint"))
+        self.length_factor = units.factor("length")  # shown in real units, stored in scene units
+        length_key = "palette.length@" + units.unit("length")[0]
+        self.length = widgets.SoftSlider(0.5 * self.length_factor, minimum=0.001 * self.length_factor, key=length_key,
+                                         label="Length", suffix=units.label("length"))
+        self.length.committed.connect(lambda v: self.push(length=v / self.length_factor))
+        self.segments = widgets.SoftSlider(12, 1, 32, integer=True, minimum=1, maximum=256, key="palette.segments",
+                                           label="Segments")
+        self.segments.committed.connect(lambda v: self.push(segments=v))
+        self.spacing = widgets.SoftSlider(0.1 * self.length_factor, minimum=0.0,
+                                          key="palette.spacing@" + units.unit("length")[0], label="Spacing",
+                                          suffix=units.label("length"))
+        self.spacing.setToolTip(_setting("spacing", "hint"))
+        self.spacing.committed.connect(lambda v: self.push(spacing=v / self.length_factor))
+        for field in (self.length, self.segments, self.spacing):
+            self.create_box.add(field)  # the name inside the field
+        self.match = widgets.chip("Match nearby", "New guides take the shape, length and painted maps of the nearest "
+                                  "guides: the group's own, or the groups around it while it has none. Draw takes the "
+                                  "maps. Off: they stand straight up, with no maps", True, "matchNearby")
+        self.match.toggled.connect(lambda on: self.push(matchNeighbors=on))
+        self.solo_new = widgets.chip("Solo new", _setting("soloNewGuides", "hint"), False, "soloNewGuides")
+        self.solo_new.toggled.connect(lambda on: self.push(soloNewGuides=on))  # (off: placing freezes nothing)
+        self.create_box.add(widgets.chip_row((self.match, self.solo_new)))
+        card.addWidget(self.create_box)
+        self.tube_panel = TubePanel(self)  # its blocks: Tube (Place, Draw), Profile and Selected guides
+        card.addWidget(self.tube_panel.tube_block)
+
+        # Comb: keep lengths, or stretch.
+        self.stretch_box = widgets.Block(NAMES.get("comb", "Comb"), name="combBlock")
+        self.stretch = widgets.chip("Stretch while combing", _setting("stretch", "hint"), False, "stretch")
+        self.stretch.toggled.connect(lambda on: self.push(stretch=on))
+        self.stretch_box.add(widgets.chip_row((self.stretch,)))
+        card.addWidget(self.stretch_box)
+
+        # Shape: what it paints on the tubes (Width, Flatness, Twist), then the profile and the
+        # selected guides' tubes.
+        self.tube_channel_box = widgets.Block(_setting("tubeChannel", "label"), name="paintsBlock")
+        self.tube_channel_box.setToolTip(_setting("tubeChannel", "hint"))
+        self.tube_channel = QtWidgets.QButtonGroup(self)  # exclusive: one channel at a time
+        self.tube_channel_buttons = {}
+        for name, label, tip in TUBE_CHANNELS:
+            b = widgets.chip(label, tip, name == "width", "tubeChannel_" + name)
+            self.tube_channel.addButton(b)
+            self.tube_channel_buttons[name] = b
+        self.tube_channel.buttonClicked.connect(lambda _b: self.push(tubeChannel=self.tube_channel_name()))
+        self.tube_channel_box.add(widgets.chip_row(self.tube_channel_buttons.values()))
+        card.addWidget(self.tube_channel_box)
+
+        # Select: the soft radius (its selection's), then the profile and the selected guides' tubes.
+        self.select_box = widgets.Block(_setting("selection", "label"), name="selectionBlock")
+        self.soft_factor = units.factor("length")  # shown in real units (View > Units), kept in scene units
+        self.soft = widgets.SoftSlider(0.0, 0.0, 1.0 * self.soft_factor, minimum=0.0, key="palette.soft",
+                                       shown_decimals=widgets.display_decimals(3, self.soft_factor),
+                                       label="Soft radius", suffix=units.label("length"))
+        self.soft.setToolTip("Soft selection radius: guides near the selection are partly selected; "
+                             "brushes fade out over it on the selected guides")
+        self.soft.committed.connect(lambda v: self.set_soft_selection(v / self.soft_factor))
+        self.select_box.add(self.soft)
+        card.addWidget(self.select_box)
+        card.addWidget(self.tube_panel.profile_block)
+        card.addWidget(self.tube_panel.selected_block)
+
+        # Erase: what it removes.
+        self.erase_box = widgets.Block(_setting("erases", "label"), name="erasesBlock")
+        self.erase_box.setToolTip("What the Erase brush removes where it passes (one undo step)")
+        self.erase_guides = widgets.chip("Guides", "Guides, with their children", True, "eraseGuides")
+        self.erase_parts = widgets.chip("Parts", "Part lines", True, "eraseParts")
+        self.erase_flow = widgets.chip("Flow", "Flow arrows and sinks", True, "eraseFlow")
+        for box, flag in ((self.erase_guides, "eraseGuides"), (self.erase_parts, "eraseParts"),
+                          (self.erase_flow, "eraseFlow")):
+            box.toggled.connect(lambda on, f=flag: self.push(**{f: on}))
+        self.erase_box.add(widgets.chip_row((self.erase_guides, self.erase_parts, self.erase_flow)))
+        self.erase_box.add(widgets.small_label(ERASE_NOTE, wrap=True))
+        card.addWidget(self.erase_box)
+
+        # Length Keys: the selected key, Apply and Cancel (Clear in the block's header).
+        self.length_keys = length_keys_box.LengthKeysBox()
+        self.keys_block = widgets.Block(_setting("lengthKeys", "label"), (self.length_keys.clear,), name="keysBlock")
+        self.keys_block.setToolTip(_setting("lengthKeys", "hint"))
+        self.keys_block.add(self.length_keys)
+        card.addWidget(self.keys_block)
+
+        # Flow arrows: what a click lays, how many the groom keeps, Clear all (in the header).
+        clear_flow = QtWidgets.QToolButton()
+        clear_flow.setText("Clear all")
+        clear_flow.setObjectName("clearFlow")
+        clear_flow.setAutoRaise(True)
+        clear_flow.setProperty("role", "ghost")
+        clear_flow.setToolTip(definitions.get("actions/flow.deleteAll")["tip"])
+        clear_flow.clicked.connect(self.clear_flow)
+        self.clear_flow_button = clear_flow
+        self.flow_box = widgets.Block(_setting("flow", "label"), (clear_flow,), name="flowBlock")
+        self.flow_sink = QtWidgets.QComboBox()
+        for kind, label, tip in _options("flowSink"):
+            self.flow_sink.addItem(label, kind)
+            self.flow_sink.setItemData(self.flow_sink.count() - 1, tip, QtCore.Qt.ToolTipRole)
+        self.flow_sink.currentIndexChanged.connect(self.flow_sink_changed)
+        self.flow_box.labeled(definitions.get("choices/flowSink")["label"], self.flow_sink)
+        # How many arrows and sinks the groom keeps (GroomLab > Utilities > Delete All Flow Arrows
+        # clears them too).
+        self.flow_count = widgets.small_label("")
+        self.flow_count.setObjectName("flowCount")
+        self.flow_count.setToolTip("The flow arrows and sinks kept on the groom (the Flow node lays the strands "
+                                   "along them)")
+        self.flow_box.add(self.flow_count)
+        self.flow_sink_changed()
+        card.addWidget(self.flow_box)
+
+        # Parts: the next part's name, the parts drawn so far (Parts from Curves in the header).
+        bind = definitions.binder(self.ACTIONS, self)
+        part_items = dict((item["id"], item) for item in definitions.resolve(definitions.get("lists/parts/bar"), None))
+        from_curves = part_items["parts.fromCurves"]
+        self.part_box = widgets.Block(_setting("parts", "label"), (widgets.glyph_button(
+            "curves", from_curves["label"] + ": " + from_curves["tip"], bind(from_curves)),), name="partsBlock")
+        self.part_name = QtWidgets.QLineEdit("part")
+        self.part_name.setToolTip("Name for the next part (made unique)")
+        self.part_name.editingFinished.connect(lambda: self.push(partName=self.part_name.text() or "part"))
+        self.part_box.labeled("Name", self.part_name)
+        self.part_list = QtWidgets.QListWidget()
+        self.part_list.setMaximumHeight(theme.px(90))
+        self.part_box.add(self.part_list)
+        part_buttons = QtWidgets.QHBoxLayout()
+        part_buttons.setSpacing(theme.px(4))
+        for key in ("parts.remove", "parts.clear"):
+            item = part_items[key]
+            b = widgets.chip(item["label"], item["tip"])
+            b.clicked.connect(lambda _=False, fn=bind(item): fn())
+            part_buttons.addWidget(b)
+        part_buttons.addStretch(1)
+        self.part_box.add(part_buttons)
+        card.addWidget(self.part_box)
+
+        # Applies to: where the stroke lands. What it acts on (the shaping brushes that also shape
+        # part lines and flow arrows), and Mirror.
+        self.applies_block = widgets.Block(definitions.text("appliesBlock"), name="appliesBlock")
+        self.target_guides = widgets.chip("Guides", "Guides", True, "targetGuides")
+        self.target_parts = widgets.chip("Parts", "Part lines", False, "targetParts")
+        self.target_flow = widgets.chip("Flow", "Flow arrows and sinks", False, "targetFlow")
+        for box in (self.target_guides, self.target_parts, self.target_flow):
+            box.toggled.connect(self.push_targets)
+        self.target_box = QtWidgets.QWidget()
+        self.target_box.setProperty("role", "options")
+        targets = QtWidgets.QVBoxLayout(self.target_box)
+        targets.setContentsMargins(0, 0, 0, 0)
+        targets.setSpacing(theme.px(4))
+        targets.addWidget(widgets.small_label(_setting("targets", "label")))
+        targets.addWidget(widgets.chip_row((self.target_guides, self.target_parts, self.target_flow)))
+        self.target_box.setToolTip("What the brush shapes where it passes: guides, part lines, flow arrows and sinks "
+                                   "(Comb slides and lays arrows along the stroke; Twist turns arrows and whorls; "
+                                   "Length sizes whorls; Smooth, Straighten and Attract shape both; Cut splits parts)")
+        self.applies_block.add(self.target_box)
+        # Mirror: Symmetry, and across what: world X, or the scalp's own topology (a head turned,
+        # or not quite symmetric).
         self.symmetry = self.setting_box("symmetry")
+        self.symmetry.setText("")
+        self.symmetry.setObjectName("symmetry")
         self.symmetry_mode = QtWidgets.QComboBox()
         self.symmetry_mode.setObjectName("symmetryMode")
         for name, label, tip in _options("symmetry"):
             self.symmetry_mode.addItem(label, name)
             self.symmetry_mode.setItemData(self.symmetry_mode.count() - 1, tip, QtCore.Qt.ToolTipRole)
-        self.symmetry_mode.setToolTip(SETTINGS["symmetry"]["hint"])
+        self.symmetry_mode.setToolTip(_setting("symmetry", "hint"))
         self.symmetry_mode.setEnabled(False)
         self.symmetry.toggled.connect(lambda on: (self.symmetry_mode.setEnabled(on), self.push(symmetry=self.symmetry_name())))
         self.symmetry_mode.currentIndexChanged.connect(lambda _i: self.push(symmetry=self.symmetry_name()))
+        self.symmetry.setToolTip(_setting("symmetry", "hint") + ". " + SYMMETRY_TIP)
         self.symmetry_row = QtWidgets.QWidget()
+        self.symmetry_row.setObjectName("symmetryRow")
         row = QtWidgets.QHBoxLayout(self.symmetry_row)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(theme.px(6))
+        mirror = QtWidgets.QLabel("Mirror")
+        mirror.setProperty("role", "rowLabel")
+        mirror.setToolTip(self.symmetry.toolTip())
+        mirror.setMinimumWidth(theme.px(84))
+        row.addWidget(mirror)
         row.addWidget(self.symmetry)
-        row.addWidget(self.symmetry_mode)
-        row.addStretch(1)
-        self.symmetry.setToolTip(SETTINGS["symmetry"]["hint"] + ". " + SYMMETRY_TIP)
-        # In the Group row, always shown: found before a brush is picked, its state always seen (the
-        # brushes that mirror take it when they start; Alt+Shift+X flips it).
-        self.symmetry_row.setObjectName("symmetryRow")
-        self.target_row.layout().addWidget(self.symmetry_row)
-        self.selected_only = self.setting_box("selectedOnly")
-        self.selected_only.toggled.connect(lambda on: self.push(selectedOnly=on))
-        self.pressure = self.setting_box("pressure")
-        self.pressure.setChecked(True)
-        self.pressure.toggled.connect(lambda on: self.push(pressure=on))
-        self.collide = self.setting_box("collide")
-        self.collide.setChecked(True)
-        self.collide.toggled.connect(lambda on: self.push(collide=on))
-        self.mask_scalp = self.setting_box("frontFacingOnly")  # "Front facing only" in both hosts
-        self.mask_scalp.setChecked(True)
-        self.mask_scalp.toggled.connect(lambda on: self.push(maskByScalp=on))
-        self.checks = QtWidgets.QGridLayout()  # refilled with the tool's own (show_tool_settings)
-        self.checks.setHorizontalSpacing(theme.px(10))
-        self.checks.setVerticalSpacing(theme.px(6))
-        self.check_boxes = (self.selected_only, self.pressure, self.collide, self.mask_scalp)
-        card.addLayout(self.checks)
-
-        # Place and Draw
-        self.create_box, column = self.options("New guides")
-        form = self.options_form(column)
-        self.match = QtWidgets.QCheckBox("Match nearby guides")
-        self.match.setChecked(True)
-        self.match.setToolTip("New guides take the shape, length and painted maps of the nearest guides: the "
-                              "group's own, or the groups around it while it has none. Draw takes the maps. "
-                              "Off: they stand straight up, with no maps")
-        self.match.toggled.connect(lambda on: self.push(matchNeighbors=on))
-        from groomlab import units
-        self.length_factor = units.factor("length")  # shown in real units, stored in scene units
-        length_key = "palette.length@" + units.unit("length")[0]
-        self.length = widgets.SoftSlider(0.5 * self.length_factor, minimum=0.001 * self.length_factor, key=length_key)
-        self.length.committed.connect(lambda v: self.push(length=v / self.length_factor))
-        self.segments = widgets.SoftSlider(12, 1, 32, integer=True, minimum=1, maximum=256, key="palette.segments")
-        self.segments.committed.connect(lambda v: self.push(segments=v))
-        self.spacing = widgets.SoftSlider(0.1 * self.length_factor, minimum=0.0,
-                                          key="palette.spacing@" + units.unit("length")[0])
-        self.spacing.committed.connect(lambda v: self.push(spacing=v / self.length_factor))
-        self.spacing_label = QtWidgets.QLabel("Spacing (%s)" % units.label("length"))
-        form.addRow(self.match)
-        form.addRow("Length (%s)" % units.label("length"), self.length)
-        form.addRow("Segments", self.segments)
-        form.addRow(self.spacing_label, self.spacing)
-        self.solo_new = self.setting_box("soloNewGuides")
-        self.solo_new.setChecked(False)  # (off by default: placing freezes nothing unless asked)
-        self.solo_new.toggled.connect(lambda on: self.push(soloNewGuides=on))
-        form.addRow(self.solo_new)
-        card.addWidget(self.create_box)
-
-        # Parts
-        self.part_box, column = self.options("Parts")
-        form = self.options_form(column)
-        self.part_name = QtWidgets.QLineEdit("part")
-        self.part_name.setToolTip("Name for the next part (made unique)")
-        self.part_name.editingFinished.connect(lambda: self.push(partName=self.part_name.text() or "part"))
-        self.part_list = QtWidgets.QListWidget()
-        self.part_list.setMaximumHeight(theme.px(90))
-        part_buttons = QtWidgets.QHBoxLayout()
-        bind = definitions.binder(self.ACTIONS, self)
-        for item in definitions.resolve(definitions.get("lists/parts/bar"), None):
-            b = QtWidgets.QPushButton(item["label"])
-            b.setToolTip(item["tip"])
-            b.clicked.connect(lambda _=False, fn=bind(item): fn())
-            part_buttons.addWidget(b)
-        form.addRow("Name", self.part_name)
-        column.addWidget(self.part_list)
-        column.addLayout(part_buttons)
-        card.addWidget(self.part_box)
-
-        # Flow arrows
-        self.flow_box, column = self.options("Flow")
-        row = QtWidgets.QHBoxLayout()
-        self.flow_sink = QtWidgets.QComboBox()
-        for kind, label, tip in _options("flowSink"):
-            self.flow_sink.addItem(label, kind)
-            self.flow_sink.setItemData(self.flow_sink.count() - 1, tip, QtCore.Qt.ToolTipRole)
-        self.flow_sink.setToolTip(definitions.get("choices/flowSink")["tip"])
-        self.flow_sink.currentIndexChanged.connect(self.flow_sink_changed)
-        row.addWidget(QtWidgets.QLabel(definitions.get("choices/flowSink")["label"]))
-        row.addWidget(self.flow_sink, 1)
-        column.addLayout(row)
-        # How many arrows and sinks the groom keeps, and Clear All (GroomLab > Utilities > Delete All
-        # Flow Arrows): where the arrows live, and how to take them all off.
-        row = QtWidgets.QHBoxLayout()
-        self.flow_count = QtWidgets.QLabel()
-        self.flow_count.setObjectName("flowCount")
-        self.flow_count.setProperty("role", "hint")
-        self.flow_count.setToolTip("The flow arrows and sinks kept on the groom (the Flow node lays the strands "
-                                   "along them)")
-        row.addWidget(self.flow_count, 1)
-        clear_flow = QtWidgets.QPushButton("Clear All")
-        clear_flow.setObjectName("clearFlow")
-        clear_flow.setToolTip(definitions.get("actions/flow.deleteAll")["tip"])
-        clear_flow.clicked.connect(self.clear_flow)
-        self.clear_flow_button = clear_flow
-        row.addWidget(clear_flow)
-        column.addLayout(row)
-        self.flow_hint = QtWidgets.QLabel()
-        self.flow_hint.setWordWrap(True)
-        self.flow_hint.setProperty("role", "hint")
-        column.addWidget(self.flow_hint)
-        self.flow_sink_changed()
-        card.addWidget(self.flow_box)
-
-        # Length Paths: the selected key, the path, Apply and Cancel
-        self.length_paths = length_paths_box.LengthPathsBox()
-        card.addWidget(self.length_paths)
-
-        # Comb: keep lengths, or stretch
-        self.stretch_box, column = self.options()
-        self.stretch = self.setting_box("stretch")
-        self.stretch.toggled.connect(lambda on: self.push(stretch=on))
-        column.addWidget(self.stretch)
-        card.addWidget(self.stretch_box)
-
-        # Shape: what it paints on the tubes (Width, Flatness, Twist), and the selected guides' tubes
-        # as a whole with the groom's Fill Tubes.
-        self.tube_channel_box, column = self.options()
-        row = QtWidgets.QHBoxLayout()
-        row.setSpacing(theme.px(6))
-        paints = QtWidgets.QLabel(SETTINGS["tubeChannel"]["label"])
-        paints.setToolTip(SETTINGS["tubeChannel"]["hint"])
-        row.addWidget(paints)
-        self.tube_channel = QtWidgets.QButtonGroup(self)  # exclusive: one channel at a time
-        self.tube_channel_buttons = {}
-        for name, label, tip in TUBE_CHANNELS:
-            b = QtWidgets.QToolButton()
-            b.setText(label)
-            b.setToolTip(tip)
-            b.setCheckable(True)
-            b.setProperty("role", "chip")
-            b.setObjectName("tubeChannel_" + name)
-            b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-            self.tube_channel.addButton(b)
-            self.tube_channel_buttons[name] = b
-            row.addWidget(b)
-        self.tube_channel_buttons["width"].setChecked(True)
-        self.tube_channel.buttonClicked.connect(lambda _b: self.push(tubeChannel=self.tube_channel_name()))
-        column.addLayout(row)
-        card.addWidget(self.tube_channel_box)
-        self.tube_panel = TubePanel(self)  # in its own Tubes section below
-
-        # Erase: what it removes
-        self.erase_box, column = self.options("Erases")
-        row = QtWidgets.QHBoxLayout()
-        self.erase_guides = QtWidgets.QCheckBox("Guides")
-        self.erase_parts = QtWidgets.QCheckBox("Parts")
-        self.erase_flow = QtWidgets.QCheckBox("Flow")
-        for box, flag in ((self.erase_guides, "eraseGuides"), (self.erase_parts, "eraseParts"),
-                          (self.erase_flow, "eraseFlow")):
-            box.setChecked(True)
-            box.toggled.connect(lambda on, f=flag: self.push(**{f: on}))
-            row.addWidget(box)
-        row.addStretch(1)
-        column.addLayout(row)
-        erase_note = QtWidgets.QLabel(ERASE_NOTE)
-        erase_note.setWordWrap(True)
-        erase_note.setProperty("role", "hint")
-        column.addWidget(erase_note)
-        self.erase_box.setToolTip("What the Erase brush removes where it passes (one undo step)")
-        card.addWidget(self.erase_box)
-
-        # Shaping brushes: what they act on (guides, part lines, flow arrows and sinks)
-        self.target_box, column = self.options("Acts on")
-        row = QtWidgets.QHBoxLayout()
-        self.target_guides = QtWidgets.QCheckBox("Guides")
-        self.target_parts = QtWidgets.QCheckBox("Parts")
-        self.target_flow = QtWidgets.QCheckBox("Flow")
-        for box, on in ((self.target_guides, True), (self.target_parts, False), (self.target_flow, False)):
-            box.setChecked(on)
-            box.toggled.connect(self.push_targets)
-            row.addWidget(box)
-        row.addStretch(1)
-        column.addLayout(row)
-        self.target_box.setToolTip("What the brush shapes where it passes: guides, part lines, flow arrows and sinks "
-                                   "(Comb slides and lays arrows along the stroke; Twist turns arrows and whorls; "
-                                   "Length sizes whorls; Smooth, Straighten and Attract shape both; Cut splits parts)")
-        card.addWidget(self.target_box)
-
-        # Guide selection
-        self.select_box, column = self.options("Selection")
-        form = self.options_form(column)
-        from groomlab import units
-        self.soft_factor = units.factor("length")  # shown in real units (View > Units), kept in scene units
-        self.soft = widgets.SoftSlider(0.0, 0.0, 1.0 * self.soft_factor, minimum=0.0, key="palette.soft",
-                                       shown_decimals=widgets.display_decimals(3, self.soft_factor))
-        self.soft.setToolTip("Soft selection radius: guides near the selection are partly selected; "
-                             "brushes with Selected only fade out over it")
-        self.soft.committed.connect(lambda v: self.set_soft_selection(v / self.soft_factor))
-        form.addRow("Soft radius", widgets.with_unit(self.soft, units.label("length")))
-        card.addWidget(self.select_box)
-
-        # Freeze: the mask as a whole
-        self.freeze_box, column = self.options("Freeze mask")
-        unfreeze = QtWidgets.QPushButton("Unfreeze All")
-        unfreeze.setToolTip("Clear the freeze mask: every guide can be brushed again")
-        unfreeze.clicked.connect(lambda: self.paint_tab.unfreeze_all())
-        column.addWidget(unfreeze)
-        card.addWidget(self.freeze_box)
-
-        self.gestures = QtWidgets.QLabel(GESTURES)
-        self.gestures.setWordWrap(True)
-        self.gestures.setProperty("role", "hint")
-        card.addWidget(self.gestures)
+        row.addWidget(self.symmetry_mode, 1)
+        self.applies_block.add(self.symmetry_row)
+        card.addWidget(self.applies_block)
         work.addWidget(self.settings)
 
-        # How the strands draw while a stroke is live: set once, rarely changed.
-        display = QtWidgets.QWidget()
-        form = QtWidgets.QFormLayout(display)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setLabelAlignment(QtCore.Qt.AlignRight)
-        self.sculpt = QtWidgets.QComboBox()
-        sculpt = definitions.get("choices/sculptDisplay")
-        for value, label, _tip in _options("sculptDisplay"):
-            self.sculpt.addItem(label, value)
-        self.sculpt.setCurrentIndex(self.sculpt.findData(sculpt["default"]))
-        self.sculpt.setToolTip(sculpt["tip"])
-        self.sculpt.currentIndexChanged.connect(self.apply_sculpt_display)
-        form.addRow(sculpt["label"], self.sculpt)
-        self.full_density = QtWidgets.QCheckBox("Full density")
-        self.full_density.setObjectName("sculptFullDensity")
-        self.full_density.setToolTip("Keep every strand of the preview up while a stroke is live, instead of a "
-                                     "lighter share of them (slower on heavy grooms, but nothing pops)")
-        self.full_density.setChecked(True)  # (the groom's sculptDensity default, 1)
-        self.full_density.toggled.connect(lambda _: self.apply_sculpt_display(self.sculpt.currentIndex()))
-        form.addRow(self.full_density)
-        # Tubes: shapes, sizes and the shape library, a section of its own (open with the Shape
-        # brush, Place or Draw; any time from its header).
-        sections = dict((section["id"], section) for section in definitions.get("palette/sections"))
-        self.section_rules = sections  # which tool and tab each section shows with (show_sections)
-        self.tubes_section = widgets.Section(sections["tubes"]["label"], self.tube_panel)
-        self.tubes_section.header.toggled.connect(lambda on: on and self.tube_panel.refresh(self.groom()))
-        work.addWidget(self.tubes_section)
-        self.display_section = widgets.Section(sections["sculptDisplay"]["label"], display)
-        work.addWidget(self.display_section)
-
-        # Guide groups and edits on many guides (Tools tab).
-        self.guides_tab = tool_tabs.GuidesTab(self)
-        self.guides_section = widgets.Section(sections["groups"]["label"], self.guides_tab)
-        work.addWidget(self.guides_section)
-
-        # After grooming: simulate, export, render, transfer, import (the GroomLab menu's items).
-        self.output_strip = self.output_buttons()
-        self.output_section = widgets.Section(sections["output"]["label"], self.output_strip,
-                                              expanded=sections["output"].get("expanded", False))
-        work.addWidget(self.output_section)
-
-        # Correctives: the groom as a stack (base groom + correctives); the picked row is what brushes edit.
-        self.sculpt_layout.addWidget(self.heading("Correctives"))
-        self.correctives = tool_tabs.CorrectivesBox(self)
-        self.sculpt_layout.addWidget(self.correctives)
+        # Under the card: the list the tab works on (Guide groups, Maps, Layers, Photos).
+        for tab in definitions.get("palette/tabs"):
+            self.tabs.addTab(pages[tab["id"]], tab["label"])
+        self.tabs.currentChanged.connect(self.tab_changed)
+        work.addWidget(self.tabs)
         outer.addStretch(1)
 
         theme.style(self)
@@ -1339,21 +1399,9 @@ class ToolPalette(QtWidgets.QWidget):
         return {"themeMenu": widgets.menu_filler(lambda menu, _item: menu.addMenu(widgets.theme_menu(self)))}
 
     @staticmethod
-    def action_chip(item):
-        """A chip running the GroomLab menu's action of a definitions item (guarded: errors in plain words)."""
-        from groomlab.ui import menu
-        chip = QtWidgets.QToolButton()
-        chip.setText(item["label"])
-        chip.setToolTip(item["tip"])
-        chip.setProperty("role", "chip")
-        chip.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        chip.clicked.connect(menu._guarded(definitions.binder(menu.ACTIONS)(item), item["label"]))
-        return chip
-
-    @staticmethod
     def menu_chip(item):
-        """A chip opening a submenu item's list of the GroomLab menu's actions (the Output strip's
-        Import, Export, Render and Studio: menus/output.<kind>; menu.shown_items, one table for both)."""
+        """A chip opening a submenu item's list of the GroomLab menu's actions (the empty state's
+        Import: menus/output.import; menu.shown_items, one table for both)."""
         from groomlab.ui import menu
         kind = item["id"]
         chip = QtWidgets.QToolButton()
@@ -1376,21 +1424,6 @@ class ToolPalette(QtWidgets.QWidget):
         chip.setMenu(popup)
         return chip
 
-    def output_buttons(self):
-        """The Output strip (palette.json's output): Simulate Range, Export, Render, Studio, Transfer... and
-        Import, the steps after grooming one click away (the same actions as the GroomLab menu's)."""
-        box = QtWidgets.QWidget()
-        box.setObjectName("groomToolsOutput")
-        grid = QtWidgets.QGridLayout(box)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(theme.px(6))
-        chips = [self.menu_chip(item) if item["kind"] == "submenu" else self.action_chip(item)
-                 for item in definitions.resolve(definitions.get("palette/output"))]
-        for i, chip in enumerate(chips):
-            grid.addWidget(chip, i // 3, i % 3)
-        self.output_chips = chips
-        return box
-
     @staticmethod
     def setting_box(setting):
         """A checkbox for one of the catalog's settings: its label and hint."""
@@ -1398,41 +1431,58 @@ class ToolPalette(QtWidgets.QWidget):
         box.setToolTip(SETTINGS[setting]["hint"])
         return box
 
+    @staticmethod
+    def setting_chip(setting, on=False):
+        """A toggle chip for one of the catalog's settings: its short name (CHIP_LABELS) and hint."""
+        b = widgets.chip(CHIP_LABELS.get(setting, SETTINGS[setting]["label"]), SETTINGS[setting]["hint"], on,
+                         "chip_" + setting)
+        return b
+
     def curve_setting(self, setting, keys, ends):
-        """A brush curve of the catalog's: a checkbox (its label and hint) over a curve editor shown
-        while it is ticked; the curve goes to the tool as it settles ("" when unticked)."""
-        box, column = self.options()
-        check = self.setting_box(setting)
-        column.addWidget(check)
+        """A brush curve of the catalog's: a chip (its label and hint) and a curve editor shown
+        under the chips while the chip is on; the curve goes to the tool as it settles ("" when off).
+        Returns (chip, editor)."""
+        check = self.setting_chip(setting, False)
         editor = widgets.RampEditor(keys, ends=ends)
         editor.setToolTip(SETTINGS[setting]["hint"] + " (right-click: presets)")
         editor.setVisible(False)
-        column.addWidget(editor)
         flag = setting  # the tool's flag has the setting's name
         check.toggled.connect(lambda on: (editor.setVisible(on), self.push(**{flag: self.curve_of(check, editor)})))
         editor.committed.connect(lambda _keys: self.push(**{flag: self.curve_of(check, editor)}))
         editor.check = check
-        return box, editor
+        return check, editor
 
     def alpha_setting(self):
-        """Paint's alpha on a scalp map (the catalog's "alpha"): the picker, and while one is
+        """Paint's stamp on a scalp map (the catalog's "alpha"): the picker, and while one is
         picked its rotation, angle, spacing and invert."""
-        box, column = self.options()
+        box = QtWidgets.QWidget()
+        box.setProperty("role", "options")
+        column = QtWidgets.QVBoxLayout(box)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(theme.px(4))
         top = QtWidgets.QHBoxLayout()
-        top.setSpacing(theme.px(10))
-        label = QtWidgets.QLabel(SETTINGS["alpha"]["label"])
-        label.setToolTip(SETTINGS["alpha"]["hint"])
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(theme.px(6))
+        label = QtWidgets.QLabel("Stamp")
+        label.setProperty("role", "rowLabel")
+        label.setMinimumWidth(theme.px(84))
+        label.setToolTip(_setting("alpha", "hint"))
         self.alpha = widgets.AlphaPicker()
+        self.alpha.setToolTip(_setting("alpha", "hint"))
         self.alpha.changed.connect(self.alpha_changed)
         top.addWidget(label)
         top.addWidget(self.alpha, 1)
         column.addLayout(top)
         self.alpha_options = QtWidgets.QWidget()
-        form = QtWidgets.QFormLayout(self.alpha_options)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setLabelAlignment(QtCore.Qt.AlignRight)
-        form.setRowWrapPolicy(QtWidgets.QFormLayout.DontWrapRows)
+        options = QtWidgets.QVBoxLayout(self.alpha_options)
+        options.setContentsMargins(0, 0, 0, 0)
+        options.setSpacing(theme.px(4))
         rotation_row = QtWidgets.QHBoxLayout()
+        rotation_row.setContentsMargins(0, 0, 0, 0)
+        rotation_row.setSpacing(theme.px(6))
+        rotation = QtWidgets.QLabel("Rotation")
+        rotation.setProperty("role", "rowLabel")
+        rotation.setMinimumWidth(theme.px(84))
         self.alpha_rotation = QtWidgets.QComboBox()
         self.alpha_rotation.setObjectName("alphaRotation")
         for name, label_text, tip in (("fixed", "Fixed", "Every stamp at the angle"),
@@ -1441,23 +1491,24 @@ class ToolPalette(QtWidgets.QWidget):
             self.alpha_rotation.addItem(label_text, name)
             self.alpha_rotation.setItemData(self.alpha_rotation.count() - 1, tip, QtCore.Qt.ToolTipRole)
         self.alpha_rotation.currentIndexChanged.connect(self.alpha_rotation_changed)
-        self.alpha_angle = widgets.SoftSlider(0, 0, 360, integer=True, minimum=-360, maximum=360)
-        self.alpha_angle.setToolTip("The alpha's angle in degrees, counterclockwise (Follow Stroke: added to the stroke's way)")
+        rotation_row.addWidget(rotation)
+        rotation_row.addWidget(self.alpha_rotation, 1)
+        options.addLayout(rotation_row)
+        self.alpha_angle = widgets.SoftSlider(0, 0, 360, integer=True, minimum=-360, maximum=360, label="Stamp angle",
+                                              suffix=u"°")
+        self.alpha_angle.setToolTip("The stamp's angle in degrees, counterclockwise (Follow Stroke: added to the stroke's way)")
         self.alpha_angle.committed.connect(lambda v: self.push(alphaAngle=v))
         self.alpha_angle.dragged.connect(lambda v: self.push(alphaAngle=v))
-        rotation_row.addWidget(self.alpha_rotation)
-        rotation_row.addWidget(self.alpha_angle, 1)
-        form.addRow("Rotation", rotation_row)
-        self.alpha_spacing = widgets.SoftSlider(25, 5, 100, integer=True, minimum=2, maximum=400, key="palette.alphaSpacing")
+        options.addWidget(self.alpha_angle)
+        self.alpha_spacing = widgets.SoftSlider(25, 5, 100, integer=True, minimum=2, maximum=400, key="palette.alphaSpacing",
+                                                label="Stamp spacing", suffix="%")
+        self.alpha_spacing.setToolTip("How far apart the stamps fall along a stroke, in percent of the brush's "
+                                      "diameter: low for a smooth trail, 100 and up for separate stamps")
         self.alpha_spacing.committed.connect(lambda v: self.push(alphaSpacing=v / 100.0))
-        spacing = widgets.with_unit(self.alpha_spacing, "%", "How far apart the stamps fall along a stroke, in percent of "
-                                                             "the brush's diameter: low for a smooth trail, 100 and up "
-                                                             "for separate stamps")
-        form.addRow("Spacing", spacing)
-        self.alpha_invert = QtWidgets.QCheckBox("Invert")
-        self.alpha_invert.setToolTip("Paint where the alpha is black instead")
+        options.addWidget(self.alpha_spacing)
+        self.alpha_invert = widgets.chip("Invert", "Paint where the stamp is black instead", False, "alphaInvert")
         self.alpha_invert.toggled.connect(lambda on: self.push(alphaInvert=on))
-        form.addRow("", self.alpha_invert)
+        options.addWidget(widgets.chip_row((self.alpha_invert,)))
         self.alpha_options.setVisible(False)
         column.addWidget(self.alpha_options)
         return box
@@ -1480,10 +1531,10 @@ class ToolPalette(QtWidgets.QWidget):
                     alpha_invert=self.alpha_invert.isChecked())
 
     def sync_alpha(self):
-        """The alpha shows for Paint on a scalp map (vertices or texture), not on a guide map."""
+        """The stamp shows for Paint on a scalp map (vertices or texture), not on a guide map."""
         if not hasattr(self, "alpha_box"):
             return  # the Paint tab picks its map while the card is still being built
-        on = "alpha" in TOOL_SETTINGS.get(self.tool, set()) and self.paint_tab.current_kind() in ("vertices", "texture")
+        on = "alpha" in TOOL_SETTINGS.get(self.card_tool(), set()) and self.paint_tab.current_kind() in ("vertices", "texture")
         self.alpha_box.setVisible(on)
         self.alpha_options.setVisible(on and bool(self.alpha.path))
 
@@ -1492,28 +1543,6 @@ class ToolPalette(QtWidgets.QWidget):
         """A curve setting as the tool takes it: the editor's keys as JSON, or "" while it is off."""
         import json
         return json.dumps(editor.value()) if check.isChecked() else ""
-
-    def options(self, title=None):
-        """A tool's own options inside the settings card: a small heading (if any) over a column."""
-        box = QtWidgets.QWidget()
-        box.setProperty("role", "options")
-        column = QtWidgets.QVBoxLayout(box)
-        column.setContentsMargins(0, theme.px(4) if title else 0, 0, 0)
-        column.setSpacing(theme.px(6))
-        if title:
-            heading = QtWidgets.QLabel(title.upper())
-            heading.setProperty("role", "subheading")
-            column.addWidget(heading)
-        return box, column
-
-    @staticmethod
-    def options_form(column):
-        form = QtWidgets.QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setLabelAlignment(QtCore.Qt.AlignRight)
-        form.setRowWrapPolicy(QtWidgets.QFormLayout.DontWrapRows)
-        column.addLayout(form)
-        return form
 
     def closeEvent(self, event):
         self.stop_following()
@@ -1585,39 +1614,41 @@ class ToolPalette(QtWidgets.QWidget):
             if getattr(button, "glyph", None):
                 button.setIcon(widgets.glyph(button.glyph))
 
+    TILE_ICON = 20       # px at 100%: the tool tiles' icons
+    TILE = (56, 50)      # the tiles' fixed width and height, the border included (they never stretch)
+
+    def _tile_size(self, b):
+        b.setIconSize(QtCore.QSize(theme.px(self.TILE_ICON), theme.px(self.TILE_ICON)))
+        b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)  # the icon over the name (elided: widgets.Tile)
+        b.setAutoRaise(True)
+        b.setFixedSize(theme.px(self.TILE[0]), theme.px(self.TILE[1]))
+        b.setProperty("role", "tool")  # a rounded tile: the theme colors it (checked: the selection, an accent border)
+
     def unfreeze_tile(self):
-        """Unfreeze All as a tile beside the Freeze tool's: every guide brushable again."""
-        b = QtWidgets.QToolButton()
+        """Unfreeze All as a tile beside the Freeze tool's (a button, not a tool: never checked):
+        every guide brushable again."""
+        b = widgets.Tile()
         b.setObjectName("unfreezeAllTile")
         b.setText("Unfreeze All")
         b.setIcon(widgets.icon("unfreeze"))
-        b.setIconSize(QtCore.QSize(theme.px(28), theme.px(28)))
-        b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
-        b.setAutoRaise(True)
-        b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        b.setMinimumSize(theme.px(64), theme.px(56))
-        b.setProperty("role", "tool")
+        self._tile_size(b)
         b.setToolTip("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again "
                      "(a brush's Shift+click where no guide is does the same)")
         b.clicked.connect(lambda: self.paint_tab.unfreeze_all())
         self.buttons.setdefault("unfreeze", b)  # its icon follows the theme
         return b
 
-    def tool_grid(self, tools, columns=4, extra=()):
-        """Tool tiles (tool, label, tooltip) that reflow to the panel's width, and any `extra`
+    def tool_grid(self, tools, extra=()):
+        """Labeled tiles (tool, label, tooltip: the icon over the name, the name and the hint in the
+        tooltip) of a fixed size, as many to a row as the panel's width holds, and any `extra`
         buttons after them; one tool is active across every tab."""
         tiles = []
         for tool, label, tip in tools:
-            b = QtWidgets.QToolButton()
+            b = widgets.Tile()
             b.setText(label)
             b.setIcon(widgets.icon(tool))
-            b.setIconSize(QtCore.QSize(theme.px(28), theme.px(28)))
-            b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
             b.setCheckable(True)
-            b.setAutoRaise(True)
-            b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-            b.setMinimumSize(theme.px(64), theme.px(56))
-            b.setProperty("role", "tool")  # a rounded tile: the theme colors it
+            self._tile_size(b)
             b.setToolTip("<b>%s</b><br>%s" % (NAMES.get(tool, label), tip))
             b.clicked.connect(lambda _=False, t=tool: self.activate(t))
             self.group.addButton(b)
@@ -1625,7 +1656,7 @@ class ToolPalette(QtWidgets.QWidget):
             self.tiles.setdefault(tool, []).append(b)
             tiles.append(b)
         tiles.extend(extra)
-        return widgets.ToolGrid(tiles, columns)
+        return widgets.ToolGrid(tiles)
 
     def check_tiles(self, tool):
         """The active tool's tiles on, every other off."""
@@ -1641,14 +1672,26 @@ class ToolPalette(QtWidgets.QWidget):
         else:
             self.tabs.setCurrentIndex(TABS.index(TAB_ALIASES.get(name, name)))
 
+    def current_tab(self):
+        return TABS[self.tabs.currentIndex()] if self.tabs.currentIndex() >= 0 else TABS[0]
+
+    def card_tool(self):
+        """The tool the card shows: the Paint tab's is Paint's (the brush it starts), the Photos
+        tab has none; else the active tool."""
+        tab = self.current_tab()
+        if tab == "paint":
+            return "paint"
+        if tab == "photos":
+            return None
+        return self.tool if self.tool != "paint" else None
+
     def show_sections(self):
-        """The sections the active tool and tab use (palette.json's "tools" and "tabs"), the rest hidden:
-        Tubes with Place, Draw, Shape and Select, While sculpting with the brushes that stroke, the
-        guide groups on the Tools tab; Output always."""
-        tab = TABS[self.tabs.currentIndex()] if self.tabs.currentIndex() >= 0 else TABS[0]
-        for key, section in (("tubes", self.tubes_section), ("sculptDisplay", self.display_section),
-                             ("groups", self.guides_section), ("output", self.output_section)):
-            section.setVisible(section_shown(self.section_rules[key], self.tool, tab))
+        """The pinned tool grid and the sections the tab uses (palette.json's "tabs"): the sculpt
+        tools on Tools and Correctives, the Paint tile on Paint; the guide groups on Tools."""
+        tab = self.current_tab()
+        self.tool_palette.setVisible(tab in ("tools", "correctives"))
+        self.paint_tiles.setVisible(tab == "paint")
+        self.guides_section.setVisible(section_shown(self.section_rules["groups"], self.tool, tab))
 
     def tab_changed(self, index):
         self.show_sections()
@@ -1692,8 +1735,7 @@ class ToolPalette(QtWidgets.QWidget):
             button.glyph = glyphs[0] if on or on is None else glyphs[1]
             button.setIcon(widgets.glyph(button.glyph))
             button.blockSignals(False)
-        # Nothing to work on: how to start a groom, in place of the group row.
-        self.target_row.setVisible(bool(active))
+        # Nothing to work on: how to start a groom, in place of the tabs and tools.
         self.empty.setVisible(not active)
         self.work.setVisible(bool(active))  # no tabs or tools with nothing to use them on
         self.empty_text.setText(
@@ -1755,12 +1797,6 @@ class ToolPalette(QtWidgets.QWidget):
         if groom:
             groomlab.isolate_group(groom, self.current_group() if self.isolate.isChecked() else None)
 
-    def apply_sculpt_display(self, index):
-        groom = self.groom()
-        if groom:
-            cmds_mode = self.sculpt.itemData(index)
-            groomlab.set_sculpt_display(groom, cmds_mode, density=1.0 if self.full_density.isChecked() else 0.35)
-
     def sync(self, from_negative):
         from groomlab.ui import menu
         menu.symmetry_sync(from_negative)
@@ -1775,12 +1811,12 @@ class ToolPalette(QtWidgets.QWidget):
         self._target = (self.current_group(), self.level.currentData())
         self.push(level=self.level.currentData(), group=self.current_group())
         self.apply_isolation()
-        self.guides_tab.sync_segments()  # Segments works on the picked group
+        self.guides_tab.show_picked()  # the list's row, its box and Segments follow the pick
 
     def pick_group(self, name):
-        """Brushes and new guides use group `name` (from the groups list)."""
+        """Brushes and new guides use group `name` (from the groups list; "" for all groups)."""
         index = next((i for i in range(self.level.count())
-                      if self.level.itemData(i, QtCore.Qt.UserRole + 1) == name), -1)
+                      if self.level.itemData(i, QtCore.Qt.UserRole + 1) == (name or "")), -1)
         if index >= 0:
             self.level.setCurrentIndex(index)
 
@@ -1896,9 +1932,9 @@ class ToolPalette(QtWidgets.QWidget):
         if self.tool == "flow" and (self._ticks % 2 == 0 or groom != getattr(self, "_flow_groom", None)):
             self._flow_groom = groom
             self.fill_flow_count(groom)
-        if self.length_paths.isVisible():  # the keys clicked and dragged in the viewport
-            self.length_paths.refresh()
-        if self.tube_panel.isVisible():  # (the Shape brush, Place, Draw) every selection or solo change
+        if self.length_keys.isVisible():  # the keys clicked and dragged in the viewport
+            self.length_keys.refresh()
+        if any(b.isVisible() for b in self.tube_panel.blocks):  # (Shape, Select, Place, Draw) a selection or solo
             self.tube_panel.refresh(groom, full=self._ticks % 3 == 0)
         # Weights change with the frame: read them every tick, the stack itself now and then
         # (keys edited in the timeline) and whenever the groom's correctives change (its callback);
@@ -1920,8 +1956,9 @@ class ToolPalette(QtWidgets.QWidget):
                     self.paint_tab.end_painting()  # the brush left Paint (a hotkey, the tool settings)
                 self.tool = mode
                 self.buttons[mode].setChecked(True)
+                self.leave_paint_tab()
                 self.show_tool_settings()
-            if not self.radius.slider.isSliderDown():
+            if not self.radius.busy():
                 self.radius.setValue(cmds.groomLabBrushCtx(ctx, query=True, radius=True))
             # The group or level picked from the viewport (the level keys) shows here too.
             if self.tool != PART:
@@ -1937,7 +1974,7 @@ class ToolPalette(QtWidgets.QWidget):
                     self.level.blockSignals(False)
                     self._target = (self.current_group(), self.level.currentData())
                     self.apply_isolation()
-            if not self.strength.slider.isSliderDown():
+            if not self.strength.busy():
                 strength = cmds.groomLabBrushCtx(ctx, query=True, strength=True)
                 self.strength.setValue(strength)
                 if self.tool in self.strengths:
@@ -2003,6 +2040,7 @@ class ToolPalette(QtWidgets.QWidget):
             self.paint_tab.end_painting()
         self.tool = tool
         self.check_tiles(tool)
+        self.leave_paint_tab()
         self.status.setText("")
         if not self.groom():
             self.status.setText("Select a groom first; tools work on the selected groom.")
@@ -2035,13 +2073,14 @@ class ToolPalette(QtWidgets.QWidget):
             return
         kwargs = dict(radius=self.radius.value(), strength=self.strengths.get(tool, 1.0),
                       level=self.level.currentData() if self.level.currentData() is not None else 0,
-                      group=self.current_group(), selected_only=self.selected_only.isChecked(),
+                      # Selected only and Front only are not in the panel: the brushes' defaults.
+                      group=self.current_group(), selected_only=False,
                       erase_guides=self.erase_guides.isChecked(), erase_parts=self.erase_parts.isChecked(),
                       erase_flow=self.erase_flow.isChecked(), stretch=self.stretch.isChecked(),
                       tube_channel=self.tube_channel_name(),
                       flow_sink=self.flow_sink.currentData() or "",
                       symmetry=self.symmetry_name(), pressure=self.pressure.isChecked(),
-                      collide=self.collide.isChecked(), mask_by_scalp=self.mask_scalp.isChecked(),
+                      collide=self.collide.isChecked(), mask_by_scalp=True,
                       match_neighbors=self.match.isChecked(), solo_new_guides=self.solo_new.isChecked(),
                       length=self.length.value() / self.length_factor, segments=self.segments.value(),
                       spacing=self.spacing.value() / self.length_factor,
@@ -2072,6 +2111,12 @@ class ToolPalette(QtWidgets.QWidget):
         except RuntimeError:
             pass
 
+    def leave_paint_tab(self):
+        """Another brush picked (a hotkey, the marking menu) while the Paint or Photos tab shows:
+        the Tools tab, where its card is."""
+        if self.tool not in (None, "paint") and self.current_tab() in ("paint", "photos"):
+            self.show_tab("tools")
+
     def clear_tool(self):
         """No tool here: every tile off, the card back to how to start."""
         self.check_tiles(None)
@@ -2092,75 +2137,81 @@ class ToolPalette(QtWidgets.QWidget):
         self.stop_tool()
 
     def show_tool_settings(self):
-        """The card shows what the active tool uses (the catalog's settings for it), and nothing
-        else; with no tool, how to start."""
-        tool = self.tool
+        """The card shows what its tool uses (the catalog's settings for it: card_tool()), and
+        nothing else; with no tool, one line on how to start. Its blocks, in order: Brush, the
+        tool's own, Applies to."""
+        tool = self.card_tool()
         uses = TOOL_SETTINGS.get(tool, set())
-        self.settings_heading.setText((NAMES.get(tool, tool) if tool else "Tool").upper())
-        self.hint.setText(HINTS.get(tool, "Pick a tool, then drag over the groom in the viewport.")
-                          if tool else "Pick a tool, then drag over the groom in the viewport.")
-        self.settings.setVisible(tool is not None)
+        self.settings.setVisible(self.current_tab() != "photos")
+        self.title_row.setVisible(tool is not None)
+        if tool:
+            self.card_title.setText(NAMES.get(tool, tool))
+            self.card_icon.setPixmap(widgets.icon(tool).pixmap(theme.px(16), theme.px(16)))
+            self.card_help.setToolTip(help_tip(tool))
+            self.hint.setText(SHORT.get(tool) or HINTS.get(tool, ""))
+        else:
+            self.hint.setText(NO_TOOL)
         brush = "radius" in uses
-        for label, slider in ((self.radius_label, self.radius), (self.strength_label, self.strength),
-                              (self.falloff_label, self.falloff)):
-            label.setVisible(brush)
-            slider.setVisible(brush)
+        self.brush_block.setVisible(brush)
+        for slider in (self.radius, self.strength, self.falloff):
             slider.setEnabled(brush)
-        self.radius_row.setVisible(brush)
-        self.falloff_curve_box.setVisible("falloffProfile" in uses)
-        self.strength_curve_box.setVisible("strengthProfile" in uses)
         self.smooth_strength.setVisible("smoothStrength" in uses)
-        self.smooth_label.setVisible("smoothStrength" in uses)
-        self.sync_alpha()
-        self.selected_only.setVisible("selectedOnly" in uses)
         self.pressure.setVisible("pressure" in uses)
         self.pressure.setEnabled("pressure" in uses)
         self.collide.setVisible("collide" in uses)
-        self.mask_scalp.setVisible("frontFacingOnly" in uses)
-        self.collide.setEnabled(tool != "select")
-        self.brush_form.setVisible(brush)
-        # The tool's checkboxes packed two to a row, with no holes where others are hidden.
-        for box in self.check_boxes:
-            self.checks.removeWidget(box)
-        shown = [box for box in self.check_boxes if not box.isHidden()]
-        for i, box in enumerate(shown):
-            self.checks.addWidget(box, i // 2, i % 2)
-        self.gestures.setVisible(brush)
+        for chip_, editor, setting in ((self.falloff_curve_box, self.falloff_curve, "falloffProfile"),
+                                       (self.strength_curve_box, self.strength_curve, "strengthProfile")):
+            chip_.setVisible(setting in uses)
+            editor.setVisible(setting in uses and chip_.isChecked())
+        self.paint_block.setVisible("map" in uses)
+        self.sync_alpha()
         self.create_box.setVisible("newGuides" in uses)
         self.spacing.setVisible("spacing" in uses)
-        self.spacing_label.setVisible("spacing" in uses)
-        self.part_box.setVisible("parts" in uses)
-        self.erase_box.setVisible("erases" in uses)
-        self.target_box.setVisible("targets" in uses)
+        # The tubes: Place and Draw give new guides one (Tube); Shape and Select edit the selected
+        # guides' (Profile, Selected guides).
+        new_tube = "tube" in uses and "newGuides" in uses
+        edit_tube = "tubeChannel" in uses or "selection" in uses
+        panel = self.tube_panel
+        panel.tube_block.setVisible(new_tube)
+        panel.profile_block.setVisible(edit_tube)
+        panel.selected_block.setVisible(edit_tube)
+        if new_tube or edit_tube:
+            panel.set_mode("new" if new_tube else "edit")
+            panel.refresh(self.groom())
         self.stretch_box.setVisible("stretch" in uses)
         self.tube_channel_box.setVisible("tubeChannel" in uses)
-        if "tube" in uses:
-            self.tubes_section.set_expanded(True)
-            self.tube_panel.refresh(self.groom())
+        self.select_box.setVisible("selection" in uses)
+        self.erase_box.setVisible("erases" in uses)
+        self.keys_block.setVisible("lengthKeys" in uses)
+        if "lengthKeys" in uses:
+            self.length_keys.refresh()
         self.flow_box.setVisible("flow" in uses)
         if "flow" in uses:
             self.fill_flow_count(self.groom())
-        self.length_paths.setVisible("lengthPaths" in uses)
-        if "lengthPaths" in uses:
-            self.length_paths.refresh()
-        self.select_box.setVisible("selection" in uses)
-        self.freeze_box.setVisible("freezeMask" in uses)
-        self.level.setEnabled(tool != PART)
+        self.part_box.setVisible("parts" in uses)
+        # Applies to: Acts on where the tool has targets, Mirror for the tools that mirror.
+        self.target_box.setVisible("targets" in uses)
+        self.symmetry_row.setVisible("symmetry" in uses)
+        self.applies_block.setVisible("targets" in uses or "symmetry" in uses)
         self.show_sections()
         if tool in self.strengths:
             signed = tool in SIGNED
             self.strength.setRange(-1.0 if signed else 0.0, 1.0)
             self.strength.setValue(self.strengths[tool])
-            self.strength_label.setText("Strength (±)" if signed else "Strength")
+            self.strength.setLabel("Strength (±)" if signed else "Strength")
 
     def push(self, **flags):
-        """Send changed settings to the active tool."""
+        """Send changed settings to the active tool (the Paint card on the Paint tab while another
+        brush is on: kept for Paint, which reads them when it starts)."""
         from maya import cmds
         ctx = groomlab.BRUSH_CONTEXT
         if self.tool in (None, "select") or not cmds.contextInfo(ctx, exists=True):
             if self.tool == "select" and ("level" in flags or "symmetry" in flags):
                 groomlab.select_tool(level=max(self.level.currentData() or 0, 0), group=self.current_group(),
                                      symmetry=self.symmetry_name())
+            return
+        card = self.card_tool()
+        if card is not None and card != self.tool and not set(flags) & {"level", "group", "symmetry"}:
             return
         try:
             cmds.groomLabBrushCtx(ctx, edit=True, **flags)
@@ -2177,8 +2228,9 @@ class ToolPalette(QtWidgets.QWidget):
         return self.symmetry_mode.currentData() if self.symmetry.isChecked() else "none"
 
     def set_strength(self, v):
-        if self.tool in self.strengths:
-            self.strengths[self.tool] = v
+        tool = self.card_tool() or self.tool
+        if tool in self.strengths:
+            self.strengths[tool] = v
         self.push(strength=v)
 
     def tube_channel_name(self):
@@ -2228,7 +2280,8 @@ class ToolPalette(QtWidgets.QWidget):
 
     def flow_sink_changed(self, *_):
         kind = self.flow_sink.currentData() or ""
-        self.flow_hint.setText(definitions.text("flowSinks" if kind else "flowArrows"))
+        self.flow_sink.setToolTip(definitions.get("choices/flowSink")["tip"] + ". " +
+                                  definitions.text("flowSinks" if kind else "flowArrows"))
         self.push(flowSink=kind)
 
     def clear_flow(self):

@@ -433,9 +433,7 @@ void AppShell::showPanel(Panel which, bool show) {
                 groomTools_->show();
                 groomTools_->raise();
                 groomToolsWidget_->showTab(tab);
-            } else if (which == Panel::Guides) {
-                groomToolsWidget_->section("groups")->setExpanded(false);
-            } else if (which != Panel::Brush && groomToolsWidget_->currentTab() == tab) {
+            } else if (which != Panel::Brush && which != Panel::Guides && groomToolsWidget_->currentTab() == tab) {
                 groomToolsWidget_->showTab(QStringLiteral("tools"));
             }
             break;
@@ -468,8 +466,7 @@ bool AppShell::panelShown(Panel which) const {
     if (!holder) return false;
     switch (which) {
         case Panel::Guides:
-            return !groomTools_->isHidden() && groomToolsWidget_->currentTab() == QLatin1String("tools") &&
-                   groomToolsWidget_->section("groups")->expanded();
+            return !groomTools_->isHidden() && groomToolsWidget_->currentTab() == QLatin1String("tools");
         case Panel::Maps: return !groomTools_->isHidden() && groomToolsWidget_->currentTab() == QLatin1String("paint");
         case Panel::Correctives: return !groomTools_->isHidden() && groomToolsWidget_->currentTab() == QLatin1String("correctives");
         case Panel::Brush: return !groomTools_->isHidden() && groomToolsWidget_->currentTab() == QLatin1String("tools");

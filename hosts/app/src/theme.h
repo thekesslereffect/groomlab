@@ -5,8 +5,8 @@
 // greys, flat, thin borders, as the Maya host wears it) in the standalone app's docked window
 // (app_shell.h: menu bar, tool bar, solid docks, clean and dark like Plasticity). Glass themes
 // (Playful, Polar) keep their translucent pieces over the viewport; every theme's docks are solid.
-// This module holds the colors, the fonts (Figtree for the words, JetBrains Mono for the numbers,
-// bundled as resources), the viewport's overlay colors (displayTheme), the layout of what stays
+// This module holds the colors, the fonts (Inter for the words and, with tabular digits, the
+// numbers; JetBrains Mono for code, hex colors and paths; bundled as resources), the sizes, the viewport's overlay colors (displayTheme), the layout of what stays
 // over the viewport (pure geometry, so the tests check it without a window), the brush tiles'
 // order and the Qt style sheet the window's widgets take. No widgets here: the painted ones are
 // in glass.h.
@@ -87,15 +87,19 @@ QColor redLight();
 QColor emeraldSoft();  // the Sym X chip's text when on
 QColor emeraldChip();  // ... and its fill
 QColor readableOn(const QColor& fill);  // ink on a bright fill, white on a dark one
-// A segmented control's chosen item: its own colors on glass; a solid theme's accent pill.
+// A segmented control's chosen item: its own colors on glass; a solid theme's selection tone.
 QColor segmentFill(const QColor& own);
 QColor segmentText(const QColor& own);
+// A checked or pressed chip (a toggle, not the primary action): its own colors on glass; on a
+// solid theme the selection tone (ui.selection) and its text (ui.selectionText).
+QColor checkedFill(const QColor& own);
+QColor checkedText(const QColor& own);
 // A slider's fill, as the Maya host's ui.sliders: a theme with one slider color (Charcoal's
 // silver, Polar's and Studio's accent) gives every slider that color; a cycle (Playful's four
 // primaries) keeps the color the slider asks for.
 QColor sliderFill(const QColor& own);
-// A filled action button or a checked chip (chrome, not meaning): its own colors on glass; on a
-// solid theme the accent pill and the accent's text.
+// A filled action button, the primary action (chrome, not meaning): its own colors on glass; on
+// a solid theme the accent pill and the accent's text.
 QColor actionFill(const QColor& own);
 QColor actionText(const QColor& own);
 // Words that say something went wrong or needs a look (an export's failure, a node's error
@@ -113,11 +117,29 @@ QColor uiColor(const std::string& key);
 // Registers the bundled fonts once (idempotent); false when the resources are missing, in
 // which case uiFont falls back to the system's sans-serif.
 bool loadFonts();
-QString uiFamily();    // "Figtree"
+// The theme's ui.font ("Inter", bundled, when the theme names none): the one place the UI's
+// family is named (the style sheet's too).
+QString uiFamily();
 QString monoFamily();  // "JetBrains Mono"
 // A UI font of `pixelSize` and `weight` (QFont::Weight: 400 regular ... 800 extra bold).
 QFont uiFont(int pixelSize, int weight = QFont::Medium);
+// Mono: what is typed as code or a name (hex colors, expressions, file paths and templates).
 QFont monoFont(int pixelSize, int weight = QFont::Medium);
+// A number shown in the UI (slider values, stats, frames, timings): the UI font with tabular
+// digits (OpenType "tnum"), so a changing value keeps its width.
+QFont numberFont(int pixelSize, int weight = QFont::Medium);
+
+// ---- Sizes ---------------------------------------------------------------------------------------
+// The theme's ui.radius (controls: fields, buttons, tiles; a glass theme's no more than 8), a
+// smaller one (check boxes, list rows: radius - 2, at least 2) and the panels' and cards'
+// (radius + 2); ui.rowHeight, every control's height (26 unless the theme says).
+int controlRadius();
+int smallRadius();
+int panelRadius();
+int rowHeight();
+// The UI's text size in pixels: ui.fontSize (11-14, 12 unless the theme says; a glass theme's 13),
+// the style sheet's and the painted fields'.
+int fontSize();
 
 // ---- Brushes --------------------------------------------------------------------------------------
 // The rail's tools are the core's brush catalog (brush_catalog.h: the ids, labels, categories
@@ -136,6 +158,11 @@ const std::vector<BrushEntry>& brushes();
 const BrushEntry* brush(const std::string& name);  // null for an unknown mode
 QColor categoryColor(BrushCategory category);      // the fill (the active tool, the ring)
 QColor categoryIconColor(BrushCategory category);  // the tint of an inactive tool's icon
+// A tool icon's two tones, as the Maya host recolors the SVGs (widgets.icon_colors): its group's
+// color (icons.create/shape/trim/paint; the guide tools Select and Freeze take Create's and
+// Paint's, as Maya groups them) and the ink (icons.ink: hair and neutral parts).
+QColor toolIconColor(BrushCategory category, const std::string& icon);
+QColor iconInk();
 QString brushTitle(const std::string& name);       // the catalog's label ("comb" -> "Comb"); a word capitalized otherwise
 
 // ---- The node graph ------------------------------------------------------------------------------
@@ -161,7 +188,13 @@ QColor graphDriven();
 QColor graphReads();
 QColor graphWrites();
 qreal nodeRadius();        // graph.cornerRadius (14 in Playful)
-bool tintedHeaders();      // graph.headerStyle "tinted": a wash and an accent bar, else filled
+// graph.headerStyle: "tinted" (a wash and an accent bar), "minimal" (no header fill, a category
+// dot by the title) or "filled" (the default: the header in the category color).
+QString headerStyle();
+bool tintedHeaders();      // headerStyle() == "tinted"
+// graph.canvasStyle: "lines" (the default: a grid of lines), "dots" (a dot at every grid
+// crossing) or "plain"; drawn in graph.grid.
+QString canvasStyle();
 
 // ---- The viewport's overlay ------------------------------------------------------------------------
 // The theme's viewport section (guide levels, selection, frozen, parts, flow, tubes...) as the
@@ -176,9 +209,10 @@ struct OverlayMetrics {
 };
 // What stays over the viewport once the window has docks (overlay.h): the active tool's name
 // (top-left), Undo and Redo (top-right), the stats (bottom-left, Groom) and the refine line
-// (bottom-right, Look), the toast above them, the prompt and the empty-state card centered. Each
-// size is the piece's hint; the rects stay inside the view and never meet each other (except the
-// prompt and the card, which sit over the rest).
+// (bottom-right, Look), the first-groom card above the stats (bottom-left), the toast above them,
+// the prompt and the empty-state card centered. Each size is the piece's hint; the rects stay
+// inside the view and never meet each other (except the prompt and the card, which sit over the
+// rest). A first-groom card with no room (it would meet the top row) is left out: a null rect.
 struct ViewportOverlayRequest {
     QSize view;
     QSize toolLabel;  // empty: none
@@ -188,9 +222,10 @@ struct ViewportOverlayRequest {
     QSize toast;
     QSize prompt;
     QSize emptyCard;
+    QSize starter;  // the first-groom steps (bottom-left, above the stats)
 };
 struct ViewportOverlayLayout {
-    QRect toolLabel, history, stats, refine, toast, prompt, emptyCard;
+    QRect toolLabel, history, stats, refine, toast, prompt, emptyCard, starter;
 };
 ViewportOverlayLayout layoutViewportOverlay(const ViewportOverlayRequest& request, int margin = 12);
 

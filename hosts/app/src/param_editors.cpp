@@ -43,8 +43,8 @@ RoundButton* chipButton(const QString& text, QWidget* parent) {
     b->setPadding(10);
     b->setFontSize(12);
     b->setFontWeight(700);
-    b->setFill(theme::chip(), theme::actionFill(theme::blue()));
-    b->setTextColor(theme::textSoft(), theme::actionText(Qt::white));
+    b->setFill(theme::chip(), theme::checkedFill(theme::blue()));
+    b->setTextColor(theme::textSoft(), theme::checkedText(Qt::white));
     return b;
 }
 
@@ -249,7 +249,7 @@ void RampEditor::paintEvent(QPaintEvent* /*event*/) {
     }
     // The dragged key's numbers.
     if (dragging_ && selected_ >= 0) {
-        painter.setFont(theme::monoFont(11));
+        painter.setFont(theme::numberFont(11));
         painter.setPen(theme::textSoft());
         painter.drawText(plot.adjusted(8, 4, -8, -4), Qt::AlignTop | Qt::AlignRight,
                          QStringLiteral("%1, %2").arg(keys_[static_cast<std::size_t>(selected_)].first, 0, 'f', 2)

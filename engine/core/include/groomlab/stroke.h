@@ -26,7 +26,7 @@
 #include "groomlab/flow.h"
 #include "groomlab/graph.h"
 #include "groomlab/guide_hierarchy.h"
-#include "groomlab/length_path_tool.h"
+#include "groomlab/length_key_tool.h"
 #include "groomlab/parts.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_paint.h"
@@ -45,7 +45,7 @@ struct BrushToolSettings {
     enum class Tool { Brush, Place, Draw, Part, Flow, Lengths };
     // Place: click one guide, drag to place many; Draw: draw a guide's shape; Part: draw a part
     // freehand on the scalp; Flow: lay flow arrows along the stroke and comb the ones it passes
-    // (Ctrl: erase them); Lengths: the Length Paths tool (length_path_tool.h, BrushTool::lengths).
+    // (Ctrl: erase them); Lengths: the Length Keys tool (length_key_tool.h, BrushTool::lengths).
     Tool tool = Tool::Brush;
     std::string partName = "part";  // Part: the new part's name (made unique)
     // Flow: "" lays arrows along strokes; whorl, whorlcw, converge or part places a sink of that
@@ -533,7 +533,7 @@ private:
 // ---- The interactive tool -------------------------------------------------------------------------
 
 // Modifier keys held when a stroke starts.
-// kStrokeAdjust: the press is the host's adjusting button (the Length Paths tool: a key's length
+// kStrokeAdjust: the press is the host's adjusting button (the Length Keys tool: a key's scale
 // dragged; right in the app and Blender, middle in Maya, whose right button opens marking menus).
 enum StrokeModifier : unsigned { kStrokeCtrl = 1u, kStrokeShift = 2u, kStrokeAdjust = 4u };
 
@@ -608,9 +608,9 @@ public:
     bool changed() const { return changed_ || mapChanged_; }
     // Part and Flow: the path drawn so far on the scalp (the host draws it until it is committed).
     const std::vector<Vec3f>& drawnPath() const { return drawPath_; }
-    // The Length Paths tool (Tool::Lengths): press, drag and release go to it; hosts draw its
+    // The Length Keys tool (Tool::Lengths): press, drag and release go to it; hosts draw its
     // overlay and give it the panel's edits, Apply and Cancel.
-    LengthPathTool& lengths() { return lengths_; }
+    LengthKeyTool& lengths() { return lengths_; }
     bool lengthsPressed() const { return lengthsPressed_; }  // a press it took, until its release
     // The mode the tool is set to: during a Shift+drag's smoothing still the tool's own mode.
     std::string toolModeName() const;
@@ -651,8 +651,8 @@ private:
     void commitSculpt(StrokeHost& host);
 
     float pressure_ = 1.0f;
-    LengthPathTool lengths_;
-    bool lengthsPressed_ = false;  // a press the Length Paths tool took
+    LengthKeyTool lengths_;
+    bool lengthsPressed_ = false;  // a press the Length Keys tool took
     std::shared_ptr<GuideHierarchy> working_;
     // The parts and flow arrows a brush stroke shapes (or erases): working copies of the stored
     // ones, previewed live and committed with the guides.
