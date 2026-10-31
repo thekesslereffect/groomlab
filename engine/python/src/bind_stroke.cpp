@@ -225,7 +225,7 @@ void bindStroke(py::module_& m) {
         }))
         .def("update", [](BrushToolSettings& s, py::kwargs kwargs) { applySettings(s, kwargs); }, "Sets the named settings.")
         .def_property("mode", &BrushToolSettings::modeName, &BrushToolSettings::setMode,
-                      "comb, smooth, lift, length, tube, paint, clump, twist, curl, straighten, attract, erase, "
+                      "comb, smooth, lift, length, tube, paint, clump, twist, straighten, attract, erase, "
                       "cut, slide, place, draw, part or flow.")
         .def_property("targets", &BrushToolSettings::targetsName, &BrushToolSettings::setTargets)
         .def_property(

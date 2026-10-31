@@ -965,9 +965,10 @@ class ToolsTest(HelperTestCase):
     def test_tool_catalog_and_settings_in_host_units(self):
         cat = self.h.call("tool_catalog")
         ids = [t["id"] for t in cat["tools"]]
-        for tool in ("place", "draw", "part", "flow", "comb", "slide", "smooth", "straighten", "lift", "twist", "curl",
+        for tool in ("place", "draw", "part", "flow", "comb", "slide", "smooth", "straighten", "lift", "twist",
                      "attract", "shape", "cut", "length", "erase", "paint", "select", "freeze"):
             self.assertIn(tool, ids)
+        self.assertFalse({"curl", "direction", "noise"} & set(ids))  # removed brushes
         self.assertIn("falloff", [s["id"] for s in cat["settings"]])
         r = self.call("tool_set", tool="comb", settings={"radius": 42, "falloff": 0.25, "symmetry": "y", "symmetryCenter": 0.01,
                                                         "length": 0.03, "frontFacingOnly": False, "targets": ["guides", "parts"]})
@@ -1071,13 +1072,13 @@ class ToolsTest(HelperTestCase):
         self.stroke("comb", self.comb_events(), settings=curves,
                     ref={"strength_profile": [[0, 0], [1, 1]], "falloff_profile": [[0, 1], [1, 0]]})
         before = self.guides()
-        self.stroke("direction", self.comb_events(dx=160.0), settings={"symmetry": "topology"}, ref={"symmetry": "topology"})
+        self.stroke("twist", self.comb_events(dx=160.0), settings={"symmetry": "topology"}, ref={"symmetry": "topology"})
         self.assertEqual(self.call("tool_get")["settings"]["symmetry"], "topology")
-        self.stroke("noise", self.comb_events(), settings={"strength": 0.8}, ref={"strength": 0.8})
+        self.stroke("smooth", self.comb_events(), settings={"strength": 0.8}, ref={"strength": 0.8})
         after = self.guides()
         moved = [g for g in before if np.abs(after[g] - before[g]).max() > 1e-4]
         self.assertTrue(moved)
-        for g in moved:  # turned and jittered, lengths kept
+        for g in moved:  # turned and smoothed, lengths kept
             np.testing.assert_allclose(np.linalg.norm(np.diff(after[g], axis=0), axis=1).sum(),
                                        np.linalg.norm(np.diff(before[g], axis=0), axis=1).sum(), rtol=0.02)
         before = after

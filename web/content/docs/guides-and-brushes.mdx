@@ -343,10 +343,8 @@ and each drag is one undo step. The brushes are the same, in the same order, in 
 | Shape | **Comb** | The main shaping brush: drags guides along the stroke with roots pinned. With **Stretch** on, combing also lengthens or shortens them. |
 | | **Slide** | Moves roots along the scalp; the guides keep their shape. |
 | | **Smooth**, **Straighten** | Remove kinks; relax guides toward a straight line. |
-| | **Lift**, **Twist**, **Curl** | Raise guides off the scalp, rotate them around their root, curl them toward the tip. |
+| | **Lift**, **Twist** | Raise guides off the scalp; rotate them around their root. |
 | | **Attract** | Pulls tips together (negative strength pushes them apart). |
-| | **Direction** | Rotates guides about their roots toward the stroke direction, keeping lengths. |
-| | **Noise** | Adds smooth random displacement that builds up with each stroke (a negative strength smooths it out). |
 | | **Shape** | Paints guides' [tubes](#tube-guides) near the brush: **Width**, **Flatness** or **Twist** (a negative strength: the opposite); its card's **Profile** and **Selected guides** set the selected guides' tube shape, width, flatness and twist. |
 | Trim | **Cut**, **Length**, **Erase** | Cut guides where the brush touches; lengthen or shorten them uniformly; delete guides, part lines or flow arrows (not the scattered hair: see below). |
 | | **Length Keys** | Scale guide lengths from keys you place on the scalp, blended smoothly between them (see [Length Keys](#length-keys)). |
@@ -396,9 +394,8 @@ to x1, so you can come back, drag a key and apply again without scaling twice.
 
 ### Keys
 
-- **Ctrl** does the brush's opposite: Length shortens, Lift lays guides down, Twist and Curl
-  turn the other way, Attract pushes apart, Direction turns away, Noise smooths, Shape shrinks,
-  Cut grows. Painting, it paints toward 0 (Ctrl+Paint on the density map removes hair,
+- **Ctrl** does the brush's opposite: Length shortens, Lift lays guides down, Twist turns the
+  other way, Attract pushes apart, Shape shrinks, Cut grows. Painting, it paints toward 0 (Ctrl+Paint on the density map removes hair,
   Ctrl+Freeze unfreezes). Comb, Slide, Smooth, Straighten and Erase have no opposite.
 - **Shift+drag** paints the selection with the brush ring, without leaving the brush: every
   guide the ring passes over is selected as you go, and when you let go the guides not selected
@@ -474,7 +471,7 @@ uses it:
 
 1. **Brush**: how the stroke feels.
 2. The tool's own block, named after what it sets: **Paint** (Mode, Value and **Fill**, the
-   stamp), **New guides** and **Tube** (Place, Draw), **Comb** (Stretch while combing),
+   stamp), **New guides** and **Tube** (Place, Draw),
    **Paints**, **Profile** and **Selected guides** (Shape; [tube guides](#tube-guides)),
    **Selection** (Select), **Erases** (Erase), **Keys** (Length Keys), **Flow** and **Parts**.
 3. **Applies to**: where the stroke lands.
@@ -488,6 +485,7 @@ With no tool picked, the card says how to start.
 | **Smooth** | Brush | Painting: how much Shift+drag smooths per stamp (past 1: several passes). |
 | **Pressure** | Brush | A tablet's pen pressure scales the strength. |
 | **Off scalp** | Brush | Guides never go below the scalp; points pushed under it slide along it. |
+| **Stretch** | Brush (Comb) | Combing lengthens or shortens guides as you pull, instead of keeping their length. |
 | **Falloff curve** | Brush | The falloff as a curve, center (left) to edge (right), shown under the chips while it is on. Right-click it for presets. |
 | **Root to tip** | Brush | How much of the strength each part of a guide receives, root (left) to tip (right); for example, style the ends and leave the roots. |
 | **Acts on** | Applies to | What a shaping brush moves: guides, part lines, flow arrows. |

@@ -1028,9 +1028,9 @@ def step_brush_pack():
     cmds.setAttr("persp.rotate", -8, 0, 0)
     cmds.select(cmds.listRelatives(groom, parent=True)[0])
 
-    # Direction: guides turn toward the stroke, one undo step.
+    # Twist with curves and topological symmetry: guides turn, one undo step.
     data0 = cmds.getAttr(groom + ".guideData")
-    ctx = groomlab.brush_tool("direction", radius=200, strength=1.0, strength_profile=[[0, 0.5], [1, 1]],
+    ctx = groomlab.brush_tool("twist", radius=200, strength=1.0, strength_profile=[[0, 0.5], [1, 1]],
                               falloff_profile=[[0, 1], [1, 0]], symmetry="topology")
     check("the curves reach the context",
           json.loads(cmds.groomLabBrushCtx(ctx, query=True, strengthProfile=True)) == [[0, 0.5], [1, 1]]
@@ -1039,7 +1039,7 @@ def step_brush_pack():
     x0, y0 = to_view((0.3, 0.85, 0.4))
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke=" ".join("%d %d" % (x0 + 15 * k, y0) for k in range(10)))
     data1 = cmds.getAttr(groom + ".guideData")
-    check("the Direction brush turns the guides", data1 != data0)
+    check("the Twist brush turns the guides", data1 != data0)
     cmds.undo()
     check("one undo restores them", cmds.getAttr(groom + ".guideData") == data0)
 
@@ -1161,11 +1161,12 @@ def step_brush_pack():
     check("redo links and paints again", "scatter_density" in groomlab.list_maps(groom))
     tools.stop_tool()
 
-    # The Groom Tools: the new tiles (no Width or Density), and the Paint card with its curves.
+    # The Groom Tools: no tiles for the removed brushes (Width, Density, Curl, Direction, Noise),
+    # and the Paint card with its curves.
     tools = palette.show()
-    check("the Groom Tools have the new brushes' tiles, not Width or Density",
-          all(t in tools.buttons for t in ("direction", "noise")) and not any(t in tools.buttons for t in ("width", "density")))
-    check("the new tiles have icons", all(not tools.buttons[t].icon().isNull() for t in ("direction", "noise")))
+    check("the Groom Tools have no Width, Density, Curl, Direction or Noise tiles",
+          not any(t in tools.buttons for t in ("width", "density", "curl", "direction", "noise")))
+    check("the tiles have icons", all(not tools.buttons[t].icon().isNull() for t in ("attract", "twist")))
     check("Unfreeze All sits beside the Freeze tile", "unfreeze" in tools.buttons and not tools.buttons["unfreeze"].isCheckable())
     gestures = palette.help_tip("comb").split("<table", 1)[-1]  # a brush tile's tooltip: the gestures' list
     check("the hints name the Shift selection and Ctrl's opposite",

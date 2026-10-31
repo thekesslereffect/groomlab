@@ -294,7 +294,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | Command | Arguments | Result |
 |---|---|---|
 | `tool_catalog` | (no session) | `{"tools": [{id, label, category, order, icon, defaultStrength, signed, hint, settings}], "categories", "settings": [{id, label, hint}], "paintable": [{id, label, type, param, hint}]}` (brush_catalog.h: every host's palette; paintable: what New Map > For offers first, stroke.h paintableSettings) |
-| `tool_set` | `tool` (a catalog id: place, draw, part, flow, comb, slide, smooth, straighten, lift, twist, curl, attract, shape, cut, length, erase, paint, select, freeze; or clump), `settings` {...} | `tool_get`'s answer |
+| `tool_set` | `tool` (a catalog id: place, draw, part, flow, comb, slide, smooth, straighten, lift, twist, attract, shape, cut, length, erase, paint, select, freeze; or clump), `settings` {...} | `tool_get`'s answer |
 | `tool_get` | | `{"tool", "mode", "settings" (all, host units), "shows" (the catalog's settings for the card), "ringColor", "pathColor", "hoverColor"}` |
 | `stroke_begin` | `view`, `x`, `y`, `pressure` (1), `ctrl`, `shift`, `overlay` (true) | `{"stroking", "mode", "ring", "overlay", "view", "warnings"}` (BrushTool::press: Ctrl the opposite action, Shift a click picks the level or a drag smooths) |
 | `stroke_drag` | `points` [[x, y] or [x, y, pressure], ...] (or `x`, `y`), `pressure`, `view`? | `{"stroking", "changed", "ring", "overlay", "warnings"}` |

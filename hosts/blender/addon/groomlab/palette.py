@@ -477,7 +477,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 sliders.prop(t, "smooth_strength", text=label("smoothStrength", "Smooth"), slider=True)
             # Its options as toggles, in one order whatever the tool (Selected only and Front only
             # are not in the panel: the brushes keep their defaults, off and on).
-            toggles = [(k, p, text) for k, p, text in (("pressure", "pressure", "Pressure"), ("collide", "collide", "Off scalp"))
+            toggles = [(k, p, text) for k, p, text in (("pressure", "pressure", "Pressure"), ("collide", "collide", "Off scalp"),
+                                                       ("stretch", "stretch", "Stretch"))  # Stretch: Comb's
                        if k in uses]
             if toggles:
                 row = col.row(align=True)
@@ -566,9 +567,6 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             col.label(text=flow_count_text(t.flow_arrows, t.flow_sinks))
         if "lengthKeys" in uses:
             self.draw_lengths(card, context, t)
-        if "stretch" in uses:  # Comb: keep lengths, or stretch
-            col, _ = block(card, info["label"])
-            col.prop(t, "stretch", text="Stretch while combing", toggle=True)
         if "tubeChannel" in uses:  # Shape: what it paints
             col, _ = block(card, label("tubeChannel", "Paints"))
             col.row(align=True).prop(t, "tube_channel", expand=True)
@@ -699,8 +697,8 @@ class GROOMLAB_UL_correctives(bpy.types.UIList):
 
 # The strokes that draw the strands while live (While sculpting): every brush that strokes, Place
 # and Draw (palette.json's old section; Blender has no other place for these two settings).
-SCULPTING_TOOLS = ("place", "draw", "flow", "comb", "slide", "smooth", "straighten", "lift", "twist", "curl", "attract",
-                   "direction", "noise", "shape", "cut", "length", "erase")
+SCULPTING_TOOLS = ("place", "draw", "flow", "comb", "slide", "smooth", "straighten", "lift", "twist", "attract",
+                   "shape", "cut", "length", "erase")
 
 
 class VIEW3D_PT_groomlab_tools_sculpting(GroomToolsSubpanel, bpy.types.Panel):

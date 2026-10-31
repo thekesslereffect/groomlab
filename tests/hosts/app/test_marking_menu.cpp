@@ -198,10 +198,10 @@ TEST(AppMarkingMenu, ReleaseToPickAndClickToPick) {
     EXPECT_EQ(menu.itemAt(c + QPointF(-30.0, 30.0)), indexOf(menu, "draw"));
     EXPECT_EQ(menu.itemAt(c + QPointF(5.0, 5.0)), -1) << "the dead zone in the middle";
     // Over a list row: that row, whatever the direction.
-    const int curl = indexOf(menu, "curl");
-    menu.track(menu.itemRect(curl).center());
-    menu.release(menu.itemRect(curl).center());
-    EXPECT_EQ(picked.back(), "curl");
+    const int attract = indexOf(menu, "attract");
+    menu.track(menu.itemRect(attract).center());
+    menu.release(menu.itemRect(attract).center());
+    EXPECT_EQ(picked.back(), "attract");
     // Away and back to the middle, then let go: nothing.
     menu.popup(c, true);
     menu.track(c + QPointF(0.0, -80.0));

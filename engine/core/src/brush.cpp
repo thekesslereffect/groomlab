@@ -17,7 +17,6 @@
 #include "groomlab/curve.h"
 #include "groomlab/frames.h"
 #include "groomlab/guide_selection.h"
-#include "groomlab/noise.h"
 #include "groomlab/parallel.h"
 #include "groomlab/point_index.h"
 #include "groomlab/random.h"
@@ -149,11 +148,7 @@ namespace {
 constexpr float kPerStampRate = 0.05f;  // Length and the Shape brush's width change per stamp at strength 1
 constexpr float kFlattenRate = 0.1f;    // Shape on flatness: share of the way to flat (or round) per stamp at strength 1
 constexpr float kTwistRate = 0.1f;      // radians per stamp at strength 1
-constexpr float kCurlRate = 0.25f;      // radians of bend per stamp over a whole guide at strength 1
 constexpr float kAttractRate = 0.1f;    // fraction of the way to the center per stamp, at the tip
-constexpr float kDirectionRate = 0.5f;  // share of the turn toward the stroke per stamp at strength 1, full weight
-constexpr float kNoiseRate = 0.02f;     // jitter added per stamp at strength 1, as a share of the guide's length
-constexpr float kNoiseWaves = 3.0f;     // the jitter's waves along a guide (about)
 
 std::vector<float> segmentLengths(const std::vector<Vec3f>& pts) {
     std::vector<float> len(pts.size(), 0.0f);
@@ -400,26 +395,6 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
             e.points = keepLengths(e.points, segmentLengths(pts));
             return e;
         }
-        case BrushMode::Curl: {
-            // Bend about the guide's side axis: each point turns the rest of the
-            // guide by its share of the curl, so the tip curls most.
-            const Vec3f dir0 = (pts[1] - pts[0]).normalized();
-            Vec3f axis = dir0.cross(rootNormal(g, scalp));
-            if (axis.length() < 1e-3f) axis = dir0.cross(g.frameUp);
-            if (axis.length() < 1e-6f) return e;
-            axis = axis.normalized();
-            const float rate = std::clamp(s.strength, -1.0f, 1.0f) * kCurlRate / static_cast<float>(n - 1);
-            std::vector<Vec3f> out;  // the points, copied once one turns
-            for (std::size_t i = 1; i + 1 < n; ++i) {
-                float angle = rate * weigh(pts[i]);
-                if (profiled) angle *= rootToTip[i];
-                if (angle == 0.0f) continue;
-                if (out.empty()) out = pts;
-                for (std::size_t j = i + 1; j < n; ++j) out[j] = out[i] + rotateAxisAngle(out[j] - out[i], axis, angle);
-            }
-            if (!out.empty()) e.points = std::move(out);
-            return e;
-        }
         case BrushMode::Slide: {
             // The root moves with the drag, projected onto the scalp; the guide
             // keeps its shape, turned from the old root normal to the new one.
@@ -457,65 +432,6 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
                 if (w == 0.0f) continue;
                 if (moved.empty()) moved = pts;
                 moved[i] = pts[i] + (center - pts[i]) * w;
-            }
-            if (!moved.empty()) e.points = keepLengths(moved, segmentLengths(pts));
-            return e;
-        }
-        case BrushMode::Direction: {
-            // The stroke's direction on the root's tangent plane, and the guide's (root to tip): the
-            // guide turns about its root normal by a share of the angle between them.
-            if (drag.length() == 0.0f) return e;
-            const Vec3f up = rootNormal(g, scalp).normalized();
-            Vec3f want = drag - up * drag.dot(up);
-            Vec3f have = pts[n - 1] - pts[0];
-            have = have - up * have.dot(up);
-            if (want.length() < 1e-9f || have.length() < 1e-6f) return e;  // standing up: no direction to turn
-            want = (s.strength < 0.0f ? -want : want).normalized();
-            have = have.normalized();
-            const float full = pm::atan2(have.cross(want).dot(up), have.dot(want));
-            const float angle = full * std::min(1.0f, std::fabs(s.strength) * guideWeight(pts, weigh)) * kDirectionRate;
-            if (angle == 0.0f) return e;
-            e.points.resize(n);
-            for (std::size_t i = 0; i < n; ++i) {
-                e.points[i] = pts[0] + rotateAxisAngle(pts[i] - pts[0], up, profiled ? angle * rootToTip[i] : angle);
-            }
-            if (profiled) e.points = keepLengths(e.points, segmentLengths(pts));
-            return e;
-        }
-        case BrushMode::Noise: {
-            std::vector<Vec3f> moved;  // the points, copied once one moves
-            if (s.strength < 0.0f) {
-                // Negative (Ctrl): smoothed out, as Smooth does.
-                for (std::size_t i = 1; i < n; ++i) {
-                    float w = 0.5f * std::min(-s.strength, 1.0f) * weigh(pts[i]);
-                    if (profiled) w *= std::clamp(rootToTip[i], 0.0f, 1.0f);
-                    if (w <= 0.0f) continue;
-                    const Vec3f target = i + 1 < n ? (pts[i - 1] + pts[i + 1]) * 0.5f
-                                                   : (n >= 3 ? pts[i - 1] * 2.0f - pts[i - 2] : pts[i]);
-                    if (moved.empty()) moved = pts;
-                    moved[i] = pts[i] + (target - pts[i]) * w;
-                }
-                if (!moved.empty()) e.points = keepLengths(moved, segmentLengths(pts));
-                return e;
-            }
-            // A smooth random offset across the guide, the same pattern for a guide every stamp
-            // (seeded by its ID), so strokes build it up; calm at the root.
-            const float total = arcLength(pts.data(), n);
-            if (total <= 0.0f || s.strength == 0.0f) return e;
-            const std::uint64_t seed = hashCombine(hash64(0x9015EB2u), static_cast<std::uint64_t>(g.id));
-            const float k = std::min(s.strength, 1.0f) * kNoiseRate * total;
-            float length = 0.0f;
-            for (std::size_t i = 1; i < n; ++i) {
-                length += (pts[i] - pts[i - 1]).length();
-                float w = weigh(pts[i]);
-                if (profiled) w *= rootToTip[i];
-                if (w <= 0.0f) continue;
-                const float t = length / total;
-                Vec3f offset = vectorNoise(Vec3f(t * kNoiseWaves, 0.5f, 0.25f), seed, 2);
-                const Vec3f along = (pts[std::min(i + 1, n - 1)] - pts[i - 1]).normalized();
-                offset = offset - along * offset.dot(along);
-                if (moved.empty()) moved = pts;
-                moved[i] = pts[i] + offset * (k * w * std::min(1.0f, 4.0f * t));
             }
             if (!moved.empty()) e.points = keepLengths(moved, segmentLengths(pts));
             return e;
@@ -1178,13 +1094,10 @@ BrushMode brushModeFromString(const std::string& name) {
     if (name == "shape") return BrushMode::ShapeTube;
     if (name == "paint" || name == "attribute" || name == "clump") return BrushMode::Attribute;
     if (name == "twist") return BrushMode::Twist;
-    if (name == "curl") return BrushMode::Curl;
     if (name == "straighten") return BrushMode::Straighten;
     if (name == "slide" || name == "move") return BrushMode::Slide;
     if (name == "attract") return BrushMode::Attract;
     if (name == "erase") return BrushMode::Erase;
-    if (name == "direction") return BrushMode::Direction;
-    if (name == "noise") return BrushMode::Noise;
     throw std::invalid_argument("unknown brush mode '" + name + "'");
 }
 
@@ -1197,14 +1110,11 @@ const char* brushModeName(BrushMode mode) {
         case BrushMode::ShapeTube: return "shape";
         case BrushMode::Attribute: return "paint";
         case BrushMode::Twist: return "twist";
-        case BrushMode::Curl: return "curl";
         case BrushMode::Straighten: return "straighten";
         case BrushMode::Slide: return "slide";
         case BrushMode::Attract: return "attract";
         case BrushMode::Erase: return "erase";
         case BrushMode::Cut: return "cut";
-        case BrushMode::Direction: return "direction";
-        case BrushMode::Noise: return "noise";
     }
     return "comb";
 }
@@ -1660,13 +1570,10 @@ std::size_t flowStamp(FlowSet& flow, const ScalpMesh& scalp, const BrushSettings
             return changed;
         }
         case BrushMode::Lift:
-        case BrushMode::Curl:
         case BrushMode::ShapeTube:
         case BrushMode::Attribute:
         case BrushMode::Slide:
         case BrushMode::Cut:
-        case BrushMode::Direction:
-        case BrushMode::Noise:
             return 0;
     }
     return 0;
@@ -1828,7 +1735,7 @@ std::size_t partStamp(PartSet& set, const ScalpMesh& scalp, const BrushSettings&
                 break;
             }
             default:
-                return 0;  // Lift, Curl, ShapeTube, Attribute, Slide, Twist, Length: not for parts
+                return 0;  // Lift, ShapeTube, Attribute, Slide, Twist, Length: not for parts
         }
         bool any = false;
         for (std::size_t i = 0; i < n; ++i) {

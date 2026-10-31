@@ -146,7 +146,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 
 | Capability | Maya entry point | App |
 | --- | --- | --- |
-| Place, Draw, Part, Flow, Comb, Slide, Smooth, Straighten, Lift, Twist, Curl, Attract, Shape, Cut, Length, Erase, Paint | the tool tiles (`brush_tool`) | present: the brush rail; both palettes are built from the core's brush catalog (`brush_catalog.h`: one order, Create, Shape, Trim, Paint, Guides, one set of names, hints and settings) |
+| Place, Draw, Part, Flow, Comb, Slide, Smooth, Straighten, Lift, Twist, Attract, Shape, Cut, Length, Erase, Paint | the tool tiles (`brush_tool`) | present: the brush rail; both palettes are built from the core's brush catalog (`brush_catalog.h`: one order, Create, Shape, Trim, Paint, Guides, one set of names, hints and settings) |
 | Select (click, box; Shift toggle, Ctrl deselect, Ctrl+Shift add) | Select tile | present (box; lasso: partial, a box) |
 | Freeze mask (paint, unfreeze all) | Freeze tile | missing (the core's brush honors a `freeze` layer; no tool to paint it) |
 | Radius, Strength (signed per tool), Falloff (0 hard, 1 soft, in both) | the card | present (the bar and the brush panel) |

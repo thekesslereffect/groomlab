@@ -3981,7 +3981,7 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual(window.tabs.currentIndex(), palette.TABS.index("paint"))  # Paint shows its maps
             window.buttons["comb"].click()  # Comb: keep lengths or stretch
             self.assertEqual(window.tabs.currentIndex(), palette.TABS.index("tools"))  # another brush: its card
-            self.assertTrue(window.stretch_box.isVisibleTo(window))
+            self.assertTrue(window.stretch.isVisibleTo(window) and window.brush_block.isAncestorOf(window.stretch))
             window.stretch.setChecked(True)
             self.assertTrue(cmds.groomLabBrushCtx(groomlab.BRUSH_CONTEXT, query=True, stretch=True))
             window.stretch.setChecked(False)

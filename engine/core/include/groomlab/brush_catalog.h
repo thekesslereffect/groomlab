@@ -10,7 +10,7 @@
 //
 // A tool's settings name what its card shows (BrushSettingSpec: the label and the hint every
 // host uses, and the direction a number runs in): "radius", "strength" (signed for the tools
-// that work both ways: lift, twist, curl, attract, length, shape), "falloff" (0 hard: full
+// that work both ways: lift, twist, attract, length, shape), "falloff" (0 hard: full
 // strength to the brush's edge, 1 soft: fading from the center; BrushSettings::hardness is
 // 1 - falloff), "falloffProfile" (the falloff as a curve, center to edge), "strengthProfile"
 // (the shaping brushes' strength root to tip), "symmetry", "selectedOnly", "pressure", "collide" (keep off scalp),

@@ -643,7 +643,7 @@ class GroomingTest(unittest.TestCase):
         self.assertTrue(first)
         self.assertGreater(sculpts.edited_guides(self.groom, "sculpt1"), 0)
         self.assertEqual(cmds.getAttr(self.groom + ".guideData"), guide_data)
-        groomlab.brush_stroke(self.groom, "curl", [(0.3, 1.25, 0.3)], radius=0.6, strength=1.0)
+        groomlab.brush_stroke(self.groom, "twist", [(0.3, 1.25, 0.3)], radius=0.6, strength=1.0)
         second = cmds.getAttr(self.groom + ".sculptData")
         self.assertNotEqual(second, first)
         with self.assertRaises(RuntimeError):  # Place, Draw, Erase, Paint are not for a Sculpt node

@@ -97,19 +97,9 @@ TEST(Sculpt, TwistSwingsAroundTheRootNormal) {
     EXPECT_NEAR(lengthOf(after), lengthOf(before), 1e-4f);
 }
 
-TEST(Sculpt, CurlBendsKeepingLength) {
-    Field f(1, {0, 1.0f, 0});
-    const auto before = f.pts(f.ids[0]);
-    for (int i = 0; i < 10; ++i) applyBrushStroke(f.h, f.plane.get(), settings(BrushMode::Curl, 2.0f), {{0.2f, 0.5f, 1}});
-    const auto after = f.pts(f.ids[0]);
-    EXPECT_NEAR(lengthOf(after), lengthOf(before), 1e-3f);
-    EXPECT_GT((after.back() - before.back()).length(), 0.3f);
-    EXPECT_LT((after.back() - after.front()).length(), 0.9f);  // chord shorter than the length: curled
-}
-
 TEST(Sculpt, StraightenUndoesABend) {
     Field f(1, {0, 1.0f, 0});
-    for (int i = 0; i < 10; ++i) applyBrushStroke(f.h, f.plane.get(), settings(BrushMode::Curl, 2.0f), {{0.2f, 0.5f, 1}});
+    for (int i = 0; i < 10; ++i) applyBrushStroke(f.h, f.plane.get(), settings(BrushMode::Comb, 0.4f), {{0.2f, 0.8f, 1}, {0.8f, 0.8f, 1}});
     const float bent = (f.pts(f.ids[0]).back() - f.pts(f.ids[0]).front()).length();
     for (int i = 0; i < 20; ++i) applyBrushStroke(f.h, f.plane.get(), settings(BrushMode::Straighten, 2.0f), {{0.2f, 0.5f, 1}});
     const float chord = (f.pts(f.ids[0]).back() - f.pts(f.ids[0]).front()).length();
@@ -340,7 +330,7 @@ TEST(Sculpt, FrozenGuidesAreLeftAlone) {
 }
 
 TEST(Sculpt, ModeNamesRoundTrip) {
-    for (const char* name : {"twist", "curl", "straighten", "attract", "erase", "cut"}) {
+    for (const char* name : {"twist", "straighten", "attract", "erase", "cut"}) {
         EXPECT_STREQ(brushModeName(brushModeFromString(name)), name);
     }
     EXPECT_THROW(brushModeFromString("grab"), std::invalid_argument);  // gone: Comb (with Stretch) does it

@@ -627,14 +627,11 @@ void bindHierarchy(py::module_& m) {
         .value("ShapeTube", BrushMode::ShapeTube)
         .value("Attribute", BrushMode::Attribute)
         .value("Twist", BrushMode::Twist)
-        .value("Curl", BrushMode::Curl)
         .value("Straighten", BrushMode::Straighten)
         .value("Attract", BrushMode::Attract)
         .value("Erase", BrushMode::Erase)
         .value("Cut", BrushMode::Cut)
-        .value("Slide", BrushMode::Slide)
-        .value("Direction", BrushMode::Direction)
-        .value("Noise", BrushMode::Noise);
+        .value("Slide", BrushMode::Slide);
     m.def("brush_mode_from_string", &brushModeFromString, py::arg("name"), "Parses a mode name (comb, smooth, lift, ...).");
     m.def("brush_mode_name", &brushModeName, py::arg("mode"));
     py::enum_<TubeChannel>(m, "TubeChannel", "What the Shape brush paints on tube sections.")

@@ -29,7 +29,7 @@ _ranges = None  # key -> [lo, hi], loaded from the optionVar on first use
 # darker shade and a lighter tint of it; "ink" is hair and neutral parts.
 ICON_GROUPS = {
     "create": ("place", "draw", "part", "flow", "select"),
-    "shape": ("comb", "slide", "smooth", "straighten", "lift", "twist", "curl", "attract", "direction", "noise"),
+    "shape": ("comb", "slide", "smooth", "straighten", "lift", "twist", "attract"),
     "trim": ("cut", "length", "lengths", "shape", "erase"),
     "paint": ("paint", "freeze", "unfreeze"),
 }

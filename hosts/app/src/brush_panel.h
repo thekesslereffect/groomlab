@@ -7,13 +7,12 @@
 // when it has rows:
 //
 //   Brush        Radius (px), Strength (± for the tools that work both ways), Falloff, Smooth (Paint);
-//                chips Pressure, Off scalp, Falloff curve, Root to tip (a curve chip that is on shows
+//                chips Pressure, Off scalp, Stretch (Comb), Falloff curve, Root to tip (a curve chip that is on shows
 //                its ramp under the chips), and the app's own Propagate (the shaping brushes) and
 //                Pointwise (Paint)
 //   the tool's own block, named for what it sets:
 //     Paint        the maps panel's Mode, Value + Fill and color (setPaintControls), the alpha stamp
 //     New guides   Length, Segments, Spacing (Place); Match nearby, Solo new, Off scalp
-//     Comb         Stretch
 //     Paints       Width, Flatness, Twist (Shape)
 //     Erases       Guides, Parts, Flow, a short note
 //     Keys         Key scale, Key length, Guides Scale / Trim, Delete key, Clear, Cancel, Apply (Length Keys)
@@ -135,6 +134,7 @@ private:
     ValueSlider* smooth_ = nullptr;
     QToolButton* pressure_ = nullptr;
     QToolButton* collide_ = nullptr;
+    QToolButton* stretch_ = nullptr;
     QToolButton* falloffCurve_ = nullptr;
     QToolButton* strengthCurve_ = nullptr;
     QToolButton* propagate_ = nullptr;
@@ -155,7 +155,6 @@ private:
     ValueSlider* spacing_ = nullptr;
     QToolButton* placeCollide_ = nullptr;
     // The others.
-    CardBlock* comb_ = nullptr;
     CardBlock* paints_ = nullptr;
     std::vector<QToolButton*> tubeChannels_;
     CardBlock* erases_ = nullptr;

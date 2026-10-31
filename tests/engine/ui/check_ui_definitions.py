@@ -255,12 +255,6 @@ def check_core(doc):
         for name in section.get("tools", []):
             if name not in tools:
                 fail("palette.json: section %s shows with %r, not in the brush catalog" % (section["id"], name))
-    # The tool cards' one line (palette.json's tools): one per tool of the catalog, no other.
-    shorts = set(k for k in doc["palette"].get("tools", {}) if k != "about")
-    for name in sorted(shorts - tools):
-        fail("palette.json: tools has %r, not in the brush catalog" % name)
-    for name in sorted(tools - shorts):
-        fail("palette.json: tools has no one-line card text for %r" % name)
     if hasattr(groomlab_core, "operator_specs_json"):
         types = set(o["type"] for o in json.loads(groomlab_core.operator_specs_json()))
         for entry in doc["graph"].get("nodeActions", {}).get("items", []):

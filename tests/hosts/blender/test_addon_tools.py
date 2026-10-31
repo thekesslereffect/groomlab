@@ -327,8 +327,10 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(labels[-5:], ["Comb", "Lift", "Slide", "Draw", "Cut"])
         overflow = labels[3:-5]
         self.assertEqual(overflow[-3:], ["Select", "Freeze", "Groom Tools"])
-        for label in ("Part", "Flow", "Straighten", "Twist", "Curl", "Attract", "Shape", "Erase", "Paint"):
+        for label in ("Part", "Flow", "Straighten", "Twist", "Attract", "Shape", "Erase", "Paint"):
             self.assertIn(label, overflow)
+        for gone in ("Curl", "Direction", "Noise"):  # removed brushes
+            self.assertNotIn(gone, overflow)
         # Tiles: the tool and the catalog's settings, each tool's own strength.
         self.assertEqual(bpy.ops.groomlab.tool(tool="place"), {"FINISHED"})
         got = hcall(head, "tool_get")

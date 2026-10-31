@@ -15,7 +15,7 @@ namespace groomlab {
 
 TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
     const std::vector<BrushEntry>& catalog = brushCatalog();
-    ASSERT_EQ(catalog.size(), 22u);
+    ASSERT_EQ(catalog.size(), 19u);
     std::set<std::string> ids;
     int lastCategory = -1;
     for (std::size_t i = 0; i < catalog.size(); ++i) {
@@ -55,9 +55,8 @@ TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
 
 TEST(BrushCatalog, EveryStrokeToolModeIsListedWithItsSettings) {
     // Every mode the stroke tools take is in the catalog, and the hosts' own tools too.
-    for (const char* mode : {"comb", "smooth", "lift", "length", "shape", "paint", "cut", "twist", "curl", "straighten",
-                             "attract", "erase", "slide", "direction", "noise", "place", "draw", "part",
-                             "flow", "lengths"}) {
+    for (const char* mode : {"comb", "smooth", "lift", "length", "shape", "paint", "cut", "twist", "straighten",
+                             "attract", "erase", "slide", "place", "draw", "part", "flow", "lengths"}) {
         const BrushEntry* e = brushEntry(mode);
         ASSERT_TRUE(e) << mode;
         BrushToolSettings s;
@@ -68,7 +67,7 @@ TEST(BrushCatalog, EveryStrokeToolModeIsListedWithItsSettings) {
     EXPECT_TRUE(brushEntry("select"));
     EXPECT_TRUE(brushEntry("freeze"));
     // The signed tools, their default strengths, and the settings the hosts' cards show.
-    for (const char* signedTool : {"lift", "twist", "curl", "attract", "length", "shape"}) EXPECT_TRUE(brushEntry(signedTool)->signedStrength) << signedTool;
+    for (const char* signedTool : {"lift", "twist", "attract", "length", "shape"}) EXPECT_TRUE(brushEntry(signedTool)->signedStrength) << signedTool;
     EXPECT_FALSE(brushEntry("comb")->signedStrength);
     EXPECT_FLOAT_EQ(brushEntry("smooth")->defaultStrength, 0.5f);
     EXPECT_FLOAT_EQ(brushEntry("comb")->defaultStrength, 1.0f);

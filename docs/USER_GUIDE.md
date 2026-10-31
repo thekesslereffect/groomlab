@@ -102,19 +102,15 @@ The tools are the same in Maya, the standalone app and Blender, in the same orde
 | Section | Tools |
 | --- | --- |
 | Create | Place, Draw, Part, Flow |
-| Shape | Comb, Slide, Smooth, Straighten, Lift, Twist, Curl, Attract, Direction, Noise, Shape |
+| Shape | Comb, Slide, Smooth, Straighten, Lift, Twist, Attract, Shape |
 | Trim | Cut, Length, Length Keys, Erase |
 | Paint | Paint (on the Paint tab) |
 | Guides | Select, Freeze (and **Unfreeze All** beside it) |
 
 - **Comb** drags guides along the stroke (**Stretch** lets them lengthen or shorten). **Slide**
-  moves roots and keeps the shape. **Smooth**, **Straighten**, **Lift**, **Twist**, **Curl** and
+  moves roots and keeps the shape. **Smooth**, **Straighten**, **Lift**, **Twist** and
   **Attract** refine; a negative strength reverses the ones that work both ways. **Shape** paints
   guides' tubes near the brush: their width, their flatness or their twist (negative: the opposite).
-- **Direction** turns guides about their roots toward the way you stroke (negative: away), keeping
-  their lean and length.
-- **Noise** adds smooth random jitter along guides. Each stroke builds up the same pattern; a
-  negative strength smooths it out.
 - **Cut** trims where the brush touches, **Length** grows or shortens evenly, and
   **Erase** removes guides (with their children), parts or flow arrows.
 - **Paint** paints the map picked in the Paint tab (see Paint maps in section 3). To paint how

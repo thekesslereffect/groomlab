@@ -122,13 +122,17 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     smooth_->setObjectName(QStringLiteral("smoothStrength"));
     {
         // The chips, in a fixed order (a chip never moves between tools): Pressure, Off scalp,
-        // Falloff curve, Root to tip, then the app's own Propagate and Pointwise.
+        // Stretch (Comb: lengths change with the pull), Falloff curve, Root to tip, then the app's
+        // own Propagate and Pointwise.
         FlowLayout* chips = nullptr;
         rows->addWidget(chipRow(brush_, &chips));
         pressure_ = settingChip(chips, "pressure", tr("Pressure"), [this] { return session_->settings().pressure; },
                                 [this](bool on) { session_->settings().pressure = on; });
         collide_ = settingChip(chips, "collide", tr("Off scalp"), [this] { return session_->settings().brush.collide; },
                                [this](bool on) { session_->settings().brush.collide = on; });
+        stretch_ = settingChip(chips, "stretch", tr("Stretch"), [this] { return session_->settings().brush.stretch; },
+                               [this](bool on) { session_->settings().brush.stretch = on; });
+        stretch_->setObjectName(QStringLiteral("stretch"));
         auto* ramps = new QVBoxLayout();
         ramps->setContentsMargins(0, 0, 0, 0);
         ramps->setSpacing(4);
@@ -268,18 +272,6 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         placeCollide_->setObjectName(QStringLiteral("placeCollide"));
     }
     card_->addWidget(newGuides_);
-
-    // ---- Comb: keep lengths, or stretch.
-    comb_ = new CardBlock(tr("Comb"), this);
-    comb_->setObjectName(QStringLiteral("combBlock"));
-    {
-        FlowLayout* chips = nullptr;
-        comb_->rows()->addWidget(chipRow(comb_, &chips));
-        QToolButton* stretch = settingChip(chips, "stretch", tr("Stretch while combing"), [this] { return session_->settings().brush.stretch; },
-                                           [this](bool on) { session_->settings().brush.stretch = on; });
-        stretch->setObjectName(QStringLiteral("stretch"));
-    }
-    card_->addWidget(comb_);
 
     // ---- Paints (Shape): what it paints on the tubes (choices.tubeChannel), one at a time.
     paints_ = new CardBlock(settingLabel("tubeChannel"), this);
@@ -725,7 +717,7 @@ void BrushPanel::setTool(const std::string& id) {
     newGuides_->setVisible(uses("newGuides"));
     spacing_->setVisible(uses("spacing"));
     placeCollide_->setVisible(uses("newGuides") && uses("collide"));
-    comb_->setVisible(uses("stretch"));
+    stretch_->setVisible(uses("stretch"));
     paints_->setVisible(uses("tubeChannel"));
     erases_->setVisible(uses("erases"));
     keys_->setVisible(uses("lengthKeys"));

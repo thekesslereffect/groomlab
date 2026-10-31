@@ -1155,7 +1155,7 @@ TEST(Incremental, LookGraphStrokesGiveWhatAFreshEvaluationGives) {
         SessionStrokeHost host(session);
         ViewRequest request;
         request.sculptDensity = sculpt;
-        const std::size_t incremental = strokeAndCompare(session, host, request, {"comb", "clump", "curl", "slide", "smooth"}, 5);
+        const std::size_t incremental = strokeAndCompare(session, host, request, {"comb", "clump", "twist", "slide", "smooth"}, 5);
         // Every dab after a press runs at least Interpolate, Clump, Noise, Curl, Width
         // and Length incrementally.
         EXPECT_GE(incremental, 5u * 4u * 7u) << "sculptDensity " << sculpt;
@@ -1566,7 +1566,7 @@ TEST(Incremental, CombColorAndResampleFollowAStroke) {
     SessionStrokeHost host(session);
     ViewRequest request;
     request.sculptDensity = 0.7f;
-    EXPECT_GT(strokeAndCompare(session, host, request, {"comb", "curl", "straighten", "clump"}, 5), 40u);
+    EXPECT_GT(strokeAndCompare(session, host, request, {"comb", "twist", "straighten", "clump"}, 5), 40u);
 }
 
 TEST(Incremental, BandedGuardHairsAndIridescenceFollowAStroke) {

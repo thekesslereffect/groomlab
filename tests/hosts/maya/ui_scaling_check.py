@@ -450,7 +450,7 @@ def main():
             _expect(tools.guides_section.expanded(), "Guide groups open")
             expected = [
                 (None, []),
-                ("comb", ["Brush", "Comb", "Applies to"]),
+                ("comb", ["Brush", "Applies to"]),  # Stretch: a Brush chip
                 ("place", ["New guides", "Tube", "Applies to"]),
                 ("draw", ["New guides", "Tube", "Applies to"]),
                 ("shape", ["Brush", "Paints", "Profile", "Selected guides", "Applies to"]),
@@ -490,7 +490,7 @@ def main():
             settle()
             flow = tools.brush_chips.flow
             order = [flow.itemAt(i).widget().text() for i in range(flow.count())]
-            _expect(order == ["Pressure", "Off scalp", "Falloff curve", "Root to tip"], "brush chips: %r" % order)
+            _expect(order == ["Pressure", "Off scalp", "Stretch", "Falloff curve", "Root to tip"], "brush chips: %r" % order)
             tools.strength_curve_box.setChecked(True)
             settle()
             _expect(tools.strength_curve.isVisibleTo(tools), "a curve chip on: its ramp under the chips")

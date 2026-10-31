@@ -1105,18 +1105,20 @@ class ToolPalette(QtWidgets.QWidget):
             fields.addWidget(slider)  # the name inside the field
         self.brush_block.add(self.brush_form)
         # The stroke's options as chips, in a fixed order (a chip never moves between tools):
-        # Pressure, Off scalp, then the brush's curves (each off until its chip is on, then drawn
+        # Pressure, Off scalp, Stretch (Comb: lengths change with the pull), then the brush's curves (each off until its chip is on, then drawn
         # in a curve editor under the chips; right-click: presets). Selected only and Front only
         # are not in the panel: the brushes keep their defaults (off and on).
         self.pressure = self.setting_chip("pressure", True)
         self.pressure.toggled.connect(lambda on: self.push(pressure=on))
         self.collide = self.setting_chip("collide", True)
         self.collide.toggled.connect(lambda on: self.push(collide=on))
+        self.stretch = widgets.chip("Stretch", _setting("stretch", "hint"), False, "stretch")
+        self.stretch.toggled.connect(lambda on: self.push(stretch=on))
         self.falloff_curve_box, self.falloff_curve = self.curve_setting(
             "falloffProfile", [[0, 1], [0.5, 0.56], [1, 0]], ("center", "edge"))
         self.strength_curve_box, self.strength_curve = self.curve_setting(
             "strengthProfile", [[0, 0.25], [1, 1]], ("root", "tip"))
-        self.brush_chips = widgets.chip_row((self.pressure, self.collide, self.falloff_curve_box,
+        self.brush_chips = widgets.chip_row((self.pressure, self.collide, self.stretch, self.falloff_curve_box,
                                              self.strength_curve_box))
         self.brush_chips.setObjectName("brushChips")
         self.brush_block.add(self.brush_chips)
@@ -1161,13 +1163,6 @@ class ToolPalette(QtWidgets.QWidget):
         card.addWidget(self.create_box)
         self.tube_panel = TubePanel(self)  # its blocks: Tube (Place, Draw), Profile and Selected guides
         card.addWidget(self.tube_panel.tube_block)
-
-        # Comb: keep lengths, or stretch.
-        self.stretch_box = widgets.Block(NAMES.get("comb", "Comb"), name="combBlock")
-        self.stretch = widgets.chip("Stretch while combing", _setting("stretch", "hint"), False, "stretch")
-        self.stretch.toggled.connect(lambda on: self.push(stretch=on))
-        self.stretch_box.add(widgets.chip_row((self.stretch,)))
-        card.addWidget(self.stretch_box)
 
         # Shape: what it paints on the tubes (Width, Flatness, Twist), then the profile and the
         # selected guides' tubes.
@@ -2180,7 +2175,7 @@ class ToolPalette(QtWidgets.QWidget):
         if new_tube or edit_tube:
             panel.set_mode("new" if new_tube else "edit")
             panel.refresh(self.groom())
-        self.stretch_box.setVisible("stretch" in uses)
+        self.stretch.setVisible("stretch" in uses)
         self.tube_channel_box.setVisible("tubeChannel" in uses)
         self.select_box.setVisible("selection" in uses)
         self.erase_box.setVisible("erases" in uses)

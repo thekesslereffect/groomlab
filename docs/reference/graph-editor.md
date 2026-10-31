@@ -70,7 +70,7 @@ works on in the list right under the tool grid, set the tool in its card under t
   none on Photos): every
   tool as a labeled tile (a 20 px icon over its name, 56 x 50 px), in groups (the core's brush
   catalog, `brush_catalog.h`): Create (Place, Draw, Part, Flow), Shape (Comb, Slide, Smooth,
-  Straighten, Lift, Twist, Curl, Attract, Direction, Noise, Shape), Trim (Cut, Length, Length
+  Straighten, Lift, Twist, Attract, Shape), Trim (Cut, Length, Length
   Keys, Erase), Paint (Paint) and Guides (Select, Freeze, with the Unfreeze All tile beside
   Freeze). Every tile keeps its size: the panel's width sets how many fit in a row (at most four),
   left aligned.
@@ -108,7 +108,7 @@ works on in the list right under the tool grid, set the tool in its card under t
   - **The tool's own block**, named after what it sets: Paint (Mode, Value and Fill or the color
     and its channels, the stamp), New guides (Place and Draw: Length, Segments, Spacing, Match
     nearby, Solo new) and Tube (the shape new guides get, a small preview, Width / Flatness /
-    Twist), Comb (Stretch while combing), Paints (Shape: Width, Flatness or Twist) with Profile
+    Twist), Paints (Shape: Width, Flatness or Twist) with Profile
     (the shape picker and Apply, the cross-section editor, Edit as custom, Mirror, Smooth; the
     library's new / rename / duplicate / delete glyphs in its header) and Selected guides (their
     Width, Flatness, Twist; Smooth in the header), Selection (Select: Soft radius, then Profile

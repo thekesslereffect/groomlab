@@ -16,8 +16,7 @@ SHIPPED_ALPHAS = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", 
 groomlab_core.set_shipped_brush_alpha_dir(SHIPPED_ALPHAS)
 
 
-BRUSH_MODES = ("comb", "slide", "smooth", "straighten", "lift", "twist", "curl", "attract", "direction", "noise", "length",
-               "cut", "shape", "erase", "paint", "clump", "place", "draw", "part", "flow", "lengths")
+BRUSH_MODES = ("comb", "slide", "smooth", "straighten", "lift", "twist", "attract", "length", "cut", "shape", "erase", "paint", "clump", "place", "draw", "part", "flow", "lengths")
 # What the Shape brush paints on the guides' tubes (tube guides).
 TUBE_CHANNELS = ("width", "flatness", "twist")
 BRUSH_CONTEXT = "groomLabBrushCtx1"
@@ -50,7 +49,7 @@ def brush_stroke(groom, mode, points, radius=0.25, strength=1.0, level=0, group=
     sphere of `radius`.
     - comb drags along the path; with `stretch` guides get longer or shorter
       with the drag instead of keeping their length.
-    - smooth, straighten, lift, twist, curl, attract, length, cut, shape and erase
+    - smooth, straighten, lift, twist, attract, length, cut, shape and erase
       act where the path passes. shape paints the guides' tubes near the path, section by
       section (one per guide point): `tube_channel` "width" grows them (negative strength
       shrinks), "flatness" flattens them toward a ribbon (negative: back toward round), "twist"

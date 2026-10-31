@@ -401,7 +401,7 @@ const paintTool: Tool = {
 // The options a card shows as chips (how the stroke behaves), in a fixed order so a chip never
 // moves between tools. Selected only and Front only are not in the panel: the brushes keep their
 // defaults (off and on).
-const BRUSH_KEYS = ["pressure", "collide"] as const;
+const BRUSH_KEYS = ["pressure", "collide", "stretch"] as const;  // Stretch: Comb's
 
 /** Chips (or checkboxes / a fold, per the lab's Brush options) for some option keys + curves. */
 function ChipSet({ keys, curves = [], foldTitle }: { keys: string[]; curves?: string[]; foldTitle: string }) {
@@ -497,12 +497,6 @@ function ToolBlock({ id, s }: { id: string; s: ToolSettings }) {
           </Block>
           {useOpt("gtTubes") === "split" && <TubeNew />}
         </>
-      );
-    case "comb":
-      return (
-        <Block title="Comb">
-          <div className="flex flex-wrap gap-1"><Chip on={false} tip="Guides get longer or shorter as you pull">Stretch while combing</Chip></div>
-        </Block>
       );
     case "shape":
       return (

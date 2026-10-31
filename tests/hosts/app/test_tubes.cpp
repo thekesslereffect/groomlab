@@ -487,7 +487,7 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
     BrushPanel* card = tools.card();
     using Titles = std::vector<std::string>;
     const std::vector<std::pair<std::string, Titles>> cases = {
-        {"comb", {"Brush", "Comb", "Applies to"}},
+        {"comb", {"Brush", "Applies to"}},  // Stretch: a Brush chip
         {"smooth", {"Brush", "Applies to"}},
         {"flow", {"Brush", "Flow"}},
         {"place", {"New guides", "Tube", "Applies to"}},

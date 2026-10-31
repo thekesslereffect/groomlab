@@ -53,14 +53,8 @@ std::vector<BrushEntry> makeCatalog() {
          kShaping},
         {"twist", "Twist", C::Shape, 0, "twist", 0.5f, true, "Swing guides around their root (negative: the other way).",
          with(kShaping, {"targets"})},
-        {"curl", "Curl", C::Shape, 0, "curl", 0.5f, true, "Curl guides toward the tip (negative: the other way).", kShaping},
         {"attract", "Attract", C::Shape, 0, "attract", 0.5f, true,
          "Pull tips together toward the brush center (negative: push apart).", with(kShaping, {"targets"})},
-        {"direction", "Direction", C::Shape, 0, "direction", 0.5f, false,
-         "Turn guides about their roots toward the way you stroke, lengths kept (Ctrl: away from it).", kShaping},
-        {"noise", "Noise", C::Shape, 0, "noise", 0.5f, true,
-         "Add smooth random jitter along guides, the same pattern each stroke builds up (negative or Ctrl: smooth it out).",
-         kShaping},
         {"shape", "Shape", C::Shape, 0, "shape", 0.5f, true,
          "Paint guides' tubes near the brush: Width grows them (Ctrl shrinks), Flatness flattens them toward a "
          "ribbon (Ctrl rounds them), Twist turns them about the guide (Ctrl the other way); Shift smooths what it "
