@@ -19,7 +19,7 @@ cheaper.
   **App:** add **Wind**, **Jiggle** or **Simulate** with **Tab** in the Graph Editor. An animated
   groom shows a timeline at the bottom (play, scrub, loop); **Follow** turns follow-the-scalp on or
   off. With a Simulate node the timeline has **Simulate**, **Bake** and **Clear**; while it runs,
-  **Simulate** reads **Cancel**. **Correctives** on the right rail holds the shot fixes. nHair and
+  **Simulate** reads **Cancel**. The Groom Tools' **Correctives** tab holds the shot fixes. nHair and
   keys on params are Maya's ([GroomLab app](/docs/app#the-layout)).
 
   **Blender:** **Wind** works. **Jiggle** and **Simulate** are not supported yet: Jiggle passes the
@@ -76,8 +76,8 @@ the standalone app, groom files and on the farm, with the same results.
 - **Playback:** playing or scrubbing past the simulated frames steps the simulation forward from
   the last one; scrubbing back reads the cached frames. Changing a setting, or editing the guides,
   restarts the simulation from the start frame.
-- **Simulate, bake, render:** **Simulate Range** (**GroomLab > Simulate**, or the Groom Tools'
-  **Output** section) fills the frames of the playback range; **Bake
+- **Simulate, bake, render:** **Simulate Range** (**GroomLab > Simulate**) fills the frames of the
+  playback range; **Bake
   Simulation** writes them to an Alembic guide cache (one per Simulate node, next to the scene or
   the groom file) that renders, exports and the farm read instead of simulating. A bake made with
   different settings from the node's current ones is ignored (with a message) and the node

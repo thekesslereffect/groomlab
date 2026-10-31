@@ -82,41 +82,48 @@ build their menus and panels from one set of definitions):
   (**Show All Hair**, **Hide All Hair**) or every groom's guides. The pin in the Graph
   Editor's header keeps it on its groom while the Groom Tools move on.
 - **Your first groom** walks you through placing guides and giving the groom a look.
-- **Group**: the guide group the brushes edit and new guides go into (**All groups**: every
-  guide); **Isolate** dims the other groups.
-- **Tools**, **Paint**, **Correctives** and **Photos** tabs. The tools come by category, with Maya's icons:
+- **Tools**, **Paint**, **Correctives** and **Photos** tabs. The tools come by category as
+  labeled tiles with Maya's icons, as many to a row as the sidebar's width holds:
   **Create** (Place, Draw, Part, Flow), **Shape** (Comb, Slide, Smooth, Straighten, Lift, Twist,
-  Curl, Attract, Direction, Noise, Tube), **Trim** (Cut, Length, Erase), **Paint** (Paint) and
-  **Guides** (Select, Freeze, and Unfreeze All beside them). Shift+drag with a
+  Curl, Attract, Direction, Noise, Shape), **Trim** (Cut, Length, Length Keys, Erase), **Paint**
+  (Paint, on the Paint tab) and **Guides** (Select, Freeze, and Unfreeze All beside them). Shift+drag with a
   guide brush paints guides into the selection (the rest freeze); Shift+click adds the guides in
   the brush ring, and where it holds none deselects and unfreezes them all. Ctrl does the brush's
   opposite; painting maps, Shift+drag smooths.
-- The active tool's **card** shows what it does and exactly its settings, by Maya's names:
+- The picked tool's **card**, right under the tiles: its name, a **?** (the tool's whole hint and
+  the gestures), one short line, then its blocks in Maya's order, by Maya's names. **Brush**:
   **Radius** (pixels), **Strength** (±: tools that work both ways go negative), **Falloff**,
-  **Falloff curve**, **Root to tip**, **Symmetry** (World X or Topology), **Selected only**, **Pen
-  pressure**, **Keep off scalp**, **Front facing only**; Place and Draw's **New guides** (Match
-  nearby guides, Length, Segments, Spacing, Solo new guides), Paint's map, Comb's
-  **Stretch**, what the Shape brush **Paints** on the tubes (Width, Flatness or Twist), what
-  shaping brushes act on (Guides, Parts, Flow), what Erase erases, the Part tool's next part name
-  and its list of parts (**Remove**, **Clear All**), Flow's arrows or sinks (Whorl, Gather, Part
-  out), how many arrows and sinks the groom keeps and **Clear All** (also **GroomLab > Utilities >
-  Delete All Flow Arrows**), the Select tool's lasso or box and soft radius, the freeze mask. Each
-  tool keeps its own strength.
+  **Smooth** (painting), the toggles **Pressure** and **Off scalp**, **Falloff curve** and **Root
+  to tip**. Then the tool's own block: Paint's **Mode**, value or color and **Fill** and its stamp;
+  Place and Draw's **New guides** (Length, Segments, Spacing, Match nearby, Solo new) and **Tube**;
+  Comb's **Stretch while combing**; what the Shape brush **Paints** on the tubes (Width, Flatness
+  or Twist) with **Profile** and **Selected guides**; the Select tool's **Selection** (lasso or
+  box, soft radius, All / None); what Erase erases; Length Keys' **Keys**; Flow's arrows or sinks
+  (Whorl, Gather, Part out), how many the groom keeps and **Clear All** (also **GroomLab >
+  Utilities > Delete All Flow Arrows**); the Part tool's next part name and its list of parts
+  (**Remove**, **Clear All**). Last, **Applies to**: what shaping brushes act on (Guides, Parts,
+  Flow) and **Mirror** (World X or Topology). Each tool keeps its own strength; **Leave Tool
+  (Esc)** ends it.
+- Under the card, the tab's list: **Guide groups** (Tools tab), the maps (Paint tab: the picked
+  map's **Show on**, channel and what reads it under the list) or the layers (Correctives tab).
 - **Undo** / **Redo** name the groom's last edit.
-- Folded below, in Maya's order: **Tubes** (with Place, Draw, Shape and Select), **While
-  sculpting** (with the brushes that stroke; guides only while a stroke is live; full density),
-  **Guide groups & edits** (Tools tab), **Output** (open: **Export** and **Import** menus) and
-  **Display** (Blender's own).
+- Folded below: **While sculpting** (with the brushes that stroke: guides only while a stroke is
+  live, full density; Maya and the app keep these on the groom) and **Display** (Blender's own).
+  Export, render and import are in the **GroomLab** menu.
 
-The lists (guide groups, maps, correctives, photos) have Maya's action bar above them and Maya's
-right-click menu, both on a right-click over an item and behind the arrow button beside the list.
+The lists (guide groups, maps, correctives) have their add and import icons in the list's header,
+the picked item's actions in a box under the list, and Maya's right-click menu, both on a
+right-click over an item and behind the arrow button beside the list.
 
-### Guide groups & edits
+### Guide groups
 
-**+ New Group**, then **Rename**, **Select** and **Delete** for the group picked in the list. The
-list shows each group's guides, level, eye and, when it has one, its own color. Right-click a group
-for **New Group...**, **Rename**, **Color...** (the group's viewport color), **Default Color** (back
-to its level's), **Select Guides** and **Delete**.
+The **Guide groups** list is always open under the Tools tab's card. Click a group to pick it: the
+brushes edit it and new guides go into it. Its header has the count, **Isolate** (the eye: the
+picked group and its child groups at full color, the others dimmed) and **+** (**New Group**); the
+picked group's box under the list has **Rename**, **Select** and **Delete**. The list shows each
+group's color, name (indented under its parent), guides and eye. Right-click a group for **New
+Group...**, **Rename**, **Color...** (the group's viewport color), **Default Color** (back to its
+level's), **Select Guides** and **Delete**.
 
 **Edit Guides** has **Children** (the count beside it), **Sync +X → -X**, **Sync -X → +X**,
 **Mirror Selection** (select the mirror images of the selected guides), **Mirror Group...** (a root
@@ -131,20 +138,20 @@ group > Reset Segments for all of them).
 
 ### Tubes
 
-The **Tubes** section edits the tubes of the selected guides (else the guides left unfrozen while
-the rest are frozen), and sets the tube Place and Draw give new guides:
+The Shape and Select cards edit the tubes of the selected guides (else the guides left unfrozen
+while the rest are frozen); Place and Draw's **Tube** block sets the tube they give new guides (a
+shape, **Width**, **Flatness** and **Twist**):
 
-- **Shape**: Round, Ribbon, Teardrop, Blade, then the groom's library of custom shapes (**Mixed**
-  while the targets differ). Picking one gives it to the targets.
-- **Edit as Custom** copies a built-in into the library. The library list adds (**+**), duplicates,
-  renames and deletes shapes (deleted: its guides go round). **Apply to Selected** gives the
-  targets the shape picked. (The outline editor is in Maya and the app.)
-- **Width**, **Flatness** and **Twist**: the targets' tube, applied as one undo step when you stop
-  dragging (Width scales the tube, its taper kept).
-- **Smooth** evens out what the brush painted along each guide: the channel the Shape brush paints,
-  or all three.
-- **Fill Tubes** and **Tube Blend**: strands rooted in a guide's tube ride it to the tip (the
-  graph's Interpolate nodes).
+- **Profile**: Round, Ribbon, Teardrop, Blade, then the groom's library of custom shapes (**Mixed**
+  while the targets differ). Picking one gives it to the targets; **Apply** gives them the shape
+  picked again. The header's icons add, duplicate, rename and delete library shapes (deleted: its
+  guides go round); **Edit as Custom** copies a built-in into the library. (The outline editor is
+  in Maya and the app.)
+- **Selected guides**: the targets' **Width**, **Flatness** and **Twist**, applied as one undo step
+  when you stop dragging (Width scales the tube, its taper kept). **Smooth** in its header evens
+  out what the brush painted along each guide: the channel the Shape brush paints, or all three.
+- **Fill Tubes** and **Tube Blend** (strands rooted in a guide's tube ride it to the tip) are the
+  Interpolate node's settings, in the Graph Editor.
 
 Pick a tool and drag over the groom in the viewport. The brush ring follows the cursor on the
 scalp in Maya's colors (yellow; red for Part and Erase, orange for Flow, green for Place and Draw)
@@ -467,8 +474,8 @@ Check for Updates... (the newest version, installed in place), Discord,
 Support GroomLab, About GroomLab). Items Blender doesn't run yet are left out. Blender's **File >
 Import** and **File > Export** have **GroomLab Groom File (.groom)** too.
 
-The Groom Tools' **Output** section has **Simulate Range**, the **Export** and **Import** menus and
-**Transfer...**.
+**Simulate Range** (under **Simulate**), **Export**, **Import** and **Transfer Groom to Scalp...**
+(under **Utilities**) are all in this menu.
 
 ### Sample meshes
 
@@ -523,7 +530,7 @@ GroomLab's own hair simulation runs in Blender as in Maya and the app:
 
 ## Transfer Groom to Scalp
 
-**Utilities > Transfer Groom to Scalp...** (or **Transfer...** in the Output section) moves the
+**Utilities > Transfer Groom to Scalp...** moves the
 groom onto another mesh: a new sculpt, a retopologized head, another character. Pick the **New
 Scalp** (the selected mesh by default) and the **Method**:
 

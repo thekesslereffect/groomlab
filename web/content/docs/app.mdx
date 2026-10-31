@@ -31,10 +31,10 @@ Maya or Blender opens with **File > Open Groom...**, Ctrl+O.)
 
 ### Place guides
 
-In **Groom Tools** on the left, pick **Place** (or **Place some guides** under **Your first
-groom**) and click or drag on the scalp. Shape the guides with **Comb**. Hold **B** and drag to size
-the brush, or hold **Y** and click for the [marking menu](#the-marking-menu). For more detail, open
-**Guide Groups & Edits** and click **Generate children**.
+In **Groom Tools** on the left, pick **Place** (or **Place some guides** on the **Your first
+groom** card over the viewport) and click or drag on the scalp. Shape the guides with **Comb**. Hold
+**B** and drag to size the brush, or hold **Y** and click for the [marking menu](#the-marking-menu).
+For more detail, choose **Edit Guides > Children** under **Guide groups**.
 
 </Step>
 <Step>
@@ -61,7 +61,7 @@ beside the graph; the groom updates as you drag. **Tab** over the graph adds a n
 
 **File > Save** (Ctrl+S) writes a `.groom` file that Maya and Blender open. **Export** mode
 (Ctrl+4, or **File > Export**, Ctrl+E) writes Alembic, USD, an Unreal groom, Unity strands or glTF
-cards; **GroomLab > Export** has the same targets.
+cards; **Export** in the menu bar's corner and **GroomLab > Export** have the same targets.
 
 </Step>
 </Steps>
@@ -88,9 +88,10 @@ notes.
 With no groom open, the viewport shows **Open groom**, **New groom on mesh**, **Start from a
 preset** and the recent files; the Graph Editor's menus and **Render** wait until a groom is open.
 **Start from a preset** (or **Presets > Apply on a Mesh...**) asks for a mesh, makes the groom on
-it and applies the look. After **New Groom on Mesh** the Groom Tools list the first steps (**Your
-first groom**: place some guides, give it a look), ticked as you do them; the cross hides them for
-good. **View > Tool Labels** turns the tool tiles' names off for compact icon tiles.
+it and applies the look. After **New Groom on Mesh** a small **Your first groom** card over the
+viewport (bottom left, in Groom mode) lists the first steps (place some guides, give it a look),
+the next one highlighted and the done ones struck through; the cross hides it for good. **View >
+Tool Labels** turns the tool tiles' names off for compact icon tiles.
 
 - **File > Open Groom...** (Ctrl+O) opens a `.groom` file, saved here or from Maya.
 - **File > Open Recent** lists the last files opened or saved (a file that is gone is greyed out;
@@ -132,12 +133,12 @@ it. There is no tool bar.
 
 | Where | What |
 | --- | --- |
-| Top | The menu bar: **File**, **Edit**, **View**, **GroomLab** (the same menu as Maya's and Blender's GroomLab menu, in the same order) and **Help**. The window's title is the file's name; `*` means unsaved edits. |
+| Top | The menu bar: **File**, **Edit**, **View**, **GroomLab** (the same menu as Maya's and Blender's GroomLab menu, in the same order) and **Help**. In its right corner: the groom's file name, **Render** and **Export**, the menus of what comes after grooming. The window's title is the file's name; `*` means unsaved edits. |
 | Left | **Groom Tools**: the brushes, guide groups, maps, correctives and photos. |
 | Right | **Properties**: what the mode is about (the groom's settings, the look, the cards or the export). |
 | Bottom | The **Graph Editor** with the selected node's settings beside it, and the timeline under it while the groom animates. |
 | Viewport, top right | **Undo** and **Redo**. |
-| Viewport, top left and bottom | The active tool's name, the strand count line (**GroomLab > Review > Strand Count HUD**) and messages. |
+| Viewport, top left and bottom | The active tool's name, the strand count line (**GroomLab > Review > Strand Count HUD**), messages and, for a new groom, the **Your first groom** card. |
 
 The modes **Groom**, **Look**, **Cards** and **Export** are in **View > Mode** (Ctrl+1 to Ctrl+4).
 Groom mode shows the Groom Tools; the other modes hide them and give Properties their own panel.
@@ -153,21 +154,21 @@ runs, **Simulate** reads **Cancel** (the frames made stay in the cache).
 ## Groom Tools
 
 The Groom Tools dock holds the same pieces as Maya's Groom Tools window, from the same shared
-definitions. At the top: the groom's name with its eyes (the hair alone: the strands, instances
-and cards go and come back at once while the guides stay; and the guides alone: every guide
-group; **View > Guides On/Off** and **Alt+Shift+G** too), the Graph Editor and more buttons,
-the guide **Group** the brushes work on (**Isolate** shows only it and its child groups at full color) and
-**Symmetry**. Then four tabs:
+definitions. Pinned at the top: the groom's name with its eyes (the hair alone: the strands,
+instances and cards go and come back at once while the guides stay; and the guides alone: every
+guide group; **View > Guides On/Off** and **Alt+Shift+G** too), the Graph Editor and **More**
+buttons, the four tabs and the tool grid (tiles of one size, as many to a row as the dock's width
+holds). Under the grid, the picked tool's card, then the tab's list:
 
 - **Tools**: every tool as a tile (Create, Shape, Trim and Paint brushes, then **Select**,
-  **Freeze** and **Unfreeze All**), the active tool's settings card, and the sections **Tubes**
-  (with Place, Draw, Shape and Select), **While Sculpting** (with the brushes that stroke),
-  **Guide Groups & Edits** and **Output** (Simulate Range, Export, Render, Studio, Transfer and
-  Import).
-- **Paint**: the painted maps (vertex maps, textures, guide layers) with their bar and right-click
-  menu ([Painting maps](#painting-maps)).
+  **Freeze** and **Unfreeze All**), the tool's card and **Guide groups**.
+- **Paint**: Paint's card and the painted maps (vertex maps, textures, guide layers) with their
+  bar and right-click menu ([Painting maps](#painting-maps)).
 - **Correctives**: shot-sculpt layers ([Correctives](#correctives)).
 - **Photos**: reference photos to groom to ([Photos](#photos)).
+
+**Simulate Range**, **Studio**, **Transfer Groom to Scalp...** and **Import** are in the
+**GroomLab** menu; **Render** and **Export** are also in the menu bar's corner.
 
 ## Groom with brushes
 
@@ -189,22 +190,30 @@ Create, Shape, Trim and Paint, then **Select** and **Freeze**. See
 - **Alt** with any mouse button moves the camera, whatever the tool.
 - **Esc** leaves the brush for the camera.
 
-The active tool's card holds its settings in Maya's order: radius, strength, falloff and its curve,
-the strength along the guide, pen pressure and the tool's own settings.
+The active tool's card holds its settings in Maya's blocks and order: **Brush** (Radius, Strength,
+Falloff, Smooth; the chips **Pressure**, **Off scalp**, **Falloff curve**, **Root to tip**, and the
+app's own **Propagate** and **Pointwise**), the tool's own block, then **Applies to** (**Acts on**
+and **Mirror**: World X, Topology, or the app's World Y and Z). The **?** beside the tool's name
+shows its whole hint and the gestures. How the strands draw while you sculpt is in
+**Properties > Sculpting**.
 
-**Guide Groups & Edits** lists the guide groups. Untick a group to hide it; double-click to rename
-it; right-click for its menu. Its bar adds a root or child group, generates children, selects,
-removes, reparents, promotes or demotes a group, deletes the selected guides, mirrors a group
-+X → -X, syncs symmetry and resamples guides. Part lines drawn with the Part brush are listed on its
-card. See [Guide groups](/docs/guides-and-brushes#guide-groups).
+**Guide groups** lists the guide groups, always open under the card: click a row to pick the group
+the brushes edit and new guides go into; its eye hides it; double-click to rename it; right-click
+for its menu. **Isolate** (the eye in the section header) shows only the picked group and its child
+groups at full color, and **+** adds a root or child group. The picked group's box under the list
+renames, selects or removes it, resamples guides (**Segments**) and has **Edit Guides** (children,
+sync and mirror, reparent, promote or demote). Part lines drawn with the Part brush are listed on
+its card. See [Guide groups](/docs/guides-and-brushes#guide-groups).
 
 ### Tubes
 
-The **Tubes** section sets the cross-section the guides' tubes have: the shape (round, flat, your
-own drawn in the outline editor and kept in the groom's library), **Width**, **Flatness** and
-**Twist** for the selected or soloed guides and for the guides Place and Draw make, **Smooth**,
-**Fill Tubes** and **Tube Blend**. Width shows in the length unit picked in the Graph Editor's
-**Edit > Units**. The Shape brush paints width, flatness or twist along a guide.
+The tool cards set the cross-section the guides' tubes have. Place and Draw's **Tube** block picks
+the shape new guides get, with its **Width**, **Flatness** and **Twist**. The Shape and Select cards
+have **Profile** (the shape: round, flat, your own drawn in the outline editor and kept in the
+groom's library; **Apply** gives it to the selected or soloed guides) and **Selected guides** (their
+**Width**, **Flatness**, **Twist** and **Smooth**). Width shows in the length unit picked in the
+Graph Editor's **Edit > Units**. The Shape brush paints width, flatness or twist along a guide.
+**Fill Tubes** and **Tube Blend** are the Interpolate node's settings.
 
 ### The marking menu
 
@@ -335,11 +344,14 @@ The **Properties** dock follows the mode:
 
 - **Groom** mode: the groom's settings in the order of Maya's Attribute Editor: **Groom** (preview
   density, point budget), **Inputs** (the scalp, rest and guides, the collider, the file),
-  **Controls**, **Hair Color**, **Display** (guides, strand shading), **Sculpting**, **Game Cards** and
-  **Rendering**. The point budget is 0 (no limit) by default; set one to keep very large grooms
-  interactive (past it the preview thins itself).
+  **Controls**, **Hair Color**, **Display** (guides, strand shading), **Sculpting** (how the strands
+  draw while a stroke is live, and their density), **Game Cards** and **Rendering**. The point
+  budget is 0 (no limit) by default; set one to keep very large grooms interactive (past it the
+  preview thins itself). Each **Inputs** row has a small icon button for its action: transfer the
+  groom to another scalp, edit the guides, add a collider, reload or save the file.
 - **Look** mode: the look card ([Look](#look)).
 - **Cards** mode: the cards panel ([Game cards](#game-cards)).
+- **Export** mode: the export panel ([Export](#export)).
 
 ### Scalp Subdivision
 
@@ -357,7 +369,6 @@ itself. Brushes, **Place** and **Draw**, part and flow strokes, map painting, an
   of its own wins; the count then says so.
 - One undo step. Saved in the `.groom` file as the scalp's subdivision level: a groom saved from
   Maya with a smoothed scalp opens at its level.
-- **Export** mode: the export panel ([Export](#export)).
 
 ## Look
 
@@ -452,7 +463,7 @@ the last bake. See [Game export](/docs/game-export).
 
 Set the frames (the current frame, or a range for an animated groom), the density and the target's
 options, then the output file (type a path or pick it with **...**). **Export** shows progress and
-can be cancelled. The same targets are in **GroomLab > Export** (and the Output section's **Export**), with
+can be cancelled. The same targets are in **Export** in the menu bar's corner and **GroomLab > Export**, with
 **Scales Instancer (USD)...**. The FBX exports are only available in Maya and Blender.
 
 ## Save and open in Maya
@@ -489,8 +500,9 @@ made.
 ## Themes
 
 **GroomLab > Theme** (also in the Graph Editor's **Edit** menu) picks the app's colors from the
-same themes as Maya: **Charcoal** (the default: solid neutral grey panels with thin borders, an
-off-white primary button, muted color only where it means something), **Playful** (translucent
+same themes as Maya: **Charcoal** (the default: neutral grey panels with thin borders, one blue
+accent for the primary buttons and what is on, the Inter font, underlined tabs, uppercase section
+headers and node headers filled with their category's color), **Playful** (translucent
 panels, bright primaries), **Polar** and **Studio**. The window restyles at once, and the choice is
 kept for the next start. A scripted run takes `--theme charcoal` (or another name) for that run
 alone.

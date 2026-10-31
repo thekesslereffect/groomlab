@@ -3,7 +3,7 @@
   "version": 1,
   "lists": {
     "groups": {
-      "about": "Place and Draw add to the <b>Group</b> picked at the top; brushes edit it. Guides nodes in the graph read groups by name.",
+      "about": "Place and Draw add to the group picked in this list (click a row); brushes edit it. Guides nodes in the graph read groups by name.",
       "bar": [
         {"id": "group.new", "label": "+ New Group"},
         {"id": "group.rename", "glyph": "rename"},

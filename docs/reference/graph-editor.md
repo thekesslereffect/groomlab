@@ -52,60 +52,84 @@ groomlab.inputs_summary(groom)                    # scalp, rest, guides, groups,
 ```
 
 The **Groom Tools** (first item in the menu; `groomlab.ui.palette.show(tab=...)` with `"tools"`,
-`"paint"`, `"correctives"`, `"photos"` or `"guides"`: Tools with the guide groups open) is the grooming hub, docked beside the viewport. Its header
-picks what the tools work on: the groom (the selected one, or one picked to stay on it), an eye
-to show or hide it, a Graph Editor button and a **...** menu (Create Groom from Selection,
-Theme); under it, the **Group** the brushes edit, with **Isolate**. With no groom to work on,
-a **Start a groom** card takes its place: select the scalp mesh (and any guide curves) and
-click **Create Groom from Selection**, or **Import** one (XGen, Yeti, Alembic curves, a groom file). Until the groom has guides and a look, a
-**Your first groom** card lists those steps, ticks each off as the groom gets there, and takes
-you to the next one on a click (its close button hides it for good). Then four tabs (Tools,
-Paint, Correctives, Photos; `show(tab=...)` also takes the old ids `"sculpt"` and `"reference"`);
-below the tabs and the Brush card, an **Output** section runs what comes after grooming: **Simulate
-Range**, **Export** (Alembic, USD, Unreal, Unity, glTF, a groom file), **Render** (from a groom
-file, as curves, a turntable), **Transfer...** and **Import** (the GroomLab menu's items, one table):
-- **Tools:** every tool as an icon, in groups (the core's brush catalog, `brush_catalog.h`):
-  Create (Place, Draw, Part, Flow), Shape (Comb, Slide, Smooth, Straighten, Lift, Twist, Curl,
-  Attract, Direction, Noise, Tube), Trim (Cut, Length, Erase), Paint (Paint, Width, Density) and
-  Guides (Select, Freeze, with the Unfreeze All tile beside Freeze): square icon tiles, up to
-  six to a row (each one's name and what it does in its tooltip). The tiles reflow to the
-  panel's width. Click one and drag in the viewport over the groom.
-- **Guide groups & edits** (a section of the Tools tab; click its title to open it): the guide
-  groups, each row with a visibility checkbox, its name (double-click to rename; graph params
-  naming it follow), a color swatch (click to give the group its own viewport color,
-  `groomlab.set_guide_group_color`; right-click to clear), its guide count and level; the name's
-  tooltip lists the graph nodes naming it. **+ New Group** and the small buttons over the list
-  make a new group, rename, select the group's guides and delete; right-click a row for the
-  same and Color. A group without a color of its own draws in an automatic hue of its own (the
-  swatch shows it, dashed). Clicking a
-  group makes it the brush group. **Segments** (a slider under it) shows the selected guides' point count, or every guide's with none
-  selected, resamples them live while dragged and applies on release (one undo step). **Edit Guides** holds Children..., Sync +X → -X, Sync -X → +X, Mirror
-  Selection, Mirror Group..., Reparent..., Promote / Demote..., From Curves and Clear Selection.
-- **Paint:** the Paint brush and the maps of every kind (see Painted maps in [Maps](looks-and-maps.md#maps)).
-- **Correctives:** Correctives (see [Correctives](guides-and-brushes.md#correctives-sculpt-layers-and-shot-fixes)).
-- **Photos:** photo cameras to groom to, and Guides from Photos (see [Grooming from reference](guides-and-brushes.md#grooming-from-reference)).
-- **Settings:** below the tabs, the active tool's name, what it does, and one card with only
-  what that tool uses: radius, strength (signed for tools that work both ways), falloff, the
-  Falloff curve and Root to tip curves, selected only, pen pressure, keep off scalp, mask by scalp (on: a stroke never reaches what the head hides from the camera, such as guides, parts, flow arrows or paint on its far side), and the tool's own options: New guides
-  (Place and Draw: length, segments, spacing and neighbor matching), Solo new guides (Place and
-  Draw), Parts (name, the list,
-  **From Curves**, Remove, Clear All), Flow (**Place** arrows or a sink, **Clear All**), Stretch
-  (Comb), Erases (Guides, Parts, Flow), Acts on (Guides, Parts, Flow for the shaping brushes),
-  Selection (**Soft radius**) and Freeze mask (**Unfreeze All**). **While sculpting** (folded
-  away under the card) sets how the strands draw during a stroke.
-- **Group:** the guide group brushes edit and Place and Draw add new guides to, with **Symmetry**
-  (World X or Topology; Alt+Shift+X with the hotkey set) beside it, shown whatever the tool; children follow
-  their parents. **All groups** brushes every guide. **New Group...** makes a group, top-level
-  or a child of another (`groomlab.add_guide_group(groom, name, parent=None)`); a **Guides**
-  node in the Graph Editor reads it by name.
+`"paint"`, `"correctives"`, `"photos"` or `"guides"`: Tools with the guide groups open) is the
+grooming hub, docked beside the viewport. One model on every tab: **pick a tool, set it in its
+card right under the tool grid, pick what it works on in the list under the card.**
+
+- **Pinned at the top** (outside the scrolling part): the header, the tabs and the tool grid. The
+  header picks what the tools work on: the groom (the selected one, or one picked to stay on it),
+  its eyes (the hair, the guides), a Graph Editor button and a **...** menu (Create Groom from
+  Selection, Theme). With no groom to work on, a **Start a groom** card takes the panel's place:
+  select the scalp mesh (and any guide curves) and click **Create Groom from Selection**, or
+  **Import** one (XGen, Yeti, Alembic curves, a groom file). Until the groom has guides and a
+  look, a **Your first groom** card lists those steps, ticks each off as the groom gets there, and
+  takes you to the next one on a click (its close button hides it for good). Then four tabs
+  (Tools, Paint, Correctives, Photos; `show(tab=...)` also takes the old ids `"sculpt"` and
+  `"reference"`).
+- **The tool grid** (Tools and Correctives; the Paint tile alone on Paint, none on Photos): every
+  tool as a labeled tile (a 20 px icon over its name, 56 x 50 px), in groups (the core's brush
+  catalog, `brush_catalog.h`): Create (Place, Draw, Part, Flow), Shape (Comb, Slide, Smooth,
+  Straighten, Lift, Twist, Curl, Attract, Direction, Noise, Shape), Trim (Cut, Length, Length
+  Keys, Erase), Paint (Paint) and Guides (Select, Freeze, with the Unfreeze All tile beside
+  Freeze). Every tile keeps its size: the panel's width sets how many fit in a row, left aligned.
+  Each tile's tooltip has its name and what it does. Click one and drag in the viewport over the
+  groom.
+- **The tool's card** (right under the grid): the tool's icon and name, a **?** (its tooltip: the
+  tool's whole hint and the gestures), one short line on what it does, then its blocks, always in
+  this order and each only when the tool has rows for it (the catalog's settings for the tool):
+  - **Brush:** how the stroke feels. Radius, Strength (signed, "Strength (±)", for tools that work
+    both ways), Falloff, Smooth (Paint: how much Shift+drag smooths); the chips Pressure, Off
+    scalp (keep off scalp), Falloff curve and Root to tip (a curve chip that is on shows its curve
+    under the row; right-click it for presets).
+  - **The tool's own block**, named after what it sets: Paint (Mode, Value and Fill or the color
+    and its channels, the stamp), New guides (Place and Draw: Length, Segments, Spacing, Match
+    nearby, Solo new) and Tube (the shape new guides get, a small preview, Width / Flatness /
+    Twist), Comb (Stretch while combing), Paints (Shape: Width, Flatness or Twist) with Profile
+    (the shape picker and Apply, the cross-section editor, Edit as custom, Mirror, Smooth; the
+    library's new / rename / duplicate / delete glyphs in its header) and Selected guides (their
+    Width, Flatness, Twist; Smooth in the header), Selection (Select: Soft radius, then Profile
+    and Selected guides), Erases (Guides, Parts, Flow), Keys (Length Keys), Flow (Place arrows or
+    a sink, the count, Clear all) and Parts (the next name, the list, From Curves, Remove, Clear
+    All).
+  - **Applies to:** where the stroke lands. Acts on (Guides, Parts, Flow for the shaping brushes)
+    and Mirror (Symmetry: World X or Topology; Alt+Shift+X with the hotkey set). The group a
+    stroke works on is not repeated here: it is the picked row of the list below.
+
+  Not in the panel: selected only and mask by scalp (the brushes keep their defaults: off, and
+  on, so a stroke never reaches what the head hides from the camera); how the strands draw while
+  sculpting (the groom's Attribute Editor > Sculpting); Simulate Range, Export, Render, Studio,
+  Transfer and Import (the GroomLab menu); Fill Tubes and Tube Blend (the Interpolate node's
+  settings).
+- **The tab's list** (under the card), each with a header (its name, how many, add / import
+  glyphs) and plain rows, and under it a small box with the picked item's own settings and
+  actions:
+  - **Guide groups** (Tools tab, always open): each row a color dot (filled for a color of its
+    own, `groomlab.set_guide_group_color`; a ring for its automatic hue), its name (indented under
+    its parent; double-click to rename, graph params naming it follow), its guide count and an eye
+    (show or hide). The name's tooltip gives its level, the graph nodes naming it and its new
+    guides' segments. Clicking a row picks the group the brushes edit and Place and Draw add new
+    guides to (children follow their parents); clicking the picked row again picks all groups
+    (every guide). The header has **Isolate** (an eye: the picked group and its child groups at
+    full color, the others dimmed) and **+** (a new group, top-level or a child of another:
+    `groomlab.add_guide_group(groom, name, parent=None)`); a **Guides** node in the Graph Editor
+    reads it by name. Right-click a row for New Group, Rename, Color, Default Color, Select, Reset
+    Segments and Delete. The picked group's box: rename, select its guides, delete; **Segments**
+    (the selected guides' point count, else the picked group's, else every guide's; resampled live
+    while dragged and applied on release, one undo step); **Edit Guides** (Children..., Sync +X →
+    -X, Sync -X → +X, Mirror Selection, Mirror Group..., Reparent..., Promote / Demote..., From
+    Curves and Clear Selection) with the children count beside it.
+  - **Paint:** Paint's card and the maps of every kind; the picked map's Show on, channel and Read
+    by under the list (see Painted maps in [Maps](looks-and-maps.md#maps)).
+  - **Correctives:** the layers (see [Correctives](guides-and-brushes.md#correctives-sculpt-layers-and-shot-fixes)).
+  - **Photos:** photo cameras to groom to, and Guides from Photos (see [Grooming from reference](guides-and-brushes.md#grooming-from-reference)).
 - **Staying in sync:** radius, strength and group changed in the viewport (middle-drag,
-  B/M-drag) show up here.
+  B/M-drag, Page Up / Page Down) show up here.
 - **Icons:** the SVG icons live in the module's `icons` folder, on Maya's icon path for shelves
   too.
 
 The **Graph Editor** is a dockable node editor for the selected groom:
-- **Nodes:** each is a card with a category color, its name and type, and ports colored by
-  type. The categories follow the order a groom is built in (the Add Node menu, the same in the app
+- **Nodes:** each is a card with a category color (Charcoal fills the header with it; a theme's
+  `headerStyle`), its name and type, and ports colored by type. The categories follow the order a groom is built in (the Add Node menu, the same in the app
   and Blender, from the core's `node_catalog.h` and each node's own registration): Sources (Scalp, Guides, ColliderMesh, ImportCurves,
   Linked Groom), Grow (Scatter, Interpolate, Cull), Shape (Length, Width, Resample, Direction, Flow,
   Part, Smooth, Mirror, Restore Length, Sculpt), Deform (Bend, Transform, Blend Neighbors,
@@ -180,7 +204,7 @@ The **Graph Editor** is a dockable node editor for the selected groom:
   - **Inputs:** the **Scalp** node shows the mesh it reads, with **Pick from Selection** (grow
     the groom on the selected mesh) and **Select**, and, for a moving scalp, the rest pose with
     **Set** and **Clear**. The **Guides** node shows the guides the groom has, with **Groups...** (the
-    Groom Tools' Guide groups & edits). Plumbing params (the Scalp input, the Guides input and hierarchy)
+    Groom Tools' Guide groups). Plumbing params (the Scalp input, the Guides input and hierarchy)
     stay hidden unless changed.
 - **Adding nodes:** press Tab or right-click the canvas to search. Type part of a name
   or of what it does ("remap curve"), then Enter adds it there. Names come first, then a few

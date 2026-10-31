@@ -19,17 +19,16 @@ basic workflow:
 />
 
 <Callout title="In the app and in Blender">
-  **App:** the brushes are on the left rail in **Groom** mode, with Select and Freeze last. The
-  brush bar at the bottom and the **Brush** panel hold the settings; **Guide groups** on the right
-  rail holds the groups, **Generate children**, mirror and sync. The keys below work without
+  **App:** the **Groom Tools** dock on the left in **Groom** mode has the same tabs, tool grid,
+  tool card and lists as Maya's, with Select and Freeze last. The keys below work without
   installing anything: **B** + drag, **M** + drag, **Alt+Shift+X**, **Page Up** / **Page Down**,
   **S** for Select, **Esc** to leave the brush, **Alt** + drag to move the camera with any brush.
   There is no marking menu. See [GroomLab app](/docs/app#groom-with-brushes).
 
   **Blender:** press **N** in the 3D viewport and open the **GroomLab** tab: **Groom Tools** has the
-  **Tools** and **Paint** tabs, with **Guide groups & edits** folded below. **B** + drag, **M** +
-  drag, **Page Up** / **Page Down** and **S** work as here; **Y** opens a pie menu in place of the
-  marking menu, and **Esc** or right-click cancels a stroke. Symmetry is in the tool's card. See
+  same tabs, tool grid, tool card and **Guide groups** list. **B** + drag, **M** + drag, **Page
+  Up** / **Page Down** and **S** work as here; **Y** opens a pie menu in place of the marking menu,
+  and **Esc** or right-click cancels a stroke. See
   [Blender](/docs/blender#groom-tools).
 </Callout>
 
@@ -40,17 +39,17 @@ Primary guides are the top level. **Child guides** are generated inside each par
 tubes, to any depth. A child stores its shape relative to its parent, so editing a parent moves
 and reshapes all its descendants.
 
-- **Generate children:** select guides, set the count in the box beside **Edit Guides** (under
-  **Guide groups & edits**) and choose **Edit Guides > Children**. Only the selected parents get
-  children (with no selection, the group picked in the list). Select children and repeat for
-  grandchildren.
-- **Place children by hand:** pick a child group in **Group** (top of the Groom Tools) and use
-  Place or Draw; each new child is parented to the nearest guide of the parent group.
+- **Generate children:** select guides, set the count in the box beside **Edit Guides** (in the
+  picked group's box under **Guide groups**) and choose **Edit Guides > Children**. Only the
+  selected parents get children (with no selection, the group picked in the list). Select children
+  and repeat for grandchildren.
+- **Place children by hand:** click a child group in the **Guide groups** list and use Place or
+  Draw; each new child is parented to the nearest guide of the parent group.
 - **Restructure:** **Reparent...** (move the selected children under another parent) and
   **Promote / Demote...** (move a group one level up, or under a sibling group) in Edit Guides
   change the hierarchy while keeping the guides' shapes.
-- **Segments:** the slider under Guide groups & edits shows the point count of the selected guides,
-  else of the picked group's (of every guide with All groups picked). Dragging it resamples them
+- **Segments:** the field in the picked group's box under Guide groups shows the point count of
+  the selected guides, else of the picked group's (of every guide with All groups picked). Dragging it resamples them
   live; releasing applies it as one undo step. Frozen guides keep theirs. Resampling a whole group
   also sets the segments its new guides get from then on: drawn, placed, from curves, baked, and
   children generated into it (the group's tooltip shows it). Selected guides resampled get a count
@@ -143,10 +142,10 @@ picks each tube's clumps among the tube's strands and clumps a strand only towar
 centers, so clumps stay inside the tube and flatten, twist and taper with it.
 
 **New guides take the chosen shape.** A guide you place or draw (symmetry's mirror guide too) gets
-the shape chosen in the **Tubes** panel (a built-in or a library shape; round until you pick one),
-and, with **Match neighbors** on, its width, flatness and twist blended from the two nearest guides'
+the shape chosen in the **Tube** block of the Place and Draw cards (a built-in or a library shape;
+round until you pick one), and, with **Match nearby** on, its width, flatness and twist blended from the two nearest guides'
 (the nearer counting more), so a new lock starts as thick and as flat as the locks round it. With no
-guides around (or Match neighbors off), it takes the panel's **Width**, **Flatness** and **Twist**.
+guides around (or Match nearby off), it takes the block's **Width**, **Flatness** and **Twist**.
 In Python: `brush_tool("place", tube={"shape": "leaf", "width": 0.1})` (and `brush_stroke(...,
 tube=...)`); `placement_tube()` reads it back.
 
@@ -167,33 +166,39 @@ The selected guides' tubes draw brighter.
   grows the tubes (a negative strength shrinks them), **Flatness** flattens them toward a ribbon
   (negative: rounds them back), **Twist** turns them about the guide (negative: the other way). The first
   stroke on a tube gives it one section per guide point, so you shape it point by point.
-  Symmetry, Selected only, frozen and soloed guides work as with every brush; each stroke is one
+  Symmetry, frozen and soloed guides work as with every brush; each stroke is one
   undo step.
 - **Ctrl** does the opposite: it shrinks, rounds or untwists the tubes.
 - **Shift+drag smooths** what the brush paints: the channel picked (width, flatness or twist) of
   the sections under the brush, each evened out toward its neighbours along the guide. The
   guides' shape stays as it is. (With the other guide brushes Shift selects.)
-- **Tubes** (a section of its own in Groom Tools > Tools, opened by the Shape brush, Place and Draw, or from its header): each guide keeps its own tube, and the
-  card edits **only its targets**: the selected guides (select them with **Select**), or with none
-  selected the soloed ones (left unfrozen while the rest are frozen). It follows every change of the
-  selection or solo. Pick the **Shape** (the built-ins, then the library's; it shows **Mixed** while
-  the targets' shapes differ), set the **Width** (the tubes scaled so the first one's widest section
-  is that wide; their taper and painted detail kept), **Flatness** and **Twist** (the same from root
-  to tip). The shape and values are also what Place and Draw give new guides. **Smooth** evens out
-  the targets' tubes along their guides, the **Current channel** (the one the brush paints) or **All
-  channels**. **Fill Tubes** and **Tube Blend** set the groom's Interpolate nodes (disabled when the
-  graph has none). Each change is one undo step.
-- **The shape editor** (in the Tubes section): a square showing the chosen shape's outline, the guide
-  at the cross, its height (off the scalp) up. A built-in shows read-only: **Edit as Custom** copies
+- **The tool cards' tube blocks.** Each guide keeps its own tube. The Shape and Select cards have
+  **Profile** and **Selected guides**, which edit **only their targets**: the selected guides
+  (select them with **Select**), or with none selected the soloed ones (left unfrozen while the rest
+  are frozen). They follow every change of the selection or solo.
+  - **Profile**: pick the shape (the built-ins, then the library's; it shows **Mixed** while the
+    targets' shapes differ) and the targets take it; **Apply** gives it to them again. Under it, the
+    shape editor (below).
+  - **Selected guides**: the targets' **Width** (the tubes scaled so the first one's widest section
+    is that wide; their taper and painted detail kept), **Flatness** and **Twist** (the same from
+    root to tip). **Smooth** in the block's header evens out the targets' tubes along their guides:
+    the **Current channel** (the one the brush paints) or **All channels** (its arrow's menu).
+  - **Tube** (the Place and Draw cards): the shape new guides get, with a small preview, and its
+    **Width**, **Flatness** and **Twist** (used where no guides are near to blend from). Profiles
+    are edited with the Shape brush.
+
+  Each change is one undo step. **Fill Tubes** and **Tube Blend** are the Interpolate node's
+  settings (`fillTubes`, `tubeBlend`), in the Graph Editor.
+- **The shape editor** (in the Profile block): a square showing the chosen shape's outline, the guide
+  at the cross, its height (off the scalp) up. A built-in shows read-only: **Edit as custom** copies
   it into the library as a new shape (the targets take it). A library shape's points drag (the
   groom shows the change live while you drag; letting go saves it, one undo step, every guide using
   it following); **click the outline** between two points to add one; **right-click** a point to
   remove it (three stay at least). **Mirror** (on by default) keeps the left and right sides alike:
   a point and its mirror image move, come and go together, points on the middle line stay on it.
-  **Smooth** switches between a smooth curve and straight edges. Under it: **New** (a circle to start
-  from), **Rename** (type the name in place, Enter), **Duplicate**, **Delete** (click twice: the
-  button says how many guides go round; they become round) and **Apply to Selected**. None of these
-  opens a dialog.
+  **Smooth** switches between a smooth curve and straight edges. The block's header has the
+  library's glyphs: **New** (a circle to start from), **Rename** (type the name in place, Enter),
+  **Duplicate** and **Delete** (click twice; its guides become round). None of these opens a dialog.
 
 **Seeing tubes.** Turn on **Display Tubes** in the groom's Attribute Editor (`displayTubes`; in
 the app, **Tubes** in the Display panel) to draw every guide's tube with its shape and sections.
@@ -219,7 +224,7 @@ groomlab.tube_shapes(groom)  # the built-ins and the library: name, builtin, poi
 groomlab.rename_tube_shape(groom, "leaf", "petal")
 groomlab.remove_tube_shape(groom, "petal")  # its guides become round; returns how many
 groomlab.preview_tube_shape(groom, "leaf", points)  # shown live, nothing stored (end_guide_preview)
-groomlab.tube_targets(groom)  # what the Tubes panel edits: the selected guides, else the soloed ones
+groomlab.tube_targets(groom)  # what Profile and Selected guides edit: the selected guides, else the soloed ones
 ```
 
 `set_tube` takes `guides`, `group` or `level` (default: the selected guides) and any of `width`,
@@ -231,29 +236,31 @@ the library is `-tubeShapes` (a query, JSON), `-editTubeShape <json>` (`{"op": "
 <json>` (live, no undo step), and `-tubeTargets` gives the panel's targets. The brush takes
 `-placeTube <json>` (Place and Draw) and `tube_channel` (`width`, `flatness`, `twist`;
 `-tubeChannel` on `groomLabBrushCtx` and `groomLabBrushStroke`). Fill Tubes and tube-space clumps
-run on the CPU; the GPU preview hands those nodes to it. The Tubes section, the shape editor
-and the wires are Maya's for now; the app and Blender paint width with it and keep (and fill) a
-groom's custom shapes, without an editor yet.
+run on the CPU; the GPU preview hands those nodes to it. The shape editor is in Maya and the app;
+Blender has the same blocks and lists the library, without the outline editor yet.
 
 ## Guide groups
 
 Guides belong to named **guide groups**. A group is either a top-level group of primary guides
 (`primary` by default, `braids`...) or a child group whose guides are children of the guides in
-its parent group. Groups are listed in **Groom Tools > Tools > Guide groups & edits**, a tree with
-the columns **Group**, a color swatch, **Guides** (count) and **Level**.
+its parent group. Groups are listed in **Groom Tools > Tools > Guide groups**, under the tool card
+(always open): one row per group with its color dot, its name (indented under its parent), its
+guide count and an eye. The section header shows how many there are, **Isolate** (the eye) and
+**+** (a new group). Under the list, the picked group's box has **rename**, **select** and
+**delete**, its **Segments**, and **Edit Guides** with the children count.
 
 | Action | How |
 | --- | --- |
-| Create a group | **+ New Group**: a name and a parent (**None** for a top-level group, or a parent group for a child group). |
-| Make it the active group | Click its row, or pick it in the **Group** menu at the top of the Groom Tools. Brushes only edit the active group's guides, and Place and Draw add guides to it. **All groups** brushes every guide. **Page Up** / **Page Down** step one level up or down. |
+| Create a group | **+** in the section header (**New Group**): a name and a parent (**None** for a top-level group, or a parent group for a child group). |
+| Make it the active group | Click its row in the list. Brushes only edit the active group's guides, and Place and Draw add guides to it. In Maya, clicking the picked group again goes back to **All groups**, which brushes every guide. **Page Up** / **Page Down** step one level up or down. |
 | Rename | Double-click the name, or **rename**. Guides node params that name the group are updated. |
-| Show / hide | The row's checkbox. The guides' eye at the top of the Groom Tools hides or shows every group of the groom at once ([The current groom](#the-current-groom-and-what-shows)). |
-| Color | The swatch shows the color the group draws in: filled when it has a color of its own, dashed around its automatic one. Click it to pick a color; right-click it (or **Default Color**) to clear. Every group without its own color, child groups too, gets a hue of its own, well apart from its parent's and its siblings'. To see a painted guide layer instead, set **Guide Color** (Display > Guides) to **Painted Layer**. The automatic colors start from a hue of the groom's own, from its name (the Maya transform, the Blender object, the app's file name), so two grooms side by side differ; the same name gives the same colors in Maya, Blender and the app. |
+| Show / hide | The row's eye. The guides' eye at the top of the Groom Tools hides or shows every group of the groom at once ([The current groom](#the-current-groom-and-what-shows)). |
+| Color | The row's dot shows the color the group draws in: filled when it has a color of its own, a ring for its automatic one. Right-click the row > **Color...** to pick a color, **Default Color** to clear it. Every group without its own color, child groups too, gets a hue of its own, well apart from its parent's and its siblings'. To see a painted guide layer instead, set **Guide Color** (Display > Guides) to **Painted Layer**. The automatic colors start from a hue of the groom's own, from its name (the Maya transform, the Blender object, the app's file name), so two grooms side by side differ; the same name gives the same colors in Maya, Blender and the app. |
 | Select its guides | **select**, or right-click > **Select Guides**. |
 | Delete | **delete**: the group, its child groups and their guides. The dialog lists graph nodes that use the group. |
 | Mirror | **Edit Guides > Mirror Group...** copies a top-level group to the other side. |
 
-**Isolate**, next to the Group menu, draws the active group and its child groups at full color and
+**Isolate**, the eye in the Guide groups header, draws the active group and its child groups at full color and
 dims every other group.
 
 **Hidden groups** are not drawn, not affected by brushes and not picked by the Select tool. Hiding
@@ -340,7 +347,7 @@ and each drag is one undo step. The brushes are the same, in the same order, in 
 | | **Attract** | Pulls tips together (negative strength pushes them apart). |
 | | **Direction** | Rotates guides about their roots toward the stroke direction, keeping lengths. |
 | | **Noise** | Adds smooth random displacement that builds up with each stroke (a negative strength smooths it out). |
-| | **Shape** | Paints guides' [tubes](#tube-guides) near the brush: **Width**, **Flatness** or **Twist** (a negative strength: the opposite), and sets the selected guides' tube shape, Fill Tubes and Tube Blend. |
+| | **Shape** | Paints guides' [tubes](#tube-guides) near the brush: **Width**, **Flatness** or **Twist** (a negative strength: the opposite); its card's **Profile** and **Selected guides** set the selected guides' tube shape, width, flatness and twist. |
 | Trim | **Cut**, **Length**, **Erase** | Cut guides where the brush touches; lengthen or shorten them uniformly; delete guides, part lines or flow arrows (not the scattered hair: see below). |
 | | **Length Keys** | Scale guide lengths from keys you place on the scalp, blended smoothly between them (see [Length Keys](#length-keys)). |
 | Paint (in the Paint tab) | **Paint** | Paints the map picked in the Paint tab, including the maps that drive settings such as density and width (see below, and [Painting maps](/docs/painting-maps)). |
@@ -411,7 +418,7 @@ to x1, so you can come back, drag a key and apply again without scaling twice.
 marks the ones that need the GroomLab hotkey set. **Install GroomLab Hotkeys** shows which keys it
 changed and the hotkey set it switched from.
 
-<Example name="groom-tools.png" alt="The Groom Tools panel" caption="The Groom Tools: brushes as icons, settings below." />
+<Example name="groom-tools.png" alt="The Groom Tools panel" caption="The Groom Tools: the tool tiles, the picked tool's card, then the tab's list." />
 
 ## The current groom and what shows
 
@@ -457,23 +464,39 @@ groomlab.set_all_hair_visible(True)
 
 ## Brush settings
 
-The active brush's settings are shown below the tabs; each brush shows only the settings it uses.
-The sections under them follow the tool too: **Tubes** shows with Place, Draw, Shape and Select,
-**While sculpting** with the brushes that stroke guides, and **Guide groups & edits** on the Tools
-tab. **Output** is always there. Pick a tool to see its sections; with no tool picked, the window
-shows the tiles, the guide groups and Output.
+The Groom Tools keep the groom header, the tabs and the tool grid pinned at the top: labeled tiles
+of one size, as many to a row as the panel's width holds. The picked tool's **card** sits right
+under the grid: its icon and name, a **?** (hover it for the tool's whole hint and the gestures),
+one short line on what it does, then its blocks, always in this order and each only when the tool
+uses it:
 
-| Setting | Effect |
-| --- | --- |
-| **Radius**, **Strength** | Brush radius (pixels) and the amount applied per dab. Negative strength reverses the brushes that work in both directions. |
-| **Falloff** | How the effect fades toward the brush edge: 0 hard, 1 soft from the center out. |
-| **Falloff curve** | The falloff as a curve, center (left) to edge (right). Right-click it for presets. |
-| **Root to tip** | How much of the strength each part of a guide receives, root (left) to tip (right); for example, style the ends and leave the roots. |
-| **Symmetry** | In the **Group** row at the top of the Groom Tools, with or without a brush. Mirrors every stroke: across world **X**, or with **Topology** across the scalp's own left and right (for a head that is rotated, animated or not quite symmetric). |
-| **Selected only** | Brush only the selected guides, weighted by the soft selection. |
-| **Keep off scalp** | Guides never go below the scalp; points pushed under it slide along it. |
-| **Front facing only** | A stroke does not reach what is on the far side of the head from the camera: guides, parts, flow arrows or paint. |
-| **Acts on** | What a shaping brush moves: guides, part lines, flow arrows. |
+1. **Brush**: how the stroke feels.
+2. The tool's own block, named after what it sets: **Paint** (Mode, Value and **Fill**, the
+   stamp), **New guides** and **Tube** (Place, Draw), **Comb** (Stretch while combing),
+   **Paints**, **Profile** and **Selected guides** (Shape; [tube guides](#tube-guides)),
+   **Selection** (Select), **Erases** (Erase), **Keys** (Length Keys), **Flow** and **Parts**.
+3. **Applies to**: where the stroke lands.
+
+Under the card is the tab's list: **Guide groups** on the Tools tab, the maps on Paint, the layers
+on Correctives, the photos on Photos. With no tool picked, the card says how to start.
+
+| Setting | Block | Effect |
+| --- | --- | --- |
+| **Radius**, **Strength** | Brush | Brush radius (pixels) and the amount applied per dab. **Strength (±)**: a negative strength reverses the brushes that work in both directions. |
+| **Falloff** | Brush | How the effect fades toward the brush edge: 0 hard, 1 soft from the center out. |
+| **Smooth** | Brush | Painting: how much Shift+drag smooths per stamp (past 1: several passes). |
+| **Pressure** | Brush | A tablet's pen pressure scales the strength. |
+| **Off scalp** | Brush | Guides never go below the scalp; points pushed under it slide along it. |
+| **Falloff curve** | Brush | The falloff as a curve, center (left) to edge (right), shown under the chips while it is on. Right-click it for presets. |
+| **Root to tip** | Brush | How much of the strength each part of a guide receives, root (left) to tip (right); for example, style the ends and leave the roots. |
+| **Acts on** | Applies to | What a shaping brush moves: guides, part lines, flow arrows. |
+| **Mirror** | Applies to | Symmetry: mirrors every stroke across world **X**, or with **Topology** across the scalp's own left and right (for a head that is rotated, animated or not quite symmetric). **Alt+Shift+X** toggles it (in Maya, with the GroomLab hotkey set). |
+
+A stroke never reaches what is on the far side of the head from the camera (guides, parts, flow
+arrows or paint), and brushes work on every unfrozen guide of the picked group; to brush only some
+guides, Shift+drag them into the selection (the rest freeze) or freeze the others. How the strands
+draw while you sculpt is the groom's setting: Attribute Editor > **Sculpting** (the app:
+Properties > **Sculpting**; Blender: **While sculpting** under the Groom Tools).
 
 ## Selection
 
@@ -483,7 +506,7 @@ Selection** and **Clear Selection**.
 
 ## Symmetry
 
-- **Symmetric grooming:** turn on **Symmetry** (in the Groom Tools' **Group** row, or **Alt+Shift+X**) and
+- **Symmetric grooming:** turn on **Symmetry** (**Mirror** in the tool card's **Applies to** block, or **Alt+Shift+X**) and
   every stroke is mirrored. While it is on, a red line on the scalp shows the mirror plane (with
   **Topology**, the scalp's middle loop) for as long as a brush is on, the cursor anywhere.
 - **Mirroring one side:** groom one side, then use **Edit Guides > Mirror Group...** or **Sync
