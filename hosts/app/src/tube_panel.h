@@ -99,7 +99,7 @@ public:
     TubeShapeEditor* editor() const { return editor_; }
     QLabel* targetsLabel() const { return targetsLabel_; }
     TubeShapeEditor* preview() const { return preview_; }  // New's small read-only profile
-    QPushButton* editAsCustomButton() const { return editCustom_; }
+    QWidget* shapeOptions() const { return shapeOptions_; }
     QToolButton* newButton() const { return new_; }
     QToolButton* renameButton() const { return rename_; }
     QToolButton* duplicateButton() const { return duplicate_; }
@@ -175,7 +175,7 @@ private:
     QComboBox* shape_ = nullptr;
     TubeShapeEditor* preview_ = nullptr;
     TubeShapeEditor* editor_ = nullptr;
-    QPushButton* editCustom_ = nullptr;
+    QWidget* shapeOptions_ = nullptr;  // Mirror and Smooth: a library shape's
     QToolButton* mirror_ = nullptr;
     QToolButton* shapeSmooth_ = nullptr;
     QToolButton* new_ = nullptr;

@@ -235,7 +235,7 @@ class DefinitionsTest(unittest.TestCase):
         self.assertEqual(texts(review), ["Density Heatmap", "Turntable"])
         self.assertIn(("prop", "show_hud"), review)  # Strand Count HUD: a checkbox (checkable)
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_main_utilities)),
-                         ["Strands to Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "Delete All Flow Arrows",
+                         ["To Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "Delete All Flow Arrows",
                           "Transfer Groom to Scalp...",
                           "Copy Graph to Other Grooms...", "Find Missing Files..."])
         help_ = drawn(bpy.types.GROOMLAB_MT_main_help)
@@ -395,11 +395,10 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(palette.flow_count_text(1, 1), "1 arrow \u00b7 1 sink")
         self.assertEqual(bpy.ops.groomlab.flow_clear(), {"FINISHED"})
         # Only the blocks the tool uses: Flow draws no tubes and no Mirror (it doesn't mirror); the
-        # guide groups under the card; While sculpting with the brushes that stroke.
+        # guide groups over the card; While sculpting with the brushes that stroke.
         self.assertNotIn(("prop", "tube_shape"), log)
         self.assertNotIn(("prop", "symmetry"), log)
         self.assertTrue(palette.VIEW3D_PT_groomlab_tools_sculpting.poll(bpy.context))
-        self.assertTrue(palette.VIEW3D_PT_groomlab_tools_guides.poll(bpy.context))
         for gone in ("VIEW3D_PT_groomlab_tools_tubes", "VIEW3D_PT_groomlab_tools_output"):
             self.assertFalse(hasattr(palette, gone))  # their items: the cards, the GroomLab menu
         bpy.ops.groomlab.tool(tool="part")
@@ -528,10 +527,12 @@ class ToolsTest(unittest.TestCase):
 
     def test_4_tubes(self):
         head, t = self.head, self.t
-        bpy.ops.groomlab.tool(tool="select")  # Select's card: Selection, Profile, Selected guides
+        bpy.ops.groomlab.tool(tool="select")  # Select's card: the selection only (the tubes: Tube's)
+        self.assertNotIn(("prop", "tube_shape"), drawn(palette.VIEW3D_PT_groomlab_tools))
+        bpy.ops.groomlab.tool(tool="shape")  # Tube's: Profile (Duplicate edits a built-in), Selected guides
         log = drawn(palette.VIEW3D_PT_groomlab_tools)
         self.assertIn(("prop", "tube_shape"), log)
-        self.assertIn("Edit as Custom", texts(log))
+        self.assertNotIn("Edit as Custom", texts(log))
         # No targets: the shape and values go to the guides Place and Draw make (the placement tube).
         t.tube_shape = "ribbon"
         bpy.ops.groomlab.tool(tool="place")
@@ -694,11 +695,11 @@ class ToolsTest(unittest.TestCase):
         self.assertEqual(d.strand_color, "density")
         bpy.ops.groomlab.review_heatmap()
         self.assertEqual(d.strand_color, "solid")
-        # Every panel of the Groom Tools draws on every tab: the card, then the Guide groups (open,
-        # palette.json's one section), While sculpting and Display.
+        # Every panel of the Groom Tools draws on every tab: the Guide groups (palette.json's one
+        # section, the Tools tab's list) right under the grid, then the card; While sculpting and
+        # Display under it.
         order = [c.bl_label for c in palette.classes if getattr(c, "bl_parent_id", "") == "VIEW3D_PT_groomlab_tools"]
-        self.assertEqual(order, ["Guide groups", "While sculpting", "Display"])
-        self.assertNotIn("DEFAULT_CLOSED", palette.VIEW3D_PT_groomlab_tools_guides.bl_options)
+        self.assertEqual(order, ["While sculpting", "Display"])
         for tab in ("TOOLS", "PAINT", "CORRECTIVES", "PHOTOS"):
             t.tab = tab
             drawn(*[c for c in palette.classes if issubclass(c, bpy.types.Panel)])
@@ -712,7 +713,12 @@ class ToolsTest(unittest.TestCase):
                 everything += texts(drawn(getattr(bpy.types, e[1])))
         for item in ("Simulate Range", "Transfer Groom to Scalp...", "Alembic...", "Alembic Curves..."):
             self.assertIn(item, everything)
-        log = drawn(palette.VIEW3D_PT_groomlab_tools_guides)
+        log = drawn(palette.VIEW3D_PT_groomlab_tools)
+        groups = log.index(("list", "groups")) if ("list", "groups") in log else -1
+        self.assertGreaterEqual(groups, 0, log)
+        brush = [i for i, e in enumerate(log) if e[:2] == ("prop", "radius")]
+        if brush:
+            self.assertLess(groups, brush[0], "the groups over the card")
         self.assertIn(("menu", "GROOMLAB_MT_guide_edits", "Edit Guides"), log)
         self.assertIn(("menu", "GROOMLAB_MT_group_context", ""), log)
         self.assertNotIn(("prop", "group"), drawn(palette.VIEW3D_PT_groomlab_tools))  # the list picks the group

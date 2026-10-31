@@ -148,6 +148,10 @@ enum StrandColorMode { kSolidColors = 0, kColorSetColors, kAttributeColors, kRan
 // `source`), the density heatmap; kDefaultStrandColor where there is nothing to read.
 std::vector<std::array<float, 3>> strandColors(const StrandSet& strands, const ScalpMesh* scalp, int mode,
                                                const std::string& source, float lo, float hi);
+// The lowest and highest value of the strand channel `channel` (the attribute colors' Auto Range:
+// the ramp from blue to red over every strand); non-finite values skipped. False: no such channel
+// or nothing finite in it (lo and hi left as they are).
+bool strandChannelRange(const StrandSet& strands, const std::string& channel, float& lo, float& hi);
 // Per point RGBA (alpha 1) from one color per strand.
 std::vector<float> strandPointColors(const StrandSet& strands, const std::vector<std::array<float, 3>>& colors);
 void writeStrandPointColors(const StrandSet& strands, const std::vector<std::array<float, 3>>& colors, float* rgba);
@@ -295,9 +299,10 @@ DisplayGeometry cardWireGeometry(const DisplayGeometry& cards);
 // The StrandMesh nodes' meshes (buildStrandMesh's tubes and ribbons: the same points) as a lit
 // surface, drawn as the scales are (scaleSurface): normals out of each tube (a ribbon's across its
 // plane), tangents along the strand, each point in its strand's own color (HairColor's channels;
-// `color` without them), uvs x root (0) to tip (1).
+// `color` without them), uvs x root (0) to tip (1). A ToMesh node's scales, instances, cards or
+// feathers are drawn as their faces, in `color` (instances' prototypes: `prototypes`).
 DisplayGeometry strandMeshGeometry(const std::vector<StrandMeshSource>& meshes, const ScalpMesh* scalp,
-                                   const std::array<float, 3>& color);
+                                   const std::array<float, 3>& color, const PrototypeLookup& prototypes = {});
 // The feathers' rachis tubes (buildRachisMesh of the strands' feather layers: a Propagate node's
 // shaftWidth) as the same lit surface, each feather in its shaft strand's color (`color` without).
 DisplayGeometry rachisGeometry(const StrandSet& strands, const std::array<float, 3>& color);

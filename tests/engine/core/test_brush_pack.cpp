@@ -101,7 +101,7 @@ TEST(BrushPack, ShapingBrushesUnchangedWithoutAProfile) {
     // A default (null) profile leaves every shaping brush exactly as it was: the same points
     // to the bit as a hierarchy brushed with settings that never had a profile.
     for (const BrushMode mode : {BrushMode::Comb, BrushMode::Smooth, BrushMode::Straighten, BrushMode::Lift, BrushMode::Twist,
-                                 BrushMode::Curl, BrushMode::Attract}) {
+                                 BrushMode::Attract}) {
         Field a, b;
         for (Field* f : {&a, &b}) {
             f->add(0.5f, 0.5f);
@@ -230,103 +230,14 @@ TEST(BrushPack, AFlatFalloffCurveIsAHardBrushOnScreenToo) {
 
 // ---- Direction and Noise ----------------------------------------------------------------------
 
-TEST(BrushPack, DirectionTurnsGuidesTowardTheStroke) {
-    Field f;
-    const GroupId g = f.h.addGroup("primary");
-    const GuideId leaning = f.h.addGuide(g, test::straightCurve({0.5f, 0, 0.5f}, Vec3f(0.6f, 0.8f, 0.0f), 10));
-    const GuideId standing = f.h.addGuide(g, test::straightCurve({0.6f, 0, 0.5f}, Vec3f(0.0f, 1.0f, 0.0f), 10));
-    f.h.evaluate(f.scalp.get());
-    const std::vector<Vec3f> upright = f.pts(standing);
-    BrushSettings s;
-    s.mode = BrushMode::Direction;
-    s.radius = 3.0f;
-    s.hardness = 1.0f;
-    s.strength = 1.0f;
-    s.collide = false;
-    // Stroking along +z: each stamp turns the guide half the way about its root normal (+y).
-    applyBrushStamp(f.h, f.scalp.get(), s, {0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 0.2f});
-    const std::vector<Vec3f>& once = f.pts(leaning);
-    const float angle = std::atan2(once.back().z - 0.5f, once.back().x - 0.5f);
-    EXPECT_NEAR(angle, 0.25f * 3.14159265f, 1e-3f) << "half of the quarter turn";
-    EXPECT_NEAR(once.back().y, 0.8f, 1e-4f) << "the lean is kept";
-    EXPECT_NEAR(lengthOf(once), 1.0f, 1e-4f);
-    EXPECT_NEAR((once.front() - Vec3f(0.5f, 0, 0.5f)).length(), 0.0f, 1e-6f);
-    for (int k = 0; k < 12; ++k) applyBrushStamp(f.h, f.scalp.get(), s, {0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 0.2f});
-    EXPECT_NEAR(f.pts(leaning).back().x, 0.5f, 1e-3f) << "it ends up along the stroke";
-    EXPECT_GT(f.pts(leaning).back().z, 1.0f);
-    EXPECT_EQ(f.pts(standing), upright) << "a guide standing up has no direction to turn";
-    // Negative strength (Ctrl): away from the stroke. A still stamp does nothing.
-    s.strength = -1.0f;
-    for (int k = 0; k < 12; ++k) applyBrushStamp(f.h, f.scalp.get(), s, {0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 0.2f});
-    EXPECT_LT(f.pts(leaning).back().z, 0.0f);
-    const std::vector<Vec3f> before = f.pts(leaning);
-    applyBrushStamp(f.h, f.scalp.get(), s, {0.5f, 0.5f, 0.5f}, {});
-    EXPECT_EQ(f.pts(leaning), before);
-}
-
-TEST(BrushPack, NoiseJittersSeededPerGuideAndCtrlSmoothsItOut) {
-    auto jittered = [](int stamps, float strength) {
-        Field f;
-        f.add(0.5f, 0.5f, 16);
-        f.add(0.55f, 0.5f, 16);
-        BrushSettings s;
-        s.mode = BrushMode::Noise;
-        s.radius = 3.0f;
-        s.hardness = 1.0f;
-        s.strength = strength;
-        s.collide = false;
-        for (int k = 0; k < stamps; ++k) applyBrushStamp(f.h, f.scalp.get(), s, {0.5f, 0.5f, 0.5f}, {});
-        return f;
-    };
-    // The straight line from the root: how far the guide strays from it.
-    auto stray = [](const std::vector<Vec3f>& pts) {
-        float most = 0.0f;
-        const Vec3f dir = Vec3f(0, 1, 0);
-        for (const Vec3f& p : pts) {
-            const Vec3f d = p - pts.front();
-            most = std::max(most, (d - dir * d.dot(dir)).length());
-        }
-        return most;
-    };
-    Field a = jittered(10, 1.0f), b = jittered(10, 1.0f);
-    const std::vector<HierarchyGuide>& guides = a.h.guides();
-    ASSERT_EQ(guides.size(), 2u);
-    const std::vector<Vec3f>& p0 = guides[0].points;
-    const std::vector<Vec3f>& p1 = guides[1].points;
-    EXPECT_EQ(a.h.toJson(), b.h.toJson()) << "the same jitter every time";
-    EXPECT_GT(stray(p0), 0.02f);
-    EXPECT_NEAR(lengthOf(p0), 1.0f, 1e-3f);
-    EXPECT_NEAR((p0.front() - Vec3f(0.5f, 0, 0.5f)).length(), 0.0f, 1e-6f);
-    // Calm at the root, and each guide its own pattern.
-    EXPECT_LT((p0[1] - Vec3f(0.5f, 1.0f / 16.0f, 0.5f)).length(), 0.25f * stray(p0));
-    bool differs = false;
-    for (std::size_t i = 1; i < p0.size(); ++i) differs = differs || ((p0[i] - Vec3f(0.5f, 0, 0.5f)) - (p1[i] - Vec3f(0.55f, 0, 0.5f))).length() > 1e-3f;
-    EXPECT_TRUE(differs);
-    // Negative strength (Ctrl) smooths it out: it strays less after.
-    const float noisy = stray(p0);
-    BrushSettings s;
-    s.mode = BrushMode::Noise;
-    s.radius = 3.0f;
-    s.hardness = 1.0f;
-    s.strength = -1.0f;
-    s.collide = false;
-    for (int k = 0; k < 20; ++k) applyBrushStamp(a.h, a.scalp.get(), s, {0.5f, 0.5f, 0.5f}, {});
-    EXPECT_LT(stray(a.h.guides()[0].points), 0.7f * noisy);
-}
-
-TEST(BrushPack, NewBrushesAreInTheCatalog) {
-    for (const char* mode : {"direction", "noise"}) {
-        const BrushEntry* e = brushEntry(mode);
-        ASSERT_TRUE(e) << mode;
-        EXPECT_EQ(e->category, BrushCategory::Shape);
-        EXPECT_TRUE(e->hasSetting("strengthProfile")) << mode;
+TEST(BrushPack, CurlDirectionAndNoiseBrushesAreGone) {
+    // Removed 2026-10-30 (not useful enough): no tile, no mode; the Curl and Noise nodes stay.
+    for (const char* brush : {"curl", "direction", "noise"}) {
         BrushToolSettings s;
-        s.setMode(mode);
-        EXPECT_EQ(s.modeName(), mode);
+        EXPECT_THROW(s.setMode(brush), std::invalid_argument) << brush;
+        EXPECT_EQ(brushEntry(brush), nullptr) << brush;
     }
-    EXPECT_TRUE(brushEntry("noise")->signedStrength);
-    EXPECT_FALSE(brushEntry("direction")->signedStrength);
-    for (const char* shaping : {"comb", "smooth", "straighten", "lift", "twist", "curl", "attract"}) {
+    for (const char* shaping : {"comb", "smooth", "lift", "twist", "attract"}) {
         EXPECT_TRUE(brushEntry(shaping)->hasSetting("strengthProfile")) << shaping;
         EXPECT_TRUE(brushEntry(shaping)->hasSetting("falloffProfile")) << shaping;
     }

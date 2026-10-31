@@ -107,30 +107,83 @@ def export_scales(groom, path, unity=False):
     selection = cmds.ls(selection=True)
     mesh = scale_mesh(groom)
     try:
-        if ext == ".fbx":
-            if not cmds.pluginInfo("fbxmaya", query=True, loaded=True):
-                cmds.loadPlugin("fbxmaya", quiet=True)
-            cmds.select(mesh, replace=True)
-            commands = ["FBXResetExport", "FBXExportInputConnections -v false", "FBXExportSmoothingGroups -v true",
-                        "FBXExportTriangulate -v false", "FBXExportEmbeddedTextures -v false"]
-            if unity:
-                commands += ["FBXExportUpAxis y", "FBXExportConvertUnitString m", "FBXExportScaleFactor 1.0"]
-            try:
-                for command in commands:
-                    mel.eval(command)
-                mel.eval('FBXExport -f "%s" -s' % path)
-            finally:
-                mel.eval("FBXResetExport")
-        else:
-            if not cmds.pluginInfo("AbcExport", query=True, loaded=True):
-                cmds.loadPlugin("AbcExport", quiet=True)
-            frame = cmds.currentTime(query=True)
-            cmds.AbcExport(j='-frameRange %s %s -uvWrite -writeUVSets -writeColorSets -worldSpace -root "%s" -file "%s"'
-                           % (frame, frame, cmds.ls(mesh, long=True)[0], path))
+        _write_mesh(mesh, path, unity=unity)
     finally:
         cmds.delete(mesh)
         cmds.select(selection, replace=True) if selection else cmds.select(clear=True)
     return path
+
+
+MESH_FORMATS = (".obj", ".fbx", ".abc")
+
+
+def export_mesh(groom, path, node=None):
+    """A ToMesh node's mesh at the current frame to `path`: .obj, .fbx (Maya's FBX export) or .abc
+    (this frame; export_alembic of a mesh on to_mesh_shape over a range is the animated one). The
+    node's settings make it (make, style, sides, width, density, cap): `node`, else the first ToMesh
+    node making the output, else the output as to_mesh's defaults (auto) make it. Returns the path."""
+    from groomlab import graph as gm, utils
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in MESH_FORMATS:
+        raise ValueError("the mesh goes to %s, not %r" % (", ".join(MESH_FORMATS), ext))
+    model = gm.GraphModel.from_groom(groom)
+    nodes = [n for n in model.feeding_output() if model.node_type(n) == "ToMesh"]
+    if node is None:
+        node = nodes[0] if nodes else None
+    elif model.node_type(node) != "ToMesh":
+        raise ValueError("%r is not a ToMesh node" % node)
+    kwargs = {}
+    if node is not None:
+        p = lambda key: model.param(node, key)  # noqa: E731
+        kwargs = {"node": node, "make": p("make"), "style": p("style"), "sides": int(p("sides")),
+                  "width_scale": float(p("widthScale")), "density": float(p("density")),
+                  "strand_uvs": bool(p("strandUVs"))}
+        cap = int(p("maxStrands"))
+        kwargs["max_strands"] = cap if cap > 0 else 100000000
+    directory = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(directory):
+        os.makedirs(directory)
+    path = path.replace("\\", "/")
+    selection = cmds.ls(selection=True)
+    made = utils.to_mesh(groom, **kwargs)["mesh"]
+    try:
+        _write_mesh(made, path)
+    finally:
+        cmds.delete(made)
+        cmds.select(selection, replace=True) if selection else cmds.select(clear=True)
+    return path
+
+
+def _write_mesh(mesh, path, unity=False):
+    """A Maya mesh (its transform) to `path`: .fbx, .abc (this frame) or .obj."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".obj":
+        if not cmds.pluginInfo("objExport", query=True, loaded=True):
+            cmds.loadPlugin("objExport", quiet=True)
+        cmds.select(mesh, replace=True)
+        cmds.file(path, force=True, exportSelected=True, type="OBJexport", preserveReferences=False,
+                  options="groups=1;ptgroups=1;materials=0;smoothing=1;normals=1")
+        return
+    if ext == ".fbx":
+        if not cmds.pluginInfo("fbxmaya", query=True, loaded=True):
+            cmds.loadPlugin("fbxmaya", quiet=True)
+        cmds.select(mesh, replace=True)
+        commands = ["FBXResetExport", "FBXExportInputConnections -v false", "FBXExportSmoothingGroups -v true",
+                    "FBXExportTriangulate -v false", "FBXExportEmbeddedTextures -v false"]
+        if unity:
+            commands += ["FBXExportUpAxis y", "FBXExportConvertUnitString m", "FBXExportScaleFactor 1.0"]
+        try:
+            for command in commands:
+                mel.eval(command)
+            mel.eval('FBXExport -f "%s" -s' % path)
+        finally:
+            mel.eval("FBXResetExport")
+    else:
+        if not cmds.pluginInfo("AbcExport", query=True, loaded=True):
+            cmds.loadPlugin("AbcExport", quiet=True)
+        frame = cmds.currentTime(query=True)
+        cmds.AbcExport(j='-frameRange %s %s -uvWrite -writeUVSets -writeColorSets -worldSpace -root "%s" -file "%s"'
+                       % (frame, frame, cmds.ls(mesh, long=True)[0], path))
 
 
 SCALE_MAPS = ("ScaleNormal", "ScaleHeight", "ScaleColor")

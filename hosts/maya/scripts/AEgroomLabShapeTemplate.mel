@@ -32,6 +32,8 @@ global proc AEgroomLabControlsNew(string $attr) { python("import groomlab.ui.ae 
 global proc AEgroomLabControlsReplace(string $attr) { python("import groomlab.ui.ae as a; a.controls_replace('" + $attr + "')"); }
 global proc AEgroomLabColorNew(string $attr) { python("import groomlab.ui.ae as a; a.color_new('" + $attr + "')"); }
 global proc AEgroomLabColorReplace(string $attr) { python("import groomlab.ui.ae as a; a.color_replace('" + $attr + "')"); }
+global proc AEgroomLabStrandColorsNew(string $attr) { python("import groomlab.ui.ae as a; a.strand_colors_new('" + $attr + "')"); }
+global proc AEgroomLabStrandColorsReplace(string $attr) { python("import groomlab.ui.ae as a; a.strand_colors_replace('" + $attr + "')"); }
 
 global proc AEgroomLabShapeTemplate(string $nodeName)
 {
@@ -80,8 +82,8 @@ global proc AEgroomLabShapeTemplate(string $nodeName)
             editorTemplate -addControl "displayInstances";
             editorTemplate -addSeparator;
             editorTemplate -addControl "strandColorMode";
-            editorTemplate -addControl "strandColorMin";
-            editorTemplate -addControl "strandColorMax";
+            // What the mode reads (a strand channel, a color set), the range and Auto Range.
+            editorTemplate -callCustom "AEgroomLabStrandColorsNew" "AEgroomLabStrandColorsReplace" "strandColorSource";
             editorTemplate -beginLayout "Guides" -collapse 1;
                 editorTemplate -addControl "displayOverlaysOnTop";
                 editorTemplate -addControl "guideWidth";
@@ -152,8 +154,10 @@ global proc AEgroomLabShapeTemplate(string $nodeName)
                             "viewNode", "inMesh", "restMesh", "guideCurves", "simGuides", "guideCache",
                             "guideCacheObject", "time", "outCards", "correctiveData", "flowData",
                             // set by the Groom Tools (the groups' eyes, the color by layer, the shot's
-                            // sculpt), the display's color source by its mode: not settings to type
-                            "hiddenGuideGroups", "guideColorLayer", "strandColorSource", "shotSculpt", "shotLayer"};
+                            // sculpt): not settings to type; the strand colors' source and range in
+                            // their own rows (under Strand Color Mode)
+                            "hiddenGuideGroups", "guideColorLayer", "shotSculpt", "shotLayer",
+                            "strandColorSource", "strandColorMin", "strandColorMax"};
         for ($attr in $hidden) editorTemplate -suppress $attr;
         // Controls show in their own section, not under Extra Attributes.
         for ($attr in $controls) editorTemplate -suppress $attr;

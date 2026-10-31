@@ -13,7 +13,9 @@
 #include <string>
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QCoreApplication>
+#include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QImage>
 #include <QLabel>
@@ -143,6 +145,19 @@ TEST(AppProperties, TheDockFollowsTheDefinitionsInMayasOrder) {
     ASSERT_TRUE(window.setDisplayText(QStringLiteral("colorMode=attribute")));
     EXPECT_TRUE(panel->shown("colorSource"));
     EXPECT_TRUE(panel->shown("colorMax"));
+    // Auto Range: the range at the source's lowest and highest value on the strands shown.
+    // (the source: the first channel the strands shown have, as Source offers them)
+    auto* source = qobject_cast<QComboBox*>(panel->control("colorSource"));
+    ASSERT_TRUE(source && source->count() > 0);
+    ASSERT_TRUE(window.setDisplayText(QStringLiteral("colorSource=") + source->itemText(0)));
+    ASSERT_TRUE(window.setDisplayText(QStringLiteral("colorMin=-5")));
+    ASSERT_TRUE(window.setDisplayText(QStringLiteral("colorMax=-4")));
+    auto* autoRange = panel->findChild<QPushButton*>(QStringLiteral("propColorAutoRange"));
+    ASSERT_TRUE(autoRange);
+    autoRange->click();
+    auto* colorMax = autoRange->parentWidget()->findChild<QDoubleSpinBox*>();  // (in the Max row)
+    ASSERT_TRUE(colorMax);
+    EXPECT_GT(colorMax->value(), -4.0);  // the channel's highest value, at or above its lowest
 
     // The inputs as the groom has them.
     auto* scalp = panel->findChild<QLabel*>(QStringLiteral("inputs_scalp"));

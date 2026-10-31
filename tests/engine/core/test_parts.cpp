@@ -344,7 +344,7 @@ TEST(PartBrush, OtherBrushesLeavePartsAlone) {
     const auto plane = test::makePlane(8);
     PartSet set = linePart(*plane, 0.5f);
     const std::uint64_t before = set.contentHash();
-    for (const BrushMode mode : {BrushMode::Twist, BrushMode::Length, BrushMode::Lift, BrushMode::Curl,
+    for (const BrushMode mode : {BrushMode::Twist, BrushMode::Length, BrushMode::Lift,
                                  BrushMode::ShapeTube, BrushMode::Attribute, BrushMode::Slide}) {
         EXPECT_EQ(applyBrushStrokeToParts(set, *plane, partBrush(mode, 0.3f), {{0.4f, 0, 0.5f}, {0.6f, 0, 0.5f}}), 0u)
             << brushModeName(mode);

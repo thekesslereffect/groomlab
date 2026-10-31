@@ -10,7 +10,7 @@
 //
 // A tool's settings name what its card shows (BrushSettingSpec: the label and the hint every
 // host uses, and the direction a number runs in): "radius", "strength" (signed for the tools
-// that work both ways: lift, twist, curl, attract, length, shape), "falloff" (0 hard: full
+// that work both ways: lift, twist, attract, length, shape), "falloff" (0 hard: full
 // strength to the brush's edge, 1 soft: fading from the center; BrushSettings::hardness is
 // 1 - falloff), "falloffProfile" (the falloff as a curve, center to edge), "strengthProfile"
 // (the shaping brushes' strength root to tip), "symmetry", "selectedOnly", "pressure", "collide" (keep off scalp),
@@ -44,6 +44,10 @@ struct BrushEntry {
     bool signedStrength;    // the strength runs -1..1 (negative: the other way)
     std::string hint;       // one line: what the tool does, shown under its name
     std::vector<std::string> settings;  // the settings its card shows (BrushSettingSpec ids)
+    // It works on a corrective (the Correctives tab shows it): the shaping brushes, whose strokes
+    // record as point offsets, and Select. Not the tools that add or remove things, paint
+    // attributes or tubes (BrushTool refuses those while a corrective is picked).
+    bool corrective = false;
     bool hasSetting(const std::string& setting) const;
 };
 

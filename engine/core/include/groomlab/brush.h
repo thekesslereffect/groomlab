@@ -28,14 +28,11 @@ enum class BrushMode {
     ShapeTube,  // paint touched guides' tube sections near the brush: width, flatness or twist (tubeChannel)
     Attribute,  // paint a per-guide attribute toward `value` (clump paint: attribute "clump")
     Twist,      // swing guides around their root normal (signed: counter-clockwise seen from above)
-    Curl,       // bend guides progressively toward the tip (signed), lengths kept
     Straighten, // relax guides toward the straight line along their root direction
     Attract,    // pull guide tips toward the brush center (negative: push apart)
     Erase,      // remove guides the brush touches, with their descendants
     Cut,        // trim guides where the brush touches them (the part past the brush goes)
     Slide,      // move roots along the scalp with the drag; each guide keeps its shape, turned with the surface
-    Direction,  // turn guides about their root normal toward the stroke's direction, lengths kept (negative: away)
-    Noise,      // add smooth random jitter along guides, seeded per guide, lengths kept (negative: smooth it out)
 };
 
 enum class PaintMode { Replace, Add, Subtract, ClampMaximum };
@@ -54,7 +51,7 @@ const char* tubeChannelName(TubeChannel channel);
 TubeChannel tubeChannelFromString(const std::string& name);
 
 // Parses a mode name: comb, smooth, lift, length, shape (ShapeTube), paint (attribute, clump),
-// cut, twist, curl, straighten, attract, erase, slide (move), direction, noise. Throws
+// cut, twist, straighten, attract, erase, slide (move). Throws
 // std::invalid_argument.
 BrushMode brushModeFromString(const std::string& name);
 const char* brushModeName(BrushMode mode);
@@ -77,8 +74,8 @@ struct BrushSettings {
     // center (0) to the radius (1); null: the smooth falloff past `hardness`.
     std::shared_ptr<const Ramp> falloffProfile;
     // Root to tip: the shaping brushes' effect along each guide, its root (0) to its tip (1) by
-    // length, times the strength (Comb, Smooth, Straighten, Lift, Twist, Curl, Attract,
-    // Direction, Noise); null: the same all along.
+    // length, times the strength (Comb, Smooth, Straighten, Lift, Twist, Attract); null: the
+    // same all along.
     std::shared_ptr<const Ramp> strengthProfile;
     int level = 0;          // hierarchy level to edit (-1: every level)
     std::string group;      // edit only this group instead of a level
@@ -119,6 +116,9 @@ struct BrushSettings {
     // Comb: guides stretch with the drag (longer or shorter, points respaced
     // evenly) instead of keeping their length.
     bool stretch = false;
+    // Smooth: relax guides toward the straight line along their root direction
+    // (Straighten) instead of only taking kinks out.
+    bool straighten = false;
 
     // Shape (ShapeTube): what it paints on the tubes.
     TubeChannel tubeChannel = TubeChannel::Width;
@@ -135,6 +135,11 @@ struct BrushSettings {
     // Groups hidden in the viewport: their guides are left alone.
     std::set<std::string> hiddenGroups;
 };
+
+// The mode a stroke runs: Smooth with `straighten` on runs Straighten.
+inline BrushMode strokeMode(const BrushSettings& s) {
+    return s.mode == BrushMode::Smooth && s.straighten ? BrushMode::Straighten : s.mode;
+}
 
 // A stroke's symmetry as one thing: off, a world plane (mirrorAxis, mirrorCenter) or the scalp's
 // own topology (mirrorTopology, on `scalp`: without one it is off).
@@ -271,7 +276,7 @@ std::size_t applyBrushStroke(GuideHierarchy& hierarchy, const ScalpMesh* scalp, 
 //               go; the pieces keep the name, then name1, name2...); pins and
 //               sinks unchanged.
 //   Erase       pins, sinks and parts under the brush removed.
-//   Lift, Curl, ShapeTube, Attribute, Slide, Direction, Noise: nothing.
+//   Lift, ShapeTube, Attribute, Slide: nothing.
 // Each returns how many pins and sinks (or parts) changed.
 std::size_t applyBrushStampToFlow(FlowSet& flow, const ScalpMesh& scalp, const BrushSettings& settings,
                                   const Vec3f& center, const Vec3f& drag, const BrushWeightFn& weight = {});

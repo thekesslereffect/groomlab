@@ -1009,7 +1009,7 @@ TEST(Golden, EveryOperatorIsCovered) {
         if (type == "ImportCurves") continue;  // Alembic operator: unit-tested in tests/engine/io
         if (type == "Input") continue;         // only inside compounds: covered by the Compound case
         if (type == "Reference") continue;     // another groom file's result: test_reference.cpp, against that groom's
-        if (type == "StrandMesh") continue;    // hands its strands on as they came: its mesh, test_strand_geometry.cpp and test_follow.cpp
+        if (type == "ToMesh") continue;        // hands its strands on as they came: its mesh, test_strand_geometry.cpp and test_follow.cpp
         EXPECT_TRUE(covered.count(type)) << type << " has no golden case";
     }
 }

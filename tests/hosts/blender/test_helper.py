@@ -965,9 +965,12 @@ class ToolsTest(HelperTestCase):
     def test_tool_catalog_and_settings_in_host_units(self):
         cat = self.h.call("tool_catalog")
         ids = [t["id"] for t in cat["tools"]]
-        for tool in ("place", "draw", "part", "flow", "comb", "slide", "smooth", "straighten", "lift", "twist", "curl",
+        for tool in ("place", "draw", "part", "flow", "comb", "slide", "smooth", "lift", "twist",
                      "attract", "shape", "cut", "length", "erase", "paint", "select", "freeze"):
             self.assertIn(tool, ids)
+        self.assertFalse({"curl", "direction", "noise", "straighten"} & set(ids))  # removed (Straighten: Smooth's chip)
+        corrective = set(t["id"] for t in cat["tools"] if t.get("corrective"))
+        self.assertEqual(corrective, {"comb", "slide", "smooth", "lift", "twist", "attract", "cut", "length", "select"})
         self.assertIn("falloff", [s["id"] for s in cat["settings"]])
         r = self.call("tool_set", tool="comb", settings={"radius": 42, "falloff": 0.25, "symmetry": "y", "symmetryCenter": 0.01,
                                                         "length": 0.03, "frontFacingOnly": False, "targets": ["guides", "parts"]})
@@ -1071,13 +1074,13 @@ class ToolsTest(HelperTestCase):
         self.stroke("comb", self.comb_events(), settings=curves,
                     ref={"strength_profile": [[0, 0], [1, 1]], "falloff_profile": [[0, 1], [1, 0]]})
         before = self.guides()
-        self.stroke("direction", self.comb_events(dx=160.0), settings={"symmetry": "topology"}, ref={"symmetry": "topology"})
+        self.stroke("twist", self.comb_events(dx=160.0), settings={"symmetry": "topology"}, ref={"symmetry": "topology"})
         self.assertEqual(self.call("tool_get")["settings"]["symmetry"], "topology")
-        self.stroke("noise", self.comb_events(), settings={"strength": 0.8}, ref={"strength": 0.8})
+        self.stroke("smooth", self.comb_events(), settings={"strength": 0.8}, ref={"strength": 0.8})
         after = self.guides()
         moved = [g for g in before if np.abs(after[g] - before[g]).max() > 1e-4]
         self.assertTrue(moved)
-        for g in moved:  # turned and jittered, lengths kept
+        for g in moved:  # turned and smoothed, lengths kept
             np.testing.assert_allclose(np.linalg.norm(np.diff(after[g], axis=0), axis=1).sum(),
                                        np.linalg.norm(np.diff(before[g], axis=0), axis=1).sum(), rtol=0.02)
         before = after
@@ -2338,14 +2341,14 @@ class PipelineTest(HelperTestCase):
         self.assertEqual(r["meshes"]["cards"]["material"], "head_cards_mat")
         self.assertEqual(r["fbxSettings"], {"upAxis": "Y", "units": "m"})
 
-        # The groom's strands as one mesh: tubes of 4 sides, at most 40 strands (thinned by ID).
-        r = self.call("strand_mesh", session=s, style="tube", sides=4, maxStrands=40, density=0.2, strandUVs=True)
+        # The groom's strands as one mesh (make strands: it has cards, auto's pick): tubes of 4 sides, at most 40 (thinned by ID).
+        r = self.call("strand_mesh", session=s, make="strands", style="tube", sides=4, maxStrands=40, density=0.2, strandUVs=True)
         self.assertEqual(r["strands"], 40)
         self.assertTrue(r["capped"])
         m = r["meshes"]["strands"]
         self.assertEqual(sum(self.h.array(m["faceCounts"])), m["corners"])
         self.assertIn("strandUVs", m["uvSets"])
-        self.assertEqual(self.call("strand_mesh", session=s, nodes=True)["nodes"], [])  # no StrandMesh node
+        self.assertEqual(self.call("strand_mesh", session=s, nodes=True)["nodes"], [])  # no ToMesh node
 
     def test_scales_mesh_maps_and_instancer(self):
         s = self.head_session(preset="dragon_scales")

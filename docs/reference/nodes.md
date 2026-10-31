@@ -17,7 +17,7 @@ User guide: [Node graph](https://www.getgroomlab.com/docs/node-graph).
 - **Deform:** `Bend`, `Transform`, `BlendNeighbors`, `Gravity`, `Displace`.
 - **Collide:** `Collide`, `SelfCollide` (hair no longer through itself), `MeshCut`.
 - **Look:** `Clump`, `Twist`, `Braid`, `Noise`, `Curl`, `Flyaway`, `Static` (charged hair puffing out), `Tangle`, `Wet` (wet hair from one slider), `Instance`, `Scales`.
-- **Convert:** `ToGuides`, `ToStrands`, `StrandMesh`. **Games:** `Cards`.
+- **Convert:** `ToGuides`, `ToStrands`, `ToMesh`. **Games:** `Cards`.
 - **Color:** `HairColor`, `Bands`, `FeatherColor`, `RenderData`.
 - **Motion:** `Wind`, `Jiggle` (no simulation cache: see [Motion without a cache](motion-and-simulation.md#motion-without-a-cache)), `Simulate`
   (the guides simulated, every host: see [Simulating the guides](motion-and-simulation.md#simulating-the-guides)).

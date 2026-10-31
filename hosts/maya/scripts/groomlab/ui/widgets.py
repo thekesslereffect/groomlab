@@ -29,7 +29,7 @@ _ranges = None  # key -> [lo, hi], loaded from the optionVar on first use
 # darker shade and a lighter tint of it; "ink" is hair and neutral parts.
 ICON_GROUPS = {
     "create": ("place", "draw", "part", "flow", "select"),
-    "shape": ("comb", "slide", "smooth", "straighten", "lift", "twist", "curl", "attract", "direction", "noise"),
+    "shape": ("comb", "slide", "smooth", "lift", "twist", "attract"),
     "trim": ("cut", "length", "lengths", "shape", "erase"),
     "paint": ("paint", "freeze", "unfreeze"),
 }
@@ -702,8 +702,8 @@ class Block(QtWidgets.QWidget):
 
 
 class ItemBox(QtWidgets.QFrame):
-    """Under a list: the picked item's own actions (glyphs, on the right) and settings, in a small
-    bordered box."""
+    """Under a list: the picked item's name and its own actions (glyphs, on the right), then its
+    settings, in a small bordered box (the name says what the glyphs act on: set_title)."""
 
     def __init__(self, actions=(), parent=None):
         super(ItemBox, self).__init__(parent)
@@ -716,7 +716,13 @@ class ItemBox(QtWidgets.QFrame):
         self.head = QtWidgets.QHBoxLayout()
         self.head.setContentsMargins(0, 0, 0, 0)
         self.head.setSpacing(theme.px(2))
-        self.head.addStretch(1)
+        self.title = ElidedLabel()
+        self.title.setObjectName("itemBoxTitle")
+        font = self.title.font()
+        font.setWeight(QtGui.QFont.DemiBold)
+        self.title.setFont(font)
+        self.title.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        self.head.addWidget(self.title, 1)
         for a in actions:
             self.head.addWidget(a)
         column.addLayout(self.head)
@@ -732,6 +738,34 @@ class ItemBox(QtWidgets.QFrame):
     def add_action(self, button):
         self.head.addWidget(button)
         return button
+
+    def set_title(self, text):
+        """The picked item's name (elided to the room the glyphs leave); empty: none."""
+        self.title.set_full_text(text or "")
+
+
+class ElidedLabel(QtWidgets.QLabel):
+    """A one-line label that elides its text to its width (the whole text in its tooltip)."""
+
+    def __init__(self, text="", parent=None):
+        super(ElidedLabel, self).__init__(parent)
+        self._full = ""
+        self.set_full_text(text)
+
+    def set_full_text(self, text):
+        self._full = text
+        self.setToolTip(text)
+        self._elide()
+
+    def full_text(self):
+        return self._full
+
+    def resizeEvent(self, event):
+        super(ElidedLabel, self).resizeEvent(event)
+        self._elide()
+
+    def _elide(self):
+        self.setText(self.fontMetrics().elidedText(self._full, QtCore.Qt.ElideRight, max(0, self.width())))
 
 
 def glyph(name, color=None, size=48):
@@ -758,14 +792,15 @@ class Tile(QtWidgets.QToolButton):
 
 
 class ToolGrid(QtWidgets.QWidget):
-    """Tiles of a fixed size (they never stretch with the panel), left aligned, as many to a row as
-    the width holds: columns = (width + spacing) // (tile width + spacing), at least one (and up to
-    `columns`, when given)."""
+    """Tiles in rows, as many to a row as the width holds at the tiles' minimum width: columns =
+    (width + spacing) // (tile width + spacing), at least one (and up to `columns`, when given);
+    the row's width is split evenly between them."""
 
     def __init__(self, buttons, columns=None, parent=None):
         super(ToolGrid, self).__init__(parent)
         from groomlab.ui import theme
-        self.buttons = list(buttons)
+        self.all_buttons = list(buttons)
+        self.buttons = list(buttons)  # the ones shown (set_shown), placed in order
         self.max_columns = columns
         self.columns = None
         # No layout: the tiles are placed by hand (a layout would answer the height for a width in
@@ -785,17 +820,33 @@ class ToolGrid(QtWidgets.QWidget):
     def _tile_height(self):
         return max(b.minimumHeight() for b in self.buttons) if self.buttons else 0
 
-    def _place(self, columns, force=False):
+    def _place(self, columns, force=False, width=None):
         columns = max(1, columns if not self.max_columns else min(columns, self.max_columns))
         if columns == self.columns and not force:
             return
         changed = columns != self.columns
         self.columns = columns
-        across, down = self._tile() + self.spacing, self._tile_height() + self.spacing
+        # The row's width split evenly, the leftover pixels spread so every row ends at the edge.
+        tile, height = self._tile(), self._tile_height()
+        across = max(self.width() if width is None else width, tile)
         for i, b in enumerate(self.buttons):
-            b.move((i % columns) * across, (i // columns) * down)
+            column = i % columns
+            left = column * (across + self.spacing) // columns
+            right = (column + 1) * (across + self.spacing) // columns - self.spacing
+            b.setGeometry(left, (i // columns) * (height + self.spacing), max(right - left, tile), height)
         if changed:
             self.updateGeometry()
+
+    def set_shown(self, keep):
+        """Show the buttons `keep(button)` is true for, placed in order without gaps; hide the rest."""
+        shown = [b for b in self.all_buttons if keep(b)]
+        if shown == self.buttons:
+            return
+        self.buttons = shown
+        for b in self.all_buttons:
+            b.setVisible(b in shown)
+        self._place(self.columns_for(self.width()), force=True)
+        self.updateGeometry()
 
     def columns_for(self, width):
         return max(1, (width + self.spacing) // max(1, self._tile() + self.spacing))
@@ -807,7 +858,7 @@ class ToolGrid(QtWidgets.QWidget):
         return max(1, -(-len(self.buttons) // max(1, columns)))
 
     def resizeEvent(self, event):
-        self._place(self.columns_for(event.size().width()), force=True)
+        self._place(self.columns_for(event.size().width()), force=True, width=event.size().width())
         super(ToolGrid, self).resizeEvent(event)
 
     def hasHeightForWidth(self):

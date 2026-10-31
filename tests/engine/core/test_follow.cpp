@@ -500,7 +500,7 @@ TEST(FollowScalp, AStrandMeshNodeFollowsWithAFixedTopology) {
     std::string graph = kLookGraph;
     const std::string noiseNode = R"({"name": "noise", "type": "Noise", "params": {"amplitude": 0.03}},)";
     graph.replace(graph.find(noiseNode), noiseNode.size(),
-                  R"({"name": "tubes", "type": "StrandMesh", "params": {"density": 0.5, "maxStrands": 120, "sides": 5}},)" +
+                  R"({"name": "tubes", "type": "ToMesh", "params": {"density": 0.5, "maxStrands": 120, "sides": 5}},)" +
                       noiseNode);
     const std::string toNoise = R"({"from": "clump", "to": "noise", "input": "strands"})";
     graph.replace(graph.find(toNoise), toNoise.size(),

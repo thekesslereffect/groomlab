@@ -118,8 +118,8 @@ groomlab.set_guide_attribute(groom, "clump", 0.5, group="primary")
   removes (**Remove**) or clears (**Clear All**) them.
 - **From curves:** parts can still be made from existing curves (the Parts box's **From
   Curves**, or `add_part`).
-- **Reshaping:** with **Parts** ticked under Acts on in the brush settings, Comb slides a part's points
-  along the scalp, Smooth and Straighten relax or straighten the line, Attract pulls it toward
+- **Reshaping:** with **Parts** ticked under Applies to in the brush settings, Comb slides a part's
+  points along the scalp, Smooth (and its Straighten) relaxes or straightens the line, Attract pulls it toward
   the cursor and Cut splits it in two (see Brushes). The parts preview live as you drag; each
   stroke is one undo step.
 
@@ -197,13 +197,10 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
 | --- | --- |
 | `comb` | Drags guide points along the stroke. Roots stay pinned and segment lengths are kept, unless **Stretch** is on (`stretch=True`): then combing out past the tips makes guides longer (and pushing in, shorter), points respaced evenly. |
 | `smooth` | Relaxes kinks, keeping lengths. |
-| `straighten` | Relaxes guides toward the straight line along their root direction. |
+| `straighten` | Relaxes guides toward the straight line along their root direction (in the palette: Smooth's **Straighten** chip; `brush_tool("smooth", straighten=True)`). |
 | `lift` | Turns guides toward the scalp normal; negative strength lays them down. |
 | `twist` | Swings guides around their root normal; the sign sets the direction. |
-| `curl` | Bends guides progressively toward the tip, keeping length; the sign sets the direction. |
 | `attract` | Pulls guide tips toward the brush center, for hand-made clumps; negative pushes them apart. |
-| `direction` | Turns guides about their root normal toward the way you stroke, keeping their lean and length (Yeti's Direction brush); Ctrl turns them away. Half the turn per stamp at strength 1. |
-| `noise` | Adds smooth random jitter along guides, across them, calm at the root, lengths kept. Each guide has its own pattern (seeded by its ID) and every stroke builds the same one up; negative strength (or Ctrl) smooths it out. |
 | `length` | Grows guides (positive strength) or shortens them evenly (negative), 5% per stamp at strength 1. |
 | `cut` | Trims guides where the brush touches them: the part past the brush is removed and the rest respaced. |
 | `tube` | Grows or shrinks a guide's tube ring by ring where the brush touches it (the profile gets at least 8 rings), so a tube can bulge or taper along its length. The tube is where the guide's children are spread (Children..., and children placed by hand follow it). |
@@ -227,12 +224,11 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   sinks and part points toward the brush center (negative pushes apart); `straighten` pulls a
   part toward the chord between its ends and turns arrows along their stroke's overall
   direction; `cut` splits a part where the brush touches it (the pieces keep the name, then
-  `name1`, `name2`...); `erase` removes them. Lift, Curl, Tube, Paint and Slide leave them
+  `name1`, `name2`...); `erase` removes them. Lift, Tube, Paint and Slide leave them
   alone. Symmetry mirrors the stamps as for guides, and a stroke is one undo step with its
   guide edit. In C++: `applyBrushStrokeToFlow` / `applyBrushStrokeToParts` (`brush.h`); in
   Python, `apply_brush_stroke_to_flow` / `apply_brush_stroke_to_parts`.
-- **Root to tip:** the shaping brushes (comb, smooth, straighten, lift, twist, curl, attract,
-  direction, noise) take a curve of their strength along each guide, root to tip
+- **Root to tip:** the shaping brushes (comb, smooth, lift, twist, attract) take a curve of their strength along each guide, root to tip
   (`strength_profile=[[0, 0], [1, 1]]`: tips only; the **Root to tip** chip in the tool card's
   Brush block). Flat (or none) is the brush as always, bit for bit.
 - **Falloff curve:** the falloff drawn as a curve, the weight from the brush's center to its edge
@@ -316,8 +312,8 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   the Blender helper's `length_edit` / `length_state`; the press with `kStrokeAdjust` drags a key's
   scale.
 - **Shift and Ctrl in a brush:** Ctrl is the brush's opposite (`BrushTool::pressed`: Length
-  shortens, Lift lays down, Twist, Curl, Attract, Direction, Noise and Shape flip, Cut grows,
-  painting goes toward 0; Comb, Slide, Smooth, Straighten and Erase have none). With a guide
+  shortens, Lift lays down, Twist, Attract and Shape flip, Cut grows,
+  painting goes toward 0; Comb, Slide, Smooth and Erase have none). With a guide
   brush Shift selects (`BrushToolSettings::shiftSelects`, the hosts'): Shift+click adds the
   guides in the ring (the rest freeze; on none: unfreeze all), Shift+drag paints them in; the
   lasso is the Select tool's. Painting maps or Freeze, and with Shape (its tube channel), Shift+drag
@@ -466,7 +462,7 @@ A preset made on a head works on a 1 cm test sphere. `save_preset` records the s
   arrows were erased); the field draws as a pale preview (`displayFlow`). Arrows are bound to the
   scalp and follow it when it deforms, and travel with groom files (`"flow"`: each pin records its
   `line` and `seq`).
-- With **Flow** ticked under Acts on in the brush settings, the shaping brushes work on the arrows and sinks
+- With **Flow** ticked under Applies to in the brush settings, the shaping brushes work on the arrows and sinks
   too: Comb slides them with the stroke and lays arrows along it, Smooth
   averages arrows with their neighbours and evens out a stroke's arrows, Twist turns arrows
   and a whorl's angle, Length sizes a sink's radius, Attract gathers them, Straighten lines a

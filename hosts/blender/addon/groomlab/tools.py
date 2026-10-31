@@ -222,7 +222,7 @@ def settings_of(scene, tool=None):
          "symmetry": t.symmetry_mode if t.symmetry else "none",
          "selectedOnly": bool(t.selected_only),
          "pressure": bool(t.pressure), "collide": bool(t.collide), "frontFacingOnly": bool(t.front_facing),
-         "stretch": bool(t.stretch), "targets": ",".join(targets) or "none",
+         "stretch": bool(t.stretch), "straighten": bool(t.straighten), "targets": ",".join(targets) or "none",
          "eraseGuides": bool(t.erase_guides), "eraseParts": bool(t.erase_parts), "eraseFlow": bool(t.erase_flow),
          "matchNeighbors": bool(t.match_neighbors), "soloNewGuides": bool(t.solo_new_guides),
          "length": float(t.length), "segments": int(t.segments),

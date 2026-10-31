@@ -32,10 +32,13 @@ namespace groomlab::maya {
 //                           carries glStrandId (string), glWidth (a double array, per point) and
 //                           the strands' channels (gl<Channel>: a double per strand channel, a
 //                           double array per point channel).
-//   -strandMesh/-smh        the strands as one polygon mesh (strand_geometry.h): -style/-st
-//                           tube|ribbon, -sides/-sds n (tubes), -widthScale/-ws s, -strandUVs/-suv
-//                           (a second UV set "strandUVs": a grid cell per strand), -node,
-//                           -density, -maxCount (strands).
+//   -strandMesh/-smh        the groom as one polygon mesh (strand_geometry.h): -make/-mk
+//                           auto|strands|scales|feathers|cards|instances (auto: scales, else
+//                           instances, else cards, else feathers, else the strands), -style/-st
+//                           tube|ribbon, -sides/-sds n (tubes), -widthScale/-ws s,
+//                           -strandUVs/-suv (a second UV set "strandUVs": a grid cell per
+//                           strand), -node, -density, -maxCount (strands; scales, feathers,
+//                           cards and instances are never thinned).
 //   -degree/-dg 1|3         the curves' degree (default 1: the CVs are the points; 3: a
 //                           cubic through them, the points its edit points)
 //   -name/-n <name>         the group (curves) or mesh transform's name

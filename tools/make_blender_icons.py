@@ -30,7 +30,7 @@ K = SIZE * SS / 32.0         # SVG units (32 x 32) to canvas pixels
 # groomlab/ui/widgets.py: which theme color each icon's main color is, and the placeholders.
 ICON_GROUPS = {
     "create": ("place", "draw", "part", "flow", "select"),
-    "shape": ("comb", "slide", "smooth", "straighten", "lift", "twist", "curl", "attract", "direction", "noise"),
+    "shape": ("comb", "slide", "smooth", "lift", "twist", "attract"),
     "trim": ("cut", "length", "lengths", "shape", "erase"),
     "paint": ("paint", "freeze", "unfreeze"),
 }

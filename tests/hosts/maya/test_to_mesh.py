@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The live strand mesh (a StrandMesh node, the groom's outStrandMesh) in mayapy: on a deforming
+"""The live strand mesh (a ToMesh node, the groom's outMesh) in mayapy: on a deforming
 scalp with follow scalp and a Simulate node its points move from frame to frame while its vertex
 and face counts stay; it matches the snapshot (groomLabConvert -strandMesh) of the node at a frame;
 Maya's Alembic export writes it as an animated mesh. Prints the ms per frame of a 10k-strand mesh.
 
-Usage: mayapy test_strand_mesh.py <GroomLab.mll> <maya/scripts dir> <work dir>
+Usage: mayapy test_to_mesh.py <GroomLab.mll> <maya/scripts dir> <work dir>
 """
 
 import math
@@ -48,7 +48,7 @@ def farthest(a, b):
     return max(math.sqrt(sum((x - y) ** 2 for x, y in zip(p, q))) for p, q in zip(a, b))
 
 
-class StrandMeshTest(unittest.TestCase):
+class ToMeshTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cmds.loadPlugin(PLUGIN_PATH, quiet=True)
@@ -84,26 +84,72 @@ class StrandMeshTest(unittest.TestCase):
                 model.set_param(name, "density", float(density))
         model.save(self.groom)
 
+    def test_scales_make_their_plates_and_export(self):
+        # A ToMesh node on scales: auto makes the plates (quads, nearly all); strands asked for,
+        # tubes (quads); Export Mesh writes the node's mesh as an OBJ.
+        model = gm.GraphModel.from_groom(self.groom)
+        scales = model.add_node("Scales", name=model.unique_name("scales"))
+        model.insert_before(model.output, scales)
+        model.save(self.groom)
+        node = groomlab.add_to_mesh(self.groom)
+        self.assertEqual(gm.GraphModel.from_groom(self.groom).param(node, "make"), "auto")
+        plates = groomlab.to_mesh(self.groom)["mesh"]
+        faces = cmds.polyEvaluate(plates, face=True)
+        self.assertGreater(faces, 0)
+        self.assertLess(faces * 1.5, cmds.polyEvaluate(plates, triangle=True))  # plates: mostly quads
+        tubes = groomlab.to_mesh(self.groom, make="strands", max_strands=20)["mesh"]
+        self.assertLess(cmds.polyEvaluate(tubes, face=True), cmds.polyEvaluate(tubes, triangle=True))  # quads
+        with self.assertRaises(ValueError):
+            groomlab.to_mesh(self.groom, make="spheres")
+        path = os.path.join(WORK_DIR, "scales.obj").replace("\\", "/")
+        self.assertEqual(groomlab.export_mesh(self.groom, path, node=node), path)
+        with open(path) as f:
+            text = f.read()
+        self.assertEqual(sum(1 for line in text.splitlines() if line.startswith("f ")), faces)
+        with self.assertRaises(ValueError):
+            groomlab.export_mesh(self.groom, os.path.join(WORK_DIR, "scales.stl"))
+
+    def test_cards_and_instances_make_their_meshes(self):
+        # A Cards node's cards: quads, auto's pick; then instances of a scene cube: their cubes where
+        # they sit (6 quads each), auto's pick over the cards.
+        model = gm.GraphModel.from_groom(self.groom)
+        cards = model.add_node("Cards", name=model.unique_name("cards"))
+        model.insert_before(model.output, cards)
+        model.save(self.groom)
+        quads = groomlab.to_mesh(self.groom, make="cards")["mesh"]
+        count = cmds.polyEvaluate(quads, face=True)
+        self.assertGreater(count, 0)
+        self.assertEqual(count * 2, cmds.polyEvaluate(quads, triangle=True))
+        self.assertEqual(cmds.polyEvaluate(groomlab.to_mesh(self.groom)["mesh"], face=True), count)  # auto: the cards
+        cube = cmds.polyCube(width=0.05, height=0.05, depth=0.05, name="probeCube")[0]
+        groomlab.add_instances(self.groom, cube, probability=1.0, count=1, scale=1.0)
+        made = groomlab.to_mesh(self.groom, make="instances")["mesh"]
+        faces = cmds.polyEvaluate(made, face=True)
+        self.assertGreater(faces, 0)
+        self.assertEqual(faces % 6, 0)  # whole cubes
+        self.assertEqual(faces, cmds.polyEvaluate(made, triangle=True) // 2)  # quads, every one
+        self.assertEqual(cmds.polyEvaluate(groomlab.to_mesh(self.groom)["mesh"], face=True), faces)  # auto: the instances
+
     def test_live_mesh_follows_the_scalp_and_simulate_with_a_fixed_topology(self):
         simulate = sim.add_simulate(self.groom, preset="fur")
-        node = groomlab.add_strand_mesh(self.groom, sides=4, max_strands=150)
+        node = groomlab.add_to_mesh(self.groom, sides=4, max_strands=150)
         model = gm.GraphModel.from_groom(self.groom)
-        self.assertEqual(model.node_type(node), "StrandMesh")
+        self.assertEqual(model.node_type(node), "ToMesh")
         self.assertEqual(model.source_of(model.output, "strands"), node)  # just before the output
-        self.assertTrue(cmds.getAttr(self.groom + ".displayStrandMesh"))  # the groom draws it at once
+        self.assertTrue(cmds.getAttr(self.groom + ".displayMesh"))  # the groom draws it at once
         # Mesh in Scene: one undo step; again, the same mesh.
-        mesh = groomlab.strand_mesh_shape(self.groom)
+        mesh = groomlab.to_mesh_shape(self.groom)
         cmds.undo()
         self.assertFalse(cmds.objExists(mesh))
         cmds.redo()
         self.assertTrue(cmds.objExists(mesh))
-        self.assertEqual(groomlab.strand_mesh_shape(self.groom), mesh)
+        self.assertEqual(groomlab.to_mesh_shape(self.groom), mesh)
         self.assertEqual(cmds.polyEvaluate(mesh, shell=True), 150)
         self.assertIn("initialShadingGroup", cmds.listConnections(cmds.listRelatives(mesh, shapes=True)[0],
                                                                   type="shadingEngine") or [])
         made = {"vertices": cmds.polyEvaluate(mesh, vertex=True)}
         # Again: the same node, the settings taken (one undo step).
-        self.assertEqual(groomlab.add_strand_mesh(self.groom, sides=5, max_strands=150), node)
+        self.assertEqual(groomlab.add_to_mesh(self.groom, sides=5, max_strands=150), node)
         self.assertEqual(groomlab.graph.GraphModel.from_groom(self.groom).param(node, "sides"), 5)
         cmds.undo()
         self.assertEqual(groomlab.graph.GraphModel.from_groom(self.groom).param(node, "sides"), 4)
@@ -121,7 +167,7 @@ class StrandMeshTest(unittest.TestCase):
             self.assertGreater(farthest(a, b), 1e-4)  # it moves every frame
 
         # The snapshot of the node at this frame: the same mesh.
-        snapshot = utils.strands_to_mesh(self.groom, node=node, sides=4, max_strands=150)
+        snapshot = utils.to_mesh(self.groom, node=node, sides=4, max_strands=150)
         self.assertEqual((snapshot["vertices"], snapshot["faces"]), counts)
         self.assertLess(farthest(points_of(snapshot["mesh"]), frames[-1]), 1e-4)
         cmds.delete(snapshot["mesh"])
@@ -129,7 +175,7 @@ class StrandMeshTest(unittest.TestCase):
         # Baked, the frames read the bake: the mesh still is the node's strands.
         sim.bake_simulation(self.groom, node=simulate, end=6, path=os.path.join(WORK_DIR, "sim.abc"))
         cmds.currentTime(3)
-        snapshot = utils.strands_to_mesh(self.groom, node=node, sides=4, max_strands=150)
+        snapshot = utils.to_mesh(self.groom, node=node, sides=4, max_strands=150)
         self.assertLess(farthest(points_of(snapshot["mesh"]), points_of(mesh)), 1e-4)
         self.assertEqual(mesh_fn(mesh).numVertices, counts[0])
         cmds.delete(snapshot["mesh"])
@@ -162,33 +208,33 @@ class StrandMeshTest(unittest.TestCase):
         self.assertLess(farthest(read[1], baked[1]), 1e-4)
 
     def test_strands_to_mesh_is_a_snapshot(self):
-        # Utilities > Strands to Mesh: a mesh of this frame, no node, nothing on outStrandMesh.
+        # Utilities > To Mesh: a mesh of this frame, no node, nothing on outMesh.
         import inspect
         from groomlab.ui import menu
-        self.assertNotIn("live", inspect.signature(utils.strands_to_mesh).parameters)
-        self.assertNotIn("live", inspect.signature(menu.strands_to_mesh_dialog).parameters)
-        made = menu.strands_to_mesh_dialog(node="(output)", style="tube", sides=4, width_scale=1.0, max_strands=20,
+        self.assertNotIn("live", inspect.signature(utils.to_mesh).parameters)
+        self.assertNotIn("live", inspect.signature(menu.to_mesh_dialog).parameters)
+        made = menu.to_mesh_dialog(make="auto", node="(output)", style="tube", sides=4, width_scale=1.0, max_strands=20,
                                            strand_uvs=False, groom=self.groom)
         self.assertEqual(made["strands"], 20)
-        self.assertEqual(utils.strand_mesh_nodes(self.groom), [])
-        self.assertFalse(cmds.listConnections(self.groom + ".outStrandMesh", destination=True, source=False))
+        self.assertEqual(utils.to_mesh_nodes(self.groom), [])
+        self.assertFalse(cmds.listConnections(self.groom + ".outMesh", destination=True, source=False))
 
     def test_a_node_after_another_and_ms_per_frame(self):
         # After a node: what that node makes (Interpolate's strands); the output is as it was.
         model = gm.GraphModel.from_groom(self.groom)
         interpolate = next(n for n in model.order if model.node_type(n) == "Interpolate")
         before = cmds.getAttr(self.groom + ".outStrandCount")
-        node = groomlab.add_strand_mesh(self.groom, after=interpolate, style="ribbon", max_strands=50)
+        node = groomlab.add_to_mesh(self.groom, after=interpolate, style="ribbon", max_strands=50)
         model = gm.GraphModel.from_groom(self.groom)
         self.assertEqual(model.source_of(node, "strands"), interpolate)
         self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), before)
         with self.assertRaises(ValueError):
-            groomlab.add_strand_mesh(self.groom, after="nope")
-        mesh = groomlab.strand_mesh_shape(self.groom)
+            groomlab.add_to_mesh(self.groom, after="nope")
+        mesh = groomlab.to_mesh_shape(self.groom)
         fn = mesh_fn(mesh)
         self.assertEqual(cmds.polyEvaluate(mesh, shell=True), 50)
         self.assertEqual(fn.numPolygons * 2, fn.numVertices - 2 * 50)  # ribbons: (points - 1) quads, 2 vertices a point
-        self.assertEqual(groomlab.strand_mesh_shape(self.groom), mesh)  # reused
+        self.assertEqual(groomlab.to_mesh_shape(self.groom), mesh)  # reused
 
         # 10,000 strands of 16 points as 4-sided tubes: ms per frame of the scalp moving.
         model = gm.GraphModel.from_groom(self.groom)
@@ -200,7 +246,7 @@ class StrandMeshTest(unittest.TestCase):
         model.save(self.groom)
         self.set_scatter(1500.0)
         plug = om.MSelectionList()
-        plug.add(self.groom + ".outStrandMesh")
+        plug.add(self.groom + ".outMesh")
         plug = plug.getPlug(0)
         cmds.currentTime(1)
         start = time.time()
@@ -210,7 +256,7 @@ class StrandMeshTest(unittest.TestCase):
         self.assertEqual(vertices, 10000 * (16 * 4 + 1))
         took = {}
         for shown in (False, True):  # the groom drawing the mesh too (its view's strands), or not
-            cmds.setAttr(self.groom + ".displayStrandMesh", shown)
+            cmds.setAttr(self.groom + ".displayMesh", shown)
             took[shown] = []
             for frame in range(2, 7):
                 cmds.currentTime(frame)
@@ -219,7 +265,7 @@ class StrandMeshTest(unittest.TestCase):
                 took[shown].append((time.time() - start) * 1000.0)
                 self.assertEqual(om.MFnMesh(data).numVertices, 10000 * (16 * 4 + 1))
         sys.stderr.write("\nlive strand mesh, 10,000 strands x 16 points, 4 sides (%d vertices): first frame %.0f ms, "
-                         "then %s ms per frame (%s with displayStrandMesh off; the groom's evaluation included)\n"
+                         "then %s ms per frame (%s with displayMesh off; the groom's evaluation included)\n"
                          % (vertices, built, ", ".join("%.0f" % t for t in took[True]),
                             ", ".join("%.0f" % t for t in took[False])))
 

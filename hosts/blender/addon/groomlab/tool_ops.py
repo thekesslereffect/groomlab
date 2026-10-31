@@ -35,7 +35,7 @@ SHORTCUTS = (
     ("B + drag", "The brush radius"),
     ("M + drag", "The brush strength"),
     ("Ctrl (stroke)", "The opposite: Length shortens, Lift lays down, Shape shrinks; painting, toward 0 (unfreeze, erase)"),
-    ("Shift (painting, Shape)", "Painting maps or guide attributes, or the Shape brush: smooth instead"),
+    ("Shift (painting, Tube)", "Painting maps or guide attributes, or the Tube brush: smooth instead"),
     ("S", "Select guides (Shift: toggle, Ctrl: deselect)"),
     ("Shift + drag", "A guide brush: paint guides into the selection, the rest frozen (Shift + click: add the guides in the ring; on none: deselect and unfreeze all)"),
     ("Page Up / Page Down", "The brush level (parents / children)"),
@@ -623,8 +623,8 @@ class GROOMLAB_OT_tool(bpy.types.Operator):
 
     @classmethod
     def description(cls, context, properties):
-        info = tools.tool_info(properties.tool)
-        return "%s: %s" % (info["label"], info["hint"]) if info else "Use this GroomLab tool"
+        from . import palette  # the tile's tooltip: the name, the whole hint, a brush's gestures
+        return palette.help_text(properties.tool) if tools.tool_info(properties.tool) else "Use this GroomLab tool"
 
     def execute(self, context):
         try:
@@ -642,26 +642,6 @@ class GROOMLAB_OT_tool(bpy.types.Operator):
             return _fail(self, e)
         if s is not None:
             start_modal(context)
-        return {"FINISHED"}
-
-
-class GROOMLAB_OT_tool_help(bpy.types.Operator):
-    """The tool card's ?: the tool's whole hint and the gestures (its tooltip; a click says the hint)"""
-    bl_idname = "groomlab.tool_help"
-    bl_label = "Tool Help"
-    bl_options = {"INTERNAL"}
-
-    tool: StringProperty(name="Tool")
-
-    @classmethod
-    def description(cls, context, properties):
-        from . import palette
-        return palette.help_text(properties.tool)
-
-    def execute(self, context):
-        info = tools.tool_info(self.tool)
-        if info:
-            self.report({"INFO"}, "%s: %s" % (info["label"], info["hint"]))
         return {"FINISHED"}
 
 
@@ -1538,11 +1518,12 @@ class GROOMLAB_OT_tube_shape_new(TubeOperator):
     bl_label = "New Shape"
 
     duplicate: BoolProperty(name="Duplicate", default=False, options={"SKIP_SAVE"},
-                            description="A copy of the shape picked in the list, to change on its own")
+                            description="A copy of the shape picked, to change on its own")
 
     @classmethod
     def description(cls, context, properties):
-        return ("A copy of this shape in the library, to change on its own" if properties.duplicate
+        return ("A copy of this shape in the groom's library, to change on its own (the targeted guides take "
+                "it): how a built-in shape is edited" if properties.duplicate
                 else "A new library shape (a circle to start from)")
 
     def execute(self, context):
@@ -1552,9 +1533,8 @@ class GROOMLAB_OT_tube_shape_new(TubeOperator):
         try:
             if self.duplicate:
                 picked = _library_pick(context)
-                if picked is None:
-                    self.report({"ERROR"}, "No library shape picked")
-                    return {"CANCELLED"}
+                if picked is None:  # a built-in: copied into the library to edit
+                    return bpy.ops.groomlab.tube_shape_custom()
                 points, smooth = tools.shape_points(scalp, picked.name)
                 name = tools.unique_shape_name(scene, picked.name)
             else:
@@ -1893,6 +1873,22 @@ class GROOMLAB_OT_show_strand_colors(GroomToolOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_auto_strand_color_range(GroomToolOperator):
+    """Min and Max set to the lowest and highest value of the source on the strands shown"""
+    bl_idname = "groomlab.auto_strand_color_range"
+    bl_label = "Auto Range"
+
+    def execute(self, context):
+        s = active(context)
+        d = s.groomlab_tools
+        found = display.state(s).strand_range
+        if not found:
+            self.report({"WARNING"}, "The strands shown have no channel %r" % d.strand_color_source)
+            return {"CANCELLED"}
+        d.strand_color_min, d.strand_color_max = found
+        return {"FINISHED"}
+
+
 # ---- The pie menu (Maya's marking menu) ----------------------------------------------------------
 
 def _tool_button(layout, tool, label=None):
@@ -1981,7 +1977,7 @@ def unregister_keymaps():
     _keymaps.clear()
 
 
-classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_help, GROOMLAB_OT_tool_exit, GROOMLAB_OT_tool_undo,
+classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROOMLAB_OT_tool_undo,
            GROOMLAB_OT_step_level, GROOMLAB_OT_group_new, GROOMLAB_OT_group_edit, GROOMLAB_OT_guides_edit,
            GROOMLAB_OT_map_new, GROOMLAB_OT_paint_param, GROOMLAB_OT_map_remove, GROOMLAB_OT_map_fill,
            GROOMLAB_OT_map_import, GROOMLAB_OT_map_relink, GROOMLAB_OT_map_rename, GROOMLAB_OT_map_convert,
@@ -1995,7 +1991,7 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_help, GROO
            GROOMLAB_OT_corrective_move, GROOMLAB_OT_corrective_solo, GROOMLAB_OT_corrective_delete,
            GROOMLAB_OT_corrective_go_to, GROOMLAB_OT_corrective_key, GROOMLAB_OT_corrective_clear_keys,
            GROOMLAB_OT_corrective_rename, GROOMLAB_OT_sculpt_target, GROOMLAB_OT_sculpt_clear,
-           GROOMLAB_OT_show_strand_colors, GROOMLAB_MT_pie)
+           GROOMLAB_OT_show_strand_colors, GROOMLAB_OT_auto_strand_color_range, GROOMLAB_MT_pie)
 
 
 def register():

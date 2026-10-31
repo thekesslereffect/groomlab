@@ -595,9 +595,10 @@ public:
     // pulls the shape's frame first).
     StrandsPtr viewedAsRendered(float density, double seconds) const;
     // One node by name ("" the output) with the last evaluation's inputs at `density`, in a
-    // scratch copy of the graph (results matching the view's are reused, none evicted). Throws
+    // scratch copy of the graph (results matching the view's are reused, none evicted); with
+    // `buildCards` the Cards nodes upstream build their cards (the strands' card layers). Throws
     // GraphError (no such node, a failing node) or std::runtime_error (no graph).
-    Value evaluateNode(const std::string& name, float density, double seconds);
+    Value evaluateNode(const std::string& name, float density, double seconds, bool buildCards = false);
     // The output at full density with the last evaluation's inputs, on a copy of the graph of
     // its own (Maya's outRachis: every feather, as exports see them); releaseFullDensity drops it.
     // Throws as the graph does; null without a graph.

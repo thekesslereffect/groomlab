@@ -14,6 +14,7 @@
 #include "groomlab/feathers.h"
 #include "groomlab/graph.h"
 #include "groomlab/operators.h"
+#include "groomlab/strand_geometry.h"
 #include "test_helpers.h"
 
 namespace groomlab {
@@ -146,6 +147,31 @@ TEST(Rachis, TubeTopologyUvsAndOutwardFaces) {
     ASSERT_EQ(r.faceCount(), 2u);
     EXPECT_GT(faceNormal(r, 0).y, 0.0f);
     EXPECT_NEAR((r.points[0] - r.points[1]).length(), 0.2f, 1e-5f);
+}
+
+TEST(Rachis, ToMeshMakesTheBarbsAndTheRachis) {
+    // Feathers (Propagate's barbs and rachis): auto picks them; the mesh is the strands' tubes,
+    // then the rachis tubes, each face named by its part.
+    const Shafts f;
+    auto op = propagate(0.06);
+    const StrandsPtr out = f.run(*op);
+    StrandMeshOptions o;
+    o.sides = 3;
+    EXPECT_EQ(resolveMeshMake(*out, o), StrandMeshOptions::Make::Feathers);
+    const StrandMesh mesh = buildStrandMesh(*out, nullptr, o);
+    StrandMeshOptions strands = o;
+    strands.make = StrandMeshOptions::Make::Strands;
+    const StrandMesh barbs = buildStrandMesh(*out, nullptr, strands);
+    const RachisMesh rachis = buildRachisMesh(out->featherLayers());
+    ASSERT_GT(rachis.faceCount(), 0u);
+    EXPECT_EQ(mesh.mesh.points.size(), barbs.mesh.points.size() + rachis.points.size());
+    EXPECT_EQ(mesh.mesh.faceCount(), barbs.mesh.faceCount() + rachis.faceCount());
+    EXPECT_EQ(std::count(mesh.faceParts.begin(), mesh.faceParts.end(), static_cast<int>(MeshPart::Rachis)),
+              static_cast<std::ptrdiff_t>(rachis.faceCount()));
+    // The rachis' faces point at its own points, after the barbs'.
+    const std::size_t corners = mesh.mesh.faceVertices.size() - rachis.faceVertices.size();
+    EXPECT_EQ(mesh.mesh.faceVertices[corners], rachis.faceVertices[0] + static_cast<int>(barbs.mesh.points.size()));
+    EXPECT_EQ(strandMeshPointCount(*out, o), mesh.mesh.points.size());
 }
 
 TEST(Rachis, PropagateMakesTubesAlongTheShaftsWithTheWidthProfile) {

@@ -614,6 +614,7 @@ void PhotosPanel::refreshControls() {
     updating_ = false;
     bar_->refresh();
     itemBar_->refresh();
+    itemBar_->setTitle(on ? name(i) : QString());  // the box is the picked photo's
     alignAbout_->setText(alignText());
     // Where Guides from Photos stands: the photos, their landmarks and arrows, the next step.
     const json all = photos();

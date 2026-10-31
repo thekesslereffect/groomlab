@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Review tools: a density heatmap, a strand count HUD, a turntable rig and its render.
+"""Review tools: a density heatmap, strands colored by a channel, a strand count HUD, a turntable
+rig and its render.
 
     import groomlab
     groomlab.density_heatmap(groom)          # strands colored by root density
+    groomlab.strand_color_sources(groom)     # the channels and color sets the strand colors can show
+    groomlab.auto_strand_color_range(groom)  # the attribute colors' ramp over the channel's values
     groomlab.show_hud()                      # the active groom's counts in the viewport
     groomlab.turntable(groom, frames=120)    # an orbiting camera and a light rig
     job = groomlab.render_turntable(groom)   # rendered in the background, for dailies
@@ -15,6 +18,7 @@ from maya import cmds
 
 HUD = "groomLabHUD"
 DENSITY_MODE = 5  # strandColorMode "density"
+COLOR_SET_MODE, ATTRIBUTE_MODE, CLUMP_MODE = 1, 2, 4  # strandColorMode "colorSet", "attribute", "clump"
 
 
 def density_heatmap(groom, on=True):
@@ -25,6 +29,29 @@ def density_heatmap(groom, on=True):
     bunched roots stand out. Off goes back to solid color.
     """
     cmds.setAttr(groom + ".strandColorMode", DENSITY_MODE if on else 0)
+
+
+def strand_color_sources(groom):
+    """{"channels", "colorSets"}: what the strand colors can read in the groom as shown (the viewed
+    node's strands): the strands' channels (the attribute mode: clumpId, length, a painted map...)
+    and the scalp's color sets (the color set mode, painted vertex maps among them), each sorted."""
+    try:
+        return json.loads(cmds.groomLabGraphStats(groom, strandColorSources=True))
+    except (RuntimeError, ValueError):
+        return {"channels": [], "colorSets": []}
+
+
+def auto_strand_color_range(groom, source=None):
+    """Sets strandColorMin and strandColorMax to the lowest and highest value of the strand channel
+    `source` (the groom's strandColorSource) as shown: the attribute colors' ramp, blue to red, over
+    every strand. Returns (lo, hi); ValueError when the strands have no such channel."""
+    source = source or cmds.getAttr(groom + ".strandColorSource")
+    lo_hi = cmds.groomLabGraphStats(groom, channelRange=source) or []
+    if len(lo_hi) != 2:
+        raise ValueError("The strands have no channel %r" % source)
+    cmds.setAttr(groom + ".strandColorMin", lo_hi[0])
+    cmds.setAttr(groom + ".strandColorMax", lo_hi[1])
+    return tuple(lo_hi)
 
 
 def groom_stats(groom):

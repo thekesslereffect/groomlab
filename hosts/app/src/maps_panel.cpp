@@ -671,6 +671,7 @@ void MapsPanel::refreshRows() {
     box_->setVisible(has);
     bar_->refresh();
     itemBar_->refresh();
+    itemBar_->setTitle(qs(picked));  // the box is the picked map's
     updating_ = false;
 }
 

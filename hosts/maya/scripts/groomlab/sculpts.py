@@ -4,7 +4,7 @@
 A Sculpt node sits on generated guides (Scatter + Interpolate -> ToGuides -> Sculpt -> the next
 Interpolate, Clump centers...). Pick it as what brushes shape (select it in the Graph Editor, or its
 row in Sculpt > Correctives): the viewport shows its output as the guides, and shaping brushes
-(Comb, Smooth, Lift, Length, Twist, Curl, Straighten, Attract, Cut, Direction, Noise) reshape them.
+(Comb, Smooth, Lift, Length, Twist, Straighten, Attract, Cut) reshape them.
 Each stroke is one undo step, kept in the groom's sculptData by node name and guide ID as a
 relative form: when what feeds the node changes (the sparse guides combed, density, a Noise), the
 guides are made again and the strokes add the same bends and length changes on top.

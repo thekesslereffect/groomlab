@@ -341,7 +341,7 @@ class GuidesTab(_GroomTab):
         glyphs = _glyphs(lists["bar"], bind, self)
         # The header: the title, how many, Isolate (the picked group at full color, the others
         # dimmed) and + (a new group).
-        self.isolate = widgets.glyph_button("eye", "Isolate the picked group: it (and its child groups) at full "
+        self.isolate = widgets.glyph_button("solo", "Isolate the picked group: it (and its child groups) at full "
                                             "color, the others dimmed", checkable=True)
         self.isolate.setObjectName("isolateGroup")
         self.isolate.setProperty("toggle", "true")
@@ -413,10 +413,16 @@ class GuidesTab(_GroomTab):
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(edits)
         row.addStretch(1)
+        self.box.add(row)
+        # Edit Guides > Children's count, on a line of its own (beside the menu it would widen a
+        # narrow dock).
+        row = QtWidgets.QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(widgets.small_label("Children per guide"))
+        row.addStretch(1)
         self.children_count = QtWidgets.QSpinBox()
         self.children_count.setRange(1, 500)
         self.children_count.setValue(menu.CHILDREN_COUNT)
-        self.children_count.setPrefix("x ")
         self.children_count.setToolTip("Children per guide for Edit Guides > Children (the selected guides, else the "
                                        "picked group)")
         self.children_count.valueChanged.connect(lambda v: setattr(menu, "CHILDREN_COUNT", int(v)))
@@ -601,6 +607,7 @@ class GuidesTab(_GroomTab):
         self.tree.blockSignals(False)
         for b in self.box_glyphs:
             b.setEnabled(self.group() is not None)
+        self.box.set_title(name or "All groups")  # none picked: Segments and the edits on every group
         self.sync_segments()
 
     def row_clicked(self, item):
@@ -1177,6 +1184,7 @@ class PaintTab(_GroomTab):
         fit_rows(self.list)
         for b in self.box_glyphs:
             b.setEnabled(self.list.currentItem() is not None)
+        self.box.set_title(self.current() or "")
         self.map_changed(self.current(), push=False)
         self.push_paint_flags()
 
@@ -1628,7 +1636,7 @@ class CorrectivesBox(_GroomTab):
         column = QtWidgets.QVBoxLayout(body)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(theme.px(6))
-        self.section = widgets.Section("Layers", body, expanded=True, count=True,
+        self.section = widgets.Section("Correctives", body, expanded=True, count=True,
                                        actions=(glyphs["corrective.fixFrame"], glyphs["corrective.new"]))
         self.section.setObjectName("layersSection")
         self.section.setToolTip(lists["about"].replace("<b>", "").replace("</b>", ""))
@@ -1877,6 +1885,8 @@ class CorrectivesBox(_GroomTab):
         self.section.set_count(len(layers))
         fit_rows(self.tree)
         layer = next((l for l in layers if l["name"] == target), None)
+        row = self.tree.currentItem()
+        self.box.set_title(row.text(0) if row is not None else "")
         self.weight.setEnabled(layer is not None)
         self.key.setEnabled(layer is not None)
         if layer is not None and not self.weight.busy():
@@ -2170,6 +2180,7 @@ class ReferenceTab(_GroomTab):
         camera = self.current()
         for widget in self._controls:
             widget.setEnabled(camera is not None)
+        self.box.set_title(camera.split("|")[-1] if camera else "")
         if not camera:
             self.align_about.setText("Import a photo to start.")
             self._shown = None

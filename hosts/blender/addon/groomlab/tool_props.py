@@ -38,6 +38,18 @@ def _strength(self, context):
     tools.push_safely(context)
 
 
+def _strand_sources(self, context, edit_text):
+    """The Source's choices: the strands' channels (Attribute), the scalp's color sets (Color Set), as
+    the colors last shown had them."""
+    from . import display
+    scalp = self.id_data if isinstance(self.id_data, bpy.types.Object) else None
+    if scalp is None:
+        return []
+    gd = display.state(scalp)
+    names = gd.strand_color_sets if self.strand_color == "colorSet" else gd.strand_channels
+    return [n for n in names if edit_text.lower() in n.lower()]
+
+
 def _display(self, context):
     if props.is_quiet():
         return
@@ -369,6 +381,9 @@ class GroomLabTools(bpy.types.PropertyGroup):
                                            "guides, parts, flow arrows or paint on the far side of the head")
     stretch: BoolProperty(name="Stretch", default=False, update=_push(),
                           description="On: guides get longer (or shorter) as you pull them. Off: they keep their length")
+    straighten: BoolProperty(name="Straighten", default=False, update=_push(),
+                             description="On: guides relax toward the straight line along their root direction. "
+                                         "Off: only their kinks are taken out")
     target_guides: BoolProperty(name="Guides", default=True, update=_push(), description="The brush shapes guides")
     target_parts: BoolProperty(name="Parts", default=False, update=_push(), description="The brush shapes part lines")
     target_flow: BoolProperty(name="Flow", default=False, update=_push(), description="The brush shapes flow arrows and sinks")
@@ -449,7 +464,7 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # Tubes (the Tubes section; what Place and Draw give new guides, the Shape brush's channel)
     tube_channel: EnumProperty(name=defs.get("choices/tubeChannel")["label"], items=defs.enum_items("tubeChannel"),
                                default=defs.enum_default("tubeChannel"), update=_push(),
-                               description="What the Shape brush paints on the tubes")
+                               description="What the Tube brush paints on the tubes")
     tube_shape: EnumProperty(name=defs.get("choices/tubeShape")["label"], items=_tube_shape_items, update=_tube_shape,
                              description="The tube shape: picked, it goes to the targeted guides and to the guides Place "
                                          "and Draw make. The built-ins, then the groom's library of custom shapes")
@@ -564,7 +579,7 @@ class GroomLabGroomDisplay(bpy.types.PropertyGroup):
     strand_color: EnumProperty(name=defs.get("choices/strandColor")["label"], items=STRAND_COLORS,
                                default=defs.enum_default("strandColor"), update=_display,
                                description=defs.get("choices/strandColor")["tip"])
-    strand_color_source: StringProperty(name="Source", default="clumpId", update=_display,
+    strand_color_source: StringProperty(name="Source", default="clumpId", update=_display, search=_strand_sources,
                                         description="The color set or channel the strands show")
     strand_color_min: FloatProperty(name="Min", default=0.0, update=_display)
     strand_color_max: FloatProperty(name="Max", default=1.0, update=_display)

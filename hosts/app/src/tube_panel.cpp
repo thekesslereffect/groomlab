@@ -159,7 +159,9 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
     };
     new_ = glyph("plus", "tubeShapeNew", tr("New shape: a library shape (a circle to start from)"), &TubePanel::newShape);
     rename_ = glyph("glyph_rename", "tubeShapeRename", tr("Rename this library shape (its guides keep it)"), &TubePanel::startRename);
-    duplicate_ = glyph("copy", "tubeShapeDuplicate", tr("Duplicate: a copy of this shape in the library, to change on its own"),
+    duplicate_ = glyph("copy", "tubeShapeDuplicate",
+                       tr("Duplicate: a copy of this shape in the groom's library, to change on its own (the targeted guides take it): "
+                          "how a built-in shape is edited"),
                        &TubePanel::duplicateShape);
     delete_ = glyph("glyph_delete", "tubeShapeDelete", tr("Delete this shape from the library: click twice (its guides become round)"),
                     &TubePanel::deleteShape);
@@ -182,14 +184,12 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         });
         connect(editor_, &TubeShapeEditor::committed, this, [this](const std::vector<SectionPoint>& points) { shapeCommitted(points); });
         profileBlock_->rows()->addWidget(editor_, 0, Qt::AlignHCenter);
-        auto* options = new QHBoxLayout();
+        // The outline's options: a library shape's (a built-in is read-only).
+        shapeOptions_ = new QWidget(profileBlock_);
+        shapeOptions_->setObjectName(QStringLiteral("tubeShapeOptions"));
+        auto* options = new QHBoxLayout(shapeOptions_);
         options->setContentsMargins(0, 0, 0, 0);
         options->setSpacing(4);
-        editCustom_ = makeGhost(tr("Edit as custom"),
-                                tr("Copy this built-in shape into the groom's library as a new shape you can edit (the targeted guides take it)"),
-                                profileBlock_);
-        editCustom_->setObjectName(QStringLiteral("tubeEditAsCustom"));
-        connect(editCustom_, &QPushButton::clicked, this, [this] { editAsCustom(); });
         mirror_ = makeChip(tr("Mirror"),
                            tr("Keep the outline's left and right sides alike (about the up axis): a point and its mirror image move, come "
                               "and go together"),
@@ -205,11 +205,10 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         connect(shapeSmooth_, &QToolButton::toggled, this, [this](bool on) {
             if (!updating_) setShapeSmooth(on);
         });
-        options->addWidget(editCustom_);
         options->addWidget(mirror_);
         options->addWidget(shapeSmooth_);
         options->addStretch(1);
-        profileBlock_->rows()->addLayout(options);
+        profileBlock_->rows()->addWidget(shapeOptions_);
         renameField_ = new QLineEdit(profileBlock_);
         renameField_->setObjectName(QStringLiteral("tubeShapeName"));
         renameField_->setPlaceholderText(tr("New name, then Enter (Esc: keep it)"));
@@ -461,7 +460,7 @@ void TubePanel::showChoice(bool mixed) {
         parseTubeShape(choice_, &shape);
         bool smooth = true;
         const std::vector<SectionPoint> points = builtinTubeShapePoints(shape, &smooth);
-        editor_->setShape(points, smooth, false, tr("Built in: Edit as custom to change it"));
+        editor_->setShape(points, smooth, false, tr("Built in: Duplicate it to edit a copy"));
         preview_->setShape(points, smooth, false);
     }
     updating_ = true;
@@ -469,11 +468,10 @@ void TubePanel::showChoice(bool mixed) {
     updating_ = false;
     const bool custom = library(choice_) != nullptr;
     const bool hasGroom = document() != nullptr;
-    editCustom_->setVisible(!custom);
-    editCustom_->setEnabled(hasGroom);
-    shapeSmooth_->setEnabled(custom);
+    shapeOptions_->setVisible(custom);
     new_->setEnabled(hasGroom);
-    for (QToolButton* b : {rename_, duplicate_, delete_}) b->setEnabled(custom);
+    duplicate_->setEnabled(hasGroom);
+    for (QToolButton* b : {rename_, delete_}) b->setEnabled(custom);
     apply_->setEnabled(!targets_.empty());
 }
 
@@ -617,9 +615,14 @@ void TubePanel::newShape() {
 }
 
 void TubePanel::duplicateShape() {
+    // A copy of the shape in the library, chosen: a built-in's is how it is edited.
     GroomDocument* doc = document();
     const LibraryShape* custom = library(choice_);
-    if (!doc || !custom) return;
+    if (doc && !custom) {
+        editAsCustom();
+        return;
+    }
+    if (!doc) return;
     const LibraryShape copy = *custom;
     const std::string name = uniqueName(copy.name);
     const std::string error = doc->addTubeShape(name, copy.points, copy.smooth);

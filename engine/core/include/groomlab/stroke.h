@@ -719,8 +719,8 @@ private:
 // and commits its edits (StrokeField::Sculpts), as the interactive tool does.
 std::size_t scriptedStroke(StrokeHost& host, BrushToolSettings s, const std::vector<Vec3f>& path);
 
-// Whether a Sculpt node takes this brush: the shaping ones (comb, smooth, lift, length, twist, curl,
-// straighten, attract, cut, direction, noise), not place, draw, part, flow, erase, paint, shape or
+// Whether a Sculpt node takes this brush: the shaping ones (comb, smooth, lift, length, twist,
+// straighten, attract, cut), not place, draw, part, flow, erase, paint, shape or
 // slide. "" when it does, else why not.
 std::string sculptRefusal(const BrushToolSettings& s);
 

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Attribute Editor sections for groomLabShape that need more than attribute
 controls: the groom's inputs (scalp, rest mesh, guides, colliders, the groom file it is linked
-to, with Reload and Save) and its controls (the
-sliders Control nodes add). AEgroomLabShapeTemplate.mel calls these.
+to, with Reload and Save), its controls (the sliders Control nodes add) and the strand colors'
+source and range (Auto Range). AEgroomLabShapeTemplate.mel calls these.
 """
 
 import json
@@ -472,6 +472,65 @@ def _fill_color(groom):
     cmds.setParent("..")
     cmds.setParent("..")
     _watch(COLOR, groom, lambda: color_replace(groom + ".graph"), attributes=("graph",))
+
+
+# ---------------------------------------------------------------------------
+# Strand Colors: under Strand Color Mode, what the mode reads (a strand channel, a color set) and
+# the attribute colors' range with Auto Range. Rows the mode does not use are left out.
+
+STRAND_COLORS = "groomLabAEStrandColors"
+SOURCE_TIP = ("What the strands are colored by: a strand channel (clumpId, length, melanin, a painted map...) for "
+              "Attribute, the channel grouping them for Clump (clumpId, region), a color set of the scalp for Color "
+              "Set; the groom as shown (the viewed node's strands)")
+AUTO_RANGE_TIP = "Min and Max set to the lowest and highest value of the source on the strands shown"
+
+
+def strand_colors_new(attr):
+    cmds.setUITemplate("attributeEditorTemplate", pushTemplate=True)
+    cmds.columnLayout(STRAND_COLORS, adjustableColumn=True, rowSpacing=2)
+    cmds.setUITemplate(popTemplate=True)
+    _fill_strand_colors(_groom(attr))
+    cmds.setParent("..")
+
+
+def strand_colors_replace(attr):
+    if cmds.columnLayout(STRAND_COLORS, exists=True):
+        _fill_strand_colors(_groom(attr))
+
+
+def _set_source(groom, source):
+    cmds.setAttr(groom + ".strandColorSource", source, type="string")
+
+
+def _fill_strand_colors(groom):
+    from groomlab import review
+    for child in cmds.columnLayout(STRAND_COLORS, query=True, childArray=True) or []:
+        cmds.deleteUI(child)
+    cmds.setParent(STRAND_COLORS)
+    mode = cmds.getAttr(groom + ".strandColorMode")
+    if mode in (review.COLOR_SET_MODE, review.ATTRIBUTE_MODE, review.CLUMP_MODE):
+        sources = review.strand_color_sources(groom)
+        names = list(sources["colorSets" if mode == review.COLOR_SET_MODE else "channels"])
+        current = cmds.getAttr(groom + ".strandColorSource") or ""
+        if current and current not in names:  # kept, though the groom as shown lacks it
+            names.append(current)
+        menu = cmds.optionMenuGrp(label="Source", annotation=SOURCE_TIP)
+        for name in names or ["(none)"]:
+            cmds.menuItem(label=name)
+        if current in names:
+            cmds.optionMenuGrp(menu, edit=True, select=names.index(current) + 1)
+        cmds.optionMenuGrp(menu, edit=True, enable=bool(names), changeCommand=lambda value: _run(_set_source, groom, value))
+    if mode == review.ATTRIBUTE_MODE:
+        cmds.attrFieldSliderGrp(attribute=groom + ".strandColorMin", label="Min")
+        cmds.attrFieldSliderGrp(attribute=groom + ".strandColorMax", label="Max")
+        cmds.rowLayout(numberOfColumns=2, adjustableColumn=2)
+        cmds.text(label="")
+        cmds.button(label="Auto Range", annotation=AUTO_RANGE_TIP,
+                    command=lambda *_a: _run(review.auto_strand_color_range, groom))
+        cmds.setParent("..")
+    cmds.setParent("..")
+    _watch(STRAND_COLORS, groom, lambda: strand_colors_replace(groom + ".strandColorSource"),
+           attributes=("strandColorMode", "strandColorSource", "viewNode"))
 
 
 def _fill_controls(groom):

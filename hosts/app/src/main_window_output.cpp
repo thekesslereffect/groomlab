@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // MainWindow: the GroomLab menu's output and housekeeping (main_window.h): Add Sample Mesh, Add
 // (feathers, braids, colliders, wind, jiggle), Simulate > Add Simulate Node, Import > Alembic
-// Curves, the Utilities (Strands to Mesh, Bake Scale Maps, Find Missing Files), Export > Scales
+// Curves, the Utilities (To Mesh, Bake Scale Maps, Find Missing Files), Export > Scales
 // Instancer (USD), the Strand Count HUD; the themes switched live, File > Open Recent and autosave.
 // Choices are asked in the viewport's glass prompt, never a dialog; a file dialog opens only in a
 // window someone sits at (a scripted run takes the default place).
@@ -321,10 +321,10 @@ bool MainWindow::strandsToMesh(const QString& path, bool ribbons, int sides, int
     }
     reevaluate(true);  // (the view back at the document's frame and density)
     if (!error.empty()) {
-        report(tr("Cannot write the strands as a mesh: %1").arg(QString::fromStdString(error)));
+        report(tr("Cannot write the mesh: %1").arg(QString::fromStdString(error)));
         return false;
     }
-    notify(tr("Wrote %n strand(s) as %1: %2", "", static_cast<int>(strands)).arg(ribbons ? tr("ribbons") : tr("tubes"), path));
+    notify(tr("Wrote the mesh (%n strand(s)): %1", "", static_cast<int>(strands)).arg(path));
     return true;
 }
 
@@ -507,11 +507,12 @@ void MainWindow::askCollider() {
 void MainWindow::askStrandsToMesh() {
     if (!document_) return;
     auto write = [this](bool ribbons) {
-        const QString path = pickSavePath(tr("Strands to Mesh"), besideGroom(document_.get(), QStringLiteral("_strandMesh.obj")), tr("OBJ meshes (*.obj)"));
+        const QString path = pickSavePath(tr("To Mesh"), besideGroom(document_.get(), QStringLiteral("_mesh.obj")), tr("OBJ meshes (*.obj)"));
         if (!path.isEmpty()) strandsToMesh(path, ribbons);
     };
-    host_->showPrompt(tr("Strands to Mesh"),
-                      tr("The strands as one mesh in an OBJ, UVs root to tip: tubes round each strand, or flat ribbons lying along the scalp."),
+    host_->showPrompt(tr("To Mesh"),
+                      tr("The groom as one mesh in an OBJ: the scales as their plates or feathers as barbs and rachis when it "
+                         "has them, else the strands, as tubes round each strand or flat ribbons lying along the scalp."),
                       {{tr("Tubes"), true, [write] { write(false); }}, {tr("Ribbons"), false, [write] { write(true); }}, {tr("Cancel"), false, {}}});
 }
 

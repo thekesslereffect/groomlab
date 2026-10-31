@@ -550,15 +550,15 @@ if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
 endif()
 
-# The live strand mesh (StrandMesh node, outStrandMesh): a deforming scalp with follow scalp and
+# The live mesh (ToMesh node, outMesh): a deforming scalp with follow scalp and
 # Simulate, a fixed topology, the snapshot matched, Alembic export; ms per frame of 10k tubes.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
-    add_test(NAME maya.strand_mesh
+    add_test(NAME maya.to_mesh
         COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
-                "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_strand_mesh.py"
+                "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_to_mesh.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
-                "${CMAKE_CURRENT_BINARY_DIR}/strand_mesh")
+                "${CMAKE_CURRENT_BINARY_DIR}/to_mesh")
 endif()
 
 # Importing XGen grooms (both flavors) on synthetic scenes made with XGen's API, compared with
@@ -763,7 +763,7 @@ endif()
 # The plugin's Python imports the build's groomlab_core module (as the
 # installed module's PYTHONPATH has it). COST starts the long suites first.
 set(GROOMLAB_MAYA_PYTHONPATH "$<$<TARGET_EXISTS:groomlab_core_py>:$<TARGET_FILE_DIR:groomlab_core_py>>")
-foreach(_maya_test maya.plugin maya.graph_editor maya.pipeline maya.groom_io maya.grooming maya.strand_mesh maya.subdivision maya.hardening maya.updates maya.arnold maya.studio maya.studio_render maya.vray maya.prman maya.xgen_import maya.yeti_import)
+foreach(_maya_test maya.plugin maya.graph_editor maya.pipeline maya.groom_io maya.grooming maya.to_mesh maya.subdivision maya.hardening maya.updates maya.arnold maya.studio maya.studio_render maya.vray maya.prman maya.xgen_import maya.yeti_import)
     if(TEST ${_maya_test})
         set(_app_dir "${CMAKE_CURRENT_BINARY_DIR}/maya_app_dirs/${_maya_test}")
         file(MAKE_DIRECTORY "${_app_dir}")

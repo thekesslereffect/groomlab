@@ -145,6 +145,9 @@ void MainWindow::buildPanels() {
     connect(groomTools_, &GroomTools::hairVisibilityToggled, this, [this](bool on) { setHairVisible(on); });
     connect(groomTools_, &GroomTools::guidesVisibilityToggled, this, [this](bool on) { setGuidesVisible(on); });
     connect(groomTools_, &GroomTools::graphRequested, this, [this] { setGraphShown(true); });
+    connect(groomTools_, &GroomTools::toolStopRequested, this, [this] {
+        if (viewport_->toolMode() == Viewport::ToolMode::Brush) viewport_->setToolMode(Viewport::ToolMode::Camera);
+    });
     connect(groomTools_, &GroomTools::tabChanged, this, [this](const QString& tab) {
         // Leaving the Paint tab is done painting (Maya's): the camera again.
         if (tab != QLatin1String("paint") && viewport_->toolMode() == Viewport::ToolMode::Brush && brush_.toolId() == "paint") {

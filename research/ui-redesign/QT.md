@@ -63,35 +63,35 @@ artifacts this starts from: a theme JSON for `hosts/maya/themes/` (same `ui` / `
 The lab's Groom Tools hold every control each tool has today (src/data/toolSettings.ts, from
 brush_catalog.cpp and palette.py). One model, every tab:
 
-**Pick a tool → its card right under the grid → the list of things you work on.**
+**Pick a tool → the list of things you work on → the tool's card.**
 
-1. **Pinned top** (outside the QScrollArea): groom header, tabs, the tool grid. Tool tiles keep a
-   fixed size (labeled tiles 56 x 50 px: 20 px icon over the name, ToolButtonTextUnderIcon; icon-only 34 px); columns = `(width + spacing) / (tile + spacing)`, left-aligned, never stretched.
-2. **The tool card**, always the same blocks in the same order (a block only shows when it has rows):
-   - Title row: icon, name, a **?** glyph (tooltip: the full hint + the gestures), then one short line.
+1. **Top** (the whole panel is one QScrollArea): groom header, tabs, the tool grid. Tool tiles keep a
+   minimum size (labeled tiles 56 x 54 px: 24 px icon over the name, ToolButtonTextUnderIcon; icon-only 38 px); columns = `min((width + spacing) / (tile + spacing), 4)`, the row's width split evenly between them (every row ends at the edge). The Paint tab has no grid: one full-width Paint button (ToolButtonTextBesideIcon, Expanding, 38 px) over the maps.
+2. **The list** of the tab's things, right under the grid: Guide groups (Tools), Maps (Paint),
+   Layers (Correctives), Photos. Section header = name, count, add/import glyphs. Plain rows
+   (dot, name, meta, eye). Under the list, a small box with **the picked item's own** settings
+   and actions (rename / select / delete glyphs; a group's Segments and Edit guides; a map's Show
+   on and Read by; a layer's Weight + key).
+3. **The tool card**, always the same blocks in the same order (a block only shows when it has rows):
+   - No title or hint line: only the settings. The tile's tooltip has the name, the full hint and
+     (a brush's) the gestures.
    - **Brush**: how the stroke feels. Radius, Strength (±), Falloff, Smooth; chips Pressure,
-     Off scalp, Falloff curve, Root to tip (a curve chip that's on shows its ramp under the row).
+     Keep off scalp, Stretch (Comb), Straighten (Smooth), Falloff curve, Root to tip (a curve chip that's on shows its ramp under the row).
    - **The tool's own block**, named after what it sets: Paint (Mode, Value + Fill, Stamp),
      New guides + Tube (Place / Draw: the profile picked, a small preview, Width / Flatness / Twist),
-     Comb (Stretch), Paints + Profile + Selected guides (Shape: the shape picker with Apply, the
-     cross-section editor (TubeShapeEditor, ≤200 px square), Edit as custom, Mirror, Smooth, and
+     Paints + Profile + Selected guides (Shape: the shape picker with Apply, the
+     cross-section editor (TubeShapeEditor, ≤200 px square), Mirror and Smooth (a library shape's; Duplicate edits a built-in), and
      the library's new / rename / duplicate / delete glyphs in the block header),
      Selection + Selected guides (Select), Erases (Erase), Keys (Length Keys), Flow, Parts.
-   - **Applies to**: where the stroke lands. Acts on, Mirror (symmetry). The current group / map
-     / layer is not repeated here: it is the picked row of the list below.
-3. **The list** of the tab's things: Guide groups (Tools), Maps (Paint), Layers (Correctives),
-   Photos. Section header = name, count, add/import glyphs. Plain rows (dot, name, meta, eye).
-   Under the list, a small box with **the picked item's own** settings and actions (rename /
-   select / delete glyphs; a group's Segments and Edit guides; a map's Show on and Read by; a
-   layer's Weight + key).
+   - **Applies to**: where the stroke lands. Guides / Parts / Flow, Mirror (symmetry). The current group / map
+     / layer is not repeated here: it is the picked row of the list above.
 
 Row styles: block titles are small semibold dim text over a faint rule; numbers are fill fields
 with the name inside; chip rows put their name above the chips; Row label | control only for
 combos/toggles (Mirror, Shape, Place, Stamp).
 
 Gone from the panel: Selected only and Front only (the brushes keep their defaults, off and on), the Output strip (GroomLab menu; the app's menu bar corner), While sculpting
-(Attribute Editor / Properties), the Group combo (pick in the list), the gestures paragraph (?
-tooltip), the second Unfreeze All, the three-times-repeated hint, Fill Tubes / Tube Blend
+(Attribute Editor / Properties), the Group combo (pick in the list), the card's title, ? and hint line (the tile's tooltip), the second Unfreeze All, the three-times-repeated hint, Fill Tubes / Tube Blend
 (Interpolate node settings).
 
 ## Graph nodes

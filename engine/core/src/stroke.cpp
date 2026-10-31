@@ -35,8 +35,8 @@ const char* strokeFieldName(StrokeField field) {
 
 std::string sculptRefusal(const BrushToolSettings& s) {
     using Tool = BrushToolSettings::Tool;
-    const char* why = "GroomLab sculpt: only shaping brushes (comb, smooth, lift, length, twist, curl, straighten, attract, "
-                      "cut, direction, noise) shape a Sculpt node's guides (pick no Sculpt node to place, draw, erase, paint "
+    const char* why = "GroomLab sculpt: only shaping brushes (comb, smooth, lift, length, twist, straighten, attract, "
+                      "cut) shape a Sculpt node's guides (pick no Sculpt node to place, draw, erase, paint "
                       "or part)";
     if (s.tool != Tool::Brush || s.paintsScalp()) return why;
     switch (s.brush.mode) {
@@ -45,12 +45,9 @@ std::string sculptRefusal(const BrushToolSettings& s) {
         case BrushMode::Lift:
         case BrushMode::Length:
         case BrushMode::Twist:
-        case BrushMode::Curl:
         case BrushMode::Straighten:
         case BrushMode::Attract:
-        case BrushMode::Cut:
-        case BrushMode::Direction:
-        case BrushMode::Noise: return {};
+        case BrushMode::Cut: return {};
         case BrushMode::ShapeTube:
         case BrushMode::Attribute:
         case BrushMode::Erase:
@@ -311,8 +308,7 @@ BrushSettings BrushTool::pressed() const {
     if (settings.pressure) b.strength *= pressure_;
     if (inverted_) {
         // Ctrl: the opposite action. The brushes that work both ways flip (Length shortens, Lift
-        // lays down, Twist and Curl turn back, Attract pushes apart, Direction turns away, Noise
-        // smooths, Shape shrinks, rounds or untwists); a gray map is painted toward 0 (unfreeze,
+        // lays down, Twist turns back, Attract pushes apart, Shape shrinks, rounds or untwists); a gray map is painted toward 0 (unfreeze,
         // erase a layer, no hair on a density map, thinner on a width map), or toward 1 when the
         // value is 0 (grayCtrlTarget; a color map's inverse color is MapDab's); Cut grows instead.
         // Comb, Slide, Smooth, Straighten and Erase have no opposite: Ctrl leaves them as they are.
@@ -323,10 +319,7 @@ BrushSettings BrushTool::pressed() const {
             case BrushMode::Length:
             case BrushMode::ShapeTube:
             case BrushMode::Twist:
-            case BrushMode::Curl:
-            case BrushMode::Attract:
-            case BrushMode::Direction:
-            case BrushMode::Noise: b.strength = -b.strength; break;
+            case BrushMode::Attract: b.strength = -b.strength; break;
             default: break;
         }
     }

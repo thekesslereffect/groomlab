@@ -65,7 +65,7 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
     layout->setSpacing(2);
     const ui::json& lists = defs().get("lists/correctives");
     // The header: Layers, how many, ◆ Fix Frame and + New (glyphs); the about line in its tip.
-    header_ = new ListHeader(tr("Layers"), this);
+    header_ = new ListHeader(tr("Correctives"), this);
     header_->setObjectName(QStringLiteral("correctivesHeader"));
     header_->setToolTip(QString::fromStdString(lists.value("about", std::string())).remove(QRegularExpression(QStringLiteral("<[^>]*>"))));
     bar_ = new ListBar(header_);
@@ -282,6 +282,9 @@ void CorrectivesPanel::refresh() {
     applyTarget();
     bar_->refresh();
     itemBar_->refresh();
+    // The box is the picked row's (a corrective, the base groom or a Sculpt node).
+    QTreeWidgetItem* picked = tree_->currentItem();
+    itemBar_->setTitle(picked ? picked->text(0) : QString());
 }
 
 void CorrectivesPanel::refreshWeights() {

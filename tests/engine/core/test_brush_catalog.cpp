@@ -15,7 +15,7 @@ namespace groomlab {
 
 TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
     const std::vector<BrushEntry>& catalog = brushCatalog();
-    ASSERT_EQ(catalog.size(), 22u);
+    ASSERT_EQ(catalog.size(), 18u);
     std::set<std::string> ids;
     int lastCategory = -1;
     for (std::size_t i = 0; i < catalog.size(); ++i) {
@@ -40,7 +40,8 @@ TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
     for (BrushCategory c : categories) EXPECT_FALSE(brushesInCategory(c).empty()) << brushCategoryName(c);
     EXPECT_EQ(catalog.front().id, "place");
     EXPECT_EQ(brushEntry("shape")->category, BrushCategory::Shape);
-    EXPECT_EQ(brushEntry("shape")->label, "Shape");
+    EXPECT_EQ(brushEntry("shape")->label, "Tube") << "not the Shape category's name again";
+    EXPECT_EQ(brushEntry("twist")->label, "Swing") << "the Tube brush and the Twist node twist; this swings guides round their roots";
     EXPECT_EQ(brushEntry("tube"), nullptr) << "the Shape brush paints the tubes now";
     EXPECT_TRUE(brushEntry("shape")->hasSetting("tubeChannel"));
     EXPECT_TRUE(brushEntry("shape")->hasSetting("tube"));
@@ -48,16 +49,16 @@ TEST(BrushCatalog, EveryToolOnceInCategoryOrder) {
     EXPECT_EQ(brushEntry("grab"), nullptr) << "Comb does what Grab did";
     EXPECT_EQ(brushEntry("clump"), nullptr) << "the Paint brush paints the clump attribute";
     EXPECT_EQ(brushEntry("density"), nullptr) << "Paint on a setting's map (+ New Map > for a setting)";
-    EXPECT_EQ(brushEntry("straighten")->label, "Straighten");
+    EXPECT_EQ(brushEntry("straighten"), nullptr) << "Smooth's Straighten chip";
+    EXPECT_TRUE(brushEntry("smooth")->hasSetting("straighten"));
     EXPECT_EQ(brushEntry("select")->category, BrushCategory::Guides);
     EXPECT_EQ(brushEntry("no such tool"), nullptr);
 }
 
 TEST(BrushCatalog, EveryStrokeToolModeIsListedWithItsSettings) {
     // Every mode the stroke tools take is in the catalog, and the hosts' own tools too.
-    for (const char* mode : {"comb", "smooth", "lift", "length", "shape", "paint", "cut", "twist", "curl", "straighten",
-                             "attract", "erase", "slide", "direction", "noise", "place", "draw", "part",
-                             "flow", "lengths"}) {
+    for (const char* mode : {"comb", "smooth", "lift", "length", "shape", "paint", "cut", "twist", "attract", "erase",
+                             "slide", "place", "draw", "part", "flow", "lengths"}) {
         const BrushEntry* e = brushEntry(mode);
         ASSERT_TRUE(e) << mode;
         BrushToolSettings s;
@@ -67,8 +68,18 @@ TEST(BrushCatalog, EveryStrokeToolModeIsListedWithItsSettings) {
     }
     EXPECT_TRUE(brushEntry("select"));
     EXPECT_TRUE(brushEntry("freeze"));
+    // Straighten: still a mode (scripts), and what Smooth runs with its chip on.
+    BrushToolSettings straighten;
+    EXPECT_NO_THROW(straighten.setMode("straighten"));
+    BrushSettings smooth;
+    smooth.mode = BrushMode::Smooth;
+    EXPECT_EQ(strokeMode(smooth), BrushMode::Smooth);
+    smooth.straighten = true;
+    EXPECT_EQ(strokeMode(smooth), BrushMode::Straighten);
+    smooth.mode = BrushMode::Comb;
+    EXPECT_EQ(strokeMode(smooth), BrushMode::Comb) << "the chip is Smooth's";
     // The signed tools, their default strengths, and the settings the hosts' cards show.
-    for (const char* signedTool : {"lift", "twist", "curl", "attract", "length", "shape"}) EXPECT_TRUE(brushEntry(signedTool)->signedStrength) << signedTool;
+    for (const char* signedTool : {"lift", "twist", "attract", "length", "shape"}) EXPECT_TRUE(brushEntry(signedTool)->signedStrength) << signedTool;
     EXPECT_FALSE(brushEntry("comb")->signedStrength);
     EXPECT_FLOAT_EQ(brushEntry("smooth")->defaultStrength, 0.5f);
     EXPECT_FLOAT_EQ(brushEntry("comb")->defaultStrength, 1.0f);
@@ -90,6 +101,17 @@ TEST(BrushCatalog, EveryStrokeToolModeIsListedWithItsSettings) {
     EXPECT_NE(falloff->hint.find("1 from the center"), std::string::npos);
     EXPECT_EQ(brushSettingSpec("frontFacingOnly")->label, "Front facing only");
     EXPECT_EQ(brushSettingSpec("no such setting"), nullptr);
+}
+
+TEST(BrushCatalog, TheCorrectivesTabShowsTheToolsThatRecordIntoACorrective) {
+    // A corrective keeps point offsets: the shaping brushes and Select work on one; the tools that
+    // add or remove things, paint attributes (Paint, Freeze) or paint tubes do not (BrushTool
+    // refuses them while a corrective is picked).
+    std::set<std::string> on;
+    for (const BrushEntry& e : brushCatalog()) {
+        if (e.corrective) on.insert(e.id);
+    }
+    EXPECT_EQ(on, (std::set<std::string>{"comb", "slide", "smooth", "lift", "twist", "attract", "cut", "length", "select"}));
 }
 
 }  // namespace groomlab

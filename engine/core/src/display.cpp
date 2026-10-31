@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -328,6 +330,21 @@ std::vector<std::array<float, 3>> strandColors(const StrandSet& s, const ScalpMe
         }
     }, kStrandGrain);
     return out;
+}
+
+bool strandChannelRange(const StrandSet& s, const std::string& channel, float& lo, float& hi) {
+    const std::vector<float>* values = s.strandChannel(channel);
+    if (!values) return false;
+    float low = std::numeric_limits<float>::infinity(), high = -low;
+    for (const float v : *values) {
+        if (!std::isfinite(v)) continue;
+        low = std::min(low, v);
+        high = std::max(high, v);
+    }
+    if (low > high) return false;
+    lo = low;
+    hi = high;
+    return true;
 }
 
 void writeStrandPointColors(const StrandSet& s, const std::vector<std::array<float, 3>>& colors, float* rgba) {
@@ -1286,13 +1303,23 @@ DisplayGeometry scaleGeometry(const ScaleMesh& scales) {
 }
 
 DisplayGeometry strandMeshGeometry(const std::vector<StrandMeshSource>& meshes, const ScalpMesh* scalp,
-                                   const std::array<float, 3>& color) {
+                                   const std::array<float, 3>& color, const PrototypeLookup& prototypes) {
     DisplayGeometry g;
     g.triangles = true;
     g.scaleSurface = true;
+    // A tube or ribbon mesh is laid out here from its strands; a scale or feather mesh (ToMesh's
+    // other makes) is built whole and drawn as its faces are.
+    std::vector<std::optional<StrandMesh>> built(meshes.size());
     std::size_t total = 0;
-    for (const StrandMeshSource& m : meshes) {
-        if (m.strands) total += strandMeshPointCount(*m.strands, m.options);
+    for (std::size_t i = 0; i < meshes.size(); ++i) {
+        const StrandMeshSource& m = meshes[i];
+        if (!m.strands) continue;
+        if (resolveMeshMake(*m.strands, m.options) != StrandMeshOptions::Make::Strands) {
+            built[i] = buildStrandMesh(*m.strands, scalp, m.options, prototypes);
+            total += built[i]->mesh.points.size();
+        } else {
+            total += strandMeshPointCount(*m.strands, m.options);
+        }
     }
     if (total == 0) return g;
     std::vector<Vec3f> points(total);
@@ -1303,8 +1330,49 @@ DisplayGeometry strandMeshGeometry(const std::vector<StrandMeshSource>& meshes, 
     g.uvs.resize(total * 2);
     g.colors.resize(total * 4);
     std::size_t base = 0;
-    for (const StrandMeshSource& m : meshes) {
+    for (std::size_t mi = 0; mi < meshes.size(); ++mi) {
+        const StrandMeshSource& m = meshes[mi];
         if (!m.strands) continue;
+        if (built[mi]) {
+            // Its faces as they are: normals the faces' about each point, the one color.
+            const RachisMesh& mesh = built[mi]->mesh;
+            const std::size_t count = mesh.points.size();
+            std::vector<Vec3f> normal(count);
+            std::size_t corner = 0;
+            for (std::size_t f = 0; f < mesh.faceCounts.size(); ++f) {
+                const int n = mesh.faceCounts[f];
+                if (n >= 3) {
+                    const Vec3f& a = mesh.points[static_cast<std::size_t>(mesh.faceVertices[corner])];
+                    const Vec3f& b = mesh.points[static_cast<std::size_t>(mesh.faceVertices[corner + 1])];
+                    const Vec3f& c = mesh.points[static_cast<std::size_t>(mesh.faceVertices[corner + 2])];
+                    const Vec3f face = (b - a).cross(c - a);
+                    for (int k = 0; k < n; ++k) normal[static_cast<std::size_t>(mesh.faceVertices[corner + static_cast<std::size_t>(k)])] += face;
+                    for (int k = 1; k + 1 < n; ++k) {
+                        g.indices.insert(g.indices.end(), {static_cast<std::uint32_t>(base + static_cast<std::size_t>(mesh.faceVertices[corner])),
+                                                           static_cast<std::uint32_t>(base + static_cast<std::size_t>(mesh.faceVertices[corner + static_cast<std::size_t>(k)])),
+                                                           static_cast<std::uint32_t>(base + static_cast<std::size_t>(mesh.faceVertices[corner + static_cast<std::size_t>(k) + 1]))});
+                    }
+                }
+                corner += static_cast<std::size_t>(std::max(n, 0));
+            }
+            for (std::size_t v = 0; v < count; ++v) {
+                const Vec3f nv = normal[v].length() > 1e-20f ? normal[v].normalized() : Vec3f(0.0f, 1.0f, 0.0f);
+                const Vec3f tv = anyPerpendicular(nv);
+                const std::size_t at = base + v;
+                for (int a = 0; a < 3; ++a) {
+                    const auto i = at * 3 + static_cast<std::size_t>(a);
+                    g.positions[i] = (&mesh.points[v].x)[a];
+                    g.normals[i] = g.bitangents[i] = (&nv.x)[a];
+                    g.tangents[i] = (&tv.x)[a];
+                    g.colors[at * 4 + static_cast<std::size_t>(a)] = color[static_cast<std::size_t>(a)];
+                }
+                g.colors[at * 4 + 3] = 1.0f;
+                g.uvs[at * 2] = v < mesh.v.size() ? mesh.v[v] : 0.0f;
+                g.uvs[at * 2 + 1] = 0.0f;
+            }
+            base += count;
+            continue;
+        }
         const StrandSet& s = *m.strands;
         const std::size_t count = strandMeshPointCount(s, m.options);
         strandMeshPoints(s, scalp, m.options, points.data() + base);
@@ -2088,7 +2156,15 @@ void DisplayBuilder::buildStrandMesh(const DisplayInputs& in, const DisplaySetti
     }
     if (!rebuild(DisplayPart::StrandMesh, key)) return;
     DisplayGeometry mesh;
-    if (draw && !in.strandMeshes.empty()) mesh = strandMeshGeometry(in.strandMeshes, in.scalp.get(), s.hairColor);
+    if (draw && !in.strandMeshes.empty()) {
+        // The instances' prototypes the host read (its scene meshes), by name.
+        const PrototypeLookup prototypes = [&in](const std::string& name) -> const InstancePrototype* {
+            if (!in.prototypes) return nullptr;
+            const auto it = in.prototypes->find(name);
+            return it != in.prototypes->end() && it->second.found ? &it->second : nullptr;
+        };
+        mesh = strandMeshGeometry(in.strandMeshes, in.scalp.get(), s.hairColor, prototypes);
+    }
     if (shafts) appendSurface(mesh, rachisGeometry(*in.strands, s.hairColor));
     put(DisplayItemId::StrandMesh, std::move(mesh));
 }

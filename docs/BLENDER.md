@@ -285,7 +285,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `collide`, `frontFacingOnly` (alias `maskByScalp`), `stretch` (Comb) | |
 | `length`, `segments`, `tubeRadius`, `spacing` (host units), `matchNeighbors` | Place and Draw's new guides |
 | `tube` {`shape` (round, ribbon, teardrop, blade or a library shape), `width` (host units, a number or a list root to tip), `aspect`, `twist` (radians)} | Place and Draw's new guides' tube (Maya's `placeTube`; `tool_get` answers it whole) |
-| `tubeChannel` (width, flatness, twist) | what the Shape brush paints on the tubes |
+| `tubeChannel` (width, flatness, twist) | what the Tube brush paints on the tubes |
 | `targets` ("guides,parts,flow" or a list), `eraseGuides`, `eraseParts`, `eraseFlow` | what shaping brushes and Erase act on |
 | `partName`, `flowSink` ("", whorl, whorlcw, converge, part) | Part and Flow |
 | `attribute`, `value`, `pointwise`, `paintKind` (guides, vertices, texture), `paintTexture`, `paintResolution`, `paintColor` [r,g,b(,a)], `paintChannels` ("rgba"...), `smoothStrength` | Paint (and Smooth on a map) |
@@ -294,7 +294,7 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | Command | Arguments | Result |
 |---|---|---|
 | `tool_catalog` | (no session) | `{"tools": [{id, label, category, order, icon, defaultStrength, signed, hint, settings}], "categories", "settings": [{id, label, hint}], "paintable": [{id, label, type, param, hint}]}` (brush_catalog.h: every host's palette; paintable: what New Map > For offers first, stroke.h paintableSettings) |
-| `tool_set` | `tool` (a catalog id: place, draw, part, flow, comb, slide, smooth, straighten, lift, twist, curl, attract, shape, cut, length, erase, paint, select, freeze; or clump), `settings` {...} | `tool_get`'s answer |
+| `tool_set` | `tool` (a catalog id: place, draw, part, flow, comb, slide, smooth, lift, twist, attract, shape, cut, length, erase, paint, select, freeze; or clump; `straighten` as a script mode), `settings` {...} | `tool_get`'s answer |
 | `tool_get` | | `{"tool", "mode", "settings" (all, host units), "shows" (the catalog's settings for the card), "ringColor", "pathColor", "hoverColor"}` |
 | `stroke_begin` | `view`, `x`, `y`, `pressure` (1), `ctrl`, `shift`, `overlay` (true) | `{"stroking", "mode", "ring", "overlay", "view", "warnings"}` (BrushTool::press: Ctrl the opposite action, Shift a click picks the level or a drag smooths) |
 | `stroke_drag` | `points` [[x, y] or [x, y, pressure], ...] (or `x`, `y`), `pressure`, `view`? | `{"stroking", "changed", "ring", "overlay", "warnings"}` |
@@ -503,7 +503,7 @@ renderOnly nodes on, as Maya's exports do.
 | `export` `format=unityFeathers` | `directory`, `name`, `lod`, `points` (16), `barbPoints` (6), `density`, `shafts`, `rachis` (true), `maxStrandsPerGroup` | Maya's export_unity_feathers: `<name>_strands.abc` (a curves object per groom group), `<name>_unity_feathers.json`, `groups`, and `meshes` {rachis} (`<name>_rachis.fbx`) when the feathers have a rachis |
 | `bake_scale_maps` | `directory`, `name`, `resolution` (2048), `maxHeight` (0: measured), `padding` (8) | `{"files", "maps" {ScaleNormal, ScaleHeight, ScaleColor: [paths]}, "pattern", "maxHeight", "udim", "tiles", "covered"}` (scale_maps.h) |
 | `scale_mesh` | `space` | `meshes` {scales} as scalesFbx's, nothing written |
-| `strand_mesh` | `style` (tube, ribbon), `sides` (4), `widthScale`, `minWidth`, `strandUVs`, `density`, `maxStrands` (100000, thinned by ID); or `nodes`: true | Strands to Mesh (strand_geometry.h buildStrandMesh): `meshes` {strands} with UVs root to tip (and uv set strandUVs), `strands`, `total`, `capped`; with `nodes` each StrandMesh node's mesh by its own options |
+| `strand_mesh` | `make` (auto, strands, scales, feathers, cards, instances), `style` (tube, ribbon), `sides` (4), `widthScale`, `minWidth`, `strandUVs`, `density`, `maxStrands` (100000, thinned by ID); or `nodes`: true | To Mesh (strand_geometry.h buildStrandMesh): `meshes` {strands} with UVs root to tip (and uv set strandUVs), `strands`, `total`, `capped`; with `nodes` each StrandMesh node's mesh by its own options |
 | `set_scalp_frames` | `first`, `points` (frames x the scalp's points, 3), `restPoints`; none: dropped | `{"first", "last", "frames"}`: the scalp at other frames, the Simulate nodes' feed (GroomSession::setSimulationFeed): a frame they step through (Simulate Range, a jump forward) reads the scalp of that frame. Not an undo step |
 | `simulate_status` | | `nodes` (the Simulate nodes making the output), `status` [{node, startFrame, ranges, frames, live, baked, bakeStale, bakedFirst, bakedLast, bakedFile, stepMs, bytes, stamp}], `bakes` (the file's simCaches), `scalpFrames`, `running` |
 | `simulate_range` | `last`, `budgetMs` (200; 0: to the end in one request) | Simulate Range in steps (GroomSession::simulateTo, stopped by its progress callback when the budget is spent, a frame at least): `{"running", "done", "frame", "target", "progress" 0-1, "frames", "milliseconds", "errors", "status"}`; the protocol answers anything between steps |

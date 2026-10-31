@@ -146,7 +146,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 
 | Capability | Maya entry point | App |
 | --- | --- | --- |
-| Place, Draw, Part, Flow, Comb, Slide, Smooth, Straighten, Lift, Twist, Curl, Attract, Shape, Cut, Length, Erase, Paint | the tool tiles (`brush_tool`) | present: the brush rail; both palettes are built from the core's brush catalog (`brush_catalog.h`: one order, Create, Shape, Trim, Paint, Guides, one set of names, hints and settings) |
+| Place, Draw, Part, Flow, Comb, Slide, Smooth, Lift, Swing, Attract, Tube, Cut, Length, Erase, Paint | the tool tiles (`brush_tool`) | present: the brush rail; both palettes are built from the core's brush catalog (`brush_catalog.h`: one order, Create, Shape, Trim, Paint, Guides, one set of names, hints and settings) |
 | Select (click, box; Shift toggle, Ctrl deselect, Ctrl+Shift add) | Select tile | present (box; lasso: partial, a box) |
 | Freeze mask (paint, unfreeze all) | Freeze tile | missing (the core's brush honors a `freeze` layer; no tool to paint it) |
 | Radius, Strength (signed per tool), Falloff (0 hard, 1 soft, in both) | the card | present (the bar and the brush panel) |
@@ -158,7 +158,7 @@ labels, search words and number decimals come from the core (`node_catalog.h`, t
 | New guides: match neighbors, length, segments, spacing | the card | present |
 | Parts box: name, list, from curves, remove, clear | the card | present *new*: the part name in the brush panel, the list, Remove and Clear in the guides panel; from curves: Maya only |
 | Flow box: arrows / whorl / gather / part out, clear | the card | present *new* (the sink kind in the brush panel; Clear flow in the guides panel) |
-| Stretch (Comb), Erases, Acts on (guides/parts/flow) | the card | present |
+| Stretch (Comb), Straighten (Smooth), Erases, Applies to (guides/parts/flow) | the card | present |
 | Display while sculpting (as they are / dimmed / guides only, full density) | the card | partial: the dimmed strands at the sculpt density |
 | Gestures: middle-drag radius, Shift+middle strength, Shift+click / drag selects the guides in the ring (painting: Shift smooths), Ctrl the opposite | the viewport | present |
 | Hover highlight of the guides to be touched | the viewport | present |

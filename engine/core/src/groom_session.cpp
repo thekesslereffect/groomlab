@@ -1873,7 +1873,7 @@ bool GroomSession::refreshCardAtlas(std::vector<SessionMessage>& messages) {
     return true;
 }
 
-Value GroomSession::evaluateNode(const std::string& name, float density, double seconds) {
+Value GroomSession::evaluateNode(const std::string& name, float density, double seconds, bool buildCards) {
     if (!doc_) throw std::runtime_error(graphError_.empty() ? "the groom has no graph" : graphError_);
     // A scratch copy of the graph: results that match the view's are reused, and what this
     // evaluation makes never evicts them.
@@ -1889,6 +1889,7 @@ Value GroomSession::evaluateNode(const std::string& name, float density, double 
     ctx.scale = groomScale_;  // the lattices sizes round to, at the groom's scale
     ctx.externals = &externals;
     ctx.paths = paths();
+    ctx.buildCards = buildCards;
     Value value = scratch.graph.evaluate(id, ctx);
     if (const StrandsPtr strands = valueAs<StrandsPtr>(value)) return Value(carry(strands, 3));
     return value;
@@ -1922,7 +1923,7 @@ std::vector<GroomSession::StrandMeshSource> GroomSession::evaluateStrandMeshes(d
     // The nodes making the output (a compound's inner ones are left out: their paths have a '/').
     std::vector<std::string> names;
     parsed_->graph.forEachActiveUpstream(parsed_->output, [&](const std::string& path, const Operator& op) {
-        if (op.typeName() == op::kStrandMesh && path.find('/') == std::string::npos &&
+        if (op.typeName() == op::kToMesh && path.find('/') == std::string::npos &&
             parsed_->nodesByName.count(path) != 0) {
             names.push_back(path);
         }
@@ -1960,6 +1961,9 @@ std::vector<GroomSession::StrandMeshSource> GroomSession::evaluateStrandMeshes(d
             doc = docs.emplace(density, std::move(made)).first;
         }
         ctx.previewDensity = density;
+        // Cards (the Cards nodes upstream build them): only when the node may make a mesh of them.
+        ctx.buildCards = settings.options.make == StrandMeshOptions::Make::Auto ||
+                         settings.options.make == StrandMeshOptions::Make::Cards;
         const StrandsPtr in = doc->second->graph.evaluateStrands(doc->second->nodesByName.at(name), ctx);
         // The same strands on the same scalps as last time: the same result (hosts keep their mesh).
         MeshMemo memo;
@@ -2304,7 +2308,7 @@ bool GroomSession::hasStrandMeshNode() const {
     if (!doc_) return false;
     bool found = false;
     doc_->graph.forEachActiveUpstream(doc_->output, [&](const std::string& path, const Operator& op) {
-        found = op.typeName() == op::kStrandMesh && path.find('/') == std::string::npos;
+        found = op.typeName() == op::kToMesh && path.find('/') == std::string::npos;
         return !found;
     });
     return found;

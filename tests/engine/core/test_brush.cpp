@@ -820,7 +820,7 @@ TEST(Brush, CullingAndStrokeCachesChangeTheSameGuidesTheSame) {
     const auto visibility = std::make_shared<ScalpVisibility>(sphere, eye, (Vec3f{0, 0.7f, 0} - eye).normalized(), false);
     const GuideHierarchy start = groomOnSphere(*sphere, 120, 6);
     const BrushMode modes[] = {BrushMode::Comb, BrushMode::Smooth, BrushMode::Lift, BrushMode::Length, BrushMode::ShapeTube,
-                               BrushMode::Attribute, BrushMode::Twist, BrushMode::Curl, BrushMode::Straighten,
+                               BrushMode::Attribute, BrushMode::Twist, BrushMode::Straighten,
                                BrushMode::Attract, BrushMode::Erase, BrushMode::Cut, BrushMode::Slide};
     std::map<GuideId, float> mask;
     for (const HierarchyGuide& g : start.guides()) {

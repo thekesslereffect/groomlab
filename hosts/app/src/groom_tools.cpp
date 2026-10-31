@@ -44,9 +44,29 @@ const ui::Definitions& defs() { return ui::Definitions::shipped(); }
 
 QString qs(const std::string& s) { return QString::fromStdString(s); }
 
+// At most this many tiles to a row, however wide the dock.
+constexpr int kMaxTileColumns = 4;
+
 QString textAt(const std::string& path) {
     const ui::json* t = defs().find(path);
     return t && t->is_string() ? qs(t->get<std::string>()) : QString();
+}
+
+// A tile's tip: the tool's name and the catalog's whole hint, then (a brush's) the gestures
+// (palette texts.gestures, the app's words) as a small list, each "keys: what".
+QString tileTip(const groomlab::BrushEntry& e) {
+    QString html = QStringLiteral("<p style='margin:0'><b>%1</b></p><p style='margin:4px 0 0 0'>%2</p>").arg(qs(e.label).toHtmlEscaped(), qs(e.hint).toHtmlEscaped());
+    if (!e.hasSetting("radius")) return html;
+    QString gestures = textAt(std::string("palette/texts/labels/") + ui::kHost + "/gestures");
+    if (gestures.isEmpty()) gestures = textAt("palette/texts/gestures");
+    html += QStringLiteral("<table style='margin-top:6px' cellspacing='0' cellpadding='1'>");
+    for (const QString& part : gestures.split(QStringLiteral(" · "), Qt::SkipEmptyParts)) {
+        const int colon = part.indexOf(QStringLiteral(": "));
+        const QString keys = colon > 0 ? part.left(colon) : part, what = colon > 0 ? part.mid(colon + 2) : QString();
+        html += QStringLiteral("<tr><td style='padding-right:8px; white-space:nowrap'><b>%1</b></td><td>%2</td></tr>")
+                    .arg(keys.trimmed().toHtmlEscaped(), what.trimmed().toHtmlEscaped());
+    }
+    return html + QStringLiteral("</table>");
 }
 
 QLabel* label(const QString& text, const char* role, QWidget* parent) {
@@ -149,9 +169,22 @@ ToolGrid::ToolGrid(QWidget* parent) : QWidget(parent) {
 }
 
 void ToolGrid::setButtons(std::vector<QAbstractButton*> buttons, int maxColumns) {
-    buttons_ = std::move(buttons);
-    for (QAbstractButton* b : buttons_) b->setParent(this);
+    all_ = std::move(buttons);
+    buttons_ = all_;
+    for (QAbstractButton* b : all_) b->setParent(this);
     maxColumns_ = std::max(1, maxColumns);
+    place();
+    updateGeometry();
+}
+
+void ToolGrid::setShown(const std::function<bool(QAbstractButton*)>& keep) {
+    std::vector<QAbstractButton*> shown;
+    for (QAbstractButton* b : all_) {
+        if (keep(b)) shown.push_back(b);
+    }
+    if (shown == buttons_) return;
+    buttons_ = std::move(shown);
+    for (QAbstractButton* b : all_) b->setVisible(std::find(buttons_.begin(), buttons_.end(), b) != buttons_.end());
     place();
     updateGeometry();
 }
@@ -187,18 +220,21 @@ QSize ToolGrid::sizeHint() const {
     return {width, heightForWidth(width)};
 }
 
-// (The pinned grid's height follows its width, heightForWidth; at least a tile wide, as tall as at
+// (The grid's height follows its width, heightForWidth; at least a tile wide, as tall as at
 // its preferred width: a narrow dock's extra rows do not make the window's minimum taller.)
 QSize ToolGrid::minimumSizeHint() const { return {tile().width(), heightForWidth(sizeHint().width())}; }
 
 void ToolGrid::place() {
     if (buttons_.empty()) return;
-    // Every tile the same fixed size, left-aligned: the width says how many fit in a row.
+    // The width says how many fit in a row (at the tiles' minimum); the row's width is then split
+    // evenly between them, the leftover pixels spread so every row ends at the grid's edge.
     const QSize t = tile();
-    const int columns = columnsFor(std::max(width(), t.width()));
+    const int across = std::max(width(), t.width());
+    const int columns = columnsFor(across);
     for (std::size_t i = 0; i < buttons_.size(); ++i) {
         const int row = static_cast<int>(i) / columns, column = static_cast<int>(i) % columns;
-        buttons_[i]->setGeometry(column * (t.width() + spacing_), row * (t.height() + spacing_), t.width(), t.height());
+        const int left = column * (across + spacing_) / columns, right = (column + 1) * (across + spacing_) / columns - spacing_;
+        buttons_[i]->setGeometry(left, row * (t.height() + spacing_), std::max(right - left, t.width()), t.height());
     }
 }
 
@@ -225,24 +261,41 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     frame->setContentsMargins(0, 0, 0, 0);
     frame->setSpacing(0);
 
-    // ---- Pinned: the header, the status, the tabs and the tool grid (outside the scroll area).
-    pinned_ = new QWidget(this);
-    pinned_->setObjectName(QStringLiteral("groomToolsPinned"));
-    auto* top = new QVBoxLayout(pinned_);
-    top->setContentsMargins(10, 8, 10, 6);
+    // One scroll area for the whole panel: the header, the status, the tabs and the tool grid on
+    // top, then the empty state, the tab's list and the card.
+    scroll_ = new QScrollArea(this);
+    scroll_->setObjectName(QStringLiteral("groomToolsScroll"));
+    scroll_->setWidgetResizable(true);
+    scroll_->setFrameShape(QFrame::NoFrame);
+    scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // (Always there: a bar coming and going would change the width the hosted panels fit to.)
+    scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+    frame->addWidget(scroll_, 1);
+    auto* content = new QWidget(scroll_);
+    content->setObjectName(QStringLiteral("groomToolsContent"));
+    scroll_->setWidget(content);
+    auto* outer = new QVBoxLayout(content);
+    outer->setContentsMargins(10, 8, 10, 12);
+    outer->setSpacing(6);
+
+    // ---- The top: the header, the status, the tabs and the tool grid.
+    top_ = new QWidget(content);
+    top_->setObjectName(QStringLiteral("groomToolsTop"));
+    auto* top = new QVBoxLayout(top_);
+    top->setContentsMargins(0, 0, 0, 0);
     top->setSpacing(6);
-    frame->addWidget(pinned_);
+    outer->addWidget(top_);
     const ui::json& header = palette.at("header");
     auto* head = new QHBoxLayout();
     head->setSpacing(2);
-    groomName_ = new QLabel(pinned_);
+    groomName_ = new QLabel(top_);
     groomName_->setObjectName(QStringLiteral("groomName"));
     groomName_->setProperty("role", "title");
     groomName_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     groomName_->setToolTip(tr("The groom every tool works on: the open one"));
     head->addWidget(groomName_, 1);
     // The hair's eye: the strands alone (instances, cards too); the guides are the next eye's.
-    eye_ = glyphButton("eye", tr("Show or hide the hair"), pinned_);
+    eye_ = glyphButton("eye", tr("Show or hide the hair"), top_);
     eye_->setObjectName(QStringLiteral("hairVisible"));
     eye_->setCheckable(true);
     eye_->setChecked(true);
@@ -252,7 +305,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     });
     head->addWidget(eye_);
     // The guides' eye: every guide group at once (Properties > Guides; Maya's displayGuides).
-    guidesEye_ = glyphButton("groups", tr("Show or hide the guides, every guide group"), pinned_);
+    guidesEye_ = glyphButton("groups", tr("Show or hide the guides, every guide group"), top_);
     guidesEye_->setObjectName(QStringLiteral("guidesVisible"));
     guidesEye_->setCheckable(true);
     guidesEye_->setChecked(true);
@@ -261,11 +314,11 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
         if (!updating_) emit guidesVisibilityToggled(on);
     });
     head->addWidget(guidesEye_);
-    graph_ = glyphButton("graph", withShortcut(qs(header.at("graph").value("tip", std::string())), "view.graph"), pinned_);
+    graph_ = glyphButton("graph", withShortcut(qs(header.at("graph").value("tip", std::string())), "view.graph"), top_);
     graph_->setObjectName(QStringLiteral("openGraph"));
     connect(graph_, &QToolButton::clicked, this, &GroomTools::graphRequested);
     head->addWidget(graph_);
-    more_ = glyphButton("more", qs(header.at("more").value("tip", std::string())), pinned_);
+    more_ = glyphButton("more", qs(header.at("more").value("tip", std::string())), top_);
     more_->setObjectName(QStringLiteral("groomToolsMore"));
     more_->setPopupMode(QToolButton::InstantPopup);
     moreMenu_ = new QMenu(more_);
@@ -274,14 +327,14 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     head->addWidget(more_);
     top->addLayout(head);
 
-    status_ = label(QString(), "status", pinned_);
+    status_ = label(QString(), "status", top_);
     status_->setObjectName(QStringLiteral("groomToolsStatus"));
     status_->setWordWrap(true);
     status_->setVisible(false);
     top->addWidget(status_);
 
     // The tabs (palette.tabs), underlined as the Properties dock's.
-    tabs_ = new QTabBar(pinned_);
+    tabs_ = new QTabBar(top_);
     tabs_->setObjectName(QStringLiteral("groomTabs"));
     tabs_->setExpanding(false);
     tabs_->setUsesScrollButtons(false);
@@ -294,7 +347,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     auto tileGrid = [this](BrushCategory category, QWidget* parent) {
         std::vector<QAbstractButton*> buttons;
         for (const groomlab::BrushEntry* e : brushesInCategory(category)) {
-            buttons.push_back(makeTile(e->id, qs(e->label), qs(e->hint)));
+            buttons.push_back(makeTile(e->id, qs(e->label), tileTip(*e)));
             if (e->id == "freeze") {
                 // Unfreeze All: a button, not a tool.
                 auto* b = new QToolButton(parent);
@@ -309,44 +362,37 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
             }
         }
         auto* grid = new ToolGrid(parent);
-        grid->setButtons(std::move(buttons), 64);
+        grid->setButtons(std::move(buttons), kMaxTileColumns);
         grids_.push_back(grid);
         return grid;
     };
-    toolsGrid_ = new QWidget(pinned_);
+    toolsGrid_ = new QWidget(top_);
     toolsGrid_->setObjectName(QStringLiteral("toolsGrid"));
     auto* tools = new QVBoxLayout(toolsGrid_);
     tools->setContentsMargins(0, 0, 0, 0);
     tools->setSpacing(3);
     for (BrushCategory category : brushCategories()) {
         if (category == BrushCategory::Paint) continue;  // beside the maps they paint
-        tools->addWidget(label(QString::fromLatin1(brushCategoryName(category)), "category", toolsGrid_));
+        QLabel* name = label(QString::fromLatin1(brushCategoryName(category)), "category", toolsGrid_);
+        tools->addWidget(name);
+        gridLabels_.push_back(name);
         tools->addWidget(tileGrid(category, toolsGrid_));
     }
     top->addWidget(toolsGrid_);
-    paintGrid_ = new QWidget(pinned_);
+    paintGrid_ = new QWidget(top_);
     paintGrid_->setObjectName(QStringLiteral("paintGrid"));
     auto* paintTiles = new QVBoxLayout(paintGrid_);
     paintTiles->setContentsMargins(0, 0, 0, 0);
-    paintTiles->addWidget(tileGrid(BrushCategory::Paint, paintGrid_));
+    // The Paint tab: Paint as one full-width button over the maps.
+    for (const groomlab::BrushEntry* e : brushesInCategory(BrushCategory::Paint)) {
+        QToolButton* b = makeTile(e->id, qs(e->label), tileTip(*e));
+        b->setProperty("wide", true);
+        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        paintTiles->addWidget(b);
+    }
     top->addWidget(paintGrid_);
 
-    // ---- What scrolls: the empty state, the card, the tab's list.
-    scroll_ = new QScrollArea(this);
-    scroll_->setObjectName(QStringLiteral("groomToolsScroll"));
-    scroll_->setWidgetResizable(true);
-    scroll_->setFrameShape(QFrame::NoFrame);
-    scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    // (Always there: a bar coming and going would change the width the hosted panels fit to.)
-    scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
-    frame->addWidget(scroll_, 1);
-    auto* content = new QWidget(scroll_);
-    content->setObjectName(QStringLiteral("groomToolsContent"));
-    scroll_->setWidget(content);
-    auto* outer = new QVBoxLayout(content);
-    outer->setContentsMargins(10, 0, 10, 12);
-    outer->setSpacing(6);
-
+    // ---- Under the top: the empty state, the tab's list, the card.
     // No groom: how to start one (palette.empty; its buttons with the bindings).
     empty_ = new QFrame(content);
     empty_->setObjectName(QStringLiteral("groomToolsEmpty"));
@@ -365,7 +411,21 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     work->setSpacing(6);
     outer->addWidget(work_);
 
-    // The tool's card, the tubes' blocks inside it.
+    // The tabs' lists, right under the grid (the window fills them: setGroupsContent...).
+    for (const ui::json& tab : palette.at("tabs")) {
+        const std::string id = tab.value("id", std::string());
+        auto* holder = new QWidget(work_);
+        holder->setObjectName(QStringLiteral("list_") + qs(id));
+        holder->setLayout(new QVBoxLayout());
+        holder->layout()->setContentsMargins(0, 0, 0, 0);
+        work->addWidget(holder);
+        lists_[id] = holder;
+        tabIds_.push_back(id);
+        const int index = tabs_->addTab(qs(tab.value("label", std::string())));
+        tabs_->setTabToolTip(index, qs(tab.value("tip", std::string())));
+    }
+
+    // Under the list: the tool's card, the tubes' blocks inside it.
     card_ = new BrushPanel(work_);
     connect(card_, &BrushPanel::settingsChanged, this, &GroomTools::settingsChanged);
     connect(card_, &BrushPanel::guidesEdited, this, &GroomTools::guidesEdited);
@@ -385,26 +445,18 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     noTool_->setContentsMargins(0, 8, 0, 4);
     work->addWidget(noTool_);
 
-    // The tabs' lists (the window fills them: setGroupsContent...).
-    for (const ui::json& tab : palette.at("tabs")) {
-        const std::string id = tab.value("id", std::string());
-        auto* holder = new QWidget(work_);
-        holder->setObjectName(QStringLiteral("list_") + qs(id));
-        holder->setLayout(new QVBoxLayout());
-        holder->layout()->setContentsMargins(0, 0, 0, 0);
-        work->addWidget(holder);
-        lists_[id] = holder;
-        tabIds_.push_back(id);
-        const int index = tabs_->addTab(qs(tab.value("label", std::string())));
-        tabs_->setTabToolTip(index, qs(tab.value("tip", std::string())));
-    }
     connect(tabs_, &QTabBar::currentChanged, this, [this](int index) {
         refreshVisibility();
-        if (index >= 0 && index < static_cast<int>(tabIds_.size())) emit tabChanged(qs(tabIds_[static_cast<std::size_t>(index)]));
+        if (index < 0 || index >= static_cast<int>(tabIds_.size())) return;
+        const std::string tab = tabIds_[static_cast<std::size_t>(index)];
+        emit tabChanged(qs(tab));
+        // Correctives: a tool whose tile is gone here (it can't record into a corrective) stops.
+        const groomlab::BrushEntry* e = brushEntry(tool_);
+        if (tab == "correctives" && !tool_.empty() && !(e && e->corrective)) emit toolStopRequested();
     });
     // Isolate: the picked group (and its child groups) at full color, the others dimmed (the eye
     // in the Guide groups header).
-    isolate_ = makeGlyph(QStringLiteral("eye"), tr("Isolate: show the picked group (and its child groups) at full color and dim the others"),
+    isolate_ = makeGlyph(QStringLiteral("glyph_solo"), tr("Isolate: show the picked group (and its child groups) at full color and dim the others"),
                          this, true);
     isolate_->setObjectName(QStringLiteral("isolate"));
     connect(isolate_, &QToolButton::toggled, this, [this](bool) {
@@ -423,7 +475,7 @@ QToolButton* GroomTools::makeTile(const std::string& id, const QString& text, co
     b->setProperty("tool", qs(id));
     b->setText(text);
     b->setCheckable(true);
-    b->setToolTip(QStringLiteral("<b>%1</b><br>%2").arg(text.toHtmlEscaped(), tip.toHtmlEscaped()));
+    b->setToolTip(tip);
     connect(b, &QToolButton::clicked, this, [this, b, id] {
         b->setChecked(id == tool_);  // the window says which tool is on (setTool)
         setStatus({});
@@ -555,7 +607,7 @@ void GroomTools::groupPicked(const std::string& name) {
 
 void GroomTools::refreshTiles() {
     const qreal dpr = devicePixelRatioF();
-    const int iconSize = 20;
+    const int iconSize = 24;
     // The icons in their two tones (the group's color and the ink, as Maya's); checked, a glass
     // theme's in the accent's text (on the accent), a solid theme's as at rest (on the selection).
     const bool glass = theme::glassy();
@@ -584,13 +636,15 @@ void GroomTools::refreshTiles() {
         }
     }
     // Labeled: the name under the icon on a raised tile (Maya's tiles); else icons alone (the
-    // names in the tool tips). Either way one fixed size for every tile.
+    // names in the tool tips). Either way one height and minimum width for every tile; the grid
+    // stretches them to fill its rows.
     for (QToolButton* b : allTiles_) {
         b->setIconSize(QSize(iconSize, iconSize));
-        b->setToolButtonStyle(tileLabels_ ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonIconOnly);
-        const QSize size = tileLabels_ ? QSize(56, 50) : QSize(34, 34);
-        b->setMinimumSize(size);
-        b->setMaximumSize(size);
+        const bool wide = b->property("wide").toBool();  // Paint's: the panel's width, the name beside the icon
+        b->setToolButtonStyle(wide ? Qt::ToolButtonTextBesideIcon : tileLabels_ ? Qt::ToolButtonTextUnderIcon : Qt::ToolButtonIconOnly);
+        const QSize size = tileLabels_ ? QSize(56, 54) : QSize(38, 38);
+        b->setMinimumSize(wide ? QSize(0, 38) : size);
+        b->setMaximumSize(QWIDGETSIZE_MAX, wide ? 38 : size.height());
         if (b->objectName() == QLatin1String("unfreezeAllTile") && b->property("iconLook").toString() != look) {
             b->setProperty("iconLook", look);
             b->setIcon(toolIcon("unfreeze", BrushCategory::Guides));
@@ -600,7 +654,7 @@ void GroomTools::refreshTiles() {
         b->style()->unpolish(b);
         b->style()->polish(b);
     }
-    for (ToolGrid* g : grids_) g->setMaxColumns(64);
+    for (ToolGrid* g : grids_) g->setMaxColumns(kMaxTileColumns);
 }
 
 void GroomTools::setTileLabels(bool shown) {
@@ -756,6 +810,15 @@ void GroomTools::refreshVisibility() {
     tabs_->setVisible(open);
     // The grid: the categories' on Tools and Correctives, the Paint tile on Paint, none on Photos.
     toolsGrid_->setVisible(open && (tab == "tools" || tab == "correctives"));
+    // Correctives: only the tools that work on a corrective (a category with none of them goes).
+    const bool layers = tab == "correctives";
+    for (std::size_t i = 0; i < grids_.size(); ++i) {
+        grids_[i]->setShown([layers](QAbstractButton* b) {
+            const groomlab::BrushEntry* e = brushEntry(b->property("tool").toString().toStdString());
+            return !layers || (e && e->corrective);
+        });
+        if (i < gridLabels_.size()) gridLabels_[i]->setVisible(!grids_[i]->shown().empty());
+    }
     paintGrid_->setVisible(open && tab == "paint");
     for (auto& [id, holder] : lists_) holder->setVisible(id == tab);
     eye_->setEnabled(open);

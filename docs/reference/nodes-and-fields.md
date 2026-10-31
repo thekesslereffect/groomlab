@@ -214,7 +214,7 @@ guides -> an even `Scatter` + `Interpolate` -> `ToGuides` (dense, evenly spaced 
 - **Pick the node:** select the Sculpt node in the Graph Editor, its row **Node: sculpt1** in
   Groom Tools > Correctives, or its menu's **Brush This Node's Guides**. The viewport then
   draws the node's output as the guides, and the shaping brushes (Comb, Smooth, Lift, Length,
-  Twist, Curl, Straighten, Attract, Cut, Direction, Noise; symmetry as for the guides) reshape
+  Twist, Attract, Cut; symmetry as for the guides) reshape
   them. Place, Draw, Erase, Paint and Part are for the guides themselves: pick the
   Base groom.
 - **Kept in the node:** each stroke is one undo step of the groom's `sculptData` (by node name,

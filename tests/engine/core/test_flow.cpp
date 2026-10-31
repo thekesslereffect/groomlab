@@ -424,7 +424,7 @@ TEST(FlowBrush, OtherBrushesLeaveArrowsAlone) {
     sink.root = plane->closestPoint({0.5f, 0, 0.5f}).root;
     set.sinks.push_back(sink);
     const std::uint64_t before = set.contentHash();
-    for (const BrushMode mode : {BrushMode::Lift, BrushMode::Curl, BrushMode::ShapeTube, BrushMode::Attribute,
+    for (const BrushMode mode : {BrushMode::Lift, BrushMode::ShapeTube, BrushMode::Attribute,
                                  BrushMode::Slide, BrushMode::Cut}) {
         EXPECT_EQ(applyBrushStrokeToFlow(set, *plane, flowBrush(mode, 0.3f), {{0.4f, 0, 0.5f}, {0.6f, 0, 0.5f}}), 0u)
             << brushModeName(mode);

@@ -333,7 +333,7 @@ TEST(SculptNode, StrokesShapeTheNodesGuidesAndKeepTheirFormUpstream) {
     const std::size_t combed = afterComb.node("sculpt1")->guides.size();
     EXPECT_GT(combed, 0u);
     EXPECT_LT(combed, fed->size());  // only the guides it touched
-    s.setMode("curl");
+    s.setMode("twist");
     s.brush.strength = 1.0f;
     scriptedStroke(*w.host, s, {{0.3f, 1.2f, 0.3f}, {0.35f, 1.2f, 0.4f}});
     ASSERT_EQ(w.host->edits().size(), 2u);

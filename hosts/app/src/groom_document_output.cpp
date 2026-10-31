@@ -757,8 +757,11 @@ std::string GroomDocument::writeStrandMesh(const std::string& objPath, const Str
     if (maxStrands < 1) return "at most 1 strand or more";
     try {
         MeshPtr scalp;
-        const StrandsPtr all = exportFrame(time_, 1.0f, &scalp);
-        const std::vector<std::size_t> keep = thinStrandsById(*all, maxStrands);
+        const bool cards = options.make == StrandMeshOptions::Make::Auto || options.make == StrandMeshOptions::Make::Cards;
+        const StrandsPtr all = exportFrame(time_, 1.0f, &scalp, cards);
+        // Scales, feathers, cards and instances whole (their plates and rachis are the strand set's); tubes thinned.
+        const bool whole = resolveMeshMake(*all, options) != StrandMeshOptions::Make::Strands;
+        const std::vector<std::size_t> keep = thinStrandsById(*all, whole ? all->strandCount() : maxStrands);
         StrandSet kept;
         const StrandSet* strands = all.get();
         if (keep.size() < all->strandCount()) {
@@ -774,8 +777,13 @@ std::string GroomDocument::writeStrandMesh(const std::string& objPath, const Str
             }
             strands = &kept;
         }
-        const StrandMesh mesh = buildStrandMesh(*strands, scalp.get(), options);
-        if (mesh.mesh.faceCount() == 0) return "the strands made no faces (each needs two points)";
+        const GroomFile& groomFile = file();
+        const PrototypeLookup prototypes = [&groomFile](const std::string& n) -> const InstancePrototype* {
+            const auto it = groomFile.prototypes.find(n);
+            return it != groomFile.prototypes.end() && it->second.found ? &it->second : nullptr;
+        };
+        const StrandMesh mesh = buildStrandMesh(*strands, scalp.get(), options, prototypes);
+        if (mesh.mesh.faceCount() == 0) return "nothing to make a mesh of (no faces)";
         const bool second = options.strandUVs && mesh.u2.size() == mesh.mesh.u.size();
         const std::vector<float>& us = second ? mesh.u2 : mesh.mesh.u;
         const std::vector<float>& vs = second ? mesh.v2 : mesh.mesh.v;

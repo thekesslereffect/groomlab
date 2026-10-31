@@ -154,11 +154,12 @@ runs, **Simulate** reads **Cancel** (the frames made stay in the cache).
 ## Groom Tools
 
 The Groom Tools dock holds the same pieces as Maya's Groom Tools window, from the same shared
-definitions. Pinned at the top: the groom's name with its eyes (the hair alone: the strands,
+definitions, and the whole dock scrolls. At the top: the groom's name with its eyes (the hair alone: the strands,
 instances and cards go and come back at once while the guides stay; and the guides alone: every
 guide group; **View > Guides On/Off** and **Alt+Shift+G** too), the Graph Editor and **More**
 buttons, the four tabs and the tool grid (tiles of one size, as many to a row as the dock's width
-holds). Under the grid, the picked tool's card, then the tab's list:
+holds, at most four; on the Paint tab one full-width **Paint** button). Under the grid, the tab's
+list, then the picked tool's card:
 
 - **Tools**: every tool as a tile (Create, Shape, Trim and Paint brushes, then **Select**,
   **Freeze** and **Unfreeze All**), the tool's card and **Guide groups**.
@@ -191,13 +192,13 @@ Create, Shape, Trim and Paint, then **Select** and **Freeze**. See
 - **Esc** leaves the brush for the camera.
 
 The active tool's card holds its settings in Maya's blocks and order: **Brush** (Radius, Strength,
-Falloff, Smooth; the chips **Pressure**, **Off scalp**, **Falloff curve**, **Root to tip**, and the
-app's own **Propagate** and **Pointwise**), the tool's own block, then **Applies to** (**Acts on**
-and **Mirror**: World X, Topology, or the app's World Y and Z). The **?** beside the tool's name
-shows its whole hint and the gestures. How the strands draw while you sculpt is in
+Falloff, Smooth; the chips **Pressure**, **Keep off scalp**, **Stretch** (Comb), **Straighten** (Smooth), **Falloff curve**, **Root to tip**, and the
+app's own **Propagate** and **Pointwise**), the tool's own block, then **Applies to** (**Guides**, **Parts**, **Flow**
+and **Mirror**: World X, Topology, or the app's World Y and Z). A tool tile's tooltip has the
+tool's whole hint and, for a brush, the gestures. How the strands draw while you sculpt is in
 **Properties > Sculpting**.
 
-**Guide groups** lists the guide groups, always open under the card: click a row to pick the group
+**Guide groups** lists the guide groups, always open right under the tool grid (over the card): click a row to pick the group
 the brushes edit and new guides go into; its eye hides it; double-click to rename it; right-click
 for its menu. **Isolate** (the eye in the section header) shows only the picked group and its child
 groups at full color, and **+** adds a root or child group. The picked group's box under the list
@@ -208,11 +209,11 @@ its card. See [Guide groups](/docs/guides-and-brushes#guide-groups).
 ### Tubes
 
 The tool cards set the cross-section the guides' tubes have. Place and Draw's **Tube** block picks
-the shape new guides get, with its **Width**, **Flatness** and **Twist**. The Shape and Select cards
+the shape new guides get, with its **Width**, **Flatness** and **Twist**. The Tube card
 have **Profile** (the shape: round, flat, your own drawn in the outline editor and kept in the
 groom's library; **Apply** gives it to the selected or soloed guides) and **Selected guides** (their
 **Width**, **Flatness**, **Twist** and **Smooth**). Width shows in the length unit picked in the
-Graph Editor's **Edit > Units**. The Shape brush paints width, flatness or twist along a guide.
+Graph Editor's **Edit > Units**. The Tube brush paints width, flatness or twist along a guide.
 **Fill Tubes** and **Tube Blend** are the Interpolate node's settings.
 
 ### The marking menu

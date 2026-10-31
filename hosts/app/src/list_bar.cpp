@@ -169,10 +169,31 @@ void ListBar::resizeEvent(QResizeEvent* event) {
     place();
 }
 
+void ListBar::setTitle(const QString& text) {
+    if (!title_) {
+        title_ = new QLabel(this);
+        title_->setObjectName(QStringLiteral("listBarTitle"));
+        QFont font = title_->font();
+        font.setWeight(QFont::DemiBold);
+        title_->setFont(font);
+    }
+    titleText_ = text;
+    title_->setToolTip(text);
+    title_->setVisible(!text.isEmpty());
+    place();
+}
+
 void ListBar::place() {
     const int width = this->width();
     const int h = rowHeight();
     const int chips = rowWidth(true), glyphs = rowWidth(false);
+    if (title_ && !titleText_.isEmpty() && !chips) {
+        // The picked item's name in the room left of the glyphs.
+        const int room = std::max(0, width - glyphs - 2 * kSpacing);
+        title_->setText(title_->fontMetrics().elidedText(titleText_, Qt::ElideRight, room));
+        const int lh = title_->sizeHint().height();
+        title_->setGeometry(0, (std::max(h, lh) - lh) / 2, room, lh);
+    }
     const bool one = chips + glyphs + (chips && glyphs ? 3 * kSpacing : 0) <= width;
     int x = 0;
     for (const auto& [id, b] : buttons_) {

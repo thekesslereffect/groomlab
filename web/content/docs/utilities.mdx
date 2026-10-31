@@ -13,7 +13,7 @@ the selected grooms), and each is one undo step.
 | **Guides to Curves** | One NURBS curve per guide, tagged with its guide ID. |
 | **Curves to Guides...** | Tagged curves update their own guide in place; any other curve becomes a new guide. |
 | **Strands to Curves...** | The evaluated strands as plain Maya curves (20,000 by default), with their attributes. |
-| **Strands to Mesh...** | A snapshot of the strands as one mesh of tubes or ribbons, with UVs, for exporting. For a mesh that follows the animation, see [Strands as a mesh](#strands-as-a-mesh). |
+| **To Mesh...** | A snapshot of the groom as one mesh, with UVs: the strands as tubes or ribbons, the scales as their plates, feathers as barbs and rachis, cards, instances. For a mesh that follows the animation, see [The groom as a mesh](#the-groom-as-a-mesh). |
 | **Bake Node to Guides...** | The groom's output, or any node's strands or guides, converted to brushable guides. To keep them procedural instead, use a ToGuides followed by a Sculpt node ([Node graph](/docs/node-graph#other-main-nodes)). |
 
 To edit guides with Maya tools: **Guides to Curves**, edit the curves (CVs, lattices, a sculpt
@@ -26,38 +26,52 @@ were removed. The arrows are kept on the groom (laid with the **Flow** tool), no
 The Flow tool's card counts them and has the same command as **Clear All**. See
 [Short hair without guides](/docs/guides-and-brushes#short-hair-without-guides).
 
-## Strands as a mesh
+## The groom as a mesh
 
-**Strands to Mesh...** makes a static mesh of the current frame: a tube (`Tube sides` around, the
-tip closed) or a flat ribbon along each strand, as wide as the strand times `Width scale`. UVs
-run across the strand (u) and from root (v 0) to tip (v 1); **Per-strand UVs** adds a second UV
-set, `strandUVs`, with each strand in its own cell of a grid. Beyond **At most** strands, the
-strands are thinned by strand ID, the same ones a lower density keeps.
+**To Mesh...** makes a static mesh of the current frame. **Make** picks what it is made of:
+**auto** (the scales when the groom has some, else instances, else cards, else feathers, else the
+strands), **strands**, **scales**, **feathers**, **cards** or **instances**. The faces are quads
+wherever the shape allows (a scale's tip, a tube's tip and a prototype's own triangles stay
+triangles).
 
-For a mesh that follows the animation, add a **StrandMesh** node in the Graph Editor. The groom
+- **Strands:** a tube (`Tube sides` around, the tip closed) or a flat ribbon along each strand, as
+  wide as the strand times `Width scale`. UVs run across the strand (u) and from root (v 0) to tip
+  (v 1); **Per-strand UVs** adds a second UV set, `strandUVs`, with each strand in its own cell of a
+  grid. Beyond **At most** strands, the strands are thinned by strand ID, the same ones a lower
+  density keeps.
+- **Scales:** every scale's plate, bent onto the skin as it renders, with the plates' UVs. A scale
+  whose prototype is one of your scene's meshes comes out as a flat quad.
+- **Feathers:** the barbs as tubes or ribbons, and the rachis (shaft) tubes.
+- **Cards:** a Cards node's cards (put the ToMesh after it), as quads with the atlas UVs the cards
+  export with.
+- **Instances:** every instance's mesh where it sits: an Instance node's scene mesh (or a Scales
+  node's plates), each one a copy of its prototype with the prototype's UVs.
+
+For a mesh that follows the animation, add a **ToMesh** node in the Graph Editor. The groom
 draws its mesh in the viewport at once, in place of the strands (**Show mesh** in the node's
-panel, the groom's `displayStrandMesh`, switches back to the strands). The mesh shows the strands
-the node receives, so its position decides what it includes: after a Simulate's Interpolate it
-moves with the simulation, and before a Noise it leaves the frizz out. It follows the scalp (with
-Follow scalp on), Simulate (live or baked), keyed params and graph edits. Its vertices and faces
-stay the same from frame to frame; only the points move. Changing the node's density, strand
-count, style or sides rebuilds it. Each StrandMesh node passes its strands on unchanged, and all
-of them share one mesh.
+panel, the groom's `displayMesh`, switches back to the strands). The mesh shows what the node
+receives, so its position decides what it includes: after a Simulate's Interpolate it moves with
+the simulation, and before a Noise it leaves the frizz out. It follows the scalp (with Follow
+scalp on), Simulate (live or baked), keyed params and graph edits. A tube mesh keeps its vertices
+and faces from frame to frame; only the points move. Changing the node's density, strand count,
+style or sides rebuilds it. Each ToMesh node passes its strands on unchanged, and all of them
+share one mesh.
 
-To cache the animated mesh, click **Mesh in Scene** in the node's panel: it makes a Maya mesh
-connected to the groom's `outStrandMesh` (or selects the one already there). Export it with
-Maya's Alembic export (**Cache > Alembic Cache > Export Selection to Alembic**, or
-`AbcExport -frameRange 1 120 -uvWrite -root |hair_strandMesh -file hair.abc`); it is written as
-one deforming mesh. While that mesh exists, it shows the mesh instead of the groom.
+**Mesh in Scene** in the node's panel makes a Maya mesh connected to the groom's `outMesh` (or
+selects the one already there), to sculpt or model further or to cache: export it with Maya's
+Alembic export (**Cache > Alembic Cache > Export Selection to Alembic**, or
+`AbcExport -frameRange 1 120 -uvWrite -root |hair_mesh -file hair.abc`). While that mesh exists,
+it shows the mesh instead of the groom. **Export Mesh...** writes the node's mesh at this frame as
+an OBJ, FBX or Alembic file, for ZBrush, baking or 3D printing.
 
 From Python:
 
 ```python
 import groomlab
-from groomlab import utils
-utils.strands_to_mesh(groom, sides=4, max_strands=20000)                # a snapshot
-node = groomlab.add_strand_mesh(groom, after="interpolate", style="ribbon")  # live, drawn by the groom
-mesh = groomlab.strand_mesh_shape(groom)                                # Mesh in Scene
+groomlab.to_mesh(groom, make="scales")                                 # a snapshot
+node = groomlab.add_to_mesh(groom, after="interpolate", style="ribbon")  # live, drawn by the groom
+mesh = groomlab.to_mesh_shape(groom)                                   # Mesh in Scene
+groomlab.export_mesh(groom, "scales.obj", node=node)                   # Export Mesh...
 ```
 
 <Callout type="warn">

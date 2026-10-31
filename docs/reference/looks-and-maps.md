@@ -388,8 +388,21 @@ The viewport can color strands and draw them as ribbons. Neither re-evaluates th
 | `clump` | A random color per value of the channel `strandColorSource` (default `clumpId`), one per clump; with `region`, one per painted region (Interpolate's `regionMap`) |
 | `density` | Root density against the groom's median: blue a quarter or less, green typical, red 4x or more (bald spots, bunched roots) |
 
-The Attribute Editor shows `strandColorMode`; `strandColorSource` is set by the Groom Tools (the
-Paint tab's map display) or by script.
+The Attribute Editor shows `strandColorMode` and, under it, what the mode reads: **Source** (the
+strands' channels for `attribute` and `clump`, the scalp's color sets for `colorSet`, as the viewed
+node gives them), and for `attribute` **Min**, **Max** and **Auto Range** (the range at the
+source's lowest and highest value on the strands shown). The app and Blender have the same rows.
+By script:
+
+```python
+groomlab.strand_color_sources(groom)            # {"channels": [...], "colorSets": [...]}
+groomlab.auto_strand_color_range(groom)         # strandColorMin/Max over the source's values
+groomlab.auto_strand_color_range(groom, "length")
+```
+
+While a painted map shows on the scalp, the scalp's wireframe is drawn over it as Maya draws a
+mesh's: with Shading > Wireframe on Shaded (or in Wireframe), and always while the scalp is
+selected, so the face stays readable while you paint.
 
 `displayRibbons` (off by default) draws strands at their true width: ribbons facing the camera as
 wide as their `Width`, times `ribbonWidthScale`, never thinner than a pixel, the parts thinner than

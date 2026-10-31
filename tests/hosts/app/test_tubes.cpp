@@ -14,6 +14,7 @@
 #include <QCoreApplication>
 #include <QResizeEvent>
 #include <QLabel>
+#include <QLayout>
 #include <QLineEdit>
 #include <QMouseEvent>
 #include <QPushButton>
@@ -267,7 +268,8 @@ TEST(AppTubes, TubesSectionPicksShapesEditsTheLibraryAndFillsTubes) {
     EXPECT_EQ(guideEdits, 0);
     EXPECT_EQ(json::parse(placementTubeJson(session.settings().place))["shape"], "blade") << "the placement tube";
     EXPECT_FALSE(panel.editor()->editable()) << "a built-in shows read-only";
-    EXPECT_TRUE(panel.editAsCustomButton()->isVisibleTo(&panel));
+    EXPECT_FALSE(panel.shapeOptions()->isVisibleTo(&panel)) << "a built-in: no outline options";
+    EXPECT_TRUE(panel.duplicateButton()->isEnabled()) << "Duplicate: how a built-in is edited";
 
     // Targets: the selection; the shape picked goes to them (one step).
     const std::vector<GuideId> ids = primaryGuides(*doc, 2);
@@ -294,13 +296,13 @@ TEST(AppTubes, TubesSectionPicksShapesEditsTheLibraryAndFillsTubes) {
     panel.smoothTargets();
     EXPECT_EQ(doc->undoText(), "Undo smooth tube");
 
-    // Edit as Custom: a library copy the targets take, editable; Rename in place; Duplicate.
-    panel.editAsCustom();
+    // Duplicate on a built-in: a library copy the targets take, editable; Rename in place; Duplicate.
+    panel.duplicateButton()->click();
     EXPECT_EQ(panel.choice(), "ribbon 1");
     EXPECT_TRUE(panel.libraryShape("ribbon 1"));
     EXPECT_TRUE(panel.editor()->editable());
     EXPECT_EQ(guideOf(*doc, ids[0]).tube.shapeName(), "ribbon 1");
-    EXPECT_FALSE(panel.editAsCustomButton()->isVisibleTo(&panel));
+    EXPECT_TRUE(panel.shapeOptions()->isVisibleTo(&panel)) << "a library shape: Mirror and Smooth";
     EXPECT_TRUE(panel.renameButton()->isEnabled());
     panel.startRename();
     EXPECT_TRUE(panel.renameField()->isVisibleTo(&panel));
@@ -379,7 +381,7 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     EXPECT_FALSE(tubes->isHidden());
     EXPECT_EQ(tubes->mode(), TubePanel::Mode::Edit);
     // Shape's Profile block: the picker with Apply beside it, the outline editor (at most 200 px
-    // square), Edit as custom, Mirror and Smooth; the library's glyphs in its header.
+    // square), Mirror and Smooth (a library shape's); the library's glyphs in its header.
     CardBlock* profile = tubes->profileBlock();
     EXPECT_FALSE(profile->isHidden());
     EXPECT_TRUE(profile->isAncestorOf(tubes->editor()));
@@ -414,7 +416,7 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     // Another tool hides the chips and the tubes; Place shows the Tube block: the new guides'.
     tools.setTool("comb");
     EXPECT_TRUE(box->isHidden());
-    EXPECT_TRUE(tubes->isHidden()) << "the tubes only with Place, Draw, Shape and Select";
+    EXPECT_TRUE(tubes->isHidden()) << "the tubes only with Place, Draw and Tube";
     tools.setTool("place");
     EXPECT_FALSE(tubes->isHidden());
     EXPECT_EQ(tubes->mode(), TubePanel::Mode::New);
@@ -425,44 +427,55 @@ TEST(AppTubes, ShapeBrushCardPaintsAChannelAndHoldsTheProfile) {
     EXPECT_TRUE(tubes->tubeBlock()->isAncestorOf(tubes->preview()));
     EXPECT_FALSE(tubes->preview()->editable()) << "a small read-only preview";
     tools.setTool("select");
-    EXPECT_EQ(tubes->mode(), TubePanel::Mode::Edit) << "Select: the selected guides' profile too";
-    EXPECT_TRUE(tubes->profileBlock()->isAncestorOf(tubes->shapeBox()));
+    EXPECT_TRUE(tubes->isHidden()) << "Select's card is the selection's: the tubes are the Tube brush's";
 }
 
-TEST(AppGroomTools, TilesKeepTheirSizeAndTheColumnsFollowTheWidth) {
-    // The pinned grid: every tile one fixed size (labeled 56 x 50, icons alone 34 x 34; 20 px
-    // icons), left-aligned, never stretched; as many to a row as (width + spacing) / (tile + spacing).
+TEST(AppGroomTools, TilesFillTheRowsAndTheColumnsFollowTheWidth) {
+    // The grid: every tile one height and minimum width (labeled 56 x 54, icons alone 38 x 38; 24 px
+    // icons); as many to a row as (width + spacing) / (tile + spacing), at most four, the row's
+    // width split evenly between them.
     GroomTools tools;
     tools.setGroomName(QStringLiteral("sample"));
-    EXPECT_TRUE(tools.pinned()->isAncestorOf(tools.tabBar()));
-    EXPECT_TRUE(tools.pinned()->isAncestorOf(tools.tile("comb")));
-    EXPECT_FALSE(tools.scrollArea()->isAncestorOf(tools.tile("comb"))) << "the grid stays put while the card scrolls";
+    EXPECT_TRUE(tools.topPart()->isAncestorOf(tools.tabBar()));
+    EXPECT_TRUE(tools.topPart()->isAncestorOf(tools.tile("comb")));
+    EXPECT_TRUE(tools.scrollArea()->isAncestorOf(tools.topPart())) << "the whole panel scrolls: the header, the tabs and the grid too";
     EXPECT_TRUE(tools.scrollArea()->isAncestorOf(tools.card()));
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);
     for (const bool labels : {true, false}) {
         tools.setTileLabels(labels);
-        const QSize tile = labels ? QSize(56, 50) : QSize(34, 34);
+        const QSize tile = labels ? QSize(56, 54) : QSize(38, 38);
         EXPECT_EQ(grid->tile(), tile) << "labels " << labels;
         for (const int width : {120, 200, 252, 320, 480}) {
             const int columns = grid->columnsFor(width);
-            EXPECT_EQ(columns, (width + grid->spacing()) / (tile.width() + grid->spacing())) << width;
+            EXPECT_EQ(columns, std::min(4, (width + grid->spacing()) / (tile.width() + grid->spacing()))) << width << ": as many as fit, at most four";
             grid->resize(width, grid->heightForWidth(width));
             QResizeEvent resized(grid->size(), QSize());  // a hidden widget gets its resize event on show
             QCoreApplication::sendEvent(grid, &resized);
-            int lefts = 0;
+            const int even = (width - (columns - 1) * grid->spacing()) / columns;
+            int lefts = 0, rights = 0;
             for (QAbstractButton* t : grid->findChildren<QAbstractButton*>()) {
-                EXPECT_EQ(t->size(), tile) << "a tile stretched at " << width;
-                EXPECT_EQ((t->x()) % (tile.width() + grid->spacing()), 0) << "on the grid's columns, from the left";
-                EXPECT_LE(t->geometry().right(), width);
+                EXPECT_EQ(t->height(), tile.height());
+                EXPECT_GE(t->width(), tile.width());
+                EXPECT_LE(std::abs(t->width() - even), 1) << "the row split evenly at " << width;
+                EXPECT_LE(t->geometry().right(), width - 1);
                 if (t->x() == 0) ++lefts;
+                if (t->geometry().right() == width - 1) ++rights;
             }
             EXPECT_GT(lefts, 0);
+            EXPECT_GT(rights, 0) << "a full row reaches the grid's right edge at " << width;
         }
         EXPECT_GT(grid->heightForWidth(120), grid->heightForWidth(480)) << "narrower: more rows";
     }
     QAbstractButton* comb = tools.tile("comb");
-    EXPECT_EQ(qobject_cast<QToolButton*>(comb)->iconSize(), QSize(20, 20));
+    EXPECT_EQ(qobject_cast<QToolButton*>(comb)->iconSize(), QSize(24, 24));
+    // The Paint tab: Paint is one full-width button over the maps, not a tile in a grid.
+    auto* paint = qobject_cast<QToolButton*>(tools.tile("paint"));
+    ASSERT_NE(paint, nullptr);
+    EXPECT_EQ(qobject_cast<ToolGrid*>(paint->parentWidget()), nullptr);
+    EXPECT_EQ(paint->toolButtonStyle(), Qt::ToolButtonTextBesideIcon);
+    EXPECT_EQ(paint->sizePolicy().horizontalPolicy(), QSizePolicy::Expanding);
+    EXPECT_EQ(paint->maximumWidth(), QWIDGETSIZE_MAX);
 }
 
 TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
@@ -478,13 +491,13 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
     BrushPanel* card = tools.card();
     using Titles = std::vector<std::string>;
     const std::vector<std::pair<std::string, Titles>> cases = {
-        {"comb", {"Brush", "Comb", "Applies to"}},
+        {"comb", {"Brush", "Applies to"}},  // Stretch: a Brush chip
         {"smooth", {"Brush", "Applies to"}},
         {"flow", {"Brush", "Flow"}},
         {"place", {"New guides", "Tube", "Applies to"}},
         {"draw", {"New guides", "Tube", "Applies to"}},
         {"shape", {"Brush", "Paints", "Profile", "Selected guides", "Applies to"}},
-        {"select", {"Profile", "Selected guides", "Applies to"}},
+        {"select", {"Applies to"}},
         {"erase", {"Brush", "Erases", "Applies to"}},
         {"lengths", {"Keys", "Applies to"}},
         {"part", {"Parts", "Applies to"}},
@@ -496,14 +509,14 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
         EXPECT_FALSE(card->isHidden()) << tool;
         EXPECT_TRUE(tools.noToolLabel()->isHidden()) << tool;
         const groomlab::BrushEntry* e = brushEntry(tool);
-        EXPECT_EQ(card->titleLabel()->text(), QString::fromStdString(e->label)) << tool;
-        EXPECT_TRUE(card->helpButton()->toolTip().contains(QString::fromStdString(e->hint).left(20).toHtmlEscaped())) << tool << ": the ? has the hint";
-        EXPECT_FALSE(card->shortLabel()->text().isEmpty()) << tool;
-        EXPECT_LT(card->shortLabel()->text().size(), 80) << tool << ": one short line (palette.tools.<id>.short)";
+        EXPECT_TRUE(tools.tile(tool)->toolTip().contains(QString::fromStdString(e->hint).left(20).toHtmlEscaped())) << tool << ": the tile has the hint";
     }
-    // The gestures are the ?'s (a brush's), not a paragraph in the card.
+    // The card is only the settings: no title, no hint line; the gestures are a brush tile's tip.
     tools.setTool("comb");
-    EXPECT_TRUE(card->helpButton()->toolTip().contains(QStringLiteral("Page Up / Down")));
+    EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr);
+    EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardShort")), nullptr);
+    EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Page Up / Down")));
+    EXPECT_FALSE(tools.tile("part")->toolTip().contains(QStringLiteral("Page Up / Down"))) << "not a brush";
     EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("gestures")), nullptr);
     // Mirror: Symmetry and its mode inside Applies to (not for Flow).
     auto* applies = card->findChild<CardBlock*>(QStringLiteral("appliesBlock"));
@@ -575,9 +588,13 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     bool value = false;
     for (ValueSlider* s : block->findChildren<ValueSlider*>()) value = value || s->caption() == QStringLiteral("Value");
     EXPECT_TRUE(value);
-    // The Maps list under the card: the header's + New Map and Import glyphs, the picked map's box.
+    // The Maps list over the card, right under the grid: the header's + New Map and Import glyphs,
+    // the picked map's box.
     EXPECT_EQ(maps.bar()->ids(), (std::vector<std::string>{"map.new", "map.import"}));
-    EXPECT_TRUE(tools.card()->y() < tools.findChild<QWidget*>(QStringLiteral("list_paint"))->y() || !tools.isVisible());
+    QLayout* work = tools.card()->parentWidget()->layout();
+    ASSERT_NE(work, nullptr);
+    for (const char* tab : {"tools", "paint", "correctives", "photos"})
+        EXPECT_LT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_") + QLatin1String(tab))), work->indexOf(tools.card())) << tab;
     // Photos: no card.
     ASSERT_TRUE(tools.showTab(QStringLiteral("photos")));
     EXPECT_TRUE(card->isHidden());

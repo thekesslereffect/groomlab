@@ -67,10 +67,11 @@ bool continueExport(const ExportProgress& progress, std::size_t done, std::size_
 
 }  // namespace
 
-StrandsPtr GroomDocument::exportFrame(double seconds, float density, MeshPtr* scalp) {
+StrandsPtr GroomDocument::exportFrame(double seconds, float density, MeshPtr* scalp, bool buildCards) {
     ViewRequest request;
     request.density = renderOverrides_.densityTimes(density);  // (the render overrides' share too)
     request.time = seconds;
+    request.buildCards = buildCards;  // the Cards nodes' cards on the strands (their card layers)
     request.wantBounds = false;
     const ViewResult& view = scene_->view(request);
     if (!view.errors.empty()) throw std::runtime_error(view.errors.front());

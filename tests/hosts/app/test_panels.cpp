@@ -829,7 +829,7 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     GroomTools tools;
     EXPECT_TRUE(tools.tileLabels()) << "labeled tiles by default";
     tools.setTileLabels(false);
-    EXPECT_EQ(tools.tiles().size(), 23u) << "Select, Freeze, the 20 tools (Paint and Length Keys among them) and Unfreeze All";
+    EXPECT_EQ(tools.tiles().size(), 19u) << "Select, Freeze, the 16 tools (Paint and Length Keys among them) and Unfreeze All";
     for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "unfreeze"}) {
         EXPECT_NE(tools.tile(id), nullptr) << id;
     }
@@ -838,14 +838,16 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     EXPECT_EQ(tabs, (std::vector<std::string>{"Tools", "Paint", "Correctives", "Photos"})) << "palette.json's tabs";
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);
-    EXPECT_EQ(grid->columnsFor(260), 6) << "six 34 px icons to a row in a 260 px column";
+    EXPECT_EQ(grid->columnsFor(260), 4) << "at most four to a row (six 38 px icons would fit in 260 px)";
+    EXPECT_EQ(grid->columnsFor(130), 3) << "fewer when only fewer fit";
     EXPECT_EQ(qobject_cast<QToolButton*>(tools.tile("comb"))->toolButtonStyle(), Qt::ToolButtonIconOnly);
     EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Comb"))) << "the name in the tool tip";
     const int icons = grid->heightForWidth(260);
     tools.setTileLabels(true);
     const int wide = grid->heightForWidth(300);
     EXPECT_GT(grid->heightForWidth(140), wide) << "a narrower dock wraps to more rows";
-    EXPECT_EQ(grid->columnsFor(300), 5) << "labeled tiles (56 px) as many as fit";
+    EXPECT_EQ(grid->columnsFor(300), 4) << "labeled tiles (56 px): as many as fit, at most four";
+    EXPECT_EQ(grid->columnsFor(180), 3);
     grid->resize(260, grid->heightForWidth(260));
     for (QAbstractButton* t : grid->findChildren<QAbstractButton*>()) {
         EXPECT_LE(t->geometry().right(), 260) << "a tile past the dock's width";
@@ -861,7 +863,7 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     tools.setTool("comb");
     EXPECT_TRUE(tools.tile("comb")->isChecked());
     EXPECT_FALSE(tools.tile("cut")->isChecked());
-    EXPECT_EQ(tools.card()->titleLabel()->text(), QStringLiteral("Comb"));
+    EXPECT_EQ(tools.card()->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr) << "the card: only the settings, no title";
     // The mode switcher says when any segment is clicked, the current one too.
     Segmented modes;
     modes.setItems({{"A", Qt::red, Qt::white}, {"B", Qt::blue, Qt::white}});

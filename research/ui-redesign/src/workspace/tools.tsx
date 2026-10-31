@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // The Groom Tools content: groom header, tabs, tool palette, brush settings, guide groups.
-import { ChevronDown, CircleHelp, Eye, EyeOff, ImagePlus, Key, Link2, MoreHorizontal, Network, Pencil, Plus, Spline, Trash2, X } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, ImagePlus, Key, Link2, MoreHorizontal, Network, Pencil, Plus, Spline, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { FillField, Kbd, Param, Row } from "@/components/ui/field";
+import { FillField, Param, Row } from "@/components/ui/field";
 import { Section } from "@/components/ui/section";
 import { Select } from "@/components/ui/select";
 import { TabBar } from "@/components/ui/tabs";
@@ -10,7 +10,7 @@ import { Toggle } from "@/components/ui/toggle";
 import { Tip } from "@/components/ui/tooltip";
 import { allTools, guideGroups, toolGroups, type Tool } from "@/data/groom";
 import { icon } from "@/data/icons";
-import { gestures, optionLabels, toolSettings, tubeShapes, type ToolSettings } from "@/data/toolSettings";
+import { optionLabels, toolSettings, tubeShapes, type ToolSettings } from "@/data/toolSettings";
 import { useOpt } from "@/lab/store";
 import { cn } from "@/lib/utils";
 import { useWS } from "./state";
@@ -70,6 +70,23 @@ export function ToolsTabs() {
 function ToolButton({ tool, style }: { tool: Tool; style: string }) {
   const { tool: current, setTool } = useWS();
   const on = current === tool.id;
+  if (style === "wide") {
+    // The Paint tab's Paint: the panel's width, the name beside the icon (Qt: ToolButtonTextBesideIcon,
+    // an Expanding width, 34 px tall).
+    return (
+      <button
+        onClick={() => setTool(tool.id)}
+        title={tool.tip}
+        className={cn(
+          "flex h-[34px] w-full items-center justify-center gap-2 rounded-ctl border outline-none",
+          on ? "border-accent bg-selection text-fg" : "border-line bg-raised text-dim hover:bg-hover hover:text-fg",
+        )}
+      >
+        <ToolIcon tool={tool} size={20} />
+        <span className="font-medium">{tool.label}</span>
+      </button>
+    );
+  }
   if (style === "list") {
     return (
       <button
@@ -121,11 +138,14 @@ export function ToolPalette({ columns }: { columns?: number }) {
       {toolGroups.map((g) => (
         <div key={g.id} className="flex flex-col gap-1">
           <span className="text-sm-ui font-medium text-muted">{g.label}</span>
-          {/* Icon tiles keep their size: the panel's width decides how many fit in a row (Qt: ToolGrid
-              columns = width / (tile + spacing), tiles fixed, left-aligned). */}
+          {/* Icon tiles keep their size: the panel's width decides how many fit in a row, at most 4
+              (Qt: ToolGrid columns = min(width / (tile + spacing), 4), tiles fixed, left-aligned). */}
           <div
             className={cn("grid gap-1", style === "list" && "gap-0")}
-            style={{ gridTemplateColumns: style === "icons" ? "repeat(auto-fill, 34px)" : style === "tiles" ? "repeat(auto-fill, 56px)" : `repeat(${cols}, minmax(0, 1fr))` }}
+            style={{
+              gridTemplateColumns: style === "icons" ? "repeat(auto-fill, 34px)" : style === "tiles" ? "repeat(auto-fill, 56px)" : `repeat(${cols}, minmax(0, 1fr))`,
+              maxWidth: style === "icons" ? 4 * 34 + 3 * 4 : style === "tiles" ? 4 * 56 + 3 * 4 : undefined,
+            }}
           >
             {g.tools.map((tool) => <ToolButton key={tool.id} tool={tool} style={style} />)}
           </div>
@@ -250,29 +270,6 @@ function Glyph({ label, children, on, onClick }: { label: string; children: Reac
 }
 
 // ---- The tool card ---------------------------------------------------------------------------
-
-function ToolHelp({ t }: { t: Tool }) {
-  return (
-    <Tip
-      side="left"
-      label={
-        <div className="flex max-w-64 flex-col gap-1.5 py-0.5">
-          <span className="text-fg">{t.tip}</span>
-          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm-ui">
-            {gestures.map(([k, v]) => (
-              <span key={k} className="contents">
-                <span><Kbd>{k}</Kbd></span>
-                <span className="text-dim">{v}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      }
-    >
-      <Button variant="ghost" size="iconSm"><CircleHelp className={ic} /></Button>
-    </Tip>
-  );
-}
 
 function TubeFields() {
   return (
@@ -404,7 +401,7 @@ const paintTool: Tool = {
 // The options a card shows as chips (how the stroke behaves), in a fixed order so a chip never
 // moves between tools. Selected only and Front only are not in the panel: the brushes keep their
 // defaults (off and on).
-const BRUSH_KEYS = ["pressure", "collide"] as const;
+const BRUSH_KEYS = ["pressure", "collide", "stretch"] as const;  // Stretch: Comb's
 
 /** Chips (or checkboxes / a fold, per the lab's Brush options) for some option keys + curves. */
 function ChipSet({ keys, curves = [], foldTitle }: { keys: string[]; curves?: string[]; foldTitle: string }) {
@@ -501,12 +498,6 @@ function ToolBlock({ id, s }: { id: string; s: ToolSettings }) {
           {useOpt("gtTubes") === "split" && <TubeNew />}
         </>
       );
-    case "comb":
-      return (
-        <Block title="Comb">
-          <div className="flex flex-wrap gap-1"><Chip on={false} tip="Guides get longer or shorter as you pull">Stretch while combing</Chip></div>
-        </Block>
-      );
     case "shape":
       return (
         <>
@@ -579,13 +570,7 @@ export function ToolCard({ tool }: { tool?: Tool }) {
   const hasApply = s.actsOn || s.symmetry;
 
   return (
-    <section className="flex flex-col border-t border-line pt-2">
-      <div className="flex h-row items-center gap-2">
-        <ToolIcon tool={t} size={16} />
-        <span className="flex-1 font-semibold text-fg">{t.label}</span>
-        {hints === "short" && <ToolHelp t={t} />}
-      </div>
-      <p className="text-sm-ui leading-snug text-muted">{hints === "short" ? s.short : t.tip}</p>
+    <section className="flex flex-col border-t border-line">
 
       {s.brush && (
         <Block title="Brush">
@@ -690,11 +675,11 @@ export function GuideGroups() {
 
 // ---- Tabs ------------------------------------------------------------------------------------
 
-/** A list section: the things a tab works on, then the picked one's own properties. */
+/** A tab's list (the things it works on, the picked one's own properties), then the tool's card. */
 function PaintTab() {
   return (
     <>
-      <ToolCard tool={paintTool} />
+      <ToolButton tool={paintTool} style="wide" />
       <Section
         title="Maps"
         count={3}
@@ -719,6 +704,7 @@ function PaintTab() {
           <p className="pt-1 text-sm-ui text-muted">Read by scatter.density</p>
         </ItemProps>
       </Section>
+      <ToolCard tool={paintTool} />
     </>
   );
 }
@@ -736,7 +722,6 @@ function ItemProps({ children, actions }: { children?: ReactNode; actions?: Reac
 function CorrectivesTab() {
   return (
     <>
-      <ToolCard />
       <Section
         title="Layers"
         count={3}
@@ -762,6 +747,7 @@ function CorrectivesTab() {
           </div>
         </ItemProps>
       </Section>
+      <ToolCard />
     </>
   );
 }
@@ -850,9 +836,9 @@ export function ToolsPanel({ paletteOnly }: { paletteOnly?: boolean }) {
   const body =
     toolsTab === "tools" ? (
       <>
+        <GuideGroups />
         {!paletteOnly && <ToolCard />}
         {!paletteOnly && tubes === "section" && toolSettings[tool]?.tube && <TubesSection />}
-        <GuideGroups />
       </>
     ) : toolsTab === "paint" ? (
       <PaintTab />

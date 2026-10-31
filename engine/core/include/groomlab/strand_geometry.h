@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "groomlab/feathers.h"
+#include "groomlab/scales.h"
 #include "groomlab/strand_set.h"
 
 namespace groomlab {
@@ -26,6 +27,14 @@ using StrandsPtr = std::shared_ptr<const StrandSet>;
 std::vector<std::size_t> thinStrandsById(const StrandSet& strands, std::size_t maxCount);
 
 struct StrandMeshOptions {
+    // What the mesh is made of (a ToMesh node's `make`): Auto picks by what the strands carry
+    // (scales, else other instances, else cards, else feathers with a rachis, else the strands);
+    // Strands: tubes or ribbons round every strand; Scales: the scales' plates bent onto the skin
+    // (scales.h buildScaleMesh); Feathers: the barbs as tubes or ribbons and the rachis tubes
+    // (buildRachisMesh); Cards: the Cards nodes' cards (their quads, laid out in one atlas);
+    // Instances: every instance's prototype mesh where it sits (scales and bent ones as Scales).
+    enum class Make { Auto, Strands, Scales, Feathers, Cards, Instances };
+    Make make = Make::Auto;
     enum class Style { Tube, Ribbon };
     Style style = Style::Tube;
     int sides = 4;            // a tube's sides (3 or more)
@@ -44,18 +53,33 @@ struct StrandMeshOptions {
 // strand (its index in `strands`), `faceFeather` each face's. With strandUVs, u2/v2 (parallel
 // to mesh.u/v, the same faceUVs) put strand k in cell k of a ceil(sqrt(n)) square grid.
 // Strands with fewer than two points are skipped.
+// Each face's part of the mesh (StrandMesh::faceParts): a host's face sets or groups.
+enum class MeshPart : int { Strands = 0, Scales = 1, Rachis = 2, Cards = 3, Instances = 4 };
 struct StrandMesh {
     RachisMesh mesh;
     std::vector<float> u2, v2;
+    std::vector<int> faceParts;  // per face: its MeshPart
 };
-StrandMesh buildStrandMesh(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options);
+// What `options.make` makes of these strands (Auto resolved; never Auto).
+StrandMeshOptions::Make resolveMeshMake(const StrandSet& strands, const StrandMeshOptions& options);
+// The mesh `options.make` asks for. Scales and instances: their prototypes' meshes (the built-in
+// ones, else `prototypes`, the host's scene meshes; a scale without one is a quad, an instance
+// without one is left out), quads where a prototype's triangles pair into them (the built-in
+// plates are quads but for a tip), featherIndex and faceFeather the instance's index. Feathers:
+// the barbs' tubes, then the rachis tubes. Cards: the strands' card layers (built when the
+// evaluation built cards), laid out in one atlas.
+StrandMesh buildStrandMesh(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options,
+                           const PrototypeLookup& prototypes = {});
 
 // buildStrandMesh's points alone, for a frame where only the strands' points moved (the same
 // strands, the same point counts: the topology and UVs stay): the very values buildStrandMesh
 // gives mesh.points, in its order, the strands in parallel. `out` holds
-// strandMeshPointCount(strands, options) of them.
-std::size_t strandMeshPointCount(const StrandSet& strands, const StrandMeshOptions& options);
-void strandMeshPoints(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options, Vec3f* out);
+// strandMeshPointCount(strands, options) of them. (For scales and feathers these build the whole
+// mesh: their key changes with every new strand set.)
+std::size_t strandMeshPointCount(const StrandSet& strands, const StrandMeshOptions& options,
+                                 const PrototypeLookup& prototypes = {});
+void strandMeshPoints(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options, Vec3f* out,
+                      const PrototypeLookup& prototypes = {});
 // What makes the mesh's topology and UVs: the style and sides, strandUVs, each strand's ID and point
 // count. Equal keys: strandMeshPoints of the new strands fits the old mesh.
 std::uint64_t strandMeshTopologyKey(const StrandSet& strands, const StrandMeshOptions& options);

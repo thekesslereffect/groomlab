@@ -2,6 +2,7 @@
 #include "groomlab/brush_catalog.h"
 
 #include <algorithm>
+#include <set>
 
 namespace groomlab {
 
@@ -46,22 +47,16 @@ std::vector<BrushEntry> makeCatalog() {
          with(kShaping, {"stretch", "targets"})},
         {"slide", "Slide", C::Shape, 0, "slide", 1.0f, false,
          "Move roots along the scalp; guides keep their shape (fix a root without redrawing).", kBrushCommon},
-        {"smooth", "Smooth", C::Shape, 0, "smooth", 0.5f, false, "Take kinks out, lengths kept.", with(kShaping, {"targets"})},
-        {"straighten", "Straighten", C::Shape, 0, "straighten", 0.5f, false,
-         "Relax guides toward the straight line along their root direction.", with(kShaping, {"targets"})},
+        {"smooth", "Smooth", C::Shape, 0, "smooth", 0.5f, false,
+         "Take kinks out, lengths kept (Straighten: relax guides toward the straight line along their root direction).",
+         with(kShaping, {"straighten", "targets"})},
         {"lift", "Lift", C::Shape, 0, "lift", 0.5f, true, "Stand guides up toward their root normal (negative: lay them down).",
          kShaping},
-        {"twist", "Twist", C::Shape, 0, "twist", 0.5f, true, "Swing guides around their root (negative: the other way).",
+        {"twist", "Swing", C::Shape, 0, "twist", 0.5f, true, "Swing guides around their root (negative: the other way).",
          with(kShaping, {"targets"})},
-        {"curl", "Curl", C::Shape, 0, "curl", 0.5f, true, "Curl guides toward the tip (negative: the other way).", kShaping},
         {"attract", "Attract", C::Shape, 0, "attract", 0.5f, true,
          "Pull tips together toward the brush center (negative: push apart).", with(kShaping, {"targets"})},
-        {"direction", "Direction", C::Shape, 0, "direction", 0.5f, false,
-         "Turn guides about their roots toward the way you stroke, lengths kept (Ctrl: away from it).", kShaping},
-        {"noise", "Noise", C::Shape, 0, "noise", 0.5f, true,
-         "Add smooth random jitter along guides, the same pattern each stroke builds up (negative or Ctrl: smooth it out).",
-         kShaping},
-        {"shape", "Shape", C::Shape, 0, "shape", 0.5f, true,
+        {"shape", "Tube", C::Shape, 0, "shape", 0.5f, true,
          "Paint guides' tubes near the brush: Width grows them (Ctrl shrinks), Flatness flattens them toward a "
          "ribbon (Ctrl rounds them), Twist turns them about the guide (Ctrl the other way); Shift smooths what it "
          "paints along the guides. Children and Fill Tubes strands follow.",
@@ -99,6 +94,11 @@ std::vector<BrushEntry> makeCatalog() {
          with(without(kBrushCommon, {"collide"}), {"freezeMask"})},
     };
     for (std::size_t i = 0; i < entries.size(); ++i) entries[i].order = static_cast<int>(i);
+    for (BrushEntry& e : entries) {
+        static const std::set<std::string> kCorrective = {"comb", "slide", "smooth", "lift", "twist", "attract",
+                                                         "cut", "length", "select"};
+        e.corrective = kCorrective.count(e.id) > 0;
+    }
     return entries;
 }
 
@@ -155,6 +155,8 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
         {"frontFacingOnly", "Front facing only", "What the scalp hides from the camera gets no weight: a stroke never reaches "
                                                  "guides, parts, flow arrows or paint on the far side of the head"},
         {"stretch", "Stretch", "On: guides get longer (or shorter) as you pull them. Off: they keep their length"},
+        {"straighten", "Straighten", "On: guides relax toward the straight line along their root direction. Off: only "
+                                     "their kinks are taken out"},
         {"targets", "Acts on", "What the brush shapes: guides, part lines, flow arrows"},
         {"erases", "Erases", "What Erase removes: guides (with their children), parts, flow arrows"},
         {"newGuides", "New guides", "Match nearby guides' shape and maps, or the length and segments of a standing guide"},
@@ -171,7 +173,7 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
                            "apart the stamps fall. Add your own images to the library (right-click)"},
         {"selection", "Selection", "How the lasso adds to or replaces the selection, and the soft radius"},
         {"freezeMask", "Freeze mask", "The frozen guides draw blue; Unfreeze All clears the mask"},
-        {"tubeChannel", "Paints", "What the Shape brush paints on the tubes near it: their width, their flatness (toward "
+        {"tubeChannel", "Paints", "What the Tube brush paints on the tubes near it: their width, their flatness (toward "
                                   "a flat ribbon) or their twist about the guide; a negative strength does the opposite"},
         {"tube", "Tube", "The selected (or soloed) guides' tubes as a whole: their shape, width, flatness and twist, "
                          "the groom's shape library (custom outlines, drawn in the shape editor), the shape new guides "

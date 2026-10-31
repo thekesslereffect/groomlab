@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// The groom's outStrandMesh: the StrandMesh nodes' strands as one live polygon mesh (tubes or
+// The groom's outMesh: the ToMesh nodes' strands as one live polygon mesh (tubes or
 // ribbons, strand_geometry.h). While the strands stay the same ones with the same point counts
 // (strandMeshTopologyKey), a new frame copies the last mesh and sets its points alone: the
 // topology and UVs are made once, and Alembic and Maya's caches see a deforming mesh.
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -51,14 +52,14 @@ MFloatPointArray toMaya(const std::vector<Vec3f>& points) {
 MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
     // Not connected: nothing reads the mesh (the Evaluation Manager computes every output it dirtied).
     const std::shared_ptr<const NodeLinks> taken = lane.live ? nullptr : links();
-    if (!(taken ? taken->strandMeshConnected : MPlug(thisMObject(), aOutStrandMesh).isConnected())) {
+    if (!(taken ? taken->strandMeshConnected : MPlug(thisMObject(), aOutMesh).isConnected())) {
         if (lane.unusedStrandMeshData.isNull()) lane.unusedStrandMeshData = MFnMeshData().create();
-        data.outputValue(aOutStrandMesh).set(lane.unusedStrandMeshData);
-        data.setClean(aOutStrandMesh);
+        data.outputValue(aOutMesh).set(lane.unusedStrandMeshData);
+        data.setClean(aOutMesh);
         return MS::kSuccess;
     }
     data.inputValue(aOutStrandCount);  // the evaluation that hands the session its inputs (scalp, guides, sims...)
-    if (lane.live) finishCommit(false, &data, "outStrandMesh");  // (the session is the worker's while a commit evaluates)
+    if (lane.live) finishCommit(false, &data, "outMesh");  // (the session is the worker's while a commit evaluates)
     std::vector<GroomSession::StrandMeshSource> sources;
     try {
         sources = lane.session.evaluateStrandMeshes(mayaSeconds(data.inputValue(aTime).asTime()));
@@ -74,18 +75,28 @@ MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
     }
     // The same strands as last time (a cache hit: another input dirtied the plug): the same mesh.
     if (lane.strandMeshMade && from == lane.strandMeshFrom && widths == lane.strandMeshWidths) {
-        data.outputValue(aOutStrandMesh).set(lane.strandMeshData);
-        data.setClean(aOutStrandMesh);
+        data.outputValue(aOutMesh).set(lane.strandMeshData);
+        data.setClean(aOutMesh);
         return MS::kSuccess;
     }
     const MeshPtr scalp = lane.session.scalp();  // the strands' roots are on it (normals: the ribbons' plane)
+    // The instances' prototypes (scene meshes), read once each on this evaluation.
+    std::map<std::string, InstancePrototype> scene;
+    const PrototypeLookup prototypes = [&scene](const std::string& name) -> const InstancePrototype* {
+        auto it = scene.find(name);
+        if (it == scene.end()) {
+            it = scene.emplace(name, InstancePrototype{}).first;
+            readInstancePrototype(name, it->second);
+        }
+        return it->second.found ? &it->second : nullptr;
+    };
     std::uint64_t key = hash64(0x5D3E5u);
     std::size_t pointCount = 0;
     for (const auto& s : sources) {
         key = hashCombine(key, hashString(hash64(0x4E0Du), s.node));
         if (!s.strands) continue;
         key = hashCombine(key, strandMeshTopologyKey(*s.strands, s.options));
-        pointCount += strandMeshPointCount(*s.strands, s.options);
+        pointCount += strandMeshPointCount(*s.strands, s.options, prototypes);
     }
 
     MObject meshObject;
@@ -96,8 +107,8 @@ MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
         std::size_t at = 0;
         for (const auto& s : sources) {
             if (!s.strands) continue;
-            strandMeshPoints(*s.strands, scalp.get(), s.options, points.data() + at);
-            at += strandMeshPointCount(*s.strands, s.options);
+            strandMeshPoints(*s.strands, scalp.get(), s.options, points.data() + at, prototypes);
+            at += strandMeshPointCount(*s.strands, s.options, prototypes);
         }
         MFloatPointArray moved = toMaya(points);
         meshObject = withPoints(lane.strandMeshData, moved);
@@ -111,7 +122,7 @@ MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
             if (!s.strands) continue;
             StrandMesh m;
             try {
-                m = buildStrandMesh(*s.strands, scalp.get(), s.options);
+                m = buildStrandMesh(*s.strands, scalp.get(), s.options, prototypes);
             } catch (const std::exception& e) {
                 if (lane.live) report(std::string("strand mesh: ") + e.what(), true);
                 continue;
@@ -162,8 +173,8 @@ MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
     lane.strandMeshFrom = std::move(from);
     lane.strandMeshWidths = std::move(widths);
     lane.strandMeshMade = true;
-    data.outputValue(aOutStrandMesh).set(meshObject);
-    data.setClean(aOutStrandMesh);
+    data.outputValue(aOutMesh).set(meshObject);
+    data.setClean(aOutMesh);
     return MS::kSuccess;
 }
 

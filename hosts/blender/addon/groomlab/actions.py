@@ -69,7 +69,7 @@ BINDINGS = {
     "export.scalesFbx": ("groomlab.export_scales_fbx", {}),
     "export.scalesUsd": ("groomlab.export_scales_usd", {}),
     # Utilities (pipeline_ops.py)
-    "strands.toMesh": ("groomlab.strands_to_mesh", {}),
+    "strands.toMesh": ("groomlab.to_mesh", {}),
     "scales.bakeMaps": ("groomlab.bake_scale_maps", {}),
     "flow.deleteAll": ("groomlab.flow_clear", {}),
     "groom.transfer": ("groomlab.transfer_groom", {}),

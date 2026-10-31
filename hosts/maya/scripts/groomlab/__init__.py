@@ -98,7 +98,7 @@ from groomlab.cards import (  # noqa: F401
     delete_card_map_preset, save_card_map_preset, card_material, card_mesh, card_node_kind, card_stats, cards_preset,
     compare_cards, create_card_mesh, create_cards, feather_card_triangles, scalp_cap, _card_maps, _preset_params)
 from groomlab.exports import (  # noqa: F401
-    SCALE_MAPS, bake_scale_maps, export_alembic, export_scales, export_usd, export_vrscene, has_scales, scale_mesh,
+    SCALE_MAPS, bake_scale_maps, export_alembic, export_mesh, export_scales, export_usd, export_vrscene, has_scales, scale_mesh,
     viewport_points)
 from groomlab.braids import add_braid, add_instances, braid_paths_from_curves, set_instance_prototype  # noqa: F401
 from groomlab.feathers import (  # noqa: F401
@@ -112,7 +112,8 @@ from groomlab.files import (  # noqa: F401
     save_groom)
 
 # Review tools (density heatmap, HUD, turntable) live in their own module.
-from groomlab.review import density_heatmap, groom_stats, render_turntable, show_hud, turntable  # noqa: F401
+from groomlab.review import (  # noqa: F401
+    auto_strand_color_range, density_heatmap, groom_stats, render_turntable, show_hud, strand_color_sources, turntable)
 # Studio lighting (a backdrop, Arnold area lights, a camera and a mannequin material): groomlab.studio.
 from groomlab import studio  # noqa: F401
 from groomlab.studio import remove_studio, studio as add_studio  # noqa: F401
@@ -127,7 +128,7 @@ from groomlab import reference  # noqa: F401
 from groomlab.from_reference import guides_from_reference  # noqa: F401  (a prototype: guides from the reference photos)
 # GroomLab > Utilities (guides and strands to and from curves and meshes, copying a look): groomlab.utils.
 from groomlab import utils  # noqa: F401
-from groomlab.utils import add_strand_mesh, strand_mesh_shape  # noqa: F401  (a StrandMesh node, its mesh in the scene)
+from groomlab.utils import add_to_mesh, to_mesh, to_mesh_shape  # noqa: F401  (a ToMesh node, its mesh in the scene)
 # Sculpt nodes: brush the guides the graph made, the strokes kept in the node: groomlab.sculpts.
 from groomlab import sculpts  # noqa: F401
 # Importers (GroomLab > Import > From XGen... / From Yeti...): XGen's and Yeti's grooms as GroomLab

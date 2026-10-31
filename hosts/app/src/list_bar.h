@@ -46,6 +46,10 @@ public:
     QToolButton* button(const std::string& id) const;
     std::vector<std::string> ids() const;  // in the row's order
     void refresh();  // the buttons' enabled states from their bindings
+    // The picked item's name on the left of a glyph row (its box's bar), so the glyphs read as
+    // its actions; empty: none. Elided to the room the glyphs leave.
+    void setTitle(const QString& text);
+    QString title() const { return titleText_; }
     // One row (chips left, glyphs right) when the width takes it, else the glyphs on a second row
     // (right-aligned): a narrow dock never clips the last glyph.
     bool hasHeightForWidth() const override { return true; }
@@ -62,6 +66,8 @@ private:
     void place();
     std::vector<std::pair<std::string, QToolButton*>> buttons_;
     std::vector<std::pair<QPointer<QAbstractButton>, std::function<bool()>>> enables_;
+    QLabel* title_ = nullptr;
+    QString titleText_;
 };
 
 // A list's right-click menu from `entries` and the conditions that hold for the row clicked

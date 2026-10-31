@@ -168,9 +168,10 @@
           {"id": "gpuPreview", "label": "GPU Preview", "hosts": ["app"], "app": "gpuPreview", "tip": "Slider, seed and profile drags of Noise, Curl, Width, Clump, Length and Interpolate, and brush dabs, previewed by the GPU (Direct3D 11, OpenGL); the release commits on the CPU"},
           "-",
           {"id": "strandColorMode", "label": "Strand Color Mode", "labels": {"app": "Strand Colors"}, "maya": "strandColorMode", "app": "colorMode", "tip": "What colors the strands: the look (lit), a color set of the scalp at the root, a per-strand channel over the range below (a ramp from blue to red), a random color per strand, the clump each strand belongs to, or how dense the strands are"},
-          {"id": "strandColorSource", "label": "Source", "hosts": ["app"], "app": "colorSource", "tip": "The color set or the strand channel read (clumpId, melanin, length...)"},
-          {"id": "strandColorMin", "label": "Strand Color Min", "labels": {"app": "Min"}, "maya": "strandColorMin", "app": "colorMin", "tip": "The attribute's value shown blue"},
-          {"id": "strandColorMax", "label": "Strand Color Max", "labels": {"app": "Max"}, "maya": "strandColorMax", "app": "colorMax", "tip": "The attribute's value shown red"},
+          {"id": "strandColorRows", "label": "Strand Colors", "custom": "AEgroomLabStrandColors", "hosts": ["maya"], "maya": "strandColorSource", "tip": "What the mode reads (Source: a strand channel, the channel grouping the clumps, a color set of the scalp), the attribute's range (Min blue, Max red) and Auto Range (the range at the source's lowest and highest value on the strands shown)"},
+          {"id": "strandColorSource", "label": "Source", "hosts": ["app"], "app": "colorSource", "tip": "The color set or the strand channel read (clumpId, melanin, length...; Clump: clumpId, region)"},
+          {"id": "strandColorMin", "label": "Min", "hosts": ["app"], "app": "colorMin", "tip": "The attribute's value shown blue"},
+          {"id": "strandColorMax", "label": "Max", "hosts": ["app"], "app": "colorMax", "tip": "The attribute's value shown red (Auto Range: Min and Max at the source's lowest and highest value on the strands shown)"},
           {"id": "scalpMapDisplay", "label": "Map on Scalp", "hosts": ["app"], "app": "scalpMap", "tip": "A painted map drawn on the scalp: a vertex map's values, a guide layer blended between the guides, a texture at the scalp's vertices"},
           {"id": "scalpMapChannel", "label": "Map Channel", "hosts": ["app"], "app": "scalpMapChannel", "tip": "A color map shown in color, or one channel as gray"}
         ],

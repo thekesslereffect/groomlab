@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The GroomLab menu's and the Groom Tools' Output strip's way out and other inputs (Maya's menu.py
 output items, palette.py's Output strip, transfer_window.py): the engine exports (Unreal and Unity
-grooms and cards, glTF cards, the scales as FBX or a USD instancer), Strands to Mesh, Bake Scale Maps,
+grooms and cards, glTF cards, the scales as FBX or a USD instancer), To Mesh, Bake Scale Maps,
 Simulate (Add Simulate Node, Simulate Range with progress in the status bar, Bake, Clear), Add
 (Feathers, Braid on Curves, Cards, Collider, the sample meshes), Transfer Groom to Scalp, Review (the
 strand count HUD, a turntable), Find Missing Files and Copy Graph to Other Grooms. The work is
@@ -203,14 +203,22 @@ class GROOMLAB_OT_export_unity_feathers(_FolderExport):
         return "wrote %s (%d strand groups)" % (r.get("abc") or folder, len(r.get("groups") or []))
 
 
-# ---- Utilities: Strands to Mesh, Bake Scale Maps --------------------------------------------------------
+# ---- Utilities: To Mesh, Bake Scale Maps -----------------------------------------------------------------
 
-class GROOMLAB_OT_strands_to_mesh(_Tipped, GroomOperator):
-    """The strands as one polygon mesh: tubes, or ribbons lying along the scalp, with UVs root to tip"""
-    bl_idname = "groomlab.strands_to_mesh"
-    bl_label = "Strands to Mesh"
+class GROOMLAB_OT_to_mesh(_Tipped, GroomOperator):
+    """The groom as one polygon mesh: the strands as tubes or ribbons, the scales as their plates, feathers as barbs and rachis"""
+    bl_idname = "groomlab.to_mesh"
+    bl_label = "To Mesh"
     bl_options = {"REGISTER", "UNDO"}
 
+    make: EnumProperty(name="Make", items=[("auto", "Auto", "The scales when there are some, else instances, else cards, else "
+                                                            "feathers, else the strands"),
+                                           ("strands", "Strands", "Tubes or ribbons round every strand"),
+                                           ("scales", "Scales", "The scales' plates bent onto the skin"),
+                                           ("feathers", "Feathers", "The barbs as tubes or ribbons and the rachis tubes"),
+                                           ("cards", "Cards", "The Cards nodes' cards, in one atlas"),
+                                           ("instances", "Instances", "Every instance's mesh where it sits")],
+                       default="auto")
     style: EnumProperty(name="Style", items=[("tube", "Tube", "Tubes round each strand"),
                                              ("ribbon", "Ribbon", "Flat ribbons lying along the scalp")],
                         default="tube")
@@ -230,13 +238,12 @@ class GROOMLAB_OT_strands_to_mesh(_Tipped, GroomOperator):
         if context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
         try:
-            obj, r = pipeline.strands_to_mesh(scalp, style=self.style, sides=self.sides, width_scale=self.width_scale,
-                                              max_strands=self.max_strands, strand_uvs=self.strand_uvs)
+            obj, r = pipeline.to_mesh(scalp, make=self.make, style=self.style, sides=self.sides,
+                                      width_scale=self.width_scale, max_strands=self.max_strands, strand_uvs=self.strand_uvs)
         except HelperError as e:
             return _fail(self, e)
         _select_only(context, obj)
-        _say(self, "%s: %d strands as %ss, %d faces%s" % (obj.name, r.get("strands", 0), self.style, len(obj.data.polygons),
-                                                        " (thinned to the cap)" if r.get("capped") else ""))
+        _say(self, "%s: %d faces%s" % (obj.name, len(obj.data.polygons), " (thinned to the cap)" if r.get("capped") else ""))
         return {"FINISHED"}
 
 
@@ -944,7 +951,7 @@ class GROOMLAB_OT_bake_to_guides(_Tipped, GroomOperator):
 
 classes = (GROOMLAB_OT_export_unreal_groom, GROOMLAB_OT_export_unity_strands, GROOMLAB_OT_export_gltf_cards,
            GROOMLAB_OT_export_scales_fbx, GROOMLAB_OT_export_scales_usd, GROOMLAB_OT_export_unreal_cards,
-           GROOMLAB_OT_export_unity_cards, GROOMLAB_OT_export_unity_feathers, GROOMLAB_OT_strands_to_mesh,
+           GROOMLAB_OT_export_unity_cards, GROOMLAB_OT_export_unity_feathers, GROOMLAB_OT_to_mesh,
            GROOMLAB_OT_bake_scale_maps, GROOMLAB_OT_simulate_add, GROOMLAB_OT_simulate_range,
            GROOMLAB_OT_simulate_clear, GROOMLAB_OT_add_feathers, GROOMLAB_OT_add_braid, GROOMLAB_OT_add_cards,
            GROOMLAB_OT_add_collider, GROOMLAB_OT_add_sample, GROOMLAB_OT_transfer_groom, GROOMLAB_OT_turntable,

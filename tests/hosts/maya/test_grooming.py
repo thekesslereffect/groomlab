@@ -643,7 +643,7 @@ class GroomingTest(unittest.TestCase):
         self.assertTrue(first)
         self.assertGreater(sculpts.edited_guides(self.groom, "sculpt1"), 0)
         self.assertEqual(cmds.getAttr(self.groom + ".guideData"), guide_data)
-        groomlab.brush_stroke(self.groom, "curl", [(0.3, 1.25, 0.3)], radius=0.6, strength=1.0)
+        groomlab.brush_stroke(self.groom, "twist", [(0.3, 1.25, 0.3)], radius=0.6, strength=1.0)
         second = cmds.getAttr(self.groom + ".sculptData")
         self.assertNotEqual(second, first)
         with self.assertRaises(RuntimeError):  # Place, Draw, Erase, Paint are not for a Sculpt node
@@ -781,6 +781,17 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(cmds.getAttr(self.groom + ".strandColorMode"), 5)
         groomlab.density_heatmap(self.groom, False)
         self.assertEqual(cmds.getAttr(self.groom + ".strandColorMode"), 0)
+        # Strand colors by a channel: what they can read, and Auto Range over its values.
+        sources = groomlab.strand_color_sources(self.groom)
+        self.assertTrue(sources["channels"])  # whatever the viewed node's strands carry
+        self.assertEqual(sources["channels"], sorted(sources["channels"]))
+        self.assertIsInstance(sources["colorSets"], list)
+        lo, hi = groomlab.auto_strand_color_range(self.groom, sources["channels"][0])
+        self.assertLessEqual(lo, hi)
+        self.assertAlmostEqual(cmds.getAttr(self.groom + ".strandColorMin"), lo, places=4)
+        self.assertAlmostEqual(cmds.getAttr(self.groom + ".strandColorMax"), hi, places=4)
+        with self.assertRaises(ValueError):
+            groomlab.auto_strand_color_range(self.groom, "noSuchChannel")
 
         stats = groomlab.groom_stats(self.groom)
         self.assertEqual(stats["strands"], cmds.getAttr(self.groom + ".outStrandCount"))
@@ -6376,7 +6387,7 @@ class UtilitiesTest(unittest.TestCase):
         from groomlab import utils
         points = [cmds.getAttr(self.curve_shape(c) + ".spans") + 1
                   for c in utils.strands_to_curves(self.groom, max_curves=40, attributes=False)["curves"]]
-        tube = utils.strands_to_mesh(self.groom, sides=4, max_strands=40)
+        tube = utils.to_mesh(self.groom, sides=4, max_strands=40)
         self.assertTrue(tube["capped"])
         self.assertEqual(tube["strands"], 40)
         self.assertEqual(tube["vertices"], sum(p * 4 + 1 for p in points))  # a ring per point and the tip
@@ -6394,7 +6405,7 @@ class UtilitiesTest(unittest.TestCase):
         cmds.redo()
         self.assertTrue(cmds.objExists(tube["mesh"]))
 
-        ribbon = utils.strands_to_mesh(self.groom, style="ribbon", max_strands=40, strand_uvs=True, width_scale=2.0)
+        ribbon = utils.to_mesh(self.groom, style="ribbon", max_strands=40, strand_uvs=True, width_scale=2.0)
         self.assertEqual(ribbon["vertices"], sum(p * 2 for p in points))
         self.assertEqual(ribbon["faces"], sum(p - 1 for p in points))
         sel = om.MSelectionList()
@@ -6404,11 +6415,11 @@ class UtilitiesTest(unittest.TestCase):
         us, vs = fn.getUVs("strandUVs")
         self.assertTrue(0.0 < min(us) and max(us) < 1.0 and 0.0 < min(vs) and max(vs) < 1.0)
         with self.assertRaises(ValueError):
-            utils.strands_to_mesh(self.groom, style="cards")
+            utils.to_mesh(self.groom, style="cards")
 
         self.set_density(self.groom, 3000.0)
         start = time.time()
-        big = utils.strands_to_mesh(self.groom, max_strands=20000)
+        big = utils.to_mesh(self.groom, max_strands=20000)
         sys.stderr.write("\nstrands_to_mesh: %d strands, %d faces in %.2f s\n"
                          % (big["strands"], big["faces"], time.time() - start))
         self.assertEqual(big["strands"], 20000)
@@ -6449,7 +6460,7 @@ class UtilitiesTest(unittest.TestCase):
         curves = menu.strands_to_curves_dialog(node="(output)", density=1.0, max_curves=12, attributes=True, degree=1,
                                                groom=self.groom)
         self.assertEqual(curves["count"], 12)
-        mesh = menu.strands_to_mesh_dialog(node="scatter", style="ribbon", sides=4, width_scale=1.0, max_strands=12,
+        mesh = menu.to_mesh_dialog(make="auto", node="scatter", style="ribbon", sides=4, width_scale=1.0, max_strands=12,
                                            strand_uvs=False, groom=self.groom)
         self.assertEqual(mesh["strands"], 12)
         other = groomlab.create_groom(cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20)[0], name="other")
