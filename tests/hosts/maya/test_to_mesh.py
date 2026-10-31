@@ -97,6 +97,16 @@ class ToMeshTest(unittest.TestCase):
         faces = cmds.polyEvaluate(plates, face=True)
         self.assertGreater(faces, 0)
         self.assertLess(faces * 1.5, cmds.polyEvaluate(plates, triangle=True))  # plates: mostly quads
+        # Each plate one closed piece: its top, rim and underside share their edge points.
+        import maya.api.OpenMaya as om
+        selection = om.MSelectionList()
+        selection.add(plates)
+        edges = om.MItMeshEdge(selection.getDagPath(0))
+        open_edges = 0
+        while not edges.isDone():
+            open_edges += 1 if edges.onBoundary() else 0
+            edges.next()
+        self.assertEqual(open_edges, 0)
         tubes = groomlab.to_mesh(self.groom, make="strands", max_strands=20)["mesh"]
         self.assertLess(cmds.polyEvaluate(tubes, face=True), cmds.polyEvaluate(tubes, triangle=True))  # quads
         with self.assertRaises(ValueError):

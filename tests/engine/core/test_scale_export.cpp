@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <map>
 #include <fstream>
 #include <sstream>
 
@@ -356,9 +357,24 @@ TEST(ScaleExport, ToMeshMakesTheScalesPlates) {
     const auto plates = buildScaleMesh(*strands, sc.skin);
     ASSERT_TRUE(plates);
     const StrandMesh mesh = buildStrandMesh(*strands, sc.skin.get(), o);
-    ASSERT_EQ(mesh.mesh.points.size(), plates->points.size());
-    for (std::size_t i = 0; i < plates->points.size(); ++i) EXPECT_LT((mesh.mesh.points[i] - plates->points[i]).length(), 1e-6f);
-    // Every triangle in one face: two in each quad.
+    // Each plate one closed piece: its top, rim and underside welded (the prototype keeps their
+    // own vertices for hard edges), every edge between two faces, every point a plate point.
+    EXPECT_LT(mesh.mesh.points.size(), plates->points.size());
+    std::map<std::pair<int, int>, int> edges;
+    std::size_t corner = 0;
+    for (int n : mesh.mesh.faceCounts) {
+        for (int c = 0; c < n; ++c) {
+            const int a = mesh.mesh.faceVertices[corner + static_cast<std::size_t>(c)];
+            const int b = mesh.mesh.faceVertices[corner + static_cast<std::size_t>((c + 1) % n)];
+            ++edges[{std::min(a, b), std::max(a, b)}];
+        }
+        corner += static_cast<std::size_t>(n);
+    }
+    std::size_t open = 0;
+    for (const auto& [edge, faces] : edges) open += faces != 2 ? 1 : 0;
+    EXPECT_EQ(open, 0u) << "watertight plates";
+    EXPECT_LT((mesh.mesh.points.back() - plates->points.back()).length(), 1e-6f);  // (the last plate's middle)
+    // Every triangle in one face: two in each quad (welding merges no corner of a built-in plate).
     std::size_t triangles = 0, quads = 0;
     for (int n : mesh.mesh.faceCounts) {
         triangles += static_cast<std::size_t>(n - 2);
@@ -371,10 +387,10 @@ TEST(ScaleExport, ToMeshMakesTheScalesPlates) {
     EXPECT_EQ(mesh.faceParts, std::vector<int>(mesh.mesh.faceCount(), static_cast<int>(MeshPart::Scales)));
     EXPECT_EQ(mesh.mesh.faceFeather.back(), static_cast<int>(plates->scales.size()) - 1);
     // The points alone (a host's per-frame update) are the same ones.
-    ASSERT_EQ(strandMeshPointCount(*strands, o), plates->points.size());
-    std::vector<Vec3f> points(plates->points.size());
+    ASSERT_EQ(strandMeshPointCount(*strands, o), mesh.mesh.points.size());
+    std::vector<Vec3f> points(mesh.mesh.points.size());
     strandMeshPoints(*strands, sc.skin.get(), o, points.data());
-    EXPECT_LT((points.back() - plates->points.back()).length(), 1e-6f);
+    EXPECT_LT((points.back() - mesh.mesh.points.back()).length(), 1e-6f);
     // Strands asked for: tubes round the strands instead.
     o.make = StrandMeshOptions::Make::Strands;
     const StrandMesh tubes = buildStrandMesh(*strands, sc.skin.get(), o);

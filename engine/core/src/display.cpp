@@ -1338,6 +1338,11 @@ DisplayGeometry strandMeshGeometry(const std::vector<StrandMeshSource>& meshes, 
             const RachisMesh& mesh = built[mi]->mesh;
             const std::size_t count = mesh.points.size();
             std::vector<Vec3f> normal(count);
+            std::vector<float> along(count, 0.0f);  // v (root to tip) at each point: a corner's uv
+            for (std::size_t c = 0; c < mesh.faceVertices.size() && c < mesh.faceUVs.size(); ++c) {
+                const auto uv = static_cast<std::size_t>(mesh.faceUVs[c]);
+                if (uv < mesh.v.size()) along[static_cast<std::size_t>(mesh.faceVertices[c])] = mesh.v[uv];
+            }
             std::size_t corner = 0;
             for (std::size_t f = 0; f < mesh.faceCounts.size(); ++f) {
                 const int n = mesh.faceCounts[f];
@@ -1367,7 +1372,7 @@ DisplayGeometry strandMeshGeometry(const std::vector<StrandMeshSource>& meshes, 
                     g.colors[at * 4 + static_cast<std::size_t>(a)] = color[static_cast<std::size_t>(a)];
                 }
                 g.colors[at * 4 + 3] = 1.0f;
-                g.uvs[at * 2] = v < mesh.v.size() ? mesh.v[v] : 0.0f;
+                g.uvs[at * 2] = along[v];
                 g.uvs[at * 2 + 1] = 0.0f;
             }
             base += count;
