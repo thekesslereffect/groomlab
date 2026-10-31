@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // ToMesh: what it is handed as a polygon mesh (strand_geometry.h buildStrandMesh): the strands as
 // tubes or flat ribbons, the scales as their plates bent onto the skin, feathers as their barbs and
-// rachis tubes; `make` auto picks by what the strands carry. The mesh follows the groom's animation
+// rachis tubes, a Cards node's cards, an Instance node's meshes; `make` auto picks by what the
+// strands carry. The mesh follows the groom's animation
 // (the scalp, Simulate, keyed params). The node hands its strands on as they are, so it sits
 // anywhere in the chain, like Cards: where it sits decides what the mesh shows (after Simulate,
 // before Noise...). Hosts make the mesh, only while something takes it
@@ -27,11 +28,13 @@ public:
     std::vector<ParamSpec> paramSpecs() const override {
         return {
             notAnimatable({"make", std::string("auto"), "What the mesh is made of. auto: the scales when there are some, "
-                                                        "else feathers (barbs and rachis) when there are some, else the "
-                                                        "strands; strands: tubes or ribbons round every strand; scales: "
-                                                        "the scales' plates bent onto the skin; feathers: the barbs as "
-                                                        "tubes or ribbons and the rachis tubes",
-                           "", {"auto", "strands", "scales", "feathers"}}),
+                                                        "else other instances, else cards (a Cards node before it), else "
+                                                        "feathers (barbs and rachis), else the strands; strands: tubes or "
+                                                        "ribbons round every strand; scales: the scales' plates bent onto "
+                                                        "the skin; feathers: the barbs as tubes or ribbons and the rachis "
+                                                        "tubes; cards: the Cards nodes' cards, in one atlas; instances: "
+                                                        "every instance's mesh where it sits",
+                           "", {"auto", "strands", "scales", "feathers", "cards", "instances"}}),
             notAnimatable({"style", std::string("tube"), "tube: a closed tube round each strand (sides around, a fan at the "
                                                          "tip); ribbon: a flat strip lying along the scalp",
                            "", {"tube", "ribbon"}})
@@ -68,10 +71,11 @@ void registerToMeshOperator(OperatorRegistry& registry) {
     registry.registerType(op::kToMesh,
                           {"convert",
                            "What it is handed as a polygon mesh that follows the animation: the strands as tubes or "
-                           "ribbons, the scales as their plates, feathers as barbs and rachis. Show it in the viewport, "
+                           "ribbons, the scales as their plates, feathers as barbs and rachis, cards, instances. Show it "
+                           "in the viewport, "
                            "put it in the scene (Maya's groom outMesh) or export it (OBJ, FBX, Alembic): for ZBrush, "
                            "baking, printing or a renderer without curves.",
-                           "polygon mesh tubes ribbons scales feathers geometry convert export obj fbx"},
+                           "polygon mesh tubes ribbons scales feathers cards instances geometry convert export obj fbx"},
                           [] { return std::make_unique<ToMeshOp>(); });
 }
 

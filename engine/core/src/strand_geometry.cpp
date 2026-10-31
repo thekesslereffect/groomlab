@@ -11,6 +11,8 @@
 #include "groomlab/graph.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
+#include "groomlab/cards.h"
+#include "groomlab/instances.h"
 #include "groomlab/random.h"
 #include "groomlab/scales.h"
 #include "groomlab/scalp_mesh.h"
@@ -162,13 +164,39 @@ bool quadOf(const std::uint32_t* a, const std::uint32_t* b, const std::vector<Ve
     return false;
 }
 
+// Triangles [first, first + count) of `tri` as faces of `m`: quads where two in a row make one
+// (quadOf), else triangles; `offset` added to their corners, each face named `feather`.
+void pairedFaces(RachisMesh& m, const std::uint32_t* tri, std::size_t first, std::size_t count, std::uint32_t offset,
+                 int feather) {
+    const std::size_t end = first + count;
+    for (std::size_t t = first; t < end;) {
+        std::array<std::uint32_t, 4> quad{};
+        std::array<std::uint32_t, 3> a{tri[3 * t] + offset, tri[3 * t + 1] + offset, tri[3 * t + 2] + offset};
+        bool paired = false;
+        if (t + 1 < end) {
+            const std::array<std::uint32_t, 3> b{tri[3 * (t + 1)] + offset, tri[3 * (t + 1) + 1] + offset, tri[3 * (t + 1) + 2] + offset};
+            paired = quadOf(a.data(), b.data(), m.points, quad);
+        }
+        if (paired) {
+            for (std::uint32_t v : quad) m.faceVertices.push_back(static_cast<int>(v));
+            m.faceCounts.push_back(4);
+            t += 2;
+        } else {
+            for (std::uint32_t v : a) m.faceVertices.push_back(static_cast<int>(v));
+            m.faceCounts.push_back(3);
+            t += 1;
+        }
+        m.faceFeather.push_back(feather);
+    }
+}
+
 // The scales' plates as one mesh: quads where two triangles in a row make one (quadOf), else
 // triangles; each vertex its own uv.
-StrandMesh scalePlates(const StrandSet& strands, const ScalpMesh* scalp) {
+StrandMesh scalePlates(const StrandSet& strands, const ScalpMesh* scalp, const PrototypeLookup& prototypes) {
     StrandMesh out;
     // (buildScaleMesh keeps no pointer: the scalp only while it builds.)
     const std::shared_ptr<const ScalpMesh> skin(std::shared_ptr<const ScalpMesh>(), scalp);
-    const std::shared_ptr<const ScaleMesh> scales = buildScaleMesh(strands, skin);
+    const std::shared_ptr<const ScaleMesh> scales = buildScaleMesh(strands, skin, prototypes);
     if (!scales) return out;
     RachisMesh& m = out.mesh;
     m.points = scales->points;
@@ -186,25 +214,71 @@ StrandMesh scalePlates(const StrandSet& strands, const ScalpMesh* scalp) {
         const ScaleMesh::Scale& scale = scales->scales[s];
         for (std::uint32_t v = 0; v < scale.vertexCount; ++v) m.featherIndex[scale.firstVertex + v] = static_cast<float>(s);
         // A scale's own triangles, paired into quads where they can be (never across scales).
-        const std::size_t end = static_cast<std::size_t>(scale.firstTriangle) + scale.triangleCount;
-        for (std::size_t t = scale.firstTriangle; t < end;) {
-            std::array<std::uint32_t, 4> quad{};
-            if (t + 1 < end && quadOf(tri + 3 * t, tri + 3 * (t + 1), m.points, quad)) {
-                for (std::uint32_t v : quad) m.faceVertices.push_back(static_cast<int>(v));
-                m.faceCounts.push_back(4);
-                t += 2;
-            } else {
-                for (int c = 0; c < 3; ++c) m.faceVertices.push_back(static_cast<int>(tri[3 * t + static_cast<std::size_t>(c)]));
-                m.faceCounts.push_back(3);
-                t += 1;
-            }
-            m.faceFeather.push_back(static_cast<int>(s));
-        }
+        pairedFaces(m, tri, scale.firstTriangle, scale.triangleCount, 0, static_cast<int>(s));
     }
     m.faceUVs = m.faceVertices;
     m.featherCount = scales->scales.size();
     out.faceParts.assign(m.faceCounts.size(), static_cast<int>(MeshPart::Scales));
     return out;
+}
+
+// The instances placed by matrices (not the meshed ones: scalePlates makes those): each one's
+// prototype mesh (built in, else `prototypes`) moved to where it sits; one without a mesh is left out.
+RachisMesh placedInstances(const StrandSet& strands, const ScalpMesh* scalp, const PrototypeLookup& prototypes) {
+    RachisMesh m;
+    if (!strands.instances()) return m;
+    const InstanceSet& set = *strands.instances();
+    const std::vector<InstanceSet::Placed> placed = set.resolve(strands, scalp);
+    for (std::size_t i = 0; i < placed.size(); ++i) {
+        const InstanceSet::Placed& p = placed[i];
+        if (p.meshed || p.prototype >= set.prototypes.size()) continue;
+        const std::string& name = set.prototypes[p.prototype];
+        const InstancePrototype* mesh = builtinPrototype(name);
+        if (!mesh && prototypes) mesh = prototypes(name);
+        if (!mesh || mesh->points.empty() || mesh->triangles.empty()) continue;
+        const auto offset = static_cast<std::uint32_t>(m.points.size());
+        for (std::size_t v = 0; v < mesh->points.size(); ++v) {
+            const Vec3f& q = mesh->points[v];
+            m.points.push_back(p.origin + p.x * q.x + p.y * q.y + p.z * q.z);
+            const bool uv = v < mesh->uvs.size();
+            m.u.push_back(uv ? mesh->uvs[v][0] : 0.0f);
+            m.v.push_back(uv ? mesh->uvs[v][1] : 0.0f);
+            m.featherIndex.push_back(static_cast<float>(i));
+            m.groupIds.push_back(0.0f);
+        }
+        pairedFaces(m, mesh->triangles.data(), 0, mesh->triangles.size() / 3, offset, static_cast<int>(i));
+        ++m.featherCount;
+    }
+    m.faceUVs = m.faceVertices;
+    return m;
+}
+
+// The strands' cards (their card layers) as one mesh of quads, laid out in one atlas.
+RachisMesh cardQuads(const StrandSet& strands) {
+    RachisMesh m;
+    if (strands.cardLayers().empty()) return m;
+    CardMesh cards = combineCardLayers(strands.cardLayers());
+    layoutCards(cards, cards.padding);
+    m.points = cards.positions;
+    m.u = cards.u;
+    m.v = cards.v;
+    m.u.resize(m.points.size(), 0.0f);
+    m.v.resize(m.points.size(), 0.0f);
+    m.featherIndex.assign(m.points.size(), 0.0f);
+    m.groupIds.assign(m.points.size(), 0.0f);
+    for (std::size_t c = 0; c < cards.cards.size(); ++c) {
+        const CardMesh::Card& card = cards.cards[c];
+        const std::size_t end = c + 1 < cards.cards.size() ? cards.cards[c + 1].firstVertex : m.points.size();
+        for (std::size_t v = card.firstVertex; v < end; ++v) m.featherIndex[v] = static_cast<float>(c);
+    }
+    for (std::size_t q = 0; q + 3 < cards.quads.size(); q += 4) {
+        m.faceCounts.push_back(4);
+        for (int k = 0; k < 4; ++k) m.faceVertices.push_back(static_cast<int>(cards.quads[q + static_cast<std::size_t>(k)]));
+        m.faceFeather.push_back(static_cast<int>(m.featherIndex[cards.quads[q]]));
+    }
+    m.faceUVs = m.faceVertices;
+    m.featherCount = cards.cards.size();
+    return m;
 }
 
 // `extra` after `into` in one mesh (its points, uvs and faces renumbered).
@@ -234,13 +308,27 @@ void appendMesh(StrandMesh& into, const RachisMesh& extra, MeshPart part) {
 StrandMeshOptions::Make resolveMeshMake(const StrandSet& strands, const StrandMeshOptions& options) {
     if (options.make != StrandMeshOptions::Make::Auto) return options.make;
     if (strands.instances() && strands.instances()->hasScales()) return StrandMeshOptions::Make::Scales;
+    if (strands.instances() && !strands.instances()->empty()) return StrandMeshOptions::Make::Instances;
+    if (!strands.cardLayers().empty()) return StrandMeshOptions::Make::Cards;
     if (hasRachis(strands.featherLayers())) return StrandMeshOptions::Make::Feathers;
     return StrandMeshOptions::Make::Strands;
 }
 
-StrandMesh buildStrandMesh(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options) {
+StrandMesh buildStrandMesh(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options,
+                           const PrototypeLookup& prototypes) {
     switch (resolveMeshMake(strands, options)) {
-        case StrandMeshOptions::Make::Scales: return scalePlates(strands, scalp);
+        case StrandMeshOptions::Make::Scales: return scalePlates(strands, scalp, prototypes);
+        case StrandMeshOptions::Make::Cards: {
+            StrandMesh out;
+            appendMesh(out, cardQuads(strands), MeshPart::Cards);
+            return out;
+        }
+        case StrandMeshOptions::Make::Instances: {
+            // The meshed ones (scales, bent along their strands) as Scales makes them, then the rest.
+            StrandMesh out = scalePlates(strands, scalp, prototypes);
+            appendMesh(out, placedInstances(strands, scalp, prototypes), MeshPart::Instances);
+            return out;
+        }
         case StrandMeshOptions::Make::Feathers: {
             StrandMesh out = strandTubes(strands, scalp, options);
             if (hasRachis(strands.featherLayers())) appendMesh(out, buildRachisMesh(strands.featherLayers()), MeshPart::Rachis);
@@ -250,9 +338,10 @@ StrandMesh buildStrandMesh(const StrandSet& strands, const ScalpMesh* scalp, con
     }
 }
 
-std::size_t strandMeshPointCount(const StrandSet& strands, const StrandMeshOptions& options) {
+std::size_t strandMeshPointCount(const StrandSet& strands, const StrandMeshOptions& options,
+                                 const PrototypeLookup& prototypes) {
     if (resolveMeshMake(strands, options) != StrandMeshOptions::Make::Strands) {
-        return buildStrandMesh(strands, nullptr, options).mesh.points.size();
+        return buildStrandMesh(strands, nullptr, options, prototypes).mesh.points.size();
     }
     const int sides = meshSides(options);
     std::size_t total = 0;
@@ -260,9 +349,10 @@ std::size_t strandMeshPointCount(const StrandSet& strands, const StrandMeshOptio
     return total;
 }
 
-void strandMeshPoints(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options, Vec3f* out) {
+void strandMeshPoints(const StrandSet& strands, const ScalpMesh* scalp, const StrandMeshOptions& options, Vec3f* out,
+                      const PrototypeLookup& prototypes) {
     if (resolveMeshMake(strands, options) != StrandMeshOptions::Make::Strands) {
-        const StrandMesh whole = buildStrandMesh(strands, scalp, options);
+        const StrandMesh whole = buildStrandMesh(strands, scalp, options, prototypes);
         std::copy(whole.mesh.points.begin(), whole.mesh.points.end(), out);
         return;
     }
@@ -339,10 +429,12 @@ bool sameStrandMeshes(const std::vector<StrandMeshSource>& a, const std::vector<
 StrandMeshSettings strandMeshSettings(const ParamSet& params) {
     StrandMeshSettings s;
     const std::string make = params.getString("make", "auto");
-    s.options.make = make == "strands"    ? StrandMeshOptions::Make::Strands
-                     : make == "scales"   ? StrandMeshOptions::Make::Scales
-                     : make == "feathers" ? StrandMeshOptions::Make::Feathers
-                                          : StrandMeshOptions::Make::Auto;
+    s.options.make = make == "strands"     ? StrandMeshOptions::Make::Strands
+                     : make == "scales"    ? StrandMeshOptions::Make::Scales
+                     : make == "feathers"  ? StrandMeshOptions::Make::Feathers
+                     : make == "cards"     ? StrandMeshOptions::Make::Cards
+                     : make == "instances" ? StrandMeshOptions::Make::Instances
+                                           : StrandMeshOptions::Make::Auto;
     s.options.style = params.getString("style", "tube") == "ribbon" ? StrandMeshOptions::Style::Ribbon
                                                                     : StrandMeshOptions::Style::Tube;
     s.options.sides = static_cast<int>(params.getInt("sides", 4));

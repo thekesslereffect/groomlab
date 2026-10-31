@@ -1303,7 +1303,7 @@ DisplayGeometry scaleGeometry(const ScaleMesh& scales) {
 }
 
 DisplayGeometry strandMeshGeometry(const std::vector<StrandMeshSource>& meshes, const ScalpMesh* scalp,
-                                   const std::array<float, 3>& color) {
+                                   const std::array<float, 3>& color, const PrototypeLookup& prototypes) {
     DisplayGeometry g;
     g.triangles = true;
     g.scaleSurface = true;
@@ -1315,7 +1315,7 @@ DisplayGeometry strandMeshGeometry(const std::vector<StrandMeshSource>& meshes, 
         const StrandMeshSource& m = meshes[i];
         if (!m.strands) continue;
         if (resolveMeshMake(*m.strands, m.options) != StrandMeshOptions::Make::Strands) {
-            built[i] = buildStrandMesh(*m.strands, scalp, m.options);
+            built[i] = buildStrandMesh(*m.strands, scalp, m.options, prototypes);
             total += built[i]->mesh.points.size();
         } else {
             total += strandMeshPointCount(*m.strands, m.options);
@@ -2156,7 +2156,15 @@ void DisplayBuilder::buildStrandMesh(const DisplayInputs& in, const DisplaySetti
     }
     if (!rebuild(DisplayPart::StrandMesh, key)) return;
     DisplayGeometry mesh;
-    if (draw && !in.strandMeshes.empty()) mesh = strandMeshGeometry(in.strandMeshes, in.scalp.get(), s.hairColor);
+    if (draw && !in.strandMeshes.empty()) {
+        // The instances' prototypes the host read (its scene meshes), by name.
+        const PrototypeLookup prototypes = [&in](const std::string& name) -> const InstancePrototype* {
+            if (!in.prototypes) return nullptr;
+            const auto it = in.prototypes->find(name);
+            return it != in.prototypes->end() && it->second.found ? &it->second : nullptr;
+        };
+        mesh = strandMeshGeometry(in.strandMeshes, in.scalp.get(), s.hairColor, prototypes);
+    }
     if (shafts) appendSurface(mesh, rachisGeometry(*in.strands, s.hairColor));
     put(DisplayItemId::StrandMesh, std::move(mesh));
 }

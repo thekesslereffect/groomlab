@@ -816,7 +816,7 @@ private:
     ExportResult exportEngineGroom(const std::string& path, const ExportOptions& options, bool unity, const ExportProgress& progress);
     // The groom at `seconds` for an export: the time fed to the session, the strands at
     // `density` (full density on the session's own document), the scalp of that time.
-    StrandsPtr exportFrame(double seconds, float density, MeshPtr* scalp);
+    StrandsPtr exportFrame(double seconds, float density, MeshPtr* scalp, bool buildCards = false);
     void adoptBake();  // the bake the file names, else one at the default place: taken as the last bake
     explicit GroomDocument(GroomFile file, std::string path);
     void loadGraph(const std::string& text);

@@ -415,7 +415,8 @@ utils.copy_graph(groom, ["hair2", "hair3"], guides="keep", maps=False)
   `glMask`...: a number per strand channel, an array per point channel). The curves are made in
   one go through the API: 20,000 in about 4 s.
 - **To Mesh...:** the groom as one polygon mesh with the default shader (**Make**: auto, strands,
-  scales or feathers; scales are their plates, feathers their barbs and rachis); strands as **tube**
+  scales, feathers, cards or instances; scales are their plates, feathers their barbs and rachis,
+  instances each prototype's mesh where it sits); strands as **tube**
   (`sides` around each strand, as wide as its widths times `width_scale`, the tip closed) or
   **ribbon** (a flat strip as wide as the strand, lying along the scalp: turned by the scalp's
   normal at the root and carried along the strand). UVs: u across, v root (0) to tip (1); **Per-

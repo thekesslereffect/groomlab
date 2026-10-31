@@ -100,7 +100,7 @@ class ToMeshTest(unittest.TestCase):
         tubes = groomlab.to_mesh(self.groom, make="strands", max_strands=20)["mesh"]
         self.assertLess(cmds.polyEvaluate(tubes, face=True), cmds.polyEvaluate(tubes, triangle=True))  # quads
         with self.assertRaises(ValueError):
-            groomlab.to_mesh(self.groom, make="cards")
+            groomlab.to_mesh(self.groom, make="spheres")
         path = os.path.join(WORK_DIR, "scales.obj").replace("\\", "/")
         self.assertEqual(groomlab.export_mesh(self.groom, path, node=node), path)
         with open(path) as f:
@@ -108,6 +108,27 @@ class ToMeshTest(unittest.TestCase):
         self.assertEqual(sum(1 for line in text.splitlines() if line.startswith("f ")), faces)
         with self.assertRaises(ValueError):
             groomlab.export_mesh(self.groom, os.path.join(WORK_DIR, "scales.stl"))
+
+    def test_cards_and_instances_make_their_meshes(self):
+        # A Cards node's cards: quads, auto's pick; then instances of a scene cube: their cubes where
+        # they sit (6 quads each), auto's pick over the cards.
+        model = gm.GraphModel.from_groom(self.groom)
+        cards = model.add_node("Cards", name=model.unique_name("cards"))
+        model.insert_before(model.output, cards)
+        model.save(self.groom)
+        quads = groomlab.to_mesh(self.groom, make="cards")["mesh"]
+        count = cmds.polyEvaluate(quads, face=True)
+        self.assertGreater(count, 0)
+        self.assertEqual(count * 2, cmds.polyEvaluate(quads, triangle=True))
+        self.assertEqual(cmds.polyEvaluate(groomlab.to_mesh(self.groom)["mesh"], face=True), count)  # auto: the cards
+        cube = cmds.polyCube(width=0.05, height=0.05, depth=0.05, name="probeCube")[0]
+        groomlab.add_instances(self.groom, cube, probability=1.0, count=1, scale=1.0)
+        made = groomlab.to_mesh(self.groom, make="instances")["mesh"]
+        faces = cmds.polyEvaluate(made, face=True)
+        self.assertGreater(faces, 0)
+        self.assertEqual(faces % 6, 0)  # whole cubes
+        self.assertEqual(faces, cmds.polyEvaluate(made, triangle=True) // 2)  # quads, every one
+        self.assertEqual(cmds.polyEvaluate(groomlab.to_mesh(self.groom)["mesh"], face=True), faces)  # auto: the instances
 
     def test_live_mesh_follows_the_scalp_and_simulate_with_a_fixed_topology(self):
         simulate = sim.add_simulate(self.groom, preset="fur")

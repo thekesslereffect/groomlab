@@ -211,10 +211,13 @@ class GROOMLAB_OT_to_mesh(_Tipped, GroomOperator):
     bl_label = "To Mesh"
     bl_options = {"REGISTER", "UNDO"}
 
-    make: EnumProperty(name="Make", items=[("auto", "Auto", "The scales when there are some, else feathers, else the strands"),
+    make: EnumProperty(name="Make", items=[("auto", "Auto", "The scales when there are some, else instances, else cards, else "
+                                                            "feathers, else the strands"),
                                            ("strands", "Strands", "Tubes or ribbons round every strand"),
                                            ("scales", "Scales", "The scales' plates bent onto the skin"),
-                                           ("feathers", "Feathers", "The barbs as tubes or ribbons and the rachis tubes")],
+                                           ("feathers", "Feathers", "The barbs as tubes or ribbons and the rachis tubes"),
+                                           ("cards", "Cards", "The Cards nodes' cards, in one atlas"),
+                                           ("instances", "Instances", "Every instance's mesh where it sits")],
                        default="auto")
     style: EnumProperty(name="Style", items=[("tube", "Tube", "Tubes round each strand"),
                                              ("ribbon", "Ribbon", "Flat ribbons lying along the scalp")],

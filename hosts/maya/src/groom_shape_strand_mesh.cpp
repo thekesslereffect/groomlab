@@ -5,6 +5,7 @@
 // topology and UVs are made once, and Alembic and Maya's caches see a deforming mesh.
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -79,13 +80,23 @@ MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
         return MS::kSuccess;
     }
     const MeshPtr scalp = lane.session.scalp();  // the strands' roots are on it (normals: the ribbons' plane)
+    // The instances' prototypes (scene meshes), read once each on this evaluation.
+    std::map<std::string, InstancePrototype> scene;
+    const PrototypeLookup prototypes = [&scene](const std::string& name) -> const InstancePrototype* {
+        auto it = scene.find(name);
+        if (it == scene.end()) {
+            it = scene.emplace(name, InstancePrototype{}).first;
+            readInstancePrototype(name, it->second);
+        }
+        return it->second.found ? &it->second : nullptr;
+    };
     std::uint64_t key = hash64(0x5D3E5u);
     std::size_t pointCount = 0;
     for (const auto& s : sources) {
         key = hashCombine(key, hashString(hash64(0x4E0Du), s.node));
         if (!s.strands) continue;
         key = hashCombine(key, strandMeshTopologyKey(*s.strands, s.options));
-        pointCount += strandMeshPointCount(*s.strands, s.options);
+        pointCount += strandMeshPointCount(*s.strands, s.options, prototypes);
     }
 
     MObject meshObject;
@@ -96,8 +107,8 @@ MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
         std::size_t at = 0;
         for (const auto& s : sources) {
             if (!s.strands) continue;
-            strandMeshPoints(*s.strands, scalp.get(), s.options, points.data() + at);
-            at += strandMeshPointCount(*s.strands, s.options);
+            strandMeshPoints(*s.strands, scalp.get(), s.options, points.data() + at, prototypes);
+            at += strandMeshPointCount(*s.strands, s.options, prototypes);
         }
         MFloatPointArray moved = toMaya(points);
         meshObject = withPoints(lane.strandMeshData, moved);
@@ -111,7 +122,7 @@ MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
             if (!s.strands) continue;
             StrandMesh m;
             try {
-                m = buildStrandMesh(*s.strands, scalp.get(), s.options);
+                m = buildStrandMesh(*s.strands, scalp.get(), s.options, prototypes);
             } catch (const std::exception& e) {
                 if (lane.live) report(std::string("strand mesh: ") + e.what(), true);
                 continue;

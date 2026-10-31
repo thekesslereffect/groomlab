@@ -1396,7 +1396,7 @@ def to_mesh_dialog(node=None, make=None, style=None, sides=None, width_scale=Non
         answer = _ask("To Mesh", [
             ("node", "Of", "choice", node or _OUTPUT, _node_choices(groom), "The groom's output, or any node's"),
             ("make", "Make", "choice", make or "auto", list(utils.MESH_MAKES),
-             "auto: the scales when there are some, else feathers, else the strands"),
+             "auto: the scales when there are some, else instances, else cards, else feathers, else the strands"),
             ("style", "Style", "choice", style or "tube", list(utils.MESH_STYLES),
              "Tubes round each strand, or flat ribbons lying along the scalp"),
             ("sides", "Tube sides", "int", sides or 4),

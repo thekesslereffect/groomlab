@@ -2501,11 +2501,11 @@ std::vector<SimStatus> GroomShape::simulationStatus() {
     return session_.simulationStatus();
 }
 
-Value GroomShape::evaluateNode(const std::string& name, float density) {
+Value GroomShape::evaluateNode(const std::string& name, float density, bool buildCards) {
     ensureEvaluated();
     // A scratch copy of the graph: results that match the viewport's are reused, and what this
     // evaluation makes never evicts them.
-    return session_.evaluateNode(name, density, mayaSeconds(MPlug(thisMObject(), aTime).asMTime()));
+    return session_.evaluateNode(name, density, mayaSeconds(MPlug(thisMObject(), aTime).asMTime()), buildCards);
 }
 
 GroomShape::HairLook GroomShape::hairLook() {

@@ -349,7 +349,7 @@ public:
     // copy of the graph (the viewport's cache is left alone; matching results are reused).
     // An empty name evaluates the graph's output.
     // Throws GraphError (no such node, a failing node) or std::runtime_error (no graph).
-    Value evaluateNode(const std::string& name, float density);
+    Value evaluateNode(const std::string& name, float density, bool buildCards = false);
     // Simulate nodes (simulation.h, groomLabSimulate): Simulate Range to `frame` (the scalp at the
     // frames on the way read from inMesh at those times), the frames dropped, their status (a bake
     // writes session()'s frames: sim_cache.h).

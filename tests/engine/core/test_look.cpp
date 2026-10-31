@@ -15,6 +15,7 @@
 #include <tbb/task_arena.h>
 #endif
 
+#include "groomlab/strand_geometry.h"
 #include "groomlab/brush.h"
 #include "groomlab/cards.h"
 #include "groomlab/curve.h"
@@ -1369,6 +1370,38 @@ TEST(ToGuides, StrandsBecomeGuidesForClumping) {
 
 namespace groomlab {
 namespace {
+
+TEST(Instances, ToMeshMakesEveryInstancesMeshWhereItSits) {
+    // An Instance node's instances: auto makes their prototypes' meshes, each moved to where it
+    // sits (the matrix's rows); a host's prototype (a square of two triangles) comes out a quad,
+    // one without a mesh is left out.
+    LookGraph lg(200.0);
+    const NodeId inst = lg.add(op::kInstance, lg.scatter);
+    lg.g.node(inst).params().set("probability", 1.0);
+    lg.g.node(inst).params().set("orient", std::string("up"));
+    lg.g.node(inst).params().set("prototype", std::string("square"));
+    const StrandsPtr s = lg.eval(inst);
+    ASSERT_TRUE(s->instances() && !s->instances()->empty());
+    StrandMeshOptions o;
+    EXPECT_EQ(resolveMeshMake(*s, o), StrandMeshOptions::Make::Instances);
+    EXPECT_EQ(buildStrandMesh(*s, nullptr, o).mesh.faceCount(), 0u) << "no mesh for 'square': none made";
+    InstancePrototype square;
+    square.found = true;
+    square.points = {{-0.5f, 0, 0}, {0.5f, 0, 0}, {0.5f, 1, 0}, {-0.5f, 1, 0}};
+    square.triangles = {0, 1, 2, 0, 2, 3};
+    square.uvs = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const PrototypeLookup lookup = [&square](const std::string& name) { return name == "square" ? &square : nullptr; };
+    const StrandMesh mesh = buildStrandMesh(*s, nullptr, o, lookup);
+    const auto placed = s->instances()->resolve(*s);
+    ASSERT_EQ(mesh.mesh.faceCount(), placed.size());
+    EXPECT_TRUE(std::all_of(mesh.mesh.faceCounts.begin(), mesh.mesh.faceCounts.end(), [](int n) { return n == 4; }));
+    EXPECT_EQ(mesh.faceParts.front(), static_cast<int>(MeshPart::Instances));
+    ASSERT_EQ(mesh.mesh.points.size(), 4 * placed.size());
+    const InstanceSet::Placed& p = placed[3];
+    const Vec3f corner = p.origin + p.x * 0.5f + p.y * 1.0f;  // the square's (0.5, 1, 0)
+    EXPECT_LT((mesh.mesh.points[4 * 3 + 2] - corner).length(), 1e-5f);
+    EXPECT_FLOAT_EQ(mesh.mesh.u[4 * 3 + 2], 1.0f);
+}
 
 TEST(Instances, PlacedOnTheStrandsAndCarriedDownstream) {
     LookGraph lg(200.0);

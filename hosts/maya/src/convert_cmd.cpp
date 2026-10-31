@@ -227,9 +227,12 @@ MStatus ConvertCmd::doIt(const MArgList& args) {
             int maxCount = 20000;
             if (db.isFlagSet(kMaxCount[0])) db.getFlagArgument(kMaxCount[0], 0, maxCount);
             if (maxCount < 1) return fail(kName, "-maxCount is at least 1");
+            // A mesh that may be of cards: the Cards nodes build them on this evaluation.
+            const std::string makeFlag = flagString(db, kMake[0], "auto").asChar();
+            const bool cards = db.isFlagSet(kStrandMesh[0]) && (makeFlag == "auto" || makeFlag == "cards");
             Value value;
             try {
-                value = shape->evaluateNode(node, static_cast<float>(density));
+                value = shape->evaluateNode(node, static_cast<float>(density), cards);
             } catch (const std::exception& e) {
                 return fail(kName, e.what());
             }
@@ -255,7 +258,9 @@ MStatus ConvertCmd::doIt(const MArgList& args) {
                 if (make == "strands") o.make = StrandMeshOptions::Make::Strands;
                 else if (make == "scales") o.make = StrandMeshOptions::Make::Scales;
                 else if (make == "feathers") o.make = StrandMeshOptions::Make::Feathers;
-                else if (make != "auto") return fail(kName, "-make is auto, strands, scales or feathers");
+                else if (make == "cards") o.make = StrandMeshOptions::Make::Cards;
+                else if (make == "instances") o.make = StrandMeshOptions::Make::Instances;
+                else if (make != "auto") return fail(kName, "-make is auto, strands, scales, feathers, cards or instances");
                 const std::string style = flagString(db, kStyle[0], "tube").asChar();
                 if (style != "tube" && style != "ribbon") return fail(kName, "-style is tube or ribbon");
                 o.style = style == "ribbon" ? StrandMeshOptions::Style::Ribbon : StrandMeshOptions::Style::Tube;
@@ -270,7 +275,16 @@ MStatus ConvertCmd::doIt(const MArgList& args) {
                 // Scales and feathers whole (their plates and rachis are the strand set's); tubes thinned.
                 const bool whole = resolveMeshMake(*strands, o) != StrandMeshOptions::Make::Strands;
                 if (whole) made_ = total_;
-                strandMesh_ = buildStrandMesh(whole ? *strands : kept, scalp.get(), o);
+                std::map<std::string, InstancePrototype> scene;  // the instances' prototypes, read once each
+                const PrototypeLookup prototypes = [&scene](const std::string& name) -> const InstancePrototype* {
+                    auto it = scene.find(name);
+                    if (it == scene.end()) {
+                        it = scene.emplace(name, InstancePrototype{}).first;
+                        readInstancePrototype(name, it->second);
+                    }
+                    return it->second.found ? &it->second : nullptr;
+                };
+                strandMesh_ = buildStrandMesh(whole ? *strands : kept, scalp.get(), o, prototypes);
                 if (strandMesh_.mesh.faceCounts.empty()) return fail(kName, "nothing to make a mesh of (no faces)");
                 mesh_ = true;
                 rootName_ = flagString(db, kNameFlag[0], (prefix + "_strandMesh").c_str());

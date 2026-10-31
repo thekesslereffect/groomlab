@@ -13,7 +13,7 @@ the selected grooms), and each is one undo step.
 | **Guides to Curves** | One NURBS curve per guide, tagged with its guide ID. |
 | **Curves to Guides...** | Tagged curves update their own guide in place; any other curve becomes a new guide. |
 | **Strands to Curves...** | The evaluated strands as plain Maya curves (20,000 by default), with their attributes. |
-| **To Mesh...** | A snapshot of the groom as one mesh, with UVs: the strands as tubes or ribbons, the scales as their plates, feathers as barbs and rachis. For a mesh that follows the animation, see [The groom as a mesh](#the-groom-as-a-mesh). |
+| **To Mesh...** | A snapshot of the groom as one mesh, with UVs: the strands as tubes or ribbons, the scales as their plates, feathers as barbs and rachis, cards, instances. For a mesh that follows the animation, see [The groom as a mesh](#the-groom-as-a-mesh). |
 | **Bake Node to Guides...** | The groom's output, or any node's strands or guides, converted to brushable guides. To keep them procedural instead, use a ToGuides followed by a Sculpt node ([Node graph](/docs/node-graph#other-main-nodes)). |
 
 To edit guides with Maya tools: **Guides to Curves**, edit the curves (CVs, lattices, a sculpt
@@ -29,8 +29,10 @@ The Flow tool's card counts them and has the same command as **Clear All**. See
 ## The groom as a mesh
 
 **To Mesh...** makes a static mesh of the current frame. **Make** picks what it is made of:
-**auto** (the scales when the groom has some, else feathers, else the strands), **strands**,
-**scales** or **feathers**.
+**auto** (the scales when the groom has some, else instances, else cards, else feathers, else the
+strands), **strands**, **scales**, **feathers**, **cards** or **instances**. The faces are quads
+wherever the shape allows (a scale's tip, a tube's tip and a prototype's own triangles stay
+triangles).
 
 - **Strands:** a tube (`Tube sides` around, the tip closed) or a flat ribbon along each strand, as
   wide as the strand times `Width scale`. UVs run across the strand (u) and from root (v 0) to tip
@@ -40,6 +42,10 @@ The Flow tool's card counts them and has the same command as **Clear All**. See
 - **Scales:** every scale's plate, bent onto the skin as it renders, with the plates' UVs. A scale
   whose prototype is one of your scene's meshes comes out as a flat quad.
 - **Feathers:** the barbs as tubes or ribbons, and the rachis (shaft) tubes.
+- **Cards:** a Cards node's cards (put the ToMesh after it), as quads with the atlas UVs the cards
+  export with.
+- **Instances:** every instance's mesh where it sits: an Instance node's scene mesh (or a Scales
+  node's plates), each one a copy of its prototype with the prototype's UVs.
 
 For a mesh that follows the animation, add a **ToMesh** node in the Graph Editor. The groom
 draws its mesh in the viewport at once, in place of the strands (**Show mesh** in the node's

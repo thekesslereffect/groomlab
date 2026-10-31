@@ -21,6 +21,7 @@
 #include "groomlab/graph_io.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/groom.h"
+#include "groomlab/strand_geometry.h"
 #include "test_helpers.h"
 
 namespace groomlab {
@@ -231,6 +232,41 @@ TEST(Cards, TheCardsNodeBuildsCardsFromTheStrandsBeforeIt) {
     std::size_t covered = 0;
     for (const auto a : t.coverage) covered += a > 0 ? 1 : 0;
     EXPECT_GT(covered, 128u * 128u / 20u);
+}
+
+TEST(Cards, ToMeshMakesTheCardsQuads) {
+    // A ToMesh node after a Cards node: with the cards built, auto makes their quads (one atlas);
+    // without them, the strands' tubes.
+    GroomData d;
+    d.scalp = test::makePlane(16);
+    d.graphJson = R"j({"version": 1, "output": "out", "nodes": [
+        {"name": "scalp", "type": "Scalp"},
+        {"name": "scatter", "type": "Scatter", "params": {"density": 800.0}},
+        {"name": "clump", "type": "Clump", "params": {"count": 12, "strength": 0.8}},
+        {"name": "cards", "type": "Cards", "params": {"segments": 4, "widthSegments": 2}},
+        {"name": "out", "type": "Output"}],
+      "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
+        {"from": "scatter", "to": "clump", "input": "strands"},
+        {"from": "clump", "to": "cards", "input": "strands"}, {"from": "cards", "to": "out", "input": "strands"}]})j";
+    GraphDocument doc = loadGraphJson(d.graphJson);
+    ExternalInputs externals;
+    setGroomExternals(externals, d.scalp, nullptr, nullptr);
+    EvalContext ctx;
+    ctx.externals = &externals;
+    StrandMeshOptions o;
+    EXPECT_EQ(resolveMeshMake(*doc.graph.evaluateStrands(doc.output, ctx), o), StrandMeshOptions::Make::Strands);
+    ctx.buildCards = true;
+    const StrandsPtr strands = doc.graph.evaluateStrands(doc.output, ctx);
+    EXPECT_EQ(resolveMeshMake(*strands, o), StrandMeshOptions::Make::Cards);
+    CardMesh laid = combineCardLayers(strands->cardLayers());
+    layoutCards(laid, laid.padding);
+    const StrandMesh mesh = buildStrandMesh(*strands, d.scalp.get(), o);
+    EXPECT_EQ(mesh.mesh.points.size(), laid.positions.size());
+    EXPECT_EQ(mesh.mesh.faceCount(), laid.quads.size() / 4);
+    EXPECT_TRUE(std::all_of(mesh.mesh.faceCounts.begin(), mesh.mesh.faceCounts.end(), [](int n) { return n == 4; }));
+    EXPECT_EQ(mesh.mesh.featherCount, laid.cards.size());
+    EXPECT_EQ(mesh.faceParts.front(), static_cast<int>(MeshPart::Cards));
+    for (std::size_t i = 0; i < laid.u.size(); i += 7) EXPECT_FLOAT_EQ(mesh.mesh.u[i], laid.u[i]) << "the atlas uvs";
 }
 
 TEST(Cards, CardsFromGuidesLieAlongEachGuideFromWhereItGrows) {

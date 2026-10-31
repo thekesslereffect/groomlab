@@ -2341,14 +2341,14 @@ class PipelineTest(HelperTestCase):
         self.assertEqual(r["meshes"]["cards"]["material"], "head_cards_mat")
         self.assertEqual(r["fbxSettings"], {"upAxis": "Y", "units": "m"})
 
-        # The groom's strands as one mesh: tubes of 4 sides, at most 40 strands (thinned by ID).
-        r = self.call("strand_mesh", session=s, style="tube", sides=4, maxStrands=40, density=0.2, strandUVs=True)
+        # The groom's strands as one mesh (make strands: it has cards, auto's pick): tubes of 4 sides, at most 40 (thinned by ID).
+        r = self.call("strand_mesh", session=s, make="strands", style="tube", sides=4, maxStrands=40, density=0.2, strandUVs=True)
         self.assertEqual(r["strands"], 40)
         self.assertTrue(r["capped"])
         m = r["meshes"]["strands"]
         self.assertEqual(sum(self.h.array(m["faceCounts"])), m["corners"])
         self.assertIn("strandUVs", m["uvSets"])
-        self.assertEqual(self.call("strand_mesh", session=s, nodes=True)["nodes"], [])  # no StrandMesh node
+        self.assertEqual(self.call("strand_mesh", session=s, nodes=True)["nodes"], [])  # no ToMesh node
 
     def test_scales_mesh_maps_and_instancer(self):
         s = self.head_session(preset="dragon_scales")

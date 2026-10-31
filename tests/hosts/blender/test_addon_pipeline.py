@@ -75,7 +75,7 @@ class PipelineTest(unittest.TestCase):
         r = pipeline.export(self.head, "gltfCards", path=glb, name="head", resolution=32)
         self.assertTrue(os.path.isfile(glb))
         # To Mesh: an object under the scalp.
-        obj, r = pipeline.to_mesh(self.head, sides=3, max_strands=25, density=0.2)
+        obj, r = pipeline.to_mesh(self.head, make="strands", sides=3, max_strands=25, density=0.2)
         self.assertEqual(obj.parent, self.head)
         self.assertEqual(r["strands"], 25)
         self.assertGreater(len(obj.data.polygons), 25)
@@ -386,7 +386,7 @@ class PipelineOpsTest(unittest.TestCase):
         self.assertTrue(any(f.endswith(".fbx") for f in os.listdir(self.tmp("unity"))))
         self.assertEqual(set(bpy.data.objects), before)
         # To Mesh: a mesh under the scalp, selected.
-        self.assertEqual(bpy.ops.groomlab.to_mesh(sides=3, max_strands=20), {"FINISHED"})
+        self.assertEqual(bpy.ops.groomlab.to_mesh(make="strands", sides=3, max_strands=20), {"FINISHED"})
         mesh = bpy.context.view_layer.objects.active
         self.assertEqual(mesh.parent, head)
         self.assertGreater(len(mesh.data.polygons), 20)

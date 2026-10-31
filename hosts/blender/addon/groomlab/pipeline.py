@@ -207,8 +207,9 @@ def to_mesh(scalp, make="auto", style="tube", sides=4, width_scale=1.0, max_stra
             strand_uvs=False, name=None):
     """The groom as one mesh object (Maya's to_mesh): `make` "strands" (tubes of `sides` sides or
     ribbons along the scalp, UVs root to tip, at most `max_strands`, thinned by strand ID),
-    "scales" (their plates), "feathers" (barbs and rachis) or "auto" (the scales when there are
-    some, else feathers, else the strands). Returns (object, the helper's answer)."""
+    "scales" (their plates), "feathers" (barbs and rachis), "cards", "instances" or "auto" (the
+    scales when there are some, else instances, else cards, else feathers, else the strands).
+    Returns (object, the helper's answer)."""
     r = call(scalp, "strand_mesh", make=make, style=style, sides=int(sides), widthScale=float(width_scale),
              maxStrands=int(max_strands), density=float(density), strandUVs=bool(strand_uvs))
     return _mesh_object(scalp, name or scalp.name + "_mesh", r["meshes"]["strands"]), r

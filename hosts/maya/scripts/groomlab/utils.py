@@ -32,7 +32,7 @@ from groomlab.bake import bake_guides  # noqa: F401  (Node to Guides: part of th
 DEFAULT_MAX_CURVES = 20000
 DEFAULT_MAX_STRANDS = 20000
 MESH_STYLES = ("tube", "ribbon")
-MESH_MAKES = ("auto", "strands", "scales", "feathers")  # what to_mesh and a ToMesh node make
+MESH_MAKES = ("auto", "strands", "scales", "feathers", "cards", "instances")  # what to_mesh and a ToMesh node make
 GUIDE_MODES = ("keep", "replace")
 
 
@@ -189,8 +189,10 @@ def to_mesh(groom, node=None, make="auto", style="tube", sides=4, width_scale=1.
     """The groom (or a node's output) as one polygon mesh.
 
     `make` "strands": the strands as tubes or ribbons; "scales": the scales' plates bent onto the
-    skin; "feathers": the barbs as tubes or ribbons and the rachis tubes; "auto" (default): the
-    scales when there are some, else feathers, else the strands. For tubes, `style` "tube":
+    skin; "feathers": the barbs as tubes or ribbons and the rachis tubes; "cards": the Cards nodes'
+    cards (quads, in one atlas); "instances": every instance's mesh where it sits (an Instance
+    node's scene meshes); "auto" (default): the scales when there are some, else instances, else
+    cards, else feathers, else the strands. For tubes, `style` "tube":
     `sides`-sided tubes along each strand, as wide as its widths (times `width_scale`), the tip
     closed; "ribbon": flat strips as wide as the strand, lying along the scalp (their faces turned
     by the scalp's normal at the root, carried along the strand). UVs: u across, v root (0) to tip
