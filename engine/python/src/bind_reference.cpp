@@ -6,6 +6,7 @@
 #include <cmath>
 #include <fstream>
 
+#include "groomlab/pin_morph.h"
 #include "groomlab/png.h"
 #include "groomlab/reference_edit.h"
 #include "groomlab/reference_guides.h"
@@ -262,6 +263,52 @@ void bindReference(py::module_& m) {
         py::arg("fix_focal") = false, py::arg("initial") = py::none(),
         "A pinhole camera from 2D-3D point pairs (camera_solve.h; pixels from the top-left): {ok, rotation, position, "
         "focal_px, width, height, rms, errors} - a camera guides_from_reference takes. `initial`: a camera dict to start from.");
+
+    m.def(
+        "morph_to_pins",
+        [](const std::vector<std::array<double, 3>>& points, const py::list& pins, const py::list& views, double stiffness,
+           bool symmetric, int axis) {
+            std::vector<PinView> vs;
+            for (const py::handle v : views) {
+                const RefCamera c = cameraFrom(v.cast<py::dict>());
+                PinView pv;
+                pv.pose = c.pose;
+                pv.focalPx = c.focalPx;
+                pv.width = c.width;
+                pv.height = c.height;
+                vs.push_back(pv);
+            }
+            std::vector<MorphPin> ps;
+            for (const py::handle h : pins) {
+                const py::dict d = h.cast<py::dict>();
+                MorphPin pin;
+                pin.mesh = d["mesh"].cast<std::array<double, 3>>();
+                if (d.contains("sights"))
+                    for (const py::handle sight : d["sights"].cast<py::list>()) {
+                        const auto t = sight.cast<std::tuple<int, double, double>>();
+                        pin.sights.push_back({std::get<0>(t), std::get<1>(t), std::get<2>(t)});
+                    }
+                ps.push_back(pin);
+            }
+            PinMorphOptions o;
+            o.stiffness = stiffness;
+            o.symmetric = symmetric;
+            o.axis = axis;
+            const PinMorphResult r = morphToPins(std::vector<CameraVec3>(points.begin(), points.end()), ps, vs, o);
+            py::dict d;
+            d["ok"] = r.ok;
+            d["error"] = r.error;
+            d["points"] = r.points;
+            d["targets"] = r.targets;
+            d["rms_before"] = r.rmsBeforePx;
+            d["rms_after"] = r.rmsAfterPx;
+            return d;
+        },
+        py::arg("points"), py::arg("pins"), py::arg("views"), py::arg("stiffness") = 0.0,
+        py::arg("symmetric") = true, py::arg("axis") = 0,
+        "The mesh's points morphed so each pin lands on its photo points (pin_morph.h): pins [{mesh: [x, y, z], "
+        "sights: [(view, u, v)]}] (pixels from the top-left), views: camera dicts as solve_camera's (or matrix + "
+        "focal_mm + aperture_in). {ok, error, points, targets, rms_before, rms_after}.");
 
     m.def("density_of_coverage", &densityOfCoverage, py::arg("coverage"),
           "A Scatter density factor (0-1) from the share of the skin hair covers (guides_from_reference's "

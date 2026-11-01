@@ -267,6 +267,12 @@ def font():
     return _font[0]
 
 
+def forget_font():
+    """The font loaded again on its next use: Blender drops the fonts add-ons loaded when it opens a
+    file (the window then drew no text at all)."""
+    _font[0] = None
+
+
 def release():
     """Drops the GPU resources and the font (the add-on's unregister)."""
     _shaders.clear()

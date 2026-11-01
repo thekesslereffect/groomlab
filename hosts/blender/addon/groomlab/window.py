@@ -524,7 +524,14 @@ CLASSES = (GROOMLAB_GT_window, GROOMLAB_GGT_window, GROOMLAB_OT_window_toggle, G
            GROOMLAB_OT_window_context, GROOMLAB_OT_window_scroll, GROOMLAB_PT_window_color)
 
 
+@bpy.app.handlers.persistent
+def _on_load_post(*args):
+    uikit.forget_font()
+    _cache.clear()
+
+
 def register():
+    bpy.app.handlers.load_post.append(_on_load_post)
     for c in CLASSES:
         bpy.utils.register_class(c)
     _draw_handle[0] = bpy.types.SpaceView3D.draw_handler_add(_draw, (), "WINDOW", "POST_PIXEL")
@@ -546,6 +553,8 @@ def register():
 
 
 def unregister():
+    if _on_load_post in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_load_post)
     if _draw_handle[0] is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_draw_handle[0], "WINDOW")
         _draw_handle[0] = None

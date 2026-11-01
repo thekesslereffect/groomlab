@@ -20,6 +20,7 @@
 #include "groomlab/camera_solve.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_hierarchy.h"
+#include "groomlab/pin_morph.h"
 #include "groomlab/reference_edit.h"
 #include "groomlab/reference_guides.h"
 #include "groomlab/texture.h"
@@ -311,6 +312,60 @@ json solveCameraCommand(Session& s, const json& args) {
     return out;
 }
 
+// ---- Morph to pins -------------------------------------------------------------------------------------
+
+// morph_mesh: the mesh's points moved so each pin's mesh point lands on its photo points (pin_morph.h).
+// All in the host's space (the morph has no groom space of its own): "points" (list or shared
+// memory, x y z per point), "pins" [{"mesh": [x, y, z], "sights": [{"view": i, "image": [u, v]}]}],
+// "views" [{"rotation", "position", "focalPx", "width", "height"}] (cameras as solve_camera's),
+// "stiffness" 0..1, "symmetric" (mirrored across the plane where coordinate "axis", 0 x, is 0). Answers {"points" (flat), "targets", "rmsBefore", "rmsAfter"} (pixels).
+json morphMeshCommand(const json& args) {
+    BlockReader blocks;
+    const std::vector<double> flat = readArray<double>(need(args, "points"), "points", 3, blocks);
+    std::vector<CameraVec3> points(flat.size() / 3);
+    for (std::size_t i = 0; i < points.size(); ++i) points[i] = {flat[3 * i], flat[3 * i + 1], flat[3 * i + 2]};
+    std::vector<PinView> views;
+    const json& viewsJson = need(args, "views");
+    if (!viewsJson.is_array()) fail("bad_request", "views is a list of cameras");
+    for (const json& v : viewsJson) {
+        PinView pv;
+        pv.pose.rotation = mat3(need(v, "rotation"), "view.rotation");
+        pv.pose.position = vec3(need(v, "position"), "view.position");
+        pv.focalPx = number(need(v, "focalPx"), "view.focalPx");
+        pv.width = number(need(v, "width"), "view.width");
+        pv.height = number(need(v, "height"), "view.height");
+        views.push_back(pv);
+    }
+    std::vector<MorphPin> pins;
+    const json& pinsJson = need(args, "pins");
+    if (!pinsJson.is_array()) fail("bad_request", "pins is a list");
+    for (const json& p : pinsJson) {
+        MorphPin pin;
+        pin.mesh = vec3(need(p, "mesh"), "pin.mesh");
+        for (const json& sight : p.value("sights", json::array())) {
+            const json& image = need(sight, "image");
+            if (!image.is_array() || image.size() != 2) fail("bad_request", "a sight's image point is [u, v] (pixels)");
+            pin.sights.push_back({static_cast<int>(number(need(sight, "view"), "sight.view")),
+                                  number(image[0], "image point"), number(image[1], "image point")});
+        }
+        pins.push_back(pin);
+    }
+    PinMorphOptions options;
+    options.stiffness = optNumber(args, "stiffness", 0.0);
+    options.symmetric = optBool(args, "symmetric", false);  // about the plane where `axis` is 0
+    options.axis = static_cast<int>(optNumber(args, "axis", 0.0));
+    const PinMorphResult r = morphToPins(points, pins, views, options);
+    if (!r.ok) fail("state", r.error);
+    json outPoints = json::array(), targets = json::array();
+    for (const CameraVec3& q : r.points) {
+        outPoints.push_back(q[0]);
+        outPoints.push_back(q[1]);
+        outPoints.push_back(q[2]);
+    }
+    for (const CameraVec3& t : r.targets) targets.push_back({t[0], t[1], t[2]});
+    return {{"points", outPoints}, {"targets", targets}, {"rmsBefore", r.rmsBeforePx}, {"rmsAfter", r.rmsAfterPx}};
+}
+
 // ---- Guides from Photos -------------------------------------------------------------------------------
 
 std::vector<std::array<float, 2>> pixels(const json& points) {
@@ -445,11 +500,13 @@ json guidesFromPhotos(Session& s, const json& args) {
 }  // namespace
 
 bool isReferenceCommand(const std::string& cmd) {
-    static const std::set<std::string> kCommands = {"reference_photos", "set_reference_photos", "solve_camera", "guides_from_photos"};
+    static const std::set<std::string> kCommands = {"reference_photos", "set_reference_photos", "solve_camera", "guides_from_photos",
+                                                    "morph_mesh"};
     return kCommands.count(cmd) > 0;
 }
 
 json runReferenceCommand(const std::string& cmd, const json& args, const std::function<Session&()>& session) {
+    if (cmd == "morph_mesh") return morphMeshCommand(args);  // (no groom needed)
     Session& s = session();
     if (cmd == "reference_photos") return referencePhotos(s);
     if (cmd == "set_reference_photos") return setReferencePhotos(s, args);

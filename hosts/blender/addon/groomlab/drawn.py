@@ -234,9 +234,17 @@ def draw_panel(cls, layout, context):
 # ---- Operators and menus --------------------------------------------------------------------------
 
 def run_operator(idname, props, call_context="INVOKE_DEFAULT"):
-    """bpy.ops.<idname>(call_context, **props)."""
+    """bpy.ops.<idname>(call_context, **props), and its undo step: an operator run from the window
+    (inside the window's own operator) records none, so Ctrl+Z went past a Solve or a Morph."""
     module, name = idname.split(".", 1)
-    return getattr(getattr(bpy.ops, module), name)(call_context, **props)
+    result = getattr(getattr(bpy.ops, module), name)(call_context, **props)
+    cls = _operator_class(idname)
+    if "FINISHED" in result and cls is not None and "UNDO" in getattr(cls, "bl_options", set()):
+        try:
+            bpy.ops.ed.undo_push(message=getattr(cls, "bl_label", idname))
+        except RuntimeError:
+            pass
+    return result
 
 
 def menu_entries(name, context):

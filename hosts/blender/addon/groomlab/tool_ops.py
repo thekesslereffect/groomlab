@@ -448,7 +448,15 @@ class ToolSession(object):
         except HelperError as e:
             tools.status(context.scene, e.message)
             return None
-        tools.status(context.scene, ("Redo" if redo else "Undo") + (" done" if r.get("done") else ": nothing to do"))
+        if not r.get("done"):
+            # Nothing left in the groom's own history: Blender's (a morph, an object moved, a setting).
+            try:
+                getattr(bpy.ops.ed, "redo" if redo else "undo")()
+                tools.status(context.scene, ("Redo" if redo else "Undo") + " done (Blender's)")
+            except RuntimeError:
+                tools.status(context.scene, ("Redo" if redo else "Undo") + ": nothing to do")
+            return r
+        tools.status(context.scene, ("Redo" if redo else "Undo") + " done")
         return r
 
     def pick(self, context, tool):

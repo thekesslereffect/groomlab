@@ -58,8 +58,14 @@ _draw_handle = [None]
 class GroomLabPhotoPair(bpy.types.PropertyGroup):
     image: FloatVectorProperty(size=2, description="The point on the photo: pixels from its top-left, v down")
     has_image: BoolProperty()
-    mesh: FloatVectorProperty(size=3, description="The point on the mesh, in the scalp object's space")
+    mesh: FloatVectorProperty(size=3, description="The point on the mesh, in the scalp object's space: on its "
+                                                   "rest shape (the shape keys' Basis), whatever shape it shows")
     has_mesh: BoolProperty()
+    # Where on the surface the mesh point is (a triangle of the mesh's and the point's weights in it):
+    # the same spot on the rest shape and on a morph, so a pin picked on a morphed head stays a point
+    # of the rest shape (morphs never stack) and draws on the shape shown. -1: a point alone.
+    tri: IntProperty(default=-1)
+    bary: FloatVectorProperty(size=3)
     error: FloatProperty(default=-1.0, description="The last solve's reprojection error, pixels (-1: none)")
 
 
@@ -118,6 +124,13 @@ class GroomLabPhotos(bpy.types.PropertyGroup):
     symmetry: EnumProperty(name="Symmetry", items=SYMMETRIES, default="auto",
                            description="One view covers both sides: each guide comes with its mirror image")
     result: StringProperty()
+    morph_stiffness: FloatProperty(name="Stiffness", default=0.0, min=0.0, max=0.95, subtype="FACTOR",
+                                   description="How much the morph gives way: 0 lands every pin exactly, higher keeps "
+                                               "the mesh's shape and lets the pins fall short")
+    morph_symmetry: BoolProperty(name="Symmetry", default=True,
+                                 description="Morph both sides alike: each pin mirrored across the mesh's middle (its "
+                                             "local X); a pin on the middle stays on it, a side with pins of its own "
+                                             "keeps them")
 
 
 # ---- Finding photos ------------------------------------------------------------------------------
@@ -264,7 +277,7 @@ def rename_photo(cam, name):
 
 # ---- Point pairs (Maya's add_pick, clear_point, remove_pair, clear_pairs) ---------------------------
 
-def add_pick(cam, kind, value):
+def add_pick(cam, kind, value, binding=None):
     """A picked point: `kind` "image" ((u, v) pixels from the photo's top-left) or "mesh" ((x, y, z)
     in the scalp object's space) goes into the first pair still missing one, else a new pair.
     Returns the pair's index."""
@@ -278,6 +291,8 @@ def add_pick(cam, kind, value):
     pair = pairs.add() if index == len(pairs) else pairs[index]
     setattr(pair, kind, value)
     setattr(pair, "has_" + kind, True)
+    if kind == "mesh":
+        pair.tri, pair.bary = binding if binding else (-1, (0.0, 0.0, 0.0))
     pair.error = -1.0
     cam.groomlab_photo.pair_index = index
     return index
@@ -468,6 +483,58 @@ def solve(cam, scalp, keep_focal=False, apply=True):
     return r
 
 
+# ---- Morph to the photos -------------------------------------------------------------------------------
+
+MORPH_KEY = "GroomLab Photo Morph"
+
+
+def morph_pins(scene, scalp):
+    """The pins every lined-up photo gives (its complete pairs), in the scalp object's space: pairs on
+    the same mesh point in several photos make one pin seen from each. (views, pins) as morph_mesh
+    takes them."""
+    views, pins = [], []
+    size = max(scalp.dimensions) or 1.0
+    for cam in list_photos(scene):
+        p = cam.groomlab_photo
+        complete = complete_pairs(cam)
+        if p.rms < 0.0 or not complete or not p.width or not p.height:
+            continue  # not lined up yet: its pairs say nothing about the mesh's shape
+        pose = camera_pose(cam, scalp)
+        views.append({"rotation": pose["rotation"], "position": pose["position"], "focalPx": pose["focalPx"],
+                      "width": p.width, "height": p.height})
+        view = len(views) - 1
+        for _i, pair in complete:
+            mesh = Vector(pair.mesh)
+            pin = next((q for q in pins if (Vector(q["mesh"]) - mesh).length <= 1e-4 * size), None)
+            if pin is None:
+                pin = {"mesh": list(mesh), "sights": []}
+                pins.append(pin)
+            pin["sights"].append({"view": view, "image": list(pair.image)})
+    return views, pins
+
+
+def morph(scene, scalp, stiffness=0.0, symmetric=True):
+    """The scalp morphed to the photos (Pins: each lined-up photo's pairs) as a shape key, MORPH_KEY at 1:
+    the mesh itself is left as it is (the key's value fades it, deleting it undoes it). Returns the
+    helper's answer (targets, rmsBefore, rmsAfter in pixels)."""
+    views, pins = morph_pins(scene, scalp)
+    if not pins:
+        raise ValueError("no lined-up photo has pairs: pick pairs on a photo and Solve it first")
+    mesh = scalp.data
+    if mesh.shape_keys is None:
+        scalp.shape_key_add(name="Basis", from_mix=False)
+    basis = mesh.shape_keys.reference_key
+    points = [0.0] * (len(mesh.vertices) * 3)
+    basis.data.foreach_get("co", points)
+    r = process.call("morph_mesh", points=points, pins=pins, views=views, stiffness=float(stiffness),
+                     symmetric=bool(symmetric), axis=0)
+    key = mesh.shape_keys.key_blocks.get(MORPH_KEY) or scalp.shape_key_add(name=MORPH_KEY, from_mix=False)
+    key.data.foreach_set("co", r["points"])
+    key.value = 1.0
+    mesh.update()
+    return r
+
+
 # ---- Looking through --------------------------------------------------------------------------------
 
 def _view3d(context):
@@ -557,6 +624,66 @@ def region_of_pixel(scene, region, rv3d, cam, u, v):
     return left + u / p.width * (right - left), top - v / p.height * (top - bottom)
 
 
+def _rest_coords(scalp):
+    """The scalp's rest shape (the shape keys' Basis, else its vertices), object space."""
+    mesh = scalp.data
+    coords = [0.0] * (len(mesh.vertices) * 3)
+    if mesh.shape_keys is not None:
+        mesh.shape_keys.reference_key.data.foreach_get("co", coords)
+    else:
+        mesh.vertices.foreach_get("co", coords)
+    return coords
+
+
+def mesh_bind(context, region, rv3d, scalp, x, y):
+    """The surface under region pixel (x, y) on the shape shown: (rest point, (triangle, weights)),
+    the point on the rest shape at the same spot of the surface, or None off the mesh."""
+    from mathutils import geometry
+    from bpy_extras import view3d_utils
+    origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, (x, y))
+    direction = view3d_utils.region_2d_to_vector_3d(region, rv3d, (x, y))
+    inv = scalp.matrix_world.inverted()
+    o = inv @ origin
+    d = (inv.to_3x3() @ direction).normalized()
+    ev = scalp.evaluated_get(context.evaluated_depsgraph_get())
+    hit, location, _normal, poly = ev.ray_cast(o, d)
+    if not hit:
+        return None
+    shown = ev.data
+    if len(shown.vertices) != len(scalp.data.vertices):  # a modifier changed the topology: the point alone
+        return tuple(location), None
+    shown.calc_loop_triangles()
+    rest = _rest_coords(scalp)
+    best = None
+    for t in shown.loop_triangles:
+        if t.polygon_index != poly:
+            continue
+        a, b, c = (shown.vertices[i].co for i in t.vertices)
+        w = geometry.barycentric_transform(location, a, b, c, Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1)))
+        worst = min(w)
+        if best is None or worst > best[0]:
+            best = (worst, t, w)
+    if best is None:
+        return tuple(location), None
+    _worst, t, w = best
+    point = Vector((0.0, 0.0, 0.0))
+    for k, i in enumerate(t.vertices):
+        point += w[k] * Vector(rest[3 * i:3 * i + 3])
+    return tuple(point), (t.index, tuple(w))
+
+
+def pair_position(context, scalp, pair):
+    """A pair's mesh point on the shape shown (a morph's), object space: its surface spot, else its point."""
+    if pair.tri >= 0:
+        ev = scalp.evaluated_get(context.evaluated_depsgraph_get()).data
+        if len(ev.vertices) == len(scalp.data.vertices):
+            ev.calc_loop_triangles()
+            if pair.tri < len(ev.loop_triangles):
+                t = ev.loop_triangles[pair.tri]
+                return sum((pair.bary[k] * ev.vertices[i].co for k, i in enumerate(t.vertices)), Vector((0.0, 0.0, 0.0)))
+    return Vector(pair.mesh)
+
+
 def mesh_point(context, region, rv3d, scalp, x, y):
     """The point on the scalp under region pixel (x, y), in the scalp object's space, or None."""
     from bpy_extras import view3d_utils
@@ -591,7 +718,7 @@ def _draw_pairs():
             if q is not None:
                 marks.append((q, i, pair.has_mesh))
         if not through and pair.has_mesh:
-            world = _space(scalp) @ Vector(pair.mesh)
+            world = _space(scalp) @ pair_position(context, scalp, pair)
             q = view3d_utils.location_3d_to_region_2d(region, rv3d, world)
             if q is not None:
                 marks.append(((q.x, q.y), i, pair.has_image))
@@ -733,8 +860,33 @@ class GROOMLAB_OT_photo_remove(_Tipped, bpy.types.Operator):
         return {"FINISHED"}
 
 
+PICK_GRAB_PX = 10.0  # a press this near a pair's point drags it instead of picking a new one
+
+
+def _push_undo(message):
+    """A Blender undo step for a change made inside a modal operator (they record none of their own)."""
+    try:
+        bpy.ops.ed.undo_push(message=message)
+    except RuntimeError:
+        pass
+
+
+def _restart_pick(window, area):
+    """Pick Points again after Ctrl+Z / Ctrl+Shift+Z ended it for Blender's undo (none runs while a
+    modal operator does): picking goes on over the undone state."""
+    def again():
+        try:
+            region = next((r for r in area.regions if r.type == "WINDOW"), None)
+            with bpy.context.temp_override(window=window, area=area, region=region):
+                bpy.ops.groomlab.photo_pick("INVOKE_DEFAULT")
+        except (RuntimeError, ReferenceError, AttributeError):
+            pass
+        return None
+    bpy.app.timers.register(again, first_interval=0.05)
+
+
 class GROOMLAB_OT_photo_pick(bpy.types.Operator):
-    """Looking through the photo's camera, click a feature on the photo; in another view, click the same feature on the mesh. Pairs fill in order and draw numbered (Esc or the button again: done)"""
+    """Looking through the photo's camera, click a feature on the photo; in another view, click the same feature on the mesh. Pairs fill in order and draw numbered; drag a point to move it; Ctrl+Z undoes (Esc or the button again: done)"""
     bl_idname = "groomlab.photo_pick"
     bl_label = "Pick Points"
 
@@ -747,15 +899,57 @@ class GROOMLAB_OT_photo_pick(bpy.types.Operator):
             _picking[0] = False  # the running pick ends on its next event
             return {"FINISHED"}
         _picking[0] = True
+        self.drag = None  # (pair index, "image" | "mesh") while a point is dragged
         _show_pairs(True)
         context.window_manager.modal_handler_add(self)
-        _say(self, "Pick Points: click the photo through its camera, the mesh in another view; Esc when done")
+        _say(self, "Pick Points: click the photo through its camera, the mesh in another view; drag a point to move "
+                   "it; Esc when done")
         return {"RUNNING_MODAL"}
 
     def finish(self):
         _picking[0] = False
         _show_pairs(False)
         return {"FINISHED"}
+
+    def grab(self, scene, region, rv3d, cam, scalp, x, y, through):
+        """The pair whose point (the photo's through its camera, else the mesh's) is under (x, y)."""
+        from bpy_extras import view3d_utils
+        best, kind = None, "image" if through else "mesh"
+        for i, pair in enumerate(cam.groomlab_photo.pairs):
+            if through and pair.has_image:
+                q = region_of_pixel(scene, region, rv3d, cam, pair.image[0], pair.image[1])
+            elif not through and pair.has_mesh:
+                q = view3d_utils.location_3d_to_region_2d(region, rv3d,
+                                                          _space(scalp) @ pair_position(bpy.context, scalp, pair))
+            else:
+                continue
+            if q is None:
+                continue
+            d = math.hypot(q[0] - x, q[1] - y)
+            if d <= PICK_GRAB_PX and (best is None or d < best[0]):
+                best = (d, i)
+        return (best[1], kind) if best else None
+
+    def place(self, context, scene, region, rv3d, cam, scalp, x, y, index, kind):
+        """Pair `index`'s point of `kind` to region pixel (x, y): False off the photo or the mesh."""
+        if kind == "image":
+            uv = photo_pixel(scene, region, rv3d, cam, x, y)
+            if uv is None:
+                return False
+            cam.groomlab_photo.pairs[index].image = uv
+        else:
+            bound = mesh_bind(context, region, rv3d, scalp, x, y)
+            if bound is None:
+                return False
+            pair = cam.groomlab_photo.pairs[index]
+            pair.mesh = bound[0]
+            pair.tri, pair.bary = bound[1] if bound[1] else (-1, (0.0, 0.0, 0.0))
+        cam.groomlab_photo.pairs[index].error = -1.0
+        return True
+
+    def redraw(self, context):
+        for a in context.window.screen.areas:
+            a.tag_redraw()
 
     def modal(self, context, event):
         scene = context.scene
@@ -764,26 +958,53 @@ class GROOMLAB_OT_photo_pick(bpy.types.Operator):
             return self.finish()
         if event.type == "ESC" and event.value == "PRESS":
             return self.finish()
+        if event.type == "Z" and event.value == "PRESS" and (event.ctrl or event.oskey):
+            # Blender's undo runs only once no modal operator does: end, let it, pick on after.
+            _restart_pick(context.window, context.area)
+            self.finish()
+            return {"FINISHED", "PASS_THROUGH"}
+        from . import tool_ops, window
+        if self.drag is not None:
+            index, kind = self.drag
+            where = tool_ops.locate(context, event)
+            if event.type == "MOUSEMOVE" and where is not None:
+                region, rv3d, x, y = where
+                if index < len(cam.groomlab_photo.pairs):
+                    self.place(context, scene, region, rv3d, cam, scalp, x, y, index, kind)
+                    self.redraw(context)
+                return {"RUNNING_MODAL"}
+            if event.type == "LEFTMOUSE" and event.value == "RELEASE":
+                self.drag = None
+                sync(scalp, scene)
+                _push_undo("Move Point")
+                self.redraw(context)
+                return {"RUNNING_MODAL"}
+            return {"RUNNING_MODAL"}
         if event.type != "LEFTMOUSE" or event.value != "PRESS" or event.ctrl or event.alt:
             return {"PASS_THROUGH"}
-        from . import tool_ops, window
         if window.over(context, event):  # a click in the GroomLab window is the window's, not a pick
             return {"PASS_THROUGH"}
         where = tool_ops.locate(context, event)  # a 3D view's region, not its header, toolbar or sidebar
         if where is None:
             return {"PASS_THROUGH"}
         region, rv3d, x, y = where
-        if rv3d.view_perspective == "CAMERA" and scene.camera == cam:
+        through = rv3d.view_perspective == "CAMERA" and scene.camera == cam
+        grabbed = self.grab(scene, region, rv3d, cam, scalp, x, y, through)
+        if grabbed is not None:  # on a point: drag it
+            self.drag = grabbed
+            cam.groomlab_photo.pair_index = grabbed[0]
+            return {"RUNNING_MODAL"}
+        if through:
             uv = photo_pixel(scene, region, rv3d, cam, x, y)
             if uv is not None:
                 add_pick(cam, "image", uv)
         else:
-            hit = mesh_point(context, region, rv3d, scalp, x, y)
-            if hit is not None:
-                add_pick(cam, "mesh", hit)
+            bound = mesh_bind(context, region, rv3d, scalp, x, y)
+            if bound is not None:
+                add_pick(cam, "mesh", bound[0], bound[1])
         sync(scalp, scene)
-        for a in context.window.screen.areas:
-            a.tag_redraw()
+        _push_undo("Pick Point")
+        self.redraw(context)
         return {"RUNNING_MODAL"}
 
 
@@ -811,6 +1032,31 @@ class GROOMLAB_OT_pairs_solve(_Tipped, bpy.types.Operator):
                                                                    "" if len(bad) > 1 else "s")
         context.scene.groomlab_photos.result = text
         _say(self, text, "WARNING" if bad else "INFO")
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_photos_morph(_Tipped, bpy.types.Operator):
+    """Morph the scalp so its pinned points land on the photos (every lined-up photo's pairs), as a
+    shape key: two photos of a pin set its depth too"""
+    bl_idname = "groomlab.photos_morph"
+    bl_label = "Morph to Photos"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return active_groom(context) is not None and bool(list_photos(context.scene))
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        try:
+            s = context.scene.groomlab_photos
+            r = morph(context.scene, scalp, s.morph_stiffness, s.morph_symmetry)
+        except (ValueError, HelperError) as e:
+            return _fail(self, e)
+        text = "%s morphed to %d pin%s: %.1f px off before, %.1f px after (shape key %s)" % (
+            scalp.name, len(r["targets"]), "" if len(r["targets"]) == 1 else "s", r["rmsBefore"], r["rmsAfter"], MORPH_KEY)
+        context.scene.groomlab_photos.result = text
+        _say(self, text)
         return {"FINISHED"}
 
 
@@ -984,6 +1230,11 @@ def draw_tab(layout, context, chars):
         if p.rms >= 0.0 and not s.result:
             text += " (last solve %.2f px)" % p.rms
         _wrap(layout, text, width=chars)
+        # Morph: the scalp to the lined-up photos' pairs (KeenTools-style pins), as a shape key.
+        row = layout.row(align=True)
+        row.operator("groomlab.photos_morph", icon="SHAPEKEY_DATA")
+        row.prop(s, "morph_symmetry", toggle=True)
+        row.prop(s, "morph_stiffness", slider=True)
     # Guides from Photos (experimental): folded (Blender 4.1+'s layout panels; a heading before).
     body = layout
     if hasattr(layout, "panel"):
@@ -999,7 +1250,7 @@ def draw_tab(layout, context, chars):
 
 classes = (GroomLabPhotoPair, GroomLabPhoto, GroomLabPhotos, GROOMLAB_OT_photo_import, GROOMLAB_OT_photo_look_through,
            GROOMLAB_OT_photo_rename, GROOMLAB_OT_photo_remove, GROOMLAB_OT_photo_pick, GROOMLAB_OT_pairs_solve,
-           GROOMLAB_OT_pairs_clear, GROOMLAB_OT_pairs_delete, GROOMLAB_OT_pairs_repick, GROOMLAB_OT_photos_guides,
+           GROOMLAB_OT_photos_morph, GROOMLAB_OT_pairs_clear, GROOMLAB_OT_pairs_delete, GROOMLAB_OT_pairs_repick, GROOMLAB_OT_photos_guides,
            GROOMLAB_UL_photos, GROOMLAB_UL_photo_pairs)
 
 

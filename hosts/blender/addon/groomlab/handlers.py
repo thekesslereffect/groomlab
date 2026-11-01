@@ -106,6 +106,15 @@ def subscribe_active():
 def on_undo(*args):
     groom.forget_cache()
     groom.invalidate_all()
+    # The photos (pairs, cameras) as the undo left them, into the groom's own copy of them.
+    from . import photos
+    from .ops import active_groom
+    try:
+        scalp = active_groom(bpy.context)
+        if scalp is not None and photos.list_photos(bpy.context.scene):
+            photos.sync(scalp)
+    except (AttributeError, ReferenceError):
+        pass
 
 
 @persistent
