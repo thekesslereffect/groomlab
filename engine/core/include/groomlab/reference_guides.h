@@ -323,8 +323,9 @@ struct ReferenceGuidesResult {
     double seconds = 0.0;
 };
 
-// Whether the scalp is symmetric in topology (its mirror pairs most vertices: ScalpMirror), as the
-// brushes' Topology symmetry needs.
+// Whether the scalp is symmetric: in topology (its mirror pairs most vertices: ScalpMirror), or in
+// shape (nearly all its points mirrored across its middle land on its surface: a sculpted or morphed
+// head, the mirror's partners then its nearest spots).
 bool scalpLooksSymmetric(const ScalpMesh& scalp);
 
 ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vector<ReferenceView>& views,
