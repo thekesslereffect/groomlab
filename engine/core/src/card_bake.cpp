@@ -36,6 +36,14 @@ using detail::ColorCache;
 
 namespace {
 
+// Each RGB triple of `rgb` by `m` (CardBakeSettings::colorToRec709).
+void applyColorMatrix(std::vector<float>& rgb, const ColorMatrix& m) {
+    parallelFor(0, rgb.size() / 3, [&](std::size_t p) {
+        const float r = rgb[p * 3], g = rgb[p * 3 + 1], b = rgb[p * 3 + 2];
+        for (std::size_t i = 0; i < 3; ++i) rgb[p * 3 + i] = m[i * 3] * r + m[i * 3 + 1] * g + m[i * 3 + 2] * b;
+    }, 4096);
+}
+
 float linearToSrgb(float x) {
     x = std::clamp(x, 0.0f, 1.0f);
     return x <= 0.0031308f ? 12.92f * x : 1.055f * pm::pow(x, 1.0f / 2.4f) - 0.055f;
@@ -174,7 +182,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
     const DensityGrid grid(settings.occlusion > 0.0f ? cloud : std::vector<Vec3f>{});
     cloud.clear();
     cloud.shrink_to_fit();
-    const ColorCache colorCache(cards.cards, &strands, settings.color);
+    const ColorCache colorCache(cards.cards, &strands, settings.color, cards.colorLook);
     // Whether each source set has real widths (any not 1), once per set, not per texture.
     std::map<const StrandSet*, bool> hasRealWidths;
     for (const std::size_t c : owners) {
@@ -475,6 +483,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
     t.tangent = std::move(b.tangent);
     t.normal = std::move(b.normal);
     t.color = std::move(b.color);
+    if (settings.colorToRec709 != kIdentityColorMatrix) applyColorMatrix(t.color, settings.colorToRec709);
     return t;
 }
 
@@ -559,7 +568,7 @@ ScalpTextures bakeScalpTextures(const StrandSet& strands, const ScalpMesh& scalp
     const bool realWidths = !strands.widths().empty() &&
                             std::any_of(strands.widths().begin(), strands.widths().end(), [](float x) { return x != 1.0f; });
     const float fallbackWidth = settings.strandWidth > 0.0f ? settings.strandWidth : extent / 3000.0f;
-    const StrandColors colors = colorsOf(strands, settings.color);
+    const StrandColors colors = colorsOf(strands, settings.color);  // (as the cards shade: CardColorLook::Shaded)
 
     // Each strand's stretch near the skin, in UV pixels: (x, y, radius, height 0 skin .. 1 reach).
     struct Dot {
@@ -695,6 +704,13 @@ ScalpTextures bakeScalpTextures(const StrandSet& strands, const ScalpMesh& scalp
     }
 
     auto to8 = [](float x) { return static_cast<std::uint8_t>(std::lround(std::clamp(x, 0.0f, 1.0f) * 255.0f)); };
+    std::array<float, 3> fallback = settings.color;
+    if (settings.colorToRec709 != kIdentityColorMatrix) {
+        applyColorMatrix(rgb, settings.colorToRec709);
+        std::vector<float> f(fallback.begin(), fallback.end());
+        applyColorMatrix(f, settings.colorToRec709);
+        fallback = {f[0], f[1], f[2]};
+    }
     t.color.resize(pixels * 3);
     t.coverage.resize(pixels);
     const std::size_t rowPixels = static_cast<std::size_t>(size);
@@ -702,7 +718,7 @@ ScalpTextures bakeScalpTextures(const StrandSet& strands, const ScalpMesh& scalp
         for (std::size_t p = y * rowPixels; p < (y + 1) * rowPixels; ++p) {
             t.coverage[p] = to8(1.0f - open[p]);
             for (int k = 0; k < 3; ++k) {
-                const float c = weight[p] > 0.0f ? rgb[p * 3 + static_cast<std::size_t>(k)] : settings.color[static_cast<std::size_t>(k)];
+                const float c = weight[p] > 0.0f ? rgb[p * 3 + static_cast<std::size_t>(k)] : fallback[static_cast<std::size_t>(k)];
                 t.color[p * 3 + static_cast<std::size_t>(k)] = to8(linearToSrgb(c));
             }
         }

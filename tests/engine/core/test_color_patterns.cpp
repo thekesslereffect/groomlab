@@ -922,8 +922,8 @@ TEST(Cards, BandsBakeIntoTheColorMapAndTheIridescenceIntoItsAlpha) {
     const CardTextures t = bakeCardTextures(*s, mesh, bake);
     // The bands bake into the Color map where they are along the strands (the Attribute map's
     // coordU says where): the band's pigment in the middle, the hair's at the root.
-    // (The Color map holds the hair's appearance: hairAppearanceColor.)
-    const Rgb base = hairAppearanceColor(melaninColor(0.7f, 0.1f)), band = hairAppearanceColor(melaninColor(0.08f, 0.6f));
+    // (The Color map holds the hair as the viewport shades it: hairShadedColor.)
+    const Rgb base = hairShadedColor(melaninColor(0.7f, 0.1f)), band = hairShadedColor(melaninColor(0.08f, 0.6f));
     double bandSum = 0.0, rootSum = 0.0, bandCount = 0.0, rootCount = 0.0;
     for (std::size_t p = 0; p < t.coverage.size(); ++p) {
         if (t.coverage[p] < 200) continue;
@@ -993,7 +993,7 @@ TEST(Cards, AFeathersBarsBakeOntoItsVaneLaidFlat) {
     const CardTextures t = bakeCardTextures(*colored, mesh, bake);
     const CardMesh::Card& card = mesh.cards[0];
     const float middle = 0.5f * (card.cell[0] + card.cell[2]) * 256.0f;
-    const float white = toSrgb(melaninColor(0.0f, 0.0f)[1]) * 255.0f;
+    const float white = toSrgb(hairShadedColor(melaninColor(0.0f, 0.0f))[1]) * 255.0f;  // (the bake's: shaded)
     int whiteHalves[2] = {0, 0}, covered[2] = {0, 0};
     for (int y = 0; y < 256; ++y) {
         for (int x = 0; x < 256; ++x) {

@@ -126,15 +126,18 @@ std::array<float, 2> cardIridescence(const CardMesh::Card& card, const StrandSet
 // (Card::colors over Card::textureColors), per channel, within 0..kCardTintMax; 1 without them.
 std::array<float, 3> cardTint(const CardMesh::Card& card, float along);
 
-StrandColors colorsOf(const StrandSet& s, const std::array<float, 3>& fallback);
+// The strands' colors as the cards hold them (`look`: shaded as the viewport draws the hair, or
+// the base color).
+StrandColors colorsOf(const StrandSet& s, const std::array<float, 3>& fallback, CardColorLook look = CardColorLook::Shaded);
 
 // The colors of every set the cards were made from, computed once each.
 class ColorCache {
 public:
-    ColorCache(const std::vector<CardMesh::Card>& cards, const StrandSet* strands, const std::array<float, 3>& fallback) {
-        if (strands) colors_.emplace(strands, colorsOf(*strands, fallback));
+    ColorCache(const std::vector<CardMesh::Card>& cards, const StrandSet* strands, const std::array<float, 3>& fallback,
+               CardColorLook look = CardColorLook::Shaded) {
+        if (strands) colors_.emplace(strands, colorsOf(*strands, fallback, look));
         for (const CardMesh::Card& c : cards) {
-            if (c.source && !colors_.count(c.source.get())) colors_.emplace(c.source.get(), colorsOf(*c.source, fallback));
+            if (c.source && !colors_.count(c.source.get())) colors_.emplace(c.source.get(), colorsOf(*c.source, fallback, look));
         }
     }
     const StrandColors& of(const StrandSet& s) const {

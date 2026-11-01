@@ -13,6 +13,7 @@
 #include "groomlab/curve.h"
 #include "groomlab/export_view.h"
 #include "groomlab/frames.h"
+#include "groomlab/hair_color.h"
 #include "groomlab/parallel.h"
 #include "groomlab/point_index.h"
 #include "groomlab/random.h"
@@ -232,12 +233,17 @@ CardPoint projectOntoCard(const CardMesh::Card& cardIn, const Vec3f& p, int& seg
     return out;
 }
 
-StrandColors colorsOf(const StrandSet& s, const std::array<float, 3>& fallback) {
+StrandColors colorsOf(const StrandSet& s, const std::array<float, 3>& fallback, CardColorLook look) {
     StrandColors c;
-    // The cards' color maps hold the hair's appearance (a card is matte in an engine; Maya's card
-    // hair shading turns it back into the base color: hairBaseOfAppearance).
-    c.colors = strandAppearanceColors(s);
-    c.points = pointAppearanceColors(s);
+    // The cards' color maps hold the hair shaded as the viewport draws it (a card is matte in an
+    // engine; Maya's card hair shading turns it back into the base color: hairBaseOfShaded), or the
+    // base color itself for a hair shader.
+    c.colors = strandColors(s);
+    c.points = pointColors(s);
+    if (look == CardColorLook::Shaded) {
+        for (std::array<float, 3>& rgb : c.colors) rgb = hairShadedColor(rgb);
+        for (std::array<float, 3>& rgb : c.points) rgb = hairShadedColor(rgb);
+    }
     const std::vector<float>* iridescence = s.pointChannel(kIridescenceChannel);
     if (iridescence && iridescence->size() == s.pointCount()) c.iridescence = *iridescence;
     c.fallback = fallback;
@@ -1516,7 +1522,7 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
         separateCards(out, settings.separation, settings.featherSeparation, settings.separationIterations);
     }
     // Each card's own strands' colors, root to tip: its tint over the texture it shares.
-    const detail::StrandColors colors = detail::colorsOf(s, CardBakeSettings{}.color);
+    const detail::StrandColors colors = detail::colorsOf(s, CardBakeSettings{}.color, settings.colorLook);
     parallelFor(0, out.size(), [&](std::size_t c) {
         out[c].colors = detail::cardColors(out[c], s, colors);
         out[c].iridescence = detail::cardIridescence(out[c], s, colors);
@@ -1562,6 +1568,7 @@ std::vector<float> cardFitDistances(const StrandSet& s, const CardMesh& cards, i
 CardMesh buildCards(const StrandSet& s, const ScalpMesh* scalp, const CardSettings& settings) {
     CardMesh mesh;
     mesh.cards = makeCards(s, scalp, settings);
+    mesh.colorLook = settings.colorLook;
     layoutCards(mesh, settings.padding);
     return mesh;
 }

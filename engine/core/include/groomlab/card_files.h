@@ -80,13 +80,15 @@ struct CardBake {
     std::shared_ptr<const CardMaps> maps;
 };
 // Combines the card layers of `strands` (combineCardLayers), lays them out and bakes them at
-// `resolution` (0: the Cards nodes' atlasSize, else 2048) with the occlusion strength. Throws
-// std::runtime_error without cards.
-CardBake bakeCardsInMemory(StrandsPtr strands, MeshPtr scalp, int resolution = 0, float occlusion = 1.0f);
+// `resolution` (0: the Cards nodes' atlasSize, else 2048) with the occlusion strength, colors
+// by `colorToRec709` (CardBakeSettings). Throws std::runtime_error without cards.
+CardBake bakeCardsInMemory(StrandsPtr strands, MeshPtr scalp, int resolution = 0, float occlusion = 1.0f,
+                           const ColorMatrix& colorToRec709 = kIdentityColorMatrix);
 // The same for a map export (card_maps.h): the maps at full precision in `maps`, at the export's
 // resolution (0: the Cards nodes' atlasSize, else 2048; at most 8192), padding and supersampling
 // (baked that many times bigger, then brought down).
-CardBake bakeCardMapsInMemory(StrandsPtr strands, MeshPtr scalp, const CardMapExport& settings, float occlusion = 1.0f);
+CardBake bakeCardMapsInMemory(StrandsPtr strands, MeshPtr scalp, const CardMapExport& settings, float occlusion = 1.0f,
+                              const ColorMatrix& colorToRec709 = kIdentityColorMatrix);
 // The resolution an export bakes at (settings.resolution, else the cards' atlasSize, else 2048;
 // 16 to 8192).
 int cardMapResolution(const CardMesh& cards, const CardMapExport& settings);

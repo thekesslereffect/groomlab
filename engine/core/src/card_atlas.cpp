@@ -212,6 +212,7 @@ CardMesh combineCardLayers(const std::vector<std::shared_ptr<const CardMesh>>& l
             card.node = static_cast<int>(it - out.nodes.begin());
             out.cards.push_back(std::move(card));
         }
+        if (first) out.colorLook = layer->colorLook;  // one bake for them all: the first node's
         out.padding = first ? layer->padding : std::min(out.padding, layer->padding);
         out.atlasSize = std::max(out.atlasSize, layer->atlasSize);
         out.thinnestStrand = first ? layer->thinnestStrand : std::max(out.thinnestStrand, layer->thinnestStrand);

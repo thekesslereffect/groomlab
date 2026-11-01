@@ -113,6 +113,7 @@ struct CardGltfSettings {
     float alphaCutoff = 0.5f;
     float roughness = 0.5f;        // the hair look's roughness
     float specular = 0.3f;         // the hair look's specular (kept in the material's extras)
+    std::array<float, 9> colorToRec709 = {1, 0, 0, 0, 1, 0, 0, 0, 1};  // the hair cap's bake (ScalpBakeSettings::colorToRec709)
 };
 
 // Adds the cards as one mesh (one primitive) with a material and two
