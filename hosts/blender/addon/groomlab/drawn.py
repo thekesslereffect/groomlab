@@ -178,10 +178,6 @@ class DrawnLayout(object):
     def template_icon_view(self, data, property, show_labels=False, scale=6.0, scale_popup=5.0):
         self._item("icon_view", data=data, prop=property)
 
-    def template_curve_mapping(self, data, property, type="NONE", levels=False, brush=False, use_negative_slope=False,
-                               show_tone=False):
-        self._item("curve", data=data, prop=property)
-
     def groomlab_profile_editor(self, context, tools_props):
         """The tube cross-section editor (the window's own: palette.draw_profile asks for it here)."""
         self._item("profile", tools=tools_props)
@@ -237,19 +233,13 @@ def draw_panel(cls, layout, context):
 
 # ---- Operators and menus --------------------------------------------------------------------------
 
-def run_operator(idname, props, call_context="INVOKE_DEFAULT", override=None):
-    """bpy.ops.<idname>(call_context, **props), in override's context when one is given (a node's
-    actions run in the Graph Editor showing its graph: they ask the node editor for their tree)."""
+def run_operator(idname, props, call_context="INVOKE_DEFAULT"):
+    """bpy.ops.<idname>(call_context, **props)."""
     module, name = idname.split(".", 1)
-    op = getattr(getattr(bpy.ops, module), name)
-    where = override() if callable(override) else override
-    if where:
-        with bpy.context.temp_override(**where):
-            return op(call_context, **props)
-    return op(call_context, **props)
+    return getattr(getattr(bpy.ops, module), name)(call_context, **props)
 
 
-def menu_entries(name, context, override=None):
+def menu_entries(name, context):
     """A Menu class's entries (its draw run against a DrawnLayout) for editors.PopupMenu, or None
     when it draws something a drawn menu cannot show (Blender's own popup opens instead)."""
     cls = getattr(bpy.types, name, None)
@@ -282,7 +272,7 @@ def menu_entries(name, context, override=None):
                 entries.append({"kind": "op", "text": text, "icon": a.get("icon"), "enabled": enabled,
                                 "checked": bool(a.get("depress")),
                                 "run": lambda ctx, i=idname, p=props, cc=a.get("context"): run_operator(
-                                    i, p, cc or "INVOKE_DEFAULT", override)})
+                                    i, p, cc or "INVOKE_DEFAULT")})
             elif kind == "prop":
                 rna = _rna(a["data"], a["prop"])
                 if rna is None:
@@ -300,7 +290,7 @@ def menu_entries(name, context, override=None):
                     return False
             elif kind == "menu":
                 entries.append({"kind": "sub", "text": a.get("text") or "", "icon": a.get("icon"), "enabled": enabled,
-                                "sub": lambda n=a["menu"]: menu_entries(n, bpy.context, override)})
+                                "sub": lambda n=a["menu"]: menu_entries(n, bpy.context)})
             elif kind == "enum_choice":
                 prop = uikit.Prop(a["data"], a["prop"])
                 entries.append({"kind": "check", "text": a.get("text") or a["value"], "enabled": enabled,
@@ -322,12 +312,12 @@ def menu_entries(name, context, override=None):
 class MenuButton(uikit.Button):
     """A menu's button: a press opens it drawn (editors.PopupMenu), else as Blender's own popup."""
 
-    def __init__(self, wid, rect, text, icon, menu_name, override=None):
+    def __init__(self, wid, rect, text, icon, menu_name):
         super().__init__(wid, rect, text, None, icon, flat=not text, align="left" if text else "center")
-        self.menu_name, self.override = menu_name, override
+        self.menu_name = menu_name
 
     def press(self, win, context, event):
-        entries = menu_entries(self.menu_name, context, self.override)
+        entries = menu_entries(self.menu_name, context)
         if not entries:
             bpy.ops.wm.call_menu(name=self.menu_name)
             return None
@@ -380,8 +370,6 @@ class Placer(object):
             return 54 * self.s  # a tool tile: its icon over its name (the app's 56 x 54)
         if kind == "icon_view":
             return 44 * self.s
-        if kind == "curve":
-            return 150 * self.s
         if kind == "profile":
             return min(200 * self.s, self.ui.w) + self.row_h + 5 * self.s
         if kind == "list":
@@ -584,7 +572,7 @@ class Placer(object):
             text = a.get("text") or ""
             icon = a.get("icon") or ("ui_chevron_down" if not text else "")
             if kind == "menu" and name:
-                widget = MenuButton(self.wid(kind, name), rect, text, icon or None, name, self.actions.get("op_context"))
+                widget = MenuButton(self.wid(kind, name), rect, text, icon or None, name)
             else:
                 call = (lambda ctx, n=name: bpy.ops.wm.call_panel(name=n)) if name else (lambda ctx: None)
                 widget = uikit.Button(self.wid(kind, name), rect, text, call, icon or None, flat=not text,
@@ -602,8 +590,6 @@ class Placer(object):
             prop = uikit.Prop(a["data"], a["prop"])
             widget = editors.IconPicker(self.wid("icons", a["prop"]), rect, prop, prop.items(icons=True),
                                         self.actions["preview"])
-        elif kind == "curve":
-            widget = editors.CurveEditor(self.wid("curve", a["prop"]), rect, a["data"], a["prop"])
         elif kind == "profile":
             self.profile(item, rect, st)
         if widget is not None:
@@ -619,10 +605,8 @@ class Placer(object):
         text = a["text"] if a["text"] is not None else self.op_label(idname)
         context = a.get("context") or "INVOKE_DEFAULT"
 
-        override = self.actions.get("op_context")
-
         def run(ctx, idname=idname, props=dict(props), context=context):
-            run_operator(idname, props, context, override)
+            run_operator(idname, props, context)
 
         def tip(idname=idname, props=dict(props)):
             return operator_tooltip(idname, props)

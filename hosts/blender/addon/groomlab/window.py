@@ -50,8 +50,7 @@ def save_settings():
         return
     try:
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({"shown": state.shown, "right": state.right, "top": state.top, "folds": state.folds,
-                       "page": state.page}, f)
+            json.dump({"shown": state.shown, "right": state.right, "top": state.top, "folds": state.folds}, f)
     except OSError:
         pass
 
@@ -66,7 +65,6 @@ def load_settings():
     state.right = max(0.0, float(data.get("right", 0.0)))
     state.top = max(0.0, float(data.get("top", 0.0)))
     state.folds.update({str(k): bool(v) for k, v in (data.get("folds") or {}).items()})
-    state.page = data.get("page") if data.get("page") in ("tools", "node") else "tools"
     if data.get("shown") and not bpy.app.background:
         state.shown, state.area = True, 0  # (the first 3D view that draws takes it)
 
@@ -176,114 +174,26 @@ ACTIONS = {
 }
 
 
-PAGES = [("tools", "Groom Tools", "The Groom Tools: tools, maps, correctives, photos and their settings"),
-         ("node", "Node", "The node selected in the Graph Editor: its settings, as Maya's and the app's side panel")]
-
-
-def _page_choice():
-    def set_page(page):
-        state.page = page
-        state.scroll = 0.0
-        save_settings()
-    return uikit.Choice("", PAGES, lambda: state.page, set_page)
-
-
-def _groom_tree(context):
-    from . import graph_tree
-    from .ops import active_groom
-    return graph_tree.tree_of(active_groom(context))
-
-
-def _graph_editor_context():
-    """A Graph Editor showing the current groom's graph, as a context override (its window, area
-    and region), for a node's actions: they ask the node editor for their tree. None: none is open."""
-    tree = _groom_tree(bpy.context)
-    for window in bpy.context.window_manager.windows:
-        for area in window.screen.areas:
-            space = area.spaces.active
-            if area.type == "NODE_EDITOR" and getattr(space, "edit_tree", None) == tree and tree is not None:
-                region = next((r for r in area.regions if r.type == "WINDOW"), None)
-                return {"window": window, "area": area, "region": region, "space_data": space}
-    return None
-
-
-NODE_ACTIONS = dict(ACTIONS, op_context=_graph_editor_context)
-
-
-def _node_content(rec, context):
-    """The node page: the groom's graph's selected node, as the Graph Editor's sidebar draws it."""
-    from . import graph_editor
-    tree = _groom_tree(context)
-    if tree is None:
-        rec.label(text="No groom here yet")
-        return
-    if not graph_editor.check_tree(tree):
-        rec.label(text="Reading the groom's graph...", icon="TIME")
-        return
-    node = tree.nodes.active
-    if node is not None and node.bl_idname == "NodeFrame" and node.select:
-        graph_editor.draw_backdrop_panel(rec, context, node)
-        return
-    if node is None or not graph_editor.ours(node) or not node.select:
-        graph_editor.wrap(rec, "Select a node in the Graph Editor to edit it here.")
-        rec.operator("groomlab.graph_open", icon="NODE")
-        return
-    graph_editor.draw_node_panel(rec, context, node)
-    if _graph_editor_context() is None:
-        rec.separator()
-        graph_editor.wrap(rec, "Some of the node's actions run in the Graph Editor: open it to use them.",
-                          icon="INFO")
-
-
 def content(layout, context):
-    """Groom Tools (palette.py) and its sub-panels, or the selected node, drawn into the window."""
+    """Groom Tools (palette.py) and its sub-panels, drawn into the window."""
     rec = drawn.DrawnLayout("column")
     space = context.space_data
     if space is not None and not space.show_gizmo:
         rec.label(text="Turn on the viewport's Gizmos to use this window", icon="ERROR")
     drawn.set_folds(state.folds)
     palette.CHARS[0] = max(20, int(layout.w / (6.4 * layout.s)))  # wrapped hints at the window's width
-    actions = ACTIONS
     try:
-        if state.page == "node":
-            _node_content(rec, context)
-            actions = NODE_ACTIONS
-        else:
-            drawn.draw_panel(palette.VIEW3D_PT_groomlab_tools, rec, context)
-            for cls in (palette.VIEW3D_PT_groomlab_tools_sculpting, palette.VIEW3D_PT_groomlab_tools_display):
-                if cls.poll(context):
-                    head, body = rec.panel("sub:" + cls.__name__, default_closed=True)
-                    head.label(text=cls.bl_label)
-                    if body is not None:
-                        drawn.draw_panel(cls, body, context)
+        drawn.draw_panel(palette.VIEW3D_PT_groomlab_tools, rec, context)
+        for cls in (palette.VIEW3D_PT_groomlab_tools_sculpting, palette.VIEW3D_PT_groomlab_tools_display):
+            if cls.poll(context):
+                head, body = rec.panel("sub:" + cls.__name__, default_closed=True)
+                head.label(text=cls.bl_label)
+                if body is not None:
+                    drawn.draw_panel(cls, body, context)
     finally:
         palette.CHARS[0] = None
     _list_areas.clear()
-    # The pages' switch on top, then the page.
-    choice = _page_choice()
-    x, w, h, s = layout.x, layout.w, layout.row, layout.s
-    for i, (ident, label, tip) in enumerate(PAGES):
-        seg = uikit.Segment("page:%s" % ident, (x + i * (w / 2.0 + 1 * s), layout.y - h, w / 2.0 - 1 * s, h), choice,
-                            ident, label, tooltip=tip)
-        layout.widgets.append(seg)
-    layout.y -= h + 8 * s
-    drawn.place(rec, layout, context, actions)
-
-
-_last_node = [None]
-
-
-def _watch_node():
-    """The node page follows the Graph Editor's selection (a node picked there redraws the window)."""
-    if not state.shown or state.page != "node":
-        return 0.5
-    tree = _groom_tree(bpy.context)
-    node = tree.nodes.active if tree is not None else None
-    key = (node.name, node.select) if node is not None else None
-    if key != _last_node[0]:
-        _last_node[0] = key
-        _redraw()
-    return 0.3
+    drawn.place(rec, layout, context, ACTIONS)
 
 
 def _window(context, region=None, reuse=False):
@@ -608,8 +518,6 @@ def register():
         key, mods = TOGGLE_KEY
         _keymaps.append((km, km.keymap_items.new(GROOMLAB_OT_window_toggle.bl_idname, key, "PRESS", **mods)))
     load_settings()
-    if not bpy.app.background:
-        bpy.app.timers.register(_watch_node, first_interval=1.0, persistent=True)
 
 
 def unregister():
@@ -622,8 +530,6 @@ def unregister():
         except (ReferenceError, RuntimeError):
             pass
     _keymaps.clear()
-    if bpy.app.timers.is_registered(_watch_node):
-        bpy.app.timers.unregister(_watch_node)
     if bpy.app.timers.is_registered(_tooltip_due):
         bpy.app.timers.unregister(_tooltip_due)
     for c in reversed(CLASSES):

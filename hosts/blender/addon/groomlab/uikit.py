@@ -1295,7 +1295,6 @@ class WindowState:
         self.mouse = (-1, -1)
         self.interaction = None
         self.folds = {}     # folding sections open (True) or folded, by id
-        self.page = "tools"  # what the window shows: Groom Tools ("tools") or the selected node ("node")
         self.lists = {}     # lists' scroll (first row shown), by id
 
 
