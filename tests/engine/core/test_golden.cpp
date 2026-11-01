@@ -199,6 +199,22 @@ std::vector<Case> cases() {
             {"name": "op", "type": "Length", "params": {}, "paramInputs": ["keep"]})",
          link("noise", "soft", "in") + "," + link("ramp", "both", "a") + "," + link("soft", "both", "b") + "," +
              link("interp", "op", "strands") + "," + link("both", "op", "keep")},
+        // A stack on Length's keep: a ramp, noise screened over half of it, and the top multiplied down.
+        {"LayersDrivenLength", "op",
+         R"({"name": "ramp", "type": "Expression", "params": {"expression": "u"}},
+            {"name": "noise", "type": "FieldNoise", "params": {"frequency": 4.0, "seed": 5}},
+            {"name": "stack", "type": "Layers", "params": {"layers": 3, "layer1": 1.0, "layer2Mode": "screen",
+             "layer2Opacity": 0.5, "layer3": 0.8, "layer3Mode": "multiply"}, "paramInputs": ["layer1", "layer2"]},
+            {"name": "op", "type": "Length", "params": {}, "paramInputs": ["keep"]})",
+         link("ramp", "stack", "layer1") + "," + link("noise", "stack", "layer2") + "," + link("interp", "op", "strands") +
+             "," + link("stack", "op", "keep")},
+        // A color stack on HairColor's color: brown, red multiplied in where a ramp masks it.
+        {"ColorLayersDrivenColor", "op",
+         R"({"name": "ramp", "type": "Expression", "params": {"expression": "u"}},
+            {"name": "stack", "type": "ColorLayers", "params": {"layer1": [0.4, 0.25, 0.15], "layer2": [1.0, 0.3, 0.2],
+             "layer2Mode": "multiply"}, "paramInputs": ["layer2Opacity"]},
+            {"name": "op", "type": "HairColor", "params": {"mode": "color", "color": [1.0, 1.0, 1.0]}, "paramInputs": ["color"]})",
+         link("ramp", "stack", "layer2Opacity") + "," + link("interp", "op", "strands") + "," + link("stack", "op", "color")},
         // Tapered strands: instances scale with the width where they sit (scaleByWidth, on by default).
         {"Instance", "op",
          R"({"name": "taper", "type": "Width", "params": {"width": 0.01, "profile": [[0, 1], [1, 0.25]]}},

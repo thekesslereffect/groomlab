@@ -72,6 +72,8 @@ see Per-point maps under [Maps](looks-and-maps.md#maps)).
 | `FieldNoise` | Smooth 3D noise over the scalp, from `min` to `max` (`frequency`, `octaves`, `offset`, `seed`) |
 | `FieldRemap` | A field reshaped: `[inMin, inMax]` through a `curve` to `[outMin, outMax]` (inMin above inMax flips the input) |
 | `FieldCombine` | Two fields, or a field and a number `b`: multiply, add, subtract, min, max or mix |
+| `Layers` | A stack of up to 8 layers (`layers`; layer 1 at the bottom), each composited on the ones below it by `layerNMode` (normal, multiply, add, subtract, screen, overlay, darken, lighten, difference) at `layerNOpacity`; `layerNOn` leaves a layer out. A layer's value `layerN` and its opacity are mappable: expose them to link a Map, noise or expression (a mask on the opacity shows the layer where it is painted). Layer 1 is 0 by default and the rest 1, so a mask on `layer2Opacity` gives the mask |
+| `ColorLayers` | The same stack of colors (`layerN` a color; a Map's `rgb` linked gives the map's color, times it), each channel composited alike. Its output `rgb` feeds color params (HairColor's `color`, `dye`, `tipColor`...) and gives its luminance to number params |
 | `Control` | A value set on the groom: the keyable attribute `ctl_<name>` (channel box, animatable), `default` until set. Right-click a mappable param and choose **Drive with Slider**, or `groomlab.add_control(groom, node, param)` |
 
 One texture or noise can drive many params, each reshaped by its own `FieldRemap`. On Scatter

@@ -334,6 +334,17 @@ std::array<float, 3> ColorField::atPoint(const StrandSet& strands, std::size_t s
     return {constant_[0] * f[0], constant_[1] * f[1], constant_[2] * f[2]};
 }
 
+std::array<float, 3> ColorField::atRoot(const StrandRoot& root) const {
+    if (!field_) return constant_;
+    const std::array<float, 3> f = field_->colorAtRoot(root);
+    return {constant_[0] * f[0], constant_[1] * f[1], constant_[2] * f[2]};
+}
+
+float ColorField::maximum() const {
+    const float c = std::max({constant_[0], constant_[1], constant_[2]});
+    return field_ ? c * field_->maximum() : c;
+}
+
 VectorField::VectorField(const ParamSet& params, const std::string& name, const ScalpMesh* scalp)
     : constant_(params.getVec3(name)), scalp_(scalp), param_(name) {
     if (!params.has(name)) return;

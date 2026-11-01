@@ -20,7 +20,7 @@ const categories: { name: string; cat: Category; nodes: string[] }[] = [
   { name: 'Feathers', cat: 'Feathers', nodes: ['Propagate', 'Plume', 'Split'] },
   { name: 'Color', cat: 'Color', nodes: ['HairColor', 'Bands', 'FeatherColor', 'RenderData'] },
   { name: 'Convert', cat: 'Convert', nodes: ['ToGuides', 'ToStrands', 'StrandMesh'] },
-  { name: 'Fields & Curves', cat: 'Fields', nodes: ['Map', 'Expression', 'Control', 'FieldNoise', 'FieldRemap', 'FieldCombine', 'Curve'] },
+  { name: 'Fields & Curves', cat: 'Fields', nodes: ['Map', 'Expression', 'Control', 'FieldNoise', 'FieldRemap', 'FieldCombine', 'Layers', 'ColorLayers', 'Curve'] },
   { name: 'Utility', cat: 'Utility', nodes: ['Group', 'Blend', 'Attribute', 'Merge', 'Switch', 'Output'] },
   { name: 'Games', cat: 'Games', nodes: ['Cards'] },
 ];

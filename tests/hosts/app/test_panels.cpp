@@ -2385,6 +2385,41 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     EXPECT_EQ(doc->undoText(), "Undo unfreeze all");
 }
 
+TEST(AppPanels, ParamPanelShowsTheLayersAStackHolds) {
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    ParamPanel panel;
+    panel.setDocument(doc.get());
+    std::string stack;
+    ASSERT_EQ(doc->addNode("ColorLayers", 0.0f, 0.0f, &stack), "");
+    panel.showNode(stack);
+    // Two layers by default, each under its own header; the rest hidden, headers too.
+    EXPECT_EQ(panel.sectionOf("layer2Mode"), "Layer 2");
+    for (const char* shown : {"layer2On", "layer2Mode", "layer2", "layer2Opacity", "layer1", "layer1Opacity"}) {
+        EXPECT_TRUE(panel.rowShown(shown)) << shown;
+    }
+    EXPECT_FALSE(panel.rowShown("layer3"));
+    auto* third = panel.findChild<QAbstractButton*>(QStringLiteral("paramSection_Layer 3"));
+    ASSERT_TRUE(third);
+    EXPECT_TRUE(third->isHidden());
+    // One more on top.
+    ASSERT_EQ(doc->setParam(stack, "layers", 3, true), "");
+    panel.rebuildNow();
+    EXPECT_TRUE(panel.rowShown("layer3Mode"));
+    EXPECT_FALSE(panel.findChild<QAbstractButton*>(QStringLiteral("paramSection_Layer 3"))->isHidden());
+    EXPECT_FALSE(panel.rowShown("layer4"));
+    // In a dock shorter than the stack, each header keeps its line (a form without wrapped text is
+    // laid out at its least height: a header that could shrink went to a sliver).
+    panel.resize(360, 300);
+    panel.show();
+    QApplication::processEvents();
+    for (const char* section : {"paramSection_Layer 3", "paramSection_Layer 2", "paramSection_Layer 1"}) {
+        auto* header = panel.findChild<QAbstractButton*>(QString::fromLatin1(section));
+        ASSERT_TRUE(header);
+        EXPECT_GE(header->height(), header->fontMetrics().height() + 6) << section;
+    }
+}
+
 TEST(AppPanels, ParamPanelGroupsFoldsShowWhenUnitsAndUpgrade) {
     // Registered before the document reads the specs (and unregistered at the end).
     OperatorRegistry::instance().registerType("TestPanelVersioned", {}, [] { return std::make_unique<VersionedPanelOp>(); });

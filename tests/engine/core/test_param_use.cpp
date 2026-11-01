@@ -77,6 +77,8 @@ const std::map<std::string, ParamValue>& fixtureValues() {
     static const std::map<std::string, ParamValue> list = {
         {"Group.guideGroup", std::string("primary")},  // the reference hierarchy's top group
         {"Plume.rankChannel", std::string("featherId")},
+        {"Layers.layers", std::int64_t{8}},  // every layer in the stack, so each layer's params show
+        {"ColorLayers.layers", std::int64_t{8}},
     };
     return list;
 }

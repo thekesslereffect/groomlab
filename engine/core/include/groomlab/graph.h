@@ -118,6 +118,11 @@ public:
         const float v = atPoint(strands, strand, point);
         return {v, v, v};
     }
+    // The color at a scalp point, before strands exist (a ColorLayers node's layers read there).
+    virtual std::array<float, 3> colorAtRoot(const StrandRoot& root) const {
+        const float v = atRoot(root);
+        return {v, v, v};
+    }
 };
 using FieldPtr = std::shared_ptr<const FieldValue>;
 using CurvePtr = std::shared_ptr<const Ramp>;
