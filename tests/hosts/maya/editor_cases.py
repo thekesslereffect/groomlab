@@ -3225,6 +3225,7 @@ class TransferWindowTest(unittest.TestCase):
 
     def setUp(self):
         cmds.file(new=True, force=True)
+        cmds.undoInfo(state=True, infinity=True)  # (its transfer is checked as one undo step)
         self.scalp = cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20, name="head")[0]
         self.groom = groomlab.create_groom(self.scalp)
         groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 2, 0)])])

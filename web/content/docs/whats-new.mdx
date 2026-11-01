@@ -13,6 +13,33 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.38.0 (November 1, 2026)
+
+- **Morph to Photos.** When the head mesh is not the person in your photos, the Photos window
+  (Blender: the Photos tab) shapes the scalp so every lined-up photo's pairs land on their photo
+  points, with **Symmetry** and **Stiffness**. Pressing it again starts from the scalp as it was,
+  so morphs never stack; **Reset Morph** puts it back. A blendShape in Maya, a shape key in
+  Blender; in the app the groom moves onto the morphed scalp. The camera solve also keeps the focal
+  length within real lenses, so a photo's camera no longer runs off. See
+  [Morph the scalp to the photos](/docs/reference-photos#morph-the-scalp-to-the-photos-optional).
+- **Layers and ColorLayers**, a paint program's layer stack as a field node: up to 8 layers, each a
+  value, map or plugged field with a blend mode (normal, multiply, add, screen, overlay and more),
+  an opacity you can map as a mask, and an on switch. ColorLayers drives any color param. See
+  [Layer stacks](/docs/node-graph#layer-stacks).
+- **Baked card colors match the groom.** The Cards node's new **Bake color** picks what the Color
+  map holds: **Shaded** (the default), the hair as the viewport shades it, so cards on a Lambert,
+  Standard Surface or an engine's lit material look like the groom; or **Base**, the strands' base
+  color, for a hair shader. In Maya under ACES, card, card map, scalp and glTF bakes are converted
+  to Rec.709, so a file node set to sRGB (and Unreal or Unity) reads the right color. Rebake cards
+  baked before this update. See [The color map](/docs/game-export#the-color-map).
+- **Blender: the GroomLab window.** **More > GroomLab Window** (or **Ctrl+Shift+G**) draws the
+  Groom Tools over the 3D view in the app's look: fill sliders you can type into, menus, the tube
+  outline editor, ramps and the stamp alphas. It reopens where you left it. An optional
+  **GroomLab Charcoal** theme gives Blender's node editor the app's graph look. Pick Points lets
+  you drag a placed point, with undo. See [The GroomLab window](/docs/blender#the-groomlab-window).
+- **Fixes:** Blender's Update no longer crashes Blender after installing; dragging Layers' count in
+  Maya no longer hides the layers.
+
 ## 0.37.2 (October 31, 2026)
 
 - **Fixes:** a ToMesh scale (or instance) is one closed piece: its top, rim and underside share

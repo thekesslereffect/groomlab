@@ -259,7 +259,12 @@ the photo as its background image, in a **GroomLab References** collection.
   another view (the pairs fill in turn and draw numbered; **Esc** when done). **Solve** finds the
   camera's position, rotation and focal length from 6 pairs, or from 4 with **Keep focal length**.
   Each pair shows its error in pixels, and pairs that stand out are named so you can pick them
-  again. Right-click a pair to pick its photo or mesh point again, or delete it.
+  again. Right-click a pair to pick its photo or mesh point again, or delete it. While picking,
+  drag a placed point to move it; each pick and move is an undo step.
+- **Morph to Photos** shapes the scalp so every lined-up photo's pairs land on their photo points,
+  into a shape key over the Basis (each press starts from the Basis, so morphs never stack), with
+  **Symmetry** and **Stiffness**. See
+  [Morph the scalp to the photos](/docs/reference-photos#morph-the-scalp-to-the-photos-optional).
 - **Open Guides from Photos...** (also **GroomLab > Guides from Photos (experimental)...**) grows
   guides from every photo camera into a **fromReference** guide group, replaced each time. Brush
   them like any guides; GroomLab's **Undo** takes them back.
