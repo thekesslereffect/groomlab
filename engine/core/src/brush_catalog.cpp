@@ -162,8 +162,8 @@ const std::vector<BrushSettingSpec>& brushSettingSpecs() {
         {"newGuides", "New guides", "Match nearby guides' shape and maps, or the length and segments of a standing guide"},
         {"spacing", "Spacing", "The distance between the guides a drag places"},
         {"soloNewGuides", "Solo new guides", "New guides stay unfrozen and every other guide is frozen, so the brushes "
-                                             "work on the new ones at once (Shift+click guides with a brush to solo them, "
-                                             "Unfreeze All to free them all)"},
+                                             "work on the new ones at once (the Select tool solos others, "
+                                             "Unfreeze All frees them all)"},
         {"parts", "Parts", "The next part's name, and the parts drawn so far"},
         {"flow", "Flow", "What a click or drag lays: arrows, or a sink (brush-sized) hair turns around"},
         {"map", "Map", "The map painted, the value (or color and channels) it is painted toward"},

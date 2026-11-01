@@ -1613,7 +1613,7 @@ class ToolPalette(QtWidgets.QWidget):
         b.setIcon(widgets.icon("unfreeze"))
         self._tile_size(b)
         b.setToolTip("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again "
-                     "(a brush's Shift+click where no guide is does the same)")
+                     "(a click with the Select tool where no guide is does the same)")
         b.clicked.connect(lambda: self.paint_tab.unfreeze_all())
         self.buttons.setdefault("unfreeze", b)  # its icon follows the theme
         return b

@@ -236,13 +236,6 @@ void Viewport::mousePressEvent(QMouseEvent* event) {
             bDragged_ = bHeld_;
             return;
         }
-        if (event->button() == Qt::LeftButton && event->modifiers().testFlag(Qt::ShiftModifier) && session_->settings().shiftSelects()) {
-            // Shift on a guide brush: selecting guides without leaving the brush (a drag paints them
-            // in with the ring, a click adds the guides in it).
-            drag_ = Drag::Paint;
-            paintMoved_ = false;
-            return;
-        }
         const bool lengths = session_->settings().tool == BrushToolSettings::Tool::Lengths;
         if (event->button() == Qt::LeftButton || (lengths && event->button() == Qt::RightButton)) {
             // The Length Keys tool: right-drag sets a key's scale (kStrokeAdjust).
@@ -336,21 +329,6 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
             session_->showBox(pressAt_, event->position());
             refreshOverlay();
             break;
-        case Drag::Paint: {
-            if (!session_) break;
-            syncView();
-            // Once it moves it paints (from the press on): the guides under the ring join the selection.
-            std::size_t painted = 0;
-            if (!paintMoved_ && (event->position() - pressAt_).manhattanLength() >= 4.0) {
-                paintMoved_ = true;
-                painted += session_->paintSelection(pressAt_);
-            }
-            if (paintMoved_) painted += session_->paintSelection(event->position());
-            session_->hover(event->position());
-            refreshOverlay();
-            if (painted) emit selectionChanged();  // the guides drawn as selected now
-            break;
-        }
         case Drag::None:
         case Drag::Menu:
             break;
@@ -395,19 +373,6 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
             emit selectionChanged();
             break;
         }
-        case Drag::Paint:
-            syncView();
-            if (paintMoved_) {
-                session_->soloSelection();  // the rest frozen, one undo step (the Select tool's solo)
-            } else if (session_->paintSelection(pressAt_, SelectMode::Add, true) == 0) {
-                // A click: the guides in the ring added, the rest frozen; on none, nothing selected
-                // and every guide unfrozen.
-                session_->paintSelection(pressAt_, SelectMode::Replace, true);
-            }
-            session_->hover(event->position());
-            refreshOverlay();
-            emit selectionChanged();
-            break;
         case Drag::Radius:
         case Drag::Strength:
             emit brushSettingsChanged();

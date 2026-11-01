@@ -887,9 +887,8 @@ void BrushContext::getClassName(MString& name) const { name = "groomLabBrush"; }
 void BrushContext::toolOnSetup(MEvent&) {
     setHelpString("Drag: brush the selected groom (Place: click one guide, drag for many; Draw: draw a guide "
                   "from the scalp). Ctrl: the opposite (Length shortens, Lift lays down; painting, toward 0). "
-                  "Shift+drag: paint guides into the selection, the rest frozen; Shift+click: add the guides in the "
-                  "ring (on none: deselect and unfreeze all). Painting maps or guide attributes, and with Shape, Shift+drag smooths. "
-                  "B/M or middle-drag: radius/strength. Double-click the tool for its settings.");
+                  "Shift+drag: smooth (the guides, a painted map, the Tube brush's channel). Select guides with the "
+                  "Select tool. B/M or middle-drag: radius/strength. Double-click the tool for its settings.");
     installPenPressure();
     active_ = true;
     if (!findGroom()) MGlobal::displayWarning("GroomLab brush: select a groom (groomLabShape) to brush");
@@ -1097,13 +1096,6 @@ MStatus BrushContext::press(MEvent& event, MHWRender::MUIDrawManager& draw) {
         drawCircle(draw, x, y);
         return MS::kSuccess;
     }
-    if (event.mouseButton() == MEvent::kLeftMouse && event.isModifierShift() && tool_.settings.shiftSelects()) {
-        // Shift on a guide brush: selecting, not brushing (a drag paints, a click adds the guides
-        // in the ring: release).
-        beginPaintSelection(x, y);
-        drawCircle(draw, x, y);
-        return MS::kSuccess;
-    }
     const unsigned modifiers = (event.isModifierControl() ? kStrokeCtrl : 0u) | (event.isModifierShift() ? kStrokeShift : 0u);
     tool_.press(*host_, activeToolView(), x, y, penPressure(), modifiers);
     unchainUnlessStroking();
@@ -1132,11 +1124,6 @@ MStatus BrushContext::drag(MEvent& event, MHWRender::MUIDrawManager& draw) {
         draw.setColor(MColor(1.0f, 1.0f, 1.0f));
         draw.text2d(MPoint(adjustX_, adjustY_ + s.screenRadius + 12), label, MHWRender::MUIDrawManager::kCenter);
         draw.endDrawable();
-        return MS::kSuccess;
-    }
-    if (painting_) {
-        movePaintSelection(x, y);
-        drawCircle(draw, x, y);
         return MS::kSuccess;
     }
     tool_.drag(*host_, activeToolView(), x, y, penPressure());
@@ -1177,94 +1164,10 @@ void BrushContext::refreshDuringDrag() {
     lastRefreshMs_ = std::chrono::duration<double, std::milli>(lastRefreshEnd_ - start).count();
 }
 
-void BrushContext::beginPaintSelection(short x, short y) {
-    painting_ = true;
-    paintMoved_ = false;
-    paintX_ = x;
-    paintY_ = y;
-    paintBefore_ = host_->selectedGuides();
-    paintedGuides_.clear();
-}
-
-void BrushContext::movePaintSelection(short x, short y) {
-    // Once it moves it paints (from the press on): the guides under the ring join the selection.
-    if (!paintMoved_ && std::abs(x - paintX_) + std::abs(y - paintY_) >= 4) {
-        paintMoved_ = true;
-        paintSelection(paintX_, paintY_);
-    }
-    if (paintMoved_) paintSelection(x, y);
-}
-
-void BrushContext::finishPaintSelection() {
-    painting_ = false;
-    GuidePick pick;
-    pick.level = tool_.settings.brush.level;
-    pick.group = tool_.settings.brush.group;
-    pick.symmetry = tool_.settings.symmetryName();
-    if (!paintMoved_) {
-        // A click: the guides in the ring added, the rest frozen; on none, nothing selected and
-        // every guide unfrozen.
-        std::vector<std::array<float, 2>> ring;
-        const float r = std::max(tool_.settings.screenRadius, 1.0f);
-        for (int k = 0; k < 24; ++k) {
-            const float a = 6.2831853f * static_cast<float>(k) / 24.0f;
-            ring.push_back({float(paintX_) + r * std::cos(a), float(paintY_) + r * std::sin(a)});
-        }
-        const std::vector<GuideId> picked = pickGuidesInView(ring, pick);
-        applyGuideSelection(picked, picked.empty() ? "replace" : "add", true, true);
-    } else {
-        // The painted selection as one undo step (the rest frozen): back to the press's, then
-        // that and what was painted.
-        std::vector<GuideId> selection = paintBefore_;
-        for (const GuideId id : paintedGuides_) {
-            if (std::find(selection.begin(), selection.end(), id) == selection.end()) selection.push_back(id);
-        }
-        applyGuideSelection(paintBefore_, "replace", false, false);
-        applyGuideSelection(selection, "replace", true, true);
-    }
-    paintedGuides_.clear();
-}
-
-int BrushContext::simulateSelectPaint(const std::vector<std::pair<short, short>>& points) {
-    if (points.empty() || !findGroom()) return 0;
-    beginPaintSelection(points.front().first, points.front().second);
-    for (std::size_t i = 1; i < points.size(); ++i) movePaintSelection(points[i].first, points[i].second);
-    finishPaintSelection();
-    return static_cast<int>(host_->selectedGuides().size());
-}
-
-void BrushContext::paintSelection(short x, short y) {
-    // The ring as a polygon in view pixels: the guides with a point inside it.
-    std::vector<std::array<float, 2>> ring;
-    const float r = tool_.settings.screenRadius;
-    for (int k = 0; k < 24; ++k) {
-        const float a = 6.2831853f * static_cast<float>(k) / 24.0f;
-        ring.push_back({float(x) + r * std::cos(a), float(y) + r * std::sin(a)});
-    }
-    GuidePick pick;
-    pick.level = tool_.settings.brush.level;
-    pick.group = tool_.settings.brush.group;
-    pick.symmetry = tool_.settings.symmetryName();
-    std::vector<GuideId> fresh;
-    for (const GuideId id : pickGuidesInView(ring, pick)) {
-        if (paintedGuides_.insert(id).second) fresh.push_back(id);
-    }
-    // Shown live, as no undo step (the release makes the one), drawn now (not when the camera
-    // next moves).
-    if (fresh.empty()) return;
-    applyGuideSelection(fresh, "add", false, false);
-    refreshDuringDrag();
-}
-
 MStatus BrushContext::release(MEvent&) {
     if (adjusting_) {
         adjusting_ = false;
         MToolsInfo::setDirtyFlag(*this);  // refresh the Tool Settings window
-        return MS::kSuccess;
-    }
-    if (painting_) {
-        finishPaintSelection();
-        M3dView::active3dView().refresh(true, true);  // the selection drawn now (the Select tool's release)
         return MS::kSuccess;
     }
     expectGpuCommit();
@@ -1521,18 +1424,6 @@ MStatus BrushContextCmd::doEditFlags() {
             text.split(' ', words);
             // "x y x y ...", or "ctrl x y ..." / "shift x y ..." for a stroke with Ctrl (Shift) held.
             // "draw x y ...": the viewport redrawn after each point, as a drag does.
-            // "select x y ..." (or "shift x y ..." with a guide brush): a Shift drag painting the
-            // selection (one point: a click adding the guides in the ring, on none clearing). The
-            // result is how many guides are selected after it.
-            const bool shiftSelect = words.length() >= 3 && words[0] == "shift" && context_->settings().shiftSelects();
-            if (words.length() >= 3 && (words[0] == "select" || shiftSelect)) {
-                std::vector<std::pair<short, short>> points;
-                for (unsigned i = 1; i + 1 < words.length(); i += 2) {
-                    points.emplace_back(static_cast<short>(words[i].asInt()), static_cast<short>(words[i + 1].asInt()));
-                }
-                setResult(context_->simulateSelectPaint(points));
-                return MS::kSuccess;
-            }
             const bool draw = words.length() > 0 && words[0] == "draw";
             if (draw) words.remove(0);
             const bool ctrl = words.length() > 0 && words[0] == "ctrl";

@@ -278,9 +278,7 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   `freeze_guides` and `unfreeze_all` do it by script.
 - **Solo:** Place and Draw's **Solo new guides** (`solo_new_guides=True`; off by default) keep
   the guides a stroke makes unfrozen and freeze every other, in the same undo step, so the next
-  brush works on the new guide at once. **Shift+click** with a guide brush solos the
-  guides in its ring the same way (Shift+drag paints them in); a Shift+click where the ring holds
-  none unfreezes them all. The **Select**
+  brush works on the new guide at once. The **Select**
   tool solos its selection (the guides not selected freeze, a pick of nothing unfreezes all;
   `select_tool(solo=False)` turns it off), one undo step with the selection. With symmetry on
   (world X or topology) the mirror guides stay live too: a guide placed with its mirror image, a
@@ -313,11 +311,9 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   scale.
 - **Shift and Ctrl in a brush:** Ctrl is the brush's opposite (`BrushTool::pressed`: Length
   shortens, Lift lays down, Twist, Attract and Shape flip, Cut grows,
-  painting goes toward 0; Comb, Slide, Smooth and Erase have none). With a guide
-  brush Shift selects (`BrushToolSettings::shiftSelects`, the hosts'): Shift+click adds the
-  guides in the ring (the rest freeze; on none: unfreeze all), Shift+drag paints them in; the
-  lasso is the Select tool's. Painting maps or Freeze, and with Shape (its tube channel), Shift+drag
-  smooths.
+  painting goes toward 0; Comb, Slide, Smooth and Erase have none). Shift+drag smooths with
+  every brush (`useShiftSmoothing`): the guides with a guide brush, a painted map or Freeze, the
+  Tube brush's channel. Selecting is the Select tool's (its lasso, solo and buttons).
   - **Your own keys:** every tool also has a runtime command (category GroomLab) you can bind.
 
 - **Which guides:** `level` (or `group`) picks the guides a brush edits. Children still follow

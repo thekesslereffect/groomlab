@@ -51,7 +51,7 @@ void appendColoredLine(DisplayGeometry& g, const std::vector<Vec3f>& points, con
 BrushSession::BrushSession() {
     tool_.settings.brush.radius = 0.25f;
     tool_.settings.screenRadius = 60.0f;
-    tool_.settings.place.soloNewGuides = false;  // off, as Maya's and Blender's Groom Tools start (Shift+click selects)
+    tool_.settings.place.soloNewGuides = false;  // off, as Maya's and Blender's Groom Tools start
 }
 
 BrushSession::~BrushSession() = default;
@@ -352,26 +352,6 @@ std::size_t BrushSession::select(const std::vector<QPointF>& lasso, SelectMode m
         }
     }
     return picked.size();
-}
-
-std::size_t BrushSession::paintSelection(const QPointF& at, SelectMode mode, bool solo) {
-    std::vector<QPointF> ring;
-    const double r = std::max<double>(tool_.settings.screenRadius, 1.0);
-    for (int k = 0; k < 24; ++k) {
-        const double a = 6.283185307 * k / 24.0;
-        ring.push_back(at + QPointF(r * std::cos(a), r * std::sin(a)));
-    }
-    return select(ring, mode, solo);
-}
-
-void BrushSession::soloSelection() {
-    if (!document_) return;
-    const std::vector<GuideId> selection = document_->selection();
-    const std::shared_ptr<const GuideHierarchy> authored = document_->session().authoredHierarchy();
-    GuideHierarchy probe = authored ? *authored : GuideHierarchy{};
-    if (freezeToSelection(probe, selection)) {
-        document_->editGuides("solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
-    }
 }
 
 void BrushSession::warm(const ViewRequest& request) {

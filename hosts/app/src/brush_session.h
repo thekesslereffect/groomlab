@@ -116,11 +116,6 @@ public:
     // `solo` (the Select tool): every guide not selected frozen, an undo step when that changed
     // anything (a plain pick of nothing unfreezes every guide).
     std::size_t select(const std::vector<QPointF>& lasso, SelectMode mode, bool solo = false);
-    // A brush's Shift drag: the guides under the ring at `at` combined with the selection by `mode`
-    // (added: no undo step; soloSelection after it makes the one; `solo` as select's).
-    std::size_t paintSelection(const QPointF& at, SelectMode mode = SelectMode::Add, bool solo = false);
-    // The guides not selected frozen (the Select tool's solo), an undo step when that changes anything.
-    void soloSelection();
     // The hierarchy guides are picked from (as shown); null without a groom.
     std::shared_ptr<const GuideHierarchy> shownHierarchy() const;
 

@@ -354,8 +354,8 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
                 b->setObjectName(QStringLiteral("unfreezeAllTile"));
                 b->setProperty("role", "tool");
                 b->setText(tr("Unfreeze All"));  // (its icon: refreshTiles)
-                b->setToolTip(tr("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again (Shift+click with a "
-                                 "brush where no guide is does the same)"));
+                b->setToolTip(tr("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again (a click with the "
+                                 "Select tool where no guide is does the same)"));
                 connect(b, &QToolButton::clicked, this, &GroomTools::unfreezeAllRequested);
                 allTiles_.push_back(b);
                 buttons.push_back(b);

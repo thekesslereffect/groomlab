@@ -113,16 +113,6 @@ struct BrushToolSettings {
     bool paintsScalp() const {
         return (brush.mode == BrushMode::Attribute || brush.mode == BrushMode::Smooth) && paintKind != "guides";
     }
-    // Whether Shift selects guides (the hosts': a drag paints the selection within the ring, a
-    // click adds the guides in it, on none clears it; the rest frozen either way) rather than
-    // smoothing: the guide brushes (comb, length, cut...). Painting (maps, a guide attribute such
-    // as freeze) and the Shape brush (its tube channel: useShiftSmoothing) keep Shift's smoothing.
-    // Ctrl is every brush's opposite (pressed()).
-    bool shiftSelects() const {
-        return tool == Tool::Brush && brush.mode != BrushMode::Attribute && brush.mode != BrushMode::ShapeTube &&
-               !paintsScalp();
-    }
-
     // comb, smooth... (brush.h), clump, place, draw, part, flow.
     std::string modeName() const;
     // Throws std::invalid_argument for an unknown name; for "width" and "density" (brushes no

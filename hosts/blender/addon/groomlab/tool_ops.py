@@ -35,9 +35,8 @@ SHORTCUTS = (
     ("B + drag", "The brush radius"),
     ("M + drag", "The brush strength"),
     ("Ctrl (stroke)", "The opposite: Length shortens, Lift lays down, Shape shrinks; painting, toward 0 (unfreeze, erase)"),
-    ("Shift (painting, Tube)", "Painting maps or guide attributes, or the Tube brush: smooth instead"),
+    ("Shift + drag", "Smooth with any brush: the guides (Comb, Length...), a painted map or guide attribute, the Tube brush's channel"),
     ("S", "Select guides (Shift: toggle, Ctrl: deselect)"),
-    ("Shift + drag", "A guide brush: paint guides into the selection, the rest frozen (Shift + click: add the guides in the ring; on none: deselect and unfreeze all)"),
     ("Page Up / Page Down", "The brush level (parents / children)"),
     ("Y", "The pie menu: every brush"),
     ("Esc / right-click", "Cancel the stroke; Esc again leaves the tool"),
@@ -134,8 +133,7 @@ class ToolSession(object):
     def __init__(self):
         self.stroking = None      # the scalp while a stroke is live
         self.points = []          # mouse samples not sent yet
-        self.lasso = None         # (scalp, view, points, mode) while selecting ("brush": a guide brush's Shift painting)
-        self.painted_at = None    # where the painting last picked
+        self.lasso = None         # (scalp, view, points, mode) while the Select tool lassos
         self.slider = None        # (setting, x at the press, value at the press, (view, x, y) of the ring)
         self.held = set()         # B / M / F held
         self.hovering = None      # the scalp hovered last
@@ -259,10 +257,7 @@ class ToolSession(object):
             return {"RUNNING_MODAL"}
         if self.lasso is not None:
             if where is not None:
-                points = self.lasso[2]
-                points.append([where[1], where[2]])
-                if self.lasso[3] == "brush":
-                    self.paint_selection(context, scalp, where)
+                self.lasso[2].append([where[1], where[2]])
             return {"RUNNING_MODAL"}
         self.set_cursor(context, where is not None)
         if where is None:
@@ -294,13 +289,6 @@ class ToolSession(object):
         if self.tool(context) == "select":
             mode = "toggle" if event.shift else "deselect" if event.ctrl else "replace"
             self.lasso = (scalp, view, [[x, y]], mode)
-            return {"RUNNING_MODAL"}
-        info = tools.tool_info(self.tool(context))
-        if event.shift and info is not None and info.get("shiftSelects"):
-            # Shift on a guide brush: selecting guides without leaving it (a drag paints them in with
-            # the ring, a click adds the guides in it: release).
-            self.lasso = (scalp, view, [[x, y]], "brush")
-            self.painted_at = None
             return {"RUNNING_MODAL"}
         pressure = float(getattr(event, "pressure", 1.0) or 1.0)
         try:
@@ -347,18 +335,6 @@ class ToolSession(object):
             self.lasso = None
             shape = context.scene.groomlab_tools.select_shape
             span = max(abs(p[0] - points[0][0]) + abs(p[1] - points[0][1]) for p in points)
-            if mode == "brush":                          # a guide brush's Shift
-                try:
-                    if span < 4.0:                       # a click: the guides in the ring added, the rest frozen
-                        ring = self.ring(context, points[0])
-                        if not tools.select(lasso_scalp, view, ring, "add").get("picked"):
-                            tools.select(lasso_scalp, view, ring, "replace")  # on none: all deselected, unfrozen
-                    else:                                # painted: the rest frozen, one undo step
-                        tools.selection_set(lasso_scalp, mode="add", solo=True)
-                except HelperError as e:
-                    tools.status(context.scene, e.message)
-                display.redraw(viewport_only=True)
-                return {"RUNNING_MODAL"}
             if span < 4.0:
                 points = points[:1]                      # a click
             elif shape == "BOX":
@@ -372,34 +348,6 @@ class ToolSession(object):
                 tools.status(context.scene, e.message)
             return {"RUNNING_MODAL"}
         return {"PASS_THROUGH"}
-
-    @staticmethod
-    def ring(context, at):
-        """The brush ring around `at` (view pixels) as a 24-point lasso."""
-        import math
-        r = max(1.0, float(context.scene.groomlab_tools.radius))
-        return [[at[0] + r * math.cos(2 * math.pi * k / 24), at[1] + r * math.sin(2 * math.pi * k / 24)] for k in range(24)]
-
-    def paint_selection(self, context, scalp, where):
-        """A brush's Ctrl drag: once it has moved, the guides under the ring join the selection
-        (no undo step: the release makes the one), a dab every quarter of the radius."""
-        view, x, y = where
-        points = self.lasso[2]
-        t = context.scene.groomlab_tools
-        x0, y0 = points[0]
-        if self.painted_at is None and abs(x - x0) + abs(y - y0) < 4.0:
-            return  # a click so far
-        at = self.painted_at or (x0, y0)
-        if self.painted_at is not None and abs(x - at[0]) + abs(y - at[1]) < 0.25 * t.radius:
-            return
-        self.painted_at = (x, y)
-        ring = self.ring(context, (x, y))
-        try:
-            tools.select(scalp, view, ring, "add", solo=False)
-            tools.hover(scalp, view, x, y)  # the ring where the cursor is
-        except HelperError as e:
-            tools.status(context.scene, e.message)
-        display.redraw(viewport_only=True)
 
     def drag_slider(self, context, scalp, event):
         """B / M held + drag: the radius (a pixel a pixel) or the strength (200 px for 1), the ring
