@@ -5,6 +5,9 @@
 
     python tools/make_blender_icons.py        (Python 3 with Pillow)
 
+It also renders the app's mono UI glyphs (hosts/app/icons/ui_*.svg, 24 x 24, white) as
+icons/ui_<name>.png for the GroomLab window (window.py), which tints them.
+
 Run it after tools/make_icons.py changes the SVGs; the PNGs are committed (Blender's previews read
 PNGs, and the extension build needs no SVG renderer). The SVGs use a small subset (path with M L H V
 C Q A Z, rect, circle, ellipse, a rotated g; strokes with round caps and joins, dashes, opacity),
@@ -25,7 +28,8 @@ OUT = os.path.join(ROOT, "hosts", "blender", "addon", "groomlab", "icons")
 THEME = os.path.join(ROOT, "hosts", "maya", "themes", "playful.json")
 SIZE = 64
 SS = 8                       # supersampling
-K = SIZE * SS / 32.0         # SVG units (32 x 32) to canvas pixels
+UI_DIR = os.path.join(ROOT, "hosts", "app", "icons")  # the mono glyphs (ui_*.svg)
+K = SIZE * SS / 32.0         # SVG units (32 x 32) to canvas pixels; render() sets it from the viewBox
 
 # groomlab/ui/widgets.py: which theme color each icon's main color is, and the placeholders.
 ICON_GROUPS = {
@@ -117,8 +121,8 @@ def _arc(p0, rx, ry, phi, large, sweep, p1, n=32):
 
 
 def parse_path(d):
-    """Subpaths [(points, closed)] of a path's d (absolute commands)."""
-    tokens = re.findall(r"[MLHVCQAZmlhvcqaz]|-?\d*\.?\d+(?:e-?\d+)?", d)
+    """Subpaths [(points, closed)] of a path's d (absolute and relative commands, S/s smooth cubics)."""
+    tokens = re.findall(r"[MLHVCSQAZmlhvcsqaz]|-?\d*\.?\d+(?:e-?\d+)?", d)
     subs, pts, closed = [], [], False
     cur = (0.0, 0.0)
     i, cmd = 0, None
@@ -129,6 +133,7 @@ def parse_path(d):
         i += 1
         return v
 
+    last_c2 = None  # the previous cubic's second control point (S reflects it)
     while i < len(tokens):
         if re.match(r"[A-Za-z]", tokens[i]):
             cmd = tokens[i]
@@ -139,37 +144,59 @@ def parse_path(d):
                     subs.append((pts, True))
                     cur = pts[0]
                 pts, closed = [], False
+                last_c2 = None
                 continue
-        if cmd == "M":
+        if cmd.islower():  # relative: the same command from the current point
+            ox, oy = cur
+            rel = cmd
+            cmd = cmd.upper()
+
+            def num_x():
+                return num() + ox
+
+            def num_y():
+                return num() + oy
+        else:
+            rel = None
+            num_x = num_y = num
+        if cmd in ("C", "S"):
+            if cmd == "C":
+                c1 = (num_x(), num_y())
+            else:
+                c1 = (2 * cur[0] - last_c2[0], 2 * cur[1] - last_c2[1]) if last_c2 else cur
+            c2, end = (num_x(), num_y()), (num_x(), num_y())
+            pts += _cubic(cur, c1, c2, end)
+            cur, last_c2 = end, c2
+        elif cmd == "M":
             if pts:
                 subs.append((pts, False))
-            cur = (num(), num())
+            cur = (num_x(), num_y())
             pts = [cur]
             cmd = "L"
         elif cmd == "L":
-            cur = (num(), num())
+            cur = (num_x(), num_y())
             pts.append(cur)
         elif cmd == "H":
-            cur = (num(), cur[1])
+            cur = (num_x(), cur[1])
             pts.append(cur)
         elif cmd == "V":
-            cur = (cur[0], num())
+            cur = (cur[0], num_y())
             pts.append(cur)
-        elif cmd == "C":
-            c1, c2, end = (num(), num()), (num(), num()), (num(), num())
-            pts += _cubic(cur, c1, c2, end)
-            cur = end
         elif cmd == "Q":
-            c1, end = (num(), num()), (num(), num())
+            c1, end = (num_x(), num_y()), (num_x(), num_y())
             pts += _quad(cur, c1, end)
             cur = end
         elif cmd == "A":
             rx, ry, phi, large, sweep = num(), num(), num(), int(num()), int(num())
-            end = (num(), num())
+            end = (num_x(), num_y())
             pts += _arc(cur, rx, ry, phi, large, sweep, end)
             cur = end
         else:
             raise ValueError("path command %r is not supported" % cmd)
+        if cmd not in ("C", "S"):
+            last_c2 = None
+        if rel is not None:
+            cmd = rel if cmd != "L" or rel != "m" else "l"  # after m, pairs are relative lines
     if pts:
         subs.append((pts, False))
     return subs
@@ -312,7 +339,10 @@ def walk(img, el, s, colors):
 
 
 def render(path, colors_by_placeholder):
+    global K
     root = ET.parse(path).getroot()
+    box = (root.get("viewBox") or "0 0 32 32").split()
+    K = SIZE * SS / float(box[2])
     img = Image.new("RGBA", (SIZE * SS, SIZE * SS), (0, 0, 0, 0))
     walk(img, root, _style(root, {}), colors_by_placeholder)
     return img.resize((SIZE, SIZE), Image.LANCZOS)
@@ -332,6 +362,10 @@ def main():
         by_placeholder = {PLACEHOLDERS[role].upper(): colors[role] for role in PLACEHOLDERS}
         render(os.path.join(SVG_DIR, file), by_placeholder).save(os.path.join(OUT, name + ".png"), optimize=True)
         count += 1
+    for file in sorted(os.listdir(UI_DIR)):  # the window's glyphs: white, tinted when drawn
+        if re.match(r"ui_\w+\.svg$", file):
+            render(os.path.join(UI_DIR, file), {}).save(os.path.join(OUT, file[:-4] + ".png"), optimize=True)
+            count += 1
     print(count, "icons in", OUT)
 
 

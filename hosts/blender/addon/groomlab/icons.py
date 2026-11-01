@@ -23,6 +23,17 @@ def icon(name):
     return pc[name].icon_id
 
 
+def name_of(icon_value):
+    """The icons/<name>.png an icon_value came from ("" for none of ours)."""
+    pc = _previews[0]
+    if pc is None or not icon_value:
+        return ""
+    for name, preview in pc.items():
+        if preview.icon_id == icon_value:
+            return name
+    return ""
+
+
 def names():
     return sorted(os.path.splitext(f)[0] for f in os.listdir(DIR) if f.endswith(".png")) if os.path.isdir(DIR) else []
 

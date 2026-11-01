@@ -557,6 +557,10 @@ class GROOMLAB_OT_tool_modal(bpy.types.Operator):
         session = _session[0]
         if session is None:
             return self._end(context)
+        if session.stroking is None:
+            from . import window
+            if window.over(context, event):  # the GroomLab window's own (its gizmo is after this operator)
+                return {"PASS_THROUGH"}
         try:
             result = session.event(context, event)
         except Exception as e:  # noqa: BLE001 - a modal operator must never leave Blender stuck
