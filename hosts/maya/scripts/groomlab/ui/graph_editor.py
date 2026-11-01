@@ -418,6 +418,8 @@ def shown_when(spec, value_of, spec_of=None):
             text = "true" if value else "false"
         elif isinstance(value, str):
             text = value
+        elif isinstance(value, float) and value.is_integer():
+            text = str(int(value))  # 3.0 stored for an int param reads as the core's "3"
         else:
             text = json.dumps(value)
         if text not in (condition.get("in") or []):
@@ -3759,8 +3761,11 @@ class ParamPanel(QtWidgets.QScrollArea):
             slider = widgets.SoftSlider(value * f, lo, hi, integer=kind == "int", minimum=hard[0], maximum=hard[1],
                                         decimals=4, key=key, default=default * f,
                                         shown_decimals=widgets.display_decimals(spec.get("decimals"), f))
-            slider.dragged.connect(lambda v: preview(v / f))
-            slider.committed.connect(lambda v: set_value(v / f))
+            # The slider gives floats: an int param stores a whole number (Layers' count, which the
+            # panel's showWhen and the GPU preview compare as one).
+            stored = (lambda v: int(round(v))) if kind == "int" else (lambda v: v / f)
+            slider.dragged.connect(lambda v: preview(stored(v)))
+            slider.committed.connect(lambda v: set_value(stored(v)))
             slider.unit_factor = f  # what show_value multiplies a keyed value by
             if name == self.node:
                 self.key_widgets[spec["name"]] = slider

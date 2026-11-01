@@ -411,6 +411,10 @@ TEST(FieldNodes, LayersCompositeByModeAndOpacity) {
         p.set("layer3Opacity", 0.5);
     });
     EXPECT_NEAR(three->atRoot({}), 0.55f, 1e-6f);
+    // Raising the count adds clear layers: the stack gives what it did until one is given an opacity.
+    for (std::int64_t n = 3; n <= 8; ++n) {
+        EXPECT_NEAR(withLayer2([n](ParamSet& p) { p.set("layers", n); })->atRoot({}), 0.4f, 1e-6f) << n;
+    }
     EXPECT_THROW(withLayer2([](ParamSet& p) { p.set("layer2Mode", std::string("dodge")); }), GraphError);
 }
 

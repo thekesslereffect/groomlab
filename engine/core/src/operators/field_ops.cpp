@@ -793,9 +793,12 @@ std::vector<ParamSpec> layerSpecs(bool color) {
                               .when("layers", holding)
                               .in(group));
         }
-        out.push_back(ParamSpec{layerParam(k, "Opacity"), 1.0,
+        // Layers 3 and up start clear (opacity 0), as a paint program's new layer: raising the
+        // count changes nothing until the new layer is given an opacity or a mask.
+        out.push_back(ParamSpec{layerParam(k, "Opacity"), k <= 2 ? 1.0 : 0.0,
                                 "How much of " + at + " shows over the layers below it, 0-1 (mappable, per point: a "
-                                "mask plugged in shows the layer where it is painted)",
+                                "mask plugged in shows the layer where it is painted)" +
+                                    std::string(k <= 2 ? "" : "; starts at 0, clear, as a new layer"),
                                 "fraction"}
                           .soft(0, 1)
                           .when("layers", holding)

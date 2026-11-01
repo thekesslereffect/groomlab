@@ -172,6 +172,8 @@ def shown_when(spec, value_of, spec_of=None):
             text = "true" if value else "false"
         elif isinstance(value, str):
             text = value
+        elif isinstance(value, float) and value.is_integer():
+            text = str(int(value))  # 3.0 stored for an int param (a graph from an older Maya) reads as "3"
         else:
             text = json.dumps(value)
         if text not in (condition.get("in") or []):

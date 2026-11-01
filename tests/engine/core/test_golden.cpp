@@ -204,7 +204,8 @@ std::vector<Case> cases() {
          R"({"name": "ramp", "type": "Expression", "params": {"expression": "u"}},
             {"name": "noise", "type": "FieldNoise", "params": {"frequency": 4.0, "seed": 5}},
             {"name": "stack", "type": "Layers", "params": {"layers": 3, "layer1": 1.0, "layer2Mode": "screen",
-             "layer2Opacity": 0.5, "layer3": 0.8, "layer3Mode": "multiply"}, "paramInputs": ["layer1", "layer2"]},
+             "layer2Opacity": 0.5, "layer3": 0.8, "layer3Mode": "multiply",
+             "layer3Opacity": 1.0}, "paramInputs": ["layer1", "layer2"]},
             {"name": "op", "type": "Length", "params": {}, "paramInputs": ["keep"]})",
          link("ramp", "stack", "layer1") + "," + link("noise", "stack", "layer2") + "," + link("interp", "op", "strands") +
              "," + link("stack", "op", "keep")},

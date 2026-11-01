@@ -499,6 +499,46 @@ class GraphEditorTest(unittest.TestCase):
                       groomlab.get_graph(self.groom)["connections"])
         self.editor.hide()
 
+    def test_layers_count_dragged_and_typed_in_the_panel(self):
+        # A Layers stack on Length's keep: its count dragged and committed in the panel, as an
+        # artist does. The groom keeps evaluating, the stack's sections follow the count and the
+        # stored count is a whole number.
+        from PySide2 import QtWidgets
+        name = self.editor.add_node("Layers")
+        self.editor.set_param_exposed("length", "keep", True)
+        self.editor.model.connect(name, "length", "keep")
+        self.editor.changed()
+        self.editor.resize(420, 900)
+        self.editor.show()
+        self.editor.params.show_node(name)
+        wait(150)
+        self.assertEqual(groomlab.errors(self.groom), [])
+        strands = cmds.getAttr(self.groom + ".outStrandCount")
+
+        def headers():
+            body = self.editor.params.widget()
+            return {h.objectName(): h.isVisible() for h in body.findChildren(QtWidgets.QPushButton)
+                    if h.objectName().startswith("paramSection_Layer")}
+
+        self.assertFalse(headers().get("paramSection_Layer 3"))
+        for count in (3, 5, 2, 8, 1):
+            slider = self.editor.params.key_widgets["layers"]
+            slider.setSliderDown(True)
+            slider.scrub(count)
+            wait(120)
+            slider.setSliderDown(False)
+            slider.committed.emit(float(count))
+            wait(200)
+            stored = next(n for n in groomlab.get_graph(self.groom)["nodes"] if n["name"] == name)["params"]
+            self.assertEqual(stored.get("layers"), count, stored)
+            self.assertIsInstance(stored.get("layers"), int, stored)
+            self.assertEqual(groomlab.errors(self.groom), [], count)
+            self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), strands, count)
+            shown = headers()
+            for k in range(1, 9):
+                self.assertEqual(bool(shown.get("paramSection_Layer %d" % k)), k <= count, (count, k, shown))
+        self.editor.hide()
+
     def test_a_map_nodes_panel_fits_a_narrow_editor(self):
         # The Map node's panel on a narrow editor: its warnings and where the map lives each take
         # a full-width row above the buttons (not a column squeezed beside them), the path breaks

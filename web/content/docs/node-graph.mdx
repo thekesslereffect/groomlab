@@ -256,7 +256,9 @@ param's own color (white: the map as it is). A number param linked to `rgb` read
 - **The layer's value** (a number for Layers, a color for ColorLayers).
 - **Opacity**: how much of it shows.
 
-Raise **Layers** to add a layer on top. The panel lists the top layer first.
+Raise **Layers** to add a layer on top. A new layer starts clear (opacity 0), so adding one
+changes nothing until you raise its opacity or link a mask to it. The panel lists the top layer
+first.
 
 The value and the opacity both take fields. Expose a layer's value (`layer2`) and link a Map, a
 FieldNoise or an Expression to make the layer that map. Expose its opacity (`layer2Opacity`) and
