@@ -766,7 +766,9 @@ class GROOMLAB_OT_photo_pick(bpy.types.Operator):
             return self.finish()
         if event.type != "LEFTMOUSE" or event.value != "PRESS" or event.ctrl or event.alt:
             return {"PASS_THROUGH"}
-        from . import tool_ops
+        from . import tool_ops, window
+        if window.over(context, event):  # a click in the GroomLab window is the window's, not a pick
+            return {"PASS_THROUGH"}
         where = tool_ops.locate(context, event)  # a 3D view's region, not its header, toolbar or sidebar
         if where is None:
             return {"PASS_THROUGH"}
