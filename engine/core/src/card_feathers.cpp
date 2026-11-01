@@ -505,7 +505,7 @@ std::vector<CardMesh::Card> makeFeatherCards(const StrandSet& s, const ScalpMesh
     std::vector<long long> repOf(feathers.size(), -1);
     std::vector<char> flipped(feathers.size(), 0);
     if (settings.variations > 0) {
-        const StrandColors colors = colorsOf(s, {0.0f, 0.0f, 0.0f});
+        const StrandColors colors = colorsOf(s, {0.0f, 0.0f, 0.0f}, settings.colorLook);
         std::size_t downs = 0;
         for (const std::size_t i : kept) downs += shapes[i].down ? 1 : 0;
         for (const bool down : {false, true}) {

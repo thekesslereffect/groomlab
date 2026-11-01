@@ -131,12 +131,14 @@ int cardMapResolution(const CardMesh& cards, const CardMapExport& settings) {
     return std::clamp(resolution, 16, 8192);
 }
 
-CardBake bakeCardMapsInMemory(StrandsPtr strands, MeshPtr scalp, const CardMapExport& settings, float occlusion) {
+CardBake bakeCardMapsInMemory(StrandsPtr strands, MeshPtr scalp, const CardMapExport& settings, float occlusion,
+                              const ColorMatrix& colorToRec709) {
     CardBake bake = laidOutCards(std::move(strands), std::move(scalp));
     const int resolution = cardMapResolution(*bake.cards, settings);
     CardBakeSettings base;
     base.scalp = bake.scalp.get();
     base.occlusion = occlusion;
+    base.colorToRec709 = colorToRec709;
     base.minStrandTexels = bake.cards->thinnestStrand;  // (the Cards nodes' Thinnest Strand)
     const CardBakeSettings bakeSettings = cardMapBakeSettings(base, settings, resolution);
     CardMaps maps = bakeCardMaps(*bake.strands, *bake.cards, bakeSettings);
@@ -145,12 +147,13 @@ CardBake bakeCardMapsInMemory(StrandsPtr strands, MeshPtr scalp, const CardMapEx
     return bake;
 }
 
-CardBake bakeCardsInMemory(StrandsPtr strands, MeshPtr scalp, int resolution, float occlusion) {
+CardBake bakeCardsInMemory(StrandsPtr strands, MeshPtr scalp, int resolution, float occlusion, const ColorMatrix& colorToRec709) {
     CardBake bake = laidOutCards(std::move(strands), std::move(scalp));
     CardBakeSettings settings;
     settings.size = resolution > 0 ? resolution : (bake.cards->atlasSize > 0 ? bake.cards->atlasSize : 2048);
     settings.scalp = bake.scalp.get();
     settings.occlusion = occlusion;
+    settings.colorToRec709 = colorToRec709;
     settings.minStrandTexels = bake.cards->thinnestStrand;  // (the Cards nodes' Thinnest Strand)
     bake.textures = bakeCardTextures(*bake.strands, *bake.cards, settings);
     return bake;

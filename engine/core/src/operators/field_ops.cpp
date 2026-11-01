@@ -2,10 +2,14 @@
 // Field operators (PG-7): nodes that output a value per strand (PortType::Field)
 // for exposed params. A Map node turns a painted map (or an image) into a node, an
 // Expression node a formula; FieldNoise, FieldRemap and FieldCombine build on fields,
-// so one map or noise can drive many params, reshaped per param.
+// so one map or noise can drive many params, reshaped per param; Layers and ColorLayers stack
+// them as a paint program's layers.
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <string>
+#include <vector>
 
 #include "groomlab/expression.h"
 #include "groomlab/field.h"
@@ -103,6 +107,9 @@ public:
     std::array<float, 3> colorAtPoint(const StrandSet& strands, std::size_t s, std::size_t point) const override {
         return {fields_[0]->atPoint(strands, s, point), fields_[1]->atPoint(strands, s, point),
                 fields_[2]->atPoint(strands, s, point)};
+    }
+    std::array<float, 3> colorAtRoot(const StrandRoot& root) const override {
+        return {fields_[0]->atRoot(root), fields_[1]->atRoot(root), fields_[2]->atRoot(root)};
     }
 
 private:
@@ -677,6 +684,282 @@ public:
     }
 };
 
+// ---------------------------------------------------------------------------
+
+// Layers and ColorLayers: a stack of up to kMaxLayers layers, as a paint program's layer panel.
+// Layer 1 is the bottom; each layer above is composited on what the layers below make (below
+// layer 1: 0, black) by its mode, then mixed in by its opacity: below + (mode(below, layer) -
+// below) x opacity. A layer's value (Layers: a number, ColorLayers: a color) and its opacity are
+// mappable: a Map plugged into the value makes the layer that map, one plugged into the opacity
+// masks the layer where it is painted. The modes act on each value (each channel of a color) as
+// a paint program's do on 0-1 values; a value past 1 goes through the same formulas.
+
+constexpr int kMaxLayers = 8;
+
+enum class LayerMode { Normal, Multiply, Add, Subtract, Screen, Overlay, Darken, Lighten, Difference };
+
+const std::vector<std::string>& layerModeNames() {
+    static const std::vector<std::string> names = {"normal", "multiply", "add",     "subtract",  "screen",
+                                                   "overlay", "darken",  "lighten", "difference"};
+    return names;
+}
+
+LayerMode layerModeOf(const std::string& name, const char* op) {
+    const auto& names = layerModeNames();
+    const auto it = std::find(names.begin(), names.end(), name);
+    if (it == names.end()) throw GraphError(std::string(op) + ": unknown mode '" + name + "'");
+    return static_cast<LayerMode>(it - names.begin());
+}
+
+// `layer` composited on `below` by `mode`, at full opacity.
+float blendLayer(LayerMode mode, float below, float layer) {
+    switch (mode) {
+        case LayerMode::Normal: return layer;
+        case LayerMode::Multiply: return below * layer;
+        case LayerMode::Add: return below + layer;
+        case LayerMode::Subtract: return below - layer;
+        case LayerMode::Screen: return 1.0f - (1.0f - below) * (1.0f - layer);
+        case LayerMode::Overlay:
+            return below < 0.5f ? 2.0f * below * layer : 1.0f - 2.0f * (1.0f - below) * (1.0f - layer);
+        case LayerMode::Darken: return std::min(below, layer);
+        case LayerMode::Lighten: return std::max(below, layer);
+        case LayerMode::Difference: return std::abs(below - layer);
+    }
+    return layer;
+}
+
+float compositeLayer(LayerMode mode, float below, float layer, float opacity) {
+    return below + (blendLayer(mode, below, layer) - below) * std::clamp(opacity, 0.0f, 1.0f);
+}
+
+// The largest value composited `layer` on `below` can give, both at most their maximum and at
+// least 0 (a field's least value isn't known), at any opacity.
+float layerMaximum(LayerMode mode, float below, float layer) {
+    switch (mode) {
+        case LayerMode::Normal:
+        case LayerMode::Lighten:
+        case LayerMode::Difference: return std::max(below, layer);
+        case LayerMode::Multiply: return std::max(below, below * layer);
+        case LayerMode::Add:
+        case LayerMode::Screen: return below + std::max(layer, 0.0f);
+        case LayerMode::Overlay: return std::max({below, layer, 1.0f, 2.0f * below * layer});
+        case LayerMode::Subtract:
+        case LayerMode::Darken: return below;
+    }
+    return std::max(below, layer);
+}
+
+std::string layerParam(int k, const char* what) { return "layer" + std::to_string(k) + what; }
+
+float luminanceOf(const std::array<float, 3>& c) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; }
+
+std::vector<ParamSpec> layerSpecs(bool color) {
+    std::vector<ParamSpec> out;
+    out.push_back(ParamSpec{"layers", std::int64_t{2}, "Layers in the stack, 1-8: layer 1 at the bottom, each "
+                                                       "layer composited on the ones below it"}
+                      .range(1, kMaxLayers));
+    // The top layer first, as a layer panel lists them; each shows while the stack holds it.
+    for (int k = kMaxLayers; k >= 1; --k) {
+        std::vector<std::string> holding;
+        for (int n = k; n <= kMaxLayers; ++n) holding.push_back(std::to_string(n));
+        const std::string group = "Layer " + std::to_string(k);
+        const std::string at = "layer " + std::to_string(k);
+        out.push_back(ParamSpec{layerParam(k, "On"), true, "Use " + at + " (off: left out of the stack, its settings kept)"}
+                          .when("layers", holding)
+                          .in(group));
+        out.push_back(ParamSpec{layerParam(k, "Mode"), std::string("normal"),
+                                "How " + at + " combines with the layers below it: normal covers them; multiply, "
+                                "add, subtract; screen lightens; overlay multiplies the dark and screens the light; "
+                                "darken and lighten keep the lower or higher; difference, how far apart",
+                                "", layerModeNames()}
+                          .when("layers", holding)
+                          .in(group));
+        // Layer 1 black by default and the rest white, so a mask plugged into layer 2's opacity
+        // gives the mask itself.
+        const float initial = k == 1 ? 0.0f : 1.0f;
+        if (color) {
+            out.push_back(ParamSpec{layerParam(k, ""), Vec3f(initial, initial, initial),
+                                    "The color of " + at + " (linear RGB); a Map's rgb plugged in gives the map's "
+                                    "color, times this",
+                                    "color"}
+                              .colorMap()
+                              .when("layers", holding)
+                              .in(group));
+        } else {
+            out.push_back(ParamSpec{layerParam(k, ""), static_cast<double>(initial),
+                                    "The value of " + at + " (mappable, per point: a field plugged in gives its "
+                                    "value, times this)"}
+                              .soft(0, 1)
+                              .when("layers", holding)
+                              .in(group));
+        }
+        // Layers 3 and up start clear (opacity 0), as a paint program's new layer: raising the
+        // count changes nothing until the new layer is given an opacity or a mask.
+        out.push_back(ParamSpec{layerParam(k, "Opacity"), k <= 2 ? 1.0 : 0.0,
+                                "How much of " + at + " shows over the layers below it, 0-1 (mappable, per point: a "
+                                "mask plugged in shows the layer where it is painted)" +
+                                    std::string(k <= 2 ? "" : "; starts at 0, clear, as a new layer"),
+                                "fraction"}
+                          .soft(0, 1)
+                          .when("layers", holding)
+                          .in(group));
+    }
+    return out;
+}
+
+// The layers on, bottom first, each read as the node's params say; numbers (Layers) or colors
+// (ColorLayers). A color stack gives its luminance to a number param.
+class LayersFieldValue : public FieldValue {
+public:
+    LayersFieldValue(const ParamSet& params, bool color, MeshPtr scalp, const char* op)
+        : scalp_(std::move(scalp)), color_(color) {
+        const int count = static_cast<int>(std::clamp<std::int64_t>(params.getInt("layers"), 1, kMaxLayers));
+        for (int k = 1; k <= count; ++k) {
+            if (!params.getBool(layerParam(k, "On"))) continue;
+            Layer layer;
+            layer.mode = layerModeOf(params.getString(layerParam(k, "Mode")), op);
+            if (color) layer.color = std::make_unique<ColorField>(params, layerParam(k, ""));
+            else layer.value = std::make_unique<ScalarField>(params, layerParam(k, ""), scalp_.get());
+            layer.opacity = std::make_unique<ScalarField>(params, layerParam(k, "Opacity"), scalp_.get());
+            layers_.push_back(std::move(layer));
+        }
+    }
+
+    float atRoot(const StrandRoot& root) const override {
+        if (color_) return luminanceOf(colorAtRoot(root));
+        return numbers([&](const ScalarField& f) { return f.atRoot(root); });
+    }
+    float at(const StrandSet& strands, std::size_t s) const override {
+        if (color_) return luminanceOf(colorAt(strands, s));
+        return numbers([&](const ScalarField& f) { return f.at(strands, s); });
+    }
+    float atPoint(const StrandSet& strands, std::size_t s, std::size_t point) const override {
+        if (color_) return luminanceOf(colorAtPoint(strands, s, point));
+        return numbers([&](const ScalarField& f) { return f.atPoint(strands, s, point); });
+    }
+    bool isColor() const override { return color_; }
+    std::array<float, 3> colorAt(const StrandSet& strands, std::size_t s) const override {
+        if (!color_) return FieldValue::colorAt(strands, s);
+        return colors([&](const ColorField& c) { return c.at(strands, s); },
+                      [&](const ScalarField& f) { return f.at(strands, s); });
+    }
+    std::array<float, 3> colorAtPoint(const StrandSet& strands, std::size_t s, std::size_t point) const override {
+        if (!color_) return FieldValue::colorAtPoint(strands, s, point);
+        return colors([&](const ColorField& c) { return c.atPoint(strands, s, point); },
+                      [&](const ScalarField& f) { return f.atPoint(strands, s, point); });
+    }
+    std::array<float, 3> colorAtRoot(const StrandRoot& root) const override {
+        if (!color_) return FieldValue::colorAtRoot(root);
+        return colors([&](const ColorField& c) { return c.atRoot(root); },
+                      [&](const ScalarField& f) { return f.atRoot(root); });
+    }
+
+    bool perPoint() const override {
+        return any([](const ScalarField& f) { return f.perPoint(); }, [](const ColorField& c) { return c.perPoint(); });
+    }
+    bool readsPositions() const override {
+        return any([](const ScalarField& f) { return f.readsPositions(); },
+                   [](const ColorField& c) { return c.readsPositions(); });
+    }
+    bool strandLocal() const override {
+        return !any([](const ScalarField& f) { return !f.strandLocal(); },
+                    [](const ColorField& c) { return !c.strandLocal(); });
+    }
+    // (All of the same strands: the same longest.)
+    float longestRead() const override {
+        if (strandLocal()) return -1.0f;
+        float longest = 0.0f;
+        bool unknown = false;
+        auto read = [&](bool local, float l) {
+            if (local) return false;
+            unknown = unknown || l < 0.0f;
+            longest = std::max(longest, l);
+            return false;
+        };
+        any([&](const ScalarField& f) { return read(f.strandLocal(), f.longestRead()); },
+            [&](const ColorField& c) { return read(c.strandLocal(), c.longestRead()); });
+        return unknown ? -1.0f : longest;
+    }
+    void validate(const StrandSet& strands) const override {
+        for (const Layer& l : layers_) {
+            if (l.value) l.value->validate(strands);
+            if (l.color) l.color->validate(strands);
+            l.opacity->validate(strands);
+        }
+    }
+    float maximum() const override {
+        float hi = 0.0f;
+        for (const Layer& l : layers_) hi = layerMaximum(l.mode, hi, l.value ? l.value->maximum() : l.color->maximum());
+        return hi;
+    }
+
+private:
+    struct Layer {
+        LayerMode mode = LayerMode::Normal;
+        std::unique_ptr<ScalarField> value;  // Layers'
+        std::unique_ptr<ColorField> color;   // ColorLayers'
+        std::unique_ptr<ScalarField> opacity;
+    };
+
+    template <class Read>
+    float numbers(Read read) const {
+        float below = 0.0f;
+        for (const Layer& l : layers_) below = compositeLayer(l.mode, below, read(*l.value), read(*l.opacity));
+        return below;
+    }
+    template <class ReadColor, class Read>
+    std::array<float, 3> colors(ReadColor readColor, Read read) const {
+        std::array<float, 3> below{};
+        for (const Layer& l : layers_) {
+            const std::array<float, 3> layer = readColor(*l.color);
+            const float opacity = read(*l.opacity);
+            for (int c = 0; c < 3; ++c) below[c] = compositeLayer(l.mode, below[c], layer[c], opacity);
+        }
+        return below;
+    }
+    // Whether any layer's value or opacity says so.
+    template <class OfScalar, class OfColor>
+    bool any(OfScalar ofScalar, OfColor ofColor) const {
+        for (const Layer& l : layers_) {
+            if ((l.value && ofScalar(*l.value)) || (l.color && ofColor(*l.color)) || ofScalar(*l.opacity)) return true;
+        }
+        return false;
+    }
+
+    MeshPtr scalp_;  // kept alive: the fields read it
+    bool color_;
+    std::vector<Layer> layers_;
+};
+
+class LayersOp : public Operator {
+public:
+    explicit LayersOp(bool color) : color_(color) {}
+    std::string typeName() const override { return color_ ? op::kColorLayers : op::kLayers; }
+    std::string category() const override { return "field"; }
+    // The scalp only for a layer whose own value is a map (a texture, an expression), read on it;
+    // fields plugged in read their own.
+    std::vector<std::string> externalInputs() const override {
+        const int count = static_cast<int>(std::clamp<std::int64_t>(params().getInt("layers"), 1, kMaxLayers));
+        for (int k = 1; k <= count; ++k) {
+            for (const std::string& name : {layerParam(k, ""), layerParam(k, "Opacity")}) {
+                if (params().has(name) && std::holds_alternative<MapRef>(params().get(name))) return {"scalp"};
+            }
+        }
+        return {};
+    }
+    std::vector<PortSpec> inputs() const override { return {}; }
+    PortSpec output() const override { return {color_ ? "rgb" : "field", PortType::Field}; }
+    std::vector<ParamSpec> paramSpecs() const override { return layerSpecs(color_); }
+    Value evaluate(const EvalContext& ctx, const std::vector<Value>&) const override {
+        MeshPtr scalp;
+        if (!externalInputs().empty()) scalpIn(ctx, &scalp);
+        return FieldPtr(std::make_shared<LayersFieldValue>(params(), color_, scalp, typeName().c_str()));
+    }
+
+private:
+    bool color_;
+};
+
 // A reusable curve for ramp params (Clump profile, Width along the length,
 // FieldRemap's curve...): edit it once, plug it into several nodes. smooth
 // eases between keys; flip runs it tip to root; the output runs from
@@ -800,6 +1083,20 @@ void registerFieldCombineOperator(OperatorRegistry& registry) {
     registry.registerType(op::kFieldCombine,
                           {"field", "Two fields multiplied, added, mixed...", "multiply add mix"},
                           [] { return std::make_unique<FieldCombineOp>(); });
+}
+
+void registerLayersOperator(OperatorRegistry& registry) {
+    registry.registerType(op::kLayers,
+                          {"field", "A stack of layers (values, maps, masks), each by a blend mode and an opacity.",
+                           "layer stack blend mode opacity mask multiply screen overlay photoshop"},
+                          [] { return std::make_unique<LayersOp>(false); });
+}
+
+void registerColorLayersOperator(OperatorRegistry& registry) {
+    registry.registerType(op::kColorLayers,
+                          {"field", "A stack of color layers (colors, color maps), each by a blend mode and an opacity.",
+                           "layer stack blend mode opacity mask multiply screen overlay photoshop tint"},
+                          [] { return std::make_unique<LayersOp>(true); });
 }
 
 }  // namespace groomlab

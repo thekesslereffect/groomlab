@@ -139,6 +139,30 @@ std::array<float, 3> hairBaseOfAppearance(const std::array<float, 3>& appearance
     return hairAbsorptionColor(sigma);
 }
 
+std::array<float, 3> hairShadedColor(const std::array<float, 3>& baseColor) {
+    const std::array<float, 3> sigma = hairColorAbsorption(baseColor);
+    std::array<float, 3> f{};
+    for (int k = 0; k < 3; ++k) {
+        f[k] = kShadedTop * (kShadedSheen + (1.0f - kShadedSheen) *
+                                                pm::exp(-kShadedScale * pm::pow(std::max(sigma[k], 0.0f), kShadedPower)));
+    }
+    std::array<float, 3> out{};
+    for (int i = 0; i < 3; ++i) {
+        out[i] = std::clamp(kShadedMix[i][0] * f[0] + kShadedMix[i][1] * f[1] + kShadedMix[i][2] * f[2], 0.0f, 1.0f);
+    }
+    return out;
+}
+
+std::array<float, 3> hairBaseOfShaded(const std::array<float, 3>& shaded) {
+    std::array<float, 3> sigma{};
+    for (int k = 0; k < 3; ++k) {
+        const float f = kShadedUnmix[k][0] * shaded[0] + kShadedUnmix[k][1] * shaded[1] + kShadedUnmix[k][2] * shaded[2];
+        const float share = std::clamp((f / kShadedTop - kShadedSheen) / (1.0f - kShadedSheen), 1e-6f, 1.0f);
+        sigma[k] = pm::pow(-pm::log(share) / kShadedScale, 1.0f / kShadedPower);
+    }
+    return hairAbsorptionColor(sigma);
+}
+
 WetShading wetShading(float wetness) {
     const float w = std::clamp(wetness, 0.0f, 1.0f);
     WetShading wet;

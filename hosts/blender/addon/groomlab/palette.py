@@ -37,7 +37,14 @@ STARTER = tuple((s["id"], s["label"], s["tip"]) for s in defs.get("palette/start
 _lists_for = [None]
 
 
+# Characters a wrapped line holds when the panel draws elsewhere than the sidebar (the GroomLab
+# window, window.py, sets it while it draws the panel): None for the sidebar's own width.
+CHARS = [None]
+
+
 def _chars(context):
+    if CHARS[0]:
+        return CHARS[0]
     region = getattr(context, "region", None)
     width = region.width if region is not None and region.width > 50 else 300
     scale = (context.preferences.system.ui_scale if context.preferences else 1.0) or 1.0
@@ -613,6 +620,9 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         apply.enabled = t.tube_targets > 0
         apply.operator("groomlab.tube_apply", text="Apply")
         col.template_list("GROOMLAB_UL_tube_shapes", "", t, "tube_shapes", t, "tube_shape_index", rows=2)
+        editor = getattr(col, "groomlab_profile_editor", None)
+        if editor is not None:  # the GroomLab window draws the picked shape's cross-section (Maya's editor)
+            editor(context, t)
         col, head = block(card, "Selected guides")
         sub = head.row(align=True)
         sub.alignment = "RIGHT"

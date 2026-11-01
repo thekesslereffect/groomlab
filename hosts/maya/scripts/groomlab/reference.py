@@ -502,12 +502,12 @@ def reference_opacity(camera):
 
 
 def set_reference_focal(camera, focal, keep=True):
-    """The photo camera's focal length (mm, 2.5 to 3500), set by hand; with `keep` Keep focal
-    length turns on, so a solve keeps it. A locked camera keeps its own (unlock it first)."""
+    """The photo camera's focal length (mm, 9 to 1080: the solve's plausible lenses), set by hand; with `keep`
+    Keep focal length turns on, so a solve keeps it. A locked camera keeps its own (unlock it first)."""
     camera = _camera(camera)
     if is_locked(camera):
         raise RuntimeError("%s is locked: unlock it to change its focal length" % _short(camera))
-    cmds.setAttr(_shape(camera) + ".focalLength", min(max(float(focal), 2.5), 3500.0))
+    cmds.setAttr(_shape(camera) + ".focalLength", min(max(float(focal), 9.0), 1080.0))
     if keep:
         set_keep_focal(camera, True)
 
@@ -737,3 +737,120 @@ def reference_info(camera):
             "depth": reference_depth(camera), "locked": is_locked(camera),
             "focal": cmds.getAttr(shape + ".focalLength"), "keepFocal": keep_focal(camera),
             "rms": cmds.getAttr(camera + ".glRefRms"), "pairs": pairs(camera)}
+
+
+# ---- Morph to Photos --------------------------------------------------------------------------------
+
+MORPH_ATTR = "glPhotoMorph"  # on the blendShape node Morph to Photos makes (one per scalp)
+MORPH_PINS_ATTR = "glPhotoMorphPins"  # on that node: each pair's stored world point and its rest point (6 per pair)
+MORPH_REST_ATTR = "glPhotoMorphRest"  # on that node: the scalp's object-space points before the morph (x, y, z, ...)
+
+
+def photo_morph_node(groom):
+    """The blendShape node holding the groom's scalp's photo morph, or None."""
+    shape = groomlab.scalp_mesh(groom)
+    if not shape:
+        return None
+    for node in cmds.ls(cmds.listHistory(shape) or [], type="blendShape") or []:
+        if cmds.attributeQuery(MORPH_ATTR, node=node, exists=True):
+            return node
+    return None
+
+
+def _object_points(shape):
+    from maya.api import OpenMaya as om
+    fn = om.MFnMesh(om.MSelectionList().add(shape).getDagPath(0))
+    return fn, [(p.x, p.y, p.z) for p in fn.getPoints(om.MSpace.kObject)]
+
+
+def morph_to_photos(groom, stiffness=0.0, symmetric=True):
+    """The groom's scalp morphed so every lined-up reference camera's pairs land on their photo
+    points (groomlab_core.morph_to_pins: one photo moves a pair across its view, two or more set
+    its depth too; `symmetric`: mirrored across the scalp's local x = 0), as a blendShape target
+    at 1 on the scalp (its own mesh left as it is; reset_photo_morph removes it). Always from the
+    scalp as it was before the first morph: a pair picked on the morphed scalp counts at the same
+    spot of the original surface, so morphs never stack. One undo step. Returns {"pins",
+    "rms_before", "rms_after"} (pixels)."""
+    import groomlab_core
+    from maya.api import OpenMaya as om
+    shape = groomlab.scalp_mesh(groom)
+    if not shape:
+        raise ValueError("%s has no scalp" % groom)
+    transform = cmds.listRelatives(shape, parent=True, fullPath=True)[0]
+    to_object = om.MMatrix(cmds.getAttr(transform + ".worldMatrix[0]")).inverse()
+    node = photo_morph_node(groom)
+    # The shape shown (the pairs were picked on it) and the rest shape (the morph off).
+    fn, _shown = _object_points(shape)
+    intersector = om.MMeshIntersector()
+    intersector.create(fn.object(), om.MMatrix())  # (object space)
+    # The rest shape kept on the morph node (turning the morph off to read it is not enough: Maya's
+    # Evaluation Manager hands back the cached, morphed points, and morphs stacked).
+    rest_points = _shown
+    if node and cmds.attributeQuery(MORPH_REST_ATTR, node=node, exists=True):
+        flat = cmds.getAttr(node + "." + MORPH_REST_ATTR) or []
+        if len(flat) == 3 * len(_shown):
+            rest_points = [tuple(flat[i:i + 3]) for i in range(0, len(flat), 3)]
+    # The pairs the last morph used: their rest points as found then (a pair's world point stays
+    # where it was picked while the surface moves away; found again on the moved surface it lands
+    # on another spot of the rest shape, and the morphs crept).
+    known = []
+    if node and cmds.attributeQuery(MORPH_PINS_ATTR, node=node, exists=True):
+        flat = cmds.getAttr(node + "." + MORPH_PINS_ATTR) or []
+        known = [(flat[i:i + 3], flat[i + 3:i + 6]) for i in range(0, len(flat) - 5, 6)]
+    bound = []  # (world point as stored, rest point)
+    views, pins = [], []
+    size = max(1e-6, max(abs(c) for p in rest_points for c in p))
+    for camera in list_references():
+        complete = complete_pairs(camera)
+        if cmds.getAttr(camera + ".glRefRms") < 0.0 or not complete:
+            continue  # not lined up: its pairs say nothing about the scalp's shape
+        cam = camera_dict(camera)
+        cam["matrix"] = list(om.MMatrix(cam["matrix"]) * to_object)
+        views.append(cam)
+        for _i, pair in complete:
+            rest = next((list(r) for w, r in known if sum((w[c] - pair["mesh"][c]) ** 2 for c in range(3)) <= 1e-12), None)
+            if rest is None:  # picked on the shape shown: the same spot of the rest shape
+                p = om.MPoint(pair["mesh"]) * to_object
+                hit = intersector.getClosestPoint(p)
+                tri = fn.getPolygonTriangleVertices(hit.face, hit.triangle)
+                u, v = hit.barycentricCoords
+                weights = (u, v, 1.0 - u - v)
+                rest = [sum(weights[k] * rest_points[tri[k]][c] for k in range(3)) for c in range(3)]
+            bound.append((list(pair["mesh"]), rest))
+            pin = next((q for q in pins if sum((q["mesh"][c] - rest[c]) ** 2 for c in range(3)) ** 0.5 <= 1e-4 * size),
+                       None)
+            if pin is None:
+                pin = {"mesh": rest, "sights": []}
+                pins.append(pin)
+            pin["sights"].append((len(views) - 1, float(pair["image"][0]), float(pair["image"][1])))
+    if not pins:
+        raise ValueError("no lined-up reference camera has pairs: pick pairs and line a photo up first")
+    r = groomlab_core.morph_to_pins(rest_points, pins, views, float(stiffness), bool(symmetric), 0)
+    if not r["ok"]:
+        raise ValueError(r["error"])
+    with groomlab.undo_chunk("morph to photos"):
+        if node:
+            cmds.delete(node)
+        target = cmds.duplicate(transform, name="groomLabPhotoMorphTarget")[0]
+        target_shape = cmds.listRelatives(target, shapes=True, fullPath=True, noIntermediate=True)[0]
+        tfn = om.MFnMesh(om.MSelectionList().add(target_shape).getDagPath(0))
+        tfn.setPoints([om.MPoint(p) for p in r["points"]], om.MSpace.kObject)
+        node = cmds.blendShape(target, transform, name=transform.split("|")[-1] + "PhotoMorph", frontOfChain=True)[0]
+        cmds.setAttr(node + ".w[0]", 1.0)
+        cmds.addAttr(node, longName=MORPH_ATTR, attributeType="bool")
+        cmds.addAttr(node, longName=MORPH_REST_ATTR, dataType="doubleArray")
+        cmds.setAttr(node + "." + MORPH_REST_ATTR, [c for p in rest_points for c in p], type="doubleArray")
+        cmds.addAttr(node, longName=MORPH_PINS_ATTR, dataType="doubleArray")
+        cmds.setAttr(node + "." + MORPH_PINS_ATTR, [c for w, r in bound for c in list(w) + list(r)], type="doubleArray")
+        cmds.delete(target)
+    return {"pins": len(pins), "rms_before": r["rms_before"], "rms_after": r["rms_after"]}
+
+
+def reset_photo_morph(groom):
+    """The scalp as it was before Morph to Photos (its blendShape removed); False when none. Undoable."""
+    node = photo_morph_node(groom)
+    if not node:
+        return False
+    with groomlab.undo_chunk("reset photo morph"):
+        cmds.delete(node)
+    return True

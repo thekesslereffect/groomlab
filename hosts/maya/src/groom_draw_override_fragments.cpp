@@ -67,6 +67,10 @@ const char* kCardColorFragment = R"x(<fragment uiName="groomLabCardColor" name="
         <float name="iridescenceShift" />
         <texture2 name="irMap" />
         <sampler name="irMapSampler" />
+        <float name="cardColorLook" />
+        <float3 name="cardFromRec709R" />
+        <float3 name="cardFromRec709G" />
+        <float3 name="cardFromRec709B" />
     </properties>
     <values>
         <float3 name="color" value="1.0,1.0,1.0" />
@@ -78,6 +82,10 @@ const char* kCardColorFragment = R"x(<fragment uiName="groomLabCardColor" name="
         <float name="alphaTest" value="1.0" />
         <float3 name="iridescenceColor" value="0.05,0.55,0.2" />
         <float name="iridescenceShift" value="0.3" />
+        <float name="cardColorLook" value="1.0" />
+        <float3 name="cardFromRec709R" value="1.0,0.0,0.0" />
+        <float3 name="cardFromRec709G" value="0.0,1.0,0.0" />
+        <float3 name="cardFromRec709B" value="0.0,0.0,1.0" />
     </values>
     <outputs>
         <float3 name="groomLabCardColor" />
@@ -104,7 +112,8 @@ float3 groomLabCardHue(float3 c, float turns)
 float3 groomLabCardColor(float3 color, float2 uv, int tubeDirection, texture2D map, sampler2D textureSampler,
                          float cutoff, float solid, float3 solidColor, float mapSize, float alphaTest, float4 tint,
                          float3 irNormal, float3 irView, float3 iridescenceColor, float iridescenceShift, texture2D irMap,
-                         sampler2D irMapSampler)
+                         sampler2D irMapSampler, float cardColorLook, float3 cardFromRec709R, float3 cardFromRec709G,
+                         float3 cardFromRec709B)
 {
     if (solid > 0.5f) return solidColor;
     float4 m = tex2D(textureSampler, uv);
@@ -120,6 +129,20 @@ float3 groomLabCardColor(float3 color, float2 uv, int tubeDirection, texture2D m
     if (alphaTest > 0.5f) clip(m.a * (1.0f + 0.25f * lod) - lerp(cutoff, noise, saturate(lod)));
     float3 c = m.rgb;
     c = lerp(c / 12.92f, pow((c + 0.055f) / 1.055f, 2.4f), step(0.04045f, c));
+    // The map's Rec.709 to the rendering space (as a file node reads it), then the hair's
+    // appearance color, what Maya's hair graph shades (hair_color.h): the bake's absorption, a
+    // Shaded bake's (hairBaseOfShaded) or the base color's (hairColorAbsorption, roughness 0.2).
+    c = float3(dot(cardFromRec709R, c), dot(cardFromRec709G, c), dot(cardFromRec709B, c));
+    float3 sigma;
+    if (cardColorLook < 0.5f) {
+        float3 f = 0.68686f * c + 0.10438f * (c.x + c.y + c.z);
+        float3 share = clamp((f / 0.7079f - 0.0989f) / 0.9011f, 1e-6f, 1.0f);
+        sigma = pow(-log(share) / 4.5472f, float3(1.468f, 1.468f, 1.468f));
+    } else {
+        float3 l = log(clamp(c, 1e-8f, 1.0f)) / 5.9504f;
+        sigma = l * l;
+    }
+    c = 0.03f + 0.97f * exp(-3.52f * pow(sigma, float3(0.79f, 0.79f, 0.79f)));
     // The card's own color: its tint (vertex color, 0.5 none) over the shared texture's.
     float3 result = color * c * 2.0f * tint.rgb;
     // Structural color: how much, the bake's (the Color map's alpha, per texel: one vane of a
@@ -155,7 +178,8 @@ float3 groomLabCardHue(float3 c, float turns)
 float3 groomLabCardColor(float3 color, float2 uv, int tubeDirection, Texture2D map, sampler textureSampler,
                          float cutoff, float solid, float3 solidColor, float mapSize, float alphaTest, float4 tint,
                          float3 irNormal, float3 irView, float3 iridescenceColor, float iridescenceShift, Texture2D irMap,
-                         sampler irMapSampler)
+                         sampler irMapSampler, float cardColorLook, float3 cardFromRec709R, float3 cardFromRec709G,
+                         float3 cardFromRec709B)
 {
     if (solid > 0.5f) return solidColor;
     float4 m = map.Sample(textureSampler, uv);
@@ -171,6 +195,20 @@ float3 groomLabCardColor(float3 color, float2 uv, int tubeDirection, Texture2D m
     if (alphaTest > 0.5f) clip(m.a * (1.0f + 0.25f * lod) - lerp(cutoff, noise, saturate(lod)));
     float3 c = m.rgb;
     c = lerp(c / 12.92f, pow((c + 0.055f) / 1.055f, 2.4f), step(0.04045f, c));
+    // The map's Rec.709 to the rendering space (as a file node reads it), then the hair's
+    // appearance color, what Maya's hair graph shades (hair_color.h): the bake's absorption, a
+    // Shaded bake's (hairBaseOfShaded) or the base color's (hairColorAbsorption, roughness 0.2).
+    c = float3(dot(cardFromRec709R, c), dot(cardFromRec709G, c), dot(cardFromRec709B, c));
+    float3 sigma;
+    if (cardColorLook < 0.5f) {
+        float3 f = 0.68686f * c + 0.10438f * (c.x + c.y + c.z);
+        float3 share = clamp((f / 0.7079f - 0.0989f) / 0.9011f, 1e-6f, 1.0f);
+        sigma = pow(-log(share) / 4.5472f, float3(1.468f, 1.468f, 1.468f));
+    } else {
+        float3 l = log(clamp(c, 1e-8f, 1.0f)) / 5.9504f;
+        sigma = l * l;
+    }
+    c = 0.03f + 0.97f * exp(-3.52f * pow(sigma, float3(0.79f, 0.79f, 0.79f)));
     // The card's own color: its tint (vertex color, 0.5 none) over the shared texture's.
     float3 result = color * c * 2.0f * tint.rgb;
     // Structural color: how much, the bake's (the Color map's alpha, per texel: one vane of a
@@ -205,7 +243,8 @@ vec3 groomLabCardHue(vec3 c, float turns)
 }
 vec3 groomLabCardColor(vec3 color, vec2 uv, int tubeDirection, sampler2D textureSampler, float cutoff, float solid,
                        vec3 solidColor, float mapSize, float alphaTest, vec4 tint,
-                       vec3 irNormal, vec3 irView, vec3 iridescenceColor, float iridescenceShift, sampler2D irMapSampler)
+                       vec3 irNormal, vec3 irView, vec3 iridescenceColor, float iridescenceShift, sampler2D irMapSampler,
+                       float cardColorLook, vec3 cardFromRec709R, vec3 cardFromRec709G, vec3 cardFromRec709B)
 {
     if (solid > 0.5) return solidColor;
     vec4 m = texture(textureSampler, uv);
@@ -217,6 +256,17 @@ vec3 groomLabCardColor(vec3 color, vec2 uv, int tubeDirection, sampler2D texture
     if (alphaTest > 0.5 && m.a * (1.0 + 0.25 * lod) - mix(cutoff, noise, clamp(lod, 0.0, 1.0)) < 0.0) discard;
     vec3 c = m.rgb;
     c = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+    c = vec3(dot(cardFromRec709R, c), dot(cardFromRec709G, c), dot(cardFromRec709B, c));
+    vec3 sigma;
+    if (cardColorLook < 0.5) {
+        vec3 f = 0.68686 * c + 0.10438 * (c.x + c.y + c.z);
+        vec3 share = clamp((f / 0.7079 - 0.0989) / 0.9011, 1e-6, 1.0);
+        sigma = pow(-log(share) / 4.5472, vec3(1.468, 1.468, 1.468));
+    } else {
+        vec3 l = log(clamp(c, 1e-8, 1.0)) / 5.9504;
+        sigma = l * l;
+    }
+    c = 0.03 + 0.97 * exp(-3.52 * pow(sigma, vec3(0.79, 0.79, 0.79)));
     vec3 result = color * c * 2.0 * tint.rgb;
     float amount = clamp((tint.a - 1.0) * 4.0, 0.0, 1.0) * texture(irMapSampler, uv).r;
     if (amount > 0.0) {
@@ -248,7 +298,8 @@ float3 groomLabCardHue(float3 c, float turns)
 float3 groomLabCardColor(float3 color, float2 uv, int tubeDirection, Texture2D map, sampler textureSampler,
                          float cutoff, float solid, float3 solidColor, float mapSize, float alphaTest, float4 tint,
                          float3 irNormal, float3 irView, float3 iridescenceColor, float iridescenceShift, Texture2D irMap,
-                         sampler irMapSampler)
+                         sampler irMapSampler, float cardColorLook, float3 cardFromRec709R, float3 cardFromRec709G,
+                         float3 cardFromRec709B)
 {
     if (solid > 0.5f) return solidColor;
     float4 m = map.Sample(textureSampler, uv);
@@ -264,6 +315,20 @@ float3 groomLabCardColor(float3 color, float2 uv, int tubeDirection, Texture2D m
     if (alphaTest > 0.5f) clip(m.a * (1.0f + 0.25f * lod) - lerp(cutoff, noise, saturate(lod)));
     float3 c = m.rgb;
     c = lerp(c / 12.92f, pow((c + 0.055f) / 1.055f, 2.4f), step(0.04045f, c));
+    // The map's Rec.709 to the rendering space (as a file node reads it), then the hair's
+    // appearance color, what Maya's hair graph shades (hair_color.h): the bake's absorption, a
+    // Shaded bake's (hairBaseOfShaded) or the base color's (hairColorAbsorption, roughness 0.2).
+    c = float3(dot(cardFromRec709R, c), dot(cardFromRec709G, c), dot(cardFromRec709B, c));
+    float3 sigma;
+    if (cardColorLook < 0.5f) {
+        float3 f = 0.68686f * c + 0.10438f * (c.x + c.y + c.z);
+        float3 share = clamp((f / 0.7079f - 0.0989f) / 0.9011f, 1e-6f, 1.0f);
+        sigma = pow(-log(share) / 4.5472f, float3(1.468f, 1.468f, 1.468f));
+    } else {
+        float3 l = log(clamp(c, 1e-8f, 1.0f)) / 5.9504f;
+        sigma = l * l;
+    }
+    c = 0.03f + 0.97f * exp(-3.52f * pow(sigma, float3(0.79f, 0.79f, 0.79f)));
     // The card's own color: its tint (vertex color, 0.5 none) over the shared texture's.
     float3 result = color * c * 2.0f * tint.rgb;
     // Structural color: how much, the bake's (the Color map's alpha, per texel: one vane of a
@@ -1172,10 +1237,17 @@ bool cardShaderRegistered() {
                              "        <float3 name=\"iridescenceColor\" ref=\"mayaHairTubeShaderColor.iridescenceColor\" />\n"
                              "        <float name=\"iridescenceShift\" ref=\"mayaHairTubeShaderColor.iridescenceShift\" />\n"
                              "        <texture2 name=\"irMap\" ref=\"mayaHairTubeShaderColor.irMap\" />\n"
-                             "        <sampler name=\"irMapSampler\" ref=\"mayaHairTubeShaderColor.irMapSampler\" />\n",
+                             "        <sampler name=\"irMapSampler\" ref=\"mayaHairTubeShaderColor.irMapSampler\" />\n"
+                             "        <float name=\"cardColorLook\" ref=\"mayaHairTubeShaderColor.cardColorLook\" />\n"
+                             "        <float3 name=\"cardFromRec709R\" ref=\"mayaHairTubeShaderColor.cardFromRec709R\" />\n"
+                             "        <float3 name=\"cardFromRec709G\" ref=\"mayaHairTubeShaderColor.cardFromRec709G\" />\n"
+                             "        <float3 name=\"cardFromRec709B\" ref=\"mayaHairTubeShaderColor.cardFromRec709B\" />\n",
                              "<float name=\"cutoff\" value=\"0.5\" />\n<float name=\"solid\" value=\"1.0\" />\n"
                              "<float3 name=\"solidColor\" value=\"0.58,0.50,0.42\" />\n<float name=\"mapSize\" value=\"2048.0\" />\n"
-                             "<float name=\"alphaTest\" value=\"1.0\" />\n",
+                             "<float name=\"alphaTest\" value=\"1.0\" />\n<float name=\"cardColorLook\" value=\"1.0\" />\n"
+                             "<float3 name=\"cardFromRec709R\" value=\"1.0,0.0,0.0\" />\n"
+                             "<float3 name=\"cardFromRec709G\" value=\"0.0,1.0,0.0\" />\n"
+                             "<float3 name=\"cardFromRec709B\" value=\"0.0,0.0,1.0\" />\n",
                              "the cards", "they draw as a plain surface", "groomLabCardShaderGeom", kCardGeomFragment, false, true);
 }
 

@@ -202,6 +202,32 @@ TEST(ReferenceEdit, TheCameraSolvesLiveFromLandmarks) {
     EXPECT_EQ(referenceBadLandmarks({1.0, 1.2, 0.9}, 320), std::vector<bool>({false, false, false}));
 }
 
+TEST(ReferenceEdit, TheSolveNeverRunsOffToATelephoto) {
+    // Pairs seen nearly flat (a profile's): a free focal length can slide toward a lens miles away
+    // (the camera past the far clip, no mesh left to pick); a runaway focal length left on the
+    // camera comes back to a normal lens, kept or not.
+    const RefCamera truth = frontCamera(40.0f, 320, 240);
+    const std::vector<Vec3f> points = {{-6, 5, 1.0f}, {6, 5, 0}, {0, -4, 1.5f}, {-5, -3, 0.3f}, {5, -2, 1.2f}, {0, 7, 0}};
+    ReferencePhotoEditor e;
+    for (const Vec3f& p : points) {
+        float u = 0, v = 0;
+        ASSERT_TRUE(truth.project(p, u, v));
+        e.addLandmark(M, world(p.x, p.y, p.z));
+        e.addLandmark(P, ReferencePhotoEditor::photoPoint(u + 1.5f, v - 1.0f));  // a click's slop
+    }
+    const ReferenceLandmarkSolve s = solveReferenceLandmarks(e.landmarks(), 320, 240, truth.focalPx, false);
+    ASSERT_TRUE(s.ok) << s.why;
+    EXPECT_LE(s.camera.focalPx, 30.0 * 320);
+    const double runaway = 500.0 * 320;
+    const ReferenceLandmarkSolve back = solveReferenceLandmarks(e.landmarks(), 320, 240, runaway, false);
+    ASSERT_TRUE(back.ok) << back.why;
+    EXPECT_LE(back.camera.focalPx, 30.0 * 320);
+    const ReferenceLandmarkSolve kept = solveReferenceLandmarks(e.landmarks(), 320, 240, runaway, true);
+    ASSERT_TRUE(kept.ok) << kept.why;
+    EXPECT_DOUBLE_EQ(kept.camera.focalPx, 320.0);  // even kept: a normal lens
+    EXPECT_DOUBLE_EQ(solveReferenceLandmarks(e.landmarks(), 320, 240, 900.0, true).camera.focalPx, 900.0);
+}
+
 TEST(ReferenceEdit, TheMeshOverThePhotoOutlinesItAndDrawsItsFrontFaces) {
     const ScalpMesh ball = sphere(10.0f);
     const RefCamera cam = frontCamera(60.0f, 320, 240);

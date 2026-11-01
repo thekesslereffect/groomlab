@@ -907,10 +907,12 @@ void ParamPanel::build() {
             header->setCheckable(true);
             header->setFlat(true);
             header->setCursor(Qt::PointingHandCursor);
-            // The design's caps header: small muted capitals after a chevron, a hairline above.
+            // The design's caps header: small muted capitals after a chevron, a hairline above. Its
+            // line's height as its least (min-height 0 let a form laid out at its least height, one
+            // without wrapped text, squeeze the headers to a sliver).
             header->setStyleSheet(QStringLiteral(
                 "QPushButton { background: transparent; border: none; border-top: 1px solid %3; border-radius: 0; color: %1; "
-                "font-size: 11px; font-weight: 600; text-align: left; padding: 6px 0 2px 0; min-height: 0; } "
+                "font-size: 11px; font-weight: 600; text-align: left; padding: 6px 0 2px 0; min-height: 14px; } "
                 "QPushButton:hover { color: %2; }")
                                       .arg(theme::textMuted().name(), theme::textDim().name(), theme::divider().name()));
             header->setChecked(!folded(section));

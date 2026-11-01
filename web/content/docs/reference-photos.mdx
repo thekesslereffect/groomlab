@@ -50,6 +50,26 @@ You can also line it up by eye: look through it and move the camera.
 </Step>
 <Step>
 
+### Morph the scalp to the photos (optional)
+
+When the head mesh is not the person in the photos, **Morph to Photos** (in the Photos window,
+under **Morph**) shapes the scalp so every lined-up photo's pairs land on their photo points. A
+pair seen in one photo moves across that photo's view; a pair seen in two or more photos gets its
+depth from them too. The rest of the mesh follows smoothly.
+
+- **Symmetry** (on by default) morphs both sides alike, each pair mirrored across the scalp's
+  middle.
+- **Stiffness** keeps more of the scalp's own shape: 0 lands every pair exactly, higher moves the
+  scalp more as one piece and the pairs fall short.
+- Each press starts from the scalp as it was before the first morph, so pressing it again after
+  moving a pair never stacks morphs. **Reset Morph** puts the scalp back (undoable).
+
+In Maya the morph is a blendShape on the scalp; in Blender (the Photos tab) a shape key over the
+Basis. In the app the groom moves onto the morphed scalp by its UVs.
+
+</Step>
+<Step>
+
 ### Lock and groom
 
 **Lock** the camera once it is aligned (in the tab or the Photos window): the landmarks no longer
@@ -65,6 +85,7 @@ import groomlab.reference as ref
 cam = ref.import_reference("C:/photos/front.jpg", groom=groom)
 ref.set_pair(cam, 0, image=(412, 230), mesh=(0.0, 9.5, 3.1))   # ... 6 pairs (4 keeping the focal length)
 ref.solve(cam)          # the camera from the pairs (the Photos window does it as you click)
+ref.morph_to_photos(groom, stiffness=0.0, symmetric=True)   # optional; ref.reset_photo_morph(groom)
 ref.look_through(cam)
 ref.lock_reference(cam)
 ref.set_reference_opacity(cam, 0.4)

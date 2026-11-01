@@ -58,6 +58,7 @@
 #include "groomlab/texture.h"
 #include "asset_files.h"
 #include "gpu_preview.h"
+#include "hair_shading.h"
 #include "maya_inputs.h"
 #include "node_ids.h"
 
@@ -2338,7 +2339,8 @@ CardBake GroomShape::bakeCardsInMemory(int resolution, float occlusion, const st
         strands = evaluateGroomNode(thisMObject(), density, &error, &scalp, true, graphJson.empty() ? nullptr : &graphJson);
     }
     if (!strands) throw std::runtime_error(error.empty() ? "the groom has no strands" : error);
-    return groomlab::bakeCardsInMemory(std::move(strands), std::move(scalp), resolution, occlusion);
+    // The color map in Rec.709, as an sRGB file holds it (renderingSpace(): Maya under ACES).
+    return groomlab::bakeCardsInMemory(std::move(strands), std::move(scalp), resolution, occlusion, renderingSpace().toRec709);
 }
 
 std::vector<std::string> GroomShape::exportCardMaps(const std::string& directory, const std::string& base, const CardMapPreset& preset,
@@ -2348,7 +2350,7 @@ std::vector<std::string> GroomShape::exportCardMaps(const std::string& directory
     const float density = MPlug(thisMObject(), aCardDensity).asFloat();
     StrandsPtr strands = evaluateGroomNode(thisMObject(), density, &error, &scalp, true, nullptr);
     if (!strands) throw std::runtime_error(error.empty() ? "the groom has no strands" : error);
-    const CardBake bake = groomlab::bakeCardMapsInMemory(std::move(strands), std::move(scalp), settings, occlusion);
+    const CardBake bake = groomlab::bakeCardMapsInMemory(std::move(strands), std::move(scalp), settings, occlusion, renderingSpace().toRec709);
     return writeCardMaps(*bake.maps, preset, settings, directory, fileSafeName(base));
 }
 
@@ -2420,6 +2422,7 @@ ScalpTextures GroomShape::bakeScalpInMemory(int resolution, float reach, float d
     ScalpBakeSettings settings;
     settings.size = resolution;
     settings.reach = reach;
+    settings.colorToRec709 = renderingSpace().toRec709;
     ScalpTextures t;
     try {
         t = bakeScalpTextures(*strands, *scalp, settings);

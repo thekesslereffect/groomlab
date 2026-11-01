@@ -1340,6 +1340,8 @@ class GROOMLAB_PT_graph_groom(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("groomlab.update", text="Evaluate", icon="FILE_REFRESH")
         row.operator("groomlab.graph_tidy", text="Tidy")
+        if graph_tree.charcoal_colors() is None:  # the app's graph look (blender_theme.py), when asked
+            layout.operator("groomlab.theme_apply", icon="COLOR")
 
 
 class GROOMLAB_PT_graph_presets(bpy.types.Panel):

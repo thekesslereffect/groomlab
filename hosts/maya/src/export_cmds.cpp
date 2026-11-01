@@ -50,6 +50,7 @@
 #include "groomlab/scales.h"
 #include "groomlab/usd_writer.h"
 #include "groomlab/vrscene_writer.h"
+#include "hair_shading.h"
 #include "maya_inputs.h"
 
 #if GROOMLAB_HAS_ALEMBIC
@@ -866,6 +867,7 @@ MStatus ExportGltfCmd::doIt(const MArgList& args) {
         settings.scale = static_cast<float>(scale);
         settings.zUp = MGlobal::isZAxisUp();
         settings.rootToTip = rootToTip;
+        settings.colorToRec709 = renderingSpace().toRec709;  // (the cards' bake: bakeCardsInMemory)
         settings.tangents = tangents;
         const GroomShape::HairLook look = shape->hairLook();
         settings.roughness = look.roughness;

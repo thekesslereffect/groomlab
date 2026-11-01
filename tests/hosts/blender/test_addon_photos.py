@@ -145,6 +145,25 @@ class PhotosTest(unittest.TestCase):
             np.testing.assert_allclose(uv, project(cam.matrix_world, focal, 400, 500, w), atol=1e-2)
             np.testing.assert_allclose(photos.region_of_pixel(scene, region, rv3d, cam, *uv), (q.x, q.y), atol=1e-3)
 
+        # Morph to Photos: two pins' photo points moved off their vertices; the scalp's shape key takes
+        # those vertices onto them (their depth kept: one photo), the mesh itself left alone.
+        before = [x.image[:] for x in p.pairs]
+        p.pairs[0].image = (p.pairs[0].image[0] + 12.0, p.pairs[0].image[1] - 6.0)
+        p.pairs[3].image = (p.pairs[3].image[0] - 8.0, p.pairs[3].image[1] + 10.0)
+        rest = [v.co.copy() for v in head.data.vertices]
+        scene.groomlab_photos.morph_symmetry = False  # (the test's pins are one-sided: each lands as given)
+        self.assertEqual(bpy.ops.groomlab.photos_morph(), {"FINISHED"})
+        key = head.data.shape_keys.key_blocks[photos.MORPH_KEY]
+        self.assertEqual(key.value, 1.0)
+        self.assertEqual([v.co for v in head.data.vertices], rest)  # the mesh itself: as it was
+        moved = key.data[int(np.linspace(0, len(head.data.vertices) - 1, 8).astype(int)[0])].co
+        landed = project(cam.matrix_world, focal, 400, 500, head.matrix_world @ moved)
+        np.testing.assert_allclose(landed, p.pairs[0].image, atol=0.05)
+        self.assertIn("morphed to 8 pins", scene.groomlab_photos.result)
+        head.shape_key_clear()
+        for x, image in zip(p.pairs, before):
+            x.image = image
+
         # Pick again, delete, keep the focal length with 4 pairs, clear.
         p.pair_index = 2
         self.assertEqual(bpy.ops.groomlab.pairs_repick(kind="mesh"), {"FINISHED"})

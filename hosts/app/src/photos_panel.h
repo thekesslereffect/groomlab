@@ -36,6 +36,8 @@
 #include "definitions.h"
 #include "groomlab/reference_guides.h"
 
+class QCheckBox;
+class QDoubleSpinBox;
 class QFrame;
 class QLabel;
 class QListWidget;
@@ -120,6 +122,14 @@ public:
     QToolButton* depthButton(bool front) const { return front ? front_ : behind_; }
     QToolButton* visibleButton() const { return visible_; }
     QPushButton* alignButton() const { return align_; }
+
+    // Morph to Photos: the groom's scalp as it was before the first morph (kept while the panel
+    // shows that groom, so morphs never stack) moved so every lined-up photo's pairs land on their
+    // photo points (pin_morph.h; `symmetric`: mirrored across x = 0). The mesh, or null with *error.
+    std::shared_ptr<const ScalpMesh> morphedScalp(double stiffness, bool symmetric, QString* error);
+    // The scalp before the first morph (null: none yet).
+    std::shared_ptr<const ScalpMesh> unmorphedScalp() const { return morphCage_; }
+    QPushButton* morphButton() const { return morph_; }
     ListBar* bar() const { return bar_; }          // the header's: Import Photo...
     ListBar* itemBar() const { return itemBar_; }  // the picked photo's: Rename, Delete
     Section* guidesSection() const { return guidesSection_; }  // Guides from photos (folded)
@@ -130,6 +140,8 @@ signals:
     void edited();          // the photos changed (stored with the groom)
     void alignRequested(int index);  // Align Photo...: the Photos window's Align stage on it
     void message(const QString& text);
+    // Morph to Photos (or Reset Morph): the scalp to take, the groom moved onto it by its UVs.
+    void morphRequested(std::shared_ptr<const ScalpMesh> scalp, const QString& what);
 
 private:
     nlohmann::json photos() const;  // the document's records (an array)
@@ -159,6 +171,14 @@ private:
     QToolButton* visible_ = nullptr;
     QPushButton* align_ = nullptr;
     QLabel* alignAbout_ = nullptr;
+    QPushButton* morph_ = nullptr;
+    QPushButton* unmorph_ = nullptr;
+    QCheckBox* morphSymmetry_ = nullptr;
+    QDoubleSpinBox* morphStiffness_ = nullptr;
+    // The scalp before the first morph and its refinement (pins are picked on the refined one):
+    // the groom it was taken from (another groom shown starts over).
+    std::shared_ptr<const ScalpMesh> morphCage_, morphRefined_;
+    const GroomDocument* morphDocument_ = nullptr;
     QLabel* guidesHint_ = nullptr;
     ListBar* guidesBar_ = nullptr;
 };

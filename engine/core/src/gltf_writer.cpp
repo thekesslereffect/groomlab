@@ -610,6 +610,7 @@ int addScalpCapToGltf(GltfDocument& doc, const StrandSet& strands, const ScalpMe
                       const CardGltfSettings& settings) {
     ScalpBakeSettings bake;
     bake.size = scalpCapResolution(capResolution, resolution);
+    bake.colorToRec709 = settings.colorToRec709;
     const ScalpTextures textures = bakeScalpTextures(strands, scalp, bake);
     CardGltfSettings cap = settings;
     cap.rootToTip = false;

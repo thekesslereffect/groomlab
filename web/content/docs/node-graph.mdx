@@ -84,7 +84,7 @@ follow it.
 | Feathers | Propagate, Plume | Feathers grown from shafts and layered over the body ([Fur & feathers](/docs/fur-and-feathers)). |
 | Color | HairColor, Bands, FeatherColor, RenderData | Hair color, banded fur, feather patterns ([Color patterns](/docs/color-patterns)); opacity ([Rendering](/docs/rendering)). |
 | Convert | ToGuides, ToStrands, ToMesh | Convert strands to guides and back; the groom as a live polygon mesh. |
-| Fields & Curves | Map, Expression, Control, FieldNoise, FieldRemap, FieldCombine, Curve | Drive parameters from maps, images, expressions or sliders. |
+| Fields & Curves | Map, Expression, Control, FieldNoise, FieldRemap, FieldCombine, Layers, ColorLayers, Curve | Drive parameters from maps, images, expressions or sliders. |
 | Utility | Value, Group, Blend, Attribute, Merge, Switch, Split, Output | One value for any param, strand masks, custom attributes, blending and combining branches, variants, routing strands to four outputs. |
 | Games | Cards | Game hair cards ([Game export](/docs/game-export)). |
 
@@ -244,6 +244,30 @@ map's color, can drive a color param: expose HairColor's `color`, `dye` or `tipC
 the param > Expose as Input; also Bands' `dye` and `undercoatDye`, FeatherColor's `dye` and
 `downColor`) and link `rgb` to it. Each strand takes the map's color at its root, times the
 param's own color (white: the map as it is). A number param linked to `rgb` reads its luminance.
+
+### Layer stacks
+
+**Layers** stacks up to 8 layers into one field, the way a paint program's layer panel does, and
+**ColorLayers** does the same with colors. Layer 1 is the bottom. Each layer has:
+
+- **On**: leaves the layer out without losing its settings.
+- **Mode**: how it combines with the layers below it. The modes are normal, multiply, add,
+  subtract, screen, overlay, darken, lighten and difference.
+- **The layer's value** (a number for Layers, a color for ColorLayers).
+- **Opacity**: how much of it shows.
+
+Raise **Layers** to add a layer on top. A new layer starts clear (opacity 0), so adding one
+changes nothing until you raise its opacity or link a mask to it. The panel lists the top layer
+first.
+
+The value and the opacity both take fields. Expose a layer's value (`layer2`) and link a Map, a
+FieldNoise or an Expression to make the layer that map. Expose its opacity (`layer2Opacity`) and
+link a painted mask to show the layer only where you painted. By default layer 1 is black and the
+rest are white, so a mask on layer 2's opacity gives the mask itself.
+
+Link the stack's output to any mappable param, or ColorLayers' `rgb` to a color param such as
+HairColor's `color`. Example: a brown base with a red layer on multiply, masked by a painted map,
+gives red streaks where you paint.
 **Split** routes
 strands to outputs `a` to `d`, by fraction or by a painted map.
 

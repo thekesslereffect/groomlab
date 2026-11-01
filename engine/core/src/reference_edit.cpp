@@ -225,6 +225,17 @@ std::vector<bool> referenceBadLandmarks(const std::vector<double>& errors, doubl
     return out;
 }
 
+namespace {
+// A photo's plausible focal lengths, pixels per photo width: a 10 mm to a ~1000 mm lens on full
+// frame. A free solve from a few pairs, or pairs seen nearly flat (a profile's), can slide toward
+// a telephoto miles away (the same picture, the depth all but lost): a camera past the far clip
+// that shows no mesh to pick on.
+constexpr double kFocalMinWidths = 0.25, kFocalMaxWidths = 30.0;
+bool plausibleFocal(double focalPx, double width) {
+    return focalPx >= kFocalMinWidths * width && focalPx <= kFocalMaxWidths * width;
+}
+}  // namespace
+
 ReferenceLandmarkSolve solveReferenceLandmarks(const MarkerLists& landmarks, double width, double height, double focalPx,
                                                bool keepFocal, const CameraPose* initial, bool findBad) {
     ReferenceLandmarkSolve out;
@@ -233,7 +244,10 @@ ReferenceLandmarkSolve solveReferenceLandmarks(const MarkerLists& landmarks, dou
         out.why = "the photo's size is unknown";
         return out;
     }
-    const bool fix = keepFocal || out.pairs < kReferenceMinPairsFocal;
+    bool fix = keepFocal || out.pairs < kReferenceMinPairsFocal;
+    // A focal length a runaway solve left behind (kept or not: no photo is shot that long): back to
+    // a normal lens.
+    if (focalPx > 0.0 && !plausibleFocal(focalPx, width)) focalPx = width;
     if (out.pairs < kReferenceMinPairs) {
         out.why = std::to_string(kReferenceMinPairs) + " landmark pairs line the camera up (" + std::to_string(out.pairs) +
                   " placed)";
@@ -257,7 +271,11 @@ ReferenceLandmarkSolve solveReferenceLandmarks(const MarkerLists& landmarks, dou
         options.hasInitialPose = true;
         options.initialPose = *initial;
     }
-    const CameraSolveResult r = solveCamera(points, options);
+    CameraSolveResult r = solveCamera(points, options);
+    if (r.ok && !fix && !plausibleFocal(r.focalPx, width) && focalPx > 0.0) {
+        options.fixFocal = fix = true;  // the pairs cannot tell the focal length: keep the one given
+        r = solveCamera(points, options);
+    }
     if (!r.ok) {
         out.why = r.error.empty() ? std::string("the camera could not be solved") : r.error;
         return out;

@@ -91,6 +91,8 @@ GROOMLAB_OPERATOR(Control)               // -> Field (a host value by name: a ke
 GROOMLAB_OPERATOR(FieldNoise)            // -> Field (3D noise over the scalp)
 GROOMLAB_OPERATOR(FieldRemap)            // Field -> Field (range and curve)
 GROOMLAB_OPERATOR(FieldCombine)          // Field + Field -> Field
+GROOMLAB_OPERATOR(Layers)                // -> Field (a stack of layers: values, maps or masks, each by a mode and an opacity)
+GROOMLAB_OPERATOR(ColorLayers)           // -> Field (the same for colors: color maps and colors)
 GROOMLAB_OPERATOR(Curve)                 // -> Curve (a reusable ramp for ramp params)
 // [utility]
 GROOMLAB_OPERATOR(Value)                 // -> Value (one value for a whole node: number, integer, switch, vector, text)

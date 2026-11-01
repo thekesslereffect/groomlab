@@ -172,6 +172,8 @@ def shown_when(spec, value_of, spec_of=None):
             text = "true" if value else "false"
         elif isinstance(value, str):
             text = value
+        elif isinstance(value, float) and value.is_integer():
+            text = str(int(value))  # 3.0 stored for an int param (a graph from an older Maya) reads as "3"
         else:
             text = json.dumps(value)
         if text not in (condition.get("in") or []):
@@ -199,12 +201,41 @@ def _linear(c):
     return tuple(one(v) for v in c)
 
 
+def charcoal_colors():
+    """(category colors, port colors, node body) of GroomLab Charcoal (the app's theme file) while
+    that theme is Blender's (blender_theme.py), else None: the graph keeps graph_ui.json's."""
+    try:
+        theme_file = bpy.context.preferences.themes[0].filepath or ""
+    except (AttributeError, IndexError):
+        return None
+    from . import blender_theme
+    if blender_theme.PRESET_NAME not in theme_file.replace("\\", "/").split("/")[-1]:
+        return None
+    g = blender_theme.graph_colors()
+    rgb = blender_theme.rgb255
+    return ({k: rgb(v) for k, v in (g.get("categories") or {}).items()},
+            {k: rgb(v) for k, v in (g.get("ports") or {}).items()}, rgb(g.get("node", "#1C1C1C")))
+
+
 def tinted(category):
     """A node's color: Maya's node color with a wash of its category's (Maya's and the app's filled
-    headers say the category with its color; here the node's custom color carries it)."""
-    accent = CATEGORY_COLORS.get(category, (142, 150, 158))
-    mix = [NODE_BG[i] + (accent[i] - NODE_BG[i]) * 0.22 for i in range(3)]
+    headers say the category with its color; here the node's custom color carries it). GroomLab
+    Charcoal's colors while that theme is Blender's."""
+    charcoal = charcoal_colors()
+    categories, node_bg = (charcoal[0], charcoal[2]) if charcoal else (CATEGORY_COLORS, NODE_BG)
+    accent = categories.get(category, CATEGORY_COLORS.get(category, (142, 150, 158)))
+    mix = [node_bg[i] + (accent[i] - node_bg[i]) * 0.22 for i in range(3)]
     return _linear(mix)
+
+
+def recolor_all():
+    """Every graph's nodes tinted again (the theme changed)."""
+    for tree in bpy.data.node_groups:
+        if tree.bl_idname != TREE:
+            continue
+        for node in tree.nodes:
+            if ours(node):
+                node.color = tinted("Output" if node.gl_is_output else category_of(node.gl_type))
 
 
 # ---- Sockets: one class per port type, in Maya's wire colors ------------------------------------
@@ -217,6 +248,9 @@ def _socket_class(port_type):
         layout.label(text=text)
 
     def draw_color_simple(cls):
+        charcoal = charcoal_colors()
+        if charcoal and port_type in charcoal[1]:
+            return _rgb(charcoal[1][port_type])
         return color
 
     return type("GroomLabSocket" + port_type, (bpy.types.NodeSocket,), {

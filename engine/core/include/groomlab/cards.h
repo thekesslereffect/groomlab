@@ -41,6 +41,16 @@ namespace groomlab {
 class ScalpMesh;
 class StrandSet;
 
+// What the cards' color maps (and their per-vertex tints) hold. Shaded: the hair as GroomLab's
+// viewport shades it (hair_color.h hairShadedColor), for a plain material, a lambert or an
+// engine's default lit, to look like the groom. Base: the strands' base color, for a hair shader
+// that shades it itself (aiStandardHair's base color, Unreal's Hair shading model).
+enum class CardColorLook { Shaded, Base };
+
+// A 3x3 color matrix, row-major: out[i] = sum_j m[i * 3 + j] in[j].
+using ColorMatrix = std::array<float, 9>;
+constexpr ColorMatrix kIdentityColorMatrix = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+
 struct CardSettings {
     // Strands are grouped by this per-strand channel (Clump writes "clumpId");
     // without it, spread-out strands are picked as centers and every strand
@@ -112,6 +122,7 @@ struct CardSettings {
     // under each station), so cards shade like the strands around them instead
     // of like flat planes; false keeps each card's own (geometric) normals.
     bool volumeNormals = true;
+    CardColorLook colorLook = CardColorLook::Shaded;  // what the color maps hold (the Cards node's bakeColor)
     int variations = 0;        // textures the cards share (0: each its own)
     bool mirror = true;        // cards sharing a texture alternate mirrored
     float padding = 0.004f;    // atlas units between textures
@@ -253,6 +264,9 @@ struct CardMesh {
     std::vector<std::string> nodes;
     float padding = 0.004f;              // atlas units between textures (layoutCards)
     int atlasSize = 0;                   // suggested bake resolution (0: none)
+    // What the bake's color maps and the tints hold (CardSettings::colorLook; Cards nodes sharing
+    // an atlas: the first one's). Maya's card shading turns it back into the base color by it.
+    CardColorLook colorLook = CardColorLook::Shaded;
     float thinnestStrand = 1.0f;         // the narrowest a strand bakes, in texels (CardBakeSettings::minStrandTexels)
     std::size_t vertexCount() const { return positions.size(); }
     std::size_t triangleCount() const { return quads.size() / 2; }
@@ -357,6 +371,11 @@ struct CardBakeSettings {
     // cards' root ends blend into each other and the scalp instead of reading
     // as edges (0: none).
     float rootFade = 0.06f;
+    // The strands' colors (linear, the host's rendering space) to linear Rec.709, sRGB's primaries,
+    // which an sRGB color map holds: a host that reads the map converts it back to its rendering
+    // space (Maya under ACES: ACEScg; a map written with ACEScg's values read as sRGB came out
+    // greyer and less red than the groom, issue #33). Identity: the colors are Rec.709 already.
+    ColorMatrix colorToRec709 = kIdentityColorMatrix;
 };
 
 // Images row 0 at v = 1 (top), `size` square, in Unreal's hair card layout.
@@ -394,6 +413,7 @@ struct ScalpBakeSettings {
     std::array<float, 3> color = {0.3f, 0.2f, 0.12f};  // linear, for strands without melanin channels
     float strandWidth = 0.0f;                     // scene units; 0: the strands' own (or a fallback)
     bool fill = true;                             // spread the color over the whole map (skin between roots, seams)
+    ColorMatrix colorToRec709 = kIdentityColorMatrix;  // as CardBakeSettings::colorToRec709
 };
 struct ScalpTextures {
     int size = 0;

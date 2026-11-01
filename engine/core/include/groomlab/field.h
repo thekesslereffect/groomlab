@@ -180,11 +180,16 @@ public:
     const std::array<float, 3>& constant() const { return constant_; }
     bool perPoint() const { return field_ && field_->perPoint(); }
     bool strandLocal() const { return !field_ || field_->strandLocal(); }
+    bool readsPositions() const { return field_ && field_->readsPositions(); }
+    float longestRead() const { return field_ ? field_->longestRead() : -1.0f; }
+    // Its largest component: the constant's, times the plugged field's maximum.
+    float maximum() const;
     void validate(const StrandSet& strands) const {
         if (field_) field_->validate(strands);
     }
     std::array<float, 3> at(const StrandSet& strands, std::size_t s) const;
     std::array<float, 3> atPoint(const StrandSet& strands, std::size_t s, std::size_t point) const;
+    std::array<float, 3> atRoot(const StrandRoot& root) const;
 
 private:
     std::array<float, 3> constant_{};

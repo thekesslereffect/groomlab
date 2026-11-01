@@ -18,6 +18,7 @@
 // own surfaces are (a Lambert there shows color x light), so the hair sits with them; Maya's color
 // management turns it to the view.
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -55,6 +56,17 @@ void noteCardShader(const MHWRender::MShaderInstance* shader);
 void cardCoverageDraws(long long& sampled, long long& tested);
 // Whether a draw is in a pass drawing the scene's colors (not shadows, depth, selection...).
 bool colorPass(const MHWRender::MDrawContext& context);
+// The scene's rendering space against linear Rec.709 (sRGB's primaries), row-major. GroomLab's
+// colors in Maya are linear values in the rendering space (as Maya's own color attributes and
+// Arnold's are) and an sRGB map holds Rec.709 ones: the card and scalp bakes convert to Rec.709
+// (toRec709), and a file node reads the map back into the rendering space, as GroomLab's card
+// shading does (fromRec709: its cardFromRec709 rows). By the rendering space's name
+// (colorManagementPrefs): ACEScg, ACES2065-1, P3 D65 and Rec.2020; identity for any other (linear
+// Rec.709) and with color management off.
+struct RenderingSpace {
+    std::array<float, 9> toRec709, fromRec709;
+};
+RenderingSpace renderingSpace();
 // The strand lines' width as coverage (engine/gpu/shaders/line_coverage.glsl, embedded: the app's
 // too) in an effect's words: HLSL's for DirectX 11, else GLSL's as they are.
 const std::string& lineCoverageText(bool hlsl);

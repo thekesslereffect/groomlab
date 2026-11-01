@@ -499,6 +499,46 @@ class GraphEditorTest(unittest.TestCase):
                       groomlab.get_graph(self.groom)["connections"])
         self.editor.hide()
 
+    def test_layers_count_dragged_and_typed_in_the_panel(self):
+        # A Layers stack on Length's keep: its count dragged and committed in the panel, as an
+        # artist does. The groom keeps evaluating, the stack's sections follow the count and the
+        # stored count is a whole number.
+        from PySide2 import QtWidgets
+        name = self.editor.add_node("Layers")
+        self.editor.set_param_exposed("length", "keep", True)
+        self.editor.model.connect(name, "length", "keep")
+        self.editor.changed()
+        self.editor.resize(420, 900)
+        self.editor.show()
+        self.editor.params.show_node(name)
+        wait(150)
+        self.assertEqual(groomlab.errors(self.groom), [])
+        strands = cmds.getAttr(self.groom + ".outStrandCount")
+
+        def headers():
+            body = self.editor.params.widget()
+            return {h.objectName(): h.isVisible() for h in body.findChildren(QtWidgets.QPushButton)
+                    if h.objectName().startswith("paramSection_Layer")}
+
+        self.assertFalse(headers().get("paramSection_Layer 3"))
+        for count in (3, 5, 2, 8, 1):
+            slider = self.editor.params.key_widgets["layers"]
+            slider.setSliderDown(True)
+            slider.scrub(count)
+            wait(120)
+            slider.setSliderDown(False)
+            slider.committed.emit(float(count))
+            wait(200)
+            stored = next(n for n in groomlab.get_graph(self.groom)["nodes"] if n["name"] == name)["params"]
+            self.assertEqual(stored.get("layers"), count, stored)
+            self.assertIsInstance(stored.get("layers"), int, stored)
+            self.assertEqual(groomlab.errors(self.groom), [], count)
+            self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), strands, count)
+            shown = headers()
+            for k in range(1, 9):
+                self.assertEqual(bool(shown.get("paramSection_Layer %d" % k)), k <= count, (count, k, shown))
+        self.editor.hide()
+
     def test_a_map_nodes_panel_fits_a_narrow_editor(self):
         # The Map node's panel on a narrow editor: its warnings and where the map lives each take
         # a full-width row above the buttons (not a column squeezed beside them), the path breaks
@@ -3185,6 +3225,7 @@ class TransferWindowTest(unittest.TestCase):
 
     def setUp(self):
         cmds.file(new=True, force=True)
+        cmds.undoInfo(state=True, infinity=True)  # (its transfer is checked as one undo step)
         self.scalp = cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20, name="head")[0]
         self.groom = groomlab.create_groom(self.scalp)
         groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 2, 0)])])
@@ -4828,9 +4869,9 @@ class ReferenceTabTest(unittest.TestCase):
         self.assertTrue(reference.keep_focal(cam))
         # A focal length gone wrong: Reset Focal Length (the slider's right-click menu) brings the default
         # lens and the slider's starting range back.
-        self.tab.focal.setValue(3000.0)  # (as a drag past the range would)
-        self.tab.focal.committed.emit(3000.0)
-        self.assertGreaterEqual(self.tab.focal.hi, 3000.0)
+        self.tab.focal.setValue(1000.0)  # (as a drag past the range would)
+        self.tab.focal.committed.emit(1000.0)
+        self.assertGreaterEqual(self.tab.focal.hi, 1000.0)
         self.tab.reset_focal()
         self.assertAlmostEqual(cmds.getAttr(shape + ".focalLength"), reference.DEFAULT_FOCAL)
         self.assertEqual((self.tab.focal.lo, self.tab.focal.hi), reference.FOCAL_RANGE)
@@ -5057,6 +5098,45 @@ class ReferenceWindowTest(unittest.TestCase):
         c = om.MPoint(*p) * om.MMatrix(cmds.getAttr(cam + ".worldMatrix[0]")).inverse()
         f = reference.focal_px(cam)
         return 80.0 + f * c.x / -c.z, 60.0 - f * c.y / -c.z
+
+    def test_morph_to_photos(self):
+        """Morph to Photos: a pair seen off the scalp moves it there (a blendShape, mirrored by
+        Symmetry), a second morph starts from the rest shape, Reset Morph and Maya's undo."""
+        from groomlab import reference
+        from groomlab.ui import menu
+        self.window = window = menu.open_guides_from_reference(self.groom)
+        wait(80)
+        cam = window.import_photo(self.photo)
+        self.assertTrue(window.morph_symmetry.isChecked())  # on by default
+        self.assertIsNone(window.morph())  # not lined up yet: a message, nothing done
+        self.assertIsNone(reference.photo_morph_node(self.groom))
+        reference.set_pair(cam, 0, image=self.project(cam, (12.0, 0.0, 0.0)), mesh=(10.0, 0.0, 0.0))
+        cmds.setAttr(cam + ".glRefRms", 0.0)
+
+        def x_range():
+            xs = cmds.xform(self.scalp + ".vtx[*]", query=True, worldSpace=True, translation=True)[0::3]
+            return min(xs), max(xs)
+        rest = x_range()
+        r = window.morph()
+        self.assertLess(r["rms_after"], 0.5)
+        self.assertGreater(r["rms_before"], 1.0)
+        lo, hi = x_range()
+        self.assertGreater(hi, 11.5)  # (on the photo point's ray at the pin's depth: near x = 12)
+        self.assertLess(lo, -11.5)  # mirrored
+        window.morph_symmetry.setChecked(False)
+        window.morph()  # from the rest shape: not stacked
+        self.assertAlmostEqual(x_range()[1], hi, delta=0.3)
+        self.assertEqual(len(cmds.ls(type="blendShape")), 1)
+        once = x_range()
+        for _ in range(2):  # pressed again: the same shape, never stacked
+            window.morph()
+            self.assertAlmostEqual(x_range()[1], once[1], places=3)
+            self.assertAlmostEqual(x_range()[0], once[0], places=3)
+        window.reset_morph()
+        self.assertIsNone(reference.photo_morph_node(self.groom))
+        self.assertAlmostEqual(x_range()[1], rest[1], places=4)
+        cmds.undo()
+        self.assertIsNotNone(reference.photo_morph_node(self.groom))
 
     def test_landmarks_solve_live_and_the_photo_tools(self):
         from PySide2 import QtCore

@@ -218,6 +218,8 @@ public:
     // The same by any method (transfer.h); a marker method without markers in `options` uses
     // the groom's stored ones (its file's "transferMarkers").
     bool transferToMesh(const QString& path, const TransferOptions& options, bool maps = true);
+    // The groom onto a mesh in hand (Morph to Photos: the same topology, by its UVs); `what` names it.
+    bool transferOnto(MeshPtr mesh, const TransferOptions& options, bool maps, const QString& what);
     // Marker pairs from a JSON file (transfer.h's format: Maya's transferMarkers attribute, a groom
     // file's "transferMarkers"); false (and a message) when it cannot be read.
     bool readTransferMarkers(const QString& path, std::vector<TransferMarker>* markers);

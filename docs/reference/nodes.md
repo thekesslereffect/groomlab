@@ -23,7 +23,7 @@ User guide: [Node graph](https://www.getgroomlab.com/docs/node-graph).
   (the guides simulated, every host: see [Simulating the guides](motion-and-simulation.md#simulating-the-guides)).
 - **Feathers:** `Propagate` (barbs grown off shafts), `Plume` (feathers laid over one another and off the body).
 - **Utility:** `Attribute`, `Value`, `Group`, `Merge`, `Switch`, `Split` (strands routed to four outputs), `Blend`, `Output`; `Compound` and `Input` for compound nodes.
-- **Fields:** `Map`, `Control` (a keyable slider on the groom), `Expression`, `FieldNoise`, `FieldRemap`, `FieldCombine`, `Curve`.
+- **Fields:** `Map`, `Control` (a keyable slider on the groom), `Expression`, `FieldNoise`, `FieldRemap`, `FieldCombine`, `Layers`, `ColorLayers`, `Curve`.
 
 ## Operators
 

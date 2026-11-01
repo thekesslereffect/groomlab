@@ -19,6 +19,11 @@ install(FILES ${_addon_py} "${CMAKE_CURRENT_BINARY_DIR}/blender_manifest.toml" "
 # The palette's icons (Maya's, rendered to PNG by tools/make_blender_icons.py) for bpy.utils.previews.
 file(GLOB _addon_icons CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/groomlab/icons/*.png")
 install(FILES ${_addon_icons} DESTINATION "GroomLabBlender/icons" COMPONENT Blender)
+# The GroomLab window's look (window.py, uikit.py): the app's font and the default theme.
+set(_addon_look_fonts "${PROJECT_SOURCE_DIR}/hosts/app/fonts/Inter[opsz,wght].ttf" "${PROJECT_SOURCE_DIR}/hosts/app/fonts/OFL-Inter.txt")
+set(_addon_look_themes "${PROJECT_SOURCE_DIR}/hosts/maya/themes/charcoal.json")
+install(FILES ${_addon_look_fonts} DESTINATION "GroomLabBlender/fonts" COMPONENT Blender)
+install(FILES ${_addon_look_themes} DESTINATION "GroomLabBlender/themes" COMPONENT Blender)
 # The UI structure every host shares (engine/ui/*.json, Apache-2.0 data): plain files the add-on reads
 # without the engine (docs/UI_DEFINITIONS.md).
 file(GLOB _addon_ui CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/engine/ui/*.json")
@@ -37,7 +42,7 @@ add_custom_command(
     COMMAND "${CMAKE_COMMAND}" -DBUILD_DIR=${CMAKE_BINARY_DIR} -DCONFIG=$<CONFIG> -DSTAGE=${_ext_root}
             -DZIP=${_ext_zip} -P "${CMAKE_CURRENT_SOURCE_DIR}/assemble_extension.cmake"
     DEPENDS groomlab-helper ${_addon_py} ${_addon_icons} "${CMAKE_CURRENT_BINARY_DIR}/blender_manifest.toml" LICENSE
-            assemble_extension.cmake ${_addon_presets} ${_addon_ui}
+            assemble_extension.cmake ${_addon_presets} ${_addon_ui} ${_addon_look_fonts} ${_addon_look_themes}
     COMMENT "Assembling the GroomLab Blender extension"
     VERBATIM)
 add_custom_target(groomlab_blender_extension ALL DEPENDS "${_ext_root}/assembled.stamp")

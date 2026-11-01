@@ -595,7 +595,7 @@ class ReferenceWindow(QtWidgets.QWidget):
         form = QtWidgets.QFormLayout()
         form.setLabelAlignment(QtCore.Qt.AlignRight)
         self.focal = widgets.SoftSlider(self.ref.DEFAULT_FOCAL, self.ref.FOCAL_RANGE[0], self.ref.FOCAL_RANGE[1],
-                                        minimum=2.5, maximum=3500.0, key=None, label="Focal Length", suffix="mm")
+                                        minimum=9.0, maximum=1080.0, key=None, label="Focal Length", suffix="mm")
         self.focal.setObjectName("referenceFocal")
         self.focal.setToolTip("The photo camera's focal length (mm): the landmarks solve it (6 or more pairs); set it "
                               "by hand when you know the lens (Keep focal length turns on, the camera follows)")
@@ -623,6 +623,33 @@ class ReferenceWindow(QtWidgets.QWidget):
         self.lock.toggled.connect(self.set_locked)
         row.addWidget(self.lock)
         layout.addLayout(row)
+
+        self._heading(layout, "MORPH")
+        row = QtWidgets.QHBoxLayout()
+        self.morph_button = QtWidgets.QPushButton("Morph to Photos")
+        self.morph_button.setObjectName("referenceMorph")
+        self.morph_button.setToolTip("Shape the scalp so every lined-up photo's pairs land on their photo points (two "
+                                     "photos of a pair set its depth too), as a blendShape on it: always from the scalp "
+                                     "as it was before the first morph")
+        self.morph_button.clicked.connect(lambda: self.morph())
+        row.addWidget(self.morph_button, 1)
+        self.morph_symmetry = QtWidgets.QCheckBox("Symmetry")
+        self.morph_symmetry.setObjectName("referenceMorphSymmetry")
+        self.morph_symmetry.setChecked(True)
+        self.morph_symmetry.setToolTip("Morph both sides alike: each pair mirrored across the scalp's middle (its local X)")
+        row.addWidget(self.morph_symmetry)
+        layout.addLayout(row)
+        self.morph_stiffness = widgets.SoftSlider(0.0, 0.0, 0.95, minimum=0.0, maximum=0.95, key=None, label="Stiffness")
+        self.morph_stiffness.setObjectName("referenceMorphStiffness")
+        self.morph_stiffness.setToolTip("0 lands every pair exactly; higher keeps the scalp's shape, the pairs falling short")
+        layout.addWidget(self.morph_stiffness)
+        reset = QtWidgets.QToolButton()
+        reset.setText("Reset Morph")
+        reset.setObjectName("referenceUnmorph")
+        reset.setProperty("role", "chip")
+        reset.setToolTip("The scalp as it was before the first morph (its blendShape removed; undoable)")
+        reset.clicked.connect(lambda: self.reset_morph())
+        layout.addWidget(reset)
 
         # Guides from Photos (the Guides stage only).
         self.guides_panel = QtWidgets.QWidget()
@@ -1335,6 +1362,31 @@ class ReferenceWindow(QtWidgets.QWidget):
         if self.mask_tint.isChecked() or self.field_lines.isChecked():
             self._preview_wanted()
 
+    def morph(self, stiffness=None, symmetric=None):
+        """Morph to Photos (groomlab.reference.morph_to_photos) with the panel's settings; its result."""
+        if not self.groom:
+            return None
+        stiffness = self.morph_stiffness.value() if stiffness is None else stiffness
+        symmetric = self.morph_symmetry.isChecked() if symmetric is None else symmetric
+        try:
+            r = self.ref.morph_to_photos(self.groom, stiffness, symmetric)
+        except (RuntimeError, ValueError) as e:
+            self.message.setText(str(e))
+            return None
+        self._scalp = None  # (the scalp's shape changed)
+        self._overlay = None
+        self.message.setText("Morphed to %d pins: %.1f px off before, %.1f px after" % (
+            r["pins"], r["rms_before"], r["rms_after"]))
+        self._redraw()
+        return r
+
+    def reset_morph(self):
+        if self.groom and self.ref.reset_photo_morph(self.groom):
+            self._scalp = None
+            self._overlay = None
+            self.message.setText("The scalp is back as it was before the morph")
+            self._redraw()
+
     def _solve(self, apply=True, find_bad=True):
         """The camera solved from the current photo's landmarks (core: solve_reference_landmarks);
         with `apply`, the Maya camera takes it (outside the undo queue: it follows the landmarks)."""
@@ -1763,6 +1815,10 @@ class ReferenceWindow(QtWidgets.QWidget):
         global _window
         self.teardown()
         mesh_views.undo_back_on(self._undo_was_on, "Reference")
+        # Again once Maya's idle queue has run: after a Morph to Photos, a job Maya queues while the
+        # views go left the queue off a moment after the window closed.
+        was_on = self._undo_was_on
+        cmds.evalDeferred(lambda: mesh_views.undo_back_on(was_on, "Reference"), lowestPriority=True)
         if _window is self:
             _window = None
         super(ReferenceWindow, self).closeEvent(event)

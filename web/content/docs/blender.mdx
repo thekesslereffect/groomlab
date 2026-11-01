@@ -115,6 +115,25 @@ The lists (guide groups, maps, correctives) have their add and import icons in t
 the picked item's actions in a box under the list, and Maya's right-click menu, both on a
 right-click over an item and behind the arrow button beside the list.
 
+### The GroomLab window
+
+**More** (the arrow at the top of Groom Tools) > **GroomLab Window**, or **Ctrl+Shift+G** over a 3D
+view, floats the same Groom Tools over the viewport in the app's look: its colors and font, its
+icons, sliders you drag or click to type in (arithmetic like `*2`, lengths with units like `2cm`),
+tooltips on hover, and the lists' and buttons' menus drawn the same way. Everything in it is the
+sidebar's Groom Tools, so the two always match; use either.
+
+- Drag its title bar to move it; the wheel scrolls it (or the list under the pointer). It opens
+  again where you left it, folds and all, the next time Blender starts.
+- A right-click on a list's row picks the row and opens its menu.
+- With the Shape tool, **Profile** shows the picked shape's cross-section: drag a point, click the
+  outline to add one, right-click a point to remove it; **Mirror** keeps both sides alike. Built-in
+  shapes are read-only (duplicate one to edit it).
+- Paint's **Stamp** opens a grid of the alphas' thumbnails.
+- Brush strokes ignore the window: a click in it never paints the groom under it.
+- With the viewport's **Gizmos** overlay off it still works, without hover or tooltips.
+- Change its key in **Edit > Preferences > Add-ons > GroomLab**.
+
 ### Guide groups
 
 The **Guide groups** list is always open under the Tools tab's card. Click a group to pick it: the
@@ -240,7 +259,12 @@ the photo as its background image, in a **GroomLab References** collection.
   another view (the pairs fill in turn and draw numbered; **Esc** when done). **Solve** finds the
   camera's position, rotation and focal length from 6 pairs, or from 4 with **Keep focal length**.
   Each pair shows its error in pixels, and pairs that stand out are named so you can pick them
-  again. Right-click a pair to pick its photo or mesh point again, or delete it.
+  again. Right-click a pair to pick its photo or mesh point again, or delete it. While picking,
+  drag a placed point to move it; each pick and move is an undo step.
+- **Morph to Photos** shapes the scalp so every lined-up photo's pairs land on their photo points,
+  into a shape key over the Basis (each press starts from the Basis, so morphs never stack), with
+  **Symmetry** and **Stiffness**. See
+  [Morph the scalp to the photos](/docs/reference-photos#morph-the-scalp-to-the-photos-optional).
 - **Open Guides from Photos...** (also **GroomLab > Guides from Photos (experimental)...**) grows
   guides from every photo camera into a **fromReference** guide group, replaced each time. Brush
   them like any guides; GroomLab's **Undo** takes them back.
@@ -289,6 +313,12 @@ its own, as Maya's GroomLab Graph Editor shows it. Any node editor shows it too:
 **GroomLab Graph** and pick the groom's graph (`<mesh> Graph`). Choosing another groom in the
 editor's header (or the GroomLab tab) shows that groom's graph.
 
+- **GroomLab Charcoal**: **Use GroomLab Charcoal Theme** (the Graph Editor's GroomLab panel, or
+  the add-on's preferences) gives Blender's node editor the app's graph look: its canvas and dot
+  grid, dark nodes with neutral headers, the blue selection and curved wires in the app's colors.
+  It is a Blender theme (listed in **Preferences > Themes**, where any other theme switches back),
+  so the rest of Blender takes the default theme with it, and Blender's own shader and geometry
+  editors show their input nodes gray.
 - **Nodes** carry their type's ports, colored by what flows through them as in Maya: strands
   orange, guides blue, meshes green, fields violet, curves yellow, strands-or-guides grey. A
   param exposed as an input is a diamond port. Each node is tinted with its category's color

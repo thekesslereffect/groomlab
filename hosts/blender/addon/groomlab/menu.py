@@ -183,6 +183,7 @@ def _more_extras(layout, context):
     layout.separator()
     layout.operator("groomlab.tool_exit")
     layout.operator("groomlab.shortcuts", text="Keyboard Shortcuts...")
+    layout.operator("groomlab.window_toggle")
 
 
 EXTRAS = {"GROOMLAB_MT_guide_edits": _guide_edit_extras, "GROOMLAB_MT_tools_more": _more_extras}

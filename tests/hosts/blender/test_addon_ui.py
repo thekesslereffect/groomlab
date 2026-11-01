@@ -751,7 +751,8 @@ class ToolsTest(unittest.TestCase):
         handlers = importlib.import_module(bu.MODULE + ".handlers")
         bpy.context.scene.groomlab.groom = None
         bpy.context.view_layer.objects.active = head
-        self.assertEqual(handlers.active_changed(), head)
+        self.assertEqual(handlers.follow_active(), head)
+        self.assertIsNone(handlers.active_changed())  # the message bus's callback returns nothing
         self.assertEqual(bpy.context.scene.groomlab.groom, head)
 
 

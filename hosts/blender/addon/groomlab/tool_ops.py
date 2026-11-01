@@ -59,7 +59,8 @@ def shortcuts():
 
 
 # (keymap, operator, (property, value) or None): the add-on's keys the preferences show.
-KEYMAP_ITEMS = (("Object Mode", "wm.call_menu_pie", ("name", "GROOMLAB_MT_pie")),)
+KEYMAP_ITEMS = (("Object Mode", "wm.call_menu_pie", ("name", "GROOMLAB_MT_pie")),
+                ("3D View", "groomlab.window_toggle", None))  # (window.py's)
 NAV_PASS = {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE", "WHEELINMOUSE", "WHEELOUTMOUSE", "TRACKPADPAN",
             "TRACKPADZOOM", "MOUSEROTATE", "MOUSESMARTZOOM", "NDOF_MOTION"}
 SLIDER_KEYS = {"B": "radius", "M": "strength", "F": "radius"}
@@ -447,7 +448,15 @@ class ToolSession(object):
         except HelperError as e:
             tools.status(context.scene, e.message)
             return None
-        tools.status(context.scene, ("Redo" if redo else "Undo") + (" done" if r.get("done") else ": nothing to do"))
+        if not r.get("done"):
+            # Nothing left in the groom's own history: Blender's (a morph, an object moved, a setting).
+            try:
+                getattr(bpy.ops.ed, "redo" if redo else "undo")()
+                tools.status(context.scene, ("Redo" if redo else "Undo") + " done (Blender's)")
+            except RuntimeError:
+                tools.status(context.scene, ("Redo" if redo else "Undo") + ": nothing to do")
+            return r
+        tools.status(context.scene, ("Redo" if redo else "Undo") + " done")
         return r
 
     def pick(self, context, tool):
@@ -557,6 +566,15 @@ class GROOMLAB_OT_tool_modal(bpy.types.Operator):
         session = _session[0]
         if session is None:
             return self._end(context)
+        if session.stroking is None:
+            from . import window
+            if window.over(context, event):  # the GroomLab window's own (its gizmo is after this operator)
+                if session.hovering is not None:  # no brush ring under the window
+                    tools.hover_clear(session.hovering)
+                    session.hovering = None
+                    display.redraw(viewport_only=True)
+                session.set_cursor(context, False)
+                return {"PASS_THROUGH"}
         try:
             result = session.event(context, event)
         except Exception as e:  # noqa: BLE001 - a modal operator must never leave Blender stuck

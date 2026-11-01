@@ -487,6 +487,11 @@ float solid = 1.0;            // 1: no maps (the solidColor)
 float3 solidColor = float3(0.58, 0.50, 0.42);
 float mapSize = 2048.0;
 float cardPass = 0.0;         // 1: a shadow map's depth, 2: a point light's (cardPassPreDraw)
+float cardColorLook = 0.0;    // what the bake holds: 0 the hair shaded (hairBaseOfShaded), 1 its base color
+// The color map's Rec.709 to the rendering space, by rows (renderingSpace(): as a file node reads it).
+float3 cardFromRec709R = float3(1.0, 0.0, 0.0);
+float3 cardFromRec709G = float3(0.0, 1.0, 0.0);
+float3 cardFromRec709B = float3(0.0, 0.0, 1.0);
 float gLightRange : LightRange;
 
 // The samples of the pixel's `samples` a card of map coverage `a` at `uv` covers, none clipped.
@@ -565,10 +570,11 @@ cardPixel hairCardPS(cardOutput IN) {
         float4 m = map.Sample(mapSampler, IN.Uv);
         OUT.Mask = cardMask(m.a, IN.Uv, GetRenderTargetSampleCount());
         float3 c = m.rgb;
-        // The bake holds the hair's appearance color (a card in an engine is matte): shaded as hair,
-        // its base color (hairBaseOfAppearance).
-        base = hairBaseOfAppearance(lerp(c / 12.92, pow((c + 0.055) / 1.055, 2.4), step(0.04045, c)) * 2.0 * IN.Color.rgb,
-                                    hairAzimuthalRoughness);
+        // The bake holds the hair as the viewport shades it (a card in an engine is matte), or its base
+        // color (cardColorLook): shaded as hair, its base color (hairBaseOfShaded).
+        float3 rec709 = lerp(c / 12.92, pow((c + 0.055) / 1.055, 2.4), step(0.04045, c));
+        float3 baked = float3(dot(cardFromRec709R, rec709), dot(cardFromRec709G, rec709), dot(cardFromRec709B, rec709)) * 2.0 * IN.Color.rgb;
+        base = cardColorLook > 0.5 ? clamp(baked, 1e-8, 1.0) : hairBaseOfShaded(baked, hairAzimuthalRoughness);
     }
     // (No strand of its own: the strands' variation is the bake's.)
     float4 none = float4(0.5, 0.5, 0.5, 0.5);
@@ -652,6 +658,10 @@ uniform float solid = 1.0;
 uniform vec3 solidColor = {0.58, 0.50, 0.42};
 uniform float mapSize = 2048.0;
 uniform float cardPass = 0.0;
+uniform float cardColorLook = 0.0;
+uniform vec3 cardFromRec709R = {1.0, 0.0, 0.0};
+uniform vec3 cardFromRec709G = {0.0, 1.0, 0.0};
+uniform vec3 cardFromRec709B = {0.0, 0.0, 1.0};
 uniform float gLightRange : LightRange;
 
 attribute appdataCard {
@@ -783,8 +793,9 @@ GLSLShader hairCardPS {
             vec4 m = texture(mapSampler, cardIn.Uv);
             mask = cardMask(m.a, cardIn.Uv, uint(max(gl_NumSamples, 1)));
             vec3 c = m.rgb;
-            base = hairBaseOfAppearance(mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)) * 2.0 *
-                                        cardIn.Color.rgb, hairAzimuthalRoughness);
+            vec3 rec709 = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
+            vec3 baked = vec3(dot(cardFromRec709R, rec709), dot(cardFromRec709G, rec709), dot(cardFromRec709B, rec709)) * 2.0 * cardIn.Color.rgb;
+            base = cardColorLook > 0.5 ? clamp(baked, 1e-8, 1.0) : hairBaseOfShaded(baked, hairAzimuthalRoughness);
         }
         gl_SampleMask[0] = int(mask);
         vec4 none = vec4(0.5, 0.5, 0.5, 0.5);
@@ -1405,6 +1416,34 @@ const std::string& lineCoverageText(bool hlsl) {
     static const std::string glsl = kLineCoverageText;
     static const std::string hlslText = hlslOf(kLineCoverageText);
     return hlsl ? hlslText : glsl;
+}
+
+RenderingSpace renderingSpace() {
+    // Rec.709 to each space and back (Bradford to ACES's white for ACEScg and ACES2065-1).
+    static constexpr RenderingSpace kIdentity = {{1, 0, 0, 0, 1, 0, 0, 0, 1}, {1, 0, 0, 0, 1, 0, 0, 0, 1}};
+    static constexpr RenderingSpace kAcesCg = {
+        {1.705051f, -0.621792f, -0.083259f, -0.130256f, 1.140805f, -0.010548f, -0.024003f, -0.128969f, 1.152972f},
+        {0.613097f, 0.339523f, 0.047379f, 0.070194f, 0.916354f, 0.013452f, 0.020616f, 0.109570f, 0.869815f}};
+    static constexpr RenderingSpace kAces2065 = {
+        {2.521686f, -1.134131f, -0.387555f, -0.276480f, 1.372719f, -0.096239f, -0.015378f, -0.152975f, 1.168353f},
+        {0.439633f, 0.382989f, 0.177378f, 0.089776f, 0.813439f, 0.096784f, 0.017541f, 0.111547f, 0.870912f}};
+    static constexpr RenderingSpace kP3 = {
+        {1.224940f, -0.224940f, 0.0f, -0.042057f, 1.042057f, 0.0f, -0.019638f, -0.078636f, 1.098274f},
+        {0.822462f, 0.177538f, 0.0f, 0.033194f, 0.966806f, 0.0f, 0.017083f, 0.072397f, 0.910520f}};
+    static constexpr RenderingSpace kRec2020 = {
+        {1.660491f, -0.587641f, -0.072850f, -0.124550f, 1.132900f, -0.008349f, -0.018151f, -0.100579f, 1.118730f},
+        {0.627404f, 0.329283f, 0.043313f, 0.069097f, 0.919540f, 0.011362f, 0.016391f, 0.088013f, 0.895595f}};
+    int enabled = 0;
+    if (!MGlobal::executeCommand("colorManagementPrefs -q -cmEnabled", enabled, false, false) || !enabled) return kIdentity;
+    MString name;
+    if (!MGlobal::executeCommand("colorManagementPrefs -q -renderingSpaceName", name, false, false)) return kIdentity;
+    const std::string space = name.asChar();
+    auto has = [&](const char* part) { return space.find(part) != std::string::npos; };
+    if (has("ACEScg") || has("AP1")) return kAcesCg;
+    if (has("2065") || has("AP0")) return kAces2065;
+    if (has("P3")) return kP3;
+    if (has("2020")) return kRec2020;
+    return kIdentity;
 }
 
 }  // namespace groomlab::maya

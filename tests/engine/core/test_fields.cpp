@@ -199,6 +199,19 @@ TEST(Fields, RemapAndCombine) {
     }
 }
 
+TEST(Fields, LayersDriveAnExposedParam) {
+    // length's keep from a stack: layer 2 (white) over layer 1 (black), masked to 0.5 by an
+    // expression: every strand keeps half, as a keep of 0.5 does.
+    const StrandsPtr half = run(graph("", R"j(, "params": {"keep": 0.5})j", "", ""));
+    const StrandsPtr s = run(graph(
+        "", R"j(, "paramInputs": ["keep"])j",
+        R"j(, {"name": "mask", "type": "Expression", "params": {"expression": "0.5"}},
+              {"name": "stack", "type": "Layers", "paramInputs": ["layer2Opacity"]})j",
+        R"j(, {"from": "mask", "to": "stack", "input": "layer2Opacity"}, {"from": "stack", "to": "length", "input": "keep"})j"));
+    ASSERT_EQ(s->strandCount(), half->strandCount());
+    for (std::size_t i = 0; i < s->strandCount(); ++i) EXPECT_NEAR(strandLength(*s, i), strandLength(*half, i), 1e-4f);
+}
+
 TEST(Fields, AControlTakesTheHostsValue) {
     // Length driven by a Control named "grow": its default until the host sets it.
     GroomData d;
@@ -356,6 +369,83 @@ TEST(FieldNodes, MaximumFollowsTheOutputRangeAndTheSign) {
     });
     EXPECT_NEAR(minus->maximum(), 3.0f, 1e-6f);
     EXPECT_NEAR(minus->atRoot({}), 3.0f, 1e-6f);
+}
+
+TEST(FieldNodes, LayersCompositeByModeAndOpacity) {
+    // Layer 1 black, layer 2 white by default: a mask on layer 2's opacity gives the mask.
+    const FieldPtr masked = fieldOf(op::kLayers, {}, [](ParamSet& p) { p.setField("layer2Opacity", constantField(0.25f)); });
+    EXPECT_NEAR(masked->atRoot({}), 0.25f, 1e-6f);
+    EXPECT_FALSE(masked->isColor());
+
+    // 0.5 on 0.6 by each mode.
+    const std::vector<std::pair<std::string, float>> modes = {
+        {"normal", 0.5f}, {"multiply", 0.3f}, {"add", 1.1f},     {"subtract", 0.1f},   {"screen", 0.8f},
+        {"overlay", 0.6f}, {"darken", 0.5f},  {"lighten", 0.6f}, {"difference", 0.1f}};
+    for (const auto& [mode, expected] : modes) {
+        const FieldPtr f = fieldOf(op::kLayers, {}, [&, m = mode](ParamSet& p) {
+            p.set("layer1", 0.6);
+            p.set("layer2", 0.5);
+            p.set("layer2Mode", m);
+        });
+        EXPECT_NEAR(f->atRoot({}), expected, 1e-5f) << mode;
+        EXPECT_GE(f->maximum(), expected - 1e-5f) << mode;
+    }
+    // Half opacity: halfway; a layer off, or past the count, is left out.
+    auto withLayer2 = [](const std::function<void(ParamSet&)>& more) {
+        return fieldOf(op::kLayers, {}, [&](ParamSet& p) {
+            p.set("layer1", 0.6);
+            p.set("layer2", 0.4);
+            more(p);
+        });
+    };
+    EXPECT_NEAR(withLayer2([](ParamSet& p) { p.set("layer2Opacity", 0.5); })->atRoot({}), 0.5f, 1e-6f);
+    EXPECT_NEAR(withLayer2([](ParamSet& p) { p.set("layer2On", false); })->atRoot({}), 0.6f, 1e-6f);
+    EXPECT_NEAR(withLayer2([](ParamSet& p) { p.set("layers", std::int64_t{1}); })->atRoot({}), 0.6f, 1e-6f);
+    // A field plugged into a layer: its value times the layer's own.
+    EXPECT_NEAR(withLayer2([](ParamSet& p) { p.setField("layer2", constantField(0.5f)); })->atRoot({}), 0.2f, 1e-6f);
+    // Three layers, the top adding 0.3 over half the stack.
+    const FieldPtr three = withLayer2([](ParamSet& p) {
+        p.set("layers", std::int64_t{3});
+        p.set("layer3", 0.3);
+        p.set("layer3Mode", std::string("add"));
+        p.set("layer3Opacity", 0.5);
+    });
+    EXPECT_NEAR(three->atRoot({}), 0.55f, 1e-6f);
+    // Raising the count adds clear layers: the stack gives what it did until one is given an opacity.
+    for (std::int64_t n = 3; n <= 8; ++n) {
+        EXPECT_NEAR(withLayer2([n](ParamSet& p) { p.set("layers", n); })->atRoot({}), 0.4f, 1e-6f) << n;
+    }
+    EXPECT_THROW(withLayer2([](ParamSet& p) { p.set("layer2Mode", std::string("dodge")); }), GraphError);
+}
+
+TEST(FieldNodes, ColorLayersCompositeEachChannel) {
+    // A color stack plugged into another's layer: its color, times the layer's own (white).
+    const FieldPtr tint = fieldOf(op::kColorLayers, {}, [](ParamSet& p) {
+        p.set("layers", std::int64_t{1});
+        p.set("layer1", Vec3f(0.5f, 1.0f, 0.25f));
+    });
+    EXPECT_TRUE(tint->isColor());
+    const FieldPtr f = fieldOf(op::kColorLayers, {}, [&](ParamSet& p) {
+        p.set("layer1", Vec3f(0.2f, 0.4f, 0.8f));
+        p.set("layer2Mode", std::string("multiply"));
+        p.setField("layer2", tint);
+    });
+    const std::array<float, 3> c = f->colorAtRoot({});
+    EXPECT_NEAR(c[0], 0.1f, 1e-6f);
+    EXPECT_NEAR(c[1], 0.4f, 1e-6f);
+    EXPECT_NEAR(c[2], 0.2f, 1e-6f);
+    // A number param reads its luminance.
+    EXPECT_NEAR(f->atRoot({}), 0.2126f * 0.1f + 0.7152f * 0.4f + 0.0722f * 0.2f, 1e-6f);
+    // Screen at half opacity over the same base.
+    const FieldPtr screen = fieldOf(op::kColorLayers, {}, [](ParamSet& p) {
+        p.set("layer1", Vec3f(0.2f, 0.4f, 0.8f));
+        p.set("layer2", Vec3f(0.5f, 0.5f, 0.5f));
+        p.set("layer2Mode", std::string("screen"));
+        p.set("layer2Opacity", 0.5);
+    });
+    const std::array<float, 3> s = screen->colorAtRoot({});
+    EXPECT_NEAR(s[0], 0.2f + (0.6f - 0.2f) * 0.5f, 1e-6f);
+    EXPECT_NEAR(s[2], 0.8f + (0.9f - 0.8f) * 0.5f, 1e-6f);
 }
 
 TEST(FieldNodes, CurveFlipKeepsLinear) {
