@@ -360,9 +360,31 @@ class GROOMLAB_OT_check_updates(bpy.types.Operator):
         r = type(self).result
         if not r or not r["installable"]:
             return {"FINISHED"}
-        out = install(r["info"])
-        self.report({"INFO"} if out["ok"] else {"ERROR"}, out["message"])
-        return {"FINISHED"} if out["ok"] else {"CANCELLED"}
+        # Installing reloads this add-on, this operator's class with it: never while it runs (Blender
+        # read the freed operator as it returned and crashed). A timer installs right after.
+        info = r["info"]
+        bpy.app.timers.register(lambda: _install_later(info), first_interval=0.0)
+        return {"FINISHED"}
+
+
+def _install_later(info):
+    """install(info) out of any operator, its message in a popup (a timer's: once)."""
+    import contextlib
+    windows = bpy.context.window_manager.windows
+    override = bpy.context.temp_override(window=windows[0]) if windows else contextlib.nullcontext()
+    with override:
+        out = install(info)
+        message = out["message"]
+
+        def draw(menu, context):
+            menu.layout.label(text=message)
+
+        try:
+            bpy.context.window_manager.popup_menu(draw, title="GroomLab Updates",
+                                                  icon="INFO" if out["ok"] else "ERROR")
+        except (RuntimeError, AttributeError, ReferenceError):
+            print("GroomLab:", message)
+    return None
 
 
 classes = (GROOMLAB_OT_check_updates,)
