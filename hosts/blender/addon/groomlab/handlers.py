@@ -81,7 +81,8 @@ def on_load_post(*args):
 _ACTIVE_OWNER = object()
 
 
-def active_changed():
+def follow_active():
+    """The active object's groom made the current one; that groom (None: not a groom's)."""
     context = bpy.context
     layer = getattr(context, "view_layer", None)
     scalp = groom.scalp_of(layer.objects.active if layer is not None else None)
@@ -89,6 +90,10 @@ def active_changed():
     if scalp is not None and groom.is_groom(scalp) and scene is not None and scene.groomlab.groom != scalp:
         scene.groomlab.groom = scalp  # (its update shows its graph)
     return scalp
+
+
+def active_changed():
+    follow_active()  # (the message bus wants no value back: Blender printed an error for one)
 
 
 def subscribe_active():

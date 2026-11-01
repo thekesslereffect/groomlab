@@ -141,7 +141,7 @@ class Editors(unittest.TestCase):
         entries = drawn.menu_entries("GROOMLAB_MT_tools_more", bpy.context)
         self.assertTrue(entries)
         texts = [e.get("text") for e in entries]
-        self.assertIn("GroomLab Window (Preview)", texts)
+        self.assertIn("GroomLab Window", texts)
         self.assertTrue(all(e["kind"] in ("op", "check", "sub", "label", "sep") for e in entries))
         self.assertIsNone(drawn.menu_entries("NO_SUCH_MENU", bpy.context))
 

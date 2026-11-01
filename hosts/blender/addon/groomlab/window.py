@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The GroomLab window (preview): Groom Tools drawn over the 3D view in the app's look (uikit.py).
+"""The GroomLab window: Groom Tools drawn over the 3D view in the app's look (uikit.py).
 
 Its content is the sidebar's Groom Tools panel (palette.py) and its sub-panels, run against
 drawn.DrawnLayout and laid out as the window's widgets: the same sections, settings and actions as
@@ -8,9 +8,10 @@ the sidebar, from the same code.
 Input comes through a gizmo, not an operator left running: the gizmo's test_select says whether the
 pointer is over the window (and tracks what it is over, for hover and tooltips); a press there starts
 GROOMLAB_OT_window_interact, which runs only for that press, drag or typing. Blender skips autosave
-while a modal operator runs, so none is kept running. The gizmo group's keymap adds the wheel
-(scroll the window, or the list under the pointer). Viewport gizmos turned off (the overlay's Gizmos
-toggle) leave the window drawn but deaf, which it says in its first row."""
+while a modal operator runs, so none is kept running. The gizmo group's keymap adds the right-click
+and the wheel (scroll the window, or the list under the pointer). With the viewport's Gizmos overlay
+off the same operators come from the 3D view's keymap (each passes on what is not over the window):
+the window still works, without hover or tooltips."""
 
 import json
 import os
@@ -179,7 +180,7 @@ def content(layout, context):
     rec = drawn.DrawnLayout("column")
     space = context.space_data
     if space is not None and not space.show_gizmo:
-        rec.label(text="Turn on the viewport's Gizmos to use this window", icon="ERROR")
+        rec.label(text="Viewport Gizmos are off: no hover or tooltips", icon="INFO")
     drawn.set_folds(state.folds)
     palette.CHARS[0] = max(20, int(layout.w / (6.4 * layout.s)))  # wrapped hints at the window's width
     try:
@@ -335,9 +336,9 @@ class GROOMLAB_GGT_window(bpy.types.GizmoGroup):
 
 
 class GROOMLAB_OT_window_toggle(bpy.types.Operator):
-    """Show or hide the GroomLab window over this 3D view (preview)"""
+    """Show or hide the GroomLab window over this 3D view: Groom Tools in the app's look (Ctrl+Shift+G)"""
     bl_idname = "groomlab.window_toggle"
-    bl_label = "GroomLab Window (Preview)"
+    bl_label = "GroomLab Window"
     bl_options = {"REGISTER"}
 
     def execute(self, context):
@@ -411,11 +412,16 @@ class GROOMLAB_OT_window_interact(_PressModal, bpy.types.Operator):
     bl_label = "GroomLab Window"
     bl_options = {"INTERNAL"}  # (no undo of its own: _push_undo, or the operators it runs)
 
+    @classmethod
+    def poll(cls, context):
+        return _shows_here(context)
+
     def invoke(self, context, event):
         win = _window(context)
-        widget = win.widget_at(event.mouse_region_x, event.mouse_region_y)
-        if widget is None:
-            return {"CANCELLED"}
+        x, y = event.mouse_region_x, event.mouse_region_y
+        widget = win.widget_at(x, y)
+        if widget is None:  # its padding: nothing under the window gets the press; outside it: Blender's
+            return {"FINISHED"} if uikit.contains(win.rect, x, y) else {"PASS_THROUGH"}
         state.hover_since = time.time() + 3600.0  # no tooltip over a press
         if widget.disabled:
             return {"FINISHED"}
@@ -439,6 +445,10 @@ class GROOMLAB_OT_window_context(_PressModal, bpy.types.Operator):
     bl_idname = "groomlab.window_context"
     bl_label = "GroomLab Window Menu"
     bl_options = {"INTERNAL"}
+
+    @classmethod
+    def poll(cls, context):
+        return _shows_here(context)
 
     def invoke(self, context, event):
         win = _window(context)
@@ -470,9 +480,15 @@ class GROOMLAB_OT_window_scroll(bpy.types.Operator):
 
     delta: bpy.props.IntProperty()
 
+    @classmethod
+    def poll(cls, context):
+        return _shows_here(context)
+
     def invoke(self, context, event):
-        win = _window(context)
+        win = _window(context, reuse=True)
         x, y = event.mouse_region_x, event.mouse_region_y
+        if not uikit.contains(win.rect, x, y):  # the viewport's own wheel (zoom)
+            return {"PASS_THROUGH"}
         for list_id, (rect, overflow) in _list_areas.items():
             if overflow > 0 and uikit.contains(rect, x, y):
                 state.lists[list_id] = min(max(state.lists.get(list_id, 0) + self.delta, 0), overflow)
@@ -517,6 +533,15 @@ def register():
         km = kc.keymaps.new(name="3D View", space_type="VIEW_3D")
         key, mods = TOGGLE_KEY
         _keymaps.append((km, km.keymap_items.new(GROOMLAB_OT_window_toggle.bl_idname, key, "PRESS", **mods)))
+        # The window's input without the gizmo (the viewport's Gizmos overlay off): the same operators
+        # from the 3D view's keymap; each passes on what is not over the window (the gizmo, when on,
+        # takes the window's presses before these).
+        for idname, event_type in (("groomlab.window_interact", "LEFTMOUSE"), ("groomlab.window_context", "RIGHTMOUSE")):
+            _keymaps.append((km, km.keymap_items.new(idname, event_type, "PRESS", any=True)))
+        for event_type, delta in (("WHEELUPMOUSE", -1), ("WHEELDOWNMOUSE", 1)):
+            kmi = km.keymap_items.new("groomlab.window_scroll", event_type, "PRESS", any=True)
+            kmi.properties.delta = delta
+            _keymaps.append((km, kmi))
     load_settings()
 
 
