@@ -26,6 +26,8 @@ uikit = importlib.import_module(bu.MODULE + ".uikit")
 window = importlib.import_module(bu.MODULE + ".window")
 drawn = importlib.import_module(bu.MODULE + ".drawn")
 editors = importlib.import_module(bu.MODULE + ".editors")
+blender_theme = importlib.import_module(bu.MODULE + ".blender_theme")
+graph_tree = importlib.import_module(bu.MODULE + ".graph_tree")
 palette = importlib.import_module(bu.MODULE + ".palette")
 
 
@@ -144,5 +146,32 @@ class Editors(unittest.TestCase):
         self.assertIsNone(drawn.menu_entries("NO_SUCH_MENU", bpy.context))
 
 
+class CharcoalTheme(unittest.TestCase):
+    def test_preset_from_the_theme_file(self):
+        import xml.dom.minidom
+        doc = xml.dom.minidom.parseString(blender_theme.preset_xml())
+        editor = doc.getElementsByTagName("ThemeNodeEditor")[0]
+        self.assertEqual(len(doc.getElementsByTagName("ThemeStyle")), 1)  # (Blender's loader asks for it)
+        g = blender_theme.graph_colors()
+        self.assertEqual(editor.getAttribute("node_backdrop"), g["node"].lower() + "ff")
+        self.assertEqual(editor.getAttribute("node_selected"), g["accent"].lower())
+        space = doc.getElementsByTagName("ThemeSpaceGeneric")[0]
+        self.assertEqual(space.getAttribute("back"), g["canvas"].lower())
+        self.assertIsNone(graph_tree.charcoal_colors())  # not Blender's theme: the graph keeps its colors
+
+    def test_applied_theme_tints_the_graph(self):
+        prefs = bpy.context.preferences
+        self.assertEqual(bpy.ops.groomlab.theme_apply(), {"FINISHED"})
+        try:
+            self.assertTrue(prefs.themes[0].filepath.endswith(blender_theme.PRESET_NAME + ".xml"))
+            back = blender_theme.rgb255(blender_theme.graph_colors()["canvas"])
+            self.assertAlmostEqual(prefs.themes[0].node_editor.space.back[0], back[0] / 255.0, places=2)
+            categories, ports, node_bg = graph_tree.charcoal_colors()
+            self.assertEqual(ports["Strands"], blender_theme.rgb255(blender_theme.graph_colors()["ports"]["Strands"]))
+        finally:
+            bpy.ops.preferences.reset_default_theme()
+        self.assertIsNone(graph_tree.charcoal_colors())
+
+
 if __name__ == "__main__":
-    bu.run(TypedValues, Assets, Props, Window, Drawn, Editors)
+    bu.run(TypedValues, Assets, Props, Window, Drawn, Editors, CharcoalTheme)

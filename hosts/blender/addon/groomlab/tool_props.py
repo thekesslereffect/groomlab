@@ -622,6 +622,9 @@ class GroomLabPreferences(bpy.types.AddonPreferences):
 
     def draw(self, context):
         self.layout.prop(self, "check_updates")
+        row = self.layout.row()
+        row.label(text="The Graph Editor in the app's look (Blender's theme; Preferences > Themes switches back):")
+        row.operator("groomlab.theme_apply", text="Use GroomLab Charcoal")
         _keymap_draw(self, context)
 
 
