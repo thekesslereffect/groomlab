@@ -13,7 +13,7 @@ out."""
 
 import bpy
 
-from . import icons, uikit
+from . import editors, icons, uikit
 
 # Blender's icons the panels use, as the app's glyphs (icons/ui_*.png) or the tools' own icons.
 ICONS = {
@@ -176,8 +176,15 @@ class DrawnLayout(object):
                    active_data=active_dataptr, active_prop=active_propname, rows=rows)
 
     def template_icon_view(self, data, property, show_labels=False, scale=6.0, scale_popup=5.0):
-        self._item("prop", data=data, prop=property, text="", icon="", has_icon=False, expand=False, toggle=-1,
-                   icon_only=False, emboss=True, placeholder="")
+        self._item("icon_view", data=data, prop=property)
+
+    def template_curve_mapping(self, data, property, type="NONE", levels=False, brush=False, use_negative_slope=False,
+                               show_tone=False):
+        self._item("curve", data=data, prop=property)
+
+    def groomlab_profile_editor(self, context, tools_props):
+        """The tube cross-section editor (the window's own: palette.draw_profile asks for it here)."""
+        self._item("profile", tools=tools_props)
 
     def context_pointer_set(self, name, data):
         pass
@@ -228,6 +235,105 @@ def draw_panel(cls, layout, context):
     cls.draw(PanelProxy(cls, layout), context)
 
 
+# ---- Operators and menus --------------------------------------------------------------------------
+
+def run_operator(idname, props, call_context="INVOKE_DEFAULT", override=None):
+    """bpy.ops.<idname>(call_context, **props), in override's context when one is given (a node's
+    actions run in the Graph Editor showing its graph: they ask the node editor for their tree)."""
+    module, name = idname.split(".", 1)
+    op = getattr(getattr(bpy.ops, module), name)
+    where = override() if callable(override) else override
+    if where:
+        with bpy.context.temp_override(**where):
+            return op(call_context, **props)
+    return op(call_context, **props)
+
+
+def menu_entries(name, context, override=None):
+    """A Menu class's entries (its draw run against a DrawnLayout) for editors.PopupMenu, or None
+    when it draws something a drawn menu cannot show (Blender's own popup opens instead)."""
+    cls = getattr(bpy.types, name, None)
+    if cls is None or not hasattr(cls, "draw"):
+        return None
+    rec = DrawnLayout("column")
+    try:
+        draw_panel(cls, rec, context)
+    except Exception:  # noqa: BLE001 - a menu that cannot draw here opens as Blender's
+        return None
+    entries = []
+
+    def walk(node, enabled):
+        for c in node.children:
+            if isinstance(c, DrawnLayout):
+                if not walk(c, enabled and c.enabled):
+                    return False
+                continue
+            kind, a = c.kind, c.args
+            if kind == "separator":
+                if entries and entries[-1]["kind"] != "sep":
+                    entries.append({"kind": "sep"})
+            elif kind == "label":
+                if a.get("text"):
+                    entries.append({"kind": "label", "text": a["text"]})
+            elif kind == "operator":
+                idname, props = a["idname"], dict(a["props"]._values)
+                cls_op = _operator_class(idname)
+                text = a["text"] if a["text"] is not None else getattr(cls_op, "bl_label", idname)
+                entries.append({"kind": "op", "text": text, "icon": a.get("icon"), "enabled": enabled,
+                                "checked": bool(a.get("depress")),
+                                "run": lambda ctx, i=idname, p=props, cc=a.get("context"): run_operator(
+                                    i, p, cc or "INVOKE_DEFAULT", override)})
+            elif kind == "prop":
+                rna = _rna(a["data"], a["prop"])
+                if rna is None:
+                    continue
+                prop = uikit.Prop(a["data"], a["prop"], rna.name if a.get("text") is None else a["text"])
+                if rna.type == "BOOLEAN":
+                    entries.append({"kind": "check", "text": prop.label, "enabled": enabled, "checked": bool(prop.get()),
+                                    "run": lambda ctx, p=prop: p.set(not bool(p.get()))})
+                elif rna.type == "ENUM":
+                    for ident, label, _tip in prop.items():
+                        entries.append({"kind": "check", "text": label, "enabled": enabled,
+                                        "checked": prop.get() == ident,
+                                        "run": lambda ctx, p=prop, i=ident: p.set(i)})
+                else:
+                    return False
+            elif kind == "menu":
+                entries.append({"kind": "sub", "text": a.get("text") or "", "icon": a.get("icon"), "enabled": enabled,
+                                "sub": lambda n=a["menu"]: menu_entries(n, bpy.context, override)})
+            elif kind == "enum_choice":
+                prop = uikit.Prop(a["data"], a["prop"])
+                entries.append({"kind": "check", "text": a.get("text") or a["value"], "enabled": enabled,
+                                "checked": prop.get() == a["value"],
+                                "run": lambda ctx, p=prop, v=a["value"]: p.set(v)})
+            else:
+                return False
+        return True
+
+    if not walk(rec, True):
+        return None
+    while entries and entries[0]["kind"] == "sep":
+        entries.pop(0)
+    while entries and entries[-1]["kind"] == "sep":
+        entries.pop()
+    return entries or None
+
+
+class MenuButton(uikit.Button):
+    """A menu's button: a press opens it drawn (editors.PopupMenu), else as Blender's own popup."""
+
+    def __init__(self, wid, rect, text, icon, menu_name, override=None):
+        super().__init__(wid, rect, text, None, icon, flat=not text, align="left" if text else "center")
+        self.menu_name, self.override = menu_name, override
+
+    def press(self, win, context, event):
+        entries = menu_entries(self.menu_name, context, self.override)
+        if not entries:
+            bpy.ops.wm.call_menu(name=self.menu_name)
+            return None
+        return editors.PopupMenu(win, entries, self.rect)
+
+
 # ---- Laying out -------------------------------------------------------------------------------
 
 class _State(object):
@@ -272,6 +378,12 @@ class Placer(object):
             return self.label_h * max(1.0, st.scale_y)
         if kind == "operator" and st.tiles:
             return 54 * self.s  # a tool tile: its icon over its name (the app's 56 x 54)
+        if kind == "icon_view":
+            return 44 * self.s
+        if kind == "curve":
+            return 150 * self.s
+        if kind == "profile":
+            return min(200 * self.s, self.ui.w) + self.row_h + 5 * self.s
         if kind == "list":
             return self.list_height(item)
         return self.row_h * st.scale_y
@@ -471,10 +583,12 @@ class Placer(object):
             name = a.get("menu") or a.get("panel")
             text = a.get("text") or ""
             icon = a.get("icon") or ("ui_chevron_down" if not text else "")
-            call = (lambda ctx, n=name: bpy.ops.wm.call_menu(name=n)) if kind == "menu" else \
-                (lambda ctx, n=name: bpy.ops.wm.call_panel(name=n))
-            widget = uikit.Button(self.wid(kind, name), rect, text, call if name else (lambda ctx: None), icon or None,
-                                  flat=not text, align="left" if text else "center")
+            if kind == "menu" and name:
+                widget = MenuButton(self.wid(kind, name), rect, text, icon or None, name, self.actions.get("op_context"))
+            else:
+                call = (lambda ctx, n=name: bpy.ops.wm.call_panel(name=n)) if name else (lambda ctx: None)
+                widget = uikit.Button(self.wid(kind, name), rect, text, call, icon or None, flat=not text,
+                                      align="left" if text else "center")
         elif kind == "prop":
             widget = self.prop(item, rect, st)
         elif kind == "enum_choice":
@@ -484,6 +598,14 @@ class Placer(object):
                                    a.get("text") if a.get("text") is not None else name)
         elif kind == "list":
             self.list(item, rect, st)
+        elif kind == "icon_view":
+            prop = uikit.Prop(a["data"], a["prop"])
+            widget = editors.IconPicker(self.wid("icons", a["prop"]), rect, prop, prop.items(icons=True),
+                                        self.actions["preview"])
+        elif kind == "curve":
+            widget = editors.CurveEditor(self.wid("curve", a["prop"]), rect, a["data"], a["prop"])
+        elif kind == "profile":
+            self.profile(item, rect, st)
         if widget is not None:
             widget.disabled = not st.enabled
             widget.dim = not st.active
@@ -497,9 +619,10 @@ class Placer(object):
         text = a["text"] if a["text"] is not None else self.op_label(idname)
         context = a.get("context") or "INVOKE_DEFAULT"
 
+        override = self.actions.get("op_context")
+
         def run(ctx, idname=idname, props=dict(props), context=context):
-            module, name = idname.split(".", 1)
-            getattr(getattr(bpy.ops, module), name)(context, **props)
+            run_operator(idname, props, context, override)
 
         def tip(idname=idname, props=dict(props)):
             return operator_tooltip(idname, props)
@@ -553,6 +676,22 @@ class Placer(object):
                 return uikit.Dropdown(self.wid("pointer", key), rect, choice, show_label=bool(prop.label))
         return uikit.Label(self.wid("label"), rect, prop.label)
 
+    def profile(self, item, rect, st):
+        """The picked library shape's cross-section in a square (at most 200 px), Mirror under it."""
+        t = item.args["tools"]
+        x, y, w, h = rect
+        side = h - self.row_h - 5 * self.s
+        shape = self.actions["tube_shape"](t)
+        mirror = uikit.Prop(t, "tube_shape_mirror")
+        editor = editors.ProfileEditor(self.wid("profile"), (x + (w - side) * 0.5, y + self.row_h + 5 * self.s, side, side),
+                                       shape, lambda pts: self.actions["tube_preview"](t, shape, pts),
+                                       lambda pts: self.actions["tube_commit"](t, shape, pts), lambda: bool(mirror.get()))
+        editor.disabled = not st.enabled
+        self.widgets.append(editor)
+        toggle = uikit.ToggleButton(self.wid("toggle", "tube_shape_mirror"), (x, y, w, self.row_h), mirror, mirror.label)
+        toggle.disabled = not st.enabled or not editor.editable
+        self.widgets.append(toggle)
+
     def segments(self, prop, items, rect, st, key):
         x, y, w, h = rect
         gap = 1 * self.s
@@ -565,6 +704,23 @@ class Placer(object):
             self.widgets.append(seg)
 
     # Lists (template_list): a UIList class's draw_item per row
+    def list_menu(self, list_cls, pick):
+        """A list row's right-click: the row picked, then its list's menu (the sidebar's right-click
+        menus, menu.LIST_MENUS; the Correctives' by the picked row)."""
+        from . import menu as menus
+
+        def open_menu(ctx, win, event):
+            pick(ctx)
+            name = menus.correctives_menu(ctx) if list_cls == "GROOMLAB_UL_correctives" else menus.LIST_MENUS.get(list_cls)
+            if not name:
+                return None
+            entries = menu_entries(name, ctx)
+            if not entries:
+                bpy.ops.wm.call_menu(name=name)
+                return None
+            return editors.PopupMenu(win, entries, (event.mouse_region_x, event.mouse_region_y, 0, 0), armed=True)
+        return open_menu
+
     def list_rows(self, item):
         a = item.args
         coll = getattr(a["data"], a["prop"])
@@ -596,6 +752,7 @@ class Placer(object):
 
             row = uikit.ListRow(self.wid("listrow", "%s.%d" % (list_id, index)), r, index == active, pick)
             row.disabled = not st.enabled
+            row.context_menu = self.list_menu(a["cls"], pick)
             self.widgets.append(row)
             if cls is not None:
                 rec = DrawnLayout("row")

@@ -25,6 +25,7 @@ pkg, m = bu.enable()
 uikit = importlib.import_module(bu.MODULE + ".uikit")
 window = importlib.import_module(bu.MODULE + ".window")
 drawn = importlib.import_module(bu.MODULE + ".drawn")
+editors = importlib.import_module(bu.MODULE + ".editors")
 palette = importlib.import_module(bu.MODULE + ".palette")
 
 
@@ -122,5 +123,26 @@ class Drawn(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(uikit.ICON_DIR, name + ".png")), name)
 
 
+class Editors(unittest.TestCase):
+    def test_tube_outline_matches_the_core(self):
+        # The square's corners: smooth, a closed curve through every point (the core's denseCurve).
+        pts = [(1.0, -1.0), (1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0)]
+        curve = editors.dense_curve(pts, True)
+        self.assertEqual(len(curve), 4 * editors.samples_per_span(4))
+        for p in pts:
+            self.assertIn(p, curve)  # each span starts at its control point
+        straight = editors.dense_curve(pts, False)
+        self.assertAlmostEqual(straight[1][0], 1.0)  # straight edges stay on the side
+        self.assertEqual(editors.partners([(0.5, 0.0), (0.0, 1.0), (-0.5, 0.0), (0.0, -1.0)]), [2, 1, 0, 3])
+
+    def test_menus_draw_as_entries(self):
+        entries = drawn.menu_entries("GROOMLAB_MT_tools_more", bpy.context)
+        self.assertTrue(entries)
+        texts = [e.get("text") for e in entries]
+        self.assertIn("GroomLab Window (Preview)", texts)
+        self.assertTrue(all(e["kind"] in ("op", "check", "sub", "label", "sep") for e in entries))
+        self.assertIsNone(drawn.menu_entries("NO_SUCH_MENU", bpy.context))
+
+
 if __name__ == "__main__":
-    bu.run(TypedValues, Assets, Props, Window, Drawn)
+    bu.run(TypedValues, Assets, Props, Window, Drawn, Editors)

@@ -620,6 +620,9 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         apply.enabled = t.tube_targets > 0
         apply.operator("groomlab.tube_apply", text="Apply")
         col.template_list("GROOMLAB_UL_tube_shapes", "", t, "tube_shapes", t, "tube_shape_index", rows=2)
+        editor = getattr(col, "groomlab_profile_editor", None)
+        if editor is not None:  # the GroomLab window draws the picked shape's cross-section (Maya's editor)
+            editor(context, t)
         col, head = block(card, "Selected guides")
         sub = head.row(align=True)
         sub.alignment = "RIGHT"

@@ -422,8 +422,9 @@ class Prop:
         lo, hi = float(self.rna.soft_min), float(self.rna.soft_max)
         return (lo, hi) if hi > lo else (0.0, 1.0)
 
-    def items(self):
-        items = [(i.identifier, i.name, i.description) for i in self.rna.enum_items]
+    def items(self, icons=False):
+        """[(id, name, tip)], with each item's icon_value after (icons=True)."""
+        items = [(i.identifier, i.name, i.description) + ((i.icon,) if icons else ()) for i in self.rna.enum_items]
         if items:
             return items
         # A Python enum whose items come from a function: its definition's, called as Blender does.
@@ -434,7 +435,16 @@ class Prop:
                 source = source(self.owner, bpy.context)
             except Exception:  # noqa: BLE001 - a menu that cannot list shows none
                 source = []
-        return [(i[0], i[1], i[2] if len(i) > 2 else "") for i in (source or []) if i]
+        out = []
+        for i in source or []:
+            if not i:
+                continue
+            item = (i[0], i[1], i[2] if len(i) > 2 else "")
+            if icons:
+                icon = i[3] if len(i) > 3 else 0
+                item += (icon if isinstance(icon, int) else 0,)
+            out.append(item)
+        return out
 
     @property
     def length_unit(self):
@@ -535,6 +545,8 @@ class Interaction:
 
 
 class Label(Widget):
+    passive = True  # text: a press or a hover goes to what is under it (a list's row)
+
     def __init__(self, wid, rect, text, dim=True, size=None, align="left", icon=None, bright=False):
         super().__init__(wid, rect)
         self.text, self.size, self.align, self.icon, self.bright = text, size, align, icon, bright or not dim
@@ -1137,6 +1149,7 @@ class ListRow(Widget):
     def __init__(self, wid, rect, active, pick):
         super().__init__(wid, rect)
         self.active, self.pick = active, pick
+        self.context_menu = None  # a right-click: (context) -> opens the row's menu
 
     def draw(self, p, win):
         t, s = p.theme, p.scale
@@ -1282,6 +1295,7 @@ class WindowState:
         self.mouse = (-1, -1)
         self.interaction = None
         self.folds = {}     # folding sections open (True) or folded, by id
+        self.page = "tools"  # what the window shows: Groom Tools ("tools") or the selected node ("node")
         self.lists = {}     # lists' scroll (first row shown), by id
 
 

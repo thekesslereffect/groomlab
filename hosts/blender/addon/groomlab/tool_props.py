@@ -417,6 +417,9 @@ class GroomLabTools(bpy.types.PropertyGroup):
     # Paint on a scalp map through an alpha (Maya's Alpha picker): its file ("" none), shown and
     # picked in the library's grid (alpha_choice), its rotation, angle, spacing and invert.
     alpha: StringProperty(name="Alpha", update=_push(), description="The image stamped inside the brush (a file)")
+    tube_shape_mirror: BoolProperty(name="Mirror", default=True,
+                                    description="The cross-section editor keeps the left and right sides alike: a "
+                                                "point and its mirror image move, come and go together")
     alpha_choice: EnumProperty(name="Alpha", items=alphas.enum_items, get=alphas.choice_get, set=alphas.choice_set,
                                description="An image stamped inside the brush on scalp maps (speckles, noise, "
                                            "streaks): white paints, black does not")
