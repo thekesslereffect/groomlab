@@ -366,7 +366,11 @@ struct CardBakeSettings {
     // where the strands' own drawing is solid. 0: to scale (thinner ones fainter).
     float minStrandTexels = 1.0f;
     float occlusion = 1.0f;                       // ambient occlusion strength (0: none)
-    int dilate = 8;                               // pixels colors spread past the strands (mip padding)
+    // Texels the values (every map but the coverage) spread past the strands, so mip maps and
+    // filtering at the cards' edges don't pull in the empty texels' (mip padding). -1: all the way
+    // (two averaged rings, then each empty texel takes its nearest strand texel's values), so
+    // neighbouring cards meet halfway and the most mipped-down level still holds the hair's colors.
+    int dilate = -1;
     // Share of the card, from its root, over which coverage fades in, so the
     // cards' root ends blend into each other and the scalp instead of reading
     // as edges (0: none).

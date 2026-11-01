@@ -35,8 +35,8 @@
 namespace groomlab {
 
 // A card bake's maps at full precision. Images row 0 at v = 1 (top), `size` square; every texel
-// holds a value (past the strands and their padding: the empty card's: depth 0.5, occlusion 1,
-// the tangent along the card, the normal out of it, the fallback color).
+// holds a value (with a limited padding, past the strands and it: the empty card's: depth 0.5,
+// occlusion 1, the tangent along the card, the normal out of it, the fallback color).
 struct CardMaps {
     int size = 0;
     bool iridescent = false;           // a strand had iridescence (else that map is all 0)
@@ -142,12 +142,10 @@ struct CardMapExport {
     int resolution = 0;        // texels square (the atlas is square); 0: the Cards nodes' atlasSize, else 2048; up to 8192
     std::string format;        // tga, png, tiff, exr; "": the preset's
     int bitDepth = 0;          // 8 or 16 (PNG, TIFF), 16 or 32 (EXR: half or float; TIFF 32 float); 0: the preset's, else the format's
-    int padding = -1;          // texels the values spread past the strands (mip padding); -1: auto (cardMapAutoPadding)
+    int padding = -1;          // texels the values spread past the strands (mip padding); -1: Full (to the neighbouring cards)
     int supersample = 1;       // 1, 2 or 4 samples a texel each way (the bake no bigger than 8192)
     std::string nameTemplate = "{name}_{map}";  // tokens {name}, {map}, {res}; the extension added
 };
-// 8 texels at 2048 and below, scaled with the resolution above (16 at 4K, 32 at 8K).
-int cardMapAutoPadding(int resolution);
 // The supersampling a bake at `resolution` gets: `requested` (1, 2 or 4), halved until the bake is
 // no bigger than 8192.
 int cardMapSupersample(int resolution, int requested);

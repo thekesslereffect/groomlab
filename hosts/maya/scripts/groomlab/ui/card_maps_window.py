@@ -220,11 +220,11 @@ class CardMapsPanel(QtWidgets.QWidget):
         self.padding = QtWidgets.QSpinBox()
         self.padding.setObjectName("cardMapsPadding")
         self.padding.setRange(-1, 256)
-        self.padding.setSpecialValueText("Auto")
+        self.padding.setSpecialValueText("Full")
         self.padding.setValue(-1)
         self.padding.setSuffix(" px")
-        self.padding.setToolTip("Texels the colors spread past the strands so mip maps don't bleed in black; "
-                                "Auto: 8 at 2K and below, scaled above")
+        self.padding.setToolTip("Texels the colors spread past the strands so mip maps don't bleed in the empty "
+                                "texels; Full: all the way, each card's colors meeting its neighbours' halfway")
         form.addRow("Padding", self.padding)
         self.supersample = QtWidgets.QComboBox()
         self.supersample.setObjectName("cardMapsSupersample")

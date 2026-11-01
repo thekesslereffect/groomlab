@@ -408,7 +408,8 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
             }
         }
     }, kRowGrain);
-    for (int pass = 0; pass < settings.dilate; ++pass) {
+    const int rings = settings.dilate < 0 ? 2 : settings.dilate;
+    for (int pass = 0; pass < rings; ++pass) {
         std::vector<char> next = filled;
         parallelFor(0, static_cast<std::size_t>(size), [&](std::size_t yy) {
             const int y = static_cast<int>(yy);
@@ -444,6 +445,49 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
             }
         }, kRowGrain);
         filled.swap(next);
+    }
+    if (settings.dilate < 0) {
+        // All the way: every empty texel the values of its nearest filled one (a flood from all of
+        // them at once, 8-connected: each card's region grows until it meets its neighbours').
+        std::vector<std::int32_t> from(pixels, -1);
+        std::vector<std::int32_t> front;
+        for (std::size_t p = 0; p < pixels; ++p)
+            if (filled[p]) {
+                from[p] = static_cast<std::int32_t>(p);
+                front.push_back(static_cast<std::int32_t>(p));
+            }
+        std::vector<std::int32_t> next;
+        while (!front.empty() && front.size() < pixels) {
+            next.clear();
+            for (const std::int32_t p : front) {
+                const int x = p % size, y = p / size;
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const int nx = x + dx, ny = y + dy;
+                        if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+                        const std::int32_t q = ny * size + nx;
+                        if (from[static_cast<std::size_t>(q)] >= 0) continue;
+                        from[static_cast<std::size_t>(q)] = from[static_cast<std::size_t>(p)];
+                        next.push_back(q);
+                    }
+            }
+            front.swap(next);
+        }
+        parallelFor(0, rowPixels, [&](std::size_t y) {
+            for (std::size_t p = y * rowPixels; p < (y + 1) * rowPixels; ++p) {
+                if (filled[p] || from[p] < 0) continue;
+                const std::size_t q = static_cast<std::size_t>(from[p]);
+                for (std::vector<float>* v : {&b.depth, &b.coordU, &b.seed, &b.ao, &b.rootU, &b.rootV, &b.iridescence, &b.id})
+                    (*v)[p] = (*v)[q];
+                for (int k = 0; k < 3; ++k) {
+                    b.tangent[p * 3 + static_cast<std::size_t>(k)] = b.tangent[q * 3 + static_cast<std::size_t>(k)];
+                    b.color[p * 3 + static_cast<std::size_t>(k)] = b.color[q * 3 + static_cast<std::size_t>(k)];
+                    b.normal[p * 3 + static_cast<std::size_t>(k)] = b.normal[q * 3 + static_cast<std::size_t>(k)];
+                }
+            }
+        }, kRowGrain);
+        for (std::size_t p = 0; p < pixels; ++p)
+            if (from[p] >= 0) filled[p] = 1;
     }
 
     // The iridescence only when a strand has any.

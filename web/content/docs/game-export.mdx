@@ -49,8 +49,9 @@ target of the Export panel; in Blender, **Card Maps...** in the GroomLab panel.
 2. Set the **Resolution** (any size up to 8192; the atlas is square), the **Format** (TGA, PNG,
    TIFF or EXR) and the **Bit depth** (8 or 16 for PNG and TIFF; 16-bit half or 32-bit float for
    EXR; TIFF also 32-bit float).
-3. Leave **Padding** on Auto (8 texels at 2K and below, scaled up at higher resolutions): colors
-   spread past the strands so mip maps don't bleed black into the edges. **Supersampling** 2x or 4x
+3. Leave **Padding** on Full: every map but the coverage spreads its colors past the strands all
+   the way, each card's meeting its neighbours' halfway, so even the smallest mip maps hold the
+   hair's colors and nothing dark bleeds into the edges. A number of texels limits it. **Supersampling** 2x or 4x
    bakes the maps larger and scales them down for smoother edges (slower).
 4. Choose the folder and the name, and click **Export**. Thumbnails of the written maps appear
    under the button.

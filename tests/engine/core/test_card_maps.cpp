@@ -129,6 +129,7 @@ TEST(CardMaps, TheOldBakeIsTheSameBytes) {
     CardBakeSettings bake;
     bake.size = 256;
     bake.scalp = plane.get();
+    bake.dilate = 8;  // (the padding the old bake had: Full came after)
     EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0x1c9a8b4fb555cc23ull);
     bake.size = 128;
     bake.dilate = 0;
@@ -412,11 +413,21 @@ TEST(CardMaps, PaddingSpreadsValuesPastTheStrands) {
     };
     EXPECT_EQ(spread(bare.maps), 0u);
     EXPECT_GT(spread(padded.maps), 500u);
-    // The auto padding: 8 texels at 2K and below, scaled above.
-    EXPECT_EQ(cardMapAutoPadding(1024), 8);
-    EXPECT_EQ(cardMapAutoPadding(2048), 8);
-    EXPECT_EQ(cardMapAutoPadding(4096), 16);
-    EXPECT_EQ(cardMapAutoPadding(8192), 32);
+    // Full (-1, the default): every texel takes a strand's values (none left the empty card's), the
+    // coverage as baked; each texel's the nearest strand texel's.
+    const FurMaps full = furMaps(128, -1);
+    std::size_t empty = 0, emptyBare = 0;
+    for (std::size_t p = 0; p < full.maps.coverage.size(); ++p) {
+        empty += full.maps.seed[p] > 0.0f ? 0 : 1;
+        emptyBare += bare.maps.seed[p] > 0.0f ? 0 : 1;
+    }
+    EXPECT_LT(empty, emptyBare / 20) << empty << " of " << emptyBare;
+    EXPECT_EQ(full.maps.coverage, padded.maps.coverage);
+    EXPECT_EQ(cardMapBakeSettings({}, CardMapExport{}, 1024).dilate, -1);
+    CardMapExport limited;
+    limited.padding = 6;
+    limited.supersample = 2;
+    EXPECT_EQ(cardMapBakeSettings({}, limited, 1024).dilate, 12);
     EXPECT_EQ(cardMapSupersample(2048, 4), 4);
     EXPECT_EQ(cardMapSupersample(4096, 4), 2);
     EXPECT_EQ(cardMapSupersample(8192, 2), 1);
@@ -430,7 +441,7 @@ TEST(CardMaps, SupersamplingBakesBiggerAndBringsItDown) {
     settings.supersample = 2;
     const CardBakeSettings bake = cardMapBakeSettings(base, settings, 256);
     EXPECT_EQ(bake.size, 512);
-    EXPECT_EQ(bake.dilate, 16);
+    EXPECT_EQ(bake.dilate, -1);  // Full (a padding in texels is scaled by the supersampling)
     EXPECT_FLOAT_EQ(bake.minStrandTexels, 2.0f);
     const CardMaps big = bakeCardMaps(*f.strands, f.mesh, bake);
     const CardMaps small = downsampleCardMaps(big, 2);

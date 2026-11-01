@@ -346,12 +346,12 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     mapBitDepth_->setToolTip(tr("Bits a channel: 8 or 16 (PNG, TIFF), 16 (half) or 32 (float) for EXR"));
     mapPadding_ = new QSpinBox(mapOptions_);
     mapPadding_->setRange(-1, 256);
-    mapPadding_->setSpecialValueText(tr("Auto"));
+    mapPadding_->setSpecialValueText(tr("Full"));
     mapPadding_->setValue(-1);
     mapPadding_->setSuffix(QStringLiteral(" px"));
     mapPadding_->setFont(theme::numberFont(12));
-    mapPadding_->setToolTip(tr("Texels the colors spread past the strands so mip maps don't bleed in black; Auto: 8 at 2K and "
-                               "below, scaled above"));
+    mapPadding_->setToolTip(tr("Texels the colors spread past the strands so mip maps don't bleed in the empty texels; Full: all "
+                               "the way, each card's colors meeting its neighbours' halfway"));
     mapSupersample_ = new QComboBox(mapOptions_);
     mapSupersample_->addItem(tr("1x (off)"), 1);
     mapSupersample_->addItem(QStringLiteral("2x"), 2);

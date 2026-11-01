@@ -714,7 +714,6 @@ void bindGroom(py::module_& m) {
           },
           py::arg("preset"), "\"\" or what is wrong with a preset.");
     m.def("card_map_preset_user_dir", &cardMapPresetUserDir, "The user's card preset folder.");
-    m.def("card_map_auto_padding", &cardMapAutoPadding, py::arg("resolution"), "The padding Auto gives at a resolution.");
     m.def("card_map_file_name", &cardMapFileName, py::arg("template"), py::arg("name"), py::arg("map"), py::arg("resolution"),
           "The file name (no extension) a naming template makes.");
     m.def("write_card_maps",
