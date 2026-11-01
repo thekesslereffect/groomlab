@@ -115,7 +115,7 @@ TEST(ReferenceEdit, FlowArrowsAndMaskStrokesAreUndoSteps) {
     EXPECT_EQ(e.eraseStrokes({{12, 30}}, 3.0f), 1u);
     ASSERT_EQ(e.strokes().size(), 1u);
     EXPECT_FLOAT_EQ(e.strokes()[0].points[0][0], 40.0f);
-    EXPECT_EQ(e.undoText(), "erase flow arrows");
+    EXPECT_EQ(e.undoText(), "erase guide lines");
     e.undo();
     EXPECT_EQ(e.strokes().size(), 2u);
     e.addMaskStroke({{5, 5}, {20, 5}}, 4.0f, true);

@@ -739,7 +739,7 @@ void PhotosPanel::refreshControls() {
         for (const json& p : all) {
             const ReferencePhotoEditor::State s = stateOf(p);
             const int pairs = static_cast<int>(s.landmarks.pairCount()), strokes = static_cast<int>(s.strokes.size());
-            rows << tr("%1: %2 landmark pair%3, %4 flow arrow%5")
+            rows << tr("%1: %2 landmark pair%3, %4 guide line%5")
                         .arg(qs(p.value("name", std::string())))
                         .arg(pairs)
                         .arg(pairs == 1 ? QString() : QStringLiteral("s"))

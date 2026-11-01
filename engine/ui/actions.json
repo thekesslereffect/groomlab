@@ -13,7 +13,7 @@
     "sample.wolf": {"label": "Wolf", "tip": "A sitting wolf (body, eyes, nails, mouth), at the origin, its body selected: then Create Groom from Selection",
                     "tips": {"app": "A new groom on a sitting wolf's body, its eyes, nails and mouth a prop beside it (asked first when the open groom has unsaved changes)"}},
     "sample.buddy": {"label": "Buddy (rig)", "tip": "Buddy, a posable character rig (skinned body, eyes, teeth, tongue; joints and controls), at the origin, its body selected: then Create Groom from Selection, and pose it", "hosts": ["maya", "blender"]},
-    "photos.guides": {"label": "Guides from Photos (experimental)...", "tip": "Grow guides from reference photos: the photo and the mesh side by side, a few landmarks to line the camera up, optional flow arrows and mask touch-ups, Generate"},
+    "photos.guides": {"label": "Guides from Photos (experimental)...", "tip": "Grow guides from reference photos: the photo and the mesh side by side, a few landmarks to line the camera up, optional guide lines and mask touch-ups, Generate"},
 
     "file.import": {"label": "Import Groom File...", "tip": "A groom from a .groom file (exported from Maya or saved by the standalone app), on the selected mesh when it is the file's scalp, else on a mesh made from the file",
                     "labels": {"app": "Open Groom File..."}, "tips": {"app": "A groom from a .groom file (saved by the app, exported from Maya or Blender) in place of the open one (asked first when it has unsaved changes)"}},

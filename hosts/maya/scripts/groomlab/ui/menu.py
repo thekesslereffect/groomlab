@@ -1921,12 +1921,15 @@ def open_palette():
 
 
 def open_guides_from_reference(groom=None):
-    """The Photos window's Guides stage (Guides from Photos) on the active groom; returns it."""
+    """The Photos window's Guides stage (Guides from Photos) on the active groom; its Align stage
+    while no photo is lined up yet (guides grow from lined-up photos). Returns it."""
+    from groomlab import reference
     from groomlab.ui import reference_window
     groom = groom or _selected_groom()
     if not groom:
         return None
-    return reference_window.show(groom, stage="guides")
+    lined_up = any(cmds.getAttr(reference._camera(c) + ".glRefRms") >= 0.0 for c in reference.list_references())
+    return reference_window.show(groom, stage="guides" if lined_up else "align")
 
 
 MENU_ONLY, TOOLS_ONLY = "menu", "tools"

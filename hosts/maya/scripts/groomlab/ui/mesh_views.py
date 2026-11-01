@@ -282,6 +282,14 @@ class MeshView(object):
                 if o not in current:
                     cmds.isolateSelect(self.editor, addDagObject=o)
 
+    def show_plugin_shapes(self, on):
+        """Plugin shapes (a groom's strands and guides) in this view too, or not (they draw whatever
+        the isolation: every groom in the scene)."""
+        if not self.editor or not cmds.modelEditor(self.editor, exists=True):
+            return
+        if cmds.modelEditor(self.editor, query=True, pluginShapes=True) != bool(on):
+            cmds.modelEditor(self.editor, edit=True, pluginShapes=bool(on))
+
     def isolated(self):
         """What the view shows (long names)."""
         view_set = cmds.isolateSelect(self.editor, query=True, viewObjects=True)

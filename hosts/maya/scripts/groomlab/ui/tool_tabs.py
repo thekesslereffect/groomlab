@@ -2024,7 +2024,7 @@ class ReferenceTab(_GroomTab):
 
     def _build_generate(self, layout):
         """The Guides from Photos section (folded): the Reference window does the work (the photo
-        and the mesh side by side: landmarks, flow arrows, the mask, Generate, the measured look);
+        and the mesh side by side: landmarks, guide lines, the mask, Generate, the measured look);
         here, a way in and where things stand."""
         body = QtWidgets.QWidget()
         column = QtWidgets.QVBoxLayout(body)
@@ -2077,7 +2077,7 @@ class ReferenceTab(_GroomTab):
         return made
 
     def show_generate(self):
-        """Where Guides from Photos stands: the photos, their landmarks and arrows, the next step."""
+        """Where Guides from Photos stands: the photos, their landmarks and guide lines, the next step."""
         from groomlab import from_reference
         rows = []
         try:
@@ -2090,7 +2090,7 @@ class ReferenceTab(_GroomTab):
         if not rows:
             step = "Open Guides from Photos, import a photo of the groom and line it up with a few landmarks."
         else:
-            step = "; ".join("%s: %d landmark pair%s, %d flow arrow%s" % (
+            step = "; ".join("%s: %d landmark pair%s, %d guide line%s" % (
                 name.split("|")[-1], pairs, "" if pairs == 1 else "s", strokes, "" if strokes == 1 else "s")
                 for name, pairs, strokes in rows) + ". Generate in Guides from Photos."
         if self.groom and from_reference.measured_look(self.groom):

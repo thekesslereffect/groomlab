@@ -98,13 +98,24 @@ Guides from Photos grows guides that follow the hair in your reference photos. I
 version: try it, then brush the result.
 </Callout>
 
-**GroomLab > Guides from Photos (experimental)...** opens the Photos window at its **Guides** stage
-(Groom Tools > Photos has an **Open Guides from Photos...** button too; the **Align** and **Guides
-(experimental)** chips at the top left switch stages). The Guides stage adds flow arrows, mask
-touch-ups, Generate and the measured look to the Align stage's landmarks. Each photo keeps its camera
-with the photo on an image plane, lined up, so renders and Arnold can use it.
+**GroomLab > Guides from Photos (experimental)...** opens the Photos window at its **Guides** stage,
+or at **Align** while no photo is lined up yet (Groom Tools > Photos has an **Open Guides from
+Photos...** button too; the **Align** and **Guides (experimental)** chips at the top left switch
+stages). Each stage shows only what its step needs:
 
-<Example name="reference-window.png" alt="The Photos window at its Guides stage: a photo with numbered landmarks, flow arrows and the mesh's outline on the left, the scalp with the matching landmarks on the right" caption="The Photos window, Guides stage" optional />
+- **Align** lines one photo up at a time: the landmarks, the mesh's outline over the photo (**Mesh
+  over photo** under it), and in the panel the landmark pairs, the camera and the scalp's shape
+  (Morph to Photos). **Next: Guides** moves on.
+- **Guides** works with every lined-up photo: the tools **Guide Lines**, **Hair** and **Backdrop**
+  above the photo, what it shows below it (**Mask**, **Flow field** and the generated **Guides**,
+  root green to tip red), the groom in the mesh view (Maya), and in the panel this photo's mask and lines,
+  then Generate's settings and the measured look. A photo that is not lined up yet says so in its
+  tab, and Guides from Photos leaves it out.
+
+Each photo keeps its camera with the photo on an image plane, lined up, so renders and Arnold can use
+it.
+
+<Example name="reference-window.png" alt="The Photos window at its Guides stage: a photo with the hair mask, guide lines and the generated guides on the left, the scalp with the guides on the right" caption="The Photos window, Guides stage" optional />
 
 <Steps>
 <Step>
@@ -113,7 +124,7 @@ with the photo on an image plane, lined up, so renders and Arnold can use it.
 
 **Import Photo...** adds a photo as a tab along the top (**Remove** takes it away; Maya's undo brings
 it back). One to three views work: a front, a side and a back, or a single three-quarter view with
-symmetry. Each photo has its own landmarks, arrows, mask and camera. In the photo view the wheel
+symmetry. Each photo has its own landmarks, guide lines, mask and camera. In the photo view the wheel
 zooms at the cursor, the middle button (or Alt+drag) pans, and **F** or **Fit** fits the photo.
 
 </Step>
@@ -121,16 +132,21 @@ zooms at the cursor, the middle button (or Alt+drag) pans, and **F** or **Fit** 
 
 ### Line each photo up with landmarks
 
-With **Landmarks** on, line each photo up as in [Line it up](#line-it-up) above. The mesh can draw
-over the photo as its outline or its wireframe (**Mesh over photo**, with its **Opacity**).
+At the **Align** stage, line each photo up as in [Line it up](#line-it-up) above. The mesh can draw
+over the photo as its outline or its wireframe (**Mesh over photo** under the photo, with its
+**Opacity**).
 
 </Step>
 <Step>
 
-### Draw flow arrows (optional)
+### Draw guide lines (optional)
 
-With **Flow** on, drag along the hair on the photo from root to tip: each stroke becomes an arrow,
-and guides near it follow its line and its way. Ctrl+drag erases. **Clear Arrows** forgets them.
+At the **Guides** stage, with **Guide Lines** on, drag along the hair on the photo from root to tip,
+as one strand runs: the
+line draws green at its root and red at its tip. Guides near it follow its course and its way, and
+take its length: a guide growing under a line is as long as the line from there to its tip. Short
+lines over a beard give short guides; one long line down the back gives long ones. Ctrl+drag erases.
+**Clear Lines** forgets them.
 
 </Step>
 <Step>
@@ -141,11 +157,11 @@ The guides grow where the photo's hair mask says there is hair: automatic on a p
 image you pick with **Mask** (white where the hair is). The automatic mask finds the hair by its
 colors, learned from the hair around the top of the head, so a face, a neck and clothes are left out
 even when the scalp is the whole head; a beard the hair's color counts as hair (paint it out with
-**Backdrop** to leave it bare). **Mask tint** shows it over the photo and
-**Flow field** the strand directions read from it. Paint with **Hair** where it missed hair and with
-**Backdrop** where it took backdrop for hair (Ctrl swaps them; **Brush** sets the size).
+**Backdrop** to leave it bare). **Show > Mask** tints it over the photo and **Flow field** draws the
+strand directions read from it. Paint with **Hair** where it missed hair and with **Backdrop** where it
+took backdrop for hair (Ctrl swaps them; **Brush**, beside them, sets the size).
 
-Every landmark, arrow and touch-up is one undo step: Ctrl+Z and Ctrl+Y in the window (or **Undo**
+Every landmark, guide line and touch-up is one undo step: Ctrl+Z and Ctrl+Y in the window (or **Undo**
 and **Redo**) walk the current photo's edits.
 
 </Step>
@@ -155,8 +171,10 @@ and **Redo**) walk the current photo's edits.
 
 Set **Symmetry** (Auto uses the scalp's own symmetry), **Guide count** and **Max length** (Auto: as
 far as the photos show the hair reaching), uncheck **Use this photo** on a photo to leave it out, then
-**Generate**. The guides go into the **fromReference** group and are selected. Generate again
-replaces them; one Maya undo step each time. While it works, the window shows a wait cursor, greys
+**Generate**. The guides go into the **fromReference** group and are selected, and they draw over
+each photo (**Show > Guides**, root green to tip red; in Maya on the scalp in the mesh view too): where they
+stray from the hair, draw guide lines there and Generate again. Generate again replaces them; one
+Maya undo step each time. While it works, the window shows a wait cursor, greys
 out its buttons and says what it is doing (Measured Look's Apply too).
 
 **Measured Look** shows what the photos measure against what your graph has: the hair color (and
@@ -173,11 +191,11 @@ clumps in short fur, and flyaways against a backdrop of the hair's own shade.
 </Steps>
 
 The standalone app has the same window: **Align Photo...** in its Photos tab, and **Tools > Guides
-from Photos (Experimental)...** (photos, landmarks, the camera, flow arrows, mask touch-ups and
+from Photos (Experimental)...** (photos, landmarks, the camera, guide lines, mask touch-ups and
 Generate, saved with the groom; the measured look is Maya's for now).
 
 What works so far: long hair and longer fur, one to three views, symmetry that covers the side a
-photo doesn't show, and flow arrows that settle which way hair runs.
+photo doesn't show, and guide lines that settle which way hair runs and how long it is.
 
 What doesn't yet: tight curls in three or more views, very short fur (too fine to read in the
 photo), and photos lit by colored light (the fitted color takes the light's tint).

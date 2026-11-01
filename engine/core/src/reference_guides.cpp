@@ -200,6 +200,8 @@ struct PreparedView {
     std::shared_ptr<const OrientationField> coarse;  // the field smoothed past its curls
     CurlEstimate curl;
     std::vector<float> hintWay;         // 3 a pixel: the directed hints' way (u, v) and their strength (empty: none)
+    std::vector<float> hintLength;      // 2 a pixel: how long the drawn lines say the hair is from there on (scene units)
+                                        // and how much they say it (0-1; empty: none)
     float depthEps = 0.0f;
 
     bool inFrame(float u, float v) const { return u >= 0 && v >= 0 && u < static_cast<float>(width) && v < static_cast<float>(height); }
@@ -661,7 +663,7 @@ RefImage grown(const RefImage& mask, int radius) {
 
 struct HintSample;
 std::vector<HintSample> hintSamples(const ReferenceView& view, float scale, int w, int h);
-void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float sigma, float lineSigma);
+void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float sigma, float lineSigma, float worldPerPixel);
 
 // The pixels (w x h) the mask strokes of one kind cover, their points scaled by `scale` (photo
 // pixels to these), each at least a pixel wide.
@@ -922,11 +924,12 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
             if (pv.rgb.empty()) throw std::invalid_argument("guidesFromReference: a view without a field needs an image");
             pv.field = std::make_shared<OrientationField>(orientationField(pv.rgb.gray(), pv.mask, options.orientation));
         }
-        // Flow hints (optional): over the field, and their way for the roots.
+        // Drawn guide lines (optional): over the field, their way and their length for the roots.
         if (!view.hints.empty() || !view.hintOverlay.empty())
             applyHints(pv, hintSamples(view, static_cast<float>(pv.width) / static_cast<float>(w), pv.width, pv.height),
                        0.5f * options.hintRadius * static_cast<float>(std::max(pv.width, pv.height)),
-                       0.5f * options.hintLineRadius * static_cast<float>(std::max(pv.width, pv.height)));
+                       0.5f * options.hintLineRadius * static_cast<float>(std::max(pv.width, pv.height)),
+                       scalpDepth > 0.0f ? scalpDepth / static_cast<float>(pv.camera.focalPx) : 0.0f);
         // The locks' flow past their curls, and the curls themselves.
         if (!view.field) {
             pv.coarse = std::make_shared<OrientationField>(coarseField(*pv.field, pv.mask, 0.02f * static_cast<float>(std::max(pv.width, pv.height))));
@@ -971,6 +974,7 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
 struct HintSample {
     float u, v, du, dv;
     bool directed;
+    float remain = -1.0f;  // a drawn line's length on from here to its tip, pixels (directed lines; else -1)
 };
 
 // Samples along the strokes (every pixel at the working size) and from the overlay's stroke pixels:
@@ -980,6 +984,10 @@ struct HintSample {
 std::vector<HintSample> hintSamples(const ReferenceView& view, float scale, int w, int h) {
     std::vector<HintSample> out;
     for (const RefHintStroke& stroke : view.hints) {
+        float total = 0.0f;
+        for (std::size_t i = 1; i < stroke.points.size(); ++i)
+            total += std::hypot(stroke.points[i][0] - stroke.points[i - 1][0], stroke.points[i][1] - stroke.points[i - 1][1]) * scale;
+        float along = 0.0f;
         for (std::size_t i = 1; i < stroke.points.size(); ++i) {
             const float u0 = stroke.points[i - 1][0] * scale, v0 = stroke.points[i - 1][1] * scale;
             const float u1 = stroke.points[i][0] * scale, v1 = stroke.points[i][1] * scale;
@@ -988,8 +996,10 @@ std::vector<HintSample> hintSamples(const ReferenceView& view, float scale, int 
             const int n = std::max(1, static_cast<int>(std::ceil(len)));
             for (int k = 0; k < n; ++k) {
                 const float t = (static_cast<float>(k) + 0.5f) / static_cast<float>(n);
-                out.push_back({u0 + du * t, v0 + dv * t, du / len, dv / len, stroke.directed});
+                out.push_back({u0 + du * t, v0 + dv * t, du / len, dv / len, stroke.directed,
+                               stroke.directed ? total - along - len * t : -1.0f});
             }
+            along += len;
         }
     }
     if (!view.hintOverlay.empty() && view.hintOverlay.channels == 4) {
@@ -1036,12 +1046,16 @@ std::vector<HintSample> hintSamples(const ReferenceView& view, float scale, int 
 }
 
 // The hints splatted (a Gaussian of `sigma` pixels): their line blended into the field over the
-// photo's (full weight near a stroke), their way kept for the guides' roots.
-void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float sigma, float lineSigma) {
+// photo's (full weight near a stroke), their way kept for the guides' roots, and a drawn line's
+// length on from each of its points (`worldPerPixel`: pixels to scene units at the scalp's depth; 0:
+// none) for the roots under it, over the way's reach.
+void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float sigma, float lineSigma, float worldPerPixel) {
     if (samples.empty()) return;
     const int w = pv.width, h = pv.height;
     const std::size_t pixels = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
     std::vector<float> line(pixels * 2, 0.0f), weight(pixels, 0.0f), way(pixels * 2, 0.0f), wayWeight(pixels, 0.0f);
+    std::vector<float> length(pixels, 0.0f), lengthWeight(pixels, 0.0f);
+    const float lengthSigma = sigma;
     const int reach = static_cast<int>(std::ceil(2.5f * sigma));
     for (const HintSample& s : samples) {
         const int cx = static_cast<int>(s.u), cy = static_cast<int>(s.v);
@@ -1060,6 +1074,11 @@ void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float 
                     way[2 * at] += k * s.du;
                     way[2 * at + 1] += k * s.dv;
                     wayWeight[at] += k;
+                }
+                if (s.remain >= 0.0f && worldPerPixel > 0.0f) {
+                    const float kn = pm::exp(-0.5f * (dx * dx + dy * dy) / (lengthSigma * lengthSigma));
+                    length[at] += kn * s.remain;
+                    lengthWeight[at] += kn;
                 }
             }
     }
@@ -1085,6 +1104,33 @@ void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float 
         pv.hintWay[3 * i + 1] = way[2 * i + 1] / n;
         pv.hintWay[3 * i + 2] = std::min(1.0f, wayWeight[i] / std::max(1.0f, sigma)) * std::min(1.0f, n / std::max(wayWeight[i], 1e-6f));
     }
+    if (worldPerPixel > 0.0f && std::any_of(lengthWeight.begin(), lengthWeight.end(), [](float x) { return x > 1e-3f; })) {
+        pv.hintLength.assign(pixels * 2, 0.0f);
+        for (std::size_t i = 0; i < pixels; ++i) {
+            if (lengthWeight[i] <= 1e-3f) continue;
+            pv.hintLength[2 * i] = length[i] / lengthWeight[i] * worldPerPixel;
+            pv.hintLength[2 * i + 1] = std::min(1.0f, lengthWeight[i] / std::max(1.0f, lengthSigma));
+        }
+    }
+}
+
+// How long the drawn lines say the hair growing at `p` is (scene units) and how much they say it
+// (0-1): the views that see it, weighed by how much each says.
+float hintedLength(const std::vector<PreparedView>& views, const Vec3f& p, float& say) {
+    double sum = 0.0, weight = 0.0;
+    say = 0.0f;
+    for (const PreparedView& v : views) {
+        if (v.hintLength.empty()) continue;
+        float u = 0, vv = 0, z = 0;
+        if (!v.camera.project(p, u, vv, &z) || !v.inFrame(u, vv) || v.hidden(u, vv, z)) continue;
+        const std::size_t at = v.pixel(u, vv);
+        const float wgt = v.hintLength[2 * at + 1];
+        if (wgt <= 0.0f) continue;
+        sum += static_cast<double>(wgt) * v.hintLength[2 * at];
+        weight += wgt;
+        say = std::max(say, wgt);
+    }
+    return weight > 0.0 ? static_cast<float>(sum / weight) : 0.0f;
 }
 
 // How much a guide's first stretch goes the way the hints say (-1 against .. 1 along; 0 without).
@@ -1445,7 +1491,7 @@ Vec3f limitTurn(const Vec3f& from, const Vec3f& to, float maxAngle) {
     return rotateAxisAngle(from, axis.normalized(), maxAngle).normalized();
 }
 
-Grown grow(const Context& ctx, const SurfacePoint& root, float sign) {
+Grown grow(const Context& ctx, const SurfacePoint& root, float sign, float maxLength) {
     Grown g;
     const Vec3f gravity = -ctx.options.up.normalized();
     const Vec3f n = root.normal.normalized();
@@ -1505,7 +1551,7 @@ Grown grow(const Context& ctx, const SurfacePoint& root, float sign) {
     g.points.push_back(p);
     float length = ctx.offset, evidenceSum = 0.0f;
     int blind = 0, seenSteps = 0;
-    const int maxSteps = static_cast<int>(std::ceil(ctx.maxLength / ctx.step)) + 2;
+    const int maxSteps = static_cast<int>(std::ceil(maxLength / ctx.step)) + 2;
     const int maxBlind = std::max(3, maxSteps / 4);
     const float maxTurn = 30.0f * kPi / 180.0f;
     g.stop = "length";
@@ -1592,7 +1638,7 @@ Grown grow(const Context& ctx, const SurfacePoint& root, float sign) {
         p = q;
         g.points.push_back(p);
         length += len;
-        if (length >= ctx.maxLength) {
+        if (length >= maxLength) {
             g.stop = "length";
             break;
         }
@@ -1996,6 +2042,11 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
                     : options.maxLength < 0 && result.rimLength > 0 ? -options.maxLength * result.rimLength
                     : result.reachLength > 0 ? measured
                                              : size;
+    // An automatic length takes the longest drawn guide line in too (a line says how long hair is).
+    if (options.maxLength <= 0.0f)
+        for (const PreparedView& v : prepared)
+            for (std::size_t i = 0; i < v.hintLength.size(); i += 2)
+                if (v.hintLength[i + 1] > 0.5f) ctx.maxLength = std::max(ctx.maxLength, 1.05f * v.hintLength[i]);
     ctx.offset = options.scalpOffset > 0 ? options.scalpOffset : 0.004f * size;
     // Short hair and fur (shorter than a seventh of the scalp's size) lies along the surface more than
     // it falls: the surface prior doubled, gravity a fifth.
@@ -2134,14 +2185,23 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
     }
     result.rootsTried = static_cast<int>(roots.size());
 
-    // Both ways from every root.
+    // Each root's length: the drawn guide lines' where they say it (blended in by how much they
+    // say it), else the longest. Both ways from every root.
+    std::vector<float> rootLength(roots.size(), ctx.maxLength);
+    std::vector<std::uint8_t> drawnLength(roots.size(), 0);
     std::vector<Grown> ways[2];
     ways[0].resize(roots.size());
     ways[1].resize(roots.size());
     parallelFor(0, roots.size(), [&](std::size_t i) {
         if (status[i] != 0) return;
-        ways[0][i] = grow(ctx, roots[i], 1.0f);
-        ways[1][i] = grow(ctx, roots[i], -1.0f);
+        float say = 0.0f;
+        const float drawn = hintedLength(prepared, roots[i].position + roots[i].normal * (ctx.offset + ctx.step), say);
+        if (say > 0.05f && drawn > 0.0f) {
+            rootLength[i] = std::max(3.0f * ctx.step, ctx.maxLength + say * (std::min(drawn, ctx.maxLength) - ctx.maxLength));
+            drawnLength[i] = 1;
+        }
+        ways[0][i] = grow(ctx, roots[i], 1.0f, rootLength[i]);
+        ways[1][i] = grow(ctx, roots[i], -1.0f, rootLength[i]);
     }, 1);
 
     // The way: the one with more evidence along it (a little toward gravity), then the
@@ -2220,7 +2280,7 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         // A guide that reached the given maximum never showed its tip (hidden under the hair above
         // it): hair is mostly shorter than the longest, so it is trimmed (calibrated on the synthetic
         // heads: such guides came out 1.15x too long).
-        if (options.maxLength > 0.0f && g.stop == "length" && options.lengthTrim < 1.0f)
+        if (options.maxLength > 0.0f && g.stop == "length" && options.lengthTrim < 1.0f && !drawnLength[i])
             path = truncated(path, options.lengthTrim * polylineLength(path));
         guide.points = resampled(path, std::max(2, options.points));
         guide.points[0] = roots[i].position;

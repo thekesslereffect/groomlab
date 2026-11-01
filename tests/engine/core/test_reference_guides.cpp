@@ -265,6 +265,48 @@ TEST(ReferenceGuidesGrow, HintStrokesChooseTheWay) {
     EXPECT_EQ(upward(guidesFromReference(scalp, {painted}, options)), 3);
 }
 
+// Drawn guide lines say how long the hair is: short lines over the roots (a beard's) grow short
+// guides, about as long as the lines; without them the guides run to the length.
+TEST(ReferenceGuidesGrow, DrawnLinesSetTheLength) {
+    const ScalpMesh scalp = sphere(1.0f);
+    const int size = 128;
+    ReferenceGuideOptions options;
+    options.symmetry = ReferenceSymmetry::None;
+    options.maxLength = 0.8f;
+    for (const Vec3f& at : {Vec3f(0, 0.0f, 1), Vec3f(0.3f, 0.1f, 0.9f), Vec3f(-0.3f, -0.1f, 0.9f)})
+        options.roots.push_back(scalp.closestPoint(at.normalized()).root);
+    ReferenceView v;
+    v.camera = camera(Vec3f(0, 0, 1), 6.0f, size);
+    v.mask = blank(size, size, 1, 1.0f);
+    v.field = constantField(size, size, 0.5f * kPi);
+    auto lengths = [](const ReferenceGuidesResult& r) {
+        std::vector<float> out;
+        for (const ReferenceGuide& g : r.guides) {
+            float l = 0.0f;
+            for (std::size_t i = 1; i < g.points.size(); ++i) l += (g.points[i] - g.points[i - 1]).length();
+            out.push_back(l);
+        }
+        return out;
+    };
+    const std::vector<float> plain = lengths(guidesFromReference(scalp, {v}, options));
+    ASSERT_EQ(plain.size(), 3u);
+    for (float l : plain) EXPECT_GT(l, 0.6f);
+    // Lines down from each root, 0.3 units long at the sphere's front (its depth, 5).
+    const float px = 0.3f * static_cast<float>(v.camera.focalPx) / 5.0f;
+    ReferenceView drawn = v;
+    for (const StrandRoot& r : options.roots) {
+        float u = 0, w = 0;
+        ASSERT_TRUE(v.camera.project(scalp.position(r), u, w));
+        drawn.hints.push_back({{{u, w}, {u, w + px}}, true});
+    }
+    const std::vector<float> short_ = lengths(guidesFromReference(scalp, {drawn}, options));
+    ASSERT_EQ(short_.size(), 3u);
+    for (float l : short_) {
+        EXPECT_LT(l, 0.45f);
+        EXPECT_GT(l, 0.1f);
+    }
+}
+
 TEST(ReferenceGuidesGrow, MirroredGuidesComeInPairs) {
     const ScalpMesh scalp = sphere(1.0f);
     const int size = 128;

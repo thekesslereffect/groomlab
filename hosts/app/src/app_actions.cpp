@@ -180,7 +180,9 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
                            }),
                            {}, groomOpen};
     b["photos.guides"] = {run([m] {
-                              if (ReferenceWindow* w = m->openReferenceWindow()) w->setStage(ReferenceWindow::Stage::Guides);
+                              if (ReferenceWindow* w = m->openReferenceWindow())
+                                  // (Align while no photo is lined up: guides grow from lined-up photos)
+                                  w->setStage(w->anyLinedUp() ? ReferenceWindow::Stage::Guides : ReferenceWindow::Stage::Align);
                           }),
                           {}, groomOpen, {}, {}, QStringLiteral("guidesFromReference")};
     b["groom.transfer"] = {run([m] { m->openTransferWindow(); }), {}, groomOpen, {}, {}, QStringLiteral("transfer")};

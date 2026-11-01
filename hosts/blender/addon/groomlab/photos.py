@@ -120,7 +120,8 @@ class GroomLabPhotos(bpy.types.PropertyGroup):
                              description="Solve the position and rotation only, keeping the camera's focal length (4 pairs "
                                          "are enough; else 6, and the focal length is solved too)")
     guide_count: IntProperty(name="Guides", default=300, min=10, max=5000,
-                             description="Roots spread over the scalp; fewer survive (bald, unseen)")
+                             description="About this many guides where the photos show hair (roots where they show "
+                                         "none get none)")
     symmetry: EnumProperty(name="Symmetry", items=SYMMETRIES, default="auto",
                            description="One view covers both sides: each guide comes with its mirror image")
     result: StringProperty()
@@ -1118,7 +1119,8 @@ class GROOMLAB_OT_photos_guides(_Tipped, bpy.types.Operator):
     bl_idname = "groomlab.photos_guides"
     bl_label = "Guides from Photos"
     guide_count: IntProperty(name="Guides", default=300, min=10, max=5000,
-                             description="Roots spread over the scalp; fewer survive (bald, unseen)")
+                             description="About this many guides where the photos show hair (roots where they show "
+                                         "none get none)")
     symmetry: EnumProperty(name="Symmetry", items=SYMMETRIES, default="auto")
 
     @classmethod
@@ -1157,7 +1159,8 @@ class GROOMLAB_UL_photos(bpy.types.UIList):
         row.label(text=item.name, icon="OUTLINER_OB_CAMERA")
         sub = row.row()
         sub.alignment = "RIGHT"
-        sub.label(text="%d x %d%s" % (p.width, p.height, "  ·  locked" if p.locked else ""))
+        sub.label(text="%d x %d%s%s" % (p.width, p.height, "  ·  locked" if p.locked else "",
+                                        "" if p.rms >= 0.0 else "  ·  not lined up"))
 
     def filter_items(self, context, data, propname):
         objs = getattr(data, propname)
@@ -1230,7 +1233,8 @@ def draw_tab(layout, context, chars):
         if p.rms >= 0.0 and not s.result:
             text += " (last solve %.2f px)" % p.rms
         _wrap(layout, text, width=chars)
-        # Morph: the scalp to the lined-up photos' pairs (KeenTools-style pins), as a shape key.
+        # Scalp shape: the scalp morphed to the lined-up photos' pairs (KeenTools-style pins), a shape key.
+        layout.label(text="SCALP SHAPE")
         row = layout.row(align=True)
         row.operator("groomlab.photos_morph", icon="SHAPEKEY_DATA")
         row.prop(s, "morph_symmetry", toggle=True)
@@ -1243,8 +1247,10 @@ def draw_tab(layout, context, chars):
     else:
         layout.label(text="GUIDES FROM PHOTOS (EXPERIMENTAL)")
     if body is not None:
-        _wrap(body, "Every photo lined up with the mesh grows guides into the %s group (replaced each time); flow "
-                    "follows the strands the photos show." % GROUP, width=chars)
+        lined = [c for c in list_photos(scene) if c.groomlab_photo.rms >= 0.0]
+        _wrap(body, "Every photo lined up with the mesh (%d of %d) grows guides into the %s group (replaced each time), "
+                    "following the strands the photos show. Guide lines and mask touch-ups drawn in Maya's or the app's "
+                    "Photos window are used too." % (len(lined), len(list_photos(scene)), GROUP), width=chars)
         palette.draw_bar(body, "lists/photos/guidesBar", "photosguides", context)
 
 
