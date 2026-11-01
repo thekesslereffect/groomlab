@@ -575,7 +575,7 @@ void ReferenceWindow::buildPanel(QWidget* panel) {
     focal_->setObjectName(QStringLiteral("referenceFocal"));
     focal_->setCaption(tr("Focal Length"));
     focal_->setRange(10.0, 200.0);
-    focal_->setLimits(2.5, 3500.0);
+    focal_->setLimits(9.0, 1080.0);
     focal_->setDecimals(1);
     focal_->setStep(1.0);
     focal_->setValue(50.0);
@@ -997,7 +997,7 @@ bool ReferenceWindow::setFocal(double mm) {
         return false;
     }
     if (!p->camera) p->camera = placedReferenceCamera(main_ ? main_->document() : nullptr, p->width, p->height);
-    p->camera->focalPx = std::clamp(mm, 2.5, 3500.0) * p->width / 36.0;
+    p->camera->focalPx = std::clamp(mm, 9.0, 1080.0) * p->width / 36.0;  // (the solve's plausible lenses, 0.25 to 30 photo widths)
     setDisplayFlag("keepFocal", true);  // (the solve keeps the focal length set by hand)
     edited();
     return true;

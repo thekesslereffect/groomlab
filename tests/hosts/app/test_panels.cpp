@@ -2967,8 +2967,8 @@ TEST(AppPanels, ReferenceWindowLinesAPhotoUpAndGrowsGuides) {
     EXPECT_NEAR(rw->photo()->camera->focalPx, solvedMm * 1.5 * W / 36.0, 1e-6);
     EXPECT_TRUE(rw->photo()->solve.ok);
     EXPECT_FALSE(rw->photo()->solve.focalSolved);
-    ASSERT_TRUE(rw->setFocal(3000.0));
-    EXPECT_GE(rw->focalSlider()->maximum(), 3000.0);
+    ASSERT_TRUE(rw->setFocal(1000.0));
+    EXPECT_GE(rw->focalSlider()->maximum(), 1000.0);
     ASSERT_TRUE(rw->resetFocal());  // the default lens, the slider's starting range
     EXPECT_NEAR(rw->photo()->camera->focalPx, 50.0 * W / 36.0, 1e-6);
     EXPECT_EQ(rw->focalSlider()->maximum(), 200.0);

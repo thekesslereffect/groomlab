@@ -595,7 +595,7 @@ class ReferenceWindow(QtWidgets.QWidget):
         form = QtWidgets.QFormLayout()
         form.setLabelAlignment(QtCore.Qt.AlignRight)
         self.focal = widgets.SoftSlider(self.ref.DEFAULT_FOCAL, self.ref.FOCAL_RANGE[0], self.ref.FOCAL_RANGE[1],
-                                        minimum=2.5, maximum=3500.0, key=None, label="Focal Length", suffix="mm")
+                                        minimum=9.0, maximum=1080.0, key=None, label="Focal Length", suffix="mm")
         self.focal.setObjectName("referenceFocal")
         self.focal.setToolTip("The photo camera's focal length (mm): the landmarks solve it (6 or more pairs); set it "
                               "by hand when you know the lens (Keep focal length turns on, the camera follows)")
@@ -1815,6 +1815,10 @@ class ReferenceWindow(QtWidgets.QWidget):
         global _window
         self.teardown()
         mesh_views.undo_back_on(self._undo_was_on, "Reference")
+        # Again once Maya's idle queue has run: after a Morph to Photos, a job Maya queues while the
+        # views go left the queue off a moment after the window closed.
+        was_on = self._undo_was_on
+        cmds.evalDeferred(lambda: mesh_views.undo_back_on(was_on, "Reference"), lowestPriority=True)
         if _window is self:
             _window = None
         super(ReferenceWindow, self).closeEvent(event)

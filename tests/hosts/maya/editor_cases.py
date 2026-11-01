@@ -4868,9 +4868,9 @@ class ReferenceTabTest(unittest.TestCase):
         self.assertTrue(reference.keep_focal(cam))
         # A focal length gone wrong: Reset Focal Length (the slider's right-click menu) brings the default
         # lens and the slider's starting range back.
-        self.tab.focal.setValue(3000.0)  # (as a drag past the range would)
-        self.tab.focal.committed.emit(3000.0)
-        self.assertGreaterEqual(self.tab.focal.hi, 3000.0)
+        self.tab.focal.setValue(1000.0)  # (as a drag past the range would)
+        self.tab.focal.committed.emit(1000.0)
+        self.assertGreaterEqual(self.tab.focal.hi, 1000.0)
         self.tab.reset_focal()
         self.assertAlmostEqual(cmds.getAttr(shape + ".focalLength"), reference.DEFAULT_FOCAL)
         self.assertEqual((self.tab.focal.lo, self.tab.focal.hi), reference.FOCAL_RANGE)

@@ -502,12 +502,12 @@ def reference_opacity(camera):
 
 
 def set_reference_focal(camera, focal, keep=True):
-    """The photo camera's focal length (mm, 2.5 to 3500), set by hand; with `keep` Keep focal
-    length turns on, so a solve keeps it. A locked camera keeps its own (unlock it first)."""
+    """The photo camera's focal length (mm, 9 to 1080: the solve's plausible lenses), set by hand; with `keep`
+    Keep focal length turns on, so a solve keeps it. A locked camera keeps its own (unlock it first)."""
     camera = _camera(camera)
     if is_locked(camera):
         raise RuntimeError("%s is locked: unlock it to change its focal length" % _short(camera))
-    cmds.setAttr(_shape(camera) + ".focalLength", min(max(float(focal), 2.5), 3500.0))
+    cmds.setAttr(_shape(camera) + ".focalLength", min(max(float(focal), 9.0), 1080.0))
     if keep:
         set_keep_focal(camera, True)
 
