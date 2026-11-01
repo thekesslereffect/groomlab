@@ -528,6 +528,15 @@ void MainWindow::buildProperties() {
         if (referenceWindow_) referenceWindow_->photosChanged();
     });
     connect(photos_, &PhotosPanel::alignRequested, this, [this](int index) { openPhotoAlign(index); });
+    // Morph to Photos / Reset Morph: the groom onto the reshaped scalp, by its UVs (else the closest
+    // point: the shapes lie close), its maps carried with it.
+    connect(photos_, &PhotosPanel::morphRequested, this, [this](std::shared_ptr<const ScalpMesh> scalp, const QString& what) {
+        if (refuseWhileBusy(tr("morphing the scalp"))) return;
+        settleCommit();
+        TransferOptions options;
+        options.method = scalp->hasUVs() ? TransferMethod::UV : TransferMethod::Closest;
+        transferOnto(scalp, options, true, what);
+    });
     lookStore_ = new QTimer(this);
     lookStore_->setSingleShot(true);
     lookStore_->setInterval(250);

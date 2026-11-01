@@ -624,6 +624,33 @@ class ReferenceWindow(QtWidgets.QWidget):
         row.addWidget(self.lock)
         layout.addLayout(row)
 
+        self._heading(layout, "MORPH")
+        row = QtWidgets.QHBoxLayout()
+        self.morph_button = QtWidgets.QPushButton("Morph to Photos")
+        self.morph_button.setObjectName("referenceMorph")
+        self.morph_button.setToolTip("Shape the scalp so every lined-up photo's pairs land on their photo points (two "
+                                     "photos of a pair set its depth too), as a blendShape on it: always from the scalp "
+                                     "as it was before the first morph")
+        self.morph_button.clicked.connect(lambda: self.morph())
+        row.addWidget(self.morph_button, 1)
+        self.morph_symmetry = QtWidgets.QCheckBox("Symmetry")
+        self.morph_symmetry.setObjectName("referenceMorphSymmetry")
+        self.morph_symmetry.setChecked(True)
+        self.morph_symmetry.setToolTip("Morph both sides alike: each pair mirrored across the scalp's middle (its local X)")
+        row.addWidget(self.morph_symmetry)
+        layout.addLayout(row)
+        self.morph_stiffness = widgets.SoftSlider(0.0, 0.0, 0.95, minimum=0.0, maximum=0.95, key=None, label="Stiffness")
+        self.morph_stiffness.setObjectName("referenceMorphStiffness")
+        self.morph_stiffness.setToolTip("0 lands every pair exactly; higher keeps the scalp's shape, the pairs falling short")
+        layout.addWidget(self.morph_stiffness)
+        reset = QtWidgets.QToolButton()
+        reset.setText("Reset Morph")
+        reset.setObjectName("referenceUnmorph")
+        reset.setProperty("role", "chip")
+        reset.setToolTip("The scalp as it was before the first morph (its blendShape removed; undoable)")
+        reset.clicked.connect(lambda: self.reset_morph())
+        layout.addWidget(reset)
+
         # Guides from Photos (the Guides stage only).
         self.guides_panel = QtWidgets.QWidget()
         self.guides_panel.setObjectName("referenceGuidesPanel")
@@ -1334,6 +1361,31 @@ class ReferenceWindow(QtWidgets.QWidget):
         self._redraw()
         if self.mask_tint.isChecked() or self.field_lines.isChecked():
             self._preview_wanted()
+
+    def morph(self, stiffness=None, symmetric=None):
+        """Morph to Photos (groomlab.reference.morph_to_photos) with the panel's settings; its result."""
+        if not self.groom:
+            return None
+        stiffness = self.morph_stiffness.value() if stiffness is None else stiffness
+        symmetric = self.morph_symmetry.isChecked() if symmetric is None else symmetric
+        try:
+            r = self.ref.morph_to_photos(self.groom, stiffness, symmetric)
+        except (RuntimeError, ValueError) as e:
+            self.message.setText(str(e))
+            return None
+        self._scalp = None  # (the scalp's shape changed)
+        self._overlay = None
+        self.message.setText("Morphed to %d pins: %.1f px off before, %.1f px after" % (
+            r["pins"], r["rms_before"], r["rms_after"]))
+        self._redraw()
+        return r
+
+    def reset_morph(self):
+        if self.groom and self.ref.reset_photo_morph(self.groom):
+            self._scalp = None
+            self._overlay = None
+            self.message.setText("The scalp is back as it was before the morph")
+            self._redraw()
 
     def _solve(self, apply=True, find_bad=True):
         """The camera solved from the current photo's landmarks (core: solve_reference_landmarks);

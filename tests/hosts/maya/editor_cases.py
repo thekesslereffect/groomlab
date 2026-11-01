@@ -5098,6 +5098,45 @@ class ReferenceWindowTest(unittest.TestCase):
         f = reference.focal_px(cam)
         return 80.0 + f * c.x / -c.z, 60.0 - f * c.y / -c.z
 
+    def test_morph_to_photos(self):
+        """Morph to Photos: a pair seen off the scalp moves it there (a blendShape, mirrored by
+        Symmetry), a second morph starts from the rest shape, Reset Morph and Maya's undo."""
+        from groomlab import reference
+        from groomlab.ui import menu
+        self.window = window = menu.open_guides_from_reference(self.groom)
+        wait(80)
+        cam = window.import_photo(self.photo)
+        self.assertTrue(window.morph_symmetry.isChecked())  # on by default
+        self.assertIsNone(window.morph())  # not lined up yet: a message, nothing done
+        self.assertIsNone(reference.photo_morph_node(self.groom))
+        reference.set_pair(cam, 0, image=self.project(cam, (12.0, 0.0, 0.0)), mesh=(10.0, 0.0, 0.0))
+        cmds.setAttr(cam + ".glRefRms", 0.0)
+
+        def x_range():
+            xs = cmds.xform(self.scalp + ".vtx[*]", query=True, worldSpace=True, translation=True)[0::3]
+            return min(xs), max(xs)
+        rest = x_range()
+        r = window.morph()
+        self.assertLess(r["rms_after"], 0.5)
+        self.assertGreater(r["rms_before"], 1.0)
+        lo, hi = x_range()
+        self.assertGreater(hi, 11.5)  # (on the photo point's ray at the pin's depth: near x = 12)
+        self.assertLess(lo, -11.5)  # mirrored
+        window.morph_symmetry.setChecked(False)
+        window.morph()  # from the rest shape: not stacked
+        self.assertAlmostEqual(x_range()[1], hi, delta=0.3)
+        self.assertEqual(len(cmds.ls(type="blendShape")), 1)
+        once = x_range()
+        for _ in range(2):  # pressed again: the same shape, never stacked
+            window.morph()
+            self.assertAlmostEqual(x_range()[1], once[1], places=3)
+            self.assertAlmostEqual(x_range()[0], once[0], places=3)
+        window.reset_morph()
+        self.assertIsNone(reference.photo_morph_node(self.groom))
+        self.assertAlmostEqual(x_range()[1], rest[1], places=4)
+        cmds.undo()
+        self.assertIsNotNone(reference.photo_morph_node(self.groom))
+
     def test_landmarks_solve_live_and_the_photo_tools(self):
         from PySide2 import QtCore
         from maya.api import OpenMaya as om

@@ -1169,10 +1169,15 @@ bool MainWindow::transferToMesh(const QString& path, const TransferOptions& opti
         report(tr("Cannot read the mesh: %1 (%2)").arg(QString::fromUtf8(e.what()), path));
         return false;
     }
+    return transferOnto(mesh, options, maps, QFileInfo(path).fileName());
+}
+
+bool MainWindow::transferOnto(MeshPtr mesh, const TransferOptions& options, bool maps, const QString& what) {
+    if (!document_ || !mesh) return false;
     std::vector<std::string> warnings;
     const std::string error = document_->transferToScalp(mesh, options, maps, &warnings);
     if (!error.empty()) {
-        report(tr("Cannot transfer the groom: %1 (%2)").arg(QString::fromStdString(error), path));
+        report(tr("Cannot transfer the groom: %1 (%2)").arg(QString::fromStdString(error), what));
         return false;
     }
     for (const std::string& warning : warnings) report(QString::fromStdString(warning), false);
@@ -1193,7 +1198,7 @@ bool MainWindow::transferToMesh(const QString& path, const TransferOptions& opti
     refreshDisplayChoices();
     refreshUndoActions();
     refreshTitle();
-    notify(tr("Transferred the groom onto %1 (%2)").arg(QFileInfo(path).fileName(), QString::fromLatin1(transferMethodName(options.method))));
+    notify(tr("Transferred the groom onto %1 (%2)").arg(what, QString::fromLatin1(transferMethodName(options.method))));
     return true;
 }
 

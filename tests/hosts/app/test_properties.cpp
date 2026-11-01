@@ -35,6 +35,8 @@
 #include "card_parts.h"
 #include "photos_panel.h"
 #include "reference_window.h"
+#include "groomlab/camera_solve.h"
+#include "groomlab/reference_edit.h"
 #include "prman_render.h"
 #include "properties_panel.h"
 #include "render_job.h"
@@ -325,6 +327,73 @@ TEST(AppProperties, GroupColorsAndHiddenGroupsSaveWithTheGroom) {
     ASSERT_TRUE(window.openGroom(QString::fromStdString(path)));
     EXPECT_EQ(window.document()->groupColors().at(root), "#ff8800");
     EXPECT_EQ(window.document()->hiddenGroups(), (std::set<std::string>{root}));
+}
+
+TEST(AppPhotos, MorphToPhotosShapesTheScalpAndResets) {
+    // A lined-up photo whose pairs say two scalp points sit off where the scalp has them: Morph to
+    // Photos moves the groom onto a scalp with those points on their photo points; again it starts
+    // from the original (no stacking); Reset Morph puts the original back.
+    const std::string path = sampleCopy("groomlab_app_morph");
+    const std::filesystem::path dir = std::filesystem::u8path(path).parent_path();
+    MainWindow window;
+    window.resize(1280, 800);
+    window.show();
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(path)));
+    GroomDocument* doc = window.document();
+    auto* photos = window.findChild<PhotosPanel*>();
+    ASSERT_TRUE(photos);
+    const int W = 400, H = 300;
+    QImage image(W, H, QImage::Format_RGB32);
+    image.fill(QColor(120, 120, 120));
+    const std::string file = (dir / "front.png").u8string();
+    ASSERT_TRUE(image.save(QString::fromStdString(file)));
+    ASSERT_EQ(photos->importPhoto(QString::fromStdString(file)), 0);
+    const std::optional<RefCamera> cam = photos->camera(0);
+    ASSERT_TRUE(cam);
+    const MeshPtr original = doc->file().data.scalp;
+    const MeshPtr refined = doc->refinedFileScalp();
+    ASSERT_TRUE(original && refined);
+    // Six cage points (the refined mesh's first points are the cage's), two of them seen 12 px off.
+    ReferencePhotoEditor::State state;
+    std::vector<std::size_t> picked;
+    for (std::size_t i = 0; picked.size() < 6 && i < original->pointCount(); i += original->pointCount() / 7) {
+        double u = 0.0, v = 0.0;
+        const Vec3f p = original->points()[i];
+        if (!projectToImage(cam->pose, cam->focalPx, W, H, {p.x, p.y, p.z}, u, v)) continue;
+        if (picked.size() < 2) u += 12.0;
+        picked.push_back(i);
+        state.landmarks.add(kLandmarkPhoto, ReferencePhotoEditor::photoPoint(static_cast<float>(u), static_cast<float>(v)));
+        MarkerPoint m;
+        m.point = p;  // (no surface spot: the point itself)
+        state.landmarks.add(kLandmarkMesh, m);
+    }
+    ASSERT_EQ(picked.size(), 6u);
+    nlohmann::json records = nlohmann::json::parse(doc->referencePhotos());
+    records[0]["state"] = nlohmann::json::parse(referencePhotoStateToJson(state));
+    doc->setReferencePhotos(records.dump());
+    photos->refresh();
+
+    ASSERT_TRUE(photos->morphButton()->isEnabled());
+    photos->morphButton()->click();
+    const MeshPtr morphed = doc->file().data.scalp;
+    ASSERT_NE(morphed, original);
+    EXPECT_EQ(photos->unmorphedScalp(), original);
+    double u = 0.0, v = 0.0;
+    const Vec3f moved = morphed->points()[picked[0]];
+    ASSERT_TRUE(projectToImage(cam->pose, cam->focalPx, W, H, {moved.x, moved.y, moved.z}, u, v));
+    double u0 = 0.0, v0 = 0.0;
+    const Vec3f was = original->points()[picked[0]];
+    projectToImage(cam->pose, cam->focalPx, W, H, {was.x, was.y, was.z}, u0, v0);
+    EXPECT_GT(std::abs(u - u0), 4.0) << "the pinned point moved toward its photo point";
+    // Again: from the original, so the same scalp (not twice the move).
+    photos->morphButton()->click();
+    const Vec3f again = doc->file().data.scalp->points()[picked[0]];
+    EXPECT_NEAR((again - moved).length(), 0.0f, 1e-5f);
+    // Reset Morph: the original's points back.
+    photos->refresh();
+    photos->findChild<QPushButton*>(QStringLiteral("referenceUnmorph"))->click();
+    const MeshPtr back = doc->file().data.scalp;
+    for (std::size_t i = 0; i < original->pointCount(); ++i) EXPECT_EQ(back->points()[i], original->points()[i]) << i;
 }
 
 TEST(AppPhotos, LookThroughLockOpacityDepthAndAlignPhoto) {

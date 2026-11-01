@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include <QCheckBox>
+#include <QDoubleSpinBox>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QIcon>
@@ -15,6 +17,7 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 
+#include "groomlab/pin_morph.h"
 #include "groomlab/reference_edit.h"
 
 #include "glass.h"
@@ -273,6 +276,46 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
     alignAbout_->setObjectName(QStringLiteral("referenceAlignAbout"));
     layout->addWidget(alignAbout_);
 
+    // Morph to Photos: the scalp shaped so the lined-up photos' pairs land (KeenTools-style pins).
+    {
+        auto* row = new QHBoxLayout();
+        row->setSpacing(4);
+        morph_ = new QPushButton(tr("Morph to Photos"), this);
+        morph_->setObjectName(QStringLiteral("referenceMorph"));
+        morph_->setToolTip(tr("Shape the scalp so every lined-up photo's pairs land on their photo points (two photos "
+                              "of a pair set its depth too); the groom follows by its UVs. Always from the scalp as it "
+                              "was before the first morph"));
+        connect(morph_, &QPushButton::clicked, this, [this] {
+            QString error;
+            const auto mesh = morphedScalp(morphStiffness_->value(), morphSymmetry_->isChecked(), &error);
+            if (!mesh) {
+                emit message(error);
+                return;
+            }
+            emit morphRequested(mesh, tr("the photos"));
+        });
+        row->addWidget(morph_, 1);
+        morphSymmetry_ = new QCheckBox(tr("Symmetry"), this);
+        morphSymmetry_->setChecked(true);
+        morphSymmetry_->setToolTip(tr("Morph both sides alike: each pair mirrored across the scalp's middle (x = 0)"));
+        row->addWidget(morphSymmetry_);
+        morphStiffness_ = new QDoubleSpinBox(this);
+        morphStiffness_->setRange(0.0, 0.95);
+        morphStiffness_->setSingleStep(0.05);
+        morphStiffness_->setDecimals(2);
+        morphStiffness_->setPrefix(tr("Stiffness "));
+        morphStiffness_->setToolTip(tr("0 lands every pair exactly; higher keeps the scalp's shape, the pairs falling short"));
+        row->addWidget(morphStiffness_);
+        layout->addLayout(row);
+        unmorph_ = new QPushButton(tr("Reset Morph"), this);
+        unmorph_->setObjectName(QStringLiteral("referenceUnmorph"));
+        unmorph_->setToolTip(tr("The scalp as it was before the first morph"));
+        connect(unmorph_, &QPushButton::clicked, this, [this] {
+            if (morphCage_) emit morphRequested(morphCage_, tr("its unmorphed scalp"));
+        });
+        layout->addWidget(unmorph_);
+    }
+
     // Guides from photos (experimental, folded): the Photos window's Guides stage does the work.
     auto* guides = new QWidget(this);
     auto* guidesColumn = new QVBoxLayout(guides);
@@ -289,6 +332,73 @@ PhotosPanel::PhotosPanel(QWidget* parent) : QWidget(parent) {
     outer->addWidget(guidesSection_);
     outer->addStretch(1);
     refresh();
+}
+
+std::shared_ptr<const ScalpMesh> PhotosPanel::morphedScalp(double stiffness, bool symmetric, QString* error) {
+    auto fail = [&](const QString& why) {
+        if (error) *error = why;
+        return std::shared_ptr<const ScalpMesh>();
+    };
+    if (!document_) return fail(tr("No groom open"));
+    if (morphDocument_ != document_ || !morphCage_) {  // the scalp before any morph: kept from now on
+        morphDocument_ = document_;
+        morphCage_ = document_->file().data.scalp;
+        morphRefined_ = document_->refinedFileScalp();
+    }
+    if (!morphCage_ || !morphRefined_) return fail(tr("The groom has no scalp"));
+    std::vector<PinView> views;
+    std::vector<MorphPin> pins;
+    const json all = photos();
+    const float size = std::max(1e-6f, [&] {
+        Vec3f lo = morphRefined_->points().front(), hi = lo;
+        for (const Vec3f& p : morphRefined_->points())
+            lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)),
+            hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+        return (hi - lo).length();
+    }());
+    for (int i = 0; i < count(); ++i) {
+        const std::optional<RefCamera> cam = camera(i);
+        if (!cam || !(cam->focalPx > 0.0)) continue;  // not lined up: says nothing of the scalp's shape
+        const MarkerLists landmarks = stateOf(all[i]).landmarks;
+        if (landmarks.pairCount() == 0) continue;
+        PinView view;
+        view.pose = cam->pose;
+        view.focalPx = cam->focalPx;
+        view.width = all[i].value("width", 0);
+        view.height = all[i].value("height", 0);
+        views.push_back(view);
+        const int index = static_cast<int>(views.size()) - 1;
+        for (std::size_t k = 0; k < landmarks.pairCount(); ++k) {
+            const MarkerPoint& photo = landmarks.point(kLandmarkPhoto, k);
+            const MarkerPoint& mesh = landmarks.point(kLandmarkMesh, k);
+            // The pin's point on the unmorphed scalp: its spot on the surface, so a pair picked on a
+            // morphed scalp stays a point of the original one.
+            const bool onSurface = mesh.root.face >= 0 && static_cast<std::size_t>(mesh.root.face) < morphRefined_->triangleCount();
+            const Vec3f rest = onSurface ? morphRefined_->position(mesh.root) : mesh.point;
+            MorphPin* pin = nullptr;
+            for (MorphPin& p : pins)
+                if ((Vec3f(static_cast<float>(p.mesh[0]), static_cast<float>(p.mesh[1]), static_cast<float>(p.mesh[2])) - rest).length() <= 1e-4f * size)
+                    pin = &p;
+            if (!pin) {
+                pins.push_back({{rest.x, rest.y, rest.z}, {}});
+                pin = &pins.back();
+            }
+            pin->sights.push_back({index, photo.point.x, photo.point.y});
+        }
+    }
+    if (pins.empty()) return fail(tr("No lined-up photo has pairs: Align Photo, pick pairs and line it up first"));
+    std::vector<CameraVec3> points;
+    for (const Vec3f& p : morphCage_->points()) points.push_back({p.x, p.y, p.z});
+    PinMorphOptions options;
+    options.stiffness = stiffness;
+    options.symmetric = symmetric;
+    const PinMorphResult r = morphToPins(points, pins, views, options);
+    if (!r.ok) return fail(QString::fromStdString(r.error));
+    std::vector<Vec3f> moved;
+    for (const CameraVec3& p : r.points) moved.emplace_back(static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]));
+    emit message(tr("Morphed to %1 pins: %2 px off before, %3 px after").arg(pins.size()).arg(r.rmsBeforePx, 0, 'f', 1)
+                     .arg(r.rmsAfterPx, 0, 'f', 1));
+    return std::make_shared<const ScalpMesh>(morphCage_->withPoints(std::move(moved)));
 }
 
 void PhotosPanel::setDocument(GroomDocument* document) {
@@ -616,6 +726,10 @@ void PhotosPanel::refreshControls() {
     itemBar_->refresh();
     itemBar_->setTitle(on ? name(i) : QString());  // the box is the picked photo's
     alignAbout_->setText(alignText());
+    if (morph_) {
+        morph_->setEnabled(document_ != nullptr && count() > 0);
+        unmorph_->setEnabled(morphCage_ != nullptr && morphDocument_ == document_);
+    }
     // Where Guides from Photos stands: the photos, their landmarks and arrows, the next step.
     const json all = photos();
     if (all.empty()) {
