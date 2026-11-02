@@ -653,6 +653,7 @@ void bindGroom(py::module_& m) {
         .def_readwrite("occlusion", &PyCardBakeSettings::occlusion)
         .def_readwrite("dilate", &PyCardBakeSettings::dilate)
         .def_readwrite("root_fade", &PyCardBakeSettings::rootFade)
+        .def_readwrite("feather_root_fade", &PyCardBakeSettings::featherRootFade)
         .def_readwrite("min_strand_texels", &PyCardBakeSettings::minStrandTexels);
     py::class_<CardTextures>(m, "CardTextures", "Baked card textures (Unreal hair card layout), row 0 at the top.")
         .def_readonly("size", &CardTextures::size)

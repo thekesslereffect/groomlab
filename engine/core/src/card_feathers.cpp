@@ -103,16 +103,16 @@ FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const Sc
     }
     samples.insert(samples.end(), even.begin(), even.end());
 
-    // Carried on past the tip (and back past the root) as far as any barb reaches.
+    // Carried on past the tip as far as any barb reaches. The card starts at the shaft root:
+    // extending it behind there makes its first row (the row seatCard plants on the scalp) a
+    // different point from the guide root. On steep feathers that leaves the quill floating,
+    // and a rigid flattened row exaggerates the offset.
     const Vec3f tipDir = (even.back() - even[even.size() - 2]).normalized();
-    const Vec3f rootDir = (even[1] - even[0]).normalized();
-    float ahead = 0.0f, behind = 0.0f;
+    float ahead = 0.0f;
     for (const Vec3f& q : samples) {
         ahead = std::max(ahead, (q - even.back()).dot(tipDir));
-        behind = std::max(behind, (even.front() - q).dot(rootDir));
     }
     std::vector<Vec3f> longer;
-    if (behind > 0.005f * shaftLength) longer.push_back(even.front() - rootDir * (behind + 0.01f * shaftLength));
     longer.insert(longer.end(), even.begin(), even.end());
     if (ahead > 0.005f * shaftLength) longer.push_back(even.back() + tipDir * (ahead + 0.01f * shaftLength));
     f.center = resampleByArcLength(longer.data(), longer.size(), kRefStations);
@@ -355,10 +355,12 @@ CardMesh::Card makeFeatherCard(const FeatherShape& f, const std::vector<std::siz
     card.strands = strands;
     card.stations = std::clamp(settings.featherSegments, 1, 256) + 1;
     card.across = 1;
+    // The shaft's place across the row is useful even for a flat strip: rigid scalp seating
+    // anchors this point, rather than whichever outer edge happens to be lowest.
+    card.spineOffset = -layout.offset;
     if (spine) {
         card.spine = true;
         card.across = 2;
-        card.spineOffset = -layout.offset;  // the card's middle sits `offset` off the shaft toward +side
         card.refFoldRight = f.foldRight;
         card.refFoldLeft = f.foldLeft;
     }
@@ -393,8 +395,7 @@ CardMesh::Card makeFeatherCard(const FeatherShape& f, const std::vector<std::siz
         }
     }
     sampleStations(card);
-    // Its base on the skin where the shaft grows, as a hair card's (the card reaches back past
-    // the root as far as the barbs do, into the skin, and the clearance lifts it out again).
+    // Its base on the skin where the shaft grows, as a hair card's.
     if (scalp) seatCard(card, *scalp, f.root, f.strandWidth, std::clamp(settings.featherFlatten, 0.0f, 1.0f));
     return card;
 }
