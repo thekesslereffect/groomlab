@@ -111,6 +111,7 @@ private:
     FileBytes textureBefore_, textureAfter_;
     std::unique_ptr<TextureUndo> textureUndo_;  // an interactive stroke's tiles (instead of the bytes)
     bool textureWritten_ = false;  // the file holds `after` now
+    bool appliedOnce_ = false;  // redoIt's first call commits the stroke; later calls are Maya redo
     std::size_t heldBytes_ = 0;  // counted in heldTextureBytes()
     void holdBytes(std::size_t bytes);
     void writeTextureBefore();
