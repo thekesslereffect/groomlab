@@ -1998,8 +1998,9 @@ class ReferenceWindow(QtWidgets.QWidget):
         global _window
         self.teardown()
         mesh_views.undo_back_on(self._undo_was_on, "Reference")
-        # Again once Maya's idle queue has run: after a Morph to Photos, a job Maya queues while the
-        # views go left the queue off a moment after the window closed.
+        # Again once Maya's idle queue has run: after a Morph to Photos, Maya's own idle work for the
+        # blendShape turns the queue off and on again; run inside a nested event loop (a script
+        # that never returns to Maya's idle, as the GUI tests) it is left off.
         was_on = self._undo_was_on
         cmds.evalDeferred(lambda: mesh_views.undo_back_on(was_on, "Reference"), lowestPriority=True)
         if _window is self:
