@@ -42,67 +42,148 @@ float halfWidthAt(const ScalePlateShape& shape, float t) {
 }  // namespace
 
 InstancePrototype scalePlate(const ScalePlateShape& shape) {
-    const int rows = std::max(shape.rows, 2), columns = std::max(shape.columns, 2);
+    // All quads, one closed piece (for subdivision), the top and the underside alike: loops of the
+    // same N vertices, each the outline scaled toward a point on the axis (from the rim's middle, a
+    // crease loop at the edge, a support loop holding it when subdivided, an inner loop), the inner
+    // ones filled with a columns x rows grid of quads (a Coons patch of their four sides). Each loop's
+    // sides match the grid's: the base `columns` segments (its middle vertex on the axis), each long
+    // side `rows`, the tip end `columns` (its middle vertex the tip).
+    const int columns = std::max(2, shape.columns + (shape.columns & 1));  // even: a column of vertices on the axis
+    const int rows = std::max(shape.rows, 2);
+    const int half = columns / 2;
+    const int n = 2 * (columns + rows);
     InstancePrototype out;
     out.found = true;
-    auto add = [&](Vec3f p, float u, float v) {
+    const float rimHeight = shape.height * std::clamp(shape.rim, 0.0f, 1.0f);
+    const float widthUv = std::max(shape.width, 1e-6f);
+    auto add = [&](const Vec3f& p) {
         out.points.push_back(p);
-        out.uvs.push_back({u, v});
+        out.uvs.push_back({0.5f + p.x / widthUv, p.y});
         return static_cast<std::uint32_t>(out.points.size() - 1);
     };
-    auto triangle = [&](std::uint32_t a, std::uint32_t b, std::uint32_t c) { out.triangles.insert(out.triangles.end(), {a, b, c}); };
-    // The top: a grid inset from the outline (the rim's bevel runs between them), domed, keeled.
-    constexpr float kInset = 0.92f, kEnds = 0.04f;
-    const float rimHeight = shape.height * std::clamp(shape.rim, 0.0f, 1.0f);
-    auto topAt = [&](int r, int c) {
-        const float t = kEnds + (1.0f - 2.0f * kEnds) * static_cast<float>(r) / static_cast<float>(rows);
-        const float s = -1.0f + 2.0f * static_cast<float>(c) / static_cast<float>(columns);
-        const float bump = pm::pow(4.0f * t * (1.0f - t), 0.6f);
-        const float dome = (1.0f - s * s) * bump;
-        const float keel = shape.keel * std::max(0.0f, 1.0f - 2.5f * std::abs(s)) * std::sqrt(4.0f * t * (1.0f - t));
-        const Vec3f p{s * halfWidthAt(shape, t) * kInset, t, rimHeight + (shape.height - rimHeight) * dome + keel};
-        return add(p, 0.5f * (s + 1.0f), t);
+    // Two triangles a quad, one after the other (a, b, c) (a, c, d): ToMesh and the exports read
+    // them back as the quad (strand_geometry quadOf).
+    auto quad = [&](std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uint32_t d) {
+        out.triangles.insert(out.triangles.end(), {a, b, c, a, c, d});
     };
-    std::vector<std::uint32_t> top(static_cast<std::size_t>((rows + 1) * (columns + 1)));
-    for (int r = 0; r <= rows; ++r) {
-        for (int c = 0; c <= columns; ++c) top[static_cast<std::size_t>(r * (columns + 1) + c)] = topAt(r, c);
-    }
-    auto at = [&](int r, int c) { return top[static_cast<std::size_t>(r * (columns + 1) + c)]; };
-    for (int r = 0; r < rows; ++r) {
-        for (int c = 0; c < columns; ++c) {
-            triangle(at(r, c), at(r, c + 1), at(r + 1, c + 1));  // counterclockwise seen from +Z
-            triangle(at(r, c), at(r + 1, c + 1), at(r + 1, c));
+
+    // The outline, counterclockwise seen from +Z from the base's middle (index 0) to the tip
+    // (n / 2) and back: the right half's n / 2 segments evenly by arc length along the base to its
+    // corner and up the side (even edges: even quads, a smooth subdivision); the left its mirror.
+    std::vector<Vec3f> outline(static_cast<std::size_t>(n));
+    {
+        std::vector<Vec3f> path{{0.0f, 0.0f, 0.0f}};
+        constexpr int kDense = 256;
+        for (int k = 0; k <= kDense; ++k) {
+            const float t = static_cast<float>(k) / static_cast<float>(kDense);
+            path.push_back({halfWidthAt(shape, t), t, 0.0f});
+        }
+        path.push_back({0.0f, 1.0f, 0.0f});  // the tip on the axis (a rounded tip ends a hair off it)
+        std::vector<float> along(path.size(), 0.0f);
+        for (std::size_t k = 1; k < path.size(); ++k) along[k] = along[k - 1] + (path[k] - path[k - 1]).length();
+        for (int k = 0; k <= n / 2; ++k) {
+            const float target = along.back() * static_cast<float>(k) / static_cast<float>(n / 2);
+            const std::size_t i = static_cast<std::size_t>(std::upper_bound(along.begin(), along.end(), target) - along.begin());
+            const std::size_t j = std::clamp<std::size_t>(i, 1, path.size() - 1);
+            const float span = along[j] - along[j - 1];
+            const float f = span > 0.0f ? std::clamp((target - along[j - 1]) / span, 0.0f, 1.0f) : 0.0f;
+            outline[static_cast<std::size_t>(k)] = path[j - 1] + (path[j] - path[j - 1]) * f;
+        }
+        outline[0] = {0.0f, 0.0f, 0.0f};
+        outline[static_cast<std::size_t>(n / 2)] = {0.0f, 1.0f, 0.0f};
+        for (int k = 1; k < n / 2; ++k) {
+            const Vec3f& m = outline[static_cast<std::size_t>(k)];
+            outline[static_cast<std::size_t>(n - k)] = {-m.x, m.y, 0.0f};
         }
     }
-    // The top's edge, counterclockwise seen from +Z: the base left to right, up the right side,
-    // the tip right to left, down the left side.
-    std::vector<std::pair<int, int>> loop;
-    for (int c = 0; c < columns; ++c) loop.emplace_back(0, c);
-    for (int r = 0; r < rows; ++r) loop.emplace_back(r, columns);
-    for (int c = columns; c > 0; --c) loop.emplace_back(rows, c);
-    for (int r = rows; r > 0; --r) loop.emplace_back(r, 0);
-    // The rim: from the top's edge (its own vertices: a hard edge) down and out to the outline on
-    // the skin. Then the flat underside, a fan.
-    const std::size_t n = loop.size();
-    std::vector<std::uint32_t> upper(n), lower(n), under(n);
-    for (std::size_t i = 0; i < n; ++i) {
-        const Vec3f& p = out.points[at(loop[i].first, loop[i].second)];
-        const auto uv = out.uvs[at(loop[i].first, loop[i].second)];
-        const float t = std::clamp((p.y - kEnds) / (1.0f - 2.0f * kEnds), 0.0f, 1.0f);
-        const float s = -1.0f + 2.0f * uv[0];
-        const Vec3f outline{s * halfWidthAt(shape, t), t, 0.0f};
-        upper[i] = add(p, uv[0], uv[1]);
-        lower[i] = add(outline, uv[0], t);
-        under[i] = add(outline, uv[0], t);
-    }
-    for (std::size_t i = 0; i < n; ++i) {
-        const std::size_t j = (i + 1) % n;
-        triangle(lower[i], lower[j], upper[j]);
-        triangle(lower[i], upper[j], upper[i]);
-    }
-    const std::uint32_t middle = add({0.0f, 0.45f, 0.0f}, 0.5f, 0.45f);
-    for (std::size_t i = 0; i < n; ++i) triangle(middle, under[(i + 1) % n], under[i]);
-    // Smooth normals within each part (the parts share no vertices: hard edges between them).
+
+    // The loops: the outline scaled by `scale` toward (0, kCenter) on the axis, at a height.
+    constexpr float kCenter = 0.45f;
+    auto loopAt = [&](float scale, const std::function<float(const Vec3f&)>& height) {
+        std::vector<std::uint32_t> loop(static_cast<std::size_t>(n));
+        for (int k = 0; k < n; ++k) {
+            const Vec3f& o = outline[static_cast<std::size_t>(k)];
+            Vec3f q{o.x * scale, kCenter + (o.y - kCenter) * scale, 0.0f};
+            q.z = height(q);
+            loop[static_cast<std::size_t>(k)] = add(q);
+        }
+        return loop;
+    };
+    // The top's height: the rim, domed toward the axis and the middle of the length, a keel down it.
+    auto top = [&](const Vec3f& q) {
+        const float t = std::clamp(q.y, 0.0f, 1.0f);
+        const float w = std::max(halfWidthAt(shape, t), 1e-6f);
+        const float s = std::clamp(q.x / w, -1.0f, 1.0f);
+        const float bump = pm::pow(4.0f * t * (1.0f - t), 0.6f);
+        const float keel = shape.keel * std::max(0.0f, 1.0f - 2.5f * std::abs(s)) * std::sqrt(4.0f * t * (1.0f - t));
+        return rimHeight + (shape.height - rimHeight) * (1.0f - s * s) * bump + keel;
+    };
+    auto flat = [](const Vec3f&) { return 0.0f; };
+    auto rim = [&](const Vec3f&) { return rimHeight; };
+    auto middle = [&](const Vec3f&) { return 0.5f * rimHeight; };
+    // The top and the underside the same: from the loop round the rim's middle (the full outline),
+    // a crease loop at the rim's edge, a support loop holding it, the inner loop the grid fills.
+    const std::vector<std::uint32_t> edge = loopAt(1.0f, middle);
+    const std::vector<std::uint32_t> topCrease = loopAt(0.985f, rim);
+    const std::vector<std::uint32_t> topSupport = loopAt(0.9f, top);
+    const std::vector<std::uint32_t> topInner = loopAt(0.62f, top);
+    const std::vector<std::uint32_t> underCrease = loopAt(0.985f, flat);
+    const std::vector<std::uint32_t> underSupport = loopAt(0.9f, flat);
+    const std::vector<std::uint32_t> underInner = loopAt(0.62f, flat);
+    auto band = [&](const std::vector<std::uint32_t>& a, const std::vector<std::uint32_t>& b, bool up) {
+        // a the loop nearer the rim's middle, b the next one in: the quads face up (the top, the
+        // rim's upper half) or down (the underside, its lower half); both loops counterclockwise
+        // from +Z.
+        for (int k = 0; k < n; ++k) {
+            const std::size_t i = static_cast<std::size_t>(k), j = static_cast<std::size_t>((k + 1) % n);
+            if (up) quad(a[i], a[j], b[j], b[i]);
+            else quad(a[i], b[i], b[j], a[j]);
+        }
+    };
+    band(edge, topCrease, true);
+    band(topCrease, topSupport, true);
+    band(topSupport, topInner, true);
+    band(edge, underCrease, false);
+    band(underCrease, underSupport, false);
+    band(underSupport, underInner, false);
+    // A loop's grid: corner (c, r) for c 0..columns (left to right), r 0..rows (base to tip), its
+    // edge the loop's vertices, the inside a Coons patch of them.
+    auto fill = [&](const std::vector<std::uint32_t>& loop, bool up, const std::function<float(const Vec3f&)>& height) {
+        auto edgeAt = [&](int c, int r) -> int {  // the loop index of an edge corner, or -1 inside
+            if (r == 0) return (c - half + n) % n;
+            if (c == columns) return half + r;
+            if (r == rows) return half + rows + (columns - c);
+            if (c == 0) return (n - half - r + n) % n;
+            return -1;
+        };
+        std::vector<std::uint32_t> grid(static_cast<std::size_t>((columns + 1) * (rows + 1)));
+        auto at = [&](int c, int r) -> std::uint32_t& { return grid[static_cast<std::size_t>(r * (columns + 1) + c)]; };
+        auto pos = [&](int c, int r) { return out.points[loop[static_cast<std::size_t>(edgeAt(c, r))]]; };
+        for (int r = 0; r <= rows; ++r) {
+            for (int c = 0; c <= columns; ++c) {
+                const int e = edgeAt(c, r);
+                if (e >= 0) {
+                    at(c, r) = loop[static_cast<std::size_t>(e)];
+                    continue;
+                }
+                const float u = static_cast<float>(c) / static_cast<float>(columns), v = static_cast<float>(r) / static_cast<float>(rows);
+                const Vec3f q = pos(c, 0) * (1.0f - v) + pos(c, rows) * v + pos(0, r) * (1.0f - u) + pos(columns, r) * u -
+                                (pos(0, 0) * ((1.0f - u) * (1.0f - v)) + pos(columns, 0) * (u * (1.0f - v)) +
+                                 pos(0, rows) * ((1.0f - u) * v) + pos(columns, rows) * (u * v));
+                at(c, r) = add({q.x, q.y, height(q)});
+            }
+        }
+        for (int r = 0; r < rows; ++r) {
+            for (int c = 0; c < columns; ++c) {
+                if (up) quad(at(c, r), at(c + 1, r), at(c + 1, r + 1), at(c, r + 1));
+                else quad(at(c, r), at(c, r + 1), at(c + 1, r + 1), at(c + 1, r));
+            }
+        }
+    };
+    fill(topInner, true, top);
+    fill(underInner, false, flat);
+
+    // Smooth normals over the whole closed piece (the crease and support loops keep the edges).
     out.normals.assign(out.points.size(), Vec3f{});
     for (std::size_t k = 0; k + 2 < out.triangles.size(); k += 3) {
         const Vec3f& a = out.points[out.triangles[k]];

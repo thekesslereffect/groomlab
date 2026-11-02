@@ -165,9 +165,11 @@ bool quadOf(const std::uint32_t* a, const std::uint32_t* b, const std::vector<Ve
 }
 
 // Triangles [first, first + count) of `tri` as faces of `m`: quads where two in a row make one
-// (quadOf), else triangles; `offset` added to their corners, each face named `feather`.
+// (quadOf), else triangles; `offset` added to their corners, each face named `feather`. `shape`:
+// the points quadOf judges by (null: m's): a scale's as its prototype has them, so bending it onto
+// the skin never splits its quads.
 void pairedFaces(RachisMesh& m, const std::uint32_t* tri, std::size_t first, std::size_t count, std::uint32_t offset,
-                 int feather) {
+                 int feather, const std::vector<Vec3f>* shape = nullptr) {
     const std::size_t end = first + count;
     for (std::size_t t = first; t < end;) {
         std::array<std::uint32_t, 4> quad{};
@@ -175,7 +177,7 @@ void pairedFaces(RachisMesh& m, const std::uint32_t* tri, std::size_t first, std
         bool paired = false;
         if (t + 1 < end) {
             const std::array<std::uint32_t, 3> b{tri[3 * (t + 1)] + offset, tri[3 * (t + 1) + 1] + offset, tri[3 * (t + 1) + 2] + offset};
-            paired = quadOf(a.data(), b.data(), m.points, quad);
+            paired = quadOf(a.data(), b.data(), shape ? *shape : m.points, quad);
         }
         if (paired) {
             for (std::uint32_t v : quad) m.faceVertices.push_back(static_cast<int>(v));
@@ -293,15 +295,8 @@ StrandMesh scalePlates(const StrandSet& strands, const ScalpMesh* scalp, const P
     m.featherIndex.assign(m.points.size(), 0.0f);
     m.groupIds.assign(m.points.size(), 0.0f);
     m.faceVertices.reserve(scales->triangles.size());
-    const std::uint32_t* tri = scales->triangles.data();
-    for (std::size_t s = 0; s < scales->scales.size(); ++s) {
-        const ScaleMesh::Scale& scale = scales->scales[s];
-        for (std::uint32_t v = 0; v < scale.vertexCount; ++v) m.featherIndex[scale.firstVertex + v] = static_cast<float>(s);
-        // A scale's own triangles, paired into quads where they can be (never across scales).
-        pairedFaces(m, tri, scale.firstTriangle, scale.triangleCount, 0, static_cast<int>(s));
-    }
-    m.faceUVs = m.faceVertices;
-    // Welded where the plates' prototypes have points together (a quad scale: none).
+    // Each point where its prototype has it: what pairs the quads and welds the points, whatever
+    // the skin bends.
     std::vector<Vec3f> rest = m.points;
     if (const std::shared_ptr<const InstanceSet>& set = strands.instances()) {
         for (const ScaleMesh::Scale& scale : scales->scales) {
@@ -313,6 +308,15 @@ StrandMesh scalePlates(const StrandSet& strands, const ScalpMesh* scalp, const P
             std::copy(proto->points.begin(), proto->points.end(), rest.begin() + scale.firstVertex);
         }
     }
+    const std::uint32_t* tri = scales->triangles.data();
+    for (std::size_t s = 0; s < scales->scales.size(); ++s) {
+        const ScaleMesh::Scale& scale = scales->scales[s];
+        for (std::uint32_t v = 0; v < scale.vertexCount; ++v) m.featherIndex[scale.firstVertex + v] = static_cast<float>(s);
+        // A scale's own triangles, paired into quads where they can be (never across scales).
+        pairedFaces(m, tri, scale.firstTriangle, scale.triangleCount, 0, static_cast<int>(s), &rest);
+    }
+    m.faceUVs = m.faceVertices;
+    // Welded where the plates' prototypes have points together (a quad scale: none).
     weldPieces(m, rest, kWeldShare);
     m.featherCount = scales->scales.size();
     out.faceParts.assign(m.faceCounts.size(), static_cast<int>(MeshPart::Scales));

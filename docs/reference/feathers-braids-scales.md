@@ -96,7 +96,10 @@ root; the preset `dragon_scales` is the whole chain, `scales_from_guides` and
   by the root. A scale following its strand is kept per scale until its strand moves.
 - **Prototypes:** the built-in plates need no scene mesh: `groomlab:scale` (keeled and pointed,
   slightly domed, bevelled), `groomlab:scaleRound` (a rounded tip, no keel) and
-  `groomlab:scaleShield` (broad and blunt, the belly's). Or a mesh of your own (Prototype from
+  `groomlab:scaleShield` (broad and blunt, the belly's): each one closed piece of quads for
+  subdivision (`scalePlate`), the top and the underside alike: loops round the outline (from the
+  rim's middle, a crease loop at each edge and a support loop holding it) and a 4 x 4 grid filling
+  the middle. Or a mesh of your own (Prototype from
   Selection): model it 1 unit long up **+Y** from its base at the origin, 1 unit wide along X,
   lying on the XY plane with its top up **+Z**. Several names are variants (above): the preset
   takes the keeled plate on the back and the shield on the belly by a map of the normal.

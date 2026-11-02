@@ -505,6 +505,29 @@ void bindStrands(py::module_& m) {
           py::arg("strands"), py::arg("scalp") = nullptr,
           "The scales among the strands' instances as one mesh (built-in prototypes only; None without scales).");
     m.def("builtin_prototypes", &builtinPrototypeNames, "The built-in scale plates' names.");
+    m.def(
+        "builtin_prototype",
+        [](const std::string& name) -> py::object {
+            const InstancePrototype* p = builtinPrototype(name);
+            if (!p) return py::none();
+            py::list points, normals, uvs, quads;
+            for (const Vec3f& v : p->points) points.append(py::make_tuple(v.x, v.y, v.z));
+            for (const Vec3f& v : p->normals) normals.append(py::make_tuple(v.x, v.y, v.z));
+            for (const auto& uv : p->uvs) uvs.append(py::make_tuple(uv[0], uv[1]));
+            // Its triangles two by two (a, b, c) (a, c, d): the quads (a, b, c, d).
+            for (std::size_t t = 0; t + 5 < p->triangles.size(); t += 6)
+                quads.append(py::make_tuple(p->triangles[t], p->triangles[t + 1], p->triangles[t + 2], p->triangles[t + 5]));
+            py::dict out;
+            out["points"] = points;
+            out["normals"] = normals;
+            out["uvs"] = uvs;
+            out["triangles"] = std::vector<std::uint32_t>(p->triangles);
+            out["quads"] = quads;
+            return out;
+        },
+        py::arg("name"),
+        "A built-in scale plate (groomlab:scale, groomlab:scaleRound, groomlab:scaleShield) as {points, normals, uvs, "
+        "triangles, quads}: one closed piece of quads (two triangles each), None for any other name.");
     m.def("graph_mesh_prototypes", &graphMeshPrototypes, py::arg("graph_json"),
           "The scene meshes a graph's Instance nodes name (not the built-in plates): what a groom file stores.");
     m.def("missing_instance_prototypes",

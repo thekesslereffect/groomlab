@@ -246,7 +246,7 @@ TEST(Scales, ConformKeepsEveryVertexAboveTheSkin) {
     for (std::size_t v = 0; v < bent->vertexCount(); ++v) {
         outward += bent->normals[v].dot(sg.skin->closestPoint(bent->points[v]).normal) > -0.2f ? 1 : 0;
     }
-    EXPECT_GT(outward, bent->vertexCount() * 7 / 10);  // (the undersides, a fifth of the plate, face in)
+    EXPECT_GT(outward, bent->vertexCount() * 55 / 100);  // (the undersides and their edge, two fifths of the plate, face in)
 }
 
 TEST(Scales, TileAndLiftRaiseTheTips) {
@@ -395,8 +395,17 @@ TEST(Scales, BuiltinPlates) {
         EXPECT_NEAR(lowZ, 0.0f, 1e-5f) << name;  // flat underneath, domed above
         EXPECT_GT(highZ, 0.05f) << name;
         EXPECT_NEAR(wide, 0.5f, 0.02f) << name;  // a unit wide: as wide as its strand
-        // Closed (by position: its parts keep vertices of their own for hard edges): every edge
-        // met the other way round by a neighbouring triangle.
+        // One closed piece by its vertices (for subdivision: no split edges), every edge in two
+        // triangles; and by position, every edge met the other way round by a neighbouring one.
+        std::map<std::pair<std::uint32_t, std::uint32_t>, int> byIndex;
+        for (std::size_t t = 0; t + 2 < plate->triangles.size(); t += 3) {
+            for (std::size_t c = 0; c < 3; ++c) {
+                const std::uint32_t a = plate->triangles[t + c], b = plate->triangles[t + (c + 1) % 3];
+                ++byIndex[{std::min(a, b), std::max(a, b)}];
+            }
+        }
+        for (const auto& [e, count] : byIndex) EXPECT_EQ(count, 2) << name << " edge " << e.first << "-" << e.second;
+        EXPECT_EQ(plate->triangles.size() % 6, 0u) << name;  // quads: two triangles each
         using Key = std::array<long, 3>;
         auto key = [](const Vec3f& v) { return Key{std::lround(v.x * 1e4f), std::lround(v.y * 1e4f), std::lround(v.z * 1e4f)}; };
         std::set<std::pair<Key, Key>> edges;

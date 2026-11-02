@@ -85,7 +85,7 @@ class ToMeshTest(unittest.TestCase):
         model.save(self.groom)
 
     def test_scales_make_their_plates_and_export(self):
-        # A ToMesh node on scales: auto makes the plates (quads, nearly all); strands asked for,
+        # A ToMesh node on scales: auto makes the plates (all quads); strands asked for,
         # tubes (quads); Export Mesh writes the node's mesh as an OBJ.
         model = gm.GraphModel.from_groom(self.groom)
         scales = model.add_node("Scales", name=model.unique_name("scales"))
@@ -96,7 +96,7 @@ class ToMeshTest(unittest.TestCase):
         plates = groomlab.to_mesh(self.groom)["mesh"]
         faces = cmds.polyEvaluate(plates, face=True)
         self.assertGreater(faces, 0)
-        self.assertLess(faces * 1.5, cmds.polyEvaluate(plates, triangle=True))  # plates: mostly quads
+        self.assertEqual(faces * 2, cmds.polyEvaluate(plates, triangle=True))  # plates: all quads, bent onto the skin too
         # Each plate one closed piece: its top, rim and underside share their edge points.
         import maya.api.OpenMaya as om
         selection = om.MSelectionList()
