@@ -310,7 +310,7 @@ the running Maya's plugin and sets it to auto-load):
 python tools/package_release.py
 ```
 
-It writes `dist/GroomLab-<version>-maya-win64.zip` (about 90 MB with all six versions;
+It writes `dist/GroomLab-<version>-maya-win64.zip` (about 140 MB with all six versions;
 `--symbols` adds each plugin's ~150 MB `.pdb` for symbolized crash logs). Build first: it installs
 `build/ninja-maya2022` and every `build/ninja-maya<year>` there is (`--maya 2022,2025` picks;
 Maya 2022 is always in, as the tested version and the only build with the procedural and the CLI).
@@ -376,7 +376,7 @@ Blender as Beta once their `latest.json` is published (it reads them when it is 
 **The loop for a change:** build, run the `quick` tier, run `gui` and `arnold` when the change
 touches them (the table above), install, commit; the full run before packaging and pushing. Commit messages say what changed and why.
 
-### Open source: the private and the public repository
+### Open source: the repository, branches and releases
 
 GroomLab is open source (Apache-2.0; the Blender add-on GPL-3.0-or-later: `LICENSE`, `NOTICE`,
 `THIRD_PARTY_NOTICES.md`, `REUSE.toml`). Every package ships `LICENSE`, `NOTICE` and
@@ -384,42 +384,55 @@ GroomLab is open source (Apache-2.0; the Blender add-on GPL-3.0-or-later: `LICEN
 `package_blender.py`, `package_release.py` and `assemble_extension.cmake` check they are there).
 New source files start with an `SPDX-License-Identifier` line (`CONTRIBUTING.md`).
 
-Two repositories:
+Work happens in this repository (github.com/thekesslereffect/groomlab), on two branches:
 
-- **maya-hair (private)** is where work happens: every branch, worktree, research harness, probe
-  output and internal note. Its history is never published.
-- **groomlab (public, github.com/thekesslereffect/groomlab)** gets one commit per release, made
-  from a snapshot of the private tree. Its local clone sits beside the private one
-  (`Documents/GitHub/groomlab`, `publish_public_repo.py`'s default).
+- **`dev`**: every change, pull request and agent branch lands here (the default branch).
+- **`main`**: released versions only. A release merges `dev` into `main` with a merge commit
+  ("Merge branch 'dev'"; `main` is not fast-forwardable from `dev`, it carries the release merges
+  and the odd web-only fix) and tags it. The website deploys from `main`, so it always matches the
+  published downloads.
 
-The snapshot: `python tools/dev/make_public_snapshot.py` writes `build/public-snapshot` from
-`git archive HEAD`, leaves out what is not public (the website's placeholder hero image, the wolf
-renders until the wolf sample ships, the research harness `tools/research/reference_guides`,
-`.claude/`, agent tooling, the bench and preset pictures, the publish scripts), strips internal
-notes (section 7's AI notes, the commit-trailer note above, the CI comment), and scans the
-result: private terms (read from `%USERPROFILE%/groomlab-deps/public-snapshot-terms.txt`, never
-committed), local user paths, machine names, secrets, private links, SPDX lines. Any finding
-fails it. Add to its `EXCLUDE` list whatever new must stay private.
+**The commit guard.** A maintainer's clone runs a pre-commit, commit-msg and pre-push hook that
+scans what is committed for private terms, local user paths, machine names and secrets (the guard
+and its installer live outside the repository, in `%USERPROFILE%/groomlab-deps/private`:
+`python install_hooks.py`). Never skip it with `--no-verify`; fix what it finds.
 
-The release, after the downloads are published: `python tools/dev/publish_public_repo.py`
-regenerates the snapshot (refusing on any finding), mirrors it into the clone (files gone from the
-snapshot are deleted; the clone's `.git` stays), commits "GroomLab <version>" with that version's
-section of What's new as the message, tags `v<version>`, and stops. Review the commit in the
-clone, then run it again with `--push`. `--notes-file` replaces the notes; `--version` the version.
+**Outside pull requests** target `dev`. They are built and tested locally before merging (there
+is no CI): treat a pull request as the idea, rework it to the conventions of section 6 where
+needed, keep the author's credit (their commit, or a `Co-Authored-By:` trailer), and leave out
+files that are not part of the change. Golden files a pull request changes on purpose are
+regenerated in the same change.
 
-**An outside pull request** on the public repository: review and merge it there (or not), then
-bring it into the private repository, where the next release will include it again:
+### Releasing
 
-```bash
-# in the public clone, after the PR is merged (or fetched as a branch)
-git format-patch -o ../pr-123 v0.11.0..main          # one .patch per commit since the release
-# in the private repository, on a branch from main
-git am -3 ../pr-123/*.patch                           # keeps the author and message
-```
+A release is a minor version for features, a patch for fixes only. In this order, never in
+parallel (the zip takes whatever is in each build folder):
 
-Paths are the same in both trees, so the patches apply; fix up anything that touched a file the
-snapshot left out or changed (rare). After the next release the public `main` and the private tree
-agree again.
+1. **Bump** on `dev`: `CMakeLists.txt`'s `project(... VERSION)`, `web/site.config.ts`'s
+   `version`, a section in `web/content/docs/whats-new.mdx` (what changed for an artist, any param
+   change and what to set, credit for outside work), and a few lines of update notes in a text file
+   (Check for Updates shows them; keep it outside the repository, e.g. `build/`).
+2. **Build every preset**: `ninja-maya2022` to `ninja-maya2027` and `ninja-app` (configure a new
+   build folder once with `cmake --preset`). Check `GROOMLAB_PORTABLE_MATH:BOOL=ON` in each
+   `CMakeCache.txt`, and that no build failed to regenerate (it leaves old binaries behind).
+3. **Run the tiers** on Maya 2022 (`quick`, `arnold`, `blender`, `gpu`, then `Budget.*` alone,
+   `gui`, `maya.gui_dx11`, `vray` / `renderman` where installed) and the app (`quick`, then
+   `blender|vray|renderman`). A timing budget that fails once under load is rerun alone, not
+   waved through.
+4. **Linux**: `tools/dev/linux_build.ps1 -Tests all` (WSL).
+5. **Install** Maya 2022's build (`cmake --install ... --component GroomLab`).
+6. **Package** `tools/package_release.py`, `tools/package_app.py`, `tools/package_blender.py`,
+   then **publish** each with `--zip dist/<its zip> --notes-file <notes>`
+   (`publish_release.py`, `publish_app.py`, `publish_blender.py`; the R2 variables above).
+7. **Verify** each `latest.json` (`https://downloads.getgroomlab.com/<maya|app|blender>/latest.json`)
+   shows the version and the local zip's sha256 (Maya's `latest.json` is written last, after its
+   three large uploads). Use curl: the bucket answers Python's urllib with 403.
+8. **Git**: push `dev`; on `main`, `git merge --no-edit dev` (check it succeeded before going on),
+   tag `v<version>`, push `main` and the tag; back to `dev`. Only after the uploads: pushing `main`
+   rebuilds the website, whose download page reads the published release lists.
+9. **The website's engine**: rebuild the WebAssembly module (`cmake --build --preset wasm`,
+   [WEB.md](WEB.md)) when the core changed, and commit `web/public/wasm/` on `dev`.
+10. Close the issues the release shipped, with a comment.
 
 ### Faster builds
 
