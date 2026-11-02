@@ -149,12 +149,17 @@ void seatCard(CardMesh::Card& card, const ScalpMesh& scalp, const Vec3f& root, f
     if ((seated.back() - seated.front()).length() < 0.5f * (row.back() - row.front()).length()) {
         for (std::size_t e = 0; e < row.size(); ++e) seated[e] = row[e] + up[e] * (clearance - lowest);
     } else if (rigid > 0.0f) {
-        // Toward the row moved as a whole along the skin's mean normal under it.
+        // Toward the row moved as a whole with the feather's shaft planted at its original
+        // root. Using the lowest outer edge here floats an asymmetric feather's shaft by as
+        // much as the row tilts across its width (most visibly when featherFlatten is 1).
         Vec3f mean{};
         for (const Vec3f& u : up) mean += u;
         mean = mean.normalized();
+        const Vec3f anchor = card.center.front() + card.side.front() * card.spineOffset;
+        const SurfacePoint near = scalp.closestPoint(root);
+        const float height = (anchor - near.position).dot(mean);
         const float r = std::min(rigid, 1.0f);
-        for (std::size_t e = 0; e < row.size(); ++e) seated[e] = seated[e] * (1.0f - r) + (row[e] + mean * (clearance - lowest)) * r;
+        for (std::size_t e = 0; e < row.size(); ++e) seated[e] = seated[e] * (1.0f - r) + (row[e] + mean * (clearance - height)) * r;
     }
     card.base = std::move(seated);
 }

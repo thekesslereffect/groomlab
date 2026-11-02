@@ -150,8 +150,8 @@ TEST(FeatherCards, OneCardPerFeatherLyingInTheVanePlaneAroundItsBarbs) {
 }
 
 TEST(FeatherCards, AFeatherGrowingFromTheSkinHasItsCardsBaseOnIt) {
-    // Shafts rooted on the plane, rising off it: the card reaches back past the quill as far as
-    // the barbs do, and its root row is seated on the skin (a hair above it), flat and spined,
+    // Shafts rooted on the plane, rising off it: the card starts at the quill and its root row is
+    // seated on the skin (a hair above it), flat and spined,
     // vaned and down; the feathers above lying just over the skin (rooted 0.05 off it) keep theirs.
     FeatherScene scene;
     auto rising = std::make_shared<StrandSet>();
@@ -180,6 +180,33 @@ TEST(FeatherCards, AFeatherGrowingFromTheSkinHasItsCardsBaseOnIt) {
     }
     const StrandsPtr lying = scene.feathers(scene.shafts({{0.5f, 1.0f}}));
     for (const CardMesh::Card& card : buildCards(*lying, scene.scalp.get(), featherSettings()).cards) EXPECT_TRUE(card.base.empty());
+}
+
+TEST(FeatherCards, ASteepFeathersShaftStaysPlantedAtItsGuideRoot) {
+    FeatherScene scene;
+    auto shafts = std::make_shared<StrandSet>();
+    const Vec3f root{0.5f, 0.0f, 1.0f};
+    std::vector<Vec3f> points;
+    for (int i = 0; i <= 10; ++i) {
+        const float t = static_cast<float>(i) / 10.0f;
+        points.push_back(root + Vec3f{0.25f * t, 1.1f * t, 0.15f * t});
+    }
+    shafts->addStrand(400, points, {}, scene.scalp->closestPoint(root).root);
+    const StrandsPtr feathers = scene.feathers(shafts, 0.45f, "both", 30);
+    for (const float flatten : {0.0f, 1.0f}) {
+        CardSettings settings = featherSettings(true);
+        settings.featherFlatten = flatten;
+        const CardMesh mesh = buildCards(*feathers, scene.scalp.get(), settings);
+        ASSERT_EQ(mesh.cards.size(), 1u);
+        const CardMesh::Card& card = mesh.cards.front();
+        ASSERT_TRUE(card.spine);
+        ASSERT_FALSE(card.base.empty());
+        const Vec3f shaftBase = mesh.positions[card.firstVertex + 1];
+        EXPECT_NEAR(shaftBase.x, root.x, 2e-3f);
+        EXPECT_NEAR(shaftBase.z, root.z, 2e-3f);
+        EXPECT_GT(shaftBase.y, 0.0f);
+        EXPECT_LT(shaftBase.y, 0.01f);
+    }
 }
 
 TEST(FeatherCards, BarbsCurlingBackNearTheTipDoNotFlipTheCard) {
@@ -256,6 +283,41 @@ TEST(FeatherCards, TheTangentMapFollowsTheBarbsNotTheCard) {
     ASSERT_GT(nearN, 0.0f);
     ASSERT_GT(farN, 0.0f);
     EXPECT_LT(nearU / nearN + 0.3f, farU / farN) << "coordU runs out along each barb";
+}
+
+TEST(FeatherCards, BakedCoverageStartsAtTheShaftRootWithoutHairRootFade) {
+    FeatherScene scene;
+    const StrandsPtr s = scene.feathers(scene.shafts({{1.0f, 1.0f}}), 0.0f, "both", 40);
+    const CardMesh mesh = buildCards(*s, scene.scalp.get(), featherSettings());
+    ASSERT_EQ(mesh.cards.size(), 1u);
+
+    CardBakeSettings bake;
+    bake.size = 128;
+    bake.occlusion = 0.0f;
+    bake.dilate = 0;
+    bake.rootFade = 0.0f;
+    const CardTextures unfaded = bakeCardTextures(*s, mesh, bake);
+    ASSERT_GT(*std::max_element(unfaded.coverage.begin(), unfaded.coverage.end()), 0);
+    const CardMesh::Card& card = mesh.cards.front();
+    const int x0 = static_cast<int>(std::lround(card.cell[0] * bake.size));
+    const int x1 = static_cast<int>(std::lround(card.cell[2] * bake.size)) - 1;
+    const int rootRow = static_cast<int>(std::lround((1.0f - card.cell[1]) * bake.size)) - 2;
+    bool rootCovered = false;
+    for (int x = x0; x < x1; ++x) {
+        rootCovered = rootCovered || unfaded.coverage[static_cast<std::size_t>(rootRow) * bake.size + static_cast<std::size_t>(x)] > 0;
+    }
+    EXPECT_TRUE(rootCovered) << "the shaft coverage reaches the card's root texels";
+
+    // Hair and feather fades are independent: an exaggerated hair fade must not pull a
+    // feather's coverage away from the shaft root.
+    bake.rootFade = 0.8f;
+    const CardTextures requestedFade = bakeCardTextures(*s, mesh, bake);
+    EXPECT_EQ(requestedFade.coverage, unfaded.coverage);
+
+    // Feather fade remains available as its own control when it is deliberately wanted.
+    bake.featherRootFade = 0.8f;
+    const CardTextures featherFade = bakeCardTextures(*s, mesh, bake);
+    EXPECT_NE(featherFade.coverage, unfaded.coverage);
 }
 
 TEST(FeatherCards, AlikeFeathersShareATextureMirroredLeftToRight) {
@@ -428,6 +490,29 @@ TEST(FeatherCards, ModesCardFeathersHairOrBoth) {
     EXPECT_GE(count(buildCards(*loose, scene.scalp.get(), settings), false), 2u);
     settings.featherMode = CardSettings::FeatherMode::Off;
     EXPECT_GE(count(buildCards(*loose, scene.scalp.get(), settings), false), 2u);
+}
+
+TEST(FeatherCards, OneMixedCardsNodeKeepsSeparateHairAndFeatherRootFades) {
+    FeatherScene scene;
+    const StrandsPtr feathers = scene.feathers(scene.shafts({{0.5f, 1.0f}, {1.0f, 0.9f}}));
+    const StrandsPtr mixed = FeatherScene::merge(hairTufts(*scene.scalp), feathers);
+    auto op = OperatorRegistry::instance().create(op::kCards);
+    op->params().set("strandsRootFade", 0.17);
+    op->params().set("featherRootFade", 0.03);
+    op->params().set("crossStyle", std::string("single"));
+    EvalContext ctx;
+    ctx.externals = &scene.ext;
+    ctx.buildCards = true;
+    const StrandsPtr out = valueAs<StrandsPtr>(op->evaluate(ctx, {Value(mixed)}));
+    const CardMesh cards = combineCardLayers(out->cardLayers());
+    std::size_t hair = 0, feather = 0;
+    for (const CardMesh::Card& card : cards.cards) {
+        EXPECT_NEAR(card.strandsRootFade, 0.17f, 1e-6f);
+        EXPECT_NEAR(card.featherRootFade, 0.03f, 1e-6f);
+        card.feather >= 0 ? ++feather : ++hair;
+    }
+    EXPECT_GT(hair, 0u);
+    EXPECT_GT(feather, 0u);
 }
 
 TEST(FeatherCards, TheBakedAtlasKeepsFeatherCellsAndNewFeathersTakeAFeathers) {

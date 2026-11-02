@@ -618,6 +618,18 @@ public:
                                     "Unreal's Hair shading model). Several Cards nodes share one bake: the first one's applies",
                                     "", {"shaded", "base"}})
                 .in("Texture"),
+            notAnimatable({"strandsRootFade", 0.06, "Share of each strands card, from its root, over which coverage fades in so "
+                                                      "hair cards blend into the scalp and each other (0: none)", "fraction"})
+                .range(0, 1)
+                .soft(0, 0.2)
+                .in("Texture")
+                .when("featherMode", {"auto", "perVane", "off"}),
+            notAnimatable({"featherRootFade", 0.0, "Share of each feather card, from its shaft root, over which coverage fades in "
+                                                      "(0 keeps the feather texture planted at the scalp)", "fraction"})
+                .range(0, 1)
+                .soft(0, 0.2)
+                .in("Texture")
+                .when("featherMode", {"auto", "perFeather"}),
             notAnimatable({"thinnestStrand", 1.0, "The narrowest a strand bakes, in the atlas's pixels, solid: 1 keeps every strand at "
                                                   "least a pixel wide, so cards cut out at a cutoff (alpha tested) don't break up, though they "
                                                   "read denser than the groom; 0 bakes the strands to scale, a thinner one fainter (as "
@@ -709,7 +721,11 @@ public:
         auto layer = std::make_shared<CardMesh>();
         layer->nodes = {nodePath()};  // every card: node 0
         layer->cards = makeCards(*source, scalpOf(ctx), s);
-        for (CardMesh::Card& card : layer->cards) card.source = source;
+        for (CardMesh::Card& card : layer->cards) {
+            card.source = source;
+            card.strandsRootFade = static_cast<float>(params().getDouble("strandsRootFade"));
+            card.featherRootFade = static_cast<float>(params().getDouble("featherRootFade"));
+        }
         layer->atlasSize = static_cast<int>(params().getInt("atlasSize"));
         layer->thinnestStrand = static_cast<float>(params().getDouble("thinnestStrand"));
         auto out = std::make_shared<StrandSet>(*in);

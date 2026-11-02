@@ -264,7 +264,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
             const std::size_t begin = s.strandBegin(si);
             // Per sample: pixel position, radius, and the values it carries.
             struct Sample {
-                float x, y, radius, depth, coordU, ao, fade, iridescence;
+                float x, y, radius, depth, coordU, ao, fade, iridescence, along;
                 Vec3f tangent, color;
                 bool in;
             };
@@ -293,10 +293,17 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                 const std::array<float, 3> rgb = colors.at(s, si, coordU);
                 sm.color = {rgb[0], rgb[1], rgb[2]};
                 sm.iridescence = colors.iridescenceAt(s, si, coordU);
+                sm.along = cp.along;
                 sm.tangent = {dir.dot(cp.side), dir.dot(cp.forward), dir.dot(cp.normal)};
                 sm.ao = settings.occlusion > 0.0f ? pm::exp(-settings.occlusion * grid.cover(pts[k], cp.normal)) : 1.0f;
                 sm.in = cp.along >= -0.1f && cp.along <= 1.1f;
-                sm.fade = settings.rootFade > 0.0f ? smoothstep(0.0f, settings.rootFade, cp.along) : 1.0f;
+                // A mixed Cards node keeps independent hair and feather root fades. Values
+                // stored on the card come from its node; direct core callers fall back to the
+                // bake settings.
+                const float rootFade = card.feather >= 0
+                                           ? (card.featherRootFade >= 0.0f ? card.featherRootFade : settings.featherRootFade)
+                                           : (card.strandsRootFade >= 0.0f ? card.strandsRootFade : settings.rootFade);
+                sm.fade = rootFade > 0.0f ? smoothstep(0.0f, rootFade, cp.along) : 1.0f;
             }
             // Capsules between samples, into this strand's stamp. Each stays inside its cell,
             // clear of the cell's edge rows and columns: a strand past the card's edge or ends
@@ -315,8 +322,17 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                 for (Sample* sample : {&a, &c}) {
                     sample->x = static_cast<float>(x1 - x0) > 2.0f * keep ? std::clamp(sample->x, static_cast<float>(x0) + keep, static_cast<float>(x1) - keep)
                                                                           : 0.5f * static_cast<float>(x0 + x1);
-                    sample->y = static_cast<float>(y1 - y0) > 2.0f * keep ? std::clamp(sample->y, static_cast<float>(y0) + keep, static_cast<float>(y1) - keep)
-                                                                          : 0.5f * static_cast<float>(y0 + y1);
+                    // Keep ordinary ends inside their cell for mip padding. A feather's root is
+                    // different: its card begins exactly at the shaft root, so putting the first
+                    // sample `keep` texels inward exposes a blank strip at the scalp. Let that
+                    // endpoint reach the last writable texel of its cell; the atlas gap still
+                    // keeps it out of the neighbouring texture.
+                    const float yHigh = card.feather >= 0 && sample->along <= 1e-4f
+                                            ? static_cast<float>(y1 - 1)
+                                            : static_cast<float>(y1) - keep;
+                    sample->y = yHigh > static_cast<float>(y0) + keep
+                                    ? std::clamp(sample->y, static_cast<float>(y0) + keep, yHigh)
+                                    : 0.5f * static_cast<float>(y0 + y1);
                 }
                 const float reach = std::max(r, 0.5f) + 1.0f;
                 const int bx0 = std::max(x0, static_cast<int>(std::floor(std::min(a.x, c.x) - reach)));

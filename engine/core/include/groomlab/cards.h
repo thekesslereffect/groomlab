@@ -252,6 +252,10 @@ struct CardMesh {
         // The card's own, not its texture's.
         std::array<float, 2> iridescence{0.0f, 0.0f};
         int node = 0;                    // the Cards node it came from: an index into CardMesh::nodes
+        // Per Cards-node coverage fades. Negative means use CardBakeSettings (cards made
+        // directly through the core API rather than by a Cards operator).
+        float strandsRootFade = -1.0f;
+        float featherRootFade = -1.0f;
         // The strands the card was made from, for baking; null: the strands
         // given to bakeCardTextures.
         std::shared_ptr<const StrandSet> source;
@@ -375,6 +379,9 @@ struct CardBakeSettings {
     // cards' root ends blend into each other and the scalp instead of reading
     // as edges (0: none).
     float rootFade = 0.06f;
+    // Feather cards begin at their shaft root and normally remain opaque there. Kept
+    // separate from rootFade so one Cards node can mix hair and feathers.
+    float featherRootFade = 0.0f;
     // The strands' colors (linear, the host's rendering space) to linear Rec.709, sRGB's primaries,
     // which an sRGB color map holds: a host that reads the map converts it back to its rendering
     // space (Maya under ACES: ACEScg; a map written with ACEScg's values read as sRGB came out
