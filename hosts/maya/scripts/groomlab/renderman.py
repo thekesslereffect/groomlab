@@ -358,6 +358,36 @@ def export_free(groom, path):
 # The pre-shape script and the node
 
 
+# RenderMan's XPU renders no procedural of any kind (prman: "Geometry ... is of unsupported type:
+# Ri:Procedural"; RfM's own RenderManArchive is one too), so it leaves grooms out. RfM renders XGen
+# Interactive Groom there through a translator of its own that writes plain curves.
+XPU_NOTE = ("RenderMan XPU renders no procedurals, so it leaves GroomLab's grooms out: render them with RIS "
+            "(Render Settings > Features > Renderer)")
+_xpu_warned = [None]  # the scene the warning was given for
+
+
+def renderer_is_xpu():
+    """Whether RfM's render settings (rmanGlobals.renderVariant) pick its XPU renderer."""
+    if cmds is None or not cmds.objExists("rmanGlobals") or not cmds.attributeQuery("renderVariant", node="rmanGlobals",
+                                                                                     exists=True):
+        return False
+    return (cmds.getAttr("rmanGlobals.renderVariant") or "").lower().startswith("xpu")
+
+
+def warn_if_xpu(force=False):
+    """The XPU warning (XPU_NOTE), when RfM renders with XPU: once per scene (each frame and procedural
+    runs pre_shape), or again with `force`. Returns whether it warned."""
+    if not renderer_is_xpu():
+        _xpu_warned[0] = None
+        return False
+    scene = cmds.file(query=True, sceneName=True) or "untitled"
+    if _xpu_warned[0] == scene and not force:
+        return False
+    _xpu_warned[0] = scene
+    cmds.warning("GroomLab: " + XPU_NOTE)
+    return True
+
+
 def pre_shape(node_or_uuid):
     """RfM's pre-shape script for a GroomLab procedural node: the groom written to its .groom at the
     current frame (groom_file_for), and -file, -frame and (with groomLabShutterFromGlobals on) the
@@ -372,6 +402,7 @@ def pre_shape(node_or_uuid):
         if not groom:
             cmds.warning("GroomLab: %s renders no groom (connect a groom's message to its %s)" % (node, GROOM_ATTR))
             return None
+        warn_if_xpu()
         frame = cmds.currentTime(query=True)
         path, export = groom_file_for(groom, frame)
         if export:
@@ -726,3 +757,15 @@ def watch_grooms():
             maya.utils.executeDeferred(run)
 
         _watched[uuid] = om2.MNodeMessage.addNodeDirtyPlugCallback(sel.getDependNode(0), dirty)
+    # Render Settings switched to XPU with grooms in the scene: the warning at once, not only at render.
+    if cmds.objExists("rmanGlobals") and _watched:
+        uuid = cmds.ls("rmanGlobals", uuid=True)[0]
+        if uuid not in _watched:
+            sel = om2.MSelectionList()
+            sel.add("rmanGlobals")
+
+            def changed(message, plug, *_args):
+                if message & om2.MNodeMessage.kAttributeSet and plug.partialName(useLongNames=True) == "renderVariant":
+                    maya.utils.executeDeferred(lambda: cmds.ls(type="groomLabShape") and warn_if_xpu(force=True))
+
+            _watched[uuid] = om2.MNodeMessage.addAttributeChangedCallback(sel.getDependNode(0), changed)

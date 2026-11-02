@@ -199,3 +199,9 @@ The groom's own shape renders nothing in RenderMan for Maya. Without a scalp cac
 doesn't blur: each frame's file holds the scalp at that frame. Use **Render from Groom File** for
 deformation blur. On Maya 2022, or with RenderMan for Maya not loaded, nothing is made and the menu
 item doesn't show.
+
+**XPU** (Render Settings > Features > Renderer) renders no procedurals of any kind (prman:
+"Geometry ... is of unsupported type: Ri:Procedural"; RenderMan for Maya's own RenderManArchive is
+one too), so an XPU render leaves the grooms out. Render grooms with RIS. GroomLab warns once per
+scene when RenderMan for Maya renders with XPU (`groomlab.renderman.warn_if_xpu`), and when the
+renderer is switched to XPU with grooms in the scene.

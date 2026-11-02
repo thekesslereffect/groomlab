@@ -850,6 +850,19 @@ The IPR now renders and converges, and an edit renders the groom again: confirme
 2026 with RfM 27.3 (the scripted window could not show it: there RfM's IPR took no edit at all, a
 light's intensity included).
 
+**XPU.** RenderMan's XPU renders no procedural of any kind: prman `-variant xpucpu` says
+"Geometry ... is of unsupported type: Ri:Procedural" for `Procedural2` and the older call alike,
+and RfM writes its RenderManArchive as `Procedural2 "DelayedReadArchive2"`, so it fails the same way.
+Plain `Curves` with the hair network render in XPU (tested with a RIB of curves and the PxrPrimvar,
+PxrHairColor, PxrMix, PxrMarschnerHair network). RfM renders XGen Interactive Groom in XPU through a
+translator of its own (`MayaTransXGenGroom` in rfm.mll: the description's splines through
+`XGenSplineAPI`, written as curves); legacy XGen is `XGenProcPrim`, a procedural. Feeding GroomLab's
+strands into an Interactive Groom description was tried and gave an empty description every time
+(`xgmSplineCache -import` of GroomLab's Alembic; `xgmCurveToSpline` with `useAlembicCurve` reading
+it, or Maya's own AbcExport curves, spliced before the description `xgmCreateSplineDescription`
+made: `loadedData` stayed empty in mayapy). So: `warn_if_xpu` (pre_shape, once per scene) and a
+callback on `rmanGlobals.renderVariant` (watch_grooms) warn that grooms need RIS.
+
 **Not yet verified:** shutter units.
 
 Not done either: LOD and culling (they need the camera), and instances and scales.

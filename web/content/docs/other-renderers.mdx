@@ -164,6 +164,11 @@ scene, shading network included. The primvars are listed in
   RenderMan Procedural** selects a groom's node, for its density and scales. An interactive render
   (IPR) follows edits to the groom as you make them. RenderMan for Maya 27.3 has no Maya 2027
   version.
+- **XPU:** RenderMan's XPU renderer renders no procedurals, the kind of object GroomLab hands
+  RenderMan its grooms as, so XPU renders leave the grooms out: render them with **RIS** (Render
+  Settings > Features > Renderer). GroomLab warns when the renderer is set to XPU and the scene
+  has grooms. (XGen Interactive Groom renders in XPU because RenderMan for Maya has a translator
+  of its own for it.)
 - **Color:** GroomLab's melanin and redness are converted to PxrHairColor's (the `rman_melanin`
   and `rman_redness` primvars). Under a strong key light, light hair can render darker than in
   Arnold, because PxrMarschnerHair transmits less light through many hairs.

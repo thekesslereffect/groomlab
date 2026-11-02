@@ -959,6 +959,26 @@ class RenderManForMayaTest(unittest.TestCase):
         menu._sync_renderman_item("noSuchMenu")
         self.assertFalse(cmds.menuItem(menu.RENDERMAN_ITEM, exists=True))
 
+    def test_xpu_warns_once_per_scene(self):
+        # RenderMan XPU renders no procedurals: with RfM's renderer set to XPU (rmanGlobals'
+        # renderVariant), pre_shape warns once per scene, and still writes the data string (RIS).
+        globals_node = cmds.createNode("network", name="rmanGlobals")
+        cmds.addAttr(globals_node, longName="renderVariant", dataType="string")
+        cmds.setAttr(globals_node + ".renderVariant", "ris", type="string")
+        self.assertFalse(self.rman.renderer_is_xpu())
+        self.assertFalse(self.rman.warn_if_xpu())
+        cmds.setAttr(globals_node + ".renderVariant", "xpu", type="string")
+        self.assertTrue(self.rman.renderer_is_xpu())
+        self.assertTrue(self.rman.warn_if_xpu())
+        self.assertFalse(self.rman.warn_if_xpu())  # once per scene
+        self.assertTrue(self.rman.warn_if_xpu(force=True))
+        node = self.stand_in()
+        self.rman.link_procedural(node, self.groom)
+        self.assertIn("-file", self.rman.pre_shape(node) or "")
+        cmds.setAttr(globals_node + ".renderVariant", "ris", type="string")
+        self.assertFalse(self.rman.warn_if_xpu())
+        cmds.delete(globals_node)
+
     def test_pre_shape_revision_and_a_file_in_use(self):
         # The groom's change count goes into the data string (-revision): a change makes it differ,
         # so RfM's interactive render renders the procedural again; an unchanged run writes nothing
