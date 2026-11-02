@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """RenderMan for Maya: a groom rendered at render time by groomlab_renderman through RfM's own
 generic RenderManProcedural node, with no GroomLab translator in RfM. EXPERIMENTAL: it needs
-RenderMan for Maya 27 on Maya 2024 to 2026 and is not yet verified in Maya (the procedural's
-render path is: tests/hosts/renderman, prman with the same call).
+RenderMan for Maya 27 on Maya 2024 to 2026; rendered in all three with RfM 27.3 (the procedural's
+render path is tested: tests/hosts/renderman, prman with the same call).
 
 RfM's RenderManProcedural node drives RenderMan's older procedural API: `__dsoname` names the
 plugin and its `data` string goes to the plugin's ConvertParameters as `-key value` pairs (the
@@ -32,6 +32,9 @@ DSO_FILE = "groomlab_renderman" + (".dll" if sys.platform == "win32" else ".so")
 DSO_ENV = "GROOMLAB_RENDERMAN_PROCEDURAL"  # a path to the plugin (or its folder) over the module's
 GROOM_ATTR = "groomLabGroom"  # message: the groom the node renders
 SHUTTER_ATTR = "groomLabShutterFromGlobals"  # bool: pre_shape writes the motion keys from rmanGlobals
+# RfM's Shading Group on a RenderManProcedural (config/extensions.json): the node takes no set
+# membership, so a shading group's message connected here is how its material reaches the curves.
+SHADING_GROUP_ATTR = "rman__torattr___customShadingGroup"
 EXPERIMENTAL_NOTE = ("experimental: needs RenderMan for Maya 27 on Maya 2024-2026; not yet verified in Maya")
 
 # The data string's keys, as the procedural spells them, by this module's argument names.
@@ -407,6 +410,10 @@ def add_renderman_procedural(groom, density=None, width_scale=None, length_scale
     node = cmds.createNode(NODE_TYPE, name=base + "Shape", parent=transform)
     node = cmds.ls(node, long=True)[0]
     cmds.setAttr(node + ".__dsoname", dso, type="string")
+    # RfM's indirect visibility inherits these, and a new shape's are off in Maya 2025 and later (on
+    # in 2024): without them the strands light no strand, and the hair renders dark.
+    for attr in ("visibleInReflections", "visibleInRefractions"):
+        cmds.setAttr(node + "." + attr, True)
     link_procedural(node, groom, density=density, width_scale=width_scale, length_scale=length_scale, debug=debug,
                     shutter_from_globals=shutter_from_globals)
     try:  # the node's own frame (the RfM UI's; the plugin reads -frame)
@@ -417,13 +424,23 @@ def add_renderman_procedural(groom, density=None, width_scale=None, length_scale
         try:
             from groomlab.shading import hair_look
             sg = create_hair_network(base, tilt=hair_look(groom)["tilt"])
-            cmds.sets(node, edit=True, forceElement=sg)
+            assign_shading_group(node, sg)
         except (RuntimeError, ValueError, TypeError) as e:
             cmds.warning("GroomLab: the RenderMan hair shader was not made (%s): see docs/DEVELOPING.md, "
                          "'RenderMan for Maya', for the network" % e)
     pre_shape(node)  # the data string complete now, not only at render time
     cmds.select(transform)
     return node
+
+
+def assign_shading_group(node, shading_group):
+    """Shade the procedural `node`'s curves with `shading_group`: its message into RfM's Shading
+    Group (SHADING_GROUP_ATTR, added as RfM's own string attribute when the node lacks it). A
+    RenderManProcedural ignores cmds.sets: in the shading group's set, RfM writes no material for it
+    and prman shades the hair a default grey."""
+    if not cmds.attributeQuery(SHADING_GROUP_ATTR, node=node, exists=True):
+        cmds.addAttr(node, longName=SHADING_GROUP_ATTR, dataType="string")
+    cmds.connectAttr(shading_group + ".message", node + "." + SHADING_GROUP_ATTR, force=True)
 
 
 # ---------------------------------------------------------------------------

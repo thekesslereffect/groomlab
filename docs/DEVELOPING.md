@@ -720,8 +720,8 @@ script divides by the disk's solid angle) and it shines down its +Z; PxrDomeLigh
 
 #### RenderMan for Maya (experimental)
 
-**Status:** needs RenderMan for Maya 27 on Maya 2024 to 2026, and is **not yet verified in Maya**
-(this machine has only Maya 2022). `hosts/maya/scripts/groomlab/renderman.py` renders a groom
+**Status:** needs RenderMan for Maya 27 on Maya 2024 to 2026; rendered in all three (below).
+`hosts/maya/scripts/groomlab/renderman.py` renders a groom
 through RfM's own generic `RenderManProcedural` node, so no GroomLab translator is needed in RfM.
 
 **What RfM has** (read from `RenderManForMaya-27.3`):
@@ -799,13 +799,20 @@ through RfM's own generic `RenderManProcedural` node, so no GroomLab translator 
     folder with a space, which `groomlab-cli` evaluates; the user's keys kept; the shutter from a
     stand-in `rmanGlobals`; the groom's own file when it renders from one.
 
-**Not yet verified** (needs Maya 2024+ with RfM 27):
-- that RfM runs the pre-shape Python script each frame and in batch;
-- that RfM passes `data` as the older API's string;
-- the bound RfM gives the procedural (a too-small bound would cull the hair);
-- shutter units;
-- the RfM node attributes `create_hair_network` sets, and shading-group assignment on a
-  RenderManProcedural.
+**In Maya 2026 with RfM 27.3** (batch `Render -r renderman`, with `MAYA_RENDER_DESC_PATH` on RfM's
+`etc` folder): RfM runs the pre-shape Python script in batch, writes `Procedural "DynamicLoad"`
+with the data string (the older API) and a bound of ±100000, and `create_hair_network`'s nodes
+come out as the RIB's network. A RenderManProcedural takes no set membership: `cmds.sets` returns
+the shading group but leaves the node out, and RfM then writes no material for it (the hair
+rendered a default grey). Its material comes from RfM's Shading Group attribute,
+`rman__torattr___customShadingGroup`, with the shading group's `message` connected
+(`assign_shading_group`; RfM's own `create_openvdb` does the same). RfM's indirect visibility
+inherits the shape's Visible in Reflections and Refractions, and a new shape's are off in Maya
+2025 and 2026 (on in 2024): with them off, no strand lights another and the hair renders dark, so
+`add_renderman_procedural` turns them on. Rendered the same in Maya 2024, 2025 and 2026 (RfM 27.3
+has no Maya 2027 build).
+
+**Not yet verified:** shutter units.
 
 Not done either: LOD and culling (they need the camera), and instances and scales.
 

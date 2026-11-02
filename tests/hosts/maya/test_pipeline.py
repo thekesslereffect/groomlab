@@ -913,6 +913,19 @@ class RenderManForMayaTest(unittest.TestCase):
         self.assertEqual(os.path.normpath(self.rman.module_root()),
                          os.path.normpath(os.path.dirname(SCRIPTS_DIR)))
 
+    def test_shading_group_reaches_the_procedural(self):
+        # RfM takes a RenderManProcedural's material from its Shading Group attribute, connected from
+        # the shading group (set membership is ignored: the hair rendered grey in RfM 27.3).
+        node = self.stand_in()
+        sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name="hair_rman_SG")
+        self.rman.assign_shading_group(node, sg)
+        plug = node + "." + self.rman.SHADING_GROUP_ATTR
+        self.assertEqual(cmds.getAttr(plug, type=True), "string")
+        self.assertEqual(cmds.listConnections(plug, plugs=True), [sg + ".message"])
+        other = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name="other_rman_SG")
+        self.rman.assign_shading_group(node, other)  # reassigned: the new one replaces it
+        self.assertEqual(cmds.listConnections(plug, plugs=True), [other + ".message"])
+
     def test_without_renderman_for_maya(self):
         # Maya 2022 has no RfM: nothing is made, nothing breaks, no dialog.
         self.assertFalse(self.rman.rfm_loaded())
