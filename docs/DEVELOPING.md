@@ -846,9 +846,9 @@ into `it`, the `it` window grabbed):
   free), and `data` names that file.
 - Queued work (`queue_renderman_sync`, the touch) goes through `maya.utils.executeDeferred`: an
   `evalDeferred` waited for the next user event, past an IPR's start.
-The IPR now renders and converges, and an edit sets the new revision; whether RfM's IPR then renders
-the groom again could not be seen there: in that scripted window RfM's IPR took no edit at all, a
-light's intensity included. Check it by hand in Maya.
+The IPR now renders and converges, and an edit renders the groom again: confirmed by hand in Maya
+2026 with RfM 27.3 (the scripted window could not show it: there RfM's IPR took no edit at all, a
+light's intensity included).
 
 **Not yet verified:** shutter units.
 

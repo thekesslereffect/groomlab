@@ -16,8 +16,7 @@ renderer at all, Render > Maya Hardware 2.0 renders with Maya's own viewport ren
   The contents of the exported files ([File contents](#file-contents)), the RenderMan procedural
   and Render > RenderMan (prman) (in RenderMan Pro Server 27.3, from Maya 2022 and the app), the V-Ray scene export and Render > V-Ray Standalone (in V-Ray Standalone 7, from
   Maya 2022) are tested. So are V-Ray for Maya (V-Ray 7, Maya 2024 to 2027) and RenderMan for Maya
-  (27.3, Maya 2024 to 2026), in batch renders, and V-Ray's interactive render (IPR); RenderMan for Maya's IPR is
-  not confirmed yet to follow edits to the groom. The Alembic and USD
+  (27.3, Maya 2024 to 2026), in batch renders and interactive renders (IPR) that follow edits to the groom. The Alembic and USD
   import steps for each renderer below follow that renderer's documentation, linked in each
   section; they have not been tested in Redshift or V-Ray yet. If a step does not work, contact
   [support@getgroomlab.com](mailto:support@getgroomlab.com).
@@ -162,8 +161,9 @@ scene, shading network included. The primvars are listed in
   batch renders and farms like any object. A RenderMan material assigned to the groom (a
   PxrMarschnerHair, in the Hypershade) is the hair's; without one, GroomLab's hair network
   (PxrMarschnerHair with PxrHairColor reading the groom's colors) is. **GroomLab > Render > Select
-  RenderMan Procedural** selects a groom's node, for its density and scales. RenderMan for Maya
-  27.3 has no Maya 2027 version.
+  RenderMan Procedural** selects a groom's node, for its density and scales. An interactive render
+  (IPR) follows edits to the groom as you make them. RenderMan for Maya 27.3 has no Maya 2027
+  version.
 - **Color:** GroomLab's melanin and redness are converted to PxrHairColor's (the `rman_melanin`
   and `rman_redness` primvars). Under a strong key light, light hair can render darker than in
   Arnold, because PxrMarschnerHair transmits less light through many hairs.
