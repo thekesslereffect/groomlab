@@ -35,12 +35,14 @@ SHUTTER_ATTR = "groomLabShutterFromGlobals"  # bool: pre_shape writes the motion
 # RfM's Shading Group on a RenderManProcedural (config/extensions.json): the node takes no set
 # membership, so a shading group's message connected here is how its material reaches the curves.
 SHADING_GROUP_ATTR = "rman__torattr___customShadingGroup"
+# int on the groom shape, dirty with any change a render of it shows (its value counts them).
+CHANGES_ATTR = "outVrayPluginData"
 
 # The data string's keys, as the procedural spells them, by this module's argument names.
 DATA_KEYS = (("file", "file"), ("frame", "frame"), ("fps", "fps"), ("density", "density"),
              ("width_scale", "widthScale"), ("length_scale", "lengthScale"), ("motion_start", "motionStart"),
              ("motion_end", "motionEnd"), ("motion_keys", "motionKeys"), ("search_paths", "searchPaths"),
-             ("name", "name"), ("debug", "debug"))
+             ("name", "name"), ("debug", "debug"), ("revision", "revision"))
 _KEY_BY_ARG = dict(DATA_KEYS)
 _KEY_CASE = dict((key.lower(), key) for _, key in DATA_KEYS)
 _KEY_CASE["filename"] = "file"
@@ -322,6 +324,36 @@ def shutter():
     return start, start + length, keys
 
 
+def export_free(groom, path):
+    """Write the groom to `path`, or, while RenderMan still has that file open, to the first
+    `<stem>.ipr<n>.groom` beside it that can be written: an interactive render renders the frame's
+    last file, and Windows refuses to replace an open file, so an update would otherwise keep
+    showing the groom as it was. The `.ipr<n>` files of earlier updates are removed when free.
+    Returns the path written."""
+    from groomlab.files import export_groom
+    stem = path[:-len(".groom")] if path.endswith(".groom") else path
+    candidates = [path] + ["%s.ipr%d.groom" % (stem, n) for n in range(1, 33)]
+    written, error = None, None
+    for candidate in candidates:
+        try:
+            export_groom(groom, candidate)
+            written = candidate
+            break
+        except RuntimeError as e:
+            if not os.path.exists(candidate):  # not a file in use: a real failure
+                raise
+            error = e
+    if written is None:
+        raise error
+    for leftover in candidates[1:]:
+        if leftover != written and os.path.exists(leftover):
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass  # still open: the next update removes it
+    return written
+
+
 # ---------------------------------------------------------------------------
 # The pre-shape script and the node
 
@@ -343,18 +375,24 @@ def pre_shape(node_or_uuid):
         frame = cmds.currentTime(query=True)
         path, export = groom_file_for(groom, frame)
         if export:
-            from groomlab.files import export_groom
             folder = os.path.dirname(path)
             if not os.path.isdir(folder):
                 os.makedirs(folder)
-            export_groom(groom, path)
+            path = export_free(groom, path)
         values = {"file": path, "frame": frame}
         if not cmds.attributeQuery(SHUTTER_ATTR, node=node, exists=True) or cmds.getAttr(node + "." + SHUTTER_ATTR):
             keys = shutter()
             values.update(motion_start=keys[0] if keys else None, motion_end=keys[1] if keys else None,
                           motion_keys=keys[2] if keys else None)
-        data = update_data(cmds.getAttr(node + ".data") or "", **values)
-        cmds.setAttr(node + ".data", data, type="string")
+        if cmds.attributeQuery(CHANGES_ATTR, node=groom, exists=True):
+            # The groom's change counter: a change makes the data string differ, so an interactive
+            # render renders the procedural again (the file's name stays the frame's). Read, it is
+            # clean again: the groom's next change dirties it (watch_grooms).
+            values["revision"] = cmds.getAttr(groom + "." + CHANGES_ATTR)
+        current = cmds.getAttr(node + ".data") or ""
+        data = update_data(current, **values)
+        if data != current:  # an unchanged write would make RfM's IPR translate the node again, endlessly
+            cmds.setAttr(node + ".data", data, type="string")
         return data
     except Exception as e:  # noqa: BLE001 (a render must go on: report whatever went wrong)
         try:
@@ -498,6 +536,7 @@ def sync_renderman():
                 cmds.delete(transform[0] if lone else node)
         for groom in cmds.ls(type="groomLabShape", long=True, noIntermediate=True) or []:
             found.append(add_renderman_procedural(groom))
+        watch_grooms()
     except Exception as e:  # noqa: BLE001 (a callback: whatever went wrong, warn and go on)
         cmds.warning("GroomLab: RenderMan: %s" % e)
     return found
@@ -507,8 +546,10 @@ _sync_queued = [False]
 
 
 def queue_renderman_sync():
-    """sync_renderman once Maya is idle again, once however many times this is called before (the
-    plugin calls it as each groom is made or deleted). Nothing without RfM."""
+    """sync_renderman once the command that made or deleted grooms is done (maya.utils.
+    executeDeferred: Maya's evalDeferred queue can wait for the next user event, past an
+    interactive render's start), once however many times this is called before (the plugin calls
+    it as each groom is made or deleted, in interactive sessions). Nothing without RfM."""
     if cmds is None or _sync_queued[0] or not rfm_loaded():
         return
 
@@ -517,7 +558,8 @@ def queue_renderman_sync():
         sync_renderman()
 
     _sync_queued[0] = True
-    cmds.evalDeferred(run, lowestPriority=True)
+    import maya.utils
+    maya.utils.executeDeferred(run)
 
 
 def assign_shading_group(node, shading_group):
@@ -611,3 +653,76 @@ def create_hair_network(name="groomLabRman", tilt=3.0):
     sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name=name + "_SG")
     cmds.connectAttr(hair + ".outColor", sg + ".surfaceShader", force=True)
     return sg
+
+
+# ---------------------------------------------------------------------------
+# Interactive renders: RfM's IPR renders a node again when an attribute of it is set, and the
+# groom's changes reach the procedural through no attribute of its own. In an interactive session,
+# a change to a groom (WATCHED going dirty) sets the -revision of its procedurals' data
+# strings; a running IPR translates them again, and pre_shape writes the groom file anew. (RfM's
+# rfm2.render.ipr_is_running() said False while its IPR rendered into it: no gate on it.)
+
+_watched = {}  # groom UUID -> callback id
+# The groom's attributes whose change a render shows (the inputs of CHANGES_ATTR, groom_shape.cpp):
+# the plugs that send a dirty message when they change. (Under the Evaluation Manager, Maya's
+# default, the outputs they affect send none.) touch_procedurals writes only a real change.
+WATCHED = frozenset((
+    "inMesh", "restMesh", "followScalp", "scalpTopology", "colliderMeshes", "extraScalps", "simGuides",
+    "guideCache", "guideCacheObject", "simCaches", "guideCurves", "graph", "guideData", "correctiveData",
+    "correctiveWeight", "sculptData", "sculptNode", "flowData", "partData", "scalpMaps", "renderDensity",
+    "renderWidthScale", "renderLengthScale", "renderMode", "groomFile", CHANGES_ATTR))
+_touch_queued = set()
+
+
+def touch_procedurals(groom):
+    """Set the -revision of `groom`'s procedurals to its change count, outside the undo queue (an
+    interactive render's bookkeeping, not an edit)."""
+    if not cmds.objExists(groom) or not cmds.attributeQuery(CHANGES_ATTR, node=groom, exists=True):
+        return
+    revision = cmds.getAttr(groom + "." + CHANGES_ATTR)  # clean again: the next change dirties it
+    for node in procedurals_of(groom):
+        current = cmds.getAttr(node + ".data") or ""
+        data = update_data(current, revision=revision)
+        if data != current:
+            cmds.undoInfo(stateWithoutFlush=False)
+            try:
+                cmds.setAttr(node + ".data", data, type="string")
+            finally:
+                cmds.undoInfo(stateWithoutFlush=True)
+
+
+def watch_grooms():
+    """Watch every groom that has a procedural (sync_renderman runs this), in an interactive
+    session: its changes touch its procedurals (touch_procedurals, once per idle however many
+    changes come; never inside the dirty callback itself)."""
+    import maya.api.OpenMaya as om2
+    import maya.utils
+    if cmds.about(batch=True):
+        return
+    for uuid in list(_watched):
+        if not cmds.ls(uuid):
+            try:
+                om2.MMessage.removeCallback(_watched.pop(uuid))
+            except RuntimeError:
+                pass
+    for groom in cmds.ls(type="groomLabShape", long=True) or []:
+        uuid = cmds.ls(groom, uuid=True)[0]
+        if uuid in _watched or not procedurals_of(groom):
+            continue
+        sel = om2.MSelectionList()
+        sel.add(groom)
+
+        def dirty(node, plug, *_args, uuid=uuid):
+            if plug.partialName(useLongNames=True) not in WATCHED or uuid in _touch_queued:
+                return
+
+            def run():
+                _touch_queued.discard(uuid)
+                found = cmds.ls(uuid, long=True)
+                if found:
+                    touch_procedurals(found[0])
+
+            _touch_queued.add(uuid)
+            maya.utils.executeDeferred(run)
+
+        _watched[uuid] = om2.MNodeMessage.addNodeDirtyPlugCallback(sel.getDependNode(0), dirty)

@@ -5,31 +5,32 @@
 // one registered for a node type while it translates the scene (V-Ray for Maya's SDK:
 // vray/include/vray_maya_sdk/translator_interface.h and its samples/maya_plugins/translators).
 //
-// Each groom becomes:
+// It is a geometry translator: V-Ray asks it for the groom's geometry, makes the Node as for any
+// shape (transform, render flags, object IDs, light links, the material of the groom's shading
+// group: a VRayHairNextMtl assigned in the Hypershade), and, in an interactive render, asks again
+// whenever the groom's outVrayPluginData goes dirty (any change a render of it shows). Each groom:
 //   GeomMayaHair <groom>@groomlabHair   the strands at render density with the groom's render
 //                                       overrides, in its object space (vrscene_writer.h
 //                                       vray::hairArrays: what a .vrscene of it holds), the radii
 //                                       times the transform's scale (V-Ray scales hair points by a
-//                                       Node's transform, not its widths)
-//   Node                                V-Ray's own (exportNodePlugin): the transform, render flags,
-//                                       object IDs and light links as for any shape
-//   material                            the groom's shading group's shader, translated by V-Ray (a
-//                                       VRayHairNextMtl assigned in the Hypershade); without one
-//                                       (none, or Maya's initialShadingGroup), GroomLab's hair:
+//                                       Node's transform, not its widths); with V-Ray's geometry
+//                                       samples above 1, the points keyed for deformation blur
+//   Node, material                      a groom with no material of its own (in no shading group, or
+//                                       Maya's default) gets no Node from V-Ray: the translator
+//                                       makes it, on the first translation, with GroomLab's hair:
 //                                       BRDFHair4 reading the strands' colors through a
-//                                       TexHairSampler, its lobes the groom's look (vray::vrayHairBrdf,
-//                                       the .vrscene's material)
+//                                       TexHairSampler, its lobes the groom's look
+//                                       (vray::vrayHairBrdf, the .vrscene's material). An interactive
+//                                       render's updates replace the hair under it.
 //
 // The groom is evaluated by a NodeEvaluator kept per groom across frames and re-renders (as the
 // MtoA extension keeps one), so a static groom's next frame is a cache hit.
 
-#include <cstdlib>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 
-#include <maya/MAnimControl.h>
 #include <maya/MCallbackIdArray.h>
 #include <maya/MDGMessage.h>
 #include <maya/MDagPath.h>
@@ -50,6 +51,7 @@
 #include "vrayplugins.h"
 #include "defparams.h"
 #include "plugman.h"
+#include "vraymayageom.h"  // AnimatedParameterInterface
 
 #include "groomlab/hair_color.h"
 #include "groomlab/render_overrides.h"
@@ -160,6 +162,103 @@ void setColorList(Context& c, VUtils::VRayPlugin* plugin, const char* name, cons
     setParam(c, plugin, param);
 }
 
+// ---------------------------------------------------------------------------
+// Deformation motion blur. V-Ray for Maya translates a groom once per frame and then, for its
+// geometry samples, steps Maya's time through the shutter and calls createKeyFrame(time) on every
+// registered parameter that has AnimatedParameterInterface (vraymayageom.h). The strands' points
+// take a key at each such time: the groom evaluated again there (the kept evaluator re-runs only
+// what moves), the same strands as the frame's (a rest mesh guarantees them on a deforming scalp,
+// as for Arnold's motion keys); a time whose strands differ keeps the frame's points.
+
+struct GroomKeys {
+    std::shared_ptr<groomlab::maya::NodeEvaluator> evaluator;
+    groomlab::RenderOverrides overrides;
+    MString name;
+    std::size_t values = 0;  // 3 a point: the frame's
+    bool warned = false;
+
+    // The points at Maya's current time, or false when its strands are not the frame's.
+    bool pointsNow(std::vector<float>* xyz) {
+        std::string error;
+        groomlab::MeshPtr scalp;
+        const groomlab::StrandsPtr strands =
+            groomlab::applyRenderOverrides(evaluator->evaluate(overrides.densityTimes(1.0f), &error, &scalp), overrides);
+        if (strands) {
+            groomlab::vray::HairArrays a = groomlab::vray::hairArrays(*strands, scalp.get());
+            if (a.xyz.size() == values) {
+                *xyz = std::move(a.xyz);
+                return true;
+            }
+        }
+        if (!warned) {
+            warned = true;
+            warn(name, "strands change within the shutter (give the groom a rest mesh): rendering without "
+                       "deformation blur");
+        }
+        return false;
+    }
+};
+
+class KeyedPointsParam : public VUtils::DefVectorListParam, public VUtils::AnimatedParameterInterface {
+public:
+    KeyedPointsParam(std::shared_ptr<GroomKeys> keys, const std::vector<float>& xyz)
+        : VUtils::DefVectorListParam("hair_vertices"), keys_(std::move(keys)) {
+        fill(values, xyz);
+    }
+    KeyedPointsParam(const KeyedPointsParam& other) : VUtils::DefVectorListParam(other), keys_(other.keys_) {
+        for (const auto& key : other.keyed_) keyed_[key.first].copy(key.second);
+    }
+
+    PluginBase* getPlugin(void) override { return static_cast<VUtils::DefVectorListParam*>(this); }
+    PluginInterface* newInterface(InterfaceID id) override {
+        if (id == EXT_ANIMATEDPARAM) return static_cast<VUtils::AnimatedParameterInterface*>(this);
+        return VUtils::DefVectorListParam::newInterface(id);
+    }
+    VUtils::VRayPluginParameter* clone() override { return new KeyedPointsParam(*this); }
+
+    // The key at `time` (the nearest: V-Ray asks at its keys' times), else the frame's points.
+    VUtils::Vector getVector(int index, double time) override { return at(time)[index]; }
+    VUtils::VectorList getVectorList(double time) override {
+        VUtils::Table<VUtils::Vector>& t = at(time);
+        return VUtils::VectorList(t.count() ? &t[0] : nullptr, t.count());
+    }
+    int getCount(double time) override { return listLevel == 0 ? at(time).count() : -1; }
+
+    void createKeyFrame(double time, int /*preRender*/) override {
+        std::vector<float> xyz;
+        if (!keys_ || !keys_->pointsNow(&xyz)) return;
+        fill(keyed_[time], xyz);
+    }
+    void clearKeyFrames(double clearUpToTime, int keepFirst) override {
+        if (clearUpToTime >= CLEAR_ALL_KEYFRAMES) {
+            keyed_.clear();
+            return;
+        }
+        for (auto it = keyed_.begin(); it != keyed_.end();) {
+            const bool first = keepFirst && it == keyed_.begin();
+            it = (it->first < clearUpToTime && !first) ? keyed_.erase(it) : std::next(it);
+        }
+    }
+
+private:
+    static void fill(VUtils::Table<VUtils::Vector>& t, const std::vector<float>& xyz) {
+        const int n = static_cast<int>(xyz.size() / 3);
+        t.setCount(n, true);
+        for (int i = 0; i < n; ++i) t[i] = VUtils::Vector(xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]);
+    }
+    VUtils::Table<VUtils::Vector>& at(double time) {
+        if (keyed_.empty()) return values;
+        auto after = keyed_.lower_bound(time);
+        if (after == keyed_.begin()) return after->second;
+        if (after == keyed_.end()) return std::prev(after)->second;
+        auto before = std::prev(after);
+        return time - before->first <= after->first - time ? before->second : after->second;
+    }
+
+    std::shared_ptr<GroomKeys> keys_;
+    std::map<double, VUtils::Table<VUtils::Vector>> keyed_;
+};
+
 VUtils::VRayPlugin* createPlugin(Context& c, const char* type, const VUtils::CharString& name) {
     bool existing = false;
     return c.mexporter9->createPlugin(type, name.ptr(), existing, c.flags.recreate != 0);
@@ -183,100 +282,119 @@ MPlug assignedShader(const MDagPath& path) {
     return MPlug();
 }
 
-class GroomTranslator : public VRayMaya::InstanceTranslator {
-public:
-    VUtils::VRayPlugin* translateInstance(Context& c, int /*mbSamples*/,
-                                          Context::OutFlags& outFlags) override {
-        outFlags.existing = false;
-        if (!c.mexporter15) {
-            MGlobal::displayError("GroomLab: this V-Ray for Maya is too old for GroomLab's translator");
-            return nullptr;
-        }
-        MFnDependencyNode depNode(c.object);
-        const MString nodeName = c.path.partialPathName();
-        try {  // never let an exception reach V-Ray (a render-density bad_alloc, say)
-            groomlab::maya::refreshMayaPaths();  // this DLL keeps its own copy
-            const auto evaluator = keptEvaluator(c.object, c.path.instanceNumber());
-            evaluator->refreshStoredInputs();  // edits since its last translation
-            groomlab::RenderOverrides overrides;
-            overrides.density = depNode.findPlug("renderDensity", true).asFloat();
-            overrides.widthScale = depNode.findPlug("renderWidthScale", true).asFloat();
-            overrides.lengthScale = depNode.findPlug("renderLengthScale", true).asFloat();
-            std::string error;
-            groomlab::MeshPtr scalp;
-            const groomlab::StrandsPtr strands =
-                groomlab::applyRenderOverrides(evaluator->evaluate(overrides.densityTimes(1.0f), &error, &scalp), overrides);
-            if (!error.empty()) warn(nodeName, error);
-            if (!strands) return nullptr;
+// The groom as GeomMayaHair: evaluated at render density with its render overrides, the points
+// keyed for deformation blur when V-Ray takes more than one geometry sample. Sets `evaluator` and
+// `transparency` for the material; null when the groom gives no strands.
+VUtils::VRayPlugin* exportHair(Context& c, int mbSamples, std::shared_ptr<groomlab::maya::NodeEvaluator>* evaluatorOut,
+                               bool* transparency) {
+    MFnDependencyNode depNode(c.object);
+    const MString nodeName = c.path.partialPathName();
+    // Read, so it is clean: the groom's next change then dirties it, which is what the IPR
+    // watches (Maya sends no dirty message for a plug that is dirty already).
+    depNode.findPlug("outVrayPluginData", true).asInt();
+    groomlab::maya::refreshMayaPaths();  // this DLL keeps its own copy
+    const auto evaluator = keptEvaluator(c.object, c.path.instanceNumber());
+    evaluator->refreshStoredInputs();  // edits since its last translation
+    groomlab::RenderOverrides overrides;
+    overrides.density = depNode.findPlug("renderDensity", true).asFloat();
+    overrides.widthScale = depNode.findPlug("renderWidthScale", true).asFloat();
+    overrides.lengthScale = depNode.findPlug("renderLengthScale", true).asFloat();
+    std::string error;
+    groomlab::MeshPtr scalp;
+    const groomlab::StrandsPtr strands =
+        groomlab::applyRenderOverrides(evaluator->evaluate(overrides.densityTimes(1.0f), &error, &scalp), overrides);
+    if (!error.empty()) warn(nodeName, error);
+    if (!strands) return nullptr;
+    if (evaluatorOut) *evaluatorOut = evaluator;
 
-            // The Node's transform scales the points but not V-Ray's hair widths: the radii take it.
-            const MMatrix world = c.path.inclusiveMatrix();
-            double m[16];
-            for (int r = 0; r < 4; ++r) {
-                for (int k = 0; k < 4; ++k) m[4 * r + k] = world[r][k];
-            }
-            groomlab::vray::HairArrays a = groomlab::vray::hairArrays(*strands, scalp.get());
-            const float widthScale = static_cast<float>(groomlab::vray::matrixScale(m));
-            for (float& w : a.widths) w *= widthScale;
-
-            const VUtils::CharString hairName = c.mexporter9->makeGeometryName(depNode, "@groomlabHair");
-            VUtils::VRayPlugin* hair = createPlugin(c, "GeomMayaHair", hairName);
-            if (!hair) return nullptr;
-            setIntList(c, hair, "num_hair_vertices", a.counts);
-            setVectorList(c, hair, "hair_vertices", a.xyz);
-            setFloatList(c, hair, "widths", a.widths);
-            setColorList(c, hair, "colors", a.colors);
-            if (a.hasTransparency) setColorList(c, hair, "transparency", a.transparency);
-            if (a.hasUVs) setVectorList(c, hair, "strand_uvw", a.uvw);
-            setInt(c, hair, "geom_splines", 1);
-
-            VUtils::VRayPlugin* node = c.mexporter9->exportNodePlugin(c.path, hair, c.flags.recreate != 0);
-            if (!node) return nullptr;
-            const MPlug shader = assignedShader(c.path);
-            VUtils::VRayPluginParameter* material =
-                shader.isNull() ? nullptr : c.mexporter6->exportParam(shader, "material", Exporter::PT_material, 0, true);
-            if (!material) {
-                groomlab::HairLook look;
-                if (!evaluator->hairLook(&look)) look = groomlab::HairLook{};
-                material = c.mexporter6->pluginToParameter("material", hairMaterial(c, depNode, look, a.hasTransparency));
-            }
-            setParam(c, node, material);
-            return node;
-        } catch (const std::exception& e) {
-            MGlobal::displayError("GroomLab: V-Ray: " + nodeName + ": " + MString(e.what()));
-            return nullptr;
-        }
+    // The Node's transform scales the points but not V-Ray's hair widths: the radii take it.
+    const MMatrix world = c.path.inclusiveMatrix();
+    double m[16];
+    for (int r = 0; r < 4; ++r) {
+        for (int k = 0; k < 4; ++k) m[4 * r + k] = world[r][k];
     }
+    groomlab::vray::HairArrays a = groomlab::vray::hairArrays(*strands, scalp.get());
+    const float widthScale = static_cast<float>(groomlab::vray::matrixScale(m));
+    for (float& w : a.widths) w *= widthScale;
+    if (transparency) *transparency = a.hasTransparency;
 
-private:
-    // GroomLab's hair for a groom without a shader of its own: the .vrscene's (vrscene_writer.h).
-    VUtils::VRayPlugin* hairMaterial(Context& c, MFnDependencyNode& depNode, const groomlab::HairLook& look,
-                                     bool transparency) {
-        const groomlab::vray::HairBrdf b = groomlab::vray::vrayHairBrdf(groomlab::hairLobes(look));
-        VUtils::VRayPlugin* sampler = createPlugin(c, "TexHairSampler", c.mexporter9->makeGeometryName(depNode, "@groomlabHairSampler"));
-        VUtils::VRayPlugin* brdf = createPlugin(c, "BRDFHair4", c.mexporter9->makeGeometryName(depNode, "@groomlabHairBrdf"));
-        VUtils::VRayPlugin* mtl = createPlugin(c, "MtlSingleBRDF", c.mexporter9->makeGeometryName(depNode, "@groomlabHairMtl"));
-        if (!sampler || !brdf || !mtl) return mtl;
-        setFloat(c, brdf, "melanin", 0.0f);  // the pigment is in the colors
-        setFloat(c, brdf, "pheomelanin", 0.0f);
-        setPlugin(c, brdf, "dye_color", sampler, "hair_color");
-        setFloat(c, brdf, "glossiness", b.glossiness);
-        setFloat(c, brdf, "softness", b.softness);
-        setFloat(c, brdf, "primary_glossiness_boost", 0.0f);
-        setParam(c, brdf, c.mexporter15->exportValueParam("primary_tint", VUtils::AColor(b.primaryTint, b.primaryTint, b.primaryTint, 1.0f)));
-        setFloat(c, brdf, "highlight_shift", b.highlightShift);
-        setFloat(c, brdf, "ior", b.ior);
-        setInt(c, brdf, "trace_depth", b.traceDepth);
-        setFloat(c, brdf, "glint_strength", 0.0f);
-        setFloat(c, brdf, "glitter_strength", 0.0f);
-        if (transparency) setPlugin(c, brdf, "transparency", sampler, "hair_transparency");
-        setPlugin(c, mtl, "brdf", brdf);
-        return mtl;
+    const VUtils::CharString hairName = c.mexporter9->makeGeometryName(depNode, "@groomlabHair");
+    VUtils::VRayPlugin* hair = createPlugin(c, "GeomMayaHair", hairName);
+    if (!hair) return nullptr;
+    setIntList(c, hair, "num_hair_vertices", a.counts);
+    if (mbSamples > 1) {  // deformation blur: the points keyed at V-Ray's geometry samples
+        auto keys = std::make_shared<GroomKeys>();
+        keys->evaluator = evaluator;
+        keys->overrides = overrides;
+        keys->name = nodeName;
+        keys->values = a.xyz.size();
+        setParam(c, hair, c.mexporter->registerParam(new KeyedPointsParam(keys, a.xyz)));
+    } else {
+        setVectorList(c, hair, "hair_vertices", a.xyz);
+    }
+    setFloatList(c, hair, "widths", a.widths);
+    setColorList(c, hair, "colors", a.colors);
+    if (a.hasTransparency) setColorList(c, hair, "transparency", a.transparency);
+    if (a.hasUVs) setVectorList(c, hair, "strand_uvw", a.uvw);
+    setInt(c, hair, "geom_splines", 1);
+    return hair;
+}
+
+// GroomLab's hair for a groom without a shader of its own: the .vrscene's (vrscene_writer.h).
+VUtils::VRayPlugin* hairMaterial(Context& c, MFnDependencyNode& depNode, const groomlab::HairLook& look, bool transparency) {
+    const groomlab::vray::HairBrdf b = groomlab::vray::vrayHairBrdf(groomlab::hairLobes(look));
+    VUtils::VRayPlugin* sampler = createPlugin(c, "TexHairSampler", c.mexporter9->makeGeometryName(depNode, "@groomlabHairSampler"));
+    VUtils::VRayPlugin* brdf = createPlugin(c, "BRDFHair4", c.mexporter9->makeGeometryName(depNode, "@groomlabHairBrdf"));
+    VUtils::VRayPlugin* mtl = createPlugin(c, "MtlSingleBRDF", c.mexporter9->makeGeometryName(depNode, "@groomlabHairMtl"));
+    if (!sampler || !brdf || !mtl) return mtl;
+    setFloat(c, brdf, "melanin", 0.0f);  // the pigment is in the colors
+    setFloat(c, brdf, "pheomelanin", 0.0f);
+    setPlugin(c, brdf, "dye_color", sampler, "hair_color");
+    setFloat(c, brdf, "glossiness", b.glossiness);
+    setFloat(c, brdf, "softness", b.softness);
+    setFloat(c, brdf, "primary_glossiness_boost", 0.0f);
+    setParam(c, brdf, c.mexporter15->exportValueParam("primary_tint", VUtils::AColor(b.primaryTint, b.primaryTint, b.primaryTint, 1.0f)));
+    setFloat(c, brdf, "highlight_shift", b.highlightShift);
+    setFloat(c, brdf, "ior", b.ior);
+    setInt(c, brdf, "trace_depth", b.traceDepth);
+    setFloat(c, brdf, "glint_strength", 0.0f);
+    setFloat(c, brdf, "glitter_strength", 0.0f);
+    if (transparency) setPlugin(c, brdf, "transparency", sampler, "hair_transparency");
+    setPlugin(c, mtl, "brdf", brdf);
+    return mtl;
+}
+
+class GroomTranslator : public VRayMaya::GeometryTranslator {
+public:
+    VUtils::VRayPlugin* translateGeometry(Context& c, int mbSamples, Context::OutFlags& outFlags) override {
+        outFlags.existing = false;
+        try {
+            std::shared_ptr<groomlab::maya::NodeEvaluator> evaluator;
+            bool transparency = false;
+            VUtils::VRayPlugin* hair = exportHair(c, mbSamples, &evaluator, &transparency);
+            if (hair && !c.flags.recreate && assignedShader(c.path).isNull()) {
+                // No material of its own: V-Ray makes no Node for a shape outside every shading
+                // group, so make it here with GroomLab's hair, once: an interactive render's
+                // update (recreate) replaces the hair under it (making the Node again then crashed
+                // Maya).
+                MFnDependencyNode depNode(c.object);
+                VUtils::VRayPlugin* node = c.mexporter9->exportNodePlugin(c.path, hair, c.flags.recreate != 0);
+                if (node) {
+                    groomlab::HairLook look;
+                    if (!evaluator->hairLook(&look)) look = groomlab::HairLook{};
+                    setParam(c, node, c.mexporter6->pluginToParameter("material", hairMaterial(c, depNode, look, transparency)));
+                }
+            }
+            return hair;
+        } catch (const std::exception& e) {
+            MGlobal::displayError("GroomLab: V-Ray: " + c.path.partialPathName() + ": " + MString(e.what()));
+            return nullptr;
+        }
     }
 };
 
-VRayMaya::InstanceTranslator* creator() { return new GroomTranslator(); }
-void deleter(VRayMaya::InstanceTranslator* t) { delete t; }
+VRayMaya::GeometryTranslator* creator() { return new GroomTranslator(); }
+void deleter(VRayMaya::GeometryTranslator* t) { delete t; }
 
 }  // namespace
 

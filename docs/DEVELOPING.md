@@ -829,6 +829,27 @@ batch render opened the scene) and with a PxrMarschnerHair assigned to the groom
 Probe: `build/probe/render_hooks` (`make_scenes.py` builds a scene per renderer in mayapy,
 `run_version.ps1 -Year <y> -Build <preset>` installs the build beside it and batch-renders each).
 
+**Interactive renders (IPR).** Measured in a scripted Maya 2026 window (`run_ipr.ps1`, RfM's IPR
+into `it`, the `it` window grabbed):
+- `pre_shape` wrote `data` on every run, and RfM translates a node again when an attribute of it is
+  set, so the IPR translated the procedural without end and never got past its first seconds.
+  `pre_shape` now writes `data` only when it changes.
+- RfM's IPR follows no connection into the procedural, so a groom's change never reached it.
+  `pre_shape` puts the groom's change count (its `outVrayPluginData`, the V-Ray translator's) in
+  `data` as `-revision` (the procedural reads and ignores it), and `watch_grooms` (run by
+  `sync_renderman`, interactive sessions only) listens to each groom's render inputs (dirty-plug
+  callbacks on the inputs themselves: under the Evaluation Manager the outputs send none) and sets
+  the new `-revision` on its procedurals once per idle (`touch_procedurals`, outside the undo queue).
+  `rfm2.render.ipr_is_running()` said False while the IPR rendered into `it`, so nothing waits on it.
+- While prman renders, the procedural holds the frame's groom file open and Windows refuses to
+  replace it: `export_free` writes `<name>.ipr<n>.groom` beside it then (and removes older ones when
+  free), and `data` names that file.
+- Queued work (`queue_renderman_sync`, the touch) goes through `maya.utils.executeDeferred`: an
+  `evalDeferred` waited for the next user event, past an IPR's start.
+The IPR now renders and converges, and an edit sets the new revision; whether RfM's IPR then renders
+the groom again could not be seen there: in that scripted window RfM's IPR took no edit at all, a
+light's intensity included. Check it by hand in Maya.
+
 **Not yet verified:** shutter units.
 
 Not done either: LOD and culling (they need the camera), and instances and scales.
@@ -905,19 +926,41 @@ calls into it) and nothing else of V-Ray: parameters come from the exporter's `c
 `vrayplugins.h`, then `defparams.h` (each assumes the one before); `queryInterface` is a global
 template (`plugman.h`). The SDK stays out of the repository.
 
-It registers an `InstanceTranslator` for `groomLabShape`: the groom evaluated at render density
+It registers a `GeometryTranslator` for `groomLabShape`: the groom evaluated at render density
 with its render overrides by a `NodeEvaluator` kept per groom (the MtoA extension's way), the
 strands as `GeomMayaHair` from `vray::hairArrays` (the `.vrscene`'s arrays, shared code), the radii
 times `vray::matrixScale` of the world matrix (V-Ray scales hair points by a Node's transform but
-not its widths), V-Ray's own `Node` (`exportNodePlugin`: transform, render flags, object IDs, light
-links), and the material: the groom's shading group's surface shader exported by V-Ray
-(`exportParam(..., PT_material)`: a VRayHairNextMtl assigned in the Hypershade) unless it is Maya's
-`initialShadingGroup`, else `TexHairSampler` + `BRDFHair4` + `MtlSingleBRDF` as the `.vrscene`
-writes them. Verified in Maya 2026 with V-Ray 7 (batch `Render -r vray`, the probe above): the
-groom renders with GroomLab's hair, and a VRayHairNextMtl assigned to it renders as that material.
-Not done: deformation motion blur (V-Ray's `mbSamples` is ignored: the Node's transform blurs, the
-strands do not), render LOD and culling, instances and scales, IPR updates while grooming (V-Ray's
-FAQ: the node needs an `outVrayPluginData` output affected by its inputs).
+not its widths). V-Ray makes the `Node` as for any shape (transform, render flags, object IDs,
+light links) with the groom's shading group's material (a VRayHairNextMtl assigned in the
+Hypershade). A groom with no material of its own (in no shading group, or Maya's
+`initialShadingGroup`) gets no Node from V-Ray: the translator makes it (`exportNodePlugin`) with
+`TexHairSampler` + `BRDFHair4` + `MtlSingleBRDF` as the `.vrscene` writes them, on the first
+translation only (`flags.recreate` 0: making it again in an IPR update crashed Maya; the update
+replaces the hair under it).
+
+Why a geometry translator: V-Ray's IPR translates a custom node again only through one. An
+`InstanceTranslator` (which makes its own Node, so it controls the material) was translated once and
+never again, whatever changed (`OutFlags::rtLinkShape` on, the Evaluation Manager on or off, both
+kinds registered: V-Ray used the instance one). The IPR asks again when the shape's integer output
+`outVrayPluginData` goes dirty (V-Ray's name, its SDK's FAQ): `GroomShape` has it, affected by what a
+render shows (the scalp and collider inputs, guides, graph, sculpts, caches, time, the render
+overrides, render mode and groom file; not the viewport's preview density, display or brush tick),
+its value a counter; the translator reads it so it is clean for the next change.
+
+**Deformation blur.** V-Ray translates once per frame and passes `mbSamples`; then, for its geometry
+samples, it steps Maya's time through the shutter and calls `createKeyFrame(time)` on every
+registered parameter with `AnimatedParameterInterface` (`vraymayageom.h`; measured: keys at 1, 1.5,
+2 for a centred one-frame shutter with 3 samples, Maya at each time). With `mbSamples` above 1,
+`hair_vertices` is a `KeyedPointsParam` (a `DefVectorListParam` that is also an
+`AnimatedParameterInterface`, registered with `registerParam`): each key evaluates the groom again
+and keeps the points when the strands are the frame's (a rest mesh guarantees them), and
+`getVectorList(time)` answers the nearest key. Deriving from V-Ray's parameter classes needs
+`plugman_s.lib` (PluginBase) and `vray.lib` (vray.dll's texture interfaces) besides `vutils_s.lib`.
+
+Verified in Maya 2026 with V-Ray 7: batch renders (no material, `initialShadingGroup`, a
+VRayHairNextMtl, deformation blur of a growing scalp, a two-frame sequence) and the IPR in a scripted
+Maya window (`build/probe/render_hooks/run_ipr.ps1`: a graph edit, a render override and a scalp
+move each re-render the groom). Not done: render LOD and culling, instances and scales.
 
 The groom shape is **renderable** (`setRenderable(true)` in `GroomShape::postConstructor`): without
 it shading groups refuse it ("the set has restrictions on membership"), so the Hypershade's Assign

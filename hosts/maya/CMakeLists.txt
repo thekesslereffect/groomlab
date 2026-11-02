@@ -180,8 +180,12 @@ if(GROOMLAB_BUILD_VRAY)
     if(EXISTS "${VRAY_FOR_MAYA_LOCATION}/vray/include/vray_maya_sdk/translator_interface.h")
         message(STATUS "V-Ray for Maya at ${VRAY_FOR_MAYA_LOCATION}")
         add_library(vraytr_groomlab SHARED vray/groom_translator.cpp)
-        # vutils: V-Ray's base library (its headers' inline code calls into it), as V-Ray's samples link it.
-        target_link_libraries(vraytr_groomlab PRIVATE groomlab_maya_inputs "${VRAY_FOR_MAYA_LOCATION}/vray/lib/vutils_s.lib")
+        # V-Ray's base libraries, as V-Ray's samples link them: vutils and plugman (PluginBase: the
+        # keyed points parameter derives from V-Ray's), and vray.dll's import library (the parameter's
+        # texture interfaces), which V-Ray has loaded whenever it loads a translator.
+        target_link_libraries(vraytr_groomlab PRIVATE groomlab_maya_inputs
+            "${VRAY_FOR_MAYA_LOCATION}/vray/lib/vutils_s.lib" "${VRAY_FOR_MAYA_LOCATION}/vray/lib/plugman_s.lib"
+            "${VRAY_FOR_MAYA_LOCATION}/vray/lib/vray.lib")
         target_include_directories(vraytr_groomlab SYSTEM PRIVATE
             "${VRAY_FOR_MAYA_LOCATION}/vray/include" "${VRAY_FOR_MAYA_LOCATION}/vray/include/vray_maya_sdk")
         # V-Ray's headers as its SDK's own builds compile them (samples/enduser_cmake).

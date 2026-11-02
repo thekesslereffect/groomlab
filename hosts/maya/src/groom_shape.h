@@ -280,6 +280,9 @@ public:
     // Outputs
     static MObject aOutStrandCount;
     static MObject aLastError;       // why the last evaluation failed or was partial ("" when fine)
+    // Dirty when what a render of the groom shows may change (not the viewport's settings): V-Ray
+    // for Maya's IPR translates a custom node again when this output (its name is V-Ray's) is dirty.
+    static MObject aOutVrayPluginData;
     // The evaluation as the viewport draws it (GroomFrame), made with outStrandCount and lastError:
     // what cached playback keeps of the groom (configCache) and the viewport reads.
     static MObject aOutFrame;

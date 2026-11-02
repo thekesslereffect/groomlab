@@ -16,7 +16,8 @@ renderer at all, Render > Maya Hardware 2.0 renders with Maya's own viewport ren
   The contents of the exported files ([File contents](#file-contents)), the RenderMan procedural
   and Render > RenderMan (prman) (in RenderMan Pro Server 27.3, from Maya 2022 and the app), the V-Ray scene export and Render > V-Ray Standalone (in V-Ray Standalone 7, from
   Maya 2022) are tested. So are V-Ray for Maya (V-Ray 7, Maya 2024 to 2027) and RenderMan for Maya
-  (27.3, Maya 2024 to 2026), in batch renders; interactive renders (IPR) in them are not tested yet. The Alembic and USD
+  (27.3, Maya 2024 to 2026), in batch renders, and V-Ray's interactive render (IPR); RenderMan for Maya's IPR is
+  not confirmed yet to follow edits to the groom. The Alembic and USD
   import steps for each renderer below follow that renderer's documentation, linked in each
   section; they have not been tested in Redshift or V-Ray yet. If a step does not work, contact
   [support@getgroomlab.com](mailto:support@getgroomlab.com).
@@ -399,8 +400,11 @@ groom renders in V-Ray's renders, batch renders and farm renders with nothing to
   hair's. Without one, GroomLab's: V-Ray's hair BRDF reading each strand's color, its highlight
   from the groom's look, set up to render close to Arnold.
 - **Render flags, object IDs, light links:** the groom's own, as for any object.
-- **Motion blur:** the groom's transform blurs; strands that deform within the shutter do not yet
-  (render it from a `.vrscene` for that: below).
+- **Motion blur:** the groom's transform and its strands' deformation (a moving scalp, a simulation)
+  blur with V-Ray's camera motion blur, at its geometry samples. The strands must stay the same
+  between them, as for Arnold: give a deforming scalp a rest mesh.
+- **Interactive render (IPR):** edits to the groom (its graph, guides, render overrides, its scalp)
+  render as you make them.
 
 Scenes saved with the old **V-Ray for Maya Hook** (GroomLab 0.39 and earlier) render as before: the
 hook steps aside while the translator is installed, so each groom renders once.
@@ -442,7 +446,7 @@ vray -sceneFile=shot.vrscene -imgFile=hair.png -frames=12
 ```
 
 **V-Ray for Maya:** grooms in the scene need no file ([above](#v-ray-for-maya-maya-2024-to-2027)).
-To render a file (a groom from another scene, deformation blur), load it in a **V-Ray Scene** node
+To render a file (a groom from another scene), load it in a **V-Ray Scene** node
 (VRayScene) and render; the hair keeps the file's shader.
 
 **V-Ray for Blender** and the **GroomLab app** need no export: a final render in V-Ray for Blender

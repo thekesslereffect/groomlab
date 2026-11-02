@@ -367,12 +367,15 @@ class RenderManProcedural(unittest.TestCase):
         groom = os.path.join(folder, "moving groom.groom")
         shutil.copyfile(self.moving, groom)
         data = helper.update_data("-foo bar -density 0.3", file=groom, frame=7.5, search_paths=[COMPAT, OUT],
-                                  motion_start=-0.25, motion_end=0.25, motion_keys=2, name="hair", debug=True)
+                                  motion_start=-0.25, motion_end=0.25, motion_keys=2, name="hair", debug=True,
+                                  revision=12)
+        self.assertIn("-revision 12", data)
         out = self.check(prman(scene('Shutter -0.25 0.25\nDisplay "helper" "null" "rgba"\n', 'Bxdf "PxrDiffuse" "d"\n',
                                      old_style(data), size=16, samples=1), "helper"))
         self.assertRegex(out, r"\[groomlab\] .*moving groom\.groom: [1-9]\d* strands, \d+ points, 2 motion key\(s\) "
                               r"at frame 7\.5 ")
         self.assertIn("unknown key -foo", out)
+        self.assertNotIn("unknown key -revision", out)  # the host's change counter: read and ignored
         self.assertNotIn("not a number", out)
 
     def test_example_scene_renders_hair(self):

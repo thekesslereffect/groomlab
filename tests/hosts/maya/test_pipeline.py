@@ -959,6 +959,28 @@ class RenderManForMayaTest(unittest.TestCase):
         menu._sync_renderman_item("noSuchMenu")
         self.assertFalse(cmds.menuItem(menu.RENDERMAN_ITEM, exists=True))
 
+    def test_pre_shape_revision_and_a_file_in_use(self):
+        # The groom's change count goes into the data string (-revision): a change makes it differ,
+        # so RfM's interactive render renders the procedural again; an unchanged run writes nothing
+        # (a write would make RfM translate the node again, endlessly).
+        node = self.stand_in()
+        self.rman.link_procedural(node, self.groom)
+        data = self.rman.pre_shape(node)
+        revision = dict(self.rman.parse_data(data))["revision"]
+        self.assertEqual(self.rman.pre_shape(node), data)
+        cmds.setAttr(self.groom + ".renderDensity", 0.5)  # a change a render shows
+        self.assertNotEqual(dict(self.rman.parse_data(self.rman.pre_shape(node)))["revision"], revision)
+        # The frame's file open (prman renders it during an interactive render; Windows refuses to
+        # replace it): the groom goes to <name>.ipr1.groom beside it, and the data string names that.
+        path = dict(self.rman.parse_data(cmds.getAttr(node + ".data")))["file"]
+        with open(path, "rb"):
+            written = self.rman.export_free(self.groom, path)
+        self.assertTrue(written.endswith(".ipr1.groom"), written)
+        self.assertTrue(os.path.isfile(written))
+        # Free again: the frame's own file, and the .ipr1 file of the last update removed.
+        self.assertEqual(self.rman.export_free(self.groom, path), path)
+        self.assertFalse(os.path.exists(written))
+
     def test_pre_shape_script(self):
         node = self.stand_in()
         self.rman.link_procedural(node, self.groom, density=0.5)
