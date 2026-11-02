@@ -41,12 +41,6 @@ namespace groomlab {
 class ScalpMesh;
 class StrandSet;
 
-// What the cards' color maps (and their per-vertex tints) hold. Shaded: the hair as GroomLab's
-// viewport shades it (hair_color.h hairShadedColor), for a plain material, a lambert or an
-// engine's default lit, to look like the groom. Base: the strands' base color, for a hair shader
-// that shades it itself (aiStandardHair's base color, Unreal's Hair shading model).
-enum class CardColorLook { Shaded, Base };
-
 // A 3x3 color matrix, row-major: out[i] = sum_j m[i * 3 + j] in[j].
 using ColorMatrix = std::array<float, 9>;
 constexpr ColorMatrix kIdentityColorMatrix = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
@@ -122,7 +116,6 @@ struct CardSettings {
     // under each station), so cards shade like the strands around them instead
     // of like flat planes; false keeps each card's own (geometric) normals.
     bool volumeNormals = true;
-    CardColorLook colorLook = CardColorLook::Shaded;  // what the color maps hold (the Cards node's bakeColor)
     int variations = 0;        // textures the cards share (0: each its own)
     bool mirror = true;        // cards sharing a texture alternate mirrored
     float padding = 0.004f;    // atlas units between textures
@@ -264,9 +257,6 @@ struct CardMesh {
     std::vector<std::string> nodes;
     float padding = 0.004f;              // atlas units between textures (layoutCards)
     int atlasSize = 0;                   // suggested bake resolution (0: none)
-    // What the bake's color maps and the tints hold (CardSettings::colorLook; Cards nodes sharing
-    // an atlas: the first one's). Maya's card shading turns it back into the base color by it.
-    CardColorLook colorLook = CardColorLook::Shaded;
     float thinnestStrand = 1.0f;         // the narrowest a strand bakes, in texels (CardBakeSettings::minStrandTexels)
     std::size_t vertexCount() const { return positions.size(); }
     std::size_t triangleCount() const { return quads.size() / 2; }

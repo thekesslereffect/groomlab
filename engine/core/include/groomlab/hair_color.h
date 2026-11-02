@@ -107,36 +107,6 @@ std::array<float, 3> hairAppearanceColor(const std::array<float, 3>& baseColor);
 // Its inverse: the base color that looks like `appearance`.
 std::array<float, 3> hairBaseOfAppearance(const std::array<float, 3>& appearance);
 
-// The SHADED color: what the cards' color maps hold (CardColorLook::Shaded, cards.h), the matte color
-// a plain material (a lambert, an engine's default lit) needs to look like the hair GroomLab's
-// viewport draws, under the same light. Issue #33: cards baked with the appearance (a thin lock
-// under an even white dome) came out lighter and greyer than the groom. Measured in Maya's Viewport
-// 2.0 (build/probe/issue33/probe_fit2.py, fit2/fith.py): cards drawn with GroomLab's hair shading
-// against the same cards with a lambert, under Maya's default light with color management off, the
-// brighter half of each one's pixels, for a gray ramp, eighteen melanin hairs (melanin 0.15-0.8,
-// redness 0-0.5) and four other colors. Per channel, f = t (s + (1 - s) exp(-k a^q)), a the base
-// color's absorption (hairColorAbsorption): the floor s is the highlight's share, which is what
-// dark hair shows in the viewport. Then kShadedMix, a saturation boost about the gray axis (rows
-// summing to 1: grays stay gray, every hue keeps its hue): the viewport's hair is richer than a
-// per-channel curve gives. Fitted with the issue's scene too (fit2/fitsat2.py: a mid brown,
-// melanin 0.356, under ACES), where a turn of the hue toward red, as the first fit had, baked it
-// pinker than the groom. About 7% off the viewport's colors where the appearance was 15-110% off.
-// White hair shades to t: hair sends much of a frontal light on through its fibers, where a matte
-// surface sends it all back.
-constexpr float kShadedTop = 0.7079f;
-constexpr float kShadedSheen = 0.0989f;
-constexpr float kShadedScale = 4.5472f;
-constexpr float kShadedPower = 0.6812f;
-// The saturation (x1.456) as a matrix, rows summing to 1, and its inverse.
-constexpr float kShadedMix[3][3] = {{1.30393f, -0.15197f, -0.15197f}, {-0.15197f, 1.30393f, -0.15197f},
-                                    {-0.15197f, -0.15197f, 1.30393f}};
-constexpr float kShadedUnmix[3][3] = {{0.79124f, 0.10438f, 0.10438f}, {0.10438f, 0.79124f, 0.10438f},
-                                      {0.10438f, 0.10438f, 0.79124f}};
-std::array<float, 3> hairShadedColor(const std::array<float, 3>& baseColor);
-// Its inverse: the base color that shades to `shaded` (a card's baked color, shaded as hair again by
-// Maya's card shading: hair_bsdf.glsl's hairBaseOfShaded).
-std::array<float, 3> hairBaseOfShaded(const std::array<float, 3>& shaded);
-
 // ---- Wet hair -----------------------------------------------------------------------------------
 //
 // The Wet node's `wetness` channel (0 dry .. 1 soaked; a Simulate's with water or rain, or an
