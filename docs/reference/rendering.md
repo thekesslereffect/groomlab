@@ -168,31 +168,34 @@ The second, older form takes its parameters as one data string of `-key value` p
 `-motionKeys`, `-searchPaths`, `-name`, `-debug`. A value with spaces goes in quotes. An unknown key
 is skipped with a warning. docs/DEVELOPING.md, "RenderMan procedural", has the details.
 
-### RenderMan for Maya (experimental)
+### RenderMan for Maya
 
-This needs RenderMan for Maya 27 on Maya 2024 to 2026. It isn't verified in Maya yet; the render
-path is, in prman with the same call. RenderMan for Maya renders the groom through its own generic
-**RenderManProcedural** node, with no GroomLab translator:
+This needs RenderMan for Maya 27 on Maya 2024 to 2026 (rendered in all three with RenderMan 27.3).
+RenderMan for Maya has no translator API, so it renders the groom through its own generic
+**RenderManProcedural** node, which GroomLab keeps in place:
 
-1. Load RenderMan for Maya (`RenderMan_for_Maya` in the Plug-in Manager). **GroomLab > Export**
-   then shows **RenderMan Procedural (experimental)**.
-2. Select the groom and choose it. It makes `<groom>_rman`, a RenderManProcedural node linked to
-   the groom, which:
+1. Load RenderMan for Maya. While it is loaded, every groom gets `<groom>_rman`, a
+   RenderManProcedural node linked to the groom (`groomlab.sync_renderman`, run when a scene opens
+   or is imported, when RenderMan for Maya loads, and when a groom is made or deleted). The node:
    - points `DSO Name` at the module's `groomlab_renderman.dll`;
    - sets `Data` to the groom's settings;
-   - assigns a PxrMarschnerHair network that reads the procedural's primvars.
-   In Python: `groomlab.renderman.add_renderman_procedural(groom, density=1.0)`.
-3. Render. Before RenderMan for Maya translates the node at each frame, its **Pre Shape Python
-   Script** writes the groom to a groom file at that frame:
+   - takes its material from the groom: a RenderMan material assigned to the groom in the
+     Hypershade, else a PxrMarschnerHair network reading the procedural's primvars;
+   - is visible to reflections and refractions (RenderMan's indirect rays: light between strands).
+   A node whose groom is gone is deleted. **GroomLab > Render > Select RenderMan Procedural**
+   selects the selected groom's node.
+2. Render, interactively or in a batch render or on a farm: the scene needs nothing saved for it.
+   Before RenderMan for Maya translates the node at each frame, its **Pre Shape Python Script**
+   writes the groom to a groom file at that frame:
    `<scene folder>/groomlab/<scene>/renders/renderman/<groom>.<frame>.groom`. If the groom renders
    from its own groom file (**Render > Render from Groom File**, which caches the scalp's
    animation), it uses that file instead. Then it puts `-file` and `-frame` into `Data`, plus the
    shutter as motion keys while 3D motion blur is on in the render settings.
-4. Edit `Data` for the rest, for example `-density 0.5 -widthScale 1.2 -debug`. The script only
+3. Edit `Data` for the rest, for example `-density 0.5 -widthScale 1.2 -debug`. The script only
    replaces `-file`, `-frame` and the motion keys, and keeps your keys. Set the node's
    `groomLabShutterFromGlobals` off to set the motion keys yourself.
 
 The groom's own shape renders nothing in RenderMan for Maya. Without a scalp cache, a moving scalp
 doesn't blur: each frame's file holds the scalp at that frame. Use **Render from Groom File** for
-deformation blur. On Maya 2022, or with RenderMan for Maya not loaded, the item doesn't show and
-nothing changes.
+deformation blur. On Maya 2022, or with RenderMan for Maya not loaded, nothing is made and the menu
+item doesn't show.

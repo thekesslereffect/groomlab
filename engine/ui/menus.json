@@ -80,7 +80,7 @@
     "render": [
       "render.fromGroomFile", "render.asCurves", "-", "render.hardware2", "-",
       "render.prman", "render.prmanFrame", "render.prmanTurntable", "-",
-      "render.vrayStandalone", "render.vrayFrame", "render.vrayTurntable", "render.vrayHook", "render.vrayLoadScene", "-",
+      "render.vrayStandalone", "render.vrayFrame", "render.vrayTurntable", "-",
       "render.prmanLocation", "render.vrayLocation"
     ],
     "studio": [
@@ -135,7 +135,7 @@
     "output.render": [
       "render.fromGroomFile", "render.asCurves", "-", "render.turntable", "-",
       "render.hardware2", "render.prman", "render.prmanFrame", "render.prmanTurntable",
-      "render.vrayStandalone", "render.vrayFrame", "render.vrayTurntable", "render.vrayHook", "render.vrayLoadScene"
+      "render.vrayStandalone", "render.vrayFrame", "render.vrayTurntable"
     ],
     "output.studio": [{"include": "menus/studio"}],
 

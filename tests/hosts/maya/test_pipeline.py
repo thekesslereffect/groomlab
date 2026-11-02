@@ -913,6 +913,20 @@ class RenderManForMayaTest(unittest.TestCase):
         self.assertEqual(os.path.normpath(self.rman.module_root()),
                          os.path.normpath(os.path.dirname(SCRIPTS_DIR)))
 
+    def test_a_groom_takes_a_material_as_any_shape(self):
+        # The groom shape is renderable: the Hypershade's Assign Material (sets -forceElement) puts
+        # it in a shading group, which V-Ray's translator and RenderMan's procedural then render with.
+        sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name="anyMaterialSG")
+        cmds.sets(self.groom, edit=True, forceElement=sg)
+        self.assertEqual(cmds.sets(sg, query=True), [cmds.ls(self.groom)[0]])
+        transform = cmds.listRelatives(self.groom, parent=True)[0]
+        other = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name="otherMaterialSG")
+        cmds.sets(transform, edit=True, forceElement=other)  # assigned through its transform
+        self.assertEqual(cmds.sets(other, query=True), [cmds.ls(self.groom)[0]])
+        self.assertIsNone(cmds.sets(sg, query=True))
+        # Not a RenderMan material: the procedural keeps GroomLab's network.
+        self.assertIsNone(self.rman.groom_shading_group(self.groom))
+
     def test_shading_group_reaches_the_procedural(self):
         # RfM takes a RenderManProcedural's material from its Shading Group attribute, connected from
         # the shading group (set membership is ignored: the hair rendered grey in RfM 27.3).
@@ -934,6 +948,9 @@ class RenderManForMayaTest(unittest.TestCase):
         self.assertIn("RenderMan for Maya is not loaded", str(raised.exception))
         with self.assertRaises(RuntimeError):
             self.rman.create_hair_network("x")
+        self.assertEqual(cmds.ls("*_rman*"), [])
+        # The plugin's hook (scene open, a groom made) makes nothing without RfM either.
+        self.assertEqual(self.rman.sync_renderman(), [])
         self.assertEqual(cmds.ls("*_rman*"), [])
         # A pre-shape script for a node that is gone: a warning, no exception.
         self.assertIsNone(self.rman.pre_shape("0BADF00D-0000-0000-0000-000000000000"))

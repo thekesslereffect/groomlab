@@ -15,7 +15,8 @@ renderer at all, Render > Maya Hardware 2.0 renders with Maya's own viewport ren
 <Callout title="What we have tested">
   The contents of the exported files ([File contents](#file-contents)), the RenderMan procedural
   and Render > RenderMan (prman) (in RenderMan Pro Server 27.3, from Maya 2022 and the app), the V-Ray scene export and Render > V-Ray Standalone (in V-Ray Standalone 7, from
-  Maya 2022) are tested. The V-Ray for Maya hook and Load as VRayScene are experimental and untested. The Alembic and USD
+  Maya 2022) are tested. So are V-Ray for Maya (V-Ray 7, Maya 2024 to 2027) and RenderMan for Maya
+  (27.3, Maya 2024 to 2026), in batch renders; interactive renders (IPR) in them are not tested yet. The Alembic and USD
   import steps for each renderer below follow that renderer's documentation, linked in each
   section; they have not been tested in Redshift or V-Ray yet. If a step does not work, contact
   [support@getgroomlab.com](mailto:support@getgroomlab.com).
@@ -154,11 +155,14 @@ scene, shading network included. The primvars are listed in
   Parameters: `filename`, `frame`, `fps`, `density`, `widthScale`, `lengthScale`,
   `motionStart`, `motionEnd`, `motionKeys` (motion blur), `searchPaths`, `name`, and `debug`
   (prints every primvar). Instances and scales are not rendered by this procedural.
-- **In RenderMan for Maya (Maya 2024 to 2026), experimental:** load RenderMan for Maya, select
-  the groom and choose **GroomLab > Render > RenderMan Procedural (experimental)**. It creates a
-  RenderMan Procedural node that renders the groom, exporting the groom file each frame, and can
-  build the hair shading network. It is tested through prman but has not yet been run inside
-  Maya; please report results.
+- **In RenderMan for Maya (Maya 2024 to 2026):** nothing to set up. While RenderMan for Maya is
+  loaded, GroomLab gives every groom a RenderMan Procedural node (`<groom>_rman`) that renders it,
+  exporting the groom file each frame, so the groom renders in RenderMan for Maya's renders,
+  batch renders and farms like any object. A RenderMan material assigned to the groom (a
+  PxrMarschnerHair, in the Hypershade) is the hair's; without one, GroomLab's hair network
+  (PxrMarschnerHair with PxrHairColor reading the groom's colors) is. **GroomLab > Render > Select
+  RenderMan Procedural** selects a groom's node, for its density and scales. RenderMan for Maya
+  27.3 has no Maya 2027 version.
 - **Color:** GroomLab's melanin and redness are converted to PxrHairColor's (the `rman_melanin`
   and `rman_redness` primvars). Under a strong key light, light hair can render darker than in
   Arnold, because PxrMarschnerHair transmits less light through many hairs.
@@ -338,8 +342,7 @@ Which route:
 | Route | Maya | Use it for |
 | --- | --- | --- |
 | **Render > V-Ray Standalone...** (tested) | Every version GroomLab supports (2022 to 2027); V-Ray for Maya not needed | Groom renders and lookdev: the grooms, the visible meshes, the camera and the lights rendered by V-Ray Standalone in the background, the image in the Render View |
-| **Render > V-Ray for Maya Hook (2024+, experimental)** | 2024 and later, with V-Ray for Maya | The grooms inside your full V-Ray for Maya scene renders (your shaders, lights, render elements and farm) |
-| **Render > Load as VRayScene (2024+, experimental)** | 2024 and later, with V-Ray for Maya | The same without a script: a VRayScene node pointing at an exported `.vrscene` |
+| **V-Ray for Maya** (tested) | 2024 to 2027, with V-Ray for Maya 7 | The grooms inside your full V-Ray for Maya scene renders (your shaders, lights, render elements and farm), with nothing to set up |
 | **Export > V-Ray Scene...** (tested) | Every version, and Blender | A `.vrscene` of the groom to `#include` in your own V-Ray scenes |
 
 ### Render in V-Ray Standalone (any Maya, tested)
@@ -384,32 +387,23 @@ job.wait()                                                        # or job.poll(
 print(job.images())                                               # the PNGs
 ```
 
-### V-Ray for Maya hook (Maya 2024+, experimental)
+### V-Ray for Maya (Maya 2024 to 2027)
 
-<Callout title="Experimental, untested">
-  V-Ray for Maya supports Maya 2024 and later only, and these two items have not been run inside
-  V-Ray for Maya yet. They are written from Chaos's documented Python API; please report results to
-  [support@getgroomlab.com](mailto:support@getgroomlab.com). In Maya 2022, or without V-Ray for
-  Maya loaded, they say "V-Ray for Maya 2024+ required" and change nothing.
-</Callout>
+GroomLab renders in V-Ray for Maya as a mesh does: V-Ray loads GroomLab's translator from the
+GroomLab module (`vraytr_groomlab`, on V-Ray's `VRAY_FOR_MAYA<year>_TRANSLATORS_PATH`), and every
+groom renders in V-Ray's renders, batch renders and farm renders with nothing to set up.
 
-**Render > V-Ray for Maya Hook (2024+, experimental)** adds one line to V-Ray's **Post Translate
-Python Script** (Render Settings > Common > MEL/Python callbacks: the
-`vraySettings.postTranslatePython` attribute; your own lines stay). After V-Ray has translated the
-scene, for each visible groom it writes the frame (with V-Ray's camera motion blur on: the
-shutter's interval, in its geometry samples) to a `.vrscene` in the scene's
-`groomlab/<scene>/caches/vray` folder, and adds a **VRayScene** plugin pointing at it through
-V-Ray's `vray.utils` module. The file carries the groom's world matrix, so the plugin adds none.
-Pick the item again to take the line out.
+- **The hair:** each groom at its render density, with its render overrides (Render Density,
+  Width Scale, Length Scale), as V-Ray hair (GeomMayaHair) with each strand's color.
+- **Material:** a material assigned to the groom in the Hypershade (a **VRayHairNextMtl**) is the
+  hair's. Without one, GroomLab's: V-Ray's hair BRDF reading each strand's color, its highlight
+  from the groom's look, set up to render close to Arnold.
+- **Render flags, object IDs, light links:** the groom's own, as for any object.
+- **Motion blur:** the groom's transform blurs; strands that deform within the shutter do not yet
+  (render it from a `.vrscene` for that: below).
 
-```python
-import groomlab.vray_hook as hook
-hook.enable_hook()     # hook.disable_hook() takes it out
-```
-
-**Render > Load as VRayScene (2024+, experimental)** exports the selected groom over the playback
-range to the scene's exports folder and makes a **VRayScene** node pointing at it (its transform is
-locked at the origin: the file has the groom's world matrix). Run it again after changing the groom.
+Scenes saved with the old **V-Ray for Maya Hook** (GroomLab 0.39 and earlier) render as before: the
+hook steps aside while the translator is installed, so each groom renders once.
 
 <Steps>
 <Step>
@@ -447,9 +441,9 @@ groomlab-cli eval hair.groom -o hair.vrscene -f 1-48
 vray -sceneFile=shot.vrscene -imgFile=hair.png -frames=12
 ```
 
-**V-Ray for Maya:** load the file in a **V-Ray Scene** node (VRayScene) and render, or use
-**Render > Load as VRayScene** ([above](#v-ray-for-maya-hook-maya-2024-experimental)). The hair keeps
-the file's shader. This step has not been run inside Maya yet; please report results.
+**V-Ray for Maya:** grooms in the scene need no file ([above](#v-ray-for-maya-maya-2024-to-2027)).
+To render a file (a groom from another scene, deformation blur), load it in a **V-Ray Scene** node
+(VRayScene) and render; the hair keeps the file's shader.
 
 **V-Ray for Blender** and the **GroomLab app** need no export: a final render in V-Ray for Blender
 renders the groom this way on its own ([Blender](/docs/blender#v-ray)), and the app's

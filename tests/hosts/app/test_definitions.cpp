@@ -170,7 +170,7 @@ TEST(AppUi, TheEmbeddedFilesAreTheSourceTreesAndResolveForTheApp) {
                                         "render.prmanLocation", "render.vrayLocation"}));
     EXPECT_EQ(d.listedIds(d.get("menus/render"), "maya"),
               (std::vector<std::string>{"render.fromGroomFile", "render.asCurves", "render.hardware2", "render.prman",
-                                        "render.vrayStandalone", "render.vrayHook", "render.vrayLoadScene"}));
+                                        "render.vrayStandalone"}));
     EXPECT_TRUE(d.listedIds(d.get("menus/render"), "blender").empty());
     // Per-host words: the app's label and tip, Maya's as they were.
     ui::ResolveOptions maya;

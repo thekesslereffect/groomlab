@@ -35,7 +35,6 @@ SHUTTER_ATTR = "groomLabShutterFromGlobals"  # bool: pre_shape writes the motion
 # RfM's Shading Group on a RenderManProcedural (config/extensions.json): the node takes no set
 # membership, so a shading group's message connected here is how its material reaches the curves.
 SHADING_GROUP_ATTR = "rman__torattr___customShadingGroup"
-EXPERIMENTAL_NOTE = ("experimental: needs RenderMan for Maya 27 on Maya 2024-2026; not yet verified in Maya")
 
 # The data string's keys, as the procedural spells them, by this module's argument names.
 DATA_KEYS = (("file", "file"), ("frame", "frame"), ("fps", "fps"), ("density", "density"),
@@ -395,8 +394,10 @@ def add_renderman_procedural(groom, density=None, width_scale=None, length_scale
     With `shader`, a PxrMarschnerHair + PxrHairColor network reading the procedural's primvars
     (create_hair_network) is assigned. The groom's own shape renders nothing in RfM.
 
-    Experimental (EXPERIMENTAL_NOTE). Raises RuntimeError when RfM is not loaded or the plugin is
-    not installed. Returns the procedural's shape."""
+    sync_renderman makes one for every groom while RfM is loaded, so a scene renders in RfM with
+    nothing to set up. A groom that has one already keeps it (repaired: repair_procedural). Raises
+    RuntimeError when RfM is not loaded or the plugin is not installed. Returns the procedural's
+    shape."""
     from groomlab.base import _shape_of
     if not rfm_loaded():
         raise RuntimeError("RenderMan for Maya is not loaded (it needs RenderMan for Maya 27, Maya 2024-2026)")
@@ -405,32 +406,118 @@ def add_renderman_procedural(groom, density=None, width_scale=None, length_scale
         raise RuntimeError("the RenderMan procedural (%s) is not installed under %s/procedurals/renderman" %
                            (DSO_FILE, module_root()))
     groom = _shape_of(groom, "groomLabShape")
+    existing = procedurals_of(groom)
+    if existing:
+        repair_procedural(existing[0], groom, shader=shader)
+        return existing[0]
     base = cmds.listRelatives(groom, parent=True)[0].split("|")[-1].split(":")[-1] + "_rman"
-    transform = cmds.createNode("transform", name=base)
-    node = cmds.createNode(NODE_TYPE, name=base + "Shape", parent=transform)
+    transform = cmds.createNode("transform", name=base, skipSelect=True)
+    node = cmds.createNode(NODE_TYPE, name=base + "Shape", parent=transform, skipSelect=True)
     node = cmds.ls(node, long=True)[0]
     cmds.setAttr(node + ".__dsoname", dso, type="string")
-    # RfM's indirect visibility inherits these, and a new shape's are off in Maya 2025 and later (on
-    # in 2024): without them the strands light no strand, and the hair renders dark.
-    for attr in ("visibleInReflections", "visibleInRefractions"):
-        cmds.setAttr(node + "." + attr, True)
     link_procedural(node, groom, density=density, width_scale=width_scale, length_scale=length_scale, debug=debug,
                     shutter_from_globals=shutter_from_globals)
     try:  # the node's own frame (the RfM UI's; the plugin reads -frame)
         cmds.connectAttr("time1.outTime", node + ".frame", force=True)
     except RuntimeError:
         pass
-    if shader:
+    repair_procedural(node, groom, shader=shader)
+    pre_shape(node)  # the data string complete now, not only at render time
+    return node
+
+
+def procedurals_of(groom):
+    """The procedural nodes rendering `groom` (its message into their groomLabGroom), long names."""
+    plugs = cmds.listConnections(groom + ".message", source=False, destination=True, plugs=True) or []
+    nodes = [p.split(".")[0] for p in plugs if p.endswith("." + GROOM_ATTR)]
+    return [n for n in (cmds.ls(nodes, long=True, type=NODE_TYPE) or [])]
+
+
+def _is_renderman_shader(node):
+    """Whether RfM renders `node` as a material: one of RenderMan's own (a Pxr or Lama node)."""
+    classes = " ".join(cmds.getClassification(cmds.nodeType(node)) or [])
+    return "pixar" in classes.lower() or cmds.nodeType(node).startswith(("Pxr", "Lama"))
+
+
+def groom_shading_group(groom):
+    """The groom's own shading group when its surface shader is a RenderMan material (assigned in
+    the Hypershade), else None: RfM cannot render another renderer's (an aiStandardHair)."""
+    for sg in cmds.listConnections(groom + ".instObjGroups", source=False, destination=True, type="shadingEngine") or []:
+        if sg == "initialShadingGroup":
+            continue
+        shaders = cmds.listConnections(sg + ".surfaceShader", source=True, destination=False) or []
+        if shaders and _is_renderman_shader(shaders[0]):
+            return sg
+    return None
+
+
+def repair_procedural(node, groom, shader=True):
+    """Make `node` render `groom` as it should, whenever it was made: indirect visibility on, and its
+    material the groom's own RenderMan shading group (groom_shading_group), else the one it has,
+    else the GroomLab hair network (create_hair_network) made for it."""
+    # RfM's indirect visibility inherits these, and a new shape's are off in Maya 2025 and later (on
+    # in 2024): without them the strands light no strand, and the hair renders dark.
+    for attr in ("visibleInReflections", "visibleInRefractions"):
+        if not cmds.getAttr(node + "." + attr):
+            cmds.setAttr(node + "." + attr, True)
+    if not shader:
+        return
+    sg = groom_shading_group(groom)
+    if not sg and cmds.attributeQuery(SHADING_GROUP_ATTR, node=node, exists=True):
+        current = cmds.listConnections(node + "." + SHADING_GROUP_ATTR, source=True, destination=False) or []
+        sg = current[0] if current else None
+    base = cmds.listRelatives(node, parent=True)[0].split("|")[-1].split(":")[-1]
+    if not sg and cmds.objExists(base + "_SG") and cmds.nodeType(base + "_SG") == "shadingEngine":
+        sg = base + "_SG"  # made by an earlier GroomLab, never bound (it used cmds.sets)
+    if not sg:
         try:
             from groomlab.shading import hair_look
             sg = create_hair_network(base, tilt=hair_look(groom)["tilt"])
-            assign_shading_group(node, sg)
         except (RuntimeError, ValueError, TypeError) as e:
             cmds.warning("GroomLab: the RenderMan hair shader was not made (%s): see docs/DEVELOPING.md, "
                          "'RenderMan for Maya', for the network" % e)
-    pre_shape(node)  # the data string complete now, not only at render time
-    cmds.select(transform)
-    return node
+            return
+    assign_shading_group(node, sg)
+
+
+def sync_renderman():
+    """Every groom rendered by RenderMan for Maya with nothing to set up, run by the plugin when a
+    scene opens or is imported, when RfM loads, and when a groom is made or deleted: while RfM is
+    loaded, each groom gets its procedural (add_renderman_procedural) and an existing one is
+    repaired (repair_procedural); a procedural whose groom is gone is deleted (it would go on
+    rendering that groom's last file). Without RfM, nothing. Never raises. Returns the procedural
+    shapes."""
+    if cmds is None or not rfm_loaded() or not dso_path():
+        return []
+    found = []
+    try:
+        for node in cmds.ls(type=NODE_TYPE, long=True) or []:
+            if cmds.attributeQuery(GROOM_ATTR, node=node, exists=True) and not groom_of(node):
+                transform = cmds.listRelatives(node, parent=True, fullPath=True)
+                lone = transform and len(cmds.listRelatives(transform[0], children=True) or []) == 1
+                cmds.delete(transform[0] if lone else node)
+        for groom in cmds.ls(type="groomLabShape", long=True, noIntermediate=True) or []:
+            found.append(add_renderman_procedural(groom))
+    except Exception as e:  # noqa: BLE001 (a callback: whatever went wrong, warn and go on)
+        cmds.warning("GroomLab: RenderMan: %s" % e)
+    return found
+
+
+_sync_queued = [False]
+
+
+def queue_renderman_sync():
+    """sync_renderman once Maya is idle again, once however many times this is called before (the
+    plugin calls it as each groom is made or deleted). Nothing without RfM."""
+    if cmds is None or _sync_queued[0] or not rfm_loaded():
+        return
+
+    def run():
+        _sync_queued[0] = False
+        sync_renderman()
+
+    _sync_queued[0] = True
+    cmds.evalDeferred(run, lowestPriority=True)
 
 
 def assign_shading_group(node, shading_group):

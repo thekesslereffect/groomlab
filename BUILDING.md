@@ -139,7 +139,13 @@ betas). So on a machine with only Maya 2024 to 2027:
 - [ ] The newer Maya you want (2026, 2027) and its MtoA, for trying the plugin by hand.
 - [ ] **Blender** 4.2 or later under `C:/Program Files/Blender Foundation/` (the add-on tests use the
       newest there; `GROOMLAB_BLENDER_EXE` picks another).
-- [ ] Optional: **V-Ray** (the `vray` tests) and **RenderMan Pro Server** (the `renderman` tier).
+- [ ] **V-Ray for Maya** (V-Ray 7) for every Maya version you build, and V-Ray Standalone: the V-Ray
+      for Maya install holds the SDK GroomLab's V-Ray translator builds against (without it that
+      Maya's build leaves the translator out, and the release zip has none for it); Standalone runs
+      the `vray` tests. Its licensing needs the Chaos login and VRLService (the installer's), no
+      license server of your own.
+- [ ] Optional: **RenderMan Pro Server** and **RenderMan for Maya** (the `renderman` tier; RfM
+      renders grooms through GroomLab's procedural).
 
 ### 4. The deps folder (outside the repository)
 

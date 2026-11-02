@@ -428,15 +428,14 @@ RENDERMAN_ITEM = "groomLabRenderManProceduralItem"
 
 
 def add_renderman_procedural_action():
-    """Render > RenderMan Procedural: RenderMan for Maya renders the groom through groomlab_renderman
-    (groomlab.renderman.add_renderman_procedural; experimental)."""
+    """Render > Select RenderMan Procedural: the node RenderMan for Maya renders the selected groom
+    through (groomlab.renderman: made with the groom while RfM is loaded; made now if it is not
+    there), selected so its density, scales and material can be changed."""
     from groomlab import renderman
     groom = _selected_groom()
     if groom:
         node = renderman.add_renderman_procedural(groom)
-        cmds.inViewMessage(amg="GroomLab: %s renders the groom in RenderMan (%s)" % (node.split("|")[-1],
-                                                                                    renderman.EXPERIMENTAL_NOTE),
-                           pos="topCenter", fade=True, fadeStayTime=4000)
+        cmds.select(cmds.listRelatives(node, parent=True, fullPath=True)[0])
 
 
 def _sync_renderman_item(parent):
@@ -448,11 +447,11 @@ def _sync_renderman_item(parent):
         wanted = renderman.rfm_loaded()
         if wanted and not shown:
             kwargs = {"insertAfter": RENDER_AS_CURVES_ITEM} if cmds.menuItem(RENDER_AS_CURVES_ITEM, exists=True) else {}
-            cmds.menuItem(RENDERMAN_ITEM, parent=parent, label="RenderMan Procedural (experimental)",
+            cmds.menuItem(RENDERMAN_ITEM, parent=parent, label="Select RenderMan Procedural",
                           command=_guarded(add_renderman_procedural_action),
-                          annotation="RenderMan for Maya renders the groom at render time through GroomLab's "
-                                     "procedural: a RenderManProcedural node exporting the groom each frame, "
-                                     "with a PxrMarschnerHair network (" + renderman.EXPERIMENTAL_NOTE + ")",
+                          annotation="The RenderManProcedural node RenderMan for Maya renders the selected groom "
+                                     "through (GroomLab makes one for every groom while RenderMan for Maya is "
+                                     "loaded): its density, scales and material",
                           **kwargs)
         elif shown and not wanted:
             cmds.deleteUI(RENDERMAN_ITEM, menuItem=True)
@@ -1110,40 +1109,6 @@ def _drop_render_jobs():
         widgets.dispose(timer)
         widgets.dispose(progress)
     del _RENDER_JOBS[:]
-
-
-def vray_hook_action():
-    """Render > V-Ray for Maya Hook (2024+, experimental): V-Ray's post-translate script renders the
-    grooms (groomlab.vray_hook); picked again, it is taken out. In Maya 2022, or without V-Ray for
-    Maya, a message says what is needed."""
-    from groomlab import vray_hook
-    try:
-        if vray_hook.hook_enabled():
-            vray_hook.disable_hook()
-            _say("V-Ray for Maya no longer renders the grooms through GroomLab's hook")
-            return False
-        vray_hook.enable_hook()
-    except vray_hook.VRayRequired as e:
-        cmds.warning("GroomLab: %s; V-Ray Standalone (Render > V-Ray Standalone) renders the groom in any Maya" % e)
-        return None
-    _say("V-Ray for Maya renders the grooms at render time now (%s)" % vray_hook.EXPERIMENTAL_NOTE)
-    return True
-
-
-def vray_load_scene_action():
-    """Render > Load as VRayScene (2024+, experimental): the groom as a .vrscene and a VRayScene node."""
-    from groomlab import vray_hook
-    groom = _selected_groom()
-    if not groom:
-        return None
-    try:
-        vray_hook.check()
-        transform = _run_export("Exporting the V-Ray scene", None, lambda: vray_hook.export_and_load(groom),
-                                "a VRayScene node renders the groom in V-Ray for Maya (%s)" % vray_hook.EXPERIMENTAL_NOTE)
-    except vray_hook.VRayRequired as e:
-        cmds.warning("GroomLab: %s; V-Ray Standalone (Render > V-Ray Standalone) renders the groom in any Maya" % e)
-        return None
-    return transform
 
 
 def mirror_group_dialog():
@@ -1999,8 +1964,6 @@ ACTIONS = {
     "render.vrayStandalone": render_vray_dialog,
     "render.prman": render_prman_dialog,
     "render.hardware2": render_hardware2_dialog,
-    "render.vrayHook": vray_hook_action,
-    "render.vrayLoadScene": vray_load_scene_action,
     "export.alembic": lambda: export_curves_dialog("alembic"),
     "export.usd": lambda: export_curves_dialog("usd"),
     "export.vrscene": lambda: export_curves_dialog("vrscene"),

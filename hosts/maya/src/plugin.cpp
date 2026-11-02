@@ -3,6 +3,7 @@
 #include <maya/MFnPlugin.h>
 #include <maya/MCallbackIdArray.h>
 #include <maya/MConditionMessage.h>
+#include <maya/MDGMessage.h>
 #include <maya/MGlobal.h>
 #include <maya/MFileIO.h>
 #include <maya/MSceneMessage.h>
@@ -93,6 +94,17 @@ void callGroomlab(const char* call) {
     MGlobal::executePythonCommand(MString("try:\n    import groomlab\n    groomlab.") + call +
                                   "()\nexcept ImportError:\n    pass\nexcept Exception as e:\n"
                                   "    import maya.cmds\n    maya.cmds.warning('GroomLab: %s' % e)");
+}
+
+// A groom made or deleted: groomlab.sync_renderman once Maya is idle again (the new groom connected
+// by then), once for any number of them (groomlab.queue_renderman_sync). Batch sessions never idle;
+// their grooms come with the scene (kAfterOpen).
+void queueRenderManSync(MObject&, void*) {
+    if (MGlobal::mayaState() != MGlobal::kInteractive || MFileIO::isReadingFile()) return;
+    try {
+        callGroomlab("queue_renderman_sync");
+    } catch (...) {
+    }
 }
 }  // namespace
 
@@ -229,6 +241,10 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
     // Where the open scene's files live is noted now and when a scene opens, never just before
     // a save: a Save As has renamed the scene by then.
     callGroomlab("remember_scene_folder");
+    // RenderMan for Maya has no translator API: while it is loaded, every groom has a procedural
+    // node it renders (groomlab.sync_renderman), made or repaired now, when a scene opens or is
+    // imported, when RfM loads after GroomLab, and when a groom is made or deleted.
+    callGroomlab("sync_renderman");
     for (const MSceneMessage::Message m : {MSceneMessage::kAfterNew, MSceneMessage::kAfterOpen}) {
         gCallbacks.append(MSceneMessage::addCallback(m, [](void*) {
             // Nothing may be thrown into Maya from a callback: it would end the session.
@@ -236,6 +252,7 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
                 groomlab::maya::refreshMayaPaths();
                 callGroomlab("remember_scene_folder");
                 callGroomlab("sync_file_nodes");  // the File Path Editor's nodes as the grooms resolve here
+                callGroomlab("sync_renderman");
             } catch (...) {
             }
         }));
@@ -244,9 +261,24 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
     gCallbacks.append(MSceneMessage::addCallback(MSceneMessage::kAfterImport, [](void*) {
         try {
             callGroomlab("sync_file_nodes");
+            callGroomlab("sync_renderman");
         } catch (...) {
         }
     }));
+    gCallbacks.append(MSceneMessage::addStringArrayCallback(MSceneMessage::kAfterPluginLoad,
+                                                            [](const MStringArray& plugin, void*) {
+        try {
+            for (unsigned i = 0; i < plugin.length(); ++i) {
+                if (plugin[i] == "RenderMan_for_Maya") {
+                    callGroomlab("sync_renderman");
+                    return;
+                }
+            }
+        } catch (...) {
+        }
+    }));
+    gCallbacks.append(MDGMessage::addNodeAddedCallback(queueRenderManSync, GroomShape::kTypeName));
+    gCallbacks.append(MDGMessage::addNodeRemovedCallback(queueRenderManSync, GroomShape::kTypeName));
     // The process-wide caches (a distance field per collider surface, surface graphs, subdivision
     // plans, decoded textures, the array pools: process_caches.h) outlive the grooms that filled
     // them: let go before a new or opened scene (the closing scene's grooms free what they hold).

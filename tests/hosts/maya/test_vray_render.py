@@ -155,11 +155,6 @@ class VRayRenderTest(unittest.TestCase):
             self.assertIn(vray_hook.REQUIRED, str(caught.exception))
         self.assertFalse(cmds.objExists(vray_hook.SETTINGS))
         self.assertEqual(vray_hook.post_translate(), [])  # no vray.utils: a warning, nothing made
-        # The Render menu's items say so too (a warning, no dialog), and leave the scene alone.
-        from groomlab.ui import menu
-        cmds.select(self.groom)
-        self.assertIsNone(menu.ACTIONS["render.vrayHook"]())
-        self.assertIsNone(menu.ACTIONS["render.vrayLoadScene"]())
         self.assertEqual(cmds.ls(type="transform", long=True), self.transforms_before)
 
     def test_vray_path_setting(self):

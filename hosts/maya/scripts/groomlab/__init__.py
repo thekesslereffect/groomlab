@@ -121,6 +121,9 @@ from groomlab.studio import remove_studio, studio as add_studio  # noqa: F401
 from groomlab.vray_render import render_vray, set_vray_path, vray_path  # noqa: F401
 # RenderMan renders (prman with GroomLab's procedural; the meshes, camera and lights as RIB).
 from groomlab.prman_render import prman_path, render_prman, set_prman_path  # noqa: F401
+# RenderMan for Maya: each groom's procedural node kept in place while RfM is loaded (the plugin
+# runs it on scene and plugin events).
+from groomlab.renderman import queue_renderman_sync, sync_renderman  # noqa: F401
 # Maya Hardware 2.0 renders (no renderer needed: the viewport's drawing into images, in this session).
 from groomlab.hardware2_render import render_hardware2  # noqa: F401
 # Reference photos as cameras (Groom Tools > Photos): groomlab.reference.

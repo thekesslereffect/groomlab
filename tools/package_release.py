@@ -134,7 +134,11 @@ def main():
             "plugin": os.path.relpath(os.path.join(folder, "plug-ins", "GroomLab.mll"), module).replace("\\", "/"),
             "python": os.path.relpath(os.path.join(folder, "python"), module).replace("\\", "/"),
             "arnold": os.path.isdir(os.path.join(folder, "extensions")),
+            "vray": os.path.isdir(os.path.join(folder, "vray")),
         }
+        if not builds[year]["vray"]:
+            print("note: no V-Ray for Maya translator for Maya %s (its build found no V-Ray for Maya %s: install it "
+                  "on this machine, or set VRAY_FOR_MAYA_LOCATION, and reconfigure to include it)" % (year, year))
     with open(os.path.join(module, "maya_versions.json"), "w") as f:
         json.dump(builds, f, indent=2, sort_keys=True)
         f.write("\n")

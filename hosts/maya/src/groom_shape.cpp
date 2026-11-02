@@ -451,6 +451,10 @@ void GroomShape::adoptWarmsOnIdle(void*) {
 
 void GroomShape::postConstructor() {
     MPxSurfaceShape::postConstructor();
+    // Renderable: shading groups take the groom as a member, so the Hypershade's Assign Material
+    // (sets -forceElement) works on it like on any shape, for every renderer's material; without
+    // it Maya refuses ("the set has restrictions on membership").
+    setRenderable(true);
     // A control attribute added, removed or renamed (a Control node, a keyed param, undo of
     // either): the list of them is found again on the next compute.
     MStatus status;

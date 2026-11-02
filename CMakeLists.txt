@@ -27,6 +27,10 @@ option(GROOMLAB_BUILD_ARNOLD  "Build the MtoA translator (needs MTOA_LOCATION)" 
 # The Arnold procedural depends on Arnold alone: one build (against the oldest Arnold 7 SDK, Maya
 # 2022's MtoA) loads in every Arnold 7, so the other Maya versions' presets leave it out.
 option(GROOMLAB_BUILD_PROCEDURAL "Build the Arnold procedural (needs the Arnold SDK under MTOA_LOCATION)" ON)
+# V-Ray for Maya's translator (hosts/maya/vray): built when V-Ray for Maya's SDK (its install's
+# vray/include and vray/lib) is found under VRAY_FOR_MAYA_LOCATION, one per Maya version like the
+# MtoA translator.
+option(GROOMLAB_BUILD_VRAY    "Build the V-Ray for Maya translator (needs V-Ray for Maya under VRAY_FOR_MAYA_LOCATION)" ON)
 # The RenderMan procedural (hosts/renderman): built when a RenderMan Pro Server SDK is found under
 # GROOMLAB_RMANTREE. Like the Arnold procedural it depends on its renderer alone, so one build (Maya
 # 2022's) ships it; the other Maya versions' presets leave it out.

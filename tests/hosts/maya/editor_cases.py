@@ -3765,8 +3765,7 @@ class DockableWindowsTest(unittest.TestCase):
                                                     "Look Through Studio Camera", "Remove Studio"])
             self.assertEqual(entries_of("Render"), ["Render from Groom File...", "Render as Curves",
                                                     "Maya Hardware 2.0 (no renderer needed)...", "RenderMan (prman)...",
-                                                    "V-Ray Standalone...", "V-Ray for Maya Hook (2024+, experimental)",
-                                                    "Load as VRayScene (2024+, experimental)"])
+                                                    "V-Ray Standalone..."])
             exports = entries_of("Export")
             self.assertIn("Unreal Cards...", exports)
             self.assertNotIn("Groom File...", exports)

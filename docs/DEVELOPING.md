@@ -414,7 +414,9 @@ parallel (the zip takes whatever is in each build folder):
    (Check for Updates shows them; keep it outside the repository, e.g. `build/`).
 2. **Build every preset**: `ninja-maya2022` to `ninja-maya2027` and `ninja-app` (configure a new
    build folder once with `cmake --preset`). Check `GROOMLAB_PORTABLE_MATH:BOOL=ON` in each
-   `CMakeCache.txt`, and that no build failed to regenerate (it leaves old binaries behind).
+   `CMakeCache.txt`, that no build failed to regenerate (it leaves old binaries behind), and that
+   each Maya build's configure found V-Ray for Maya ("V-Ray for Maya at ...": its translator, else
+   `package_release.py` notes the version without one).
 3. **Run the tiers** on Maya 2022 (`quick`, `arnold`, `blender`, `gpu`, then `Budget.*` alone,
    `gui`, `maya.gui_dx11`, `vray` / `renderman` where installed) and the app (`quick`, then
    `blender|vray|renderman`). A timing budget that fails once under load is rerun alone, not
@@ -718,7 +720,7 @@ PxrDistantLight's intensity is its disk's radiance (an Arnold distant light's is
 script divides by the disk's solid angle) and it shines down its +Z; PxrDomeLight reads `.tex`
 (`txmake -envlatl`) and its lat-long is Z-up.
 
-#### RenderMan for Maya (experimental)
+#### RenderMan for Maya
 
 **Status:** needs RenderMan for Maya 27 on Maya 2024 to 2026; rendered in all three (below).
 `hosts/maya/scripts/groomlab/renderman.py` renders a groom
@@ -750,8 +752,20 @@ through RfM's own generic `RenderManProcedural` node, so no GroomLab translator 
   - writes the data string's settings (`-name`, `-density`, the scales, `-debug`);
   - sets the pre-shape Python script to `groomlab.renderman.pre_shape("<the node's UUID>")`, so a
     rename doesn't break it.
-  It runs `pre_shape` once so `data` is complete. Without RfM loaded, or without the DSO installed,
-  it raises `RuntimeError`.
+  `repair_procedural` then sets its material and visibility (below), and it runs `pre_shape` once
+  so `data` is complete. A groom that has a procedural already (`procedurals_of`) gets that one,
+  repaired. Without RfM loaded, or without the DSO installed, it raises `RuntimeError`.
+- **`sync_renderman()`** (the plugin runs it: plugin load, `kAfterOpen`/`kAfterNew`, `kAfterImport`,
+  `kAfterPluginLoad` of `RenderMan_for_Maya`; a groom made or deleted queues it for the next idle,
+  `queue_renderman_sync`, interactive sessions only): while RfM is loaded and the DSO is found,
+  every groom gets a procedural (`add_renderman_procedural`) and one whose groom is gone is deleted
+  (it would go on rendering the last file). So a batch render or a farm needs nothing saved: the
+  scene opens, the nodes are made, RfM renders them. Never raises.
+- **`repair_procedural(node, groom)`**: `visibleInReflections`/`visibleInRefractions` on (RfM's
+  indirect visibility inherits them: below); the material is the groom's own shading group when its
+  surface shader is a RenderMan one (`groom_shading_group`: a Pxr or Lama node, by its
+  classification), else the one the node has, else an earlier GroomLab's `<base>_SG` (made but never
+  bound), else a new `create_hair_network`; bound with `assign_shading_group`.
 - **`dso_path()`** looks in this order:
   1. `$GROOMLAB_RENDERMAN_PROCEDURAL` (the file or its folder);
   2. `<module>/procedurals/renderman/groomlab_renderman.dll` (the module these scripts are in);
@@ -780,10 +794,10 @@ through RfM's own generic `RenderManProcedural` node, so no GroomLab translator 
   Params are set through `_set`, which handles RfM's string, enum and number attributes. The
   shading group takes `outColor` on `surfaceShader`. If a step fails, it's a warning that points
   here, and the network above (this section's "The shading network") is the reference.
-- **Menu:** **GroomLab > Render > RenderMan Procedural (experimental)**. The Render submenu's
-  `postMenuCommand` adds the item while `cmds.pluginInfo("RenderMan_for_Maya", loaded=True)` and
-  removes it otherwise, so RfM can load after GroomLab. Without RfM, as in Maya 2022, nothing shows
-  and nothing changes.
+- **Menu:** **GroomLab > Render > Select RenderMan Procedural** selects the selected groom's node
+  (made if missing). The Render submenu's `postMenuCommand` adds the item while
+  `cmds.pluginInfo("RenderMan_for_Maya", loaded=True)` and removes it otherwise. Without RfM, as in
+  Maya 2022, nothing shows and nothing changes.
 
 **Tested:**
 - **In prman** (`renderman.procedural`): the exact call RfM's node makes, the older API with a
@@ -810,7 +824,10 @@ rendered a default grey). Its material comes from RfM's Shading Group attribute,
 inherits the shape's Visible in Reflections and Refractions, and a new shape's are off in Maya
 2025 and 2026 (on in 2024): with them off, no strand lights another and the hair renders dark, so
 `add_renderman_procedural` turns them on. Rendered the same in Maya 2024, 2025 and 2026 (RfM 27.3
-has no Maya 2027 build).
+has no Maya 2027 build), with scenes saved with no procedural (`sync_renderman` made it as the
+batch render opened the scene) and with a PxrMarschnerHair assigned to the groom (the node took it).
+Probe: `build/probe/render_hooks` (`make_scenes.py` builds a scene per renderer in mayapy,
+`run_version.ps1 -Year <y> -Build <preset>` installs the build beside it and batch-renders each).
 
 **Not yet verified:** shutter units.
 
@@ -875,16 +892,43 @@ scene text, command line and the hook against a stand-in `vray.utils`) and `maya
 the studio's scene from Maya, and with vray.exe a small render whose hair is centered, and a
 two-frame sequence).
 
-**V-Ray for Maya hook (Maya 2024+, experimental, never run here):** `vray_hook.py`. V-Ray for Maya
-supports Maya 2024+ only, so it is written from Chaos's documented API alone (the doc pages are cited
-in the module) and every entry point raises `VRayRequired` ("V-Ray for Maya 2024+ required") in Maya
-2022. `enable_hook` appends one line to `vraySettings.postTranslatePython` (V-Ray execs that script
-after translating); `post_translate` exports each visible groom over V-Ray's motion-blur shutter
-(`cam_mbOn`, `cam_mbDuration`, `cam_mbIntervalCenter`, `cam_mbGeomSamples`) and makes a `VRayScene`
-plugin (`vray.utils.create`/`findByName`, `filepath`, `use_transform` 0: the file's Node has the
-world matrix) and deletes Node plugins V-Ray may have made from the groom shape. `load_vrayscene`
-makes a Maya VRayScene node (`FilePath`, `inputTime`, `outMesh`). Read V-Ray for Maya's shipped
-scripts (`maya_vray/scripts/vray`) to learn the public API; never copy Chaos code.
+**V-Ray for Maya translator** (`hosts/maya/vray/groom_translator.cpp`, `vraytr_groomlab.dll`): V-Ray
+for Maya renders groomLabShape as it renders a mesh. V-Ray for Maya ships a translator SDK with every
+install (`vray/include/vray_maya_sdk`: `translator_interface.h`, `exporter_base.h`; samples in
+`vray/samples/maya_plugins/translators`) and loads `vraytr_*.dll` from its `translators` folder and
+from `VRAY_FOR_MAYA<year>_TRANSLATORS_PATH`, which `GroomLab.mod` sets to the module's
+`[maya<year>/]vray`. The build (`GROOMLAB_BUILD_VRAY`, on) finds that SDK under
+`VRAY_FOR_MAYA_LOCATION` (default `C:/Program Files/Chaos/V-Ray/Maya <year> for x64`: one translator a
+Maya version, like the MtoA translator), links V-Ray's `vutils_s.lib` (its headers' inline code
+calls into it) and nothing else of V-Ray: parameters come from the exporter's `createDefParam` and
+`exportValueParam`, which need no `vray.dll`. Include `translator_interface.h` first, then
+`vrayplugins.h`, then `defparams.h` (each assumes the one before); `queryInterface` is a global
+template (`plugman.h`). The SDK stays out of the repository.
+
+It registers an `InstanceTranslator` for `groomLabShape`: the groom evaluated at render density
+with its render overrides by a `NodeEvaluator` kept per groom (the MtoA extension's way), the
+strands as `GeomMayaHair` from `vray::hairArrays` (the `.vrscene`'s arrays, shared code), the radii
+times `vray::matrixScale` of the world matrix (V-Ray scales hair points by a Node's transform but
+not its widths), V-Ray's own `Node` (`exportNodePlugin`: transform, render flags, object IDs, light
+links), and the material: the groom's shading group's surface shader exported by V-Ray
+(`exportParam(..., PT_material)`: a VRayHairNextMtl assigned in the Hypershade) unless it is Maya's
+`initialShadingGroup`, else `TexHairSampler` + `BRDFHair4` + `MtlSingleBRDF` as the `.vrscene`
+writes them. Verified in Maya 2026 with V-Ray 7 (batch `Render -r vray`, the probe above): the
+groom renders with GroomLab's hair, and a VRayHairNextMtl assigned to it renders as that material.
+Not done: deformation motion blur (V-Ray's `mbSamples` is ignored: the Node's transform blurs, the
+strands do not), render LOD and culling, instances and scales, IPR updates while grooming (V-Ray's
+FAQ: the node needs an `outVrayPluginData` output affected by its inputs).
+
+The groom shape is **renderable** (`setRenderable(true)` in `GroomShape::postConstructor`): without
+it shading groups refuse it ("the set has restrictions on membership"), so the Hypershade's Assign
+Material (`sets -forceElement`) failed on grooms and `shading.assign_shading_group` connected
+`instObjGroups` by hand.
+
+**V-Ray for Maya hook** (`vray_hook.py`, before the translator): `enable_hook` appends a line to
+`vraySettings.postTranslatePython`; `post_translate` exported each groom to a `.vrscene` and made a
+`VRayScene` plugin through `vray.utils`. Rendered in Maya 2024 to 2027 (V-Ray 7). Kept for scenes
+saved with it: `post_translate` returns at once while `translator_installed()` (the translator on
+`VRAY_FOR_MAYA<year>_TRANSLATORS_PATH`), so a groom renders once. Its menu items are gone.
 
 ### Linux builds (WSL): farms and pipelines
 
