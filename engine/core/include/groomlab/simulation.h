@@ -120,10 +120,15 @@ struct SimSettings {
     float drag = 0.05f;      // air drag toward the wind's air, 0-1
     float gravity = 980.0f;  // scene units per second squared (cm: 980)
     Vec3f gravityDirection{0.0f, -1.0f, 0.0f};
-    // The groomed shape is how the hair rests under gravity at the start frame: each guide feels
-    // only how gravity's pull in its root's frame changed since then (the head turned over or
-    // tilted), not gravity itself, so a still groom keeps its shape however soft it is.
+    // The groomed shape is how the hair rests under gravity at the start frame: a still groom
+    // keeps it (preload says how). Off: gravity pulls on the groomed shape.
     bool groomedUnderGravity = true;
+    // How groomedUnderGravity holds it (the param: "preload", "weightless", "off"): true preloads
+    // the rest shape (gravity preloading, Liu 2022): each joint's rest turn takes the groomed
+    // shape's weight beyond it, so the hair keeps its weight and rests in the groomed shape (soft
+    // guides that could not hold all of it take a share, the rest as weightless); false cancels
+    // the start's gravity in each root's frame (the hair weighs nothing while still).
+    bool preload = true;
     float windSpeed = 0.0f;  // the air's speed, scene units per second (0: still air)
     Vec3f windDirection{1.0f, 0.0f, 0.0f};
     float windGust = 0.5f;        // how much the wind varies, 0-1 (as Wind's gust)

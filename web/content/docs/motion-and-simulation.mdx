@@ -94,7 +94,7 @@ the standalone app, groom files and on the farm, with the same results.
 | `mass` | Hair mass: drag and other hair move heavier hair less (gravity accelerates all hair equally). |
 | `strength` | Fraction of the simulated motion applied, 0-1: paint 0 where guides should stay as groomed. |
 | `gravity`, `gravityDirection` | 980 (cm/s²), straight down. |
-| `groomedUnderGravity` | The groomed shape is how the hair rests under gravity at the start frame: still hair keeps its shape, and only motion (or the head tilting or turning over) moves it. On by default; off, gravity pulls on the groomed shape and the hair sags until it hangs. |
+| `groomedUnderGravity` | The groomed shape is how the hair rests under gravity at the start frame, so still hair keeps its shape. **preload** (default): the hair keeps its full weight, and each guide's rest shape is bent just enough to carry it, so it rests in the groomed shape, presses on what it lies on, and falls back with its weight after a fast move (gravity preloading, as in Liu 2022). Soft hair that could not hold all of its weight upright takes what it can and the rest is taken away. **weightless**: gravity's pull at the start is taken away; only its change as the head tilts or turns over moves the hair. **off**: gravity pulls on the groomed shape and the hair sags until it hangs. |
 | `windSpeed`, `windDirection`, `windGust`, `windFrequency` | A gusting wind the hair is dragged toward (the same gusts as the Wind node). |
 | `inertia` | How much of the head's motion the hair feels (lower: less floppy; 0 moves rigidly with the head). |
 | `collideScalp`, `collisionOffset`, `friction` | Collision with the scalp and the `collider` input's mesh; `friction` is the scalp's (a ColliderMesh node's `friction` sets its own mesh's). |
@@ -129,7 +129,7 @@ matter, with the preset's values:
 
 | Setting | Fur | What it does |
 | --- | --- | --- |
-| `groomedUnderGravity` | on | Gravity does not pull the groom out of shape. The groomed shape is taken as how the fur rests under gravity, so only motion moves it. |
+| `groomedUnderGravity` | weightless | Gravity does not pull the groom out of shape. The groomed shape is taken as how the fur rests under gravity, so only motion moves it. |
 | `bend` | 0.8 | How stiff each guide is along its length. This setting has the largest effect: 0.9 is nearly rigid, 0.7 is clearly loose. |
 | `rootStiffnessProfile` (with `rootStiffness` 1) | root 1, middle 0.7, tips 0.35 | How firmly each part of the guide is pulled back to its groomed shape. Holding the whole length, not only the root, keeps the look and makes the fur spring back. |
 | `inertia` | 0.8 | How much of the body's motion the fur feels. |
@@ -151,7 +151,9 @@ If the result is not what you want:
 - **Too dead** (stops without any spring): lower `bend` to 0.75, or lower the profile's tips.
 - **Sags when the head tilts or turns over**: `groomedUnderGravity` keeps the shape for the pose
   at the start frame; gravity's change as the head tilts still acts. Raise the profile's tips to
-  hold it, or turn `groomedUnderGravity` off to let gravity act on the groom fully.
+  hold it, or set `groomedUnderGravity` to off to let gravity act on the groom fully.
+- **Floats instead of falling back after a fast move**: use `groomedUnderGravity` preload, so
+  the fur keeps its weight.
 
 Notes:
 

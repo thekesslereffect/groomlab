@@ -14,6 +14,7 @@
 #include <functional>
 #include <map>
 #include <set>
+#include <tuple>
 
 #if GROOMLAB_HAS_TBB
 #include <tbb/task_arena.h>
@@ -255,7 +256,7 @@ TEST(Simulation, DryDefaultsAreTheSolverBeforeWater) {
         EXPECT_EQ(bitsHash(simulatePoints(s, guides, sphere, 20)), 0xcf93dfcbd12007d9ull);
         EXPECT_EQ(bitsHash(simulatePoints(unitSettings(), guides, sphere, 20)), 0x448a7ce0b65a1e96ull);
     }
-    EXPECT_EQ(SimSettings{}.hash(), 0x72b2bbc817a8716aull);  // groomedUnderGravity on by default since 0.15.0
+    EXPECT_EQ(SimSettings{}.hash(), 0x8eacb7b84342c479ull);  // groomedUnderGravity preload by default since 0.39.0
     EXPECT_EQ(s.hash(), 0xa179909d7d9cee95ull);
     // Water params set while water is off change nothing, the stamp included.
     SimSettings off = s;
@@ -1311,7 +1312,9 @@ TEST(Simulation, HairEndsDoNotFlipInAHeadShake) {
 TEST(Simulation, GroomedUnderGravityKeepsAStillGroomAndStillMoves) {
     // Soft guides held near the root only: gravity bends them down from the groomed shape.
     // groomedUnderGravity takes the groomed shape as how they rest under gravity: still, they
-    // keep it; the head's motion still swings them, and they come back to it.
+    // keep it; the head's motion still swings them, and they come back to it. Weightless and
+    // preloaded alike (these soft guides stand up: preloaded, they take the share of their weight
+    // they can hold upright).
     const auto head = test::makeSphere(32, 64, 10.0f);
     const GuidesPtr guides = guidesOnSphere(*head, 60, 12, 8.0f);
     SimSettings s;
@@ -1320,21 +1323,124 @@ TEST(Simulation, GroomedUnderGravityKeepsAStillGroomAndStillMoves) {
     auto still = [](int) { return 0.0f; };
     auto turn = [](int f) { return 1.5708f * std::clamp((f - 30) / 4.0f, 0.0f, 1.0f); };
     const TurnedRun pulled = turnedRun(s, guides, head, still, 60);
-    s.groomedUnderGravity = true;
-    const TurnedRun held = turnedRun(s, guides, head, still, 60);
     EXPECT_GT(pulled.endShape, 1.0f) << "gravity should bend soft guides";
-    EXPECT_LT(held.endShape, 0.02f) << "the groomed shape held under gravity";
-    EXPECT_LT(held.endMotion, 0.02f);
-    // A head turn swings them (in the head's frame), and they settle back into the groom.
-    const TurnedRun turned = turnedRun(s, guides, head, turn, 120);
-    EXPECT_LT(turned.endShape, 0.05f);
-    EXPECT_LT(turned.endMotion, 0.02f);
-    EXPECT_GT(turnedRun(s, guides, head, turn, 34).endShape, 1.0f) << "the turn should swing the guides";  // as it ends
-    // On by default; off is a different stamp.
+    s.groomedUnderGravity = true;
+    for (const bool preload : {false, true}) {
+        SCOPED_TRACE(preload ? "preload" : "weightless");
+        s.preload = preload;
+        const TurnedRun held = turnedRun(s, guides, head, still, 60);
+        EXPECT_LT(held.endShape, 0.02f) << "the groomed shape held under gravity";
+        EXPECT_LT(held.endMotion, 0.02f);
+        // A head turn swings them (in the head's frame), and they settle back into the groom
+        // (with their weight they swing on longer at these low damping defaults).
+        const TurnedRun turned = turnedRun(s, guides, head, turn, preload ? 168 : 120);
+        EXPECT_LT(turned.endShape, 0.05f);
+        EXPECT_LT(turned.endMotion, 0.02f);
+        EXPECT_GT(turnedRun(s, guides, head, turn, 34).endShape, 1.0f) << "the turn should swing the guides";  // as it ends
+    }
+    // Preload by default; weightless and off are other stamps.
     EXPECT_TRUE(SimSettings{}.groomedUnderGravity);
-    SimSettings off;
+    EXPECT_TRUE(SimSettings{}.preload);
+    SimSettings off, weightless;
     off.groomedUnderGravity = false;
+    weightless.preload = false;
     EXPECT_NE(off.hash(), SimSettings{}.hash());
+    EXPECT_NE(weightless.hash(), SimSettings{}.hash());
+}
+
+// The guides run with the head pitched about x (forward) by pitchAt(frame) radians, measured in
+// the head's frame: the farthest a point is from its groomed place at `frames`, and at `holdEnd`.
+struct PitchedRun {
+    float shapeAtHold = 0.0f;
+    float endShape = 0.0f;
+    float endMotion = 0.0f;
+};
+PitchedRun pitchedRun(const SimSettings& s, const GuidesPtr& guides, const MeshPtr& scalp, const std::function<float(int)>& pitchAt,
+                      int holdEnd, int frames) {
+    auto pitched = [](float a, const Vec3f& v) {
+        const float c = std::cos(a), sn = std::sin(a);
+        return Vec3f{v.x, c * v.y - sn * v.z, sn * v.y + c * v.z};
+    };
+    auto inputsAt = [&](int frame) {
+        const float a = pitchAt(frame);
+        auto g = std::make_shared<GuideSet>(*guides);
+        for (Guide& guide : g->guides()) {
+            for (Vec3f& p : guide.points) p = pitched(a, p);
+        }
+        MeshPtr mesh;
+        if (scalp) {
+            std::vector<Vec3f> points = scalp->points();
+            for (Vec3f& p : points) p = pitched(a, p);
+            auto m = std::make_shared<ScalpMesh>(scalp->withPoints(std::move(points)));
+            m->setRestPoints(scalp->points());
+            mesh = m;
+        }
+        return SimInputs{GuidesPtr(g), mesh, {}};
+    };
+    std::vector<Vec3f> groomed;
+    for (const Guide& g : guides->guides()) groomed.insert(groomed.end(), g.points.begin(), g.points.end());
+    GuideSolver solver;
+    solver.start(s, kFps, 1, inputsAt(1));
+    std::vector<Vec3f> before = groomed;
+    PitchedRun run;
+    for (int f = 2; f <= frames; ++f) {
+        solver.step(inputsAt(f), 1);
+        std::vector<Vec3f> x = solver.points();
+        for (Vec3f& p : x) p = pitched(-pitchAt(f), p);
+        for (std::size_t k = 0; k < x.size(); ++k) {
+            const float off = (x[k] - groomed[k]).length();
+            if (f == holdEnd) run.shapeAtHold = std::max(run.shapeAtHold, off);
+            if (f == frames) run.endShape = std::max(run.endShape, off);
+            if (f > frames - 24) run.endMotion = std::max(run.endMotion, (x[k] - before[k]).length());
+        }
+        before = std::move(x);
+    }
+    return run;
+}
+
+TEST(Simulation, GravityPreloadHoldsTheGroomWithItsWeight) {
+    // Preload (gravity preloading, Liu 2022): the rest turns take the groomed shape's weight, so
+    // gravity acts in full and a still groom rests in its groomed shape. A level 25 cm guide (the
+    // most a joint carries) and guides on a head, natural-hair settings.
+    auto level = std::make_shared<GuideSet>();
+    level->add(1, test::straightCurve({0.0f, 0.0f, 0.0f}, {25.0f, 0.0f, 0.0f}, 15));
+    const auto head = test::makeSphere(32, 64, 10.0f);
+    const GuidesPtr onHead = guidesOnSphere(*head, 60, 12, 8.0f);
+    auto still = [](int) { return 0.0f; };
+    auto tilt = [](int f) { return 1.5708f * std::clamp((f - 30) / 6.0f, 0.0f, 1.0f) * (1.0f - std::clamp((f - 90) / 6.0f, 0.0f, 1.0f)); };
+    for (const float bend : {0.6f, 0.78f, 0.9f}) {
+        SimSettings s;
+        s.bend = bend;
+        s.twist = 0.6f;
+        s.damping = 0.35f;
+        s.drag = 0.4f;
+        s.rootStiffnessProfile = Ramp{{0.0f, 1.0f}, {0.25f, 0.4f}, {0.55f, 0.05f}, {1.0f, 0.0f}};
+        for (const auto& [name, guides, scalp] : std::vector<std::tuple<const char*, GuidesPtr, MeshPtr>>{{"level", level, nullptr},
+                                                                                                         {"head", onHead, head}}) {
+            s.groomedUnderGravity = false;
+            const PitchedRun off = pitchedRun(s, guides, scalp, still, 0, 96);
+            s.groomedUnderGravity = true;
+            s.preload = false;
+            const PitchedRun cancel = pitchedRun(s, guides, scalp, still, 0, 96);
+            const PitchedRun cancelTilt = pitchedRun(s, guides, scalp, tilt, 90, 200);
+            s.preload = true;
+            const PitchedRun preload = pitchedRun(s, guides, scalp, still, 0, 96);
+            const PitchedRun preloadTilt = pitchedRun(s, guides, scalp, tilt, 90, 200);
+            char what[256];
+            std::snprintf(what, sizeof what,
+                          "%s bend %.2f: still off %.3f cancel %.3f preload %.3f (motion %.4f); tilted cancel %.3f preload %.3f; "
+                          "back cancel %.3f preload %.3f",
+                          name, bend, off.endShape, cancel.endShape, preload.endShape, preload.endMotion, cancelTilt.shapeAtHold,
+                          preloadTilt.shapeAtHold, cancelTilt.endShape, preloadTilt.endShape);
+            ::testing::Test::RecordProperty(std::string(name) + "_bend" + std::to_string(static_cast<int>(bend * 100)), what);
+            const float scale = guides == level ? 25.0f : 8.0f;
+            EXPECT_LT(preload.endShape, 0.02f * scale) << what;
+            EXPECT_LT(preload.endMotion, 0.002f * scale) << what;
+            // Back in the groom after the tilt (soft guides with their weight may fall over to
+            // the other side and stay there, as hair does: within 15% of their length).
+            EXPECT_LT(preloadTilt.endShape, (bend < 0.7f ? 0.15f : 0.03f) * scale) << what;
+        }
+    }
 }
 
 TEST(Simulation, SimulatePresetsSetTheSameParamsAndDefaultIsTheNodes) {
@@ -1359,7 +1465,7 @@ TEST(Simulation, SimulatePresetsSetTheSameParamsAndDefaultIsTheNodes) {
     for (const std::string& name : keys) defaults.set(name, specs.at(name));
     EXPECT_EQ(nlohmann::json::parse(simulatePresetParamsJson("default")), nlohmann::json::parse(paramsJson(defaults)));
     const auto fur = nlohmann::json::parse(simulatePresetParamsJson("fur"));
-    EXPECT_EQ(fur["groomedUnderGravity"], true);
+    EXPECT_EQ(fur["groomedUnderGravity"], "weightless");
     EXPECT_THROW(simulatePresetParamsJson("nope"), std::invalid_argument);
 }
 

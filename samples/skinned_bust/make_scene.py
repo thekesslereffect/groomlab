@@ -345,10 +345,11 @@ def main():
     # The simulated variant: the guides swing, the strands follow them.
     cmds.currentTime(1)
     groom_api.set_follow_scalp(groom, False)
-    # Natural hair, not jelly: the groom is its shape under gravity (groomedUnderGravity), held only
-    # near the root (a hold down the whole length springs the bob back as one block), its form kept
-    # by a firm bend, and air drag that makes the ends trail and settle without springing back.
-    sim.add_simulate(groom, groomedUnderGravity=True, bend=0.78, twist=0.6, damping=0.35, drag=0.4, inertia=0.75,
+    # Natural hair, not jelly: the groom is its shape under gravity, the hair keeping its weight
+    # (groomedUnderGravity preload), held only near the root (a hold down the whole length springs
+    # the bob back as one block), its form kept by a firm bend, and air drag that makes the ends
+    # trail and settle without springing back.
+    sim.add_simulate(groom, groomedUnderGravity="preload", bend=0.78, twist=0.6, damping=0.35, drag=0.4, inertia=0.75,
                      rootStiffnessProfile=[[0.0, 1.0], [0.25, 0.4], [0.55, 0.05], [1.0, 0.0]])
     simulated = out + "/skinned_bust_sim.ma"
     cmds.file(rename=simulated)
