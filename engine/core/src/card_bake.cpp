@@ -182,7 +182,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
     const DensityGrid grid(settings.occlusion > 0.0f ? cloud : std::vector<Vec3f>{});
     cloud.clear();
     cloud.shrink_to_fit();
-    const ColorCache colorCache(cards.cards, &strands, settings.color, cards.colorLook);
+    const ColorCache colorCache(cards.cards, &strands, settings.color);
     // Whether each source set has real widths (any not 1), once per set, not per texture.
     std::map<const StrandSet*, bool> hasRealWidths;
     for (const std::size_t c : owners) {
@@ -628,7 +628,7 @@ ScalpTextures bakeScalpTextures(const StrandSet& strands, const ScalpMesh& scalp
     const bool realWidths = !strands.widths().empty() &&
                             std::any_of(strands.widths().begin(), strands.widths().end(), [](float x) { return x != 1.0f; });
     const float fallbackWidth = settings.strandWidth > 0.0f ? settings.strandWidth : extent / 3000.0f;
-    const StrandColors colors = colorsOf(strands, settings.color);  // (as the cards shade: CardColorLook::Shaded)
+    const StrandColors colors = colorsOf(strands, settings.color);  // base color: the scalp map's color/albedo contract
 
     // Each strand's stretch near the skin, in UV pixels: (x, y, radius, height 0 skin .. 1 reach).
     struct Dot {

@@ -611,13 +611,6 @@ public:
                 .range(16, 16384)
                 .soft(256, 8192)
                 .in("Texture"),
-            notAnimatable(ParamSpec{"bakeColor", std::string("shaded"),
-                                    "What the baked color map holds: shaded, the hair as the viewport shows it, so a plain "
-                                    "material (a lambert, an engine's default lit) looks like the groom; base, the strands' "
-                                    "base color, for a hair shader that shades it itself (aiStandardHair's base color, "
-                                    "Unreal's Hair shading model). Several Cards nodes share one bake: the first one's applies",
-                                    "", {"shaded", "base"}})
-                .in("Texture"),
             notAnimatable({"strandsRootFade", 0.06, "Share of each strands card, from its root, over which coverage fades in so "
                                                       "hair cards blend into the scalp and each other (0: none)", "fraction"})
                 .range(0, 1)
@@ -685,7 +678,6 @@ public:
         s.variations = static_cast<int>(params().getInt("variations"));
         s.mirror = params().getBool("mirror");
         s.volumeNormals = params().getBool("volumeNormals");
-        s.colorLook = params().getString("bakeColor") == "base" ? CardColorLook::Base : CardColorLook::Shaded;
         const std::string style = params().getString("crossStyle");
         s.crossStyle = style == "single" ? CardSettings::CrossStyle::Single
                        : style == "cross" ? CardSettings::CrossStyle::Cross

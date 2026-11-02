@@ -193,9 +193,7 @@ Game cards as glTF, below).
 - **Controls:** `cardsPerClump`, `layers`, `fitTwist`, `ruffle`, `margin`, `flyawayCards`, `braids`,
   `segments` along, `widthSegments` across, `widthScale`, `widthProfile` (taper), `twist` (on top
   of the fit), `curvature` (bowed, needs 2+ width segments), `minStrands`, `maxCards`,
-  `minWidth`, `atlasSize` (the bake's resolution), `bakeColor` (`shaded`: the Color map as the
-  viewport shades the hair, for plain materials; `base`: the strands' base color, for hair
-  shaders); `groomlab.create_cards(groom, cards_per_clump=6,
+  `minWidth`, `atlasSize` (the bake's resolution); `groomlab.create_cards(groom, cards_per_clump=6,
   layers=2, flyaway_cards=200, ...)` sets them from Python. `cardDensity` is the strand density
   cards are made and baked at: 1.0, the whole groom, so every strand of a clump goes into its
   card and the bake sees all of them. The viewport's `previewDensity` and `previewPointBudget`

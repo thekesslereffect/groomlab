@@ -76,18 +76,6 @@ vec3 hairColorSigma(vec3 rgb, float azimuthalRoughness) {
     return l * l;
 }
 
-// The base color a card's baked color shows (core's hairBaseOfShaded, hair_color.h: the shaded color,
-// kShadedMix of t (s + (1 - s) exp(-k a^q)) of the base color's absorption a, undone).
-vec3 hairBaseOfShaded(vec3 shaded, float azimuthalRoughness) {
-    vec3 f = 0.68686 * shaded + 0.10438 * (shaded.x + shaded.y + shaded.z);
-    vec3 share = clamp((f / 0.7079 - 0.0989) / 0.9011, 1e-6, 1.0);
-    vec3 sigma = pow(-log(share) / 4.5472, vec3(1.46800, 1.46800, 1.46800));
-    float b = clamp(azimuthalRoughness, 0.0, 1.0);
-    float b2 = b * b;
-    float d = 5.969 - 0.215 * b + 2.532 * b2 - 10.73 * b2 * b + 5.574 * b2 * b2 + 0.245 * b2 * b2 * b;
-    return clamp(exp(-d * sqrt(sigma)), 1e-8, 1.0);
-}
-
 // The structural color: the color's hue turned by `turns`, its saturation and value kept
 // (color_patterns.h iridescentTint, the Arnold network's ramp).
 vec3 hairHue(vec3 c, float turns) {

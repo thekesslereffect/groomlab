@@ -935,9 +935,7 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
         if (textured) bindCardTextures(cards);
         if (cards.shader && cards.shaderKind == 6) {
             cards.shader->setParameter("solid", textured ? 0.0f : 1.0f);
-            {  // what the bake holds (CardMesh::colorLook): GroomLab's card shading or Maya's hair graph turns it back
-                const std::shared_ptr<const CardMesh> mesh = in.cards;
-                cards.shader->setParameter("cardColorLook", mesh && mesh->colorLook == CardColorLook::Base ? 1.0f : 0.0f);
+            {  // the base-color bake's Rec.709 back to Maya's rendering space
                 const RenderingSpace space = renderingSpace();  // (the bake wrote Rec.709)
                 cards.shader->setParameter("cardFromRec709R", &space.fromRec709[0]);
                 cards.shader->setParameter("cardFromRec709G", &space.fromRec709[3]);

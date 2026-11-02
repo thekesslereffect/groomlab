@@ -132,21 +132,16 @@ groomlab.save_card_map_preset("My packed", preset_dict)
 
 ### The color map
 
-The Cards node's **Bake color** (in Texture) says what the Color map holds:
-
-- **Shaded** (the default): the hair as GroomLab's viewport shades it, so cards with a plain
-  material (a Lambert, Standard Surface, an engine's default lit or unlit) look like the groom.
-  It is darker and richer than the strands' base color, because hair absorbs light as it passes
-  through the fibers.
-- **Base**: the strands' base color, for a hair shader that shades it itself (aiStandardHair's
-  Base Color, Unreal's Hair shading model). On a plain material it looks lighter and greyer than
-  the groom.
-
-GroomLab's own card preview reads either, so the cards in the viewport look the same.
+The Color map holds the strands' authored base color/albedo. Use it with aiStandardHair's Base
+Color, Unreal's Hair shading model, or whenever the texture must preserve the authored color
+independently of a particular light and shader. Lighting and hair-BSDF appearance are never baked
+into the color map.
 
 The Color map is sRGB, with Rec.709 primaries, as engines expect. In Maya, colors are in the
-scene's rendering space (ACEScg under ACES), so the bake converts them to Rec.709. A file node set
-to sRGB then reads them back unchanged, and so does an engine.
+scene's rendering space (ACEScg under ACES), so the bake converts them to Rec.709 exactly once. A
+file node set to sRGB converts them back to the scene space; engines read the same Rec.709 color.
+As with every sRGB texture, colors outside the Rec.709 gamut cannot be represented without clipping;
+use a wide-gamut linear format when that data must be preserved.
 
 ### In the engine
 
@@ -216,7 +211,7 @@ iridescence is a per-point mask ([Color patterns](/docs/color-patterns)):
 | Target | Colors | Iridescence |
 | --- | --- | --- |
 | Unreal strands | `groom_color` per vertex | `groom_iridescence` per vertex; with **Iridescence as AO** (`iridescence_as_ao=True`) also `groom_ao`, which the Hair Attributes material node exposes |
-| Cards (Unreal, glTF, Unity) | Baked into the Color map, shaded as the viewport shows the hair or as its base color (the Cards node's Bake color; a feather's card is its vane laid flat, so its patterns map directly) | The Color map's alpha (Unreal; RGBA only then); Unity's Mask map red channel; glTF: not carried |
+| Cards (Unreal, glTF, Unity) | Baked into the Color map as base color/albedo, without viewport lighting or hair-BSDF shading (a feather's card is its vane laid flat, so its patterns map directly) | The Color map's alpha (Unreal; RGBA only then); Unity's Mask map red channel; glTF: not carried |
 | Unity strands | One color per strand (`Cd`, as in GroomLab's Alembic; bands and patterns along a strand are not carried) | Not carried |
 | glTF cards | The baked `_BaseColor` and each card's `_TINT` | Not carried (the alpha is the coverage) |
 
