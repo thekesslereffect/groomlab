@@ -46,6 +46,10 @@ option(GROOMLAB_BUILD_WEB     "Build the WebAssembly module (Emscripten) or its 
 
 set(MAYA_LOCATION "$ENV{MAYA_LOCATION}" CACHE PATH "Maya install root, e.g. C:/Program Files/Autodesk/Maya2022")
 set(MTOA_LOCATION "$ENV{MTOA_LOCATION}" CACHE PATH "MtoA install root, e.g. C:/Program Files/Autodesk/Arnold/maya2022")
+# The Maya the tests run in (its bin folder: mayapy, maya, its TBB DLL): the one built against (an
+# install), or, for a plugin built from a devkit, an installed Maya of the same version (the
+# ninja-maya2026-tests and ninja-maya2027-tests presets).
+set(GROOMLAB_MAYA_BIN "${MAYA_LOCATION}/bin" CACHE PATH "The bin folder of the Maya the tests run in (default: MAYA_LOCATION's)")
 if(APPLE)
     # macOS: MAYA_LOCATION is the Maya devkit (headers); the libraries the plugin links (OpenMaya...,
     # TBB) and mayapy are the install's, inside Maya.app (docs/MACOS.md).

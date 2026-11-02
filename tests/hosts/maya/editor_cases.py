@@ -30,7 +30,7 @@ def classic_links():
 def wait(ms):
     """Let Qt run events and timers for `ms` milliseconds (PySide2 has no QTest.qWait)."""
     import time
-    from PySide2 import QtWidgets
+    from groomlab.ui.qt import QtWidgets
     end = time.time() + ms / 1000.0
     while time.time() < end:
         QtWidgets.QApplication.processEvents()
@@ -41,7 +41,8 @@ def wait(ms):
 def press(widget, key, modifiers=None):
     """A key pressed on widget as a user would: its window active and widget focused (activate:
     Qt's own, whatever window the OS has in front, so shortcuts reach it)."""
-    from PySide2 import QtCore, QtTest
+    from groomlab.ui.qt import QtCore, QtTest as qt_test_module
+    QtTest = qt_test_module()
     assert activate(widget), "no keyboard focus for %s" % widget
     QtTest.QTest.keyClick(widget, key, QtCore.Qt.NoModifier if modifiers is None else modifiers)
 
@@ -56,7 +57,7 @@ def at_frame(t):
 class GraphEditorTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         cls.app = QtWidgets.QApplication.instance()
 
     def setUp(self):
@@ -167,11 +168,11 @@ class GraphEditorTest(unittest.TestCase):
             widgets.forget_range("Scatter.density")
 
     def test_dragging_a_link_onto_a_port_connects_without_selecting(self):
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         self.editor.unlink("interpolate", "guides")
         self.editor.resize(1200, 600)
         self.editor.show()
-        QtWidgets = __import__("PySide2.QtWidgets", fromlist=["QtWidgets"])
+        from groomlab.ui.qt import QtWidgets
         QtWidgets.QApplication.processEvents()
         view = self.editor.view
         src = view.mapFromScene(self.editor.items["guides"].output.scene_center())
@@ -210,7 +211,8 @@ class GraphEditorTest(unittest.TestCase):
     def test_pins_route_links_and_snap_puts_them_on_the_grid(self):
         # Double-click a link: a pin there, the link through it; no undo step (layout), the groom's
         # graph keeps it. Delete takes it out. Snap lands a dragged node on the grid.
-        from PySide2 import QtTest
+        from groomlab.ui.qt import QtTest as qt_test_module
+        QtTest = qt_test_module()
         QtCore, QtWidgets = self.ge.QtCore, self.ge.QtWidgets
         self.editor.resize(1200, 600)
         self.editor.show()
@@ -338,7 +340,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertIn("Not inserted", self.editor.status.text())
 
     def test_a_node_dropped_on_a_wire_goes_into_it(self):
-        from PySide2 import QtCore, QtWidgets
+        from groomlab.ui.qt import QtCore, QtWidgets
         self.editor.resize(1400, 700)
         self.editor.show()
         QtWidgets.QApplication.processEvents()
@@ -378,7 +380,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(maps[0], "freckles")
 
     def test_an_invalid_link_drop_says_why_and_keeps_the_link(self):
-        from PySide2 import QtCore, QtWidgets
+        from groomlab.ui.qt import QtCore, QtWidgets
         self.editor.resize(1200, 600)
         self.editor.show()
         QtWidgets.QApplication.processEvents()
@@ -407,7 +409,7 @@ class GraphEditorTest(unittest.TestCase):
     def test_a_map_node_links_from_the_output_dragged(self):
         # A Map node shows one labelled port per output (luminance, r, g, b, a) down its right
         # edge; a link dragged from g reads g, is drawn from g, and one undo takes it away.
-        from PySide2 import QtGui, QtWidgets
+        from groomlab.ui.qt import QtGui, QtWidgets
         groomlab.add_map(self.groom, "packed", 1.0, kind="vertices", color=True)
         self.editor.reload()
         name = self.editor.add_node("Map")
@@ -503,7 +505,7 @@ class GraphEditorTest(unittest.TestCase):
         # A Layers stack on Length's keep: its count dragged and committed in the panel, as an
         # artist does. The groom keeps evaluating, the stack's sections follow the count and the
         # stored count is a whole number.
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         name = self.editor.add_node("Layers")
         self.editor.set_param_exposed("length", "keep", True)
         self.editor.model.connect(name, "length", "keep")
@@ -543,7 +545,7 @@ class GraphEditorTest(unittest.TestCase):
         # The Map node's panel on a narrow editor: its warnings and where the map lives each take
         # a full-width row above the buttons (not a column squeezed beside them), the path breaks
         # at its folders, and the name box stays wide enough to read.
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         groomlab.add_map(self.groom, "grow", 0.5, kind="texture", resolution=16)
         self.editor.reload()
         name = self.editor.add_node("Map")
@@ -577,7 +579,7 @@ class GraphEditorTest(unittest.TestCase):
         # A Map node reading a texture map whose image is missing warns, naming the file, with a
         # Relink button (its dialog opens only from the click; relink_map_image takes the path).
         import tempfile
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         folder = tempfile.mkdtemp(prefix="groomlab_relinkge_").replace("\\", "/")
         cmds.workspace(folder, openWorkspace=True)
         groomlab.add_map(self.groom, "grow", 0.5, kind="texture", resolution=16)
@@ -619,7 +621,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertTrue(any("driven by" in t or "×" in t for t in labels))  # the field named beside the value
 
     def test_expand_inputs_button_toggles_every_connectable_param(self):
-        from PySide2 import QtCore, QtWidgets
+        from groomlab.ui.qt import QtCore, QtWidgets
         item = self.editor.items["length"]
         params = item.mappable()
         self.assertGreater(len(params), 1)
@@ -655,7 +657,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertIsNone(self.editor.scene._drag_port)
 
     def test_search_backdrops_badges_reset(self):
-        from PySide2 import QtCore, QtWidgets
+        from groomlab.ui.qt import QtCore, QtWidgets
         from groomlab.ui import widgets
         # Type-to-search: the best match first, Enter adds it where asked.
         self.editor.show_search(QtCore.QPointF(500, 300), QtCore.QPoint(100, 100))
@@ -727,7 +729,7 @@ class GraphEditorTest(unittest.TestCase):
         self.editor.items[name].setSelected(True)
 
     def _action(self, label):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         buttons = [b for b in self.editor.params.findChildren(QtWidgets.QPushButton)
                    if b.objectName() == "nodeAction_" + label.replace(" ", "").replace(".", "")]
         self.assertEqual(len(buttons), 1, label)
@@ -763,7 +765,7 @@ class GraphEditorTest(unittest.TestCase):
         cards = self.editor.add_node("Cards")
         self._select_node(cards)
         self._action("Bake Maps")
-        from PySide2 import QtWidgets as _qw
+        from groomlab.ui.qt import QtWidgets as _qw
         show = [b for b in self.editor.params.findChildren(_qw.QCheckBox) if b.objectName() == "nodeAction_ShowCards"]
         self.assertEqual(len(show), 1)
         show[0].setChecked(True)  # the cards view, as A/B
@@ -812,7 +814,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertIsNotNone(self._action("Export Mesh..."))  # (a file dialog: not clicked here)
         self._select_node("length")
         wait(10)  # (the last node's pinned actions go once the event is over)
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         self.assertFalse([b for b in self.editor.params.findChildren(QtWidgets.QPushButton)
                           if b.objectName().startswith("nodeAction_") and b.isVisibleTo(self.editor.params)])
         self.assertIsNone(self.editor.params.pinned)
@@ -824,7 +826,7 @@ class GraphEditorTest(unittest.TestCase):
         import tempfile
         import groomlab_core
         from groomlab import sculpts
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         model = self.editor.model
         self.editor.scene.clearSelection()
         to_guides = self.editor.add_node("ToGuides")
@@ -870,7 +872,7 @@ class GraphEditorTest(unittest.TestCase):
 
     def test_a_direction_takes_an_expression(self):
         # Gravity's direction: three numbers, or (f(x)) an expression giving a vector per strand.
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         gravity = self.editor.add_node("Gravity")
         self.editor.link("width", gravity, "strands")
         self._select_node(gravity)
@@ -897,7 +899,7 @@ class GraphEditorTest(unittest.TestCase):
         # A world Transform's pivot is a world position: Pick beside it takes the selected locator's
         # (the editor stays on its groom while the locator is selected). Its translate is no world
         # position: no Pick.
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         tie = self.editor.add_node("Transform")
         self.editor.link("width", tie, "strands")
         self.editor.model.set_param(tie, "space", "world")
@@ -981,7 +983,7 @@ class GraphEditorTest(unittest.TestCase):
         # Two Cards nodes, baked; the strands between them change: the inner node's maps are out
         # of date, the outer node's still fit. Each node's panel shows its own numbers.
         import tempfile
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         from groomlab import graph as gm
         outer = groomlab.create_cards(self.groom, max_cards=12)
         model = gm.GraphModel.from_groom(self.groom)
@@ -1022,7 +1024,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertIsNotNone(paint)
         self.assertEqual([a.text() for a in paint.actions()], ["On Guides", "On Scalp Vertices", "As Texture"])
         # The row's yellow Paint chip (the app's pill) offers the same choices.
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         self.editor.params.show_node("scatter")
         chips = self.editor.params.widget().findChildren(QtWidgets.QToolButton, "paintChip")
         self.assertTrue(chips)
@@ -1049,7 +1051,7 @@ class GraphEditorTest(unittest.TestCase):
                          if self.editor.model.param_spec("output", "strands") else ["x"])
 
     def test_any_param_exposed_and_set_by_a_value(self):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         # A seed (no field can drive it) offers Expose as Input too: a Value port a Value node sets.
         menu = self.editor.params.build_param_menu("scatter", "seed")
         expose = next((a for a in menu.actions() if a.text() == "Expose as Input"), None)
@@ -1099,7 +1101,7 @@ class GraphEditorTest(unittest.TestCase):
             units.set_unit("length", "cm")
 
     def _param_label(self, param):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         body = self.editor.params.widget()
         return next(w for w in body.findChildren(QtWidgets.QLabel) if w.property("glParam") == param)
 
@@ -1118,7 +1120,7 @@ class GraphEditorTest(unittest.TestCase):
         return [s.suffix() for s in root.findChildren(widgets.SoftSlider)]
 
     def test_param_sections_show_when_units_and_upgrade(self):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         from groomlab.ui import widgets
         panel = self.editor.params
         self.ge.ParamPanel.folded.clear()
@@ -1208,7 +1210,7 @@ class GraphEditorTest(unittest.TestCase):
             self.editor.hide()
 
     def test_node_toggles_and_curves(self):
-        from PySide2 import QtCore, QtWidgets
+        from groomlab.ui.qt import QtCore, QtWidgets
         from groomlab.ui import widgets
         self.editor.resize(1200, 600)
         self.editor.show()
@@ -1217,7 +1219,8 @@ class GraphEditorTest(unittest.TestCase):
         item = self.editor.items["length"]
         rects = item.toggle_rects()
         view = self.editor.view
-        from PySide2 import QtTest
+        from groomlab.ui.qt import QtTest as qt_test_module
+        QtTest = qt_test_module()
         for kind in ("focus", "disable"):
             point = view.mapFromScene(item.mapToScene(rects[kind].center()))
             QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, point)
@@ -1416,7 +1419,7 @@ class GraphEditorTest(unittest.TestCase):
     def test_an_inserted_presets_compound_shows_its_key_params(self):
         # The preset's "exposed" params on the Compound's own panel, grouped as the inner params
         # are; an edit there changes the groom and is stored with it.
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         self.editor.load_preset("hair_basics")
         self.editor.scene.clearSelection()
         self.assertEqual(self.editor.insert_preset("creature_fur"), "creatureFur")
@@ -1445,7 +1448,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(groomlab.errors(self.groom), [])
 
     def test_copy_and_paste_the_whole_graph_through_the_clipboard(self):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         from groomlab import presets
         clipboard = QtWidgets.QApplication.clipboard()
         users = clipboard.text()  # the user's clipboard, put back after
@@ -1606,7 +1609,7 @@ class GraphEditorTest(unittest.TestCase):
         # Testers found Alt+drag panning sluggish: nodes and ports paint once into pixmaps a pan
         # moves; an Alt+right-drag zoom scales one picture of the view (at the screen's resolution:
         # item-coordinate caches drew 1.5x too large on a 150% screen), sharp again on release.
-        from PySide2 import QtCore, QtGui, QtWidgets
+        from groomlab.ui.qt import QtCore, QtGui, QtWidgets
         device = QtWidgets.QGraphicsItem.DeviceCoordinateCache
         items = [i for i in self.editor.scene.items() if isinstance(i, (self.ge.NodeItem, self.ge.PortItem))]
         self.assertTrue(items)
@@ -1641,7 +1644,7 @@ class GraphEditorTest(unittest.TestCase):
     def test_wheel_zoom_draws_what_a_fresh_paint_draws(self):
         # A tester saw the view broken while wheel-zooming (stale, larger pictures of the nodes left
         # behind): each wheel step must show what painting the view afresh shows.
-        from PySide2 import QtCore, QtGui, QtWidgets
+        from groomlab.ui.qt import QtCore, QtGui, QtWidgets
         self.editor.resize(1200, 500)
         self.editor.show()
         wait(30)
@@ -1718,7 +1721,8 @@ class GraphEditorTest(unittest.TestCase):
     def test_ctrl_z_in_the_editor_is_mayas_undo(self):
         # Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z sent to the editor window undo and redo the groom's graph
         # (Maya's undo), and the editor shows the result, keeping the selection where it can.
-        from PySide2 import QtCore, QtTest
+        from groomlab.ui.qt import QtCore, QtTest as qt_test_module
+        QtTest = qt_test_module()
         from groomlab.ui import widgets
         self.editor.resize(1200, 600)
         self.editor.show()
@@ -1798,7 +1802,7 @@ class GraphEditorTest(unittest.TestCase):
         # edit puts the graph back to the text the move wrote, and the editor shows it (its model,
         # canvas and panel), whether undone here (Ctrl+Z) or by Maya (Edit > Undo); before, it kept
         # showing the edit until reopened.
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         self.editor.resize(1200, 600)
         self.editor.show()
         wait(30)
@@ -1846,7 +1850,8 @@ class GraphEditorTest(unittest.TestCase):
     def test_set_key_from_the_menu_and_with_s_over_a_param(self):
         # Right-click > Set Key links the param to its own attribute and keys it (one undo step); S
         # over its field keys it again; the field takes the Channel Box's colors as the time moves.
-        from PySide2 import QtCore, QtGui, QtTest
+        from groomlab.ui.qt import QtCore, QtGui, QtTest as qt_test_module
+        QtTest = qt_test_module()
         cmds.autoKeyframe(state=False)
         cmds.playbackOptions(minTime=1, maxTime=20)
         cmds.currentTime(1)
@@ -1931,7 +1936,8 @@ class GraphEditorTest(unittest.TestCase):
     def test_dragging_a_keyed_slider_previews_live_and_commits_one_step(self):
         # A keyed param's slider moves the groom while it is dragged (its attribute, outside undo),
         # and the release is one undo step from the value before the drag.
-        from PySide2 import QtCore, QtGui, QtTest
+        from groomlab.ui.qt import QtCore, QtGui, QtTest as qt_test_module
+        QtTest = qt_test_module()
         from groomlab.ui import widgets
         widgets.forget_range("Length.keep")  # the default range, whatever an earlier test stretched it to
         # The CPU's drag (the attribute written as it moves): the chain ends in an even Resample, which
@@ -2071,7 +2077,7 @@ class GraphEditorTest(unittest.TestCase):
         editor.deleteLater()
 
     def test_scalp_node_shows_the_mesh(self):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         self.editor.params.show_node("scalp")
         body = self.editor.params.widget()
         labels = [w.text() for w in body.findChildren(QtWidgets.QLabel)]
@@ -2161,7 +2167,7 @@ class GraphEditorTest(unittest.TestCase):
     def test_attribute_editor_pick_takes_the_next_selected_mesh(self):
         # Pick arms: the next mesh selected (viewport or Outliner: a selection change) becomes a
         # collider through Maya's own SelectionChanged scriptJob, and the groom is selected again.
-        from PySide2 import QtCore, QtGui
+        from groomlab.ui.qt import QtCore, QtGui
         from groomlab.ui import ae, pick
         window = cmds.window()
         cmds.columnLayout()
@@ -2214,7 +2220,7 @@ class GraphEditorTest(unittest.TestCase):
         # A ColliderMesh node added in the graph: its mesh menu wires the groom's collider of its
         # name, the eyedropper swaps it for the next mesh selected, and a change from elsewhere (the
         # Attribute Editor, a script) shows in the panel.
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         from groomlab.ui import pick
         ball = cmds.polySphere(radius=0.3, name="ball")[0]
         box = cmds.polyCube(name="box")[0]
@@ -2255,7 +2261,7 @@ class GraphEditorTest(unittest.TestCase):
         # A Scalp node whose input names another scalp (several scalps on one groom): its mesh menu
         # wires the groom's extraScalps element of that name; the Attribute Editor lists it with
         # Select and Remove, and a Pick row adds one.
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         from groomlab.ui import ae
         ear = cmds.polyPlane(width=0.5, height=0.5, name="earMesh")[0]
         cmds.xform(ear, translation=(1.5, 0.0, 0.0))
@@ -2304,7 +2310,8 @@ class GraphEditorTest(unittest.TestCase):
     def test_group_and_ungroup_from_keys_menu_and_panel(self):
         # Ctrl+G groups the selection; a Compound offers Ungroup on right-click, in its panel and as
         # Ctrl+Shift+G, and Ctrl+Z brings the compound back.
-        from PySide2 import QtCore, QtTest, QtWidgets
+        from groomlab.ui.qt import QtCore, QtTest as qt_test_module, QtWidgets
+        QtTest = qt_test_module()
         editor = self.editor
         editor.resize(1200, 600)
         editor.show()
@@ -2346,7 +2353,7 @@ class GraphEditorTest(unittest.TestCase):
         # Import Node copies a shared file in and adds it.
         import shutil
         import tempfile
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         folder = tempfile.mkdtemp(prefix="groomlab_gui_nodes_")
         old = os.environ.get("GROOMLAB_USER_NODES")
         os.environ["GROOMLAB_USER_NODES"] = folder
@@ -2428,7 +2435,7 @@ class GraphEditorTest(unittest.TestCase):
         # Library writes the file; Done shows the node's params, the new one among them.
         import shutil
         import tempfile
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         folder = tempfile.mkdtemp(prefix="groomlab_gui_scripts_")
         old = os.environ.get("GROOMLAB_USER_NODES")
         os.environ["GROOMLAB_USER_NODES"] = folder
@@ -2545,7 +2552,7 @@ class GraphEditorTest(unittest.TestCase):
 
     def test_attribute_maps_offer_the_channels_that_reach_the_node(self):
         from groomlab import presets
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         presets.apply_preset(self.groom, "flow_with_guides")  # its Blend writes `blend` (mixChannel)
         self.editor.reload()
         self.assertIn("blend", self.editor.node_channels.get("blend", []))
@@ -2562,7 +2569,7 @@ class GraphEditorTest(unittest.TestCase):
         # Clump's clumpChannel writes (a plain field, a warning when it overwrites an upstream
         # Clump's), its regionChannel and a Curl's clumpChannel read (the attributes reaching the
         # node to pick from, each with its writer; a note when the one named does not reach).
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         model, panel = self.editor.model, self.editor.params
         model.insert_between("interpolate", "length", model.add_node("Clump", name="clumpLarge"))
         model.insert_between("clumpLarge", "length", model.add_node("Clump", name="clumpSmall"))
@@ -2609,7 +2616,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(model.param("curl", "clumpChannel"), "clumpId")
 
     def test_widget_renders(self):
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         self.editor.resize(1200, 600)
         self.editor.show()
         self.editor.items["scatter"].setSelected(True)
@@ -2637,7 +2644,7 @@ class GraphEditorTest(unittest.TestCase):
         self.assertTrue(view.viewport().rect().contains(node))
         # Alt+right-drag zooms as in Maya's viewports (right or down: in), the pressed point staying
         # put, and opens no add menu.
-        from PySide2 import QtGui, QtWidgets
+        from groomlab.ui.qt import QtGui, QtWidgets
         alt, right = QtCore.Qt.AltModifier, QtCore.Qt.RightButton
         start = QtCore.QPointF(view.viewport().rect().center())
         anchor = view.mapToScene(start.toPoint())
@@ -2666,11 +2673,11 @@ class GraphEditorTest(unittest.TestCase):
             image.save(out)
 
     def test_a_deleted_editor_stops_following_the_time(self):
-        import shiboken2
+        from groomlab.ui.qt import shiboken
         editor = self.ge.GraphEditor(self.groom)
         job = editor._time_job
         self.assertTrue(job is not None and cmds.scriptJob(exists=job))
-        shiboken2.delete(editor)  # gone without a closeEvent, as a dock deleted with its workspace
+        shiboken.delete(editor)  # gone without a closeEvent, as a dock deleted with its workspace
         editor.status_soon()  # what the time job calls on the next frame: no touching the dead widget
         wait(50)
         self.assertIsNone(editor._time_job)
@@ -2698,7 +2705,7 @@ class GuidesTabTest(unittest.TestCase):
         self.tools.deleteLater()
 
     def events(self):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         for _ in range(5):
             QtWidgets.QApplication.processEvents()
 
@@ -2771,7 +2778,7 @@ class GuidesTabTest(unittest.TestCase):
         self.assertEqual(len(groomlab.guide_ids(self.groom, children)), 2)  # one guide, two children
 
     def test_groups_show_where_graph_names_come_from(self):
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         groomlab.generate_children(self.groom, "primary", name="kids", count=2)
         path = cmds.curve(degree=1, point=[(0.2, 0.98, 0), (0.2, 0.5, -1.0)])
         groomlab.add_braid(self.groom, [path])
@@ -2823,7 +2830,7 @@ class GuidesTabTest(unittest.TestCase):
 
     def test_guides_nodes_pick_groups_in_the_graph_editor(self):
         from groomlab.ui import graph_editor
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         editor = graph_editor.GraphEditor(self.groom)
         try:
             groomlab.generate_children(self.groom, "primary", name="kids", count=2)
@@ -2854,7 +2861,7 @@ class GuidesTabTest(unittest.TestCase):
             editor.deleteLater()
 
     def test_hidden_groups_are_not_drawn_or_brushed(self):
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         self.tab.refresh()
         item = self.tab.tree.findItems("primary", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
         eye = self.tab.tree.itemWidget(item, 2)  # the row's eye glyph
@@ -2879,7 +2886,7 @@ class GuidesTabTest(unittest.TestCase):
 
     def test_new_groups_take_new_guides_and_name_guides_nodes(self):
         from groomlab.ui import palette
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         self.assertEqual(palette.TABS[0], "tools")  # groups live on the Tools tab
         self.assertEqual(self.tools.current_group(), "primary")  # the first group to start
         groomlab.add_guide_group(self.groom, "bangs")
@@ -3256,7 +3263,7 @@ class TransferWindowTest(unittest.TestCase):
         color on the ring of `radius` around port pixel `center`, and within 2 pixels of it."""
         import tempfile
         from maya.api import OpenMaya as om
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         from groomlab.ui import transfer_window
         view = window.view(side)
         view.refresh(False, True)
@@ -3281,7 +3288,7 @@ class TransferWindowTest(unittest.TestCase):
     def test_marker_views_points_and_a_transfer(self):
         from groomlab.ui import menu, transfer_window
         from groomlab import transfer
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         long = lambda n: cmds.ls(n, long=True)[0]
         window = menu.transfer_dialog(groom=self.groom)  # no choices given: the window, not a modal dialog
         try:
@@ -3536,7 +3543,7 @@ class RenderProgressTest(unittest.TestCase):
     white box until the image came."""
 
     def test_one_steady_window_over_maya_until_done(self):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         from groomlab.ui import menu, widgets
 
         class FakeJob(object):
@@ -3597,7 +3604,7 @@ class DockableWindowsTest(unittest.TestCase):
 
     def test_add_node_menu_works_in_the_docked_window(self):
         import gc
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         from groomlab.ui import graph_editor
         window = graph_editor.show(self.groom)
         try:
@@ -3926,8 +3933,9 @@ class DockableWindowsTest(unittest.TestCase):
         # and a dock Maya kept is filled again rather than replaced; standalone windows keep their
         # geometry in an optionVar.
         import maya.OpenMayaUI as omui
-        from PySide2 import QtWidgets
-        from shiboken2 import wrapInstance
+        from groomlab.ui.qt import QtWidgets
+        from groomlab.ui.qt import shiboken
+        wrapInstance = shiboken.wrapInstance
         from groomlab.ui import graph_editor, palette, updates_window, widgets
         control = "groomLabGraphEditorWorkspaceControl"
 
@@ -3987,7 +3995,7 @@ class DockableWindowsTest(unittest.TestCase):
         more; the empty state keeps Import); Import > Alembic Curves... makes the file's curves the
         groom's guides in one undo step."""
         import tempfile
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         from groomlab import sim
         from groomlab.ui import menu, palette
         cmds.select(self.groom)
@@ -4021,7 +4029,7 @@ class DockableWindowsTest(unittest.TestCase):
 
     def test_tool_palette_drives_the_brush(self):
         from groomlab.ui import palette, widgets
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         groomlab.guides_from_curves(self.groom, [cmds.curve(degree=1, point=[(0, 1, 0), (0, 2, 0)])])
         groomlab.add_map(self.groom, "fur")  # maps live on guides
         cmds.select(self.groom)
@@ -4198,7 +4206,7 @@ class DockableWindowsTest(unittest.TestCase):
             window.poll()
             self.assertEqual(window.level.currentData(), -1)
             # Correctives: a stack with the base groom at the bottom; the picked row is what brushes edit.
-            from PySide2 import QtCore
+            from groomlab.ui.qt import QtCore
             from groomlab import shots
             box = window.correctives
             box.set_groom(self.groom)
@@ -4268,7 +4276,7 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertTrue(window.settings.isVisibleTo(window))
             groomlab.add_map(self.groom, "density")
             self.app_events()
-            from PySide2 import QtCore as _qc
+            from groomlab.ui.qt import QtCore as _qc
             self.assertIn("density", [window.paint_tab.list.item(i).data(_qc.Qt.UserRole) for i in range(window.paint_tab.list.count())])
             self.assertEqual(window.paint_tab.box.title.full_text(), window.paint_tab.current())  # the picked map's box
             window.paint_tab.value.setValue(0.3)
@@ -4586,7 +4594,7 @@ class DockableWindowsTest(unittest.TestCase):
         # Paint on a scalp map shows the Alpha picker (not on a guide map): its grid lists None
         # and the library, a pick reaches the tool with its rotation, spacing and invert, shown
         # only while an alpha is picked.
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         from groomlab.ui import palette
         cmds.select(self.groom)
         groomlab.add_map(self.groom, "crown", 0.0, kind="vertices")
@@ -4645,7 +4653,7 @@ class DockableWindowsTest(unittest.TestCase):
         # A color map: the tab shows a swatch and channel toggles instead of the value; each
         # change reaches the Paint tool; Fill fills the color in the ticked channels. No dialog
         # opens from scripted paths (the swatch's dialog is stubbed here).
-        from PySide2 import QtCore as _qc, QtGui, QtWidgets
+        from groomlab.ui.qt import QtCore as _qc, QtGui, QtWidgets
         from groomlab.ui import palette, tool_tabs
         cmds.select(self.groom)
         window = palette.show()
@@ -4791,7 +4799,7 @@ class DockableWindowsTest(unittest.TestCase):
             window.close()
 
     def app_events(self):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         for _ in range(5):
             QtWidgets.QApplication.processEvents()
 
@@ -4803,7 +4811,7 @@ class ReferenceTabTest(unittest.TestCase):
     def setUp(self):
         import tempfile
         from groomlab.ui import palette
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         cmds.file(new=True, force=True)
         cmds.undoInfo(state=True, infinity=True)
         self.folder = tempfile.mkdtemp(prefix="groomlab_reftab_")
@@ -4831,7 +4839,7 @@ class ReferenceTabTest(unittest.TestCase):
         self.tools.deleteLater()
 
     def chip(self, name):
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         return self.tab.findChild(QtWidgets.QToolButton, name)
 
     def test_the_tab_lists_references_and_drives_them(self):
@@ -4923,7 +4931,7 @@ class ReferenceTabTest(unittest.TestCase):
 
     def test_align_photo_opens_the_window_and_the_tab_shows_where_it_stands(self):
         """The pairs are made in the Photos window (Align Photo...); the tab says how far along they are."""
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         from groomlab import reference
         from groomlab.ui import reference_window
         from maya.api import OpenMaya as om
@@ -4984,7 +4992,7 @@ class ReferenceTabTest(unittest.TestCase):
     def test_the_tab_opens_the_reference_window_and_the_old_flow_tool_still_draws(self):
         """Guides from Reference lives in the Photos window's Guides stage: the tab keeps a way in and
         where things stand. The older Reference Flow tool (looking through the camera) still draws."""
-        from PySide2 import QtWidgets
+        from groomlab.ui.qt import QtWidgets
         from maya.api import OpenMaya as om
         import maya.api.OpenMayaUI as omui
         from groomlab import from_reference, reference
@@ -5039,7 +5047,7 @@ class ReferenceWindowTest(unittest.TestCase):
 
     def setUp(self):
         import tempfile
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         cmds.file(new=True, force=True)
         cmds.undoInfo(state=True, infinity=True)
         self.folder = tempfile.mkdtemp(prefix="groomlab_refwin_")
@@ -5063,7 +5071,7 @@ class ReferenceWindowTest(unittest.TestCase):
         wait(20)
 
     def mouse(self, widget, kind, pos, button=None, buttons=None, modifiers=None):
-        from PySide2 import QtCore, QtGui, QtWidgets
+        from groomlab.ui.qt import QtCore, QtGui, QtWidgets
         button = QtCore.Qt.LeftButton if button is None else button
         buttons = button if buttons is None else buttons
         modifiers = QtCore.Qt.NoModifier if modifiers is None else modifiers
@@ -5071,14 +5079,14 @@ class ReferenceWindowTest(unittest.TestCase):
         QtWidgets.QApplication.sendEvent(widget, event)
 
     def click_photo(self, u, v, modifiers=None):
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         view = self.window.photo_view
         at = view.to_widget(u, v)
         self.mouse(view, QtCore.QEvent.MouseButtonPress, at, modifiers=modifiers)
         self.mouse(view, QtCore.QEvent.MouseButtonRelease, at, buttons=QtCore.Qt.NoButton, modifiers=modifiers)
 
     def drag_photo(self, points, modifiers=None):
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         view = self.window.photo_view
         self.mouse(view, QtCore.QEvent.MouseButtonPress, view.to_widget(*points[0]), modifiers=modifiers)
         for p in points[1:]:
@@ -5088,7 +5096,7 @@ class ReferenceWindowTest(unittest.TestCase):
                    modifiers=modifiers)
 
     def key(self, widget, key, modifiers):
-        from PySide2 import QtCore, QtGui, QtWidgets
+        from groomlab.ui.qt import QtCore, QtGui, QtWidgets
         QtWidgets.QApplication.sendEvent(widget, QtGui.QKeyEvent(QtCore.QEvent.KeyPress, key, modifiers))
 
     def project(self, cam, p):
@@ -5139,7 +5147,7 @@ class ReferenceWindowTest(unittest.TestCase):
         self.assertIsNotNone(reference.photo_morph_node(self.groom))
 
     def test_landmarks_solve_live_and_the_photo_tools(self):
-        from PySide2 import QtCore
+        from groomlab.ui.qt import QtCore
         from maya.api import OpenMaya as om
         from groomlab import from_reference, reference
         from groomlab.ui import menu, reference_window

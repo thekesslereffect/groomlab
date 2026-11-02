@@ -22,7 +22,7 @@ def start():
 
 def _guard_dialogs():
     """Any modal dialog that opens fails the suite and is closed: a scripted session never waits."""
-    from PySide2 import QtCore, QtWidgets
+    from groomlab.ui.qt import QtCore, QtWidgets
 
     def close_modal():
         for widget in QtWidgets.QApplication.topLevelWidgets():

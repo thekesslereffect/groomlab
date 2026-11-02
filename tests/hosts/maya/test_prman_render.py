@@ -194,7 +194,7 @@ class PrmanSceneTest(unittest.TestCase):
         for job in (with_hair, without):
             job.wait(600)
             self.assertTrue(job.ok(), "prman failed: %s (%s)" % (job.errors(), job.log))
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         hair = QtGui.QImage(with_hair.images()[0])
         bald = QtGui.QImage(without.images()[0])
         self.assertEqual((hair.width(), hair.height()), (width, height))

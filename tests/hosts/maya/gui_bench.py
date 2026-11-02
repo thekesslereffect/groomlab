@@ -132,9 +132,9 @@ def view_size():
 
 def set_window(width, height):
     import maya.OpenMayaUI as omui
-    import shiboken2
-    from PySide2 import QtWidgets
-    window = shiboken2.wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QMainWindow)
+    from groomlab.ui.qt import shiboken
+    from groomlab.ui.qt import QtWidgets
+    window = shiboken.wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QMainWindow)
     window.setGeometry(40, 40, width, height)
     QtWidgets.QApplication.processEvents()
     cmds.refresh(force=True)

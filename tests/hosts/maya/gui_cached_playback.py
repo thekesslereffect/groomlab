@@ -112,7 +112,7 @@ def shot(folder, name, frame):
 
 def differ(a, b):
     """The share of pixels that differ between two captures."""
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     ia, ib = QtGui.QImage(a), QtGui.QImage(b)
     if ia.size() != ib.size() or ia.isNull():
         return 1.0

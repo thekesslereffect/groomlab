@@ -583,6 +583,17 @@ and tools working in it; the UI docked in Maya's own windows; the `.mod`'s per-v
 picked as written; the translator inside that MtoA. Those wait for a tester (or a machine) with
 that Maya.
 
+**Testing in a newer Maya (the port, in progress).** `ninja-maya2026-tests` and
+`ninja-maya2027-tests` build the plugin from the devkit as above, but with every test and the GUI
+session, run in that Maya's install: `GROOMLAB_MAYA_BIN` (default `MAYA_LOCATION`'s `bin`) is the
+folder whose `mayapy` and `maya` the tests start and whose TBB DLL the core's tests load (a devkit
+has none), and `MTOA_LOCATION` is the installed MtoA (its `kick` for the Arnold tests). The tests
+take Qt from `groomlab.ui.qt` as the UI does (`QtTest` through its `QtTest()`), never PySide2, so
+the same suites run under PySide6. What is left is what only that Maya shows: Python 3.11/3.13
+and Qt 6 differences in the suites, the GUI session's prefs folder and viewport, and stored
+pictures or numbers that differ between versions. Until they pass, Maya 2022 stays the tested
+version and releases come from a machine with it.
+
 ### RenderMan procedural
 
 `hosts/renderman/` builds `groomlab_renderman.dll`, the counterpart of the Arnold procedural: prman

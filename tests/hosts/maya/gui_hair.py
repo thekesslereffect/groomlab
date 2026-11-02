@@ -173,7 +173,7 @@ def compare_scene(folder):
 
 
 def pixels(path):
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
     return image.width(), image.height(), bytes(image.constBits())[:image.byteCount()]
 

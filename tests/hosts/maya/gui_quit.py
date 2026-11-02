@@ -30,7 +30,7 @@ def open_panels():
     """The panels open on a new groom and repolish what changes role (the first-groom steps, the
     editor's status): a dynamic property's rule applies, and no widget's style() is called."""
     import groomlab
-    from PySide2 import QtGui, QtWidgets
+    from groomlab.ui.qt import QtGui, QtWidgets
     from groomlab.ui import graph_editor, palette
     cmds.file(new=True, force=True)
     cmds.optionVar(intValue=(palette.STARTER_VAR, 0))  # the first-groom steps show (they repolish)

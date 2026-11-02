@@ -35,7 +35,7 @@ def head(name="head"):
 
 def write_gradient_png(path, size=64):
     """A gray PNG, white at the top of the image (V = 1) to black at the bottom, written by Qt."""
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(size, size, QtGui.QImage.Format_RGB32)
     for y in range(size):
         v = int(round(255 * (1.0 - y / float(size - 1))))
@@ -211,7 +211,7 @@ def strand_picture(path, panels, size=420, view="front", max_strands=4000):
     """A PNG of strand sets side by side, drawn flat (orthographic, `view` "front": x right, y up;
     "side": z right, y up; "top": x right, z down), all at one scale: panels [(title, StrandSet)].
     Each strand a thin line darkening toward its tip."""
-    from PySide2 import QtCore, QtGui
+    from groomlab.ui.qt import QtCore, QtGui
     app = QtGui.QGuiApplication.instance() or QtGui.QGuiApplication(["strand_picture", "-platform", "offscreen"])
     axes = {"front": (0, 1, 1.0), "side": (2, 1, 1.0), "top": (0, 2, -1.0)}[view]
     lo, hi = [1e30, 1e30], [-1e30, -1e30]

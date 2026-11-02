@@ -14,10 +14,12 @@ betas). So on a machine with only Maya 2026 or 2027:
 
 - **Simplest:** install Maya 2022 too (and its MtoA). Everything below then works as it does on the
   main machine, and the newer Maya is for trying the plugin by hand.
-- **Moving dev to a newer Maya:** add a preset that builds against that Maya's install with the
-  tests on (like `ninja-maya2022`, with `MAYA_LOCATION` the Maya 2026/2027 install and its MtoA),
-  then get the mayapy and GUI suites passing there (Qt 6 / PySide6, oneTBB). That is real porting
-  work: plan it as its own task, and keep releasing from a Maya 2022 machine until it is done.
+- **Moving dev to a newer Maya:** the `ninja-maya2026-tests` and `ninja-maya2027-tests` presets
+  build the plugin from that version's devkit with every test on, run in the installed Maya and its
+  MtoA (`C:/Program Files/Autodesk/Maya2026` or `Maya2027`, `Arnold/maya2026` or `maya2027`). The
+  tests already take Qt through `groomlab.ui.qt`, so they can run under PySide6; what is left is
+  getting the mayapy and GUI suites to pass there (DEVELOPING.md, "Testing in a newer Maya"). Keep
+  releasing from a Maya 2022 machine until they do.
 
 ## 1. Accounts and sign-ins
 

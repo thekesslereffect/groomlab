@@ -175,7 +175,7 @@ def persp_panel():
 
 def process_events(ms=0):
     """Let Qt run events and timers for `ms` milliseconds (PySide2 has no QTest.qWait)."""
-    from PySide2 import QtWidgets
+    from groomlab.ui.qt import QtWidgets
     end = time.time() + ms / 1000.0
     while time.time() < end:
         QtWidgets.QApplication.processEvents()
@@ -193,7 +193,7 @@ def settle_undo(rounds=20):
 
     Lays an undoable marker step and lets idle work and Qt's events run; when the marker is still
     on top, nothing came after it. Returns the marker's name (on top of the queue)."""
-    from PySide2 import QtWidgets
+    from groomlab.ui.qt import QtWidgets
     for _ in range(rounds):
         _marks[0] += 1
         name = "glTestMark%d" % _marks[0]
@@ -213,7 +213,7 @@ def settle_undo(rounds=20):
 def activate(widget):
     """Make widget's window Qt's active window and give widget the keyboard focus, without asking
     the OS: shortcuts and key events then work while the user is busy in another application."""
-    from PySide2 import QtCore, QtWidgets
+    from groomlab.ui.qt import QtCore, QtWidgets
     QtWidgets.QApplication.setActiveWindow(widget.window())
     widget.setFocus(QtCore.Qt.OtherFocusReason)
     QtWidgets.QApplication.processEvents()
@@ -224,7 +224,7 @@ def hover(widget, pos=None):
     """Put the (Qt) mouse over widget at pos (its center by default) without moving the real
     cursor: the window gets the enter and move events the window system would send, so Qt
     dispatches enter and leave to the widgets under that point (QWidget.underMouse())."""
-    from PySide2 import QtCore, QtGui, QtWidgets
+    from groomlab.ui.qt import QtCore, QtGui, QtWidgets
     pos = widget.rect().center() if pos is None else pos
     window = widget.window()
     handle = window.windowHandle()
@@ -242,7 +242,7 @@ def hover(widget, pos=None):
 def clear_of_cursor(window):
     """Move a test's window off the real cursor (the user's own mouse moves would otherwise reach
     it between hover()'s events and the checks): to the side of its screen the cursor is not on."""
-    from PySide2 import QtGui, QtWidgets
+    from groomlab.ui.qt import QtGui, QtWidgets
     cursor = QtGui.QCursor.pos()
     frame = window.frameGeometry()
     if not frame.contains(cursor):
@@ -256,7 +256,7 @@ def clear_of_cursor(window):
 def under_point(widget, pos=None):
     """Why hover(widget) may have missed, for an assertion's message: what the window has at the
     widget's point, a popup taking the mouse, the real cursor over the window (its moves win)."""
-    from PySide2 import QtGui, QtWidgets
+    from groomlab.ui.qt import QtGui, QtWidgets
     pos = widget.rect().center() if pos is None else pos
     window = widget.window()
     local = widget.mapTo(window, pos)
@@ -276,7 +276,8 @@ def under_point(widget, pos=None):
 def drag(widget, start, end, steps=2, button=None, modifiers=None):
     """A left-button drag on widget from start to end (widget coordinates), sent as events (QTest's
     mouseMove would move the real cursor)."""
-    from PySide2 import QtCore, QtGui, QtTest, QtWidgets
+    from groomlab.ui.qt import QtCore, QtGui, QtTest as qt_test_module, QtWidgets
+    QtTest = qt_test_module()
     button = QtCore.Qt.LeftButton if button is None else button
     modifiers = QtCore.Qt.NoModifier if modifiers is None else modifiers
     QtTest.QTest.mousePress(widget, button, modifiers, start)
@@ -311,9 +312,9 @@ def _workspace_controls():
 
 
 def _top_level_widgets():
-    import shiboken2
-    from PySide2 import QtWidgets
-    return {shiboken2.getCppPointer(w)[0] for w in QtWidgets.QApplication.topLevelWidgets() if w.isVisible()}
+    from groomlab.ui.qt import shiboken
+    from groomlab.ui.qt import QtWidgets
+    return {shiboken.getCppPointer(w)[0] for w in QtWidgets.QApplication.topLevelWidgets() if w.isVisible()}
 
 
 # The size every session's Maya window takes, whatever its prefs saved: brush radii are in
@@ -326,9 +327,9 @@ def pin_view():
     """The Maya window at WINDOW_SIZE, showing the perspective view alone."""
     import maya.mel
     import maya.OpenMayaUI as omui
-    import shiboken2
-    from PySide2 import QtWidgets
-    window = shiboken2.wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QMainWindow)
+    from groomlab.ui.qt import shiboken
+    from groomlab.ui.qt import QtWidgets
+    window = shiboken.wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QMainWindow)
     window.showNormal()
     window.setGeometry(40, 40, WINDOW_SIZE[0], WINDOW_SIZE[1])
     # The docks a prefs folder may have open take the view's room: hidden, so the view is the
@@ -383,8 +384,8 @@ def reset_session():
     Tools, pinned groom, Auto Key, GroomLab's (and any) windows, palettes and docks opened since,
     scriptJobs made since, the perspective panel's camera and display, playback options, hotkey
     set, project, then a new scene, its deferred callbacks run, and an empty undo queue."""
-    import shiboken2
-    from PySide2 import QtWidgets
+    from groomlab.ui.qt import shiboken
+    from groomlab.ui.qt import QtWidgets
     base = S.baseline
     try:
         import groomlab
@@ -408,7 +409,7 @@ def reset_session():
             except RuntimeError:
                 pass
     for widget in QtWidgets.QApplication.topLevelWidgets():
-        if widget.isVisible() and shiboken2.getCppPointer(widget)[0] not in base["widgets"]:
+        if widget.isVisible() and shiboken.getCppPointer(widget)[0] not in base["widgets"]:
             widget.close()
     process_events(20)
     for job in _job_ids() - base["jobs"]:
@@ -446,7 +447,7 @@ def watch(suite):
     """A Qt timer (it fires while Maya sits idle) that fails `suite` and moves the session on when
     it has not finished within SUITE_TIMEOUT, with the Python stacks and the time and evaluation
     state in the log."""
-    from PySide2 import QtCore
+    from groomlab.ui.qt import QtCore
 
     def expired():
         if S.suite != suite or suite in S.finished:

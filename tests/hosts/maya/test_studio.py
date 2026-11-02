@@ -276,7 +276,7 @@ class StudioRenderTest(unittest.TestCase):
                 if attempt == 1:
                     self.fail("kick stalled twice")
         self.assertEqual(result.returncode, 0, result.stdout[-3000:])
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         picture = QtGui.QImage(image)
         self.assertEqual((picture.width(), picture.height()), (160, 90))
         values = []

@@ -482,7 +482,7 @@ endif()
 # Maya integration test: loads the plugin in mayapy standalone.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     add_test(NAME maya.plugin
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_plugin.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
@@ -491,7 +491,7 @@ endif()
 # Graph API, presets and the graph editor (Qt offscreen).
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     add_test(NAME maya.graph_editor
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_graph_editor.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
@@ -500,7 +500,7 @@ endif()
 # Pipeline: rest mesh, USD export, groom files evaluated by groomlab-cli.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab AND TARGET groomlab-cli AND TARGET groomlab_alembic)
     add_test(NAME maya.pipeline
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_pipeline.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
@@ -512,7 +512,7 @@ endif()
 # Maya and with the standalone app (run headless when it is built).
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab AND TARGET groomlab-cli AND TARGET groomlab_alembic)
     add_test(NAME maya.groom_io
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_groom_io.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
@@ -529,7 +529,7 @@ endif()
 # once-a-day startup check, offline silence.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     add_test(NAME maya.updates
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_updates.py"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
 endif()
@@ -538,7 +538,7 @@ endif()
 # groom files, our surface against Maya's own smooth mesh.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     add_test(NAME maya.subdivision
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_subdivision.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
@@ -547,7 +547,7 @@ endif()
 # Grooming: guide selection, masks, symmetry, clump paint, hierarchy tools.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     add_test(NAME maya.grooming
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_grooming.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
@@ -557,7 +557,7 @@ endif()
 # Simulate, a fixed topology, the snapshot matched, Alembic export; ms per frame of 10k tubes.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     add_test(NAME maya.to_mesh
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_to_mesh.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
@@ -568,7 +568,7 @@ endif()
 # XGen's own strands (pictures in the work dir). Needs Maya's XGen plugin (skipped without it).
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab AND TARGET groomlab_alembic)
     add_test(NAME maya.xgen_import
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_xgen_import.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
@@ -579,7 +579,7 @@ endif()
 # (data/yeti/make_scenes.py): the format reader, the mapping, guide layers, textures.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab AND TARGET groomlab_alembic)
     add_test(NAME maya.yeti_import
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_yeti_import.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
@@ -590,7 +590,7 @@ endif()
 # 1.0 hardening: errors on the node, referencing and moved projects, scene-open time.
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab AND TARGET groomlab-cli AND TARGET groomlab_alembic)
     add_test(NAME maya.hardening
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_hardening.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
@@ -624,7 +624,7 @@ endif()
 # Arnold translator test: exports a 100k-strand groom through MtoA to .ass.
 if(TARGET groomLabTranslator)
     add_test(NAME maya.arnold
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_arnold.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
@@ -647,7 +647,7 @@ if(TARGET groomLabTranslator)
             set(_studio_args "--render")
         endif()
         add_test(NAME ${_studio_name}
-            COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+            COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                     "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_studio.py"
                     "$<TARGET_FILE:GroomLab>"
                     "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
@@ -708,7 +708,7 @@ if(Python3_Interpreter_FOUND)
 endif()
 if(TARGET groomLabTranslator)
     add_test(NAME maya.vray
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_vray_render.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
@@ -737,7 +737,7 @@ if(Python3_Interpreter_FOUND)
 endif()
 if(TARGET groomLabTranslator)
     add_test(NAME maya.prman
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_prman_render.py"
                 "$<TARGET_FILE:GroomLab>"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts"
@@ -752,9 +752,9 @@ endif()
 # PySide2, Qt offscreen and a stand-in Maya; no window on the desktop.
 if(GROOMLAB_BUILD_MAYA AND TARGET groomlab_core_py)
     add_test(NAME maya.ui_scaling
-        COMMAND "${MAYA_LOCATION}/bin/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/ui_scaling_check.py"
-                --core "$<TARGET_FILE_DIR:groomlab_core_py>" --dll-dir "${MAYA_LOCATION}/bin")
+                --core "$<TARGET_FILE_DIR:groomlab_core_py>" --dll-dir "${GROOMLAB_MAYA_BIN}")
     set_tests_properties(maya.ui_scaling PROPERTIES LABELS "quick;maya" TIMEOUT 300
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GROOMLAB_NO_UPDATES=1")
 endif()
@@ -803,7 +803,7 @@ if(GROOMLAB_GUI_TESTS AND GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gui.mel"
         "python(\"exec(open(r'${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/gui_runner.py').read())\");\n")
     add_test(NAME maya.gui
-        COMMAND "${MAYA_LOCATION}/bin/maya${CMAKE_EXECUTABLE_SUFFIX}" -script "${CMAKE_CURRENT_BINARY_DIR}/gui.mel")
+        COMMAND "${GROOMLAB_MAYA_BIN}/maya${CMAKE_EXECUTABLE_SUFFIX}" -script "${CMAKE_CURRENT_BINARY_DIR}/gui.mel")
     set_tests_properties(maya.gui PROPERTIES
         TIMEOUT 900
         RUN_SERIAL TRUE
@@ -819,7 +819,7 @@ if(GROOMLAB_GUI_TESTS AND GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     # playback, whose frames the viewport draws from the cache; and Hardware 2.0 renders
     # (gui_render.py), which draw through Viewport 2.0.
     add_test(NAME maya.gui_dx11
-        COMMAND "${MAYA_LOCATION}/bin/maya${CMAKE_EXECUTABLE_SUFFIX}" -script "${CMAKE_CURRENT_BINARY_DIR}/gui.mel")
+        COMMAND "${GROOMLAB_MAYA_BIN}/maya${CMAKE_EXECUTABLE_SUFFIX}" -script "${CMAKE_CURRENT_BINARY_DIR}/gui.mel")
     set_tests_properties(maya.gui_dx11 PROPERTIES
         TIMEOUT 900
         RUN_SERIAL TRUE
@@ -838,7 +838,7 @@ if(GROOMLAB_GUI_TESTS AND GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
             set(_sheet_name maya.preset_sheet_dx11)
         endif()
         add_test(NAME ${_sheet_name}
-            COMMAND "${MAYA_LOCATION}/bin/maya${CMAKE_EXECUTABLE_SUFFIX}" -script "${CMAKE_CURRENT_BINARY_DIR}/gui.mel")
+            COMMAND "${GROOMLAB_MAYA_BIN}/maya${CMAKE_EXECUTABLE_SUFFIX}" -script "${CMAKE_CURRENT_BINARY_DIR}/gui.mel")
         set_tests_properties(${_sheet_name} PROPERTIES
             TIMEOUT 3600
             RUN_SERIAL TRUE
@@ -857,7 +857,7 @@ if(GROOMLAB_GUI_TESTS AND GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
             set(_bench_name maya.viewport_bench_dx11)
         endif()
         add_test(NAME ${_bench_name}
-            COMMAND "${MAYA_LOCATION}/bin/maya${CMAKE_EXECUTABLE_SUFFIX}" -script "${CMAKE_CURRENT_BINARY_DIR}/gui.mel")
+            COMMAND "${GROOMLAB_MAYA_BIN}/maya${CMAKE_EXECUTABLE_SUFFIX}" -script "${CMAKE_CURRENT_BINARY_DIR}/gui.mel")
         set_tests_properties(${_bench_name} PROPERTIES
             TIMEOUT 3600
             RUN_SERIAL TRUE
