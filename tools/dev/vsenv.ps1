@@ -56,7 +56,27 @@ function Import-GroomLabVsEnv {
         Move-Item -Force $tmp $cache
     }
     foreach ($p in $saved.vars.PSObject.Properties) { Set-Item -Path "env:$($p.Name)" -Value $p.Value }
-    $env:PATH = (@($saved.path) + @($env:PATH)) -join ";"
+    # The Build Tools bundle a 32-bit CMake and Ninja: everything they start, ctest's tests included,
+    # would see Program Files (x86) as ProgramFiles and a redirected System32. A 64-bit CMake and
+    # ninja.exe in groomlab-deps/cmake/bin (the portable zip) go first, the 32-bit folders last.
+    $added = @($saved.path)
+    $own = Join-Path $env:USERPROFILE "groomlab-deps\cmake\bin"
+    if ((Test-Path (Join-Path $own "cmake.exe")) -and (Test-Path (Join-Path $own "ninja.exe"))) {
+        $x86 = @($added | Where-Object {
+            foreach ($exe in "cmake.exe", "ninja.exe") {
+                $f = Join-Path $_ $exe
+                if (Test-Path $f) {
+                    $b = [IO.File]::ReadAllBytes($f)
+                    if ([BitConverter]::ToUInt16($b, [BitConverter]::ToInt32($b, 0x3C) + 4) -eq 0x14C) { return $true }
+                }
+            }
+            $false
+        })
+        $added = @($own) + @($added | Where-Object { $x86 -notcontains $_ })
+        $env:PATH = (@($added) + @($env:PATH) + $x86) -join ";"
+        return
+    }
+    $env:PATH = (@($added) + @($env:PATH)) -join ";"
 }
 
 Import-GroomLabVsEnv

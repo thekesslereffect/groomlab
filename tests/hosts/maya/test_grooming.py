@@ -4800,7 +4800,7 @@ class AssetFilesTest(unittest.TestCase):
 def write_image(path, gray=None, color=None, size=16):
     """A flat image of `size` square in the format its extension names (PNG, JPEG...): `gray`
     (0-255) or `color` (r, g, b)."""
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(size, size, QtGui.QImage.Format_RGB32)
     image.fill(QtGui.QColor(*(color or (gray, gray, gray))))
     folder = os.path.dirname(path)
@@ -5178,7 +5178,7 @@ class MapImagesTest(unittest.TestCase):
 
 def write_photo(path, width, height, spot=None):
     """A test photo: dark gray, with a white square (x, y, size: pixels from the top-left)."""
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(width, height, QtGui.QImage.Format_RGB32)
     image.fill(QtGui.QColor(40, 40, 40))
     if spot:
@@ -5476,7 +5476,7 @@ class ReferenceTest(unittest.TestCase):
         """Guides from Reference (experimental) as the Reference tab runs it: flow strokes and a
         mask kept on the groom, Generate into fromReference (again: replaced; one undo step each),
         the fitted look applied to HairColor, a camera with an image plane adopted as a view."""
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         from groomlab import from_reference as fr
         # A light backdrop, dark vertical strands where the ball shows (the camera Import Photo
         # aims at the groom sees it fill the middle of the photo).
@@ -5566,7 +5566,7 @@ class ReferenceTest(unittest.TestCase):
         and stored back, the live solve put on the camera, and Generate with the touch-ups."""
         import groomlab_core as gl
         from maya.api import OpenMaya as om
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         from groomlab import from_reference as fr
         image = QtGui.QImage(160, 120, QtGui.QImage.Format_RGB32)
         image.fill(QtGui.QColor(230, 230, 235))

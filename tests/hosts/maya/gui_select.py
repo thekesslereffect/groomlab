@@ -93,8 +93,9 @@ def post_mouse(points, done, shift=False):
     `shift`: Shift held through it (Maya's thread's key state, as SetKeyboardState sets it for
     this thread only, and the messages' MK_SHIFT), let go after the release."""
     import ctypes
-    from PySide2 import QtCore, QtWidgets
-    from shiboken2 import wrapInstance
+    from groomlab.ui.qt import QtCore, QtWidgets
+    from groomlab.ui.qt import shiboken
+    wrapInstance = shiboken.wrapInstance
     widget = wrapInstance(int(omui.M3dView.active3dView().widget()), QtWidgets.QWidget)
     native = widget if widget.testAttribute(QtCore.Qt.WA_NativeWindow) else (widget.nativeParentWidget() or widget.window())
     hwnd, ratio = int(native.winId()), widget.devicePixelRatioF()
@@ -134,8 +135,9 @@ def mouse_marquee():
     (testers saw the selection change only once the camera moved)."""
     import sys
     import groomlab
-    from PySide2 import QtCore, QtWidgets
-    from shiboken2 import wrapInstance
+    from groomlab.ui.qt import QtCore, QtWidgets
+    from groomlab.ui.qt import shiboken
+    wrapInstance = shiboken.wrapInstance
     if sys.platform != "win32":  # (Windows mouse messages)
         soon(symmetric_paint)
         return

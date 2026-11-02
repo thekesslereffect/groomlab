@@ -310,7 +310,7 @@ the running Maya's plugin and sets it to auto-load):
 python tools/package_release.py
 ```
 
-It writes `dist/GroomLab-<version>-maya-win64.zip` (about 90 MB with all six versions;
+It writes `dist/GroomLab-<version>-maya-win64.zip` (about 140 MB with all six versions;
 `--symbols` adds each plugin's ~150 MB `.pdb` for symbolized crash logs). Build first: it installs
 `build/ninja-maya2022` and every `build/ninja-maya<year>` there is (`--maya 2022,2025` picks;
 Maya 2022 is always in, as the tested version and the only build with the procedural and the CLI).
@@ -376,7 +376,7 @@ Blender as Beta once their `latest.json` is published (it reads them when it is 
 **The loop for a change:** build, run the `quick` tier, run `gui` and `arnold` when the change
 touches them (the table above), install, commit; the full run before packaging and pushing. Commit messages say what changed and why.
 
-### Open source: the private and the public repository
+### Open source: the repository, branches and releases
 
 GroomLab is open source (Apache-2.0; the Blender add-on GPL-3.0-or-later: `LICENSE`, `NOTICE`,
 `THIRD_PARTY_NOTICES.md`, `REUSE.toml`). Every package ships `LICENSE`, `NOTICE` and
@@ -384,42 +384,57 @@ GroomLab is open source (Apache-2.0; the Blender add-on GPL-3.0-or-later: `LICEN
 `package_blender.py`, `package_release.py` and `assemble_extension.cmake` check they are there).
 New source files start with an `SPDX-License-Identifier` line (`CONTRIBUTING.md`).
 
-Two repositories:
+Work happens in this repository (github.com/thekesslereffect/groomlab), on two branches:
 
-- **maya-hair (private)** is where work happens: every branch, worktree, research harness, probe
-  output and internal note. Its history is never published.
-- **groomlab (public, github.com/thekesslereffect/groomlab)** gets one commit per release, made
-  from a snapshot of the private tree. Its local clone sits beside the private one
-  (`Documents/GitHub/groomlab`, `publish_public_repo.py`'s default).
+- **`dev`**: every change, pull request and agent branch lands here (the default branch).
+- **`main`**: released versions only. A release merges `dev` into `main` with a merge commit
+  ("Merge branch 'dev'"; `main` is not fast-forwardable from `dev`, it carries the release merges
+  and the odd web-only fix) and tags it. The website deploys from `main`, so it always matches the
+  published downloads.
 
-The snapshot: `python tools/dev/make_public_snapshot.py` writes `build/public-snapshot` from
-`git archive HEAD`, leaves out what is not public (the website's placeholder hero image, the wolf
-renders until the wolf sample ships, the research harness `tools/research/reference_guides`,
-`.claude/`, agent tooling, the bench and preset pictures, the publish scripts), strips internal
-notes (section 7's AI notes, the commit-trailer note above, the CI comment), and scans the
-result: private terms (read from `%USERPROFILE%/groomlab-deps/public-snapshot-terms.txt`, never
-committed), local user paths, machine names, secrets, private links, SPDX lines. Any finding
-fails it. Add to its `EXCLUDE` list whatever new must stay private.
+**The commit guard.** A maintainer's clone runs a pre-commit, commit-msg and pre-push hook that
+scans what is committed for private terms, local user paths, machine names and secrets (the guard
+and its installer live outside the repository, in `%USERPROFILE%/groomlab-deps/private`:
+`python install_hooks.py`). Never skip it with `--no-verify`; fix what it finds.
 
-The release, after the downloads are published: `python tools/dev/publish_public_repo.py`
-regenerates the snapshot (refusing on any finding), mirrors it into the clone (files gone from the
-snapshot are deleted; the clone's `.git` stays), commits "GroomLab <version>" with that version's
-section of What's new as the message, tags `v<version>`, and stops. Review the commit in the
-clone, then run it again with `--push`. `--notes-file` replaces the notes; `--version` the version.
+**Outside pull requests** target `dev`. They are built and tested locally before merging (there
+is no CI): treat a pull request as the idea, rework it to the conventions of section 6 where
+needed, keep the author's credit (their commit, or a `Co-Authored-By:` trailer), and leave out
+files that are not part of the change. Golden files a pull request changes on purpose are
+regenerated in the same change.
 
-**An outside pull request** on the public repository: review and merge it there (or not), then
-bring it into the private repository, where the next release will include it again:
+### Releasing
 
-```bash
-# in the public clone, after the PR is merged (or fetched as a branch)
-git format-patch -o ../pr-123 v0.11.0..main          # one .patch per commit since the release
-# in the private repository, on a branch from main
-git am -3 ../pr-123/*.patch                           # keeps the author and message
-```
+A release is a minor version for features, a patch for fixes only. In this order, never in
+parallel (the zip takes whatever is in each build folder):
 
-Paths are the same in both trees, so the patches apply; fix up anything that touched a file the
-snapshot left out or changed (rare). After the next release the public `main` and the private tree
-agree again.
+1. **Bump** on `dev`: `CMakeLists.txt`'s `project(... VERSION)`, `web/site.config.ts`'s
+   `version`, a section in `web/content/docs/whats-new.mdx` (what changed for an artist, any param
+   change and what to set, credit for outside work), and a few lines of update notes in a text file
+   (Check for Updates shows them; keep it outside the repository, e.g. `build/`).
+2. **Build every preset**: `ninja-maya2022` to `ninja-maya2027` and `ninja-app` (configure a new
+   build folder once with `cmake --preset`). Check `GROOMLAB_PORTABLE_MATH:BOOL=ON` in each
+   `CMakeCache.txt`, that no build failed to regenerate (it leaves old binaries behind), and that
+   each Maya build's configure found V-Ray for Maya ("V-Ray for Maya at ...": its translator, else
+   `package_release.py` notes the version without one).
+3. **Run the tiers** on Maya 2022 (`quick`, `arnold`, `blender`, `gpu`, then `Budget.*` alone,
+   `gui`, `maya.gui_dx11`, `vray` / `renderman` where installed) and the app (`quick`, then
+   `blender|vray|renderman`). A timing budget that fails once under load is rerun alone, not
+   waved through.
+4. **Linux**: `tools/dev/linux_build.ps1 -Tests all` (WSL).
+5. **Install** Maya 2022's build (`cmake --install ... --component GroomLab`).
+6. **Package** `tools/package_release.py`, `tools/package_app.py`, `tools/package_blender.py`,
+   then **publish** each with `--zip dist/<its zip> --notes-file <notes>`
+   (`publish_release.py`, `publish_app.py`, `publish_blender.py`; the R2 variables above).
+7. **Verify** each `latest.json` (`https://downloads.getgroomlab.com/<maya|app|blender>/latest.json`)
+   shows the version and the local zip's sha256 (Maya's `latest.json` is written last, after its
+   three large uploads). Use curl: the bucket answers Python's urllib with 403.
+8. **Git**: push `dev`; on `main`, `git merge --no-edit dev` (check it succeeded before going on),
+   tag `v<version>`, push `main` and the tag; back to `dev`. Only after the uploads: pushing `main`
+   rebuilds the website, whose download page reads the published release lists.
+9. **The website's engine**: rebuild the WebAssembly module (`cmake --build --preset wasm`,
+   [WEB.md](WEB.md)) when the core changed, and commit `web/public/wasm/` on `dev`.
+10. Close the issues the release shipped, with a comment.
 
 ### Faster builds
 
@@ -583,6 +598,17 @@ and tools working in it; the UI docked in Maya's own windows; the `.mod`'s per-v
 picked as written; the translator inside that MtoA. Those wait for a tester (or a machine) with
 that Maya.
 
+**Testing in a newer Maya (the port, in progress).** `ninja-maya2024-tests` to
+`ninja-maya2027-tests` build the plugin from the devkit as above, but with every test and the GUI
+session, run in that Maya's install: `GROOMLAB_MAYA_BIN` (default `MAYA_LOCATION`'s `bin`) is the
+folder whose `mayapy` and `maya` the tests start and whose TBB DLL the core's tests load (a devkit
+has none), and `MTOA_LOCATION` is the installed MtoA (its `kick` for the Arnold tests). The tests
+take Qt from `groomlab.ui.qt` as the UI does (`QtTest` through its `QtTest()`), never PySide2, so
+the same suites run under PySide6. What is left is what only that Maya shows: Python 3.11/3.13
+and Qt 6 differences in the suites, the GUI session's prefs folder and viewport, and stored
+pictures or numbers that differ between versions. Until they pass, Maya 2022 stays the tested
+version and releases come from a machine with it.
+
 ### RenderMan procedural
 
 `hosts/renderman/` builds `groomlab_renderman.dll`, the counterpart of the Arnold procedural: prman
@@ -694,10 +720,10 @@ PxrDistantLight's intensity is its disk's radiance (an Arnold distant light's is
 script divides by the disk's solid angle) and it shines down its +Z; PxrDomeLight reads `.tex`
 (`txmake -envlatl`) and its lat-long is Z-up.
 
-#### RenderMan for Maya (experimental)
+#### RenderMan for Maya
 
-**Status:** needs RenderMan for Maya 27 on Maya 2024 to 2026, and is **not yet verified in Maya**
-(this machine has only Maya 2022). `hosts/maya/scripts/groomlab/renderman.py` renders a groom
+**Status:** needs RenderMan for Maya 27 on Maya 2024 to 2026; rendered in all three (below).
+`hosts/maya/scripts/groomlab/renderman.py` renders a groom
 through RfM's own generic `RenderManProcedural` node, so no GroomLab translator is needed in RfM.
 
 **What RfM has** (read from `RenderManForMaya-27.3`):
@@ -726,8 +752,20 @@ through RfM's own generic `RenderManProcedural` node, so no GroomLab translator 
   - writes the data string's settings (`-name`, `-density`, the scales, `-debug`);
   - sets the pre-shape Python script to `groomlab.renderman.pre_shape("<the node's UUID>")`, so a
     rename doesn't break it.
-  It runs `pre_shape` once so `data` is complete. Without RfM loaded, or without the DSO installed,
-  it raises `RuntimeError`.
+  `repair_procedural` then sets its material and visibility (below), and it runs `pre_shape` once
+  so `data` is complete. A groom that has a procedural already (`procedurals_of`) gets that one,
+  repaired. Without RfM loaded, or without the DSO installed, it raises `RuntimeError`.
+- **`sync_renderman()`** (the plugin runs it: plugin load, `kAfterOpen`/`kAfterNew`, `kAfterImport`,
+  `kAfterPluginLoad` of `RenderMan_for_Maya`; a groom made or deleted queues it for the next idle,
+  `queue_renderman_sync`, interactive sessions only): while RfM is loaded and the DSO is found,
+  every groom gets a procedural (`add_renderman_procedural`) and one whose groom is gone is deleted
+  (it would go on rendering the last file). So a batch render or a farm needs nothing saved: the
+  scene opens, the nodes are made, RfM renders them. Never raises.
+- **`repair_procedural(node, groom)`**: `visibleInReflections`/`visibleInRefractions` on (RfM's
+  indirect visibility inherits them: below); the material is the groom's own shading group when its
+  surface shader is a RenderMan one (`groom_shading_group`: a Pxr or Lama node, by its
+  classification), else the one the node has, else an earlier GroomLab's `<base>_SG` (made but never
+  bound), else a new `create_hair_network`; bound with `assign_shading_group`.
 - **`dso_path()`** looks in this order:
   1. `$GROOMLAB_RENDERMAN_PROCEDURAL` (the file or its folder);
   2. `<module>/procedurals/renderman/groomlab_renderman.dll` (the module these scripts are in);
@@ -756,10 +794,10 @@ through RfM's own generic `RenderManProcedural` node, so no GroomLab translator 
   Params are set through `_set`, which handles RfM's string, enum and number attributes. The
   shading group takes `outColor` on `surfaceShader`. If a step fails, it's a warning that points
   here, and the network above (this section's "The shading network") is the reference.
-- **Menu:** **GroomLab > Render > RenderMan Procedural (experimental)**. The Render submenu's
-  `postMenuCommand` adds the item while `cmds.pluginInfo("RenderMan_for_Maya", loaded=True)` and
-  removes it otherwise, so RfM can load after GroomLab. Without RfM, as in Maya 2022, nothing shows
-  and nothing changes.
+- **Menu:** **GroomLab > Render > Select RenderMan Procedural** selects the selected groom's node
+  (made if missing). The Render submenu's `postMenuCommand` adds the item while
+  `cmds.pluginInfo("RenderMan_for_Maya", loaded=True)` and removes it otherwise. Without RfM, as in
+  Maya 2022, nothing shows and nothing changes.
 
 **Tested:**
 - **In prman** (`renderman.procedural`): the exact call RfM's node makes, the older API with a
@@ -775,13 +813,44 @@ through RfM's own generic `RenderManProcedural` node, so no GroomLab translator 
     folder with a space, which `groomlab-cli` evaluates; the user's keys kept; the shutter from a
     stand-in `rmanGlobals`; the groom's own file when it renders from one.
 
-**Not yet verified** (needs Maya 2024+ with RfM 27):
-- that RfM runs the pre-shape Python script each frame and in batch;
-- that RfM passes `data` as the older API's string;
-- the bound RfM gives the procedural (a too-small bound would cull the hair);
-- shutter units;
-- the RfM node attributes `create_hair_network` sets, and shading-group assignment on a
-  RenderManProcedural.
+**In Maya 2026 with RfM 27.3** (batch `Render -r renderman`, with `MAYA_RENDER_DESC_PATH` on RfM's
+`etc` folder): RfM runs the pre-shape Python script in batch, writes `Procedural "DynamicLoad"`
+with the data string (the older API) and a bound of ±100000, and `create_hair_network`'s nodes
+come out as the RIB's network. A RenderManProcedural takes no set membership: `cmds.sets` returns
+the shading group but leaves the node out, and RfM then writes no material for it (the hair
+rendered a default grey). Its material comes from RfM's Shading Group attribute,
+`rman__torattr___customShadingGroup`, with the shading group's `message` connected
+(`assign_shading_group`; RfM's own `create_openvdb` does the same). RfM's indirect visibility
+inherits the shape's Visible in Reflections and Refractions, and a new shape's are off in Maya
+2025 and 2026 (on in 2024): with them off, no strand lights another and the hair renders dark, so
+`add_renderman_procedural` turns them on. Rendered the same in Maya 2024, 2025 and 2026 (RfM 27.3
+has no Maya 2027 build), with scenes saved with no procedural (`sync_renderman` made it as the
+batch render opened the scene) and with a PxrMarschnerHair assigned to the groom (the node took it).
+Probe: `build/probe/render_hooks` (`make_scenes.py` builds a scene per renderer in mayapy,
+`run_version.ps1 -Year <y> -Build <preset>` installs the build beside it and batch-renders each).
+
+**Interactive renders (IPR).** Measured in a scripted Maya 2026 window (`run_ipr.ps1`, RfM's IPR
+into `it`, the `it` window grabbed):
+- `pre_shape` wrote `data` on every run, and RfM translates a node again when an attribute of it is
+  set, so the IPR translated the procedural without end and never got past its first seconds.
+  `pre_shape` now writes `data` only when it changes.
+- RfM's IPR follows no connection into the procedural, so a groom's change never reached it.
+  `pre_shape` puts the groom's change count (its `outVrayPluginData`, the V-Ray translator's) in
+  `data` as `-revision` (the procedural reads and ignores it), and `watch_grooms` (run by
+  `sync_renderman`, interactive sessions only) listens to each groom's render inputs (dirty-plug
+  callbacks on the inputs themselves: under the Evaluation Manager the outputs send none) and sets
+  the new `-revision` on its procedurals once per idle (`touch_procedurals`, outside the undo queue).
+  `rfm2.render.ipr_is_running()` said False while the IPR rendered into `it`, so nothing waits on it.
+- While prman renders, the procedural holds the frame's groom file open and Windows refuses to
+  replace it: `export_free` writes `<name>.ipr<n>.groom` beside it then (and removes older ones when
+  free), and `data` names that file.
+- Queued work (`queue_renderman_sync`, the touch) goes through `maya.utils.executeDeferred`: an
+  `evalDeferred` waited for the next user event, past an IPR's start.
+The IPR now renders and converges, and an edit renders the groom again: confirmed by hand in Maya
+2026 with RfM 27.3 (the scripted window could not show it: there RfM's IPR took no edit at all, a
+light's intensity included).
+
+**Not yet verified:** shutter units.
 
 Not done either: LOD and culling (they need the camera), and instances and scales.
 
@@ -844,16 +913,65 @@ scene text, command line and the hook against a stand-in `vray.utils`) and `maya
 the studio's scene from Maya, and with vray.exe a small render whose hair is centered, and a
 two-frame sequence).
 
-**V-Ray for Maya hook (Maya 2024+, experimental, never run here):** `vray_hook.py`. V-Ray for Maya
-supports Maya 2024+ only, so it is written from Chaos's documented API alone (the doc pages are cited
-in the module) and every entry point raises `VRayRequired` ("V-Ray for Maya 2024+ required") in Maya
-2022. `enable_hook` appends one line to `vraySettings.postTranslatePython` (V-Ray execs that script
-after translating); `post_translate` exports each visible groom over V-Ray's motion-blur shutter
-(`cam_mbOn`, `cam_mbDuration`, `cam_mbIntervalCenter`, `cam_mbGeomSamples`) and makes a `VRayScene`
-plugin (`vray.utils.create`/`findByName`, `filepath`, `use_transform` 0: the file's Node has the
-world matrix) and deletes Node plugins V-Ray may have made from the groom shape. `load_vrayscene`
-makes a Maya VRayScene node (`FilePath`, `inputTime`, `outMesh`). Read V-Ray for Maya's shipped
-scripts (`maya_vray/scripts/vray`) to learn the public API; never copy Chaos code.
+**V-Ray for Maya translator** (`hosts/maya/vray/groom_translator.cpp`, `vraytr_groomlab.dll`): V-Ray
+for Maya renders groomLabShape as it renders a mesh. V-Ray for Maya ships a translator SDK with every
+install (`vray/include/vray_maya_sdk`: `translator_interface.h`, `exporter_base.h`; samples in
+`vray/samples/maya_plugins/translators`) and loads `vraytr_*.dll` from its `translators` folder and
+from `VRAY_FOR_MAYA<year>_TRANSLATORS_PATH`, which `GroomLab.mod` sets to the module's
+`[maya<year>/]vray`. The build (`GROOMLAB_BUILD_VRAY`, on) finds that SDK under
+`VRAY_FOR_MAYA_LOCATION` (default `C:/Program Files/Chaos/V-Ray/Maya <year> for x64`: one translator a
+Maya version, like the MtoA translator), links V-Ray's `vutils_s.lib` (its headers' inline code
+calls into it) and nothing else of V-Ray: parameters come from the exporter's `createDefParam` and
+`exportValueParam`, which need no `vray.dll`. Include `translator_interface.h` first, then
+`vrayplugins.h`, then `defparams.h` (each assumes the one before); `queryInterface` is a global
+template (`plugman.h`). The SDK stays out of the repository.
+
+It registers a `GeometryTranslator` for `groomLabShape`: the groom evaluated at render density
+with its render overrides by a `NodeEvaluator` kept per groom (the MtoA extension's way), the
+strands as `GeomMayaHair` from `vray::hairArrays` (the `.vrscene`'s arrays, shared code), the radii
+times `vray::matrixScale` of the world matrix (V-Ray scales hair points by a Node's transform but
+not its widths). V-Ray makes the `Node` as for any shape (transform, render flags, object IDs,
+light links) with the groom's shading group's material (a VRayHairNextMtl assigned in the
+Hypershade). A groom with no material of its own (in no shading group, or Maya's
+`initialShadingGroup`) gets no Node from V-Ray: the translator makes it (`exportNodePlugin`) with
+`TexHairSampler` + `BRDFHair4` + `MtlSingleBRDF` as the `.vrscene` writes them, on the first
+translation only (`flags.recreate` 0: making it again in an IPR update crashed Maya; the update
+replaces the hair under it).
+
+Why a geometry translator: V-Ray's IPR translates a custom node again only through one. An
+`InstanceTranslator` (which makes its own Node, so it controls the material) was translated once and
+never again, whatever changed (`OutFlags::rtLinkShape` on, the Evaluation Manager on or off, both
+kinds registered: V-Ray used the instance one). The IPR asks again when the shape's integer output
+`outVrayPluginData` goes dirty (V-Ray's name, its SDK's FAQ): `GroomShape` has it, affected by what a
+render shows (the scalp and collider inputs, guides, graph, sculpts, caches, time, the render
+overrides, render mode and groom file; not the viewport's preview density, display or brush tick),
+its value a counter; the translator reads it so it is clean for the next change.
+
+**Deformation blur.** V-Ray translates once per frame and passes `mbSamples`; then, for its geometry
+samples, it steps Maya's time through the shutter and calls `createKeyFrame(time)` on every
+registered parameter with `AnimatedParameterInterface` (`vraymayageom.h`; measured: keys at 1, 1.5,
+2 for a centred one-frame shutter with 3 samples, Maya at each time). With `mbSamples` above 1,
+`hair_vertices` is a `KeyedPointsParam` (a `DefVectorListParam` that is also an
+`AnimatedParameterInterface`, registered with `registerParam`): each key evaluates the groom again
+and keeps the points when the strands are the frame's (a rest mesh guarantees them), and
+`getVectorList(time)` answers the nearest key. Deriving from V-Ray's parameter classes needs
+`plugman_s.lib` (PluginBase) and `vray.lib` (vray.dll's texture interfaces) besides `vutils_s.lib`.
+
+Verified in Maya 2026 with V-Ray 7: batch renders (no material, `initialShadingGroup`, a
+VRayHairNextMtl, deformation blur of a growing scalp, a two-frame sequence) and the IPR in a scripted
+Maya window (`build/probe/render_hooks/run_ipr.ps1`: a graph edit, a render override and a scalp
+move each re-render the groom). Not done: render LOD and culling, instances and scales.
+
+The groom shape is **renderable** (`setRenderable(true)` in `GroomShape::postConstructor`): without
+it shading groups refuse it ("the set has restrictions on membership"), so the Hypershade's Assign
+Material (`sets -forceElement`) failed on grooms and `shading.assign_shading_group` connected
+`instObjGroups` by hand.
+
+**V-Ray for Maya hook** (`vray_hook.py`, before the translator): `enable_hook` appends a line to
+`vraySettings.postTranslatePython`; `post_translate` exported each groom to a `.vrscene` and made a
+`VRayScene` plugin through `vray.utils`. Rendered in Maya 2024 to 2027 (V-Ray 7). Kept for scenes
+saved with it: `post_translate` returns at once while `translator_installed()` (the translator on
+`VRAY_FOR_MAYA<year>_TRANSLATORS_PATH`), so a groom renders once. Its menu items are gone.
 
 ### Linux builds (WSL): farms and pipelines
 

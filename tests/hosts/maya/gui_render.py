@@ -50,7 +50,7 @@ def compare(folder, width=960, height=540):
     import subprocess
     import groomlab
     from groomlab import studio
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     api = cmds.groomLabGpuPreview(drawApi=True)
     if not os.path.isdir(folder):
         os.makedirs(folder)
@@ -117,7 +117,7 @@ def luma(p):
 
 
 def image(path):
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     return QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_ARGB32)
 
 

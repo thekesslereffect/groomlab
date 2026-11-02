@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
-"""V-Ray for Maya (2024 and later): the groom rendered by V-Ray itself at render time. EXPERIMENTAL
-and UNTESTED: V-Ray for Maya supports Maya 2024 and later only, and GroomLab is developed on Maya
-2022, so none of this has run inside V-Ray for Maya yet. It is written strictly from Chaos's
-documented Python API; on Maya 2022, or without V-Ray for Maya loaded, every entry point says
-"V-Ray for Maya 2024+ required" and changes nothing. In any Maya, V-Ray Standalone renders the groom
-(groomlab.render_vray, tested).
+"""V-Ray for Maya through its post-translate script: the way GroomLab rendered in V-Ray for Maya
+before its translator (hosts/maya/vray, vraytr_groomlab), which V-Ray loads from the module and
+which renders every groom with nothing to set up, with the groom's own material. Kept for scenes
+saved with the hook on: when the translator is installed (translator_installed), post_translate
+does nothing, so the groom is not drawn twice. On Maya 2022, or without V-Ray for Maya loaded,
+every entry point says "V-Ray for Maya 2024+ required" and changes nothing. In any Maya, V-Ray
+Standalone renders the groom (groomlab.render_vray).
 
     import groomlab.vray_hook as hook
     hook.enable_hook()        # V-Ray's post-translate script calls hook.post_translate()
@@ -204,6 +205,19 @@ def motion_blur():
             int(get("cam_mbGeomSamples", 2)))
 
 
+TRANSLATOR = "vraytr_groomlab" + (".dll" if os.name == "nt" else ".so")
+
+
+def translator_installed():
+    """Whether V-Ray for Maya loads GroomLab's translator (vraytr_groomlab, on this Maya's
+    VRAY_FOR_MAYA<year>_TRANSLATORS_PATH, as GroomLab.mod puts it): V-Ray then renders every groom
+    itself, as it renders a mesh, and the hook has nothing to do."""
+    if cmds is None:
+        return False
+    folders = os.environ.get("VRAY_FOR_MAYA%d_TRANSLATORS_PATH" % maya_version(), "")
+    return any(f and os.path.isfile(os.path.join(f, TRANSLATOR)) for f in folders.split(os.pathsep))
+
+
 def _vray_utils():
     try:
         import vray.utils as utils  # V-Ray for Maya's own module, there while it translates
@@ -219,6 +233,8 @@ def post_translate(utils=None, grooms=None, frame=None, folder=None):
     VRayScene plugin names made."""
     import groomlab
     from groomlab import vray_render
+    if utils is None and translator_installed():
+        return []  # GroomLab's translator renders the grooms: the hook would draw them twice
     try:
         utils = utils or _vray_utils()
     except VRayRequired as e:

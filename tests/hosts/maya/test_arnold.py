@@ -808,7 +808,7 @@ class ArnoldTest(unittest.TestCase):
                 if attempt == 1:
                     self.fail("kick stalled twice rendering " + name)
         self.assertEqual(result.returncode, 0, result.stdout[-3000:])
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         picture = QtGui.QImage(image)
         self.assertEqual((picture.width(), picture.height()), (320, 240), image)
         linear = [c / 255.0 / 12.92 if c <= 10 else ((c / 255.0 + 0.055) / 1.055) ** 2.4 for c in range(256)]
@@ -845,7 +845,7 @@ class TurntableRenderTest(unittest.TestCase):
         self.assertIn("/groomlab/shot/renders/turntable_", job.folder)  # the scene's own folder
         self.assertTrue(job.folder.startswith(home.replace("\\", "/")), job.folder)
         self.assertTrue(cmds.ls("groomTurntable_cam*"))  # the rig, in the scene
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         image = QtGui.QImage(job.rendered()[0])
         self.assertEqual((image.width(), image.height()), (64, 64))
         brightest = max(QtGui.QColor(image.pixel(x, y)).value() for x in range(0, 64, 4) for y in range(0, 64, 4))

@@ -913,6 +913,33 @@ class RenderManForMayaTest(unittest.TestCase):
         self.assertEqual(os.path.normpath(self.rman.module_root()),
                          os.path.normpath(os.path.dirname(SCRIPTS_DIR)))
 
+    def test_a_groom_takes_a_material_as_any_shape(self):
+        # The groom shape is renderable: the Hypershade's Assign Material (sets -forceElement) puts
+        # it in a shading group, which V-Ray's translator and RenderMan's procedural then render with.
+        sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name="anyMaterialSG")
+        cmds.sets(self.groom, edit=True, forceElement=sg)
+        self.assertEqual(cmds.sets(sg, query=True), [cmds.ls(self.groom)[0]])
+        transform = cmds.listRelatives(self.groom, parent=True)[0]
+        other = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name="otherMaterialSG")
+        cmds.sets(transform, edit=True, forceElement=other)  # assigned through its transform
+        self.assertEqual(cmds.sets(other, query=True), [cmds.ls(self.groom)[0]])
+        self.assertIsNone(cmds.sets(sg, query=True))
+        # Not a RenderMan material: the procedural keeps GroomLab's network.
+        self.assertIsNone(self.rman.groom_shading_group(self.groom))
+
+    def test_shading_group_reaches_the_procedural(self):
+        # RfM takes a RenderManProcedural's material from its Shading Group attribute, connected from
+        # the shading group (set membership is ignored: the hair rendered grey in RfM 27.3).
+        node = self.stand_in()
+        sg = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name="hair_rman_SG")
+        self.rman.assign_shading_group(node, sg)
+        plug = node + "." + self.rman.SHADING_GROUP_ATTR
+        self.assertEqual(cmds.getAttr(plug, type=True), "string")
+        self.assertEqual(cmds.listConnections(plug, plugs=True), [sg + ".message"])
+        other = cmds.sets(renderable=True, noSurfaceShader=True, empty=True, name="other_rman_SG")
+        self.rman.assign_shading_group(node, other)  # reassigned: the new one replaces it
+        self.assertEqual(cmds.listConnections(plug, plugs=True), [other + ".message"])
+
     def test_without_renderman_for_maya(self):
         # Maya 2022 has no RfM: nothing is made, nothing breaks, no dialog.
         self.assertFalse(self.rman.rfm_loaded())
@@ -922,12 +949,37 @@ class RenderManForMayaTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.rman.create_hair_network("x")
         self.assertEqual(cmds.ls("*_rman*"), [])
+        # The plugin's hook (scene open, a groom made) makes nothing without RfM either.
+        self.assertEqual(self.rman.sync_renderman(), [])
+        self.assertEqual(cmds.ls("*_rman*"), [])
         # A pre-shape script for a node that is gone: a warning, no exception.
         self.assertIsNone(self.rman.pre_shape("0BADF00D-0000-0000-0000-000000000000"))
         # The menu's item stays away (the check runs as the Export menu opens).
         from groomlab.ui import menu
         menu._sync_renderman_item("noSuchMenu")
         self.assertFalse(cmds.menuItem(menu.RENDERMAN_ITEM, exists=True))
+
+    def test_pre_shape_revision_and_a_file_in_use(self):
+        # The groom's change count goes into the data string (-revision): a change makes it differ,
+        # so RfM's interactive render renders the procedural again; an unchanged run writes nothing
+        # (a write would make RfM translate the node again, endlessly).
+        node = self.stand_in()
+        self.rman.link_procedural(node, self.groom)
+        data = self.rman.pre_shape(node)
+        revision = dict(self.rman.parse_data(data))["revision"]
+        self.assertEqual(self.rman.pre_shape(node), data)
+        cmds.setAttr(self.groom + ".renderDensity", 0.5)  # a change a render shows
+        self.assertNotEqual(dict(self.rman.parse_data(self.rman.pre_shape(node)))["revision"], revision)
+        # The frame's file open (prman renders it during an interactive render; Windows refuses to
+        # replace it): the groom goes to <name>.ipr1.groom beside it, and the data string names that.
+        path = dict(self.rman.parse_data(cmds.getAttr(node + ".data")))["file"]
+        with open(path, "rb"):
+            written = self.rman.export_free(self.groom, path)
+        self.assertTrue(written.endswith(".ipr1.groom"), written)
+        self.assertTrue(os.path.isfile(written))
+        # Free again: the frame's own file, and the .ipr1 file of the last update removed.
+        self.assertEqual(self.rman.export_free(self.groom, path), path)
+        self.assertFalse(os.path.exists(written))
 
     def test_pre_shape_script(self):
         node = self.stand_in()

@@ -38,7 +38,7 @@ def view_camera():
 
 
 def write_photo(path, width, height, spot):
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(width, height, QtGui.QImage.Format_RGB32)
     image.fill(QtGui.QColor(20, 20, 20))
     sx, sy, size = spot
@@ -95,7 +95,7 @@ def the_photo_is_drawn_where_its_pixels_are():
     shot = os.path.join(state["folder"], "through.png")
     cmds.playblast(frame=[1], format="image", compression="png", viewer=False, showOrnaments=False, percent=100,
                    widthHeight=(width, height), completeFilename=shot, offScreen=True)
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(shot)
     xs, ys = [], []
     for j in range(0, image.height()):

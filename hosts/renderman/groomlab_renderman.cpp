@@ -32,6 +32,9 @@
 //                 resolve after the groom file's folder and its own search paths
 //   name          the curves' identifier name
 //   debug         1: print the strand and point counts and every primvar with its count
+//   revision      ignored: a host changes it to say the groom changed (RenderMan for Maya's IPR
+//                 renders a procedural again when its data string changes, and the groom file's
+//                 name stays the same)
 //
 // RenderMan's Procedural2 hands a DSO each string as one value, so searchPaths is one string.
 //
@@ -43,7 +46,8 @@
 //       [-100 100 -100 100 -100 100]
 //
 // Keys (the names above; -file for filename): -file, -frame, -fps, -density, -widthScale,
-// -lengthScale, -motionStart, -motionEnd, -motionKeys, -searchPaths, -name, -debug (alone: 1). A
+// -lengthScale, -motionStart, -motionEnd, -motionKeys, -searchPaths, -name, -debug (alone: 1),
+// -revision. A
 // value with spaces goes in double or single quotes (no escapes inside: Windows paths keep their
 // backslashes). An unknown key warns and is skipped with its value. A Procedural2 call's "data"
 // string parameter is read the same way, before its typed parameters (RenderMan for Maya's node
@@ -230,6 +234,10 @@ void parseData(const std::string& text, Params& p) {
         std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         const bool hasValue = i + 1 < words.size();
         const std::string value = hasValue ? words[i + 1] : std::string();
+        if (key == "revision") {  // the host's change counter: nothing to read
+            if (hasValue) ++i;
+            continue;
+        }
         if (key == "debug") {  // a flag, or -debug 0/1
             int on = 1;
             if (hasValue && parseInt(value, on)) ++i;

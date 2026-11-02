@@ -132,6 +132,60 @@
             }
         },
         {
+            "name": "maya-devkit-tests",
+            "hidden": true,
+            "inherits": "ninja",
+            "description": "A newer Maya's plugin built from its devkit with every test, run in that Maya's install (GROOMLAB_MAYA_BIN: mayapy, maya, its TBB DLL) and its MtoA: the tests' port to that Maya, docs/DEVELOPING.md, Other Maya versions",
+            "cacheVariables": {
+                "GROOMLAB_BUILD_MAYA": "ON",
+                "GROOMLAB_GUI_TESTS": "ON"
+            }
+        },
+        {
+            "name": "ninja-maya2024-tests",
+            "displayName": "Windows, Maya 2024 plugin from its devkit + core + every test, run in the installed Maya 2024 (port in progress)",
+            "inherits": "maya-devkit-tests",
+            "cacheVariables": {
+                "MAYA_LOCATION": "$env{USERPROFILE}/groomlab-deps/sdks/maya-devkit-2024",
+                "GROOMLAB_PYTHON_ROOT": "$env{USERPROFILE}/groomlab-deps/sdks/python-3.10.8/tools",
+                "GROOMLAB_MAYA_BIN": "C:/Program Files/Autodesk/Maya2024/bin",
+                "MTOA_LOCATION": "C:/Program Files/Autodesk/Arnold/maya2024"
+            }
+        },
+        {
+            "name": "ninja-maya2025-tests",
+            "displayName": "Windows, Maya 2025 plugin from its devkit + core + every test, run in the installed Maya 2025 (port in progress)",
+            "inherits": "maya-devkit-tests",
+            "cacheVariables": {
+                "MAYA_LOCATION": "$env{USERPROFILE}/groomlab-deps/sdks/maya-devkit-2025",
+                "GROOMLAB_PYTHON_ROOT": "$env{USERPROFILE}/groomlab-deps/sdks/python-3.11.4/tools",
+                "GROOMLAB_MAYA_BIN": "C:/Program Files/Autodesk/Maya2025/bin",
+                "MTOA_LOCATION": "C:/Program Files/Autodesk/Arnold/maya2025"
+            }
+        },
+        {
+            "name": "ninja-maya2026-tests",
+            "displayName": "Windows, Maya 2026 plugin from its devkit + core + every test, run in the installed Maya 2026 (port in progress)",
+            "inherits": "maya-devkit-tests",
+            "cacheVariables": {
+                "MAYA_LOCATION": "$env{USERPROFILE}/groomlab-deps/sdks/maya-devkit-2026",
+                "GROOMLAB_PYTHON_ROOT": "$env{USERPROFILE}/groomlab-deps/sdks/python-3.11.9/tools",
+                "GROOMLAB_MAYA_BIN": "C:/Program Files/Autodesk/Maya2026/bin",
+                "MTOA_LOCATION": "C:/Program Files/Autodesk/Arnold/maya2026"
+            }
+        },
+        {
+            "name": "ninja-maya2027-tests",
+            "displayName": "Windows, Maya 2027 plugin from its devkit + core + every test, run in the installed Maya 2027 (port in progress)",
+            "inherits": "maya-devkit-tests",
+            "cacheVariables": {
+                "MAYA_LOCATION": "$env{USERPROFILE}/groomlab-deps/sdks/maya-devkit-2027",
+                "GROOMLAB_PYTHON_ROOT": "$env{USERPROFILE}/groomlab-deps/sdks/python-3.13.9/tools",
+                "GROOMLAB_MAYA_BIN": "C:/Program Files/Autodesk/Maya2027/bin",
+                "MTOA_LOCATION": "C:/Program Files/Autodesk/Arnold/maya2027"
+            }
+        },
+        {
             "name": "ninja-core",
             "displayName": "Windows, core only (no Maya, Ninja)",
             "inherits": "ninja",
@@ -299,6 +353,10 @@
         { "name": "ninja-maya2025", "configurePreset": "ninja-maya2025", "configuration": "RelWithDebInfo" },
         { "name": "ninja-maya2026", "configurePreset": "ninja-maya2026", "configuration": "RelWithDebInfo" },
         { "name": "ninja-maya2027", "configurePreset": "ninja-maya2027", "configuration": "RelWithDebInfo" },
+        { "name": "ninja-maya2024-tests", "configurePreset": "ninja-maya2024-tests", "configuration": "RelWithDebInfo" },
+        { "name": "ninja-maya2025-tests", "configurePreset": "ninja-maya2025-tests", "configuration": "RelWithDebInfo" },
+        { "name": "ninja-maya2026-tests", "configurePreset": "ninja-maya2026-tests", "configuration": "RelWithDebInfo" },
+        { "name": "ninja-maya2027-tests", "configurePreset": "ninja-maya2027-tests", "configuration": "RelWithDebInfo" },
         { "name": "ninja-core", "configurePreset": "ninja-core", "configuration": "RelWithDebInfo" },
         { "name": "wasm", "configurePreset": "wasm", "targets": [ "groomlab_web" ] },
         { "name": "linux-maya2022", "configurePreset": "linux-maya2022" },
@@ -325,6 +383,10 @@
             "execution": { "jobs": 12 }
         },
         { "name": "ninja-maya2022", "inherits": "ninja", "configurePreset": "ninja-maya2022" },
+        { "name": "ninja-maya2024-tests", "inherits": "ninja", "configurePreset": "ninja-maya2024-tests" },
+        { "name": "ninja-maya2025-tests", "inherits": "ninja", "configurePreset": "ninja-maya2025-tests" },
+        { "name": "ninja-maya2026-tests", "inherits": "ninja", "configurePreset": "ninja-maya2026-tests" },
+        { "name": "ninja-maya2027-tests", "inherits": "ninja", "configurePreset": "ninja-maya2027-tests" },
         { "name": "ninja-app", "inherits": "ninja", "configurePreset": "ninja-app" },
         { "name": "ninja-core", "inherits": "ninja", "configurePreset": "ninja-core" },
         { "name": "linux-maya2022", "configurePreset": "linux-maya2022", "output": { "outputOnFailure": true } },

@@ -47,6 +47,79 @@ std::string pluginName(const std::string& name) {
     return out;
 }
 
+HairArrays hairArrays(const StrandSet& strands, const ScalpMesh* scalp, float scale, const HairArrays* like) {
+    // Base colors (what a hair BSDF takes), per point when they vary along the strands.
+    const ExportView view = describeExport(strands, scalp, kExportPointColors);
+    const std::vector<float>* opacity = view.pointChannel(kOpacityChannel);
+    bool wetPerPoint = false;
+    const std::vector<float>* wetness = wetnessChannel(strands, &wetPerPoint);
+    HairArrays out;
+    out.hasTransparency = like ? like->hasTransparency : opacity != nullptr;
+    out.hasUVs = like ? like->hasUVs : view.hasUVs();
+
+    // The strands V-Ray takes: two points or more.
+    std::vector<std::size_t> kept;
+    std::vector<std::size_t> offsets(view.strandCount() + 1, 0);
+    for (std::size_t s = 0; s < view.strandCount(); ++s) {
+        offsets[s + 1] = offsets[s] + static_cast<std::size_t>(std::max(0, view.counts[s]));
+        if (view.counts[s] >= 2) kept.push_back(s);
+    }
+    std::size_t pointTotal = 0;
+    for (const std::size_t s : kept) pointTotal += static_cast<std::size_t>(view.counts[s]);
+
+    out.counts.reserve(kept.size());
+    for (const std::size_t s : kept) out.counts.push_back(view.counts[s]);
+    out.xyz.reserve(3 * pointTotal);
+    out.widths.reserve(pointTotal);
+    out.colors.reserve(3 * pointTotal);
+    if (out.hasTransparency) out.transparency.reserve(3 * pointTotal);
+    const std::vector<Vec3f>& positions = strands.positions();
+    const std::array<float, 3> fallback = defaultHairColor();
+    for (const std::size_t s : kept) {
+        for (std::size_t p = offsets[s]; p < offsets[s + 1]; ++p) {
+            out.xyz.push_back(positions[p].x * scale);
+            out.xyz.push_back(positions[p].y * scale);
+            out.xyz.push_back(positions[p].z * scale);
+            out.widths.push_back(view.radius(p) * scale);
+            std::array<float, 3> c = view.hasPointColors() ? view.pointColors[p] : view.hasColors() ? view.colors[s] : fallback;
+            const float wet = wetness ? (*wetness)[wetPerPoint ? p : s] : 0.0f;
+            if (wet > 0.0f) {  // the fiber's absorption up (hair_color.h wetShading)
+                std::array<float, 3> a = hairColorAbsorption(c);
+                for (float& v : a) v *= wetShading(wet).absorption;
+                c = hairAbsorptionColor(a);
+            }
+            c = vrayDyeColor(c);
+            out.colors.insert(out.colors.end(), c.begin(), c.end());
+            if (out.hasTransparency) {
+                const float t = opacity ? 1.0f - std::clamp((*opacity)[p], 0.0f, 1.0f) : 0.0f;
+                out.transparency.insert(out.transparency.end(), {t, t, t});
+            }
+        }
+    }
+    if (out.hasUVs) {
+        out.uvw.reserve(3 * kept.size());
+        for (const std::size_t s : kept) {
+            const std::array<float, 2> uv = view.hasUVs() ? view.rootUVs[s] : std::array<float, 2>{0.0f, 0.0f};
+            out.uvw.insert(out.uvw.end(), {uv[0], uv[1], 0.0f});
+        }
+    }
+    return out;
+}
+
+double matrixScale(const double* m) {
+    if (!m) return 1.0;
+    const double det = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) +
+                       m[2] * (m[4] * m[9] - m[5] * m[8]);
+    // A uniform scale: an axis's length (sqrt is exact on every platform; glibc's cbrt(27) is not
+    // 3, which left 0.9999999999999999 in the Node's matrix on Linux); otherwise the mean scale.
+    const double ax = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+    const double ay = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+    const double az = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+    const bool uniform = std::abs(ax - ay) <= 1e-12 * ax && std::abs(ax - az) <= 1e-12 * ax;
+    const double k = uniform ? ax : std::cbrt(std::abs(det));
+    return k > 1e-12 && std::abs(k - 1.0) > 1e-9 ? k : 1.0;
+}
+
 }  // namespace vray
 
 namespace {
@@ -250,103 +323,39 @@ void VrsceneWriter::writeFrame(double frame, const StrandSet& strands, const Sca
     if (d.closed) throw VrsceneError("writeFrame after close");
     if (d.frames > 0 && frame <= d.lastFrame) throw VrsceneError("frames must increase");
 
-    // Base colors (what a hair BSDF takes), per point when they vary along the strands.
-    const ExportView view = describeExport(strands, scalp, kExportPointColors);
-    const std::vector<float>* opacity = view.pointChannel(kOpacityChannel);
-    bool wetPerPoint = false;
-    const std::vector<float>* wetness = wetnessChannel(strands, &wetPerPoint);
-    if (d.frames == 0) {
-        d.firstFrame = frame;
-        d.hasUVs = view.hasUVs();
-        d.hasTransparency = opacity != nullptr;
-    }
-
-    // The strands V-Ray takes: two points or more.
-    std::vector<std::size_t> kept;
-    std::vector<std::size_t> offsets(view.strandCount() + 1, 0);
-    for (std::size_t s = 0; s < view.strandCount(); ++s) {
-        offsets[s + 1] = offsets[s] + static_cast<std::size_t>(std::max(0, view.counts[s]));
-        if (view.counts[s] >= 2) kept.push_back(s);
-    }
-    std::size_t pointTotal = 0;
-    for (const std::size_t s : kept) pointTotal += static_cast<std::size_t>(view.counts[s]);
-    if (d.frames == 0) {
-        d.strands = kept.size();
-        d.points = pointTotal;
-    }
-
-    const bool z = d.options.compress;
-    const std::string hair = d.name + "@hair";
-    std::vector<std::int32_t> counts;
-    counts.reserve(kept.size());
-    for (const std::size_t s : kept) counts.push_back(view.counts[s]);
-    d.param(hair, "num_hair_vertices").put(frame, packedList("Int", rawBytes(counts), z));
-
-    std::vector<float> xyz, widths, colors, transparency;
-    xyz.reserve(3 * pointTotal);
-    widths.reserve(pointTotal);
-    colors.reserve(3 * pointTotal);
-    const std::vector<Vec3f>& positions = strands.positions();
-    const std::array<float, 3> fallback = defaultHairColor();
     // The transform's own scale goes into the points and radii (V-Ray does not scale hair widths
     // by a Node's transform): the Node keeps the rotation and translation (a scale that differs per
     // axis keeps the rest of it; the widths then take the mean).
     double nodeMatrix[16];
-    double matrixScale = 1.0;
+    const double k = vray::matrixScale(objectToWorld);
     if (objectToWorld) {
         std::copy(objectToWorld, objectToWorld + 16, nodeMatrix);
-        const double* m = objectToWorld;
-        const double det = m[0] * (m[5] * m[10] - m[6] * m[9]) - m[1] * (m[4] * m[10] - m[6] * m[8]) +
-                           m[2] * (m[4] * m[9] - m[5] * m[8]);
-        // A uniform scale: an axis's length (sqrt is exact on every platform; glibc's cbrt(27) is not
-        // 3, which left 0.9999999999999999 in the Node's matrix on Linux); otherwise the mean scale.
-        const double ax = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-        const double ay = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-        const double az = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
-        const bool uniform = std::abs(ax - ay) <= 1e-12 * ax && std::abs(ax - az) <= 1e-12 * ax;
-        const double k = uniform ? ax : std::cbrt(std::abs(det));
-        if (k > 1e-12 && std::abs(k - 1.0) > 1e-9) {
-            matrixScale = k;
-            for (int row = 0; row < 3; ++row) {
-                for (int col = 0; col < 3; ++col) nodeMatrix[4 * row + col] /= k;
-            }
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) nodeMatrix[4 * row + col] /= k;
         }
     }
-    const float scale = static_cast<float>(d.options.scale * matrixScale);
-    for (const std::size_t s : kept) {
-        for (std::size_t p = offsets[s]; p < offsets[s + 1]; ++p) {
-            xyz.push_back(positions[p].x * scale);
-            xyz.push_back(positions[p].y * scale);
-            xyz.push_back(positions[p].z * scale);
-            widths.push_back(view.radius(p) * scale);
-            std::array<float, 3> c = view.hasPointColors() ? view.pointColors[p] : view.hasColors() ? view.colors[s] : fallback;
-            const float wet = wetness ? (*wetness)[wetPerPoint ? p : s] : 0.0f;
-            if (wet > 0.0f) {  // the fiber's absorption up (hair_color.h wetShading)
-                std::array<float, 3> a = hairColorAbsorption(c);
-                for (float& v : a) v *= wetShading(wet).absorption;
-                c = hairAbsorptionColor(a);
-            }
-            c = vray::vrayDyeColor(c);
-            colors.insert(colors.end(), c.begin(), c.end());
-            if (d.hasTransparency) {
-                const float t = opacity ? 1.0f - std::clamp((*opacity)[p], 0.0f, 1.0f) : 0.0f;
-                transparency.insert(transparency.end(), {t, t, t});
-            }
-        }
+    // Every frame keeps the first's transparency and UVs (zeros where a frame lacks them).
+    vray::HairArrays like;
+    like.hasTransparency = d.hasTransparency;
+    like.hasUVs = d.hasUVs;
+    const vray::HairArrays a =
+        vray::hairArrays(strands, scalp, static_cast<float>(d.options.scale * k), d.frames > 0 ? &like : nullptr);
+    if (d.frames == 0) {
+        d.firstFrame = frame;
+        d.hasUVs = a.hasUVs;
+        d.hasTransparency = a.hasTransparency;
+        d.strands = a.counts.size();
+        d.points = a.widths.size();
     }
-    d.param(hair, "hair_vertices").put(frame, packedList("Vector", rawBytes(xyz), z));
-    d.param(hair, "widths").put(frame, packedList("Float", rawBytes(widths), z));
-    d.param(hair, "colors").put(frame, packedList("Color", rawBytes(colors), z));
-    if (d.hasTransparency) d.param(hair, "transparency").put(frame, packedList("Color", rawBytes(transparency), z));
-    if (d.hasUVs) {
-        std::vector<float> uvw;
-        uvw.reserve(3 * kept.size());
-        for (const std::size_t s : kept) {
-            const std::array<float, 2> uv = view.hasUVs() ? view.rootUVs[s] : std::array<float, 2>{0.0f, 0.0f};
-            uvw.insert(uvw.end(), {uv[0], uv[1], 0.0f});
-        }
-        d.param(hair, "strand_uvw").put(frame, packedList("Vector", rawBytes(uvw), z));
-    }
+
+    const bool z = d.options.compress;
+    const std::string hair = d.name + "@hair";
+    d.param(hair, "num_hair_vertices").put(frame, packedList("Int", rawBytes(a.counts), z));
+    d.param(hair, "hair_vertices").put(frame, packedList("Vector", rawBytes(a.xyz), z));
+    d.param(hair, "widths").put(frame, packedList("Float", rawBytes(a.widths), z));
+    d.param(hair, "colors").put(frame, packedList("Color", rawBytes(a.colors), z));
+    if (a.hasTransparency) d.param(hair, "transparency").put(frame, packedList("Color", rawBytes(a.transparency), z));
+    if (a.hasUVs) d.param(hair, "strand_uvw").put(frame, packedList("Vector", rawBytes(a.uvw), z));
     d.param(d.name + "@node", "transform").put(frame, transformText(objectToWorld ? nodeMatrix : nullptr));
 
     d.lastFrame = frame;

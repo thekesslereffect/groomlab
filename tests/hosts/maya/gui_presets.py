@@ -277,7 +277,7 @@ def override_params(groom):
 
 def contact_sheet(cells, path, title, size):
     """A grid of the pictures, each labelled with the preset's name, category and its stats."""
-    from PySide2 import QtCore, QtGui
+    from groomlab.ui.qt import QtCore, QtGui
     columns = 6 if len(cells) > 12 else max(1, min(len(cells), 4))
     rows = (len(cells) + columns - 1) // columns
     label = 40

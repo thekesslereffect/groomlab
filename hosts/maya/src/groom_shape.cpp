@@ -236,6 +236,7 @@ MObject GroomShape::aDisplayHair;
 MObject GroomShape::aBrushTick;
 MObject GroomShape::aOutStrandCount;
 MObject GroomShape::aLastError;
+MObject GroomShape::aOutVrayPluginData;
 MObject GroomShape::aOutFrame;
 
 const MTypeId GroomFrameData::kTypeId(kGroomLabFrameDataTypeId);
@@ -451,6 +452,10 @@ void GroomShape::adoptWarmsOnIdle(void*) {
 
 void GroomShape::postConstructor() {
     MPxSurfaceShape::postConstructor();
+    // Renderable: shading groups take the groom as a member, so the Hypershade's Assign Material
+    // (sets -forceElement) works on it like on any shape, for every renderer's material; without
+    // it Maya refuses ("the set has restrictions on membership").
+    setRenderable(true);
     // A control attribute added, removed or renamed (a Control node, a keyed param, undo of
     // either): the list of them is found again on the next compute.
     MStatus status;
@@ -1067,6 +1072,12 @@ MStatus GroomShape::initialize() {
     tAttr.setWritable(false);
     tAttr.setStorable(false);
 
+    aOutVrayPluginData = nAttr.create("outVrayPluginData", "glovpd", MFnNumericData::kInt, 0, &status);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
+    nAttr.setWritable(false);
+    nAttr.setStorable(false);
+    nAttr.setHidden(true);
+
     // What the viewport draws, made with outStrandCount: what cached playback keeps of the groom.
     aOutFrame = tAttr.create("outFrame", "glofr", GroomFrameData::kTypeId, MObject::kNullObj, &status);
     CHECK_MSTATUS_AND_RETURN_IT(status);
@@ -1076,8 +1087,20 @@ MStatus GroomShape::initialize() {
 
     for (MObject* attr : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aGroomScale, &aScaleArea, &aScaleTransform, &aColliderMeshes, &aExtraScalps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderView, &aSimGuides, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aTransferMarkers, &aGuideCurves, &aTime, &aGraph, &aGuideData, &aPartData, &aGraphUi, &aViewNode, &aLocked, &aDisplayInstances, &aGuideSelection, &aSoftSelectRadius, &aStrandColorMode, &aStrandColorSource, &aStrandColorMin, &aStrandColorMax, &aDisplayRibbons, &aRibbonWidthScale, &aDisplayWidthCoverage, &aDisplayCoverageDensity, &aDisplayClumpLod, &aClumpLodError, &aDisplayLighting, &aDisplayShadows, &aDisplayHairShading, &aDisplaySelfShadowing, &aDisplayStrandVariation, &aGuideWidth, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aDisplayFlow, &aShotSculpt, &aShotLayer, &aLodDistance, &aLodNear, &aLodFar, &aLodMinDensity,
                           &aLodWidthCompensation, &aCameraCull, &aCullMargin, &aBackfaceCull, &aBackfaceAngle, &aDisplayColor, &aUseMaterialColor, &aSculptDisplay, &aSculptDensity, &aIsolateGroup, &aGuideColorMode, &aGuideColorLayer, &aGuidePoints, &aGuideSmoothing, &aHiddenGuideGroups, &aGuideGroupColors, &aRenderMode, &aGroomFile, &aPreviewDensity, &aPreviewPointBudget, &aDisplayGuides, &aDisplayHair,
-                          &aDisplayTubes, &aBrushTick, &aCardDensity, &aOutCards, &aOutRachis, &aOutMesh, &aDisplayCards, &aDisplayMesh, &aDisplayCardTextures, &aDisplayOverlaysOnTop, &aCardMaps, &aScalpMaps, &aScalpMapDisplay, &aScalpMapChannel, &aOutStrandCount, &aLastError, &aOutFrame}) {
+                          &aDisplayTubes, &aBrushTick, &aCardDensity, &aOutCards, &aOutRachis, &aOutMesh, &aDisplayCards, &aDisplayMesh, &aDisplayCardTextures, &aDisplayOverlaysOnTop, &aCardMaps, &aScalpMaps, &aScalpMapDisplay, &aScalpMapChannel, &aOutStrandCount, &aLastError, &aOutVrayPluginData, &aOutFrame}) {
         CHECK_MSTATUS_AND_RETURN_IT(addAttribute(*attr));
+    }
+    // What renders the groom differently (the render's inputs and settings; not the viewport's
+    // preview density, display or brush tick: an interactive render would evaluate at render
+    // density with each dab).
+    for (MObject* input : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference,
+                           &aScaleTransformReference, &aColliderMeshes, &aColliderMesh, &aColliderName, &aColliderRestMesh,
+                           &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve,
+                           &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aTime, &aGraph,
+                           &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData,
+                           &aPartData, &aScalpMaps, &aRenderDensity, &aRenderWidthScale, &aRenderLengthScale, &aRenderMode,
+                           &aGroomFile}) {
+        CHECK_MSTATUS_AND_RETURN_IT(attributeAffects(*input, aOutVrayPluginData));
     }
     for (MObject* input : {&aInMesh, &aRestMesh, &aFollowScalp, &aScalpTopology, &aScaleSource, &aScaleReference, &aScaleTransformReference, &aColliderMeshes, &aColliderMesh, &aColliderName, &aColliderRestMesh,
                            &aExtraScalps, &aExtraScalpMesh, &aExtraScalpName, &aExtraScalpRestMesh, &aSimGuides, &aSimCurve, &aSimGuideId, &aGuideCache, &aGuideCacheObject, &aSimCaches, &aGuideCurves, &aTime, &aGraph, &aGuideData, &aCorrectiveData, &aCorrectiveWeight, &aSculptData, &aSculptNode, &aFlowData, &aPartData, &aPreviewDensity, &aPreviewPointBudget, &aRenderView, &aSculptDensity, &aViewNode, &aBrushTick, &aCardDensity, &aDisplayCards, &aDisplayMesh, &aCardMaps, &aScalpMaps}) {
@@ -1189,6 +1212,12 @@ void GroomShape::report(const std::string& message, bool error) {
 }
 
 MStatus GroomShape::compute(const MPlug& plug, MDataBlock& data) {
+    if (plug == aOutVrayPluginData) {  // a token: V-Ray reads that it was dirty, the translator evaluates
+        MDataHandle out = data.outputValue(aOutVrayPluginData);
+        out.setInt(out.asInt() + 1);
+        data.setClean(aOutVrayPluginData);
+        return MS::kSuccess;
+    }
     if (plug != aOutStrandCount && plug != aLastError && plug != aOutFrame && plug != aOutCards && plug != aOutRachis &&
         plug != aOutMesh && plug != aGroomScale && plug != aScaleArea && plug != aScaleTransform) {
         return MS::kUnknownParameter;
@@ -2032,7 +2061,7 @@ MStatus GroomShape::setDependentsDirty(const MPlug& plug, MPlugArray& affected) 
     // Control attributes (dynamic, added per Control node): the groom re-evaluates.
     const bool control = !display && !input && isControlAttribute(plug.attribute());
     if (control) {
-        for (const MObject* out : {&aOutStrandCount, &aLastError, &aOutFrame, &aOutCards, &aOutRachis, &aOutMesh}) affected.append(MPlug(thisMObject(), *out));
+        for (const MObject* out : {&aOutStrandCount, &aLastError, &aOutFrame, &aOutCards, &aOutRachis, &aOutMesh, &aOutVrayPluginData}) affected.append(MPlug(thisMObject(), *out));
     }
     // The expensive conversions and the stored texts are read again only for inputs that were
     // dirtied (or whose data reads differently; see computeStrands).

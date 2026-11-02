@@ -17,7 +17,7 @@ Loading the plugin adds a **GroomLab** menu:
   Collider, Wind, Jiggle).
 - **Simulate** (Add Simulate Node, Simulate Range, Bake Simulation, Clear Simulation; nHair under
   **Legacy**), **Review** (Density Heatmap and Strand Count HUD, check items; Turntable, Render
-  Turntable...), **Render** (Render from Groom File..., Render as Curves, and RenderMan Procedural
+  Turntable...), **Render** (Render from Groom File..., Render as Curves, and Select RenderMan Procedural
   while RenderMan for Maya is loaded: see [Rendering with RenderMan](rendering.md#rendering-with-renderman)) and **Export** (Alembic...,
   USD..., Unreal Groom..., the game cards, the scales).
 - **Utilities**: guides and strands to and from Maya curves and meshes, baking a node to guides,

@@ -47,7 +47,7 @@ def view_pixels(name, what, test):
     """The active view redrawn and read back: how many pixels pass test(r, g, b)."""
     from maya.api import OpenMaya as om
     from maya.api import OpenMayaUI as omui2
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     cmds.refresh(force=True)
     view = omui2.M3dView.active3dView()
     view.refresh(False, True)
@@ -156,7 +156,7 @@ def step_partial_upload():
     stroked = shot("stroked")
     rewrite()
     whole = shot("whole")
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     a, b = QtGui.QImage(stroked), QtGui.QImage(whole)
     check("the strands written after the stroke draw as the strands written whole", not a.isNull() and a == b)
     cmds.modelEditor(panel, edit=True, polymeshes=meshes)
@@ -635,7 +635,7 @@ def step_redo():
     cmds.redo()
     cmds.redo()
     check("redoing both gives the second stroke's file", digest(lazy_path) == lazy[2])
-    from PySide2 import QtGui as _qg
+    from groomlab.ui.qt import QtGui as _qg
     outside = _qg.QImage(128, 128, _qg.QImage.Format_Grayscale8)
     outside.fill(77)
     time.sleep(0.05)
@@ -748,7 +748,7 @@ def step_redo():
     cmds.refresh(force=True)
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke=" ".join("%d %d" % (sx + 5 * k, sy) for k in range(8)))
     cmds.refresh(force=True)  # the rewritten RGBA file drawn on the scalp
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     picture = QtGui.QImage(tint_path)
     reds, blues = [], []
     for y in range(0, picture.height(), 2):
@@ -917,7 +917,7 @@ def step_paint_across_seam():
     # surface. Then a paint stroke across the seam paints both sides.
     import tempfile
     from maya.api import OpenMaya as om2
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     groomlab = state["groomlab"]
     cmds.file(new=True, force=True)
     scalp = cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20)[0]

@@ -201,7 +201,7 @@ class HardeningTest(unittest.TestCase):
 QUIT_SCRIPT = r'''
 import os, sys
 sys.path.insert(0, %r)
-from PySide2 import QtWidgets
+from groomlab.ui.qt import QtWidgets
 from groomlab.ui import widgets
 app = QtWidgets.QApplication([])
 keep = []

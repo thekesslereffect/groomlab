@@ -683,7 +683,7 @@ class GraphApiTest(unittest.TestCase):
         cmds.redo()
         self.assertEqual(graph_editor.load_model(self.groom, self.catalog).to_json(layout=False), edited_json)
         # The editor's key tests: Ctrl+Z is undo, Ctrl+Y and Ctrl+Shift+Z redo, and nothing else is.
-        from PySide2 import QtCore, QtGui
+        from groomlab.ui.qt import QtCore, QtGui
         ctrl, shift = QtCore.Qt.ControlModifier, QtCore.Qt.ShiftModifier
 
         def key(k, mods):

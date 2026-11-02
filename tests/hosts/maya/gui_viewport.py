@@ -473,7 +473,7 @@ def scales_check(snapshots=None):
     quads = shot("quads")
     api = cmds.groomLabGpuPreview(drawApi=True)
     # The share of the body's pixels (off the background, as its corner shows it) the scales change.
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(hidden).convertToFormat(QtGui.QImage.Format_RGB32)
     data = bytes(image.constBits())[:image.byteCount()]
     background = data[0:3]
@@ -571,7 +571,7 @@ COVERAGE_GRAPH = {
 def band_ink(path, rows):
     """How far a capture's pixels in each band of rows (fractions of its height, top 0) are from
     its background (the mean color of its top 4 rows, above the strands), mean over the band."""
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
     w, h = image.width(), image.height()
     data = bytes(image.constBits())[:image.byteCount()]
@@ -1018,7 +1018,7 @@ def true_width_check(snapshots=None):
     each view (refaced); flat (lighting off) alike; off, the lines."""
     import tempfile
     import groomlab
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     folder = snapshots or tempfile.mkdtemp(prefix="groomlab_truewidth_")
     cmds.file(new=True, force=True)
     scalp = cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20)[0]
@@ -1237,7 +1237,7 @@ def lod_orbit_checks(groom, api, frame):
 
 def differ(a, b):
     """The share of pixels that differ between two captures."""
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     ia, ib = QtGui.QImage(a), QtGui.QImage(b)
     if ia.size() != ib.size() or ia.isNull():
         return 1.0
@@ -1254,7 +1254,7 @@ def hue_counts(path):
     rest that is not the dark background. (By a third for red, a fifth for green and blue: picked
     colors shade as Arnold renders a base color, hair_bsdf.glsl hairColorSigma, lighter and less
     saturated than the one-pass transmittance they drew as before.)"""
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
     data = bytes(image.constBits())[:image.byteCount()]
     counts = {"r": 0, "g": 0, "b": 0, "other": 0}
@@ -1276,7 +1276,7 @@ def hair_pixel_change(before, after, block=6):
     (the mean variance inside the squares over the variance of all: low when neighboring strands,
     a clump, change alike)."""
     import colorsys
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
 
     def load(path):
         image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
@@ -1457,7 +1457,7 @@ def hair_color_scale_presets_check(snapshots=None):
 
 def hair_luminance(path):
     """The mean luminance of the pixels that are neither the white background nor the gray floor."""
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
     data = bytes(image.constBits())[:image.byteCount()]
     total, count = 0.0, 0
@@ -1495,9 +1495,9 @@ def freeze_cycle_scene_check(scene, snapshots=None):
 
     if os.environ.get("GROOMLAB_PROBE_MAXIMIZE") == "1":  # the user's full screen window
         import maya.OpenMayaUI as omui
-        import shiboken2
-        from PySide2 import QtWidgets
-        window = shiboken2.wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QMainWindow)
+        from groomlab.ui.qt import shiboken
+        from groomlab.ui.qt import QtWidgets
+        window = shiboken.wrapInstance(int(omui.MQtUtil.mainWindow()), QtWidgets.QMainWindow)
         window.showMaximized()
         process_events(500)
         view = omui.M3dView.active3dView()
@@ -1949,7 +1949,7 @@ def overlay_check(snapshots=None):
     def shot(name):
         """The capture and its guide pixels: green to cyan (the children's levels shift the hue),
         where the brown hair and the light background are neither."""
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         cmds.refresh(currentView=True, force=True)
         path = os.path.join(folder, "overlay_check_%s.png" % name)
         cmds.playblast(frame=[1], format="image", compression="png", viewer=False, showOrnaments=False,
@@ -1976,7 +1976,7 @@ def eyes_check(groom, folder):
     (displayHair) hides the strands alone, the guides drawing on; the guides' eye (displayGuides)
     hides the guides alone, the strands drawing on. Neither hides the groom's transform."""
     import groomlab
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     transform = cmds.listRelatives(groom, parent=True, fullPath=True)[0]
 
     def shot(name):
@@ -2044,7 +2044,7 @@ def clump_centers_check(snapshots=None):
 
     def shot(name):
         """The dots counted (the viewport's) and the capture's pixels near their color."""
-        from PySide2 import QtGui
+        from groomlab.ui.qt import QtGui
         cmds.refresh(currentView=True, force=True)
         draw = json.loads(cmds.groomLabGraphStats(groom, drawTimes=True))["draw"]
         centers = json.loads(cmds.groomLabGraphStats(groom, overlays=True))["clumpCenters"]
@@ -2083,7 +2083,7 @@ def cards_check(snapshots=None):
     measure is tools/bench/card_fidelity)."""
     import tempfile
     import groomlab
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     cmds.file(new=True, force=True)
     scalp = cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20)[0]
     groom = groomlab.create_groom(scalp)
@@ -2202,7 +2202,7 @@ def strand_colors_check(snapshots=None):
     DirectX 11)."""
     import tempfile
     import groomlab
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     folder = tempfile.mkdtemp(prefix="groomlab_colors_")
     cmds.file(new=True, force=True)
     cmds.file(rename=os.path.join(folder, "colors.ma"))
@@ -2379,7 +2379,7 @@ def draw_serial():
 def run_steps(steps, then, ms=150):
     """Runs a generator's steps, Maya's event loop running `ms` between them (its idle work, the
     viewport's idle redraw, Qt's timers: what happens between a slider's steps), then `then`."""
-    from PySide2 import QtCore
+    from groomlab.ui.qt import QtCore
 
     from gui_support import guarded
 

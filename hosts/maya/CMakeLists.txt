@@ -162,6 +162,45 @@ if(GROOMLAB_BUILD_ARNOLD)
     endif()
 endif()
 
+# V-Ray: a translator V-Ray for Maya loads (vraytr_*.dll from VRAY_FOR_MAYA<year>_TRANSLATORS_PATH)
+# that renders groomLabShape as hair. It builds against the V-Ray for Maya install of this Maya
+# version (its vray/include, vray/include/vray_maya_sdk and vray/lib: Chaos's SDK, never in this
+# repository), V-Ray 7's by default.
+if(GROOMLAB_BUILD_VRAY)
+    set(_vray_default "")
+    if(WIN32)
+        set(_program_files "$ENV{ProgramW6432}")
+        if(NOT _program_files)
+            set(_program_files "$ENV{ProgramFiles}")
+        endif()
+        file(TO_CMAKE_PATH "${_program_files}/Chaos/V-Ray/Maya ${GROOMLAB_MAYA_YEAR} for x64" _vray_default)
+    endif()
+    set(VRAY_FOR_MAYA_LOCATION "${_vray_default}" CACHE PATH
+        "V-Ray for Maya's install for this Maya version (holding vray/include/vray_maya_sdk)")
+    if(EXISTS "${VRAY_FOR_MAYA_LOCATION}/vray/include/vray_maya_sdk/translator_interface.h")
+        message(STATUS "V-Ray for Maya at ${VRAY_FOR_MAYA_LOCATION}")
+        add_library(vraytr_groomlab SHARED vray/groom_translator.cpp)
+        # V-Ray's base libraries, as V-Ray's samples link them: vutils and plugman (PluginBase: the
+        # keyed points parameter derives from V-Ray's), and vray.dll's import library (the parameter's
+        # texture interfaces), which V-Ray has loaded whenever it loads a translator.
+        target_link_libraries(vraytr_groomlab PRIVATE groomlab_maya_inputs
+            "${VRAY_FOR_MAYA_LOCATION}/vray/lib/vutils_s.lib" "${VRAY_FOR_MAYA_LOCATION}/vray/lib/plugman_s.lib"
+            "${VRAY_FOR_MAYA_LOCATION}/vray/lib/vray.lib")
+        target_include_directories(vraytr_groomlab SYSTEM PRIVATE
+            "${VRAY_FOR_MAYA_LOCATION}/vray/include" "${VRAY_FOR_MAYA_LOCATION}/vray/include/vray_maya_sdk")
+        # V-Ray's headers as its SDK's own builds compile them (samples/enduser_cmake).
+        target_compile_definitions(vraytr_groomlab PRIVATE _REENTRANT NOMINMAX VUTILS_UTF8 END_USER_BUILD
+            __SSE__ __SSE2__ __SSE3__ __SSSE3__ __SSE4_1__ __SSE4_2__)
+        set_target_properties(vraytr_groomlab PROPERTIES
+            PREFIX ""
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/vray"
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/vray")
+        # No groomlab::warnings here: V-Ray's headers trip /permissive- and /W4.
+    elseif(VRAY_FOR_MAYA_LOCATION)
+        message(STATUS "V-Ray for Maya ${GROOMLAB_MAYA_YEAR} not found at '${VRAY_FOR_MAYA_LOCATION}': no V-Ray translator")
+    endif()
+endif()
+
 # Maya module layout: <prefix>/GroomLab.mod + <prefix>/GroomLab/{plug-ins,scripts,python,extensions}
 # (Maya 2022's binaries) and <prefix>/GroomLab/maya<year>/{plug-ins,python,extensions} (another
 # version's). Maya only scans the top level of MAYA_MODULE_PATH for .mod files; the module path
@@ -177,6 +216,9 @@ if(TARGET groomLabTranslator)
     set(GROOMLAB_MOD_EXTENSIONS "MTOA_EXTENSIONS_PATH+:=${GROOMLAB_MAYA_BIN}extensions\n")
 else()
     set(GROOMLAB_MOD_EXTENSIONS "")
+endif()
+if(TARGET vraytr_groomlab)
+    string(APPEND GROOMLAB_MOD_EXTENSIONS "VRAY_FOR_MAYA${GROOMLAB_MAYA_YEAR}_TRANSLATORS_PATH+:=${GROOMLAB_MAYA_BIN}vray\n")
 endif()
 configure_file(module/GroomLab.mod.in "${CMAKE_CURRENT_BINARY_DIR}/GroomLab.mod" @ONLY)
 
@@ -211,6 +253,11 @@ if(TARGET groomlab_core_py)
     install(TARGETS groomlab_core_py LIBRARY DESTINATION "${GROOMLAB_MODULE_DIR}/${GROOMLAB_MAYA_BIN}python" COMPONENT GroomLab)
 else()
     message(WARNING "GROOMLAB_BUILD_PYTHON is off: the plugin's Python (scripts/groomlab) needs the groomlab_core module")
+endif()
+if(TARGET vraytr_groomlab)
+    install(TARGETS vraytr_groomlab
+        RUNTIME DESTINATION "${GROOMLAB_MODULE_DIR}/${GROOMLAB_MAYA_BIN}vray" COMPONENT GroomLab
+        LIBRARY DESTINATION "${GROOMLAB_MODULE_DIR}/${GROOMLAB_MAYA_BIN}vray" COMPONENT GroomLab)
 endif()
 if(TARGET groomLabTranslator)
     install(TARGETS groomLabTranslator

@@ -104,8 +104,6 @@
     "render.vrayFrame": {"label": "Render Frame in V-Ray", "tip": "This frame in V-Ray Standalone: every strand, the viewport's camera, lights and scalp", "hosts": ["app"]},
     "render.vrayTurntable": {"label": "Render Turntable in V-Ray", "tip": "36 frames of the camera around the groom in V-Ray Standalone", "hosts": ["app"]},
     "render.vrayLocation": {"label": "V-Ray Standalone Location...", "tip": "Where V-Ray Standalone's vray executable is, when the app does not find it (remembered)", "hosts": ["app"]},
-    "render.vrayHook":{"label": "V-Ray for Maya Hook (2024+, experimental)", "tip": "Experimental, untested: V-Ray for Maya (Maya 2024 or later) renders the grooms inside its own scene renders, through its post-translate Python script (picking it again turns it off)", "hosts": ["maya"]},
-    "render.vrayLoadScene": {"label": "Load as VRayScene (2024+, experimental)", "tip": "Experimental, untested: the groom over the playback range as a .vrscene and a VRayScene node pointing at it, for V-Ray for Maya (Maya 2024 or later)", "hosts": ["maya"]},
 
     "export.alembic": {"label": "Alembic...", "tip": "The strands as Alembic curves over the playback range",
                       "tips": {"app": "The strands as Alembic curves over the timeline's range (Export mode)"}},

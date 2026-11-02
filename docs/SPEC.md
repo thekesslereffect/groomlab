@@ -6,7 +6,7 @@ The full PRD and spec are kept outside the repository. This file keeps what code
 
 - Our own core instead of XGen or Bifrost. XGen guides are flat and its modifier stack is closed; Bifrost is weak at interactive guide authoring.
 - One `groomLabShape` shape node holds the whole graph (Yeti-style), not one DG node per operator.
-- Target: Maya 2022 (C++17, Python 3.7, PySide2, TBB 2020.2). Renderer: Arnold.
+- Target: Maya 2022 (C++17, Python 3.7, PySide2, TBB 2020.2), the tested version; Maya 2023 to 2027 built from their devkits (PySide6 and oneTBB from 2025/2026), their tests being ported. Renderer: Arnold (also V-Ray and RenderMan exports).
 - Output: USD `BasisCurves` and Alembic, plus an Arnold procedural later.
 - Groom files (M4) are JSON (`.groom`): graph, hierarchy, flat guides and the scalp, with caches (animated scalp, guide poses) in Alembic beside them. USD was considered for the groom file itself; JSON keeps the core free of a USD dependency, and USD stays an output format.
 - Host strategy (2026-09-25):

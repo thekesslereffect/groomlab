@@ -8,7 +8,7 @@ if(POLICY CMP0141)
     set(CMAKE_POLICY_DEFAULT_CMP0141 NEW)
 endif()
 
-project(GroomLab VERSION 0.39.0 LANGUAGES CXX)
+project(GroomLab VERSION 0.40.0 LANGUAGES CXX)
 
 # Maya 2022 devkit targets C++17 (Visual Studio 2019 / v142 ABI; v143 is binary compatible).
 set(CMAKE_CXX_STANDARD 17)
@@ -27,6 +27,10 @@ option(GROOMLAB_BUILD_ARNOLD  "Build the MtoA translator (needs MTOA_LOCATION)" 
 # The Arnold procedural depends on Arnold alone: one build (against the oldest Arnold 7 SDK, Maya
 # 2022's MtoA) loads in every Arnold 7, so the other Maya versions' presets leave it out.
 option(GROOMLAB_BUILD_PROCEDURAL "Build the Arnold procedural (needs the Arnold SDK under MTOA_LOCATION)" ON)
+# V-Ray for Maya's translator (hosts/maya/vray): built when V-Ray for Maya's SDK (its install's
+# vray/include and vray/lib) is found under VRAY_FOR_MAYA_LOCATION, one per Maya version like the
+# MtoA translator.
+option(GROOMLAB_BUILD_VRAY    "Build the V-Ray for Maya translator (needs V-Ray for Maya under VRAY_FOR_MAYA_LOCATION)" ON)
 # The RenderMan procedural (hosts/renderman): built when a RenderMan Pro Server SDK is found under
 # GROOMLAB_RMANTREE. Like the Arnold procedural it depends on its renderer alone, so one build (Maya
 # 2022's) ships it; the other Maya versions' presets leave it out.
@@ -46,6 +50,10 @@ option(GROOMLAB_BUILD_WEB     "Build the WebAssembly module (Emscripten) or its 
 
 set(MAYA_LOCATION "$ENV{MAYA_LOCATION}" CACHE PATH "Maya install root, e.g. C:/Program Files/Autodesk/Maya2022")
 set(MTOA_LOCATION "$ENV{MTOA_LOCATION}" CACHE PATH "MtoA install root, e.g. C:/Program Files/Autodesk/Arnold/maya2022")
+# The Maya the tests run in (its bin folder: mayapy, maya, its TBB DLL): the one built against (an
+# install), or, for a plugin built from a devkit, an installed Maya of the same version (the
+# ninja-maya2024-tests to ninja-maya2027-tests presets).
+set(GROOMLAB_MAYA_BIN "${MAYA_LOCATION}/bin" CACHE PATH "The bin folder of the Maya the tests run in (default: MAYA_LOCATION's)")
 if(APPLE)
     # macOS: MAYA_LOCATION is the Maya devkit (headers); the libraries the plugin links (OpenMaya...,
     # TBB) and mayapy are the install's, inside Maya.app (docs/MACOS.md).

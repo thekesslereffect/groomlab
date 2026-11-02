@@ -57,7 +57,7 @@ def shot(name, groom=None):
 
 
 def pixels(path):
-    from PySide2 import QtGui
+    from groomlab.ui.qt import QtGui
     image = QtGui.QImage(path)
     if image.isNull():
         return None, None

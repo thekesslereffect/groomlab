@@ -13,6 +13,24 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.40.0 (November 2, 2026)
+
+- **V-Ray for Maya renders grooms with nothing to set up** (Maya 2024 to 2027, V-Ray 7), as Arnold
+  does: renders, batch renders and farms. Each groom renders as V-Ray hair at its render density,
+  with each strand's color, its render flags, object IDs and light links, deformation motion blur
+  (a moving scalp, a simulation), and interactive renders (IPR) that follow your edits. Assign a
+  **VRayHairNextMtl** to the groom for your own hair material; without one, GroomLab's hair is set
+  up to render close to Arnold. Scenes saved with the old V-Ray for Maya Hook render as before. See
+  [V-Ray for Maya](/docs/other-renderers#v-ray-for-maya-maya-2024-to-2027).
+- **RenderMan for Maya renders grooms with nothing to set up** (Maya 2024 to 2026, RenderMan
+  27.3): while RenderMan for Maya is loaded, every groom gets the RenderMan procedural that renders
+  it, in renders, batch renders, farms and the IPR, which follows your edits. The hair now takes
+  its material and lights itself between strands (it rendered grey and dark in newer Maya). Assign
+  a **PxrMarschnerHair** to the groom for your own; without one, GroomLab's hair network. See
+  [RenderMan procedural](/docs/other-renderers#renderman-procedural).
+- **Grooms take Hypershade materials.** **Assign Material** works on a groom (Maya refused it
+  before); Arnold, V-Ray and RenderMan render the groom with the material you assign.
+
 ## 0.39.0 (November 2, 2026)
 
 - **Simulated hair keeps its weight.** The Simulate node's **groomedUnderGravity** is now a

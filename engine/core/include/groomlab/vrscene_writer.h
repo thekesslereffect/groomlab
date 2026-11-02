@@ -48,9 +48,11 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "groomlab/hair_color.h"
 #include "groomlab/scalp_mesh.h"
@@ -109,6 +111,30 @@ HairBrdf vrayHairBrdf(const HairLobes& lobes);
 // A V-Ray plugin name for `name`: letters, digits and '_' (others become '_'), not starting with
 // a digit; "groom" when empty.
 std::string pluginName(const std::string& name);
+
+// The strands as GeomMayaHair takes them, what the file below holds and what GroomLab's V-Ray for
+// Maya translator hands V-Ray: strands of fewer than 2 points left out, the points and radii
+// times `scale`, the colors the dye (vrayDyeColor of the base color, darkened where wet).
+struct HairArrays {
+    std::vector<std::int32_t> counts;  // num_hair_vertices
+    std::vector<float> xyz;            // hair_vertices, 3 a point
+    std::vector<float> widths;         // a radius a point
+    std::vector<float> colors;         // 3 a point
+    std::vector<float> transparency;   // 3 a point (1 - opacity), when hasTransparency
+    std::vector<float> uvw;            // strand_uvw, the root's (u, v, 0), 3 a strand, when hasUVs
+    bool hasTransparency = false;      // the strands have an opacity channel
+    bool hasUVs = false;               // the scalp gives the roots UVs
+};
+// `like`: another frame's arrays, whose hasTransparency and hasUVs this one keeps (zeros where
+// these strands lack them), so every frame's parameters agree.
+HairArrays hairArrays(const StrandSet& strands, const ScalpMesh* scalp, float scale = 1.0f,
+                      const HairArrays* like = nullptr);
+
+// The scale of a transform (16 values, row-major with the translation in the last row: Maya's
+// MMatrix) that V-Ray does not apply to hair widths: an axis's length when the scale is uniform,
+// else the cube root of the determinant's magnitude; 1 for none. A groom's radii are multiplied
+// by it (and, in a .vrscene, its points, the Node's matrix divided by it).
+double matrixScale(const double* objectToWorld);
 
 }  // namespace vray
 
