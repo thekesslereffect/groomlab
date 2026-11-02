@@ -13,7 +13,6 @@
 #include "groomlab/curve.h"
 #include "groomlab/export_view.h"
 #include "groomlab/frames.h"
-#include "groomlab/hair_color.h"
 #include "groomlab/parallel.h"
 #include "groomlab/point_index.h"
 #include "groomlab/random.h"
@@ -149,12 +148,17 @@ void seatCard(CardMesh::Card& card, const ScalpMesh& scalp, const Vec3f& root, f
     if ((seated.back() - seated.front()).length() < 0.5f * (row.back() - row.front()).length()) {
         for (std::size_t e = 0; e < row.size(); ++e) seated[e] = row[e] + up[e] * (clearance - lowest);
     } else if (rigid > 0.0f) {
-        // Toward the row moved as a whole along the skin's mean normal under it.
+        // Toward the row moved as a whole with the feather's shaft planted at its original
+        // root. Using the lowest outer edge here floats an asymmetric feather's shaft by as
+        // much as the row tilts across its width (most visibly when featherFlatten is 1).
         Vec3f mean{};
         for (const Vec3f& u : up) mean += u;
         mean = mean.normalized();
+        const Vec3f anchor = card.center.front() + card.side.front() * card.spineOffset;
+        const SurfacePoint near = scalp.closestPoint(root);
+        const float height = (anchor - near.position).dot(mean);
         const float r = std::min(rigid, 1.0f);
-        for (std::size_t e = 0; e < row.size(); ++e) seated[e] = seated[e] * (1.0f - r) + (row[e] + mean * (clearance - lowest)) * r;
+        for (std::size_t e = 0; e < row.size(); ++e) seated[e] = seated[e] * (1.0f - r) + (row[e] + mean * (clearance - height)) * r;
     }
     card.base = std::move(seated);
 }
@@ -233,17 +237,11 @@ CardPoint projectOntoCard(const CardMesh::Card& cardIn, const Vec3f& p, int& seg
     return out;
 }
 
-StrandColors colorsOf(const StrandSet& s, const std::array<float, 3>& fallback, CardColorLook look) {
+StrandColors colorsOf(const StrandSet& s, const std::array<float, 3>& fallback) {
     StrandColors c;
-    // The cards' color maps hold the hair shaded as the viewport draws it (a card is matte in an
-    // engine; Maya's card hair shading turns it back into the base color: hairBaseOfShaded), or the
-    // base color itself for a hair shader.
+    // A color map is material input, not lighting output: preserve the authored base color.
     c.colors = strandColors(s);
     c.points = pointColors(s);
-    if (look == CardColorLook::Shaded) {
-        for (std::array<float, 3>& rgb : c.colors) rgb = hairShadedColor(rgb);
-        for (std::array<float, 3>& rgb : c.points) rgb = hairShadedColor(rgb);
-    }
     const std::vector<float>* iridescence = s.pointChannel(kIridescenceChannel);
     if (iridescence && iridescence->size() == s.pointCount()) c.iridescence = *iridescence;
     c.fallback = fallback;
@@ -1522,7 +1520,7 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
         separateCards(out, settings.separation, settings.featherSeparation, settings.separationIterations);
     }
     // Each card's own strands' colors, root to tip: its tint over the texture it shares.
-    const detail::StrandColors colors = detail::colorsOf(s, CardBakeSettings{}.color, settings.colorLook);
+    const detail::StrandColors colors = detail::colorsOf(s, CardBakeSettings{}.color);
     parallelFor(0, out.size(), [&](std::size_t c) {
         out[c].colors = detail::cardColors(out[c], s, colors);
         out[c].iridescence = detail::cardIridescence(out[c], s, colors);
@@ -1568,7 +1566,6 @@ std::vector<float> cardFitDistances(const StrandSet& s, const CardMesh& cards, i
 CardMesh buildCards(const StrandSet& s, const ScalpMesh* scalp, const CardSettings& settings) {
     CardMesh mesh;
     mesh.cards = makeCards(s, scalp, settings);
-    mesh.colorLook = settings.colorLook;
     layoutCards(mesh, settings.padding);
     return mesh;
 }

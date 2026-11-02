@@ -2,7 +2,7 @@
 """Guides from reference photos (experimental): the photos on the groom's reference cameras
 (groomlab.reference: a camera lined up with the mesh, the photo on its image plane) give guides
 that follow the hair they show, in a guide group of their own. Its UI is the Reference window
-(ui/reference_window.py: the photo and the mesh side by side, landmarks, flow arrows, mask
+(ui/reference_window.py: the photo and the mesh side by side, landmarks, guide lines, mask
 touch-ups, Generate, the measured look).
 
     import groomlab

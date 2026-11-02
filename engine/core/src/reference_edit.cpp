@@ -97,8 +97,8 @@ void ReferencePhotoEditor::clearLandmarks() {
 }
 
 std::size_t ReferencePhotoEditor::addStroke(Pixels points, bool directed) {
-    if (points.size() < 2) throw std::invalid_argument("a flow arrow needs 2 points or more");
-    record("flow arrow");
+    if (points.size() < 2) throw std::invalid_argument("a guide line needs 2 points or more");
+    record("guide line");
     state_.strokes.push_back({std::move(points), directed});
     return state_.strokes.size() - 1;
 }
@@ -114,14 +114,14 @@ std::size_t ReferencePhotoEditor::eraseStrokes(const Pixels& path, float radius)
     };
     const std::size_t gone = static_cast<std::size_t>(std::count_if(state_.strokes.begin(), state_.strokes.end(), near));
     if (gone == 0) return 0;
-    record("erase flow arrows");
+    record("erase guide lines");
     state_.strokes.erase(std::remove_if(state_.strokes.begin(), state_.strokes.end(), near), state_.strokes.end());
     return gone;
 }
 
 void ReferencePhotoEditor::clearStrokes() {
     if (state_.strokes.empty()) return;
-    record("clear flow arrows");
+    record("clear guide lines");
     state_.strokes.clear();
 }
 

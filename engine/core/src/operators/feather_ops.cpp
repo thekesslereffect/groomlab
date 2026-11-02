@@ -310,6 +310,12 @@ public:
                 .range(2, 32)
                 .in("Rachis")
                 .adv(),
+            notAnimatable({"shaftSegments", std::int64_t{0}, "Segments of the rachis tube along the shaft, on a smooth "
+                                                             "curve through the shaft's points, so a shaft of few points "
+                                                             "still makes a round rachis (0: one a shaft point)"})
+                .range(0, 256)
+                .soft(0, 64)
+                .in("Rachis"),
             ParamSpec{"rootOnShaft", true, "With a shaftWidth: barbs start on the rachis's surface, not its center line, "
                                            "so an engine binds them to their own rachis"}
                 .in("Rachis")
@@ -359,7 +365,11 @@ public:
         const float shaftWidth = static_cast<float>(params().getDouble("shaftWidth"));
         const Ramp shaftWidthProfile = params().getRamp("shaftWidthProfile");
         const int shaftSides = static_cast<int>(params().getInt("shaftSides"));
+        const int shaftSegments = static_cast<int>(std::clamp<std::int64_t>(params().getInt("shaftSegments"), 0, 256));
         const bool rachis = shaftWidth > 0.0f && std::isfinite(shaftWidth);
+        const auto rachisRadius = [&](float u) {
+            return std::max(0.5f * shaftWidth * shaftWidthProfile(u), kMinRachisRadius * 0.5f * shaftWidth);
+        };
         const bool rootOnShaft = rachis && params().getBool("rootOnShaft");
         const auto groupId = static_cast<int>(params().getInt("groupId"));
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
@@ -628,25 +638,44 @@ public:
             if (plan.barbs.empty() && !rachis) return;
             const ShaftWalker walker(pts, n, rootUp(scalp, in->roots()[s], pts, n));
             if (keepShaft) setVaneNormal(firstStrand[s], walker.frame(0).normal);
-            // The rachis: a ring at every shaft point, in the frames the barbs grow in.
+            // The rachis: a ring at every shaft point, in the frames the barbs grow in; with
+            // shaftSegments, that many segments evenly along the smooth curve through the shaft's
+            // points instead (its frames rotation-minimizing from the shaft's first).
             std::vector<RachisRing>& rings = shaftRings[s];
+            const bool resampled = rachis && shaftSegments > 0;
             if (rachis) {
-                rings.resize(n);
-                for (std::size_t k = 0; k < n; ++k) {
-                    const Frame& fr = walker.frame(k);
-                    RachisRing& r = rings[k];
-                    r.center = pts[k];
-                    r.tangent = fr.tangent;
-                    r.normal = fr.normal;
-                    r.side = fr.binormal;
-                    r.u = walker.along(k);
-                    r.radius = std::max(0.5f * shaftWidth * shaftWidthProfile(r.u), kMinRachisRadius * 0.5f * shaftWidth);
+                if (resampled) {
+                    const std::size_t m = static_cast<std::size_t>(shaftSegments) + 1;
+                    const std::vector<Vec3f> smooth = resampleSmoothCurve(pts, n, m);
+                    const std::vector<Frame> frames = rotationMinimizingFrames(smooth.data(), smooth.size(), walker.frame(0).normal);
+                    rings.resize(smooth.size());
+                    for (std::size_t k = 0; k < smooth.size(); ++k) {
+                        RachisRing& r = rings[k];
+                        r.center = smooth[k];
+                        r.tangent = frames[k].tangent;
+                        r.normal = frames[k].normal;
+                        r.side = frames[k].binormal;
+                        r.u = static_cast<float>(k) / static_cast<float>(smooth.size() - 1);
+                        r.radius = rachisRadius(r.u);
+                    }
+                } else {
+                    rings.resize(n);
+                    for (std::size_t k = 0; k < n; ++k) {
+                        const Frame& fr = walker.frame(k);
+                        RachisRing& r = rings[k];
+                        r.center = pts[k];
+                        r.tangent = fr.tangent;
+                        r.normal = fr.normal;
+                        r.side = fr.binormal;
+                        r.u = walker.along(k);
+                        r.radius = rachisRadius(r.u);
+                    }
                 }
                 // The kept shaft as wide as its rachis, point by point: a renderer drawing it as a
                 // curve draws the rachis (a Width node after leaves it so).
                 if (keepShaft) {
                     const std::size_t dst = out->strandBegin(firstStrand[s]);
-                    for (std::size_t k = 0; k < n; ++k) widths[dst + k] = 2.0f * rings[k].radius;
+                    for (std::size_t k = 0; k < n; ++k) widths[dst + k] = 2.0f * rachisRadius(walker.along(k));
                     (*rachisShafts)[firstStrand[s]] = 1.0f;
                 }
             }
@@ -684,7 +713,13 @@ public:
                         // across the shaft leaves the tube (its length and shape as designed).
                         std::size_t seg = 0;
                         float frac = 0.0f;
-                        walker.locate(b.u, &seg, &frac);
+                        if (resampled) {  // (the rings evenly along the smooth curve)
+                            const float x = std::clamp(b.u, 0.0f, 1.0f) * static_cast<float>(rings.size() - 1);
+                            seg = std::min(static_cast<std::size_t>(x), rings.size() - 2);
+                            frac = x - static_cast<float>(seg);
+                        } else {
+                            walker.locate(b.u, &seg, &frac);
+                        }
                         const RachisRing& ra = rings[seg];
                         Vec3f away = b.points > 1 ? q[1] - q[0] : across;
                         away = away - ra.tangent * away.dot(ra.tangent);

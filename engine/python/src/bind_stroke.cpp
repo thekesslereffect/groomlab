@@ -320,8 +320,8 @@ void bindStroke(py::module_& m) {
     py::class_<BrushTool>(m, "BrushTool",
                           "The interactive brush, Place, Draw, Part and Flow tools driven by mouse events in a "
                           "ToolView's pixels: press, drag, release (or stroke() for a whole one). Ctrl: the opposite "
-                          "action (the brushes that work both ways, painting, Part, Flow); Shift while painting: a drag "
-                          "smooths (a guide brush's Shift selects guides: the host's, shiftSelects). One edit per stroke.")
+                          "action (the brushes that work both ways, painting, Part, Flow); Shift: a drag smooths (the "
+                          "guides, a painted map, the Tube brush's channel). One edit per stroke.")
         .def(py::init([](py::kwargs kwargs) {
             auto tool = std::make_unique<BrushTool>();
             applySettings(tool->settings, kwargs);

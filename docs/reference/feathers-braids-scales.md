@@ -96,7 +96,10 @@ root; the preset `dragon_scales` is the whole chain, `scales_from_guides` and
   by the root. A scale following its strand is kept per scale until its strand moves.
 - **Prototypes:** the built-in plates need no scene mesh: `groomlab:scale` (keeled and pointed,
   slightly domed, bevelled), `groomlab:scaleRound` (a rounded tip, no keel) and
-  `groomlab:scaleShield` (broad and blunt, the belly's). Or a mesh of your own (Prototype from
+  `groomlab:scaleShield` (broad and blunt, the belly's): each one closed piece of quads for
+  subdivision (`scalePlate`), the top and the underside alike: loops round the outline (from the
+  rim's middle, a crease loop at each edge and a support loop holding it) and a 4 x 4 grid filling
+  the middle. Or a mesh of your own (Prototype from
   Selection): model it 1 unit long up **+Y** from its base at the origin, 1 unit wide along X,
   lying on the XY plane with its top up **+Z**. Several names are variants (above): the preset
   takes the keeled plate on the back and the shield on the belly by a map of the normal.
@@ -200,7 +203,9 @@ Curl, Width, HairColor, Clump, Cards...) shape and color them like hair.
   engines split by; `groupName` names it), as `add_feathers` sets per design.
 - **The rachis.** `shaftWidth` (0: none) makes each shaft a tube of that width at the root, times
   `shaftWidthProfile` along it (tapering to a quarter by default, never under 5%), with
-  `shaftSides` sides (6; 2: a flat ribbon in the vane plane): geometry to skin into the
+  `shaftSides` sides (6; 2: a flat ribbon in the vane plane) and a ring at every shaft point, or
+  `shaftSegments` segments evenly along the smooth curve through the shaft's points (0: off), so
+  a shaft of few points still makes a round rachis: geometry to skin into the
   character for game engines ([Feathers in Unreal](game-export.md#feathers-in-unreal-the-meerkat-eagle-workflow)). With a rachis the barbs start on its
   surface instead of its center line (`rootOnShaft`, on): each barb moves, as designed, to where
   its first segment leaves the tube, so the closest triangle to its root is its own rachis's.
@@ -221,7 +226,7 @@ Curl, Width, HairColor, Clump, Cards...) shape and color them like hair.
 
 | Operator | What it does | Main parameters |
 | --- | --- | --- |
-| `Propagate` | Grows barbs off every strand or guide it is fed (the shafts): feathers, ferns, plumes. Outputs strands: the shafts (`keepShaft`) and their barbs, with vane space; a down zone at the base | `sides`, `count`, `start`, `end`, `segments`, `length` (mappable, per shaft), `lengthProfile` (ramp), `asymmetry`, `angle` (mappable), `angleProfile`, `curl`, `curlProfile`, `lift`, `droop`, `splits`, `splitAmount`, `lengthRandom`, `angleRandom`, `down`, `downCount`, `downLength`, `downCurl`, `downFrizz`, `downSegments`, `width`, `keepShaft`, `shaftWidth`, `shaftWidthProfile` (ramp), `shaftSides`, `rootOnShaft`, `groupId`, `groupName`, `seed` |
+| `Propagate` | Grows barbs off every strand or guide it is fed (the shafts): feathers, ferns, plumes. Outputs strands: the shafts (`keepShaft`) and their barbs, with vane space; a down zone at the base | `sides`, `count`, `start`, `end`, `segments`, `length` (mappable, per shaft), `lengthProfile` (ramp), `asymmetry`, `angle` (mappable), `angleProfile`, `curl`, `curlProfile`, `lift`, `droop`, `splits`, `splitAmount`, `lengthRandom`, `angleRandom`, `down`, `downCount`, `downLength`, `downCurl`, `downFrizz`, `downSegments`, `width`, `keepShaft`, `shaftWidth`, `shaftWidthProfile` (ramp), `shaftSides`, `shaftSegments`, `rootOnShaft`, `groupId`, `groupName`, `seed` |
 | `Plume` | Lays feathers (Propagate's output, by `featherId`) over one another and off the body (Yeti's Plume): ranks them (`rankBy` `rootDistance` along `direction`, or with none each neighbouring pair against its own mean direction, `length`, `channel` or `random`; `invert`) and turns each up about its root, lowest first, until it lies `offset` above every lower feather under it (each a height map of its vane) and `bodyOffset` above the scalp and the `collider` input. `stiffness` 1 rigid, lower bends; roots stay on the skin; deterministic on any thread count; full evaluation | `offset`, `bodyOffset`, `rankBy`, `direction`, `rankChannel`, `invert`, `iterations`, `stiffness`, `maxAngle`, `depth`, `strength` (mappable, per feather), `seed` |
 | `Split` | Routes each strand (or guide: guides in, guides out) to one of four outputs `a`, `b`, `c`, `d`, by their weights' shares: in `random` mode by strand ID (stable: a thinner preview keeps each strand's output), in `map` mode by `select`, a 0-1 value per strand (a painted map, a channel) that picks the share it falls in (weights 1 1 0 0: under 0.5 to a, the rest to b). Every strand goes to exactly one output. Several feather designs on one set of shafts, or any look split by a map | `mode`, `weightA`-`weightD`, `select` (mappable), `seed` |
 

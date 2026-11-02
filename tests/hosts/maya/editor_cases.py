@@ -4991,7 +4991,7 @@ class ReferenceTabTest(unittest.TestCase):
         from groomlab.ui import reference_window
         cam = self.tab.import_photo(self.photo)
         self.tools.poll()
-        self.assertIn("0 landmark pairs, 0 flow arrows", self.tab.gen_hint.text())
+        self.assertIn("0 landmark pairs, 0 guide lines", self.tab.gen_hint.text())
         self.tab.findChild(QtWidgets.QToolButton, "referenceOpenWindow").click()
         window = reference_window.window()
         try:
@@ -5022,7 +5022,7 @@ class ReferenceTabTest(unittest.TestCase):
         cmds.groomLabReferenceFlowCtx(from_reference.FLOW_CONTEXT, edit=True, debugStroke=stroke)
         self.assertEqual(len(from_reference.reference_hints(self.groom, cam)), 1)
         self.tools.poll()
-        self.assertIn("1 flow arrow", self.tab.gen_hint.text())
+        self.assertIn("1 guide line", self.tab.gen_hint.text())
 
 
 def widgets_alive(widget):
@@ -5243,10 +5243,17 @@ class ReferenceWindowTest(unittest.TestCase):
         window.lock.click()
         self.assertFalse(reference.is_locked(cam))
         self.assertTrue(window.focal.isEnabled())
-        # The stages: Align shows the landmarks only; a Guides tool moves to the Guides stage.
+        # The stages: Align shows the landmarks only (no tool chips: one tool); a Guides tool moves to
+        # the Guides stage.
         window.set_stage("align")
         self.assertFalse(window.guides_panel.isVisibleTo(window))
         self.assertFalse(window.mode_buttons["flow"].isVisibleTo(window))
+        self.assertFalse(window.mode_buttons["landmarks"].isVisibleTo(window))
+        self.assertTrue(window.align_panel.isVisibleTo(window))
+        self.assertTrue(window.align_show.isVisibleTo(window))
+        self.assertFalse(window.guides_show.isVisibleTo(window))
+        self.assertTrue(window.next_button.isVisibleTo(window))
+        self.assertFalse(window.generate_button.isVisibleTo(window))
         # Stored on the camera (pairs with their errors) as the old tab reads them.
         self.assertEqual(len(reference.complete_pairs(cam)), len(points))
         self.assertIsNotNone(reference.pairs(cam)[0].get("error"))
@@ -5274,6 +5281,17 @@ class ReferenceWindowTest(unittest.TestCase):
         window.set_mode("flow")
         self.assertEqual(window.stage(), "guides")
         self.assertTrue(window.guides_panel.isVisibleTo(window))
+        # Guides shows its own: no landmarks (no chip, no Align panel, no markers on the mesh view),
+        # the mesh's outline off the photo, the groom in the mesh view; the brush for the mask only.
+        self.assertFalse(window.mode_buttons["landmarks"].isVisibleTo(window))
+        self.assertFalse(window.align_panel.isVisibleTo(window))
+        self.assertTrue(window.guides_show.isVisibleTo(window))
+        self.assertFalse(window.align_show.isVisibleTo(window))
+        self.assertFalse(window.next_button.isVisibleTo(window))
+        self.assertFalse(window.brush.isVisibleTo(window))
+        self.assertNotIn(window.mesh_view.marker_set, cmds.ls(window.mesh_view.isolated(), dag=True, long=True))
+        self.assertTrue(cmds.modelEditor(window.mesh_view.editor, query=True, pluginShapes=True))
+        self.assertIn("is lined up", window.photo_label.text())
         self.drag_photo([(80, 30 + 7 * k) for k in range(11)])
         self.assertEqual(len(window.editor().strokes), 1)
         self.assertEqual(len(from_reference.reference_hints(self.groom, cam)), 1)  # stored on the groom
@@ -5281,7 +5299,7 @@ class ReferenceWindowTest(unittest.TestCase):
         self.drag_photo([(60, 30 + 7 * k) for k in range(11)])
         self.drag_photo([(61, 60), (62, 62)], modifiers=QtCore.Qt.ControlModifier)
         self.assertEqual(len(window.editor().strokes), 1)
-        self.assertEqual(window.editor().undo_text, "erase flow arrows")
+        self.assertEqual(window.editor().undo_text, "erase guide lines")
         window.undo()
         self.assertEqual(len(window.editor().strokes), 2)
         window.undo()

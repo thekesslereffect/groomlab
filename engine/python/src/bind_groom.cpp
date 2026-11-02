@@ -653,6 +653,7 @@ void bindGroom(py::module_& m) {
         .def_readwrite("occlusion", &PyCardBakeSettings::occlusion)
         .def_readwrite("dilate", &PyCardBakeSettings::dilate)
         .def_readwrite("root_fade", &PyCardBakeSettings::rootFade)
+        .def_readwrite("feather_root_fade", &PyCardBakeSettings::featherRootFade)
         .def_readwrite("min_strand_texels", &PyCardBakeSettings::minStrandTexels);
     py::class_<CardTextures>(m, "CardTextures", "Baked card textures (Unreal hair card layout), row 0 at the top.")
         .def_readonly("size", &CardTextures::size)
@@ -714,7 +715,6 @@ void bindGroom(py::module_& m) {
           },
           py::arg("preset"), "\"\" or what is wrong with a preset.");
     m.def("card_map_preset_user_dir", &cardMapPresetUserDir, "The user's card preset folder.");
-    m.def("card_map_auto_padding", &cardMapAutoPadding, py::arg("resolution"), "The padding Auto gives at a resolution.");
     m.def("card_map_file_name", &cardMapFileName, py::arg("template"), py::arg("name"), py::arg("map"), py::arg("resolution"),
           "The file name (no extension) a naming template makes.");
     m.def("write_card_maps",

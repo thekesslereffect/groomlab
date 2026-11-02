@@ -8,8 +8,8 @@
 // MarkerView: its own orbit camera), settings beside them. Two stages (the chips at the top left):
 //   - Align: landmarks only; the panel holds the pairs and their errors, the camera (Focal Length,
 //     Keep focal length, Lock) and the mesh drawn over the photo.
-//   - Guides (experimental): Guides from Photos besides: flow arrows, mask touch-ups, Generate.
-// Photos: a tab each (Import Photo..., Remove), each with its own landmarks, flow arrows, mask
+//   - Guides (experimental): Guides from Photos besides: guide lines, mask touch-ups, Generate.
+// Photos: a tab each (Import Photo..., Remove), each with its own landmarks, guide lines, mask
 // touch-ups and solved camera (the core's ReferencePhotoEditor, reference_edit.h, the same rules
 // as Maya's window):
 //   - Landmarks: a click on the photo and one on the mesh (either order) make a pair; a drag moves
@@ -135,12 +135,15 @@ public:
     const ReferencePhoto* photo() const;
 
     // ---- Edits (the clicks call these; scripts and tests too) ----
-    // Align (landmarks only) or Guides (the flow, the mask and Generate too).
+    // Align (one photo's landmarks and camera, the mesh over the photo) or Guides (Guides from
+    // Photos over every lined-up photo: guide lines, the mask, Generate). Each shows only its own
+    // tools, panel and overlays.
     void setStage(Stage stage);
     Stage stage() const { return stage_; }
     // The photo view's tool; one of Guides' moves to the Guides stage.
     void setMode(Mode mode);
     Mode mode() const { return mode_; }
+    bool anyLinedUp() const;  // a photo with a camera (Guides from Photos has one to grow from)
     std::size_t addLandmark(MarkerSide side, const Vec3f& point);  // photo: (u, v, 0); mesh: snapped
     std::vector<std::size_t> deleteLandmark(MarkerSide side, std::size_t index);
     void moveLandmark(MarkerSide side, std::size_t index, const Vec3f& point, bool newStep = true);
@@ -174,8 +177,13 @@ public:
     double overlayOpacity() const;
     void setMaskTint(bool on);
     void setFieldLines(bool on);
+    void setGuidesShown(bool on);  // the last Generate's guides over the photo (Guides)
     bool maskTint() const;
     bool fieldLines() const;
+    bool guidesShown() const;
+    // The last Generate's guides over the current photo (photo pixels, root first), those rooted on
+    // the far side of the scalp from its camera left out.
+    const std::vector<std::vector<std::array<float, 2>>>& guideLinesShown();
     double brushSize() const;
     const std::vector<std::array<float, 4>>& overlayLines();  // photo pixels
     const std::vector<ReferenceArrow>& arrows();
@@ -195,6 +203,12 @@ public:
     MarkerView* meshView() const { return meshView_; }
     QPushButton* generateButton() const { return generateButton_; }
     QWidget* guidesPanel() const { return guidesPanel_; }
+    QWidget* alignPanel() const { return alignPanel_; }
+    QWidget* alignShow() const { return alignShow_; }
+    QWidget* guidesShow() const { return guidesShow_; }
+    QPushButton* nextButton() const { return nextButton_; }
+    ValueSlider* brushSlider() const { return brush_; }
+    QString photoText() const;
     QToolButton* modeButton(Mode mode) const { return modeButtons_[static_cast<int>(mode)]; }
     ValueSlider* focalSlider() const { return focal_; }
     QToolButton* lockButton() const { return lock_; }
@@ -204,7 +218,7 @@ public:
 
     // ---- MarkerViewHost (the mesh view: the mesh side of the landmarks) ----
     const MarkerLists& markerLists() const override;
-    bool markerEditing() const override { return mode_ == Mode::Landmarks && photo() != nullptr; }
+    bool markerEditing() const override { return stage_ == Stage::Align && photo() != nullptr; }
     std::size_t addPicked(MarkerSide side, const MarkerPoint& picked) override;
     std::vector<std::size_t> deletePoint(MarkerSide side, std::size_t index) override { return deleteLandmark(side, index); }
     void movePicked(MarkerSide side, std::size_t index, const MarkerPoint& picked, bool newStep) override;
@@ -219,7 +233,9 @@ signals:
 private:
     friend class PhotoView;
     void buildPanel(QWidget* panel);
+    QHBoxLayout* buildShowRow();
     void refreshTabs();
+    void refreshTabTexts();
     void refreshPanel();
     void solve(bool findBad = true);
     void store();
@@ -245,6 +261,10 @@ private:
     QImage previewTint_;
     std::uint64_t previewKey_ = ~0ull;
     std::uint64_t solveCount_ = 0;  // moves the overlay's and the preview's keys
+    std::vector<std::vector<Vec3f>> lastGuides_;  // the last Generate's guides (world)
+    std::uint64_t guidesSerial_ = 0;
+    std::vector<std::vector<std::array<float, 2>>> guideLines_;
+    std::uint64_t guideLinesKey_ = ~0ull;
 
     QTabBar* tabs_ = nullptr;
     QPushButton* removeButton_ = nullptr;
@@ -260,10 +280,16 @@ private:
     QToolButton* lock_ = nullptr;
     QComboBox* overlayBox_ = nullptr;
     ValueSlider* opacity_ = nullptr;
+    QWidget* alignPanel_ = nullptr;
+    QWidget* alignShow_ = nullptr;
     QWidget* guidesPanel_ = nullptr;
+    QWidget* guidesShow_ = nullptr;
+    QLabel* photoLabel_ = nullptr;
     QLabel* flowLabel_ = nullptr;
-    QCheckBox* maskTint_ = nullptr;
-    QCheckBox* fieldLines_ = nullptr;
+    QToolButton* maskTint_ = nullptr;
+    QToolButton* fieldLines_ = nullptr;
+    QToolButton* guidesShown_ = nullptr;
+    QPushButton* nextButton_ = nullptr;
     ValueSlider* brush_ = nullptr;
     QComboBox* symmetry_ = nullptr;
     QSpinBox* guideCount_ = nullptr;

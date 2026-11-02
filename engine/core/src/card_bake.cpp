@@ -182,7 +182,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
     const DensityGrid grid(settings.occlusion > 0.0f ? cloud : std::vector<Vec3f>{});
     cloud.clear();
     cloud.shrink_to_fit();
-    const ColorCache colorCache(cards.cards, &strands, settings.color, cards.colorLook);
+    const ColorCache colorCache(cards.cards, &strands, settings.color);
     // Whether each source set has real widths (any not 1), once per set, not per texture.
     std::map<const StrandSet*, bool> hasRealWidths;
     for (const std::size_t c : owners) {
@@ -264,7 +264,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
             const std::size_t begin = s.strandBegin(si);
             // Per sample: pixel position, radius, and the values it carries.
             struct Sample {
-                float x, y, radius, depth, coordU, ao, fade, iridescence;
+                float x, y, radius, depth, coordU, ao, fade, iridescence, along;
                 Vec3f tangent, color;
                 bool in;
             };
@@ -293,10 +293,17 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                 const std::array<float, 3> rgb = colors.at(s, si, coordU);
                 sm.color = {rgb[0], rgb[1], rgb[2]};
                 sm.iridescence = colors.iridescenceAt(s, si, coordU);
+                sm.along = cp.along;
                 sm.tangent = {dir.dot(cp.side), dir.dot(cp.forward), dir.dot(cp.normal)};
                 sm.ao = settings.occlusion > 0.0f ? pm::exp(-settings.occlusion * grid.cover(pts[k], cp.normal)) : 1.0f;
                 sm.in = cp.along >= -0.1f && cp.along <= 1.1f;
-                sm.fade = settings.rootFade > 0.0f ? smoothstep(0.0f, settings.rootFade, cp.along) : 1.0f;
+                // A mixed Cards node keeps independent hair and feather root fades. Values
+                // stored on the card come from its node; direct core callers fall back to the
+                // bake settings.
+                const float rootFade = card.feather >= 0
+                                           ? (card.featherRootFade >= 0.0f ? card.featherRootFade : settings.featherRootFade)
+                                           : (card.strandsRootFade >= 0.0f ? card.strandsRootFade : settings.rootFade);
+                sm.fade = rootFade > 0.0f ? smoothstep(0.0f, rootFade, cp.along) : 1.0f;
             }
             // Capsules between samples, into this strand's stamp. Each stays inside its cell,
             // clear of the cell's edge rows and columns: a strand past the card's edge or ends
@@ -315,8 +322,17 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                 for (Sample* sample : {&a, &c}) {
                     sample->x = static_cast<float>(x1 - x0) > 2.0f * keep ? std::clamp(sample->x, static_cast<float>(x0) + keep, static_cast<float>(x1) - keep)
                                                                           : 0.5f * static_cast<float>(x0 + x1);
-                    sample->y = static_cast<float>(y1 - y0) > 2.0f * keep ? std::clamp(sample->y, static_cast<float>(y0) + keep, static_cast<float>(y1) - keep)
-                                                                          : 0.5f * static_cast<float>(y0 + y1);
+                    // Keep ordinary ends inside their cell for mip padding. A feather's root is
+                    // different: its card begins exactly at the shaft root, so putting the first
+                    // sample `keep` texels inward exposes a blank strip at the scalp. Let that
+                    // endpoint reach the last writable texel of its cell; the atlas gap still
+                    // keeps it out of the neighbouring texture.
+                    const float yHigh = card.feather >= 0 && sample->along <= 1e-4f
+                                            ? static_cast<float>(y1 - 1)
+                                            : static_cast<float>(y1) - keep;
+                    sample->y = yHigh > static_cast<float>(y0) + keep
+                                    ? std::clamp(sample->y, static_cast<float>(y0) + keep, yHigh)
+                                    : 0.5f * static_cast<float>(y0 + y1);
                 }
                 const float reach = std::max(r, 0.5f) + 1.0f;
                 const int bx0 = std::max(x0, static_cast<int>(std::floor(std::min(a.x, c.x) - reach)));
@@ -408,7 +424,8 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
             }
         }
     }, kRowGrain);
-    for (int pass = 0; pass < settings.dilate; ++pass) {
+    const int rings = settings.dilate < 0 ? 2 : settings.dilate;
+    for (int pass = 0; pass < rings; ++pass) {
         std::vector<char> next = filled;
         parallelFor(0, static_cast<std::size_t>(size), [&](std::size_t yy) {
             const int y = static_cast<int>(yy);
@@ -444,6 +461,49 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
             }
         }, kRowGrain);
         filled.swap(next);
+    }
+    if (settings.dilate < 0) {
+        // All the way: every empty texel the values of its nearest filled one (a flood from all of
+        // them at once, 8-connected: each card's region grows until it meets its neighbours').
+        std::vector<std::int32_t> from(pixels, -1);
+        std::vector<std::int32_t> front;
+        for (std::size_t p = 0; p < pixels; ++p)
+            if (filled[p]) {
+                from[p] = static_cast<std::int32_t>(p);
+                front.push_back(static_cast<std::int32_t>(p));
+            }
+        std::vector<std::int32_t> next;
+        while (!front.empty() && front.size() < pixels) {
+            next.clear();
+            for (const std::int32_t p : front) {
+                const int x = p % size, y = p / size;
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const int nx = x + dx, ny = y + dy;
+                        if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+                        const std::int32_t q = ny * size + nx;
+                        if (from[static_cast<std::size_t>(q)] >= 0) continue;
+                        from[static_cast<std::size_t>(q)] = from[static_cast<std::size_t>(p)];
+                        next.push_back(q);
+                    }
+            }
+            front.swap(next);
+        }
+        parallelFor(0, rowPixels, [&](std::size_t y) {
+            for (std::size_t p = y * rowPixels; p < (y + 1) * rowPixels; ++p) {
+                if (filled[p] || from[p] < 0) continue;
+                const std::size_t q = static_cast<std::size_t>(from[p]);
+                for (std::vector<float>* v : {&b.depth, &b.coordU, &b.seed, &b.ao, &b.rootU, &b.rootV, &b.iridescence, &b.id})
+                    (*v)[p] = (*v)[q];
+                for (int k = 0; k < 3; ++k) {
+                    b.tangent[p * 3 + static_cast<std::size_t>(k)] = b.tangent[q * 3 + static_cast<std::size_t>(k)];
+                    b.color[p * 3 + static_cast<std::size_t>(k)] = b.color[q * 3 + static_cast<std::size_t>(k)];
+                    b.normal[p * 3 + static_cast<std::size_t>(k)] = b.normal[q * 3 + static_cast<std::size_t>(k)];
+                }
+            }
+        }, kRowGrain);
+        for (std::size_t p = 0; p < pixels; ++p)
+            if (from[p] >= 0) filled[p] = 1;
     }
 
     // The iridescence only when a strand has any.
@@ -568,7 +628,7 @@ ScalpTextures bakeScalpTextures(const StrandSet& strands, const ScalpMesh& scalp
     const bool realWidths = !strands.widths().empty() &&
                             std::any_of(strands.widths().begin(), strands.widths().end(), [](float x) { return x != 1.0f; });
     const float fallbackWidth = settings.strandWidth > 0.0f ? settings.strandWidth : extent / 3000.0f;
-    const StrandColors colors = colorsOf(strands, settings.color);  // (as the cards shade: CardColorLook::Shaded)
+    const StrandColors colors = colorsOf(strands, settings.color);  // base color: the scalp map's color/albedo contract
 
     // Each strand's stretch near the skin, in UV pixels: (x, y, radius, height 0 skin .. 1 reach).
     struct Dot {

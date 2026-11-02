@@ -151,6 +151,14 @@ float stretchComplianceOf(float stiffness) {
     return (2.0f / 3.0f) * (1.0f - std::clamp(stiffness, 0.0f, 1.0f));
 }
 constexpr float kReferenceStep = 1.0f / 96.0f;
+// The most a joint's rest turn is preloaded (radians, 14 degrees). Beyond, guides whose twist is
+// soft drift off their groom (on a skinned bust's bob at twist 0.6: 0.06 cm on average still at
+// 25 degrees, 0.006 at 14), and soft hair at a few substeps is not stable beyond 25.
+constexpr float kMostPreload = 0.25f;
+// The most of a joint's bend stiffness gravity's moment may take away where the hair beyond it is
+// above it (standing hair): soft guides standing up off a head at the node's defaults fell over at
+// 0.5 and hold at 0.25.
+constexpr float kMostBuckle = 0.25f;
 // The frame rootStiffnessProfile's share is taken over (a 24 fps frame): the same pull per second at any
 // frame rate and substeps.
 constexpr float kReferenceFrame = 1.0f / 24.0f;
@@ -822,7 +830,9 @@ SimSettings SimSettings::fromParams(const ParamSet& p) {
     s.drag = f("drag", s.drag);
     s.gravity = f("gravity", s.gravity);
     s.gravityDirection = p.getVec3("gravityDirection", s.gravityDirection);
-    s.groomedUnderGravity = p.getBool("groomedUnderGravity", s.groomedUnderGravity);
+    const std::string underGravity = p.getString("groomedUnderGravity", "preload");
+    s.groomedUnderGravity = underGravity != "off";
+    s.preload = underGravity == "preload";
     s.windSpeed = f("windSpeed", s.windSpeed);
     s.windDirection = p.getVec3("windDirection", s.windDirection);
     s.windGust = f("windGust", s.windGust);
@@ -892,6 +902,7 @@ std::uint64_t SimSettings::hash() const {
     }
     // Only when on (else the hash made before it).
     if (groomedUnderGravity) h = hashCombine(h, 0x6A7E);
+    if (groomedUnderGravity && preload) h = hashCombine(h, 0x9E10);
     // Dry: the hash made before water (the stamps of bakes made then still match).
     if (!wetting()) return h;
     h = hashCombine(h, water ? 0x3A7E : 0x3A7F);
@@ -1030,6 +1041,7 @@ struct GuideSolver::Impl {
     Targets prev, next;
     std::vector<float> length;  // each guide's length as groomed at the start
     std::vector<Vec3f> restGravity;  // groomedUnderGravity: each guide's gravity in its root's frame at the start
+    std::vector<Quat> preload;       // groomedUnderGravity with preload: each segment's turn on its rest turn
     float longest = 0.0f;
     // The scalp's rest pose (collisions through its field) and each root's frame on it.
     MeshPtr restScalp;
@@ -1099,6 +1111,78 @@ struct GuideSolver::Impl {
                 d3Before = d3;
             }
         });
+    }
+
+    // Gravity preloading: each segment's rest turn turned so that, in the groomed shape, its bend
+    // and twist rows carry the weight of the hair beyond it (the torque of gravity on its points
+    // about the segment's first point). The rows (rodIteration) measure the turn from the rest
+    // turn to the segment's as a rotation vector of half its angle, r, in the rest turn's frame,
+    // and push back along that frame's axes by r / (2 a) for a physical compliance a per row
+    // (complianceOf times the reference step squared, over the orientation's 4 l^2; bend across,
+    // twist along): the rest turn's own turn is the half-angle vector -2 a t, t the torque in its
+    // own frame (a few fixed-point steps: that frame is turned by it). Gravity as a still point
+    // feels it per substep: through the drag and damping its velocity takes. From the start's
+    // groomed shape and frames (q). Without twist or bend rows (0) nothing keeps a preloaded strand
+    // from rolling or folding: none. Two limits on the share of its weight a guide takes (the rest
+    // cancelled as without preload: restGravity, scaled): joints turned far off their rest turn
+    // are not stable at a few substeps (a guide whose heaviest joint would turn more than
+    // kMostPreload takes that share), and hair standing up buckles under a weight its bend cannot
+    // hold upright: a joint with the hair beyond above it has gravity's moment there (sum of
+    // m (p - joint) against g) taking from its stiffness (l^2 / bendC per radian); at most
+    // kMostBuckle of it (the joint's own share: the chain buckles under less).
+    void preloadRest() {
+        const SimSettings& s = settings;
+        const float h = static_cast<float>(1.0 / (fps * s.substeps));
+        const Vec3f gravity = s.gravityDirection.length() > 1e-8f ? s.gravityDirection.normalized() * s.gravity : Vec3f{};
+        const Vec3f g = gravity * (pm::exp(-10.0f * s.drag * h) * pm::exp(-20.0f * s.damping * h));
+        const float bendC = s.bend > 0.0f ? complianceOf(s.bend) * kReferenceStep * kReferenceStep : -1.0f;
+        const float twistC = s.twist > 0.0f ? complianceOf(s.twist) * kReferenceStep * kReferenceStep : -1.0f;
+        const float mass = std::max(s.mass, 1e-6f);
+        preload.assign(x.size(), Quat{});
+        restGravity.resize(guideCount());
+        // The rest turn's turn (as a half-angle vector) for torque t, in the segment's frame, on a
+        // segment l^2 long (rows of compliance 0 hold any torque: none on them).
+        auto turnFor = [&](const Vec3f& t, float l2) {
+            const Vec3f a{bendC / (4.0f * l2), bendC / (4.0f * l2), twistC / (4.0f * l2)};
+            Vec3f r{};
+            for (int k = 0; k < 4; ++k) {
+                const Vec3f there = rotate(conj(turnOfHalfAngle(r)), t);  // in the rest turn's frame
+                r = Vec3f{a.x * there.x, a.y * there.y, a.z * there.z} * -2.0f;
+            }
+            return r;
+        };
+        parallelFor(0, guideCount(), [&](std::size_t gi) {
+            const std::size_t b = begin[gi], n = begin[gi + 1] - b;
+            if (twistC < 0.0f || bendC < 0.0f) {  // (no twist or bend rows: weightless)
+                restGravity[gi] = rotate(conj(prev.roots[gi].rot), gravity);
+                return;
+            }
+            thread_local std::vector<Vec3f> torques;
+            torques.assign(n, Vec3f{});
+            Vec3f moment{};  // the points beyond, weighted: sum of m p
+            float weight = 0.0f, most = 0.0f, buckle = 0.0f;
+            for (std::size_t j = n; j-- > 1;) {
+                const std::size_t i = b + j;
+                moment += x[i] * mass;
+                weight += mass;
+                const Vec3f arm = moment - x[i - 1] * weight;
+                torques[j] = rotate(conj(q[i]), arm.cross(g));  // in the segment's frame (z along it)
+                const float l2 = std::max(prev.lengths[i] * prev.lengths[i], 1e-8f);
+                most = std::max(most, 2.0f * turnFor(torques[j], l2).length());  // the turn's angle
+                buckle = std::max(buckle, -arm.dot(g) * bendC / l2);
+            }
+            float share = most > kMostPreload ? kMostPreload / most : 1.0f;
+            if (buckle > kMostBuckle) share = std::min(share, kMostBuckle / buckle);
+            for (std::size_t j = 1; j < n; ++j) {
+                const std::size_t i = b + j;
+                preload[i] = turnOfHalfAngle(turnFor(torques[j] * share, std::max(prev.lengths[i] * prev.lengths[i], 1e-8f)));
+            }
+            restGravity[gi] = rotate(conj(prev.roots[gi].rot), gravity) * (1.0f - share);
+        });
+    }
+    void preloaded(Targets& t) const {
+        if (preload.empty()) return;
+        for (std::size_t i = 0; i < t.rest.size(); ++i) t.rest[i] = normalized(t.rest[i] * preload[i]);
     }
 
     // The segment frames of the targets in world space (start: the rods' first orientations).
@@ -1207,7 +1291,10 @@ void GuideSolver::start(const SimSettings& settings, double framesPerSecond, int
     if (count > 0) {
         m.targetsOf(inputs, m.prev);
         m.framesFromTargets(m.prev);
-        if (settings.groomedUnderGravity) {
+        if (settings.groomedUnderGravity && settings.preload) {
+            m.preloadRest();
+            m.preloaded(m.prev);
+        } else if (settings.groomedUnderGravity) {
             const Vec3f gravity =
                 settings.gravityDirection.length() > 1e-8f ? settings.gravityDirection.normalized() * settings.gravity : Vec3f{};
             m.restGravity.resize(count);
@@ -1237,6 +1324,7 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
         return;
     }
     targetsOf(in, next);
+    preloaded(next);
     if (in.scalp && in.scalp->hasRest() && in.scalp->restPoseHash() != restKey) rootRestFrames(in.scalp);
 
     const SimSettings& s = settings;
@@ -1954,9 +2042,9 @@ const std::vector<SimPreset>& simulatePresets() {
 std::string simulatePresetParamsJson(const std::string& name) {
     // Every preset sets the same params (see simulation.h).
     ParamSet params;
-    auto set = [&](bool underGravity, double bend, double twist, double damping, double drag, double rootStiffness,
+    auto set = [&](const char* underGravity, double bend, double twist, double damping, double drag, double rootStiffness,
                    Ramp profile, double inertia, std::int64_t iterations) {
-        params.set("groomedUnderGravity", underGravity);
+        params.set("groomedUnderGravity", std::string(underGravity));
         params.set("bend", bend);
         params.set("twist", twist);
         params.set("damping", damping);
@@ -1968,15 +2056,15 @@ std::string simulatePresetParamsJson(const std::string& name) {
     };
     if (name == "default") {
         // The Simulate node's defaults (its spec's: a test holds them together).
-        set(true, 0.5, 0.5, 0.1, 0.05, 1.0, Ramp{{0.0f, 1.0f}, {0.2f, 0.0f}}, 1.0, 6);
+        set("preload", 0.5, 0.5, 0.1, 0.05, 1.0, Ramp{{0.0f, 1.0f}, {0.2f, 0.0f}}, 1.0, 6);
     } else if (name == "fur") {
         // Tuned on a wolf (centimetres, 30 fps: a fast turn, a run, a hard stop; docs:
-        // motion-and-simulation, "Springy fur that holds its groom"). groomedUnderGravity keeps
-        // the groom as it is while still (the typical tip moved under 0.1% of its length a second in,
+        // motion-and-simulation, "Springy fur that holds its groom"). groomedUnderGravity
+        // (weightless, as tuned) keeps the groom as it is while still (the typical tip moved under 0.1% of its length a second in,
         // 86% at the node's defaults); bend 0.8 and the hold all along the length (root 1, middle
         // 0.7, tips 0.35) spring it back as a whole; inertia 0.8 takes the edge off the body's
         // motion and damping 0.25 stops it after two or three swings (a third of a second).
-        set(true, 0.8, 0.7, 0.25, 0.05, 1.0, Ramp{{0.0f, 1.0f}, {0.5f, 0.7f}, {1.0f, 0.35f}}, 0.8, 6);
+        set("weightless", 0.8, 0.7, 0.25, 0.05, 1.0, Ramp{{0.0f, 1.0f}, {0.5f, 0.7f}, {1.0f, 0.35f}}, 0.8, 6);
     } else {
         throw std::invalid_argument("no Simulate preset '" + name + "' (default, fur)");
     }

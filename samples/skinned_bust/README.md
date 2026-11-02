@@ -24,7 +24,7 @@ shoulders); the hairline, joints and hair lengths are measured on the mesh.
 | 140-156 | Settles. |
 
 The simulated scene's hair is held near the root, keeps its shape with a firm bend and settles by
-air drag (natural hair, not a spring): `groomedUnderGravity` on, bend 0.78, damping 0.35, drag 0.4,
+air drag (natural hair, not a spring): `groomedUnderGravity` preload, bend 0.78, damping 0.35, drag 0.4,
 inertia 0.75. The guides start clear of the head mesh, so nothing moves before the head does.
 
 About 50,000 strands of 17 points each (Hair basics preset, preview density 1). The scalp mesh

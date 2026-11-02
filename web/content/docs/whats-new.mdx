@@ -13,6 +13,35 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.39.0 (November 2, 2026)
+
+- **Simulated hair keeps its weight.** The Simulate node's **groomedUnderGravity** is now a
+  choice. **preload** (the new default) bends each guide's rest shape just enough to carry its own
+  weight, so still hair rests in the groomed shape and still has its weight: it hangs and swings
+  like hair, presses on what it lies on, and falls back after a fast move instead of floating
+  (gravity preloading, after Disney's Liu 2022). Soft hair that could not hold all of its weight
+  takes what it can. **weightless** is the old behaviour, **off** lets gravity pull on the groom.
+  Param change: grooms saved with groomedUnderGravity on now preload; set **weightless** to keep
+  their old motion (the Fur preset uses weightless). See
+  [Motion and simulation](/docs/motion-and-simulation).
+- **Guides from Photos, better guides.** The hair mask finds the hair by its colors, roots land on
+  the hair, the flow follows waves, and heads that are nearly symmetric come out even. **Guide
+  Lines** (the old flow lines) set both the way and the length of the guides near them, drawn green
+  at the root to red at the tip. The Photos window splits into an **Align** and a **Guides**
+  stage, each showing only its own tools. See [Reference photos](/docs/reference-photos).
+- **Scales subdivide cleanly.** The built-in scale plates are one closed piece of quads, the same
+  loops on the underside as on top, with support loops at the rim (issue #35). ToMesh keeps every
+  scale face a quad on curved skin.
+- **Propagate: Shaft segments** rounds a faceted rachis on a smooth curve without a Resample node
+  (issue #32).
+- **Cards:** the maps' **Padding** goes all the way (**Full**, the new default), each card's colors
+  meeting its neighbours' halfway, so small mip maps hold the hair's colors (issue #34). Feather
+  cards start at the shaft's root, and the Color map always holds the strands' base color (the
+  **Bake color** param is gone; thanks to Omar Hesham, PRs #36 and #37). Rebake cards baked before
+  this update.
+- **Brushes:** Shift+drag smooths with every brush again; selecting and soloing guides is the
+  **Select** tool's (issue #23).
+
 ## 0.38.0 (November 1, 2026)
 
 - **Morph to Photos.** When the head mesh is not the person in your photos, the Photos window

@@ -49,8 +49,9 @@ using json = nlohmann::json;
 using Pixels = std::vector<std::array<float, 2>>;
 
 const QColor kBackground(46, 48, 53);
-const QColor kArrow(255, 158, 38);      // the flow arrows (the Reference Flow tool's orange)
-const QColor kArrowNew(255, 230, 102);  // the one being drawn
+const QColor kLineRoot(40, 255, 40);      // a guide line's root end (green) ...
+const QColor kLineTip(255, 40, 40);       // ... to its tip (red)
+const QColor kLineUndirected(200, 200, 200);  // a line without a way (only its course counts)
 const QColor kErase(255, 77, 77);
 const QColor kBad(255, 70, 70);
 const QColor kHairTint(80, 230, 120, 90);
@@ -72,14 +73,36 @@ void drawPolyline(QPainter& painter, const Pixels& points) {
     else if (poly.size() == 1) painter.drawPoint(poly[0]);
 }
 
-void drawArrow(QPainter& painter, const ReferenceArrow& arrow, const QColor& color) {
-    QPen pen(color, 2.0);
-    pen.setCosmetic(true);
-    pen.setCapStyle(Qt::RoundCap);
-    painter.setPen(pen);
+// A guide line: green at its root to red at its tip when it has a way (the arrow's head), else one
+// color (`color`, or the undirected gray).
+void drawGuideLine(QPainter& painter, const ReferenceArrow& arrow, double width = 2.0, const QColor* color = nullptr,
+                   int alpha = 255) {
     painter.setBrush(Qt::NoBrush);
-    drawPolyline(painter, arrow.line);
-    if (arrow.hasHead) drawPolyline(painter, Pixels(arrow.head.begin(), arrow.head.end()));
+    const Pixels& pts = arrow.line;
+    if (pts.size() < 2) return;
+    if (color || !arrow.hasHead) {
+        QPen pen(color ? *color : kLineUndirected, width);
+        pen.setCosmetic(true);
+        pen.setCapStyle(Qt::RoundCap);
+        painter.setPen(pen);
+        drawPolyline(painter, pts);
+        return;
+    }
+    std::vector<double> along(pts.size(), 0.0);
+    for (std::size_t i = 1; i < pts.size(); ++i)
+        along[i] = along[i - 1] + std::hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    const double total = std::max(along.back(), 1e-6);
+    for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
+        const double t = 0.5 * (along[i] + along[i + 1]) / total;
+        const QColor c(static_cast<int>(kLineRoot.red() + t * (kLineTip.red() - kLineRoot.red())),
+                       static_cast<int>(kLineRoot.green() + t * (kLineTip.green() - kLineRoot.green())),
+                       static_cast<int>(kLineRoot.blue() + t * (kLineTip.blue() - kLineRoot.blue())), alpha);
+        QPen pen(c, width);
+        pen.setCosmetic(true);
+        pen.setCapStyle(Qt::RoundCap);
+        painter.setPen(pen);
+        painter.drawLine(QPointF(pts[i][0], pts[i][1]), QPointF(pts[i + 1][0], pts[i + 1][1]));
+    }
 }
 
 json cameraJson(const RefCamera& c) {
@@ -152,7 +175,8 @@ void PhotoView::paintEvent(QPaintEvent*) {
     const QRectF photoRect(0, 0, p->width, p->height);
     if (!p->picture.isNull()) painter.drawImage(photoRect, p->picture);
     else painter.fillRect(photoRect, QColor(70, 70, 70));
-    if (window_->maskTint() || window_->fieldLines()) {
+    const bool guides = window_->stage() == ReferenceWindow::Stage::Guides;
+    if (guides && (window_->maskTint() || window_->fieldLines())) {
         if (const ReferenceViewPreview* preview = window_->preview()) {
             const QRectF crop(preview->crop[0], preview->crop[1], preview->crop[2], preview->crop[3]);
             if (window_->maskTint()) painter.drawImage(crop, window_->previewTint());
@@ -164,22 +188,31 @@ void PhotoView::paintEvent(QPaintEvent*) {
             }
         }
     }
-    for (const RefMaskStroke& s : p->editor.maskStrokes()) {
+    for (const RefMaskStroke& s : guides ? p->editor.maskStrokes() : std::vector<RefMaskStroke>{}) {
         QPen pen(s.include ? kInclude : kExclude, 2.0 * s.radius);
         pen.setCapStyle(Qt::RoundCap);
         pen.setJoinStyle(Qt::RoundJoin);
         painter.setPen(pen);
         drawPolyline(painter, s.points);
     }
-    {
+    if (!guides) {  // the mesh through the camera (Align)
         QPen pen(QColor(255, 255, 255, static_cast<int>(255 * window_->overlayOpacity())), 1.0);
         pen.setCosmetic(true);
         painter.setPen(pen);
         for (const auto& l : window_->overlayLines()) painter.drawLine(QPointF(l[0], l[1]), QPointF(l[2], l[3]));
     }
-    for (const ReferenceArrow& a : window_->arrows()) drawArrow(painter, a, kArrow);
-    if ((drag_ == Drag::Stroke || drag_ == Drag::Erase) && path_.size() >= 2)
-        drawArrow(painter, referenceArrow(path_, drag_ == Drag::Stroke ? p->width / 40.0f : 0.0f), drag_ == Drag::Stroke ? kArrowNew : kErase);
+    if (guides && window_->guidesShown()) {  // the last Generate's guides, thin, under the guide lines
+        for (const auto& line : window_->guideLinesShown()) {
+            ReferenceArrow a;
+            a.line = line;
+            a.hasHead = true;
+            drawGuideLine(painter, a, 1.0, nullptr, 150);
+        }
+    }
+    if (guides)
+        for (const ReferenceArrow& a : window_->arrows()) drawGuideLine(painter, a, 2.5);
+    if (drag_ == Drag::Stroke && path_.size() >= 2) drawGuideLine(painter, referenceArrow(path_, p->width / 40.0f), 3.0);
+    if (drag_ == Drag::Erase && path_.size() >= 2) drawGuideLine(painter, referenceArrow(path_, 0.0f), 2.0, &kErase);
     if (drag_ == Drag::Mask && !path_.empty()) {
         QPen pen(include_ ? kInclude : kExclude, 2.0 * radius_);
         pen.setCapStyle(Qt::RoundCap);
@@ -187,9 +220,9 @@ void PhotoView::paintEvent(QPaintEvent*) {
         drawPolyline(painter, path_);
     }
     painter.restore();
-    // The landmarks, as the mesh view's dots; with a solve, a line to where each mesh point lands.
+    // The landmarks (Align), as the mesh view's dots; with a solve, a line to where each mesh point lands.
     const MarkerLists& lists = p->editor.landmarks();
-    const auto& points = lists.points(kLandmarkPhoto);
+    const auto& points = guides ? std::vector<MarkerPoint>{} : lists.points(kLandmarkPhoto);
     const ReferenceLandmarkSolve& solve = p->solve;
     const MarkerHover& hover = window_->hover();
     for (std::size_t i = 0; i < points.size(); ++i) {
@@ -366,8 +399,8 @@ ReferenceWindow::ReferenceWindow(MainWindow* main, QWidget* parent) : QWidget(pa
     auto* top = new QHBoxLayout;
     auto* stages = new QButtonGroup(this);
     const std::pair<Stage, QString> stageLabels[] = {{Stage::Align, tr("Align")}, {Stage::Guides, tr("Guides (experimental)")}};
-    const QString stageTips[] = {tr("Line the photos up with the mesh: landmark pairs, the camera"),
-                                 tr("Guides from Photos: flow arrows and mask touch-ups on the lined-up photos, Generate")};
+    const QString stageTips[] = {tr("Line each photo up with the mesh: landmark pairs, the camera"),
+                                 tr("Guides from Photos: guide lines and mask touch-ups on the lined-up photos, Generate")};
     for (int i = 0; i < 2; ++i) {
         auto* b = new QToolButton;
         b->setText(stageLabels[i].second);
@@ -410,11 +443,11 @@ ReferenceWindow::ReferenceWindow(MainWindow* main, QWidget* parent) : QWidget(pa
     auto* tools = new QHBoxLayout;
     tools->setSpacing(4);
     auto* group = new QButtonGroup(this);
-    const std::pair<Mode, QString> modes[] = {{Mode::Landmarks, tr("Landmarks")}, {Mode::Flow, tr("Flow")},
+    const std::pair<Mode, QString> modes[] = {{Mode::Landmarks, tr("Landmarks")}, {Mode::Flow, tr("Guide Lines")},
                                               {Mode::Hair, tr("Hair")}, {Mode::Backdrop, tr("Backdrop")}};
     const QString tips[] = {tr("Click a feature on the photo, then the same feature on the mesh (either order). Drag a point "
                                "to adjust it; Ctrl+click deletes it and its partner."),
-                            tr("Drag along the hair from root to tip: a flow arrow the guides follow. Ctrl+drag erases."),
+                            tr("Drag along the hair from root to tip: guides there follow the line and are as long as it. Ctrl+drag erases."),
                             tr("Paint where the photo shows hair the mask missed (Ctrl: backdrop)"),
                             tr("Paint where the mask took backdrop for hair (Ctrl: hair)")};
     for (int i = 0; i < 4; ++i) {
@@ -430,6 +463,22 @@ ReferenceWindow::ReferenceWindow(MainWindow* main, QWidget* parent) : QWidget(pa
         modeButtons_[i] = b;
     }
     modeButtons_[0]->setChecked(true);
+    brush_ = new ValueSlider;
+    brush_->setObjectName(QStringLiteral("referenceBrush"));
+    brush_->setCaption(tr("Brush"));
+    brush_->setRange(2.0, 120.0);
+    brush_->setLimits(1.0, 1000.0);
+    brush_->setInteger(true);
+    brush_->setValue(14.0);
+    brush_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral(" px"); });
+    brush_->setToolTip(tr("The touch-up brush's radius on the photo (pixels)"));
+    brush_->setMinimumWidth(140);
+    brush_->setMaximumWidth(180);
+    QSizePolicy policy = brush_->sizePolicy();
+    policy.setRetainSizeWhenHidden(true);  // (the views keep their size as the tools change)
+    brush_->setSizePolicy(policy);
+    tools->addSpacing(6);
+    tools->addWidget(brush_);
     tools->addStretch(1);
     auto* fit = new QToolButton;
     fit->setText(tr("Fit"));
@@ -439,6 +488,7 @@ ReferenceWindow::ReferenceWindow(MainWindow* main, QWidget* parent) : QWidget(pa
     photoView_ = new PhotoView(this);
     connect(fit, &QToolButton::clicked, photoView_, [this] { photoView_->fit(); });
     photoColumn->addWidget(photoView_, 1);
+    photoColumn->addLayout(buildShowRow());
     body->addLayout(photoColumn, 1);
 
     auto* meshColumn = new QVBoxLayout;
@@ -480,6 +530,14 @@ ReferenceWindow::ReferenceWindow(MainWindow* main, QWidget* parent) : QWidget(pa
     redoButton_ = new QPushButton(tr("Redo"));
     connect(redoButton_, &QPushButton::clicked, this, [this] { redo(); });
     bottom->addWidget(redoButton_);
+    bottom->addSpacing(12);
+    nextButton_ = new QPushButton(tr("Next: Guides"));
+    nextButton_->setObjectName(QStringLiteral("referenceNextStage"));
+    nextButton_->setDefault(true);
+    nextButton_->setToolTip(tr("On to Guides from Photos with the lined-up photos"));
+    connect(nextButton_, &QPushButton::clicked, this, [this] { setStage(Stage::Guides); });
+    bottom->addWidget(nextButton_);
+    bottom->addWidget(generateButton_);
     auto* close = new QPushButton(tr("Close"));
     connect(close, &QPushButton::clicked, this, &QWidget::close);
     bottom->addWidget(close);
@@ -522,12 +580,19 @@ void ReferenceWindow::buildPanel(QWidget* panel) {
     auto* outer = new QVBoxLayout(panel);
     outer->setContentsMargins(0, 0, 4, 0);
     outer->setSpacing(6);
-    QVBoxLayout* layout = outer;  // the sections go here (Guides' into their box)
+    QVBoxLayout* layout = outer;  // the sections go here (each stage's into its box)
     const auto heading = [&layout](const QString& text) {
         auto* label = new QLabel(text);
         label->setStyleSheet(QStringLiteral("font-weight: bold; letter-spacing: 1px;"));
         layout->addWidget(label);
     };
+    // Align's sections (the Align stage only).
+    alignPanel_ = new QWidget;
+    alignPanel_->setObjectName(QStringLiteral("referenceAlignPanel"));
+    layout = new QVBoxLayout(alignPanel_);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(6);
+    outer->addWidget(alignPanel_);
     heading(tr("LANDMARKS"));
     solveLabel_ = new QLabel;
     solveLabel_->setWordWrap(true);
@@ -547,30 +612,9 @@ void ReferenceWindow::buildPanel(QWidget* panel) {
     connect(clear, &QPushButton::clicked, this, [this] { clearLandmarks(); });
     row->addWidget(clear);
     layout->addLayout(row);
-    auto* form = new QFormLayout;
-    overlayBox_ = new QComboBox;
-    overlayBox_->addItems({tr("Outline"), tr("Wireframe"), tr("Off")});
-    overlayBox_->setToolTip(tr("The mesh drawn over the photo through the solved camera"));
-    connect(overlayBox_, &QComboBox::currentIndexChanged, this, [this] {
-        overlayKey_ = ~0ull;
-        photoView_->update();
-    });
-    form->addRow(tr("Mesh over photo"), overlayBox_);
-    opacity_ = new ValueSlider;
-    opacity_->setObjectName(QStringLiteral("referenceOverlayOpacity"));
-    opacity_->setCaption(tr("Opacity"));
-    opacity_->setRange(0.0, 1.0);
-    opacity_->setLimits(0.0, 1.0);
-    opacity_->setDecimals(2);
-    opacity_->setStep(0.05);
-    opacity_->setValue(0.7);
-    opacity_->setToolTip(tr("How opaque the mesh over the photo is"));
-    connect(opacity_, &ValueSlider::valueChanged, photoView_, [this] { photoView_->update(); });
-    form->addRow(opacity_);
-    layout->addLayout(form);
 
     heading(tr("CAMERA"));
-    form = new QFormLayout;
+    auto* form = new QFormLayout;
     focal_ = new ValueSlider;
     focal_->setObjectName(QStringLiteral("referenceFocal"));
     focal_->setCaption(tr("Focal Length"));
@@ -616,20 +660,24 @@ void ReferenceWindow::buildPanel(QWidget* panel) {
     row->addWidget(lock_);
     layout->addLayout(row);
 
-    // Guides from Photos (the Guides stage only).
+    // Guides from Photos (the Guides stage only): this photo's part, then every photo's.
     guidesPanel_ = new QWidget;
     guidesPanel_->setObjectName(QStringLiteral("referenceGuidesPanel"));
     layout = new QVBoxLayout(guidesPanel_);
-    layout->setContentsMargins(0, 6, 0, 0);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(6);
     outer->addWidget(guidesPanel_);
 
-    heading(tr("FLOW AND MASK"));
+    heading(tr("THIS PHOTO"));
+    photoLabel_ = new QLabel;
+    photoLabel_->setObjectName(QStringLiteral("referencePhotoLabel"));
+    photoLabel_->setWordWrap(true);
+    layout->addWidget(photoLabel_);
     flowLabel_ = new QLabel;
     flowLabel_->setWordWrap(true);
     layout->addWidget(flowLabel_);
     row = new QHBoxLayout;
-    auto* clearArrows = new QPushButton(tr("Clear Arrows"));
+    auto* clearArrows = new QPushButton(tr("Clear Lines"));
     connect(clearArrows, &QPushButton::clicked, this, [this] { clearFlow(); });
     row->addWidget(clearArrows);
     auto* clearMaskButton = new QPushButton(tr("Clear Touch-ups"));
@@ -637,31 +685,8 @@ void ReferenceWindow::buildPanel(QWidget* panel) {
     row->addWidget(clearMaskButton);
     row->addStretch(1);
     layout->addLayout(row);
-    row = new QHBoxLayout;
-    maskTint_ = new QCheckBox(tr("Mask tint"));
-    maskTint_->setToolTip(tr("Tint the hair mask the guides are grown in (automatic and refined, with the touch-ups)"));
-    connect(maskTint_, &QCheckBox::toggled, photoView_, [this] { photoView_->update(); });
-    row->addWidget(maskTint_);
-    fieldLines_ = new QCheckBox(tr("Flow field"));
-    fieldLines_->setToolTip(tr("The strand directions read from the photo (with the arrows), as short lines"));
-    connect(fieldLines_, &QCheckBox::toggled, photoView_, [this] { photoView_->update(); });
-    row->addWidget(fieldLines_);
-    row->addStretch(1);
-    layout->addLayout(row);
-    form = new QFormLayout;
-    brush_ = new ValueSlider;
-    brush_->setObjectName(QStringLiteral("referenceBrush"));
-    brush_->setCaption(tr("Brush"));
-    brush_->setRange(2.0, 120.0);
-    brush_->setLimits(1.0, 1000.0);
-    brush_->setInteger(true);
-    brush_->setValue(14.0);
-    brush_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral(" px"); });
-    brush_->setToolTip(tr("The touch-up brush's radius on the photo (pixels)"));
-    form->addRow(brush_);
-    layout->addLayout(form);
 
-    heading(tr("GENERATE"));
+    heading(tr("GENERATE (EVERY PHOTO)"));
     form = new QFormLayout;
     symmetry_ = new QComboBox;
     for (const auto& [label, key] : {std::pair<QString, QString>{tr("Auto"), "auto"}, {tr("None"), "none"},
@@ -671,6 +696,7 @@ void ReferenceWindow::buildPanel(QWidget* panel) {
     guideCount_ = new QSpinBox;
     guideCount_->setRange(10, 20000);
     guideCount_->setValue(300);
+    guideCount_->setToolTip(tr("About this many guides where the photos show hair (roots where they show none get none)"));
     form->addRow(tr("Guide count"), guideCount_);
     maxLength_ = new QDoubleSpinBox;
     maxLength_->setRange(0.0, 100000.0);
@@ -679,12 +705,71 @@ void ReferenceWindow::buildPanel(QWidget* panel) {
     connect(maxLength_, &QDoubleSpinBox::valueChanged, this, [this] { previewKey_ = ~0ull; });
     form->addRow(tr("Max length"), maxLength_);
     layout->addLayout(form);
+    // (Generate sits in the window's bottom row, always in view, beside Close.)
     generateButton_ = new QPushButton(tr("Generate"));
+    generateButton_->setObjectName(QStringLiteral("referenceGenerate"));
     generateButton_->setDefault(true);
     generateButton_->setToolTip(tr("Grow guides from the lined-up photos into the fromReference group (again: replaced)"));
     connect(generateButton_, &QPushButton::clicked, this, [this] { generate(); });
-    layout->addWidget(generateButton_);
     outer->addStretch(1);
+}
+
+// What the photo view shows, under it: Align's mesh over the photo (and its opacity), Guides' mask
+// tint, flow field and the last Generate's guides.
+QHBoxLayout* ReferenceWindow::buildShowRow() {
+    auto* row = new QHBoxLayout;
+    row->setSpacing(4);
+    alignShow_ = new QWidget;
+    alignShow_->setObjectName(QStringLiteral("referenceAlignShow"));
+    auto* line = new QHBoxLayout(alignShow_);
+    line->setContentsMargins(0, 0, 0, 0);
+    line->setSpacing(6);
+    line->addWidget(new QLabel(tr("Mesh over photo")));
+    overlayBox_ = new QComboBox;
+    overlayBox_->addItems({tr("Outline"), tr("Wireframe"), tr("Off")});
+    overlayBox_->setToolTip(tr("The mesh drawn over the photo through the solved camera"));
+    connect(overlayBox_, &QComboBox::currentIndexChanged, this, [this] {
+        overlayKey_ = ~0ull;
+        photoView_->update();
+    });
+    line->addWidget(overlayBox_);
+    opacity_ = new ValueSlider;
+    opacity_->setObjectName(QStringLiteral("referenceOverlayOpacity"));
+    opacity_->setCaption(tr("Opacity"));
+    opacity_->setRange(0.0, 1.0);
+    opacity_->setLimits(0.0, 1.0);
+    opacity_->setDecimals(2);
+    opacity_->setStep(0.05);
+    opacity_->setValue(0.7);
+    opacity_->setMaximumWidth(180);
+    opacity_->setToolTip(tr("How opaque the mesh over the photo is"));
+    connect(opacity_, &ValueSlider::valueChanged, photoView_, [this] { photoView_->update(); });
+    line->addWidget(opacity_);
+    line->addStretch(1);
+    row->addWidget(alignShow_, 1);
+    guidesShow_ = new QWidget;
+    guidesShow_->setObjectName(QStringLiteral("referenceGuidesShow"));
+    line = new QHBoxLayout(guidesShow_);
+    line->setContentsMargins(0, 0, 0, 0);
+    line->setSpacing(4);
+    line->addWidget(new QLabel(tr("Show")));
+    const auto chip = [&](const QString& text, const QString& tip, bool checked) {
+        auto* b = new QToolButton;
+        b->setText(text);
+        b->setCheckable(true);
+        b->setChecked(checked);
+        b->setToolTip(tip);
+        connect(b, &QToolButton::toggled, photoView_, [this] { photoView_->update(); });
+        line->addWidget(b);
+        return b;
+    };
+    maskTint_ = chip(tr("Mask"), tr("Tint the hair mask the guides are grown in (automatic and refined, with the touch-ups)"), true);
+    fieldLines_ = chip(tr("Flow field"), tr("The strand directions read from the photo (with the guide lines), as short lines"), false);
+    guidesShown_ = chip(tr("Guides"), tr("The last Generate's guides over the photo, root green to tip red (those rooted on the far "
+                                        "side left out)"), true);
+    line->addStretch(1);
+    row->addWidget(guidesShow_, 1);
+    return row;
 }
 
 QRhi* ReferenceWindow::rhi() {
@@ -781,7 +866,25 @@ void ReferenceWindow::refreshTabs() {
     while (tabs_->count()) tabs_->removeTab(0);
     for (const auto& p : photos_) tabs_->addTab(p->name);
     if (current_ >= 0) tabs_->setCurrentIndex(current_);
+    refreshTabTexts();
 }
+
+void ReferenceWindow::refreshTabTexts() {
+    const bool guides = stage_ == Stage::Guides;
+    for (int i = 0; i < tabs_->count() && i < photoCount(); ++i) {
+        const ReferencePhoto& p = *photos_[static_cast<std::size_t>(i)];
+        const bool off = guides && !p.camera;
+        const QString text = off ? tr("%1  (not lined up)").arg(p.name) : p.name;
+        if (tabs_->tabText(i) != text) tabs_->setTabText(i, text);
+        tabs_->setTabToolTip(i, off ? tr("Not lined up yet: Align it first (Guides from Photos leaves it out)") : p.name);
+    }
+}
+
+bool ReferenceWindow::anyLinedUp() const {
+    return std::any_of(photos_.begin(), photos_.end(), [](const auto& p) { return p->camera.has_value(); });
+}
+
+QString ReferenceWindow::photoText() const { return photoLabel_->text(); }
 
 int ReferenceWindow::importPhoto(const QString& path) {
     if (!main_ || !main_->document()) {
@@ -862,19 +965,28 @@ void ReferenceWindow::setStage(Stage stage) {
     stage_ = stage;
     const bool guides = stage == Stage::Guides;
     stageButtons_[guides ? 1 : 0]->setChecked(true);
-    for (QToolButton* b : modeButtons_) b->setVisible(guides);
-    guidesPanel_->setVisible(guides);
-    if (!guides && mode_ != Mode::Landmarks) {
-        setMode(Mode::Landmarks);
-        return;
-    }
+    for (int i = 0; i < 4; ++i) modeButtons_[i]->setVisible(guides && i != static_cast<int>(Mode::Landmarks));  // (Align: one tool)
+    for (QWidget* w : {guidesPanel_, guidesShow_, static_cast<QWidget*>(generateButton_)}) w->setVisible(guides);
+    for (QWidget* w : {alignPanel_, alignShow_, static_cast<QWidget*>(nextButton_)}) w->setVisible(!guides);
+    const Mode mode = guides ? (mode_ == Mode::Landmarks ? Mode::Flow : mode_) : Mode::Landmarks;
+    mode_ = mode;
+    modeButtons_[static_cast<int>(mode)]->setChecked(true);
+    brush_->setVisible(mode == Mode::Hair || mode == Mode::Backdrop);
+    hover_.reset();
+    refreshTabTexts();
+    photoView_->update();
+    meshView_->update();
     refreshPanel();
 }
 
 void ReferenceWindow::setMode(Mode mode) {
-    if (mode != Mode::Landmarks && stage_ != Stage::Guides) setStage(Stage::Guides);
+    if ((mode != Mode::Landmarks) != (stage_ == Stage::Guides)) {
+        mode_ = mode;
+        setStage(mode == Mode::Landmarks ? Stage::Align : Stage::Guides);
+    }
     mode_ = mode;
     modeButtons_[static_cast<int>(mode)]->setChecked(true);
+    brush_->setVisible(mode == Mode::Hair || mode == Mode::Backdrop);
     hover_.reset();
     photoView_->update();
     meshView_->update();
@@ -1065,6 +1177,32 @@ ReferenceWindow::Overlay ReferenceWindow::overlay() const { return static_cast<O
 double ReferenceWindow::overlayOpacity() const { return opacity_->value(); }
 void ReferenceWindow::setMaskTint(bool on) { maskTint_->setChecked(on); }
 void ReferenceWindow::setFieldLines(bool on) { fieldLines_->setChecked(on); }
+void ReferenceWindow::setGuidesShown(bool on) { guidesShown_->setChecked(on); }
+bool ReferenceWindow::guidesShown() const { return guidesShown_->isChecked(); }
+
+const std::vector<std::vector<std::array<float, 2>>>& ReferenceWindow::guideLinesShown() {
+    const ReferencePhoto* p = photo();
+    const std::uint64_t key = (guidesSerial_ * 4096 + solveCount_) * 1024 + static_cast<std::uint64_t>(current_ + 1);
+    if (key == guideLinesKey_) return guideLines_;
+    guideLinesKey_ = key;
+    guideLines_.clear();
+    GroomDocument* doc = main_ ? main_->document() : nullptr;
+    if (!p || !p->camera || lastGuides_.empty() || !doc || !doc->file().data.scalp) return guideLines_;
+    const std::shared_ptr<const ScalpMesh> scalp = doc->refinedFileScalp();
+    const Vec3f eye = p->camera->eye();
+    for (const auto& g : lastGuides_) {
+        if (g.size() < 2) continue;
+        const SurfacePoint at = scalp->closestPoint(g.front());
+        if (at.normal.dot(eye - g.front()) <= 0.0f) continue;  // rooted on the far side
+        std::vector<std::array<float, 2>> line;
+        for (const Vec3f& q : g) {
+            float u = 0.0f, v = 0.0f;
+            if (p->camera->project(q, u, v)) line.push_back({u, v});
+        }
+        if (line.size() >= 2) guideLines_.push_back(std::move(line));
+    }
+    return guideLines_;
+}
 bool ReferenceWindow::maskTint() const { return maskTint_->isChecked(); }
 bool ReferenceWindow::fieldLines() const { return fieldLines_->isChecked(); }
 double ReferenceWindow::brushSize() const { return brush_->value(); }
@@ -1186,6 +1324,10 @@ bool ReferenceWindow::generate() {
         message_->setText(tr("Cannot add the guides: %1").arg(QString::fromStdString(error)));
         return false;
     }
+    lastGuides_.clear();
+    for (const ReferenceGuide& g : result.guides) lastGuides_.push_back(g.points);
+    ++guidesSerial_;
+    photoView_->update();
     message_->setText(tr("%1 guides in fromReference (symmetry: %2; %3 roots had no hair over them, %4 were not seen).")
                           .arg(result.guides.size())
                           .arg(QString::fromLatin1(referenceSymmetryName(result.symmetry)))
@@ -1243,25 +1385,30 @@ void ReferenceWindow::refreshPanel() {
         } else {
             solveLabel_->setText(summary + QStringLiteral(". ") + QString::fromStdString(p->solve.why));
         }
-        flowLabel_->setText(tr("%n flow arrow(s), ", nullptr, static_cast<int>(p->editor.strokes().size())) +
+        photoLabel_->setText(p->camera ? tr("%1 is lined up.").arg(p->name)
+                                       : tr("%1 is not lined up yet: Align it first (Guides from Photos leaves it out).").arg(p->name));
+        flowLabel_->setText(tr("%n guide line(s), ", nullptr, static_cast<int>(p->editor.strokes().size())) +
                             tr("%n mask touch-up(s).", nullptr, static_cast<int>(p->editor.maskStrokes().size())));
         undoButton_->setEnabled(p->editor.canUndo());
         undoButton_->setToolTip(p->editor.canUndo() ? tr("Undo %1 (Ctrl+Z)").arg(QString::fromStdString(p->editor.undoText())) : tr("Undo (Ctrl+Z)"));
         redoButton_->setEnabled(p->editor.canRedo());
     } else {
         solveLabel_->setText(tr("No photo yet: Import Photo... above."));
+        photoLabel_->setText(tr("No photo yet: Import Photo... above."));
         flowLabel_->clear();
         undoButton_->setEnabled(false);
         redoButton_->setEnabled(false);
     }
+    refreshTabTexts();
     const QString why = requirement();
     generateButton_->setEnabled(why.isEmpty());
     generateButton_->setToolTip(why.isEmpty() ? tr("Grow guides from the lined-up photos into the fromReference group") : why);
     static const char* const hints[] = {
         QT_TR_NOOP("Landmarks: click a feature on the photo, then the same feature on the mesh (either order); drag to adjust, "
                    "Ctrl+click deletes a pair. 4 pairs line the camera up."),
-        QT_TR_NOOP("Flow: drag along the hair from root to tip; Ctrl+drag erases."),
-        QT_TR_NOOP("Hair: paint where the mask missed hair (Ctrl: backdrop). Mask tint shows the mask."),
+        QT_TR_NOOP("Guide Lines: drag along the hair from root to tip (how guides there run and how long they are); "
+                   "Ctrl+drag erases."),
+        QT_TR_NOOP("Hair: paint where the mask missed hair (Ctrl: backdrop). Show > Mask tints it."),
         QT_TR_NOOP("Backdrop: paint where the mask took backdrop for hair (Ctrl: hair).")};
     hint_->setText(tr(hints[static_cast<int>(mode_)]) + tr("  Wheel zooms, middle drag pans, Ctrl+Z / Ctrl+Y undo and redo."));
     status_->setText(tr("%n photo(s)", nullptr, photoCount()) +

@@ -87,7 +87,7 @@
       "pairsBar": ["pairs.solve", "pairs.clear", {"id": "pairs.delete", "glyph": "delete"}],
       "pairsContext": ["pairs.repickPhoto", "pairs.repickMesh", "-", "pairs.delete"],
       "guidesBar": [
-        {"id": "photos.guides", "label": "Open Guides from Photos...", "tip": "The Photos window's Guides stage: flow arrows and mask touch-ups on the lined-up photos, Generate and the measured look"},
+        {"id": "photos.guides", "label": "Open Guides from Photos...", "tip": "The Photos window's Guides stage: guide lines and mask touch-ups on the lined-up photos, Generate and the measured look"},
         "photo.addView"
       ]
     }

@@ -137,7 +137,10 @@ each copy aligned with its vane. Bent copies render and export as one mesh. See
 ### The rachis
 
 `shaftWidth` turns each shaft into a tube mesh that can be skinned with the character in a game
-engine, with the barbs rooted on its surface. See [Game export](/docs/game-export#feathers-in-engines).
+engine, with the barbs rooted on its surface. **Shaft sides** sets the sides around it and **Shaft
+segments** the segments along it: 0 puts a ring at every point of the shaft, a number lays that
+many evenly along a smooth curve through them, so a faceted rachis turns round without a Resample
+node (the barbs and the shafts stay as they are). See [Game export](/docs/game-export#feathers-in-engines).
 
 ## Scales
 
@@ -154,7 +157,7 @@ colors them.
 
 | Param | Effect |
 | --- | --- |
-| `prototype` | The plate: the built-in `groomlab:scale` (keeled), `groomlab:scaleRound` and `groomlab:scaleShield`, or your own mesh (1 unit long along +Y, top facing +Z). Several names mix them, at random or by a map (`variantBy`, `variant`). |
+| `prototype` | The plate: the built-in `groomlab:scale` (keeled), `groomlab:scaleRound` and `groomlab:scaleShield`, or your own mesh (1 unit long along +Y, top facing +Z). The built-in plates are one closed piece of quads, the top and the underside alike, with support loops at the rim's edges, ready to subdivide (ToMesh > Mesh in Scene gives them to you to sculpt). Several names mix them, at random or by a map (`variantBy`, `variant`). |
 | `tile`, `lift` | `tile` lifts each tip over the base of the next scale, like roof tiles; `lift` tilts them further. |
 | `conform`, `offset` | Bend each plate over the body's curvature without going inside it; raise the plates off the skin. |
 | `follow` | `strand` bends each plate along its strand's curve: swept scales, spikes and quills (the `swept_spikes` preset). |

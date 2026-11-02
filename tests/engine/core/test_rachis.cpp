@@ -256,12 +256,13 @@ TEST(Rachis, KeptShaftsAreAsWideAsTheirRachis) {
 // Every barb root lies on its own feather's rachis (the closest triangle of the whole mesh is
 // its feather's), off the center line by about the rachis's radius, and the barbs keep their
 // designed lengths and shapes.
-void expectBarbsOnTheirRachis(const char* sides, std::int64_t shaftSides, double lift) {
-    SCOPED_TRACE(std::string(sides) + " sides " + std::to_string(shaftSides));
+void expectBarbsOnTheirRachis(const char* sides, std::int64_t shaftSides, double lift, std::int64_t shaftSegments = 0) {
+    SCOPED_TRACE(std::string(sides) + " sides " + std::to_string(shaftSides) + " segments " + std::to_string(shaftSegments));
     const Shafts f;
     auto op = propagate(0.06);
     op->params().set("sides", std::string(sides));
     op->params().set("shaftSides", shaftSides);
+    op->params().set("shaftSegments", shaftSegments);
     op->params().set("lift", lift);
     const StrandsPtr out = f.run(*op);
     op->params().set("rootOnShaft", false);
@@ -299,6 +300,45 @@ TEST(Rachis, BarbRootsLieOnTheirOwnRachisSurface) {
     expectBarbsOnTheirRachis("both", 4, 25.0);  // lifted barbs leave the upper faces
     expectBarbsOnTheirRachis("around", 5, 0.0);
     expectBarbsOnTheirRachis("left", 2, 0.0);   // a flat ribbon: its edge
+    expectBarbsOnTheirRachis("both", 6, 0.0, 40);  // on the smooth rachis Shaft segments makes
+}
+
+// Shaft segments: that many segments evenly along the smooth curve through the shaft's points
+// (root to tip, the width profile by arc length), not a ring a shaft point; the barbs and the shafts
+// as without it.
+TEST(Rachis, ShaftSegmentsRoundTheRachisOnASmoothCurve) {
+    const Shafts f;
+    auto op = propagate(0.06);
+    op->params().set("shaftWidthProfile", Ramp{{0.0f, 1.0f}, {1.0f, 0.5f}});
+    const StrandsPtr plain = f.run(*op);
+    op->params().set("shaftSegments", std::int64_t{30});
+    const StrandsPtr out = f.run(*op);
+    ASSERT_EQ(out->strandCount(), plain->strandCount());
+    const FeatherLayer& layer = *out->featherLayers().front();
+    ASSERT_EQ(layer.shaftCount(), 4u);
+    for (std::size_t k = 0; k < layer.shaftCount(); ++k) {
+        ASSERT_EQ(layer.offsets[k + 1] - layer.offsets[k], 31u);
+        const Vec3f* shaft = f.shafts->strandPoints(k);
+        const std::size_t n = f.shafts->strandPointCount(k);
+        const RachisRing& first = layer.rings[layer.offsets[k]];
+        const RachisRing& last = layer.rings[layer.offsets[k + 1] - 1];
+        EXPECT_LT((first.center - shaft[0]).length(), 1e-5f);
+        EXPECT_LT((last.center - shaft[n - 1]).length(), 1e-4f);
+        for (std::size_t r = 0; r < 31; ++r) {
+            const RachisRing& ring = layer.rings[layer.offsets[k] + r];
+            EXPECT_NEAR(ring.u, static_cast<float>(r) / 30.0f, 1e-6f);
+            EXPECT_NEAR(ring.radius, 0.03f * (1.0f - 0.5f * ring.u), 1e-5f);
+            EXPECT_NEAR(ring.tangent.dot(ring.normal), 0.0f, 1e-4f);
+        }
+    }
+    // The shafts (kept) are the same curves, as wide as the rachis at their points.
+    for (std::size_t s = 0; s < out->strandCount(); ++s) {
+        if (channel(*out, "isShaft", s) < 0.5f) continue;
+        for (std::size_t j = 0; j < out->strandPointCount(s); ++j)
+            EXPECT_LT((out->strandPoints(s)[j] - plain->strandPoints(s)[j]).length(), 1e-6f);
+    }
+    const RachisMesh m = buildRachisMesh(out->featherLayers());
+    EXPECT_EQ(m.points.size(), 4u * (31u * 6u + 1u));
 }
 
 TEST(Rachis, GroupsNameTheFeathersAndMergeCarriesThem) {

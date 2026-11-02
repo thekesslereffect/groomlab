@@ -179,24 +179,6 @@ TEST(HairColorModel, TheAppearanceIsWhatTheHairLooksLike) {
         const Rgb back = hairBaseOfAppearance(hairAppearanceColor(c));
         for (int k = 0; k < 3; ++k) EXPECT_NEAR(back[k], c[k], 2e-3f * std::max(c[k], 0.05f)) << k;
     }
-    // The shaded color (the cards' bake, issue #33): darker and more saturated than the appearance
-    // (Maya's viewport against a lambert of each: within about 10%), white at kShadedTop, and its
-    // inverse gives the base color back (Maya's card shading).
-    const Rgb medium{0.25f, 0.12f, 0.05f};
-    const Rgb shaded = hairShadedColor(medium), look = hairAppearanceColor(medium);
-    for (int k = 0; k < 3; ++k) EXPECT_LT(shaded[k], look[k]) << k;
-    EXPECT_GT(shaded[0] / shaded[2], look[0] / look[2]);  // more saturated
-    EXPECT_NEAR(hairShadedColor({1.0f, 1.0f, 1.0f})[0], kShadedTop, 1e-4f);
-    const Rgb gray = hairShadedColor({0.3f, 0.3f, 0.3f});  // grays stay gray (kShadedMix's rows sum to 1)
-    EXPECT_NEAR(gray[0], gray[1], 1e-5f);
-    EXPECT_NEAR(gray[1], gray[2], 1e-5f);
-    const Rgb blue = hairShadedColor({0.05f, 0.15f, 0.6f});  // a dyed hair keeps its hue
-    EXPECT_GT(blue[2], blue[1]);
-    EXPECT_GT(blue[1], blue[0]);
-    for (const Rgb& c : {brown, medium, melaninColor(0.15f, 0.2f), Rgb{0.6f, 0.35f, 0.2f}, Rgb{0.9f, 0.9f, 0.9f}}) {
-        const Rgb back = hairBaseOfShaded(hairShadedColor(c));
-        for (int k = 0; k < 3; ++k) EXPECT_NEAR(back[k], c[k], 2e-3f * std::max(c[k], 0.05f)) << k;
-    }
     // Lighter than the base color, the order of colors kept.
     for (const float c : {0.001f, 0.01f, 0.1f, 0.5f}) {
         EXPECT_GT(hairAppearanceColor({c, c, c})[0], c);

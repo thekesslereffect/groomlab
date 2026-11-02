@@ -6,14 +6,19 @@ reference photo on the left and the groom's scalp on the right, and the settings
 them. Nothing has to be done through a Maya camera; each photo's camera and image plane are made and
 kept lined up (from the solve), so the viewport, renders and Arnold can look through them.
 
-Two stages (the chips at the top left):
-  - Align: landmarks only. The panel: the pairs and their errors, the camera (Focal Length, Keep
-    focal length, Lock) and the mesh drawn over the photo.
-  - Guides (experimental): Guides from Photos besides: flow arrows, mask touch-ups, Generate and
-    the measured look.
+Two stages (the chips at the top left), each showing only what its step needs:
+  - Align (one photo at a time): the landmarks over the photo and the mesh, the mesh's outline
+    through the camera (Mesh over photo, under the photo). The panel: the pairs and their errors,
+    the camera (Focal Length, Keep focal length, Lock) and the scalp's shape (Morph to Photos).
+    Next: Guides moves on.
+  - Guides (experimental, every lined-up photo): the tools Guide Lines, Hair and Backdrop over the
+    photo (no landmarks, no mesh outline), what it shows under it (Mask, Flow field, the generated
+    Guides drawn root green to tip red), the groom in the mesh view. The panel: this photo (used,
+    its mask, its lines and touch-ups), Generate's settings and the measured look; a photo not
+    lined up yet is marked in its tab.
 
-Photos: a tab each along the top (Import Photo..., Remove). Each has its own landmarks, flow
-arrows, mask touch-ups and solved camera (a groomlab.reference camera).
+Photos: a tab each along the top (Import Photo..., Remove). Each has its own landmarks, guide
+lines, mask touch-ups and solved camera (a groomlab.reference camera).
 
 The photo view (2D): the wheel zooms at the cursor, the middle button (or Alt+left) pans, F or
 Fit fits it. The tools (the chips above it):
@@ -24,8 +29,8 @@ Fit fits it. The tools (the chips above it):
     too, unless Keep focal length); each pair shows its reprojection error (a line to where the
     mesh point lands, the table's Error column), bad pairs in red. The mesh's outline or wireframe
     draws over the photo through the camera (Overlay, with its opacity).
-  - Flow: drag along the hair from root to tip: an arrow (as the Reference Flow tool drew them);
-    Ctrl+drag erases. Each arrow one undo step.
+  - Guide Lines: drag along the hair from root to tip: how guides there run and how long they are
+    (drawn green at the root to red at the tip); Ctrl+drag erases. Each line one undo step.
   - Hair / Backdrop: brush touch-ups of the hair mask (Ctrl swaps the kind); the refined mask
     shows as a tint (Mask tint), the orientation field as short lines (Flow field).
 The mesh view: a Maya view of the scalp with its own camera (Alt navigates, Frame fits); clicks
@@ -61,11 +66,12 @@ SIDES = ("photo", "mesh")
 COLORS = {"photo": (1.0, 0.85, 0.1), "mesh": (0.15, 0.9, 1.0)}  # yellow photo, cyan mesh
 STAGES = ("align", "guides")
 MODES = ("landmarks", "flow", "hair", "backdrop")
-MODE_LABELS = {"landmarks": "Landmarks", "flow": "Flow", "hair": "Hair", "backdrop": "Backdrop"}
+MODE_LABELS = {"landmarks": "Landmarks", "flow": "Guide Lines", "hair": "Hair", "backdrop": "Backdrop"}
 OVERLAYS = ("off", "outline", "wireframe")
 PHOTO_FILTER = "Images (*.png *.jpg *.jpeg *.tif *.tiff *.tga *.bmp *.exr *.iff);;All Files (*.*)"
-ARROW = QtGui.QColor(255, 158, 38)       # the flow arrows (the Reference Flow tool's orange)
-ARROW_NEW = QtGui.QColor(255, 230, 102)  # the one being drawn
+LINE_ROOT = QtGui.QColor(40, 255, 40)    # a guide line's root end (green) ...
+LINE_TIP = QtGui.QColor(255, 40, 40)     # ... to its tip (red)
+LINE_UNDIRECTED = QtGui.QColor(200, 200, 200)  # a line without a way (only its course counts)
 ERASE = QtGui.QColor(255, 77, 77)
 BAD = QtGui.QColor(255, 70, 70)
 HAIR_TINT = QtGui.QColor(80, 230, 120, 90)
@@ -178,7 +184,8 @@ class PhotoView(QtWidgets.QWidget):
             painter.drawPixmap(QtCore.QRectF(0, 0, W, H), self.pixmap, QtCore.QRectF(self.pixmap.rect()))
         else:
             painter.fillRect(QtCore.QRectF(0, 0, W, H), t.qcolor("ui.raised"))
-        preview = w.preview() if (w.mask_tint.isChecked() or w.field_lines.isChecked()) else None
+        guides = w.stage() == "guides"
+        preview = w.preview() if guides and (w.mask_tint.isChecked() or w.field_lines.isChecked()) else None
         if preview:
             x0, y0, cw, ch = preview["crop"]
             if w.mask_tint.isChecked() and preview.get("tint") is not None:
@@ -188,30 +195,36 @@ class PhotoView(QtWidgets.QWidget):
                 pen.setCosmetic(True)
                 painter.setPen(pen)
                 painter.drawLines(preview["qlines"])
-        # Mask touch-ups: the brush lines, as wide as they paint.
+        # Mask touch-ups: the brush lines, as wide as they paint (Guides).
         editor = w.editor()
-        for s in (editor.mask_strokes if editor else []):
+        for s in (editor.mask_strokes if editor and guides else []):
             pen = QtGui.QPen(INCLUDE if s["include"] else EXCLUDE, 2.0 * s["radius"])
             pen.setCapStyle(QtCore.Qt.RoundCap)
             pen.setJoinStyle(QtCore.Qt.RoundJoin)
             painter.setPen(pen)
             points = [QtCore.QPointF(*p) for p in s["points"]]
             painter.drawPolyline(QtGui.QPolygonF(points)) if len(points) > 1 else painter.drawPoint(points[0])
-        # The mesh through the camera.
-        lines = w.overlay_lines()
+        # The mesh through the camera (Align).
+        lines = w.overlay_lines() if not guides else []
         if lines:
             pen = QtGui.QPen(QtGui.QColor(255, 255, 255, int(255 * w.overlay_opacity())), 1.0)
             pen.setCosmetic(True)
             painter.setPen(pen)
             painter.drawLines(lines)
-        # Flow arrows.
-        head = W / 40.0
-        for arrow in w.arrows():
-            self._arrow(painter, arrow, ARROW)
+        # The generated guides, thin, under the drawn guide lines (Guides).
+        if guides and w.guides_shown.isChecked():
+            for line in w.guide_lines_shown():
+                self._guide_line(painter, line, True, 1.0, alpha=150)
+        # Guide lines (Guides).
+        for line, directed in (w.arrows() if guides else []):
+            self._guide_line(painter, line, directed, 2.5)
         if self.drag and self.drag[0] in ("stroke", "erase") and len(self.drag[1]) >= 2:
             import groomlab_core as gl
-            self._arrow(painter, gl.reference_arrow(self.drag[1], head if self.drag[0] == "stroke" else 0.0),
-                        ARROW_NEW if self.drag[0] == "stroke" else ERASE)
+            line = gl.reference_arrow(self.drag[1], 0.0)["line"]
+            if self.drag[0] == "stroke":
+                self._guide_line(painter, line, True, 3.0)
+            else:
+                self._guide_line(painter, line, False, 2.0, ERASE)
         if self.drag and self.drag[0] == "mask" and self.drag[1]:
             pen = QtGui.QPen(INCLUDE if self.drag[2] else EXCLUDE, 2.0 * self.drag[3])
             pen.setCapStyle(QtCore.Qt.RoundCap)
@@ -219,22 +232,41 @@ class PhotoView(QtWidgets.QWidget):
             points = [QtCore.QPointF(*p) for p in self.drag[1]]
             painter.drawPolyline(QtGui.QPolygonF(points)) if len(points) > 1 else painter.drawPoint(points[0])
         painter.restore()
-        self._paint_landmarks(painter)
+        if not guides:
+            self._paint_landmarks(painter)
         if w.mode() in ("hair", "backdrop") and self.hover_pos is not None and not self.drag:
             painter.setPen(QtGui.QPen(QtGui.QColor(255, 255, 255, 180), 1.0))
             painter.setBrush(QtCore.Qt.NoBrush)
             r = w.brush_size()
             painter.drawEllipse(self.hover_pos, r, r)
 
-    def _arrow(self, painter, arrow, color):
-        pen = QtGui.QPen(color, 2.0)
-        pen.setCosmetic(True)
-        pen.setCapStyle(QtCore.Qt.RoundCap)
-        painter.setPen(pen)
+    def _guide_line(self, painter, line, directed, width=2.0, color=None, alpha=255):
+        """A guide line: green at its root to red at its tip (a line without a way, or `color`: one color)."""
         painter.setBrush(QtCore.Qt.NoBrush)
-        painter.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(*p) for p in arrow["line"]]))
-        if arrow.get("head"):
-            painter.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(*p) for p in arrow["head"]]))
+        points = [QtCore.QPointF(*p) for p in line]
+        if len(points) < 2:
+            return
+        if color is not None or not directed:
+            pen = QtGui.QPen(color or LINE_UNDIRECTED, width)
+            pen.setCosmetic(True)
+            pen.setCapStyle(QtCore.Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawPolyline(QtGui.QPolygonF(points))
+            return
+        lengths = [0.0]
+        for a, b in zip(points, points[1:]):
+            lengths.append(lengths[-1] + QtCore.QLineF(a, b).length())
+        total = max(lengths[-1], 1e-6)
+        for i in range(len(points) - 1):
+            t = 0.5 * (lengths[i] + lengths[i + 1]) / total
+            c = QtGui.QColor(int(LINE_ROOT.red() + t * (LINE_TIP.red() - LINE_ROOT.red())),
+                             int(LINE_ROOT.green() + t * (LINE_TIP.green() - LINE_ROOT.green())),
+                             int(LINE_ROOT.blue() + t * (LINE_TIP.blue() - LINE_ROOT.blue())), alpha)
+            pen = QtGui.QPen(c, width)
+            pen.setCosmetic(True)
+            pen.setCapStyle(QtCore.Qt.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(points[i], points[i + 1])
 
     def _paint_landmarks(self, painter):
         """The photo's landmarks as the Transfer window's dots: filled matched, a ring pending,
@@ -363,6 +395,8 @@ class ReferenceWindow(QtWidgets.QWidget):
         self._overlay = None  # (key, [QLineF])
         self._arrows = None   # (revision, [arrow dicts])
         self._preview = None  # (key, preview dict)
+        self._guide_overlay = None  # (key, [[(u, v)]]): the generated guides over the photo
+        self._guides_serial = 0
         self._hover = None    # (side, index)
         self._drag = None     # mesh view drag: [index, first move]
         self._owned_press = False
@@ -386,7 +420,7 @@ class ReferenceWindow(QtWidgets.QWidget):
         stages.setExclusive(True)
         for stage, label, tip in (
                 ("align", "Align", "Line the photos up with the mesh: landmark pairs, the camera"),
-                ("guides", "Guides (experimental)", "Guides from Photos: flow arrows and mask touch-ups on the "
+                ("guides", "Guides (experimental)", "Guides from Photos: guide lines and mask touch-ups on the "
                                                     "lined-up photos, Generate and the measured look")):
             b = QtWidgets.QToolButton()
             b.setText(label)
@@ -423,7 +457,8 @@ class ReferenceWindow(QtWidgets.QWidget):
 
         body = QtWidgets.QHBoxLayout()
         body.setSpacing(theme.px(6))
-        # Left: the photo, its tools above it.
+        # Left: the photo, its tools above it (Guides': Guide Lines, Hair, Backdrop and the brush),
+        # what it shows below it (Align: the mesh over it; Guides: the mask, the field, the guides).
         photo_column = QtWidgets.QVBoxLayout()
         tools = QtWidgets.QHBoxLayout()
         tools.setSpacing(theme.px(4))
@@ -432,8 +467,8 @@ class ReferenceWindow(QtWidgets.QWidget):
         group.setExclusive(True)
         tips = {"landmarks": "Click a feature on the photo, then the same feature on the mesh (either order). Drag a "
                              "point to adjust it; Ctrl+click deletes it and its partner.",
-                "flow": "Drag along the hair from root to tip: a flow arrow the guides follow (optional). Ctrl+drag "
-                        "erases.",
+                "flow": "Drag along the hair from root to tip: guides there follow the line and are as long as it "
+                        "(optional). Ctrl+drag erases.",
                 "hair": "Paint where the photo shows hair the mask missed (Ctrl: backdrop)",
                 "backdrop": "Paint where the mask took backdrop for hair (Ctrl: hair)"}
         for mode in MODES:
@@ -448,6 +483,17 @@ class ReferenceWindow(QtWidgets.QWidget):
             tools.addWidget(b)
             self.mode_buttons[mode] = b
         self.mode_buttons["landmarks"].setChecked(True)
+        self.brush = widgets.SoftSlider(14, 2, 120, integer=True, minimum=2, maximum=120, key=None,
+                                        label="Brush", suffix="px")
+        self.brush.setObjectName("referenceBrushSize")
+        self.brush.setToolTip("The mask brush's radius on screen")
+        self.brush.setMinimumWidth(theme.px(140))
+        self.brush.setMaximumWidth(theme.px(180))
+        policy = self.brush.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)  # (the views keep their size as the tools change)
+        self.brush.setSizePolicy(policy)
+        tools.addSpacing(theme.px(6))
+        tools.addWidget(self.brush)
         tools.addStretch(1)
         fit = QtWidgets.QToolButton()
         fit.setText("Fit")
@@ -459,6 +505,7 @@ class ReferenceWindow(QtWidgets.QWidget):
         photo_column.addLayout(tools)
         self.photo_view = PhotoView(self)
         photo_column.addWidget(self.photo_view, 1)
+        photo_column.addLayout(self._build_show_row())
         body.addLayout(photo_column, 1)
 
         # Middle: the mesh, a Maya view of its own.
@@ -516,6 +563,12 @@ class ReferenceWindow(QtWidgets.QWidget):
         bottom.addWidget(self.redo_button)
         bottom.addSpacing(theme.px(12))
         # The one button rule: secondary actions, the primary one on the right, Close last.
+        self.next_button = QtWidgets.QPushButton("Next: Guides")
+        self.next_button.setObjectName("referenceNextStage")
+        self.next_button.setProperty("role", "primary")
+        self.next_button.setToolTip("On to Guides from Photos with the lined-up photos")
+        self.next_button.clicked.connect(lambda: self.set_stage("guides"))
+        bottom.addWidget(self.next_button)
         bottom.addWidget(self.look_button)
         bottom.addWidget(self.generate_button)
         close = QtWidgets.QPushButton("Close")
@@ -541,9 +594,75 @@ class ReferenceWindow(QtWidgets.QWidget):
         label.setProperty("role", "subheading")
         layout.addWidget(label)
 
+    def _build_show_row(self):
+        """What the photo view shows, under it: Align's mesh over the photo (and its opacity),
+        Guides' mask tint, flow field and generated guides."""
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(theme.px(4))
+        self.align_show = QtWidgets.QWidget()
+        self.align_show.setObjectName("referenceAlignShow")
+        line = QtWidgets.QHBoxLayout(self.align_show)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(theme.px(6))
+        line.addWidget(QtWidgets.QLabel("Mesh over photo"))
+        self.overlay_box = QtWidgets.QComboBox()
+        self.overlay_box.setObjectName("referenceOverlay")
+        for key, label in (("outline", "Outline"), ("wireframe", "Wireframe"), ("off", "Off")):
+            self.overlay_box.addItem(label, key)
+        self.overlay_box.setToolTip("The mesh drawn over the photo through the camera: its outline or its wireframe")
+        self.overlay_box.currentIndexChanged.connect(lambda *_: self._overlay_changed())
+        line.addWidget(self.overlay_box)
+        self.opacity = widgets.SoftSlider(70, 0, 100, integer=True, minimum=0, maximum=100, key=None,
+                                          label="Opacity", suffix="%")
+        self.opacity.setObjectName("referenceOverlayOpacity")
+        self.opacity.setToolTip("How opaque the mesh over the photo is")
+        self.opacity.setMaximumWidth(theme.px(180))
+        self.opacity.dragged.connect(lambda *_: self.photo_view.update())
+        self.opacity.committed.connect(lambda *_: self.photo_view.update())
+        line.addWidget(self.opacity)
+        line.addStretch(1)
+        row.addWidget(self.align_show, 1)
+        self.guides_show = QtWidgets.QWidget()
+        self.guides_show.setObjectName("referenceGuidesShow")
+        line = QtWidgets.QHBoxLayout(self.guides_show)
+        line.setContentsMargins(0, 0, 0, 0)
+        line.setSpacing(theme.px(4))
+        line.addWidget(QtWidgets.QLabel("Show"))
+
+        def chip(text, name, tip, checked):
+            b = QtWidgets.QToolButton()
+            b.setText(text)
+            b.setObjectName(name)
+            b.setCheckable(True)
+            b.setChecked(checked)
+            b.setProperty("role", "chip")
+            b.setToolTip(tip)
+            line.addWidget(b)
+            return b
+        self.mask_tint = chip("Mask", "referenceMaskTint", "Tint the hair mask the guides are grown in (automatic and "
+                              "refined, or the mask image, with the touch-ups)", True)
+        self.mask_tint.toggled.connect(lambda _: self._preview_wanted())
+        self.field_lines = chip("Flow field", "referenceFieldLines", "The strand directions read from the photo (with "
+                                "the guide lines), as short lines", False)
+        self.field_lines.toggled.connect(lambda _: self._preview_wanted())
+        self.guides_shown = chip("Guides", "referenceShowGuides", "The generated guides over the photo, root green to tip "
+                                 "red (those rooted on the far side left out)", True)
+        self.guides_shown.toggled.connect(lambda _: self.photo_view.update())
+        line.addStretch(1)
+        row.addWidget(self.guides_show, 1)
+        return row
+
     def _build_panel(self, layout):
         layout.setContentsMargins(0, 0, theme.px(4), 0)
         layout.setSpacing(theme.px(6))
+        # Align's sections (the Align stage only).
+        self.align_panel = QtWidgets.QWidget()
+        self.align_panel.setObjectName("referenceAlignPanel")
+        outer = layout
+        layout = QtWidgets.QVBoxLayout(self.align_panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(theme.px(6))
+        outer.addWidget(self.align_panel)
         self._heading(layout, "LANDMARKS")
         self.solve_label = QtWidgets.QLabel()
         self.solve_label.setObjectName("referenceSolve")
@@ -573,23 +692,6 @@ class ReferenceWindow(QtWidgets.QWidget):
         clear.clicked.connect(lambda: self.clear_landmarks())
         row.addWidget(clear)
         layout.addLayout(row)
-        form = QtWidgets.QFormLayout()
-        form.setLabelAlignment(QtCore.Qt.AlignRight)
-        self.overlay_box = QtWidgets.QComboBox()
-        self.overlay_box.setObjectName("referenceOverlay")
-        for key, label in (("outline", "Outline"), ("wireframe", "Wireframe"), ("off", "Off")):
-            self.overlay_box.addItem(label, key)
-        self.overlay_box.setToolTip("The mesh drawn over the photo through the camera: its outline or its wireframe")
-        self.overlay_box.currentIndexChanged.connect(lambda *_: self._overlay_changed())
-        form.addRow("Mesh over photo", self.overlay_box)
-        self.opacity = widgets.SoftSlider(70, 0, 100, integer=True, minimum=0, maximum=100, key=None,
-                                          label="Opacity", suffix="%")
-        self.opacity.setObjectName("referenceOverlayOpacity")
-        self.opacity.setToolTip("How opaque the mesh over the photo is")
-        self.opacity.dragged.connect(lambda *_: self.photo_view.update())
-        self.opacity.committed.connect(lambda *_: self.photo_view.update())
-        form.addRow(self.opacity)  # the name inside the field
-        layout.addLayout(form)
 
         self._heading(layout, "CAMERA")
         form = QtWidgets.QFormLayout()
@@ -624,7 +726,7 @@ class ReferenceWindow(QtWidgets.QWidget):
         row.addWidget(self.lock)
         layout.addLayout(row)
 
-        self._heading(layout, "MORPH")
+        self._heading(layout, "SCALP SHAPE")
         row = QtWidgets.QHBoxLayout()
         self.morph_button = QtWidgets.QPushButton("Morph to Photos")
         self.morph_button.setObjectName("referenceMorph")
@@ -651,16 +753,26 @@ class ReferenceWindow(QtWidgets.QWidget):
         reset.clicked.connect(lambda: self.reset_morph())
         layout.addWidget(reset)
 
-        # Guides from Photos (the Guides stage only).
+        # Guides from Photos (the Guides stage only): this photo's part, then every photo's.
         self.guides_panel = QtWidgets.QWidget()
         self.guides_panel.setObjectName("referenceGuidesPanel")
-        outer = layout
         layout = QtWidgets.QVBoxLayout(self.guides_panel)
-        layout.setContentsMargins(0, theme.px(6), 0, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(theme.px(6))
         outer.addWidget(self.guides_panel)
 
-        self._heading(layout, "FLOW AND MASK")
+        self._heading(layout, "THIS PHOTO")
+        self.photo_label = QtWidgets.QLabel()
+        self.photo_label.setObjectName("referencePhotoLabel")
+        self.photo_label.setWordWrap(True)
+        self.photo_label.setProperty("role", "hint")
+        layout.addWidget(self.photo_label)
+        self.use_photo = QtWidgets.QCheckBox("Use this photo")
+        self.use_photo.setObjectName("referenceUsePhoto")
+        self.use_photo.setChecked(True)
+        self.use_photo.setToolTip("Grow guides from this photo too")
+        self.use_photo.toggled.connect(self._use_changed)
+        layout.addWidget(self.use_photo)
         self.flow_label = QtWidgets.QLabel()
         self.flow_label.setObjectName("referenceFlowLabel")
         self.flow_label.setWordWrap(True)
@@ -668,10 +780,10 @@ class ReferenceWindow(QtWidgets.QWidget):
         layout.addWidget(self.flow_label)
         row = QtWidgets.QHBoxLayout()
         clear = QtWidgets.QToolButton()
-        clear.setText("Clear Arrows")
+        clear.setText("Clear Lines")
         clear.setObjectName("referenceClearArrows")
         clear.setProperty("role", "chip")
-        clear.setToolTip("Forget this photo's flow arrows (undoable)")
+        clear.setToolTip("Forget this photo's guide lines (undoable)")
         clear.clicked.connect(lambda: self.clear_flow())
         row.addWidget(clear)
         clear = QtWidgets.QToolButton()
@@ -683,27 +795,8 @@ class ReferenceWindow(QtWidgets.QWidget):
         row.addWidget(clear)
         row.addStretch(1)
         layout.addLayout(row)
-        row = QtWidgets.QHBoxLayout()
-        self.mask_tint = QtWidgets.QCheckBox("Mask tint")
-        self.mask_tint.setObjectName("referenceMaskTint")
-        self.mask_tint.setToolTip("Tint the hair mask the guides are grown in (automatic and refined, or the mask image, "
-                                  "with the touch-ups)")
-        self.mask_tint.toggled.connect(lambda _: self._preview_wanted())
-        row.addWidget(self.mask_tint)
-        self.field_lines = QtWidgets.QCheckBox("Flow field")
-        self.field_lines.setObjectName("referenceFieldLines")
-        self.field_lines.setToolTip("The strand directions read from the photo (with the arrows), as short lines")
-        self.field_lines.toggled.connect(lambda _: self._preview_wanted())
-        row.addWidget(self.field_lines)
-        row.addStretch(1)
-        layout.addLayout(row)
         form = QtWidgets.QFormLayout()
         form.setLabelAlignment(QtCore.Qt.AlignRight)
-        self.brush = widgets.SoftSlider(14, 2, 120, integer=True, minimum=2, maximum=120, key=None,
-                                        label="Brush", suffix="px")
-        self.brush.setObjectName("referenceBrushSize")
-        self.brush.setToolTip("The mask brush's radius on screen")
-        form.addRow(self.brush)
         masks = QtWidgets.QHBoxLayout()
         self.mask_label = QtWidgets.QLabel()
         self.mask_label.setObjectName("referenceMaskLabel")
@@ -722,13 +815,7 @@ class ReferenceWindow(QtWidgets.QWidget):
         form.addRow("Mask", masks)
         layout.addLayout(form)
 
-        self._heading(layout, "GENERATE")
-        self.use_photo = QtWidgets.QCheckBox("Use this photo")
-        self.use_photo.setObjectName("referenceUsePhoto")
-        self.use_photo.setChecked(True)
-        self.use_photo.setToolTip("Grow guides from this photo too")
-        self.use_photo.toggled.connect(self._use_changed)
-        layout.addWidget(self.use_photo)
+        self._heading(layout, "GENERATE (EVERY PHOTO)")
         form = QtWidgets.QFormLayout()
         form.setLabelAlignment(QtCore.Qt.AlignRight)
         self.gen_symmetry = QtWidgets.QComboBox()
@@ -742,7 +829,8 @@ class ReferenceWindow(QtWidgets.QWidget):
         self.gen_count.setObjectName("referenceGuideCount")
         self.gen_count.setRange(10, 20000)
         self.gen_count.setValue(300)
-        self.gen_count.setToolTip("Roots spread over the whole scalp; those the photos show no hair over get none")
+        self.gen_count.setToolTip("About this many guides where the photos show hair (roots where they show none get "
+                                  "none)")
         form.addRow("Guide count", self.gen_count)
         self.gen_length = QtWidgets.QDoubleSpinBox()
         self.gen_length.setObjectName("referenceMaxLength")
@@ -827,10 +915,30 @@ class ReferenceWindow(QtWidgets.QWidget):
         for cam in cameras:
             index = self.tabs.addTab(cam.split("|")[-1])
             self.tabs.setTabData(index, cam)
+        self._tab_texts()
         if current:
             self.tabs.setCurrentIndex(cameras.index(current))
         self.tabs.blockSignals(False)
         self.select_photo(current)
+
+    def lined_up(self, camera):
+        """Whether a photo's camera is lined up (its last solve stored)."""
+        try:
+            return cmds.getAttr(self.ref._camera(camera) + ".glRefRms") >= 0.0
+        except (RuntimeError, ValueError):
+            return False
+
+    def _tab_texts(self):
+        """The tabs' names; in Guides a photo not lined up yet (Align it first) is marked."""
+        guides = self.stage() == "guides"
+        for i in range(self.tabs.count()):
+            cam = self.tabs.tabData(i)
+            name = cam.split("|")[-1]
+            off = guides and not self.lined_up(cam)
+            text = name + ("  (not lined up)" if off else "")
+            if self.tabs.tabText(i) != text:
+                self.tabs.setTabText(i, text)
+            self.tabs.setTabToolTip(i, "Not lined up yet: Align it first (Guides from Photos leaves it out)" if off else name)
 
     def _load(self, camera):
         editor = self.gl.ReferencePhotoEditor()
@@ -870,7 +978,7 @@ class ReferenceWindow(QtWidgets.QWidget):
             self.photo_view.set_photo(None, (0, 0))
         self.remove_button.setEnabled(bool(camera))
         self._redraw()
-        if self.mask_tint.isChecked() or self.field_lines.isChecked():
+        if self.stage() == "guides" and (self.mask_tint.isChecked() or self.field_lines.isChecked()):
             self._preview_wanted()
 
     def current_photo(self):
@@ -987,20 +1095,31 @@ class ReferenceWindow(QtWidgets.QWidget):
         return next((s for s, b in self.stage_buttons.items() if b.isChecked()), "align")
 
     def set_stage(self, stage):
-        """Align (landmarks only) or Guides (Guides from Photos: the flow, mask and Generate too)."""
+        """Align (one photo's landmarks and camera, the scalp's shape) or Guides (Guides from Photos:
+        guide lines, the mask, Generate, the measured look). Each shows only its own tools, panel and
+        overlays."""
         if stage not in STAGES:
             raise ValueError("stage %r: one of %s" % (stage, ", ".join(STAGES)))
         self.stage_buttons[stage].setChecked(True)
         guides = stage == "guides"
-        for button in self.mode_buttons.values():
-            button.setVisible(guides)
-        for widget in (self.guides_panel, self.generate_button, self.look_button):
+        for mode, button in self.mode_buttons.items():
+            button.setVisible(guides and mode != "landmarks")  # (Align has one tool: no chips)
+        for widget in (self.guides_panel, self.generate_button, self.look_button, self.guides_show):
             widget.setVisible(guides)
-        if not guides:
+        for widget in (self.align_panel, self.next_button, self.align_show):
+            widget.setVisible(not guides)
+        if guides:
+            if self.mode() == "landmarks":
+                self.mode_buttons["flow"].setChecked(True)
+        else:
             self.mode_buttons["landmarks"].setChecked(True)
             self.look_panel.setVisible(False)
+        self.brush.setVisible(self.mode() in ("hair", "backdrop"))
         self._hover = None
+        self._tab_texts()
         self._redraw()
+        if guides and (self.mask_tint.isChecked() or self.field_lines.isChecked()):
+            self._preview_wanted()
 
     def mode(self):
         return next((m for m, b in self.mode_buttons.items() if b.isChecked()), "landmarks")
@@ -1009,9 +1128,11 @@ class ReferenceWindow(QtWidgets.QWidget):
         """The photo view's tool; one of Guides' (the flow, the mask) moves to the Guides stage."""
         if mode not in MODES:
             raise ValueError("mode %r: one of %s" % (mode, ", ".join(MODES)))
-        if mode != "landmarks" and self.stage() != "guides":
-            self.set_stage("guides")
+        if (mode != "landmarks") != (self.stage() == "guides"):
+            self.mode_buttons[mode].setChecked(True)
+            self.set_stage("align" if mode == "landmarks" else "guides")
         self.mode_buttons[mode].setChecked(True)
+        self.brush.setVisible(mode in ("hair", "backdrop"))
         self._hover = None
         self._redraw()
 
@@ -1123,15 +1244,61 @@ class ReferenceWindow(QtWidgets.QWidget):
         return self._overlay[1]
 
     def arrows(self):
-        """The current photo's flow arrows as drawn (core's reference_arrow), cached per revision."""
+        """The current photo's guide lines as drawn (core's reference_arrow's smooth curve, root first):
+        [(points, directed)], cached per revision."""
         editor = self.editor()
         if editor is None:
             return []
         if self._arrows is None or self._arrows[0] != (self.camera, editor.revision):
-            head = self.photo_size()[0] / 40.0
             self._arrows = ((self.camera, editor.revision),
-                            [self.gl.reference_arrow(s["points"], head if s["directed"] else 0.0) for s in editor.strokes])
+                            [(self.gl.reference_arrow(s["points"], 0.0)["line"], s["directed"]) for s in editor.strokes])
         return self._arrows[1]
+
+    def guide_lines_shown(self):
+        """The generated guides (the fromReference group) over the current photo, root first, as
+        photo pixels: [[(u, v), ...]], those rooted on the far side of the scalp from the camera left
+        out; cached until the guides or the camera change."""
+        if not self.camera or not self.groom or not cmds.objExists(self.groom):
+            return []
+        camera = self.ref.camera_dict(self.camera)
+        key = (self.camera, self._guides_serial, tuple(camera["matrix"]), camera["focal_mm"])
+        if self._guide_overlay is not None and self._guide_overlay[0] == key:
+            return self._guide_overlay[1]
+        import groomlab
+        from maya.api import OpenMaya as om
+        from groomlab.guides import guide_ids, list_guide_groups
+        lines = []
+        shape = groomlab.scalp_mesh(self.groom)
+        group = self.fr.GROUP
+        if shape and group in [g["name"] for g in list_guide_groups(self.groom)]:
+            m = camera["matrix"]
+            rows = ((m[0], m[1], m[2]), (m[4], m[5], m[6]), (m[8], m[9], m[10]))
+            eye = (m[12], m[13], m[14])
+            f = camera["focal_mm"] / 25.4 / camera["aperture_in"] * camera["width"]
+            W, H = camera["width"], camera["height"]
+            fn = om.MFnMesh(om.MSelectionList().add(shape).getDagPath(0))
+
+            def project(p):
+                q = (p[0] - eye[0], p[1] - eye[1], p[2] - eye[2])
+                x, y, z = (sum(q[i] * r[i] for i in range(3)) for r in rows)
+                return (W / 2.0 + f * x / -z, H / 2.0 - f * y / -z) if z < -1e-6 else None
+            for gid in guide_ids(self.groom, group):
+                xyz = cmds.groomLabGuides(self.groom, guidePoints=str(gid)) or []
+                pts = [tuple(xyz[i:i + 3]) for i in range(0, len(xyz) - 2, 3)]
+                if len(pts) < 2:
+                    continue
+                normal, _ = fn.getClosestNormal(om.MPoint(*pts[0]), om.MSpace.kWorld)
+                if sum(normal[i] * (eye[i] - pts[0][i]) for i in range(3)) <= 0.0:
+                    continue  # rooted on the far side
+                line = [q for q in (project(p) for p in pts) if q]
+                if len(line) >= 2:
+                    lines.append(line)
+        self._guide_overlay = (key, lines)
+        return lines
+
+    def _guides_changed(self):
+        self._guides_serial += 1
+        self.photo_view.update()
 
     # ---- The preview: the mask and the field ------------------------------------------------------
 
@@ -1146,7 +1313,10 @@ class ReferenceWindow(QtWidgets.QWidget):
             self._preview_wanted()
 
     def _preview_wanted(self):
-        """The preview again soon (the masks and fields take a moment), the view meanwhile as it is."""
+        """The preview again soon (the masks and fields take a moment), the view meanwhile as it is.
+        Guides only (Align shows neither)."""
+        if self.stage() != "guides":
+            return
         if not hasattr(self, "_preview_timer"):
             self._preview_timer = QtCore.QTimer(self)
             self._preview_timer.setSingleShot(True)
@@ -1279,16 +1449,16 @@ class ReferenceWindow(QtWidgets.QWidget):
                 best, best_d = i, d
         return best
 
-    # ---- Flow arrows and mask touch-ups ------------------------------------------------------------
+    # ---- Guide lines and mask touch-ups ------------------------------------------------------------
 
     def add_flow_stroke(self, points, directed=True):
-        """A flow arrow (photo pixels, root first): one undo step. Returns its index."""
+        """A guide line (photo pixels, root first): one undo step. Returns its index."""
         index = self._need_photo().add_stroke([tuple(p) for p in points], directed)
         self._edited(solve=False)
         return index
 
     def erase_flow(self, path, radius=None):
-        """Erases the arrows within `radius` photo pixels (a 50th of the photo's width) of `path`."""
+        """Erases the guide lines within `radius` photo pixels (a 50th of the photo's width) of `path`."""
         radius = radius if radius is not None else self.photo_size()[0] / 50.0
         gone = self._need_photo().erase_strokes([tuple(p) for p in path], radius)
         if gone:
@@ -1449,10 +1619,13 @@ class ReferenceWindow(QtWidgets.QWidget):
         if not self.mesh_view.editor:
             return
         editor = self.editor()
-        editing = editor is not None and self.isVisible()
+        editing = editor is not None and self.isVisible() and self.stage() == "align"
         points = self.landmarks("mesh") if editing else []
         self.mesh_view.set_markers(points, [editor.matched("mesh", i) for i in range(len(points))] if editing else [],
                                    self.hover_index("mesh") if editing else -1)
+        guides = self.stage() == "guides"
+        # Guides: the groom with the mesh (its guides as they grow), no landmarks.
+        self.mesh_view.show_plugin_shapes(guides)
         self.mesh_view.show(markers=editing)
 
     def marker_state(self):
@@ -1508,9 +1681,16 @@ class ReferenceWindow(QtWidgets.QWidget):
             self.solve_label.setText(text)
         else:
             self.solve_label.setText("%s. %s" % (editor.summary(), solve.get("why") or ""))
+        self._tab_texts()
+        if self.camera:
+            name = self.camera.split("|")[-1]
+            self.photo_label.setText(("%s is lined up." % name) if self.lined_up(self.camera) else
+                                     ("%s is not lined up yet: Align it first (Guides from Photos leaves it out)." % name))
+        else:
+            self.photo_label.setText("No photo yet: Import Photo... above.")
         strokes = len(editor.strokes) if editor else 0
         touchups = len(editor.mask_strokes) if editor else 0
-        self.flow_label.setText("%d flow arrow%s, %d mask touch-up%s." % (strokes, "" if strokes == 1 else "s", touchups,
+        self.flow_label.setText("%d guide line%s, %d mask touch-up%s." % (strokes, "" if strokes == 1 else "s", touchups,
                                                                         "" if touchups == 1 else "s"))
         mask = self.fr.view_mask(self.groom, self.camera) if (self.camera and self.groom) else None
         self.mask_label.setText(os.path.basename(mask) if mask else "Auto (a plain backdrop)")
@@ -1528,8 +1708,9 @@ class ReferenceWindow(QtWidgets.QWidget):
                                     "Redo (Ctrl+Y)")
         hints = {"landmarks": "Landmarks: click a feature on the photo, then the same feature on the mesh (either order); "
                               "drag to adjust, Ctrl+click deletes a pair. 4 pairs line the camera up.",
-                 "flow": "Flow: drag along the hair from root to tip; Ctrl+drag erases.",
-                 "hair": "Hair: paint where the mask missed hair (Ctrl: backdrop). Mask tint shows the mask.",
+                 "flow": "Guide Lines: drag along the hair from root to tip (how guides there run and how long they "
+                         "are); Ctrl+drag erases.",
+                 "hair": "Hair: paint where the mask missed hair (Ctrl: backdrop). Show > Mask tints it.",
                  "backdrop": "Backdrop: paint where the mask took backdrop for hair (Ctrl: hair)."}
         self.hint.setText(hints[self.mode()] + "  Wheel zooms, middle drag pans, Ctrl+Z / Ctrl+Y undo and redo.")
         self.status.setText(("%d photo%s" % (len(self.photos()), "" if len(self.photos()) == 1 else "s")) +
@@ -1685,8 +1866,9 @@ class ReferenceWindow(QtWidgets.QWidget):
             self.message.setText(str(e).strip())
             return None
         self.last_result = result
+        self._guides_serial += 1
         self.message.setText("%d guides in fromReference (symmetry: %s; %d roots had no hair over them, %d were not "
-                             "seen). Brush them, or Generate again after drawing flow arrows." % (
+                             "seen). Brush them, or Generate again after drawing guide lines." % (
                                  len(result["guide_ids"]), result["symmetry"], result["roots_bald"],
                                  result["roots_unseen"]))
         self._redraw()
@@ -1765,6 +1947,7 @@ class ReferenceWindow(QtWidgets.QWidget):
 
     def _undone(self, *_):
         # After Maya's undo or redo has finished (deferred): the window follows the scene.
+        self._guides_serial += 1
         QtCore.QTimer.singleShot(0, self.follow_scene)
 
     def follow_scene(self):
@@ -1815,8 +1998,9 @@ class ReferenceWindow(QtWidgets.QWidget):
         global _window
         self.teardown()
         mesh_views.undo_back_on(self._undo_was_on, "Reference")
-        # Again once Maya's idle queue has run: after a Morph to Photos, a job Maya queues while the
-        # views go left the queue off a moment after the window closed.
+        # Again once Maya's idle queue has run: after a Morph to Photos, Maya's own idle work for the
+        # blendShape turns the queue off and on again; run inside a nested event loop (a script
+        # that never returns to Maya's idle, as the GUI tests) it is left off.
         was_on = self._undo_was_on
         cmds.evalDeferred(lambda: mesh_views.undo_back_on(was_on, "Reference"), lowestPriority=True)
         if _window is self:

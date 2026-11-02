@@ -357,9 +357,9 @@ TEST(ScaleExport, ToMeshMakesTheScalesPlates) {
     const auto plates = buildScaleMesh(*strands, sc.skin);
     ASSERT_TRUE(plates);
     const StrandMesh mesh = buildStrandMesh(*strands, sc.skin.get(), o);
-    // Each plate one closed piece: its top, rim and underside welded (the prototype keeps their
-    // own vertices for hard edges), every edge between two faces, every point a plate point.
-    EXPECT_LT(mesh.mesh.points.size(), plates->points.size());
+    // Each plate one closed piece (the built-in plates are: nothing to weld), every edge between
+    // two faces, every point a plate point.
+    EXPECT_LE(mesh.mesh.points.size(), plates->points.size());
     std::map<std::pair<int, int>, int> edges;
     std::size_t corner = 0;
     for (int n : mesh.mesh.faceCounts) {
@@ -374,14 +374,15 @@ TEST(ScaleExport, ToMeshMakesTheScalesPlates) {
     for (const auto& [edge, faces] : edges) open += faces != 2 ? 1 : 0;
     EXPECT_EQ(open, 0u) << "watertight plates";
     EXPECT_LT((mesh.mesh.points.back() - plates->points.back()).length(), 1e-6f);  // (the last plate's middle)
-    // Every triangle in one face: two in each quad (welding merges no corner of a built-in plate).
+    // Every triangle in one face: two in each quad, every face a quad (the built-in plates are all
+    // quads, for subdivision).
     std::size_t triangles = 0, quads = 0;
     for (int n : mesh.mesh.faceCounts) {
         triangles += static_cast<std::size_t>(n - 2);
         quads += n == 4 ? 1 : 0;
     }
     EXPECT_EQ(triangles, plates->triangleCount());
-    EXPECT_GT(quads * 10, mesh.mesh.faceCount() * 9) << "the plates are quads, nearly all";
+    EXPECT_EQ(quads, mesh.mesh.faceCount()) << "the plates are quads, all of them";
     EXPECT_TRUE(std::all_of(mesh.mesh.faceCounts.begin(), mesh.mesh.faceCounts.end(), [](int n) { return n == 3 || n == 4; }));
     EXPECT_EQ(mesh.mesh.featherCount, plates->scales.size());
     EXPECT_EQ(mesh.faceParts, std::vector<int>(mesh.mesh.faceCount(), static_cast<int>(MeshPart::Scales)));

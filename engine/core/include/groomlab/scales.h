@@ -33,12 +33,14 @@ class ScalpMesh;
 // ---- Built-in plates --------------------------------------------------------------------------
 
 // A scale plate made in the core: its base at the origin, +Y its length (0 to 1), X across
-// (`width` wide at its widest), +Z off the skin (0 underneath, `height` at the dome's top). A
-// domed top on a grid, a keel down its middle, a bevelled rim down to `rim` of the height, a
-// flat underside; uvs u across, v along.
+// (`width` wide at its widest), +Z off the skin (0 underneath, `height` at the dome's top). One
+// closed piece of quads for subdivision, the top and the underside alike: from a loop round the
+// rim's middle (`rim` of the height is the rim's top), a crease loop at each edge, a support loop
+// holding it, then an inner loop filled with a columns x rows grid of quads; a domed top with a keel
+// down the middle, a flat underside; uvs planar (u across, v along).
 struct ScalePlateShape {
-    int rows = 6;          // along
-    int columns = 4;       // across
+    int rows = 4;          // quads along the middle grid (and each long side's segments)
+    int columns = 4;       // quads across it (even: made so)
     float width = 1.0f;    // at the widest, over the length (1: as wide as the strand)
     float base = 0.55f;    // the base's width over the widest
     float widest = 0.35f;  // where it is widest, 0 base to 1 tip

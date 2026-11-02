@@ -487,7 +487,6 @@ float solid = 1.0;            // 1: no maps (the solidColor)
 float3 solidColor = float3(0.58, 0.50, 0.42);
 float mapSize = 2048.0;
 float cardPass = 0.0;         // 1: a shadow map's depth, 2: a point light's (cardPassPreDraw)
-float cardColorLook = 0.0;    // what the bake holds: 0 the hair shaded (hairBaseOfShaded), 1 its base color
 // The color map's Rec.709 to the rendering space, by rows (renderingSpace(): as a file node reads it).
 float3 cardFromRec709R = float3(1.0, 0.0, 0.0);
 float3 cardFromRec709G = float3(0.0, 1.0, 0.0);
@@ -570,11 +569,10 @@ cardPixel hairCardPS(cardOutput IN) {
         float4 m = map.Sample(mapSampler, IN.Uv);
         OUT.Mask = cardMask(m.a, IN.Uv, GetRenderTargetSampleCount());
         float3 c = m.rgb;
-        // The bake holds the hair as the viewport shades it (a card in an engine is matte), or its base
-        // color (cardColorLook): shaded as hair, its base color (hairBaseOfShaded).
+        // The bake holds the authored base color in Rec.709; restore the rendering space.
         float3 rec709 = lerp(c / 12.92, pow((c + 0.055) / 1.055, 2.4), step(0.04045, c));
         float3 baked = float3(dot(cardFromRec709R, rec709), dot(cardFromRec709G, rec709), dot(cardFromRec709B, rec709)) * 2.0 * IN.Color.rgb;
-        base = cardColorLook > 0.5 ? clamp(baked, 1e-8, 1.0) : hairBaseOfShaded(baked, hairAzimuthalRoughness);
+        base = clamp(baked, 1e-8, 1.0);
     }
     // (No strand of its own: the strands' variation is the bake's.)
     float4 none = float4(0.5, 0.5, 0.5, 0.5);
@@ -658,7 +656,6 @@ uniform float solid = 1.0;
 uniform vec3 solidColor = {0.58, 0.50, 0.42};
 uniform float mapSize = 2048.0;
 uniform float cardPass = 0.0;
-uniform float cardColorLook = 0.0;
 uniform vec3 cardFromRec709R = {1.0, 0.0, 0.0};
 uniform vec3 cardFromRec709G = {0.0, 1.0, 0.0};
 uniform vec3 cardFromRec709B = {0.0, 0.0, 1.0};
@@ -795,7 +792,7 @@ GLSLShader hairCardPS {
             vec3 c = m.rgb;
             vec3 rec709 = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
             vec3 baked = vec3(dot(cardFromRec709R, rec709), dot(cardFromRec709G, rec709), dot(cardFromRec709B, rec709)) * 2.0 * cardIn.Color.rgb;
-            base = cardColorLook > 0.5 ? clamp(baked, 1e-8, 1.0) : hairBaseOfShaded(baked, hairAzimuthalRoughness);
+            base = clamp(baked, 1e-8, 1.0);
         }
         gl_SampleMask[0] = int(mask);
         vec4 none = vec4(0.5, 0.5, 0.5, 0.5);

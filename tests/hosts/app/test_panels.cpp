@@ -2954,6 +2954,14 @@ TEST(AppPanels, ReferenceWindowLinesAPhotoUpAndGrowsGuides) {
     EXPECT_LT(rw->photo()->solve.rms, 1.0);
     EXPECT_EQ(rw->stage(), ReferenceWindow::Stage::Align);
     EXPECT_FALSE(rw->guidesPanel()->isVisibleTo(rw));
+    // Align shows its own: no tool chips (one tool), its panel, the mesh over the photo, Next: Guides.
+    EXPECT_FALSE(rw->modeButton(ReferenceWindow::Mode::Landmarks)->isVisibleTo(rw));
+    EXPECT_FALSE(rw->modeButton(ReferenceWindow::Mode::Flow)->isVisibleTo(rw));
+    EXPECT_TRUE(rw->alignPanel()->isVisibleTo(rw));
+    EXPECT_TRUE(rw->alignShow()->isVisibleTo(rw));
+    EXPECT_FALSE(rw->guidesShow()->isVisibleTo(rw));
+    EXPECT_TRUE(rw->nextButton()->isVisibleTo(rw));
+    EXPECT_FALSE(rw->generateButton()->isVisibleTo(rw));
     // Keep focal length (kept with the photo); the focal length by hand turns it on, the camera follows.
     rw->setKeepFocal(true);
     EXPECT_FALSE(rw->photo()->solve.focalSolved);
@@ -3005,6 +3013,17 @@ TEST(AppPanels, ReferenceWindowLinesAPhotoUpAndGrowsGuides) {
     rw->setMode(ReferenceWindow::Mode::Flow);
     EXPECT_EQ(rw->stage(), ReferenceWindow::Stage::Guides);
     EXPECT_TRUE(rw->guidesPanel()->isVisibleTo(rw));
+    // Guides shows its own: no landmarks (no chip, no Align panel, no markers in the mesh view), what
+    // the photo shows below it, Generate; the brush for the mask tools only.
+    EXPECT_FALSE(rw->modeButton(ReferenceWindow::Mode::Landmarks)->isVisibleTo(rw));
+    EXPECT_FALSE(rw->alignPanel()->isVisibleTo(rw));
+    EXPECT_TRUE(rw->guidesShow()->isVisibleTo(rw));
+    EXPECT_FALSE(rw->alignShow()->isVisibleTo(rw));
+    EXPECT_FALSE(rw->nextButton()->isVisibleTo(rw));
+    EXPECT_TRUE(rw->generateButton()->isVisibleTo(rw));
+    EXPECT_FALSE(rw->markerEditing());
+    EXPECT_FALSE(rw->brushSlider()->isVisibleTo(rw));
+    EXPECT_TRUE(rw->photoText().contains("is lined up"));
     const QPointF top = pixel(center + Vec3f(0, radius * 0.5f, 0)), bottom = pixel(center - Vec3f(0, radius * 0.3f, 0));
     std::vector<QPointF> stroke;
     for (int k = 0; k <= 10; ++k) stroke.push_back(top + (bottom - top) * (k / 10.0));
@@ -3025,6 +3044,7 @@ TEST(AppPanels, ReferenceWindowLinesAPhotoUpAndGrowsGuides) {
     for (float m : before->mask.pixels) hairBefore += m;
     EXPECT_GT(hairBefore, 0.0f);
     rw->setMode(ReferenceWindow::Mode::Backdrop);
+    EXPECT_TRUE(rw->brushSlider()->isVisibleTo(rw));  // (the mask tools have the brush)
     const QPointF mid = pixel(center);
     dragPhoto(view, {mid - QPointF(30, 0), mid, mid + QPointF(30, 0)});
     ASSERT_EQ(rw->photo()->editor.maskStrokes().size(), 1u);

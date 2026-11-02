@@ -81,7 +81,7 @@ public:
     bool undo();
     bool redo();
     std::size_t undoDepth() const { return undo_.size(); }
-    // What undo() and redo() would take back or do again ("landmark", "flow arrow", ...; "" none).
+    // What undo() and redo() would take back or do again ("landmark", "guide line", ...; "" none).
     std::string undoText() const { return undo_.empty() ? std::string() : undo_.back().what; }
     std::string redoText() const { return redo_.empty() ? std::string() : redo_.back().what; }
     std::uint64_t revision() const { return revision_; }

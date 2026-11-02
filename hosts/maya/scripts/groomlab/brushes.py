@@ -226,10 +226,8 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
     - Ctrl is the opposite: Length shortens, Lift lays down, Twist and Curl turn back, Attract
       pushes apart, Direction turns away, Noise smooths, Shape shrinks, rounds or untwists, Cut
       grows; painting, toward 0 (Comb, Slide, Smooth and Erase have none).
-    - Shift with a guide brush selects guides: a drag paints them into the selection with the
-      ring, a click adds the guides in the ring; every guide not selected freezes (one undo step).
-      A Shift+click where no guide is deselects and unfreezes every guide. Painting (maps,
-      Freeze), Shift+drag smooths.
+    - Shift+drag smooths with every brush: the guides (a guide brush), a painted map or Freeze,
+      the Tube brush's channel. Selecting guides is the Select tool's.
     """
     _check_mode(mode)
     ensure_plugin()

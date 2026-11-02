@@ -1028,9 +1028,8 @@ void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, 
     inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
     if (modifiers & kStrokeShift) {
-        // Painting, a drag smooths (decided on drag); a release without one does nothing. A guide
-        // brush's Shift selects (the host's): nothing here.
-        if (settings.shiftSelects()) return;
+        // Every brush's Shift+drag smooths (decided on drag: the guides, a painted map, the Tube
+        // brush's channel); a release without one does nothing. Selecting is the Select tool's.
         shiftPending_ = true;
         pressX_ = x;
         pressY_ = y;
@@ -1085,9 +1084,8 @@ bool BrushTool::stroke(StrokeHost& host, const ToolView& view, const std::vector
                        unsigned modifiers, const std::function<void()>& afterDab) {
     inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
-    if ((modifiers & kStrokeShift) && settings.shiftSelects()) return false;  // a guide brush's Shift selects: the host's
     const BrushMode saved = settings.brush.mode;
-    if (modifiers & kStrokeShift) useShiftSmoothing(settings.brush);  // as a Shift+drag while painting does
+    if (modifiers & kStrokeShift) useShiftSmoothing(settings.brush);  // as a Shift+drag does
     if (points.empty() || !startStroke(host, view, points[0][0], points[0][1])) {
         endShiftSmoothing(settings.brush, saved);
         return false;

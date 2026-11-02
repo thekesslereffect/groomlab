@@ -41,12 +41,6 @@ namespace groomlab {
 class ScalpMesh;
 class StrandSet;
 
-// What the cards' color maps (and their per-vertex tints) hold. Shaded: the hair as GroomLab's
-// viewport shades it (hair_color.h hairShadedColor), for a plain material, a lambert or an
-// engine's default lit, to look like the groom. Base: the strands' base color, for a hair shader
-// that shades it itself (aiStandardHair's base color, Unreal's Hair shading model).
-enum class CardColorLook { Shaded, Base };
-
 // A 3x3 color matrix, row-major: out[i] = sum_j m[i * 3 + j] in[j].
 using ColorMatrix = std::array<float, 9>;
 constexpr ColorMatrix kIdentityColorMatrix = {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f};
@@ -122,7 +116,6 @@ struct CardSettings {
     // under each station), so cards shade like the strands around them instead
     // of like flat planes; false keeps each card's own (geometric) normals.
     bool volumeNormals = true;
-    CardColorLook colorLook = CardColorLook::Shaded;  // what the color maps hold (the Cards node's bakeColor)
     int variations = 0;        // textures the cards share (0: each its own)
     bool mirror = true;        // cards sharing a texture alternate mirrored
     float padding = 0.004f;    // atlas units between textures
@@ -252,6 +245,10 @@ struct CardMesh {
         // The card's own, not its texture's.
         std::array<float, 2> iridescence{0.0f, 0.0f};
         int node = 0;                    // the Cards node it came from: an index into CardMesh::nodes
+        // Per Cards-node coverage fades. Negative means use CardBakeSettings (cards made
+        // directly through the core API rather than by a Cards operator).
+        float strandsRootFade = -1.0f;
+        float featherRootFade = -1.0f;
         // The strands the card was made from, for baking; null: the strands
         // given to bakeCardTextures.
         std::shared_ptr<const StrandSet> source;
@@ -264,9 +261,6 @@ struct CardMesh {
     std::vector<std::string> nodes;
     float padding = 0.004f;              // atlas units between textures (layoutCards)
     int atlasSize = 0;                   // suggested bake resolution (0: none)
-    // What the bake's color maps and the tints hold (CardSettings::colorLook; Cards nodes sharing
-    // an atlas: the first one's). Maya's card shading turns it back into the base color by it.
-    CardColorLook colorLook = CardColorLook::Shaded;
     float thinnestStrand = 1.0f;         // the narrowest a strand bakes, in texels (CardBakeSettings::minStrandTexels)
     std::size_t vertexCount() const { return positions.size(); }
     std::size_t triangleCount() const { return quads.size() / 2; }
@@ -366,11 +360,18 @@ struct CardBakeSettings {
     // where the strands' own drawing is solid. 0: to scale (thinner ones fainter).
     float minStrandTexels = 1.0f;
     float occlusion = 1.0f;                       // ambient occlusion strength (0: none)
-    int dilate = 8;                               // pixels colors spread past the strands (mip padding)
+    // Texels the values (every map but the coverage) spread past the strands, so mip maps and
+    // filtering at the cards' edges don't pull in the empty texels' (mip padding). -1: all the way
+    // (two averaged rings, then each empty texel takes its nearest strand texel's values), so
+    // neighbouring cards meet halfway and the most mipped-down level still holds the hair's colors.
+    int dilate = -1;
     // Share of the card, from its root, over which coverage fades in, so the
     // cards' root ends blend into each other and the scalp instead of reading
     // as edges (0: none).
     float rootFade = 0.06f;
+    // Feather cards begin at their shaft root and normally remain opaque there. Kept
+    // separate from rootFade so one Cards node can mix hair and feathers.
+    float featherRootFade = 0.0f;
     // The strands' colors (linear, the host's rendering space) to linear Rec.709, sRGB's primaries,
     // which an sRGB color map holds: a host that reads the map converts it back to its rendering
     // space (Maya under ACES: ACEScg; a map written with ACEScg's values read as sRGB came out

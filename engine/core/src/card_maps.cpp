@@ -583,7 +583,6 @@ bool deleteCardMapPreset(const std::string& name) {
 // ---------------------------------------------------------------------------------------------
 // Settings
 
-int cardMapAutoPadding(int resolution) { return std::max(8, static_cast<int>(std::lround(8.0 * resolution / 2048.0))); }
 
 int cardMapSupersample(int resolution, int requested) {
     int factor = requested >= 4 ? 4 : requested >= 2 ? 2 : 1;
@@ -611,9 +610,8 @@ std::vector<int> cardMapBitDepths(const std::string& format) {
 CardBakeSettings cardMapBakeSettings(const CardBakeSettings& base, const CardMapExport& settings, int resolution) {
     CardBakeSettings out = base;
     const int factor = cardMapSupersample(resolution, settings.supersample);
-    const int padding = settings.padding >= 0 ? settings.padding : cardMapAutoPadding(resolution);
     out.size = resolution * factor;
-    out.dilate = padding * factor;
+    out.dilate = settings.padding >= 0 ? settings.padding * factor : -1;  // (-1: Full, to the neighbouring cards)
     out.minStrandTexels = base.minStrandTexels * static_cast<float>(factor);
     return out;
 }

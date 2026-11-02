@@ -161,6 +161,9 @@ constexpr float kFlyawayGain = 0.111f, kFlyawayFloor = 0.5f, kFlyawayContrast = 
 constexpr float kFrizzGain = 0.94f, kFrizzFloor = 0.05f;
 // Curls: a clear share of the flow swinging with a period, by more than this.
 constexpr float kCurlShare = 0.22f, kCurlAmplitude = 7.5f;
+// Wavy: a smaller share swinging, as widely. Not curly enough for a Curl node, but guides along each
+// wave wander inside the hair and never reach its ends: they follow the coarse flow too.
+constexpr float kWavyShare = 0.12f, kWavyAmplitude = 15.0f;
 
 float srgbToLinear(float c) {
     c = std::clamp(c, 0.0f, 1.0f);
@@ -197,6 +200,8 @@ struct PreparedView {
     std::shared_ptr<const OrientationField> coarse;  // the field smoothed past its curls
     CurlEstimate curl;
     std::vector<float> hintWay;         // 3 a pixel: the directed hints' way (u, v) and their strength (empty: none)
+    std::vector<float> hintLength;      // 2 a pixel: how long the drawn lines say the hair is from there on (scene units)
+                                        // and how much they say it (0-1; empty: none)
     float depthEps = 0.0f;
 
     bool inFrame(float u, float v) const { return u >= 0 && v >= 0 && u < static_cast<float>(width) && v < static_cast<float>(height); }
@@ -282,21 +287,244 @@ std::array<float, 3> borderColor(const RefImage& image) {
     return bg;
 }
 
-RefImage autoMask(const RefImage& image, const std::array<float, 3>& bg) {
-    // Everything not the backdrop: a distance over 0.12 from its color.
+// The backdrop as a smooth fit of the photo's border: per channel a quadratic in x and y over the
+// photo, so a lit backdrop's gradient (lighter on one side) is not taken for the subject. Border
+// pixels far off the fit (the subject at the border: shoulders, a shirt) are left out of it, twice.
+struct BackdropFit {
+    std::array<std::array<double, 3>, 6> coef{};
+    double width = 1.0, height = 1.0;
+
+    static std::array<double, 6> terms(double x, double y) { return {1.0, x, y, x * x, y * y, x * y}; }
+    // The backdrop's color at photo pixel (x, y).
+    std::array<float, 3> at(double px, double py) const {
+        const auto t = terms(2.0 * px / width - 1.0, 2.0 * py / height - 1.0);
+        std::array<float, 3> c{0, 0, 0};
+        for (int k = 0; k < 3; ++k) {
+            double s = 0.0;
+            for (int i = 0; i < 6; ++i) s += t[static_cast<std::size_t>(i)] * coef[static_cast<std::size_t>(i)][static_cast<std::size_t>(k)];
+            c[static_cast<std::size_t>(k)] = static_cast<float>(s);
+        }
+        return c;
+    }
+};
+
+BackdropFit fitBackdrop(const RefImage& image) {
+    BackdropFit fit;
+    fit.width = image.width;
+    fit.height = image.height;
+    const int c = std::min(image.channels, 3);
+    const int pad = std::max(2, std::min(image.width, image.height) / 40);
+    struct Sample {
+        std::array<double, 6> t;
+        std::array<float, 3> rgb;
+    };
+    std::vector<Sample> samples;
+    for (int y = 0; y < image.height; ++y)
+        for (int x = 0; x < image.width; ++x) {
+            if ((x >= pad && x < image.width - pad) && (y >= pad && y < image.height - pad)) continue;
+            Sample s{BackdropFit::terms(2.0 * (x + 0.5) / fit.width - 1.0, 2.0 * (y + 0.5) / fit.height - 1.0), {0, 0, 0}};
+            for (int k = 0; k < 3; ++k) s.rgb[static_cast<std::size_t>(k)] = image.at(x, y, std::min(k, c - 1));
+            samples.push_back(s);
+        }
+    std::vector<std::uint8_t> use(samples.size(), 1);
+    const std::array<float, 3> flat = borderColor(image);
+    for (int k = 0; k < 3; ++k) fit.coef[0][static_cast<std::size_t>(k)] = flat[static_cast<std::size_t>(k)];
+    for (int round = 0; round < 3; ++round) {
+        if (round > 0) {  // the samples far off the last fit left out
+            std::vector<float> res(samples.size());
+            for (std::size_t i = 0; i < samples.size(); ++i) {
+                const auto& t = samples[i].t;
+                float d = 0.0f;
+                for (int k = 0; k < 3; ++k) {
+                    double s = 0.0;
+                    for (int j = 0; j < 6; ++j) s += t[static_cast<std::size_t>(j)] * fit.coef[static_cast<std::size_t>(j)][static_cast<std::size_t>(k)];
+                    const float e = static_cast<float>(s) - samples[i].rgb[static_cast<std::size_t>(k)];
+                    d += e * e;
+                }
+                res[i] = std::sqrt(d);
+            }
+            const float limit = std::max(0.04f, 2.5f * median(res));
+            for (std::size_t i = 0; i < samples.size(); ++i) use[i] = res[i] < limit ? 1 : 0;
+        }
+        // The normal equations (6 x 6, shared by the channels), solved by Gaussian elimination.
+        double a[6][9] = {};
+        std::size_t n = 0;
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            if (!use[i]) continue;
+            ++n;
+            const auto& t = samples[i].t;
+            for (int r = 0; r < 6; ++r) {
+                for (int q = 0; q < 6; ++q) a[r][q] += t[static_cast<std::size_t>(r)] * t[static_cast<std::size_t>(q)];
+                for (int k = 0; k < 3; ++k) a[r][6 + k] += t[static_cast<std::size_t>(r)] * samples[i].rgb[static_cast<std::size_t>(k)];
+            }
+        }
+        if (n < 24) break;
+        bool ok = true;
+        for (int col = 0; col < 6 && ok; ++col) {
+            int pivot = col;
+            for (int r = col + 1; r < 6; ++r)
+                if (std::abs(a[r][col]) > std::abs(a[pivot][col])) pivot = r;
+            if (std::abs(a[pivot][col]) < 1e-9) ok = false;
+            if (!ok) break;
+            for (int q = 0; q < 9; ++q) std::swap(a[col][q], a[pivot][q]);
+            for (int r = 0; r < 6; ++r) {
+                if (r == col) continue;
+                const double f = a[r][col] / a[col][col];
+                for (int q = col; q < 9; ++q) a[r][q] -= f * a[col][q];
+            }
+        }
+        if (!ok) break;
+        for (int r = 0; r < 6; ++r)
+            for (int k = 0; k < 3; ++k) fit.coef[static_cast<std::size_t>(r)][static_cast<std::size_t>(k)] = a[r][6 + k] / a[r][r];
+    }
+    return fit;
+}
+
+// Everything not the backdrop: a distance over 0.12 from its fitted color. `crop`: the part of the
+// photo `image` shows (photo pixels), at whatever size `image` is.
+RefImage autoMask(const RefImage& image, const BackdropFit& backdrop, const std::array<int, 4>& crop) {
     RefImage mask;
     mask.width = image.width;
     mask.height = image.height;
     mask.channels = 1;
     mask.pixels.assign(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height), 0.0f);
     const int c = image.channels;
+    const double sx = static_cast<double>(crop[2]) / image.width, sy = static_cast<double>(crop[3]) / image.height;
     for (int y = 0; y < image.height; ++y)
         for (int x = 0; x < image.width; ++x) {
+            const std::array<float, 3> bg = backdrop.at(crop[0] + (x + 0.5) * sx, crop[1] + (y + 0.5) * sy);
             float d = 0.0f;
-            for (int k = 0; k < std::min(c, 3); ++k) d += (image.at(x, y, k) - bg[k]) * (image.at(x, y, k) - bg[k]);
+            for (int k = 0; k < std::min(c, 3); ++k) d += (image.at(x, y, k) - bg[static_cast<std::size_t>(k)]) * (image.at(x, y, k) - bg[static_cast<std::size_t>(k)]);
             mask.pixels[static_cast<std::size_t>(y * image.width + x)] = std::sqrt(d) > 0.12f ? 1.0f : 0.0f;
         }
     return mask;
+}
+
+// `set` kept where 4-connected to a pixel of `from` (both w x h).
+void keepConnected(std::vector<std::uint8_t>& set, const std::vector<std::uint8_t>& from, int w, int h) {
+    std::vector<std::uint8_t> keep(set.size(), 0);
+    std::vector<std::size_t> stack;
+    for (std::size_t i = 0; i < set.size(); ++i)
+        if (set[i] && from[i]) {
+            keep[i] = 1;
+            stack.push_back(i);
+        }
+    while (!stack.empty()) {
+        const std::size_t i = stack.back();
+        stack.pop_back();
+        const int x = static_cast<int>(i % static_cast<std::size_t>(w)), y = static_cast<int>(i / static_cast<std::size_t>(w));
+        const int nx[4] = {x - 1, x + 1, x, x}, ny[4] = {y, y, y - 1, y + 1};
+        for (int k = 0; k < 4; ++k) {
+            if (nx[k] < 0 || ny[k] < 0 || nx[k] >= w || ny[k] >= h) continue;
+            const std::size_t o = static_cast<std::size_t>(ny[k]) * static_cast<std::size_t>(w) + static_cast<std::size_t>(nx[k]);
+            if (keep[o] || !set[o]) continue;
+            keep[o] = 1;
+            stack.push_back(o);
+        }
+    }
+    set.swap(keep);
+}
+
+// An automatic hair mask by the hair's colors (the subject is more than its hair: a face, a beard
+// below it, a neck, clothes). `subject`: what is not the backdrop. The hair's colors are learned from
+// the subject just outside the scalp's projection on its upper side (`up`: the photo's up, pixels;
+// only hair surrounds the top of a head, even a scalp that is the whole head), the rest's from the
+// subject's other pixels; then three more rounds, each from the last (the hair found, a little in;
+// the rest, a little off it). A pixel is hair where the hair's colors explain it better over a 5 x 5
+// neighbourhood, connected to the seeds; the top of the scalp's projection leans to hair (the
+// crown, whose shadowed colors can match dark clothes). `seeds`: more sure hair (strokes);
+// `notHair`: never hair. False (nothing changed) when too little hair shows past the scalp to learn
+// from (short hair, fur on a body).
+bool hairByColor(const RefImage& rgb, RefImage& mask, const RefImage& subject, const std::vector<std::uint8_t>& scalpCover,
+                 const std::array<float, 2>& up, const std::vector<std::uint8_t>& seedsIn, const std::vector<std::uint8_t>& notHair) {
+    const int w = rgb.width, h = rgb.height;
+    const std::size_t pixels = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
+    // The scalp's projection along the photo's up: its center and extent.
+    float hlo = kInf, hhi = -kInf, cx = 0.0f, cy = 0.0f;
+    std::size_t covered = 0;
+    for (std::size_t i = 0; i < pixels; ++i)
+        if (scalpCover[i]) {
+            cx += static_cast<float>(i % static_cast<std::size_t>(w));
+            cy += static_cast<float>(i / static_cast<std::size_t>(w));
+            ++covered;
+        }
+    if (covered < 64) return false;
+    cx /= static_cast<float>(covered);
+    cy /= static_cast<float>(covered);
+    const auto height = [&](std::size_t i) {
+        return (static_cast<float>(i % static_cast<std::size_t>(w)) - cx) * up[0] + (static_cast<float>(i / static_cast<std::size_t>(w)) - cy) * up[1];
+    };
+    for (std::size_t i = 0; i < pixels; ++i)
+        if (scalpCover[i]) {
+            hlo = std::min(hlo, height(i));
+            hhi = std::max(hhi, height(i));
+        }
+    // The subject's parts that reach the scalp (a blotch of backdrop the fit missed is not hair).
+    std::vector<std::uint8_t> sil(pixels, 0), near(pixels, 0);
+    const std::vector<float> fromScalp = distanceTransform(scalpCover, w, h);
+    for (std::size_t i = 0; i < pixels; ++i) {
+        sil[i] = subject.pixels[i] >= 0.5f && !notHair[i] ? 1 : 0;
+        near[i] = fromScalp[i] <= 3.0f ? 1 : 0;
+    }
+    keepConnected(sil, near, w, h);
+    const float mid = 0.5f * (hlo + hhi), crown = hhi - 0.3f * (hhi - hlo);
+    std::vector<std::uint8_t> seeds(pixels, 0);
+    std::size_t seedCount = 0, silCount = 0;
+    for (std::size_t i = 0; i < pixels; ++i) {
+        silCount += sil[i];
+        seeds[i] = (sil[i] && !scalpCover[i] && fromScalp[i] > 2.0f && height(i) > mid) ? 1 : 0;
+        seedCount += seeds[i];
+        if (seedsIn[i] && !notHair[i]) seeds[i] = sil[i] = 1;
+    }
+    if (seedCount < std::max<std::size_t>(100, silCount / 50)) return false;
+    auto bin = [&](std::size_t i) {
+        int b = 0;
+        for (int c = 0; c < 3; ++c)
+            b = b * 16 + std::clamp(static_cast<int>(rgb.pixels[i * static_cast<std::size_t>(rgb.channels) + static_cast<std::size_t>(std::min(c, rgb.channels - 1))] * 15.999f), 0, 15);
+        return static_cast<std::size_t>(b);
+    };
+    std::vector<std::uint8_t> fg = seeds, bg(pixels, 0), hair(pixels, 0);
+    for (std::size_t i = 0; i < pixels; ++i) bg[i] = sil[i] && !seeds[i] ? 1 : 0;
+    std::vector<float> llr(pixels), box(pixels);
+    for (int round = 0; round < 4; ++round) {
+        std::vector<double> hf(4096, 0.5), hb(4096, 0.5);
+        double nf = 2048.0, nb = 2048.0;
+        for (std::size_t i = 0; i < pixels; ++i) {
+            if (fg[i]) hf[bin(i)] += 1.0, nf += 1.0;
+            else if (bg[i]) hb[bin(i)] += 1.0, nb += 1.0;
+        }
+        for (std::size_t i = 0; i < pixels; ++i) {
+            const std::size_t b = bin(i);
+            llr[i] = static_cast<float>(pm::log(hf[b] / nf) - pm::log(hb[b] / nb)) + (scalpCover[i] && height(i) > crown ? 1.5f : 0.0f);
+        }
+        // A 5 x 5 mean (separable).
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                float s = 0.0f;
+                int n = 0;
+                for (int i = std::max(0, x - 2); i <= std::min(w - 1, x + 2); ++i, ++n) s += llr[static_cast<std::size_t>(y * w + i)];
+                box[static_cast<std::size_t>(y * w + x)] = s / static_cast<float>(n);
+            }
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                float s = 0.0f;
+                int n = 0;
+                for (int j = std::max(0, y - 2); j <= std::min(h - 1, y + 2); ++j, ++n) s += box[static_cast<std::size_t>(j * w + x)];
+                llr[static_cast<std::size_t>(y * w + x)] = s / static_cast<float>(n);
+            }
+        for (std::size_t i = 0; i < pixels; ++i) hair[i] = sil[i] && (llr[i] > 0.0f || (seedsIn[i] && !notHair[i])) ? 1 : 0;
+        keepConnected(hair, seeds, w, h);
+        // The next round's samples: the hair a little in (and the seeds), the rest a little off it.
+        std::vector<std::uint8_t> off(pixels);
+        for (std::size_t i = 0; i < pixels; ++i) off[i] = hair[i] ? 0 : 1;
+        const std::vector<float> in = distanceTransform(off, w, h), out = distanceTransform(hair, w, h);
+        for (std::size_t i = 0; i < pixels; ++i) {
+            fg[i] = sil[i] && (seeds[i] || in[i] > 2.0f) ? 1 : 0;
+            bg[i] = sil[i] && !fg[i] && out[i] > 3.0f ? 1 : 0;
+        }
+    }
+    for (std::size_t i = 0; i < pixels; ++i) mask.pixels[i] = hair[i] ? 1.0f : 0.0f;
+    return true;
 }
 
 RefImage grown(const RefImage& mask, int radius);
@@ -435,7 +663,7 @@ RefImage grown(const RefImage& mask, int radius) {
 
 struct HintSample;
 std::vector<HintSample> hintSamples(const ReferenceView& view, float scale, int w, int h);
-void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float sigma, float lineSigma);
+void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float sigma, float lineSigma, float worldPerPixel);
 
 // The pixels (w x h) the mask strokes of one kind cover, their points scaled by `scale` (photo
 // pixels to these), each at least a pixel wide.
@@ -476,7 +704,7 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
         ReferenceView view = original;
         std::array<int, 4> crop{0, 0, 0, 0};
         // The backdrop's color, from the whole photo's border (before any crop).
-        const std::array<float, 3> backdrop = original.image.empty() ? std::array<float, 3>{0, 0, 0} : borderColor(original.image);
+        const BackdropFit backdrop = original.image.empty() || !original.mask.empty() ? BackdropFit{} : fitBackdrop(original.image);
         if (options.cropToSubject && !original.field && !original.image.empty()) {
             RefCamera cam = original.camera;
             if (cam.width <= 0.0) {
@@ -610,7 +838,7 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
             pv.mask = (view.mask.width == pv.width && view.mask.height == pv.height) ? view.mask : view.mask.resized(pv.width, pv.height);
             if (pv.mask.channels != 1) pv.mask = pv.mask.gray();
         } else if (!pv.rgb.empty()) {
-            pv.mask = autoMask(pv.rgb, backdrop);
+            pv.mask = autoMask(pv.rgb, backdrop, crop[2] > 0 ? crop : std::array<int, 4>{0, 0, w, h});
         } else {
             pv.mask.width = pv.width;
             pv.mask.height = pv.height;
@@ -659,7 +887,30 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
                 return distanceTransform(off, pv.width, pv.height);
             }();
             for (std::size_t i = 0; i < pixels; ++i) likelyHair[i] = pv.scalpCover[i] && outside[i] > 3.0f ? 1 : 0;
-            pv.mask = refineMask(pv.rgb, pv.mask, seeds, sureBackdrop, likelyHair);
+            // An automatic mask: by the hair's colors (a face, a beard, a neck and clothes are not
+            // backdrop either), where enough hair shows past the scalp to learn them from.
+            bool byColor = false;
+            if (view.mask.empty()) {
+                std::array<float, 2> up{0.0f, -1.0f};
+                {
+                    Vec3f center{0, 0, 0};
+                    for (std::size_t i = 0; i < scalp.pointCount(); ++i) center = center + scalp.points()[i];
+                    center = center * (1.0f / static_cast<float>(std::max<std::size_t>(1, scalp.pointCount())));
+                    float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+                    if (pv.camera.project(center, u0, v0) && pv.camera.project(center + options.up * (0.05f * scalpSize), u1, v1)) {
+                        const float du = u1 - u0, dv = v1 - v0, l = std::sqrt(du * du + dv * dv);
+                        if (l > 1e-6f) up = {du / l, dv / l};
+                    }
+                }
+                std::vector<std::uint8_t> seedPixels(pixels, 0);
+                for (const auto& s : seeds) {
+                    const int x = static_cast<int>(s[0]), y = static_cast<int>(s[1]);
+                    if (x >= 0 && y >= 0 && x < pv.width && y < pv.height) seedPixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(pv.width) + static_cast<std::size_t>(x)] = 1;
+                }
+                const RefImage subject = pv.mask;
+                byColor = hairByColor(pv.rgb, pv.mask, subject, pv.scalpCover, up, seedPixels, sureBackdrop);
+            }
+            if (!byColor) pv.mask = refineMask(pv.rgb, pv.mask, seeds, sureBackdrop, likelyHair);
             touchUp();
         }
         pv.hullMask = grown(pv.mask, 2);
@@ -673,11 +924,12 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
             if (pv.rgb.empty()) throw std::invalid_argument("guidesFromReference: a view without a field needs an image");
             pv.field = std::make_shared<OrientationField>(orientationField(pv.rgb.gray(), pv.mask, options.orientation));
         }
-        // Flow hints (optional): over the field, and their way for the roots.
+        // Drawn guide lines (optional): over the field, their way and their length for the roots.
         if (!view.hints.empty() || !view.hintOverlay.empty())
             applyHints(pv, hintSamples(view, static_cast<float>(pv.width) / static_cast<float>(w), pv.width, pv.height),
                        0.5f * options.hintRadius * static_cast<float>(std::max(pv.width, pv.height)),
-                       0.5f * options.hintLineRadius * static_cast<float>(std::max(pv.width, pv.height)));
+                       0.5f * options.hintLineRadius * static_cast<float>(std::max(pv.width, pv.height)),
+                       scalpDepth > 0.0f ? scalpDepth / static_cast<float>(pv.camera.focalPx) : 0.0f);
         // The locks' flow past their curls, and the curls themselves.
         if (!view.field) {
             pv.coarse = std::make_shared<OrientationField>(coarseField(*pv.field, pv.mask, 0.02f * static_cast<float>(std::max(pv.width, pv.height))));
@@ -722,6 +974,7 @@ std::vector<PreparedView> prepareViews(const ScalpMesh& scalp, const std::vector
 struct HintSample {
     float u, v, du, dv;
     bool directed;
+    float remain = -1.0f;  // a drawn line's length on from here to its tip, pixels (directed lines; else -1)
 };
 
 // Samples along the strokes (every pixel at the working size) and from the overlay's stroke pixels:
@@ -731,6 +984,10 @@ struct HintSample {
 std::vector<HintSample> hintSamples(const ReferenceView& view, float scale, int w, int h) {
     std::vector<HintSample> out;
     for (const RefHintStroke& stroke : view.hints) {
+        float total = 0.0f;
+        for (std::size_t i = 1; i < stroke.points.size(); ++i)
+            total += std::hypot(stroke.points[i][0] - stroke.points[i - 1][0], stroke.points[i][1] - stroke.points[i - 1][1]) * scale;
+        float along = 0.0f;
         for (std::size_t i = 1; i < stroke.points.size(); ++i) {
             const float u0 = stroke.points[i - 1][0] * scale, v0 = stroke.points[i - 1][1] * scale;
             const float u1 = stroke.points[i][0] * scale, v1 = stroke.points[i][1] * scale;
@@ -739,8 +996,10 @@ std::vector<HintSample> hintSamples(const ReferenceView& view, float scale, int 
             const int n = std::max(1, static_cast<int>(std::ceil(len)));
             for (int k = 0; k < n; ++k) {
                 const float t = (static_cast<float>(k) + 0.5f) / static_cast<float>(n);
-                out.push_back({u0 + du * t, v0 + dv * t, du / len, dv / len, stroke.directed});
+                out.push_back({u0 + du * t, v0 + dv * t, du / len, dv / len, stroke.directed,
+                               stroke.directed ? total - along - len * t : -1.0f});
             }
+            along += len;
         }
     }
     if (!view.hintOverlay.empty() && view.hintOverlay.channels == 4) {
@@ -787,12 +1046,16 @@ std::vector<HintSample> hintSamples(const ReferenceView& view, float scale, int 
 }
 
 // The hints splatted (a Gaussian of `sigma` pixels): their line blended into the field over the
-// photo's (full weight near a stroke), their way kept for the guides' roots.
-void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float sigma, float lineSigma) {
+// photo's (full weight near a stroke), their way kept for the guides' roots, and a drawn line's
+// length on from each of its points (`worldPerPixel`: pixels to scene units at the scalp's depth; 0:
+// none) for the roots under it, over the way's reach.
+void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float sigma, float lineSigma, float worldPerPixel) {
     if (samples.empty()) return;
     const int w = pv.width, h = pv.height;
     const std::size_t pixels = static_cast<std::size_t>(w) * static_cast<std::size_t>(h);
     std::vector<float> line(pixels * 2, 0.0f), weight(pixels, 0.0f), way(pixels * 2, 0.0f), wayWeight(pixels, 0.0f);
+    std::vector<float> length(pixels, 0.0f), lengthWeight(pixels, 0.0f);
+    const float lengthSigma = sigma;
     const int reach = static_cast<int>(std::ceil(2.5f * sigma));
     for (const HintSample& s : samples) {
         const int cx = static_cast<int>(s.u), cy = static_cast<int>(s.v);
@@ -811,6 +1074,11 @@ void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float 
                     way[2 * at] += k * s.du;
                     way[2 * at + 1] += k * s.dv;
                     wayWeight[at] += k;
+                }
+                if (s.remain >= 0.0f && worldPerPixel > 0.0f) {
+                    const float kn = pm::exp(-0.5f * (dx * dx + dy * dy) / (lengthSigma * lengthSigma));
+                    length[at] += kn * s.remain;
+                    lengthWeight[at] += kn;
                 }
             }
     }
@@ -836,6 +1104,33 @@ void applyHints(PreparedView& pv, const std::vector<HintSample>& samples, float 
         pv.hintWay[3 * i + 1] = way[2 * i + 1] / n;
         pv.hintWay[3 * i + 2] = std::min(1.0f, wayWeight[i] / std::max(1.0f, sigma)) * std::min(1.0f, n / std::max(wayWeight[i], 1e-6f));
     }
+    if (worldPerPixel > 0.0f && std::any_of(lengthWeight.begin(), lengthWeight.end(), [](float x) { return x > 1e-3f; })) {
+        pv.hintLength.assign(pixels * 2, 0.0f);
+        for (std::size_t i = 0; i < pixels; ++i) {
+            if (lengthWeight[i] <= 1e-3f) continue;
+            pv.hintLength[2 * i] = length[i] / lengthWeight[i] * worldPerPixel;
+            pv.hintLength[2 * i + 1] = std::min(1.0f, lengthWeight[i] / std::max(1.0f, lengthSigma));
+        }
+    }
+}
+
+// How long the drawn lines say the hair growing at `p` is (scene units) and how much they say it
+// (0-1): the views that see it, weighed by how much each says.
+float hintedLength(const std::vector<PreparedView>& views, const Vec3f& p, float& say) {
+    double sum = 0.0, weight = 0.0;
+    say = 0.0f;
+    for (const PreparedView& v : views) {
+        if (v.hintLength.empty()) continue;
+        float u = 0, vv = 0, z = 0;
+        if (!v.camera.project(p, u, vv, &z) || !v.inFrame(u, vv) || v.hidden(u, vv, z)) continue;
+        const std::size_t at = v.pixel(u, vv);
+        const float wgt = v.hintLength[2 * at + 1];
+        if (wgt <= 0.0f) continue;
+        sum += static_cast<double>(wgt) * v.hintLength[2 * at];
+        weight += wgt;
+        say = std::max(say, wgt);
+    }
+    return weight > 0.0 ? static_cast<float>(sum / weight) : 0.0f;
 }
 
 // How much a guide's first stretch goes the way the hints say (-1 against .. 1 along; 0 without).
@@ -1069,7 +1364,26 @@ ReferenceSymmetry referenceSymmetryFromName(const std::string& name) {
 bool scalpLooksSymmetric(const ScalpMesh& scalp) {
     if (scalp.pointCount() == 0) return false;
     const auto mirror = ScalpMirror::of(scalp);
-    return mirror && static_cast<double>(mirror->pairedCount()) >= 0.9 * static_cast<double>(scalp.pointCount());
+    if (!mirror) return false;
+    if (static_cast<double>(mirror->pairedCount()) >= 0.9 * static_cast<double>(scalp.pointCount())) return true;
+    // Symmetric in shape, if not to the vertex (a sculpted head, a morphed one): its points mirrored
+    // across its middle land on its surface (within 1% of its size), nearly all of them. The mirror's
+    // partners are then the nearest surface spots.
+    const ScalpMesh rest = scalp.restPose();
+    const std::vector<Vec3f>& pts = rest.points();
+    Vec3f lo = pts.front(), hi = pts.front();
+    for (const Vec3f& p : pts) {
+        lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
+        hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+    }
+    const float middle = 0.5f * (lo.x + hi.x), near = 0.01f * (hi - lo).length();
+    const std::size_t every = std::max<std::size_t>(1, pts.size() / 2000);
+    std::size_t tried = 0, on = 0;
+    for (std::size_t i = 0; i < pts.size(); i += every, ++tried) {
+        const Vec3f m(2.0f * middle - pts[i].x, pts[i].y, pts[i].z);
+        if ((rest.closestPoint(m).position - m).length() <= near) ++on;
+    }
+    return static_cast<double>(on) >= 0.9 * static_cast<double>(tried);
 }
 
 namespace {
@@ -1177,7 +1491,7 @@ Vec3f limitTurn(const Vec3f& from, const Vec3f& to, float maxAngle) {
     return rotateAxisAngle(from, axis.normalized(), maxAngle).normalized();
 }
 
-Grown grow(const Context& ctx, const SurfacePoint& root, float sign) {
+Grown grow(const Context& ctx, const SurfacePoint& root, float sign, float maxLength) {
     Grown g;
     const Vec3f gravity = -ctx.options.up.normalized();
     const Vec3f n = root.normal.normalized();
@@ -1237,7 +1551,7 @@ Grown grow(const Context& ctx, const SurfacePoint& root, float sign) {
     g.points.push_back(p);
     float length = ctx.offset, evidenceSum = 0.0f;
     int blind = 0, seenSteps = 0;
-    const int maxSteps = static_cast<int>(std::ceil(ctx.maxLength / ctx.step)) + 2;
+    const int maxSteps = static_cast<int>(std::ceil(maxLength / ctx.step)) + 2;
     const int maxBlind = std::max(3, maxSteps / 4);
     const float maxTurn = 30.0f * kPi / 180.0f;
     g.stop = "length";
@@ -1324,7 +1638,7 @@ Grown grow(const Context& ctx, const SurfacePoint& root, float sign) {
         p = q;
         g.points.push_back(p);
         length += len;
-        if (length >= ctx.maxLength) {
+        if (length >= maxLength) {
             g.stop = "length";
             break;
         }
@@ -1728,6 +2042,11 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
                     : options.maxLength < 0 && result.rimLength > 0 ? -options.maxLength * result.rimLength
                     : result.reachLength > 0 ? measured
                                              : size;
+    // An automatic length takes the longest drawn guide line in too (a line says how long hair is).
+    if (options.maxLength <= 0.0f)
+        for (const PreparedView& v : prepared)
+            for (std::size_t i = 0; i < v.hintLength.size(); i += 2)
+                if (v.hintLength[i + 1] > 0.5f) ctx.maxLength = std::max(ctx.maxLength, 1.05f * v.hintLength[i]);
     ctx.offset = options.scalpOffset > 0 ? options.scalpOffset : 0.004f * size;
     // Short hair and fur (shorter than a seventh of the scalp's size) lies along the surface more than
     // it falls: the surface prior doubled, gravity a fifth.
@@ -1785,7 +2104,8 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
                 result.look.curlRadius = kCurlRadiusGain * wavelength * pm::tan(std::min(median(amplitudes), 1.2f)) / (2.0f * kPi);
             }
         }
-        const bool coarse = options.curlFlow > 0 || (options.curlFlow < 0 && result.look.curly);
+        const bool wavy = result.look.curlShare > kWavyShare && result.look.curlAmplitudeDeg > kWavyAmplitude;
+        const bool coarse = options.curlFlow > 0 || (options.curlFlow < 0 && (result.look.curly || wavy));
         if (coarse)
             for (PreparedView& v : prepared)
                 if (v.coarse) v.field = v.coarse;
@@ -1811,55 +2131,77 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
 
     // Roots: given, or spread; with symmetry the ones on the first side (and the seam).
     std::vector<SurfacePoint> roots;
-    if (!options.roots.empty()) {
-        for (const StrandRoot& r : options.roots) {
-            if (!scalp.contains(r)) continue;
-            SurfacePoint sp;
-            sp.root = r;
-            sp.position = scalp.position(r);
-            sp.normal = scalp.normal(r);
-            roots.push_back(sp);
-        }
-    } else {
-        roots = blueNoiseRoots(scalp, options.guideCount, options.seed);
-    }
-    const float spacing = std::sqrt(scalp.totalArea() / static_cast<float>(std::max<std::size_t>(1, roots.size())));
-    std::vector<std::uint8_t> seam(roots.size(), 0);
-    if (ctx.mirror.on() && options.roots.empty()) {
-        std::vector<SurfacePoint> kept;
-        std::vector<std::uint8_t> keptSeam;
-        for (const SurfacePoint& r : roots) {
-            const Vec3f m = ctx.mirror.point(r.position);
-            const bool onSeam = (m - r.position).length() < 0.5f * spacing;
-            if (onSeam || r.position.x >= m.x) {
-                kept.push_back(r);
-                keptSeam.push_back(onSeam ? 1 : 0);
+    std::vector<std::uint8_t> seam;
+    std::vector<int> status;  // 0 grow, 1 unseen, 2 bald
+    float spacing = 0.0f;
+    const auto spread = [&](int count) {
+        roots.clear();
+        if (!options.roots.empty()) {
+            for (const StrandRoot& r : options.roots) {
+                if (!scalp.contains(r)) continue;
+                SurfacePoint sp;
+                sp.root = r;
+                sp.position = scalp.position(r);
+                sp.normal = scalp.normal(r);
+                roots.push_back(sp);
             }
+        } else {
+            roots = blueNoiseRoots(scalp, count, options.seed);
         }
-        roots.swap(kept);
-        seam.swap(keptSeam);
-    } else if (ctx.mirror.on()) {
-        seam.assign(roots.size(), 1);  // given roots: each grown on its own, none mirrored
+        spacing = std::sqrt(scalp.totalArea() / static_cast<float>(std::max<std::size_t>(1, roots.size())));
+        seam.assign(roots.size(), 0);
+        if (ctx.mirror.on() && options.roots.empty()) {
+            std::vector<SurfacePoint> kept;
+            std::vector<std::uint8_t> keptSeam;
+            for (const SurfacePoint& r : roots) {
+                const Vec3f m = ctx.mirror.point(r.position);
+                const bool onSeam = (m - r.position).length() < 0.5f * spacing;
+                if (onSeam || r.position.x >= m.x) {
+                    kept.push_back(r);
+                    keptSeam.push_back(onSeam ? 1 : 0);
+                }
+            }
+            roots.swap(kept);
+            seam.swap(keptSeam);
+        } else if (ctx.mirror.on()) {
+            seam.assign(roots.size(), 1);  // given roots: each grown on its own, none mirrored
+        }
+        // Which roots hair covers: seen by some view (or mirror) with the mask over them.
+        status.assign(roots.size(), 0);
+        parallelFor(0, roots.size(), [&](std::size_t i) {
+            const Vec3f at = roots[i].position + roots[i].normal * (ctx.offset + ctx.step);
+            const Evidence e = ctx.evidence(at);
+            if (e.seen == 0) status[i] = 1;
+            else if (e.inside == 0 || !ctx.rootCovered(at)) status[i] = 2;
+        }, 4);
+    };
+    spread(options.guideCount);
+    if (options.roots.empty()) {
+        // The guides wanted where the hair is: when many roots fall where there is none (a scalp
+        // that is the whole head, the face bare), spread again, as much denser as they fell short.
+        const std::size_t hair = static_cast<std::size_t>(std::count(status.begin(), status.end(), 0));
+        if (hair > 0 && static_cast<double>(hair) < 0.8 * static_cast<double>(roots.size()))
+            spread(static_cast<int>(std::lround(options.guideCount * std::min(5.0, static_cast<double>(roots.size()) / static_cast<double>(hair)))));
     }
     result.rootsTried = static_cast<int>(roots.size());
 
-    // Which roots hair covers: seen by some view (or mirror) with the mask over them.
-    std::vector<int> status(roots.size(), 0);  // 0 grow, 1 unseen, 2 bald
-    parallelFor(0, roots.size(), [&](std::size_t i) {
-        const Vec3f at = roots[i].position + roots[i].normal * (ctx.offset + ctx.step);
-        const Evidence e = ctx.evidence(at);
-        if (e.seen == 0) status[i] = 1;
-        else if (e.inside == 0 || !ctx.rootCovered(at)) status[i] = 2;
-    }, 4);
-
-    // Both ways from every root.
+    // Each root's length: the drawn guide lines' where they say it (blended in by how much they
+    // say it), else the longest. Both ways from every root.
+    std::vector<float> rootLength(roots.size(), ctx.maxLength);
+    std::vector<std::uint8_t> drawnLength(roots.size(), 0);
     std::vector<Grown> ways[2];
     ways[0].resize(roots.size());
     ways[1].resize(roots.size());
     parallelFor(0, roots.size(), [&](std::size_t i) {
         if (status[i] != 0) return;
-        ways[0][i] = grow(ctx, roots[i], 1.0f);
-        ways[1][i] = grow(ctx, roots[i], -1.0f);
+        float say = 0.0f;
+        const float drawn = hintedLength(prepared, roots[i].position + roots[i].normal * (ctx.offset + ctx.step), say);
+        if (say > 0.05f && drawn > 0.0f) {
+            rootLength[i] = std::max(3.0f * ctx.step, ctx.maxLength + say * (std::min(drawn, ctx.maxLength) - ctx.maxLength));
+            drawnLength[i] = 1;
+        }
+        ways[0][i] = grow(ctx, roots[i], 1.0f, rootLength[i]);
+        ways[1][i] = grow(ctx, roots[i], -1.0f, rootLength[i]);
     }, 1);
 
     // The way: the one with more evidence along it (a little toward gravity), then the
@@ -1938,7 +2280,7 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         // A guide that reached the given maximum never showed its tip (hidden under the hair above
         // it): hair is mostly shorter than the longest, so it is trimmed (calibrated on the synthetic
         // heads: such guides came out 1.15x too long).
-        if (options.maxLength > 0.0f && g.stop == "length" && options.lengthTrim < 1.0f)
+        if (options.maxLength > 0.0f && g.stop == "length" && options.lengthTrim < 1.0f && !drawnLength[i])
             path = truncated(path, options.lengthTrim * polylineLength(path));
         guide.points = resampled(path, std::max(2, options.points));
         guide.points[0] = roots[i].position;

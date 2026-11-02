@@ -603,8 +603,8 @@ TEST(Cards, StrandsKeepTheirLengthOnTheCardAndTheirColor) {
         return sum / static_cast<double>(std::max<std::size_t>(n, 1));
     };
     EXPECT_LT(band(0.8f, 0.95f), 0.75 * band(0.05f, 0.2f));  // the short ones stop half way
-    // Color: the strands' melanin as the viewport shades the hair (a card is matte: hairShadedColor), sRGB.
-    const std::array<float, 3> linear = hairShadedColor(melaninColor(0.5f, 0.2f));
+    // Color: the strands' base color (their melanin), sRGB.
+    const std::array<float, 3> linear = melaninColor(0.5f, 0.2f);
     const std::size_t p = static_cast<std::size_t>(std::max_element(t.coverage.begin(), t.coverage.end()) - t.coverage.begin());
     ASSERT_GT(t.coverage[p], 60);  // thinner than a pixel here: partly covered, as a real strand would be
     for (std::size_t k = 0; k < 3; ++k) {
@@ -612,26 +612,14 @@ TEST(Cards, StrandsKeepTheirLengthOnTheCardAndTheirColor) {
         const float srgb = c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
         EXPECT_NEAR(t.color[p * 3 + k], srgb * 255.0f, 2.0f);
     }
-    // bakeColor base: the strands' base color itself, for a hair shader that shades it.
-    CardSettings asBase = settings;
-    asBase.colorLook = CardColorLook::Base;
-    const CardMesh baseMesh = buildCards(*s, nullptr, asBase);
-    EXPECT_EQ(baseMesh.colorLook, CardColorLook::Base);
-    const CardTextures tb = bakeCardTextures(*s, baseMesh, bake);
-    const std::array<float, 3> raw = melaninColor(0.5f, 0.2f);
-    for (std::size_t k = 0; k < 3; ++k) {
-        const float c = raw[k];
-        const float srgb = c <= 0.0031308f ? 12.92f * c : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
-        EXPECT_NEAR(tb.color[p * 3 + k], srgb * 255.0f, 2.0f);
-    }
     // A rendering space's colors (Maya under ACES: ACEScg) written as Rec.709: here red and blue
     // swapped.
     CardBakeSettings swapped = bake;
     swapped.colorToRec709 = {0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f};
-    const CardTextures ts = bakeCardTextures(*s, baseMesh, swapped);
-    EXPECT_EQ(ts.color[p * 3], tb.color[p * 3 + 2]);
-    EXPECT_EQ(ts.color[p * 3 + 1], tb.color[p * 3 + 1]);
-    EXPECT_EQ(ts.color[p * 3 + 2], tb.color[p * 3]);
+    const CardTextures ts = bakeCardTextures(*s, mesh, swapped);
+    EXPECT_EQ(ts.color[p * 3], t.color[p * 3 + 2]);
+    EXPECT_EQ(ts.color[p * 3 + 1], t.color[p * 3 + 1]);
+    EXPECT_EQ(ts.color[p * 3 + 2], t.color[p * 3]);
 }
 
 TEST(Cards, TheGroomBakesOntoItsScalp) {
@@ -667,8 +655,8 @@ TEST(Cards, TheGroomBakesOntoItsScalp) {
     };
     EXPECT_GT(coverage(40, 60), 100.0);
     EXPECT_LT(coverage(4, 24), 5.0);
-    // The color is the hair's (shaded as the cards hold it), and fills the bare skin too.
-    const std::array<float, 3> linear = hairShadedColor(melaninColor(0.5f, 0.2f));
+    // The color is the hair's base color, and fills the bare skin too.
+    const std::array<float, 3> linear = melaninColor(0.5f, 0.2f);
     for (const std::size_t p : {std::size_t{50 * 64 + 30}, std::size_t{10 * 64 + 30}}) {
         for (std::size_t k = 0; k < 3; ++k) {
             const float c = linear[k];
@@ -1249,8 +1237,7 @@ TEST(Cards, ACardSharingATextureIsTintedToItsOwnStrandsColor) {
         for (std::size_t k = 0; k < 3; ++k) EXPECT_NEAR(own[k], 1.0f, 1e-4f);
         // Root: the strands' own color over the owner's (clamped to kCardTintMax); at the tip
         // both blend to the same color, so the tint fades to none.
-        const std::array<float, 3> rootDark = hairShadedColor({0.1f, 0.05f, 0.02f}),
-                                    rootLight = hairShadedColor({0.4f, 0.3f, 0.2f});
+        const std::array<float, 3> rootDark = {0.1f, 0.05f, 0.02f}, rootLight = {0.4f, 0.3f, 0.2f};
         const bool sharerDark = sharer == 0;
         for (std::size_t k = 0; k < 3; ++k) {
             const float want = station == 0 ? std::min((sharerDark ? rootDark : rootLight)[k] / (sharerDark ? rootLight : rootDark)[k], kCardTintMax)
@@ -1298,8 +1285,8 @@ TEST(Cards, TheColorMapCarriesTheStrandsRootToTipColor) {
         return n > 0.0 ? sum / n : 0.0;
     };
     const auto srgb = [](float c) { return 255.0 * (c <= 0.0031308f ? 12.92 * c : 1.055 * std::pow(c, 1.0 / 2.4) - 0.055); };
-    // (As the viewport shades the hair: hairShadedColor, channel by channel.)
-    const auto shown = [](float c) { return hairShadedColor({c, c, c})[0]; };
+    // (The base color itself.)
+    const auto shown = [](float c) { return c; };
     EXPECT_NEAR(red(0.1f, 0.2f), srgb(shown(0.1f + 0.5f * 0.15f)), 25.0);   // near the root: dark
     EXPECT_NEAR(red(0.85f, 0.95f), srgb(shown(0.1f + 0.5f * 0.9f)), 25.0);  // near the tip: the tip color
 }

@@ -229,7 +229,7 @@ public:
     TransferWindow* openTransferWindow();
     TransferWindow* transferWindow() const { return transferWindow_; }
     // Tools > Guides from Reference (experimental): the Reference window (reference_window.h: the photo
-    // and the scalp side by side, landmarks, flow arrows, mask touch-ups, Generate), made once and
+    // and the scalp side by side, landmarks, guide lines, mask touch-ups, Generate), made once and
     // raised again; it follows the open groom.
     ReferenceWindow* openReferenceWindow();
     // The Photos window's Align stage on photo `index` (Align Photo...).
