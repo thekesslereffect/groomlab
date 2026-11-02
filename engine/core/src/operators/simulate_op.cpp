@@ -57,10 +57,13 @@ public:
             notAnimatable({"gravity", 980.0, "Gravity's pull, scene units per second squared (980 in centimeters)", "length"})
                 .soft(0, 2000),
             notAnimatable({"gravityDirection", Vec3f{0.0f, -1.0f, 0.0f}, "Gravity's direction (world space)"}).world(),
-            notAnimatable({"groomedUnderGravity", true,
-                           "The groomed shape is how the hair rests under gravity at the start frame: it keeps that shape "
-                           "while still, and only the head's motion (and gravity's change as the head tilts or turns over) "
-                           "moves it. Off: gravity pulls on the groomed shape"}),
+            notAnimatable({"groomedUnderGravity", std::string("preload"),
+                           "The groomed shape is how the hair rests under gravity at the start frame, kept while still. "
+                           "preload: the hair keeps its weight, its rest shape bent to carry it (soft hair that could not "
+                           "hold all of it upright takes what it can, the rest as weightless); weightless: gravity's pull "
+                           "at the start is taken away, only its change as the head tilts or turns over moves the hair; "
+                           "off: gravity pulls on the groomed shape",
+                           "", {"preload", "weightless", "off"}}),
             notAnimatable({"windSpeed", 0.0, "The wind's speed, scene units per second (0: still air): the hair drags toward it",
                            "length"})
                 .soft(0, 1000)
