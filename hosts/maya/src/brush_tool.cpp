@@ -645,21 +645,43 @@ void BrushStrokeCmd::writeTextureAfter() {
 
 MStatus BrushStrokeCmd::redoIt() {
     return groomlab::maya::guarded("BrushStrokeCmd::redoIt", [&]() -> MStatus {
+        auto* shape = groom_.isValid() ? dynamic_cast<GroomShape*>(MFnDagNode(groom_).userNode()) : nullptr;
+        // A Maya redo must not race a guide stroke's detached commit. The first call is the
+        // original commit itself, whose asynchronous evaluation is deliberately left alone.
+        if (appliedOnce_ && shape) shape->ensureEvaluated();
         if (!texturePath_.empty() && !textureWritten_) {
             writeTextureAfter();
             textureWritten_ = true;
         }
-        return modifier_.doIt();
+        const MStatus status = modifier_.doIt();
+        if (status) {
+            if (appliedOnce_ && shape) shape->ensureEvaluated();
+            appliedOnce_ = true;
+            // Maya's undo/redo does not reliably redraw an MPxToolCommand (notably in Maya
+            // 2026). Evaluate first, then refresh synchronously so VP2 cannot draw the old frame.
+            if (MGlobal::mayaState() == MGlobal::kInteractive) M3dView::active3dView().refresh(false, true);
+        }
+        return status;
     });
 }
 
 MStatus BrushStrokeCmd::undoIt() {
     return groomlab::maya::guarded("BrushStrokeCmd::undoIt", [&]() -> MStatus {
+        auto* shape = groom_.isValid() ? dynamic_cast<GroomShape*>(MFnDagNode(groom_).userNode()) : nullptr;
+        // The frame committed after a guide stroke may still be evaluating off-thread. Take it in
+        // before changing the stored guides, or it can land after this undo and put the stroked
+        // frame back until a camera move forces another evaluation.
+        if (shape) shape->ensureEvaluated();
         if (!texturePath_.empty() && textureWritten_) {
             writeTextureBefore();
             textureWritten_ = false;
         }
-        return modifier_.undoIt();
+        const MStatus status = modifier_.undoIt();
+        if (status) {
+            if (shape) shape->ensureEvaluated();
+            if (MGlobal::mayaState() == MGlobal::kInteractive) M3dView::active3dView().refresh(false, true);
+        }
+        return status;
     });
 }
 
