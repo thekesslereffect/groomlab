@@ -596,7 +596,7 @@ and tools working in it; the UI docked in Maya's own windows; the `.mod`'s per-v
 picked as written; the translator inside that MtoA. Those wait for a tester (or a machine) with
 that Maya.
 
-**Testing in a newer Maya (the port, in progress).** `ninja-maya2026-tests` and
+**Testing in a newer Maya (the port, in progress).** `ninja-maya2024-tests` to
 `ninja-maya2027-tests` build the plugin from the devkit as above, but with every test and the GUI
 session, run in that Maya's install: `GROOMLAB_MAYA_BIN` (default `MAYA_LOCATION`'s `bin`) is the
 folder whose `mayapy` and `maya` the tests start and whose TBB DLL the core's tests load (a devkit

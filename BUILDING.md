@@ -92,13 +92,14 @@ builds", "Releasing").
 The everyday preset, `ninja-maya2022`, builds against the **installed Maya 2022** and runs every
 test tier with it (the mayapy suites, the GUI session, Arnold). The `ninja-maya2023` to
 `ninja-maya2027` presets build from Autodesk's devkits with **no tests** (they ship as build-checked
-betas). So on a machine with only Maya 2026 or 2027:
+betas). So on a machine with only Maya 2024 to 2027:
 
 - **Simplest:** install Maya 2022 too (and its MtoA). Everything below then works as it does on the
   main machine, and the newer Maya is for trying the plugin by hand.
-- **Moving dev to a newer Maya:** the `ninja-maya2026-tests` and `ninja-maya2027-tests` presets
+- **Moving dev to a newer Maya:** the `ninja-maya2024-tests` to `ninja-maya2027-tests` presets
   build the plugin from that version's devkit with every test on, run in the installed Maya and its
-  MtoA (`C:/Program Files/Autodesk/Maya2026` or `Maya2027`, `Arnold/maya2026` or `maya2027`). The
+  MtoA (`C:/Program Files/Autodesk/Maya<year>`, `Arnold/maya<year>`): the devkit and the CPython
+  of step 4, no MtoA SDK. The
   tests already take Qt through `groomlab.ui.qt`, so they can run under PySide6; what is left is
   getting the mayapy and GUI suites to pass there (docs/DEVELOPING.md, "Testing in a newer Maya"). Keep
   releasing from a Maya 2022 machine until they do.
@@ -119,8 +120,11 @@ betas). So on a machine with only Maya 2026 or 2027:
 ### 2. Tools
 
 - [ ] **Visual Studio 2022** (Community is fine) with the **Desktop development with C++** workload
-      (MSVC v143, a Windows 10/11 SDK). It brings CMake (3.25+) and Ninja; `tools/dev/vsenv.ps1`
-      finds them, so no separate install.
+      (MSVC v143, a Windows 10/11 SDK) and **C++ Clang tools for Windows** (the build compiles the
+      CPU kernels with its clang-cl, else they fall back to MSVC and run slower). It brings CMake
+      (3.25+) and Ninja; `tools/dev/vsenv.ps1` finds them, so no separate install. It looks for
+      Visual Studio 2022 only: next to a newer Visual Studio, add the 2022 Build Tools:
+      `winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100 --add Microsoft.VisualStudio.Component.VC.CMake.Project --add Microsoft.VisualStudio.Component.VC.Llvm.Clang --add Microsoft.VisualStudio.Component.VC.Llvm.ClangToolset"`.
 - [ ] **Python 3** (3.12 or later) on PATH, for the tools and the commit guard.
 - [ ] **Node.js 24** for the website (`web/`): `cd web && npm ci`.
 - [ ] **WSL 2 with Ubuntu 22.04**, for the Linux build (`tools/dev/linux_build.ps1`; the first run
@@ -149,11 +153,13 @@ and how to rebuild each piece instead:
 | `sdks/python-3.x.y` | CPython for each devkit's module | the python.org NuGet packages, same section |
 | `sdks/mtoa-*` | MtoA SDKs (headers, libraries) for the 2023-2027 translators | extracted from each MtoA installer |
 | `Qt/6.8.3/msvc2022_64` | Qt for the standalone app (`ninja-app`) | the Qt online installer or `aqtinstall`, Qt 6.8.3 MSVC 2022 64-bit |
+| `cmake` | only beside VS 2022 Build Tools, whose bundled CMake and Ninja are 32-bit: a 64-bit CMake and `ninja.exe` in `bin/`, which `tools/dev/vsenv.ps1` puts first | CMake's `cmake-3.31.6-windows-x86_64.zip` unzipped, plus Ninja's `ninja-win.zip` |
 | `fetch` | pybind11, GoogleTest, json, Imath, Alembic, Slang sources | fetched by the first configure |
 | `kernels` | the compiled GPU kernel cache | rebuilt by the first build (slow once) |
 | `venvs` | PySide venvs for `qt_compat_check.py` (one per Python) | docs/DEVELOPING.md, "Other Maya versions" |
 | `emsdk` | Emscripten, for the website's WebAssembly engine | [docs/WEB.md](docs/WEB.md) |
 | `private` | the commit guard and its hook installer (not public) | copy it: it cannot be rebuilt from the repository |
+| `public-snapshot-terms.txt` | the guard's list of private terms (beside `private`, not in it): without it the guard refuses every commit | copy it |
 | `assets` | test and showcase assets (the scan head) | copy it |
 
 ### 5. The repository
