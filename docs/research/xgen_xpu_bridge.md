@@ -86,6 +86,32 @@ any rebuild, measure:
 
 If those are not well under a second for a production groom, the route is not worth building.
 
+## Routes without a conversion: both closed
+
+Checked 2026-11-02 against RenderMan for Maya 27.3 on Maya 2026.
+
+**A translator of our own for `groomLabShape`, as V-Ray for Maya allows.** Not possible:
+
+- The geometry translators are a fixed set compiled into `rfm.mll`: Archive, Camera, ClippingPlane,
+  CoordSys, Curve, Dag, Fluid, Geo, Instancer, Light, LightFilter, Mesh, Nurbs, OpenVDB, Particles,
+  Pfx, Procedural, RunProgram, USD, Volume, XGen and XGenGroom.
+- No SDK, plugin path or registration call adds one.
+- `config/mayaTranslation.json` looks like a node table, but it only maps shading nodes to Pxr
+  patterns (`lambert` to `PxrMayaLambert`, `hairSystem` to `PxrMayaHair`).
+- The only devkit shipped is `openvdb_maya`.
+- A `nurbsCurve` renders as curves with `rman_renderCurve`, but that means one Maya node per strand.
+
+**A USD stage in a `mayaUsdProxyShape`, then possibly a Hydra generative procedural.** Not
+rendered:
+
+- A proxy shape holding all 100,028 strands as one `BasisCurves` prim was left out of batch renders
+  in both XPU and RIS. The log doesn't mention it, and `rfm.mll` links no USD library.
+- The hdPrman plugins RenderMan for Maya ships (`hdPrmanMaya`, the "RenderMan XPU" Hydra renderers)
+  are for Maya's Hydra viewport, not final renders.
+- Writing the USD file from Python took 5 s.
+
+So an Interactive Groom is the only XPU route found.
+
 ## What a full version would need
 
 - **Where it hooks in:** a hidden `xgmSplineCache` and `xgmSplineDescription` per groom, created
@@ -115,6 +141,8 @@ folder is not in git):
 - `import_render.py`: `xgmSplineCache -import`, count the splines, save a RenderMan XPU scene.
 - `../dump_abc.py`: print an Alembic file's objects, properties and first values.
 - `../probe_xgen_native_cache.py`: make a native groom, export its cache, import it back.
+
+- `../usd_xpu/make_usd_scene.py` and `run.ps1`: the USD proxy shape test.
 
 Run them with Maya 2026's `mayapy`. To load RenderMan for Maya, set `MAYA_MODULE_PATH` to the
 shared Autodesk modules folder, and set `RMANTREE`, `RFMTREE` and `MAYA_RENDER_DESC_PATH`.
