@@ -945,8 +945,10 @@ strands as `GeomMayaHair` from `vray::hairArrays` (the `.vrscene`'s arrays, shar
 times `vray::matrixScale` of the world matrix (V-Ray scales hair points by a Node's transform but
 not its widths). V-Ray makes the `Node` as for any shape (transform, render flags, object IDs,
 light links) with the groom's shading group's material (a VRayHairNextMtl assigned in the
-Hypershade). A groom with no material of its own (in no shading group, or Maya's
-`initialShadingGroup`) gets no Node from V-Ray: the translator makes it (`exportNodePlugin`) with
+Hypershade). A groom with no material of its own (in no shading group, Maya's
+`initialShadingGroup`, or a shading group whose shader is another renderer's: classified
+`rendernode/<renderer>` other than `rendernode/vray`, which V-Ray cannot export, and the hair then
+rendered with no material, nothing in the image) gets no usable Node from V-Ray: the translator makes it (`exportNodePlugin`) with
 `TexHairSampler` + `BRDFHair4` + `MtlSingleBRDF` as the `.vrscene` writes them, on the first
 translation only (`flags.recreate` 0: making it again in an IPR update crashed Maya; the update
 replaces the hair under it).

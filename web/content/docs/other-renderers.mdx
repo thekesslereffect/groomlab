@@ -403,7 +403,9 @@ groom renders in V-Ray's renders, batch renders and farm renders with nothing to
   Width Scale, Length Scale), as V-Ray hair (GeomMayaHair) with each strand's color.
 - **Material:** a material assigned to the groom in the Hypershade (a **VRayHairNextMtl**) is the
   hair's. Without one, GroomLab's: V-Ray's hair BRDF reading each strand's color, its highlight
-  from the groom's look, set up to render close to Arnold.
+  from the groom's look, set up to render close to Arnold. Another renderer's material on the
+  groom (an aiStandardHair, a PxrMarschnerHair) counts as none, so a scene renders in each
+  renderer whichever one's material the groom has.
 - **Render flags, object IDs, light links:** the groom's own, as for any object.
 - **Motion blur:** the groom's transform and its strands' deformation (a moving scalp, a simulation)
   blur with V-Ray's camera motion blur, at its geometry samples. The strands must stay the same

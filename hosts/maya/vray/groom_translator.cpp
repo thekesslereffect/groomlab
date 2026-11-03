@@ -265,7 +265,21 @@ VUtils::VRayPlugin* createPlugin(Context& c, const char* type, const VUtils::Cha
 }
 
 // ---------------------------------------------------------------------------
-// The groom's shading group's surface shader, when it has one of its own (not Maya's default).
+// Whether `shader` is another renderer's (classified rendernode/RenderMan, rendernode/arnold, ...):
+// V-Ray exports no material from it, and the hair would render without one. Maya's own shaders
+// (lambert, standardSurface) have no rendernode classification, and V-Ray renders them.
+bool otherRenderersShader(const MObject& shader) {
+    MString classes = MFnDependencyNode::classification(MFnDependencyNode(shader).typeName());
+    classes.toLowerCase();
+    const std::string s = classes.asChar();
+    for (std::size_t at = s.find("rendernode/"); at != std::string::npos; at = s.find("rendernode/", at + 1)) {
+        if (s.compare(at, 16, "rendernode/vray/") != 0) return true;
+    }
+    return false;
+}
+
+// The groom's shading group's surface shader, when it has one of its own that V-Ray renders (not
+// Maya's default, not another renderer's: otherRenderersShader).
 MPlug assignedShader(const MDagPath& path) {
     MFnDagNode shape(path);
     MPlug groups = shape.findPlug("instObjGroups", true);
@@ -277,7 +291,7 @@ MPlug assignedShader(const MDagPath& path) {
         MFnDependencyNode sg(targets[i].node());
         if (sg.typeName() != "shadingEngine" || sg.name() == "initialShadingGroup") continue;
         MPlug shader = sg.findPlug("surfaceShader", true);
-        if (!shader.isNull() && shader.isDestination()) return shader;
+        if (!shader.isNull() && shader.isDestination() && !otherRenderersShader(shader.source().node())) return shader;
     }
     return MPlug();
 }
@@ -373,8 +387,9 @@ public:
             bool transparency = false;
             VUtils::VRayPlugin* hair = exportHair(c, mbSamples, &evaluator, &transparency);
             if (hair && !c.flags.recreate && assignedShader(c.path).isNull()) {
-                // No material of its own: V-Ray makes no Node for a shape outside every shading
-                // group, so make it here with GroomLab's hair, once: an interactive render's
+                // No material of its own (or another renderer's, which V-Ray cannot export): V-Ray
+                // makes no Node for a shape outside every shading group, and a Node with no
+                // material renders no hair, so make it here with GroomLab's hair, once: an interactive render's
                 // update (recreate) replaces the hair under it (making the Node again then crashed
                 // Maya).
                 MFnDependencyNode depNode(c.object);
