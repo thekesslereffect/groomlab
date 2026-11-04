@@ -175,6 +175,7 @@ private:
     QComboBox* shape_ = nullptr;
     TubeShapeEditor* preview_ = nullptr;
     TubeShapeEditor* editor_ = nullptr;
+    QLabel* builtinNote_ = nullptr;  // under the editor: a built-in shape is duplicated to edit
     QWidget* shapeOptions_ = nullptr;  // Mirror and Smooth: a library shape's
     QToolButton* mirror_ = nullptr;
     QToolButton* shapeSmooth_ = nullptr;

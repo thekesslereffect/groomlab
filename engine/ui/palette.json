@@ -39,7 +39,7 @@
       "dismissTip": "Hide these steps (for good)",
       "steps": [
         {"id": "guides", "label": "Place some guides", "tip": "Place: click the scalp, or drag to lay down many."},
-        {"id": "look", "label": "Give it a look", "tip": "Graph Editor: add Clump, Noise or Curl after Interpolate."}
+        {"id": "look", "label": "Give it a look", "tip": "Graph Editor > Presets picks a whole look; or add Clump, Curl or Noise."}
       ],
       "lookTypes": ["Clump", "Noise", "Curl", "Flyaway", "Tangle", "Wet", "Twist", "Braid", "Gravity", "Displace",
                     "HairColor", "Bend", "Direction", "Transform", "SelfCollide", "Static"]

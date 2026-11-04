@@ -364,6 +364,12 @@ ColorEditor::ColorEditor(QWidget* parent) : QWidget(parent) {
     refresh();
 }
 
+void ColorEditor::setReadOnly(bool readOnly) {
+    hex_->setReadOnly(readOnly);
+    swatch_->setAttribute(Qt::WA_TransparentForMouseEvents, readOnly);
+    swatch_->setCursor(readOnly ? Qt::ArrowCursor : Qt::PointingHandCursor);
+}
+
 QColor ColorEditor::shown() const {
     const RGB s = linearToSrgb(linear_);
     return QColor::fromRgbF(s[0], s[1], s[2]);

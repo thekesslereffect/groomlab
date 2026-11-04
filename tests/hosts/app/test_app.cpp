@@ -715,8 +715,8 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     EXPECT_EQ(theme::textDisabled(), hex(charcoal["ui"]["textDisabled"]));
     EXPECT_EQ(theme::actionText(theme::ink()), hex(charcoal["ui"]["accentText"]));
     EXPECT_EQ(theme::nodeRadius(), charcoal["graph"]["cornerRadius"].get<double>());
-    EXPECT_FALSE(theme::tintedHeaders());
-    EXPECT_EQ(theme::headerStyle(), QStringLiteral("filled")) << "the category color behind the title";
+    EXPECT_TRUE(theme::tintedHeaders());
+    EXPECT_EQ(theme::headerStyle(), QStringLiteral("tinted")) << "a wash of the category color under an accent bar";
     EXPECT_EQ(theme::canvasStyle(), QStringLiteral("dots"));
     // ui.radius for the controls, two less for the small ones, two more for panels and cards;
     // ui.rowHeight for every control's height.
@@ -2024,7 +2024,7 @@ TEST(AppRender, IridescenceTurnsTheHairToItsStructuralColor) {
         for (int y = 0; y < image.height(); ++y) {
             for (int x = 0; x < image.width(); ++x) {
                 const QColor c = image.pixelColor(x, y);
-                if (c.value() < 40) continue;
+                if (c.value() < 64) continue;  // (the backdrop, a mid-dark grey, left out)
                 blue += c.blueF();
                 all += c.redF() + c.greenF() + c.blueF();
             }
@@ -2207,7 +2207,7 @@ TEST(AppRender, DrawsTheSampleGroomOffscreen) {
     // one (the same scene, converging), yet differ (jitter, stochastic coverage, more lights).
     const QColor bottom = interactive.image.pixelColor(2, size.height() - 2), top = interactive.image.pixelColor(2, 2);
     EXPECT_EQ(bottom.value(), top.value());
-    EXPECT_LT(top.value(), 40) << "a deep charcoal backdrop";
+    EXPECT_LT(top.value(), 56) << "a mid-dark charcoal backdrop (lighter than the docks: they recede)";
     int lit = 0;
     for (int y = 0; y < size.height(); ++y) {
         for (int x = 0; x < size.width(); ++x) {

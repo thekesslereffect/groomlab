@@ -2,6 +2,7 @@
 // MainWindow: surfaces and props, messages and stats, tools and strokes, look and camera.
 
 #include "main_window_internal.h"
+#include "guides_panel.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -348,16 +349,23 @@ void MainWindow::refreshStats() {
     // agrees with Guide Groups and Inputs.
     const HierarchyPtr authored = document_ ? document_->session().authoredHierarchy() : nullptr;
     const bool graphGuides = document_ && (!authored || authored->guides().empty());
+    // Where those come from: the graph's evaluation, else the file's own guides.
+    const QString guidesFrom = !graphGuides ? QString() : view && view->hierarchy ? tr("the graph") : tr("the file");
+    // Guide Groups says where the guides shown come from (and offers Bake to Guides) once they show.
+    if (guidesPanel_ && guidesPanel_->property("graphGuides").toInt() != (graphGuides ? static_cast<int>(guides) : 0)) {
+        guidesPanel_->setProperty("graphGuides", graphGuides ? static_cast<int>(guides) : 0);
+        guidesPanel_->refresh();
+    }
     // Inputs > Guides says the same once the graph has made them (it was written before the evaluation).
     if (graphGuides && guides != static_cast<std::size_t>(-1) && guides > 0 && inputsBlock_) {
         if (auto* l = inputsBlock_->findChild<QLabel*>(QStringLiteral("inputs_guides")); l && l->text().startsWith(tr("none yet"))) {
-            l->setText(tr("%1 from the graph").arg(guides));
+            l->setText(tr("%1 from %2").arg(guides).arg(guidesFrom));
             l->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textSoft().name()));
         }
     }
     // The artist's numbers always; the time per dab (and the draw path) once a brush has worked.
     host_->setStats(strands, lastDabMs_ > 0.0 ? lastDabMs_ : 0.0, gpu ? tr("GPU") : tr("LINES"),
-                    gpu ? theme::purple() : theme::textMuted(), guides, graphGuides);
+                    gpu ? theme::purple() : theme::textMuted(), guides, guidesFrom);
     const bool refining = r.lookdev() && r.lighting().quality == Quality::Refine;
     host_->setRefine(refining, r.accumulatedFrames(), std::clamp(r.lighting().refineFrames, 1, LookdevRenderer::kMaxAccumulatedFrames),
                      viewport_->lastFrameMs());

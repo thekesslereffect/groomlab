@@ -507,8 +507,9 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
         tools.setTool(tool);
         EXPECT_EQ(card->blockTitles(), want) << tool;
         EXPECT_FALSE(card->isHidden()) << tool;
-        EXPECT_TRUE(tools.noToolLabel()->isHidden()) << tool;
         const groomlab::BrushEntry* e = brushEntry(tool);
+        // Over the card: what the tool does (the catalog's hint, its first sentence).
+        EXPECT_TRUE(tools.noToolLabel()->text().startsWith(QString::fromStdString(e->hint).left(16))) << tool;
         EXPECT_TRUE(tools.tile(tool)->toolTip().contains(QString::fromStdString(e->hint).left(20).toHtmlEscaped())) << tool << ": the tile has the hint";
     }
     // The card is only the settings: no title, no hint line; the gestures are a brush tile's tip.

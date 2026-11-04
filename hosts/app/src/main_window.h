@@ -717,6 +717,8 @@ private:
     LookPanel* look_ = nullptr;
     GroomTools* groomTools_ = nullptr;  // the Groom Tools dock (the shell's)
     QLabel* help_ = nullptr;  // the Help pages' text
+    QLineEdit* helpFilter_ = nullptr;  // the shortcut sheet's filter (shown on that page)
+    QWidget* shortcutSheet_ = nullptr;  // the shortcut sheet: keycaps and actions in a grid
     UpdateChecker* updates_ = nullptr;  // Help > Check for Updates (made on first use)
     GuidesPanel* guidesPanel_ = nullptr;
     CorrectivesPanel* correctives_ = nullptr;

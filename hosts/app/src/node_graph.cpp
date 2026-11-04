@@ -139,7 +139,9 @@ NodeGraphView::NodeGraphView(QWidget* parent) : QWidget(parent) {
 
     // The add-node search: a glass box with a filter line and the matching types.
     search_ = new GlassPanel(this, 14.0);
-    search_->setColor(theme::glassSolid());
+    // A popup: the raised tone over the canvas (its list too), so it floats.
+    search_->setColor(theme::glassy() ? theme::glassSolid() : theme::uiColor("raised"));
+    search_->setProperty("role", "popup");
     auto* layout = new QVBoxLayout(search_);
     layout->setContentsMargins(10, 10, 10, 10);
     layout->setSpacing(8);

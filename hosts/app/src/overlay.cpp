@@ -137,7 +137,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto* layout = new QVBoxLayout(this);
     // A solid theme's card sits in the dock: the docks' gutters (Properties').
     if (theme::glassy()) layout->setContentsMargins(18, 18, 18, 18);
-    else layout->setContentsMargins(12, 12, 24, 12);
+    else layout->setContentsMargins(16, 12, 24, 12);
     layout->setSpacing(12);
 
     tabs_ = new Segmented(this);
@@ -297,7 +297,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     };
     // HairColor's mode: natural hair (melanin, redness) or a color picked as it renders.
     groomMode_ = new Segmented(materialPage_);
-    groomMode_->setItems({{tr("Natural"), theme::red(), Qt::white}, {tr("Picked color"), theme::red(), Qt::white}});
+    groomMode_->setItems({{tr("Natural"), theme::red(), Qt::white}, {tr("Picked Color"), theme::red(), Qt::white}});
     groomMode_->setBackground(theme::chip());
     groomMode_->setSegmentHeight(28);
     groomMode_->setPadding(3);
@@ -330,7 +330,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     materialLayout->addWidget(colorNote_);
 
     moreButton_ = new RoundButton(materialPage_);
-    moreButton_->setText(tr("More settings  ▾"));
+    moreButton_->setText(tr("More Settings  ▾"));
     moreButton_->setDiameter(theme::rowHeight());
     moreButton_->setFontSize(12);
     moreButton_->setFontWeight(500);
@@ -855,7 +855,7 @@ void LookCard::setTab(Tab tab) {
 void LookCard::setMoreShown(bool shown) {
     moreShown_ = shown;
     more_->setVisible(shown);
-    moreButton_->setText(shown ? tr("Fewer settings  ▴") : tr("More settings  ▾"));
+    moreButton_->setText(shown ? tr("Fewer Settings  ▴") : tr("More Settings  ▾"));
     updateGeometry();
 }
 
@@ -1216,14 +1216,14 @@ QString OverlayHost::statsText() const {
 }
 
 void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& /*badgeColor*/, std::size_t guides,
-                           bool graphGuides) {
+                           const QString& guidesFrom) {
     // One quiet line in the number font: "25,843 strands · 104 guides · 63 ms per dab · GPU".
     const QLocale english(QLocale::English);
     QStringList parts;
     parts << english.toString(static_cast<qulonglong>(strands)) + tr(" strands");
     if (guides != static_cast<std::size_t>(-1)) {
         parts << english.toString(static_cast<qulonglong>(guides)) + (guides == 1 ? tr(" guide") : tr(" guides")) +
-                     (graphGuides && guides > 0 ? tr(" from the graph") : QString());
+                     (!guidesFrom.isEmpty() && guides > 0 ? tr(" from %1").arg(guidesFrom) : QString());
     }
     if (msPerDab > 0.0) {
         parts << QString::number(msPerDab, 'f', msPerDab < 10.0 ? 1 : 0) + tr(" ms per dab");

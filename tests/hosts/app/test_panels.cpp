@@ -3248,27 +3248,28 @@ TEST(AppPanels, TheShortcutSheetListsTheSharedTable) {
     window.resize(1280, 720);
     window.show();
     ASSERT_TRUE(window.showHelp(QStringLiteral("shortcuts")));
-    QString sheet;
-    for (const QLabel* label : window.shell()->panel(AppShell::Panel::Help)->findChildren<QLabel*>()) {
-        if (label->text().contains(QStringLiteral("<table"))) sheet = label->text();
+    // The sheet: keycaps, actions and caps group headers as labels in a grid.
+    QWidget* grid = window.shell()->panel(AppShell::Panel::Help)->findChild<QWidget*>(QStringLiteral("shortcutSheet"));
+    ASSERT_NE(grid, nullptr);
+    QStringList caps, actions, groups;
+    for (const QLabel* label : grid->findChildren<QLabel*>()) {
+        const QString role = label->property("role").toString();
+        if (role == QStringLiteral("keycap")) caps << label->text();
+        else if (role == QStringLiteral("keyAction")) actions << label->text();
+        else if (role == QStringLiteral("keyGroup")) groups << label->text();
     }
-    ASSERT_FALSE(sheet.isEmpty());
+    const QString sheet = actions.join(QLatin1Char('\n'));
     const std::vector<Shortcut> rows = shortcutsFor(kShortcutApp);
     ASSERT_GT(rows.size(), 20u);
     for (const Shortcut& s : rows) {
-        // Each key a chip of its own ("Ctrl+S / Ctrl+Shift+S": two).
+        // Each key a cap of its own ("Ctrl+S / Ctrl+Shift+S": two; "Ctrl+1 / 2 / 3 / 4": one).
         QStringList keys = QString::fromStdString(s.keys).split(QStringLiteral(" / "));
         if (std::all_of(keys.begin() + 1, keys.end(), [](const QString& k) { return k.size() <= 2; })) keys = {QString::fromStdString(s.keys)};
-        for (const QString& key : keys) {
-            // (each kept whole: non-breaking spaces and hyphens)
-            QString whole = key.toHtmlEscaped();
-            whole.replace(QLatin1Char(' '), QStringLiteral("&nbsp;")).replace(QLatin1Char('-'), QChar(0x2011));
-            EXPECT_TRUE(sheet.contains(QStringLiteral("&nbsp;%1&nbsp;").arg(whole))) << s.id;
-        }
-        EXPECT_TRUE(sheet.contains(QString::fromStdString(s.action).toHtmlEscaped())) << s.id;
+        for (const QString& key : keys) EXPECT_TRUE(caps.contains(key)) << s.id;
+        EXPECT_TRUE(actions.contains(QString::fromStdString(s.action))) << s.id;
     }
     for (const char* context : {"File", "Modes", "Brush", "Viewport", "Graph"}) {
-        EXPECT_TRUE(sheet.contains(QStringLiteral(">%1<").arg(QString::fromLatin1(context).toUpper()))) << context << ": a caps heading";
+        EXPECT_TRUE(groups.contains(QString::fromLatin1(context).toUpper())) << context << ": a caps heading";
     }
     for (const Shortcut& s : shortcutsFor(kShortcutMaya)) {
         if (!(s.hosts & kShortcutApp) && s.id == "graph.view") EXPECT_FALSE(sheet.contains(QString::fromStdString(s.action)));

@@ -115,7 +115,7 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     {
         // The tabs start at the docks' 12 px edge, with the content under them.
         auto* tabsRow = new QHBoxLayout();
-        tabsRow->setContentsMargins(12, 0, 12, 0);
+        tabsRow->setContentsMargins(16, 0, 16, 0);
         tabsRow->addWidget(propertiesTabs_);
         propertiesColumn->addLayout(tabsRow);
     }
@@ -317,16 +317,19 @@ void AppShell::setMode(Mode mode) {
 }
 
 void AppShell::refreshPages() {
-    // The modes as workspaces: Groom edits the groom (Attributes alone, no tab row), Look its
-    // material, lights and render (their tabs), Cards and Export their own panel. No groom: the
-    // empty page (no editor full of zeros).
+    // The modes as workspaces: Groom edits the groom (Attributes first, the look's tabs beside
+    // it), Look its material, lights and render (their tabs alone), Cards and Export their own
+    // panel. No groom: the empty page (no editor full of zeros).
     QWidget* page = displayPage_;
     const bool open = groomOpen();
     const bool look = mode_ == Mode::Look;
     propertiesTabs_->setTabVisible(0, !look);
-    propertiesTabs_->setVisible(open && look);
+    propertiesTabs_->setVisible(open && (look || mode_ == Mode::Groom));
     if (!open) {
         page = emptyPage_;
+    } else if (mode_ == Mode::Groom && propertiesTab() != PropertiesTab::Attributes) {
+        lookCard_->setTab(static_cast<LookCard::Tab>(static_cast<int>(propertiesTab()) - 1));
+        page = lookCard_;
     } else if (look) {
         if (propertiesTab() == PropertiesTab::Attributes) {
             const QSignalBlocker block(propertiesTabs_);

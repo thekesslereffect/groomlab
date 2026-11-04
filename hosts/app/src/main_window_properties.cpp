@@ -604,11 +604,12 @@ void MainWindow::refreshProperties() {
             guides = h->guides().size();
             groups = h->groups().size();
         }
-        // None of its own: the guides the graph makes (as the stats line says them), else none yet.
+        // None of its own: the guides the graph makes or the file holds (as the stats line says
+        // them), else none yet.
         const ViewResult& view = document_->lastView();
-        const std::size_t made = view.hierarchy ? view.hierarchy->guides().size() : 0;
+        const std::size_t made = view.hierarchy ? view.hierarchy->guides().size() : file.data.guides ? file.data.guides->guides().size() : 0;
         set("guides", guides  ? tr("%1 guides in %2 group%3").arg(guides).arg(groups).arg(groups == 1 ? QString() : QStringLiteral("s"))
-                      : made  ? tr("%1 from the graph").arg(made)
+                      : made  ? tr("%1 from %2").arg(made).arg(view.hierarchy ? tr("the graph") : tr("the file"))
                               : tr("none yet: place them"));
         QStringList colliders;
         for (const auto& [name, mesh] : file.data.meshes) colliders << qs(name);
@@ -866,7 +867,7 @@ void MainWindow::refreshHairColorRows() {
                     RGB dye{1.0f, 1.0f, 1.0f};
                     if (d.is_array() && d.size() == 3) dye = {d[0].get<float>(), d[1].get<float>(), d[2].get<float>()};
                     rgb = melaninColor(m.get<float>(), r.get<float>(), dye);
-                    e->setEnabled(false);
+                    e->setReadOnly(true);  // a value to read, not a disabled control
                 } else if (v.is_array() && v.size() == 3) {
                     rgb = {v[0].get<float>(), v[1].get<float>(), v[2].get<float>()};
                 }

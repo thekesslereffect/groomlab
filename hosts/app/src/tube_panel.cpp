@@ -184,6 +184,12 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         });
         connect(editor_, &TubeShapeEditor::committed, this, [this](const std::vector<SectionPoint>& points) { shapeCommitted(points); });
         profileBlock_->rows()->addWidget(editor_, 0, Qt::AlignHCenter);
+        // Under the drawing, never over it.
+        builtinNote_ = new QLabel(tr("Built-in shape: Duplicate to edit"), profileBlock_);
+        builtinNote_->setProperty("role", "hint");
+        builtinNote_->setAlignment(Qt::AlignHCenter);
+        builtinNote_->hide();
+        profileBlock_->rows()->addWidget(builtinNote_);
         // The outline's options: a library shape's (a built-in is read-only).
         shapeOptions_ = new QWidget(profileBlock_);
         shapeOptions_->setObjectName(QStringLiteral("tubeShapeOptions"));
@@ -449,6 +455,7 @@ void TubePanel::showChoice(bool mixed) {
     }
     if (const LibraryShape* custom = library(choice_)) {
         editor_->setShape(custom->points, custom->smooth, true);
+        builtinNote_->hide();
         preview_->setShape(custom->points, custom->smooth, false);
         if (mirror_->isChecked() && editor_->setMirror(true)) {
             const std::vector<SectionPoint> made = editor_->points();
@@ -460,7 +467,8 @@ void TubePanel::showChoice(bool mixed) {
         parseTubeShape(choice_, &shape);
         bool smooth = true;
         const std::vector<SectionPoint> points = builtinTubeShapePoints(shape, &smooth);
-        editor_->setShape(points, smooth, false, tr("Built-in shape (Duplicate to edit)"));
+        editor_->setShape(points, smooth, false, QString());
+        builtinNote_->show();
         preview_->setShape(points, smooth, false);
     }
     updating_ = true;

@@ -96,6 +96,8 @@ public:
     void setLinear(const std::array<float, 3>& rgb);  // no signal
     std::array<float, 3> linear() const { return linear_; }
     QColor shown() const;  // the sRGB color of the swatch
+    // A value shown, not edited (Hair Color's Result): readable (muted, not the disabled tone).
+    void setReadOnly(bool readOnly);
 
 signals:
     void edited(bool live);

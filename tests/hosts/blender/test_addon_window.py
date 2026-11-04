@@ -63,7 +63,7 @@ class Assets(unittest.TestCase):
         self.assertTrue(os.path.isfile(uikit.FONT_FILE), uikit.FONT_FILE)
         self.assertTrue(os.path.isfile(uikit.THEME_FILE), uikit.THEME_FILE)
         t = uikit.Theme()
-        self.assertAlmostEqual(t.panel[0], uikit.linear(0x17 / 255.0), places=5)  # charcoal's #17181B
+        self.assertAlmostEqual(t.panel[0], uikit.linear(0x19 / 255.0), places=5)  # charcoal's #191A1E
         self.assertAlmostEqual(t.accent[2], uikit.linear(0xEF / 255.0), places=5)  # #5B8DEF
         self.assertEqual(t.row, 26.0)
 

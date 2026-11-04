@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "properties_panel.h"
+#include "theme.h"
 
 #include <algorithm>
 
@@ -142,7 +143,7 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     auto* column = new QWidget(scroll_);
     column->setObjectName(QStringLiteral("propertiesColumn"));
     auto* layout = new QVBoxLayout(column);
-    layout->setContentsMargins(12, 4, 24, 12);  // the right: the 12 px gutter clear of the scroll bar over it
+    layout->setContentsMargins(16, 4, 24, 12);  // the docks' 16 px gutter (the right clear of the scroll bar over it)
     layout->setSpacing(4);
     build(defs().get("properties/sections"), layout, nullptr);
     layout->addStretch(1);
@@ -162,6 +163,8 @@ void PropertiesPanel::build(const ui::json& sections, QVBoxLayout* into, Propert
             QGridLayout* grid = parent->grid();
             grid->addWidget(section, grid->rowCount(), 0, 1, 2);
         } else {
+            // The first section sits right under the dock's title: no rule over it (no doubled edge).
+            if (into->count() == 0) section->header()->setProperty("first", true);
             into->addWidget(section);
         }
         QGridLayout* grid = section->grid();
@@ -233,6 +236,8 @@ bool PropertiesPanel::setBlock(const std::string& key, QWidget* block) {
 
 void PropertiesPanel::finish() {
     for (Row& r : rows_) {
+        // One pitch: a shown row (a check box, a value) as tall as a slider's; a hidden one none.
+        if (!r.rule) r.section->grid()->setRowMinimumHeight(r.row, r.control && r.wanted ? theme::rowHeight() : 0);
         if (r.rule || r.control) continue;
         r.label->hide();  // nothing the app does for it yet
     }
@@ -296,6 +301,7 @@ void PropertiesPanel::setRowVisible(const std::string& key, bool visible) {
     if (it == byKey_.end()) return;
     Row& r = rows_[it->second];
     r.wanted = visible;
+    if (!r.rule) r.section->grid()->setRowMinimumHeight(r.row, r.control && visible ? theme::rowHeight() : 0);
     if (r.control) r.control->setVisible(visible);
     if (!r.item.custom && !r.inField) r.label->setVisible(visible && r.control);
 }

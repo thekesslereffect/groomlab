@@ -15,7 +15,10 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QKeySequence>
+#include <QGridLayout>
 #include <QLabel>
+#include <QVBoxLayout>
+#include <QLineEdit>
 #include <QDockWidget>
 #include <QListWidget>
 #include <QMenu>
@@ -451,44 +454,70 @@ bool MainWindow::showHelp(const QString& page) {
         title = tr("Keyboard Shortcuts");
         // The one shortcut table every host shows (groomlab/shortcuts.h: the docs site reads the
         // same rows), the app's, a heading row per context (File, Modes, Brush, Viewport, Graph).
-        // Keys as small mono chips (each kept whole, wrapping between chips), the action beside
-        // them taking the rest of the width; rows of a context with one action merged ("B + drag",
-        // "Middle-drag": Brush radius); caps group headers.
-        text = QStringLiteral("<table cellspacing='0' cellpadding='4' width='100%'>");
-        const QString chip = QStringLiteral("<span style='white-space:nowrap; font-family:\"%1\"; font-size:11px; color:%2; background-color:%3;'>&nbsp;%4&nbsp;</span>");
+        // Keycaps (one per key, a row's alternatives under each other) beside the action, rows of
+        // a context with one action merged ("B + drag", "Middle-drag": Brush radius), caps group
+        // headers; filtered by the field over it.
         struct Row {
             std::string context, action;
             QStringList keys;
         };
         std::vector<Row> rows;
+        const QString filter = helpFilter_ ? helpFilter_->text().trimmed() : QString();
         for (const Shortcut& s : shortcutsFor(kShortcutApp)) {
-            // Alternatives on their own chips ("Ctrl+Z / Ctrl+Y"); a run of one key's variants stays
-            // one chip ("Ctrl+1 / 2 / 3 / 4").
+            if (!filter.isEmpty() && !QString::fromStdString(s.keys).contains(filter, Qt::CaseInsensitive) &&
+                !QString::fromStdString(s.action).contains(filter, Qt::CaseInsensitive) &&
+                !QString::fromStdString(s.context).contains(filter, Qt::CaseInsensitive)) {
+                continue;
+            }
+            // Alternatives on their own caps ("Ctrl+Z / Ctrl+Y"); a run of one key's variants stays
+            // one cap ("Ctrl+1 / 2 / 3 / 4").
             QStringList keys = QString::fromStdString(s.keys).split(QStringLiteral(" / "));
             if (std::all_of(keys.begin() + 1, keys.end(), [](const QString& k) { return k.size() <= 2; })) keys = {QString::fromStdString(s.keys)};
             auto same = std::find_if(rows.begin(), rows.end(), [&](const Row& r) { return r.context == s.context && r.action == s.action; });
             if (same != rows.end()) same->keys << keys;
             else rows.push_back({s.context, s.action, keys});
         }
+        auto* grid = static_cast<QGridLayout*>(shortcutSheet_->layout());
+        while (QLayoutItem* item = grid->takeAt(0)) {
+            if (QWidget* w = item->widget()) w->deleteLater();
+            delete item;
+        }
+        grid->setContentsMargins(0, 0, 0, 12);
+        grid->setHorizontalSpacing(12);
+        grid->setVerticalSpacing(6);
+        grid->setColumnMinimumWidth(0, 132);
+        grid->setColumnStretch(1, 1);
+        int line = 0;
         std::string context;
         for (const Row& r : rows) {
             if (r.context != context) {
-                text += QStringLiteral("<tr><td colspan='2' style='padding-top:%1px; font-size:11px; font-weight:600; color:%2'>%3</td></tr>")
-                            .arg(context.empty() ? 2 : 12)
-                            .arg(theme::textMuted().name(), QString::fromStdString(r.context).toUpper().toHtmlEscaped());
                 context = r.context;
+                auto* group = new QLabel(QString::fromStdString(r.context).toUpper(), shortcutSheet_);
+                group->setProperty("role", "keyGroup");
+                grid->addWidget(group, line++, 0, 1, 2);
             }
-            // A chip never breaks: its spaces and hyphens non-breaking; a row's other keys under it.
-            QStringList keys;
+            auto* caps = new QWidget(shortcutSheet_);
+            auto* capColumn = new QVBoxLayout(caps);
+            capColumn->setContentsMargins(0, 0, 0, 0);
+            capColumn->setSpacing(4);
             for (const QString& k : r.keys) {
-                QString whole = k.toHtmlEscaped();
-                whole.replace(QLatin1Char(' '), QStringLiteral("&nbsp;")).replace(QLatin1Char('-'), QChar(0x2011));
-                keys << chip.arg(theme::monoFamily(), theme::text().name(), theme::uiColor("raised").name(), whole);
+                auto* cap = new QLabel(k, caps);
+                cap->setProperty("role", "keycap");
+                cap->setMinimumHeight(20);
+                capColumn->addWidget(cap, 0, Qt::AlignLeft);
             }
-            text += QStringLiteral("<tr><td width='52%' valign='top' style='padding-bottom:6px'>%1</td><td width='48%' valign='top' style='color:%2'>%3</td></tr>")
-                        .arg(keys.join(QStringLiteral("<br>")), theme::textDim().name(), QString::fromStdString(r.action).toHtmlEscaped());
+            grid->addWidget(caps, line, 0, Qt::AlignTop);
+            auto* action = new QLabel(QString::fromStdString(r.action), shortcutSheet_);
+            action->setProperty("role", "keyAction");
+            action->setWordWrap(true);
+            action->setMinimumHeight(20);
+            grid->addWidget(action, line++, 1, Qt::AlignTop);
         }
-        text += QStringLiteral("</table>");
+        if (rows.empty()) {
+            auto* none = new QLabel(tr("No shortcut matches."), shortcutSheet_);
+            none->setProperty("role", "hint");
+            grid->addWidget(none, 0, 0, 1, 2);
+        }
     } else if (page == QStringLiteral("about")) {
         title = tr("About GroomLab");
         text = tr("<p><b>GroomLab</b> %1</p><p>Hair, fur and feather grooming: the Maya plugin and this standalone app share "
@@ -503,6 +532,10 @@ bool MainWindow::showHelp(const QString& page) {
         return false;
     }
     help_->setText(text.replace(QStringLiteral("@link@"), theme::linkText().name()));
+    const bool sheet = page == QStringLiteral("shortcuts");
+    if (helpFilter_) helpFilter_->setVisible(sheet);
+    if (shortcutSheet_) shortcutSheet_->setVisible(sheet);
+    help_->setVisible(!sheet);
     shell_->setPanelTitle(AppShell::Panel::Help, title, theme::blue());
     shell_->showPanel(AppShell::Panel::Help, true);
     return true;

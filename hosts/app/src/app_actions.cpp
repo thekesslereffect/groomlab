@@ -211,7 +211,6 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
                                 // Properties' Lighting tab, with lookdev on so the lights show.
                                 m->applyLightingPreset(str(value));
                                 if (m->lookdev_ && !m->lookdev_->isChecked()) m->lookdev_->setChecked(true);
-                                if (m->document_) m->setUiMode(QStringLiteral("look"));
                                 m->shell_->setPropertiesTab(AppShell::PropertiesTab::Lighting);
                             },
                             [m](const json& value) { return value.is_string() && m->look_->lighting().presetName == value.get<std::string>(); }};

@@ -268,14 +268,14 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     scroll_->setWidgetResizable(true);
     scroll_->setFrameShape(QFrame::NoFrame);
     scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    // (Always there: a bar coming and going would change the width the hosted panels fit to.)
-    scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+    // Only when the content is taller than the dock: an empty bar read as a second border.
+    scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     frame->addWidget(scroll_, 1);
     auto* content = new QWidget(scroll_);
     content->setObjectName(QStringLiteral("groomToolsContent"));
     scroll_->setWidget(content);
     auto* outer = new QVBoxLayout(content);
-    outer->setContentsMargins(12, 10, 12, 12);
+    outer->setContentsMargins(16, 10, 16, 12);  // the docks' gutter
     outer->setSpacing(6);
 
     // ---- The top: the header, the status, the tabs and the tool grid.
@@ -683,9 +683,19 @@ void GroomTools::refreshCard() {
     card_->setVisible(open && card_->hasSettings());
     // Over the card: what the picked tool does (the catalog's hint) and the gestures every brush
     // shares; no tool: how to start.
+    // One line or two: the hint's first sentence (the whole hint in its tooltip). Correctives
+    // have their own hint under their list.
     const groomlab::BrushEntry* picked = card_->hasSettings() ? brushEntry(shown) : nullptr;
-    noTool_->setText(picked ? qs(picked->hint) + tr("  Shift+drag smooths.") : tr("Pick a tool, then drag over the groom in the viewport."));
-    noTool_->setVisible(open && tab != "photos" && (picked || !card_->hasSettings()));
+    QString hint = picked ? qs(picked->hint) : tr("Pick a tool, then drag over the groom in the viewport.");
+    const QString whole = hint;
+    for (const QString& stop : {QStringLiteral(". "), QStringLiteral("; "), QStringLiteral(" (")}) {
+        const int at = hint.indexOf(stop);
+        if (at > 24) hint = hint.left(at) + QStringLiteral(".");
+    }
+    if (!hint.endsWith(QLatin1Char('.'))) hint += QLatin1Char('.');
+    noTool_->setText(picked ? hint + tr(" Shift+drag smooths.") : hint);
+    noTool_->setToolTip(picked && hint.size() < whole.size() ? whole : QString());
+    noTool_->setVisible(open && tab != "photos" && tab != "correctives" && (picked || !card_->hasSettings()));
     if (!tubes_->isHidden() && (tubesStale_ || !hadTubes)) {
         tubesStale_ = false;
         tubes_->refresh();

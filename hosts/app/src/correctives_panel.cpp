@@ -8,6 +8,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
+#include <QPushButton>
 #include <QSignalBlocker>
 #include <QRegularExpression>
 #include <QTimer>
@@ -140,6 +141,15 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
     hint_->setWordWrap(true);
     hint_->setProperty("role", "hint");
     layout->addWidget(hint_);
+    newButton_ = new QPushButton(this);
+    newButton_->setObjectName(QStringLiteral("correctiveFirst"));
+    newButton_->setProperty("role", "primary");
+    newButton_->hide();
+    connect(newButton_, &QPushButton::clicked, this, [this] {
+        const auto it = bindings_.find("corrective.new");
+        if (it != bindings_.end()) it->second.trigger(ui::json(), false);
+    });
+    layout->addWidget(newButton_, 0, Qt::AlignLeft);
     fitRows(tree_);
     setEnabled(false);
 }
@@ -406,9 +416,13 @@ void CorrectivesPanel::applyTarget() {
                                 .arg(std::lround(document_->frame()))
                                 .arg(qs(target_))
                           : stack_ && !stack_->layers.empty() ? tr("Strokes edit the guides. Pick a corrective to sculpt it at this frame.")
-                                                                : tr("Correctives sculpt per-shot fixes on top of the groom, keyed over time. "
-                                                                     "The + above makes one at this frame; strokes then go into it."));
+                                                                : tr("Correctives sculpt per-shot fixes on top of the groom, keyed over time."));
     if (session_) session_->setShotSculpt(shot, document_ ? document_->time() : 0.0, document_ ? std::lround(document_->frame()) : 0, target_);
+    // The base groom is not a layer: no layer box for it. No corrective yet: the first one, labeled.
+    box_->setVisible(shot || !node.empty());
+    const bool first = document_ && (!stack_ || stack_->layers.empty());
+    newButton_->setText(tr("New Corrective at Frame %1").arg(document_ ? std::lround(document_->frame()) : 0));
+    newButton_->setVisible(first);
 }
 
 bool CorrectivesPanel::editLayers(const std::string& label, const std::function<void(Correctives&)>& edit) {

@@ -129,6 +129,7 @@ signals:
     void displayChanged();
     void message(const QString& text);
     void groupClicked(const std::string& name);  // a row clicked: the brushes' group (Maya's pick_group)
+    void bakeRequested(const std::string& node);  // Bake to Guides: the graph's guides into a group to brush
 
 protected:
     void showEvent(QShowEvent* event) override;
@@ -152,6 +153,8 @@ private:
     QTreeWidget* tree_ = nullptr;
     QFrame* box_ = nullptr;
     QLabel* empty_ = nullptr;  // no groups yet
+    QPushButton* bake_ = nullptr;  // ... the graph makes guides: bake them to brush
+    std::string graphGuidesNode() const;  // the last node handing on guides ("" none)
     ListBar* itemBar_ = nullptr;
     QLabel* selection_ = nullptr;
     QPushButton* edits_ = nullptr;

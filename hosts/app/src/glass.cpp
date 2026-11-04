@@ -415,10 +415,13 @@ void RoundButton::paintEvent(QPaintEvent* /*event*/) {
         painter.drawText(QRectF(x, 0, width, height()), Qt::AlignVCenter | Qt::AlignLeft, text());
         x += width;
         if (!dim_.isEmpty()) {
-            // The dim part in the text's own color, faded: muted gray reads on glass, not on a fill.
+            // The dim part: on glass the text's color faded; on a solid theme's button the text's
+            // own color at a lighter weight (an alpha fade fell below 4.5:1 on the accent).
             QColor dimColor = textColor;
-            dimColor.setAlpha(140);
-            painter.setFont(theme::uiFont(fontSize_, 600));
+            const bool solid = !theme::glassy();
+            if (!solid) dimColor.setAlpha(140);
+            else dimColor.setAlpha(215);
+            painter.setFont(theme::uiFont(fontSize_, solid ? 400 : 600));
             painter.setPen(dimColor);
             painter.drawText(QRectF(x + 6, 0, width + 100, height()), Qt::AlignVCenter | Qt::AlignLeft, dim_);
         }
@@ -1078,7 +1081,7 @@ void Segmented::paintEvent(QPaintEvent* /*event*/) {
             if (glassy) {
                 paintGlass(painter, QRectF(rects[i]), inner, theme::segmentFill(items_[i].fill));
             } else {
-                paintGlass(painter, QRectF(rects[i]), inner, theme::uiColor("hover"));
+                paintGlass(painter, QRectF(rects[i]), inner, theme::uiColor("hover").lighter(112));
                 painter.save();
                 painter.setRenderHint(QPainter::Antialiasing, true);
                 painter.setPen(QPen(QColor(255, 255, 255, 18), 1.0));  // a faint top light: raised

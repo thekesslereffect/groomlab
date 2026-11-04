@@ -284,7 +284,7 @@ def main():
                         "%s: the Graph Editor's canvas" % name)
                 _expect(graph_editor.HEADER_STYLE == t.get("graph.headerStyle"), "%s: the header style" % name)
             charcoal = theme.set_theme("charcoal")
-            _expect(graph_editor.HEADER_STYLE == "filled", "Charcoal: filled node headers")
+            _expect(graph_editor.HEADER_STYLE == "tinted", "Charcoal: tinted node headers")
             sheet = tools.styleSheet()
             _expect("solid %s" % charcoal.color("ui.outline") in sheet, "Charcoal: thin outlines")
             _expect("background: %s; color: %s" % (charcoal.color("ui.selection"), charcoal.color("ui.selectionText")) in sheet,
@@ -411,7 +411,7 @@ def main():
             graph_editor.apply_theme(theme.current())
             widgets.dispose(editor)
             theme.set_theme("playful")
-    check.run("the new look: labeled tiles, underlined tabs, plain sections, filled node headers", redesign_look)
+    check.run("the new look: labeled tiles, underlined tabs, plain sections, tinted node headers", redesign_look)
 
     # The Groom Tools layout (research/ui-redesign/QT.md, "Groom Tools layout"): the header, the
     # tabs and the tool grid pinned over the scrolling column; the tool's card right under the grid

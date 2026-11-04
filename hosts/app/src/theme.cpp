@@ -691,6 +691,8 @@ QAbstractSpinBox, QLineEdit, QComboBox {
     background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; padding: 0 8px; min-height: @controlInner@px; max-height: @controlInner@px;
     selection-background-color: @selection@; selection-color: @selectionText@; }
 QAbstractSpinBox:hover, QLineEdit:hover, QComboBox:hover { border: 1px solid @hoverEdge@; }
+QLineEdit:read-only { color: @muted@; }
+QLineEdit:read-only:hover { border: 1px solid @fieldEdge@; }
 QAbstractSpinBox:focus, QLineEdit:focus, QComboBox:focus { border: 2px solid @accent@; }
 QAbstractSpinBox:disabled, QLineEdit:disabled, QComboBox:disabled { color: @disabled@; background: @fieldOff@; }
 QAbstractSpinBox::up-button, QAbstractSpinBox::down-button { width: 14px; border: none; background: transparent; }
@@ -725,6 +727,7 @@ QScrollBar:horizontal { height: 8px; background: transparent; margin: 0; }
 QScrollBar::handle:horizontal { background: @scroll@; border-radius: 4px; min-width: 24px; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 QTreeWidget, QListWidget { background: @list@; border: 1px solid @fieldEdge@; border-radius: @radiusLarge@px; padding: 4px; outline: none; alternate-background-color: transparent; }
+*[role="popup"] QListWidget, *[role="popup"] QTreeWidget { background: @field@; border: 1px solid @popupEdge@; }
 QTreeWidget::item, QListWidget::item { padding: 3px; border-radius: @smallRadius@px; }
 QTreeWidget::item:selected, QListWidget::item:selected { background: @selection@; color: @selectionText@; }
 QTreeWidget::item:hover, QListWidget::item:hover { background: @fieldHover@; }
@@ -756,6 +759,7 @@ QToolButton[role="chip"]::menu-indicator, QToolButton[role="glyph"]::menu-indica
 QToolButton[role="glyph"], QToolButton[role="glyph"]:checked { background: transparent; border: none; border-radius: @radius@px; padding: 2px; }
 QToolButton[role="glyph"]:hover { background: @hover@; }
 QToolButton[role="glyph"]:checked { background: @selection@; }
+QToolButton[role="glyph"]:disabled, QToolButton[role="glyph"]:checked:disabled { background: transparent; }
 QToolButton[role="glyph"][armed="true"] { color: @warning@; padding: 2px 6px; }
 /* The tool card (brush_panel.h): blocks under a faint rule, small semibold dim titles, chips that wrap. */
 QFrame[role="toolCard"] { background: transparent; border: none; border-top: 1px solid @edge@; border-radius: 0; }
@@ -815,10 +819,15 @@ QPushButton[role="propSection"], QPushButton[role="propSection"]:checked, QPushB
     background: transparent; border: none; border-top: 1px solid @edge@; border-radius: 0; color: @muted@; font-size: @smallSize@px;
     font-weight: 600; letter-spacing: 0.6px; text-align: left; padding: 10px 2px 6px 2px; min-height: 0; }
 QPushButton[role="propSection"]:hover { color: @dim@; background: transparent; }
+QPushButton[role="propSection"][first="true"] { border-top: none; }
 QPushButton[role="propSubsection"], QPushButton[role="propSubsection"]:checked, QPushButton[role="propSubsection"]:pressed {
     background: transparent; border: none; color: @dim@; font-size: @fontSize@px; font-weight: 500; text-align: left; padding: 8px 2px 4px 2px; }
 QPushButton[role="propSubsection"]:hover { color: @text@; background: transparent; }
 QLabel[role="propLabel"] { color: @dim@; }
+QLabel[role="keycap"] { background: @field@; color: @text@; border: 1px solid @edge@; border-bottom: 2px solid @background@; border-radius: 4px; padding: 0 6px; font-size: @smallSize@px; font-weight: 500; }
+QLabel[role="keyOr"] { color: @muted@; font-size: @smallSize@px; }
+QLabel[role="keyAction"] { color: @dim@; }
+QLabel[role="keyGroup"] { color: @muted@; font-size: @smallSize@px; font-weight: 600; letter-spacing: 0.6px; padding-top: 10px; }
 QLabel[role="propLabel"]:disabled { color: @disabled@; }
 QFrame[role="propRule"] { background: @groupEdge@; border: none; }
 )");
@@ -844,7 +853,7 @@ QFrame[role="propRule"] { background: @groupEdge@; border: none; }
         {QStringLiteral("@toolRest@"), glass ? wash(8) : QStringLiteral("transparent")},
         {QStringLiteral("@toolEdge@"), QStringLiteral("transparent")},
         {QStringLiteral("@toolOnText@"), (glass ? uiColor("accentText") : checkedText(text())).name()},
-        {QStringLiteral("@toolOn@"), glass ? uiColor("accent").name() : QStringLiteral("rgba(91,141,239,0.16)")},
+        {QStringLiteral("@toolOn@"), glass ? uiColor("accent").name() : mix(uiColor("panel"), uiColor("accent"), 0.16).name()},
         {QStringLiteral("@uiFamily@"), uiFamily()},
         {QStringLiteral("@fieldHeight@"), QString::number(rowHeight() - 8)},
         {QStringLiteral("@controlInner@"), QString::number(rowHeight() - 2)},
@@ -860,14 +869,14 @@ QFrame[role="propRule"] { background: @groupEdge@; border: none; }
         {QStringLiteral("@field@"), glass ? wash(8) : uiColor("raised").name()},
         {QStringLiteral("@list@"), glass ? wash(5) : backdrop().name()},
         {QStringLiteral("@checkEdge@"), glass ? wash(14) : mix(uiColor("hover"), textMuted(), 0.8).name()},
-        {QStringLiteral("@popupEdge@"), glass ? wash(16) : uiColor("hover").lighter(128).name()},
+        {QStringLiteral("@popupEdge@"), glass ? wash(16) : QStringLiteral("#454952")},
         {QStringLiteral("@toolRestFill@"), glass ? wash(8) : QStringLiteral("transparent")},
-        {QStringLiteral("@toolOnEdge@"), glass ? uiColor("accent").name() : QStringLiteral("rgba(91,141,239,0.55)")},
+        {QStringLiteral("@toolOnEdge@"), glass ? uiColor("accent").name() : mix(uiColor("panel"), uiColor("accent"), 0.8).name()},
         {QStringLiteral("@checkOff@"), glass ? wash(5) : uiColor("panel").name()},
         {QStringLiteral("@check@"), glass ? wash(10) : uiColor("raised").name()},
         {QStringLiteral("@track@"), glass ? wash(12) : uiColor("hover").name()},
-        {QStringLiteral("@scrollHover@"), glass ? wash(30) : QStringLiteral("rgba(255,255,255,0.22)")},
-        {QStringLiteral("@scroll@"), glass ? wash(18) : QStringLiteral("rgba(255,255,255,0.12)")},
+        {QStringLiteral("@scrollHover@"), glass ? wash(30) : uiColor("hover").lighter(175).name()},
+        {QStringLiteral("@scroll@"), glass ? wash(18) : uiColor("hover").lighter(135).name()},
         {QStringLiteral("@radiusLarge@"), QString::number(panelRadius())},
         {QStringLiteral("@radius@"), QString::number(controlRadius())},
         {QStringLiteral("@smallRadius@"), QString::number(smallRadius())},

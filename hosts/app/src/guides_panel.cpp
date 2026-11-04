@@ -129,6 +129,15 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     empty_->setProperty("role", "hint");
     empty_->setWordWrap(true);
     layout->addWidget(empty_);
+    bake_ = new QPushButton(tr("Bake to Guides"), this);
+    bake_->setObjectName(QStringLiteral("groupsBake"));
+    bake_->setToolTip(tr("Turn the guides the graph makes into a group you can brush"));
+    bake_->hide();
+    layout->addWidget(bake_, 0, Qt::AlignLeft);
+    connect(bake_, &QPushButton::clicked, this, [this] {
+        const std::string node = graphGuidesNode();
+        if (!node.empty()) emit bakeRequested(node);
+    });
     connect(tree_, &QTreeWidget::itemChanged, this, &GuidesPanel::itemChanged);
     connect(tree_, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int column) {
         const std::string name = groupOf(item);
@@ -419,8 +428,34 @@ void GuidesPanel::refreshRows() {
     itemBar_->setTitle(group.empty() ? tr("All groups") : qs(group));
     box_->setVisible(tree_->topLevelItemCount() > 0);
     tree_->setVisible(tree_->topLevelItemCount() > 0);
-    empty_->setVisible(document_ && tree_->topLevelItemCount() == 0);
+    // No group of its own: say where the guides shown come from, and how to brush them.
+    const bool none = document_ && tree_->topLevelItemCount() == 0;
+    const std::string source = none ? graphGuidesNode() : std::string();
+    const auto& viewed = none ? document_->lastView().hierarchy : nullptr;
+    const auto& held = none ? document_->file().data.guides : nullptr;
+    const std::size_t made = viewed ? viewed->guides().size() : held ? held->guides().size() : 0;
+    empty_->setText(!source.empty() && made > 0
+                        ? tr("The %1 guides shown can't be brushed yet. Bake them into a group, or Place or Draw a new one.").arg(made)
+                    : made > 0 ? tr("The %1 guides shown can't be brushed here. Place or Draw starts a group you can brush.").arg(made)
+                               : tr("No editable guides yet: Place or Draw starts the first group."));
+    empty_->setVisible(none);
+    bake_->setVisible(!source.empty() && made > 0);
     ui::refreshActions(editsMenu_);
+}
+
+std::string GuidesPanel::graphGuidesNode() const {
+    if (!document_) return {};
+    std::string found;
+    for (const GroomDocument::NodeInfo& n : document_->nodes()) {
+        const nlohmann::json* spec = document_->spec(n.type);
+        if (!spec || !spec->contains("outputs")) continue;
+        for (const nlohmann::json& port : (*spec)["outputs"]) {
+            if (port.is_object() && QString::fromStdString(port.value("type", std::string())).compare(QStringLiteral("guides"), Qt::CaseInsensitive) == 0) {
+                found = n.name;
+            }
+        }
+    }
+    return found;
 }
 
 void GuidesPanel::itemChanged(QTreeWidgetItem* item, int column) {
