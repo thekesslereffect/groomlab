@@ -272,8 +272,7 @@ void MainWindow::buildProperties() {
         scalpTriangles_->setObjectName(QStringLiteral("scalpSubdivisionTriangles"));
         scalpTriangles_->setWordWrap(false);
         // The count gives way first (elided, whole in its tooltip): the row never pushes the dock wider.
-        scalpTriangles_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-        scalpTriangles_->setMinimumWidth(48);
+        scalpTriangles_->hide();  // shown when the count is a warning (refreshScalpSubdivision)
         scalpSubdivision_->setMinimumWidth(64);
         auto* row = hbox({scalpSubdivision_, scalpTriangles_});
         p->setControl("scalpSubdivision", row);
@@ -755,6 +754,9 @@ void MainWindow::refreshScalpSubdivision() {
     }
     scalpTriangles_->setText(text);
     scalpTriangles_->setToolTip(tip);
+    // The combo says it too (the count beside it shows only when it is a warning: too many).
+    scalpSubdivision_->setToolTip(text + QStringLiteral(": ") + tip);
+    scalpTriangles_->setVisible(triangles > kLargeScalpTriangles);
     scalpTriangles_->setStyleSheet(QStringLiteral("color: %1;").arg(
         (triangles > kLargeScalpTriangles ? theme::warningText() : theme::textSoft()).name()));
 }

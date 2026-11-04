@@ -207,6 +207,11 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
         graphStatus_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         row->addSpacing(8);
         row->addWidget(graphStatus_, 1);
+        graphCount_ = new QLabel(graphBar_);
+        graphCount_->setObjectName(QStringLiteral("graphCount"));
+        graphCount_->setStyleSheet(QStringLiteral("color: %1; font-size: 11px;").arg(theme::textMuted().name()));
+        row->addWidget(graphCount_);
+        row->addSpacing(6);
         // Snap: nodes and pins dragged land on the grid (Maya's Graph Editor's Snap).
         graphSnap_ = new QToolButton(graphBar_);
         graphSnap_->setObjectName(QStringLiteral("graphSnapButton"));
@@ -219,7 +224,7 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
                                 tr("Edit: undo, framing, layout, groups, Copy and Paste Graph, units, theme"));
         const QString chip = theme::uiColor("hover").name();
         graphBar_->setStyleSheet(QStringLiteral("#graphBar { background: %1; border-bottom: 1px solid %2; }"
-                                                "#graphBar QToolButton { color: %3; font-weight: 700; padding: 3px 9px; border: none; border-radius: 5px; }"
+                                                "#graphBar QToolButton { color: %3; font-weight: 500; padding: 3px 9px; border: none; border-radius: 5px; }"
                                                 "#graphBar QToolButton:hover, #graphBar QToolButton:pressed { background: %4; color: %5; }"
                                                 "#graphBar QToolButton:disabled { color: %6; }"
                                                 "#graphBar QToolButton:checked { background: %4; color: %7; }"
@@ -399,6 +404,7 @@ bool AppShell::graphShown() const { return !graphDock_->isHidden(); }
 void AppShell::setNodeCount(int nodeCount) {
     nodeCount_ = nodeCount;
     graphDock_->setWindowTitle(nodeCount > 0 ? tr("Graph Editor  \u00B7  %n nodes", "", nodeCount) : tr("Graph Editor"));
+    if (graphCount_) graphCount_->setText(nodeCount > 0 ? tr("%n nodes", "", nodeCount) : QString());
 }
 
 void AppShell::setGraphStatus(const QString& text) {

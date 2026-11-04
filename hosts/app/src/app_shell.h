@@ -158,6 +158,7 @@ private:
     QToolButton* graphEdit_ = nullptr;
     QToolButton* graphSnap_ = nullptr;
     QLabel* graphStatus_ = nullptr;
+    QLabel* graphCount_ = nullptr;  // "17 nodes" in the bar (the docked dock shows no title)
     // The pieces.
     GroomTools* groomToolsWidget_ = nullptr;
     LookCard* lookCard_ = nullptr;

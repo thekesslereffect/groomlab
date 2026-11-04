@@ -27,6 +27,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QStyle>
 #include <QTimer>
 #include <QToolButton>
@@ -137,7 +138,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto* layout = new QVBoxLayout(this);
     // A solid theme's card sits in the dock: the docks' gutters (Properties').
     if (theme::glassy()) layout->setContentsMargins(18, 18, 18, 18);
-    else layout->setContentsMargins(16, 12, 24, 12);
+    else layout->setContentsMargins(16, 12, 0, 12);  // the right: the pages' own (their scroll bar at the dock's edge)
     layout->setSpacing(12);
 
     tabs_ = new Segmented(this);
@@ -162,11 +163,20 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     pagesLayout->setSpacing(0);
     scroll_->setWidget(pages_);
     layout->addWidget(scroll_, 1);
+    if (!theme::glassy()) {
+        // The docks' right gutter: 24, or 16 beside the scroll bar (which takes its own 8), so the
+        // fields end where Attributes' and Export's do.
+        auto gutter = [this, pagesLayout] {
+            pagesLayout->setContentsMargins(0, 0, scroll_->verticalScrollBar()->isVisible() ? 16 : 24, 0);
+        };
+        connect(scroll_->verticalScrollBar(), &QScrollBar::rangeChanged, this, [this, gutter](int, int) { QTimer::singleShot(0, this, gutter); });
+        gutter();
+    }
 
     auto page = [&] {
         auto* w = new QWidget(pages_);
         auto* l = new QVBoxLayout(w);
-        l->setContentsMargins(0, 0, 4, 0);
+        l->setContentsMargins(0, 0, theme::glassy() ? 4 : 0, 0);
         l->setSpacing(12);
         pagesLayout->addWidget(w);
         return w;
@@ -567,7 +577,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         if (i > 0 && !theme::glassy()) {
             auto* rule = new QFrame(lightingPage_);
             rule->setFixedHeight(1);
-            rule->setStyleSheet(QStringLiteral("background: %1; margin-top: 6px;").arg(theme::glassEdge().name()));
+            rule->setStyleSheet(QStringLiteral("background: %1;").arg(theme::glassEdge().lighter(118).name()));
             lightingLayout->addSpacing(6);
             lightingLayout->addWidget(rule);
         }
