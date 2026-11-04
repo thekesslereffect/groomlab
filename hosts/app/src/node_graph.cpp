@@ -963,7 +963,7 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         }
     }
     // The ports: inputs down the left edge, outputs down the right, named inside.
-    painter.setFont(theme::uiFont(12, 500));
+    painter.setFont(theme::uiFont(13, 500));
     for (std::size_t i = 0; i < node.inputs.size(); ++i) {
         const QPointF at = inputPos(node, static_cast<int>(i));
         painter.setPen(Qt::NoPen);

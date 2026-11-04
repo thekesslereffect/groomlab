@@ -121,9 +121,9 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
                      [this](double v) { session_->settings().setSmoothStrength(static_cast<float>(v)); }, settingHint("smoothStrength"));
     smooth_->setObjectName(QStringLiteral("smoothStrength"));
     {
-        // The chips, in a fixed order (a chip never moves between tools): Pressure, Keep off scalp,
-        // Stretch (Comb: lengths change with the pull), Straighten (Smooth: toward the straight
-        // line), Falloff curve, Root to tip, then the app's own Propagate and Pointwise.
+        // The chips, in a fixed order (a chip never moves between tools): the toggles (Pressure,
+        // Keep off scalp, Stretch for Comb, Straighten for Smooth, the app's own Propagate and
+        // Pointwise), then the curves, which open an editor (a chevron says so).
         FlowLayout* chips = nullptr;
         rows->addWidget(chipRow(brush_, &chips));
         pressure_ = settingChip(chips, "pressure", tr("Pressure"), [this] { return session_->settings().pressure; },
@@ -139,14 +139,6 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         auto* ramps = new QVBoxLayout();
         ramps->setContentsMargins(0, 0, 0, 0);
         ramps->setSpacing(4);
-        curve(chips, ramps, "falloffProfile", tr("Falloff curve"), "[[0, 1], [0.5, 0.56], [1, 0]]",
-              [this] { return session_->settings().falloffProfileJson(); }, [this](const std::string& v) { session_->settings().setFalloffProfile(v); });
-        falloffCurve_ = findChild<QToolButton*>(QStringLiteral("falloffProfile"));
-        falloffRamp_ = findChild<QWidget*>(QStringLiteral("falloffProfileCurve"));
-        curve(chips, ramps, "strengthProfile", tr("Root to tip"), "[[0, 0.25], [1, 1]]",
-              [this] { return session_->settings().strengthProfileJson(); }, [this](const std::string& v) { session_->settings().setStrengthProfile(v); });
-        strengthCurve_ = findChild<QToolButton*>(QStringLiteral("strengthProfile"));
-        strengthRamp_ = findChild<QWidget*>(QStringLiteral("strengthProfileCurve"));
         propagate_ = chip(chips, tr("Propagate"), [this] { return session_->settings().brush.propagate; },
                           [this](bool on) { session_->settings().brush.propagate = on; },
                           tr("Also edit the locked descendants (children that keep their own shape)"));
@@ -155,6 +147,14 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
                           [this](bool on) { session_->settings().brush.pointwise = on; },
                           tr("Paint a per-point layer along the guide instead of one value per guide"));
         pointwise_->setObjectName(QStringLiteral("pointwise"));
+        curve(chips, ramps, "falloffProfile", tr("Falloff curve"), "[[0, 1], [0.5, 0.56], [1, 0]]",
+              [this] { return session_->settings().falloffProfileJson(); }, [this](const std::string& v) { session_->settings().setFalloffProfile(v); });
+        falloffCurve_ = findChild<QToolButton*>(QStringLiteral("falloffProfile"));
+        falloffRamp_ = findChild<QWidget*>(QStringLiteral("falloffProfileCurve"));
+        curve(chips, ramps, "strengthProfile", tr("Root to tip"), "[[0, 0.25], [1, 1]]",
+              [this] { return session_->settings().strengthProfileJson(); }, [this](const std::string& v) { session_->settings().setStrengthProfile(v); });
+        strengthCurve_ = findChild<QToolButton*>(QStringLiteral("strengthProfile"));
+        strengthRamp_ = findChild<QWidget*>(QStringLiteral("strengthProfileCurve"));
         rows->addLayout(ramps);
     }
     card_->addWidget(brush_);
@@ -629,7 +629,7 @@ QToolButton* BrushPanel::settingChip(FlowLayout* into, const char* id, const QSt
 void BrushPanel::curve(FlowLayout* chips, QVBoxLayout* editors, const std::string& setting, const QString& label, const std::string& start,
                        std::function<std::string()> get, std::function<void(const std::string&)> set) {
     const QString hint = settingHint(setting.c_str());
-    QToolButton* on = makeChip(label, hint, this);
+    QToolButton* on = makeChip(label + QStringLiteral("  ▸"), hint, this);
     on->setObjectName(qs(setting));
     chips->addWidget(on);
     auto* holder = new QWidget(this);
@@ -655,7 +655,8 @@ void BrushPanel::curve(FlowLayout* chips, QVBoxLayout* editors, const std::strin
         }
         edited();
     };
-    connect(on, &QToolButton::toggled, this, [holder, push](bool checked) {
+    connect(on, &QToolButton::toggled, this, [on, label, holder, push](bool checked) {
+        on->setText(label + (checked ? QStringLiteral("  ▾") : QStringLiteral("  ▸")));  // the editor open below
         holder->setVisible(checked);
         push();
     });

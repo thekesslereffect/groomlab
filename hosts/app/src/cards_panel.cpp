@@ -47,7 +47,7 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto* body = new QWidget;
     outer->addWidget(new FitScrollArea(body, this));
     auto* layout = new QVBoxLayout(body);
-    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setContentsMargins(12, 12, 24, 12);  // the docks' gutters (Properties')
     layout->setSpacing(10);
 
     // ---- The title row: the node to edit.

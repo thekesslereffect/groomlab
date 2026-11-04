@@ -133,7 +133,7 @@ public:
     // Interpolate node to the Output, or the Output near the right edge), as Maya's frame_readable.
     void frameReadable();
     // The least zoom the view frames at: node names and port labels stay readable in a short dock.
-    static constexpr qreal kReadableScale = 0.8;
+    static constexpr qreal kReadableScale = 0.9;
     // F: the selected node framed (zoomed in no further than 1:1); none selected: fitAll.
     void frameSelected();
     // The view panned (the zoom kept) just enough to show a node's card whole (a node picked

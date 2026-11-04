@@ -3257,8 +3257,13 @@ TEST(AppPanels, TheShortcutSheetListsTheSharedTable) {
     ASSERT_GT(rows.size(), 20u);
     for (const Shortcut& s : rows) {
         // Each key a chip of its own ("Ctrl+S / Ctrl+Shift+S": two).
-        for (const QString& key : QString::fromStdString(s.keys).split(QStringLiteral(" / "))) {
-            EXPECT_TRUE(sheet.contains(QStringLiteral("&nbsp;%1&nbsp;").arg(key.toHtmlEscaped()))) << s.id;
+        QStringList keys = QString::fromStdString(s.keys).split(QStringLiteral(" / "));
+        if (std::all_of(keys.begin() + 1, keys.end(), [](const QString& k) { return k.size() <= 2; })) keys = {QString::fromStdString(s.keys)};
+        for (const QString& key : keys) {
+            // (each kept whole: non-breaking spaces and hyphens)
+            QString whole = key.toHtmlEscaped();
+            whole.replace(QLatin1Char(' '), QStringLiteral("&nbsp;")).replace(QLatin1Char('-'), QChar(0x2011));
+            EXPECT_TRUE(sheet.contains(QStringLiteral("&nbsp;%1&nbsp;").arg(whole))) << s.id;
         }
         EXPECT_TRUE(sheet.contains(QString::fromStdString(s.action).toHtmlEscaped())) << s.id;
     }

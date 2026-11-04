@@ -367,7 +367,7 @@ void GuidesPanel::refresh() {
                 item->setText(0, qs(group.name));
                 item->setText(1, QString::number(counts[group.id]));
                 item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
-                item->setForeground(1, theme::textMuted());
+                item->setForeground(1, theme::textDim());  // the count: readable on the selection tone too
                 if (off) item->setForeground(0, theme::textMuted());
                 item->setIcon(2, lineIcon(off ? QStringLiteral("eye_off") : QStringLiteral("eye"), devicePixelRatioF(), 14));
                 item->setToolTip(2, off ? tr("%1 is hidden: click to show it").arg(qs(group.name)) : tr("Hide %1 in the viewport").arg(qs(group.name)));

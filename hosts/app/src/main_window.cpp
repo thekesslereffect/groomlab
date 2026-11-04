@@ -462,7 +462,10 @@ bool MainWindow::showHelp(const QString& page) {
         };
         std::vector<Row> rows;
         for (const Shortcut& s : shortcutsFor(kShortcutApp)) {
-            const QStringList keys = QString::fromStdString(s.keys).split(QStringLiteral(" / "));
+            // Alternatives on their own chips ("Ctrl+Z / Ctrl+Y"); a run of one key's variants stays
+            // one chip ("Ctrl+1 / 2 / 3 / 4").
+            QStringList keys = QString::fromStdString(s.keys).split(QStringLiteral(" / "));
+            if (std::all_of(keys.begin() + 1, keys.end(), [](const QString& k) { return k.size() <= 2; })) keys = {QString::fromStdString(s.keys)};
             auto same = std::find_if(rows.begin(), rows.end(), [&](const Row& r) { return r.context == s.context && r.action == s.action; });
             if (same != rows.end()) same->keys << keys;
             else rows.push_back({s.context, s.action, keys});
@@ -475,10 +478,15 @@ bool MainWindow::showHelp(const QString& page) {
                             .arg(theme::textMuted().name(), QString::fromStdString(r.context).toUpper().toHtmlEscaped());
                 context = r.context;
             }
+            // A chip never breaks: its spaces and hyphens non-breaking; a row's other keys under it.
             QStringList keys;
-            for (const QString& k : r.keys) keys << chip.arg(theme::monoFamily(), theme::text().name(), theme::uiColor("raised").name(), k.toHtmlEscaped());
-            text += QStringLiteral("<tr><td width='46%'>%1</td><td width='54%' style='color:%2'>%3</td></tr>")
-                        .arg(keys.join(QStringLiteral(" ")), theme::textDim().name(), QString::fromStdString(r.action).toHtmlEscaped());
+            for (const QString& k : r.keys) {
+                QString whole = k.toHtmlEscaped();
+                whole.replace(QLatin1Char(' '), QStringLiteral("&nbsp;")).replace(QLatin1Char('-'), QChar(0x2011));
+                keys << chip.arg(theme::monoFamily(), theme::text().name(), theme::uiColor("raised").name(), whole);
+            }
+            text += QStringLiteral("<tr><td width='52%' valign='top' style='padding-bottom:6px'>%1</td><td width='48%' valign='top' style='color:%2'>%3</td></tr>")
+                        .arg(keys.join(QStringLiteral("<br>")), theme::textDim().name(), QString::fromStdString(r.action).toHtmlEscaped());
         }
         text += QStringLiteral("</table>");
     } else if (page == QStringLiteral("about")) {

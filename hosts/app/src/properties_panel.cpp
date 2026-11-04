@@ -89,7 +89,7 @@ PropertySection::PropertySection(const QString& title, bool nested, QWidget* par
     grid_->setHorizontalSpacing(12);
     grid_->setVerticalSpacing(6);
     // One label column for every section (Maya's AE): the controls line up down the whole dock.
-    grid_->setColumnMinimumWidth(0, nested ? 84 : 96);  // nested: less its 12 px indent, so the values line up
+    grid_->setColumnMinimumWidth(0, nested ? 75 : 96);  // nested: less its indents, so the values line up
     grid_->setColumnStretch(0, 0);
     grid_->setColumnStretch(1, 1);
     layout->addWidget(body_);

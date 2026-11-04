@@ -71,24 +71,38 @@ void FlowLayout::setGeometry(const QRect& rect) {
 }
 
 int FlowLayout::place(const QRect& rect, bool apply) const {
+    // An even grid of chips: as many equal columns (at most three) as the widest chip allows, each
+    // chip a column wide, so rows line up and no chip is left alone at its own width.
     const QMargins m = contentsMargins();
     const QRect area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom());
-    int x = area.x(), y = area.y(), line = 0;
-    bool any = false;
+    std::vector<QLayoutItem*> shown;
+    int widest = 0;
     for (QLayoutItem* item : items_) {
         if (item->isEmpty()) continue;
-        const QSize s = item->sizeHint();
-        if (any && x + s.width() > area.right() + 1) {  // the next row
-            x = area.x();
+        shown.push_back(item);
+        widest = std::max(widest, item->sizeHint().width());
+    }
+    if (shown.empty()) return 0;
+    const int columns = std::clamp((area.width() + gap_) / std::max(1, widest + gap_), 1, 3);
+    const int column = std::max(widest, (area.width() - (columns - 1) * gap_) / columns);
+    int y = area.y(), line = 0;
+    for (std::size_t i = 0; i < shown.size(); ++i) {
+        const int c = static_cast<int>(i) % columns;
+        if (c == 0 && i > 0) {
             y += line + gap_;
             line = 0;
         }
-        if (apply) item->setGeometry(QRect(QPoint(x, y), s));
-        x += s.width() + gap_;
+        const QSize s = shown[i]->sizeHint();
+        if (apply) {
+            // A chip fills its column (a fixed-size button would sit at its own width in it).
+            if (QWidget* w = shown[i]->widget(); w && w->sizePolicy().horizontalPolicy() != QSizePolicy::Expanding) {
+                w->setSizePolicy(QSizePolicy::Expanding, w->sizePolicy().verticalPolicy());
+            }
+            shown[i]->setGeometry(QRect(QPoint(area.x() + c * (column + gap_), y), QSize(column, s.height())));
+        }
         line = std::max(line, s.height());
-        any = true;
     }
-    return any ? y + line - rect.y() + m.bottom() : 0;
+    return y + line - rect.y() + m.bottom();
 }
 
 // ---- Section ---------------------------------------------------------------------------------------

@@ -816,7 +816,7 @@ void MainWindow::refreshHairColorRows() {
             if (!only.empty() && only != mode) continue;
             const QString label = qs(ui::hostText("label", ui::kHost, {&part})), tip = qs(ui::hostText("tip", ui::kHost, {&part}));
             if (kind == "heading") {
-                auto* h = new QLabel(label.toUpper(), hairColorBlock_);
+                auto* h = new QLabel(label, hairColorBlock_);  // sentence case: a level under the section headers
                 h->setProperty("role", "subheading");
                 grid->addWidget(h, row++, 0, 1, 2);
                 continue;

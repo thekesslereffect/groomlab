@@ -731,7 +731,7 @@ QTreeView::branch { background: transparent; }
 /* The Groom Tools (groom_tools.h), as Maya's: tiles, chips, the card, the tabs, sections. */
 QLabel[role="heading"] { color: @muted@; font-size: @smallSize@px; font-weight: 600; letter-spacing: 0.4px; padding-top: 8px; border-top: 1px solid @edge@; }
 QLabel[role="category"] { color: @muted@; font-size: @smallSize@px; font-weight: 600; letter-spacing: 0.6px; padding-top: 6px; }
-QLabel[role="subheading"] { color: @muted@; font-size: @tinySize@px; font-weight: 600; letter-spacing: 0.6px; }
+QLabel[role="subheading"] { color: @dim@; font-size: @fontSize@px; font-weight: 500; padding-top: 8px; }
 QLabel[role="about"] { color: @dim@; }
 QLabel[role="hint"] { color: @muted@; font-size: @smallSize@px; }
 QLabel[role="title"] { color: @text@; font-size: @titleSize@px; font-weight: 600; }
@@ -812,7 +812,7 @@ QPushButton[role="propSection"], QPushButton[role="propSection"]:checked, QPushB
     font-weight: 600; letter-spacing: 0.6px; text-align: left; padding: 10px 2px 6px 2px; min-height: 0; }
 QPushButton[role="propSection"]:hover { color: @dim@; background: transparent; }
 QPushButton[role="propSubsection"], QPushButton[role="propSubsection"]:checked, QPushButton[role="propSubsection"]:pressed {
-    background: transparent; border: none; color: @dim@; font-size: @smallSize@px; font-weight: 600; text-align: left; padding: 4px 2px; }
+    background: transparent; border: none; color: @dim@; font-size: @fontSize@px; font-weight: 500; text-align: left; padding: 8px 2px 4px 2px; }
 QPushButton[role="propSubsection"]:hover { color: @text@; background: transparent; }
 QLabel[role="propLabel"] { color: @dim@; }
 QFrame[role="propRule"] { background: @groupEdge@; border: none; }
@@ -854,7 +854,7 @@ QFrame[role="propRule"] { background: @groupEdge@; border: none; }
         {QStringLiteral("@fieldOff@"), glass ? wash(4) : uiColor("panel").name()},
         {QStringLiteral("@field@"), glass ? wash(8) : uiColor("raised").name()},
         {QStringLiteral("@list@"), glass ? wash(5) : backdrop().name()},
-        {QStringLiteral("@checkEdge@"), glass ? wash(14) : uiColor("hover").lighter(118).name()},
+        {QStringLiteral("@checkEdge@"), glass ? wash(14) : mix(uiColor("hover"), textMuted(), 0.65).name()},
         {QStringLiteral("@checkOff@"), glass ? wash(5) : uiColor("panel").name()},
         {QStringLiteral("@check@"), glass ? wash(10) : uiColor("raised").name()},
         {QStringLiteral("@track@"), glass ? wash(12) : uiColor("hover").name()},

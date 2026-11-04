@@ -135,7 +135,9 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     material_ = hairPreset("groom");
     lighting_ = lightingPreset("studio");
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(18, 18, 18, 18);
+    // A solid theme's card sits in the dock: the docks' gutters (Properties').
+    if (theme::glassy()) layout->setContentsMargins(18, 18, 18, 18);
+    else layout->setContentsMargins(12, 12, 24, 12);
     layout->setSpacing(12);
 
     tabs_ = new Segmented(this);
