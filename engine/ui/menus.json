@@ -26,8 +26,11 @@
         "sim.bake",
         "sim.clear",
         "-",
+        "nhair.exportGuides",
+        "nhair.loadCache",
+        "-",
         {"submenu": "Legacy", "id": "legacy", "tip": "Maya's nHair on the guides (before the Simulate node)", "hosts": ["maya"], "items": [
-          "nhair.simulate", "nhair.bake", "nhair.remove", "-", "nhair.exportGuides", "nhair.loadCache"
+          "nhair.simulate", "nhair.bake", "nhair.remove"
         ]}
       ]},
       {"submenu": "Display", "id": "display", "tip": "Show or hide every groom, or every groom's guides (XGen's Hide All Guides)", "tips": {"app": "Show or hide the groom or its guides"}, "items": [

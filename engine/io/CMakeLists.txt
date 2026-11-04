@@ -7,6 +7,7 @@ add_library(groomlab_alembic STATIC
     src/engine_export.cpp
     src/groom_scene.cpp
     src/import_curves_op.cpp
+    src/guide_cache_op.cpp
     src/sim_cache.cpp
 )
 add_library(groomlab::alembic ALIAS groomlab_alembic)

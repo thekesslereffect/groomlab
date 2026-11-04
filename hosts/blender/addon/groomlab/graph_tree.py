@@ -61,7 +61,7 @@ CATEGORY_COLORS = graph_ui.category_colors({
 # Params naming the host's inputs: plumbing, hidden from the panel unless changed (as in Maya).
 PLUMBING = graph_ui.plumbing({("Scalp", "input"), ("Guides", "input"), ("Guides", "hierarchy")})
 # Nodes whose `path` names a file (graph_ui.json's filePathFilters): Blender's file browser button.
-FILE_PATH_FILTERS = graph_ui.get("graph/filePathFilters", {"Reference": "", "ImportCurves": ""})
+FILE_PATH_FILTERS = graph_ui.get("graph/filePathFilters", {"Reference": "", "ImportCurves": "", "GuideCache": ""})
 # A backdrop's color when a frame has none of its own (Maya's Add Backdrop: Blue).
 BACKDROP_COLOR = [70, 90, 120]
 ADVANCED = "Advanced"

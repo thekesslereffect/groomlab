@@ -73,8 +73,8 @@
     "nhair.simulate": {"label": "Simulate Guides (nHair)...", "tip": "Maya's nHair on one guide group; children follow the simulated guides", "hosts": ["maya"]},
     "nhair.bake": {"label": "Bake Simulation to Cache...", "tip": "Run the nHair sim over the playback range, cache the guides and drop the live sim", "hosts": ["maya"]},
     "nhair.remove": {"label": "Remove Simulation", "tip": "Drop the live nHair simulation and the guide cache", "hosts": ["maya"]},
-    "nhair.exportGuides": {"label": "Export Guides for Simulation...", "tip": "A guide group as Alembic curves (strandId = guide ID), to simulate in another package", "hosts": ["maya"]},
-    "nhair.loadCache": {"label": "Load Guide Cache...", "tip": "Guide poses from an Alembic cache, by guide ID", "hosts": ["maya"]},
+    "nhair.exportGuides": {"label": "Export Guides for Simulation...", "tip": "The guides as Alembic curves over the playback range (each curve's strandId its guide's ID), to simulate in another package (Houdini...); Load Guide Cache brings the result back"},
+    "nhair.loadCache": {"label": "Load Guide Cache...", "tip": "Simulated guide curves from an Alembic file pose the guides, matched by guide ID (strandId): a GuideCache node after the Guides node; the groom stays, only the guides move"},
 
     "display.showAllHair": {"label": "Show All Hair", "tip": "Show the hair of every groom in the scene, the strands alone (as Shift+click on the Groom Tools' eye)", "tips": {"app": "Show the hair"}},
     "display.hideAllHair": {"label": "Hide All Hair", "tip": "Hide the hair of every groom in the scene, the strands alone: the guides stay (as Shift+click on the Groom Tools' eye)", "tips": {"app": "Hide the hair"}},

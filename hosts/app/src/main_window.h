@@ -467,6 +467,11 @@ public:
     bool addMotionNode(const QString& type);
     // Simulate > Add Simulate Node: between the guides and Interpolate (the timeline then shows).
     bool addSimulateNode();
+    // Simulate > Export Guides for Simulation... and Load Guide Cache... (every host's): the
+    // primary guides to Alembic over the timeline's range; an Alembic cache as a GuideCache node.
+    // An empty path asks for one (a dialog).
+    bool exportGuidesForSimulation(const QString& path = QString());
+    bool loadGuideCache(const QString& path = QString());
     // Add > Collider: the prop named `prop` (a mesh added with File > Add Prop Mesh) keeps the strands off it.
     bool addCollider(const QString& prop);
     // Add > Feathers: the designs (feathers_<design> presets: featherDesigns) as scattered feathers

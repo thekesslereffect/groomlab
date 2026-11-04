@@ -140,6 +140,23 @@ bool graphReadsTime(const Graph& graph, NodeId output) {
     return false;
 }
 
+GuideSet guidesToSimulate(const HierarchyPtr& hierarchy, const GuidesPtr& flat, const std::string& group) {
+    if (group != "*") {
+        const GroupId gid = hierarchy ? hierarchy->findGroup(group) : kNoGroup;
+        if (gid == kNoGroup) throw std::runtime_error("no guide group named " + group);
+        return hierarchy->flattenGroup(gid);
+    }
+    GuideSet out;
+    if (hierarchy && !hierarchy->guides().empty()) out = hierarchy->flatten(-1);
+    if (flat) {
+        for (const Guide& g : flat->guides()) {
+            Guide& added = out.add(g.id, g.points);
+            added.root = g.root;
+        }
+    }
+    return out;
+}
+
 void applyGuidePoses(GuideHierarchy& hierarchy, const GuideSet& poses, const ScalpMesh* scalp) {
     std::vector<GuideId> posed;
     for (const Guide& pose : poses.guides()) {

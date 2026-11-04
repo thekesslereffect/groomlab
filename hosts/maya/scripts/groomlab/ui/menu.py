@@ -633,7 +633,7 @@ def export_guides_dialog():
         return None
     start, end = _playback_range()
     return _run_export("Exporting the guides", path[0],
-                       lambda: sim.export_guides(groom, path[0], "primary", start=start, end=end),
+                       lambda: sim.export_guides(groom, path[0], "*", start=start, end=end),
                        "wrote the guides to %s (%d frames)" % (path[0], _frames(start, end)))
 
 
@@ -646,7 +646,9 @@ def load_guide_cache_dialog():
     path = cmds.fileDialog2(fileFilter="Alembic (*.abc)", dialogStyle=2, fileMode=1, caption="Load Guide Cache",
                             startingDirectory=groomlab.asset_folder("caches"))
     if path:
-        sim.set_guide_cache(groom, path[0])
+        from groomlab.ui import messages
+        node = sim.add_guide_cache(groom, path[0])  # (a GuideCache node: every host reads it)
+        messages.say("The guides follow %s (the %s node)" % (os.path.basename(path[0]), node), warning=False)
 
 
 def _prompt(title, message, text=""):

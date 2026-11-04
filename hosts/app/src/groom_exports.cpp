@@ -106,6 +106,36 @@ ExportResult GroomDocument::exportAlembic(const std::string& path, const ExportO
     return result;
 }
 
+ExportResult GroomDocument::exportGuides(const std::string& path, const std::string& group, const ExportOptions& options,
+                                         const ExportProgress& progress) {
+    const FrameRange& range = options.frames;
+    const double fps = framesPerSecond();
+    ExportResult result;
+    try {
+        AlembicCurvesWriter writer(path, exportName(path) + "Guides", frameToSeconds(range.first, fps), frameToSeconds(range.step, fps));
+        const std::size_t count = range.count();
+        for (std::size_t i = 0; i < count; ++i) {
+            ViewRequest request;
+            request.time = frameToSeconds(range.frame(i), fps);
+            request.wantBounds = false;
+            const ViewResult& view = scene_->view(request);  // (the guides at that frame: the scalp, the poses)
+            const StrandSet curves = toCurves(guidesToSimulate(view.hierarchy, session().data().guides, group));
+            writer.writeFrame(curves);
+            result.strands = curves.strandCount();
+            result.frames = i + 1;
+            if (!continueExport(progress, i + 1, count)) {
+                result.cancelled = true;
+                break;
+            }
+        }
+        writer.close();
+    } catch (const std::exception& e) {
+        throw std::runtime_error(e.what());
+    }
+    result.files = {path};
+    return result;
+}
+
 ExportResult GroomDocument::exportUsd(const std::string& path, const ExportOptions& options, const ExportProgress& progress) {
     const FrameRange& range = options.frames;
     const double fps = framesPerSecond();

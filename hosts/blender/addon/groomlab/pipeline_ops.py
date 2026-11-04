@@ -293,6 +293,61 @@ class GROOMLAB_OT_simulate_add(_Tipped, GroomOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_export_guides_sim(_Tipped, GroomOperator, ExportHelper):
+    """The guides as Alembic curves over the scene's frame range (each curve's strandId its guide's
+    ID), to simulate in another package; Load Guide Cache brings the result back"""
+    bl_idname = "groomlab.export_guides_sim"
+    bl_label = "Export Guides for Simulation"
+    bl_options = {"REGISTER"}
+    filename_ext = ".abc"
+    filter_glob: StringProperty(default="*.abc", options={"HIDDEN"})
+    group: StringProperty(name="Guide Group", default="*",
+                          description="The guides written: * every guide the Guides node feeds (what Load Guide Cache "
+                                      "poses), or one guide group's")
+
+    def invoke(self, context, event):
+        if not self.filepath:
+            self.filepath = os.path.join(_export_folder(), active_groom(context).name + "_guides.abc")
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        scene = context.scene
+        path = bpy.path.abspath(self.filepath)
+        try:
+            r = pipeline.export(scalp, "guides", path, scene=scene, first=scene.frame_start, last=scene.frame_end,
+                                group=self.group or "*")
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "wrote %d frames of the guides to %s: simulate them, then Load Guide Cache"
+             % (int(r.get("frames", 0)), r.get("path") or path))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_load_guide_cache(_Tipped, GroomOperator, ImportHelper):
+    """Simulated guide curves from an Alembic file pose the guides, matched by guide ID (strandId): a
+    GuideCache node after the Guides node; the groom stays, only the guides move"""
+    bl_idname = "groomlab.load_guide_cache"
+    bl_label = "Load Guide Cache"
+    bl_options = {"REGISTER", "UNDO"}
+    filename_ext = ".abc"
+    filter_glob: StringProperty(default="*.abc", options={"HIDDEN"})
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        path = bpy.path.abspath(self.filepath)
+        if not os.path.isfile(path):
+            self.report({"ERROR"}, "GroomLab: no file at %s" % path)
+            return {"CANCELLED"}
+        try:
+            node = pipeline.add_guide_cache(scalp, path)
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "the guides follow %s (the %s node)" % (os.path.basename(path), node))
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_simulate_range(_Tipped, GroomOperator):
     """Step the Simulate nodes over the playback range into their cache (Esc stops); with Bake, write
     their frames as Alembic guide caches after"""
@@ -952,7 +1007,8 @@ class GROOMLAB_OT_bake_to_guides(_Tipped, GroomOperator):
 classes = (GROOMLAB_OT_export_unreal_groom, GROOMLAB_OT_export_unity_strands, GROOMLAB_OT_export_gltf_cards,
            GROOMLAB_OT_export_scales_fbx, GROOMLAB_OT_export_scales_usd, GROOMLAB_OT_export_unreal_cards,
            GROOMLAB_OT_export_unity_cards, GROOMLAB_OT_export_unity_feathers, GROOMLAB_OT_to_mesh,
-           GROOMLAB_OT_bake_scale_maps, GROOMLAB_OT_simulate_add, GROOMLAB_OT_simulate_range,
+           GROOMLAB_OT_bake_scale_maps, GROOMLAB_OT_simulate_add, GROOMLAB_OT_export_guides_sim,
+           GROOMLAB_OT_load_guide_cache, GROOMLAB_OT_simulate_range,
            GROOMLAB_OT_simulate_clear, GROOMLAB_OT_add_feathers, GROOMLAB_OT_add_braid, GROOMLAB_OT_add_cards,
            GROOMLAB_OT_add_collider, GROOMLAB_OT_add_sample, GROOMLAB_OT_transfer_groom, GROOMLAB_OT_turntable,
            GROOMLAB_OT_find_missing_files, GROOMLAB_OT_copy_graph_to_grooms, GROOMLAB_OT_import_alembic_curves,

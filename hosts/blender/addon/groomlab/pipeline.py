@@ -18,7 +18,7 @@ from . import groom, process, units
 from .helper_client import HelperError
 
 # export's formats the helper writes alone, and those whose meshes come back for an FBX.
-STRAND_FORMATS = ("alembic", "usd", "scalesUsd", "vrscene", "unrealGroom", "unityStrands")
+STRAND_FORMATS = ("alembic", "usd", "scalesUsd", "vrscene", "guides", "unrealGroom", "unityStrands")
 MESH_FORMATS = ("unrealCards", "unityCards", "scalesFbx", "unityFeathers")
 LODS = ("hero", "mid", "low")            # cards' levels of detail (gltfCards' lods)
 BARB_LODS = ("high", "mid", "low")       # lighter feather grooms (unrealGroom, unityStrands, unityFeathers)
@@ -543,6 +543,34 @@ def add_simulate(scalp, params=None):
     consumers = interpolates(source)
     x, y = g.position(source)
     node = g.add("Simulate", params=params or {}, at=(x + LAYOUT_DX / 2, y + LAYOUT_DY))
+    for dst, input_name in consumers:
+        g.connect(node, dst, input_name)
+    g.connect(source, node, "guides")
+    g.finish()
+    return node
+
+
+def add_guide_cache(scalp, path, object_name=""):
+    """Load Guide Cache (every host's): a GuideCache node reading `path` (Alembic curves simulated
+    elsewhere, each with its guide's ID as strandId) right after the Guides node, feeding all it
+    fed, so the guides take the cache's poses and the groom stays. A GuideCache already there
+    reads the new file. Returns the node's name."""
+    g = GraphEdits(scalp)
+    params = {"path": path, "object": object_name or ""}
+    for node in g.of_type("GuideCache"):
+        source = g.source_of(node, "guides")
+        if source is None or g.node_type(source) == "Guides":
+            for k, v in params.items():
+                g.set_param(node, k, v)
+            g.finish()
+            return node
+    guides = [n for n in g.of_type("Guides") if g.downstream_of(n)]
+    if not guides:
+        raise HelperError("state", "the groom's graph has no Guides node feeding the groom")
+    source = guides[0]
+    consumers = list(g.downstream_of(source))
+    x, y = g.position(source)
+    node = g.add("GuideCache", params=params, at=(x + LAYOUT_DX / 2, y + LAYOUT_DY))
     for dst, input_name in consumers:
         g.connect(node, dst, input_name)
     g.connect(source, node, "guides")

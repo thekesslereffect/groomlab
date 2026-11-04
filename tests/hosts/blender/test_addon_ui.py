@@ -226,7 +226,8 @@ class DefinitionsTest(unittest.TestCase):
         self.assertEqual(texts(samples), ["Nika (head)", "Manny (head)", "Wolf", "Buddy (rig)"])
         self.assertEqual([e[3].sample for e in samples if e[0] == "op_text"], ["nika", "manny", "wolf", "buddy"])
         sim = drawn(bpy.types.GROOMLAB_MT_main_simulate)
-        self.assertEqual(texts(sim), ["Add Simulate Node", "Simulate Range", "Bake Simulation", "Clear Simulation"])
+        self.assertEqual(texts(sim), ["Add Simulate Node", "Simulate Range", "Bake Simulation", "Clear Simulation",
+                                      "Export Guides for Simulation...", "Load Guide Cache..."])
         self.assertEqual([e[3].bake for e in sim if e[0] == "op_text" and e[1] == "groomlab.simulate_range"],
                          [False, True])
         self.assertEqual(actions.action_for("groomlab.simulate_range", {"bake": True}), "sim.bake")

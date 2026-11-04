@@ -273,17 +273,40 @@ sim.bake_sim(groom, "shot010.guides.abc", made)
 
 ## Houdini and other packages
 
-1. **Export Guides for Simulation...** writes the guides to Alembic. Each curve carries its guide
-   ID as a per-curve `strandId` attribute; keep that attribute through the simulation. Maya's
-   progress bar counts the frames; Esc cancels and removes the half-written file.
-2. Simulate in the other package.
-3. **Load Guide Cache...** loads the result, matching curves to guides by `strandId`. The cache
-   is interpolated between samples, so motion-blur subframes are smooth.
+Guides simulated in another package drive the groom through a **GuideCache** node, the same in
+Maya, Blender and the app (**GroomLab > Simulate** in each):
+
+1. **Export Guides for Simulation...** writes the guides (every guide the Guides node feeds) to Alembic over the playback
+   range, in GroomLab's space (Y up, centimeters). Each curve carries its guide ID as a per-curve
+   `strandId` attribute. Maya's progress bar counts the frames; Esc cancels and removes the
+   half-written file.
+2. Simulate the curves in the other package. Keep `strandId` on each curve (a primitive attribute
+   in Houdini), keep the roots pinned, and write the result back to Alembic in the same space.
+3. **Load Guide Cache...** adds a **GuideCache** node right after the Guides node (loading again
+   points the same node at the new file). At each frame it lays each curve on the guide with its
+   `strandId`: the guides move, and their groups, painted maps and brushed shapes stay. A curve
+   with another point count is resampled along its length to the guide's.
+
+The node's settings: **Path** and **Object** (only the curves under one object), **Match By**
+(`id`, or `order` for a cache whose curves lost `strandId`), **Frame Offset** (a cache that starts
+earlier or later than the shot) and **Blend** (1 the cache's pose, 0 the guides as groomed; key it
+to fade the simulation in). Guides with no curve in the cache keep their pose, and the node's note
+says how many were posed. Bypass the node to see the groomed guides.
 
 ```python
-sim.export_guides(groom, "guides.abc", "primary", start=1, end=100)
-sim.set_guide_cache(groom, "sim.abc")
+# Maya
+sim.export_guides(groom, "guides.abc", start=1, end=100)  # every guide; or one group: "primary"
+sim.add_guide_cache(groom, "sim.abc")
 ```
+
+```python
+# Blender
+bpy.ops.groomlab.export_guides_sim(filepath="//guides.abc")
+bpy.ops.groomlab.load_guide_cache(filepath="//sim.abc")
+```
+
+Older Maya scenes whose groom has a guide cache set (`sim.set_guide_cache`, the groom's
+`guideCache` attribute) still play it.
 
 <Callout title="Motion blur">
   Give a groom on a deforming scalp a rest mesh, so the strands match between motion samples

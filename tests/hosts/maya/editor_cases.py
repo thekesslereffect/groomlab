@@ -86,7 +86,7 @@ class GraphEditorTest(unittest.TestCase):
 
     def test_motion_nodes_come_from_the_add_menu_and_notes_badge_them(self):
         cats = dict(self.ge.categories(self.editor.catalog))
-        self.assertEqual(cats["Motion"], ["Wind", "Jiggle", "Simulate"])
+        self.assertEqual(cats["Motion"], ["Wind", "Jiggle", "Simulate", "GuideCache"])
         self.editor.items["resample"].setSelected(True)
         name = self.editor.add_node("Jiggle")
         self.assertEqual(self.editor.model.source_of(name, "strands"), "resample")

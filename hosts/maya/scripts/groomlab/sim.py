@@ -69,6 +69,38 @@ def add_simulate(groom, name=None, preset=None, **params):
     return node
 
 
+@groomlab.undoable("load guide cache")
+def add_guide_cache(groom, path, object_name=""):
+    """Load Guide Cache (every host's): a GuideCache node reading `path` (Alembic curves simulated
+    elsewhere, each with its guide's ID as strandId: export_guides writes the guides to simulate)
+    right after the Guides node, feeding all it fed, so the guides take the cache's poses and the
+    groom stays. A GuideCache already there reads the new file. Returns the node's name. (The
+    groom's guideCache attribute, set_guide_cache, still poses older scenes.)"""
+    from groomlab import graph as gm
+    model = gm.GraphModel.from_groom(groom)
+    params = {"path": groomlab.portable_path(path), "object": object_name or ""}
+    for node in [n for n in model.order if model.node_type(n) == "GuideCache"]:
+        source = model.source_of(node, "guides")
+        if source is None or model.node_type(source) == "Guides":
+            for k, v in params.items():
+                model.set_param(node, k, v)
+            model.save(groom)
+            return node
+    guides = [n for n in model.order if model.node_type(n) == "Guides" and model.downstream_of(n)]
+    if not guides:
+        raise ValueError("%s's graph has no Guides node feeding the groom" % groom)
+    source = guides[0]
+    consumers = list(model.downstream_of(source))
+    node = model.add_node("GuideCache", params=params)
+    for dst, input_name in consumers:
+        model.connect(node, dst, input_name)
+    model.connect(source, node, "guides")
+    x, y = model.position(source)
+    model.set_position(node, x + gm.LAYOUT_DX / 2, y + gm.LAYOUT_DY)
+    model.save(groom)
+    return node
+
+
 def simulate_presets():
     """The Simulate node's one-click settings, every host's (the core's): [{name, title,
     description}]: "default" (the node's defaults) and "fur" (springy fur that holds its groom)."""
@@ -406,8 +438,10 @@ def remove_sim(groom, sim=None):
         cmds.delete(doomed)
 
 
-def export_guides(groom, path, group="primary", start=None, end=None, step=1.0):
-    """Write a group's guides (posed, as the groom sees them) to Alembic, strandId = guide ID.
+def export_guides(groom, path, group="*", start=None, end=None, step=1.0):
+    """Write the guides (posed, as the groom sees them) to Alembic, strandId = guide ID: `group` "*"
+    every guide the Guides node feeds (what add_guide_cache's GuideCache node poses), else one
+    guide group's.
 
     The starting point for a simulation in another package; bring the
     result back with set_guide_cache.

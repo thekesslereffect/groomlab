@@ -39,6 +39,9 @@ struct ExportJob {
     std::unique_ptr<EngineGroomWriter> engine;
 #endif
     bool unreal = false;  // the engine writer's: Unreal (the primary guides go too) or Unity
+    // format "guides" (Export Guides for Simulation): these guides' curves ("*": every guide the
+    // Guides node feeds, else a group's), strandId = guide ID.
+    std::string guideGroup;
     std::unique_ptr<UsdCurvesWriter> usd;
     std::unique_ptr<VrsceneWriter> vrscene;  // a V-Ray scene (vrscene_writer.h)
     bool withScales = true;  // an Alembic export writes the scales' mesh (scales "mesh")

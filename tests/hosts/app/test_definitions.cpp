@@ -265,7 +265,7 @@ TEST(AppUi, MenuBarFromTheDefinitionsHidesWhatTheAppDoesNotRun) {
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Add"))),
               (std::vector<std::string>{"Feathers...", "Braid on Curves...", "Cards", "Collider", "Wind", "Jiggle"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Simulate"))),
-              (std::vector<std::string>{"Add Simulate Node", "Simulate Range", "Bake Simulation", "Clear Simulation"}));
+              (std::vector<std::string>{"Add Simulate Node", "Simulate Range", "Bake Simulation", "Clear Simulation", "-", "Export Guides for Simulation...", "Load Guide Cache..."}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Utilities"))),
               (std::vector<std::string>{"To Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "-", "Delete All Flow Arrows", "-",
                                         "Transfer Groom to Scalp...", "-", "Find Missing Files..."}));
