@@ -522,6 +522,8 @@ def write_hair(scalp, r):
     a = r["arrays"]
     pos = client.view(a["positions"])
     counts = client.view(a["pointCounts"])
+    if r.get("viewedRoots"):  # a viewed Scatter: its roots are the overlay's dots, no hair
+        pos, counts = pos[:0], counts[:0]
     s, p = len(counts), len(pos)
     curves = hair.data
     same = len(curves.curves) == s and len(curves.points) == p

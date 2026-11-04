@@ -629,6 +629,22 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(len(counts), h["strandCount"])
         self.assertEqual(bpy.ops.groomlab.graph_view_node(node="interpolate"), {"FINISHED"})  # again: off
         self.assertEqual(head.groomlab.view_node, "")
+        # A Scatter viewed: its roots as the overlay's dots (Maya's and the app's), no hair curves.
+        scatter = next((n["name"] for n in helper_graph(head)["nodes"] if n.get("type") == "Scatter"), None)
+        self.assertIsNotNone(scatter, "hair_basics has a Scatter node")
+        if scatter:
+            display = importlib.import_module(bu.MODULE + ".display")
+            self.assertEqual(bpy.ops.groomlab.graph_view_node(node=scatter), {"FINISHED"})
+            settle(head)
+            r = groom.evaluate(head, rt)
+            self.assertTrue(r.get("viewedRoots"))
+            self.assertEqual(len(head.groomlab.hair.data.curves), 0)
+            d = process.call("display", session=rt.session, settings=display.settings_for(head, bpy.context.scene), have={})
+            self.assertGreater(d["items"]["dots"]["count"], 0)
+            self.assertEqual(bpy.ops.groomlab.graph_view_node(node=scatter), {"FINISHED"})  # off
+            settle(head)
+            groom.evaluate(head, rt)
+            self.assertGreater(len(head.groomlab.hair.data.curves), 0)
         # View is refused for a node that gives no strands.
         self.assertEqual(bpy.ops.groomlab.graph_view_node(node="scalp"), {"CANCELLED"})
         # Set as Output.
