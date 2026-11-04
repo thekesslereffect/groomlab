@@ -719,6 +719,29 @@ TEST(ParamSpecs, EachDefaultIsWrittenOnceInItsSpec) {
     EXPECT_GT(files, 15u);
 }
 
+TEST(GraphEdit, MovedGuidesLinkedByHandMakeAClumpFollowThem) {
+    // Guides a Simulate node moves, linked by hand into a picking Clump's centers, directly or
+    // through a curve node: each clump along its guide (inputCurves), as a Guides node's are (the
+    // GuideCache's and ImportCurves': test_guide_cache.cpp, where those types are registered).
+    for (const char* kind : {"Simulate", "Guides"}) {
+        for (const char* source : {"moved", "wave"}) {
+            const nlohmann::json g = {
+                {"version", 1},
+                {"nodes",
+                 {{{"name", "s"}, {"type", "Scatter"}},
+                  {{"name", "c"}, {"type", "Clump"}},
+                  {{"name", "moved"}, {"type", kind}},
+                  {{"name", "wave"}, {"type", "Noise"}}}},
+                {"connections",
+                 {{{"from", "s"}, {"to", "c"}, {"input", "strands"}}, {{"from", "moved"}, {"to", "wave"}, {"input", "strands"}}}}};
+            GraphEdit edit(g.dump());
+            EXPECT_TRUE(edit.connectByHand(source, "c", "centers")) << kind << " " << source;
+            const nlohmann::json now = nlohmann::json::parse(edit.toJson());
+            EXPECT_EQ(now["nodes"][1]["params"].value("centersFrom", std::string()), "inputCurves") << kind << " " << source;
+        }
+    }
+}
+
 TEST(GraphEdit, NewNodesFitTheGroomsSize) {
     // The spec defaults are authored at a 20-unit scalp (a head in cm, as the presets are): a node
     // added to a groom of another size takes the defaults that measure something fitted to it, as

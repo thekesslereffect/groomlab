@@ -10,6 +10,7 @@
 #include "groomlab/alembic_io.h"
 #include "groomlab/alembic_operators.h"
 #include "groomlab/graph.h"
+#include "groomlab/graph_edit.h"
 #include "groomlab/guide_set.h"
 #include "groomlab/operators.h"
 
@@ -165,6 +166,29 @@ TEST(GuideCache, TheViewGivesTheGuidesItMovesForTheViewport) {
     EXPECT_FALSE(moving(graphWith(path, true)));          // bypassed
     EXPECT_FALSE(moving(graphWith(std::string(), false)));  // no file: the guides pass through
     std::remove(path.c_str());
+}
+
+TEST(GuideCache, LinkedByHandIntoAClumpEachClumpFollowsItsGuide) {
+    // A GuideCache's guides (or an ImportCurves'), linked by hand into a picking Clump's centers,
+    // directly or through a curve node: centersFrom inputCurves, each clump along its guide.
+    registerAlembicOperators(OperatorRegistry::instance());
+    for (const char* kind : {"GuideCache", "ImportCurves"}) {
+        for (const char* source : {"moved", "wave"}) {
+            const nlohmann::json g = {
+                {"version", 1},
+                {"nodes",
+                 {{{"name", "s"}, {"type", "Scatter"}},
+                  {{"name", "c"}, {"type", "Clump"}},
+                  {{"name", "moved"}, {"type", kind}},
+                  {{"name", "wave"}, {"type", "Noise"}}}},
+                {"connections",
+                 {{{"from", "s"}, {"to", "c"}, {"input", "strands"}}, {{"from", "moved"}, {"to", "wave"}, {"input", "strands"}}}}};
+            GraphEdit edit(g.dump());
+            EXPECT_TRUE(edit.connectByHand(source, "c", "centers")) << kind << " " << source;
+            const nlohmann::json now = nlohmann::json::parse(edit.toJson());
+            EXPECT_EQ(now["nodes"][1]["params"].value("centersFrom", std::string()), "inputCurves") << kind << " " << source;
+        }
+    }
 }
 
 TEST(GuideCache, AMissingFileIsTheNodesError) {

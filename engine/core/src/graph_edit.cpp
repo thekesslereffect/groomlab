@@ -735,17 +735,21 @@ bool GraphEdit::connectByHand(const std::string& src, const std::string& dst, co
                               const std::string& output) {
     impl_->connect(src, dst, input, output);
     // A Clump picking its own centers takes the centers linked to it (its centersFrom: inputPoints;
-    // from a Guides node, through any curve nodes after it, inputCurves: each clump along its
-    // guide); a Cards node following the strands, the guides linked to it (its cardsFrom: guides).
+    // guides, through any curve nodes after them, inputCurves: each clump along its guide); a Cards
+    // node following the strands, the guides linked to it (its cardsFrom: guides). Guides are a
+    // Guides node's, an ImportCurves', or as a GuideCache or Simulate node moves them (a simulated
+    // guide is a clump's curve as much as a groomed one).
     auto fromGuidesNode = [&] {
         std::string at = src;
         std::set<std::string> seen;
         while (!at.empty() && seen.insert(at).second) {
-            if (nodeType(at) == op::kGuides) return true;
+            const std::string type = nodeType(at);
+            if (type == op::kGuides || type == "GuideCache" || type == op::kSimulate || type == "ImportCurves") return true;
             std::string next;
             const json spec = impl_->spec(at);
             for (const json& port : spec["inputs"]) {
-                if (port.value("type", std::string()) == "Curves") {
+                const std::string portType = port.value("type", std::string());
+                if (portType == "Curves" || portType == "Guides") {
                     next = impl_->sourceOf(at, port.value("name", std::string()));
                     break;
                 }
