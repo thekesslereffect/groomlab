@@ -2,6 +2,7 @@
 #include "main_window.h"
 
 #include <algorithm>
+#include <cmath>
 #include <thread>
 
 #include <QAction>
@@ -59,6 +60,12 @@ MainWindow::MainWindow() {
     setStyleSheet(theme::styleSheet());
     // The viewport's overlays (guide levels, selection, frozen, parts...) in the theme's colors.
     settings_.theme = theme::displayTheme();
+    {
+        // The brush ring in the theme's tone (viewport.brushRing, else the accent's ink), linear.
+        const QColor ring = theme::accentInk();
+        auto lin = [](qreal c) { return static_cast<float>(c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4)); };
+        brush_.setRingTone({lin(ring.redF()), lin(ring.greenF()), lin(ring.blueF())});
+    }
     viewport_ = new Viewport();
     host_ = new OverlayHost(viewport_, this);
     setCentralWidget(host_);
@@ -483,35 +490,49 @@ bool MainWindow::showHelp(const QString& page) {
             delete item;
         }
         grid->setContentsMargins(0, 0, 0, 12);
-        grid->setHorizontalSpacing(12);
-        grid->setVerticalSpacing(6);
-        grid->setColumnMinimumWidth(0, 132);
-        grid->setColumnStretch(1, 1);
+        grid->setHorizontalSpacing(0);
+        grid->setVerticalSpacing(8);
+        grid->setColumnStretch(0, 1);
+        // Each group a card (the style sheet's tray): its title, then a keycap column and the actions.
         int line = 0;
         std::string context;
+        QVBoxLayout* card = nullptr;
+        QWidget* cardHost = nullptr;
         for (const Row& r : rows) {
-            if (r.context != context) {
+            if (r.context != context || !card) {
                 context = r.context;
-                auto* group = new QLabel(QString::fromStdString(r.context).toUpper(), shortcutSheet_);
+                cardHost = new QWidget(shortcutSheet_);
+                if (!theme::glassy()) {
+                    cardHost->setProperty("role", "tray");
+                    cardHost->setAttribute(Qt::WA_StyledBackground, true);
+                }
+                card = new QVBoxLayout(cardHost);
+                card->setContentsMargins(12, 10, 12, 12);
+                card->setSpacing(6);
+                auto* group = new QLabel(QString::fromStdString(r.context), cardHost);
                 group->setProperty("role", "keyGroup");
-                grid->addWidget(group, line++, 0, 1, 2);
+                card->addWidget(group);
+                grid->addWidget(cardHost, line++, 0);
             }
-            auto* caps = new QWidget(shortcutSheet_);
-            auto* capColumn = new QVBoxLayout(caps);
-            capColumn->setContentsMargins(0, 0, 0, 0);
-            capColumn->setSpacing(4);
-            for (const QString& k : r.keys) {
-                auto* cap = new QLabel(k, caps);
-                cap->setProperty("role", "keycap");
-                cap->setMinimumHeight(20);
-                capColumn->addWidget(cap, 0, Qt::AlignLeft);
-            }
-            grid->addWidget(caps, line, 0, Qt::AlignTop);
-            auto* action = new QLabel(QString::fromStdString(r.action), shortcutSheet_);
+            // A row: the action, then its keys at the right on one line (an alternative after a dot).
+            auto* rowLine = new QHBoxLayout();
+            rowLine->setSpacing(8);
+            auto* action = new QLabel(QString::fromStdString(r.action), cardHost);
             action->setProperty("role", "keyAction");
             action->setWordWrap(true);
             action->setMinimumHeight(20);
-            grid->addWidget(action, line++, 1, Qt::AlignTop);
+            rowLine->addWidget(action, 1);
+            // Its keys at the right: one, or several stacked (the action never wraps beside them).
+            auto* capColumn = new QVBoxLayout();
+            capColumn->setSpacing(3);
+            for (const QString& k : r.keys) {
+                auto* cap = new QLabel(k, cardHost);
+                cap->setProperty("role", "keycap");
+                cap->setMinimumHeight(20);
+                capColumn->addWidget(cap, 0, Qt::AlignRight);
+            }
+            rowLine->addLayout(capColumn);
+            card->addLayout(rowLine);
         }
         if (rows.empty()) {
             auto* none = new QLabel(tr("No shortcut matches."), shortcutSheet_);

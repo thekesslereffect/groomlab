@@ -512,9 +512,11 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
         EXPECT_TRUE(tools.noToolLabel()->text().startsWith(QString::fromStdString(e->hint).left(16))) << tool;
         EXPECT_TRUE(tools.tile(tool)->toolTip().contains(QString::fromStdString(e->hint).left(20).toHtmlEscaped())) << tool << ": the tile has the hint";
     }
-    // The card is only the settings: no title, no hint line; the gestures are a brush tile's tip.
+    // The card's header: the tool's name and what it does (its first sentence); the gestures are a brush tile's tip.
     tools.setTool("comb");
-    EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr);
+    ASSERT_NE(card->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr);
+    EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardTitle"))->text(), QStringLiteral("Comb"));
+    EXPECT_FALSE(card->findChild<QLabel*>(QStringLiteral("toolCardHint"))->isHidden());
     EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardShort")), nullptr);
     EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Page Up / Down")));
     EXPECT_FALSE(tools.tile("part")->toolTip().contains(QStringLiteral("Page Up / Down"))) << "not a brush";

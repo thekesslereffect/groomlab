@@ -10,6 +10,7 @@
 #include <QComboBox>
 #include <QEvent>
 #include <QFormLayout>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
@@ -167,15 +168,19 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                     &TubePanel::deleteShape);
     delete_->setText(tr("Delete"));
     {
-        editPicker_ = new QHBoxLayout();
-        editPicker_->setContentsMargins(0, 0, 0, 0);
+        // The shape and Apply in one field row (the combo flat in it, Apply its trailing action).
+        auto* pickBox = new QFrame(profileBlock_);
+        pickBox->setProperty("role", "propField");
+        pickBox->setMinimumHeight(theme::rowHeight());
+        editPicker_ = new QHBoxLayout(pickBox);
+        editPicker_->setContentsMargins(4, 0, 2, 0);
         editPicker_->setSpacing(4);
         apply_ = new QPushButton(tr("Apply"), profileBlock_);
         apply_->setObjectName(QStringLiteral("tubeShapeApply"));
         apply_->setToolTip(tr("Give the selected guides this profile"));
         connect(apply_, &QPushButton::clicked, this, [this] { applyShape(); });
         editPicker_->addWidget(apply_);
-        profileBlock_->rows()->addLayout(editPicker_);
+        profileBlock_->rows()->addWidget(pickBox);
         // The editor: the chosen shape's outline (at most 200 px square), and the library's edits.
         editor_ = new TubeShapeEditor(profileBlock_);
         editor_->setMaximumWidth(200);
@@ -232,6 +237,7 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         smooth_ = new QToolButton(selectedBlock_);
         smooth_->setObjectName(QStringLiteral("tubeSmooth"));
         smooth_->setProperty("role", "ghost");
+        smooth_->setProperty("outlined", true);  // a block header's action: an outlined split button
         smooth_->setText(tr("Smooth"));
         smooth_->setAutoRaise(true);
         smooth_->setPopupMode(QToolButton::MenuButtonPopup);

@@ -203,8 +203,11 @@ void MainWindow::buildProperties() {
     // ghost icon button (the File row's two: Reload and Save).
     {
         inputsBlock_ = new QWidget();
+        // One field-toned list (the style sheet's fieldList): its rows on the fields' value column.
+        inputsBlock_->setProperty("role", "fieldList");
+        inputsBlock_->setAttribute(Qt::WA_StyledBackground, true);
         auto* grid = new QGridLayout(inputsBlock_);
-        grid->setContentsMargins(0, 0, 0, 0);
+        grid->setContentsMargins(8, 3, 2, 3);
         grid->setHorizontalSpacing(8);
         grid->setVerticalSpacing(2);
         grid->setColumnStretch(2, 1);
@@ -219,7 +222,7 @@ void MainWindow::buildProperties() {
             auto* label = new QLabel(PropertiesPanel::partLabel("inputs", part));
             label->setProperty("role", "propLabel");
             label->setToolTip(PropertiesPanel::partTip("inputs", part));
-            label->setMinimumWidth(76);
+            label->setMinimumWidth(80);  // (with the icon: the fields' 104 px label column)
             label->setObjectName(QStringLiteral("inputsLabel_") + QLatin1String(part));
             // One line (the row's height; the whole text in the tip when it is cut).
             auto* value = valueLabel();
@@ -233,11 +236,17 @@ void MainWindow::buildProperties() {
             line->setContentsMargins(0, 0, 0, 0);
             line->setSpacing(0);
             for (QToolButton* b : buttons) line->addWidget(b);
+            // The value, then this row's own actions (a row with one glyph leaves its value the room).
+            auto* tail = new QWidget();
+            auto* tailLine = new QHBoxLayout(tail);
+            tailLine->setContentsMargins(0, 0, 0, 0);
+            tailLine->setSpacing(2);
+            tailLine->addWidget(value, 1);
+            tailLine->addWidget(actions, 0, Qt::AlignVCenter);
             grid->addWidget(mark, row, 0, Qt::AlignTop);
             grid->addWidget(label, row, 1, Qt::AlignVCenter);
-            grid->addWidget(value, row, 2, Qt::AlignVCenter);
-            grid->addWidget(actions, row, 3, Qt::AlignRight | Qt::AlignVCenter);
-            grid->setRowMinimumHeight(row, 22);
+            grid->addWidget(tail, row, 2, 1, 2, Qt::AlignVCenter);
+            grid->setRowMinimumHeight(row, 24);
             value->setProperty("row", row);
             ++row;
         };
@@ -605,7 +614,7 @@ void MainWindow::refreshProperties() {
             for (const QString& name : {QStringLiteral("inputsIcon_"), QStringLiteral("inputsLabel_"), QStringLiteral("inputs_"), QStringLiteral("inputsActions_")}) {
                 if (auto* w = inputsBlock_->findChild<QWidget*>(name + key)) w->setVisible(shown);
             }
-            if (auto* grid = qobject_cast<QGridLayout*>(inputsBlock_->layout())) grid->setRowMinimumHeight(l->property("row").toInt(), shown ? 22 : 0);
+            if (auto* grid = qobject_cast<QGridLayout*>(inputsBlock_->layout())) grid->setRowMinimumHeight(l->property("row").toInt(), shown ? 24 : 0);
         }
         l->setStyleSheet(none ? QStringLiteral("color: %1; font-style: italic;").arg(theme::textMuted().name())
                               : QStringLiteral("color: %1;").arg(theme::textSoft().name()));
@@ -781,6 +790,14 @@ void MainWindow::refreshControlSliders() {
     grid->setVerticalSpacing(5);
     grid->setColumnStretch(0, 2);
     grid->setColumnStretch(1, 3);
+    // A folded Controls card with none says so ("Controls · none").
+    for (QWidget* w = controlsBlock_->parentWidget(); w; w = w->parentWidget()) {
+        if (auto* section = qobject_cast<PropertySection*>(w)) {
+            section->setProperty("emptySummary", sliders.empty() ? tr("none") : QString());
+            if (!section->expanded()) section->setExpanded(false);
+            break;
+        }
+    }
     if (sliders.empty()) {
         auto* none = new QLabel(tr("No sliders yet: in the Graph Editor, right-click a param > Drive with Slider."), controlsBlock_);
         none->setProperty("role", "hint");
@@ -814,6 +831,13 @@ void MainWindow::refreshControlSliders() {
         });
         grid->addWidget(s, row, 0, 1, 2);
         ++row;
+    }
+    // A folded Controls card says its first slider in its title (the summary, now the sliders are there).
+    for (QWidget* w = controlsBlock_->parentWidget(); w; w = w->parentWidget()) {
+        if (auto* section = qobject_cast<PropertySection*>(w)) {
+            if (!section->expanded()) section->setExpanded(false);
+            break;
+        }
     }
 }
 
@@ -859,8 +883,13 @@ void MainWindow::refreshHairColorRows() {
             if (!only.empty() && only != mode) continue;
             const QString label = qs(ui::hostText("label", ui::kHost, {&part})), tip = qs(ui::hostText("tip", ui::kHost, {&part}));
             if (kind == "heading") {
-                auto* h = new QLabel(label, hairColorBlock_);  // sentence case: a level under the section headers
-                h->setProperty("role", "subheading");
+                // The nested sections' header (their chevron, their weight): one subsection style.
+                auto* h = new QPushButton(label, hairColorBlock_);
+                h->setProperty("role", "propSubsection");
+                h->setFlat(true);
+                h->setFocusPolicy(Qt::NoFocus);
+                h->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_chevron_down.svg"), theme::textMuted(), 10, h->devicePixelRatioF())));
+                h->setIconSize(QSize(10, 10));
                 grid->addWidget(h, row++, 0, 1, 2);
                 continue;
             }
@@ -916,8 +945,9 @@ void MainWindow::refreshHairColorRows() {
                 grid->addWidget(control, row++, 0, 1, 2);
                 continue;
             }
-            grid->addWidget(l, row, 0);
-            grid->addWidget(control, row++, 1);
+            // Every other control in a field row, as the number fields: one row type down the card.
+            if (qobject_cast<QComboBox*>(control)) control->setMinimumWidth(140);
+            grid->addWidget(fieldRow(hairColorBlock_, l, control), row++, 0, 1, 2);
         }
     }
     auto* edit = smallButton(node.empty() ? tr("Graph Editor") : tr("Edit in Graph Editor"),

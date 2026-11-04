@@ -128,12 +128,16 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     empty_->setObjectName(QStringLiteral("groupsEmpty"));
     empty_->setProperty("role", "hint");
     empty_->setWordWrap(true);
+    empty_->setAlignment(Qt::AlignHCenter);  // the shared empty state: icon, line, one button, centered
+    emptyIcon_ = emptyIcon(QStringLiteral("spline"), this);
+    emptyIcon_->hide();
+    layout->addWidget(emptyIcon_, 0, Qt::AlignHCenter);
     layout->addWidget(empty_);
     bake_ = new QPushButton(tr("Bake to Guides"), this);
     bake_->setObjectName(QStringLiteral("groupsBake"));
     bake_->setToolTip(tr("Turn the guides the graph makes into a group you can brush"));
     bake_->hide();
-    layout->addWidget(bake_, 0, Qt::AlignLeft);
+    layout->addWidget(bake_, 0, Qt::AlignHCenter);
     connect(bake_, &QPushButton::clicked, this, [this] {
         const std::string node = graphGuidesNode();
         if (!node.empty()) emit bakeRequested(node);
@@ -200,30 +204,25 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
     const ui::json& edits = lists.at("edits");
     edits_ = new QPushButton(qs(edits.value("label", std::string())) + QStringLiteral("  ▾"), box_);
     edits_->setObjectName(QStringLiteral("editGuides"));
-    edits_->setProperty("role", "ghost");
-    edits_->setFlat(true);
+    edits_->setProperty("role", "disclosure");  // opens a menu: outlined, the row's width
     edits_->setToolTip(qs(edits.value("tip", std::string())));
     editsMenu_ = new QMenu(edits_);
     editsMenu_->setObjectName(QStringLiteral("editGuidesMenu"));
     edits_->setMenu(editsMenu_);
-    row->addWidget(edits_);
-    row->addStretch(1);
+    row->addWidget(edits_, 1);
     rows->addLayout(row);
     // Edit Guides > Children's count, on a line of its own (beside the menu it would widen a
     // narrow dock).
-    auto* countRow = new QHBoxLayout();
-    countRow->setSpacing(4);
-    auto* countLabel = new QLabel(tr("Children per guide"), box_);
-    countLabel->setProperty("role", "hint");
-    countRow->addWidget(countLabel);
-    countRow->addStretch(1);
-    count_ = new QSpinBox(box_);
+    count_ = new ValueSlider(box_);
     count_->setObjectName(QStringLiteral("childrenCount"));
-    count_->setRange(1, 500);
+    count_->setCaption(tr("Children per guide"));
+    count_->setInteger(true);
+    count_->setRange(1, 50);
+    count_->setLimits(1, 500);
     count_->setValue(5);
+    count_->setFormat([](double v) { return QString::number(std::lround(v)); });
     count_->setToolTip(tr("Children per guide for Edit Guides > Children (the selected guides, else the picked group)"));
-    countRow->addWidget(count_);
-    rows->addLayout(countRow);
+    rows->addWidget(count_);
     layout->addWidget(box_);
 
     // The parts and flow the brushes laid (parts.h, flow.h): listed by name, removed, cleared
@@ -322,7 +321,7 @@ void GuidesPanel::editCurrentName() {
     if (QTreeWidgetItem* item = tree_->currentItem()) tree_->editItem(item, 0);
 }
 
-int GuidesPanel::childrenCount() const { return count_->value(); }
+int GuidesPanel::childrenCount() const { return static_cast<int>(std::lround(count_->value())); }
 void GuidesPanel::setChildrenCount(int count) { count_->setValue(count); }
 
 void GuidesPanel::invalidate() {
@@ -425,7 +424,9 @@ void GuidesPanel::refreshRows() {
     itemBar_->refresh();
     // The box is the picked group's (none picked: every group's, Segments on every guide).
     const std::string group = currentGroup();
-    itemBar_->setTitle(group.empty() ? tr("All groups") : qs(group));
+    // (A picked group: the row above names it, the drawer's bar holds its actions alone.)
+    itemBar_->setMutedTitle(true);
+    itemBar_->setTitle(group.empty() ? tr("All groups") : tr("%1 segments per guide").arg(std::lround(segments_->value())));
     box_->setVisible(tree_->topLevelItemCount() > 0);
     tree_->setVisible(tree_->topLevelItemCount() > 0);
     // No group of its own: say where the guides shown come from, and how to brush them.
@@ -434,11 +435,16 @@ void GuidesPanel::refreshRows() {
     const auto& viewed = none ? document_->lastView().hierarchy : nullptr;
     const auto& held = none ? document_->file().data.guides : nullptr;
     const std::size_t made = viewed ? viewed->guides().size() : held ? held->guides().size() : 0;
-    empty_->setText(!source.empty() && made > 0
-                        ? tr("The %1 guides shown can't be brushed yet. Bake them into a group, or Place or Draw a new one.").arg(made)
-                    : made > 0 ? tr("The %1 guides shown can't be brushed here. Place or Draw starts a group you can brush.").arg(made)
-                               : tr("No editable guides yet: Place or Draw starts the first group."));
+    const QString body = !source.empty() && made > 0
+                             ? tr("The %1 guides shown can't be brushed yet. Bake them into a group, or Place or Draw a new one.").arg(made)
+                         : made > 0 ? tr("The %1 guides shown can't be brushed here. Place or Draw starts a group you can brush.").arg(made)
+                                    : tr("Place or Draw starts the first group.");
+    // The shared empty state: a title, then the line.
+    empty_->setText(theme::glassy() ? body
+                                    : tr("<p style='margin:0 0 4px 0; font-weight:600; font-size:13px; color:%1'>No guide groups yet</p><p style='margin:0'>%2</p>")
+                                          .arg(theme::text().name(), body.toHtmlEscaped()));
     empty_->setVisible(none);
+    emptyIcon_->setVisible(none && !theme::glassy());
     bake_->setVisible(!source.empty() && made > 0);
     ui::refreshActions(editsMenu_);
 }

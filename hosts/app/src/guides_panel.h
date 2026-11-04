@@ -153,13 +153,14 @@ private:
     QTreeWidget* tree_ = nullptr;
     QFrame* box_ = nullptr;
     QLabel* empty_ = nullptr;  // no groups yet
+    QLabel* emptyIcon_ = nullptr;  // the empty state's icon over it
     QPushButton* bake_ = nullptr;  // ... the graph makes guides: bake them to brush
     std::string graphGuidesNode() const;  // the last node handing on guides ("" none)
     ListBar* itemBar_ = nullptr;
     QLabel* selection_ = nullptr;
     QPushButton* edits_ = nullptr;
     QMenu* editsMenu_ = nullptr;
-    QSpinBox* count_ = nullptr;
+    ValueSlider* count_ = nullptr;
     ValueSlider* segments_ = nullptr;
     QWidget* overlays_ = nullptr;  // the parts and flow box
     QListWidget* parts_ = nullptr;

@@ -275,8 +275,8 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     content->setObjectName(QStringLiteral("groomToolsContent"));
     scroll_->setWidget(content);
     auto* outer = new QVBoxLayout(content);
-    outer->setContentsMargins(16, 10, 16, 12);  // the docks' gutter
-    outer->setSpacing(6);
+    outer->setContentsMargins(12, 10, 12, 12);  // the cards 12 px in, as the Properties dock's
+    outer->setSpacing(8);
 
     // ---- The top: the header, the status, the tabs and the tool grid.
     top_ = new QWidget(content);
@@ -341,6 +341,9 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     tabs_->setElideMode(Qt::ElideRight);
     tabs_->setDrawBase(false);
     tabs_->setDocumentMode(true);
+    tabs_->setProperty("role", "pills");
+    tabs_->setExpanding(true);  // the track the panel's width, the tabs sharing it
+    tabs_->setElideMode(Qt::ElideNone);
     top->addWidget(tabs_);
 
     // The tool grid: the tiles by category (Paint's on the Paint tab), Unfreeze All beside Freeze.
@@ -373,19 +376,29 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     toolsGrid_->setObjectName(QStringLiteral("toolsGrid"));
     auto* tools = new QVBoxLayout(toolsGrid_);
     tools->setContentsMargins(0, 0, 0, 0);
-    tools->setSpacing(3);
+    tools->setSpacing(8);
     for (BrushCategory category : brushCategories()) {
         if (category == BrushCategory::Paint) continue;  // beside the maps they paint
-        QLabel* name = label(QString::fromLatin1(brushCategoryName(category)).toUpper(), "category", toolsGrid_);
-        tools->addWidget(name);
+        // Each category a tray: its name inside, over its tiles.
+        auto* tray = new QFrame(toolsGrid_);
+        tray->setObjectName(QStringLiteral("tray_") + QString::fromLatin1(brushCategoryName(category)).toLower());
+        tray->setProperty("role", "tray");
+        auto* trayLayout = new QVBoxLayout(tray);
+        trayLayout->setContentsMargins(8, 8, 8, 8);
+        trayLayout->setSpacing(4);
+        QLabel* name = label(QString::fromLatin1(brushCategoryName(category)), "category", tray);
+        trayLayout->addWidget(name);
         gridLabels_.push_back(name);
-        tools->addWidget(tileGrid(category, toolsGrid_));
+        trayLayout->addWidget(tileGrid(category, tray));
+        tools->addWidget(tray);
     }
     top->addWidget(toolsGrid_);
     paintGrid_ = new QWidget(top_);
     paintGrid_->setObjectName(QStringLiteral("paintGrid"));
+    paintGrid_->setProperty("role", "tray");  // a tray, as the Tools tab's
+    paintGrid_->setAttribute(Qt::WA_StyledBackground, true);
     auto* paintTiles = new QVBoxLayout(paintGrid_);
-    paintTiles->setContentsMargins(0, 0, 0, 0);
+    paintTiles->setContentsMargins(8, 8, 8, 8);
     // The Paint tab: Paint as one full-width button over the maps.
     for (const groomlab::BrushEntry* e : brushesInCategory(BrushCategory::Paint)) {
         QToolButton* b = makeTile(e->id, qs(e->label), tileTip(*e));
@@ -403,7 +416,9 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     emptyItems_ = new QVBoxLayout(empty_);
     emptyItems_->setContentsMargins(12, 12, 12, 12);
     emptyItems_->setSpacing(8);
-    emptyItems_->addWidget(label(tr("More ways to start"), "title", empty_));
+    // Secondary to the viewport's start card (one start surface): a quiet heading, outlined actions, no card.
+    if (!theme::glassy()) empty_->setProperty("role", "emptyQuiet");
+    emptyItems_->addWidget(label(tr("More ways to start"), theme::glassy() ? "title" : "subheading", empty_));
     emptyItems_->addWidget(label(tr("Try a sample head, or bring a groom in from Alembic curves or a groom file."), "about", empty_));
     outer->addWidget(empty_);
 
@@ -420,7 +435,10 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
         auto* holder = new QWidget(work_);
         holder->setObjectName(QStringLiteral("list_") + qs(id));
         holder->setLayout(new QVBoxLayout());
-        holder->layout()->setContentsMargins(0, 0, 0, 0);
+        // Each tab's list on a card (its header inside), as the Properties dock's sections.
+        holder->setProperty("role", "tray");
+        holder->setAttribute(Qt::WA_StyledBackground, true);
+        holder->layout()->setContentsMargins(10, 4, 10, 10);
         work->addWidget(holder);
         lists_[id] = holder;
         tabIds_.push_back(id);
@@ -446,7 +464,14 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     card_->setTubes(tubes_);
     noTool_ = label(tr("Pick a tool, then drag over the groom in the viewport."), "hint", work_);
     noTool_->setObjectName(QStringLiteral("noTool"));
-    noTool_->setContentsMargins(0, 4, 0, 2);
+    if (!theme::glassy()) {
+        // A compact card in the tool card's place (no text outside a card).
+        noTool_->setAttribute(Qt::WA_StyledBackground, true);
+        noTool_->setStyleSheet(QStringLiteral("background: %1; border-radius: %2px; padding: 10px 12px; color: %3;")
+                                   .arg(theme::card().name()).arg(theme::cardRadius()).arg(theme::textDim().name()));
+    } else {
+        noTool_->setContentsMargins(0, 4, 0, 2);
+    }
     noTool_->setWordWrap(true);
     work->insertWidget(0, noTool_);
 
@@ -523,13 +548,15 @@ void GroomTools::setBindings(const ui::Bindings& bindings, const ui::FillOptions
         if (item.kind == ui::Item::Kind::Action) {
             auto* b = new QPushButton(qs(item.label), empty_);
             b->setObjectName(QStringLiteral("empty_") + qs(item.id));
-            b->setProperty("role", "primary");
+            b->setProperty("role", theme::glassy() ? "primary" : "disclosure");
             b->setToolTip(qs(item.tip));
             const ui::Binding binding = bindings.at(item.id);
             connect(b, &QPushButton::clicked, this, [binding, value = item.value] { binding.trigger(value, false); });
             emptyItems_->addWidget(b);
         } else if (item.kind == ui::Item::Kind::Submenu) {
-            emptyItems_->addWidget(menuChip(item, bindings, options, empty_));
+            QToolButton* chip = menuChip(item, bindings, options, empty_);
+            if (!theme::glassy()) chip->setProperty("disclosure", true);
+            emptyItems_->addWidget(chip);
         }
     }
     // ---- The Parts block.
@@ -625,7 +652,7 @@ void GroomTools::refreshTiles() {
         // a glass theme's keep their two tones.
         const QPixmap rest = glass ? duotoneIcon(resource, theme::toolIconColor(category, stem), theme::iconInk(), iconSize, dpr)
                                    : tintedIcon(resource, theme::toolIconColor(category, stem), iconSize, dpr);
-        const QPixmap on = tintedIcon(resource, glass ? theme::uiColor("accentText") : theme::uiColor("accent").lighter(115), iconSize, dpr);
+        const QPixmap on = tintedIcon(resource, glass ? theme::uiColor("accentText") : theme::accentInk(), iconSize, dpr);
         const QPixmap off = tintedIcon(resource, theme::textMuted(), iconSize, dpr);
         QIcon icon;
         icon.addPixmap(rest, QIcon::Normal, QIcon::Off);
@@ -695,7 +722,9 @@ void GroomTools::refreshCard() {
     if (!hint.endsWith(QLatin1Char('.'))) hint += QLatin1Char('.');
     noTool_->setText(picked ? hint + tr(" Shift+drag smooths.") : hint);
     noTool_->setToolTip(picked && hint.size() < whole.size() ? whole : QString());
-    noTool_->setVisible(open && tab != "photos" && tab != "correctives" && (picked || !card_->hasSettings()));
+    // A picked tool's line in the card's header (under its name); no tool: the line over the panel.
+    card_->setSubtitle(picked ? noTool_->text() : QString());
+    noTool_->setVisible(open && tab != "photos" && tab != "correctives" && !picked && !card_->hasSettings());
     if (!tubes_->isHidden() && (tubesStale_ || !hadTubes)) {
         tubesStale_ = false;
         tubes_->refresh();
@@ -842,7 +871,8 @@ void GroomTools::refreshVisibility() {
             const groomlab::BrushEntry* e = brushEntry(b->property("tool").toString().toStdString());
             return !layers || (e && e->corrective);
         });
-        if (i < gridLabels_.size()) gridLabels_[i]->setVisible(!grids_[i]->shown().empty());
+        // (A tray with none of its tiles shown goes, its card with it.)
+        if (i < gridLabels_.size()) gridLabels_[i]->parentWidget()->setVisible(!grids_[i]->shown().empty());
     }
     paintGrid_->setVisible(open && tab == "paint");
     for (auto& [id, holder] : lists_) holder->setVisible(id == tab);

@@ -69,6 +69,10 @@ public:
     // The session's view is the camera over this widget (called before every event; a host
     // that moved the camera itself calls it before asking the session anything).
     void syncView();
+    // A brush hover at `at` (view pixels) with `readout` beside it (empty: none): a screenshot's still.
+    void previewBrush(const QPointF& at, const QString& readout, int state = 0);
+    // Where a readout chip goes for a ring at `center`: outside it, at its upper right.
+    QPoint readoutAnchor(const QPointF& center) const;
     // The session's overlay (the ring, the hovered guides) to the renderer, then a redraw.
     void refreshOverlay();
 
@@ -88,6 +92,8 @@ signals:
     void strokeEnded();
     void brushSettingsChanged();
     void selectionChanged();
+    // While a radius or strength drag runs: what it sets, at the drag's start (an empty text when it ends).
+    void brushReadout(const QPoint& at, const QString& text);
     // Delete was pressed over the viewport (the host removes the selected guides).
     void deleteRequested();
     // Something went wrong in a stroke (the host says so; the stroke was dropped).
@@ -113,6 +119,7 @@ protected:
     void leaveEvent(QEvent* event) override;
 
 private:
+    QString hoverState_;  // the held key's state shown beside the ring ("" none)
     enum class Drag { None, Orbit, Pan, Dolly, Stroke, Radius, Strength, Box, Menu };
     void cameraMoved();
     bool cameraPress(QMouseEvent* event, bool alt);  // the camera's buttons; false: not a camera drag

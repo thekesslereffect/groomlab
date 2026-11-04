@@ -80,6 +80,7 @@ private:
     QLabel* titleRowLabel_ = nullptr;  // the header: with a Cards node only (the empty state has its own title)  // the Strands/Cards switch and Maps: with a Cards node only
     QWidget* bakeBox_ = nullptr;     // Bake maps and its resolution: with a Cards node only
     QLabel* stats_ = nullptr;
+    QLabel* emptyIcon_ = nullptr;  // over the empty state's title (no Cards node)
     QComboBox* bakeResolution_ = nullptr;
     RoundButton* bake_ = nullptr;
     QLabel* bakeStatus_ = nullptr;

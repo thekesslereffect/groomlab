@@ -95,6 +95,10 @@ public:
     // The cursor at `at` (not pressed): the guides the brush would touch and the ring under it
     // go into the overlay. The ring alone while a stroke is live; clearHover empties it.
     void hover(const QPointF& at);
+    // The ring's look: the theme's tone for the shaping brushes (linear RGB; unset: the core's), and
+    // what a held key makes of the stroke (0 none, 1 Reverse: a warm dashed ring, 2 Smooth: its own tone).
+    void setRingTone(const std::array<float, 3>& linear) { ringTone_ = linear; ringToneSet_ = true; }
+    void setHoverState(int state) { hoverState_ = state; }
     void clearHover();
     // The Select tool's box between two widget corners, drawn at the camera target's depth.
     void showBox(const QPointF& a, const QPointF& b);
@@ -139,6 +143,9 @@ private:
     DisplayGeometry overlay_;
     std::uint64_t overlayVersion_ = 0;
     bool ringValid_ = false;
+    std::array<float, 3> ringTone_{1.0f, 1.0f, 1.0f};
+    bool ringToneSet_ = false;
+    int hoverState_ = 0;
     Vec3f ringCenter_;
     float ringRadius_ = 0.0f;
     // The scalp's line of symmetry (symmetrySeam), drawn red while symmetry is on; kept until the

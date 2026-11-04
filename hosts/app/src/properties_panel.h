@@ -107,6 +107,7 @@ private:
         Item item;
         bool wanted = true;
         bool inField = false;  // the label is the number field's caption (its own stays hidden)
+        QWidget* field = nullptr;  // a control's row as one field (the label inside it, the control at its right)
     };
     void build(const ui::json& sections, QVBoxLayout* into, PropertySection* parent);
     QScrollArea* scroll_ = nullptr;

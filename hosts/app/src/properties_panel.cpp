@@ -4,7 +4,9 @@
 
 #include <algorithm>
 
+#include <QCheckBox>
 #include <QFrame>
+#include <QHBoxLayout>
 #include <QGridLayout>
 #include <QLabel>
 #include <QPushButton>
@@ -69,8 +71,13 @@ const ui::json* partOf(const std::string& key, const std::string& part) {
 
 PropertySection::PropertySection(const QString& title, bool nested, QWidget* parent) : QWidget(parent), title_(title) {
     setProperty("nested", nested);
+    if (!nested) {
+        // A section is a card (the style sheet's propCard): its title and its rows on one block.
+        setProperty("role", "propCard");
+        setAttribute(Qt::WA_StyledBackground, true);
+    }
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(nested ? 8 : 0, 0, 0, nested ? 2 : 4);
+    layout->setContentsMargins(nested ? 0 : 12, 0, nested ? 0 : 12, nested ? 2 : 6);
     layout->setSpacing(0);
     header_ = new QPushButton(this);
     header_->setObjectName(QStringLiteral("propSection"));
@@ -86,11 +93,11 @@ PropertySection::PropertySection(const QString& title, bool nested, QWidget* par
     body_ = new QWidget(this);
     body_->setObjectName(QStringLiteral("propBody"));
     grid_ = new QGridLayout(body_);
-    grid_->setContentsMargins(nested ? 4 : 0, 4, 0, 8);
+    grid_->setContentsMargins(0, 0, 0, 6);
     grid_->setHorizontalSpacing(12);
     grid_->setVerticalSpacing(6);
     // One label column for every section (Maya's AE): the controls line up down the whole dock.
-    grid_->setColumnMinimumWidth(0, nested ? 75 : 96);  // nested: less its indents, so the values line up
+    grid_->setColumnMinimumWidth(0, 92);  // (nested ones too: no indent, so the values line up)
     grid_->setColumnStretch(0, 0);
     grid_->setColumnStretch(1, 1);
     layout->addWidget(body_);
@@ -111,7 +118,26 @@ void PropertySection::setExpanded(bool expanded) {
         header_->setIcon(QIcon(tintedIcon(chevron, theme::textMuted(), 10, header_->devicePixelRatioF())));
         header_->setIconSize(QSize(10, 10));
     } else {
-        setSectionHeader(header_, title_, expanded);
+        // Folded: the title with its first value after it ("Controls · Frizz 1"), what is inside at a glance.
+        QString title = title_;
+        if (!expanded) {
+            for (ValueSlider* s : body_->findChildren<ValueSlider*>()) {
+                // (one hidden on purpose skipped; one not shown yet, under the folded body, counts)
+                if ((s->isHidden() && s->testAttribute(Qt::WA_WState_ExplicitShowHide)) || s->caption().isEmpty()) continue;
+                title += QStringLiteral("  \u00B7  ") + s->caption() + QStringLiteral(" ") + s->shownText();
+                if (!s->property("summaryHooked").toBool()) {
+                    s->setProperty("summaryHooked", true);
+                    connect(s, &ValueSlider::valueChanged, this, [this] {
+                        if (!expanded_) setExpanded(false);
+                    });
+                }
+                break;
+            }
+            // No value to say: what the section says it holds when empty ("none").
+            if (title == title_ && !property("emptySummary").toString().isEmpty())
+                title += QStringLiteral("  \u00B7  ") + property("emptySummary").toString();
+        }
+        setSectionHeader(header_, title, expanded);
     }
     body_->setVisible(expanded);
 }
@@ -147,8 +173,8 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     auto* column = new QWidget(scroll_);
     column->setObjectName(QStringLiteral("propertiesColumn"));
     auto* layout = new QVBoxLayout(column);
-    layout->setContentsMargins(16, 4, 16, 12);  // the docks' 16 px gutter (the scroll bar beside it takes its own 8)
-    layout->setSpacing(4);
+    layout->setContentsMargins(12, 8, 12, 12);  // the cards 12 px in from the dock's edges (the scroll bar beside takes its own 8)
+    layout->setSpacing(8);
     build(defs().get("properties/sections"), layout, nullptr);
     layout->addStretch(1);
     scroll_->setWidget(column);
@@ -220,7 +246,29 @@ bool PropertiesPanel::setControl(const std::string& key, QWidget* control) {
         r.inField = true;
         r.section->grid()->addWidget(control, r.row, 0, 1, 2);
     } else {
-        r.section->grid()->addWidget(control, r.row, 1);
+        // Every other control in a field of its own, as a number field: one row type down the card,
+        // the label inside at its left, the control at its right (a check box at the row's end).
+        auto* box = new QFrame(r.section->body());
+        box->setObjectName(QStringLiteral("propField_") + qs(key));
+        box->setProperty("role", "propField");
+        box->setMinimumHeight(theme::rowHeight());
+        auto* line = new QHBoxLayout(box);
+        line->setContentsMargins(8, 0, 2, 0);
+        line->setSpacing(8);
+        r.label->setParent(box);
+        r.label->setWordWrap(false);
+        r.label->setMinimumWidth(104);  // one value edge: the controls start past the longest label
+        line->addWidget(r.label, 0, Qt::AlignVCenter);
+        if (qobject_cast<QCheckBox*>(control)) {
+            line->addStretch(1);
+            line->addWidget(control, 0, Qt::AlignVCenter);
+            line->addSpacing(6);
+        } else {
+            line->addWidget(control, 1);  // (at the value column, as every field's value)
+        }
+        r.label->show();
+        r.field = box;
+        r.section->grid()->addWidget(box, r.row, 0, 1, 2);
     }
     r.control = control;
     return true;
@@ -263,6 +311,10 @@ void PropertiesPanel::finish() {
             if (child != s && child->parentWidget() == s->body() && !child->isHidden()) any = true;
         }
         s->setVisible(any);
+    }
+    // The folded sections' summaries, now their controls are there.
+    for (const auto& [id, s] : sections_) {
+        if (!s->expanded() && !s->property("nested").toBool()) s->setExpanded(false);
     }
 }
 
@@ -307,6 +359,7 @@ void PropertiesPanel::setRowVisible(const std::string& key, bool visible) {
     r.wanted = visible;
     if (!r.rule) r.section->grid()->setRowMinimumHeight(r.row, r.control && visible ? theme::rowHeight() : 0);
     if (r.control) r.control->setVisible(visible);
+    if (r.field) r.field->setVisible(visible);
     if (!r.item.custom && !r.inField) r.label->setVisible(visible && r.control);
 }
 

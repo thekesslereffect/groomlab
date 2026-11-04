@@ -67,6 +67,7 @@ public:
     explicit BrushPanel(QWidget* parent = nullptr);
 
     void setSession(BrushSession* session);  // null: nothing to edit
+    void setSubtitle(const QString& text);   // the header's second line: what the tool does
     // The tool whose card shows (a catalog id: comb, place, freeze, paint, select...; "" none).
     void setTool(const std::string& id);
     const std::string& tool() const { return tool_; }
@@ -103,6 +104,9 @@ signals:
     void lengthsPreviewed();    // the Keys block changed the Length Keys preview: evaluate and redraw
 
 private:
+    QLabel* toolIcon_ = nullptr;   // the card's header: the tool's icon and name
+    QLabel* toolTitle_ = nullptr;
+    QLabel* toolHint_ = nullptr;   // under the title: what the tool does (setSubtitle)
     // A fill field (the name inside) bound to a float: its span `min`..`max`, a typed value
     // reaching `limitMin`..`limitMax`.
     ValueSlider* slider(QVBoxLayout* into, const QString& label, double min, double max, double limitMin, double limitMax, int decimals,

@@ -50,6 +50,8 @@ public:
     // its actions; empty: none. Elided to the room the glyphs leave.
     void setTitle(const QString& text);
     QString title() const { return titleText_; }
+    // A muted title (12 px, dim, regular): a summary of the picked item, not its name again.
+    void setMutedTitle(bool muted) { mutedTitle_ = muted; }
     // One row (chips left, glyphs right) when the width takes it, else the glyphs on a second row
     // (right-aligned): a narrow dock never clips the last glyph.
     bool hasHeightForWidth() const override { return true; }
@@ -68,6 +70,7 @@ private:
     std::vector<std::pair<QPointer<QAbstractButton>, std::function<bool()>>> enables_;
     QLabel* title_ = nullptr;
     QString titleText_;
+    bool mutedTitle_ = false;
 };
 
 // A list's right-click menu from `entries` and the conditions that hold for the row clicked

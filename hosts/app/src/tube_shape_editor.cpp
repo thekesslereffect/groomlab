@@ -259,12 +259,12 @@ bool TubeShapeEditor::removePoint(int index) {
 void TubeShapeEditor::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
-    const QColor accent = theme::yellow();
+    const QColor accent = theme::glassy() ? theme::yellow() : theme::uiColor("accent");
     const QColor bad = theme::errorText();
     const QColor raised = uiOr("raised", theme::chip());
-    painter.fillRect(rect(), uiOr("panel", theme::glassPanel()));
+    painter.fillRect(rect(), theme::glassy() ? uiOr("panel", theme::glassPanel()) : theme::card());
     const QRectF r = square();
-    painter.fillRect(r, uiOr("background", theme::backdrop()));
+    painter.fillRect(r, theme::glassy() ? uiOr("background", theme::backdrop()) : theme::sunken());
     // The grid: the unit square (where the outline is fitted) and its halves; the axes stronger.
     painter.setPen(QPen(raised, 1));
     for (const float k : {-1.0f, -0.5f, 0.5f, 1.0f}) {

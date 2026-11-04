@@ -96,9 +96,23 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     empty->setObjectName(QStringLiteral("propertiesEmpty"));
     empty->setWordWrap(true);
     empty->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
-    empty->setContentsMargins(24, 48, 24, 24);
-    empty->setStyleSheet(QStringLiteral("color: %1; padding: 40px 24px;").arg(theme::textDim().name()));
-    emptyPage_ = empty;
+    empty->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
+    // The shared empty state: a card at the top of the page (as the Cards panel's): its icon, title and line centered.
+    auto* emptyHost = new QWidget(propertiesStack_);
+    auto* emptyColumn = new QVBoxLayout(emptyHost);
+    emptyColumn->setContentsMargins(12, 10, 24, 12);  // (where the Attributes cards end)
+    auto* emptyCard = new QWidget(emptyHost);
+    emptyCard->setProperty("role", "tray");
+    emptyCard->setAttribute(Qt::WA_StyledBackground, true);
+    auto* emptyCardColumn = new QVBoxLayout(emptyCard);
+    emptyCardColumn->setContentsMargins(16, 24, 16, 24);
+    emptyCardColumn->setSpacing(10);
+    emptyCardColumn->addWidget(emptyIcon(QStringLiteral("groups"), emptyCard), 0, Qt::AlignHCenter);
+    empty->setParent(emptyCard);
+    emptyCardColumn->addWidget(empty);
+    emptyColumn->addWidget(emptyCard);
+    emptyColumn->addStretch(1);
+    emptyPage_ = emptyHost;
     for (QWidget* page : {displayPage_, static_cast<QWidget*>(lookCard_), static_cast<QWidget*>(cardsPanel_),
                           static_cast<QWidget*>(exportPanel_), emptyPage_}) {
         propertiesStack_->addWidget(page);
@@ -109,7 +123,8 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     propertiesTabs_->setObjectName(QStringLiteral("propertiesTabs"));
     propertiesTabs_->setDocumentMode(true);
     propertiesTabs_->setExpanding(false);
-    propertiesTabs_->setDrawBase(true);
+    propertiesTabs_->setDrawBase(false);
+    propertiesTabs_->setProperty("role", "pills");
     propertiesTabs_->setUsesScrollButtons(false);
     for (const QString& title : {tr("Attributes"), tr("Material"), tr("Lighting"), tr("Render")}) propertiesTabs_->addTab(title);
     propertiesTabs_->setTabToolTip(0, tr("The groom's settings, in the order of Maya's Attribute Editor"));
@@ -122,10 +137,11 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     propertiesColumn->setContentsMargins(0, 0, 0, 0);
     propertiesColumn->setSpacing(0);
     {
-        // The tabs start at the docks' 12 px edge, with the content under them.
+        // The tabs: a pill track at the cards' 12 px edge, the content under them.
         auto* tabsRow = new QHBoxLayout();
-        tabsRow->setContentsMargins(16, 0, 16, 0);
+        tabsRow->setContentsMargins(12, 10, 12, 0);
         tabsRow->addWidget(propertiesTabs_);
+        tabsRow->addStretch(1);
         propertiesColumn->addLayout(tabsRow);
     }
     propertiesColumn->addWidget(propertiesStack_, 1);
@@ -152,8 +168,10 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     // ---- The Graph Editor (bottom): the canvas, the selected node's settings at its right.
     graph_ = new NodeGraphView();
     graph_->setFitMargins(QMargins(24, 24, 24, 24));
-    nodeSide_ = section(nullptr, 8);
+    nodeSide_ = section(nullptr, 12);
     nodeSide_->setObjectName(QStringLiteral("nodeSettings"));
+    nodeSide_->setProperty("role", "tray");  // a card, as Properties' sections
+    nodeSide_->setAttribute(Qt::WA_StyledBackground, true);
     {
         auto* header = new QHBoxLayout();
         header->setSpacing(8);
@@ -450,7 +468,7 @@ void AppShell::setPanelTitle(Panel which, const QString& title, const QColor& co
         case Panel::Node: {
             // No node: a section header, as Properties'; a node: its name after its category's dot.
             const bool none = title == tr("Node Settings");
-            nodeTitle_->setText(none ? title.toUpper() : title);
+            nodeTitle_->setText(title);
             nodeTitle_->setProperty("role", none ? "listTitle" : "title");
             nodeTitle_->style()->unpolish(nodeTitle_);
             nodeTitle_->style()->polish(nodeTitle_);

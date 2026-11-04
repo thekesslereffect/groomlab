@@ -212,8 +212,16 @@ bool MainWindow::setUiLookTab(const QString& name) {
 
 bool MainWindow::setUiHover(const QString& name) {
     const QString n = name.toLower();
+    if (n == QStringLiteral("brush") || n == QStringLiteral("brush-radius")) {
+        // The brush over the view's middle: its ring (and falloff ring), and the radius drag's readout.
+        Viewport* view = host_->viewport();
+        const QPointF at(view->width() * 0.5, view->height() * 0.42);
+        const int radius = static_cast<int>(std::lround(brush_.settings().screenRadius));
+        view->previewBrush(at, n == QStringLiteral("brush") ? tr("\u2212  Reverse") : tr("Radius  %1 px").arg(radius), n == QStringLiteral("brush") ? 1 : 0);
+        return true;
+    }
     if (n != QStringLiteral("rail") && n != QStringLiteral("panels") && n != QStringLiteral("all") && n != QStringLiteral("labels")) {
-        report(tr("No hover state '%1' (rail, panels, all, labels)").arg(name));
+        report(tr("No hover state '%1' (rail, panels, all, labels, brush, brush-radius)").arg(name));
         return false;
     }
     // The tiles' names under their icons (not saved); the panels' names are their docks'.

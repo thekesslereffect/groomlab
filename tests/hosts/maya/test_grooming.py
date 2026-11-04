@@ -4073,7 +4073,7 @@ class ControlsAndExamplesTest(unittest.TestCase):
             charcoal = theme.Theme("charcoal", theme.load("charcoal"))
             self.assertIs(charcoal.get("ui.glass"), False)
             self.assertEqual(charcoal.get("graph.headerStyle"), "tinted")
-            self.assertIs(charcoal.get("graph.shadow"), False)
+            self.assertIs(charcoal.get("graph.shadow"), True)  # the nodes lift off the canvas (every host draws it)
             self.assertIn("solid %s" % charcoal.color("ui.outline"), theme.stylesheet(charcoal))
             polar = theme.Theme("polar", theme.load("polar"))
             self.assertEqual(polar.hex("accent"), "#3619CC")          # Ether

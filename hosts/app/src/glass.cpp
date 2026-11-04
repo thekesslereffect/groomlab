@@ -7,10 +7,15 @@
 #include <vector>
 
 #include <QBuffer>
+#include <QLinearGradient>
+#include <QAbstractScrollArea>
+#include <QScrollBar>
+#include <QCheckBox>
 #include <QEnterEvent>
 #include <QFile>
 #include <QImageReader>
 #include <QFocusEvent>
+#include <QFrame>
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QHelpEvent>
@@ -64,6 +69,137 @@ QPixmap coloredIcon(const QString& resource, int size, qreal devicePixelRatio) {
     pixmap.setDevicePixelRatio(devicePixelRatio);
     QPixmapCache::insert(key, pixmap);
     return pixmap;
+}
+
+
+
+namespace {
+
+// A row that follows its control: shown and hidden with it (ShowToParent/HideToParent reach the
+// control even while the row is hidden), its label dimmed with it.
+class RowFollower : public QObject {
+public:
+    RowFollower(QWidget* row, QWidget* label, QWidget* control) : QObject(control), row_(row), label_(label) {
+        control->installEventFilter(this);
+        row_->setVisible(!control->isHidden());
+        if (label_) label_->setEnabled(control->isEnabled());
+    }
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        auto* control = static_cast<QWidget*>(watched);
+        if (event->type() == QEvent::ShowToParent) row_->show();
+        else if (event->type() == QEvent::HideToParent) row_->hide();
+        else if (event->type() == QEvent::EnabledChange && label_) label_->setEnabled(control->isEnabled());
+        return false;
+    }
+
+private:
+    QWidget* row_;
+    QWidget* label_;
+};
+
+// The fade over a scroll area's viewport, at its bottom.
+class ScrollFade : public QWidget {
+public:
+    explicit ScrollFade(QAbstractScrollArea* area) : QWidget(area->viewport()), area_(area) {
+        setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        area->viewport()->installEventFilter(this);
+        QScrollBar* bar = area->verticalScrollBar();
+        connect(bar, &QScrollBar::valueChanged, this, [this](int) { place(); });
+        connect(bar, &QScrollBar::rangeChanged, this, [this](int, int) { place(); });
+        place();
+    }
+    bool eventFilter(QObject*, QEvent* event) override {
+        if (event->type() == QEvent::Resize) place();
+        return false;
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        QLinearGradient fade(0, 0, 0, height());
+        QColor clear = theme::card(), solid = theme::card();
+        clear.setAlpha(0);
+        fade.setColorAt(0.0, clear);
+        fade.setColorAt(1.0, solid);
+        painter.fillRect(rect(), fade);
+    }
+
+private:
+    void place() {
+        const QWidget* view = area_->viewport();
+        const QScrollBar* bar = area_->verticalScrollBar();
+        setGeometry(0, view->height() - 20, view->width(), 20);
+        setVisible(bar->maximum() > 0 && bar->value() < bar->maximum());
+        raise();
+    }
+    QAbstractScrollArea* area_;
+};
+
+}  // namespace
+
+QFrame* fieldRow(QWidget* parent, QWidget* label, QWidget* control) {
+    auto* box = new QFrame(parent);
+    box->setProperty("role", "propField");
+    box->setMinimumHeight(theme::rowHeight());
+    auto* line = new QHBoxLayout(box);
+    line->setContentsMargins(8, 0, 2, 0);
+    line->setSpacing(8);
+    if (label) {
+        label->setParent(box);
+        label->setMinimumWidth(104);
+        if (auto* text = qobject_cast<QLabel*>(label)) {
+            text->setWordWrap(false);
+            text->setProperty("role", "propLabel");
+        }
+        line->addWidget(label, 0, Qt::AlignVCenter);
+    }
+    if (control) {
+        control->setParent(box);
+        if (qobject_cast<QCheckBox*>(control)) {
+            // A switch at the row's end.
+            line->addStretch(1);
+            line->addWidget(control, 0, Qt::AlignVCenter);
+        } else {
+            // A value at the value column (the label's 104 px), as Properties' rows.
+            line->addWidget(control, 1, Qt::AlignVCenter);
+        }
+        new RowFollower(box, label, control);
+    }
+    return box;
+}
+
+QLabel* emptyIcon(const QString& icon, QWidget* parent) {
+    // A soft-accent disc with the icon in the accent's ink, over an empty state's title.
+    auto* l = new QLabel(parent);
+    const qreal dpr = l->devicePixelRatioF();
+    QPixmap disc(QSize(40, 40) * dpr);
+    disc.setDevicePixelRatio(dpr);
+    disc.fill(Qt::transparent);
+    QPainter painter(&disc);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(theme::accentSoft());
+    painter.drawEllipse(QRectF(0, 0, 40, 40));
+    painter.drawPixmap(QPointF(10, 10), tintedIcon(QStringLiteral(":/groomlab/icons/ui_%1.svg").arg(icon), theme::accentInk(), 20, dpr));
+    painter.end();
+    l->setPixmap(disc);
+    l->setFixedSize(40, 40);
+    l->setObjectName(QStringLiteral("emptyIcon"));
+    return l;
+}
+
+QFrame* switchRow(QWidget* parent, QCheckBox* box) {
+    auto* label = new QLabel(box->text());
+    box->setText(QString());
+    QFrame* row = fieldRow(parent, label, box);
+    row->setObjectName(box->objectName().isEmpty() ? QString() : box->objectName() + QStringLiteral("Row"));
+    if (static_cast<QHBoxLayout*>(row->layout())->count() > 0) static_cast<QHBoxLayout*>(row->layout())->addSpacing(6);
+    label->setToolTip(box->toolTip());
+    return row;
+}
+
+void addScrollFade(QAbstractScrollArea* area) {
+    if (!theme::glassy()) new ScrollFade(area);
 }
 
 QPixmap tintedIcon(const QString& resource, const QColor& color, int size, qreal devicePixelRatio) {
@@ -129,7 +265,8 @@ QPixmap duotoneIcon(const QString& resource, const QColor& main, const QColor& i
 }
 
 void setSectionHeader(QAbstractButton* header, const QString& title, bool expanded) {
-    header->setText(title.toUpper().replace(QLatin1Char('&'), QStringLiteral("&&")));
+    // Sentence case, as written (a card's title, not a caps label over a hairline).
+    header->setText(QString(title).replace(QLatin1Char('&'), QStringLiteral("&&")));
     const qreal dpr = header->devicePixelRatioF();
     const QString chevron = expanded ? QStringLiteral(":/groomlab/icons/ui_chevron_down.svg") : QStringLiteral(":/groomlab/icons/ui_chevron_right.svg");
     QIcon icon;
@@ -140,13 +277,7 @@ void setSectionHeader(QAbstractButton* header, const QString& title, bool expand
     }
     header->setIcon(icon);
     header->setIconSize(QSize(10, 10));
-    // The capitals spaced out (0.08 em), as the design's caps headers; the size and weight are the
-    // style sheet's.
-    QFont font = header->font();
-    if (font.letterSpacingType() != QFont::PercentageSpacing || font.letterSpacing() != 108.0) {
-        font.setLetterSpacing(QFont::PercentageSpacing, 108.0);
-        header->setFont(font);
-    }
+    // (The size and weight are the style sheet's.)
 }
 
 void paintGlass(QPainter& painter, const QRectF& rect, qreal radius, const QColor& color, const QColor& edge) {
@@ -700,7 +831,8 @@ void ValueSlider::paintEvent(QPaintEvent* /*event*/) {
     const bool enabled = isEnabled();
     const bool editingNow = editing();
     const bool focusShown = keyFocus_ && hasFocus();
-    if (!enabled) painter.setOpacity(0.45);
+    const bool solid = !theme::glassy();
+    if (!enabled && !solid) painter.setOpacity(0.45);  // (a solid theme's disabled field: no fill, disabled text)
     const QRectF field = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     const qreal radius = theme::controlRadius();
     QPainterPath shape;
@@ -717,14 +849,22 @@ void ValueSlider::paintEvent(QPaintEvent* /*event*/) {
         if (!focusShown) edge = state_;
     }
     painter.fillPath(shape, base);
-    if (!editingNow) {
+    if (!editingNow && (enabled || !solid)) {
         const double t = std::clamp((value_ - min_) / (max_ - min_), 0.0, 1.0);
         const qreal filled = std::round(width() * t);
         if (filled > 0.0) {
             painter.save();
             painter.setClipPath(shape);
             painter.fillRect(QRectF(0.0, 0.0, filled, height()), fill);
-            if (!theme::glassy() && !state_.isValid()) painter.fillRect(QRectF(0.0, height() - 2.0, filled, 2.0), theme::textDim().darker(115));
+            if (solid) {
+                // The value as a 2 px bar along the fill's bottom edge, in the accent (the keyed/driven state's
+                // color), brighter under the mouse: it never crosses the words.
+                QColor line = state_.isValid() ? withAlpha(state_, 255) : theme::uiColor("accent");
+                if (hover_) line = line.lighter(115);
+                // (inset from the rounded ends: a full field shows no stroke up its side)
+                const qreal inset = std::min<qreal>(radius, 4.0);
+                if (filled > inset) painter.fillRect(QRectF(inset, height() - 2.0, std::min(filled, width() - inset) - inset, 2.0), line);
+            }
             painter.restore();
         }
     }
@@ -742,13 +882,13 @@ void ValueSlider::paintEvent(QPaintEvent* /*event*/) {
         const QFont words = theme::uiFont(theme::fontSize(), QFont::Normal);
         const int room = editingNow ? std::max(0, inner.width() / 2 - kGap) : std::max(0, inner.width() - valueW - kGap);
         painter.setFont(words);
-        painter.setPen(theme::textDim());
+        painter.setPen(enabled || !solid ? theme::textDim() : theme::textDisabled());
         painter.drawText(QRect(inner.x(), 0, room, height()), Qt::AlignVCenter | Qt::AlignLeft,
                          QFontMetrics(words).elidedText(caption_, Qt::ElideRight, room));
     }
     if (!editingNow) {
         painter.setFont(numbers);
-        painter.setPen(theme::text());
+        painter.setPen(enabled || !solid ? theme::text() : theme::textDisabled());
         painter.drawText(inner, Qt::AlignVCenter | (caption_.isEmpty() ? Qt::AlignHCenter : Qt::AlignRight), shown);
     }
 }
@@ -1149,6 +1289,12 @@ void ShadowText::setShadow(bool shadow) {
     update();
 }
 
+void ShadowText::setChip(const QColor& fill) {
+    chip_ = fill;
+    updateGeometry();
+    update();
+}
+
 QSize ShadowText::sizeHint() const {
     int width = 0, height = 0;
     for (const Run& run : runs_) {
@@ -1156,6 +1302,7 @@ QSize ShadowText::sizeHint() const {
         width += run.gapBefore + metrics.horizontalAdvance(run.text) + (run.dot.isValid() ? 17 : 0) + (run.pill.isValid() ? 16 : 0);
         height = std::max(height, metrics.height() + (run.pill.isValid() ? 6 : 0));
     }
+    if (chip_.isValid()) return QSize(width + 24, std::max(28, height + 10));
     return QSize(width + 2, height + 2);
 }
 
@@ -1164,6 +1311,14 @@ void ShadowText::paintEvent(QPaintEvent* /*event*/) {
     painter.setRenderHint(QPainter::Antialiasing, true);
     qreal x = 0;
     const int h = height();
+    const bool chip = chip_.isValid();
+    if (chip) {
+        const QRectF pill = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+        painter.setPen(QPen(QColor(255, 255, 255, 16), 1.0));
+        painter.setBrush(chip_);
+        painter.drawRoundedRect(pill, pill.height() / 2.0, pill.height() / 2.0);
+        x = 12;
+    }
     for (const Run& run : runs_) {
         x += run.gapBefore;
         const QFontMetrics metrics(run.font);
@@ -1181,7 +1336,7 @@ void ShadowText::paintEvent(QPaintEvent* /*event*/) {
             const QRectF pill(x, h / 2.0 - metrics.height() / 2.0 - 2, w + 16, metrics.height() + 4);
             painter.drawRoundedRect(pill, pill.height() / 2.0, pill.height() / 2.0);
             x += 8;
-        } else if (shadow_) {
+        } else if (shadow_ && !chip) {
             // A soft shadow from a few offset copies: no blur effect over the viewport's texture.
             painter.setPen(QColor(0, 0, 0, 70));
             for (const QPointF& d : {QPointF(0, 1), QPointF(1, 1), QPointF(-1, 1), QPointF(0, 2)}) {

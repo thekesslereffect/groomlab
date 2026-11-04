@@ -280,8 +280,18 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
         // Hovering in brush mode: the ring and the guides under the brush follow the cursor.
         if (mode_ == ToolMode::Brush && session_ && !(event->buttons() & Qt::AllButtons)) {
             syncView();
+            // What a held key turns the stroke into: on the ring (Reverse dashed and warm, Smooth its
+            // own tone) and in a chip beside it.
+            const Qt::KeyboardModifiers mods = event->modifiers();
+            const int stateId = mods.testFlag(Qt::ControlModifier) ? 1 : mods.testFlag(Qt::ShiftModifier) ? 2 : 0;
+            session_->setHoverState(stateId);
             session_->hover(event->position());
             refreshOverlay();
+            const QString state = stateId == 1 ? tr("\u2212  Reverse") : stateId == 2 ? tr("Smooth") : QString();
+            if (state != hoverState_ || !state.isEmpty()) {
+                hoverState_ = state;
+                emit brushReadout(state.isEmpty() ? QPoint() : readoutAnchor(event->position()), state);
+            }
         }
         return;
     }
@@ -317,9 +327,11 @@ void Viewport::mouseMoveEvent(QMouseEvent* event) {
             BrushToolSettings& s = session_->settings();
             if (drag_ == Drag::Radius) s.screenRadius = std::clamp(dragStart_ + dx, 5.0f, 2000.0f);
             else s.brush.strength = std::clamp(dragStart_ + dx * 0.01f, -10.0f, 10.0f);
-            // The ring where the drag started, at its new size.
+            // The ring where the drag started, at its new size, and its value beside it.
             session_->hover(pressAt_);
             refreshOverlay();
+            emit brushReadout(readoutAnchor(pressAt_), drag_ == Drag::Radius ? tr("Radius  %1 px").arg(std::lround(s.screenRadius))
+                                                                         : tr("Strength  %1").arg(s.brush.strength, 0, 'f', 2));
             emit brushSettingsChanged();
             break;
         }
@@ -375,11 +387,29 @@ void Viewport::mouseReleaseEvent(QMouseEvent* event) {
         }
         case Drag::Radius:
         case Drag::Strength:
+            emit brushReadout({}, {});
             emit brushSettingsChanged();
             break;
         default:
             break;
     }
+}
+
+QPoint Viewport::readoutAnchor(const QPointF& center) const {
+    // Outside the ring, at its upper right (the chip's bottom-left corner here): nothing covers the
+    // strands under the brush.
+    const float r = session_ ? session_->settings().screenRadius : 40.0f;
+    return (center + QPointF(r * 0.72f + 8.0f, -(r * 0.72f + 8.0f))).toPoint();
+}
+
+void Viewport::previewBrush(const QPointF& at, const QString& readout, int state) {
+    // As a hover there (the ring and the guides under it), the readout beside it: for a still.
+    if (mode_ != ToolMode::Brush || !session_) return;
+    syncView();
+    session_->setHoverState(state);
+    session_->hover(at);
+    refreshOverlay();
+    emit brushReadout(readoutAnchor(at), readout);
 }
 
 void Viewport::wheelEvent(QWheelEvent* event) {

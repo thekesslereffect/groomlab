@@ -866,7 +866,8 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     tools.setTool("comb");
     EXPECT_TRUE(tools.tile("comb")->isChecked());
     EXPECT_FALSE(tools.tile("cut")->isChecked());
-    EXPECT_EQ(tools.card()->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr) << "the card: only the settings, no title";
+    ASSERT_NE(tools.card()->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr) << "the card's header names the tool";
+    EXPECT_EQ(tools.card()->findChild<QLabel*>(QStringLiteral("toolCardTitle"))->text(), QStringLiteral("Comb"));
     // The mode switcher says when any segment is clicked, the current one too.
     Segmented modes;
     modes.setItems({{"A", Qt::red, Qt::white}, {"B", Qt::blue, Qt::white}});
@@ -3269,7 +3270,7 @@ TEST(AppPanels, TheShortcutSheetListsTheSharedTable) {
         EXPECT_TRUE(actions.contains(QString::fromStdString(s.action))) << s.id;
     }
     for (const char* context : {"File", "Modes", "Brush", "Viewport", "Graph"}) {
-        EXPECT_TRUE(groups.contains(QString::fromLatin1(context).toUpper())) << context << ": a caps heading";
+        EXPECT_TRUE(groups.contains(QString::fromLatin1(context))) << context << ": a heading as written";
     }
     for (const Shortcut& s : shortcutsFor(kShortcutMaya)) {
         if (!(s.hosts & kShortcutApp) && s.id == "graph.view") EXPECT_FALSE(sheet.contains(QString::fromStdString(s.action)));

@@ -105,6 +105,10 @@ QColor actionFill(const QColor& own);
 // (ui.textDisabled, else the muted text): dimmer than any text that can be read.
 QColor accentFill();
 QColor textDisabled();
+QColor card();        // a section's card on the panel (ui.card)
+QColor sunken();      // the track under segments and pill tabs (ui.sunken)
+QColor accentSoft();  // what is chosen: the accent as a soft wash (ui.accentSoft)
+QColor accentInk();   // text and icons in the accent on a dark surface (ui.accentInk)
 QColor actionText(const QColor& own);
 // Words that say something went wrong or needs a look (an export's failure, a node's error
 // line): the theme's ui.error and ui.warning, readable on the panels.
@@ -139,6 +143,7 @@ QFont numberFont(int pixelSize, int weight = QFont::Medium);
 // (radius + 2); ui.rowHeight, every control's height (26 unless the theme says).
 int controlRadius();
 int smallRadius();
+int cardRadius();  // a section's card (ui.cardRadius)
 int panelRadius();
 int rowHeight();
 // The UI's text size in pixels: ui.fontSize (11-14, 12 unless the theme says; a glass theme's 13),
@@ -175,7 +180,8 @@ QString brushTitle(const std::string& name);       // the catalog's label ("comb
 QColor nodeCategoryColor(const std::string& category);
 // A port's color by its type name ("strands", "guides", "mesh", "field", "curve", "curves").
 QColor portColor(const std::string& type);
-QColor nodeBody();  // #2A2C31 (opaque)
+QColor nodeBody();
+bool isPortType(const std::string& portType);  // one of graph.ports' types (Strands, Guides, ...; either case)  // #2A2C31 (opaque)
 // The Graph Editor's opaque canvas and its grid (graph.canvas, graph.grid; else the backdrop and
 // a lighter line).
 QColor graphCanvas();
@@ -195,6 +201,7 @@ qreal nodeRadius();        // graph.cornerRadius (14 in Playful)
 // graph.headerStyle: "tinted" (a wash and an accent bar), "minimal" (no header fill, a category
 // dot by the title) or "filled" (the default: the header in the category color).
 QString headerStyle();
+bool nodeShadow();         // graph.shadow: a soft shadow under each node
 bool tintedHeaders();      // headerStyle() == "tinted"
 // graph.canvasStyle: "lines" (the default: a grid of lines), "dots" (a dot at every grid
 // crossing) or "plain"; drawn in graph.grid.

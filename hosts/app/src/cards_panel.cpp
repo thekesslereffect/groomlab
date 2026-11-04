@@ -46,15 +46,27 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     outer->setContentsMargins(0, 0, 0, 0);
     auto* body = new QWidget;
     outer->addWidget(new FitScrollArea(body, this));
-    auto* layout = new QVBoxLayout(body);
-    layout->setContentsMargins(16, 12, 24, 12);  // the docks' gutters (Properties')
+    // The panel on a card (the style sheet's tray), 12 px in, as every dock's sections; it ends
+    // where its content does.
+    auto* bodyLayout = new QVBoxLayout(body);
+    bodyLayout->setContentsMargins(12, 10, 24, 12);  // (where the Properties dock's cards end)
+    auto* sheet = new QWidget(body);
+    sheet->setObjectName(QStringLiteral("cardsSheet"));
+    if (!theme::glassy()) {
+        sheet->setProperty("role", "tray");
+        sheet->setAttribute(Qt::WA_StyledBackground, true);
+    }
+    bodyLayout->addWidget(sheet);
+    bodyLayout->addStretch(1);
+    auto* layout = new QVBoxLayout(sheet);
+    layout->setContentsMargins(12, 10, 12, 12);
     layout->setSpacing(10);
 
     // ---- The title row: the node to edit.
     auto* title = new QHBoxLayout();
     title->setSpacing(10);
     // The mode switch names the mode: a section header, then the node it edits.
-    auto* titleLabel = new QLabel(tr("GAME CARDS"), this);
+    auto* titleLabel = new QLabel(tr("Game Cards"), this);
     titleLabel->setProperty("role", "listTitle");
     titleRowLabel_ = titleLabel;
     title->addWidget(titleLabel);
@@ -143,6 +155,8 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     stats_->setFont(theme::uiFont(12, 400));
     stats_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
     stats_->setWordWrap(true);
+    emptyIcon_ = emptyIcon(QStringLiteral("layers"), this);  // (strips in a stack: hair cards)
+    layout->addWidget(emptyIcon_, 0, Qt::AlignHCenter);
     layout->addWidget(stats_);
     // No Cards node yet: the one thing to do, full width.
     add_ = new RoundButton(this);
@@ -313,7 +327,8 @@ void CardsPanel::refresh() {
     bakeBox_->setVisible(!node_.empty());
     // The empty state centered (the header and the node picker go with the node).
     stats_->setAlignment(node_.empty() ? Qt::AlignHCenter : Qt::AlignLeft);
-    stats_->setContentsMargins(0, node_.empty() ? 28 : 0, 0, node_.empty() ? 6 : 0);
+    emptyIcon_->setVisible(node_.empty() && !theme::glassy());
+    stats_->setContentsMargins(node_.empty() ? 18 : 0, 0, node_.empty() ? 18 : 0, node_.empty() ? 6 : 0);  // (a balanced block)
     titleRowLabel_->setVisible(!node_.empty());
     bake_->setEnabled(!node_.empty());
     if (!node_.empty()) {
@@ -348,8 +363,7 @@ void CardsPanel::refresh() {
         stats_->setText(tr("No groom open"));
     } else if (node_.empty()) {
         stats_->setText(tr("<p style='margin:0 0 6px 0; font-weight:600; color:%1'>No cards yet</p>"
-                           "<p style='margin:0'>Turn this groom into hair cards for Unreal, Unity or glTF: textured strips, an atlas "
-                           "and levels of detail.</p>").arg(theme::text().name()));
+                           "<p style='margin:0'>Turn this groom into hair cards for Unreal, Unity or glTF.</p>").arg(theme::text().name()));
     }
     refreshAtlas();
     updating_ = false;

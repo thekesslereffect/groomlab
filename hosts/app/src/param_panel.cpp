@@ -226,21 +226,29 @@ ParamPanel::ParamPanel(QWidget* parent) : QWidget(parent) {
     note_->hide();
     layout->addWidget(note_);
     bypass_ = new QCheckBox(tr("Bypass"), this);
+    bypass_->setObjectName(QStringLiteral("nodeBypass"));
     bypass_->setEnabled(false);
     bypass_->hide();
-    layout->addWidget(bypass_);
+    layout->addWidget(switchRow(this, bypass_));  // (a field row, as Properties': it shows and hides with the box)
     // When the node runs: always, in the viewport only (exports skip it), in renders only.
     evaluation_ = new QComboBox(this);
     evaluation_->setObjectName(QStringLiteral("nodeEvaluation"));
-    evaluation_->addItem(tr("Evaluate: Always"), QStringLiteral("always"));
-    evaluation_->addItem(tr("Evaluate: Viewport Only"), QStringLiteral("viewportOnly"));
-    evaluation_->addItem(tr("Evaluate: Render Only"), QStringLiteral("renderOnly"));
+    evaluation_->addItem(tr("Always"), QStringLiteral("always"));
+    evaluation_->addItem(tr("Viewport Only"), QStringLiteral("viewportOnly"));
+    evaluation_->addItem(tr("Render Only"), QStringLiteral("renderOnly"));
     evaluation_->setToolTip(tr("Viewport Only: exports and renders skip the node (a fast stand-in). Render Only: the "
                                "viewport skips it (a heavy node kept for the final strands)."));
     evaluation_->hide();
-    layout->addWidget(evaluation_);
+    {
+        auto* label = new QLabel(tr("Evaluate"));
+        label->setToolTip(evaluation_->toolTip());
+        layout->addWidget(fieldRow(this, label, evaluation_));  // (a field row: it shows and hides with the combo)
+    }
+    emptyIcon_ = emptyIcon(QStringLiteral("graph"), this);
+    layout->addWidget(emptyIcon_, 0, Qt::AlignHCenter);
     empty_ = new QLabel(tr("Select a node in the graph to edit it."), this);
     empty_->setWordWrap(true);
+    empty_->setAlignment(Qt::AlignHCenter);
     empty_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textMuted().name()));
     layout->addWidget(empty_);
     scroll_ = new QScrollArea(this);
@@ -256,6 +264,7 @@ ParamPanel::ParamPanel(QWidget* parent) : QWidget(parent) {
     list_->setSpacing(8);
     scroll_->setWidget(formHost_);
     layout->addWidget(scroll_, 1);
+    addScrollFade(scroll_);
     connect(bypass_, &QCheckBox::toggled, this, [this](bool on) {
         if (updating_ || !document_ || node_.empty()) return;
         const std::string error = document_->setBypass(node_, on);
@@ -532,6 +541,7 @@ void ParamPanel::build() {
     bypass_->setVisible(spec != nullptr);
     evaluation_->setVisible(spec != nullptr);
     empty_->setVisible(spec == nullptr);
+    emptyIcon_->setVisible(spec == nullptr && !theme::glassy());
     scroll_->setVisible(spec != nullptr);
     upgrade_->hide();
     presets_->hide();
@@ -1116,9 +1126,10 @@ QSize ParamPanel::sizeHint() const {
     // As tall as the rows (the host sizes the floating panel to this, within the view; the rows
     // scroll past that): the title, the description and the bypass box over the form.
     int height = 12;
-    for (QWidget* w : {static_cast<QWidget*>(title_), static_cast<QWidget*>(actions_), static_cast<QWidget*>(bypass_), static_cast<QWidget*>(evaluation_),
-                       static_cast<QWidget*>(empty_)}) {
-        if (w->isVisibleTo(const_cast<ParamPanel*>(this))) height += w->sizeHint().height() + 6;
+    // (Bypass and Evaluate: their field rows, as tall as a row.)
+    for (QWidget* w : {static_cast<QWidget*>(title_), static_cast<QWidget*>(actions_), bypass_->parentWidget(), evaluation_->parentWidget(),
+                       static_cast<QWidget*>(emptyIcon_), static_cast<QWidget*>(empty_)}) {
+        if (w->isVisibleTo(const_cast<ParamPanel*>(this))) height += std::max(w->sizeHint().height(), w->minimumHeight()) + 6;
     }
     // The wrapped lines (the error, the description, the note) at the panel's width, every line.
     const int w = width() >= 212 && width() <= 432 ? width() - 12 : 300;  // (not laid out yet: the Node panel's)

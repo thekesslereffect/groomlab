@@ -841,6 +841,14 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     QPainterPath body;
     body.addRoundedRect(rect, radius, radius);
     painter.setPen(Qt::NoPen);
+    if (!viewport_ && theme::nodeShadow()) {
+        // A soft shadow under the card (a few widening rounded rects, faint): the nodes sit over the canvas.
+        for (int k = 3; k >= 1; --k) {
+            painter.setBrush(QColor(0, 0, 0, 22));
+            const qreal grow = 1.5 * k;
+            painter.drawRoundedRect(rect.adjusted(-grow, -grow + 3.0, grow, grow + 3.0), radius + grow, radius + grow);
+        }
+    }
     painter.setBrush(theme::nodeBody());
     painter.drawPath(body);
     const QString header = theme::headerStyle();
@@ -850,12 +858,17 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     if (minimal) {
         // No header fill (the design's minimal cards): the category is the dot by the title.
     } else if (header == QLatin1String("tinted")) {
-        QColor wash = color;
-        wash.setAlpha(34);
+        // The category's color washing down from the top edge, fading out under the title.
+        QLinearGradient wash(rect.topLeft(), QPointF(rect.x(), rect.y() + kHeader));
+        QColor top = color, bottom = color;
+        top.setAlpha(selected ? 112 : 96);
+        bottom.setAlpha(30);
+        wash.setColorAt(0.0, top);
+        wash.setColorAt(1.0, bottom);
         painter.setBrush(wash);
         painter.drawRect(QRectF(rect.topLeft(), QSizeF(rect.width(), kHeader)));
         painter.setBrush(color);
-        painter.drawRect(QRectF(rect.topLeft(), QSizeF(rect.width(), 3.0)));
+        painter.drawRect(QRectF(rect.topLeft(), QSizeF(rect.width(), 2.0)));
     } else {
         painter.setBrush(color);
         painter.drawRect(QRectF(rect.topLeft(), QSizeF(rect.width(), kHeader)));
@@ -1130,7 +1143,15 @@ void NodeGraphView::paintEvent(QPaintEvent* /*event*/) {
         const Wire& w = wires_[i];
         if (dragWireInputNode_ == w.to && dragWireInputPort_ == w.input && drag_ == Drag::Wire) continue;  // picked up
         const bool selected = static_cast<int>(i) == selectedWire_ || static_cast<int>(i) == dropWire_ || static_cast<int>(i) == searchWire_;
-        QColor color = theme::portColor(nodes_[w.from].outputs[w.output].type);
+        // The signal's color: the output's type; an output of any curves (or no known type) takes the
+        // more specific type of the input it feeds (Strands into an output: the strands' color).
+        std::string type = nodes_[w.from].outputs[w.output].type;
+        if (w.input >= 0 && w.input < static_cast<int>(nodes_[w.to].inputs.size())) {
+            const std::string& into = nodes_[w.to].inputs[w.input].type;
+            const auto generic = [](const std::string& t) { return !theme::isPortType(t) || t == "Curves" || t == "curves"; };
+            if (generic(type) && !generic(into)) type = into;
+        }
+        QColor color = theme::portColor(type);
         color.setAlpha(selected ? 255 : 220);
         QPen pen(selected ? theme::nodeSelected() : color, selected ? 3.0 : 2.0);
         if (wireDashed(static_cast<int>(i))) {

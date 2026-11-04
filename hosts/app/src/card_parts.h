@@ -7,6 +7,7 @@
 // list's header (its name, a count, glyphs) and the picked item's box under a list, and the
 // folding section (Photos' Guides from photos).
 
+#include <algorithm>
 #include <vector>
 
 #include <QFrame>
@@ -29,6 +30,9 @@ namespace groomlab::app {
 class FlowLayout : public QLayout {
 public:
     explicit FlowLayout(QWidget* parent = nullptr, int spacing = 4);
+    void setMaxColumns(int columns) { maxColumns_ = std::max(1, columns); }  // (3 unless said)
+    void setGap(int gap) { gap_ = gap; invalidate(); }
+    void setLastRowStretch(bool stretch) { lastRowStretch_ = stretch; invalidate(); }  // (on unless said)
     ~FlowLayout() override;
     void addItem(QLayoutItem* item) override;
     int count() const override { return static_cast<int>(items_.size()); }
@@ -45,6 +49,8 @@ private:
     int place(const QRect& rect, bool apply) const;
     std::vector<QLayoutItem*> items_;
     int gap_ = 4;
+    int maxColumns_ = 3;
+    bool lastRowStretch_ = true;
 };
 
 // ---- Section ---------------------------------------------------------------------------------------
@@ -91,6 +97,8 @@ QToolButton* makeChip(const QString& text, const QString& tip, QWidget* parent);
 // A row of chips that wraps to the width; with a `label`, the name sits above the chips (chips
 // don't fit a label column). `flow` takes the chips.
 QWidget* chipRow(QWidget* parent, FlowLayout** flow, const QString& label = {});
+// A chip row for a one-of choice: the chips as segments on a sunken track.
+QWidget* segmentRow(QWidget* parent, FlowLayout** flow, const QString& label = {});
 // A line glyph (a ui_<name>.svg icon in the theme's dim text, the text color while checked or
 // hovered): the card's and the lists' small actions.
 QIcon lineIcon(const QString& name, qreal devicePixelRatio, int size = 16);

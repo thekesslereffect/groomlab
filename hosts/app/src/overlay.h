@@ -128,6 +128,7 @@ private:
     struct LightRow {
         QWidget* host = nullptr;
         QCheckBox* enabled = nullptr;
+        QLabel* name = nullptr;  // the header's title (the switch at its end, as every switch row)
         ValueSlider* azimuth = nullptr;
         ValueSlider* elevation = nullptr;
         ValueSlider* intensity = nullptr;
@@ -335,6 +336,7 @@ private:
     ShadowText* stats_ = nullptr;
     bool statsWanted_ = true;
     ShadowText* refine_ = nullptr;
+    ShadowText* readout_ = nullptr;  // a radius or strength drag's value, beside the ring
     GlassPanel* toast_ = nullptr;
     QLabel* toastText_ = nullptr;
     QLabel* toastDot_ = nullptr;

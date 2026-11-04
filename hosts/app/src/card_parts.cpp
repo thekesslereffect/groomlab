@@ -83,8 +83,14 @@ int FlowLayout::place(const QRect& rect, bool apply) const {
         widest = std::max(widest, item->sizeHint().width());
     }
     if (shown.empty()) return 0;
-    const int columns = std::clamp((area.width() + gap_) / std::max(1, widest + gap_), 1, 3);
-    const int column = std::max(widest, (area.width() - (columns - 1) * gap_) / columns);
+    const int n = static_cast<int>(shown.size());
+    int columns = std::clamp((area.width() + gap_) / std::max(1, widest + gap_), 1, std::min(maxColumns_, n));
+    // A track's few segments on one row when each still gets most of its width (their padding gives).
+    if (!lastRowStretch_ && n <= maxColumns_ && (area.width() - (n - 1) * gap_) / n >= widest * 85 / 100) columns = n;
+    const int column = lastRowStretch_ ? std::max(widest, (area.width() - (columns - 1) * gap_) / columns) : (area.width() - (columns - 1) * gap_) / columns;
+    // The last row's chips share its whole width: no hole at its end.
+    const int lastRow = (n - 1) / columns, lastCount = n - lastRow * columns;
+    const int lastColumn = std::max(widest, (area.width() - (lastCount - 1) * gap_) / std::max(1, lastCount));
     int y = area.y(), line = 0;
     for (std::size_t i = 0; i < shown.size(); ++i) {
         const int c = static_cast<int>(i) % columns;
@@ -98,7 +104,9 @@ int FlowLayout::place(const QRect& rect, bool apply) const {
             if (QWidget* w = shown[i]->widget(); w && w->sizePolicy().horizontalPolicy() != QSizePolicy::Expanding) {
                 w->setSizePolicy(QSizePolicy::Expanding, w->sizePolicy().verticalPolicy());
             }
-            shown[i]->setGeometry(QRect(QPoint(area.x() + c * (column + gap_), y), QSize(column, s.height())));
+            const bool last = lastRowStretch_ && static_cast<int>(i) / columns == lastRow;
+            const int width = last ? lastColumn : column;
+            shown[i]->setGeometry(QRect(QPoint(area.x() + c * (width + gap_), y), QSize(width, s.height())));
         }
         line = std::max(line, s.height());
     }
@@ -147,9 +155,8 @@ CardBlock::CardBlock(const QString& title, QWidget* parent) : QFrame(parent) {
     head_ = new QHBoxLayout();
     head_->setContentsMargins(0, 0, 0, 0);
     head_->setSpacing(0);
-    // Shown in caps, as every section header (the list titles, Properties' sections); title()
-    // stays the word it was given.
-    title_ = new QLabel(title.toUpper(), this);
+    // As written, as every section title (the list titles, Properties' cards); title() is the word it was given.
+    title_ = new QLabel(title, this);
     title_->setProperty("role", "blockTitle");
     title_->setProperty("title", title);
     title_->setMinimumHeight(22);
@@ -191,6 +198,21 @@ QWidget* chipRow(QWidget* parent, FlowLayout** flow, const QString& label) {
     auto* chips = new QWidget(row);
     *flow = new FlowLayout(chips, 4);
     column->addWidget(chips);
+    return row;
+}
+
+QWidget* segmentRow(QWidget* parent, FlowLayout** flow, const QString& label) {
+    // A one-of choice: its chips as segments on a sunken track (the style sheet's segTrack), the
+    // chosen one raised in a neutral tone; a chip row's toggles stay chips (any of them on).
+    QWidget* row = chipRow(parent, flow, label);
+    if (QWidget* chips = (*flow)->parentWidget()) {
+        chips->setProperty("role", "segTrack");
+        chips->setAttribute(Qt::WA_StyledBackground, true);
+    }
+    (*flow)->setContentsMargins(2, 2, 2, 2);
+    (*flow)->setGap(2);
+    (*flow)->setMaxColumns(4);
+    (*flow)->setLastRowStretch(false);  // a track keeps its column grid
     return row;
 }
 
@@ -236,11 +258,8 @@ ListHeader::ListHeader(const QString& title, QWidget* parent) : QWidget(parent) 
     auto* row = new QHBoxLayout(this);
     row->setContentsMargins(0, 6, 0, 0);
     row->setSpacing(6);
-    title_ = new QLabel(title.toUpper(), this);
+    title_ = new QLabel(title, this);
     title_->setProperty("role", "listTitle");
-    QFont font = title_->font();
-    font.setLetterSpacing(QFont::PercentageSpacing, 108.0);
-    title_->setFont(font);
     row->addWidget(title_);
     count_ = new QLabel(this);
     count_->setProperty("role", "listCount");

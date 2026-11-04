@@ -20,6 +20,7 @@
 #include <QSpinBox>
 #include <QVBoxLayout>
 
+#include "glass.h"
 #include "theme.h"
 
 namespace groomlab::app {
@@ -140,13 +141,30 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto* body = new QWidget;
     outer->addWidget(new FitScrollArea(body, this));
     auto* layout = new QVBoxLayout(body);
-    layout->setContentsMargins(16, 12, 24, 12);  // the docks' gutters (Properties')
-    layout->setSpacing(12);
+    layout->setContentsMargins(12, 10, 24, 12);  // the cards where the Properties dock's end (12 px and its scroll bar's room)
+    layout->setSpacing(8);
+    // Two cards (the style sheet's tray), as every dock's sections: the format, then the output's options;
+    // the Export button under them.
+    auto card = [&](const char* name) {
+        auto* w = new QWidget(body);
+        w->setObjectName(QLatin1String(name));
+        if (!theme::glassy()) {
+            w->setProperty("role", "tray");
+            w->setAttribute(Qt::WA_StyledBackground, true);
+        }
+        auto* l = new QVBoxLayout(w);
+        l->setContentsMargins(12, 10, 12, 12);
+        l->setSpacing(8);
+        layout->addWidget(w);
+        return l;
+    };
+    QVBoxLayout* formatLayout = card("formatCard");
+    QVBoxLayout* outputLayout = card("outputCard");
 
     // The mode switch names the mode: the panel starts with its first section's header.
-    auto* titleLabel = new QLabel(tr("FORMAT"), this);
+    auto* titleLabel = new QLabel(tr("Format"), this);
     titleLabel->setProperty("role", "listTitle");
-    layout->addWidget(titleLabel);
+    formatLayout->addWidget(titleLabel);
 
     // ---- The targets as a column of pills (radio-like).
     auto* targetGrid = new QGridLayout();
@@ -159,27 +177,42 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
         b->setFontSize(12);
         b->setFontWeight(500);
         b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        b->setFill(theme::chip(), theme::checkedFill(theme::emerald()));
-        b->setTextColor(theme::textSoft(), theme::checkedText(theme::ink()));
+        // A one-of choice: the chosen format raised in a neutral tone (the accent is for what is on).
+        b->setFill(theme::glassy() ? theme::chip() : QColor(0, 0, 0, 0), theme::glassy() ? theme::checkedFill(theme::emerald()) : theme::uiColor("hover"));
+        b->setTextColor(theme::glassy() ? theme::textSoft() : theme::textDim(), theme::glassy() ? theme::checkedText(theme::ink()) : theme::text());
         b->setCheckable(true);
         b->setToolTip(tr(kTargets[i].description));
         connect(b, &QAbstractButton::clicked, this, [this, i] {
             setTarget(static_cast<Target>(i));
         });
         targets_.push_back(b);
-        targetGrid->addWidget(b, i / 2, i % 2);
+        // Two columns; an odd last one the row's width (no hole beside it).
+        const bool lone = i == static_cast<int>(Target::Count) - 1 && static_cast<int>(Target::Count) % 2 == 1;
+        targetGrid->addWidget(b, i / 2, i % 2, 1, lone ? 2 : 1);
     }
-    layout->addLayout(targetGrid);
+    {
+        // A one-of choice: the formats as segments on a sunken track, the chosen one raised.
+        auto* track = new QWidget(this);
+        track->setObjectName(QStringLiteral("formatTrack"));
+        if (!theme::glassy()) {
+            track->setProperty("role", "segTrack");
+            track->setAttribute(Qt::WA_StyledBackground, true);
+            targetGrid->setContentsMargins(2, 2, 2, 2);
+            targetGrid->setSpacing(2);
+        }
+        track->setLayout(targetGrid);
+        formatLayout->addWidget(track);
+    }
     description_ = new QLabel(this);
     description_->setWordWrap(true);
     description_->setFont(theme::uiFont(12, 500));
     description_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
-    layout->addWidget(description_);
+    formatLayout->addWidget(description_);
 
     // ---- The frames and the density.
     range_ = new QCheckBox(tr("Frame range"), this);
     range_->setToolTip(tr("Off: the current frame alone (a static groom); on: every frame of the range (a cache)"));
-    layout->addWidget(range_);
+    outputLayout->addWidget(theme::glassy() ? static_cast<QWidget*>(range_) : switchRow(this, range_));
     framesBox_ = new QWidget(this);
     auto* frames = new QGridLayout(framesBox_);
     frames->setContentsMargins(0, 0, 0, 0);
@@ -208,7 +241,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     frames->addWidget(last_, 0, 3);
     frames->addWidget(captionLabel(tr("Step"), framesBox_), 1, 0);
     frames->addWidget(step_, 1, 1);
-    layout->addWidget(framesBox_);
+    outputLayout->addWidget(framesBox_);
     density_ = new ValueSlider(this);
     density_->setCaption(tr("Density"));
     density_->setRange(0.01, 1.0);
@@ -216,7 +249,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     density_->setFill(theme::yellow());
     density_->setFormat([](double v) { return QString::number(std::lround(v * 100.0)) + QStringLiteral("%"); });
     density_->setToolTip(tr("The share of the strands written (a lighter groom for a game's lower LOD)"));
-    layout->addWidget(density_);
+    outputLayout->addWidget(density_);
 
     // ---- Each target's own options. Unreal's and Unity's are the Maya host's export's
     // (engine_export.h): groom groups, the feathers' shafts and a lighter groom of barbs.
@@ -256,7 +289,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     barbWidth_->setToolTip(tr("Each barb kept this many times as wide, so the vanes keep their coverage"));
     engineLayout->addWidget(captionLabel(tr("Barb width"), engineOptions_), 3, 0);
     engineLayout->addWidget(barbWidth_, 3, 1);
-    layout->addWidget(engineOptions_);
+    outputLayout->addWidget(engineOptions_);
 
     unrealOptions_ = new QWidget(this);
     auto* unrealLayout = new QHBoxLayout(unrealOptions_);
@@ -273,7 +306,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     unrealLayout->addWidget(featherGuides_);
     unrealLayout->addWidget(iridescenceAo_);
     unrealLayout->addStretch(1);
-    layout->addWidget(unrealOptions_);
+    outputLayout->addWidget(unrealOptions_);
 
     unityOptions_ = new QWidget(this);
     auto* unityLayout = new QGridLayout(unityOptions_);
@@ -307,7 +340,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     barbPoints_->setToolTip(tr("The feather groups' strands resampled to this many points (with groom groups)"));
     unityLayout->addWidget(captionLabel(tr("Barb points"), unityOptions_), 2, 0);
     unityLayout->addWidget(barbPoints_, 2, 1);
-    layout->addWidget(unityOptions_);
+    outputLayout->addWidget(unityOptions_);
 
     cardOptions_ = new QWidget(this);
     auto* cardLayout = new QVBoxLayout(cardOptions_);
@@ -332,7 +365,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     occlusion_->setFill(theme::purple());
     occlusion_->setFormat([](double v) { return QString::number(v, 'f', 2); });
     cardLayout->addWidget(occlusion_);
-    layout->addWidget(cardOptions_);
+    outputLayout->addWidget(cardOptions_);
 
     // ---- Card maps: the preset, the output's settings, and the packing under Advanced.
     mapOptions_ = new QWidget(this);
@@ -451,7 +484,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     packingLayout->addLayout(saveRowMaps);
     packing_->setVisible(false);
     mapLayout->addWidget(packing_);
-    layout->addWidget(mapOptions_);
+    outputLayout->addWidget(mapOptions_);
     connect(mapPreset_, &QComboBox::currentIndexChanged, this, [this] {
         if (!filling_) setMapPreset(mapPreset_->currentText());
     });
@@ -483,7 +516,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     browse_->setFill(theme::chip(), theme::chip());
     browse_->setToolTip(tr("Choose the output file"));
     pathRow->addWidget(browse_);
-    layout->addLayout(pathRow);
+    outputLayout->addLayout(pathRow);
     export_ = new RoundButton(this);
     export_->setText(tr("Export"));
     export_->setIcon(QStringLiteral(":/groomlab/icons/ui_export.svg"), 16);
@@ -494,7 +527,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     export_->setFontWeight(600);
     export_->setFill(theme::actionFill(theme::emerald()), theme::actionFill(theme::emerald()));
     export_->setTextColor(theme::actionText(theme::ink()), theme::actionText(theme::ink()));
-    layout->addWidget(export_);
+    outputLayout->addWidget(export_);  // the card's primary, inside it
     progressBar_ = new ProgressBar(this);
     progressBar_->hide();
     layout->addWidget(progressBar_);
@@ -875,7 +908,10 @@ void ExportPanel::refresh() {
         b->setEnabled(!cards || cardsAvailable_);
         b->setToolTip(cards && !cardsAvailable_ ? tr("Needs cards: Cards mode > Make Cards") : tr(kTargets[i].description));
     }
-    description_->setText(tr(kTargets[static_cast<int>(target_)].description));
+    // The chosen format's line; while the card formats are off, why (in the line under the formats).
+    description_->setText(tr(kTargets[static_cast<int>(target_)].description) +
+                          (cardsAvailable_ ? QString() : tr("<br><span style='color:%1'>Cards (glTF) and Card maps need cards: Cards mode &gt; Make Cards.</span>")
+                                                             .arg(theme::textMuted().name())));
     const bool maps = target_ == Target::CardMaps;
     const bool cards = target_ == Target::Cards;
     const bool range = range_->isChecked() && range_->isEnabled() && !cards && !maps;

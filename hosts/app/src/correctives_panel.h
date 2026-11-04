@@ -130,6 +130,7 @@ private:
     ValueSlider* weight_ = nullptr;
     QToolButton* key_ = nullptr;
     QLabel* hint_ = nullptr;
+    QLabel* emptyIcon_ = nullptr;  // no corrective yet: the empty state's icon
     std::string target_;
     std::string shownKey_;
     std::shared_ptr<Correctives> stack_;  // the stack as last read (the weights read again per frame from it)

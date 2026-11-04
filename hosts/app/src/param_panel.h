@@ -204,6 +204,7 @@ private:
     QLabel* note_ = nullptr;  // the node's note (refreshNote)
     QLabel* error_ = nullptr;  // the node's error (refreshNote)
     QLabel* empty_ = nullptr;  // "No node selected", in place of the rows
+    QLabel* emptyIcon_ = nullptr;  // its icon over it
     QCheckBox* bypass_ = nullptr;
     QComboBox* evaluation_ = nullptr;  // when the node runs
     QWidget* actions_ = nullptr;        // the node's actions (NodeAction), over the scroll area
