@@ -4,7 +4,7 @@
 // The app's look: GroomLab's themes (hosts/maya/themes/*.json; Charcoal by default: calm neutral
 // greys, flat, thin borders, as the Maya host wears it) in the standalone app's docked window
 // (app_shell.h: menu bar, tool bar, solid docks, clean and dark like Plasticity). Glass themes
-// (Playful, Polar) keep their translucent pieces over the viewport; every theme's docks are solid.
+// (a theme with ui.glass) keep their translucent pieces over the viewport; every theme's docks are solid.
 // This module holds the colors, the fonts (Inter for the words and, with tabular digits, the
 // numbers; JetBrains Mono for code, hex colors and paths; bundled as resources), the sizes, the viewport's overlay colors (displayTheme), the layout of what stays
 // over the viewport (pure geometry, so the tests check it without a window), the brush tiles'
@@ -34,7 +34,7 @@ namespace groomlab::app::theme {
 // before the window is built, and GroomLab > Theme switches it live (MainWindow::restyle: the
 // window's style sheet made again, the widgets' own sheets given the new colors, everything
 // repainted; the painted widgets read the theme when they paint).
-QStringList themeNames();                  // "charcoal", "playful", "polar", "studio" and the user's (sorted)
+QStringList themeNames();                  // "charcoal", "paper", "playful", "studio" and the user's (sorted)
 QString themeLabel(const QString& name);   // "Charcoal"
 QString defaultTheme();                    // "charcoal" (themes without "extends" still extend Playful)
 QString currentTheme();                    // defaultTheme() until setTheme
@@ -95,7 +95,7 @@ QColor segmentText(const QColor& own);
 QColor checkedFill(const QColor& own);
 QColor checkedText(const QColor& own);
 // A slider's fill, as the Maya host's ui.sliders: a theme with one slider color (Charcoal's
-// silver, Polar's and Studio's accent) gives every slider that color; a cycle (Playful's four
+// silver, Paper's accent) gives every slider that color; a cycle (Playful's four
 // primaries) keeps the color the slider asks for.
 QColor sliderFill(const QColor& own);
 // A filled action button, the primary action (chrome, not meaning): its own colors on glass; on
@@ -105,6 +105,16 @@ QColor actionFill(const QColor& own);
 // (ui.textDisabled, else the muted text): dimmer than any text that can be read.
 QColor accentFill();
 QColor textDisabled();
+QColor viewportColor(const std::string& key);  // viewport.<key> (invalid when the theme has none)
+bool isLight();
+QColor segmentOn();    // the chosen cell on a sunken track (ui.segmentOn)
+QColor swatchEdge();   // a color swatch's 1 px edge
+QColor hudFill();      // the chips over the viewport (viewport.hudFill)
+QColor hudText();      // their text (viewport.hudText)
+QColor hudTextDim();
+int checkRadius();     // a check box's corner (ui.checkRadius)
+bool toolOnCategory(); // ui.toolOn "category": a chosen tool tile in its category's color                                  // a light theme (its panel brighter than mid grey)
+QColor towardText(const QColor& c, double t);    // c a step toward the text: more contrast on any theme
 QColor card();        // a section's card on the panel (ui.card)
 QColor sunken();      // the track under segments and pill tabs (ui.sunken)
 QColor accentSoft();  // what is chosen: the accent as a soft wash (ui.accentSoft)

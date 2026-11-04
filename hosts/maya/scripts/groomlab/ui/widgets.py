@@ -28,10 +28,10 @@ _ranges = None  # key -> [lo, hi], loaded from the optionVar on first use
 # replaces: each tool group has its color (theme "icons": {group: color}), a
 # darker shade and a lighter tint of it; "ink" is hair and neutral parts.
 ICON_GROUPS = {
-    "create": ("place", "draw", "part", "flow", "select"),
+    "create": ("place", "draw", "part", "flow"),
     "shape": ("comb", "slide", "smooth", "lift", "twist", "attract"),
     "trim": ("cut", "length", "lengths", "shape", "erase"),
-    "paint": ("paint", "freeze", "unfreeze"),
+    "paint": ("paint", "freeze", "unfreeze", "select"),  # the guide tools share one color
 }
 PLACEHOLDERS = {"main": "#3D7EFF", "shade": "#1F4FB3", "tint": "#A8C7FF", "ink": "#F2F2F5", "shine": "#FFFFFF",
                 "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90"}

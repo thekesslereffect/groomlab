@@ -310,7 +310,9 @@ void BrushSession::rebuildOverlay(const QPointF& at, bool withLines) {
                         }
                         for (std::size_t k = 0; k + 3 < pts.size(); k += 4) appendColoredLine(overlay_, {pts[k], pts[k + 1], pts[k + 2], pts[k + 3]}, c);
                     };
-                    const std::array<float, 3> halo{0.0f, 0.0f, 0.0f};
+                    // The halo opposite the ring: dark under a light ring, light under a dark one.
+                    const float lum = 0.2126f * color[0] + 0.7152f * color[1] + 0.0722f * color[2];
+                    const std::array<float, 3> halo = lum > 0.18f ? std::array<float, 3>{0.0f, 0.0f, 0.0f} : std::array<float, 3>{1.0f, 1.0f, 1.0f};
                     draw(circle(r + 1.6f * px), halo);
                     draw(circle(std::max(0.0f, r - 1.6f * px)), halo);
                     draw(circle(r), color);

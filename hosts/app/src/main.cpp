@@ -423,7 +423,7 @@ int main(int argc, char** argv) {
                         "                [--screenshot out.png [--size WxH] [--frames N]] [--benchmark N]\n"
                         "                [--live-benchmark N [--live-mode orbit|hover|stroke|param|param-commit]]\n"
                         "                [--gpu-preview on|off] [--benchmark-drag node.param=from,to[,steps]]... [--benchmark-orbit N] [--draw-dabs]\n"
-                        "                [--display name=value]... [--theme charcoal|playful|polar|studio]\n"
+                        "                [--display name=value]... [--theme charcoal|paper|playful|studio]\n"
                         "                [--ui-screenshot out.png [--ui-mode groom|look|cards|export] [--ui-graph] [--ui-panel name]\n"
                         "                                         [--ui-look-tab material|lighting|render[,more]] [--ui-node name]\n"
                         "                                         [--ui-hover rail|panels|all|labels] [--ui-preset name] [--ui-menu presets|add|edit|node|groups|editguides|maps|convert|correctives|marking|bar:Menu/Submenu]\n"

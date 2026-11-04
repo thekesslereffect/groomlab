@@ -62,7 +62,8 @@ MainWindow::MainWindow() {
     settings_.theme = theme::displayTheme();
     {
         // The brush ring in the theme's tone (viewport.brushRing, else the accent's ink), linear.
-        const QColor ring = theme::accentInk();
+        const QColor named = theme::viewportColor("brushRing");
+        const QColor ring = named.isValid() ? named : theme::accentInk();
         auto lin = [](qreal c) { return static_cast<float>(c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4)); };
         brush_.setRingTone({lin(ring.redF()), lin(ring.greenF()), lin(ring.blueF())});
     }
@@ -268,7 +269,9 @@ void MainWindow::buildMenuCorner() {
         const char* keys[] = {"1", "2", "3", "4"};
         int k = 0;
         for (const QString& label : {tr("Groom"), tr("Look"), tr("Cards"), tr("Export")}) {
-            items.push_back({label, QColor(), QColor(), tr("%1 mode (Ctrl+%2)").arg(label, QLatin1String(keys[k++]))});
+            // (A glass theme fills the chosen segment with its own color: a white wash, the text bright.)
+            items.push_back({label, theme::glassy() ? theme::chipChecked() : QColor(), theme::glassy() ? theme::text() : QColor(),
+                             tr("%1 mode (Ctrl+%2)").arg(label, QLatin1String(keys[k++]))});
         }
         modeSwitch_->setItems(std::move(items));
     }

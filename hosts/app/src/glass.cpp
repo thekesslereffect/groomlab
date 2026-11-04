@@ -751,6 +751,12 @@ QColor ValueSlider::fillColor() const {
     if (theme::glassy()) return withAlpha(theme::sliderFill(fill_), 120);
     const QColor own = theme::uiColor("sliderFill");
     if (own.isValid()) return own;
+    // (derived: the field a step toward the accent)
+    if (theme::uiColor("raised").isValid()) {
+        const QColor f = theme::uiColor("raised"), a = theme::uiColor("accent");
+        return QColor::fromRgbF(f.redF() + (a.redF() - f.redF()) * 0.18f, f.greenF() + (a.greenF() - f.greenF()) * 0.18f,
+                                f.blueF() + (a.blueF() - f.blueF()) * 0.18f);
+    }
     const QColor selection = theme::uiColor("selection");
     return selection.isValid() ? selection : withAlpha(theme::sliderFill(fill_), 90);
 }
@@ -841,7 +847,9 @@ void ValueSlider::paintEvent(QPaintEvent* /*event*/) {
     // The field, the fill clipped to its corners, then the edge over both.
     QColor base = editingNow ? theme::backdrop() : (hover_ && enabled ? fieldHover() : fieldBase());
     QColor fill = fillColor();
-    QColor edge = editingNow || focusShown ? fieldAccent() : theme::glassy() ? fieldEdge() : QColor(Qt::transparent);
+    // (a light theme's fields keep their hairline: ui.fieldEdge)
+    QColor edge = editingNow || focusShown ? fieldAccent() : theme::glassy() ? fieldEdge()
+                  : theme::uiColor("fieldEdge").isValid() ? theme::uiColor("fieldEdge") : QColor(Qt::transparent);
     const qreal edgeWidth = !theme::glassy() && (editingNow || focusShown) ? 2.0 : 1.0;
     if (state_.isValid() && !editingNow) {
         base = mixed(base, withAlpha(state_, 255), 0.22);
@@ -1221,10 +1229,10 @@ void Segmented::paintEvent(QPaintEvent* /*event*/) {
             if (glassy) {
                 paintGlass(painter, QRectF(rects[i]), inner, theme::segmentFill(items_[i].fill));
             } else {
-                paintGlass(painter, QRectF(rects[i]), inner, theme::uiColor("hover").lighter(112));
+                paintGlass(painter, QRectF(rects[i]), inner, theme::segmentOn());
                 painter.save();
                 painter.setRenderHint(QPainter::Antialiasing, true);
-                painter.setPen(QPen(QColor(255, 255, 255, 18), 1.0));  // a faint top light: raised
+                painter.setPen(QPen(theme::isLight() ? QColor(0, 0, 0, 20) : QColor(255, 255, 255, 18), 1.0));  // a faint edge: raised
                 const QRectF r = QRectF(rects[i]).adjusted(inner, 0.5, -inner, 0.0);
                 painter.drawLine(r.topLeft(), r.topRight());
                 painter.restore();

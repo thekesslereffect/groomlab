@@ -626,7 +626,7 @@ TEST(AppTheme, FontsBrushesAndColors) {
     EXPECT_EQ(theme::nodeCategoryColor("shape"), theme::blue());
     EXPECT_EQ(theme::nodeCategoryColor("look"), theme::yellow());
     EXPECT_EQ(theme::portColor("strands"), theme::yellow());
-    EXPECT_EQ(theme::glass().alpha(), 184);  // rgba(31,32,37,0.72)
+    EXPECT_EQ(theme::glass().alpha(), 255);  // solid panels: no shipped theme is glass any more
 
     // The colors are the Maya host's theme file's (embedded at build time), not a copy of it.
     std::ifstream in(std::string(GROOMLAB_TEST_DATA) + "/../../hosts/maya/themes/playful.json");
@@ -670,17 +670,20 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     EXPECT_EQ(theme::defaultTheme(), QStringLiteral("charcoal"));
     ASSERT_EQ(theme::currentTheme(), theme::defaultTheme());
     EXPECT_FALSE(theme::glassy());
+    // Playful: solid too (the one component system), its character in tokens: round, filled headers,
+    // the categories' colors, the chosen tool tile in its category's color.
     ASSERT_TRUE(theme::setTheme(QStringLiteral("playful")));
-    EXPECT_TRUE(theme::glassy());
-    EXPECT_FALSE(theme::glassEdge().isValid());
+    EXPECT_FALSE(theme::glassy());
+    EXPECT_TRUE(theme::glassEdge().isValid());
     EXPECT_EQ(theme::nodeRadius(), 14.0);
     EXPECT_FALSE(theme::tintedHeaders());
     EXPECT_EQ(theme::headerStyle(), QStringLiteral("filled"));
     EXPECT_EQ(theme::canvasStyle(), QStringLiteral("dots"));
-    EXPECT_EQ(theme::controlRadius(), 8) << "a glass theme's controls no rounder than its pills";
-    EXPECT_EQ(theme::segmentFill(theme::red()), theme::red());
-    EXPECT_EQ(theme::sliderFill(theme::purple()), theme::purple()) << "Playful's slider cycle: each slider its own color";
-    EXPECT_EQ(theme::actionFill(theme::yellow()), theme::yellow());
+    EXPECT_EQ(theme::controlRadius(), 12) << "round";
+    EXPECT_EQ(theme::checkRadius(), 7) << "round checks";
+    EXPECT_TRUE(theme::toolOnCategory());
+    EXPECT_EQ(theme::segmentFill(theme::red()), theme::uiColor("selection"));
+    EXPECT_EQ(theme::actionFill(theme::yellow()), theme::accentFill()) << "one primary color";
 
     std::ifstream in(folder + "/charcoal.json");
     ASSERT_TRUE(in);
@@ -761,13 +764,45 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     for (int k = 0; k < 3; ++k) EXPECT_NEAR(display.parts[k], parts[k], 1e-4);
     EXPECT_FLOAT_EQ(display.pointSize, charcoal["viewport"]["pointSize"].get<float>());
     EXPECT_NE(display.frozen, DisplayTheme().frozen) << "not the core's defaults";
-    // An unknown theme changes nothing; a theme without "glass" (Polar) takes Playful's (it extends it).
+    // An unknown theme changes nothing; Paper, the light theme, is solid with its own component tokens.
     EXPECT_FALSE(theme::setTheme(QStringLiteral("no such theme")));
     EXPECT_EQ(theme::currentTheme(), QStringLiteral("charcoal"));
-    ASSERT_TRUE(theme::setTheme(QStringLiteral("polar")));
-    EXPECT_TRUE(theme::glassy());
-    EXPECT_EQ(theme::nodeRadius(), 12.0);
-    EXPECT_EQ(theme::sliderFill(theme::yellow()), theme::uiColor("accent")) << "Polar's sliders: [\"accent\"]";
+    ASSERT_TRUE(theme::setTheme(QStringLiteral("paper")));
+    EXPECT_FALSE(theme::glassy());
+    EXPECT_TRUE(theme::isLight());
+    EXPECT_EQ(theme::nodeRadius(), 10.0);
+    EXPECT_EQ(theme::sliderFill(theme::yellow()), theme::uiColor("accent")) << "Paper's sliders: [\"accent\"]";
+    EXPECT_EQ(theme::card(), theme::uiColor("card"));
+    // Every shipped theme draws the solid component system (glass is no longer a shipped recipe).
+    // And holds the legibility floors: text tones at 4.5:1 on cards and fields, white on the primary,
+    // the chosen one-of cell apart from its track, a swatch's edge apart from the field.
+    auto lum = [](const QColor& c) {
+        auto ch = [](qreal v) { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * ch(c.redF()) + 0.7152 * ch(c.greenF()) + 0.0722 * ch(c.blueF());
+    };
+    auto ratio = [&](const QColor& x, const QColor& y) {
+        const qreal a = lum(x), b = lum(y);
+        return (std::max(a, b) + 0.05) / (std::min(a, b) + 0.05);
+    };
+    for (const char* name : {"charcoal", "playful", "studio", "paper"}) {
+        ASSERT_TRUE(theme::setTheme(QString::fromLatin1(name)));
+        EXPECT_FALSE(theme::glassy()) << name;
+        // Playful's personality stays its own (the themes fill their gaps from it).
+        EXPECT_EQ(theme::toolOnCategory(), std::string(name) == "playful") << name;
+        EXPECT_TRUE(theme::accentSoft().isValid() && theme::accentInk().isValid() && theme::sunken().isValid()) << name;
+        for (const QColor& surface : {theme::card(), theme::uiColor("raised")}) {
+            EXPECT_GE(ratio(theme::text(), surface), 4.5) << name << ": text";
+            EXPECT_GE(ratio(theme::textDim(), surface), 4.5) << name << ": dim text";
+            EXPECT_GE(ratio(theme::textMuted(), surface), 4.5) << name << ": muted text";
+        }
+        EXPECT_GE(ratio(theme::uiColor("accentText"), theme::accentFill()), 4.5) << name << ": the primary's text";
+        EXPECT_GE(ratio(theme::segmentOn(), theme::sunken()), 1.15) << name << ": the chosen cell on its track";
+        EXPECT_GE(ratio(theme::swatchEdge(), theme::uiColor("raised")), 1.4) << name << ": a swatch's edge";
+        // The chosen tool tile: the accent's soft wash, apart from its card (Playful: its category's own).
+        if (!theme::toolOnCategory()) EXPECT_GE(ratio(theme::accentSoft(), theme::card()), 1.12) << name << ": the chosen tile on its card";
+        EXPECT_GE(ratio(theme::accentInk(), theme::accentSoft()), 3.0) << name << ": the chosen tile's icon";
+    }
+    ASSERT_TRUE(theme::setTheme(QStringLiteral("charcoal")));
 }
 
 TEST(AppTheme, ViewportOverlayFollowsTheCorners) {

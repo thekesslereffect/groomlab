@@ -455,10 +455,10 @@ TEST(AppOutput, ScriptedRunsLeaveTheUsersSettingsAlone) {
     fs::remove_all(user);
     fs::create_directories(user / "GroomLab");
     const fs::path ini = user / "GroomLab" / (QCoreApplication::applicationName().toStdString() + ".ini");
-    const std::string bytes = "[General]\nrecentFiles=C:/nowhere/kept.groom\n\n[ui]\ntheme=polar\n\n[units]\nlength=mm\n";
+    const std::string bytes = "[General]\nrecentFiles=C:/nowhere/kept.groom\n\n[ui]\ntheme=paper\n\n[units]\nlength=mm\n";
     std::ofstream(ini, std::ios::binary) << bytes;
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, QString::fromStdString(user.u8string()));
-    ASSERT_EQ(QSettings().value(QStringLiteral("ui/theme")).toString(), QStringLiteral("polar"));
+    ASSERT_EQ(QSettings().value(QStringLiteral("ui/theme")).toString(), QStringLiteral("paper"));
     // A scripted run (no GROOMLAB_SETTINGS_DIR: ctest's is put back after) opens, edits, autosaves,
     // picks a theme and units: all of it in a throwaway folder that goes with the run.
     const QByteArray given = qgetenv("GROOMLAB_SETTINGS_DIR");
@@ -496,7 +496,7 @@ TEST(AppOutput, ScriptedRunsLeaveTheUsersSettingsAlone) {
         const RunSettings run(true);
         EXPECT_FALSE(run.throwaway());
         EXPECT_EQ(run.folder().toStdString(), user.u8string());
-        EXPECT_EQ(QSettings().value(QStringLiteral("ui/theme")).toString(), QStringLiteral("polar"));
+        EXPECT_EQ(QSettings().value(QStringLiteral("ui/theme")).toString(), QStringLiteral("paper"));
     }
     if (given.isEmpty()) qunsetenv("GROOMLAB_SETTINGS_DIR");
     else qputenv("GROOMLAB_SETTINGS_DIR", given);

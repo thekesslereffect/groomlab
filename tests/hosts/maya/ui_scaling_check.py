@@ -860,7 +860,7 @@ def main():
         maya_labels = [kw["label"] for name, kw in items if name == "menuItem" and "label" in kw and kw["label"] != "Theme"]
         _expect(maya_labels == qt_labels, "one Theme menu: %r vs %r" % (maya_labels, qt_labels))
         # Status colors follow the theme.
-        for name in ("polar", "playful"):
+        for name in ("paper", "playful"):
             t = theme.set_theme(name)
             graph_editor.apply_theme(t)
             _expect(graph_editor.ERROR.name().upper() == t.color("graph.error").upper(), "%s: error color" % name)

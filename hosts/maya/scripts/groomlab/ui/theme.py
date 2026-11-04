@@ -2,18 +2,18 @@
 """GroomLab UI themes: colors and shapes for the Groom Tools, the Graph Editor
 and the viewport's guides, from JSON files.
 
-Four ship with GroomLab: "charcoal" (calm neutral greys, one blue accent,
-thin borders, muted color only where it means something; the default),
-"playful" (charcoal and primaries, flat and round; the base every theme
-extends), "studio" (low-key greys, one accent) and "polar" (near-black and
-monochrome with one indigo accent, after polar.sh). Pick one in GroomLab >
+Four ship with GroomLab: "charcoal" (graphite greys with sections on soft
+cards and one iris-violet accent; the default), "playful" (charcoal and
+primaries, round; the base every theme extends), "studio" (low-key DCC greys,
+one steel-blue accent) and "paper" (light: warm paper and ink with one deep
+teal, for bright rooms and reading the groom against light). Pick one in GroomLab >
 Theme, or Theme in the Groom Tools' More menu or the Graph Editor's Edit menu
 (a pick is remembered: a user who made one keeps it). Make your own:
 
     from groomlab.ui import theme
     path = theme.create_theme("mine")      # a copy of the current theme, to edit
     theme.set_theme("mine")                # after editing: applies everywhere at once
-    theme.list_themes()                    # ["charcoal", "mine", "playful", "polar", "studio"]
+    theme.list_themes()                    # ["charcoal", "mine", "paper", "playful", "studio"]
 
 Themes are looked up, in order, in every directory on GROOMLAB_THEME_PATH,
 the user's folder (<Maya user app dir>/groomlab/themes) and the shipped

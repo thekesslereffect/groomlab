@@ -1262,7 +1262,7 @@ TEST(AppPanels, ViewThemeSavesTheChoiceForTheNextStart) {
     MainWindow window;
     window.resize(1280, 720);
     window.show();
-    EXPECT_TRUE(theme::glassy());
+    EXPECT_FALSE(theme::glassy()) << "every shipped theme is solid";
     EXPECT_TRUE(window.styleSheet().contains(theme::uiColor("panel").name())) << "the docks' solid panel";
     window.overlay()->toast(QStringLiteral("glass"), false);
     QWidget* toast = nullptr;
@@ -1270,7 +1270,7 @@ TEST(AppPanels, ViewThemeSavesTheChoiceForTheNextStart) {
         if (label->text() == QStringLiteral("glass")) toast = label->parentWidget();
     }
     ASSERT_NE(qobject_cast<GlassPanel*>(toast), nullptr);
-    EXPECT_LT(static_cast<GlassPanel*>(toast)->color().alpha(), 255) << "glass over the viewport";
+    EXPECT_EQ(static_cast<GlassPanel*>(toast)->color().alpha(), 255) << "a solid toast over the viewport";
 }
 
 TEST(AppPanels, UnsavedChangesAreAskedAboutAndMessagesToast) {
@@ -4354,8 +4354,13 @@ TEST(AppPanels, ThemesGiveTheGraphStatusColors) {
                                 theme::windowButtonHover()}) {
             EXPECT_TRUE(c.isValid()) << name.toStdString();
         }
-        // Every theme is dark: the error words stay readable on its panels.
-        EXPECT_GT(theme::errorText().lightnessF(), theme::glassPanel().lightnessF() + 0.2) << name.toStdString();
+        // The error words stay readable on its panels, dark or light (3:1 at least).
+        auto lum = [](const QColor& c) {
+            auto ch = [](qreal v) { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+            return 0.2126 * ch(c.redF()) + 0.7152 * ch(c.greenF()) + 0.0722 * ch(c.blueF());
+        };
+        const qreal a = lum(theme::errorText()), b = lum(theme::glassPanel());
+        EXPECT_GE((std::max(a, b) + 0.05) / (std::min(a, b) + 0.05), 3.0) << name.toStdString();
         EXPECT_TRUE(theme::nodeCategoryColor("deform").isValid());
         EXPECT_TRUE(theme::nodeCategoryColor("collide").isValid());
     }

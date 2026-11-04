@@ -268,26 +268,70 @@ QColor accentFill() {
     const QColor c = uiColor("accentFill");
     return c.isValid() ? c : uiColor("accent");
 }
+QColor viewportColor(const std::string& key) { return themed({"viewport"}, key); }
+
+QColor segmentOn() {
+    // The chosen cell on a sunken track (ui.segmentOn): raised toward the surface on a light theme
+    // (white over the track), a step toward the text on a dark one.
+    const QColor c = uiColor("segmentOn");
+    if (c.isValid()) return c;
+    return isLight() ? QColor(Qt::white) : towardText(uiColor("hover"), 0.08);
+}
+QColor swatchEdge() {
+    // A color swatch's 1 px edge (ui.checkEdge on a light theme): white or black colors keep their shape.
+    const QColor c = uiColor(isLight() ? "checkEdge" : "swatchEdge");
+    return c.isValid() ? c : towardText(uiColor("raised"), isLight() ? 0.45 : 0.22);
+}
+QColor hudFill() {
+    // The chips over the viewport (viewport.hudFill): they belong to the view, dark over its dark render
+    // whatever the panels' theme.
+    const QColor c = themed({"viewport"}, "hudFill");
+    if (c.isValid()) return c;
+    QColor f = isLight() ? QColor(0x1C, 0x1B, 0x19) : uiColor("panel");
+    f.setAlpha(isLight() ? 226 : 214);
+    return f;
+}
+QColor hudText() {
+    const QColor c = themed({"viewport"}, "hudText");
+    return c.isValid() ? c : isLight() ? QColor(0xF4, 0xF1, 0xEA) : text();
+}
+QColor hudTextDim() { return isLight() ? QColor(0xC4, 0xBF, 0xB4) : textMuted(); }
+int checkRadius() { return std::clamp(value("ui", "checkRadius", smallRadius()), 0, 7); }
+bool toolOnCategory() {
+    // ui.toolOn "category": the chosen tool tile in its category's color (Playful's), else the accent.
+    const nlohmann::json& ui = current().value("ui", nlohmann::json::object());
+    return ui.is_object() && ui.value("toolOn", std::string()) == "category";
+}
+
+bool isLight() {
+    // A light theme: its panel brighter than mid grey (the contrast steps then go toward dark).
+    const QColor p = uiColor("panel");
+    return p.isValid() && 0.2126 * p.redF() + 0.7152 * p.greenF() + 0.0722 * p.blueF() > 0.5;
+}
+QColor towardText(const QColor& c, double t) { return mix(c, text(), t); }
+// The component tokens: the theme's own (ui.<key>), else derived from its base tones (never white),
+// so a theme that sets only its base tones still draws every part.
 QColor card() {
-    // A section's card on the panel (ui.card): a step lighter than the panel, so a section reads as one block.
+    // A section's card on the panel (ui.card): a step toward the fields, so a section reads as one block.
     if (glassy()) return QColor(255, 255, 255, 10);
     const QColor c = uiColor("card");
-    return c.isValid() ? c : uiColor("panel");
+    return c.isValid() ? c : mix(uiColor("panel"), uiColor("raised"), 0.45);
 }
 QColor sunken() {
-    // A track under segments and pill tabs (ui.sunken): darker than the panel.
+    // A track under segments and pill tabs (ui.sunken): toward the window's backdrop.
     const QColor c = uiColor("sunken");
-    return c.isValid() ? c : backdrop();
+    if (c.isValid()) return c;
+    return isLight() ? mix(uiColor("panel"), text(), 0.07) : mix(backdrop(), uiColor("panel"), 0.3);
 }
 QColor accentSoft() {
-    // What is chosen (a tool, a chip, a row): the accent as a soft wash (ui.accentSoft).
+    // What is chosen (a tool, a chip, a row): the accent as a soft wash of the card (ui.accentSoft).
     const QColor c = uiColor("accentSoft");
-    return c.isValid() ? c : checkedFill(uiColor("accent"));
+    return c.isValid() ? c : mix(card(), uiColor("accent"), isLight() ? 0.16 : 0.22);
 }
 QColor accentInk() {
-    // Text and icons in the accent on a dark surface (ui.accentInk): lighter than the accent.
+    // Text and icons in the accent on the panels (ui.accentInk): the accent toward the text.
     const QColor c = uiColor("accentInk");
-    return c.isValid() ? c : uiColor("accent").lighter(125);
+    return c.isValid() ? c : mix(uiColor("accent"), text(), 0.45);
 }
 QColor textDisabled() {
     if (glassy()) return QColor(0x6E, 0x6B, 0x66);
@@ -471,9 +515,9 @@ QColor categoryIconColor(BrushCategory category) {
 }
 
 QColor toolIconColor(BrushCategory category, const std::string& icon) {
-    if (category == BrushCategory::Guides) {
-        category = icon == "freeze" || icon == "unfreeze" ? BrushCategory::Paint : BrushCategory::Create;
-    }
+    // The Guides tray's tools (Select, Freeze, Unfreeze) share one color: the paint group's (yellow in Playful).
+    (void)icon;
+    if (category == BrushCategory::Guides) category = BrushCategory::Paint;
     return categoryIconColor(category);
 }
 
@@ -550,7 +594,7 @@ QColor graphCanvas() {
 
 QColor graphGrid() {
     const QColor c = themed({"graph"}, "grid");
-    return c.isValid() ? c : graphCanvas().lighter(135);
+    return c.isValid() ? c : towardText(graphCanvas(), 0.08);
 }
 
 QColor nodeBorder() { return themed({"graph"}, "nodeBorder"); }
@@ -713,12 +757,12 @@ QTabBar[role="pills"] { background: @sunken@; border-radius: 9px; }
 QTabBar[role="pills"]::tab { background: transparent; color: @muted@; padding: 5px 9px; margin: 3px 1px; border: none; border-radius: 6px; font-weight: 500; }
 QTabBar[role="pills"]::tab:first { margin-left: 3px; }
 QTabBar[role="pills"]::tab:last { margin-right: 3px; }
-QTabBar[role="pills"]::tab:selected { background: @hover@; color: @text@; font-weight: 600; }
+QTabBar[role="pills"]::tab:selected { background: @segOn@; color: @text@; font-weight: 600; }
 QTabBar[role="pills"]::tab:hover:!selected { color: @text@; }
 #groomTabs::tab { padding: 5px 6px; }
 QMainWindow > QTabBar { background: @sunken@; border-radius: 9px; }
 QMainWindow > QTabBar::tab { background: transparent; color: @muted@; padding: 5px 12px; margin: 3px 1px; border: none; border-radius: 6px; font-weight: 500; }
-QMainWindow > QTabBar::tab:selected { background: @hover@; color: @text@; font-weight: 600; }
+QMainWindow > QTabBar::tab:selected { background: @segOn@; color: @text@; font-weight: 600; }
 QMainWindow > QTabBar::tab:hover:!selected { color: @text@; }
 QSplitter::handle { background: @background@; }
 QSplitter::handle:horizontal { width: 3px; }
@@ -749,8 +793,8 @@ QComboBox::down-arrow { image: url(:/groomlab/icons/ui_chevron_down.svg); width:
 QComboBox QAbstractItemView { background: @field@; border: 1px solid @popupEdge@; border-radius: @radius@px; padding: 4px; selection-background-color: @selection@;
     selection-color: @selectionText@; outline: none; }
 QCheckBox { spacing: 8px; }
-QCheckBox::indicator { width: 14px; height: 14px; border-radius: @smallRadius@px; background: @check@; border: 1px solid @checkEdge@; }
-QCheckBox::indicator:checked { background: @accentSoft@; border-color: @accent@; image: url(:/groomlab/icons/ui_check_light.svg); }
+QCheckBox::indicator { width: 14px; height: 14px; border-radius: @checkRadius@px; background: @check@; border: 1px solid @checkEdge@; }
+QCheckBox::indicator:checked { background: @checkOn@; border-color: @checkOnEdge@; image: url(:/groomlab/icons/ui_check_light.svg); }
 QCheckBox::indicator:disabled { background: @checkOff@; }
 QCheckBox::indicator:checked:disabled { background: @hover@; border-color: @hover@; image: url(:/groomlab/icons/ui_check_light.svg); }
 QCheckBox:disabled { color: @disabled@; }
@@ -801,7 +845,7 @@ QToolButton[role="tool"][labels="true"] { background: @toolRestFill@; border-col
 QToolButton[role="tool"]:hover { background: @fieldHover@; color: @text@; }
 QToolButton[role="tool"]:checked, QFrame[role="tray"] QToolButton[role="tool"]:checked { background: @toolOn@; border-color: @toolOnEdge@; color: @toolOnText@; }
 QToolButton[role="tool"]:disabled { color: @disabled@; }
-QToolButton[role="tool"]:pressed, QFrame[role="tray"] QToolButton[role="tool"]:pressed, QWidget[role="tray"] QToolButton[role="tool"]:pressed { background: @hover@; }
+QToolButton[role="tool"]:pressed:!checked, QFrame[role="tray"] QToolButton[role="tool"]:pressed:!checked, QWidget[role="tray"] QToolButton[role="tool"]:pressed:!checked { background: @hover@; }
 QWidget[role="tray"] QToolButton[role="tool"]:hover:!checked { background: @fieldHover@; color: @text@; }
 QToolButton[role="chip"] { background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; padding: 4px 8px; font-weight: 500; }
 QToolButton[role="chip"]:hover { background: @fieldHover@; }
@@ -847,7 +891,7 @@ QWidget[role="segTrack"] QToolButton[role="chip"], QFrame[role="toolCard"] QWidg
 QWidget[role="segTrack"] QToolButton[role="chip"]:hover, QFrame[role="toolCard"] QWidget[role="segTrack"] QToolButton[role="chip"]:hover,
 #paintControls QWidget[role="segTrack"] QToolButton[role="chip"]:hover { background: transparent; color: @text@; }
 QWidget[role="segTrack"] QToolButton[role="chip"]:checked, QFrame[role="toolCard"] QWidget[role="segTrack"] QToolButton[role="chip"]:checked,
-#paintControls QWidget[role="segTrack"] QToolButton[role="chip"]:checked { background: @hover@; border-color: @hover@; color: @text@; font-weight: 600; }
+#paintControls QWidget[role="segTrack"] QToolButton[role="chip"]:checked { background: @segOn@; border-color: @segOn@; color: @text@; font-weight: 600; }
 QPushButton[role="ghost"], QToolButton[role="ghost"] { background: transparent; border: 1px solid transparent; color: @soft@; padding: 2px 6px;
     min-height: 0; font-weight: 500; }
 QPushButton[role="ghost"]:hover, QToolButton[role="ghost"]:hover { background: @hover@; color: @text@; }
@@ -903,8 +947,8 @@ QPushButton[role="propSubsection"], QPushButton[role="propSubsection"]:checked, 
 QPushButton[role="propSubsection"]:hover { color: @text@; background: transparent; }
 QLabel[role="propLabel"] { color: @dim@; }
 /* A control's row as one field (properties_panel.cpp): the label inside at its left, the control at its right, flat in it. */
-QFrame[role="propField"] { background: @field@; border: none; border-radius: @radius@px; }
-QWidget[role="fieldList"] { background: @field@; border: none; border-radius: @radius@px; }
+QFrame[role="propField"] { background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; }
+QWidget[role="fieldList"] { background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; }
 QWidget[role="fieldList"] QLabel { background: transparent; }
 QFrame[role="emptyQuiet"] { background: transparent; border: none; }
 QFrame[role="emptyQuiet"] QLabel { background: transparent; }
@@ -936,7 +980,7 @@ QFrame[role="propRule"] { background: @cardRule@; border: none; }
         {QStringLiteral("@accentFill@"), accentFill().name()},
         {QStringLiteral("@accent@"), uiColor("accent").name()},
         {QStringLiteral("@disabled@"), textDisabled().name()},
-        {QStringLiteral("@hoverEdge@"), glass ? wash(20) : uiColor("hover").lighter(118).name()},
+        {QStringLiteral("@hoverEdge@"), glass ? wash(20) : towardText(uiColor("hover"), 0.12).name()},
         {QStringLiteral("@selectionText@"), (selectionText.isValid() ? selectionText : uiColor("accentText")).name()},
         {QStringLiteral("@selection@"), (selection.isValid() ? selection : uiColor("accent")).name()},
         {QStringLiteral("@slider@"), (glass ? uiColor("accent") : sliderFill(uiColor("accent"))).name()},
@@ -955,20 +999,21 @@ QFrame[role="propRule"] { background: @cardRule@; border: none; }
         {QStringLiteral("@hover@"), uiColor("hover").name()},
         {QStringLiteral("@edge@"), edgeName},
         {QStringLiteral("@groupEdge@"), glass ? wash(10) : edgeName},
-        {QStringLiteral("@fieldEdge@"), QStringLiteral("transparent")},
+        // A light theme's fields keep a hairline (ui.fieldEdge) to stand off its light cards; else none.
+        {QStringLiteral("@fieldEdge@"), uiColor("fieldEdge").isValid() && !glass ? uiColor("fieldEdge").name() : QStringLiteral("transparent")},
         {QStringLiteral("@fieldHover@"), glass ? wash(14) : uiColor("hover").name()},
         {QStringLiteral("@fieldOff@"), glass ? wash(4) : uiColor("panel").name()},
         {QStringLiteral("@field@"), glass ? wash(8) : uiColor("raised").name()},
         {QStringLiteral("@list@"), glass ? wash(5) : backdrop().name()},
         {QStringLiteral("@checkEdge@"), glass ? wash(14) : mix(uiColor("hover"), textMuted(), 0.8).name()},
-        {QStringLiteral("@popupEdge@"), glass ? wash(16) : QStringLiteral("#454952")},
+        {QStringLiteral("@popupEdge@"), glass ? wash(16) : (uiColor("popupEdge").isValid() ? uiColor("popupEdge") : towardText(uiColor("raised"), 0.18)).name()},
         {QStringLiteral("@toolRestFill@"), glass ? wash(8) : QStringLiteral("transparent")},
         {QStringLiteral("@toolOnEdge@"), glass ? uiColor("accent").name() : mix(accentSoft(), uiColor("accent"), 0.45).name()},
         {QStringLiteral("@checkOff@"), glass ? wash(5) : uiColor("panel").name()},
         {QStringLiteral("@check@"), glass ? wash(10) : uiColor("raised").name()},
         {QStringLiteral("@track@"), glass ? wash(12) : uiColor("hover").name()},
-        {QStringLiteral("@scrollHover@"), glass ? wash(30) : uiColor("hover").lighter(175).name()},
-        {QStringLiteral("@scroll@"), glass ? wash(18) : uiColor("hover").lighter(135).name()},
+        {QStringLiteral("@scrollHover@"), glass ? wash(30) : towardText(uiColor("hover"), 0.45).name()},
+        {QStringLiteral("@scroll@"), glass ? wash(18) : towardText(uiColor("hover"), 0.25).name()},
         {QStringLiteral("@radiusLarge@"), QString::number(panelRadius())},
         {QStringLiteral("@radius@"), QString::number(controlRadius())},
         {QStringLiteral("@smallRadius@"), QString::number(smallRadius())},
@@ -980,6 +1025,11 @@ QFrame[role="propRule"] { background: @cardRule@; border: none; }
         {QStringLiteral("@checkMark@"), uiColor("accentText").lightness() < 128 ? QStringLiteral(":/groomlab/icons/ui_check_dark.svg")
                                                                                  : QStringLiteral(":/groomlab/icons/ui_check_light.svg")},
         {QStringLiteral("@cardRule@"), glass ? wash(8) : mix(card(), uiColor("hover"), 0.6).name()},
+        {QStringLiteral("@segOn@"), glass ? wash(20) : segmentOn().name()},
+        {QStringLiteral("@checkRadius@"), QString::number(checkRadius())},
+        // A checked box: the accent filled with the light tick on a light theme (a pale wash would hide it), the soft accent on a dark one.
+        {QStringLiteral("@checkOnEdge@"), glass ? uiColor("accent").name() : (isLight() ? accentFill() : uiColor("accent")).name()},
+        {QStringLiteral("@checkOn@"), glass ? wash(30) : (isLight() ? accentFill() : accentSoft()).name()},
         {QStringLiteral("@cardRadius@"), QString::number(cardRadius())},
         {QStringLiteral("@card@"), glass ? wash(4) : card().name()},
         {QStringLiteral("@sunken@"), glass ? wash(4) : sunken().name()},

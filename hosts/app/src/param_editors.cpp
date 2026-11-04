@@ -332,7 +332,7 @@ ColorEditor::ColorEditor(QWidget* parent) : QWidget(parent) {
     swatch_->setRadius(9.0);
     swatch_->setFixedWidth(36);
     swatch_->setToolTip(tr("Pick the color (shown in sRGB, stored linear)"));
-    if (!theme::glassy()) swatch_->setEdge(theme::uiColor("hover").lighter(130));  // a black or white color keeps its shape
+    if (!theme::glassy()) swatch_->setEdge(theme::swatchEdge());  // a black or white color keeps its shape
     layout->addWidget(swatch_);
     hex_ = new QLineEdit(this);
     hex_->setMaxLength(7);

@@ -178,7 +178,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
         b->setFontWeight(500);
         b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         // A one-of choice: the chosen format raised in a neutral tone (the accent is for what is on).
-        b->setFill(theme::glassy() ? theme::chip() : QColor(0, 0, 0, 0), theme::glassy() ? theme::checkedFill(theme::emerald()) : theme::uiColor("hover"));
+        b->setFill(theme::glassy() ? theme::chip() : QColor(0, 0, 0, 0), theme::glassy() ? theme::checkedFill(theme::emerald()) : theme::segmentOn());
         b->setTextColor(theme::glassy() ? theme::textSoft() : theme::textDim(), theme::glassy() ? theme::checkedText(theme::ink()) : theme::text());
         b->setCheckable(true);
         b->setToolTip(tr(kTargets[i].description));

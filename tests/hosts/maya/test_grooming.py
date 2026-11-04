@@ -4046,7 +4046,7 @@ class ControlsAndExamplesTest(unittest.TestCase):
         folder = tempfile.mkdtemp()
         os.environ["GROOMLAB_USER_THEMES"] = folder
         try:
-            self.assertTrue({"playful", "studio", "polar", "charcoal"} <= set(theme.list_themes()))
+            self.assertTrue({"playful", "studio", "paper", "charcoal"} <= set(theme.list_themes()))
             # Charcoal's file sets every key Playful's does (nothing falls back to Playful's colors),
             # and every color in every shipped theme resolves.
             def keys(data, prefix=""):
@@ -4075,8 +4075,8 @@ class ControlsAndExamplesTest(unittest.TestCase):
             self.assertEqual(charcoal.get("graph.headerStyle"), "tinted")
             self.assertIs(charcoal.get("graph.shadow"), True)  # the nodes lift off the canvas (every host draws it)
             self.assertIn("solid %s" % charcoal.color("ui.outline"), theme.stylesheet(charcoal))
-            polar = theme.Theme("polar", theme.load("polar"))
-            self.assertEqual(polar.hex("accent"), "#3619CC")          # Ether
+            paper = theme.Theme("paper", theme.load("paper"))
+            self.assertEqual(paper.hex("accent"), "#0F766E")          # deep teal (the light theme)
             playful = theme.Theme("playful", theme.load("playful"))
             self.assertEqual(playful.hex("blue"), "#2F7BF6")          # palette names resolve
             self.assertEqual(playful.hex("accent"), "#2F7BF6")        # ui.accent -> blue

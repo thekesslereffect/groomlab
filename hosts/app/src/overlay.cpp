@@ -213,7 +213,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
             b->setIconColored(true);
         }
         b->setCheckedRing(theme::text(), 3.0);
-        if (!theme::glassy()) b->setEdge(theme::uiColor("hover").lighter(130));  // dark and light swatches keep their shape
+        if (!theme::glassy()) b->setEdge(theme::swatchEdge());  // dark and light swatches keep their shape
         const std::string preset = s.preset;
         connect(b, &QAbstractButton::clicked, this, [this, preset] {
             if (!groomColor_.node.empty()) {
@@ -597,7 +597,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         b->setFontSize(12);
         b->setFontWeight(500);
         // A one-of choice: the chosen preset raised in a neutral tone (the accent is for what is on).
-        b->setFill(theme::glassy() ? theme::chip() : QColor(0, 0, 0, 0), theme::glassy() ? theme::checkedFill(theme::yellow()) : theme::uiColor("hover"));
+        b->setFill(theme::glassy() ? theme::chip() : QColor(0, 0, 0, 0), theme::glassy() ? theme::checkedFill(theme::yellow()) : theme::segmentOn());
         b->setTextColor(theme::glassy() ? theme::textSoft() : theme::textDim(), theme::glassy() ? theme::checkedText(theme::ink()) : theme::text());
         if (!theme::glassy()) b->setDiameter(26);
         b->setCheckable(true);
@@ -1056,18 +1056,20 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
     // ---- Top-left: the active tool's name.
     toolLabel_ = overlayPanel(this, 10.0);
     toolLabel_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    if (!theme::glassy()) toolLabel_->setColor(theme::hudFill());  // (the viewport's HUD tone)
     auto* labelLayout = new QHBoxLayout(toolLabel_);
     labelLayout->setContentsMargins(10, 5, 10, 5);
     toolName_ = new QLabel(toolLabel_);
     toolName_->setObjectName(QStringLiteral("toolName"));
     toolName_->setFont(theme::uiFont(12, 700));
-    toolName_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::text().name()));
+    toolName_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::hudText().name()));
     labelLayout->addWidget(toolName_);
     toolLabel_->hide();
 
     // ---- Top-right: Undo and Redo (the window has no tool bar: the menus, the keys and these).
     history_ = overlayPanel(this, 10.0);
     history_->setObjectName(QStringLiteral("history"));
+    if (!theme::glassy()) history_->setColor(theme::hudFill());
     auto* historyLayout = new QHBoxLayout(history_);
     historyLayout->setContentsMargins(theme::glassy() ? 4 : 2, theme::glassy() ? 4 : 1, theme::glassy() ? 4 : 2, theme::glassy() ? 4 : 1);
     historyLayout->setSpacing(2);
@@ -1095,11 +1097,7 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
     // The brush's value while a radius or strength drag runs, beside where it started.
     readout_ = new ShadowText(this);
     readout_->setObjectName(QStringLiteral("brushReadout"));
-    {
-        QColor chip = theme::uiColor("panel");
-        chip.setAlpha(230);
-        readout_->setChip(chip);
-    }
+    readout_->setChip(theme::hudFill());
     readout_->hide();
     connect(viewport_, &Viewport::brushReadout, this, [this](const QPoint& at, const QString& text) {
         if (text.isEmpty()) {
@@ -1109,7 +1107,7 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
         ShadowText::Run run;
         run.text = text;
         run.font = theme::numberFont(13, 600);
-        run.color = theme::text();
+        run.color = theme::hudText();
         readout_->setRuns({run});
         readout_->resize(readout_->sizeHint());
         // Its bottom-left at the anchor (outside the ring), flipped back inside the view at its edges.
@@ -1120,11 +1118,9 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
         readout_->raise();
     });
     if (!theme::glassy()) {
-        // A solid theme's lines on chips (the panel's tone, a little see-through), as the tool's name and Undo.
-        QColor chip = theme::uiColor("panel");
-        chip.setAlpha(214);
-        stats_->setChip(chip);
-        refine_->setChip(chip);
+        // A solid theme's lines on chips (the viewport's HUD tone), as the tool's name and Undo.
+        stats_->setChip(theme::hudFill());
+        refine_->setChip(theme::hudFill());
     }
     toast_ = overlayPanel(this, 12.0);
     toast_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
@@ -1317,7 +1313,8 @@ void OverlayHost::refreshToolLabel() {
         // The key as a small cap beside the name; its tooltip says what it does.
         const QString key = toolSelect_ ? QStringLiteral("S") : QStringLiteral("B");
         toolName_->setText(QStringLiteral("%1&nbsp;&nbsp;<span style=\"color:%3; background-color:%4; font-size:11px; font-weight:500\">&nbsp;%2&nbsp;</span>")
-                               .arg(toolSelect_ ? tr("Select") : theme::brushTitle(toolMode_), key, theme::textDim().name(), theme::uiColor("hover").name()));
+                               .arg(toolSelect_ ? tr("Select") : theme::brushTitle(toolMode_), key, theme::hudTextDim().name(),
+                                    theme::isLight() ? QStringLiteral("#3A3833") : theme::uiColor("hover").name()));
         toolLabel_->setToolTip(toolSelect_ ? tr("S: back to Select") : tr("B: back to %1 (the brush used last)").arg(theme::brushTitle(toolMode_)));
         toolLabel_->adjustSize();
     }
@@ -1353,7 +1350,7 @@ void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& 
     ShadowText::Run line;
     line.text = parts.join(QStringLiteral(" · "));
     line.font = theme::numberFont(12);
-    line.color = theme::textMuted();
+    line.color = theme::hudTextDim();
     // Set after every frame: the same line changes nothing, and a new one lays the overlay out
     // again only when its size changed.
     const QSize before = stats_->sizeHint();
@@ -1366,13 +1363,13 @@ void OverlayHost::setRefine(bool refining, int frames, int target, double msPerF
     lead.dot = refining && frames < target ? theme::yellow() : theme::emerald();
     lead.text = refining ? tr("Refining") : QString();
     lead.font = theme::uiFont(12, 500);
-    lead.color = theme::textSoft();
+    lead.color = theme::hudText();
     runs.push_back(lead);
     ShadowText::Run numbers;
     numbers.text = refining ? QStringLiteral("%1 / %2").arg(frames).arg(target) : msPerFrame > 0.05 ? QStringLiteral("%1 ms").arg(msPerFrame, 0, 'f', 1)
                                                                                        : tr("Ready");
     numbers.font = theme::numberFont(12);
-    numbers.color = theme::textSoft();
+    numbers.color = theme::hudText();
     numbers.gapBefore = refining ? 6 : 0;
     runs.push_back(numbers);
     const QSize before = refine_->sizeHint();
@@ -1709,8 +1706,8 @@ void OverlayHost::setUndoRedo(bool canUndo, bool canRedo, const QString& undoTip
     // Dim while there is nothing to undo or redo; the tip names the step and its keys.
     undo_->setEnabled(canUndo);
     redo_->setEnabled(canRedo);
-    undo_->setIconColor(canUndo ? theme::text() : theme::textMuted(), theme::text());
-    redo_->setIconColor(canRedo ? theme::text() : theme::textMuted(), theme::text());
+    undo_->setIconColor(canUndo ? theme::hudText() : theme::hudTextDim(), theme::hudText());
+    redo_->setIconColor(canRedo ? theme::hudText() : theme::hudTextDim(), theme::hudText());
     undo_->setToolTip(undoTip);
     redo_->setToolTip(redoTip);
 }

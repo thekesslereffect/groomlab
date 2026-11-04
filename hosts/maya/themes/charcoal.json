@@ -11,6 +11,8 @@
     "silver": "#A3A3A3"
   },
   "ui": {
+    "checkRadius": 5,
+    "toolOn": "accent",
     "card": "#1F2025",
     "sunken": "#111215",
     "accentSoft": "#2C2850",
@@ -23,7 +25,7 @@
     "border": "#2A2C31",
     "text": "#EDEDF0",
     "textDim": "#B4B5BC",
-    "textMuted": "#8A8C96",
+    "textMuted": "#9597A1",
     "accent": "#8B7DFF",
     "accentText": "#FFFFFF",
     "accentFill": "#6A5CF5",
@@ -112,6 +114,7 @@
     "ink": "#EDEDF0"
   },
   "viewport": {
+    "brushRing": "#B9B0FF",
     "pointSize": 3,
     "selected": "#FFFFFF",
     "softSelected": "#E8A44C",

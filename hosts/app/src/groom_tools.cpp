@@ -652,7 +652,9 @@ void GroomTools::refreshTiles() {
         // a glass theme's keep their two tones.
         const QPixmap rest = glass ? duotoneIcon(resource, theme::toolIconColor(category, stem), theme::iconInk(), iconSize, dpr)
                                    : tintedIcon(resource, theme::toolIconColor(category, stem), iconSize, dpr);
-        const QPixmap on = tintedIcon(resource, glass ? theme::uiColor("accentText") : theme::accentInk(), iconSize, dpr);
+        // Chosen: the accent's ink; a theme with toolOn "category" (Playful) keeps the category's own color.
+        const QColor onInk = glass ? theme::uiColor("accentText") : theme::toolOnCategory() ? theme::towardText(theme::toolIconColor(category, stem), 0.25) : theme::accentInk();
+        const QPixmap on = tintedIcon(resource, onInk, iconSize, dpr);
         const QPixmap off = tintedIcon(resource, theme::textMuted(), iconSize, dpr);
         QIcon icon;
         icon.addPixmap(rest, QIcon::Normal, QIcon::Off);
@@ -671,6 +673,17 @@ void GroomTools::refreshTiles() {
             if (b->property("iconLook").toString() == look) continue;
             b->setProperty("iconLook", look);
             b->setIcon(toolIcon(e ? e->icon : id, e ? e->category : BrushCategory::Guides));
+            // toolOn "category": the chosen tile a soft wash of its category's color (else the sheet's accent).
+            if (theme::toolOnCategory() && !theme::glassy()) {
+                const QColor cat = theme::toolIconColor(e ? e->category : BrushCategory::Guides, e ? e->icon : id);
+                auto wash = [](const QColor& a, const QColor& b, double t) {
+                    return QColor::fromRgbF(a.redF() + (b.redF() - a.redF()) * t, a.greenF() + (b.greenF() - a.greenF()) * t, a.blueF() + (b.blueF() - a.blueF()) * t);
+                };
+                b->setStyleSheet(QStringLiteral("QToolButton:checked { background: %1; border: 1px solid %2; color: %3; }")
+                                     .arg(wash(theme::card(), cat, 0.22).name(), wash(theme::card(), cat, 0.55).name(), theme::text().name()));
+            } else {
+                b->setStyleSheet(QString());
+            }
         }
     }
     // Labeled: the name under the icon on a raised tile (Maya's tiles); else icons alone (the
