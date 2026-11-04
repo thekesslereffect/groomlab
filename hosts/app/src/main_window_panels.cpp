@@ -6,6 +6,7 @@
 #include <QFileInfo>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include <QCheckBox>
@@ -105,6 +106,13 @@ void MainWindow::buildPanels() {
         refreshTool();
     });
     connect(maps_, &MapsPanel::message, this, [this](const QString& text) { report(text); });
+    connect(maps_, &MapsPanel::mapNodeRequested, this, [this](const std::string& map) {
+        // A Map node reading the map, in the Graph Editor (shown) to wire into a setting.
+        if (!document_) return;
+        setGraphShown(true);
+        const qreal nan = std::numeric_limits<qreal>::quiet_NaN();
+        if (!graph_->addNodeOfType("Map", QPointF(nan, nan), false, -1, nlohmann::json{{"name", map}}, map).empty()) graphEdited();
+    });
     connect(maps_, &MapsPanel::paintParamRequested, this, [this](const std::string& node, const std::string& param, const std::string& kind) {
         paintParam(QString::fromStdString(node), QString::fromStdString(param), QString::fromStdString(kind));
     });

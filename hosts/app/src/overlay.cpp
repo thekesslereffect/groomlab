@@ -534,11 +534,12 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     int k = 0;
     for (const char* name : kLightingChips) {
         auto* b = new RoundButton(chips);
-        b->setText(theme::brushTitle(name));
+        // The preset's label ("rim" reads Backlit: not to be confused with the Rim light below).
+        b->setText(std::string(name) == "rim" ? tr("Backlit") : theme::brushTitle(name));
         b->setDiameter(28);
         b->setPadding(9);
-        b->setFontSize(11);
-        b->setFontWeight(700);
+        b->setFontSize(12);
+        b->setFontWeight(500);
         b->setFill(theme::chip(), theme::checkedFill(theme::yellow()));
         b->setTextColor(theme::textSoft(), theme::checkedText(theme::ink()));
         b->setCheckable(true);
@@ -763,7 +764,7 @@ ColorEditor* LookCard::color(QBoxLayout* into, const QString& text, std::functio
 QLabel* LookCard::caption(QBoxLayout* into, const QString& text, int kinds, Target target) {
     auto* label = new QLabel(text.toUpper(), into->parentWidget());
     label->setFont(theme::uiFont(11, 600));
-    label->setStyleSheet(QStringLiteral("color: %1; margin-top: 8px; letter-spacing: 0.6px;").arg(theme::textMuted().name()));
+    label->setStyleSheet(QStringLiteral("color: %1; margin-top: 8px; letter-spacing: 0.6px; font-size: 11px; font-weight: 600;").arg(theme::textMuted().name()));
     into->addWidget(label);
     if (target == Target::Surface) surfaceRows_.push_back({label, kinds});
     return label;
@@ -1243,7 +1244,7 @@ void OverlayHost::setRefine(bool refining, int frames, int target, double msPerF
     std::vector<ShadowText::Run> runs;
     ShadowText::Run lead;
     lead.dot = refining && frames < target ? theme::yellow() : theme::emerald();
-    lead.text = refining ? tr("Refining") : tr("Interactive");
+    lead.text = refining ? tr("Refining") : QString();
     lead.font = theme::uiFont(12, 500);
     lead.color = theme::textSoft();
     runs.push_back(lead);
@@ -1252,7 +1253,7 @@ void OverlayHost::setRefine(bool refining, int frames, int target, double msPerF
                                                                                        : tr("Ready");
     numbers.font = theme::numberFont(12);
     numbers.color = theme::textSoft();
-    numbers.gapBefore = 6;
+    numbers.gapBefore = refining ? 6 : 0;
     runs.push_back(numbers);
     const QSize before = refine_->sizeHint();
     if (refine_->setRuns(runs) && refine_->sizeHint() != before) relayout();

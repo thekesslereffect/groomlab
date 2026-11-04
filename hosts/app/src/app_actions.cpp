@@ -45,6 +45,7 @@ QString str(const json& value) { return value.is_string() ? QString::fromStdStri
 // The Look card's lighting presets by name, as the Studio menu shows them.
 QString lightingLabel(const std::string& name) {
     if (name == "env") return QObject::tr("Environment");
+    if (name == "rim") return QObject::tr("Backlit");  // (the preset; Rim is one of its lights)
     QString label = QString::fromStdString(name);
     if (!label.isEmpty()) label[0] = label[0].toUpper();
     return label;

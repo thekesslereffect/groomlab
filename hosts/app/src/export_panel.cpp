@@ -35,7 +35,7 @@ public:
 protected:
     void paintEvent(QPaintEvent* event) override {
         const QString full = text();
-        if (hasFocus() || full.isEmpty() || fontMetrics().horizontalAdvance(full) <= textRect().width()) {
+        if (hasFocus() || full.isEmpty() || !full.contains(QLatin1Char('/'))) {
             QLineEdit::paintEvent(event);
             return;
         }
@@ -46,7 +46,7 @@ protected:
         painter.setFont(font());
         painter.setPen(palette().color(QPalette::Text));
         const QRect r = textRect();
-        painter.drawText(r, Qt::AlignVCenter | Qt::AlignLeft, fontMetrics().elidedText(full, Qt::ElideMiddle, r.width()));
+        painter.drawText(r, Qt::AlignVCenter | Qt::AlignLeft, fontMetrics().elidedText(QStringLiteral("…/") + QFileInfo(full).fileName(), Qt::ElideMiddle, r.width()));
     }
 
 private:

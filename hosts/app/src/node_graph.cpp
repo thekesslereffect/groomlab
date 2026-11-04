@@ -854,7 +854,9 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     painter.restore();
     // A thin border where the theme gives the nodes one (its color other than the body's).
     if (const QColor border = theme::nodeBorder(); border.isValid() && border != theme::nodeBody()) {
-        painter.setPen(QPen(border, 1.0));
+        QPen edge(border, 1.0);
+        edge.setCosmetic(true);  // one screen pixel at any zoom: the token's color, not smeared over two
+        painter.setPen(edge);
         painter.setBrush(Qt::NoBrush);
         painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius - 0.5, radius - 0.5);
     }

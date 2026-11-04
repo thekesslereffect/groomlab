@@ -345,6 +345,15 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     users_->setWordWrap(true);
     users_->setProperty("role", "hint");
     boxRows->addWidget(users_);
+    useMap_ = new QPushButton(tr("Add Map Node"), box_);
+    useMap_->setObjectName(QStringLiteral("mapAddNode"));
+    useMap_->setToolTip(tr("A Map node reading this map in the graph: wire it into the setting it should drive"));
+    useMap_->hide();
+    connect(useMap_, &QPushButton::clicked, this, [this] {
+        const std::string picked = selectedMap();
+        if (!picked.empty()) emit mapNodeRequested(picked);
+    });
+    boxRows->addWidget(useMap_, 0, Qt::AlignLeft);
     layout->addWidget(box_);
     fitRows(list_);
     setEnabled(false);
@@ -654,14 +663,16 @@ void MapsPanel::refreshRows() {
             for (const auto& [node, param] : document_->mapUsers(picked)) users << qs(node) + QLatin1Char('.') + qs(param);
         }
         users_->setText(!users.isEmpty() ? tr("Read by %1").arg(users.join(QStringLiteral(", ")))
-                        : !picked.empty() ? tr("Unused: add a Map node to use it")
+                        : !picked.empty() ? tr("Not used by the graph yet.")
                                           : QString());
         users_->setToolTip(users.isEmpty() && !picked.empty()
                                ? tr("+ New Map > For a setting makes a map a setting reads; or in the Graph Editor, right-click a param > "
                                     "Paint, or add a Map node.")
                                : QString());
+        useMap_->setVisible(users.isEmpty() && !picked.empty());
     } else {
         users_->clear();
+        useMap_->hide();
     }
     const bool has = !picked.empty();
     paint_->setEnabled(has);

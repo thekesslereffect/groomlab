@@ -71,7 +71,7 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     // ---- Properties (right): the mode's panel.
     propertiesStack_ = new QStackedWidget();
     propertiesStack_->setObjectName(QStringLiteral("propertiesStack"));
-    displayPage_ = section(propertiesStack_, 8);
+    displayPage_ = section(propertiesStack_, 0);  // (its content carries the docks' gutter, as the other pages)
     sections_[static_cast<std::size_t>(Panel::Display)] = displayPage_;
     lookCard_ = new LookCard(propertiesStack_);
     lookCard_->setDocked(true);

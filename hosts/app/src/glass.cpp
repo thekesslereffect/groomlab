@@ -420,7 +420,7 @@ void RoundButton::paintEvent(QPaintEvent* /*event*/) {
             QColor dimColor = textColor;
             const bool solid = !theme::glassy();
             if (!solid) dimColor.setAlpha(140);
-            else dimColor.setAlpha(215);
+            else dimColor.setAlpha(240);
             painter.setFont(theme::uiFont(fontSize_, solid ? 400 : 600));
             painter.setPen(dimColor);
             painter.drawText(QRectF(x + 6, 0, width + 100, height()), Qt::AlignVCenter | Qt::AlignLeft, dim_);

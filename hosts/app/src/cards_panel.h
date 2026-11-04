@@ -76,7 +76,8 @@ private:
     std::vector<Slider> sliders_;
     QComboBox* atlas_ = nullptr;
     QWidget* settings_ = nullptr;
-    QWidget* previewBox_ = nullptr;  // the Strands/Cards switch and Maps: with a Cards node only
+    QWidget* previewBox_ = nullptr;
+    QLabel* titleRowLabel_ = nullptr;  // the header: with a Cards node only (the empty state has its own title)  // the Strands/Cards switch and Maps: with a Cards node only
     QWidget* bakeBox_ = nullptr;     // Bake maps and its resolution: with a Cards node only
     QLabel* stats_ = nullptr;
     QComboBox* bakeResolution_ = nullptr;

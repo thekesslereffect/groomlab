@@ -14,6 +14,7 @@
 #include <QLayoutItem>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QRegularExpression>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPushButton>
@@ -547,7 +548,12 @@ void ParamPanel::build() {
     // The type by its label ("Linked Groom" for a Reference node), as every host shows it.
     // A node from the node library by its own label ("Soft Frizz").
     const std::string kind = spec->contains("library") ? spec->value("label", std::string()) : nodeLabel(spec->value("type", std::string()));
-    title_->setText(QString::fromStdString(node_ + "  (" + kind + ")"));
+    // A node named after its type ("collide", a Collide) by its type alone; a renamed one by its
+    // name, the type after it.
+    QString plainName = QString::fromStdString(node_), plainKind = QString::fromStdString(kind);
+    plainName.remove(QRegularExpression(QStringLiteral("[\\s_\\d]"))), plainKind.remove(QLatin1Char(' '));
+    title_->setText(plainName.compare(plainKind, Qt::CaseInsensitive) == 0 ? QString::fromStdString(kind)
+                                                                           : QString::fromStdString(node_ + "  (" + kind + ")"));
     const auto [saved, newest] = document_->nodeVersion(node_);
     if (saved < newest) {
         // Saved with an older behaviour of its operator: Upgrade gives it the newest.

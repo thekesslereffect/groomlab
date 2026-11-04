@@ -56,6 +56,7 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     // The mode switch names the mode: a section header, then the node it edits.
     auto* titleLabel = new QLabel(tr("GAME CARDS"), this);
     titleLabel->setProperty("role", "listTitle");
+    titleRowLabel_ = titleLabel;
     title->addWidget(titleLabel);
     title->addStretch(1);
     nodes_ = new QComboBox(this);
@@ -154,7 +155,7 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     add_->setTextColor(theme::actionText(Qt::white), theme::actionText(Qt::white));
     add_->setMinimumWidth(160);
     add_->setToolTip(tr("A Cards node between the groom and its output: the cards are made from every strand"));
-    layout->addWidget(add_, 0, Qt::AlignLeft);
+    layout->addWidget(add_, 0, Qt::AlignHCenter);
     bakeBox_ = new QWidget(this);
     auto* bakeRow = new QHBoxLayout(bakeBox_);
     bakeRow->setContentsMargins(0, 0, 0, 0);
@@ -310,6 +311,10 @@ void CardsPanel::refresh() {
     settings_->setVisible(!node_.empty());
     previewBox_->setVisible(!node_.empty());
     bakeBox_->setVisible(!node_.empty());
+    // The empty state centered (the header and the node picker go with the node).
+    stats_->setAlignment(node_.empty() ? Qt::AlignHCenter : Qt::AlignLeft);
+    stats_->setContentsMargins(0, node_.empty() ? 28 : 0, 0, node_.empty() ? 6 : 0);
+    titleRowLabel_->setVisible(!node_.empty());
     bake_->setEnabled(!node_.empty());
     if (!node_.empty()) {
         for (Slider& s : sliders_) {
@@ -342,7 +347,9 @@ void CardsPanel::refresh() {
     if (!document_) {
         stats_->setText(tr("No groom open"));
     } else if (node_.empty()) {
-        stats_->setText(tr("Turn this groom into hair cards for Unreal, Unity or glTF: textured strips, an atlas and levels of detail."));
+        stats_->setText(tr("<p style='margin:0 0 6px 0; font-weight:600; color:%1'>No cards yet</p>"
+                           "<p style='margin:0'>Turn this groom into hair cards for Unreal, Unity or glTF: textured strips, an atlas "
+                           "and levels of detail.</p>").arg(theme::text().name()));
     }
     refreshAtlas();
     updating_ = false;

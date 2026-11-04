@@ -167,7 +167,7 @@ TEST(AppProperties, TheDockFollowsTheDefinitionsInMayasOrder) {
     EXPECT_TRUE(scalp->text().contains(QStringLiteral("vertices"))) << scalp->text().toStdString();
     auto* guides = panel->findChild<QLabel*>(QStringLiteral("inputs_guides"));
     ASSERT_TRUE(guides);
-    EXPECT_TRUE(guides->text().contains(QStringLiteral("guides in"))) << guides->text().toStdString();
+    EXPECT_TRUE(guides->text().contains(QStringLiteral("guides · "))) << guides->text().toStdString();
     EXPECT_EQ(panel->findChild<QLabel*>(QStringLiteral("inputs_file"))->text(), QStringLiteral("sample.groom"));
 }
 

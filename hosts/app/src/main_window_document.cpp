@@ -893,7 +893,17 @@ void MainWindow::refreshStarter() {
         const ViewResult& view = document_->lastView();
         if (!guides && !document_->path().empty() && view.strands && view.strands->strandCount() > 0) guides = true;
         const ui::json& types = ui::Definitions::shipped().get("palette/starter/lookTypes");
+        // A new groom's own graph has look nodes already: only one added since counts (a groom
+        // from a file counts what it has).
+        if (starterDocument_ != document_.get()) {
+            starterDocument_ = document_.get();
+            starterBase_.clear();
+            if (document_->path().empty()) {
+                for (const GroomDocument::NodeInfo& n : document_->nodes()) starterBase_.insert(n.name);
+            }
+        }
         for (const GroomDocument::NodeInfo& n : document_->nodes()) {
+            if (starterBase_.count(n.name)) continue;
             if (std::find(types.begin(), types.end(), n.type) != types.end()) look = true;
         }
     }

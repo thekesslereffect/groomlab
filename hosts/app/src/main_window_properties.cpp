@@ -89,8 +89,27 @@ QPushButton* smallButton(const QString& text, const QString& tip) {
 }
 
 // A value as the rows show it, muted (an input's name, a count).
+// A one-line value that is cut with an ellipsis where its room ends (never mid-letter), the whole
+// text in its tooltip.
+class ElidedLabel : public QLabel {
+public:
+    using QLabel::QLabel;
+
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        if (wordWrap() || fontMetrics().horizontalAdvance(text()) <= contentsRect().width()) {
+            QLabel::paintEvent(event);
+            return;
+        }
+        QPainter painter(this);
+        painter.setFont(font());
+        painter.setPen(palette().color(foregroundRole()));
+        painter.drawText(contentsRect(), Qt::AlignVCenter | Qt::AlignLeft, fontMetrics().elidedText(text(), Qt::ElideRight, contentsRect().width()));
+    }
+};
+
 QLabel* valueLabel(const QString& text = {}) {
-    auto* l = new QLabel(text);
+    auto* l = new ElidedLabel(text);
     l->setWordWrap(true);
     l->setTextInteractionFlags(Qt::TextSelectableByMouse);
     l->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textSoft().name()));
@@ -579,6 +598,7 @@ void MainWindow::refreshProperties() {
         auto* l = inputsBlock_->findChild<QLabel*>(QStringLiteral("inputs_") + QLatin1String(part));
         if (!l) return;
         l->setText(text);
+        l->setToolTip(text);
         const bool none = text == tr("none") || text.startsWith(tr("none yet")) || text == QStringLiteral("—");
         const QString key = QLatin1String(part);
         if (key == QStringLiteral("rest") || key == QStringLiteral("scalps")) {
@@ -608,7 +628,7 @@ void MainWindow::refreshProperties() {
         // them), else none yet.
         const ViewResult& view = document_->lastView();
         const std::size_t made = view.hierarchy ? view.hierarchy->guides().size() : file.data.guides ? file.data.guides->guides().size() : 0;
-        set("guides", guides  ? tr("%1 guides in %2 group%3").arg(guides).arg(groups).arg(groups == 1 ? QString() : QStringLiteral("s"))
+        set("guides", guides  ? tr("%1 guides · %2 group%3").arg(guides).arg(groups).arg(groups == 1 ? QString() : QStringLiteral("s"))
                       : made  ? tr("%1 from %2").arg(made).arg(view.hierarchy ? tr("the graph") : tr("the file"))
                               : tr("none yet: place them"));
         QStringList colliders;

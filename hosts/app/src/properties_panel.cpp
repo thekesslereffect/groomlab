@@ -104,8 +104,12 @@ void PropertySection::setExpanded(bool expanded) {
         header_->setChecked(expanded);
     }
     if (property("nested").toBool()) {
-        // A section inside a section: its title as it is, a smaller fold.
-        header_->setText((expanded ? QStringLiteral("▾   ") : QStringLiteral("▸   ")) + QString(title_).replace(QLatin1Char('&'), QStringLiteral("&&")));
+        // A section inside a section: its title as it is (a level under the caps), the same
+        // chevron as the sections over it.
+        header_->setText(QString(title_).replace(QLatin1Char('&'), QStringLiteral("&&")));
+        const QString chevron = expanded ? QStringLiteral(":/groomlab/icons/ui_chevron_down.svg") : QStringLiteral(":/groomlab/icons/ui_chevron_right.svg");
+        header_->setIcon(QIcon(tintedIcon(chevron, theme::textMuted(), 10, header_->devicePixelRatioF())));
+        header_->setIconSize(QSize(10, 10));
     } else {
         setSectionHeader(header_, title_, expanded);
     }

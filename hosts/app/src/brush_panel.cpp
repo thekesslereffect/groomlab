@@ -629,7 +629,7 @@ QToolButton* BrushPanel::settingChip(FlowLayout* into, const char* id, const QSt
 void BrushPanel::curve(FlowLayout* chips, QVBoxLayout* editors, const std::string& setting, const QString& label, const std::string& start,
                        std::function<std::string()> get, std::function<void(const std::string&)> set) {
     const QString hint = settingHint(setting.c_str());
-    QToolButton* on = makeChip(label + QStringLiteral("  ▸"), hint, this);
+    QToolButton* on = makeChip(label + QStringLiteral("  ▾"), hint, this);
     on->setObjectName(qs(setting));
     chips->addWidget(on);
     auto* holder = new QWidget(this);
@@ -656,7 +656,7 @@ void BrushPanel::curve(FlowLayout* chips, QVBoxLayout* editors, const std::strin
         edited();
     };
     connect(on, &QToolButton::toggled, this, [on, label, holder, push](bool checked) {
-        on->setText(label + (checked ? QStringLiteral("  ▾") : QStringLiteral("  ▸")));  // the editor open below
+        on->setText(label + (checked ? QStringLiteral("  ▴") : QStringLiteral("  ▾")));  // the editor opens below
         holder->setVisible(checked);
         push();
     });
