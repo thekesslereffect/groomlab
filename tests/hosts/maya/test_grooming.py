@@ -4114,12 +4114,12 @@ class ControlsAndExamplesTest(unittest.TestCase):
             with open(os.path.join(folder, "dense.json"), "w") as f:
                 json.dump({"extends": "studio", "ui": {"textMuted": "#737373", "rowHeight": 26}}, f)
             sheet = theme.stylesheet(theme.Theme("dense", theme.load("dense")))
-            self.assertIn("border-radius: 0; color: #737373", sheet)  # the section headers
+            self.assertIn('QLabel[role="count"] { color: #737373', sheet)  # the lists' counts, the quietest text
             self.assertIn("min-height: %dpx; padding-top: 0" % (theme.px(26) - 2 * theme.px(1)), sheet)
             with open(os.path.join(folder, "loose.json"), "w") as f:
                 json.dump({"extends": "studio", "ui": {"textMuted": None, "rowHeight": None}}, f)
             sheet = theme.stylesheet(theme.Theme("loose", theme.load("loose")))
-            self.assertIn("border-radius: 0; color: %s" % dim, sheet)
+            self.assertIn('QLabel[role="count"] { color: %s' % dim, sheet)
             self.assertNotIn("padding-top: 0; padding-bottom: 0", sheet)
             # Who never picked a theme gets Charcoal; every theme still extends Playful.
             cmds.optionVar(remove=theme.THEME_VAR)

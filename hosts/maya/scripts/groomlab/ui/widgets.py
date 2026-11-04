@@ -506,7 +506,85 @@ GLYPHS = {
     "curves": '<path d="M4 19 C8 19 7 5 12 5 C17 5 16 19 20 19" fill="none" stroke="{c}" stroke-width="1.8" '
               'stroke-linecap="round"/><circle cx="4" cy="19" r="1.8" fill="{c}"/><circle cx="20" cy="19" r="1.8" '
               'fill="{c}"/>',
+    # The app's line icons (hosts/app/icons/ui_*.svg): the Groom Tools' page rail and empty states.
+    "tools": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+             '<rect x="4" y="4" width="6.5" height="6.5" rx="1.6" fill="{c}"/><rect x="13.5" y="4" width="6.5" height="6.5" '
+             'rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="13.5" width="6.5" '
+             'height="6.5" rx="1.6"/></g>',
+    "layers": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+              '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></g>',
+    "imagePlus": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+                 '<path d="M20 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h7"/><path d="M4 16l4.5-4.5 5 5"/>'
+                 '<path d="M13.5 14.5l2-2 4.5 4.5"/><path d="M18 3v6M15 6h6"/></g>',
+    "spline": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+              '<path d="M5 19c2-9 12-5 14-14"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="5" r="1.6"/></g>',
+    "graphLine": '<g fill="none" stroke="{c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'
+                 '<circle cx="5" cy="6" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/>'
+                 '<path d="M7.5 6h9"/><path d="M6 8.3l4.7 7.5"/><path d="m18 8.3-4.7 7.5"/></g>',
+    "chevronDown": '<path d="M6 9 12 15 18 9" fill="none" stroke="{c}" stroke-width="2.4" stroke-linecap="round" '
+                   'stroke-linejoin="round"/>',
+    "chevronRight": '<path d="M9 6 15 12 9 18" fill="none" stroke="{c}" stroke-width="2.4" stroke-linecap="round" '
+                    'stroke-linejoin="round"/>',
 }
+
+
+def _svg_pixmap(name, color, size):
+    """A glyph (GLYPHS) or a GroomLab icon as a size x size pixmap, its shapes in `color`."""
+    if name in GLYPHS:
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">%s</svg>' % GLYPHS[name].replace("{c}", color))
+        return _pixmap(svg, size)
+    svg = icon_svg(name)
+    if svg is None:
+        pixmap = QtGui.QPixmap(size, size)
+        pixmap.fill(QtCore.Qt.transparent)
+        return pixmap
+    # The icon's shapes as a mask: the color fills them where the icon is opaque (the app's tintedIcon).
+    image = _pixmap(svg, size).toImage()
+    painter = QtGui.QPainter(image)
+    painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceIn)
+    painter.fillRect(image.rect(), QtGui.QColor(color))
+    painter.end()
+    return QtGui.QPixmap.fromImage(image)
+
+
+_tint_cache = {}
+
+
+def tinted_pixmap(name, color, size):
+    """A glyph (GLYPHS) or a GroomLab icon in one color (the app's tintedIcon), cached."""
+    key = (name, color, size)
+    pixmap = _tint_cache.get(key)
+    if pixmap is None:
+        pixmap = _tint_cache[key] = _svg_pixmap(name, color, size)
+    return pixmap
+
+
+def tinted_icon(name, rest, on=None, hover=None, disabled=None, size=48):
+    """A QIcon of one glyph or icon in one tone per state: `rest` (Normal Off), `on` (checked),
+    `hover` (Active Off), `disabled` (the app's tool tiles and rail buttons)."""
+    icon = QtGui.QIcon()
+    icon.addPixmap(tinted_pixmap(name, rest, size), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+    if hover:
+        icon.addPixmap(tinted_pixmap(name, hover, size), QtGui.QIcon.Active, QtGui.QIcon.Off)
+    if on:
+        icon.addPixmap(tinted_pixmap(name, on, size), QtGui.QIcon.Normal, QtGui.QIcon.On)
+        icon.addPixmap(tinted_pixmap(name, on, size), QtGui.QIcon.Active, QtGui.QIcon.On)
+    if disabled:
+        icon.addPixmap(tinted_pixmap(name, disabled, size), QtGui.QIcon.Disabled, QtGui.QIcon.Off)
+        icon.addPixmap(tinted_pixmap(name, disabled, size), QtGui.QIcon.Disabled, QtGui.QIcon.On)
+    return icon
+
+
+def tool_icon(name, t=None, size=48):
+    """A tool tile's icon as the app draws it on a solid theme: one quiet tone (its group's icon
+    color) at rest, the accent's ink when chosen (a theme with ui.toolOn "category": its group's
+    color toward the text), the muted text disabled."""
+    from groomlab.ui import theme
+    t = t or theme.current()
+    group = next((g for g, names in ICON_GROUPS.items() if name in names), "app")
+    rest = t.hex(t.get("icons." + group, "accent"))
+    on = _mix(rest, t.color("ui.text"), 0.25) if t.get("ui.toolOn") == "category" else t.token("accentInk")
+    return tinted_icon(name, rest, on=on, disabled=t.token("textMuted"), size=size)
 
 
 def glyph_button(name, tip="", slot=None, checkable=False, menu=None):
@@ -546,13 +624,18 @@ def chip(text, tip="", checked=None, name=None):
 
 
 class FlowLayout(QtWidgets.QLayout):
-    """Items left to right, wrapping onto a new line when the width runs out (the chips' rows)."""
+    """The chips' rows (the app's FlowLayout): an even grid, as many equal columns (at most
+    `max_columns`, 3 unless said) as the widest item allows, each item a column wide, so rows line
+    up; the last row's items share its whole width (no hole at its end) unless `last_row_stretch`
+    is off (a segmented track keeps its column grid, its few segments on one row)."""
 
-    def __init__(self, parent=None, spacing=None):
+    def __init__(self, parent=None, spacing=None, max_columns=3, last_row_stretch=True):
         super(FlowLayout, self).__init__(parent)
         from groomlab.ui import theme
         self._items = []
         self._gap = theme.px(4) if spacing is None else spacing
+        self.max_columns = max(1, max_columns)
+        self.last_row_stretch = last_row_stretch
         self.setContentsMargins(0, 0, 0, 0)
 
     def addItem(self, item):
@@ -590,28 +673,60 @@ class FlowLayout(QtWidgets.QLayout):
 
     def _arrange(self, rect, move):
         m = self.contentsMargins()
-        x, y = rect.x() + m.left(), rect.y() + m.top()
-        right = rect.right() - m.right()
-        line = 0
-        for item in self._items:
-            if item.isEmpty():
-                continue
-            hint = item.sizeHint()
-            if x > rect.x() + m.left() and x + hint.width() - 1 > right:
-                x = rect.x() + m.left()
-                y += line + self._gap
+        area = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        shown = [item for item in self._items if not item.isEmpty()]
+        if not shown:
+            return 0
+        gap = self._gap
+        widest = max(item.sizeHint().width() for item in shown)
+        n = len(shown)
+        columns = max(1, min((area.width() + gap) // max(1, widest + gap), min(self.max_columns, n)))
+        # A track's few segments on one row when each still gets most of its width (their padding gives).
+        if not self.last_row_stretch and n <= self.max_columns and (area.width() - (n - 1) * gap) // n >= widest * 85 // 100:
+            columns = n
+        span = (area.width() - (columns - 1) * gap) // columns
+        column = max(widest, span) if self.last_row_stretch else span
+        last_row = (n - 1) // columns
+        last_count = n - last_row * columns
+        last_column = max(widest, (area.width() - (last_count - 1) * gap) // max(1, last_count))
+        y, line = area.y(), 0
+        for i, item in enumerate(shown):
+            c = i % columns
+            if c == 0 and i > 0:
+                y += line + gap
                 line = 0
+            hint = item.sizeHint()
             if move:
-                item.setGeometry(QtCore.QRect(QtCore.QPoint(x, y), hint))
-            x += hint.width() + self._gap
+                w = item.widget()
+                if w is not None and w.sizePolicy().horizontalPolicy() != QtWidgets.QSizePolicy.Expanding:
+                    w.setSizePolicy(QtWidgets.QSizePolicy.Expanding, w.sizePolicy().verticalPolicy())
+                width = last_column if self.last_row_stretch and i // columns == last_row else column
+                item.setGeometry(QtCore.QRect(QtCore.QPoint(area.x() + c * (width + gap), y),
+                                              QtCore.QSize(width, hint.height())))
             line = max(line, hint.height())
         return y + line - rect.y() + m.bottom()
 
 
 def chip_row(buttons, parent=None):
-    """A wrapping row of chips (FlowLayout)."""
+    """The chips of a block in an even grid (FlowLayout: up to three equal columns, wrapping)."""
     row = QtWidgets.QWidget(parent)
     flow = FlowLayout(row)
+    for b in buttons:
+        flow.addWidget(b)
+    row.flow = flow
+    return row
+
+
+def seg_row(buttons, parent=None):
+    """A one-of choice (or a few toggles read as one choice): its chips as segments on a sunken
+    track (QWidget[role="segTrack"], components.segTrack), the chosen ones raised in a neutral tone."""
+    from groomlab.ui import theme
+    row = QtWidgets.QWidget(parent)
+    row.setProperty("role", "segTrack")
+    row.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+    pad = theme.component_px("segTrack", "padding", 2)
+    flow = FlowLayout(row, spacing=pad, max_columns=4, last_row_stretch=False)
+    flow.setContentsMargins(pad, pad, pad, pad)
     for b in buttons:
         flow.addWidget(b)
     row.flow = flow
@@ -634,6 +749,100 @@ def small_label(text, role="muted", wrap=False):
     return label
 
 
+def field_row(text, *controls, **kwargs):
+    """A control's row as one field (the app's fieldRow, QFrame[role="propField"]): the name inside
+    at its left, the controls after it, flat in the field (a checkbox: a switch at the row's end).
+    Returns (the row, its label)."""
+    from groomlab.ui import theme
+    box = QtWidgets.QFrame()
+    box.setProperty("role", "propField")
+    box.setMinimumHeight(SoftSlider.row_height())
+    line = QtWidgets.QHBoxLayout(box)
+    line.setContentsMargins(theme.px(8), 0, theme.px(2), 0)
+    line.setSpacing(theme.px(6))
+    label = QtWidgets.QLabel(text)
+    label.setProperty("role", "propLabel")
+    width = kwargs.get("label_width")
+    label.setMinimumWidth(theme.px(width if width is not None else 72))
+    line.addWidget(label, 0, QtCore.Qt.AlignVCenter)
+    switches = []
+    for c in controls:
+        if isinstance(c, QtWidgets.QLayout):
+            line.addLayout(c, 1)
+        elif isinstance(c, QtWidgets.QCheckBox) and not c.text():
+            switches.append(c)
+        else:
+            line.addWidget(c, 1 if isinstance(c, (QtWidgets.QComboBox, QtWidgets.QLineEdit, SoftSlider)) else 0,
+                           QtCore.Qt.AlignVCenter)
+    if switches:
+        if not any(isinstance(c, (QtWidgets.QComboBox, QtWidgets.QLineEdit, QtWidgets.QLayout)) for c in controls):
+            line.addStretch(1)
+        for s in switches:
+            line.addWidget(s, 0, QtCore.Qt.AlignVCenter)
+        line.addSpacing(theme.px(6))
+    return box, label
+
+
+def disc_icon(name, size=40, glyph_size=20, t=None):
+    """An empty state's icon (components.emptyState): a soft-accent disc with the glyph (GLYPHS, or
+    a GroomLab icon) in the accent's ink. A QPixmap at Maya's interface scale."""
+    from groomlab.ui import theme
+    t = t or theme.current()
+    side = theme.px(theme.component("emptyState", "disc", size))
+    inner = theme.px(glyph_size)
+    pixmap = QtGui.QPixmap(side, side)
+    pixmap.fill(QtCore.Qt.transparent)
+    p = QtGui.QPainter(pixmap)
+    p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+    p.setPen(QtCore.Qt.NoPen)
+    p.setBrush(QtGui.QColor(theme.component_color("emptyState", "fill", "accentSoft", t)))
+    p.drawEllipse(QtCore.QRectF(0, 0, side, side))
+    ink = theme.component_color("emptyState", "icon", "accentInk", t)
+    p.drawPixmap((side - inner) // 2, (side - inner) // 2, tinted_pixmap(name, ink, inner))
+    p.end()
+    return pixmap
+
+
+class EmptyState(QtWidgets.QFrame):
+    """A list with nothing in it yet (the app's empty states): the soft-accent disc and its glyph, a
+    bold title, a dim sentence, and any buttons, centered (no card of its own: it sits in a tray)."""
+
+    def __init__(self, icon, title, text="", buttons=(), parent=None):
+        super(EmptyState, self).__init__(parent)
+        from groomlab.ui import theme
+        self.setProperty("role", "emptyQuiet")
+        self.icon_name = icon
+        column = QtWidgets.QVBoxLayout(self)
+        column.setContentsMargins(theme.px(4), theme.px(6), theme.px(4), theme.px(4))
+        column.setSpacing(theme.px(4))
+        self.icon = QtWidgets.QLabel()
+        self.icon.setObjectName("emptyIcon")
+        self.icon.setAlignment(QtCore.Qt.AlignCenter)
+        column.addWidget(self.icon, 0, QtCore.Qt.AlignHCenter)
+        self.title = QtWidgets.QLabel(title)
+        self.title.setProperty("role", "emptyTitle")
+        self.title.setAlignment(QtCore.Qt.AlignCenter)
+        column.addWidget(self.title)
+        self.text = QtWidgets.QLabel(text)
+        self.text.setProperty("role", "emptyText")
+        self.text.setAlignment(QtCore.Qt.AlignCenter)
+        self.text.setWordWrap(True)
+        self.text.setVisible(bool(text))
+        column.addWidget(self.text)
+        for b in buttons:
+            column.addWidget(b, 0, QtCore.Qt.AlignHCenter)
+        self.apply_theme()
+        theme.listen(self, "apply_theme")
+
+    def set_text(self, text):
+        self.text.setText(text)
+        self.text.setVisible(bool(text))
+
+    def apply_theme(self, _t=None):
+        self.icon.setPixmap(disc_icon(self.icon_name))
+        self.icon.setFixedSize(self.icon.pixmap().size())
+
+
 class Block(QtWidgets.QWidget):
     """One of a tool card's labeled blocks: a small semibold dim title over a faint hairline, any
     action glyphs on the title's right, then its rows (add())."""
@@ -645,14 +854,16 @@ class Block(QtWidgets.QWidget):
         if name:
             self.setObjectName(name)
         column = QtWidgets.QVBoxLayout(self)
-        column.setContentsMargins(0, theme.px(4), 0, 0)
+        column.setContentsMargins(0, theme.px(2), 0, 0)
         column.setSpacing(theme.px(4))
-        column.addWidget(hairline(faint=True))
+        self.rule = hairline(faint=True)  # (the card's rule: components.card, cardRule)
+        column.addWidget(self.rule)
         head = QtWidgets.QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(theme.px(2))
         self.title = QtWidgets.QLabel(title)
         self.title.setProperty("role", "block")
+        self.title.setMinimumHeight(theme.px(20))
         head.addWidget(self.title, 1)
         self.head = head
         for a in actions:
@@ -676,22 +887,11 @@ class Block(QtWidgets.QWidget):
         return button
 
     def labeled(self, text, *controls, **kwargs):
-        """A "name | control" row (combos and toggles): the name in the dim text, ~38% wide."""
-        from groomlab.ui import theme
-        row = QtWidgets.QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(theme.px(6))
-        label = QtWidgets.QLabel(text)
-        label.setProperty("role", "rowLabel")
-        label.setMinimumWidth(theme.px(kwargs.get("label_width", 84)))
-        row.addWidget(label)
-        for c in controls:
-            if isinstance(c, QtWidgets.QLayout):
-                row.addLayout(c, 1)
-            else:
-                row.addWidget(c, 1 if isinstance(c, (QtWidgets.QComboBox, QtWidgets.QLineEdit)) else 0)
-        self.body.addLayout(row)
-        row.label = label
+        """A "name | control" row (combos and toggles) as one field (field_row): the name inside
+        at its left in the dim text, the controls flat in it after the name."""
+        box, label = field_row(text, *controls, label_width=kwargs.get("label_width"))
+        self.body.addWidget(box)
+        box.layout().label = label
         return label
 
     def named(self, text, widget):
@@ -781,9 +981,13 @@ class Tile(QtWidgets.QToolButton):
     """A tool tile: its icon over its name, the name elided to the tile's width (text() keeps the
     whole name, for scripts and accessibility)."""
 
+    short = None  # the word the tile shows when its name doesn't fit a tile ("Keys" for Length Keys)
+
     def paintEvent(self, event):
         option = QtWidgets.QStyleOptionToolButton()
         self.initStyleOption(option)
+        if option.text and self.short and self.toolButtonStyle() == QtCore.Qt.ToolButtonTextUnderIcon:
+            option.text = self.short
         if option.text:
             room = option.rect.width() - 2 * max(2, self.width() // 14)
             option.text = self.fontMetrics().elidedText(option.text, QtCore.Qt.ElideRight, max(0, room))
@@ -881,61 +1085,133 @@ class ToolGrid(QtWidgets.QWidget):
         return QtCore.QSize(width, self.heightForWidth(max(width, self.width())))
 
 
+class IconRail(QtWidgets.QWidget):
+    """A side panel's page icons on its outer edge (the app's icon rail, components.iconRail): a
+    slim column, one checkable icon button per page, the open page's lit (the soft accent, its
+    icon in the accent's ink); the tooltips name the pages. Page switching only (folding the
+    panel is the standalone app's chrome). Signal: picked(index)."""
+
+    picked = QtCore.Signal(int)
+
+    def __init__(self, parent=None):
+        super(IconRail, self).__init__(parent)
+        from groomlab.ui import theme
+        self.setObjectName("pageRail")
+        self.setProperty("role", "iconRail")
+        self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        width = theme.component_px("iconRail", "width", 44)
+        self.setFixedWidth(width)
+        pad_x = max(0, (width - theme.component_px("iconRail", "button", 36)) // 2)
+        pad_y = theme.component_px("iconRail", "padding", 10, index=1)
+        self.column = QtWidgets.QVBoxLayout(self)
+        self.column.setContentsMargins(pad_x, pad_y, pad_x, pad_y)
+        self.column.setSpacing(theme.component_px("iconRail", "gap", 4))
+        self.column.addStretch(1)
+        self.buttons = []
+        self.icons = []
+        self.current = -1
+        theme.listen(self, "apply_theme")
+
+    def add_page(self, icon, name, tip=""):
+        from groomlab.ui import theme
+        b = QtWidgets.QToolButton(self)
+        index = len(self.buttons)
+        b.setObjectName("page_%d" % index)
+        b.setProperty("role", "railButton")
+        b.setCheckable(True)
+        b.setAutoRaise(True)
+        b.setAccessibleName(name)
+        b.setToolTip(name + (": " + tip if tip else ""))
+        size = theme.component_px("iconRail", "button", 36)
+        b.setFixedSize(size, size)
+        glyph_size = theme.component_px("iconRail", "icon", 20)
+        b.setIconSize(QtCore.QSize(glyph_size, glyph_size))
+        b.setCursor(QtCore.Qt.PointingHandCursor)
+        b.clicked.connect(lambda _=False, i=index: self._clicked(i))
+        self.column.insertWidget(self.column.count() - 1, b)  # (before the stretch)
+        self.buttons.append(b)
+        self.icons.append(icon)
+        self._paint_icon(index)
+        self.set_current(self.current)
+        return b
+
+    def _clicked(self, index):
+        self.set_current(index)
+        self.picked.emit(index)
+
+    def set_current(self, index):
+        self.current = index
+        for i, b in enumerate(self.buttons):
+            b.setChecked(i == index)
+
+    def _paint_icon(self, index, t=None):
+        from groomlab.ui import theme
+        t = t or theme.current()
+        size = max(16, theme.component_px("iconRail", "icon", 20) * 2)  # (drawn at twice the size: sharp when scaled)
+        color = lambda key, fallback: theme.component_color("iconRail", key, fallback, t)  # noqa: E731
+        self.buttons[index].setIcon(tinted_icon(self.icons[index], color("ink", "textMuted"), on=color("inkOn", "accentInk"),
+                                                hover=color("inkHover", "text"), disabled=color("inkOff", "textDisabled"),
+                                                size=size))
+
+    def apply_theme(self, t):
+        for i in range(len(self.buttons)):
+            self._paint_icon(i, t)
+
+
 class Pages(QtWidgets.QWidget):
-    """Underlined tabs over pages (a hairline under the bar, the current tab's name underlined in
-    the accent): only the page showing takes room, so what sits under it follows right below
-    (the QTabWidget API: addTab, currentIndex, setCurrentIndex, currentChanged, count, widget)."""
+    """Pages switched by an icon rail (IconRail, `rail`: the window puts it on its left edge): only
+    the page showing takes room, so what sits under it follows right below (the QTabWidget API:
+    addTab, currentIndex, setCurrentIndex, currentChanged, count, widget, tabText)."""
 
     currentChanged = QtCore.Signal(int)
 
     def __init__(self, parent=None):
         super(Pages, self).__init__(parent)
-        from groomlab.ui import theme
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(theme.px(8))
-        track = QtWidgets.QFrame()
-        track.setProperty("role", "segments")  # the hairline under the tabs
-        self.track = track  # the bar's row: a window may put it elsewhere (the Groom Tools pin it)
-        row = QtWidgets.QHBoxLayout(track)
-        row.setContentsMargins(0, 0, 0, 0)
-        self.bar = QtWidgets.QTabBar()
-        self.bar.setExpanding(False)  # each tab as wide as its name, left aligned
-        self.bar.setUsesScrollButtons(False)  # a narrow panel shortens the names rather than scroll them
-        self.bar.setElideMode(QtCore.Qt.ElideRight)
-        self.bar.setDrawBase(False)
-        self.bar.setDocumentMode(True)
-        row.addWidget(self.bar)
-        row.addStretch(1)
-        layout.addWidget(track)
+        layout.setSpacing(0)
+        self.rail = IconRail()
         self._pages = []
-        self.bar.currentChanged.connect(self._show)
+        self._titles = []
+        self._current = -1
+        self.rail.picked.connect(self.setCurrentIndex)
 
-    def addTab(self, widget, title):
+    def addTab(self, widget, title, icon="tools", tip=""):
         self._pages.append(widget)
+        self._titles.append(title)
         self.layout().addWidget(widget)
         widget.setVisible(False)
-        self.bar.addTab(title)
-        self._show(self.bar.currentIndex(), emit=False)
+        self.rail.add_page(icon, title, tip)
+        if self._current < 0:
+            self._current = 0
+        self._show(self._current, emit=False)
         return len(self._pages) - 1
 
     def _show(self, index, emit=True):
         for i, page in enumerate(self._pages):
             page.setVisible(i == index)
+        self.rail.set_current(index)
         if emit:
             self.currentChanged.emit(index)
 
     def currentIndex(self):
-        return self.bar.currentIndex()
+        return self._current
 
     def setCurrentIndex(self, index):
-        self.bar.setCurrentIndex(index)
+        if not 0 <= index < len(self._pages) or index == self._current:
+            self.rail.set_current(self._current)
+            return
+        self._current = index
+        self._show(index)
 
     def count(self):
         return len(self._pages)
 
     def widget(self, index):
         return self._pages[index]
+
+    def tabText(self, index):
+        return self._titles[index]
 
 
 class StatusLabel(QtWidgets.QLabel):
@@ -954,7 +1230,8 @@ class StatusLabel(QtWidgets.QLabel):
 
 class Section(QtWidgets.QWidget):
     """A titled section that folds away: click its header to show or hide `content`. The header:
-    a chevron and the title in small spaced capitals, muted, under a hairline (no card)."""
+    a small chevron and the title as written, semibold in the text color (the app's list titles;
+    the window puts a section on a card, its title inside)."""
 
     def __init__(self, title, content, expanded=False, parent=None, count=False, actions=()):
         super(Section, self).__init__(parent)
@@ -967,10 +1244,10 @@ class Section(QtWidgets.QWidget):
         self.header.setCheckable(True)
         self.header.setFlat(True)
         self.header.setProperty("role", "section")
-        font = QtGui.QFont(self.header.font())
-        font.setLetterSpacing(QtGui.QFont.PercentageSpacing, 108)  # the style sheet sets its size and weight
-        self.header.setFont(font)
+        self.header.setCursor(QtCore.Qt.PointingHandCursor)
+        self.header.setIconSize(QtCore.QSize(theme.px(12), theme.px(12)))
         self.header.toggled.connect(self.set_expanded)
+        theme.listen(self, "apply_theme")
         self.content = content
         self.count = None
         if count or actions:
@@ -982,7 +1259,7 @@ class Section(QtWidgets.QWidget):
             self.row.setProperty("role", "sectionRow")
             line = QtWidgets.QHBoxLayout(self.row)
             line.setContentsMargins(0, 0, 0, 0)
-            line.setSpacing(theme.px(2))
+            line.setSpacing(theme.px(6))
             line.addWidget(self.header)
             if count:
                 self.count = QtWidgets.QLabel()
@@ -1010,8 +1287,18 @@ class Section(QtWidgets.QWidget):
         self.header.blockSignals(True)
         self.header.setChecked(on)
         self.header.blockSignals(False)
-        self.header.setText(("\u25be  " if on else "\u25b8  ") + self.title.upper().replace("&", "&&"))
+        self.header.setText(" " + self.title.replace("&", "&&"))
+        self._chevron()
         self.content.setVisible(on)
+
+    def _chevron(self, t=None):
+        from groomlab.ui import theme
+        t = t or theme.current()
+        self.header.setIcon(QtGui.QIcon(tinted_pixmap("chevronDown" if self.header.isChecked() else "chevronRight",
+                                                      t.token("textMuted"), theme.px(24))))
+
+    def apply_theme(self, t):
+        self._chevron(t)
 
     def expanded(self):
         return self.header.isChecked()
@@ -1753,20 +2040,19 @@ class SoftSlider(QtWidgets.QWidget):
         return QtCore.QSize(theme.px(48), self.row_height())
 
     def colors(self):
-        """(background, fill, border, text, label) as the field paints them now."""
+        """(background, fill, border, text, label) as the field paints them now (the app's
+        ValueSlider: components.field and components.slider; the border transparent at rest
+        unless the theme gives its fields an edge, ui.fieldEdge)."""
         from groomlab.ui import theme
         t = theme.current()
         raised = QtGui.QColor(t.color("ui.raised"))
         hovered = self._hover and self.isEnabled() and not self._editing
         background = QtGui.QColor(t.color("ui.hover")) if hovered else raised
-        if self.accent:
-            fill = _mix_color(raised, QtGui.QColor(t.hex(self.accent)), 0.5)
-        elif t.get("ui.selection"):
-            fill = QtGui.QColor(t.color("ui.selection"))
-        else:  # a theme without a selection color: the accent, quietened under the text
-            fill = _mix_color(raised, QtGui.QColor(t.hex("accent")), 0.35)
-        border = QtGui.QColor(t.color("ui.border"))
-        text, label = QtGui.QColor(t.color("ui.text")), QtGui.QColor(t.color("ui.textDim"))
+        # (one fill for every field, as the app's solid themes: `accent` no longer tints it)
+        fill = QtGui.QColor(theme.component_color("slider", "fill", "sliderFill", t))
+        edge = t.get("ui.fieldEdge")
+        border = QtGui.QColor(t.hex(edge)) if edge else QtGui.QColor(0, 0, 0, 0)
+        text, label = QtGui.QColor(t.color("ui.text")), QtGui.QColor(t.token("textDim"))
         if self._key_color is not None:  # keyed, animated, driven: the Channel Box's colors
             key = self._key_color
             background = _mix_color(raised, key, 0.6 if hovered else 0.45)
@@ -1775,8 +2061,16 @@ class SoftSlider(QtWidgets.QWidget):
             label = QtGui.QColor(text)
             label.setAlpha(200)
         if self.hasFocus() and not self._editing:
-            border = QtGui.QColor(t.hex("accent"))
+            border = QtGui.QColor(theme.component_color("field", "focus", "accent", t))
         return background, fill, border, text, label
+
+    def bar_color(self):
+        """The value's bar along the fill's bottom edge (components.slider.bar): the accent, a key
+        state's color when keyed, brighter under the mouse."""
+        from groomlab.ui import theme
+        bar = QtGui.QColor(self._key_color) if self._key_color is not None else QtGui.QColor(
+            theme.component_color("slider", "bar", "accent"))
+        return bar.lighter(115) if self._hover and self.isEnabled() else bar
 
     def paintEvent(self, _event):
         from groomlab.ui import theme
@@ -1792,11 +2086,24 @@ class SoftSlider(QtWidgets.QWidget):
         path.addRoundedRect(box, radius, radius)
         p.fillPath(path, background)
         share = self.fraction()
-        if share > 0.0:
+        filled = round(self.width() * share)
+        if filled > 0 and not self._editing:
             p.save()
             p.setClipPath(path)
-            p.fillRect(QtCore.QRectF(box.left(), box.top(), box.width() * share, box.height()), fill)
+            p.fillRect(QtCore.QRectF(0.0, 0.0, filled, self.height()), fill)
+            # The value as a thin bar along the fill's bottom edge, in the accent: it never crosses
+            # the words (inset from the rounded ends: a full field shows no stroke up its side).
+            bar = max(1, theme.px(float(theme.component("slider", "barHeight", 2))))
+            inset = min(radius, float(theme.px(4)))
+            if filled > inset:
+                p.fillRect(QtCore.QRectF(inset, self.height() - bar, min(filled, self.width() - inset) - inset, bar),
+                           self.bar_color())
             p.restore()
+        if self.hasFocus() and not self._editing and self._key_color is None:
+            line = max(line, theme.px(2))  # (the focus ring: 2 px, as the app's fields)
+            box = QtCore.QRectF(self.rect()).adjusted(line / 2.0, line / 2.0, -line / 2.0, -line / 2.0)
+            path = QtGui.QPainterPath()
+            path.addRoundedRect(box, radius, radius)
         p.setPen(QtGui.QPen(border, line))
         p.setBrush(QtCore.Qt.NoBrush)
         p.drawPath(path)

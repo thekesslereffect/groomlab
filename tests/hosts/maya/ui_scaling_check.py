@@ -304,6 +304,7 @@ def main():
     # sections under a hairline without a card, and the Graph Editor's node headers (Charcoal's
     # filled) and canvas styles painted.
     def redesign_look():
+        from groomlab.ui import definitions
         from groomlab.ui.qt import QtCore, QtGui
         t = theme.set_theme("charcoal")
         tools = palette.ToolPalette()
@@ -356,18 +357,33 @@ def main():
                     "Unfreeze All: a labeled tile, a button")
             _expect(unfreeze.text() == "Unfreeze All" and unfreeze.toolButtonStyle() == QtCore.Qt.ToolButtonTextUnderIcon,
                     "Unfreeze All's name under its icon")
+            # The app's tiles: one quiet tone at rest, the accent's ink when chosen.
             comb = tools.buttons["comb"].icon()
-            _expect(comb.pixmap(32, 32, QtGui.QIcon.Normal, QtGui.QIcon.On).toImage()
-                    == comb.pixmap(32, 32, QtGui.QIcon.Normal, QtGui.QIcon.Off).toImage(), "a checked tile's icon: the same")
-            _expect(not tools.tabs.bar.expanding(), "tabs as wide as their names")
+
+            def ink(icon, state):
+                image = icon.pixmap(32, 32, QtGui.QIcon.Normal, state).toImage()
+                return next(QtGui.QColor(image.pixel(x, y)).name().upper() for y in range(32) for x in range(32)
+                            if QtGui.QColor.fromRgba(image.pixel(x, y)).alpha() == 255)
+            _expect(ink(comb, QtGui.QIcon.On) == t.token("accentInk").upper()
+                    and ink(comb, QtGui.QIcon.Off) == t.hex(t.get("icons.shape")).upper(),
+                    "a tile's icon: the group's tone, chosen the accent's ink (%s, %s)"
+                    % (ink(comb, QtGui.QIcon.Off), ink(comb, QtGui.QIcon.On)))
+            # The pages: an icon rail on the window's left edge (components.iconRail), no tab row.
+            rail = tools.tabs.rail
+            _expect(rail.width() == theme.component_px("iconRail", "width", 44) and rail.x() == 0
+                    and not tools.scroll.isAncestorOf(rail), "the page rail on the left edge, %d px" % rail.width())
+            _expect([b.accessibleName() for b in rail.buttons] == [t_["label"] for t_ in definitions.get("palette/tabs")]
+                    and all(b.toolTip().startswith(b.accessibleName()) for b in rail.buttons), "one icon per page, named")
+            _expect(not tools.findChildren(QtWidgets.QTabBar), "no tab row")
             sheet = tools.styleSheet()
             _expect("QToolButton[role=\"tool\"]:checked { background: %s; border-color: %s;"
-                    % (t.hex(t.get("ui.selection") or "accent"), t.hex("accent")) in sheet, "checked tile: selection + accent")
-            _expect("border-bottom-color: %s" % t.hex("accent") in sheet, "the current tab underlined in the accent")
-            _expect("QFrame[role=\"card\"] { background: transparent; border: none; }" in sheet, "no card box")
-            _expect(tools.settings.layout().contentsMargins().left() == 0, "the brush settings unpadded")
-            rule = tools.settings.layout().itemAt(0).widget()
-            _expect(rule is not None and rule.property("role") == "rule", "the tool's card under a hairline")
+                    % (t.token("accentSoft"), t.token("accentEdge")) in sheet, "checked tile: the soft accent")
+            _expect("QToolButton[role=\"railButton\"]:checked { background: %s; }" % t.token("accentSoft") in sheet,
+                    "the open page's icon on the soft accent")
+            _expect("QWidget[role=\"tray\"] { background: %s;" % t.token("card") in sheet, "sections on cards")
+            _expect(tools.settings.property("role") == "toolCard" and tools.settings.layout().contentsMargins().left() > 0,
+                    "the tool's settings on a card")
+            _expect(all(tray.property("role") == "tray" for tray in tools.tool_trays), "each tool category a tray")
         finally:
             widgets.dispose(tools)
         # The node painters: every header and canvas style, a theme's unknown ones as the defaults.
@@ -443,14 +459,14 @@ def main():
 
         try:
             content = tools.scroll.widget()
-            _expect(tools.top_part.isAncestorOf(tools.tabs.bar) and tools.top_part.isAncestorOf(tools.tool_palette)
-                    and tools.top_part.isAncestorOf(tools.grooms), "the top: the header, the tabs, the tool grid")
+            _expect(tools.top_part.isAncestorOf(tools.tool_palette) and tools.top_part.isAncestorOf(tools.grooms)
+                    and not tools.scroll.isAncestorOf(tools.tabs.rail), "the top: the header, the tool grid (the rail beside)")
             _expect(tools.scroll.isAncestorOf(tools.top_part), "the whole panel scrolls, the top too")
             _expect(content.isAncestorOf(tools.settings) and content.isAncestorOf(tools.guides_section),
                     "the card and the list scroll")
             _expect(tools.guides_section.mapTo(content, tools.guides_section.rect().topLeft()).y()
-                    < tools.settings.mapTo(content, tools.settings.rect().topLeft()).y(),
-                    "the list right under the grid, the card after it")
+                    > tools.hint.mapTo(content, tools.hint.rect().topLeft()).y(),
+                    "the card (no tool: its hint) right under the grid, the list after it")
             _expect(not tools.level.isVisibleTo(tools), "no Group combo: the list picks the group")
             _expect(tools.guides_section.row.isAncestorOf(tools.isolate) and tools.isolate.isCheckable(),
                     "Isolate: an eye in the Guide groups header")
@@ -516,17 +532,18 @@ def main():
             from groomlab.ui.qt import QtCore
             paint = tools.tiles["paint"][-1]
             _expect(paint.toolButtonStyle() == QtCore.Qt.ToolButtonTextBesideIcon
-                    and paint.width() > tools.paint_tiles.width() - theme.px(4),
+                    and paint.width() >= tools.paint_tiles.width() - 2 * theme.px(8) - theme.px(2),  # (in its tray)
                     "Paint: one full-width button over the maps (%d of %d px)" % (paint.width(), tools.paint_tiles.width()))
             _expect(tools.paint_tab.section.isVisibleTo(tools) and tools.paint_tab.box.isVisibleTo(tools),
                     "the Maps list and the picked map's box")
             tools.tabs.setCurrentIndex(palette.TABS.index("correctives"))
             settle()
-            _expect(tools.tool_palette.isVisibleTo(tools) and tools.settings.isVisibleTo(tools)
-                    and tools.correctives.section.isVisibleTo(tools), "Correctives: the grid, the card, the layers")
+            _expect(tools.tool_palette.isVisibleTo(tools) and tools.hint.isVisibleTo(tools)
+                    and tools.correctives.section.isVisibleTo(tools), "Correctives: the grid, the card's hint, the layers")
             tools.tabs.setCurrentIndex(palette.TABS.index("photos"))
             settle()
-            _expect(not tools.settings.isVisibleTo(tools) and not tools.tool_palette.isVisibleTo(tools)
+            _expect(not tools.settings.isVisibleTo(tools) and not tools.hint.isVisibleTo(tools)
+                    and not tools.tool_palette.isVisibleTo(tools)
                     and tools.reference_tab.section.isVisibleTo(tools), "Photos: the photos, no card")
             _expect(not tools.reference_tab.generate_section.expanded(), "Guides from photos folded")
             tools.tabs.setCurrentIndex(palette.TABS.index("tools"))
@@ -762,7 +779,7 @@ def main():
         from groomlab import units
         tools = palette.ToolPalette()
         try:
-            titles = [tools.tabs.bar.tabText(i) for i in range(tools.tabs.bar.count())]
+            titles = [tools.tabs.tabText(i) for i in range(tools.tabs.count())]
             _expect(titles == ["Tools", "Paint", "Correctives", "Photos"], "Groom Tools tabs: %r" % titles)
             _expect(tools.applies_block.isAncestorOf(tools.symmetry_row), "Mirror sits in the card's Applies to")
             tools.work.setVisible(True)

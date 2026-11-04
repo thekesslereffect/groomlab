@@ -101,10 +101,16 @@ def run(check, shots=None):
             y = 4
             filled = QtGui.QColor(image.pixel(int(f.width() * 0.12), y))
             empty = QtGui.QColor(image.pixel(int(f.width() * 0.6), y))
-            _expect(close(filled, QtGui.QColor("#35435E")), "the filled part in ui.selection: %s" % filled.name())
+            # The app's field: the fill in the slider tone (components.slider.fill: sliderFill), a 2 px
+            # accent bar along its bottom edge, no border at rest (the theme's fields have no ui.fieldEdge).
+            _expect(close(filled, QtGui.QColor(t.token("sliderFill"))), "the filled part in sliderFill: %s" % filled.name())
             _expect(close(empty, QtGui.QColor(t.color("ui.raised"))), "the rest in ui.raised: %s" % empty.name())
-            edge = QtGui.QColor(image.pixel(f.width() // 2, 0))
-            _expect(close(edge, QtGui.QColor(t.color("ui.border")), 24), "a 1px border: %s" % edge.name())
+            edge = QtGui.QColor(image.pixel(f.width() // 2, 1))  # (row 0: the rounded edge's antialiasing)
+            _expect(close(edge, QtGui.QColor(t.color("ui.raised")), 12), "no border at rest: %s" % edge.name())
+            bar = QtGui.QColor(image.pixel(int(f.width() * 0.12), f.height() - 2))  # (the last row: antialiased)
+            _expect(close(bar, QtGui.QColor(t.hex("accent")), 24), "the value's bar in the accent: %s" % bar.name())
+            past = QtGui.QColor(image.pixel(int(f.width() * 0.6), f.height() - 2))
+            _expect(not close(past, QtGui.QColor(t.hex("accent")), 40), "the bar ends with the fill: %s" % past.name())
             # The label on the left (textDim), the value on the right (text): some text-colored pixels there.
             right = [QtGui.QColor(image.pixel(x, yy)) for x in range(f.width() - 40, f.width() - 6)
                      for yy in range(6, f.height() - 6)]
@@ -124,7 +130,7 @@ def run(check, shots=None):
             plain = field(0.5, 0.0, 1.0)  # no label: the value centered
             _expect(plain.text() == "0.5", plain.text())
             save(plain, "field_no_label")
-        check.run("fill field paints: a row tall, filled in the selection, label left and value right", painting)
+        check.run("fill field paints: a row tall, filled in the slider tone with the accent bar, label left and value right", painting)
 
         def typing():
             f = field(0.25, 0.0, 1.0, label="Strength")
@@ -251,10 +257,10 @@ def run(check, shots=None):
                 save(f, "field_" + state)
             f.set_key_color(None)
             _expect(f.key_color() is None and close(QtGui.QColor(grab(f).pixel(int(f.width() * 0.1), 5)),
-                                                    QtGui.QColor("#35435E")), "no state: the theme's look")
+                                                    QtGui.QColor(t.token("sliderFill"))), "no state: the theme's look")
             f.setEnabled(False)
             dim = QtGui.QColor(grab(f).pixel(int(f.width() * 0.1), 5))
-            _expect(dim.lightness() < QtGui.QColor("#35435E").lightness(), "disabled: dimmed (%s)" % dim.name())
+            _expect(dim.lightness() < QtGui.QColor(t.token("sliderFill")).lightness(), "disabled: dimmed (%s)" % dim.name())
             save(f, "field_disabled")
             QTest.mouseClick(f, Qt.LeftButton, Qt.NoModifier, QtCore.QPoint(30, 10))
             _expect(not f.isEditing() and f.edit() is None, "disabled: no typing")
