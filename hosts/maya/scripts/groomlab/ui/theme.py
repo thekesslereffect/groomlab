@@ -787,6 +787,7 @@ QPushButton[role="section"], QPushButton[role="section"]:checked, QPushButton[ro
 QPushButton[role="section"]:hover { color: %(accentInk)s; background: transparent; }
 QFrame[role="sectionRow"] { background: transparent; border: none; border-radius: 0; }
 QWidget[role="iconRail"] { background: %(railFill)s; border: none; border-right: {{1}}px solid %(railEdge)s; }
+QWidget[role="iconRail"][side="top"] { border-right: none; border-bottom: {{1}}px solid %(railEdge)s; }
 QToolButton[role="railButton"] { background: transparent; border: none; padding: 0; border-radius: %(rail_r)dpx; }
 QToolButton[role="railButton"]:hover { background: %(railHover)s; }
 QToolButton[role="railButton"]:checked { background: %(railOn)s; }

@@ -1547,8 +1547,8 @@ class WindowState:
 
 
 class Rail:
-    """A window's pages as icons on its left edge (components.iconRail): pages of (id, label, tip,
-    icon), the open one get(), a press set(id)."""
+    """A window's pages as icons in a row under its title bar (components.iconRail; a side column
+    would widen the window): pages of (id, label, tip, icon), the open one get(), a press set(id)."""
 
     def __init__(self, pages, get, set_):
         self.pages, self.get, self.set = pages, get, set_
@@ -1556,9 +1556,9 @@ class Rail:
 
 class Window:
     """One frame of a window: its rect in `region`, its widgets laid out by content(layout, context);
-    with a rail, the pages' icons down its left edge under the title bar."""
+    with a rail, the pages' icons in a row under the title bar."""
 
-    width = 344  # (the rail's 44 and the app's dock column)
+    width = 300  # (the app's dock column)
 
     def __init__(self, state, context, region, title, icon, content, theme=None, rail=None):
         self.state, self.theme = state, theme or _theme()
@@ -1568,28 +1568,24 @@ class Window:
         self.hover, self.mouse = state.hover, state.mouse
         self.region_w = region.width
         s = self.scale
-        self.rail_w = t.size("iconRail", "width", 44) * s if rail is not None else 0.0
-        w = (self.width if rail is not None else self.width - 44) * s
+        self.rail_h = t.size("iconRail", "width", 44) * s if rail is not None else 0.0  # (its thickness)
+        w = self.width * s
         right = region.width - _sidebar_width(context, region) - _gizmo_width(context, s) - (state.right + 12) * s
         self.title_h = 40 * s
         top = region.height - _header_height(context, region) - (state.top + 8) * s
         top = max(top, self.title_h + 4 * s)  # the title bar stays in the view, to drag it back
         x = max(4 * s, right - w)
         pad = 10 * s
-        layout = Layout(self, x + self.rail_w + pad, top - self.title_h - 2 * s + state.scroll * s,
-                        w - self.rail_w - 2 * pad)
+        head = self.title_h + self.rail_h  # (the title bar and the rail: they don't scroll)
+        layout = Layout(self, x + pad, top - head - 2 * s + state.scroll * s, w - 2 * pad)
         content(layout, context)
-        content_h = (top - self.title_h - 2 * s + state.scroll * s) - layout.y + pad
-        rail_h = 0.0
-        if rail is not None:
-            button, gap = t.size("iconRail", "button", 36) * s, t.size("iconRail", "gap", 4) * s
-            rail_h = 2 * t.size("iconRail", "padding", 10, 1) * s + len(rail.pages) * (button + gap) - gap
-        max_h = max(self.title_h + 60 * s, top - 8 * s)
-        h = min(self.title_h + max(content_h, rail_h), max_h)
+        content_h = (top - head - 2 * s + state.scroll * s) - layout.y + pad
+        max_h = max(head + 60 * s, top - 8 * s)
+        h = min(head + content_h, max_h)
         self.rect = (x, top - h, w, h)
         self.body = (x, top - h, w, h - self.title_h)
-        self.content = (x + self.rail_w, top - h, w - self.rail_w, h - self.title_h)  # (what scrolls)
-        self.overflow = max(0.0, (self.title_h + content_h - h) / s)
+        self.content = (x, top - h, w, h - head)  # (what scrolls)
+        self.overflow = max(0.0, (head + content_h - h) / s)
         self.widgets = [TitleBar("title", (x, top - self.title_h, w - 40 * s, self.title_h), title, icon),
                         Glyph("close", (x + w - 34 * s, top - self.title_h + 8 * s, 24 * s, 24 * s), "close",
                               lambda ctx: close(state))]
@@ -1597,14 +1593,14 @@ class Window:
         if rail is not None:
             button = t.size("iconRail", "button", 36) * s
             gap = t.size("iconRail", "gap", 4) * s
-            bx = x + (self.rail_w - button) * 0.5
-            by = top - self.title_h - t.size("iconRail", "padding", 10, 1) * s
+            bx = x + pad  # (the first tile on the cards' left edge, as the header row under it)
+            by = top - self.title_h - (self.rail_h - button) * 0.5 - button
             for ident, label, tip, glyph in rail.pages:
                 wid = "rail:" + ident
-                self.widgets.append(RailButton(wid, (bx, by - button, button, button), ident, label, tip, glyph,
+                self.widgets.append(RailButton(wid, (bx, by, button, button), ident, label, tip, glyph,
                                                rail.get, rail.set))
                 self.chrome.add(wid)
-                by -= button + gap
+                bx += button + gap
         c = self.content
         self.widgets += [wd for wd in layout.widgets if wd.rect[1] + wd.rect[3] > c[1] and wd.rect[1] < c[1] + c[3]]
 
@@ -1627,8 +1623,8 @@ class Window:
         p.rect(self.rect, t.panel, radius, t.outline, 1.0 * s)
         rule = max(1.0, s)
         p.rect((x + 1 * s, y + h - self.title_h, w - 2 * s, rule), t.cardRule)
-        if self.rail_w:
-            p.rect((x + self.rail_w - rule, y + 1 * s, rule, h - self.title_h - 1 * s), t.role("iconRail", "edge", "cardRule"))
+        if self.rail_h:
+            p.rect((x + 1 * s, y + h - self.title_h - self.rail_h, w - 2 * s, rule), t.role("iconRail", "edge", "cardRule"))
         cx, cy, cw, ch = self.content
         gpu.state.scissor_test_set(True)
         try:

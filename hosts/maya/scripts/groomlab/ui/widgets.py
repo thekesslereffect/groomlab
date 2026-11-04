@@ -1086,10 +1086,10 @@ class ToolGrid(QtWidgets.QWidget):
 
 
 class IconRail(QtWidgets.QWidget):
-    """A side panel's page icons on its outer edge (the app's icon rail, components.iconRail): a
-    slim column, one checkable icon button per page, the open page's lit (the soft accent, its
-    icon in the accent's ink); the tooltips name the pages. Page switching only (folding the
-    panel is the standalone app's chrome). Signal: picked(index)."""
+    """A panel's page icons (the app's icon rail, components.iconRail), along the panel's top in
+    Maya (a side column would widen a docked panel): one checkable icon button per page, the open
+    page's lit (the soft accent, its icon in the accent's ink); the tooltips name the pages. Page
+    switching only (folding the panel is the standalone app's chrome). Signal: picked(index)."""
 
     picked = QtCore.Signal(int)
 
@@ -1099,11 +1099,12 @@ class IconRail(QtWidgets.QWidget):
         self.setObjectName("pageRail")
         self.setProperty("role", "iconRail")
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
-        width = theme.component_px("iconRail", "width", 44)
-        self.setFixedWidth(width)
-        pad_x = max(0, (width - theme.component_px("iconRail", "button", 36)) // 2)
-        pad_y = theme.component_px("iconRail", "padding", 10, index=1)
-        self.column = QtWidgets.QVBoxLayout(self)
+        self.setProperty("side", "top")
+        height = theme.component_px("iconRail", "width", 44)  # (the rail's thickness)
+        self.setFixedHeight(height)
+        pad_y = max(0, (height - theme.component_px("iconRail", "button", 36)) // 2)
+        pad_x = theme.px(12)  # (the panel's gutter: the first tile on the cards' left edge, as the header under it)
+        self.column = QtWidgets.QHBoxLayout(self)
         self.column.setContentsMargins(pad_x, pad_y, pad_x, pad_y)
         self.column.setSpacing(theme.component_px("iconRail", "gap", 4))
         self.column.addStretch(1)
@@ -1159,7 +1160,7 @@ class IconRail(QtWidgets.QWidget):
 
 
 class Pages(QtWidgets.QWidget):
-    """Pages switched by an icon rail (IconRail, `rail`: the window puts it on its left edge): only
+    """Pages switched by an icon rail (IconRail, `rail`: the window puts it along its top): only
     the page showing takes room, so what sits under it follows right below (the QTabWidget API:
     addTab, currentIndex, setCurrentIndex, currentChanged, count, widget, tabText)."""
 

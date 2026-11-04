@@ -903,8 +903,9 @@ class ToolPalette(QtWidgets.QWidget):
 
         # One scrolling column, the whole panel: the top (the header, the tabs, the tool grid), then
         # the list the tab works on, then the tool's card; the window paints the theme's background.
-        # The page rail on the left edge (the pages' icons, widgets.Pages), the column beside it.
-        frame = QtWidgets.QHBoxLayout(self)
+        # The page rail along the top (the pages' icons, widgets.Pages: a side column would widen
+        # the docked panel), the column under it.
+        frame = QtWidgets.QVBoxLayout(self)
         frame.setContentsMargins(0, 0, 0, 0)
         frame.setSpacing(0)
         self.frame = frame
@@ -1043,7 +1044,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.group = QtWidgets.QButtonGroup(self)
         self.group.setExclusive(False)  # the active tool's tiles are checked by hand (one tool, maybe two tiles)
         self.tabs = widgets.Pages()
-        frame.insertWidget(0, self.tabs.rail)  # the pages' icons on the window's left edge
+        frame.insertWidget(0, self.tabs.rail)  # the pages' icons along the window's top
         # The tool grid (Tools and Correctives): each category a tray, its name inside over its
         # tiles; the Paint tile alone in a tray on the Paint tab.
         self.tool_palette = QtWidgets.QWidget()

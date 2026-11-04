@@ -368,10 +368,12 @@ def main():
                     and ink(comb, QtGui.QIcon.Off) == t.hex(t.get("icons.shape")).upper(),
                     "a tile's icon: the group's tone, chosen the accent's ink (%s, %s)"
                     % (ink(comb, QtGui.QIcon.Off), ink(comb, QtGui.QIcon.On)))
-            # The pages: an icon rail on the window's left edge (components.iconRail), no tab row.
+            # The pages: an icon rail along the window's top (components.iconRail; a side column
+            # would widen the docked panel), no tab row.
             rail = tools.tabs.rail
-            _expect(rail.width() == theme.component_px("iconRail", "width", 44) and rail.x() == 0
-                    and not tools.scroll.isAncestorOf(rail), "the page rail on the left edge, %d px" % rail.width())
+            _expect(rail.height() == theme.component_px("iconRail", "width", 44) and rail.y() == 0 and rail.x() == 0
+                    and rail.width() == tools.width() and not tools.scroll.isAncestorOf(rail),
+                    "the page rail along the top, %d px" % rail.height())
             _expect([b.accessibleName() for b in rail.buttons] == [t_["label"] for t_ in definitions.get("palette/tabs")]
                     and all(b.toolTip().startswith(b.accessibleName()) for b in rail.buttons), "one icon per page, named")
             _expect(not tools.findChildren(QtWidgets.QTabBar), "no tab row")
@@ -460,7 +462,7 @@ def main():
         try:
             content = tools.scroll.widget()
             _expect(tools.top_part.isAncestorOf(tools.tool_palette) and tools.top_part.isAncestorOf(tools.grooms)
-                    and not tools.scroll.isAncestorOf(tools.tabs.rail), "the top: the header, the tool grid (the rail beside)")
+                    and not tools.scroll.isAncestorOf(tools.tabs.rail), "the top: the header, the tool grid (the rail over it)")
             _expect(tools.scroll.isAncestorOf(tools.top_part), "the whole panel scrolls, the top too")
             _expect(content.isAncestorOf(tools.settings) and content.isAncestorOf(tools.guides_section),
                     "the card and the list scroll")
