@@ -20,6 +20,7 @@ Radius and strength changed in the viewport (middle-drag) show up here.
 from groomlab.ui import qt
 from groomlab.ui.qt import QtCore, QtWidgets
 
+import re
 import groomlab
 import groomlab_core
 from groomlab.ui import definitions, length_keys_box, theme, tool_tabs, widgets
@@ -55,6 +56,19 @@ SYMMETRY_TIP = definitions.text("symmetryTip")
 NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 # The brush block's chips: a short name each (their tooltips: the catalog's hints).
 CHIP_LABELS = {"pressure": "Pressure", "collide": "Keep off scalp"}
+
+
+def short_hint(hint):
+    """A tool's line on its card, as the app's (groom_tools.cpp refreshCard): the hint's first
+    clause without its asides in parentheses (cut at ". " or "; " past 24 characters), then the gesture every brush shares."""
+    short = re.sub(r"\s*\([^()]*\)", "", hint)  # (asides in parentheses: the tooltip's)
+    for stop in (". ", "; ", " ("):
+        at = short.find(stop)
+        if at > 24:
+            short = short[:at] + "."
+    if not short.endswith("."):
+        short += "."
+    return short + " Shift+drag smooths."
 
 
 def rail_icon(name):
@@ -2294,8 +2308,12 @@ class ToolPalette(QtWidgets.QWidget):
         t = theme.current()
         self.card_icon.setPixmap(widgets.tinted_pixmap(tool, t.token("accentInk"), theme.px(18)))
         self.card_title.setText(NAMES.get(tool, tool.title()))
-        self.card_hint.setText(HINTS.get(tool, ""))
-        self.card_hint.setVisible(bool(HINTS.get(tool)))
+        # One line (the app's): the hint's first clause and the gesture every brush shares; the
+        # whole hint on the tool name's hover.
+        whole = HINTS.get(tool, "")
+        self.card_hint.setText(short_hint(whole) if whole else "")
+        self.card_hint.setVisible(bool(whole))
+        self.card_title.setToolTip(whole)
 
     def push(self, **flags):
         """Send changed settings to the active tool (the Paint card on the Paint tab while another

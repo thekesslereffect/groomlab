@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include <QRegularExpression>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -508,8 +509,13 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
         EXPECT_EQ(card->blockTitles(), want) << tool;
         EXPECT_FALSE(card->isHidden()) << tool;
         const groomlab::BrushEntry* e = brushEntry(tool);
-        // Over the card: what the tool does (the catalog's hint, its first sentence).
-        EXPECT_TRUE(tools.noToolLabel()->text().startsWith(QString::fromStdString(e->hint).left(16))) << tool;
+        // Over the card: what the tool does (the catalog's hint, its first sentence without its
+        // asides in parentheses); the whole hint in its tooltip when that cut it.
+        const QString hint = QString::fromStdString(e->hint);
+        const QString plain = QString(hint).remove(QRegularExpression(QStringLiteral(R"(\s*\([^()]*\))")));
+        EXPECT_TRUE(tools.noToolLabel()->text().startsWith(plain.left(16))) << tool;
+        EXPECT_FALSE(tools.noToolLabel()->text().contains(QLatin1Char('('))) << tool;
+        if (tools.noToolLabel()->text().size() < hint.size()) EXPECT_EQ(tools.noToolLabel()->toolTip(), hint) << tool;
         EXPECT_TRUE(tools.tile(tool)->toolTip().contains(QString::fromStdString(e->hint).left(20).toHtmlEscaped())) << tool << ": the tile has the hint";
     }
     // The card's header: the tool's name and what it does (its first sentence); the gestures are a brush tile's tip.

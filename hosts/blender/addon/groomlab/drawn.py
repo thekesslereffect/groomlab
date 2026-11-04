@@ -92,6 +92,7 @@ class DrawnLayout(object):
         self.active_default = False
         self.activate_init = False
         self.groomlab_role = None  # the window's look for what it holds (the module's docstring)
+        self.groomlab_tip = ""     # its labels' tooltip (the window: a hover shows it)
 
     def _child(self, kind, **kw):
         child = DrawnLayout(kind, **kw)
@@ -135,7 +136,7 @@ class DrawnLayout(object):
     # Leaves
     def label(self, text="", text_ctxt="", translate=True, icon="NONE", icon_value=0):
         first = not any(isinstance(c, Item) and c.kind == "label" for c in self.children)
-        self._item("label", text=text, icon=icon_name(icon, icon_value), first=first)
+        self._item("label", text=text, icon=icon_name(icon, icon_value), first=first, tip=self.groomlab_tip)
 
     def separator(self, factor=1.0, type="AUTO"):
         self._item("separator", factor=factor, line=type == "LINE")
@@ -644,6 +645,8 @@ class Placer(object):
                 self.widgets.append(uikit.EmptyIcon(self.wid("emptyicon"), (x, y + h - disc, w, disc), icon))
                 rect, icon = (x, y, w, h - disc - 8 * self.s), None
             widget = uikit.Label(self.wid("label"), rect, a.get("text", ""), icon=icon, style=style, align=align)
+            if a.get("tip"):  # (a label with a tooltip takes the hover)
+                widget.tooltip, widget.passive = a["tip"], False
         elif kind == "separator":
             if a.get("line"):
                 widget = uikit.Backdrop(self.wid("line"), rect, "line")

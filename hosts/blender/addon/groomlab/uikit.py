@@ -1577,9 +1577,12 @@ class Window:
         x = max(4 * s, right - w)
         pad = 10 * s
         head = self.title_h + self.rail_h  # (the title bar and the rail: they don't scroll)
-        layout = Layout(self, x + pad, top - head - 2 * s + state.scroll * s, w - 2 * pad)
+        # Under the rail, the content's own gap between its rows (an even step to the header row);
+        # under a bare title bar, 2 px.
+        lead = (t.size("card", "gap", 8) if rail is not None else 2) * s
+        layout = Layout(self, x + pad, top - head - lead + state.scroll * s, w - 2 * pad)
         content(layout, context)
-        content_h = (top - head - 2 * s + state.scroll * s) - layout.y + pad
+        content_h = (top - head - lead + state.scroll * s) - layout.y + pad
         max_h = max(head + 60 * s, top - 8 * s)
         h = min(head + content_h, max_h)
         self.rect = (x, top - h, w, h)

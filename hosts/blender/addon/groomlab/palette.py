@@ -16,6 +16,7 @@ An action shows when actions.py binds it (the rest is hidden). Drawing never wri
 the lists (groups, maps, parts, tubes, correctives) are refreshed by the tools after each edit, or
 by a timer when the panel shows another groom than they were filled for."""
 
+import re
 import json
 import os
 
@@ -94,6 +95,20 @@ def section_shown(section_id, context):
 def in_window(layout):
     """Whether the panel draws in the GroomLab window (window.py: drawn.DrawnLayout), not the sidebar."""
     return hasattr(layout, "groomlab_role")
+
+
+def short_hint(hint):
+    """A tool's line on its card, as the app's (groom_tools.cpp refreshCard): the hint's first
+    clause without its asides in parentheses (cut at ". " or "; " past 24 characters), then the gesture every brush shares;
+    the whole hint is the tool name's tooltip."""
+    short = re.sub(r"\s*\([^()]*\)", "", hint)  # (asides in parentheses: the tooltip's)
+    for stop in (". ", "; ", " ("):
+        at = short.find(stop)
+        if at > 24:
+            short = short[:at] + "."
+    if not short.endswith("."):
+        short += "."
+    return short + " Shift+drag smooths."
 
 
 def look(layout, role):
@@ -538,9 +553,11 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         uses = set(info["settings"])
         card = look(layout, "card") if in_window(layout) else layout.column()
         if in_window(card):  # the window's card heads with the tool: its icon, its name, its line
-            look(card, "tool").label(text=info["label"], icon_value=icons.icon(tool))
+            head = look(card, "tool")
+            head.groomlab_tip = info.get("hint", "")  # (the whole hint on the name's hover, as the app)
+            head.label(text=info["label"], icon_value=icons.icon(tool))
             if info.get("hint"):
-                _wrap(look(card, "about"), info["hint"], width=_chars(context))
+                _wrap(look(card, "about"), short_hint(info["hint"]), width=_chars(context))
         if "radius" in uses:  # Brush: how the stroke feels
             col, _ = block(card, defs.text("brushBlock"), titled=False)
             sliders = col.column(align=True)
