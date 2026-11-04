@@ -124,7 +124,7 @@ GuidesPanel::GuidesPanel(QWidget* parent) : QWidget(parent) {
                          "Right-click: more (its color...)"));
     tree_->setContextMenuPolicy(Qt::CustomContextMenu);
     layout->addWidget(tree_);
-    empty_ = new QLabel(tr("No guide groups yet: Place or Draw starts the first (primary)."), this);
+    empty_ = new QLabel(tr("No editable guides yet: Place or Draw starts the first group."), this);
     empty_->setObjectName(QStringLiteral("groupsEmpty"));
     empty_->setProperty("role", "hint");
     empty_->setWordWrap(true);

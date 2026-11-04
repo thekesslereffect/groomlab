@@ -101,6 +101,7 @@ class OverlayHost;
 class ParamPanel;
 class PhotosPanel;
 class PropertiesPanel;
+class Segmented;
 class ValueSlider;
 class Viewport;
 class TransferWindow;
@@ -360,7 +361,7 @@ public:
     // then Render ▾ (a ghost button) and Export ▾ (the accent), with menus.json's output.render and
     // output.export menus.
     QWidget* menuCorner() const { return menuCorner_; }
-    QLabel* cornerFileName() const { return cornerName_; }
+    Segmented* modeSwitch() const { return modeSwitch_; }
     QToolButton* cornerRender() const { return cornerRender_; }
     QToolButton* cornerExport() const { return cornerExport_; }
     AppShell* shell() { return shell_; }
@@ -801,7 +802,7 @@ private:
     QAction* saveAs_ = nullptr;
     QAction* export_ = nullptr;
     QWidget* menuCorner_ = nullptr;
-    QLabel* cornerName_ = nullptr;
+    Segmented* modeSwitch_ = nullptr;
     QToolButton* cornerRender_ = nullptr;
     QToolButton* cornerExport_ = nullptr;
     QAction* saveImage_ = nullptr;

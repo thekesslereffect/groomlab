@@ -886,6 +886,10 @@ void MainWindow::refreshStarter() {
     bool guides = false, look = false;
     if (document_) {
         if (const HierarchyPtr h = document_->session().authoredHierarchy()) guides = !h->guides().empty();
+        // A groom opened from a file with hair already (baked strands, guides the graph makes) is
+        // past its first steps: the card is for one started on a mesh here (untitled).
+        const ViewResult& view = document_->lastView();
+        if (!guides && !document_->path().empty() && view.strands && view.strands->strandCount() > 0) guides = true;
         const ui::json& types = ui::Definitions::shipped().get("palette/starter/lookTypes");
         for (const GroomDocument::NodeInfo& n : document_->nodes()) {
             if (std::find(types.begin(), types.end(), n.type) != types.end()) look = true;

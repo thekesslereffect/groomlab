@@ -64,7 +64,7 @@ class DisplayBuffersTest(unittest.TestCase):
         sizes = {name: (item.vertex_count, memoryview(item.geometry.indices).shape[0]) for name, item in items.items()}
         self.assertEqual(sizes, dict(EXPECTED_SIZES, strands=(22100, 19890), guides=(1395, 1380)))
         self.assertEqual("%016x" % lines.digest, "d1b2ace3b459e113")  # its Collide by the distance field
-        self.assertEqual("%016x" % items["guides"].geometry.digest, "2483fbee9bf9139d")
+        self.assertEqual("%016x" % items["guides"].geometry.digest, "73ce81bd15ee1cf8")
         # The guides: colored lines over the hair, with dots.
         guides = items["guides"].geometry
         self.assertTrue(guides.overlay)

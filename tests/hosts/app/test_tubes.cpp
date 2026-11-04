@@ -588,13 +588,14 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     bool value = false;
     for (ValueSlider* s : block->findChildren<ValueSlider*>()) value = value || s->caption() == QStringLiteral("Value");
     EXPECT_TRUE(value);
-    // The Maps list over the card, right under the grid: the header's + New Map and Import glyphs,
-    // the picked map's box.
+    // The tool's card right under the grid, the tab's list under it; on Paint the Maps list first
+    // (what is painted, then how): the header's + New Map and Import glyphs, the picked map's box.
     EXPECT_EQ(maps.bar()->ids(), (std::vector<std::string>{"map.new", "map.import"}));
     QLayout* work = tools.card()->parentWidget()->layout();
     ASSERT_NE(work, nullptr);
-    for (const char* tab : {"tools", "paint", "correctives", "photos"})
-        EXPECT_LT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_") + QLatin1String(tab))), work->indexOf(tools.card())) << tab;
+    EXPECT_LT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_paint"))), work->indexOf(tools.card())) << "Paint: the maps first";
+    ASSERT_TRUE(tools.showTab(QStringLiteral("tools")));
+    EXPECT_GT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_tools"))), work->indexOf(tools.card())) << "Tools: the card first";
     // Photos: no card.
     ASSERT_TRUE(tools.showTab(QStringLiteral("photos")));
     EXPECT_TRUE(card->isHidden());

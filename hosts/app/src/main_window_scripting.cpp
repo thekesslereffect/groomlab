@@ -2,6 +2,7 @@
 // MainWindow: the UI, graph presets and params driven by name (scripted runs and the tests).
 
 #include "main_window_internal.h"
+#include "glass.h"
 
 #include <QScrollBar>
 #include <QTimer>
@@ -68,6 +69,7 @@ bool MainWindow::setUiMode(const QString& name) {
         report(tr("No UI mode '%1' (groom, look, cards, export)").arg(name));
         return false;
     }
+    if (modeSwitch_) modeSwitch_->setCurrent(static_cast<int>(mode));
     if (mode != shell_->mode()) {
         shell_->setMode(mode);
         // The brushes belong to Groom mode: elsewhere the mouse is the camera's. Cards mode shows

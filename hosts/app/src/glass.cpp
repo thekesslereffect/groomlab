@@ -344,19 +344,31 @@ QSize RoundButton::sizeHint() const {
     return QSize(width, diameter_);
 }
 
+void RoundButton::setEdge(const QColor& color) {
+    edge_ = color;
+    update();
+}
+
 void RoundButton::paintEvent(QPaintEvent* /*event*/) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
     const bool on = isChecked();
     QColor fill = on ? fillChecked_ : fillRest_;
     if (!isEnabled()) {
-        fill.setAlpha(fill.alpha() / 2);
+        // A disabled primary (the accent's fill) is a quiet field, not a muddy accent; anything else
+        // (a swatch showing a color) keeps its fill.
+        const bool primary = fill == theme::accentFill() || fill == theme::uiColor("accent");
+        if (!theme::glassy() && primary) fill = theme::uiColor("raised");
+        else if (theme::glassy() || fill.alpha() == 0) fill.setAlpha(fill.alpha() / 2);
     } else if (hover_ && fill.alpha() > 0) {
         fill = fill.lighter(on ? 108 : 125);
     } else if (hover_) {
         fill = theme::chip();
     }
-    const qreal radius = radius_ >= 0.0 ? radius_ : height() / 2.0;
+    // A solid theme's buttons are controls: the control radius (a round icon or swatch, as wide as
+    // it is tall, stays round); a glass theme's are pills unless they say.
+    qreal radius = radius_ >= 0.0 ? radius_ : height() / 2.0;
+    if (!theme::glassy() && width() != height()) radius = std::min<qreal>(radius, theme::controlRadius());
     const bool tile = !tileLabel_.isEmpty();
     // A tile hovers as one row (the circle and the name); its circle keeps the fill.
     QRectF circle(rect());
@@ -366,7 +378,8 @@ void RoundButton::paintEvent(QPaintEvent* /*event*/) {
         if (!on && hover_) fill = fillRest_;
     }
     // A floating button at rest wears the panels' edge on a solid theme.
-    if (fill.alpha() > 0) paintGlass(painter, circle, radius, fill, !on && fillRest_ == theme::glass() ? theme::glassEdge() : QColor());
+    const QColor restEdge = edge_.isValid() ? edge_ : !on && fillRest_ == theme::glass() ? theme::glassEdge() : QColor();
+    if (fill.alpha() > 0) paintGlass(painter, circle, radius, fill, restEdge);
     if (on && ringWidth_ > 0.0 && ring_.isValid()) {
         painter.setPen(QPen(ring_, ringWidth_));
         painter.setBrush(Qt::NoBrush);
@@ -376,7 +389,7 @@ void RoundButton::paintEvent(QPaintEvent* /*event*/) {
     QColor iconColor = on ? iconChecked_ : iconRest_;
     QColor textColor = on ? textChecked_ : textRest_;
     if (!isEnabled()) {
-        iconColor = theme::textMuted();
+        iconColor = theme::textDisabled();
         textColor = theme::textMuted();
     }
     qreal x = text().isEmpty() ? (circle.width() - iconSize_) / 2.0 : padding_;
@@ -602,6 +615,8 @@ void ValueSlider::setFill(const QColor& color) {
 
 QColor ValueSlider::fillColor() const {
     if (theme::glassy()) return withAlpha(theme::sliderFill(fill_), 120);
+    const QColor own = theme::uiColor("sliderFill");
+    if (own.isValid()) return own;
     const QColor selection = theme::uiColor("selection");
     return selection.isValid() ? selection : withAlpha(theme::sliderFill(fill_), 90);
 }
@@ -691,7 +706,7 @@ void ValueSlider::paintEvent(QPaintEvent* /*event*/) {
     // The field, the fill clipped to its corners, then the edge over both.
     QColor base = editingNow ? theme::backdrop() : (hover_ && enabled ? fieldHover() : fieldBase());
     QColor fill = fillColor();
-    QColor edge = editingNow || focusShown ? fieldAccent() : fieldEdge();
+    QColor edge = editingNow || focusShown ? fieldAccent() : theme::glassy() ? fieldEdge() : QColor(Qt::transparent);
     if (state_.isValid() && !editingNow) {
         base = mixed(base, withAlpha(state_, 255), 0.22);
         fill = mixed(fill, withAlpha(state_, 255), 0.45);
@@ -1050,13 +1065,28 @@ std::vector<QRect> Segmented::segmentRects() const {
 void Segmented::paintEvent(QPaintEvent* /*event*/) {
     QPainter painter(this);
     if (!isEnabled()) painter.setOpacity(0.45);  // (the modes before a groom is open)
-    paintGlass(painter, QRectF(rect()), height() / 2.0, background_, background_ == theme::glass() ? theme::glassEdge() : QColor());
+    const bool glassy = theme::glassy();
+    const qreal outer = glassy ? height() / 2.0 : theme::controlRadius();
+    paintGlass(painter, QRectF(rect()), outer, background_, glassy && background_ == theme::glass() ? theme::glassEdge() : QColor());
     const std::vector<QRect> rects = segmentRects();
     for (std::size_t i = 0; i < items_.size(); ++i) {
         const bool on = static_cast<int>(i) == current_;
-        if (on) paintGlass(painter, QRectF(rects[i]), rects[i].height() / 2.0, theme::segmentFill(items_[i].fill));
-        painter.setFont(theme::uiFont(fontSize_, on ? 800 : 600));
-        painter.setPen(on ? theme::segmentText(items_[i].text) : theme::textSoft());
+        if (on) {
+            const qreal inner = glassy ? rects[i].height() / 2.0 : std::max(2, theme::controlRadius() - 2);
+            if (glassy) paintGlass(painter, QRectF(rects[i]), inner, theme::segmentFill(items_[i].fill));
+            if (!glassy) {
+                // The chosen segment marked by more than its tone: an accent line along its foot.
+                const QRectF r(rects[i]);
+                painter.save();
+                painter.setRenderHint(QPainter::Antialiasing, true);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(theme::uiColor("accent"));
+                painter.drawRoundedRect(QRectF(r.left() + inner, r.bottom() - 1.5, r.width() - 2 * inner, 2.0), 1.0, 1.0);
+                painter.restore();
+            }
+        }
+        painter.setFont(theme::uiFont(fontSize_, on ? 600 : 500));
+        painter.setPen(on ? (glassy ? theme::segmentText(items_[i].text) : theme::text()) : glassy ? theme::textSoft() : theme::textDim());
         painter.drawText(rects[i], Qt::AlignCenter, items_[i].label);
     }
 }

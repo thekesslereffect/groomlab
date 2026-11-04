@@ -85,12 +85,13 @@ PropertySection::PropertySection(const QString& title, bool nested, QWidget* par
     body_ = new QWidget(this);
     body_->setObjectName(QStringLiteral("propBody"));
     grid_ = new QGridLayout(body_);
-    grid_->setContentsMargins(nested ? 4 : 10, 4, 6, 6);
-    grid_->setHorizontalSpacing(10);
-    grid_->setVerticalSpacing(5);
-    // The labels about two fifths of the width, the controls the rest (Maya's AE: a label column).
-    grid_->setColumnStretch(0, 2);
-    grid_->setColumnStretch(1, 3);
+    grid_->setContentsMargins(nested ? 4 : 0, 4, 0, 8);
+    grid_->setHorizontalSpacing(12);
+    grid_->setVerticalSpacing(6);
+    // One label column for every section (Maya's AE): the controls line up down the whole dock.
+    grid_->setColumnMinimumWidth(0, nested ? 84 : 96);  // nested: less its 12 px indent, so the values line up
+    grid_->setColumnStretch(0, 0);
+    grid_->setColumnStretch(1, 1);
     layout->addWidget(body_);
     setExpanded(false);
 }
@@ -141,7 +142,7 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     auto* column = new QWidget(scroll_);
     column->setObjectName(QStringLiteral("propertiesColumn"));
     auto* layout = new QVBoxLayout(column);
-    layout->setContentsMargins(6, 4, 8, 8);
+    layout->setContentsMargins(12, 4, 24, 12);  // the right: the 12 px gutter clear of the scroll bar over it
     layout->setSpacing(4);
     build(defs().get("properties/sections"), layout, nullptr);
     layout->addStretch(1);

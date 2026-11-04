@@ -238,7 +238,7 @@ ParamPanel::ParamPanel(QWidget* parent) : QWidget(parent) {
                                "viewport skips it (a heavy node kept for the final strands)."));
     evaluation_->hide();
     layout->addWidget(evaluation_);
-    empty_ = new QLabel(tr("No node selected: click one in the list or the graph"), this);
+    empty_ = new QLabel(tr("Select a node in the graph to edit it."), this);
     empty_->setWordWrap(true);
     empty_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textMuted().name()));
     layout->addWidget(empty_);

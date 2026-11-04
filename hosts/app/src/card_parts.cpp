@@ -133,8 +133,11 @@ CardBlock::CardBlock(const QString& title, QWidget* parent) : QFrame(parent) {
     head_ = new QHBoxLayout();
     head_->setContentsMargins(0, 0, 0, 0);
     head_->setSpacing(0);
-    title_ = new QLabel(title, this);
+    // Shown in caps, as every section header (the list titles, Properties' sections); title()
+    // stays the word it was given.
+    title_ = new QLabel(title.toUpper(), this);
     title_->setProperty("role", "blockTitle");
+    title_->setProperty("title", title);
     title_->setMinimumHeight(22);
     head_->addWidget(title_, 1);
     column->addLayout(head_);
@@ -149,7 +152,7 @@ void CardBlock::addAction(QWidget* action) {
     head_->addWidget(action);
 }
 
-QString CardBlock::title() const { return title_->text(); }
+QString CardBlock::title() const { return title_->property("title").toString(); }
 
 QToolButton* makeChip(const QString& text, const QString& tip, QWidget* parent) {
     auto* chip = new QToolButton(parent);

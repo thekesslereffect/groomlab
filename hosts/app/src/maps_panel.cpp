@@ -654,7 +654,7 @@ void MapsPanel::refreshRows() {
             for (const auto& [node, param] : document_->mapUsers(picked)) users << qs(node) + QLatin1Char('.') + qs(param);
         }
         users_->setText(!users.isEmpty() ? tr("Read by %1").arg(users.join(QStringLiteral(", ")))
-                        : !picked.empty() ? tr("Not read by the graph yet")
+                        : !picked.empty() ? tr("Unused: a Map node in the graph reads it")
                                           : QString());
         users_->setToolTip(users.isEmpty() && !picked.empty()
                                ? tr("+ New Map > For a setting makes a map a setting reads; or in the Graph Editor, right-click a param > "

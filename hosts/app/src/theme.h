@@ -101,6 +101,10 @@ QColor sliderFill(const QColor& own);
 // A filled action button, the primary action (chrome, not meaning): its own colors on glass; on
 // a solid theme the accent pill and the accent's text.
 QColor actionFill(const QColor& own);
+// The filled primary action's tone (ui.accentFill, else the accent) and text that is disabled
+// (ui.textDisabled, else the muted text): dimmer than any text that can be read.
+QColor accentFill();
+QColor textDisabled();
 QColor actionText(const QColor& own);
 // Words that say something went wrong or needs a look (an export's failure, a node's error
 // line): the theme's ui.error and ui.warning, readable on the panels.

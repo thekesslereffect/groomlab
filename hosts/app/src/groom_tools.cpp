@@ -275,7 +275,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     content->setObjectName(QStringLiteral("groomToolsContent"));
     scroll_->setWidget(content);
     auto* outer = new QVBoxLayout(content);
-    outer->setContentsMargins(10, 8, 10, 12);
+    outer->setContentsMargins(12, 10, 12, 12);
     outer->setSpacing(6);
 
     // ---- The top: the header, the status, the tabs and the tool grid.
@@ -347,13 +347,16 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     auto tileGrid = [this](BrushCategory category, QWidget* parent) {
         std::vector<QAbstractButton*> buttons;
         for (const groomlab::BrushEntry* e : brushesInCategory(category)) {
-            buttons.push_back(makeTile(e->id, qs(e->label), tileTip(*e)));
+            // A tile's word fits its fixed width at the UI's text size: Length Keys shows as Keys
+            // (its tooltip and the card say the full name).
+            const QString word = e->id == "lengths" ? tr("Keys") : qs(e->label);
+            buttons.push_back(makeTile(e->id, word, tileTip(*e)));
             if (e->id == "freeze") {
                 // Unfreeze All: a button, not a tool.
                 auto* b = new QToolButton(parent);
                 b->setObjectName(QStringLiteral("unfreezeAllTile"));
                 b->setProperty("role", "tool");
-                b->setText(tr("Unfreeze All"));  // (its icon: refreshTiles)
+                b->setText(tr("Unfreeze"));  // (its icon: refreshTiles; the tooltip says it frees every guide)
                 b->setToolTip(tr("<b>Unfreeze All</b><br>Clear the freeze mask: every guide can be brushed again (a click with the "
                                  "Select tool where no guide is does the same)"));
                 connect(b, &QToolButton::clicked, this, &GroomTools::unfreezeAllRequested);
@@ -373,7 +376,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     tools->setSpacing(3);
     for (BrushCategory category : brushCategories()) {
         if (category == BrushCategory::Paint) continue;  // beside the maps they paint
-        QLabel* name = label(QString::fromLatin1(brushCategoryName(category)), "category", toolsGrid_);
+        QLabel* name = label(QString::fromLatin1(brushCategoryName(category)).toUpper(), "category", toolsGrid_);
         tools->addWidget(name);
         gridLabels_.push_back(name);
         tools->addWidget(tileGrid(category, toolsGrid_));
@@ -425,13 +428,14 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
         tabs_->setTabToolTip(index, qs(tab.value("tip", std::string())));
     }
 
-    // Under the list: the tool's card, the tubes' blocks inside it.
+    // Over the list: the tool's card (what the picked tool does, right under its tile), the
+    // tubes' blocks inside it; the tab's list (guide groups, maps) below it.
     card_ = new BrushPanel(work_);
     connect(card_, &BrushPanel::settingsChanged, this, &GroomTools::settingsChanged);
     connect(card_, &BrushPanel::guidesEdited, this, &GroomTools::guidesEdited);
     connect(card_, &BrushPanel::clearFlowRequested, this, &GroomTools::clearFlowRequested);
     connect(card_, &BrushPanel::lengthsPreviewed, this, &GroomTools::lengthsPreviewed);
-    work->addWidget(card_);
+    work->insertWidget(0, card_);
     tubes_ = new TubePanel();
     connect(tubes_, &TubePanel::guidesEdited, this, &GroomTools::guidesEdited);
     connect(tubes_, &TubePanel::previewed, this, &GroomTools::tubesPreviewed);
@@ -443,7 +447,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     noTool_ = label(tr("Pick a tool, then drag over the groom in the viewport."), "hint", work_);
     noTool_->setObjectName(QStringLiteral("noTool"));
     noTool_->setContentsMargins(0, 8, 0, 4);
-    work->addWidget(noTool_);
+    work->insertWidget(1, noTool_);
 
     connect(tabs_, &QTabBar::currentChanged, this, [this](int index) {
         refreshVisibility();
@@ -613,8 +617,11 @@ void GroomTools::refreshTiles() {
     const bool glass = theme::glassy();
     auto toolIcon = [&](const std::string& stem, BrushCategory category) {
         const QString resource = iconPath(stem);
-        const QPixmap rest = duotoneIcon(resource, theme::toolIconColor(category, stem), theme::iconInk(), iconSize, dpr);
-        const QPixmap on = glass ? tintedIcon(resource, theme::uiColor("accentText"), iconSize, dpr) : rest;
+        // A solid theme's tiles are one quiet tone (every part of the icon, Unfreeze's slash too);
+        // a glass theme's keep their two tones.
+        const QPixmap rest = glass ? duotoneIcon(resource, theme::toolIconColor(category, stem), theme::iconInk(), iconSize, dpr)
+                                   : tintedIcon(resource, theme::toolIconColor(category, stem), iconSize, dpr);
+        const QPixmap on = tintedIcon(resource, glass ? theme::uiColor("accentText") : theme::uiColor("accent").lighter(115), iconSize, dpr);
         const QPixmap off = tintedIcon(resource, theme::textMuted(), iconSize, dpr);
         QIcon icon;
         icon.addPixmap(rest, QIcon::Normal, QIcon::Off);
@@ -821,6 +828,18 @@ void GroomTools::refreshVisibility() {
     }
     paintGrid_->setVisible(open && tab == "paint");
     for (auto& [id, holder] : lists_) holder->setVisible(id == tab);
+    // The card under the tools; on Paint the maps come first (what is painted, then how).
+    if (auto* work = qobject_cast<QVBoxLayout*>(work_->layout())) {
+        const auto paint = lists_.find("paint");
+        const int want = tab == "paint" && paint != lists_.end() ? work->indexOf(paint->second) + 1 : 0;
+        if (work->indexOf(card_) != want && want >= 0) {
+            work->removeWidget(card_);
+            work->removeWidget(noTool_);
+            const int at = tab == "paint" && paint != lists_.end() ? work->indexOf(paint->second) + 1 : 0;
+            work->insertWidget(at, card_);
+            work->insertWidget(at + 1, noTool_);
+        }
+    }
     eye_->setEnabled(open);
     guidesEye_->setEnabled(open);
     graph_->setEnabled(open);

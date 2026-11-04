@@ -699,18 +699,20 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     EXPECT_EQ(theme::text(), hex(charcoal["ui"]["text"]));
     EXPECT_EQ(theme::textMuted(), hex(charcoal["ui"]["textMuted"]));
     EXPECT_EQ(theme::backdrop(), hex(charcoal["ui"]["background"]));
-    EXPECT_EQ(theme::renderRed(), hex(charcoal["ui"]["accent"])) << "the primary action: the blue pill";
+    EXPECT_EQ(theme::renderRed(), hex(charcoal["ui"]["accentFill"])) << "the primary action: the accent's fill";
     EXPECT_EQ(theme::readableOn(theme::renderRed()), QColor(Qt::white));
     // A chosen segment and a checked chip: the selection tone, not the accent.
     EXPECT_EQ(theme::segmentFill(theme::red()), hex(charcoal["ui"]["selection"]));
     EXPECT_EQ(theme::segmentText(Qt::white), hex(charcoal["ui"]["selectionText"]));
     EXPECT_EQ(theme::checkedFill(theme::yellow()), hex(charcoal["ui"]["selection"]));
     // Every slider takes the theme's one slider color (ui.sliders ["accent"]), as in Maya; filled
-    // actions (Export, Bake, Paint) are the accent pill.
+    // actions (Export, Bake, Paint) take the accent's fill (deeper, so white text on it reads).
     ASSERT_EQ(charcoal["ui"]["sliders"][0].get<std::string>(), "accent");
     EXPECT_EQ(theme::sliderFill(theme::yellow()), hex(charcoal["ui"]["accent"]));
     EXPECT_EQ(theme::sliderFill(theme::purple()), hex(charcoal["ui"]["accent"]));
-    EXPECT_EQ(theme::actionFill(theme::emerald()), hex(charcoal["ui"]["accent"]));
+    EXPECT_EQ(theme::actionFill(theme::emerald()), hex(charcoal["ui"]["accentFill"]));
+    EXPECT_EQ(theme::accentFill(), hex(charcoal["ui"]["accentFill"]));
+    EXPECT_EQ(theme::textDisabled(), hex(charcoal["ui"]["textDisabled"]));
     EXPECT_EQ(theme::actionText(theme::ink()), hex(charcoal["ui"]["accentText"]));
     EXPECT_EQ(theme::nodeRadius(), charcoal["graph"]["cornerRadius"].get<double>());
     EXPECT_FALSE(theme::tintedHeaders());
@@ -723,8 +725,8 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     EXPECT_EQ(theme::smallRadius(), std::max(2, radius - 2));
     EXPECT_EQ(theme::panelRadius(), radius + 2);
     EXPECT_EQ(theme::rowHeight(), charcoal["ui"]["rowHeight"].get<int>());
-    // The tool icons in their two tones (the accent and the ink), as the design's.
-    EXPECT_EQ(theme::toolIconColor(theme::BrushCategory::Shape, "comb"), hex(charcoal["ui"]["accent"]));
+    // The tool icons in one quiet tone (the theme's icons colors); the accent marks the checked tile.
+    EXPECT_EQ(theme::toolIconColor(theme::BrushCategory::Shape, "comb"), hex(charcoal["icons"]["shape"]));
     EXPECT_EQ(theme::iconInk(), hex(charcoal["icons"]["ink"]));
     EXPECT_EQ(theme::nodeBorder(), hex(charcoal["graph"]["nodeBorder"]));
     EXPECT_EQ(theme::nodeCategoryColor("shape"), hex(charcoal["graph"]["categories"]["Shape"]));

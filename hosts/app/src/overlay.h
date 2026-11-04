@@ -219,10 +219,10 @@ public:
     // The active tool's name at the top-left ("Comb" with the key that brings it back), Groom mode.
     void setTool(const std::string& brushMode, bool select);
     QString toolText() const;  // "" when hidden
-    // The stats line (Groom): strands, the guides (npos: not said), the time per dab (0: the
-    // evaluation's), the path's badge.
+    // The stats line (Groom): strands, the guides (npos: not said; graphGuides: the graph makes
+    // them, none to brush), the time per dab (0: the evaluation's), the path's badge.
     void setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& badgeColor,
-                  std::size_t guides = static_cast<std::size_t>(-1));
+                  std::size_t guides = static_cast<std::size_t>(-1), bool graphGuides = false);
     QString statsText() const;  // the stats line's words ("" hidden)
     // GroomLab > Review > Strand Count HUD: the stats line shown (on by default) or not.
     void setStatsWanted(bool on);

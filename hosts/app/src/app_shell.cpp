@@ -2,12 +2,15 @@
 #include "app_shell.h"
 
 #include <algorithm>
+#include <vector>
 
+#include <QAction>
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMainWindow>
 #include <QSplitter>
+#include <QStyle>
 #include <QStackedWidget>
 #include <QSignalBlocker>
 #include <QTabBar>
@@ -106,7 +109,13 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     auto* propertiesColumn = new QVBoxLayout(propertiesBody);
     propertiesColumn->setContentsMargins(0, 0, 0, 0);
     propertiesColumn->setSpacing(0);
-    propertiesColumn->addWidget(propertiesTabs_);
+    {
+        // The tabs start at the docks' 12 px edge, with the content under them.
+        auto* tabsRow = new QHBoxLayout();
+        tabsRow->setContentsMargins(12, 0, 12, 0);
+        tabsRow->addWidget(propertiesTabs_);
+        propertiesColumn->addLayout(tabsRow);
+    }
     propertiesColumn->addWidget(propertiesStack_, 1);
     properties_ = makeDock(tr("Properties"), "propertiesDock", propertiesBody);
     window_->addDockWidget(Qt::RightDockWidgetArea, properties_);
@@ -123,6 +132,22 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
         dock->hide();
     }
     properties_->raise();
+    // Tabbed together, the tabs name the docks: their own title bars would say it again. Alone
+    // or floating, a dock keeps its title (to drag it, float it, close it).
+    const std::vector<QDockWidget*> tabbed = {properties_, nodesDock_, lookDock_, helpDock_};
+    auto titles = [tabbed] {
+        int shown = 0;
+        for (QDockWidget* d : tabbed) shown += d->toggleViewAction()->isChecked() && !d->isFloating() ? 1 : 0;
+        for (QDockWidget* d : tabbed) {
+            const bool hide = shown > 1 && !d->isFloating();
+            const bool hidden = d->titleBarWidget() != nullptr;
+            if (hide != hidden) d->setTitleBarWidget(hide ? new QWidget(d) : nullptr);
+        }
+    };
+    for (QDockWidget* d : tabbed) {
+        connect(d, &QDockWidget::visibilityChanged, this, [titles](bool) { titles(); });
+        connect(d, &QDockWidget::topLevelChanged, this, [titles](bool) { titles(); });
+    }
 
     // ---- The Graph Editor (bottom): the canvas, the selected node's settings at its right.
     graph_ = new NodeGraphView();
@@ -133,12 +158,11 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
         auto* header = new QHBoxLayout();
         header->setSpacing(8);
         nodeDot_ = dot(theme::blue(), nodeSide_);
-        nodeTitle_ = new QLabel(tr("Node Settings"), nodeSide_);
-        nodeTitle_->setFont(theme::uiFont(13, 800));
-        nodeTitle_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::text().name()));
+        nodeTitle_ = new QLabel(nodeSide_);
         header->addWidget(nodeDot_);
         header->addWidget(nodeTitle_, 1);
         static_cast<QVBoxLayout*>(nodeSide_->layout())->addLayout(header);
+        setPanelTitle(Panel::Node, tr("Node Settings"), theme::blue());
     }
     sections_[static_cast<std::size_t>(Panel::Node)] = nodeSide_;
     graphSplit_ = new QSplitter(Qt::Horizontal);
@@ -406,10 +430,17 @@ void AppShell::setPanelTitle(Panel which, const QString& title, const QColor& co
         case Panel::Look:
         case Panel::Nodes:
         case Panel::Help: static_cast<QDockWidget*>(panel(which))->setWindowTitle(title); break;
-        case Panel::Node:
-            nodeTitle_->setText(title);
+        case Panel::Node: {
+            // No node: a section header, as Properties'; a node: its name after its category's dot.
+            const bool none = title == tr("Node Settings");
+            nodeTitle_->setText(none ? title.toUpper() : title);
+            nodeTitle_->setProperty("role", none ? "listTitle" : "title");
+            nodeTitle_->style()->unpolish(nodeTitle_);
+            nodeTitle_->style()->polish(nodeTitle_);
+            nodeDot_->setVisible(!none);
             nodeDot_->setStyleSheet(QStringLiteral("background: %1; border-radius: 4px;").arg(color.name()));
             break;
+        }
         default: break;
     }
 }

@@ -23,6 +23,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
@@ -190,6 +191,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
             b->setIconColored(true);
         }
         b->setCheckedRing(theme::text(), 3.0);
+        if (!theme::glassy()) b->setEdge(theme::uiColor("hover").lighter(130));  // dark and light swatches keep their shape
         const std::string preset = s.preset;
         connect(b, &QAbstractButton::clicked, this, [this, preset] {
             if (!groomColor_.node.empty()) {
@@ -273,13 +275,13 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         row->setContentsMargins(0, 0, 0, 0);
         row->setSpacing(8);
         auto* label = new QLabel(text, host);
-        label->setFont(theme::uiFont(13, 600));
+        label->setFont(theme::uiFont(12, 400));
         label->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
         label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         label->setMinimumWidth(40);
         row->addWidget(label, 1);
         auto* editor = new ColorEditor(host);
-        editor->setFixedWidth(112);
+        editor->setFixedWidth(132);  // the swatch and all seven characters of #RRGGBB
         row->addWidget(editor);
         materialLayout->addWidget(host);
         const std::string name = param;
@@ -321,16 +323,15 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
                                     &GroomColor::saturationRandom, [](double) {});
     colorNote_ = new QLabel(materialPage_);
     colorNote_->setWordWrap(true);
-    colorNote_->setFont(theme::uiFont(12, 500));
+    colorNote_->setFont(theme::uiFont(11, 400));
     colorNote_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textMuted().name()));
     materialLayout->addWidget(colorNote_);
 
     moreButton_ = new RoundButton(materialPage_);
-    moreButton_->setText(tr("More settings"));
-    moreButton_->setDiameter(34);
-    moreButton_->setRadius(12.0);
-    moreButton_->setFontSize(13);
-    moreButton_->setFontWeight(600);
+    moreButton_->setText(tr("More settings  ▾"));
+    moreButton_->setDiameter(theme::rowHeight());
+    moreButton_->setFontSize(12);
+    moreButton_->setFontWeight(500);
     moreButton_->setFill(theme::chipSoft(), theme::chipSoft());
     moreButton_->setTextColor(theme::textDim(), theme::textDim());
     moreButton_->setToolTip(tr("Every hair material parameter, and the surfaces (the scalp, the props, the eyes)"));
@@ -758,9 +759,9 @@ ColorEditor* LookCard::color(QBoxLayout* into, const QString& text, std::functio
 }
 
 QLabel* LookCard::caption(QBoxLayout* into, const QString& text, int kinds, Target target) {
-    auto* label = new QLabel(text, into->parentWidget());
-    label->setFont(theme::uiFont(13, 800));
-    label->setStyleSheet(QStringLiteral("color: %1; margin-top: 4px;").arg(theme::text().name()));
+    auto* label = new QLabel(text.toUpper(), into->parentWidget());
+    label->setFont(theme::uiFont(11, 600));
+    label->setStyleSheet(QStringLiteral("color: %1; margin-top: 8px; letter-spacing: 0.6px;").arg(theme::textMuted().name()));
     into->addWidget(label);
     if (target == Target::Surface) surfaceRows_.push_back({label, kinds});
     return label;
@@ -852,7 +853,7 @@ void LookCard::setTab(Tab tab) {
 void LookCard::setMoreShown(bool shown) {
     moreShown_ = shown;
     more_->setVisible(shown);
-    moreButton_->setText(shown ? tr("Fewer settings") : tr("More settings"));
+    moreButton_->setText(shown ? tr("Fewer settings  ▴") : tr("More settings  ▾"));
     updateGeometry();
 }
 
@@ -901,7 +902,7 @@ void LookCard::refreshGroomColor() {
     hueRandom_->setValue(groomColor_.hueRandom);
     saturationRandom_->setVisible(groom);
     saturationRandom_->setValue(groomColor_.saturationRandom);
-    colorNote_->setText(groom ? tr("The groom's %1 node, saved with it").arg(QString::fromStdString(groomColor_.node))
+    colorNote_->setText(groom ? tr("Edits the groom's %1 node").arg(QString::fromStdString(groomColor_.node))
                               : tr("No HairColor node in the graph: viewport only"));
     updating_ = was;
 }
@@ -1212,16 +1213,20 @@ QString OverlayHost::statsText() const {
     return words.join(QLatin1Char(' '));
 }
 
-void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& /*badgeColor*/, std::size_t guides) {
+void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& /*badgeColor*/, std::size_t guides,
+                           bool graphGuides) {
     // One quiet line in the number font: "25,843 strands · 104 guides · 63 ms per dab · GPU".
     const QLocale english(QLocale::English);
     QStringList parts;
     parts << english.toString(static_cast<qulonglong>(strands)) + tr(" strands");
     if (guides != static_cast<std::size_t>(-1)) {
-        parts << english.toString(static_cast<qulonglong>(guides)) + (guides == 1 ? tr(" guide") : tr(" guides"));
+        parts << english.toString(static_cast<qulonglong>(guides)) + (guides == 1 ? tr(" guide") : tr(" guides")) +
+                     (graphGuides && guides > 0 ? tr(" from the graph") : QString());
     }
-    parts << QString::number(msPerDab, 'f', msPerDab < 10.0 ? 1 : 0) + tr(" ms per dab");
-    if (!badge.isEmpty()) parts << badge;
+    if (msPerDab > 0.0) {
+        parts << QString::number(msPerDab, 'f', msPerDab < 10.0 ? 1 : 0) + tr(" ms per dab");
+        if (!badge.isEmpty()) parts << badge;
+    }
     ShadowText::Run line;
     line.text = parts.join(QStringLiteral(" · "));
     line.font = theme::numberFont(12);
@@ -1488,8 +1493,8 @@ void OverlayHost::refreshStarter() {
         return;
     }
     // Each step numbered in a small circle: the next one's filled with the accent, the others
-    // outlined; a done step struck through and dim. The next one's tip below them.
-    auto badge = [this](int n, bool filled) {
+    // outlined; a done step ticked (a check in the circle) and dim. The next one's tip below them.
+    auto badge = [this](int n, bool filled, bool done) {
         const qreal dpr = devicePixelRatioF();
         QPixmap pm(QSize(16, 16) * dpr);
         pm.setDevicePixelRatio(dpr);
@@ -1507,7 +1512,17 @@ void OverlayHost::refreshStarter() {
             p.setBrush(Qt::NoBrush);
         }
         p.drawEllipse(ring);
-        p.setFont(theme::numberFont(9, 700));
+        if (done) {
+            QPainterPath tick;
+            tick.moveTo(4.6, 8.2);
+            tick.lineTo(7.0, 10.6);
+            tick.lineTo(11.4, 5.6);
+            p.setPen(QPen(theme::textDim(), 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+            p.drawPath(tick);
+            return QIcon(pm);
+        }
+        p.setFont(theme::numberFont(11, 600));
         p.setPen(filled ? theme::uiColor("accentText") : theme::textMuted());
         p.drawText(QRectF(0, 0, 16, 16), Qt::AlignCenter, QString::number(n));
         return QIcon(pm);
@@ -1521,11 +1536,9 @@ void OverlayHost::refreshStarter() {
         const bool isNext = !done && next.isEmpty();
         if (isNext) next = QString::fromStdString(step.value("tip", std::string()));
         b->setText(QString::fromStdString(step.value("label", std::string())));
-        b->setIcon(badge(++n, isNext));
+        b->setIcon(badge(++n, isNext, done));
         b->setIconSize(QSize(16, 16));
-        QFont font = theme::uiFont(12, isNext ? 600 : 500);
-        font.setStrikeOut(done);
-        b->setFont(font);
+        b->setFont(theme::uiFont(12, isNext ? 600 : 500));
         b->setProperty("done", done);
         b->setProperty("next", isNext);
         b->style()->unpolish(b);

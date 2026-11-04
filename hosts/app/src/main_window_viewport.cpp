@@ -343,8 +343,21 @@ void MainWindow::refreshStats() {
     if (view && view->hierarchy) guides = view->hierarchy->guides().size();
     else if (document_ && document_->session().authoredHierarchy()) guides = document_->session().authoredHierarchy()->guides().size();
     else if (document_ && document_->file().data.guides) guides = document_->file().data.guides->guides().size();
-    host_->setStats(strands, lastDabMs_ > 0.0 ? lastDabMs_ : lastEvaluateMs_, gpu ? tr("GPU") : tr("LINES"),
-                    gpu ? theme::purple() : theme::textMuted(), guides);
+    refreshStarter();  // a groom that opened with hair: past its first steps once it shows
+    // Guides the graph makes while the groom has none of its own to brush: said so, so the count
+    // agrees with Guide Groups and Inputs.
+    const HierarchyPtr authored = document_ ? document_->session().authoredHierarchy() : nullptr;
+    const bool graphGuides = document_ && (!authored || authored->guides().empty());
+    // Inputs > Guides says the same once the graph has made them (it was written before the evaluation).
+    if (graphGuides && guides != static_cast<std::size_t>(-1) && guides > 0 && inputsBlock_) {
+        if (auto* l = inputsBlock_->findChild<QLabel*>(QStringLiteral("inputs_guides")); l && l->text().startsWith(tr("none yet"))) {
+            l->setText(tr("%1 from the graph").arg(guides));
+            l->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textSoft().name()));
+        }
+    }
+    // The artist's numbers always; the time per dab (and the draw path) once a brush has worked.
+    host_->setStats(strands, lastDabMs_ > 0.0 ? lastDabMs_ : 0.0, gpu ? tr("GPU") : tr("LINES"),
+                    gpu ? theme::purple() : theme::textMuted(), guides, graphGuides);
     const bool refining = r.lookdev() && r.lighting().quality == Quality::Refine;
     host_->setRefine(refining, r.accumulatedFrames(), std::clamp(r.lighting().refineFrames, 1, LookdevRenderer::kMaxAccumulatedFrames),
                      viewport_->lastFrameMs());

@@ -120,6 +120,7 @@ public:
     void setRadius(qreal radius);
     // A ring around the button when checked (a swatch's selection).
     void setCheckedRing(const QColor& color, qreal width);
+    void setEdge(const QColor& color);  // a 1 px edge at rest (a swatch on a panel of its own tone)
     // A tile: the circle (the diameter) at the left with a name beside it at `labelX`, faded by
     // `opacity` (the brush rail's rows as they widen). The whole widget is the hit target and
     // the hover covers it as one, under the circle and the name; "" goes back to a plain button.
@@ -146,6 +147,7 @@ private:
     bool hover_ = false;
     qreal radius_ = -1.0;
     QColor ring_;
+    QColor edge_;
     qreal ringWidth_ = 0.0;
     QString tileLabel_;
     int tileLabelX_ = 0;

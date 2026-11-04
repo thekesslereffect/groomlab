@@ -809,7 +809,10 @@ TEST(AppPanels, ValueSliderPaintsItsFillStateAndDisabledLook) {
     const int y = 3;  // above the texts, inside the edge
     const QColor filled = shot.pixelColor(12, y), empty = shot.pixelColor(188, y);
     EXPECT_NE(filled.rgb(), empty.rgb()) << "the fill covers the value's share from the left";
-    if (!theme::glassy()) EXPECT_EQ(slider.fillColor(), theme::uiColor("selection")) << "a solid theme fills with its selection tone";
+    if (!theme::glassy()) {
+        EXPECT_EQ(slider.fillColor(), theme::uiColor("sliderFill")) << "a solid theme fills with its slider tone";
+        EXPECT_NE(slider.fillColor(), theme::uiColor("selection")) << "a slider never looks like a selected row";
+    }
     // A driven param: tinted; disabled: faded.
     slider.setStateColor(QColor(0xCF, 0xC2, 0x7A));
     EXPECT_NE(slider.grab().toImage().pixelColor(188, y).rgb(), empty.rgb()) << "the state color shows";
@@ -3253,11 +3256,14 @@ TEST(AppPanels, TheShortcutSheetListsTheSharedTable) {
     const std::vector<Shortcut> rows = shortcutsFor(kShortcutApp);
     ASSERT_GT(rows.size(), 20u);
     for (const Shortcut& s : rows) {
-        EXPECT_TRUE(sheet.contains(QString::fromStdString(s.keys).toHtmlEscaped())) << s.id;
+        // Each key a chip of its own ("Ctrl+S / Ctrl+Shift+S": two).
+        for (const QString& key : QString::fromStdString(s.keys).split(QStringLiteral(" / "))) {
+            EXPECT_TRUE(sheet.contains(QStringLiteral("&nbsp;%1&nbsp;").arg(key.toHtmlEscaped()))) << s.id;
+        }
         EXPECT_TRUE(sheet.contains(QString::fromStdString(s.action).toHtmlEscaped())) << s.id;
     }
     for (const char* context : {"File", "Modes", "Brush", "Viewport", "Graph"}) {
-        EXPECT_TRUE(sheet.contains(QStringLiteral("<b>%1</b>").arg(QLatin1String(context)))) << context;
+        EXPECT_TRUE(sheet.contains(QStringLiteral(">%1<").arg(QString::fromLatin1(context).toUpper()))) << context << ": a caps heading";
     }
     for (const Shortcut& s : shortcutsFor(kShortcutMaya)) {
         if (!(s.hosts & kShortcutApp) && s.id == "graph.view") EXPECT_FALSE(sheet.contains(QString::fromStdString(s.action)));
@@ -4220,33 +4226,42 @@ TEST(AppPanels, GroomToolsTilesPickToolsAndTheEyeHidesTheGroom) {
     EXPECT_EQ(tools->findChild<QWidget*>(QStringLiteral("outputStrip")), nullptr);
 }
 
-TEST(AppPanels, MenuBarCornerHasTheFileNameRenderAndExport) {
+TEST(AppPanels, MenuBarCornerHasTheModeSwitchRenderAndQuickExport) {
     MainWindow window;
     window.resize(1280, 720);
     window.show();
     QWidget* corner = window.menuCorner();
     ASSERT_NE(corner, nullptr);
     EXPECT_EQ(window.menuBar()->cornerWidget(Qt::TopRightCorner), corner);
-    EXPECT_FALSE(window.cornerFileName()->isVisibleTo(&window)) << "no groom, no name";
+    // The mode switch: where you are, always in sight (disabled until a groom is open); the
+    // file's name is the window's title.
+    Segmented* modes = window.modeSwitch();
+    ASSERT_NE(modes, nullptr);
+    ASSERT_EQ(modes->items().size(), 4u);
+    EXPECT_EQ(modes->items()[1].label, QStringLiteral("Look"));
+    EXPECT_FALSE(modes->isEnabled()) << "no groom, no modes";
     ASSERT_TRUE(window.openGroom(QString::fromStdString(kSampleGroom)));
     QCoreApplication::processEvents();
-    EXPECT_TRUE(window.cornerFileName()->isVisibleTo(&window));
-    EXPECT_EQ(window.cornerFileName()->text(), QFileInfo(QString::fromStdString(kSampleGroom)).fileName());
-    EXPECT_EQ(window.cornerFileName()->property("role").toString(), QStringLiteral("cornerName"));
-    // Render (a ghost button) left of Export (the accent), at the bar's right.
+    EXPECT_TRUE(modes->isEnabled());
+    EXPECT_EQ(modes->current(), 0) << "Groom";
+    ASSERT_TRUE(window.setUiMode(QStringLiteral("cards")));
+    EXPECT_EQ(modes->current(), 2) << "it follows the mode however it changes";
+    ASSERT_TRUE(window.setUiMode(QStringLiteral("groom")));
+    EXPECT_TRUE(window.windowTitle().startsWith(QFileInfo(QString::fromStdString(kSampleGroom)).fileName()));
+    // Render and Quick Export: ghost buttons (the one filled Export is Export mode's), at the bar's right.
     QToolButton* render = window.cornerRender();
     QToolButton* exportButton = window.cornerExport();
     ASSERT_TRUE(render && exportButton);
     EXPECT_EQ(render->property("role").toString(), QStringLiteral("cornerGhost"));
-    EXPECT_EQ(exportButton->property("role").toString(), QStringLiteral("cornerPrimary"));
+    EXPECT_EQ(exportButton->property("role").toString(), QStringLiteral("cornerGhost"));
     EXPECT_TRUE(render->text().startsWith(QStringLiteral("Render")));
-    EXPECT_TRUE(exportButton->text().startsWith(QStringLiteral("Export")));
+    EXPECT_TRUE(exportButton->text().startsWith(QStringLiteral("Quick Export")));
     EXPECT_LT(render->mapTo(&window, QPoint(0, 0)).x(), exportButton->mapTo(&window, QPoint(0, 0)).x());
     EXPECT_GT(exportButton->mapTo(&window, QPoint(0, 0)).x(), window.width() / 2);
     EXPECT_FALSE(render->toolTip().isEmpty());
     EXPECT_FALSE(exportButton->toolTip().isEmpty());
     // Whole, never cut short: the bar lays the corner out again as the name changes.
-    for (QWidget* w : {static_cast<QWidget*>(window.cornerFileName()), static_cast<QWidget*>(render), static_cast<QWidget*>(exportButton)}) {
+    for (QWidget* w : {static_cast<QWidget*>(modes), static_cast<QWidget*>(render), static_cast<QWidget*>(exportButton)}) {
         EXPECT_GE(w->width(), w->sizeHint().width()) << w->objectName().toStdString();
     }
     EXPECT_GE(corner->width(), corner->sizeHint().width());

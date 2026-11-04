@@ -37,6 +37,7 @@
 #include <QLineF>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QStyledItemDelegate>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPen>
@@ -57,6 +58,55 @@
 namespace groomlab::app {
 
 namespace {
+
+// The Add Node search's rows: the type's name in the text color at the left, its menu category
+// quiet at the right after a dot of the category's color (the row's text is "Name    Category").
+class SearchRowDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        QSize s = QStyledItemDelegate::sizeHint(option, index);
+        s.setHeight(std::max(s.height(), theme::rowHeight()));
+        return s;
+    }
+    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        const QRectF row = QRectF(option.rect).adjusted(1, 1, -1, -1);
+        const bool selected = option.state & QStyle::State_Selected;
+        const bool hover = option.state & QStyle::State_MouseOver;
+        if (selected || hover) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(selected ? theme::checkedFill(theme::blue()) : theme::uiColor("hover"));
+            painter->drawRoundedRect(row, theme::smallRadius(), theme::smallRadius());
+        }
+        const QString text = index.data(Qt::DisplayRole).toString();
+        const int split = text.indexOf(QStringLiteral("    "));
+        const QString name = split < 0 ? text : text.left(split);
+        const QString category = split < 0 ? QString() : text.mid(split).trimmed();
+        const QRect inner = option.rect.adjusted(10, 0, -10, 0);
+        int right = inner.right();
+        if (!category.isEmpty()) {
+            const QFont small = theme::uiFont(11, 500);
+            const QFontMetrics fm(small);
+            const int w = fm.horizontalAdvance(category);
+            painter->setFont(small);
+            painter->setPen(theme::textMuted());
+            painter->drawText(QRect(right - w, inner.top(), w, inner.height()), Qt::AlignVCenter | Qt::AlignRight, category);
+            const QColor dot = index.data(Qt::ForegroundRole).value<QBrush>().color();
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(dot);
+            painter->drawEllipse(QPointF(right - w - 8, inner.center().y() + 0.5), 3.0, 3.0);
+            right -= w + 18;
+        }
+        const QFont words = theme::uiFont(13, selected ? 600 : 500);
+        painter->setFont(words);
+        painter->setPen(selected ? theme::checkedText(theme::text()) : theme::text());
+        painter->drawText(QRect(inner.left(), inner.top(), std::max(0, right - inner.left()), inner.height()), Qt::AlignVCenter | Qt::AlignLeft,
+                          QFontMetrics(words).elidedText(name, Qt::ElideRight, std::max(0, right - inner.left())));
+        painter->restore();
+    }
+};
 
 constexpr qreal kNodeWidth = 160.0;
 constexpr qreal kHeader = 28.0;
@@ -95,9 +145,11 @@ NodeGraphView::NodeGraphView(QWidget* parent) : QWidget(parent) {
     layout->setSpacing(8);
     searchEdit_ = new QLineEdit(search_);
     searchEdit_->setPlaceholderText(tr("Add a node..."));
-    searchEdit_->setFont(theme::uiFont(14, 600));
+    searchEdit_->setFont(theme::uiFont(13, 500));
     searchList_ = new QListWidget(search_);
     searchList_->setFont(theme::uiFont(13, 500));
+    searchList_->setItemDelegate(new SearchRowDelegate(searchList_));
+    searchList_->setMouseTracking(true);
     // The current type's description under the list (Maya's search shows it there too).
     searchAbout_ = new QLabel(search_);
     searchAbout_->setWordWrap(true);
@@ -536,6 +588,12 @@ void NodeGraphView::frameReadable() {
     qreal x = outputRight + 40.0 - shown / 2.0;  // the output near the right edge
     if (start && outputRight - start->pos.x() + 80.0 <= shown) x = (start->pos.x() + outputRight) / 2.0;
     pan_.setX(view.center().x() - x * scale_);
+    // No node cut in half at the left edge: one that would be is left out of view (its wire leads
+    // to it), the view moved past it.
+    for (const Node& n : nodes_) {
+        const qreal left = n.pos.x() * scale_ + pan_.x(), right = (n.pos.x() + n.size.width()) * scale_ + pan_.x();
+        if (left < view.left() && right > 0.0) pan_.setX(pan_.x() - right - 12.0);
+    }
 }
 
 void NodeGraphView::frameSelected() {
@@ -810,7 +868,7 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     const bool filled = header == QLatin1String("filled");
     const qreal row = rect.y() + kHeader / 2.0;
     qreal x = (node.linkableParams.empty() ? bypassButtonRect(node) : inputsButtonRect(node)).left() - 4.0;
-    const QFont number = theme::numberFont(10);
+    const QFont number = theme::numberFont(11);
     if (!badges.time.isEmpty()) {
         const qreal w = QFontMetricsF(number).horizontalAdvance(badges.time);
         QColor ink = badges.timeColor;
@@ -857,14 +915,14 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.drawEllipse(c + QPointF(0.0, h * 0.34), 0.9, 0.9);
         x -= 17.0;
     }
-    painter.setFont(theme::uiFont(13, minimal ? 700 : 800));
+    painter.setFont(theme::uiFont(14, 600));  // (drawn at the view's scale: about 11 px at the readable 0.8)
     painter.setPen(headerText(color));
     const QRectF title(titleX, rect.y(), std::max(24.0, x - titleX - 2.0), kHeader);
     painter.drawText(title, Qt::AlignVCenter | Qt::AlignLeft,
                      QFontMetricsF(painter.font()).elidedText(QString::fromStdString(node.name), Qt::ElideRight, title.width()));
     // When it runs, unless always: a tag under the card.
     if (node.evaluation == "viewportOnly" || node.evaluation == "renderOnly") {
-        painter.setFont(theme::uiFont(10, 600));
+        painter.setFont(theme::uiFont(11, 500));
         painter.setPen(theme::textMuted());
         painter.drawText(QRectF(rect.x() + 4, rect.bottom() + 2, rect.width() - 8, 16), Qt::AlignLeft | Qt::AlignVCenter,
                          node.evaluation == "viewportOnly" ? tr("viewport only") : tr("render only"));
@@ -905,7 +963,7 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         }
     }
     // The ports: inputs down the left edge, outputs down the right, named inside.
-    painter.setFont(theme::uiFont(11, 600));
+    painter.setFont(theme::uiFont(12, 500));
     for (std::size_t i = 0; i < node.inputs.size(); ++i) {
         const QPointF at = inputPos(node, static_cast<int>(i));
         painter.setPen(Qt::NoPen);
@@ -927,7 +985,7 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     if (node.type != node.name && node.inputs.size() <= 1 && node.outputs.size() <= 1) {
         // Room under the ports for the type, dim.
         painter.setPen(theme::textMuted());
-        painter.setFont(theme::uiFont(10, 600));
+        painter.setFont(theme::uiFont(11, 500));
         painter.drawText(QRectF(rect.x(), rect.bottom() - 16, rect.width(), 14), Qt::AlignCenter,
                          QString::fromStdString(node.libraryLabel.empty() ? nodeLabel(node.type) : node.libraryLabel));
     }

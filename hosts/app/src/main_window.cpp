@@ -230,8 +230,9 @@ void MainWindow::buildMenuBar() {
 }
 
 void MainWindow::buildMenuCorner() {
-    // The design's corner of the menu bar: the groom's file name (muted), Render ▾ (ghost) and
-    // Export ▾ (the accent): what comes after grooming one click away, where Maya's and Blender's
+    // The design's corner of the menu bar: the mode switch (Groom, Look, Cards, Export: where you
+    // are, always in sight; the file's name is the window's title and the Groom Tools' header),
+    // Render ▾ (ghost) and Export ▾ (the accent): what comes after grooming one click away, where Maya's and Blender's
     // Groom Tools have their Output strip (palette.output, which the app's Groom Tools leave out;
     // its Simulate Range, Studio, Transfer and Import are in the GroomLab menu). The menus are
     // menus.json's output.render and output.export, with the window's bindings; the tips are
@@ -250,11 +251,29 @@ void MainWindow::buildMenuCorner() {
     auto* row = new QHBoxLayout(menuCorner_);
     row->setContentsMargins(0, 2, 6, 2);
     row->setSpacing(4);
-    cornerName_ = new QLabel(menuCorner_);
-    cornerName_->setObjectName(QStringLiteral("cornerFileName"));
-    cornerName_->setProperty("role", "cornerName");
-    row->addWidget(cornerName_);
-    row->addSpacing(8);
+    modeSwitch_ = new Segmented(menuCorner_);
+    modeSwitch_->setObjectName(QStringLiteral("modeSwitch"));
+    {
+        std::vector<Segmented::Item> items;
+        const char* keys[] = {"1", "2", "3", "4"};
+        int k = 0;
+        for (const QString& label : {tr("Groom"), tr("Look"), tr("Cards"), tr("Export")}) {
+            items.push_back({label, QColor(), QColor(), tr("%1 mode (Ctrl+%2)").arg(label, QLatin1String(keys[k++]))});
+        }
+        modeSwitch_->setItems(std::move(items));
+    }
+    modeSwitch_->setBackground(theme::uiColor("raised"));
+    modeSwitch_->setFontSize(theme::fontSize());
+    modeSwitch_->setSegmentHeight(theme::rowHeight() - 6);
+    modeSwitch_->setPadding(2);
+    modeSwitch_->setSegmentPadding(12);
+    modeSwitch_->setCursor(Qt::PointingHandCursor);
+    connect(modeSwitch_, &Segmented::changed, this, [this](int index) {
+        static const char* names[] = {"groom", "look", "cards", "export"};
+        if (index >= 0 && index < 4) setUiMode(QLatin1String(names[index]));
+    });
+    row->addWidget(modeSwitch_);
+    row->addSpacing(10);
     auto button = [&](const char* ref, const QString& text, const char* tipId, const char* role, const char* name) {
         QToolButton* b = GroomTools::menuButton(ref, text + QStringLiteral("  ▾"), tipOf(tipId), bindings, options, menuCorner_,
                                                 QStringLiteral("corner_"));
@@ -266,7 +285,9 @@ void MainWindow::buildMenuCorner() {
         return b;
     };
     cornerRender_ = button("menus/output.render", tr("Render"), "render", "cornerGhost", "cornerRender");
-    cornerExport_ = button("menus/output.export", tr("Export"), "export", "cornerPrimary", "cornerExport");
+    // Quick Export: the formats one click away, a ghost like Render (the Export mode has the one
+    // filled Export).
+    cornerExport_ = button("menus/output.export", tr("Quick Export"), "export", "cornerGhost", "cornerExport");
     menuBar()->setCornerWidget(menuCorner_, Qt::TopRightCorner);
     fitMenuCorner();
 }
@@ -430,16 +451,34 @@ bool MainWindow::showHelp(const QString& page) {
         title = tr("Keyboard Shortcuts");
         // The one shortcut table every host shows (groomlab/shortcuts.h: the docs site reads the
         // same rows), the app's, a heading row per context (File, Modes, Brush, Viewport, Graph).
-        text = QStringLiteral("<table cellspacing='0' cellpadding='3'>");
-        std::string context;
+        // Keys as small mono chips (each kept whole, wrapping between chips), the action beside
+        // them taking the rest of the width; rows of a context with one action merged ("B + drag",
+        // "Middle-drag": Brush radius); caps group headers.
+        text = QStringLiteral("<table cellspacing='0' cellpadding='4' width='100%'>");
+        const QString chip = QStringLiteral("<span style='white-space:nowrap; font-family:\"%1\"; font-size:11px; color:%2; background-color:%3;'>&nbsp;%4&nbsp;</span>");
+        struct Row {
+            std::string context, action;
+            QStringList keys;
+        };
+        std::vector<Row> rows;
         for (const Shortcut& s : shortcutsFor(kShortcutApp)) {
-            if (s.context != context) {
-                context = s.context;
-                text += QStringLiteral("<tr><td colspan='2' style='padding-top:8px; color:%1'><b>%2</b></td></tr>")
-                            .arg(theme::textMuted().name(), QString::fromStdString(context).toHtmlEscaped());
+            const QStringList keys = QString::fromStdString(s.keys).split(QStringLiteral(" / "));
+            auto same = std::find_if(rows.begin(), rows.end(), [&](const Row& r) { return r.context == s.context && r.action == s.action; });
+            if (same != rows.end()) same->keys << keys;
+            else rows.push_back({s.context, s.action, keys});
+        }
+        std::string context;
+        for (const Row& r : rows) {
+            if (r.context != context) {
+                text += QStringLiteral("<tr><td colspan='2' style='padding-top:%1px; font-size:11px; font-weight:600; color:%2'>%3</td></tr>")
+                            .arg(context.empty() ? 2 : 12)
+                            .arg(theme::textMuted().name(), QString::fromStdString(r.context).toUpper().toHtmlEscaped());
+                context = r.context;
             }
-            text += QStringLiteral("<tr><td><b>%1</b></td><td>%2</td></tr>")
-                        .arg(QString::fromStdString(s.keys).toHtmlEscaped(), QString::fromStdString(s.action).toHtmlEscaped());
+            QStringList keys;
+            for (const QString& k : r.keys) keys << chip.arg(theme::monoFamily(), theme::text().name(), theme::uiColor("raised").name(), k.toHtmlEscaped());
+            text += QStringLiteral("<tr><td width='46%'>%1</td><td width='54%' style='color:%2'>%3</td></tr>")
+                        .arg(keys.join(QStringLiteral(" ")), theme::textDim().name(), QString::fromStdString(r.action).toHtmlEscaped());
         }
         text += QStringLiteral("</table>");
     } else if (page == QStringLiteral("about")) {
@@ -504,12 +543,7 @@ void MainWindow::refreshTitle() {
     }
     setWindowTitle(title);
     shell_->setFileName(name, dirty);
-    if (cornerName_) {
-        cornerName_->setText(name + (dirty ? QStringLiteral(" *") : QString()));
-        cornerName_->setToolTip(document_ && !document_->path().empty() ? QString::fromStdString(document_->path()) : QString());
-        cornerName_->setVisible(!name.isEmpty());
-        fitMenuCorner();
-    }
+    if (modeSwitch_) modeSwitch_->setEnabled(document_ != nullptr);
     refreshExportState();
 }
 

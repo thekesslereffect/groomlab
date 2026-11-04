@@ -200,7 +200,8 @@ void MainWindow::buildProperties() {
             auto* label = new QLabel(PropertiesPanel::partLabel("inputs", part));
             label->setProperty("role", "propLabel");
             label->setToolTip(PropertiesPanel::partTip("inputs", part));
-            label->setMinimumWidth(56);
+            label->setMinimumWidth(76);
+            label->setObjectName(QStringLiteral("inputsLabel_") + QLatin1String(part));
             // One line (the row's height; the whole text in the tip when it is cut).
             auto* value = valueLabel();
             value->setWordWrap(false);
@@ -218,6 +219,7 @@ void MainWindow::buildProperties() {
             grid->addWidget(value, row, 2, Qt::AlignVCenter);
             grid->addWidget(actions, row, 3, Qt::AlignRight | Qt::AlignVCenter);
             grid->setRowMinimumHeight(row, 22);
+            value->setProperty("row", row);
             ++row;
         };
         auto* transfer = inputAction("link", tr("Transfer to another mesh: the guides, parts and flow re-rooted, the maps projected"),
@@ -250,6 +252,10 @@ void MainWindow::buildProperties() {
         scalpTriangles_ = valueLabel();
         scalpTriangles_->setObjectName(QStringLiteral("scalpSubdivisionTriangles"));
         scalpTriangles_->setWordWrap(false);
+        // The count gives way first (elided, whole in its tooltip): the row never pushes the dock wider.
+        scalpTriangles_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        scalpTriangles_->setMinimumWidth(48);
+        scalpSubdivision_->setMinimumWidth(64);
         auto* row = hbox({scalpSubdivision_, scalpTriangles_});
         p->setControl("scalpSubdivision", row);
         scalpSubdivision_->setToolTip(row->toolTip());
@@ -275,7 +281,7 @@ void MainWindow::buildProperties() {
     });
     {
         groomScale_ = valueLabel(QStringLiteral("1.00x"));
-        auto* setReference = smallButton(tr("Set Scale Reference"), QString());
+        auto* setReference = smallButton(tr("Set Reference"), QString());
         setReference->setObjectName(QStringLiteral("propSetScaleReference"));
         connect(setReference, &QPushButton::clicked, this, [this] {
             if (!document_) return;
@@ -557,6 +563,14 @@ void MainWindow::refreshProperties() {
         if (!l) return;
         l->setText(text);
         const bool none = text == tr("none") || text.startsWith(tr("none yet")) || text == QStringLiteral("—");
+        const QString key = QLatin1String(part);
+        if (key == QStringLiteral("rest") || key == QStringLiteral("scalps")) {
+            const bool shown = !none;
+            for (const QString& name : {QStringLiteral("inputsIcon_"), QStringLiteral("inputsLabel_"), QStringLiteral("inputs_"), QStringLiteral("inputsActions_")}) {
+                if (auto* w = inputsBlock_->findChild<QWidget*>(name + key)) w->setVisible(shown);
+            }
+            if (auto* grid = qobject_cast<QGridLayout*>(inputsBlock_->layout())) grid->setRowMinimumHeight(l->property("row").toInt(), shown ? 22 : 0);
+        }
         l->setStyleSheet(none ? QStringLiteral("color: %1; font-style: italic;").arg(theme::textMuted().name())
                               : QStringLiteral("color: %1;").arg(theme::textSoft().name()));
     };
@@ -573,8 +587,12 @@ void MainWindow::refreshProperties() {
             guides = h->guides().size();
             groups = h->groups().size();
         }
-        set("guides", guides ? tr("%1 guides in %2 group%3").arg(guides).arg(groups).arg(groups == 1 ? QString() : QStringLiteral("s"))
-                             : tr("none yet: place them"));
+        // None of its own: the guides the graph makes (as the stats line says them), else none yet.
+        const ViewResult& view = document_->lastView();
+        const std::size_t made = view.hierarchy ? view.hierarchy->guides().size() : 0;
+        set("guides", guides  ? tr("%1 guides in %2 group%3").arg(guides).arg(groups).arg(groups == 1 ? QString() : QStringLiteral("s"))
+                      : made  ? tr("%1 from the graph").arg(made)
+                              : tr("none yet: place them"));
         QStringList colliders;
         for (const auto& [name, mesh] : file.data.meshes) colliders << qs(name);
         for (const SurfacePtr& prop : props_) {

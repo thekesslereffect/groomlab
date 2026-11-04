@@ -266,7 +266,7 @@ std::map<GroupId, std::array<float, 3>> autoGuideColors(const GuideHierarchy& h,
         hues[g->id] = best;
     }
     std::map<GroupId, std::array<float, 3>> colors;
-    for (const auto& [id, hue] : hues) colors[id] = hueColor(hue, 0.75f, 0.95f);
+    for (const auto& [id, hue] : hues) colors[id] = hueColor(hue, kGuideSaturation, kGuideValue);
     return colors;
 }
 

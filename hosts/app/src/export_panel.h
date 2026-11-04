@@ -104,6 +104,7 @@ private:
     std::vector<RoundButton*> targets_;
     QLabel* description_ = nullptr;
     QCheckBox* range_ = nullptr;
+    QWidget* framesBox_ = nullptr;  // From, to and Step: shown while Frame range is on
     QSpinBox* first_ = nullptr;
     QSpinBox* last_ = nullptr;
     QDoubleSpinBox* step_ = nullptr;
