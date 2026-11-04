@@ -41,6 +41,64 @@ namespace groomlab {
 
 namespace {
 
+// The guides an Interpolate feeding `shown` takes, when a GuideCache or Simulate node on its guides
+// input moved them this frame (its output not its input passed through): what the viewport draws
+// as the moving guides. Every value read is the evaluation's own (cached): no extra work.
+GuidesPtr movingGuidesOf(Graph& graph, NodeId shown, const EvalContext& ctx) {
+    auto isMotion = [&](NodeId id) {
+        const std::string type = graph.node(id).typeName();
+        return (type == "GuideCache" || type == "Simulate") && !graph.bypassed(id);
+    };
+    auto guidesSlot = [&](NodeId id) -> std::ptrdiff_t {
+        const std::vector<PortSpec> specs = graph.inputSpecs(id);
+        for (std::size_t slot = 0; slot < specs.size(); ++slot) {
+            if (specs[slot].name == "guides") return static_cast<std::ptrdiff_t>(slot);
+        }
+        return -1;
+    };
+    std::vector<NodeId> stack{shown}, seen;
+    while (!stack.empty()) {
+        const NodeId id = stack.back();
+        stack.pop_back();
+        if (std::find(seen.begin(), seen.end(), id) != seen.end()) continue;
+        seen.push_back(id);
+        if (graph.node(id).typeName() == "Interpolate" && !graph.bypassed(id)) {
+            const std::ptrdiff_t slot = guidesSlot(id);
+            NodeId source = 0;
+            std::size_t output = 0;
+            if (slot >= 0 && graph.inputSource(id, static_cast<std::size_t>(slot), &source, &output)) {
+                // Up the guides' chain to the nearest node that moves them.
+                NodeId at = source;
+                for (int steps = 0; at && steps < 64 && !isMotion(at); ++steps) {
+                    const std::ptrdiff_t up = guidesSlot(at);
+                    NodeId next = 0;
+                    if (up < 0 || !graph.inputSource(at, static_cast<std::size_t>(up), &next)) at = 0;
+                    else at = next;
+                }
+                if (at) {
+                    const GuidesPtr moved = valueAs<GuidesPtr>(graph.evaluateOutput(source, output, ctx));
+                    NodeId fed = 0;
+                    std::size_t fedOutput = 0;
+                    const std::ptrdiff_t in = guidesSlot(at);
+                    const GuidesPtr before = in >= 0 && graph.inputSource(at, static_cast<std::size_t>(in), &fed, &fedOutput)
+                                                 ? valueAs<GuidesPtr>(graph.evaluateOutput(fed, fedOutput, ctx))
+                                                 : nullptr;
+                    if (moved && !moved->empty() && moved != before) return moved;
+                }
+            }
+        }
+        for (std::size_t slot = 0; slot < graph.inputSpecs(id).size(); ++slot) {
+            NodeId source = 0;
+            if (graph.inputSource(id, slot, &source)) stack.push_back(source);
+        }
+    }
+    return nullptr;
+}
+
+}  // namespace
+
+namespace {
+
 // A double's bits, for a key (std::hash is the standard library's own).
 std::uint64_t doubleBits(double d) {
     std::uint64_t bits = 0;
@@ -1586,6 +1644,7 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
             }
             StrandsPtr strands = viewed->graph.evaluateStrands(shown, ctx);
             const StrandsPtr evaluated = strands;  // the node's result (before pinning or carrying)
+            out.movingGuides = movingGuidesOf(viewed->graph, shown, ctx);
             if (centersOf) {
                 const std::shared_ptr<const std::vector<Vec3f>> dots = clumpCenterDots(*viewed, centersOf, evaluated, ctx);
                 if (!previousCenters || *previousCenters != *dots) out.clumpCenters = dots;  // the same: kept

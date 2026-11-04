@@ -1611,6 +1611,7 @@ DisplayInputs DisplayInputs::fromView(const ViewResult& view, bool stroke) {
     in.strands = view.strands;
     in.viewedRoots = view.viewedRoots;
     in.clumpCenters = view.clumpCenters;
+    in.movingGuides = view.movingGuides;
     in.scalp = view.scalp;
     in.hierarchy = view.hierarchy;
     in.parts = view.parts;
@@ -1972,6 +1973,11 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
         key = hashCombine(key, clumpCentersHash_);
         for (const float c : theme.clumpCenters) key = hashFloat(key, c);
     }
+    const GuideSet* moving = s.guides && s.movingGuides && in.movingGuides && !in.movingGuides->empty() ? in.movingGuides.get() : nullptr;
+    if (moving) {
+        key = hashCombine(key, in.movingGuides->contentHash());
+        for (const float c : theme.movingGuides) key = hashFloat(key, c);
+    }
     if (!rebuild(DisplayPart::Guides, key)) return;
     // By group (or by a layer, black to white), other levels dimmed when one is isolated, frozen
     // ones in the theme's color. Each group in its automatic color; its own (the host's, or a
@@ -2042,6 +2048,7 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
             }
             const bool dimmed = isolated != kNoGroup && !inIsolated(g.group);
             if (dimmed) c = {c[0] * 0.25f, c[1] * 0.25f, c[2] * 0.25f};
+            if (moving) c = {c[0] * 0.4f, c[1] * 0.4f, c[2] * 0.4f};  // the groomed pose, under the moving guides
             const std::size_t first = guides.positions.size() / 3;
             const std::size_t drawn = appendGuideCurve(guides, g.points, smoothing);
             guides.colors.resize((first + drawn) * 4);
@@ -2060,6 +2067,30 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
                 if (pointMode == 1 ? !end : !(end || k % stride == 0)) continue;
                 dots.points.push_back(points[k]);
                 dots.colors.push_back(c);
+            }
+        }
+    }
+    // The moving guides over the groomed ones, in their own color with a dot at the tip (the
+    // groups hidden in the viewport hidden here too).
+    if (moving) {
+        for (const Guide& g : moving->guides()) {
+            if (g.points.size() < 2) continue;
+            if (hierarchy && !hiddenNames.empty()) {
+                const HierarchyGuide* own = hierarchy->guide(g.id);
+                if (own && hiddenGuide(*own)) continue;
+            }
+            const std::size_t first = guides.positions.size() / 3;
+            const std::size_t drawn = appendGuideCurve(guides, g.points, smoothing);
+            guides.colors.resize((first + drawn) * 4);
+            for (float* out = guides.colors.data() + first * 4; out < guides.colors.data() + guides.colors.size(); out += 4) {
+                out[0] = theme.movingGuides[0];
+                out[1] = theme.movingGuides[1];
+                out[2] = theme.movingGuides[2];
+                out[3] = 1.0f;
+            }
+            if (pointMode != 0) {
+                dots.points.push_back(g.points.back());
+                dots.colors.push_back(theme.movingGuides);
             }
         }
     }

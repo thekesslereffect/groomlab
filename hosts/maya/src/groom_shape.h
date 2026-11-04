@@ -516,6 +516,7 @@ public:
     bool showsRoots();
     // The viewport shows a Clump: its clump centers, as dots on the scalp (null: none).
     std::shared_ptr<const std::vector<groomlab::Vec3f>> clumpCenters();
+    groomlab::GuidesPtr movingGuides();  // the guides a GuideCache or Simulate node moved (ViewResult::movingGuides)
     // The graph node the viewport shows instead of the output ("": the output).
     std::string viewedNode();
     // The preview density the shown strands were evaluated at (ViewResult::density; 1 without).

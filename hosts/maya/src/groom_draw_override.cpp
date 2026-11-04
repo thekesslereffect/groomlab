@@ -807,6 +807,7 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
     in.strands = strands;
     in.viewedRoots = shape_->showsRoots();  // a Scatter shown alone: its roots as dots
     in.clumpCenters = shape_->clumpCenters();  // a Clump shown: its centers as dots
+    in.movingGuides = shape_->movingGuides();  // over the groomed guides, in their own color
     in.scalp = shape_->evaluatedScalp();
     in.hierarchy = shape_->evaluatedHierarchy();
     in.parts = shape_->evaluatedParts();

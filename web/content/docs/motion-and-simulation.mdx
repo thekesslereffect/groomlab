@@ -293,6 +293,10 @@ earlier or later than the shot) and **Blend** (1 the cache's pose, 0 the guides 
 to fade the simulation in). Guides with no curve in the cache keep their pose, and the node's note
 says how many were posed. Bypass the node to see the groomed guides.
 
+While a GuideCache or Simulate node moves the guides, the viewport draws them as they move, in
+amber over the groomed guides (which dim): what the strands follow. Brushes still edit the groomed
+guides.
+
 ```python
 # Maya
 sim.export_guides(groom, "guides.abc", start=1, end=100)  # every guide; or one group: "primary"

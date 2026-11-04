@@ -407,6 +407,33 @@ json recordImages() {
     return out;
 }
 
+TEST(Display, MovingGuidesDrawOverTheGroomedOnesDimmed) {
+    // A GuideCache's or Simulate's guides (ViewResult::movingGuides): drawn in the theme's
+    // movingGuides color over the groomed guides, which dim; off in the settings, as before.
+    const Scenario s = scenarios()[0];  // (a copy: scenarios() makes a new list)
+    DisplayBuilder plain;
+    const DisplayGeometry groomed = *plain.update(inputsFor(s), s.settings).item(DisplayItemId::Guides).geometry;
+    ASSERT_GT(groomed.vertexCount(), 0u);
+    GuideSet shifted = fixture().view.hierarchy->flatten(-1);
+    for (Guide& g : shifted.guides()) {
+        for (Vec3f& p : g.points) p.x += 0.1f;
+    }
+    DisplayInputs in = inputsFor(s);
+    in.movingGuides = std::make_shared<const GuideSet>(shifted);
+    DisplayBuilder builder;
+    const DisplayGeometry& both = *builder.update(in, s.settings).item(DisplayItemId::Guides).geometry;
+    ASSERT_GT(both.vertexCount(), groomed.vertexCount());
+    const DisplayTheme& theme = s.settings.theme;
+    for (int c = 0; c < 3; ++c) {
+        EXPECT_NEAR(both.colors[static_cast<std::size_t>(c)], groomed.colors[static_cast<std::size_t>(c)] * 0.4f, 1e-6f);  // dimmed
+        EXPECT_NEAR(both.colors[both.colors.size() - 4 + static_cast<std::size_t>(c)], theme.movingGuides[static_cast<std::size_t>(c)], 1e-6f);
+    }
+    DisplaySettings off = s.settings;
+    off.movingGuides = false;
+    DisplayBuilder hidden;
+    EXPECT_EQ(hidden.update(in, off).item(DisplayItemId::Guides).geometry->vertexCount(), groomed.vertexCount());
+}
+
 TEST(Display, BuffersAsRecorded) {
     json actual = json::object();
     for (const Scenario& s : scenarios()) {

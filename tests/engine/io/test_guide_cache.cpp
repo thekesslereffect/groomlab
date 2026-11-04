@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <filesystem>
 
+#include <nlohmann/json.hpp>
+#include "../core/test_helpers.h"
+#include "groomlab/groom_session.h"
 #include "groomlab/alembic_io.h"
 #include "groomlab/alembic_operators.h"
 #include "groomlab/graph.h"
@@ -117,6 +120,50 @@ TEST(GuideCache, ByOrderForACacheWithoutIdsAndNoFileIsAPassThrough) {
     g.graph.node(g.cache).params().set("path", std::string());
     const GuidesPtr fed = g.eval(1.0);
     for (const Guide& x : fed->guides()) EXPECT_NEAR(x.points.back().x, 0.0f, 1e-6f);
+    std::remove(path.c_str());
+}
+
+TEST(GuideCache, TheViewGivesTheGuidesItMovesForTheViewport) {
+    // The session's view: the guides Interpolate takes after the GuideCache (ViewResult::
+    // movingGuides, drawn over the groomed guides); none when the node is bypassed or reads nothing.
+    const std::string path = tempPath("groomlab_guide_cache_view.abc");
+    writeCache(path, {swung({1, 2, 3}, 0.4f)});
+    registerAlembicOperators(OperatorRegistry::instance());
+    auto graphWith = [&](const std::string& cachePath, bool bypass) {
+        nlohmann::json g = {
+            {"version", 1},
+            {"nodes",
+             {{{"name", "scalp"}, {"type", "Scalp"}},
+              {{"name", "guides"}, {"type", "Guides"}},
+              {{"name", "cache"}, {"type", "GuideCache"}, {"params", {{"path", cachePath}}}, {"bypass", bypass}},
+              {{"name", "scatter"}, {"type", "Scatter"}, {"params", {{"density", 40.0}}}},
+              {{"name", "interpolate"}, {"type", "Interpolate"}},
+              {{"name", "output"}, {"type", "Output"}}}},
+            {"connections",
+             {{{"from", "scalp"}, {"to", "scatter"}, {"input", "scalp"}},
+              {{"from", "guides"}, {"to", "cache"}, {"input", "guides"}},
+              {{"from", "cache"}, {"to", "interpolate"}, {"input", "guides"}},
+              {{"from", "scatter"}, {"to", "interpolate"}, {"input", "strands"}},
+              {{"from", "interpolate"}, {"to", "output"}, {"input", "strands"}}}},
+            {"output", "output"}};
+        return g.dump();
+    };
+    auto moving = [&](const std::string& graph) {
+        GroomData data;
+        data.scalp = test::makePlane(8);
+        data.guides = restGuides();
+        data.graphJson = graph;
+        GroomSession session(data);
+        ViewRequest request;
+        request.time = 1.0;
+        return session.evaluate(request).movingGuides;
+    };
+    const GuidesPtr moved = moving(graphWith(path, false));
+    ASSERT_TRUE(moved);
+    ASSERT_EQ(moved->size(), 3u);
+    EXPECT_NEAR(moved->guides()[0].points.back().x, 0.4f, 1e-4f);
+    EXPECT_FALSE(moving(graphWith(path, true)));          // bypassed
+    EXPECT_FALSE(moving(graphWith(std::string(), false)));  // no file: the guides pass through
     std::remove(path.c_str());
 }
 
