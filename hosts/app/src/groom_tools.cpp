@@ -403,8 +403,8 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     emptyItems_ = new QVBoxLayout(empty_);
     emptyItems_->setContentsMargins(12, 12, 12, 12);
     emptyItems_->setSpacing(8);
-    emptyItems_->addWidget(label(qs(palette.at("empty").value("title", std::string())), "title", empty_));
-    emptyItems_->addWidget(label(tr("Open a groom (File > Open Groom, or drop a .groom on the window), or make one on a mesh."), "about", empty_));
+    emptyItems_->addWidget(label(tr("More ways to start"), "title", empty_));
+    emptyItems_->addWidget(label(tr("Try a sample head, or bring a groom in from Alembic curves or a groom file."), "about", empty_));
     outer->addWidget(empty_);
 
     work_ = new QWidget(content);
@@ -435,7 +435,7 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     connect(card_, &BrushPanel::guidesEdited, this, &GroomTools::guidesEdited);
     connect(card_, &BrushPanel::clearFlowRequested, this, &GroomTools::clearFlowRequested);
     connect(card_, &BrushPanel::lengthsPreviewed, this, &GroomTools::lengthsPreviewed);
-    work->insertWidget(0, card_);
+    work->insertWidget(0, card_);  // (the tool's hint goes over it below)
     tubes_ = new TubePanel();
     connect(tubes_, &TubePanel::guidesEdited, this, &GroomTools::guidesEdited);
     connect(tubes_, &TubePanel::previewed, this, &GroomTools::tubesPreviewed);
@@ -446,8 +446,9 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
     card_->setTubes(tubes_);
     noTool_ = label(tr("Pick a tool, then drag over the groom in the viewport."), "hint", work_);
     noTool_->setObjectName(QStringLiteral("noTool"));
-    noTool_->setContentsMargins(0, 8, 0, 4);
-    work->insertWidget(1, noTool_);
+    noTool_->setContentsMargins(0, 4, 0, 2);
+    noTool_->setWordWrap(true);
+    work->insertWidget(0, noTool_);
 
     connect(tabs_, &QTabBar::currentChanged, this, [this](int index) {
         refreshVisibility();
@@ -516,6 +517,9 @@ void GroomTools::setBindings(const ui::Bindings& bindings, const ui::FillOptions
     resolve.keep = [&bindings](const std::string& id) { return bindings.count(id) > 0; };
     resolve.dropGenerators = true;
     for (const ui::Item& item : defs().resolve(defs().get("palette/empty/items"), resolve)) {
+        // The app's start card in the viewport holds New Groom on Mesh (and Open): the dock keeps
+        // the other ways to start (a sample mesh, an import), not a second primary.
+        if (item.kind == ui::Item::Kind::Action && item.id == "groom.create") continue;
         if (item.kind == ui::Item::Kind::Action) {
             auto* b = new QPushButton(qs(item.label), empty_);
             b->setObjectName(QStringLiteral("empty_") + qs(item.id));
@@ -677,7 +681,11 @@ void GroomTools::refreshCard() {
     card_->setTool(shown);
     const bool open = groomOpen();
     card_->setVisible(open && card_->hasSettings());
-    noTool_->setVisible(open && !card_->hasSettings() && tab != "photos");
+    // Over the card: what the picked tool does (the catalog's hint) and the gestures every brush
+    // shares; no tool: how to start.
+    const groomlab::BrushEntry* picked = card_->hasSettings() ? brushEntry(shown) : nullptr;
+    noTool_->setText(picked ? qs(picked->hint) + tr("  Shift+drag smooths.") : tr("Pick a tool, then drag over the groom in the viewport."));
+    noTool_->setVisible(open && tab != "photos" && (picked || !card_->hasSettings()));
     if (!tubes_->isHidden() && (tubesStale_ || !hadTubes)) {
         tubesStale_ = false;
         tubes_->refresh();
@@ -832,12 +840,12 @@ void GroomTools::refreshVisibility() {
     if (auto* work = qobject_cast<QVBoxLayout*>(work_->layout())) {
         const auto paint = lists_.find("paint");
         const int want = tab == "paint" && paint != lists_.end() ? work->indexOf(paint->second) + 1 : 0;
-        if (work->indexOf(card_) != want && want >= 0) {
+        if (work->indexOf(noTool_) != want && want >= 0) {
             work->removeWidget(card_);
             work->removeWidget(noTool_);
             const int at = tab == "paint" && paint != lists_.end() ? work->indexOf(paint->second) + 1 : 0;
-            work->insertWidget(at, card_);
-            work->insertWidget(at + 1, noTool_);
+            work->insertWidget(at, noTool_);
+            work->insertWidget(at + 1, card_);
         }
     }
     eye_->setEnabled(open);

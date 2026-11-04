@@ -707,6 +707,7 @@ void ValueSlider::paintEvent(QPaintEvent* /*event*/) {
     QColor base = editingNow ? theme::backdrop() : (hover_ && enabled ? fieldHover() : fieldBase());
     QColor fill = fillColor();
     QColor edge = editingNow || focusShown ? fieldAccent() : theme::glassy() ? fieldEdge() : QColor(Qt::transparent);
+    const qreal edgeWidth = !theme::glassy() && (editingNow || focusShown) ? 2.0 : 1.0;
     if (state_.isValid() && !editingNow) {
         base = mixed(base, withAlpha(state_, 255), 0.22);
         fill = mixed(fill, withAlpha(state_, 255), 0.45);
@@ -720,10 +721,11 @@ void ValueSlider::paintEvent(QPaintEvent* /*event*/) {
             painter.save();
             painter.setClipPath(shape);
             painter.fillRect(QRectF(0.0, 0.0, filled, height()), fill);
+            if (!theme::glassy() && !state_.isValid()) painter.fillRect(QRectF(0.0, height() - 2.0, filled, 2.0), theme::textDim().darker(115));
             painter.restore();
         }
     }
-    painter.setPen(QPen(edge, 1.0));
+    painter.setPen(QPen(edge, edgeWidth));
     painter.setBrush(Qt::NoBrush);
     painter.drawPath(shape);
 
@@ -1066,22 +1068,22 @@ void Segmented::paintEvent(QPaintEvent* /*event*/) {
     QPainter painter(this);
     if (!isEnabled()) painter.setOpacity(0.45);  // (the modes before a groom is open)
     const bool glassy = theme::glassy();
-    const qreal outer = glassy ? height() / 2.0 : theme::controlRadius();
-    paintGlass(painter, QRectF(rect()), outer, background_, glassy && background_ == theme::glass() ? theme::glassEdge() : QColor());
+    const qreal outer = glassy ? height() / 2.0 : theme::controlRadius() + 1;
+    paintGlass(painter, QRectF(rect()), outer, glassy ? background_ : theme::backdrop(), glassy && background_ == theme::glass() ? theme::glassEdge() : QColor());
     const std::vector<QRect> rects = segmentRects();
     for (std::size_t i = 0; i < items_.size(); ++i) {
         const bool on = static_cast<int>(i) == current_;
         if (on) {
-            const qreal inner = glassy ? rects[i].height() / 2.0 : std::max(2, theme::controlRadius() - 2);
-            if (glassy) paintGlass(painter, QRectF(rects[i]), inner, theme::segmentFill(items_[i].fill));
-            if (!glassy) {
-                // The chosen segment marked by more than its tone: an accent line along its foot.
-                const QRectF r(rects[i]);
+            const qreal inner = glassy ? rects[i].height() / 2.0 : std::max(2, theme::controlRadius() - 1);
+            if (glassy) {
+                paintGlass(painter, QRectF(rects[i]), inner, theme::segmentFill(items_[i].fill));
+            } else {
+                paintGlass(painter, QRectF(rects[i]), inner, theme::uiColor("hover"));
                 painter.save();
                 painter.setRenderHint(QPainter::Antialiasing, true);
-                painter.setPen(Qt::NoPen);
-                painter.setBrush(theme::uiColor("accent"));
-                painter.drawRoundedRect(QRectF(r.left() + inner, r.bottom() - 1.5, r.width() - 2 * inner, 2.0), 1.0, 1.0);
+                painter.setPen(QPen(QColor(255, 255, 255, 18), 1.0));  // a faint top light: raised
+                const QRectF r = QRectF(rects[i]).adjusted(inner, 0.5, -inner, 0.0);
+                painter.drawLine(r.topLeft(), r.topRight());
                 painter.restore();
             }
         }

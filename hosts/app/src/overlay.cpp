@@ -317,11 +317,11 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     melanin_ = groomSlider(tr("Melanin"), theme::yellow(), 0.0, 1.0, "melanin", &GroomColor::melanin, ms(&HairMaterial::melanin, true));
     redness_ = groomSlider(tr("Redness"), theme::red(), 0.0, 1.0, "redness", &GroomColor::redness, ms(&HairMaterial::melaninRedness, true));
     roughness_ = groomSlider(tr("Roughness"), theme::blue(), 0.0, 1.0, "roughness", &GroomColor::roughness, ms(&HairMaterial::roughness));
-    tipColor_ = groomColorRow(tr("Tip color"), "tipColor", &tipColorRow_);
-    tipStrength_ = groomSlider(tr("Tip strength"), theme::yellow(), 0.0, 1.0, "tipStrength", &GroomColor::tipStrength, [](double) {});
+    tipColor_ = groomColorRow(tr("Tip Color"), "tipColor", &tipColorRow_);
+    tipStrength_ = groomSlider(tr("Tip Strength"), theme::yellow(), 0.0, 1.0, "tipStrength", &GroomColor::tipStrength, [](double) {});
     // Each strand's hue and saturation spread (HairColor's randomness, in either mode).
-    hueRandom_ = groomSlider(tr("Hue random"), theme::red(), 0.0, 1.0, "hueRandom", &GroomColor::hueRandom, [](double) {});
-    saturationRandom_ = groomSlider(tr("Saturation random"), theme::blue(), 0.0, 1.0, "saturationRandom",
+    hueRandom_ = groomSlider(tr("Hue Random"), theme::red(), 0.0, 1.0, "hueRandom", &GroomColor::hueRandom, [](double) {});
+    saturationRandom_ = groomSlider(tr("Saturation Random"), theme::blue(), 0.0, 1.0, "saturationRandom",
                                     &GroomColor::saturationRandom, [](double) {});
     colorNote_ = new QLabel(materialPage_);
     colorNote_->setWordWrap(true);
@@ -571,10 +571,10 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         auto* head = new QHBoxLayout();
         head->setSpacing(8);
         row.enabled = new QCheckBox(tr("Light %1").arg(i + 1), row.host);
-        row.enabled->setFont(theme::uiFont(13, 700));
+        row.enabled->setFont(theme::uiFont(12, 600));
         head->addWidget(row.enabled, 1);
         row.color = new ColorEditor(row.host);
-        row.color->setFixedWidth(112);
+        row.color->setFixedWidth(132);  // all of #RRGGBB
         row.color->setToolTip(tr("The light's color"));
         head->addWidget(row.color);
         v->addLayout(head);
@@ -590,7 +590,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         row.azimuth = lightSlider(tr("Azimuth"), theme::blue(), -180.0, 180.0, 0);
         row.elevation = lightSlider(tr("Elevation"), theme::blue(), -90.0, 90.0, 0);
         row.intensity = lightSlider(tr("Intensity"), theme::yellow(), 0.0, 10.0, 2);
-        row.shadows = new QCheckBox(tr("Shadows (deep opacity map)"), row.host);
+        row.shadows = new QCheckBox(tr("Shadows"), row.host);
         row.shadows->setToolTip(tr("Casts a deep opacity map: hair-on-hair shadows, the scalp in them"));
         v->addWidget(row.shadows);
         lightingLayout->addWidget(row.host);
@@ -746,7 +746,7 @@ ColorEditor* LookCard::color(QBoxLayout* into, const QString& text, std::functio
     label->setMinimumWidth(40);
     row->addWidget(label, 1);
     auto* editor = new ColorEditor(host);
-    editor->setFixedWidth(112);
+    editor->setFixedWidth(132);  // all of #RRGGBB
     row->addWidget(editor);
     into->addWidget(host);
     connect(editor, &ColorEditor::edited, this, [this, set, editor, target](bool) {
@@ -904,7 +904,7 @@ void LookCard::refreshGroomColor() {
     hueRandom_->setValue(groomColor_.hueRandom);
     saturationRandom_->setVisible(groom);
     saturationRandom_->setValue(groomColor_.saturationRandom);
-    colorNote_->setText(groom ? tr("Edits the groom's %1 node").arg(QString::fromStdString(groomColor_.node))
+    colorNote_->setText(groom ? tr("The same settings as Attributes > Hair Color (the %1 node)").arg(QString::fromStdString(groomColor_.node))
                               : tr("No HairColor node in the graph: viewport only"));
     updating_ = was;
 }
@@ -1038,15 +1038,15 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
         auto* card = new QVBoxLayout(emptyCard_);
         card->setContentsMargins(28, 24, 28, 24);
         card->setSpacing(10);
-        auto* title = new QLabel(tr("No groom open"), emptyCard_);
-        title->setFont(theme::uiFont(18, 800));
-        title->setStyleSheet(QStringLiteral("color: %1; font-size: 18px; font-weight: 800;").arg(theme::text().name()));
+        auto* title = new QLabel(tr("Start a groom"), emptyCard_);
+        title->setFont(theme::uiFont(18, 600));
+        title->setStyleSheet(QStringLiteral("color: %1; font-size: 18px; font-weight: 600;").arg(theme::text().name()));
         card->addWidget(title);
         auto* hint = new QLabel(emptyCard_);
         hint->setObjectName(QStringLiteral("emptyHint"));
         hint->setWordWrap(true);
         hint->setFixedWidth(320);
-        hint->setFont(theme::uiFont(13, 500));
+        hint->setFont(theme::uiFont(12, 400));
         hint->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
         card->addWidget(hint);
         emptyHint_ = hint;
@@ -1054,21 +1054,21 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
             auto* b = new RoundButton(emptyCard_);
             b->setText(text);
             b->setDimText(key);
-            b->setDiameter(38);
+            b->setDiameter(theme::glassy() ? 38 : 32);
             b->setRadius(theme::glassy() ? 14.0 : 6.0);
             b->setPadding(16);
-            b->setFontSize(14);
-            b->setFontWeight(700);
+            b->setFontSize(theme::glassy() ? 14 : 13);
+            b->setFontWeight(theme::glassy() ? 700 : 500);
             b->setFill(fill, fill);
             b->setTextColor(ink, ink);
             connect(b, &QAbstractButton::clicked, this, slot);
             card->addWidget(b);
             return b;
         };
-        action(tr("Open groom"), QStringLiteral("Ctrl+O"), theme::actionFill(theme::yellow()), theme::actionText(theme::ink()),
-               [this] { emit openRequested(); });
-        action(tr("New groom on mesh"), QStringLiteral("Ctrl+N"), theme::chip(), theme::text(), [this] { emit newRequested(); });
-        action(tr("Start from a preset"), QString(), theme::chip(), theme::text(), [this] { emit presetsRequested(); });
+        action(tr("New Groom on Mesh..."), QStringLiteral("Ctrl+N"), theme::actionFill(theme::yellow()), theme::actionText(theme::ink()),
+               [this] { emit newRequested(); });
+        action(tr("Open Groom..."), QStringLiteral("Ctrl+O"), theme::chip(), theme::text(), [this] { emit openRequested(); });
+        action(tr("Start from a Preset..."), QString(), theme::chip(), theme::text(), [this] { emit presetsRequested(); });
         auto* recent = new QWidget(emptyCard_);
         recentLayout_ = new QVBoxLayout(recent);
         recentLayout_->setContentsMargins(0, 6, 0, 0);
@@ -1248,7 +1248,8 @@ void OverlayHost::setRefine(bool refining, int frames, int target, double msPerF
     lead.color = theme::textSoft();
     runs.push_back(lead);
     ShadowText::Run numbers;
-    numbers.text = refining ? QStringLiteral("%1 / %2").arg(frames).arg(target) : QStringLiteral("%1 ms").arg(msPerFrame, 0, 'f', 1);
+    numbers.text = refining ? QStringLiteral("%1 / %2").arg(frames).arg(target) : msPerFrame > 0.05 ? QStringLiteral("%1 ms").arg(msPerFrame, 0, 'f', 1)
+                                                                                       : tr("Ready");
     numbers.font = theme::numberFont(12);
     numbers.color = theme::textSoft();
     numbers.gapBefore = 6;

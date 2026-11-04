@@ -268,6 +268,7 @@ void MainWindow::refreshExportState() {
     panel->setDocumentState(document_ != nullptr, document_ ? document_->frame() : 1.0, animated,
                             animated ? timeline->first() : 1.0, animated ? timeline->last() : 1.0,
                             document_ ? QString::fromStdString(document_->path()) : QString());
+    panel->setCardsAvailable(!document_ || !document_->cardsNodes().empty());
 }
 
 bool MainWindow::setExportTarget(const QString& target) {
@@ -868,6 +869,7 @@ void MainWindow::graphEdited() {
     refreshNodes();
     refreshGroomColor();
     refreshStarter();  // a look node added: the first-groom step ticks
+    shell_->exportPanel()->setCardsAvailable(!document_ || !document_->cardsNodes().empty());  // (a Cards node added or gone)
     shell_->setNodeCount(document_ ? static_cast<int>(document_->nodes().size()) : 0);
     if (graphShown()) graph_->refresh();
     params_->refresh();

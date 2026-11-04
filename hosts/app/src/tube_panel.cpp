@@ -460,7 +460,7 @@ void TubePanel::showChoice(bool mixed) {
         parseTubeShape(choice_, &shape);
         bool smooth = true;
         const std::vector<SectionPoint> points = builtinTubeShapePoints(shape, &smooth);
-        editor_->setShape(points, smooth, false, tr("Built in: Duplicate it to edit a copy"));
+        editor_->setShape(points, smooth, false, tr("Built-in shape (Duplicate to edit)"));
         preview_->setShape(points, smooth, false);
     }
     updating_ = true;

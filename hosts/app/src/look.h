@@ -114,7 +114,7 @@ struct LightingSetup {
     Background background = Background::Gradient;
     // Linear, before the display transform: deep charcoal, #17181B on screen through the default
     // ACES at exposure 0 (the line view clears to the same #17181B).
-    RGB backgroundColor{0.0175f, 0.0183f, 0.0206f};
+    RGB backgroundColor{0.030f, 0.031f, 0.033f};
     float backgroundIntensity = 1.0f;          // the environment as background, dimmed
     Quality quality = Quality::Interactive;
     // Refine mode stops accumulating at this many frames (1 to LookdevRenderer::kMaxAccumulatedFrames).

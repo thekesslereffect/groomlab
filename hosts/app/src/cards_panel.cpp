@@ -54,7 +54,7 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto* title = new QHBoxLayout();
     title->setSpacing(10);
     // The mode switch names the mode: a section header, then the node it edits.
-    auto* titleLabel = new QLabel(tr("CARDS NODE"), this);
+    auto* titleLabel = new QLabel(tr("GAME CARDS"), this);
     titleLabel->setProperty("role", "listTitle");
     title->addWidget(titleLabel);
     title->addStretch(1);
@@ -145,7 +145,7 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     layout->addWidget(stats_);
     // No Cards node yet: the one thing to do, full width.
     add_ = new RoundButton(this);
-    add_->setText(tr("Add Cards Node"));
+    add_->setText(tr("Make Cards"));
     add_->setDiameter(30);
     add_->setPadding(14);
     add_->setFontSize(13);
@@ -160,7 +160,7 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     bakeRow->setContentsMargins(0, 0, 0, 0);
     bakeRow->setSpacing(8);
     bake_ = new RoundButton(bakeBox_);
-    bake_->setText(tr("Bake maps"));
+    bake_->setText(tr("Bake Maps"));
     bake_->setDiameter(30);
     bake_->setPadding(14);
     bake_->setFontSize(13);
@@ -342,7 +342,7 @@ void CardsPanel::refresh() {
     if (!document_) {
         stats_->setText(tr("No groom open"));
     } else if (node_.empty()) {
-        stats_->setText(tr("No cards yet. Hair cards for game engines come from a Cards node in the graph."));
+        stats_->setText(tr("Turn this groom into hair cards for Unreal, Unity or glTF: textured strips, an atlas and levels of detail."));
     }
     refreshAtlas();
     updating_ = false;

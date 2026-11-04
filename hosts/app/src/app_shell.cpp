@@ -80,12 +80,15 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     cardsPanel_->setDocked(true);
     exportPanel_ = new ExportPanel(propertiesStack_);
     exportPanel_->setDocked(true);
-    auto* empty = new QLabel(tr("Open a groom (File > Open Groom, or New Groom on Mesh) to use this mode."), propertiesStack_);
+    auto* empty = new QLabel(tr("<p style='margin:0 0 6px 0; font-weight:600; color:%1'>Nothing to edit yet</p>"
+                                "<p style='margin:0'>A groom's settings show here once one is open.</p>")
+                                 .arg(theme::text().name()),
+                             propertiesStack_);
     empty->setObjectName(QStringLiteral("propertiesEmpty"));
     empty->setWordWrap(true);
-    empty->setAlignment(Qt::AlignCenter);
-    empty->setMargin(24);
-    empty->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textMuted().name()));
+    empty->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
+    empty->setContentsMargins(24, 48, 24, 24);
+    empty->setStyleSheet(QStringLiteral("color: %1; padding: 40px 24px;").arg(theme::textDim().name()));
     emptyPage_ = empty;
     for (QWidget* page : {displayPage_, static_cast<QWidget*>(lookCard_), static_cast<QWidget*>(cardsPanel_),
                           static_cast<QWidget*>(exportPanel_), emptyPage_}) {
@@ -314,20 +317,27 @@ void AppShell::setMode(Mode mode) {
 }
 
 void AppShell::refreshPages() {
+    // The modes as workspaces: Groom edits the groom (Attributes alone, no tab row), Look its
+    // material, lights and render (their tabs), Cards and Export their own panel. No groom: the
+    // empty page (no editor full of zeros).
     QWidget* page = displayPage_;
-    const bool tabbed = mode_ == Mode::Groom || mode_ == Mode::Look;
-    propertiesTabs_->setVisible(tabbed);
-    if (tabbed) {
-        // Attributes, else the look card on its tab (no zeros before a groom: it waits for one).
-        const PropertiesTab tab = propertiesTab();
-        if (tab != PropertiesTab::Attributes) {
-            lookCard_->setTab(static_cast<LookCard::Tab>(static_cast<int>(tab) - 1));
-            page = groomOpen() ? static_cast<QWidget*>(lookCard_) : emptyPage_;
+    const bool open = groomOpen();
+    const bool look = mode_ == Mode::Look;
+    propertiesTabs_->setTabVisible(0, !look);
+    propertiesTabs_->setVisible(open && look);
+    if (!open) {
+        page = emptyPage_;
+    } else if (look) {
+        if (propertiesTab() == PropertiesTab::Attributes) {
+            const QSignalBlocker block(propertiesTabs_);
+            propertiesTabs_->setCurrentIndex(static_cast<int>(PropertiesTab::Material));
         }
-    } else {
-        page = !groomOpen() ? emptyPage_
-               : mode_ == Mode::Cards ? static_cast<QWidget*>(cardsPanel_)
-                                      : static_cast<QWidget*>(exportPanel_);
+        lookCard_->setTab(static_cast<LookCard::Tab>(static_cast<int>(propertiesTab()) - 1));
+        page = lookCard_;
+    } else if (mode_ == Mode::Cards) {
+        page = cardsPanel_;
+    } else if (mode_ == Mode::Export) {
+        page = exportPanel_;
     }
     propertiesStack_->setCurrentWidget(page);
 }

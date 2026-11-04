@@ -451,6 +451,23 @@ void MainWindow::buildProperties() {
     lodSlider("cullMargin", &LodSettings::margin, 1.0, 3);
     lodCheck("backfaceCull", &LodSettings::backface);
     lodSlider("backfaceAngle", &LodSettings::backfaceAngle, 90.0, 1);
+    // A switch's settings follow it: off, they are dimmed (they do nothing until it is on).
+    auto follows = [p](const char* driver, std::initializer_list<const char*> keys) {
+        auto* c = qobject_cast<QCheckBox*>(p->control(driver));
+        if (!c) return;
+        std::vector<std::string> deps(keys.begin(), keys.end());
+        auto apply = [p, deps](bool on) {
+            for (const std::string& k : deps) {
+                if (QWidget* w = p->control(k)) w->setEnabled(on);
+                if (QLabel* l = p->label(k)) l->setEnabled(on);
+            }
+        };
+        connect(c, &QCheckBox::toggled, p, apply);
+        apply(c->isChecked());
+    };
+    follows("lodDistance", {"lodNear", "lodFar", "lodMinDensity", "lodWidthCompensation"});
+    follows("cameraCull", {"cullMargin"});
+    follows("backfaceCull", {"backfaceAngle"});
 
     p->finish();
     shell_->setPanelContent(AppShell::Panel::Display, tr("Properties"), theme::purple(), p);
@@ -754,7 +771,10 @@ void MainWindow::refreshControlSliders() {
         auto* s = rowSlider(c.min, c.max, 3, (c.max - c.min) / 100.0, theme::purple());
         s->setParent(controlsBlock_);
         s->setObjectName(QStringLiteral("control_") + qs(c.name));
-        s->setCaption(qs(c.name));
+        // A control's name as a label: its first letter capitalized ("frizz": Frizz).
+        QString caption = qs(c.name);
+        if (!caption.isEmpty()) caption[0] = caption[0].toUpper();
+        s->setCaption(caption);
         s->setValue(c.value);
         s->setToolTip(tr("The Control node %1's value (its slider spans %2 to %3; values past it are not clamped)")
                           .arg(qs(c.node))

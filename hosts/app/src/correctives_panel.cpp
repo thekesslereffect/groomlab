@@ -301,6 +301,9 @@ void CorrectivesPanel::refreshWeights() {
         item->setText(1, QStringLiteral("%1%").arg(std::lround(100.0f * w)));
     }
     const CorrectiveLayer* layer = target_.empty() ? nullptr : stack_->layer(target_);
+    // The base groom has no weight: the row shows only for a corrective (no dead slider).
+    weight_->setVisible(layer != nullptr);
+    key_->setVisible(layer != nullptr);
     weight_->setEnabled(layer != nullptr);
     key_->setEnabled(layer != nullptr);
     if (layer) weight_->setValue(layer->weightCurve.empty() ? layer->weight : layer->weightAt(now));
@@ -402,7 +405,9 @@ void CorrectivesPanel::applyTarget() {
                    : shot ? tr("Strokes sculpt the groom as shown at frame %1 into the corrective %2.")
                                 .arg(std::lround(document_->frame()))
                                 .arg(qs(target_))
-                          : tr("Strokes edit the guides."));
+                          : stack_ && !stack_->layers.empty() ? tr("Strokes edit the guides. Pick a corrective to sculpt it at this frame.")
+                                                                : tr("Correctives sculpt per-shot fixes on top of the groom, keyed over time. "
+                                                                     "The + above makes one at this frame; strokes then go into it."));
     if (session_) session_->setShotSculpt(shot, document_ ? document_->time() : 0.0, document_ ? std::lround(document_->frame()) : 0, target_);
 }
 

@@ -262,7 +262,7 @@ void MainWindow::buildMenuCorner() {
         }
         modeSwitch_->setItems(std::move(items));
     }
-    modeSwitch_->setBackground(theme::uiColor("raised"));
+    modeSwitch_->setBackground(theme::backdrop());
     modeSwitch_->setFontSize(theme::fontSize());
     modeSwitch_->setSegmentHeight(theme::rowHeight() - 6);
     modeSwitch_->setPadding(2);

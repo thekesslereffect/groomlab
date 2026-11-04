@@ -813,6 +813,12 @@ QString ExportPanel::outputPath() const { return path_->text().trimmed(); }
 
 void ExportPanel::setOutputPath(const QString& path) { path_->setText(path); }
 
+void ExportPanel::setCardsAvailable(bool available) {
+    if (available == cardsAvailable_) return;
+    cardsAvailable_ = available;
+    refresh();
+}
+
 void ExportPanel::setDocumentState(bool open, double frame, bool animated, double first, double last, const QString& groomPath) {
     updating_ = true;
     frame_ = frame;
@@ -862,7 +868,13 @@ void ExportPanel::setStatus(const QString& text, bool error) {
 }
 
 void ExportPanel::refresh() {
-    for (int i = 0; i < static_cast<int>(targets_.size()); ++i) targets_[static_cast<std::size_t>(i)]->setChecked(i == static_cast<int>(target_));
+    for (int i = 0; i < static_cast<int>(targets_.size()); ++i) {
+        RoundButton* b = targets_[static_cast<std::size_t>(i)];
+        b->setChecked(i == static_cast<int>(target_));
+        const bool cards = static_cast<Target>(i) == Target::Cards || static_cast<Target>(i) == Target::CardMaps;
+        b->setEnabled(!cards || cardsAvailable_);
+        b->setToolTip(cards && !cardsAvailable_ ? tr("Needs cards: Cards mode > Make Cards") : tr(kTargets[i].description));
+    }
     description_->setText(tr(kTargets[static_cast<int>(target_)].description));
     const bool maps = target_ == Target::CardMaps;
     const bool cards = target_ == Target::Cards;
