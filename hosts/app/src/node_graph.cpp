@@ -108,7 +108,7 @@ public:
     }
 };
 
-constexpr qreal kNodeWidth = 160.0;
+constexpr qreal kNodeWidth = 176.0;  // (a name of ten letters beside the time badge at the readable scale)
 constexpr qreal kHeader = 28.0;
 constexpr qreal kRow = 18.0;
 constexpr qreal kBodyPadding = 8.0;
@@ -292,7 +292,10 @@ void NodeGraphView::rebuild() {
                 node.updateAvailable = library.value("updateAvailable", false);
             }
         }
-        const std::size_t rows = std::max<std::size_t>(std::max(node.inputs.size(), node.outputs.size()), 1);
+        // A node whose type shows under its ports (a name that is not the type, one port a side)
+        // gets a row for it: the type never runs into the port names.
+        const bool typeRow = node.type != node.name && node.inputs.size() <= 1 && node.outputs.size() <= 1;
+        const std::size_t rows = std::max<std::size_t>(std::max(node.inputs.size(), node.outputs.size()), 1) + (typeRow ? 1 : 0);
         node.size = QSizeF(kNodeWidth, kHeader + kBodyPadding * 2 + rows * kRow);
         float x = 0.0f, y = 0.0f;
         if (document_->nodePosition(info.name, &x, &y)) {
