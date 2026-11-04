@@ -275,7 +275,7 @@ TEST(AppGraphEditor, ExpandInputsButtonTogglesEveryConnectableParam) {
     ASSERT_GT(params.size(), 1u);
     const QRectF card = graph->nodeRect(scatter);
     const qreal scale = graph->viewScale();
-    const QPointF button(card.right() - 40.0 * scale, card.top() + 14.0 * scale);
+    const QPointF button(card.right() - 63.0 * scale, card.top() + 14.0 * scale);  // (left of the View eye: Expand, View, Bypass)
     mouse(graph, QEvent::MouseButtonPress, button, Qt::LeftButton);
     for (const std::string& param : params) EXPECT_TRUE(doc->paramExposed(scatter, param)) << param;
     std::string field;

@@ -68,9 +68,17 @@ MainWindow::MainWindow() {
         brush_.setRingTone({lin(ring.redF()), lin(ring.greenF()), lin(ring.blueF())});
     }
     viewport_ = new Viewport();
-    host_ = new OverlayHost(viewport_, this);
-    setCentralWidget(host_);
+    // The central column: the viewport (its overlays) over the timeline's bar, between the side docks.
+    auto* central = new QWidget(this);
+    central->setObjectName(QStringLiteral("viewportColumn"));
+    auto* column = new QVBoxLayout(central);
+    column->setContentsMargins(0, 0, 0, 0);
+    column->setSpacing(0);
+    host_ = new OverlayHost(viewport_, central);
+    column->addWidget(host_, 1);
+    setCentralWidget(central);
     shell_ = new AppShell(this, host_);
+    column->addWidget(shell_->timeline());
     graph_ = shell_->graph();
     viewport_->setBrushSession(&brush_);
     // The GPU look preview runs in the viewport's frames (and the headless benchmarks'), on by

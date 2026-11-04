@@ -1906,11 +1906,11 @@ TEST(AppPanels, ParamPanelShowsCompoundParamsAndTheDescription) {
     panel.setDocument(doc.get());
     panel.showNode("");
     EXPECT_EQ(panel.description(), "");
-    EXPECT_FALSE(panel.findChild<QCheckBox*>()->isVisibleTo(&panel)) << "no Bypass box without a node";
+    EXPECT_FALSE(panel.findChild<QCheckBox*>(QStringLiteral("nodeBypass"))->isVisibleTo(&panel)) << "no Bypass box without a node";
     const std::string clump = nodeOfType(*doc, "Clump");
     panel.showNode(clump);
     EXPECT_FALSE(panel.description().isEmpty()) << "the operator's description, as Maya's Attribute Editor";
-    EXPECT_TRUE(panel.findChild<QCheckBox*>()->isVisibleTo(&panel));
+    EXPECT_FALSE(panel.findChild<QCheckBox*>(QStringLiteral("nodeBypass"))->isVisibleTo(&panel)) << "Bypass is the node header's toggle, not a row";
     EXPECT_GT(panel.sizeHint().height(), 200);
     // When the node runs, beside Bypass: picking Render Only sets it on the node (one undo step).
     auto* evaluation = panel.findChild<QComboBox*>(QStringLiteral("nodeEvaluation"));

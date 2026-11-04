@@ -264,13 +264,11 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     // ---- The timeline: a strip under the graph (no title: Maya's time slider).
     timeline_ = new Timeline();
     timeline_->setDocked(true);
-    timelineDock_ = makeDock(tr("Timeline"), "timelineDock", timeline_);
-    timelineDock_->setTitleBarWidget(new QWidget(timelineDock_));
-    timelineDock_->setFeatures(QDockWidget::DockWidgetClosable);
-    window_->addDockWidget(Qt::BottomDockWidgetArea, timelineDock_);
-    window_->splitDockWidget(graphDock_, timelineDock_, Qt::Vertical);
+    timeline_->setObjectName(QStringLiteral("viewportTimeline"));
+    // Under the viewport, its width (between the side docks): a bar, never a dock beside the graph
+    // (MainWindow puts it in the viewport's column).
+    timeline_->hide();
     graphDock_->hide();
-    timelineDock_->hide();
 
     setFileName({}, false);
     setNodeCount(0);
@@ -293,8 +291,8 @@ QDockWidget* AppShell::makeDock(const QString& title, const char* name, QWidget*
     return dock;
 }
 
-std::array<QDockWidget*, 7> AppShell::docks() const {
-    return {groomTools_, properties_, graphDock_, timelineDock_, nodesDock_, lookDock_, helpDock_};
+std::array<QDockWidget*, 6> AppShell::docks() const {
+    return {groomTools_, properties_, graphDock_, nodesDock_, lookDock_, helpDock_};
 }
 
 void AppShell::resetLayout() {
@@ -311,7 +309,7 @@ void AppShell::resetLayout() {
 void AppShell::layoutRestored() {
     groomToolsWanted_ = !groomTools_->isHidden();
     graphDock_->setProperty("sized", true);
-    timelineDock_->setVisible(timelineShown_);
+    timeline_->setVisible(timelineShown_);
     setMode(mode_);
 }
 
@@ -544,7 +542,7 @@ bool AppShell::panelShown(Panel which) const {
 
 void AppShell::setTimelineShown(bool shown) {
     timelineShown_ = shown;
-    timelineDock_->setVisible(shown);
+    timeline_->setVisible(shown);
 }
 
 void AppShell::setRailLabels(bool shown) { groomToolsWidget_->setTileLabels(shown); }

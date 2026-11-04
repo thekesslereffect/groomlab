@@ -783,7 +783,29 @@ QRectF NodeGraphView::bypassButtonRect(const Node& node) const {
 }
 
 QRectF NodeGraphView::inputsButtonRect(const Node& node) const {
-    return QRectF(node.pos.x() + node.size.width() - 49.0, node.pos.y() + 5.0, 18.0, 18.0);
+    // Left of the View eye when the node has one (Expand Inputs, View, Bypass), else of Bypass.
+    return QRectF(node.pos.x() + node.size.width() - (viewable(node) ? 72.0 : 49.0), node.pos.y() + 5.0, 18.0, 18.0);
+}
+
+QRectF NodeGraphView::viewButtonRect(const Node& node) const {
+    // Between Expand Inputs and Bypass: the header's toggles read Expand, View, Bypass.
+    return bypassButtonRect(node).translated(-23.0, 0.0);
+}
+
+bool NodeGraphView::viewable(const Node& node) const {
+    return std::any_of(node.outputs.begin(), node.outputs.end(), [](const Port& p) {
+        return p.type == "strands" || p.type == "Strands" || p.type == "curves" || p.type == "Curves";
+    });
+}
+
+bool NodeGraphView::viewButtonAt(const QPointF& scene, int* node) const {
+    for (std::size_t i = 0; i < nodes_.size(); ++i) {
+        if (viewable(nodes_[i]) && viewButtonRect(nodes_[i]).adjusted(-2, -2, 2, 2).contains(scene)) {
+            *node = static_cast<int>(i);
+            return true;
+        }
+    }
+    return false;
 }
 
 int NodeGraphView::backdropTitleAt(const QPointF& scene, bool* grip) const {
@@ -896,7 +918,7 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     const NodeBadges badges = nodeBadges(node.name);
     const bool filled = header == QLatin1String("filled");
     const qreal row = rect.y() + kHeader / 2.0;
-    qreal x = (node.linkableParams.empty() ? bypassButtonRect(node) : inputsButtonRect(node)).left() - 4.0;
+    qreal x = (!node.linkableParams.empty() ? inputsButtonRect(node) : viewable(node) ? viewButtonRect(node) : bypassButtonRect(node)).left() - 4.0;
     const QFont number = theme::numberFont(11);
     if (!badges.time.isEmpty()) {
         const qreal w = QFontMetricsF(number).horizontalAdvance(badges.time);
@@ -910,8 +932,8 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.drawText(QRectF(x - w - 1.0, rect.y(), w + 1.0, kHeader), Qt::AlignVCenter | Qt::AlignRight, badges.time);
         x -= w + 6.0;
     }
-    if (badges.viewed) {
-        // An eye: the viewport shows the graph up to here (View Up to Here).
+    if (badges.viewed && !viewable(node)) {
+        // An eye: the viewport shows the graph up to here (View Up to Here; a viewable node's is its header toggle).
         const QPointF c(x - 7.0, row);
         QPainterPath eye;
         eye.moveTo(c + QPointF(-6.5, 0.0));
@@ -978,6 +1000,35 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.drawEllipse(ring);
         const qreal k = ring.width() / 2.0 * 0.7071;
         painter.drawLine(ring.center() + QPointF(-k, k), ring.center() + QPointF(k, -k));
+    }
+    // The View toggle (an eye, as Maya's Graph Editor's Focus): the viewport shows the groom up to this
+    // node; dim until it is the viewed one, then lit on a tile.
+    if (viewable(node)) {
+        const QRectF eyeRect = viewButtonRect(node);
+        const bool on = !viewed_.empty() && viewed_ == node.name;
+        QColor ink = filled ? headerText(color) : (on ? theme::uiColor("accent") : theme::textDim());
+        if (on) {
+            QColor tile = ink;
+            tile.setAlpha(60);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(tile);
+            painter.drawRoundedRect(eyeRect, 4.0, 4.0);
+        } else {
+            ink.setAlpha(filled ? 140 : 170);
+        }
+        const QPointF c = eyeRect.center();
+        QPainterPath eye;
+        eye.moveTo(c + QPointF(-6.5, 0.0));
+        eye.quadTo(c + QPointF(0.0, -6.0), c + QPointF(6.5, 0.0));
+        eye.quadTo(c + QPointF(0.0, 6.0), c + QPointF(-6.5, 0.0));
+        QPen pen(ink, on ? 1.8 : 1.5);
+        pen.setJoinStyle(Qt::RoundJoin);
+        painter.setPen(pen);
+        painter.setBrush(Qt::NoBrush);
+        painter.drawPath(eye);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(ink);
+        painter.drawEllipse(c, 2.2, 2.2);
     }
     if (!node.linkableParams.empty()) {
         const QRectF inputs = inputsButtonRect(node);
@@ -1262,6 +1313,19 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
     bool output = false;
     if (bypassButtonAt(pressScene_, &node)) {
         setBypass(nodes_[node].name, !nodes_[node].bypass);
+        return;
+    }
+    if (viewButtonAt(pressScene_, &node)) {
+        // The eye: the viewport shows the groom up to this node; on the viewed one, the output again.
+        const std::string name = nodes_[node].name;
+        if (viewed_ == name) {
+            setViewedNode({});
+            emit message(tr("Viewing the graph's output again"));
+        } else {
+            setViewedNode(name);
+            emit message(tr("Viewing up to %1 (click the eye again, or V: the output)").arg(QString::fromStdString(name)));
+        }
+        update();
         return;
     }
     if (inputsButtonAt(pressScene_, &node)) {
@@ -1853,6 +1917,10 @@ bool NodeGraphView::event(QEvent* event) {
         QString tip;
         if (inputsButtonAt(scene, &node)) {
             tip = tr("Expand Inputs: show or hide all connectable parameter ports");
+        } else if (viewButtonAt(scene, &node)) {
+            tip = tr("View: show the groom up to this node in the viewport (V); again: the output");
+        } else if (bypassButtonAt(scene, &node)) {
+            tip = tr("Bypass: the node passes its input through unchanged");
         } else if ((node = nodeAt(scene)) >= 0) {
             const std::string error = nodeError(nodes_[node].name), note = nodeNote(nodes_[node].name);
             tip = !error.empty() ? QString::fromStdString(error) : QString::fromStdString(note);

@@ -390,11 +390,14 @@ private:
     int wireAt(const QPointF& scene) const;
     bool bypassButtonAt(const QPointF& scene, int* node) const;
     bool inputsButtonAt(const QPointF& scene, int* node) const;
+    bool viewButtonAt(const QPointF& scene, int* node) const;
+    bool viewable(const Node& node) const;  // a strands output: View Up to Here can show it
     // The backdrop whose title bar (or, `grip`, resize corner) is under a scene point; -1 none.
     int backdropTitleAt(const QPointF& scene, bool* grip = nullptr) const;
     int backdropAt(const QPointF& scene) const;  // anywhere on it
     QRectF bypassButtonRect(const Node& node) const;
     QRectF inputsButtonRect(const Node& node) const;
+    QRectF viewButtonRect(const Node& node) const;  // the header's View eye (left of Expand Inputs / Bypass)
     void drawNode(QPainter& painter, const Node& node, bool selected);
     void forwardToViewport(QEvent* event);
     void addFromSearch();

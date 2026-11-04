@@ -538,7 +538,7 @@ void ParamPanel::build() {
     const json* spec = document_ && !node_.empty() ? document_->nodeSpec(node_) : nullptr;
     title_->setVisible(spec != nullptr);
     description_->setVisible(spec != nullptr);
-    bypass_->setVisible(spec != nullptr);
+    bypass_->setVisible(false);  // Bypass is the node header's toggle (the graph), not a row here
     evaluation_->setVisible(spec != nullptr);
     empty_->setVisible(spec == nullptr);
     emptyIcon_->setVisible(spec == nullptr && !theme::glassy());

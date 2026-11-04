@@ -80,12 +80,11 @@ public:
     QDockWidget* groomToolsDock() const { return groomTools_; }
     QDockWidget* propertiesDock() const { return properties_; }
     QDockWidget* graphDock() const { return graphDock_; }
-    QDockWidget* timelineDock() const { return timelineDock_; }
     QDockWidget* nodesDock() const { return nodesDock_; }
     QDockWidget* lookDock() const { return lookDock_; }
     QDockWidget* helpDock() const { return helpDock_; }
     // Every dock (View > Panels lists their toggles in this order).
-    std::array<QDockWidget*, 7> docks() const;
+    std::array<QDockWidget*, 6> docks() const;
     // The docks' sizes for a window of this size (a first run, or View > Reset Layout).
     void resetLayout();
     // A saved layout was put back (QMainWindow::restoreState): its docks kept as they were, the
@@ -170,7 +169,6 @@ private:
     QDockWidget* groomTools_ = nullptr;
     QDockWidget* properties_ = nullptr;
     QDockWidget* graphDock_ = nullptr;
-    QDockWidget* timelineDock_ = nullptr;
     QDockWidget* nodesDock_ = nullptr;
     QDockWidget* lookDock_ = nullptr;
     QDockWidget* helpDock_ = nullptr;

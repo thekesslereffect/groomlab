@@ -744,7 +744,7 @@ QImage MainWindow::grabUi(const QImage& scene) {
         if (!w || w == host_ || w->isWindow() || !w->isVisible()) continue;
         w->render(&painter, w->pos(), QRegion(), QWidget::DrawWindowBackground | QWidget::DrawChildren);
     }
-    const QPoint at = host_->pos();
+    const QPoint at = host_->mapTo(this, QPoint());  // (the viewport's column holds it: its place in the window)
     const QSize pixels = host_->size() * ratio;
     QImage frame = scene.isNull() ? viewport_->grabFramebuffer() : scene;
     if (frame.isNull()) {
