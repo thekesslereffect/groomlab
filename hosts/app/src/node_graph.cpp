@@ -36,6 +36,7 @@
 #include <QLabel>
 #include <QLineF>
 #include <QLineEdit>
+#include <QGraphicsDropShadowEffect>
 #include <QListWidget>
 #include <QStyledItemDelegate>
 #include <QMouseEvent>
@@ -142,6 +143,14 @@ NodeGraphView::NodeGraphView(QWidget* parent) : QWidget(parent) {
     // A popup: the raised tone over the canvas (its list too), so it floats.
     search_->setColor(theme::glassy() ? theme::glassSolid() : theme::uiColor("raised"));
     search_->setProperty("role", "popup");
+    if (!theme::glassy()) {
+        // It floats: a soft shadow under it (a child of the view, so no translucent window needed).
+        auto* shadow = new QGraphicsDropShadowEffect(search_);
+        shadow->setBlurRadius(24.0);
+        shadow->setOffset(0.0, 8.0);
+        shadow->setColor(QColor(0, 0, 0, 115));
+        search_->setGraphicsEffect(shadow);
+    }
     auto* layout = new QVBoxLayout(search_);
     layout->setContentsMargins(10, 10, 10, 10);
     layout->setSpacing(8);
@@ -2219,8 +2228,13 @@ void NodeGraphView::openSearchAt(const QPointF& where) {
     // Over a wire: the node added goes into it (lit while the search is open).
     searchWire_ = nodeAt(searchScene_) < 0 ? wireAt(searchScene_) : -1;
     update();
+    // As tall as the editor allows (the list gives way, the description under it always shows),
+    // placed where it fits: below the cursor, else above it.
+    search_->resize(search_->width(), std::clamp(height() - 8, 200, 380));
+    int top = static_cast<int>(where.y());
+    if (top + search_->height() > height()) top = std::max(0, static_cast<int>(where.y()) - search_->height());
     search_->move(std::clamp(static_cast<int>(where.x()), 0, std::max(0, width() - search_->width())),
-                  std::clamp(static_cast<int>(where.y()), 0, std::max(0, height() - search_->height())));
+                  std::clamp(top, 0, std::max(0, height() - search_->height())));
     searchEdit_->clear();
     if (document_) document_->refreshLibrary();  // nodes saved or dropped in since
     filterSearch({});

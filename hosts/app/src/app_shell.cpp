@@ -38,6 +38,15 @@ QWidget* section(QWidget* parent, int margin) {
     return w;
 }
 
+void hideDockedTitle(QDockWidget* dock) {
+    auto apply = [dock](bool floating) {
+        const bool hidden = dock->titleBarWidget() != nullptr;
+        if (floating == hidden) dock->setTitleBarWidget(floating ? nullptr : new QWidget(dock));
+    };
+    QObject::connect(dock, &QDockWidget::topLevelChanged, dock, apply);
+    apply(dock->isFloating());
+}
+
 QLabel* dot(const QColor& color, QWidget* parent) {
     auto* d = new QLabel(parent);
     d->setFixedSize(8, 8);
@@ -135,22 +144,10 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
         dock->hide();
     }
     properties_->raise();
-    // Tabbed together, the tabs name the docks: their own title bars would say it again. Alone
-    // or floating, a dock keeps its title (to drag it, float it, close it).
-    const std::vector<QDockWidget*> tabbed = {properties_, nodesDock_, lookDock_, helpDock_};
-    auto titles = [tabbed] {
-        int shown = 0;
-        for (QDockWidget* d : tabbed) shown += d->toggleViewAction()->isChecked() && !d->isFloating() ? 1 : 0;
-        for (QDockWidget* d : tabbed) {
-            const bool hide = shown > 1 && !d->isFloating();
-            const bool hidden = d->titleBarWidget() != nullptr;
-            if (hide != hidden) d->setTitleBarWidget(hide ? new QWidget(d) : nullptr);
-        }
-    };
-    for (QDockWidget* d : tabbed) {
-        connect(d, &QDockWidget::visibilityChanged, this, [titles](bool) { titles(); });
-        connect(d, &QDockWidget::topLevelChanged, this, [titles](bool) { titles(); });
-    }
+    // Docked, a dock's own title bar only restates its content's header (the groom's name, the
+    // tabs, the graph's bar): hidden; floating, it is back (to drag, dock and close the window).
+    // View > Panels shows and hides the docks.
+    for (QDockWidget* d : {groomTools_, properties_, nodesDock_, lookDock_, helpDock_}) hideDockedTitle(d);
 
     // ---- The Graph Editor (bottom): the canvas, the selected node's settings at its right.
     graph_ = new NodeGraphView();
@@ -238,6 +235,7 @@ AppShell::AppShell(QMainWindow* window, OverlayHost* overlay) : QObject(window),
     graphColumn->addWidget(graphBar_);
     graphColumn->addWidget(graphSplit_, 1);
     graphDock_ = makeDock(tr("Graph Editor"), "graphDock", graphBody);
+    hideDockedTitle(graphDock_);
     window_->addDockWidget(Qt::BottomDockWidgetArea, graphDock_);
 
     // ---- The timeline: a strip under the graph (no title: Maya's time slider).

@@ -147,7 +147,7 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     auto* column = new QWidget(scroll_);
     column->setObjectName(QStringLiteral("propertiesColumn"));
     auto* layout = new QVBoxLayout(column);
-    layout->setContentsMargins(16, 4, 24, 12);  // the docks' 16 px gutter (the right clear of the scroll bar over it)
+    layout->setContentsMargins(16, 4, 16, 12);  // the docks' 16 px gutter (the scroll bar beside it takes its own 8)
     layout->setSpacing(4);
     build(defs().get("properties/sections"), layout, nullptr);
     layout->addStretch(1);

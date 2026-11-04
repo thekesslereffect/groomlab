@@ -564,6 +564,13 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     };
     slider(lightingLayout, tr("Exposure (EV)"), theme::yellow(), -4.0, 4.0, 2, l(&LightingSetup::exposure), ls(&LightingSetup::exposure), Target::Lighting);
     for (int i = 0; i < 3; ++i) {
+        if (i > 0 && !theme::glassy()) {
+            auto* rule = new QFrame(lightingPage_);
+            rule->setFixedHeight(1);
+            rule->setStyleSheet(QStringLiteral("background: %1; margin-top: 6px;").arg(theme::glassEdge().name()));
+            lightingLayout->addSpacing(6);
+            lightingLayout->addWidget(rule);
+        }
         LightRow row;
         row.host = new QWidget(lightingPage_);
         auto* v = new QVBoxLayout(row.host);
@@ -905,7 +912,7 @@ void LookCard::refreshGroomColor() {
     hueRandom_->setValue(groomColor_.hueRandom);
     saturationRandom_->setVisible(groom);
     saturationRandom_->setValue(groomColor_.saturationRandom);
-    colorNote_->setText(groom ? tr("The same settings as Attributes > Hair Color (the %1 node)").arg(QString::fromStdString(groomColor_.node))
+    colorNote_->setText(groom ? tr("Same as Attributes > Hair Color (%1)").arg(QString::fromStdString(groomColor_.node))
                               : tr("No HairColor node in the graph: viewport only"));
     updating_ = was;
 }
@@ -1196,9 +1203,11 @@ void OverlayHost::refreshToolLabel() {
     // The name and the key that brings the tool back: S for Select, B for the brushes (Groom mode).
     const bool shown = groomOpen() && mode_ == Mode::Groom && (toolSelect_ || !toolMode_.empty());
     if (shown) {
-        toolName_->setText(QStringLiteral("%1 <span style=\"color:%3; font-weight:600\">%2</span>")
-                               .arg(toolSelect_ ? tr("Select") : theme::brushTitle(toolMode_), toolSelect_ ? QStringLiteral("S") : QStringLiteral("B"),
-                                    theme::textMuted().name()));
+        // The key as a small cap beside the name; its tooltip says what it does.
+        const QString key = toolSelect_ ? QStringLiteral("S") : QStringLiteral("B");
+        toolName_->setText(QStringLiteral("%1&nbsp;&nbsp;<span style=\"color:%3; background-color:%4; font-size:11px; font-weight:500\">&nbsp;%2&nbsp;</span>")
+                               .arg(toolSelect_ ? tr("Select") : theme::brushTitle(toolMode_), key, theme::textDim().name(), theme::uiColor("hover").name()));
+        toolLabel_->setToolTip(toolSelect_ ? tr("S: back to Select") : tr("B: back to %1 (the brush used last)").arg(theme::brushTitle(toolMode_)));
         toolLabel_->adjustSize();
     }
     if (toolLabel_->isVisibleTo(this) != shown) {

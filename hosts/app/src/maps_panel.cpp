@@ -322,17 +322,21 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     itemBar_ = new ListBar(box_);
     itemBar_->setObjectName(QStringLiteral("mapItemBar"));
     boxRows->addWidget(itemBar_);
-    FlowLayout* showChips = nullptr;
-    boxRows->addWidget(chipRow(box_, &showChips, tr("Show on")));
-    show_ = makeChip(tr("Scalp"), tr("Show the map on the scalp (black to white), whatever its kind"), box_);
+    // Show on scalp: a switch (a check box, not a chip that reads as a choice), the channel beside it.
+    auto* showRow = new QHBoxLayout();
+    showRow->setContentsMargins(0, 0, 0, 0);
+    showRow->setSpacing(8);
+    show_ = new QCheckBox(tr("Show on scalp"), box_);
+    show_->setToolTip(tr("Show the map on the scalp (black to white), whatever its kind"));
     show_->setObjectName(QStringLiteral("paintShowOnScalp"));
-    showChips->addWidget(show_);
+    showRow->addWidget(show_, 1);
+    boxRows->addLayout(showRow);
     channel_ = new QComboBox(box_);
     channel_->setObjectName(QStringLiteral("paintScalpChannel"));
     for (const ui::json& c : defs().choices("scalpChannel")) channel_->addItem(qs(c.value("label", std::string())), qs(c.value("value", std::string())));
     channel_->setToolTip(qs(defs().get("choices/scalpChannel").value("tip", std::string())));
-    showChips->addWidget(channel_);
-    connect(show_, &QToolButton::toggled, this, [this](bool on) {
+    showRow->addWidget(channel_);
+    connect(show_, &QCheckBox::toggled, this, [this](bool on) {
         if (updating_) return;
         showSelected(on);
     });

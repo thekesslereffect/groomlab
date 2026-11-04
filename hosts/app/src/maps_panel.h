@@ -165,7 +165,7 @@ private:
     QCheckBox* newColor_ = nullptr;
     ValueSlider* newValue_ = nullptr;
     QSpinBox* newResolution_ = nullptr;
-    QToolButton* show_ = nullptr;
+    QCheckBox* show_ = nullptr;  // Show on scalp (a switch; its channel beside it)
     QComboBox* channel_ = nullptr;
     ValueSlider* paintValue_ = nullptr;
     QWidget* valueRow_ = nullptr;
