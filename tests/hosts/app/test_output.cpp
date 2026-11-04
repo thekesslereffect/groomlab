@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include <QToolButton>
 #include <QAction>
 #include <QApplication>
 #include <QDir>
@@ -19,6 +20,8 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QLineEdit>
+#include <QKeyEvent>
 #include <QSettings>
 #include <QTabBar>
 #include <QDockWidget>
@@ -26,6 +29,8 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "glass.h"
+#include "icon_rail.h"
 #include "app_actions.h"
 #include "app_shell.h"
 #include "groom_document.h"
@@ -646,13 +651,20 @@ TEST(AppOutput, StudioLightingKeepsTheModeAndTheGroomTools) {
     QCoreApplication::processEvents();
     AppShell* shell = window.shell();
     ASSERT_FALSE(shell->groomToolsDock()->isHidden());
-    // The Properties dock's tabs: Attributes, then the look's Material, Lighting and Render.
+    // The Properties dock's tabs: Attributes, the look's Material, Lighting and Render, Cards, Export.
     QTabBar* tabs = shell->propertiesTabs();
     ASSERT_TRUE(tabs);
-    ASSERT_EQ(tabs->count(), 4);
+    ASSERT_EQ(tabs->count(), 6);
     EXPECT_EQ(tabs->tabText(0), QStringLiteral("Attributes"));
     EXPECT_EQ(tabs->tabText(2), QStringLiteral("Lighting"));
-    EXPECT_FALSE(tabs->isHidden());
+    // The tabs are the dock's icon rail (the tab bar hidden keeps which page is open).
+    IconRail* rail = shell->rightRail();
+    ASSERT_TRUE(rail);
+    EXPECT_TRUE(tabs->isHidden());
+    EXPECT_FALSE(rail->isHidden());
+    ASSERT_EQ(rail->count(), 6);
+    EXPECT_TRUE(rail->button(0)->isEnabled());
+    EXPECT_EQ(rail->current(), 0);
     EXPECT_EQ(shell->propertiesTab(), AppShell::PropertiesTab::Attributes);
     const ui::Bindings bindings = AppActions::bindings(window);
     ASSERT_TRUE(bindings.count("studio.lighting"));
@@ -664,11 +676,124 @@ TEST(AppOutput, StudioLightingKeepsTheModeAndTheGroomTools) {
     EXPECT_EQ(shell->propertiesTab(), AppShell::PropertiesTab::Lighting);
     EXPECT_EQ(shell->lookCard()->tab(), LookCard::Tab::Lighting);
     EXPECT_TRUE(bindings.at("studio.lighting").checked(json(preset)));
-    // Back to Attributes: the groom's settings again; Cards mode shows its own panel, no tabs.
+    // Back to Attributes: the groom's settings again; Cards mode is the Cards tab (the tabs stay).
     shell->setPropertiesTab(AppShell::PropertiesTab::Attributes);
     EXPECT_TRUE(shell->panelShown(AppShell::Panel::Display));
     ASSERT_TRUE(window.setUiMode(QStringLiteral("cards")));
-    EXPECT_TRUE(tabs->isHidden());
+    EXPECT_FALSE(rail->isHidden());
+    EXPECT_EQ(shell->propertiesTab(), AppShell::PropertiesTab::Cards);
+    EXPECT_EQ(rail->current(), static_cast<int>(AppShell::PropertiesTab::Cards));
+    EXPECT_TRUE(rail->button(rail->current())->isChecked());
+    // Its open icon folds the dock to the rail (no icon lit), any icon opens it on that page.
+    rail->button(rail->current())->click();
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(rail->collapsed());
+    EXPECT_FALSE(rail->button(rail->current())->isChecked());
+    EXPECT_LE(shell->propertiesDock()->maximumWidth(), IconRail::railWidth());
+    rail->button(static_cast<int>(AppShell::PropertiesTab::Export))->click();
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(rail->collapsed());
+    EXPECT_EQ(shell->propertiesTab(), AppShell::PropertiesTab::Export);
+    EXPECT_EQ(shell->mode(), OverlayHost::Mode::Export);
+    EXPECT_GT(shell->propertiesDock()->maximumWidth(), IconRail::railWidth());
+}
+
+TEST(AppOutput, FoldedDocksOpenForShortcutsFloatingAndTheNextStart) {
+    MainWindow window;
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(sampleCopy("groomlab_app_output_fold"))));
+    window.resize(1400, 860);
+    window.show();
+    QCoreApplication::processEvents();
+    AppShell* shell = window.shell();
+    IconRail* rail = shell->rightRail();
+    const ui::Bindings bindings = AppActions::bindings(window);
+    // The pages' shortcuts in their tooltips (from the actions: Attributes Ctrl+1, Material Ctrl+2).
+    EXPECT_TRUE(rail->button(0)->toolTip().contains(QStringLiteral("Ctrl+1"))) << rail->button(0)->toolTip().toStdString();
+    EXPECT_TRUE(rail->button(1)->toolTip().contains(QStringLiteral("Ctrl+2"))) << rail->button(1)->toolTip().toStdString();
+    EXPECT_TRUE(rail->button(0)->toolTip().contains(QStringLiteral("fold")));  // (the open page's icon folds)
+    // Ctrl+1 from a look page: Attributes again.
+    shell->setPropertiesTab(AppShell::PropertiesTab::Lighting);
+    bindings.at("view.mode.groom").trigger(nullptr, false);
+    EXPECT_EQ(shell->propertiesTab(), AppShell::PropertiesTab::Attributes);
+    // Folded, a mode's shortcut opens the dock on its page (Ctrl+4: Export).
+    rail->button(rail->current())->click();
+    QCoreApplication::processEvents();
+    ASSERT_TRUE(shell->folded(false));
+    bindings.at("view.mode.export").trigger(nullptr, false);
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(shell->folded(false));
+    EXPECT_EQ(shell->propertiesTab(), AppShell::PropertiesTab::Export);
+    EXPECT_TRUE(rail->button(rail->current())->isChecked());
+    // Floated, a folded dock opens (no 44 px window).
+    shell->leftRail()->button(shell->leftRail()->current())->click();
+    QCoreApplication::processEvents();
+    ASSERT_TRUE(shell->folded(true));
+    shell->groomToolsDock()->setFloating(true);
+    QCoreApplication::processEvents();
+    EXPECT_FALSE(shell->folded(true));
+    EXPECT_GT(shell->groomToolsDock()->maximumWidth(), IconRail::railWidth());
+    shell->groomToolsDock()->setFloating(false);
+    QCoreApplication::processEvents();
+    // From the keyboard: View > Panels > Fold Properties (Ctrl+]) folds and opens; the left rail's
+    // pages on Shift+1..4, its open page's tooltip with the fold's key.
+    EXPECT_TRUE(shell->leftRail()->button(1)->toolTip().contains(QStringLiteral("Shift+2"))) << shell->leftRail()->button(1)->toolTip().toStdString();
+    EXPECT_TRUE(rail->button(rail->current())->toolTip().contains(QStringLiteral("Ctrl+]")));
+    bindings.at("view.foldProperties").trigger(nullptr, true);
+    EXPECT_TRUE(shell->folded(false));
+    EXPECT_TRUE(bindings.at("view.foldProperties").checked(nullptr));
+    bindings.at("view.foldProperties").trigger(nullptr, false);
+    EXPECT_FALSE(shell->folded(false));
+    shell->showToolsPage(2);
+    EXPECT_EQ(shell->leftRail()->current(), 2);
+    // The menu's check follows a fold made with the rail's icon.
+    rail->button(rail->current())->click();
+    EXPECT_TRUE(bindings.at("view.foldProperties").checked(nullptr));
+    rail->button(rail->current())->click();
+    EXPECT_FALSE(bindings.at("view.foldProperties").checked(nullptr));
+    // Shift+1 in a text field types "!" (the field takes the key before the page shortcut): every
+    // field the window has (hex colors, the graph's search, names) and a slider's inline edit.
+    {
+        ValueSlider* slider = window.findChild<ValueSlider*>();
+        ASSERT_TRUE(slider);
+        slider->beginEdit();
+        const QList<QLineEdit*> fields = window.findChildren<QLineEdit*>();
+        ASSERT_FALSE(fields.isEmpty());
+        ASSERT_TRUE(slider->findChild<QLineEdit*>()) << "the slider's inline edit";
+        for (QLineEdit* field : fields) {
+            if (field->isReadOnly() || !field->isEnabled()) continue;  // (no typing there: the page's key)
+            QKeyEvent overrideKey(QEvent::ShortcutOverride, Qt::Key_Exclam, Qt::ShiftModifier, QStringLiteral("!"));
+            QCoreApplication::sendEvent(field, &overrideKey);
+            EXPECT_TRUE(overrideKey.isAccepted()) << field->objectName().toStdString() << " in " << field->parentWidget()->metaObject()->className();
+        }
+        slider->cancelEdit();
+    }
+    // Floating, a dock's fold action is off.
+    shell->propertiesDock()->setFloating(true);
+    EXPECT_FALSE(bindings.at("view.foldProperties").enabled());
+    shell->propertiesDock()->setFloating(false);
+    EXPECT_TRUE(bindings.at("view.foldProperties").enabled());
+    // A Help window floating (not a tab beside Properties) leaves the fold alone.
+    bindings.at("view.foldProperties").trigger(nullptr, true);
+    shell->helpDock()->setFloating(true);
+    shell->helpDock()->show();
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(shell->folded(false));
+    shell->helpDock()->hide();
+    bindings.at("view.foldProperties").trigger(nullptr, false);
+    // The side docks stay at the sides (their rails are their outer edges).
+    EXPECT_FALSE(shell->propertiesDock()->isAreaAllowed(Qt::BottomDockWidgetArea));
+    // The fold kept for the next start, with the width it opens at.
+    const int open = shell->propertiesDock()->width();
+    rail->button(rail->current())->click();
+    QCoreApplication::processEvents();
+    window.saveLayout();
+    MainWindow next;
+    next.resize(1400, 860);
+    ASSERT_TRUE(next.restoreLayout());
+    EXPECT_TRUE(next.shell()->folded(false));
+    EXPECT_FALSE(next.shell()->folded(true));
+    EXPECT_EQ(next.shell()->openWidth(false), open);
+    QSettings().remove(QStringLiteral("ui"));  // (the other tests start from the default layout)
 }
 
 }  // namespace

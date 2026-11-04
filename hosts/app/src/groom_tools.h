@@ -180,6 +180,7 @@ public:
     QWidget* topPart() const { return top_; }
     QWidget* work() const { return work_; }
     QTabBar* tabBar() const { return tabs_; }
+    void setTabsShown(bool shown) { tabsShown_ = shown; tabs_->setVisible(shown && tabs_->isVisible()); }  // false: a rail picks the page
     QScrollArea* scrollArea() const { return scroll_; }
 
 signals:
@@ -223,6 +224,7 @@ private:
     QMenu* moreMenu_ = nullptr;
     QLabel* status_ = nullptr;
     QTabBar* tabs_ = nullptr;
+    bool tabsShown_ = true;
     std::vector<std::string> tabIds_;
     QWidget* toolsGrid_ = nullptr;  // the categories' grids (Tools, Correctives)
     QWidget* paintGrid_ = nullptr;  // the Paint tile (Paint)

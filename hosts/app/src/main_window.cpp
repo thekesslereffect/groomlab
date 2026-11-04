@@ -18,6 +18,7 @@
 #include <QKeySequence>
 #include <QGridLayout>
 #include <QLabel>
+#include <QPushButton>
 #include <QVBoxLayout>
 #include <QLineEdit>
 #include <QDockWidget>
@@ -33,6 +34,7 @@
 
 #include "app_actions.h"
 #include "app_shell.h"
+#include "icon_rail.h"
 #include "groom_tools.h"
 #include "cards_panel.h"
 #include "correctives_panel.h"
@@ -79,6 +81,14 @@ MainWindow::MainWindow() {
     setCentralWidget(central);
     shell_ = new AppShell(this, host_);
     column->addWidget(shell_->timeline());
+    // The Properties tabs are the modes: Cards and Export theirs, the groom's and the look's tabs Groom.
+    connect(shell_, &AppShell::propertiesTabPicked, this, [this](int tab) {
+        const auto t = static_cast<AppShell::PropertiesTab>(tab);
+        const QString mode = t == AppShell::PropertiesTab::Cards    ? QStringLiteral("cards")
+                             : t == AppShell::PropertiesTab::Export ? QStringLiteral("export")
+                                                                    : QStringLiteral("groom");
+        setUiMode(mode);
+    });
     graph_ = shell_->graph();
     viewport_->setBrushSession(&brush_);
     // The GPU look preview runs in the viewport's frames (and the headless benchmarks'), on by
@@ -249,68 +259,45 @@ void MainWindow::buildMenuBar() {
 }
 
 void MainWindow::buildMenuCorner() {
-    // The design's corner of the menu bar: the mode switch (Groom, Look, Cards, Export: where you
-    // are, always in sight; the file's name is the window's title and the Groom Tools' header),
-    // Render ▾ (ghost) and Export ▾ (the accent): what comes after grooming one click away, where Maya's and Blender's
-    // Groom Tools have their Output strip (palette.output, which the app's Groom Tools leave out;
-    // its Simulate Range, Studio, Transfer and Import are in the GroomLab menu). The menus are
-    // menus.json's output.render and output.export, with the window's bindings; the tips are
-    // palette.output's.
+    // No corner on the menu bar: the Properties dock's tabs are the modes (Attributes, Material,
+    // Lighting and Render groom and look; Cards and Export their own), the Render tab holds the
+    // render actions (menus.json's output.render, also in the GroomLab menu) and the Export tab
+    // the export. menuCorner_, modeSwitch_ and the corner buttons stay null.
     const ui::Bindings bindings = AppActions::bindings(*this);
-    ui::FillOptions options = AppActions::fillOptions(*this);
-    options.liveShortcuts = false;  // the menu bar holds the keys; here they show as text
-    auto tipOf = [](const char* id) {
-        for (const ui::json& entry : ui::Definitions::shipped().get("palette/output")) {
-            if (entry.is_object() && entry.value("id", std::string()) == id) return QString::fromStdString(ui::hostText("tip", ui::kHost, {&entry}));
+    ui::ResolveOptions resolve = AppActions::fillOptions(*this).resolve;
+    resolve.state.reset();
+    resolve.keep = [&bindings](const std::string& id) { return bindings.count(id) > 0; };
+    resolve.dropGenerators = true;
+    auto* card = new QWidget();
+    card->setObjectName(QStringLiteral("renderActions"));
+    auto* column = new QVBoxLayout(card);
+    column->setContentsMargins(0, 0, 0, 0);
+    column->setSpacing(6);
+    auto* title = new QLabel(tr("Render out"), card);
+    title->setStyleSheet(QStringLiteral("color: %1; font-size: 12px; font-weight: 600; margin-top: 4px;").arg(theme::text().name()));
+    column->addWidget(title);
+    for (const ui::Item& item : ui::Definitions::shipped().resolve(ui::Definitions::shipped().get("menus/output.render"), resolve)) {
+        if (item.kind == ui::Item::Kind::Divider) {
+            column->addSpacing(4);
+            continue;
         }
-        return QString();
-    };
-    menuCorner_ = new QWidget(menuBar());
-    menuCorner_->setObjectName(QStringLiteral("menuCorner"));
-    auto* row = new QHBoxLayout(menuCorner_);
-    row->setContentsMargins(0, 2, 6, 2);
-    row->setSpacing(4);
-    modeSwitch_ = new Segmented(menuCorner_);
-    modeSwitch_->setObjectName(QStringLiteral("modeSwitch"));
-    {
-        std::vector<Segmented::Item> items;
-        const char* keys[] = {"1", "2", "3", "4"};
-        int k = 0;
-        for (const QString& label : {tr("Groom"), tr("Look"), tr("Cards"), tr("Export")}) {
-            // (A glass theme fills the chosen segment with its own color: a white wash, the text bright.)
-            items.push_back({label, theme::glassy() ? theme::chipChecked() : QColor(), theme::glassy() ? theme::text() : QColor(),
-                             tr("%1 mode (Ctrl+%2)").arg(label, QLatin1String(keys[k++]))});
-        }
-        modeSwitch_->setItems(std::move(items));
+        if (item.kind != ui::Item::Kind::Action) continue;
+        auto* b = new QPushButton(QString::fromStdString(item.label), card);
+        b->setObjectName(QStringLiteral("render_") + QString::fromStdString(item.id));
+        b->setToolTip(QString::fromStdString(item.tip));
+        b->setProperty("role", "disclosure");  // (outlined: an action that opens a render)
+        const ui::Binding binding = bindings.at(item.id);
+        connect(b, &QPushButton::clicked, this, [binding, value = item.value] { binding.trigger(value, false); });
+        column->addWidget(b);
     }
-    modeSwitch_->setBackground(theme::backdrop());
-    modeSwitch_->setFontSize(theme::fontSize());
-    modeSwitch_->setSegmentHeight(theme::rowHeight() - 6);
-    modeSwitch_->setPadding(2);
-    modeSwitch_->setSegmentPadding(12);
-    modeSwitch_->setCursor(Qt::PointingHandCursor);
-    connect(modeSwitch_, &Segmented::changed, this, [this](int index) {
-        static const char* names[] = {"groom", "look", "cards", "export"};
-        if (index >= 0 && index < 4) setUiMode(QLatin1String(names[index]));
+    shell_->lookCard()->addRenderWidget(card);
+    // The Properties pages' shortcuts in the rail's tooltips (the actions' live keys: Ctrl+1 Attributes...).
+    shell_->setFoldKeys(QKeySequence(Qt::CTRL | Qt::Key_BracketLeft).toString(QKeySequence::NativeText),
+                        QKeySequence(Qt::CTRL | Qt::Key_BracketRight).toString(QKeySequence::NativeText));
+    shell_->setPageKeys([&bindings](const std::string& id) {
+        const auto it = bindings.find(id);
+        return it == bindings.end() || it->second.keys.isEmpty() ? QString() : it->second.keys.first().toString(QKeySequence::NativeText);
     });
-    row->addWidget(modeSwitch_);
-    row->addSpacing(10);
-    auto button = [&](const char* ref, const QString& text, const char* tipId, const char* role, const char* name) {
-        QToolButton* b = GroomTools::menuButton(ref, text + QStringLiteral("  ▾"), tipOf(tipId), bindings, options, menuCorner_,
-                                                QStringLiteral("corner_"));
-        b->setObjectName(QLatin1String(name));
-        b->menu()->setObjectName(QLatin1String(name) + QStringLiteral("Menu"));
-        b->setProperty("role", role);
-        b->setCursor(Qt::PointingHandCursor);
-        row->addWidget(b);
-        return b;
-    };
-    cornerRender_ = button("menus/output.render", tr("Render"), "render", "cornerGhost", "cornerRender");
-    // Quick Export: the formats one click away, a ghost like Render (the Export mode has the one
-    // filled Export).
-    cornerExport_ = button("menus/output.export", tr("Quick Export"), "export", "cornerGhost", "cornerExport");
-    menuBar()->setCornerWidget(menuCorner_, Qt::TopRightCorner);
-    fitMenuCorner();
 }
 
 void MainWindow::fitMenuCorner() {
@@ -362,6 +349,12 @@ void MainWindow::saveLayout() {
     QSettings settings;
     settings.setValue(QStringLiteral("ui/windowGeometry"), saveGeometry());
     settings.setValue(QStringLiteral("ui/windowState"), saveState(kLayoutVersion));
+    // The side docks folded to their rails, and the widths they open at again.
+    for (const bool left : {true, false}) {
+        const QString side = left ? QStringLiteral("Left") : QStringLiteral("Right");
+        settings.setValue(QStringLiteral("ui/fold") + side, shell_->folded(left));
+        settings.setValue(QStringLiteral("ui/openWidth") + side, shell_->openWidth(left));
+    }
 }
 
 bool MainWindow::restoreLayout() {
@@ -373,6 +366,11 @@ bool MainWindow::restoreLayout() {
     if (!restoreState(state, kLayoutVersion)) return false;
     layoutShown_ = true;  // the saved sizes, not the defaults
     shell_->layoutRestored();
+    for (const bool left : {true, false}) {
+        const QString side = left ? QStringLiteral("Left") : QStringLiteral("Right");
+        shell_->restoreFold(left, settings.value(QStringLiteral("ui/fold") + side, false).toBool(),
+                            settings.value(QStringLiteral("ui/openWidth") + side, 0).toInt());
+    }
     return true;
 }
 
@@ -422,6 +420,8 @@ bool MainWindow::chooseTheme(const QString& name) {
         theme::setTheme(name);
         restyle(before, sheet);
         fitMenuCorner();  // (the new theme's font and padding)
+        shell_->leftRail()->refreshIcons();  // (the rails' icons in the new theme's tones)
+        shell_->rightRail()->refreshIcons();
     }
     theme::saveTheme(name);
     for (QAction* a : findChildren<QAction*>()) {

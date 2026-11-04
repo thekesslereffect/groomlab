@@ -173,7 +173,7 @@ PropertiesPanel::PropertiesPanel(QWidget* parent) : QWidget(parent) {
     auto* column = new QWidget(scroll_);
     column->setObjectName(QStringLiteral("propertiesColumn"));
     auto* layout = new QVBoxLayout(column);
-    layout->setContentsMargins(12, 8, 12, 12);  // the cards 12 px in from the dock's edges (the scroll bar beside takes its own 8)
+    layout->setContentsMargins(12, 9, 10, 12);  // the cards 12 px in from the dock's edge, 24 from the rail (the scroll bar beside takes its own 8, the dock 6)
     layout->setSpacing(8);
     build(defs().get("properties/sections"), layout, nullptr);
     layout->addStretch(1);

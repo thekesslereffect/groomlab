@@ -2,7 +2,15 @@
   "$schema": "./ui.schema.json",
   "version": 1,
   "properties": {
-    "about": "The groom's own settings, in the order of Maya's Attribute Editor for the groom (AEgroomLabShapeTemplate.mel): the app's Properties dock and Blender's groom panel lay them out the same way. Each item names the Maya attribute (maya), the app's control (app) and the Blender property (blender); custom blocks (custom: the MEL proc) list the rows they show (parts).",
+    "about": "The groom's own settings, in the order of Maya's Attribute Editor for the groom (AEgroomLabShapeTemplate.mel): the app's Properties dock and Blender's groom panel lay them out the same way. Each item names the Maya attribute (maya), the app's control (app) and the Blender property (blender); custom blocks (custom: the MEL proc) list the rows they show (parts). The pages: the app's Properties dock's icon rail (in this order), each with its glyph (hosts/app/icons) and the action whose shortcut opens it.",
+    "pages": [
+      {"id": "attributes", "label": "Attributes", "icon": "ui_sliders", "action": "view.mode.groom", "tip": "The groom's settings, in the order of Maya's Attribute Editor"},
+      {"id": "material", "label": "Material", "icon": "ui_swatch", "action": "view.mode.look", "tip": "The hair's color and shading"},
+      {"id": "lighting", "label": "Lighting", "icon": "ui_sun", "tip": "The viewport's lookdev lighting: studio presets and lights"},
+      {"id": "render", "label": "Render", "icon": "ui_camera", "tip": "The lookdev render's quality, and rendering out (images, turntables, V-Ray, RenderMan)"},
+      {"id": "cards", "label": "Cards", "icon": "ui_cards", "action": "view.mode.cards", "tip": "Game cards: hair cards made from the groom (Unreal, Unity, glTF)"},
+      {"id": "export", "label": "Export", "icon": "ui_export", "action": "view.mode.export", "tip": "Export the groom: Alembic, USD, Unreal, Unity, cards, V-Ray"}
+    ],
     "sections": [
       {
         "id": "groom",

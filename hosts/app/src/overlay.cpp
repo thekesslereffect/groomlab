@@ -139,7 +139,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto* layout = new QVBoxLayout(this);
     // A solid theme's card sits in the dock: the docks' gutters (Properties').
     if (theme::glassy()) layout->setContentsMargins(18, 18, 18, 18);
-    else layout->setContentsMargins(16, 12, 0, 12);  // the right: the pages' own (their scroll bar at the dock's edge)
+    else layout->setContentsMargins(12, 9, 0, 12);  // the right: the pages' own (their scroll bar at the dock's edge)
     layout->setSpacing(12);
 
     tabs_ = new Segmented(this);
@@ -165,10 +165,10 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     scroll_->setWidget(pages_);
     layout->addWidget(scroll_, 1);
     if (!theme::glassy()) {
-        // The docks' right gutter: 24, or 16 beside the scroll bar (which takes its own 8), so the
+        // The docks' right gutter: 18, or 10 beside the scroll bar (which takes its own 8), so the
         // fields end where Attributes' and Export's do.
         auto gutter = [this, pagesLayout] {
-            pagesLayout->setContentsMargins(0, 0, scroll_->verticalScrollBar()->isVisible() ? 16 : 24, 0);
+            pagesLayout->setContentsMargins(0, 0, scroll_->verticalScrollBar()->isVisible() ? 10 : 18, 0);
         };
         connect(scroll_->verticalScrollBar(), &QScrollBar::rangeChanged, this, [this, gutter](int, int) { QTimer::singleShot(0, this, gutter); });
         gutter();
@@ -770,7 +770,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         emit lightingEdited();
     });
     lightingRefreshers_.push_back([this] { interactiveQuality_->setCurrent(lighting_.interactiveQuality == InteractiveQuality::Full ? 1 : 0); });
-    auto* note = new QLabel(tr("Render (top right) refines from a clean slate; the line at the bottom right counts the frames."), renderPage_);
+    auto* note = new QLabel(tr("Refine accumulates once nothing moves; the line at the bottom right of the viewport counts the frames."), renderPage_);
     note->setWordWrap(true);
     note->setFont(theme::uiFont(12, 500));
     note->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textMuted().name()));
@@ -842,6 +842,11 @@ ColorEditor* LookCard::color(QBoxLayout* into, const QString& text, std::functio
     (target == Target::Material ? materialRefreshers_ : target == Target::Lighting ? lightingRefreshers_ : surfaceRefreshers_).push_back(refresher);
     if (target == Target::Surface) surfaceRows_.push_back({host, kinds});
     return editor;
+}
+
+void LookCard::addRenderWidget(QWidget* widget) {
+    widget->setParent(renderPage_);
+    static_cast<QVBoxLayout*>(renderPage_->layout())->addWidget(widget);
 }
 
 QLabel* LookCard::caption(QBoxLayout* into, const QString& text, int kinds, Target target) {
@@ -1094,6 +1099,21 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
     stats_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     refine_ = new ShadowText(this);
     refine_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    // The Graph handle: a chip at the viewport's bottom middle that shows or hides the Graph Editor (Tab too).
+    graphHandle_ = new QToolButton(this);
+    graphHandle_->setObjectName(QStringLiteral("graphHandle"));
+    graphHandle_->setCursor(Qt::PointingHandCursor);
+    graphHandle_->setToolTip(tr("Show or hide the Graph Editor (Tab)"));
+    // Its tones in the theme's style sheet (QToolButton#graphHandle), its sizes components.graphChip.
+    graphHandle_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    graphHandle_->setLayoutDirection(Qt::RightToLeft);  // (the chevron after the word)
+    graphHandle_->setFixedHeight(theme::component("graphChip", "height", 26));
+    graphHandle_->setStyleSheet(QStringLiteral("QToolButton#graphHandle { border-radius: %1px; padding: 0 12px 0 14px; }")
+                                    .arg(theme::component("graphChip", "radius", 13)));
+    connect(graphHandle_, &QToolButton::clicked, this, &OverlayHost::graphToggleRequested);
+    setGraphOpen(false);
+    graphHandle_->hide();
+
     // The brush's value while a radius or strength drag runs, beside where it started.
     readout_ = new ShadowText(this);
     readout_->setObjectName(QStringLiteral("brushReadout"));
@@ -1231,9 +1251,9 @@ void OverlayHost::setRecentFiles(const QStringList& paths) {
 
 QString OverlayHost::emptyText() const {
     switch (mode_) {
-        case Mode::Look: return tr("Look mode lights the groom and sets its hair material. Open a groom, or make one on a mesh:");
-        case Mode::Cards: return tr("Cards mode turns a groom into hair cards for game engines and bakes their textures. Open a groom first:");
-        case Mode::Export: return tr("Export mode writes the groom as Alembic, USD, Unreal or Unity strands, or cards. Open a groom first:");
+        case Mode::Look: return tr("Material, Lighting and Render light the groom and set its hair material. Open a groom, or make one on a mesh:");
+        case Mode::Cards: return tr("Cards turns a groom into hair cards for game engines and bakes their textures. Open a groom first:");
+        case Mode::Export: return tr("Export writes the groom as Alembic, USD, Unreal or Unity strands, or cards. Open a groom first:");
         case Mode::Groom: break;
     }
     return tr("Drop a .groom, .obj or .abc file on the window, or");
@@ -1712,6 +1732,22 @@ void OverlayHost::setUndoRedo(bool canUndo, bool canRedo, const QString& undoTip
     redo_->setToolTip(redoTip);
 }
 
+void OverlayHost::setGraphOpen(bool open) {
+    graphHandle_->setText(tr("Graph"));
+    graphHandle_->setProperty("open", open);
+    graphHandle_->style()->unpolish(graphHandle_);
+    graphHandle_->style()->polish(graphHandle_);
+    const int glyph = theme::component("graphChip", "icon", 12);
+    graphHandle_->setIconSize(QSize(glyph, glyph));
+    // Open: the chevron down (it closes), in the chosen ink; closed: up, in the chip's text.
+    graphHandle_->setIcon(tintedIcon(open ? QStringLiteral(":/groomlab/icons/ui_chevron_down.svg") : QStringLiteral(":/groomlab/icons/ui_chevron_up.svg"),
+                                     open ? theme::componentColor("graphChip", "onText", theme::accentInk())
+                                          : theme::componentColor("graphChip", "text", theme::hudTextDim()),
+                                     glyph, devicePixelRatioF()));
+    graphHandle_->adjustSize();
+    relayout();
+}
+
 void OverlayHost::relayout() {
     const QSize size = this->size();
     if (!built_ || size.isEmpty()) return;
@@ -1742,6 +1778,18 @@ void OverlayHost::relayout() {
     place(prompt_, layout.prompt);
     place(emptyCard_, layout.emptyCard);
     place(starter_, layout.starter);
+    // The Graph handle at the bottom middle, with a groom open: clear of the stats pill on its line
+    // (a narrow view: just after the pill).
+    if (graphHandle_) {
+        graphHandle_->setVisible(groomOpen());
+        graphHandle_->adjustSize();
+        const int gap = theme::component("graphChip", "gap", 12);
+        QRect r(QPoint((size.width() - graphHandle_->width()) / 2, size.height() - graphHandle_->height() - gap), graphHandle_->size());
+        const QRect stats = stats_->isVisibleTo(this) ? stats_->geometry() : QRect();
+        if (!stats.isNull() && r.adjusted(-gap, 0, gap, 0).intersects(stats)) r.moveLeft(stats.right() + gap);
+        graphHandle_->setGeometry(r);
+        graphHandle_->raise();
+    }
 }
 
 }  // namespace groomlab::app

@@ -874,7 +874,7 @@ void GroomTools::refreshVisibility() {
     const std::string tab = currentTab().toStdString();
     empty_->setVisible(!open);
     work_->setVisible(open);
-    tabs_->setVisible(open);
+    tabs_->setVisible(open && tabsShown_);  // (the app's rail picks the page: its tab bar stays hidden)
     // The grid: the categories' on Tools and Correctives, the Paint tile on Paint, none on Photos.
     toolsGrid_->setVisible(open && (tab == "tools" || tab == "correctives"));
     // Correctives: only the tools that work on a corrective (a category with none of them goes).

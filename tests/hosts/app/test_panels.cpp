@@ -1190,9 +1190,9 @@ TEST(AppPanels, EmptyStateCardAndPillsInEveryMode) {
         ASSERT_TRUE(window.setUiMode(QLatin1String(mode)));
         EXPECT_TRUE(host->undoButton()->isVisibleTo(&window)) << mode;
         EXPECT_TRUE(host->redoButton()->isVisibleTo(&window)) << mode;
-        // The modes are workspaces: the Groom Tools in Groom mode alone, the Properties dock the
-        // mode's panel.
-        EXPECT_EQ(shell->groomToolsDock()->isVisibleTo(&window), QLatin1String(mode) == QLatin1String("groom")) << mode;
+        // The modes are the Properties tabs: the Groom Tools stay in every one, the Properties dock
+        // shows the mode's tab.
+        EXPECT_TRUE(shell->groomToolsDock()->isVisibleTo(&window)) << mode;
         EXPECT_TRUE(shell->propertiesDock()->isVisibleTo(&window)) << mode;
     }
     ASSERT_TRUE(window.setUiMode(QStringLiteral("look")));
@@ -4233,64 +4233,43 @@ TEST(AppPanels, GroomToolsTilesPickToolsAndTheEyeHidesTheGroom) {
     EXPECT_EQ(tools->findChild<QWidget*>(QStringLiteral("outputStrip")), nullptr);
 }
 
-TEST(AppPanels, MenuBarCornerHasTheModeSwitchRenderAndQuickExport) {
+TEST(AppPanels, PropertiesTabsAreTheModesAndHoldRenderAndExport) {
+    // No mode switch and no Render / Quick Export dropdowns on the menu bar: the Properties tabs
+    // (Attributes, Material, Lighting, Render, Cards, Export) are the modes; the Render tab holds
+    // the render actions, the Export tab the export.
     MainWindow window;
     window.resize(1280, 720);
     window.show();
-    QWidget* corner = window.menuCorner();
-    ASSERT_NE(corner, nullptr);
-    EXPECT_EQ(window.menuBar()->cornerWidget(Qt::TopRightCorner), corner);
-    // The mode switch: where you are, always in sight (disabled until a groom is open); the
-    // file's name is the window's title.
-    Segmented* modes = window.modeSwitch();
-    ASSERT_NE(modes, nullptr);
-    ASSERT_EQ(modes->items().size(), 4u);
-    EXPECT_EQ(modes->items()[1].label, QStringLiteral("Look"));
-    EXPECT_FALSE(modes->isEnabled()) << "no groom, no modes";
+    EXPECT_EQ(window.menuBar()->cornerWidget(Qt::TopRightCorner), nullptr);
+    EXPECT_EQ(window.modeSwitch(), nullptr);
+    EXPECT_EQ(window.cornerRender(), nullptr);
+    EXPECT_EQ(window.cornerExport(), nullptr);
     ASSERT_TRUE(window.openGroom(QString::fromStdString(kSampleGroom)));
     QCoreApplication::processEvents();
-    EXPECT_TRUE(modes->isEnabled());
-    EXPECT_EQ(modes->current(), 0) << "Groom";
-    ASSERT_TRUE(window.setUiMode(QStringLiteral("cards")));
-    EXPECT_EQ(modes->current(), 2) << "it follows the mode however it changes";
+    QTabBar* tabs = window.shell()->propertiesTabs();
+    ASSERT_EQ(tabs->count(), 6);
+    QStringList names;
+    for (int i = 0; i < tabs->count(); ++i) names << tabs->tabText(i);
+    EXPECT_EQ(names, (QStringList{QStringLiteral("Attributes"), QStringLiteral("Material"), QStringLiteral("Lighting"),
+                                  QStringLiteral("Render"), QStringLiteral("Cards"), QStringLiteral("Export")}));
+    // A tab picks its mode; a mode picks its tab.
+    tabs->setCurrentIndex(static_cast<int>(AppShell::PropertiesTab::Cards));
+    EXPECT_EQ(window.shell()->mode(), OverlayHost::Mode::Cards);
+    EXPECT_TRUE(window.shell()->cardsPanel()->isVisibleTo(&window));
+    tabs->setCurrentIndex(static_cast<int>(AppShell::PropertiesTab::Export));
+    EXPECT_EQ(window.shell()->mode(), OverlayHost::Mode::Export);
+    tabs->setCurrentIndex(static_cast<int>(AppShell::PropertiesTab::Material));
+    EXPECT_EQ(window.shell()->mode(), OverlayHost::Mode::Groom);
+    EXPECT_TRUE(window.shell()->groomToolsDock()->isVisibleTo(&window)) << "the Groom Tools stay";
+    ASSERT_TRUE(window.setUiMode(QStringLiteral("export")));
+    EXPECT_EQ(window.shell()->propertiesTab(), AppShell::PropertiesTab::Export);
     ASSERT_TRUE(window.setUiMode(QStringLiteral("groom")));
+    EXPECT_EQ(window.shell()->propertiesTab(), AppShell::PropertiesTab::Attributes);
     EXPECT_TRUE(window.windowTitle().startsWith(QFileInfo(QString::fromStdString(kSampleGroom)).fileName()));
-    // Render and Quick Export: ghost buttons (the one filled Export is Export mode's), at the bar's right.
-    QToolButton* render = window.cornerRender();
-    QToolButton* exportButton = window.cornerExport();
-    ASSERT_TRUE(render && exportButton);
-    EXPECT_EQ(render->property("role").toString(), QStringLiteral("cornerGhost"));
-    EXPECT_EQ(exportButton->property("role").toString(), QStringLiteral("cornerGhost"));
-    EXPECT_TRUE(render->text().startsWith(QStringLiteral("Render")));
-    EXPECT_TRUE(exportButton->text().startsWith(QStringLiteral("Quick Export")));
-    EXPECT_LT(render->mapTo(&window, QPoint(0, 0)).x(), exportButton->mapTo(&window, QPoint(0, 0)).x());
-    EXPECT_GT(exportButton->mapTo(&window, QPoint(0, 0)).x(), window.width() / 2);
-    EXPECT_FALSE(render->toolTip().isEmpty());
-    EXPECT_FALSE(exportButton->toolTip().isEmpty());
-    // Whole, never cut short: the bar lays the corner out again as the name changes.
-    for (QWidget* w : {static_cast<QWidget*>(modes), static_cast<QWidget*>(render), static_cast<QWidget*>(exportButton)}) {
-        EXPECT_GE(w->width(), w->sizeHint().width()) << w->objectName().toStdString();
-    }
-    EXPECT_GE(corner->width(), corner->sizeHint().width());
-    // Their menus: menus.json's output.export and output.render, the window's actions under
-    // another name (the menu bar's keep theirs).
-    auto texts = [](QMenu* menu) {
-        std::vector<std::string> out;
-        for (QAction* a : menu->actions()) {
-            if (!a->isSeparator() && a->isVisible()) out.push_back(a->text().section(QLatin1Char('\t'), 0, 0).toStdString());
-        }
-        return out;
-    };
-    ASSERT_NE(exportButton->menu(), nullptr);
-    ASSERT_NE(render->menu(), nullptr);
-    const std::vector<std::string> exports = texts(exportButton->menu());
-    ASSERT_GE(exports.size(), 4u);
-    EXPECT_TRUE(std::any_of(exports.begin(), exports.end(), [](const std::string& t) { return t.find("Groom File") != std::string::npos; }))
-        << "the groom file too: " << json(exports).dump();
-    EXPECT_FALSE(texts(render->menu()).empty());
-    for (QAction* a : exportButton->menu()->actions()) {
-        if (!a->objectName().isEmpty()) EXPECT_TRUE(a->objectName().startsWith(QStringLiteral("corner_"))) << a->objectName().toStdString();
-    }
+    // The Render tab: the render actions (menus.json's output.render) as buttons.
+    QWidget* render = window.findChild<QWidget*>(QStringLiteral("renderActions"));
+    ASSERT_NE(render, nullptr);
+    EXPECT_FALSE(render->findChildren<QPushButton*>().isEmpty());
     // What the Groom Tools' Output strip had stays one menu away: the GroomLab menu holds Simulate
     // Range, Studio, Transfer and Import.
     QMenu* groomlab = nullptr;

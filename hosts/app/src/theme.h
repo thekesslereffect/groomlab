@@ -119,6 +119,8 @@ QColor card();        // a section's card on the panel (ui.card)
 QColor sunken();      // the track under segments and pill tabs (ui.sunken)
 QColor accentSoft();  // what is chosen: the accent as a soft wash (ui.accentSoft)
 QColor accentInk();   // text and icons in the accent on a dark surface (ui.accentInk)
+QColor cardRule();    // the rule between a card's blocks and beside the rails (ui.cardRule; derived.cardRule)
+QColor accentEdge();  // the chosen's edge: the soft accent toward the accent (derived.accentEdge)
 QColor actionText(const QColor& own);
 // Words that say something went wrong or needs a look (an export's failure, a node's error
 // line): the theme's ui.error and ui.warning, readable on the panels.
@@ -156,6 +158,15 @@ int smallRadius();
 int cardRadius();  // a section's card (ui.cardRadius)
 int panelRadius();
 int rowHeight();
+// A component's size from the components block (components.<name>.<key>: Charcoal's, as
+// hosts/maya/themes/charcoal.json writes it for every theme and host), or `fallback`.
+// (`index`: an entry of an array value, as iconRail.padding's [x, y])
+int component(const char* name, const char* key, int fallback, int index = -1);
+double componentReal(const char* name, const char* key, double fallback);
+// A component's color: the role its key names (components.iconRail.ink: "textMuted"), a token
+// (text, textMuted, accentSoft, cardRule, hudFill...), a ui or palette key, or "#RRGGBB"; else `fallback`.
+QColor componentColor(const char* name, const char* key, const QColor& fallback);
+QColor role(const std::string& name);  // a token by its name ("accentInk"); invalid for none
 // The UI's text size in pixels: ui.fontSize (11-14, 12 unless the theme says; a glass theme's 13),
 // the style sheet's and the painted fields'.
 int fontSize();

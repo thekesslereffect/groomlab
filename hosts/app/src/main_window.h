@@ -337,6 +337,8 @@ public:
     // Selects a node in the graph (shown if it was not), so its params show beside it; false
     // (and a message) for no such node.
     bool selectUiNode(const QString& name);
+    bool foldUiDocks(const QString& which);  // left, right or both docks folded to their rails (their open icon clicked)
+    bool viewUiNode(const QString& name);  // View Up to Here on the node (its header's eye); false: no such node
     // The tool tiles' names shown ("rail", "all" or "labels": the scripted screenshot's --ui-hover;
     // "panels": nothing more, the docks name their panels); false for another word.
     bool setUiHover(const QString& name);

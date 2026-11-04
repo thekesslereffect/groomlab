@@ -103,7 +103,27 @@
     "listBand": {"selected": "accentSoft", "hover": "card"},
     "emptyState": {"disc": 40, "fill": "accentSoft", "icon": "accentInk"},
     "hudChip": {"height": 28, "fill": "panel", "alpha": 0.84},
-    "brushRing": {"shaping": "accentInk", "reverse": "#F25A50", "smooth": "#5FD39A", "falloff": "dashed"}
+    "brushRing": {"shaping": "accentInk", "reverse": "#F25A50", "smooth": "#5FD39A", "falloff": "dashed"},
+    "iconRail": {"about": "(Every theme draws the components as Charcoal's block says: hosts read it from here.) A side dock's page icons on its outer edge; the open page's icon folds the dock to the rail (fold: app chrome; in Maya and Blender the rail only switches pages)", "width": 44, "button": 36, "icon": 20, "radius": 8, "padding": [4, 10], "gap": 4, "fill": "panel", "edge": "cardRule", "hover": "hover", "on": "accentSoft", "ink": "textMuted", "inkHover": "text", "inkOn": "accentInk", "inkOff": "textDisabled", "marker": "accent", "markerAlpha": 0.9, "markerWidth": 3, "markerHeight": 24, "markerInset": 3, "openMin": 220},
+    "pageTitle": {"about": "The open page's name over it (the rail's pages have no tab row)", "size": 15, "weight": 700, "inset": 12, "text": "text"},
+    "graphChip": {"about": "The viewport's Graph button (app chrome: the hosts have their own graph windows)", "height": 26, "radius": 13, "icon": 12, "fill": "hudFill", "text": "hudTextDim", "textHover": "hudText", "edge": "cardRule", "on": "accentSoft", "onText": "accentInk", "onEdge": "accentEdge", "gap": 12}
+  },
+  "derived": {
+    "about": "Tokens a theme may leave out, made from its base tones (hosts compute them the same way; mix(a, b, t) = a toward b by t). A light theme: its ui.panel's luminance (0.2126 R + 0.7152 G + 0.0722 B, 0-1) over 0.5. A theme's own ui key wins over its formula. No shipped theme is glass (ui.glass false); a glass theme draws white washes instead and is the app's alone.",
+    "card": "mix(panel, raised, 0.45)",
+    "accentSoft": "mix(card, accent, 0.22); light themes 0.16",
+    "accentInk": "mix(accent, text, 0.45)",
+    "cardRule": "mix(card, hover, 0.6)",
+    "accentEdge": "mix(accentSoft, accent, 0.45)",
+    "accentFill": "accent",
+    "textSoft": "mix(text, textDim, 0.33)",
+    "textMuted": "textDim",
+    "textDisabled": "textMuted",
+    "sunken": "mix(background, panel, 0.3); light themes mix(panel, text, 0.07)",
+    "segmentOn": "mix(hover, text, 0.08); light themes #FFFFFF",
+    "hudFill": "viewport.hudFill, else panel at alpha 214/255; light themes #1C1B19 at 226/255",
+    "hudText": "viewport.hudText, else text; light themes #F4F1EA",
+    "hudTextDim": "textMuted; light themes #C4BFB4"
   },
   "icons": {
     "create": "#A7A9B1",

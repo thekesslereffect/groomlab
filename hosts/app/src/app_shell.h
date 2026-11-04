@@ -24,7 +24,9 @@
 // (Guides, Maps, Correctives and Brush: the Groom Tools' tab or section).
 
 #include <array>
+#include <functional>
 #include <string>
+#include <vector>
 
 #include <QObject>
 #include <QPoint>
@@ -45,6 +47,8 @@ class QWidget;
 
 namespace groomlab::app {
 
+class IconRail;
+
 class CardsPanel;
 class ExportPanel;
 class GroomTools;
@@ -53,6 +57,10 @@ class Timeline;
 
 class AppShell : public QObject {
     Q_OBJECT
+signals:
+    // A Properties tab picked by hand (Cards and Export are their modes; the others Groom's).
+    void propertiesTabPicked(int tab);
+
 public:
     using Mode = OverlayHost::Mode;
     // The sections the window fills (setPanelContent) and shows by name (MainWindow::showUiPanel).
@@ -62,6 +70,19 @@ public:
 
     // ---- The pieces ---------------------------------------------------------------------------
     GroomTools* groomTools() const { return groomToolsWidget_; }
+    IconRail* leftRail() const { return leftRail_; }
+    // The side docks folded to their rails (the open page's icon): `left` the Groom Tools, else the
+    // Properties. Kept across starts (MainWindow::saveLayout): the fold and the width it opens at.
+    bool folded(bool left) const;
+    int openWidth(bool left) const;
+    void restoreFold(bool left, bool fold, int width);
+    void unfold(bool left) { foldDock(left, false); }
+    void toggleFold(bool left);                                // View > Panels > Fold (Ctrl+[ and Ctrl+])
+    void setFoldKeys(const QString& left, const QString& right);  // their keys in the rails' tooltips
+    void showToolsPage(int index);                             // a Groom Tools page (Shift+1..4), the dock open
+    // The Properties pages' shortcuts in their tooltips: `keyOf` gives an action's (properties/pages' action).
+    void setPageKeys(const std::function<QString(const std::string& action)>& keyOf);
+    IconRail* rightRail() const { return rightRail_; }
     LookCard* lookCard() const { return lookCard_; }
     CardsPanel* cardsPanel() const { return cardsPanel_; }
     ExportPanel* exportPanel() const { return exportPanel_; }
@@ -93,7 +114,7 @@ public:
 
     // ---- The Properties tabs (Groom and Look): Attributes (the groom's settings in the
     // Attribute Editor's order), then the look card's Material, Lighting and Render.
-    enum class PropertiesTab { Attributes, Material, Lighting, Render };
+    enum class PropertiesTab { Attributes, Material, Lighting, Render, Cards, Export };
     void setPropertiesTab(PropertiesTab tab);  // shows the dock too
     PropertiesTab propertiesTab() const;
     QTabBar* propertiesTabs() const { return propertiesTabs_; }
@@ -177,6 +198,16 @@ private:
     QWidget* displayPage_ = nullptr;
     QWidget* emptyPage_ = nullptr;
     QSplitter* graphSplit_ = nullptr;
+    // The side docks' icon rails (their pages; the open page's icon folds the dock to its rail).
+    IconRail* leftRail_ = nullptr;
+    IconRail* rightRail_ = nullptr;
+    QWidget* leftContent_ = nullptr;   // what folds away: the Groom Tools
+    QWidget* rightContent_ = nullptr;  // the Properties' title and pages
+    QLabel* propertiesTitle_ = nullptr;
+    int leftWidth_ = 0, rightWidth_ = 0;  // a folded dock's width to open it at again
+    void foldDock(bool left, bool fold);
+    void placeRail(bool left, Qt::DockWidgetArea area);  // the rail on the dock's outer edge
+    std::vector<std::string> pageActions_;  // the Properties pages' actions (properties/pages)
     QWidget* nodeSide_ = nullptr;
     QLabel* nodeDot_ = nullptr;
     QLabel* nodeTitle_ = nullptr;

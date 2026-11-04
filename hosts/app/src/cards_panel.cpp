@@ -49,7 +49,7 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     // The panel on a card (the style sheet's tray), 12 px in, as every dock's sections; it ends
     // where its content does.
     auto* bodyLayout = new QVBoxLayout(body);
-    bodyLayout->setContentsMargins(12, 10, 24, 12);  // (where the Properties dock's cards end)
+    bodyLayout->setContentsMargins(12, 9, 18, 12);  // (where the Properties dock's cards end)
     auto* sheet = new QWidget(body);
     sheet->setObjectName(QStringLiteral("cardsSheet"));
     if (!theme::glassy()) {
@@ -155,7 +155,7 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     stats_->setFont(theme::uiFont(12, 400));
     stats_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
     stats_->setWordWrap(true);
-    emptyIcon_ = emptyIcon(QStringLiteral("layers"), this);  // (strips in a stack: hair cards)
+    emptyIcon_ = emptyIcon(QStringLiteral("cards"), this);  // (the Cards page's own glyph)
     layout->addWidget(emptyIcon_, 0, Qt::AlignHCenter);
     layout->addWidget(stats_);
     // No Cards node yet: the one thing to do, full width.

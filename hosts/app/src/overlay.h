@@ -63,6 +63,8 @@ public:
     enum class Tab { Material, Lighting, Render };
 
     explicit LookCard(QWidget* parent = nullptr);
+    // A widget at the Render page's end (the window's render actions: Render out).
+    void addRenderWidget(QWidget* widget);
     void setMaterial(const HairMaterial& material);  // no signals
     void setLighting(const LightingSetup& lighting);
     const HairMaterial& material() const { return material_; }
@@ -291,6 +293,7 @@ signals:
     void presetsRequested();
     void fileDropped(const QString& path);
     void undoRequested();
+    void graphToggleRequested();  // the Graph handle at the viewport's bottom: show or hide the Graph Editor
     void redoRequested();
     void starterStepRequested(const QString& id);  // "guides" or "look"
     void starterDismissRequested();
@@ -337,6 +340,11 @@ private:
     bool statsWanted_ = true;
     ShadowText* refine_ = nullptr;
     ShadowText* readout_ = nullptr;  // a radius or strength drag's value, beside the ring
+    QToolButton* graphHandle_ = nullptr;  // "Graph ▴" at the viewport's bottom middle
+public:
+    void setGraphOpen(bool open);  // the handle's arrow (no signal)
+    QToolButton* graphHandle() const { return graphHandle_; }
+private:
     GlassPanel* toast_ = nullptr;
     QLabel* toastText_ = nullptr;
     QLabel* toastDot_ = nullptr;

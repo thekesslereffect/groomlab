@@ -141,7 +141,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     auto* body = new QWidget;
     outer->addWidget(new FitScrollArea(body, this));
     auto* layout = new QVBoxLayout(body);
-    layout->setContentsMargins(12, 10, 24, 12);  // the cards where the Properties dock's end (12 px and its scroll bar's room)
+    layout->setContentsMargins(12, 9, 18, 12);  // the cards where the Properties dock's end (12 px, its scroll bar's room and the dock's 6)
     layout->setSpacing(8);
     // Two cards (the style sheet's tray), as every dock's sections: the format, then the output's options;
     // the Export button under them.
@@ -906,11 +906,11 @@ void ExportPanel::refresh() {
         b->setChecked(i == static_cast<int>(target_));
         const bool cards = static_cast<Target>(i) == Target::Cards || static_cast<Target>(i) == Target::CardMaps;
         b->setEnabled(!cards || cardsAvailable_);
-        b->setToolTip(cards && !cardsAvailable_ ? tr("Needs cards: Cards mode > Make Cards") : tr(kTargets[i].description));
+        b->setToolTip(cards && !cardsAvailable_ ? tr("Needs cards: the Cards tab > Make Cards") : tr(kTargets[i].description));
     }
     // The chosen format's line; while the card formats are off, why (in the line under the formats).
     description_->setText(tr(kTargets[static_cast<int>(target_)].description) +
-                          (cardsAvailable_ ? QString() : tr("<br><span style='color:%1'>Cards (glTF) and Card maps need cards: Cards mode &gt; Make Cards.</span>")
+                          (cardsAvailable_ ? QString() : tr("<br><span style='color:%1'>Cards (glTF) and Card maps need cards: the Cards tab &gt; Make Cards.</span>")
                                                              .arg(theme::textMuted().name())));
     const bool maps = target_ == Target::CardMaps;
     const bool cards = target_ == Target::Cards;

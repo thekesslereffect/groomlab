@@ -26,6 +26,7 @@
         "tabs": {"type": "array", "items": {
           "type": "object", "additionalProperties": false, "required": ["id", "label"],
           "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "tip": {"type": "string"},
+                         "icon": {"type": "string"},
                          "aliases": {"type": "array", "items": {"type": "string"}}}}},
         "header": {"type": "object", "additionalProperties": {
           "type": "object", "additionalProperties": false,
@@ -107,6 +108,10 @@
       "type": "object", "additionalProperties": false, "required": ["sections"],
       "properties": {
         "about": {"type": "string"},
+        "pages": {"type": "array", "minItems": 1, "items": {
+          "type": "object", "additionalProperties": false, "required": ["id", "label", "icon"],
+          "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "tip": {"type": "string"}, "icon": {"type": "string"},
+                         "action": {"$ref": "#/$defs/id"}}}},
         "sections": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/propertySection"}}
       }
     }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "theme.h"
 
+#include <map>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -333,6 +334,11 @@ QColor accentInk() {
     const QColor c = uiColor("accentInk");
     return c.isValid() ? c : mix(uiColor("accent"), text(), 0.45);
 }
+QColor accentEdge() { return mix(accentSoft(), uiColor("accent"), 0.45); }
+QColor cardRule() {
+    const QColor c = uiColor("cardRule");
+    return c.isValid() ? c : mix(card(), uiColor("hover"), 0.6);
+}
 QColor textDisabled() {
     if (glassy()) return QColor(0x6E, 0x6B, 0x66);
     const QColor c = uiColor("textDisabled");
@@ -451,6 +457,50 @@ int smallRadius() { return std::max(2, controlRadius() - 2); }
 int cardRadius() { return std::clamp(value("ui", "cardRadius", panelRadius()), 0, 20); }
 int panelRadius() { return controlRadius() + 2; }
 int rowHeight() { return std::clamp(value("ui", "rowHeight", 26), 18, 40); }
+namespace {
+// The components block: one for every theme, Charcoal's (the default theme's file sets every key).
+const nlohmann::json* componentValue(const char* name, const char* key) {
+    static const nlohmann::json components = [] {
+        const nlohmann::json t = readTheme(kDefaultTheme);
+        const auto c = t.find("components");
+        return c != t.end() && c->is_object() ? *c : nlohmann::json::object();
+    }();
+    const nlohmann::json* c = &components;
+    const auto n = c->find(name);
+    if (n == c->end() || !n->is_object()) return nullptr;
+    const auto v = n->find(key);
+    return v != n->end() ? &*v : nullptr;
+}
+}  // namespace
+int component(const char* name, const char* key, int fallback, int index) {
+    const nlohmann::json* v = componentValue(name, key);
+    if (v && index >= 0 && v->is_array()) v = index < static_cast<int>(v->size()) ? &(*v)[static_cast<std::size_t>(index)] : nullptr;
+    return v && v->is_number() ? v->get<int>() : fallback;
+}
+double componentReal(const char* name, const char* key, double fallback) {
+    const nlohmann::json* v = componentValue(name, key);
+    return v && v->is_number() ? v->get<double>() : fallback;
+}
+QString cssRgba(const QColor& c) {
+    return QStringLiteral("rgba(%1, %2, %3, %4)").arg(c.red()).arg(c.green()).arg(c.blue()).arg(c.alpha());
+}
+QColor role(const std::string& name) {
+    // The tokens the code derives (theme.h), then what the theme file names.
+    static const std::map<std::string, QColor (*)()> derived = {
+        {"text", text},         {"textSoft", textSoft},     {"textDim", textDim},         {"textMuted", textMuted},
+        {"textDisabled", textDisabled}, {"accentSoft", accentSoft}, {"accentInk", accentInk}, {"accentFill", accentFill},
+        {"card", card},         {"sunken", sunken},         {"cardRule", cardRule},       {"hudFill", hudFill},
+        {"hudText", hudText},   {"hudTextDim", hudTextDim}, {"segmentOn", segmentOn},
+        {"accentEdge", accentEdge},
+    };
+    const auto d = derived.find(name);
+    return d != derived.end() ? d->second() : resolve(name);
+}
+QColor componentColor(const char* name, const char* key, const QColor& fallback) {
+    const nlohmann::json* v = componentValue(name, key);
+    const QColor c = v && v->is_string() ? role(v->get<std::string>()) : QColor();
+    return c.isValid() ? c : fallback;
+}
 int fontSize() { return glassy() ? 13 : std::clamp(value("ui", "fontSize", 12), 11, 14); }
 
 QString headerStyle() {
@@ -950,6 +1000,19 @@ QLabel[role="propLabel"] { color: @dim@; }
 QFrame[role="propField"] { background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; }
 QWidget[role="fieldList"] { background: @field@; border: 1px solid @fieldEdge@; border-radius: @radius@px; }
 QWidget[role="fieldList"] QLabel { background: transparent; }
+/* The side docks' icon rails (icon_rail.h): a slim column at the dock's outer edge, the open page's icon lit. */
+QWidget[role="iconRail"] { background: @railFill@; }
+QWidget[role="iconRail"][side="left"] { border-right: 1px solid @railEdge@; }
+QWidget[role="iconRail"][side="right"] { border-left: 1px solid @railEdge@; }
+QToolButton[role="railButton"] { background: transparent; border: none; padding: 0; }
+QToolButton[role="railButton"]:hover { background: @railHover@; }
+QToolButton[role="railButton"]:checked { background: @railOn@; }
+QToolButton[role="railButton"]:checked:disabled { background: transparent; }
+QLabel#propertiesTitle { color: @pageTitleText@; background: transparent; }
+/* The viewport's Graph chip (overlay.cpp): a HUD chip; the graph open, the chosen wash. */
+QToolButton#graphHandle { background: @graphChipFill@; color: @graphChipText@; border: 1px solid @graphChipEdge@; font-weight: 600; }
+QToolButton#graphHandle:hover { color: @graphChipTextHover@; }
+QToolButton#graphHandle[open="true"] { background: @graphChipOn@; color: @graphChipOnText@; border-color: @graphChipOnEdge@; }
 QFrame[role="emptyQuiet"] { background: transparent; border: none; }
 QFrame[role="emptyQuiet"] QLabel { background: transparent; }
 QFrame[role="propField"] QLabel { background: transparent; }
@@ -1024,7 +1087,7 @@ QFrame[role="propRule"] { background: @cardRule@; border: none; }
         // The check mark in the accent's text color (a light accent: a dark tick).
         {QStringLiteral("@checkMark@"), uiColor("accentText").lightness() < 128 ? QStringLiteral(":/groomlab/icons/ui_check_dark.svg")
                                                                                  : QStringLiteral(":/groomlab/icons/ui_check_light.svg")},
-        {QStringLiteral("@cardRule@"), glass ? wash(8) : mix(card(), uiColor("hover"), 0.6).name()},
+        {QStringLiteral("@cardRule@"), glass ? wash(8) : cardRule().name()},
         {QStringLiteral("@segOn@"), glass ? wash(20) : segmentOn().name()},
         {QStringLiteral("@checkRadius@"), QString::number(checkRadius())},
         // A checked box: the accent filled with the light tick on a light theme (a pale wash would hide it), the soft accent on a dark one.
@@ -1035,8 +1098,21 @@ QFrame[role="propRule"] { background: @cardRule@; border: none; }
         {QStringLiteral("@sunken@"), glass ? wash(4) : sunken().name()},
         {QStringLiteral("@accentSoft@"), glass ? wash(20) : accentSoft().name()},
         {QStringLiteral("@accentInk@"), glass ? text().name() : accentInk().name()},
-        {QStringLiteral("@accentEdge@"), glass ? wash(30) : mix(accentSoft(), uiColor("accent"), 0.45).name()},
+        {QStringLiteral("@accentEdge@"), glass ? wash(30) : accentEdge().name()},
         {QStringLiteral("@warning@"), warningText().name()},
+        // The components' roles (charcoal.json components: iconRail, pageTitle, graphChip).
+        {QStringLiteral("@railFill@"), componentColor("iconRail", "fill", uiColor("panel")).name()},
+        {QStringLiteral("@railEdge@"), componentColor("iconRail", "edge", cardRule()).name()},
+        {QStringLiteral("@railHover@"), componentColor("iconRail", "hover", uiColor("hover")).name()},
+        {QStringLiteral("@railOn@"), componentColor("iconRail", "on", accentSoft()).name()},
+        {QStringLiteral("@pageTitleText@"), componentColor("pageTitle", "text", text()).name()},
+        {QStringLiteral("@graphChipFill@"), cssRgba(componentColor("graphChip", "fill", hudFill()))},
+        {QStringLiteral("@graphChipTextHover@"), componentColor("graphChip", "textHover", hudText()).name()},
+        {QStringLiteral("@graphChipText@"), componentColor("graphChip", "text", hudTextDim()).name()},
+        {QStringLiteral("@graphChipEdge@"), componentColor("graphChip", "edge", cardRule()).name()},
+        {QStringLiteral("@graphChipOnText@"), componentColor("graphChip", "onText", accentInk()).name()},
+        {QStringLiteral("@graphChipOnEdge@"), componentColor("graphChip", "onEdge", accentSoft()).name()},
+        {QStringLiteral("@graphChipOn@"), componentColor("graphChip", "on", accentSoft()).name()},
         {QStringLiteral("@text@"), text().name()},
         {QStringLiteral("@soft@"), textSoft().name()},
         {QStringLiteral("@dim@"), textDim().name()},

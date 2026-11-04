@@ -601,10 +601,11 @@ void MainWindow::reevaluate(bool quiet) {
     // renderers write only those.
     const HairChanges changes{shown.strandsSerial, shown.changesBase, shown.strandsChanges};
     // (The Groom Tools' eye off: the renderers hold them, drawing none.)
-    viewport_->renderer().setHairStrands(showCards ? nullptr : shown.strands, shown.versions.strands, changes);
+    // (A Scatter viewed alone: its roots are dots, with the guides': no hair to shade.)
+    viewport_->renderer().setHairStrands(showCards || shown.viewedRoots ? nullptr : shown.strands, shown.versions.strands, changes);
     if (headless_) {
         headless_->renderer.setScalp(scalp);
-        headless_->renderer.setHairStrands(showCards ? nullptr : shown.strands, shown.versions.strands, changes);
+        headless_->renderer.setHairStrands(showCards || shown.viewedRoots ? nullptr : shown.strands, shown.versions.strands, changes);
     }
     if (textured) {
         if (!cardSurface_ || cardSurfaceVersion_ != shown.versions.cards || cardSurfaceMap_ != bake->preview) {

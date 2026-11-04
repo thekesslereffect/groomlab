@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // MainWindow: the UI, graph presets and params driven by name (scripted runs and the tests).
 
+#include "icon_rail.h"
 #include "main_window_internal.h"
 #include "glass.h"
 
@@ -641,6 +642,25 @@ void MainWindow::pasteGraph() {
         graph_->frameReadable();
     }
     notify(tr("Pasted %1 (Ctrl+Z undoes it)").arg(QString::fromStdString(presetMessage(applied))));
+}
+
+bool MainWindow::foldUiDocks(const QString& which) {
+    const bool left = which == QStringLiteral("left") || which == QStringLiteral("both");
+    const bool right = which == QStringLiteral("right") || which == QStringLiteral("both");
+    if (!left && !right) {
+        report(tr("No dock '%1' to fold (left, right or both)").arg(which));
+        return false;
+    }
+    for (IconRail* rail : {left ? shell_->leftRail() : nullptr, right ? shell_->rightRail() : nullptr}) {
+        if (rail && !rail->collapsed() && rail->button(rail->current())) rail->button(rail->current())->click();
+    }
+    return true;
+}
+
+bool MainWindow::viewUiNode(const QString& name) {
+    if (!selectUiNode(name)) return false;
+    graph_->setViewedNode(name.toStdString());
+    return true;
 }
 
 bool MainWindow::selectUiNode(const QString& name) {

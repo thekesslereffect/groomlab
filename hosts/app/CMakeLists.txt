@@ -287,6 +287,8 @@ qt_add_library(groomlab_app_ui STATIC
     src/render_job.h
     src/app_shell.cpp
     src/app_shell.h
+    src/icon_rail.cpp
+    src/icon_rail.h
     src/vray_render.cpp
     src/vray_render.h)
 # The brush icons: GroomLab's own (the Maya plugin's, hosts/maya/icons), and the UI's (ui_*.svg, white

@@ -274,6 +274,7 @@ void MainWindow::wireOverlay() {
     connect(markingMenu_, &MarkingMenu::picked, this, [this](const MarkingMenu::Item& item) { AppActions::runMarkingMenuItem(*this, item); });
     connect(markingMenu_, &MarkingMenu::dismissed, this, [this] { viewport_->setFocus(); });
     connect(host_, &OverlayHost::undoRequested, this, [this] { undo(); });
+    connect(host_, &OverlayHost::graphToggleRequested, this, [this] { setGraphShown(!graphShown()); });
     connect(host_, &OverlayHost::redoRequested, this, [this] { redo(); });
     connect(host_, &OverlayHost::presetsRequested, this, [this] { showPresetsMenu(); });
     // The Graph Editor closed or shown by its own button or View > Panels: the graph follows (it

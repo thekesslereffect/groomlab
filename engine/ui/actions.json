@@ -44,6 +44,8 @@
     "view.mode.look": {"label": "Look", "tip": "Look mode: the hair material, the lighting and the render", "checkable": true, "hosts": ["app"]},
     "view.mode.cards": {"label": "Cards", "tip": "Cards mode: game cards, their levels of detail and their maps", "checkable": true, "hosts": ["app"]},
     "view.mode.export": {"label": "Export", "tip": "Export mode: every target, the frames and the output", "checkable": true, "hosts": ["app"]},
+    "view.foldGroomTools": {"label": "Fold Groom Tools", "tip": "The Groom Tools down to their icon rail, the viewport taking the room (again: open them; also the open page's icon)", "checkable": true, "shortcut": "view.fold", "shortcutPart": 0, "hosts": ["app"]},
+    "view.foldProperties": {"label": "Fold Properties", "tip": "The Properties down to their icon rail, the viewport taking the room (again: open them; also the open page's icon)", "checkable": true, "shortcut": "view.fold", "shortcutPart": 1, "hosts": ["app"]},
     "view.railLabels": {"label": "Tool Labels", "tip": "The Groom Tools' tiles with their names under the icons (off: compact icon tiles)", "checkable": true, "hosts": ["app"]},
     "view.turntable": {"label": "Turntable", "tip": "The camera turns round the groom while this is on", "checkable": true, "hosts": ["app"]},
 

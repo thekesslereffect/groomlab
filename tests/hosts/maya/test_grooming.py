@@ -4061,6 +4061,20 @@ class ControlsAndExamplesTest(unittest.TestCase):
                 with open(os.path.join(theme.SHIPPED_DIR, name + ".json"), encoding="utf-8") as f:
                     return json.load(f)
             self.assertEqual(keys(raw("playful")) - keys(raw("charcoal")), set())
+            # The components every host draws (sizes and color roles, read from Charcoal's file for every theme).
+            for component in ("iconRail", "pageTitle", "graphChip"):
+                self.assertIn(component, raw("charcoal")["components"])
+            for key in ("width", "button", "icon", "radius", "padding", "fill", "edge", "ink", "inkOn", "marker"):
+                self.assertIn(key, raw("charcoal")["components"]["iconRail"])
+            charcoal = raw("charcoal")
+            known = set(charcoal["derived"]) | set(charcoal["ui"]) | set(charcoal["palette"])
+            styles = {"dashed", "solid"}  # (brushRing.falloff: a line style, not a color)
+            for component, values in charcoal["components"].items():
+                for key, value in values.items():
+                    if key == "about" or not isinstance(value, str):
+                        continue
+                    self.assertTrue(value.startswith("#") or value in known or value in styles,
+                                    "components.%s.%s: %r is no token" % (component, key, value))
             for name in (f[:-5] for f in os.listdir(theme.SHIPPED_DIR) if f.endswith(".json")):
                 t = theme.Theme(name, theme.load(name))
                 for path in ("ui.background", "ui.panel", "ui.text", "ui.accent", "graph.node", "graph.selected",
