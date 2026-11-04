@@ -736,7 +736,9 @@ void GroomTools::refreshCard() {
         if (at > 24) hint = hint.left(at) + QStringLiteral(".");
     }
     if (!hint.endsWith(QLatin1Char('.'))) hint += QLatin1Char('.');
-    noTool_->setText(picked ? hint + tr(" Shift+drag smooths.") : hint);
+    // The Shape and Trim tools smooth on Shift+drag (Create's, Paint's and Guides' don't say so).
+    const bool smooths = picked && (picked->category == BrushCategory::Shape || picked->category == BrushCategory::Trim);
+    noTool_->setText(smooths ? hint + tr(" Shift+drag smooths.") : hint);
     noTool_->setToolTip(picked && hint.size() < whole.size() ? whole : QString());
     // A picked tool's line in the card's header (under its name); no tool: the line over the panel.
     card_->setSubtitle(picked ? noTool_->text() : QString());

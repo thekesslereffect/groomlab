@@ -58,9 +58,13 @@ NO_TOOL = "Pick a tool, then drag over the groom in the viewport."
 CHIP_LABELS = {"pressure": "Pressure", "collide": "Keep off scalp"}
 
 
-def short_hint(hint):
+SMOOTHING = ("Shape", "Trim")  # the groups whose tools smooth on Shift+drag (Create's, Paint's and Guides' don't say)
+
+
+def short_hint(hint, category=""):
     """A tool's line on its card, as the app's (groom_tools.cpp refreshCard): the hint's first
-    clause without its asides in parentheses (cut at ". " or "; " past 24 characters), then the gesture every brush shares."""
+    clause without its asides in parentheses (cut at ". " or "; " past 24 characters), then, for
+    the Shape and Trim tools, the Shift+drag smoothing they share."""
     short = re.sub(r"\s*\([^()]*\)", "", hint)  # (asides in parentheses: the tooltip's)
     for stop in (". ", "; ", " ("):
         at = short.find(stop)
@@ -68,7 +72,7 @@ def short_hint(hint):
             short = short[:at] + "."
     if not short.endswith("."):
         short += "."
-    return short + " Shift+drag smooths."
+    return short + (" Shift+drag smooths." if category in SMOOTHING else "")
 
 
 def rail_icon(name):
@@ -2311,7 +2315,8 @@ class ToolPalette(QtWidgets.QWidget):
         # One line (the app's): the hint's first clause and the gesture every brush shares; the
         # whole hint on the tool name's hover.
         whole = HINTS.get(tool, "")
-        self.card_hint.setText(short_hint(whole) if whole else "")
+        category = next((t["category"] for t in CATALOG if t["id"] == tool), "")
+        self.card_hint.setText(short_hint(whole, category) if whole else "")
         self.card_hint.setVisible(bool(whole))
         self.card_title.setToolTip(whole)
 

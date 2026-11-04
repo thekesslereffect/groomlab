@@ -97,9 +97,13 @@ def in_window(layout):
     return hasattr(layout, "groomlab_role")
 
 
-def short_hint(hint):
+SMOOTHING = ("Shape", "Trim")  # the groups whose tools smooth on Shift+drag (Create's, Paint's and Guides' don't say)
+
+
+def short_hint(hint, category=""):
     """A tool's line on its card, as the app's (groom_tools.cpp refreshCard): the hint's first
-    clause without its asides in parentheses (cut at ". " or "; " past 24 characters), then the gesture every brush shares;
+    clause without its asides in parentheses (cut at ". " or "; " past 24 characters), then, for
+    the Shape and Trim tools, the Shift+drag smoothing they share;
     the whole hint is the tool name's tooltip."""
     short = re.sub(r"\s*\([^()]*\)", "", hint)  # (asides in parentheses: the tooltip's)
     for stop in (". ", "; ", " ("):
@@ -108,7 +112,7 @@ def short_hint(hint):
             short = short[:at] + "."
     if not short.endswith("."):
         short += "."
-    return short + " Shift+drag smooths."
+    return short + (" Shift+drag smooths." if category in SMOOTHING else "")
 
 
 def look(layout, role):
@@ -557,7 +561,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             head.groomlab_tip = info.get("hint", "")  # (the whole hint on the name's hover, as the app)
             head.label(text=info["label"], icon_value=icons.icon(tool))
             if info.get("hint"):
-                _wrap(look(card, "about"), short_hint(info["hint"]), width=_chars(context))
+                _wrap(look(card, "about"), short_hint(info["hint"], info.get("category", "")), width=_chars(context))
         if "radius" in uses:  # Brush: how the stroke feels
             col, _ = block(card, defs.text("brushBlock"), titled=False)
             sliders = col.column(align=True)
