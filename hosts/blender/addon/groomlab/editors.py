@@ -126,14 +126,14 @@ class ProfileEditor(uikit.Widget):
     def draw(self, p, win):
         t, s = p.theme, p.scale
         x, y, w, h = self.rect
-        p.rect(self.rect, t.background, t.radius * s, t.border, 1.0 * s)
+        p.rect(self.rect, t.sunken, t.radius * s)
         cx, cy = self.to_screen(0.0, 0.0)
-        p.rect((x + 4 * s, cy, w - 8 * s, max(1.0, s)), t.border)  # the guide through the center
-        p.rect((cx, y + 4 * s, max(1.0, s), h - 8 * s), t.border)
+        p.rect((x + 4 * s, cy, w - 8 * s, max(1.0, s)), t.cardRule)  # the guide through the center
+        p.rect((cx, y + 4 * s, max(1.0, s), h - 8 * s), t.cardRule)
         if len(self.points) >= 3:
             curve = dense_curve(self.points, self.shape.get("smooth", True))
             pts = [self.to_screen(u, v) for u, v in curve]
-            p.lines(pts + [pts[0]], t.accent if self.editable else t.textDim, 1.8)
+            p.lines(pts + [pts[0]], t.accent if self.editable else t.accentInk, 1.8)
         drag = getattr(win.interaction, "index", None) if isinstance(win.interaction, _ProfileDrag) else None
         mates = partners(self.points) if self.mirror() else [None] * len(self.points)
         for i, (u, v) in enumerate(self.points):
@@ -310,7 +310,7 @@ class IconPicker(uikit.Widget):
             draw_thumbnail(p, tex, (x + 3 * s, y + 3 * s, side, side))
         p.text(cur[1] if cur else "-", (x + side + 10 * s, y, w - side - 30 * s, h), t.text)
         cx, cy, k = x + w - 13 * s, y + h * 0.5, 3.5 * s
-        p.lines([(cx - k, cy + k * 0.5), (cx, cy - k * 0.5), (cx + k, cy + k * 0.5)], t.textDim)
+        p.chevron(cx, cy, k, t.text if hover else t.textDim)
 
     def press(self, win, context, event):
         return _GridInteraction(self, win)
@@ -371,8 +371,7 @@ class _GridInteraction(uikit.Interaction):
 
     def draw(self, p, win):
         t, s = p.theme, p.scale
-        p.rect(uikit.inset(self.rect, -2 * s), (0, 0, 0, 0.35), 8 * s, soft=10 * s)
-        p.rect(self.rect, t.panel, t.radius * s, t.border, 1.0 * s)
+        uikit.draw_popup(p, self.rect)
         x, y, w, h = self.rect
         current = self.picker.prop.get()
         for i, (ident, name, _tip, icon) in enumerate(self.picker.items[:self.COLS * 5]):
@@ -381,7 +380,7 @@ class _GridInteraction(uikit.Interaction):
             cy = y + h - 4 * s - (row + 1) * (self.cell + 14 * s)
             cell = (cx + 2 * s, cy, self.cell - 4 * s, self.cell + 12 * s)
             if ident == current:
-                p.rect(cell, t.selection, t.radius * s, t.accent, 1.0 * s)
+                p.rect(cell, t.accentSoft, t.radius * s, t.accentEdge, 1.0 * s)
             elif i == self.hover:
                 p.rect(cell, t.hover, t.radius * s)
             tex = thumbnail(self.picker.preview_of(icon)) if icon else None
@@ -499,12 +498,11 @@ class PopupMenu(uikit.Interaction):
         t, s = p.theme, p.scale
         for level in self.levels:
             entries, rect, hover, _heights = level
-            p.rect(uikit.inset(rect, -2 * s), (0, 0, 0, 0.35), 8 * s, soft=10 * s)
-            p.rect(rect, t.panel, t.radius * s, t.border, 1.0 * s)
+            uikit.draw_popup(p, rect)
             for i, (e, r) in enumerate(zip(entries, self.entry_rects(level))):
                 kind = e["kind"]
                 if kind == "sep":
-                    p.rect((r[0] + 4 * s, r[1] + r[3] * 0.5, r[2] - 8 * s, max(1.0, s)), t.border)
+                    p.rect((r[0] + 4 * s, r[1] + r[3] * 0.5, r[2] - 8 * s, max(1.0, s)), t.popupEdge)
                     continue
                 if kind == "label":
                     p.text(e.get("text", ""), uikit.inset(r, 8 * s, 0), t.textMuted, t.font_size - 1)
@@ -515,12 +513,11 @@ class PopupMenu(uikit.Interaction):
                     p.rect(r, t.hover, (t.radius - 2) * s)
                 if e.get("checked"):
                     cx, cy, k = r[0] + 12 * s, r[1] + r[3] * 0.5, 3.5 * s
-                    p.lines([(cx - k, cy), (cx - k * 0.3, cy - k * 0.8), (cx + k, cy + k * 0.8)], t.accent, 1.8)
+                    p.lines([(cx - k, cy), (cx - k * 0.3, cy - k * 0.8), (cx + k, cy + k * 0.8)], t.accentInk, 1.8)
                 elif e.get("icon"):
                     g = 14 * s
                     p.glyph(e["icon"], (r[0] + 5 * s, r[1] + (r[3] - g) * 0.5, g, g), t.textDim)
                 p.text(e.get("text", ""), (r[0] + 26 * s, r[1], r[2] - 44 * s, r[3]), t.text)
                 if kind == "sub":
-                    cx, cy, k = r[0] + r[2] - 10 * s, r[1] + r[3] * 0.5, 3.0 * s
-                    p.lines([(cx - k * 0.5, cy + k), (cx + k * 0.5, cy), (cx - k * 0.5, cy - k)], t.textDim)
+                    p.chevron(r[0] + r[2] - 10 * s, r[1] + r[3] * 0.5, 3.0 * s, t.textDim, down=False)
                 p.fade = 1.0

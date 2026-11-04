@@ -1188,16 +1188,22 @@ def draw_tab(layout, context, chars):
     s = scene.groomlab_photos
     # The photos (a header: how many, Import), the list, then the picked photo's box: rename and
     # delete, how it shows, its lens; Align by Points; Guides from Photos.
+    layout = palette.look(layout, "card")  # (the GroomLab window: the tab on a card)
     head = palette.section_header(layout, "Photos", len(list_photos(scene)))
     sub = head.row(align=True)
     sub.alignment = "RIGHT"
     palette.bar_icons(sub, "lists/photos/bar", "photosbar", context, ("photo.import",))
-    row = layout.row()  # the list (bpy.data.objects, the photos shown) with its right-click menu beside it
-    row.template_list("GROOMLAB_UL_photos", "", bpy.data, "objects", s, "photo_index", rows=3)
-    row.column(align=True).menu("GROOMLAB_MT_photo_context", text="", icon="DOWNARROW_HLT")
+    shown = bool(list_photos(scene))
+    if shown or not palette.in_window(layout):
+        row = layout.row()  # the list (bpy.data.objects, the photos shown) with its right-click menu beside it
+        row.template_list("GROOMLAB_UL_photos", "", bpy.data, "objects", s, "photo_index", rows=3)
+        row.column(align=True).menu("GROOMLAB_MT_photo_context", text="", icon="DOWNARROW_HLT")
+    else:  # (the GroomLab window: an empty state)
+        palette.empty_state(layout, "No photos yet", "Import a photo to start: a camera to groom to.", "IMPORT", chars)
     cam = current(scene)
     if cam is None:
-        _wrap(layout, "Import a photo to start.", width=chars)
+        if shown or not palette.in_window(layout):
+            _wrap(layout, "Import a photo to start.", width=chars)
     else:
         p = cam.groomlab_photo
         box = layout.box()
