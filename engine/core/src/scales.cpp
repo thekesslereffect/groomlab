@@ -199,6 +199,75 @@ InstancePrototype scalePlate(const ScalePlateShape& shape) {
 
 namespace {
 
+// A ring turned about +Y from a closed profile (radius, height) going round counterclockwise as
+// seen with +Y up and the radius to the right (outward normals): all quads, one closed piece,
+// `segments` round. U goes round, V along the profile.
+InstancePrototype lathe(const std::vector<std::array<float, 2>>& profile, int segments) {
+    InstancePrototype out;
+    out.found = true;
+    const int m = static_cast<int>(profile.size());
+    for (int k = 0; k < segments; ++k) {
+        const float a = 6.2831853f * static_cast<float>(k) / static_cast<float>(segments);
+        for (int j = 0; j < m; ++j) {
+            const auto& q = profile[static_cast<std::size_t>(j)];
+            out.points.push_back({q[0] * pm::cos(a), q[1], -q[0] * pm::sin(a)});
+            out.uvs.push_back({static_cast<float>(k) / static_cast<float>(segments), static_cast<float>(j) / static_cast<float>(m)});
+        }
+    }
+    auto at = [&](int k, int j) { return static_cast<std::uint32_t>(((k % segments) * m) + (j % m)); };
+    for (int k = 0; k < segments; ++k) {
+        for (int j = 0; j < m; ++j) {
+            const std::uint32_t a = at(k, j), b = at(k + 1, j), c = at(k + 1, j + 1), d = at(k, j + 1);
+            out.triangles.insert(out.triangles.end(), {a, b, c, a, c, d});
+        }
+    }
+    out.normals.assign(out.points.size(), Vec3f{});
+    for (std::size_t k = 0; k + 2 < out.triangles.size(); k += 3) {
+        const Vec3f& a = out.points[out.triangles[k]];
+        const Vec3f face = (out.points[out.triangles[k + 1]] - a).cross(out.points[out.triangles[k + 2]] - a);
+        for (int c = 0; c < 3; ++c) out.normals[out.triangles[k + static_cast<std::size_t>(c)]] += face;
+    }
+    for (Vec3f& v : out.normals) v = v.length() > 1e-20f ? v.normalized() : Vec3f{0, 1, 0};
+    std::uint64_t signature = hash64(0xB3AD5);
+    for (const Vec3f& p : out.points) signature = hashFloat(hashFloat(hashFloat(signature, p.x), p.y), p.z);
+    out.signature = signature ? signature : 1;
+    return out;
+}
+
+// The braid accessories, each round a bore of radius 0.5 (a tie as wide as its braid: the Braid
+// node's ties, the Instance node's fitWidth) from +Y 0 to 1: a barrel bead, a metal cuff with
+// lipped ends, an elastic hair tie (a thin band round the middle).
+InstancePrototype bead() {
+    std::vector<std::array<float, 2>> p;
+    const int n = 10;
+    for (int i = 0; i <= n; ++i) {  // the barrel, bottom to top
+        const float y = 0.04f + 0.92f * static_cast<float>(i) / static_cast<float>(n);
+        p.push_back({0.56f + 0.1f * pm::sin(3.14159265f * y), y});
+    }
+    p.push_back({0.54f, 0.995f});
+    p.push_back({0.51f, 1.0f});
+    p.push_back({0.5f, 0.97f});  // the bore, top to bottom
+    p.push_back({0.5f, 0.03f});
+    p.push_back({0.51f, 0.0f});
+    p.push_back({0.54f, 0.005f});
+    return lathe(p, 24);
+}
+
+InstancePrototype cuff() {
+    return lathe({{0.56f, 0.0f}, {0.58f, 0.04f}, {0.54f, 0.1f}, {0.54f, 0.9f}, {0.58f, 0.96f}, {0.56f, 1.0f},
+                  {0.5f, 1.0f}, {0.5f, 0.0f}},
+                 28);
+}
+
+InstancePrototype hairTie() {
+    std::vector<std::array<float, 2>> p;
+    for (int i = 0; i < 10; ++i) {  // a round band, tube 0.07 thick, at the middle
+        const float a = 6.2831853f * static_cast<float>(i) / 10.0f;
+        p.push_back({0.55f + 0.05f * pm::cos(a), 0.5f + 0.3f * pm::sin(a)});
+    }
+    return lathe(p, 24);
+}
+
 struct Builtin {
     const char* name;
     ScalePlateShape shape;
@@ -230,6 +299,9 @@ const std::map<std::string, InstancePrototype>& builtins() {
         m["groomlab:scale"] = scalePlate(ScalePlateShape{});
         m["groomlab:scaleRound"] = scalePlate(roundShape());
         m["groomlab:scaleShield"] = scalePlate(shieldShape());
+        m["groomlab:bead"] = bead();
+        m["groomlab:cuff"] = cuff();
+        m["groomlab:hairTie"] = hairTie();
         return m;
     }();
     return made;
@@ -245,6 +317,8 @@ const InstancePrototype* builtinPrototype(const std::string& name) {
 }
 
 std::vector<std::string> builtinPrototypeNames() { return {"groomlab:scale", "groomlab:scaleRound", "groomlab:scaleShield"}; }
+
+std::vector<std::string> builtinAccessoryNames() { return {"groomlab:bead", "groomlab:cuff", "groomlab:hairTie"}; }
 
 std::vector<std::string> graphMeshPrototypes(const std::string& graphJson) {
     std::set<std::string> names;

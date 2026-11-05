@@ -3,6 +3,7 @@
 #include "groomlab/portable_math.h"
 
 #include <algorithm>
+#include <iterator>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -94,6 +95,15 @@ void InstanceSet::append(const InstanceSet& other) {
     for (const std::string& name : other.prototypes) remap.push_back(prototypeIndex(name));
     for (const std::string& name : other.materials) remapMaterials.push_back(materialIndex(name));
     hidesStrands = hidesStrands || other.hidesStrands;
+    if (other.anchors && !other.anchors->empty()) {
+        if (!anchors || anchors->empty()) {
+            anchors = other.anchors;
+        } else {
+            auto both = std::make_shared<StrandSet>(*anchors);
+            both->append(*other.anchors);
+            anchors = std::move(both);
+        }
+    }
     instances.reserve(instances.size() + other.instances.size());
     for (Instance i : other.instances) {
         i.prototype = i.prototype < remap.size() ? remap[i.prototype] : 0;
@@ -110,7 +120,7 @@ std::uint64_t InstanceSet::hashInstance(std::uint64_t h, const Instance& i) {
                    i.scale, i.offset,      i.restDistance, i.aspect,      i.restLength};
     h = hashCombine(hashCombine(hashCombine(h, i.prototype), i.strand), i.id);
     h = hashCombine(h, static_cast<std::uint64_t>(i.orient) | (i.scaleByWidth ? 0x100u : 0u) |
-                           (i.pinToRest ? 0x200u : 0u) | (i.fitStrand ? 0x400u : 0u));
+                           (i.pinToRest ? 0x200u : 0u) | (i.fitStrand ? 0x400u : 0u) | (i.fitWidth ? 0x800u : 0u));
     for (const float v : f) {
         std::uint32_t bits = 0;
         std::memcpy(&bits, &v, sizeof bits);
@@ -134,6 +144,7 @@ std::uint64_t InstanceSet::contentHash() const {
     }
     for (const std::string& name : materials) h = hashString(h, name);
     if (hidesStrands) h = hashCombine(h, 0x41DEu);
+    if (anchors && !anchors->empty()) h = hashCombine(h, anchors->contentHash());
     for (const Instance& i : instances) h = hashInstance(h, i);
     return h;
 }
@@ -242,6 +253,19 @@ bool InstanceSet::hasScales() const {
 }
 
 std::vector<InstanceSet::Placed> InstanceSet::resolve(const StrandSet& strands, const ScalpMesh* scalp) const {
+    std::vector<Placed> out = resolveIn(strands, scalp);
+    if (!anchors || anchors->empty() || out.size() == instances.size()) return out;
+    // The rest on the anchors, kept in the order of `instances` (the IDs differ: none is placed twice).
+    std::vector<Placed> more = resolveIn(*anchors, scalp);
+    if (more.empty()) return out;
+    std::vector<Placed> all;
+    all.reserve(out.size() + more.size());
+    std::merge(out.begin(), out.end(), more.begin(), more.end(), std::back_inserter(all),
+               [](const Placed& a, const Placed& b) { return a.index < b.index; });
+    return all;
+}
+
+std::vector<InstanceSet::Placed> InstanceSet::resolveIn(const StrandSet& strands, const ScalpMesh* scalp) const {
     std::vector<Placed> out;
     if (instances.empty()) return out;
     // Each instance's strand (the first holding its ID), found through the IDs the instances name
@@ -302,10 +326,14 @@ std::vector<InstanceSet::Placed> InstanceSet::resolve(const StrandSet& strands, 
         if (i.fitStrand) along *= i.restLength >= 0.0f ? i.restLength : length;
         float across = i.fitStrand ? along * i.aspect : along;
         const std::size_t begin = strands.strandBegin(s);
-        if (i.scaleByWidth && begin + n <= widths.size()) {
+        if (begin + n <= widths.size() && (i.scaleByWidth || (i.fitStrand && i.fitWidth))) {
             const float root = widths[begin];
             const float here = segment == 0 ? root : widths[begin + segment - 1] * (1.0f - u) + widths[begin + segment] * u;
-            if (root > 0.0f && std::isfinite(here)) across *= std::max(here, 0.0f) / root;
+            if (i.fitStrand && i.fitWidth) {
+                if (std::isfinite(here)) across = std::max(here, 0.0f) * i.aspect;  // as thick as its strand there
+            } else if (root > 0.0f && std::isfinite(here)) {
+                across *= std::max(here, 0.0f) / root;
+            }
         }
         if (!i.fitStrand) along = across;
         Vec3f y;

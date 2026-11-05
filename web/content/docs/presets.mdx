@@ -48,6 +48,13 @@ the technique presets).
 | `cinematic_hair` | A detailed hero look: large locks with finer clumps inside them, restrained noise, frizz on a few strands near the tips, a few flyaways, uneven lengths and widths, color variation. |
 | `curly` | Ringlets: small clumps curled together (Curl with `coherence` `clump`), a little frizz, and the segments curls need. |
 | `braids` | Box braids without drawn paths: the Braid node places one braid per 2.6 cm of scalp (`braidSpacing`). |
+| `braids_beaded` | Box braids sealed at the ends with beads and cuffs near the tips: the braid's ties and an Instance node on them (`beadsPerBraid`, `beadSpacing`, `cinch`). |
+| `braids_curly_ends` | Box braids tied off near the end, the ends below the tie curling: a Curl mapped by the Braid's `braidTail` channel (`curlyLength`, `curlFrequency`). |
+| `braids_twists` | Two-strand twists all over the head: the Braid's rope style (`plies` 3 for three-strand twists). |
+| `braids_cornrows` | Cornrows along rows you draw: each row picks up the hair on its sides into every crossing, hanging as braids past `onTheHeadUntil`, a bead at each end. |
+| `braids_french` | A French braid along one path you draw down the back, fed from both sides, tied off at the end (`dutch` for a Dutch braid). |
+| `braids_loose` | A loose braid along one path you draw: pulled apart (`pancake`), sections looping out of it and back (`loops`, `loopSize`). |
+| `braids_fishtail_ponytail` | A fishtail ponytail from one path you draw from its base: all the hair sweeps into it, tied at the base and the end. |
 | `parted_style` | A part drawn with the Part tool, respected by Interpolate and Clump. |
 | `tube_locks` | Tube locks (anime): stylized locks shaped as a whole. Interpolate's Fill Tubes (with a soft edge) fills each guide's tube, soft clumps follow the tubes, a little noise, tapered tips. Place guides, then shape their tubes with the Shape brush (see [Tube guides](/docs/guides-and-brushes#tube-guides)). |
 

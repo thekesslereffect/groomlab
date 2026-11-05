@@ -25,7 +25,7 @@ namespace fs = std::filesystem;
 using json = nlohmann::ordered_json;
 
 const std::vector<std::string>& presetCategories() {
-    static const std::vector<std::string> categories = {"Hair", "Fur", "Feathers", "Scales", "Motion", "Techniques", "Games", "Add-ons"};
+    static const std::vector<std::string> categories = {"Hair", "Braids", "Fur", "Feathers", "Scales", "Motion", "Techniques", "Games", "Add-ons"};
     return categories;
 }
 

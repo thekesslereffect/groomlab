@@ -448,7 +448,7 @@ guides). With `limitDistance` 0, Interpolate shapes every strand, as usual.
 largest extent of the scalp's bounding box). `apply_preset` (and the Graph Editor's Presets menu)
 fits it to the groom's scalp: params in length and width units (strand length, radii, widths,
 noise amplitudes, the min and max of their maps) scale with the size, densities with its square,
-and rates per unit of length (Curl's turns, Twist's turns, Braid's crossings, Wind's and
+and rates per unit of length (Curl's turns, Twist's turns, Wind's and
 FieldNoise's frequency: their spec's unit `perLength`) with its inverse, so curls keep their count
 per strand. Noise's `frequency` is per strand length by default and does not change.
 A preset made on a head works on a 1 cm test sphere. `save_preset` records the size;

@@ -1618,8 +1618,8 @@ struct McpTools::Impl {
                           {"node", prop("string", "Evaluate up to this node instead of the output.")}}),
             &Impl::evaluate);
         add("render_preview", "Render a preview",
-            "Draws the groom as a PNG image you can look at: the scalp shaded and the strands as lines in the hair's color, from "
-            "one or several views in a grid. A simple CPU preview (no lighting model or shadows), not a render: use it to check "
+            "Draws the groom as a PNG image you can look at: the scalp shaded and the strands as lines in the hair's color (and "
+            "instances with a built-in mesh: beads, cuffs, hair ties), from one or several views in a grid. A simple CPU preview (no lighting model or shadows), not a render: use it to check "
             "shape, length, direction and color. Big grooms are thinned to max_strands.",
             objectSchema({{"groom", groom}, {"views", views},
                           {"size", prop("integer", "The image's width in pixels (64-1024, default 512).")},

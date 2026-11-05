@@ -57,6 +57,9 @@ InstancePrototype scalePlate(const ScalePlateShape& shape);
 // the host's scene).
 const InstancePrototype* builtinPrototype(const std::string& name);
 std::vector<std::string> builtinPrototypeNames();
+// The built-in braid accessories (beads, cuffs, hair ties): rings round a bore of radius 0.5 from
+// +Y 0 to 1, for Instance nodes on a Braid node's ties (sizeMode fitStrand, fitWidth).
+std::vector<std::string> builtinAccessoryNames();
 
 // The prototypes a graph's Instance nodes name (its JSON, compounds' inner graphs too) that are
 // not built-in plates: the scene meshes a groom file stores (GroomFile::prototypes). Sorted, once

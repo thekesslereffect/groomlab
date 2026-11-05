@@ -924,10 +924,10 @@ def add_feathers(scalp, design="contour", source="scatter", weights=None, curves
     return {"shafts": shafts, "split": split, "designs": names, "merge": final}
 
 
-BRAID_STYLES = ("three", "fishtail", "rope", "cornrow")
+BRAID_STYLES = ("three", "four", "five", "fishtail", "rope", "cornrow")
 
 
-def add_braid(scalp, curves=None, style="three", group="braids", width=0.12, crossings=2.5, region=0.25,
+def add_braid(scalp, curves=None, style="three", group="braids", width=0.25, tightness=1.0, region=0.25,
               dutch=False, feed=None):
     """Add > Braid on Curves (Maya's add_braid): curve objects `curves` (drawn from the scalp along the
     braids) become guide group `group`, else its guides are the paths (draw them with Draw); a Braid
@@ -949,7 +949,7 @@ def add_braid(scalp, curves=None, style="three", group="braids", width=0.12, cro
     paths = next((n for n in g.of_type("Guides") if g.param(n, "group") == group), None)
     if paths is None:
         paths = g.add("Guides", base="braidPaths", params={"group": group})
-    params = {"style": style, "width": float(width), "crossings": float(crossings), "region": float(region),
+    params = {"style": style, "width": float(width), "tightness": float(tightness), "region": float(region),
               "dutch": bool(dutch), "feed": bool(feed)}
     braid = g.add("Braid", base="braid", params=params)
     g.insert_after(after, braid)

@@ -8,7 +8,10 @@
 // each to its strand instead (leaves, feathers spanning it): a fraction of the
 // strand's rest length along the prototype's +Y, `aspect` of that across.
 // Several prototypes (names separated by spaces) are variants, one per
-// instance, picked by its ID or by a map.
+// instance, picked by its ID or by a map. With strands on its `along` input
+// (a Braid node's ties) the instances go on those instead, which are carried
+// with the instances (InstanceSet::anchors) and never drawn as hair: beads,
+// cuffs and hair ties round braids (fitWidth: as thick as the braid there).
 // Scales (Strands -> Strands): one scale at each strand's root instead, lying on the skin along the
 // strand, as long as the strand and as wide as its root (times `size`; scales.h makes their
 // meshes: tilted like roof tiles, bent onto the skin).
@@ -53,7 +56,10 @@ public:
     std::string typeName() const override { return scales_ ? op::kScales : op::kInstance; }
     std::string category() const override { return "look"; }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
-    std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Strands}}; }
+    std::vector<PortSpec> inputs() const override {
+        if (scales_) return {{"strands", PortType::Strands}};
+        return {{"strands", PortType::Strands}, {"along", PortType::Strands, true}};
+    }
     std::vector<ParamSpec> paramSpecs() const override {
         std::vector<ParamSpec> specs;
         if (scales_) {
@@ -142,9 +148,13 @@ public:
                                            "(mappable)"}
                     .soft(0, 2)
                     .when("sizeMode", {"fitStrand"}),
-                ParamSpec{"aspect", 0.1, "Width across (X and Z) over the length along +Y (mappable)"}
+                ParamSpec{"aspect", 0.1, "Width across (X and Z) over the length along +Y (mappable); with "
+                                         "fitWidth, over the strand's width"}
                     .atLeast(0)
                     .soft(0, 1)
+                    .when("sizeMode", {"fitStrand"}),
+                ParamSpec{"fitWidth", false, "Across: the strand's width where it sits (times aspect) instead of its "
+                                             "length: beads and cuffs round a Braid node's ties, as thick as the braid"}
                     .when("sizeMode", {"fitStrand"}),
                 ParamSpec{"scaleByWidth", true,
                           "Scale each one by the strand's width where it sits over its root width (the Width node's "
@@ -239,7 +249,12 @@ private:
     bool run(const EvalContext& ctx, const std::vector<Value>& inputs, const IncrementalInputs* incremental, Value* result,
              StrandChanges* changed) const {
         const char* typeLabel = scales_ ? op::kScales : op::kInstance;
-        const StrandsPtr in = requireStrands(inputs, 0, typeLabel);
+        const StrandsPtr hair = requireStrands(inputs, 0, typeLabel);
+        // Placed along other strands (a Braid's ties): those are what the instances sit on and are
+        // carried as anchors; the hair passes through with them. (In full every time.)
+        const StrandsPtr along = !scales_ && inputs.size() > 1 ? valueAs<StrandsPtr>(inputs[1]) : nullptr;
+        if (along && incremental) return false;
+        const StrandsPtr in = along ? along : hair;
         const ScalpMesh* scalp = valueAs<MeshPtr>(ctx.external("scalp")).get();
         const bool scales = scales_;
         const std::string sizeMode = scales ? std::string("fixed") : params().getString("sizeMode");
@@ -326,7 +341,7 @@ private:
         const auto seed = static_cast<std::uint64_t>(params().getInt("seed"));
         // Instance's own.
         InstanceOrient orient = InstanceOrient::Strand;
-        bool scaleByWidth = false, pinToRest = false, deformed = false;
+        bool scaleByWidth = false, pinToRest = false, deformed = false, fitWidth = false;
         std::uint8_t axisCode = 1;
         // Scales' own.
         std::uint8_t previewCode = 0;
@@ -360,11 +375,17 @@ private:
             const std::string deformAxis = params().getString("deformAxis");
             if (deformAxis != "x" && deformAxis != "y" && deformAxis != "z") throw GraphError("Instance: deformAxis must be x, y or z");
             deformed = deform == "alongStrand";
+            fitWidth = fitStrand && params().getBool("fitWidth");
             axisCode = static_cast<std::uint8_t>(deformAxis == "x" ? 0 : deformAxis == "y" ? 1 : 2);
         }
 
         auto instances = std::make_shared<InstanceSet>();
-        if (const auto& existing = in->instances()) *instances = *existing;
+        if (const auto& existing = hair->instances()) *instances = *existing;
+        if (along && !along->empty()) {
+            InstanceSet carriers;
+            carriers.anchors = std::make_shared<StrandSet>(*along);
+            instances->append(carriers);
+        }
         if (scales && !showStrands) instances->hidesStrands = true;
         std::vector<std::uint32_t> prototypes;
         for (const std::string& name : names) prototypes.push_back(instances->prototypeIndex(name));
@@ -432,6 +453,7 @@ private:
                 inst.scaleByWidth = scaleByWidth;
                 inst.pinToRest = pinToRest;
                 inst.fitStrand = fitStrand;
+                inst.fitWidth = fitWidth;
                 inst.aspect = d.ratio;
                 if (deformed) {
                     inst.deform = true;
@@ -561,7 +583,7 @@ private:
                 keptHash_ = hash;
             }
         }
-        auto out = std::make_shared<StrandSet>(*in);
+        auto out = std::make_shared<StrandSet>(*hair);
         if (redrawn) {
             *changed = StrandChanges::listed(*redrawn);
             changed->instancesChanged = made != spliceLast->instances();
@@ -570,7 +592,7 @@ private:
         const StrandsPtr output = out;
         {
             const std::lock_guard<std::mutex> lock(keptMutex_);
-            keptOutput_ = in->instances() ? StrandsPtr() : output;
+            keptOutput_ = in->instances() || along ? StrandsPtr() : output;
             if (keptFirst_ != firstMade) spareFirst_ = std::move(keptFirst_);
             keptFirst_ = std::move(firstMade);
             if (spliceLast && spliceLast->instances() != output->instances()) spareSet_ = spliceLast->instances();

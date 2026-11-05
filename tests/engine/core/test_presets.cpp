@@ -826,8 +826,9 @@ TEST(Presets, EditingAnExposedParamEqualsEditingTheInnerNode) {
         definition["expose"] = json::object();
         const json before = lookOf(reference, inserted.dump());
         if (before.contains("error")) {
-            // What the look reads that this groom lacks: painted_maps' map.
-            EXPECT_EQ(p.name, "painted_maps") << before.dump();
+            // What the look reads that this groom lacks: painted_maps' map, a drawn group (the braid
+            // presets' paths, which the host makes when it applies them).
+            EXPECT_TRUE(p.name == "painted_maps" || !presetRequiredGroups(readPreset(p.name)).empty()) << p.name << ": " << before.dump();
             continue;
         }
         const json edited = lookOf(reference, onCompound.dump());

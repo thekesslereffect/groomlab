@@ -1652,8 +1652,9 @@ def add_braid_dialog(style=None, groom=None):
     curves = cmds.ls(selection=True, dag=True, type="nurbsCurve", long=True) or []
     if style is None:
         answer = _ask("Braid on Curves", [
-            ("style", "Style", "choice", "three", ["three", "fishtail", "rope", "cornrow"],
-             "three: a classic plait; fishtail; rope: two strands twisted; cornrow: fed along the scalp")],
+            ("style", "Style", "choice", "three", ["three", "four", "five", "fishtail", "rope", "cornrow"],
+             "three: a classic plait; four, five: more sections; fishtail; rope: two strands twisted; "
+             "cornrow: fed along the scalp")],
             note="%d curve(s) selected become braid paths." % len(curves) if curves else
                  "No curves selected: the braids group's guides are used (draw them with the Draw tool).")
         if not answer:

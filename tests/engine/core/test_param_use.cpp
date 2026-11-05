@@ -42,7 +42,7 @@ namespace {
 
 const std::string kShipped = GROOMLAB_SHIPPED_PRESETS;
 constexpr float kDensity = 0.05f;
-constexpr std::size_t kInstancesPerType = 2;  // preset nodes of one type evaluated in every state
+constexpr std::size_t kInstancesPerType = 3;  // preset nodes of one type evaluated in every state
 
 // Params an operator never reads itself, each with who does.
 const std::map<std::string, std::string>& allowlist() {
