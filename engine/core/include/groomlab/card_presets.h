@@ -29,7 +29,7 @@ struct CardLodPreset {
     int triangles = 0;
     int cardsPerClump = 1, layers = 1, flyawayCards = 0;
     double ruffle = 0.0;
-    int segments = 8, widthSegments = 1;
+    int segments = 8, widthSegments = 2;
     double curvature = 0.0;
     int variations = 0, atlasSize = 2048;
     double widthScale = 1.0;

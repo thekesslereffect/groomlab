@@ -117,6 +117,7 @@ StrandMesh strandTubes(const StrandSet& strands, const ScalpMesh* scalp, const S
     StrandMesh out;
     out.mesh = buildRachisMesh({layer});
     if (options.strandUVs && n > 0) {
+        out.uv2Name = "strandUVs";
         const auto grid = static_cast<std::size_t>(std::ceil(std::sqrt(static_cast<double>(n))));
         const float cell = 1.0f / static_cast<float>(grid);
         constexpr float kMargin = 0.05f;  // of a cell, on each side
@@ -358,11 +359,15 @@ RachisMesh placedInstances(const StrandSet& strands, const ScalpMesh* scalp, con
 }
 
 // The strands' cards (their card layers) as one mesh of quads, laid out in one atlas.
-RachisMesh cardQuads(const StrandSet& strands) {
+RachisMesh cardQuads(const StrandSet& strands, std::vector<float>& worldU, std::vector<float>& worldV) {
     RachisMesh m;
     if (strands.cardLayers().empty()) return m;
     CardMesh cards = combineCardLayers(strands.cardLayers());
     layoutCards(cards, cards.padding);
+    CardMesh unique = cards;
+    layoutCardsUnique(unique, unique.padding);
+    worldU = std::move(unique.u);
+    worldV = std::move(unique.v);
     m.points = cards.positions;
     m.u = cards.u;
     m.v = cards.v;
@@ -424,7 +429,9 @@ StrandMesh buildStrandMesh(const StrandSet& strands, const ScalpMesh* scalp, con
         case StrandMeshOptions::Make::Scales: return scalePlates(strands, scalp, prototypes);
         case StrandMeshOptions::Make::Cards: {
             StrandMesh out;
-            appendMesh(out, cardQuads(strands), MeshPart::Cards);
+            RachisMesh cards = cardQuads(strands, out.u2, out.v2);
+            out.uv2Name = "aoWorld";
+            appendMesh(out, cards, MeshPart::Cards);
             return out;
         }
         case StrandMeshOptions::Make::Instances: {

@@ -4,6 +4,7 @@
 // (strandMeshTopologyKey), a new frame copies the last mesh and sets its points alone: the
 // topology and UVs are made once, and Alembic and Maya's caches see a deforming mesh.
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -114,10 +115,9 @@ MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
         meshObject = withPoints(lane.strandMeshData, moved);
     }
     if (meshObject.isNull()) {
-        // The topology anew: each node's mesh, joined (UV set map1; strandUVs where a node asks).
+        // The topology anew: each node's mesh, joined (UV set map1; strandUVs or aoWorld where supplied).
         RachisMesh joined;
-        std::vector<float> u2, v2;
-        bool strandUVs = false;
+        std::map<std::string, std::pair<std::vector<float>, std::vector<float>>> secondaryUVs;
         for (const auto& s : sources) {
             if (!s.strands) continue;
             StrandMesh m;
@@ -134,13 +134,17 @@ MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
             for (const int v : m.mesh.faceUVs) joined.faceUVs.push_back(v + uvBase);
             joined.u.insert(joined.u.end(), m.mesh.u.begin(), m.mesh.u.end());
             joined.v.insert(joined.v.end(), m.mesh.v.begin(), m.mesh.v.end());
-            strandUVs = strandUVs || !m.u2.empty();
-            if (m.u2.empty()) {
-                u2.resize(joined.u.size(), 0.0f);
-                v2.resize(joined.v.size(), 0.0f);
-            } else {
-                u2.insert(u2.end(), m.u2.begin(), m.u2.end());
-                v2.insert(v2.end(), m.v2.begin(), m.v2.end());
+            for (auto& [name, uv] : secondaryUVs) {
+                uv.first.resize(joined.u.size(), 0.0f);
+                uv.second.resize(joined.v.size(), 0.0f);
+            }
+            if (!m.u2.empty()) {
+                const std::string name = m.uv2Name.empty() ? "strandUVs" : m.uv2Name;
+                auto& uv = secondaryUVs[name];
+                uv.first.resize(joined.u.size(), 0.0f);
+                uv.second.resize(joined.v.size(), 0.0f);
+                std::copy(m.u2.begin(), m.u2.end(), uv.first.begin() + uvBase);
+                std::copy(m.v2.begin(), m.v2.end(), uv.second.begin() + uvBase);
             }
         }
         MFnMeshData meshData;
@@ -157,11 +161,11 @@ MStatus GroomShape::computeStrandMesh(MDataBlock& data, Lane& lane) {
                         connects, us, vs, meshObject, &status);
             if (status) {
                 mesh.assignUVs(counts, uvIds);
-                if (strandUVs) {
-                    MString set("strandUVs");
+                for (const auto& [name, uv] : secondaryUVs) {
+                    MString set(name.c_str());
                     mesh.createUVSetDataMesh(set);
-                    mesh.setUVs(MFloatArray(u2.data(), static_cast<unsigned>(u2.size())),
-                                MFloatArray(v2.data(), static_cast<unsigned>(v2.size())), &set);
+                    mesh.setUVs(MFloatArray(uv.first.data(), static_cast<unsigned>(uv.first.size())),
+                                MFloatArray(uv.second.data(), static_cast<unsigned>(uv.second.size())), &set);
                     mesh.assignUVs(counts, uvIds, &set);
                 }
             }

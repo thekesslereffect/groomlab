@@ -68,10 +68,15 @@ namespace detail {
 void sampleStations(CardMesh::Card& card) {
     const std::size_t n = static_cast<std::size_t>(std::max(card.stations, 2));
     const std::size_t last = card.refCenter.size() - 1;
+    if (card.stationAlong.size() != n) {
+        card.stationAlong.resize(n);
+        for (std::size_t k = 0; k < n; ++k) card.stationAlong[k] = static_cast<float>(k) / static_cast<float>(n - 1);
+    }
     card.center.clear(), card.side.clear(), card.normal.clear(), card.width.clear(), card.shading.clear();
     card.foldRight.clear(), card.foldLeft.clear();
+    card.featherBarbShiftRight.clear(), card.featherBarbShiftLeft.clear();
     for (std::size_t k = 0; k < n; ++k) {
-        const float f = static_cast<float>(k) / static_cast<float>(n - 1) * static_cast<float>(last);
+        const float f = std::clamp(card.stationAlong[k], 0.0f, 1.0f) * static_cast<float>(last);
         const std::size_t i = std::min(static_cast<std::size_t>(f), last - 1);
         const float w = f - static_cast<float>(i);
         Vec3f center = card.refCenter[i] * (1.0f - w) + card.refCenter[i + 1] * w;
@@ -84,6 +89,14 @@ void sampleStations(CardMesh::Card& card) {
             card.foldRight.push_back(card.refFoldRight[i] * (1.0f - w) + card.refFoldRight[i + 1] * w);
             card.foldLeft.push_back(card.refFoldLeft[i] * (1.0f - w) + card.refFoldLeft[i + 1] * w);
         }
+        if (card.refFeatherBarbShiftRight.size() == card.refCenter.size()) {
+            card.featherBarbShiftRight.push_back(card.refFeatherBarbShiftRight[i] * (1.0f - w) +
+                                                 card.refFeatherBarbShiftRight[i + 1] * w);
+        }
+        if (card.refFeatherBarbShiftLeft.size() == card.refCenter.size()) {
+            card.featherBarbShiftLeft.push_back(card.refFeatherBarbShiftLeft[i] * (1.0f - w) +
+                                                card.refFeatherBarbShiftLeft[i + 1] * w);
+        }
         if (card.refShading.size() == card.refCenter.size()) {
             card.shading.push_back((card.refShading[i] * (1.0f - w) + card.refShading[i + 1] * w).normalized());
         }
@@ -92,9 +105,24 @@ void sampleStations(CardMesh::Card& card) {
 
 std::vector<Vec3f> cardVertexRow(const CardMesh::Card& card, std::size_t i, const std::vector<Vec3f>& root) {
     std::vector<Vec3f> points = cardRow(card, i);
-    const float along = static_cast<float>(i) / static_cast<float>(std::max(card.stations - 1, 1));
-    if (card.base.size() == root.size() && along < kBaseBlend) {
-        const float w = 1.0f - along / kBaseBlend;
+    const float along = i < card.stationAlong.size()
+                            ? card.stationAlong[i]
+                            : static_cast<float>(i) / static_cast<float>(std::max(card.stations - 1, 1));
+    // Hair cards need at least two quads to ease from the scalp-seated root row into their
+    // fitted plane. With the old fixed 10% blend, an eight-segment card's first interior row was
+    // already outside the blend, so its first quad absorbed the entire root twist. Feather cards
+    // retain their shorter, shaft-specific blend.
+    const float segment = card.stationAlong.size() > 1 ? std::max(card.stationAlong[1] - card.stationAlong[0], 1e-6f)
+                                                       : 1.0f / static_cast<float>(std::max(card.stations - 1, 1));
+    const float baseBlend = card.feather >= 0 ? kBaseBlend : std::max(kBaseBlend, 3.0f * segment);
+    if (card.base.size() == root.size() && along < baseBlend) {
+        // A hair card's root row and first interior row move together. Letting the first row
+        // receive only part of the scalp-seating offset shears the first quad and turns every
+        // otherwise-straight baked strand into a small zigzag there. Above that rigid root quad,
+        // ease the offset out smoothly. Feather seating keeps its shaft-specific falloff.
+        const float held = card.feather >= 0 ? 0.0f : segment;
+        const float t = std::clamp((along - held) / std::max(baseBlend - held, 1e-9f), 0.0f, 1.0f);
+        const float w = 1.0f - t * t * (3.0f - 2.0f * t);
         for (std::size_t e = 0; e < points.size(); ++e) points[e] += (card.base[e] - root[e]) * w;
     }
     return points;
@@ -170,8 +198,17 @@ float textureWidthOf(const CardMesh::Card& card) {
     return std::max(width, 1e-9f);
 }
 
-CardPoint projectOntoCard(const CardMesh::Card& cardIn, const Vec3f& p, int& segment) {
-    const CardShape card(cardIn);
+float finalWidthAt(const CardMesh::Card& card, float along) {
+    if (card.width.empty()) return textureWidthOf(card);
+    if (card.width.size() == 1) return std::max(card.width.front(), 1e-9f);
+    const float at = std::clamp(along, 0.0f, 1.0f) * static_cast<float>(card.width.size() - 1);
+    const std::size_t a = std::min(static_cast<std::size_t>(at), card.width.size() - 2);
+    const float t = at - static_cast<float>(a);
+    return std::max(card.width[a] * (1.0f - t) + card.width[a + 1] * t, 1e-9f);
+}
+
+CardPoint projectOntoCard(const CardMesh::Card& cardIn, const Vec3f& p, int& segment, bool finalMesh) {
+    const CardShape card(cardIn, finalMesh);
     const int last = static_cast<int>(card.center.size()) - 2;  // last segment
     int lo = 0, hi = last;
     if (segment >= 0) lo = std::max(0, segment - 3), hi = std::min(last, segment + 3);
@@ -224,7 +261,9 @@ CardPoint projectOntoCard(const CardMesh::Card& cardIn, const Vec3f& p, int& seg
     out.offset = d.dot(out.side);
     out.across = out.offset / out.textureWidth + 0.5f;
     out.depth = d.dot(out.normal);
-    out.along = (static_cast<float>(bestK) + bestT) / static_cast<float>(card.center.size() - 1);
+    out.along = cardIn.stationAlong.size() == card.center.size()
+                    ? cardIn.stationAlong[i] * (1.0f - bestT) + cardIn.stationAlong[i + 1] * bestT
+                    : (static_cast<float>(bestK) + bestT) / static_cast<float>(card.center.size() - 1);
     if (cardIn.spine) {
         // A spine card: across and along stay the flat card's (its vertices keep the flat UVs),
         // depth and frame are the folded half's, so the bake's depth and tangent are in the frame
@@ -530,10 +569,11 @@ float percentile(std::vector<float>& values, float share) {
     return values[at];
 }
 
-// How much of the members a card fits across and along: the rest (a few strands straying past
-// the others, a longer one) are drawn at the card's edge rather than widen or lengthen it, so the
-// cards keep to the groom's envelope however many strands each holds (a lower level of detail's
-// cards hold more, and the farthest of more strands strays farther).
+// How much of the members a card fits across: the rest (a few strands straying sideways from
+// the others) are drawn at the card's edge rather than widen it, so the cards keep to the groom's
+// envelope however many strands each holds (a lower level of detail's cards hold more, and the
+// farthest of more strands strays farther). Along its length, however, a card always reaches its
+// farthest member tip.
 constexpr float kFitShare = 0.9f;
 // Where across its strands' thickness a ribbon lies: the depth (out of the scalp) a quarter of
 // them lie beyond.
@@ -541,7 +581,7 @@ constexpr float kOuterShell = 0.75f;
 
 // The members' median curve at kRefStations (each station the median of theirs, axis by axis:
 // a few strands leaving the rest don't pull it off them), carried on past its tip along its last
-// direction as far as most of the members' tips reach.
+// direction as far as the farthest member tip reaches.
 std::vector<Vec3f> medianCurve(const StrandSet& s, const std::vector<std::size_t>& members) {
     std::vector<Vec3f> center(kRefStations, Vec3f{});
     std::vector<Vec3f> pts(kRefStations);
@@ -565,7 +605,7 @@ std::vector<Vec3f> medianCurve(const StrandSet& s, const std::vector<std::size_t
         const Vec3f& end = s.strandPoints(i)[s.strandPointCount(i) - 1];
         reaches.push_back((end - center.back()).dot(tip));
     }
-    const float reach = members.size() < 10 ? *std::max_element(reaches.begin(), reaches.end()) : percentile(reaches, kFitShare);
+    const float reach = *std::max_element(reaches.begin(), reaches.end());
     if (reach > -0.005f * meanLength) {  // a hair past them, so no tip lands on the card's end
         std::vector<Vec3f> longer = center;
         longer.push_back(center.back() + tip * (reach + 0.01f * meanLength));
@@ -801,8 +841,24 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
     std::vector<CardMesh::Card> out;
     if (members.empty()) return out;
     const bool hasScalp = scalp && scalp->triangleCount() > 0;
-    const std::vector<Vec3f> center =
+    std::vector<Vec3f> center =
         spec.spine ? resampleSmoothCurve(spec.spine->data(), spec.spine->size(), kRefStations) : medianCurve(s, members);
+    if (spec.spine) {
+        // Cards from guides follow the guide's shape, but Clump's past-tip Extend can preserve
+        // strands beyond that guide. Keep following the guide's final direction until the card
+        // has room for the longest member's true arc length.
+        const float spineLength = arcLength(center);
+        float longest = 0.0f;
+        for (const std::size_t i : members) {
+            longest = std::max(longest, arcLength(s.strandPoints(i), s.strandPointCount(i)));
+        }
+        if (spineLength > 1e-9f && longest > spineLength) {
+            const Vec3f tip = (center.back() - center[center.size() - 2]).normalized();
+            std::vector<Vec3f> extended = center;
+            extended.push_back(center.back() + tip * (longest - spineLength + 0.01f * spineLength));
+            center = resampleByArcLength(extended.data(), extended.size(), kRefStations);
+        }
+    }
     const std::vector<Frame> frames = cardFrames(center, hasScalp ? scalp : nullptr);
     const std::vector<Offset> offsets = strandOffsets(s, members, center, 16);
     const float twist = settings.twist * 0.0174532925f;
@@ -848,15 +904,10 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
         }
     }
 
-    // The way the strands lie across the card: their principal direction in the
-    // cross-section (the axis of their spread) at each station, as an angle from the
-    // frame's binormal, then ONE straight line through those angles up the card (a
-    // weighted least squares fit, stations where the strands are round weighing
-    // nothing). A card so turns steadily the way its strands lie (a sheet that turns
-    // 90 degrees from root to tip gets that turn), and never wobbles station by
-    // station: the raw angles jump around where the spread is nearly round, and a
-    // card following them twisted and warped.
-    std::vector<float> fit(kRefStations, 0.0f);
+    // The way the strands lie across the card: their principal direction in the cross-section
+    // at every station, reduced to one weighted card-wide angle. Fit Twist rotates the card as a
+    // whole; it never introduces a root-to-tip turn.
+    float fitAngle = 0.0f;
     if (settings.fitTwist > 0.0f) {
         std::vector<float> suu(kRefStations, 0.0f), svv(kRefStations, 0.0f), suv(kRefStations, 0.0f);
         for (const Offset& o : offsets) {
@@ -867,7 +918,7 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
         }
         // Angles unwrapped against the last station that had a clear axis (an axis
         // repeats every pi), each weighted by how clear the axis is.
-        double sw = 0.0, sk = 0.0, sa = 0.0, skk = 0.0, ska = 0.0;
+        double sw = 0.0, sa = 0.0;
         float previous = 0.0f;
         for (std::size_t k = 0; k < kRefStations; ++k) {
             const float total = suu[k] + svv[k];
@@ -878,20 +929,11 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
             while (angle - previous > 1.5707963f) angle -= 3.14159265f;
             while (angle - previous < -1.5707963f) angle += 3.14159265f;
             previous = angle;
-            const double x = static_cast<double>(k);
-            sw += w, sk += w * x, sa += w * angle, skk += w * x * x, ska += w * x * angle;
+            sw += w;
+            sa += w * angle;
         }
         if (sw > 0.5) {
-            const double denominator = sw * skk - sk * sk;
-            double slope = denominator > 1e-9 ? (sw * ska - sk * sa) / denominator : 0.0;
-            // No more than 100 degrees over the card: a sheet turning a quarter turn
-            // follows; past that the axis is ambiguous anyway.
-            const double maxSlope = 1.7453293 / static_cast<double>(kRefStations - 1);
-            slope = std::clamp(slope, -maxSlope, maxSlope);
-            const double intercept = (sa - slope * sk) / sw;
-            for (std::size_t k = 0; k < kRefStations; ++k) {
-                fit[k] = static_cast<float>(intercept + slope * static_cast<double>(k)) * std::min(settings.fitTwist, 1.0f);
-            }
+            fitAngle = static_cast<float>(sa / sw) * std::clamp(settings.fitTwist, 0.0f, 1.0f);
         }
     }
 
@@ -921,7 +963,7 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
     const int from = spec.crossing > 0 ? spec.turn : 0, to = spec.crossing > 0 ? spec.turn + 1 : crossing;
     // Crossed cards stand for a round tuft: its strands have no axis to follow, so
     // the cross keeps its set facings instead of turning with a noisy fit.
-    if (crossing > 1 || spec.braid >= 0) std::fill(fit.begin(), fit.end(), 0.0f);
+    if (crossing > 1 || spec.braid >= 0) fitAngle = 0.0f;
 
     // The members' widths, for cards of one or two strands (no spread to measure).
     float strandWidth = 0.0f;
@@ -952,6 +994,9 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
         card.layer = spec.layer;
         card.flyaway = spec.flyaway;
         card.braid = spec.braid;
+        // A textured line cannot look smoother than the ribbon it is mapped onto. Keep hair
+        // cards at the reference curve's resolution so the bake stays clean instead of encoding
+        // the visible corners of a coarse eight-quad strip into its atlas.
         card.stations = std::max(settings.segments, 1) + 1;
         card.across = std::clamp(settings.widthSegments, 1, 16);
         card.curvature = std::clamp(settings.curvature, 0.0f, 1.0f);
@@ -960,17 +1005,68 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
                            ruffleSign * ruffle * 0.26f * (crossing > 1 ? 0.0f : 1.0f);
         for (std::size_t k = 0; k < kRefStations; ++k) {
             const Frame& f = frames[k];
-            const float along = static_cast<float>(k) / static_cast<float>(kRefStations - 1);
             // The fit turns the card the way its strands lie; twist turns it around its
             // length on top; crossed cards turn further.
-            const float a = twist * along + turn - fit[k];
+            const float a = turn - fitAngle;
             card.refNormal.push_back(f.normal * pm::cos(a) + f.binormal * pm::sin(a));
             card.refSide.push_back(f.binormal * pm::cos(a) - f.normal * pm::sin(a));
         }
-        // Width: most of the strands (kFitShare of them, each by its farthest point across it in its
-        // plane here and at the neighbouring stations; a group too small for that, every one) fit across
-        // it, with a margin each side kept clear of them; shaped by the profile. The few beyond
-        // bake along its edge: a card as wide as its farthest strand balloons past the groom.
+        // Flatten toward a developable ribbon. Merely projecting one mean direction onto every
+        // station tangent still leaves successive sides out of the plane of their shared
+        // centerline segment; Maya triangulates that non-planar quad and its two UV interpolants
+        // show as a wave. Propagate each next side in the plane of the previous side and the
+        // segment, while keeping it perpendicular to the next station tangent. At flatten 1 every
+        // unbowed quad is therefore planar. Fit twist chooses the initial facing of the ribbon.
+        const float flatten = std::clamp(settings.flatten, 0.0f, 1.0f);
+        if (flatten > 0.0f) {
+            Vec3f mean{};
+            for (const Vec3f& side : card.refSide) mean += side;
+            if (mean.length() > 1e-6f) {
+                mean = mean.normalized();
+                std::vector<Vec3f> tangent(kRefStations);
+                for (std::size_t k = 0; k < kRefStations; ++k) {
+                    const std::size_t before = k > 0 ? k - 1 : 0;
+                    const std::size_t after = std::min(k + 1, kRefStations - 1);
+                    tangent[k] = (center[after] - center[before]).normalized();
+                }
+                std::vector<Vec3f> flat(kRefStations);
+                flat[0] = mean - tangent[0] * mean.dot(tangent[0]);
+                if (flat[0].length() <= 1e-6f) flat[0] = card.refSide[0];
+                flat[0] = flat[0].normalized();
+                if (flat[0].dot(card.refSide[0]) < 0.0f) flat[0] = flat[0] * -1.0f;
+                for (std::size_t k = 0; k + 1 < kRefStations; ++k) {
+                    const Vec3f segment = (center[k + 1] - center[k]).normalized();
+                    const Vec3f planeNormal = flat[k].cross(segment).normalized();
+                    Vec3f next = tangent[k + 1].cross(planeNormal);
+                    if (next.length() <= 1e-6f) next = flat[k];
+                    next = next.normalized();
+                    if (next.dot(flat[k]) < 0.0f) next = next * -1.0f;
+                    flat[k + 1] = next;
+                }
+                for (std::size_t k = 0; k < kRefStations; ++k) {
+                    Vec3f side = card.refSide[k] * (1.0f - flatten) + flat[k] * flatten;
+                    side = side - tangent[k] * side.dot(tangent[k]);
+                    if (side.length() <= 1e-6f) continue;
+                    card.refSide[k] = side.normalized();
+                    card.refNormal[k] = card.refSide[k].cross(tangent[k]).normalized();
+                }
+            }
+        }
+        // Authored Twist stays on top of the fitted/flattened card. Flatten is a remedy for the
+        // fit's noisy local rotation, not a way to disable an intentional twist control.
+        if (std::abs(twist) > 1e-9f) {
+            for (std::size_t k = 0; k < kRefStations; ++k) {
+                const float along = static_cast<float>(k) / static_cast<float>(kRefStations - 1);
+                const float a = twist * along;
+                const Vec3f normal = card.refNormal[k], side = card.refSide[k];
+                card.refNormal[k] = normal * pm::cos(a) + side * pm::sin(a);
+                card.refSide[k] = side * pm::cos(a) - normal * pm::sin(a);
+            }
+        }
+        // Width: every retained member strand, each by its farthest point across it in its plane
+        // here and at the neighbouring stations, fits across the card with a margin each side.
+        // True flyaways have already been split onto flyaway cards; clipping the remaining outer
+        // members to a percentile makes their bake run along the cell edge and visibly cut off.
         std::vector<float> spread(kRefStations, 0.0f);
         {
             std::vector<std::vector<float>> across(kRefStations);
@@ -999,8 +1095,7 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
             }
             for (std::size_t k = 0; k < kRefStations; ++k) {
                 if (across[k].empty()) continue;
-                spread[k] = members.size() < 10 ? *std::max_element(across[k].begin(), across[k].end())
-                                                : percentile(across[k], kFitShare);
+                spread[k] = *std::max_element(across[k].begin(), across[k].end());
             }
         }
         // Smoothed up the card, never below the spread there: no notches between wider
@@ -1042,10 +1137,16 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
         const float margin = std::clamp(settings.margin, 0.0f, 0.45f);
         const float widthFloor = members.size() < 3 ? 4.0f * strandWidth : 2.0f * strandWidth;
         for (std::size_t k = 0; k < kRefStations; ++k) {
-            const float along = static_cast<float>(k) / static_cast<float>(kRefStations - 1);
             spread[k] = std::max(2.0f * spread[k] + 2.0f * strandWidth, widthFloor) / (1.0f - 2.0f * margin);
-            card.refWidth.push_back(std::max(spread[k] * settings.widthScale * std::max(settings.widthProfile(along), 0.0f),
-                                             settings.minWidth));
+            card.refWidth.push_back(std::max(spread[k] * settings.widthScale, settings.minWidth));
+        }
+        // Hair cards use a rectangular UV grid. The widest required station sets the width
+        // for every row. Apply the authored profile afterward so its endpoint can still control
+        // the tip; the default constant profile remains a non-tapered rectangle.
+        const float uniformWidth = *std::max_element(card.refWidth.begin(), card.refWidth.end());
+        for (std::size_t k = 0; k < kRefStations; ++k) {
+            const float along = static_cast<float>(k) / static_cast<float>(kRefStations - 1);
+            card.refWidth[k] = std::max(uniformWidth * std::max(settings.widthProfile(along), 0.0f), settings.minWidth);
         }
         // The texture's frame: one scale along the whole card, the widest station's.
         card.textureWidth = *std::max_element(card.refWidth.begin(), card.refWidth.end());
@@ -1122,7 +1223,10 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
         // The base on the scalp under the card: the stations' root row is a straight line across
         // (bowed by the curvature, tilted by the fit), at the members' mean root lifted clear of
         // the skin, and over a curved head a wide card's floated well above the roots it holds.
-        if (hasScalp) seatCard(card, *scalp, rootNearest, strandWidth);
+        // Fit Twist rotates the card as one ribbon, including its freely turning root row. Blend
+        // from per-vertex scalp seating to one root-anchored rigid translation by the same amount;
+        // at full fit the first quad keeps exactly the card's orientation.
+        if (hasScalp) seatCard(card, *scalp, rootNearest, strandWidth, std::clamp(settings.fitTwist, 0.0f, 1.0f));
         out.push_back(std::move(card));
     }
     return out;

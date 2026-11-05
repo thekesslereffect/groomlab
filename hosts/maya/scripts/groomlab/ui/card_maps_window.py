@@ -186,7 +186,8 @@ class CardMapsPanel(QtWidgets.QWidget):
         preset_row = QtWidgets.QHBoxLayout()
         self.preset = QtWidgets.QComboBox()
         self.preset.setObjectName("cardMapsPreset")
-        self.preset.setToolTip("What goes in each file: an engine's layout, every map on its own, or your own")
+        self.preset.setToolTip("What goes in each file: an engine's layout, every map on its own, or your own. AO World "
+                               "uses the mesh's unique aoWorld UV set")
         self.preset.currentIndexChanged.connect(self._preset_picked)
         preset_row.addWidget(self.preset, 1)
         self.delete_button = QtWidgets.QPushButton("Delete")

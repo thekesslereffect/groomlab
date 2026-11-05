@@ -1820,8 +1820,9 @@ class GroomingTest(unittest.TestCase):
         folder = tempfile.mkdtemp(prefix="groomlab_cards_")
         paths = groomlab.bake_cards(self.groom, folder, resolution=256, name="fur")
         self.assertEqual(sorted(os.path.basename(p) for p in paths),
-                         ["fur_AO.tga", "fur_Atlas.json", "fur_Attribute.tga", "fur_Color.tga", "fur_Coverage.tga",
+                         ["fur_AO.tga", "fur_AO_world.tga", "fur_Atlas.json", "fur_Attribute.tga", "fur_Color.tga", "fur_Coverage.tga",
                           "fur_Depth.tga", "fur_Normal.tga", "fur_Tangent.tga"])
+        self.assertIn("aoWorld", cmds.polyUVSet(mesh, query=True, allUVSets=True))
         self.assertEqual(os.path.getsize(os.path.join(folder, "fur_Coverage.tga")), 18 + 256 * 256)
         self.assertEqual(os.path.getsize(os.path.join(folder, "fur_Attribute.tga")), 18 + 4 * 256 * 256)
         # The cards view shows them (cardMaps); a live mesh, when there is one, gets them as its material.
@@ -1927,6 +1928,7 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(names[:4], ["Unreal Hair Cards", "Unreal (packed)", "Unity HDRP Hair", "Separate maps (all)"])
         sources = groomlab.card_map_sources()
         self.assertIn("normal.z", sources["channels"])
+        self.assertIn("ao_world", sources["channels"])
         self.assertIn("translucency", [s["name"] for s in sources["sources"]])
         stored = cmds.getAttr(self.groom + ".cardMaps")
         # The default preset: Bake Maps' six files, byte for byte, and the groom's own bake untouched.

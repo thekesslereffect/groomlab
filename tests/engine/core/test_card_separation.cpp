@@ -120,9 +120,9 @@ TEST(CardSeparation, TheSameCardsComeOutTheSame) {
     for (std::size_t c = 0; c < a.size(); ++c) EXPECT_EQ(a[c].refShift, b[c].refShift) << c;
 }
 
-TEST(CardSeparation, TheCardsNodesSeparationMovesTheMeshNotTheBake) {
-    // Built cards: separation moves vertices; the bake's stamp (what the texture is made from)
-    // stays the same whatever the separation.
+TEST(CardSeparation, TheCardsNodesSeparationMovesTheMeshAndBakeTogether) {
+    // Built cards: separation moves vertices, and the bake follows the final card so its strands
+    // do not wave or slide relative to the rendered polygons.
     const auto scalp = test::makePlane(16);
     auto strands = std::make_shared<StrandSet>();
     std::vector<float> clump;
@@ -150,10 +150,10 @@ TEST(CardSeparation, TheCardsNodesSeparationMovesTheMeshNotTheBake) {
     }
     EXPECT_TRUE(moved);
     EXPECT_NE(plain.positions, apart.positions);
-    // The bake's stamp: the same with no separation, some, or more (nothing to bake again).
+    // Each final shape has a different bake stamp and therefore requests a matching rebake.
     const auto stamp = [&](const CardMesh& m) { return summarizeCardNodes(m, strands.get()).front().bakeHash; };
-    EXPECT_EQ(stamp(plain), stamp(apart));
-    EXPECT_EQ(stamp(apart), stamp(further));
+    EXPECT_NE(stamp(plain), stamp(apart));
+    EXPECT_NE(stamp(apart), stamp(further));
 }
 
 }  // namespace

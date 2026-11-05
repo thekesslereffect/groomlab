@@ -58,6 +58,7 @@ enum class MeshPart : int { Strands = 0, Scales = 1, Rachis = 2, Cards = 3, Inst
 struct StrandMesh {
     RachisMesh mesh;
     std::vector<float> u2, v2;
+    std::string uv2Name;         // strandUVs for strands/feathers, aoWorld for cards
     std::vector<int> faceParts;  // per face: its MeshPart
 };
 // What `options.make` makes of these strands (Auto resolved; never Auto).
