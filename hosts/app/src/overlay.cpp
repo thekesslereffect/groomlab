@@ -23,9 +23,11 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QStyle>
 #include <QTimer>
 #include <QToolButton>
@@ -39,6 +41,7 @@
 #include "groomlab/graph_io.h"
 #include "definitions.h"
 
+#include "glass.h"
 #include "param_editors.h"
 #include "param_panel.h"
 #include "theme.h"
@@ -134,7 +137,9 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     material_ = hairPreset("groom");
     lighting_ = lightingPreset("studio");
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(18, 18, 18, 18);
+    // A solid theme's card sits in the dock: the docks' gutters (Properties').
+    if (theme::glassy()) layout->setContentsMargins(18, 18, 18, 18);
+    else layout->setContentsMargins(12, 9, 0, 12);  // the right: the pages' own (their scroll bar at the dock's edge)
     layout->setSpacing(12);
 
     tabs_ = new Segmented(this);
@@ -159,19 +164,37 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     pagesLayout->setSpacing(0);
     scroll_->setWidget(pages_);
     layout->addWidget(scroll_, 1);
+    if (!theme::glassy()) {
+        // The docks' right gutter: 18, or 10 beside the scroll bar (which takes its own 8), so the
+        // fields end where Attributes' and Export's do.
+        auto gutter = [this, pagesLayout] {
+            pagesLayout->setContentsMargins(0, 0, scroll_->verticalScrollBar()->isVisible() ? 10 : 18, 0);
+        };
+        connect(scroll_->verticalScrollBar(), &QScrollBar::rangeChanged, this, [this, gutter](int, int) { QTimer::singleShot(0, this, gutter); });
+        gutter();
+    }
 
     auto page = [&] {
         auto* w = new QWidget(pages_);
         auto* l = new QVBoxLayout(w);
-        l->setContentsMargins(0, 0, 4, 0);
+        l->setContentsMargins(0, 0, theme::glassy() ? 4 : 0, 0);
         l->setSpacing(12);
         pagesLayout->addWidget(w);
         return w;
     };
     auto layoutOf = [](QWidget* w) { return static_cast<QVBoxLayout*>(w->layout()); };
+    // A solid theme's page on one card (the style sheet's tray), as the Properties dock's sections.
+    auto onCard = [](QWidget* w) {
+        if (theme::glassy()) return;
+        w->setProperty("role", "tray");
+        w->setAttribute(Qt::WA_StyledBackground, true);
+        w->layout()->setContentsMargins(12, 12, 12, 12);
+        static_cast<QVBoxLayout*>(w->layout())->setSpacing(8);
+    };
 
     // ---- Material: the swatches, the three sliders that matter most, then everything.
     materialPage_ = page();
+    onCard(materialPage_);
     QVBoxLayout* materialLayout = layoutOf(materialPage_);
     auto* swatchRow = new QWidget(materialPage_);
     auto* swatchLayout = new QHBoxLayout(swatchRow);
@@ -190,6 +213,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
             b->setIconColored(true);
         }
         b->setCheckedRing(theme::text(), 3.0);
+        if (!theme::glassy()) b->setEdge(theme::swatchEdge());  // dark and light swatches keep their shape
         const std::string preset = s.preset;
         connect(b, &QAbstractButton::clicked, this, [this, preset] {
             if (!groomColor_.node.empty()) {
@@ -268,18 +292,25 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     };
     // A color param of the groom's HairColor: a row with its editor, edits sent as picks.
     auto groomColorRow = [this, materialLayout](const QString& text, const char* param, QWidget** rowOut) {
-        auto* host = new QWidget(materialPage_);
+        auto* host = new QFrame(materialPage_);
         auto* row = new QHBoxLayout(host);
-        row->setContentsMargins(0, 0, 0, 0);
+        if (!theme::glassy()) {
+            // A field row, as the number fields (the label inside, the swatch and hex at the right).
+            host->setProperty("role", "propField");
+            host->setMinimumHeight(theme::rowHeight());
+            row->setContentsMargins(8, 0, 2, 0);
+        } else {
+            row->setContentsMargins(0, 0, 0, 0);
+        }
         row->setSpacing(8);
         auto* label = new QLabel(text, host);
-        label->setFont(theme::uiFont(13, 600));
+        label->setFont(theme::uiFont(12, 400));
         label->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
         label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         label->setMinimumWidth(40);
         row->addWidget(label, 1);
         auto* editor = new ColorEditor(host);
-        editor->setFixedWidth(112);
+        editor->setFixedWidth(132);  // the swatch and all seven characters of #RRGGBB
         row->addWidget(editor);
         materialLayout->addWidget(host);
         const std::string name = param;
@@ -293,7 +324,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     };
     // HairColor's mode: natural hair (melanin, redness) or a color picked as it renders.
     groomMode_ = new Segmented(materialPage_);
-    groomMode_->setItems({{tr("Natural"), theme::red(), Qt::white}, {tr("Picked color"), theme::red(), Qt::white}});
+    groomMode_->setItems({{tr("Natural"), theme::red(), Qt::white}, {tr("Picked Color"), theme::red(), Qt::white}});
     groomMode_->setBackground(theme::chip());
     groomMode_->setSegmentHeight(28);
     groomMode_->setPadding(3);
@@ -313,25 +344,31 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     melanin_ = groomSlider(tr("Melanin"), theme::yellow(), 0.0, 1.0, "melanin", &GroomColor::melanin, ms(&HairMaterial::melanin, true));
     redness_ = groomSlider(tr("Redness"), theme::red(), 0.0, 1.0, "redness", &GroomColor::redness, ms(&HairMaterial::melaninRedness, true));
     roughness_ = groomSlider(tr("Roughness"), theme::blue(), 0.0, 1.0, "roughness", &GroomColor::roughness, ms(&HairMaterial::roughness));
-    tipColor_ = groomColorRow(tr("Tip color"), "tipColor", &tipColorRow_);
-    tipStrength_ = groomSlider(tr("Tip strength"), theme::yellow(), 0.0, 1.0, "tipStrength", &GroomColor::tipStrength, [](double) {});
+    tipColor_ = groomColorRow(tr("Tip Color"), "tipColor", &tipColorRow_);
+    tipStrength_ = groomSlider(tr("Tip Strength"), theme::yellow(), 0.0, 1.0, "tipStrength", &GroomColor::tipStrength, [](double) {});
     // Each strand's hue and saturation spread (HairColor's randomness, in either mode).
-    hueRandom_ = groomSlider(tr("Hue random"), theme::red(), 0.0, 1.0, "hueRandom", &GroomColor::hueRandom, [](double) {});
-    saturationRandom_ = groomSlider(tr("Saturation random"), theme::blue(), 0.0, 1.0, "saturationRandom",
+    hueRandom_ = groomSlider(tr("Hue Random"), theme::red(), 0.0, 1.0, "hueRandom", &GroomColor::hueRandom, [](double) {});
+    saturationRandom_ = groomSlider(tr("Saturation Random"), theme::blue(), 0.0, 1.0, "saturationRandom",
                                     &GroomColor::saturationRandom, [](double) {});
     colorNote_ = new QLabel(materialPage_);
     colorNote_->setWordWrap(true);
-    colorNote_->setFont(theme::uiFont(12, 500));
+    colorNote_->setFont(theme::uiFont(11, 400));
     colorNote_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textMuted().name()));
     materialLayout->addWidget(colorNote_);
 
     moreButton_ = new RoundButton(materialPage_);
-    moreButton_->setText(tr("More settings"));
-    moreButton_->setDiameter(34);
-    moreButton_->setRadius(12.0);
-    moreButton_->setFontSize(13);
-    moreButton_->setFontWeight(600);
-    moreButton_->setFill(theme::chipSoft(), theme::chipSoft());
+    moreButton_->setText(tr("More Settings  ▾"));
+    moreButton_->setDiameter(theme::rowHeight());
+    moreButton_->setFontSize(12);
+    moreButton_->setFontWeight(500);
+    if (theme::glassy()) {
+        moreButton_->setFill(theme::chipSoft(), theme::chipSoft());
+    } else {
+        // Opens more below: outlined (the disclosure kind), not a filled action.
+        // The card's own tone with the disclosure edge (Edit Guides' outline): the edge draws over an opaque fill.
+        moreButton_->setFill(theme::card(), theme::uiColor("raised"));
+        moreButton_->setEdge(theme::uiColor("hover"));
+    }
     moreButton_->setTextColor(theme::textDim(), theme::textDim());
     moreButton_->setToolTip(tr("Every hair material parameter, and the surfaces (the scalp, the props, the eyes)"));
     materialLayout->addWidget(moreButton_);
@@ -524,20 +561,45 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
     // ---- Lighting: the presets as chips, the lights, the environment, exposure, the display.
     lightingPage_ = page();
     QVBoxLayout* lightingLayout = layoutOf(lightingPage_);
+    // The page in cards (the style sheet's tray; a glass theme's straight on the page): the rig (the
+    // presets and the exposure), each light, the environment, the tone map, the background.
+    auto lightingCard = [this, lightingLayout]() -> QVBoxLayout* {
+        if (theme::glassy()) return lightingLayout;
+        auto* w = new QWidget(lightingPage_);
+        w->setProperty("role", "tray");
+        w->setAttribute(Qt::WA_StyledBackground, true);
+        auto* l = new QVBoxLayout(w);
+        l->setContentsMargins(10, 10, 10, 10);
+        l->setSpacing(6);
+        lightingLayout->addWidget(w);
+        return l;
+    };
+    QVBoxLayout* sceneLayout = lightingCard();
     auto* chips = new QWidget(lightingPage_);
     auto* chipGrid = new QGridLayout(chips);
-    chipGrid->setContentsMargins(0, 0, 0, 0);
-    chipGrid->setSpacing(6);
+    if (!theme::glassy()) {
+        // A one-of choice: segments on a sunken track, the chosen one raised.
+        chips->setProperty("role", "segTrack");
+        chips->setAttribute(Qt::WA_StyledBackground, true);
+        chipGrid->setContentsMargins(2, 2, 2, 2);
+        chipGrid->setSpacing(2);
+    } else {
+        chipGrid->setContentsMargins(0, 0, 0, 0);
+        chipGrid->setSpacing(6);
+    }
     int k = 0;
     for (const char* name : kLightingChips) {
         auto* b = new RoundButton(chips);
-        b->setText(theme::brushTitle(name));
+        // The preset's label ("rim" reads Backlit: not to be confused with the Rim light below).
+        b->setText(std::string(name) == "rim" ? tr("Backlit") : theme::brushTitle(name));
         b->setDiameter(28);
         b->setPadding(9);
-        b->setFontSize(11);
-        b->setFontWeight(700);
-        b->setFill(theme::chip(), theme::checkedFill(theme::yellow()));
-        b->setTextColor(theme::textSoft(), theme::checkedText(theme::ink()));
+        b->setFontSize(12);
+        b->setFontWeight(500);
+        // A one-of choice: the chosen preset raised in a neutral tone (the accent is for what is on).
+        b->setFill(theme::glassy() ? theme::chip() : QColor(0, 0, 0, 0), theme::glassy() ? theme::checkedFill(theme::yellow()) : theme::segmentOn());
+        b->setTextColor(theme::glassy() ? theme::textSoft() : theme::textDim(), theme::glassy() ? theme::checkedText(theme::ink()) : theme::text());
+        if (!theme::glassy()) b->setDiameter(26);
         b->setCheckable(true);
         const std::string preset = name;
         connect(b, &QAbstractButton::clicked, this, [this, preset] {
@@ -547,10 +609,11 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
             emit lightingEdited();
         });
         lightingChips_.push_back(b);
+        // Rows of three on one column grid (the track shows where a row is short).
         chipGrid->addWidget(b, k / 3, k % 3);
         ++k;
     }
-    lightingLayout->addWidget(chips);
+    sceneLayout->addWidget(chips);
     auto l = [this](auto member) { return [this, member]() -> double { return lighting_.*member; }; };
     auto ls = [this](auto member) {
         return [this, member](double v) {
@@ -558,22 +621,35 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
             lighting_.presetName.clear();
         };
     };
-    slider(lightingLayout, tr("Exposure (EV)"), theme::yellow(), -4.0, 4.0, 2, l(&LightingSetup::exposure), ls(&LightingSetup::exposure), Target::Lighting);
+    slider(sceneLayout, tr("Exposure (EV)"), theme::yellow(), -4.0, 4.0, 2, l(&LightingSetup::exposure), ls(&LightingSetup::exposure), Target::Lighting);
     for (int i = 0; i < 3; ++i) {
         LightRow row;
         row.host = new QWidget(lightingPage_);
         auto* v = new QVBoxLayout(row.host);
-        v->setContentsMargins(0, 0, 0, 0);
-        v->setSpacing(8);
+        if (!theme::glassy()) {
+            // Each light a card (the style sheet's tray): its switch, color and sliders on one block.
+            row.host->setProperty("role", "tray");
+            row.host->setAttribute(Qt::WA_StyledBackground, true);
+            v->setContentsMargins(10, 10, 10, 10);
+            if (i > 0) lightingLayout->addSpacing(2);
+        } else {
+            v->setContentsMargins(0, 0, 0, 0);
+        }
+        v->setSpacing(6);
         auto* head = new QHBoxLayout();
         head->setSpacing(8);
-        row.enabled = new QCheckBox(tr("Light %1").arg(i + 1), row.host);
-        row.enabled->setFont(theme::uiFont(13, 700));
-        head->addWidget(row.enabled, 1);
+        row.enabled = new QCheckBox(row.host);
+        row.enabled->setToolTip(tr("The light on or off"));
+        row.name = new QLabel(tr("Light %1").arg(i + 1), row.host);
+        row.name->setStyleSheet(QStringLiteral("color: %1; font-size: 12px; font-weight: 600;").arg(theme::text().name()));
+        head->addWidget(row.name, 1);
         row.color = new ColorEditor(row.host);
-        row.color->setFixedWidth(112);
+        row.color->setFixedWidth(132);  // all of #RRGGBB
         row.color->setToolTip(tr("The light's color"));
         head->addWidget(row.color);
+        head->addSpacing(4);
+        head->addWidget(row.enabled);  // the switch at the header's end
+        head->addSpacing(6);
         v->addLayout(head);
         auto lightSlider = [&](const QString& name, const QColor& fill, double min, double max, int decimals) {
             auto* s = new ValueSlider(row.host);
@@ -587,9 +663,9 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         row.azimuth = lightSlider(tr("Azimuth"), theme::blue(), -180.0, 180.0, 0);
         row.elevation = lightSlider(tr("Elevation"), theme::blue(), -90.0, 90.0, 0);
         row.intensity = lightSlider(tr("Intensity"), theme::yellow(), 0.0, 10.0, 2);
-        row.shadows = new QCheckBox(tr("Shadows (deep opacity map)"), row.host);
+        row.shadows = new QCheckBox(tr("Shadows"), row.host);
         row.shadows->setToolTip(tr("Casts a deep opacity map: hair-on-hair shadows, the scalp in them"));
-        v->addWidget(row.shadows);
+        v->addWidget(theme::glassy() ? static_cast<QWidget*>(row.shadows) : switchRow(row.host, row.shadows));
         lightingLayout->addWidget(row.host);
         const std::size_t index = lightRows_.size();
         auto read = [this, index](bool live) {
@@ -613,10 +689,11 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         connect(row.color, &ColorEditor::edited, this, [read](bool live) { read(live); });
         lightRows_.push_back(row);
     }
-    caption(lightingLayout, tr("Environment"), 7, Target::Lighting);
+    QVBoxLayout* environmentLayout = lightingCard();
+    caption(environmentLayout, tr("Environment"), 7, Target::Lighting);
     environment_ = comboBox(lightingPage_, {tr("None"), tr("Studio"), tr("Sky"), tr("Overcast"), tr("Sunset")},
                             tr("A generated environment: its light on the hair, and the background when chosen"));
-    lightingLayout->addWidget(environment_);
+    environmentLayout->addWidget(environment_);
     connect(environment_, &QComboBox::currentIndexChanged, this, [this](int index) {
         if (updating_) return;
         lighting_.environment = static_cast<Environment>(index);
@@ -624,35 +701,37 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         emit lightingEdited();
     });
     lightingRefreshers_.push_back([this] { environment_->setCurrentIndex(static_cast<int>(lighting_.environment)); });
-    slider(lightingLayout, tr("Intensity"), theme::blue(), 0.0, 4.0, 2, l(&LightingSetup::environmentIntensity), ls(&LightingSetup::environmentIntensity), Target::Lighting);
-    slider(lightingLayout, tr("Rotation"), theme::blue(), -180.0, 180.0, 0, l(&LightingSetup::environmentRotation), ls(&LightingSetup::environmentRotation), Target::Lighting);
-    caption(lightingLayout, tr("Tone map"), 7, Target::Lighting);
+    slider(environmentLayout, tr("Intensity"), theme::blue(), 0.0, 4.0, 2, l(&LightingSetup::environmentIntensity), ls(&LightingSetup::environmentIntensity), Target::Lighting);
+    slider(environmentLayout, tr("Rotation"), theme::blue(), -180.0, 180.0, 0, l(&LightingSetup::environmentRotation), ls(&LightingSetup::environmentRotation), Target::Lighting);
+    QVBoxLayout* toneLayout = lightingCard();
+    caption(toneLayout, tr("Tone map"), 7, Target::Lighting);
     toneMap_ = chipSegments({{tr("None"), theme::emerald(), theme::ink()}, {tr("ACES"), theme::emerald(), theme::ink()}, {tr("AgX"), theme::emerald(), theme::ink()}},
                             lightingPage_, tr("The display transform after exposure"));
-    lightingLayout->addWidget(toneMap_);
+    toneLayout->addWidget(toneMap_);
     connect(toneMap_, &Segmented::changed, this, [this](int index) {
         if (updating_) return;
         lighting_.toneMap = static_cast<ToneMap>(index);
         emit lightingEdited();
     });
     lightingRefreshers_.push_back([this] { toneMap_->setCurrent(static_cast<int>(lighting_.toneMap)); });
-    caption(lightingLayout, tr("Background"), 7, Target::Lighting);
+    QVBoxLayout* backgroundLayout = lightingCard();
+    caption(backgroundLayout, tr("Background"), 7, Target::Lighting);
     background_ = chipSegments({{tr("Solid"), theme::emerald(), theme::ink()}, {tr("Gradient"), theme::emerald(), theme::ink()}, {tr("Environment"), theme::emerald(), theme::ink()}},
                                lightingPage_, tr("Behind the hair: a color (deep charcoal by default), a gradient of it, or the environment"));
-    lightingLayout->addWidget(background_);
+    backgroundLayout->addWidget(background_);
     connect(background_, &Segmented::changed, this, [this](int index) {
         if (updating_) return;
         lighting_.background = static_cast<Background>(index);
         emit lightingEdited();
     });
     lightingRefreshers_.push_back([this] { background_->setCurrent(static_cast<int>(lighting_.background)); });
-    color(lightingLayout, tr("Background color"), [this] { return lighting_.backgroundColor; },
+    color(backgroundLayout, tr("Background color"), [this] { return lighting_.backgroundColor; },
           [this](const RGB& c) { lighting_.backgroundColor = c; }, Target::Lighting);
-    slider(lightingLayout, tr("Background intensity"), theme::blue(), 0.0, 4.0, 2, l(&LightingSetup::backgroundIntensity), ls(&LightingSetup::backgroundIntensity), Target::Lighting);
-    slider(lightingLayout, tr("Shadow softness"), theme::purple(), 0.05, 10.0, 2, l(&LightingSetup::shadowSoftness), ls(&LightingSetup::shadowSoftness), Target::Lighting);
+    slider(backgroundLayout, tr("Background intensity"), theme::blue(), 0.0, 4.0, 2, l(&LightingSetup::backgroundIntensity), ls(&LightingSetup::backgroundIntensity), Target::Lighting);
+    slider(backgroundLayout, tr("Shadow softness"), theme::purple(), 0.05, 10.0, 2, l(&LightingSetup::shadowSoftness), ls(&LightingSetup::shadowSoftness), Target::Lighting);
     ambientOcclusion_ = new QCheckBox(tr("Ambient occlusion"), lightingPage_);
     ambientOcclusion_->setToolTip(tr("A map from above: what the hair above hides of the sky"));
-    lightingLayout->addWidget(ambientOcclusion_);
+    backgroundLayout->addWidget(theme::glassy() ? static_cast<QWidget*>(ambientOcclusion_) : switchRow(lightingPage_, ambientOcclusion_));
     connect(ambientOcclusion_, &QCheckBox::toggled, this, [this](bool on) {
         if (updating_) return;
         lighting_.ambientOcclusion = on;
@@ -662,6 +741,7 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
 
     // ---- Render: the quality, the sample count, the resolution scale.
     renderPage_ = page();
+    onCard(renderPage_);
     QVBoxLayout* renderLayout = layoutOf(renderPage_);
     caption(renderLayout, tr("Quality"), 7, Target::Lighting);
     quality_ = chipSegments({{tr("Interactive"), theme::emerald(), theme::ink()}, {tr("Refine"), theme::emerald(), theme::ink()}}, renderPage_,
@@ -690,12 +770,12 @@ LookCard::LookCard(QWidget* parent) : GlassPanel(parent, 24.0) {
         emit lightingEdited();
     });
     lightingRefreshers_.push_back([this] { interactiveQuality_->setCurrent(lighting_.interactiveQuality == InteractiveQuality::Full ? 1 : 0); });
-    auto* note = new QLabel(tr("Render (top right) refines from a clean slate; the line at the bottom right counts the frames."), renderPage_);
+    auto* note = new QLabel(tr("Refine accumulates once nothing moves; the line at the bottom right of the viewport counts the frames."), renderPage_);
     note->setWordWrap(true);
     note->setFont(theme::uiFont(12, 500));
     note->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textMuted().name()));
     renderLayout->addWidget(note);
-    renderLayout->addStretch(1);
+    pagesLayout->addStretch(1);  // (the pages their content's height: a card ends where its content does)
 
     connect(tabs_, &Segmented::changed, this, [this](int index) {
         materialPage_->setVisible(index == 0);
@@ -731,19 +811,26 @@ ValueSlider* LookCard::slider(QBoxLayout* into, const QString& text, const QColo
 
 ColorEditor* LookCard::color(QBoxLayout* into, const QString& text, std::function<RGB()> get, std::function<void(const RGB&)> set,
                              Target target, int kinds) {
-    auto* host = new QWidget(into->parentWidget());
+    auto* host = new QFrame(into->parentWidget());
     auto* row = new QHBoxLayout(host);
-    row->setContentsMargins(0, 0, 0, 0);
+    if (!theme::glassy()) {
+        // A field row, as the number fields (the label inside, the swatch and hex at the right).
+        host->setProperty("role", "propField");
+        host->setMinimumHeight(theme::rowHeight());
+        row->setContentsMargins(8, 0, 2, 0);
+    } else {
+        row->setContentsMargins(0, 0, 0, 0);
+    }
     row->setSpacing(8);
     auto* label = new QLabel(text, host);
-    label->setFont(theme::uiFont(13, 600));
+    label->setFont(theme::uiFont(theme::glassy() ? 13 : 12, theme::glassy() ? 600 : 400));
     label->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
     // The label takes what the editor leaves (a long name clips rather than widen the card).
     label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     label->setMinimumWidth(40);
     row->addWidget(label, 1);
     auto* editor = new ColorEditor(host);
-    editor->setFixedWidth(112);
+    editor->setFixedWidth(132);  // all of #RRGGBB
     row->addWidget(editor);
     into->addWidget(host);
     connect(editor, &ColorEditor::edited, this, [this, set, editor, target](bool) {
@@ -757,10 +844,16 @@ ColorEditor* LookCard::color(QBoxLayout* into, const QString& text, std::functio
     return editor;
 }
 
+void LookCard::addRenderWidget(QWidget* widget) {
+    widget->setParent(renderPage_);
+    static_cast<QVBoxLayout*>(renderPage_->layout())->addWidget(widget);
+}
+
 QLabel* LookCard::caption(QBoxLayout* into, const QString& text, int kinds, Target target) {
+    // A caption as written (sentence case), as the cards' titles.
     auto* label = new QLabel(text, into->parentWidget());
-    label->setFont(theme::uiFont(13, 800));
-    label->setStyleSheet(QStringLiteral("color: %1; margin-top: 4px;").arg(theme::text().name()));
+    label->setFont(theme::uiFont(12, 600));
+    label->setStyleSheet(QStringLiteral("color: %1; margin-top: 8px; font-size: 12px; font-weight: 600;").arg(theme::text().name()));
     into->addWidget(label);
     if (target == Target::Surface) surfaceRows_.push_back({label, kinds});
     return label;
@@ -852,7 +945,7 @@ void LookCard::setTab(Tab tab) {
 void LookCard::setMoreShown(bool shown) {
     moreShown_ = shown;
     more_->setVisible(shown);
-    moreButton_->setText(shown ? tr("Fewer settings") : tr("More settings"));
+    moreButton_->setText(shown ? tr("Fewer Settings  ▴") : tr("More Settings  ▾"));
     updateGeometry();
 }
 
@@ -901,7 +994,7 @@ void LookCard::refreshGroomColor() {
     hueRandom_->setValue(groomColor_.hueRandom);
     saturationRandom_->setVisible(groom);
     saturationRandom_->setValue(groomColor_.saturationRandom);
-    colorNote_->setText(groom ? tr("The groom's %1 node, saved with it").arg(QString::fromStdString(groomColor_.node))
+    colorNote_->setText(groom ? tr("Same as Attributes > Hair Color (%1)").arg(QString::fromStdString(groomColor_.node))
                               : tr("No HairColor node in the graph: viewport only"));
     updating_ = was;
 }
@@ -922,7 +1015,7 @@ void LookCard::refresh() {
         double azimuth = 0.0, elevation = 0.0;
         lightAngles(light.direction, azimuth, elevation);
         row.enabled->setChecked(light.enabled);
-        row.enabled->setText(light.name.empty() ? tr("Light %1").arg(i + 1) : theme::brushTitle(light.name));
+        row.name->setText(light.name.empty() ? tr("Light %1").arg(i + 1) : theme::brushTitle(light.name));
         row.azimuth->setValue(azimuth);
         row.elevation->setValue(elevation);
         row.intensity->setValue(light.intensity);
@@ -943,7 +1036,7 @@ constexpr int kViewportResizeMs = 60;
 
 // The panels over the viewport: solid in a solid theme (its panel color, a thin edge), glass else.
 GlassPanel* overlayPanel(QWidget* parent, qreal radius) {
-    auto* panel = new GlassPanel(parent, theme::glassy() ? radius : std::min<qreal>(radius, 8.0));
+    auto* panel = new GlassPanel(parent, theme::glassy() ? radius : std::min<qreal>(radius, 14.0));
     panel->setColor(theme::glassSolid());
     return panel;
 }
@@ -968,20 +1061,22 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
     // ---- Top-left: the active tool's name.
     toolLabel_ = overlayPanel(this, 10.0);
     toolLabel_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    if (!theme::glassy()) toolLabel_->setColor(theme::hudFill());  // (the viewport's HUD tone)
     auto* labelLayout = new QHBoxLayout(toolLabel_);
     labelLayout->setContentsMargins(10, 5, 10, 5);
     toolName_ = new QLabel(toolLabel_);
     toolName_->setObjectName(QStringLiteral("toolName"));
     toolName_->setFont(theme::uiFont(12, 700));
-    toolName_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::text().name()));
+    toolName_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::hudText().name()));
     labelLayout->addWidget(toolName_);
     toolLabel_->hide();
 
     // ---- Top-right: Undo and Redo (the window has no tool bar: the menus, the keys and these).
     history_ = overlayPanel(this, 10.0);
     history_->setObjectName(QStringLiteral("history"));
+    if (!theme::glassy()) history_->setColor(theme::hudFill());
     auto* historyLayout = new QHBoxLayout(history_);
-    historyLayout->setContentsMargins(4, 4, 4, 4);
+    historyLayout->setContentsMargins(theme::glassy() ? 4 : 2, theme::glassy() ? 4 : 1, theme::glassy() ? 4 : 2, theme::glassy() ? 4 : 1);
     historyLayout->setSpacing(2);
     auto historyButton = [this, historyLayout](const char* icon, const char* name) {
         auto* b = new RoundButton(history_);
@@ -1004,6 +1099,49 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
     stats_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     refine_ = new ShadowText(this);
     refine_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    // The Graph handle: a chip at the viewport's bottom middle that shows or hides the Graph Editor (Tab too).
+    graphHandle_ = new QToolButton(this);
+    graphHandle_->setObjectName(QStringLiteral("graphHandle"));
+    graphHandle_->setCursor(Qt::PointingHandCursor);
+    graphHandle_->setToolTip(tr("Show or hide the Graph Editor (Tab)"));
+    // Its tones in the theme's style sheet (QToolButton#graphHandle), its sizes components.graphChip.
+    graphHandle_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    graphHandle_->setLayoutDirection(Qt::RightToLeft);  // (the chevron after the word)
+    graphHandle_->setFixedHeight(theme::component("graphChip", "height", 26));
+    graphHandle_->setStyleSheet(QStringLiteral("QToolButton#graphHandle { border-radius: %1px; padding: 0 12px 0 14px; }")
+                                    .arg(theme::component("graphChip", "radius", 13)));
+    connect(graphHandle_, &QToolButton::clicked, this, &OverlayHost::graphToggleRequested);
+    setGraphOpen(false);
+    graphHandle_->hide();
+
+    // The brush's value while a radius or strength drag runs, beside where it started.
+    readout_ = new ShadowText(this);
+    readout_->setObjectName(QStringLiteral("brushReadout"));
+    readout_->setChip(theme::hudFill());
+    readout_->hide();
+    connect(viewport_, &Viewport::brushReadout, this, [this](const QPoint& at, const QString& text) {
+        if (text.isEmpty()) {
+            readout_->hide();
+            return;
+        }
+        ShadowText::Run run;
+        run.text = text;
+        run.font = theme::numberFont(13, 600);
+        run.color = theme::hudText();
+        readout_->setRuns({run});
+        readout_->resize(readout_->sizeHint());
+        // Its bottom-left at the anchor (outside the ring), flipped back inside the view at its edges.
+        int x = at.x(), y = at.y() - readout_->height();
+        if (x + readout_->width() > width() - 8) x = std::max(8, width() - 8 - readout_->width());
+        readout_->move(std::max(0, x), std::clamp(y, 8, std::max(8, height() - readout_->height())));
+        readout_->show();
+        readout_->raise();
+    });
+    if (!theme::glassy()) {
+        // A solid theme's lines on chips (the viewport's HUD tone), as the tool's name and Undo.
+        stats_->setChip(theme::hudFill());
+        refine_->setChip(theme::hudFill());
+    }
     toast_ = overlayPanel(this, 12.0);
     toast_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     auto* toastLayout = new QHBoxLayout(toast_);
@@ -1035,15 +1173,15 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
         auto* card = new QVBoxLayout(emptyCard_);
         card->setContentsMargins(28, 24, 28, 24);
         card->setSpacing(10);
-        auto* title = new QLabel(tr("No groom open"), emptyCard_);
-        title->setFont(theme::uiFont(18, 800));
-        title->setStyleSheet(QStringLiteral("color: %1; font-size: 18px; font-weight: 800;").arg(theme::text().name()));
+        auto* title = new QLabel(tr("Start a groom"), emptyCard_);
+        title->setFont(theme::uiFont(18, 600));
+        title->setStyleSheet(QStringLiteral("color: %1; font-size: 18px; font-weight: 600;").arg(theme::text().name()));
         card->addWidget(title);
         auto* hint = new QLabel(emptyCard_);
         hint->setObjectName(QStringLiteral("emptyHint"));
         hint->setWordWrap(true);
         hint->setFixedWidth(320);
-        hint->setFont(theme::uiFont(13, 500));
+        hint->setFont(theme::uiFont(12, 400));
         hint->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
         card->addWidget(hint);
         emptyHint_ = hint;
@@ -1051,21 +1189,21 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
             auto* b = new RoundButton(emptyCard_);
             b->setText(text);
             b->setDimText(key);
-            b->setDiameter(38);
+            b->setDiameter(theme::glassy() ? 38 : 32);
             b->setRadius(theme::glassy() ? 14.0 : 6.0);
             b->setPadding(16);
-            b->setFontSize(14);
-            b->setFontWeight(700);
+            b->setFontSize(theme::glassy() ? 14 : 13);
+            b->setFontWeight(theme::glassy() ? 700 : 500);
             b->setFill(fill, fill);
             b->setTextColor(ink, ink);
             connect(b, &QAbstractButton::clicked, this, slot);
             card->addWidget(b);
             return b;
         };
-        action(tr("Open groom"), QStringLiteral("Ctrl+O"), theme::actionFill(theme::yellow()), theme::actionText(theme::ink()),
-               [this] { emit openRequested(); });
-        action(tr("New groom on mesh"), QStringLiteral("Ctrl+N"), theme::chip(), theme::text(), [this] { emit newRequested(); });
-        action(tr("Start from a preset"), QString(), theme::chip(), theme::text(), [this] { emit presetsRequested(); });
+        action(tr("New Groom on Mesh..."), QStringLiteral("Ctrl+N"), theme::actionFill(theme::yellow()), theme::actionText(theme::ink()),
+               [this] { emit newRequested(); });
+        action(tr("Open Groom..."), QStringLiteral("Ctrl+O"), theme::chip(), theme::text(), [this] { emit openRequested(); });
+        action(tr("Start from a Preset..."), QString(), theme::chip(), theme::text(), [this] { emit presetsRequested(); });
         auto* recent = new QWidget(emptyCard_);
         recentLayout_ = new QVBoxLayout(recent);
         recentLayout_->setContentsMargins(0, 6, 0, 0);
@@ -1113,9 +1251,9 @@ void OverlayHost::setRecentFiles(const QStringList& paths) {
 
 QString OverlayHost::emptyText() const {
     switch (mode_) {
-        case Mode::Look: return tr("Look mode lights the groom and sets its hair material. Open a groom, or make one on a mesh:");
-        case Mode::Cards: return tr("Cards mode turns a groom into hair cards for game engines and bakes their textures. Open a groom first:");
-        case Mode::Export: return tr("Export mode writes the groom as Alembic, USD, Unreal or Unity strands, or cards. Open a groom first:");
+        case Mode::Look: return tr("Material, Lighting and Render light the groom and set its hair material. Open a groom, or make one on a mesh:");
+        case Mode::Cards: return tr("Cards turns a groom into hair cards for game engines and bakes their textures. Open a groom first:");
+        case Mode::Export: return tr("Export writes the groom as Alembic, USD, Unreal or Unity strands, or cards. Open a groom first:");
         case Mode::Groom: break;
     }
     return tr("Drop a .groom, .obj or .abc file on the window, or");
@@ -1192,9 +1330,12 @@ void OverlayHost::refreshToolLabel() {
     // The name and the key that brings the tool back: S for Select, B for the brushes (Groom mode).
     const bool shown = groomOpen() && mode_ == Mode::Groom && (toolSelect_ || !toolMode_.empty());
     if (shown) {
-        toolName_->setText(QStringLiteral("%1 <span style=\"color:%3; font-weight:600\">%2</span>")
-                               .arg(toolSelect_ ? tr("Select") : theme::brushTitle(toolMode_), toolSelect_ ? QStringLiteral("S") : QStringLiteral("B"),
-                                    theme::textMuted().name()));
+        // The key as a small cap beside the name; its tooltip says what it does.
+        const QString key = toolSelect_ ? QStringLiteral("S") : QStringLiteral("B");
+        toolName_->setText(QStringLiteral("%1&nbsp;&nbsp;<span style=\"color:%3; background-color:%4; font-size:11px; font-weight:500\">&nbsp;%2&nbsp;</span>")
+                               .arg(toolSelect_ ? tr("Select") : theme::brushTitle(toolMode_), key, theme::hudTextDim().name(),
+                                    theme::isLight() ? QStringLiteral("#3A3833") : theme::uiColor("hover").name()));
+        toolLabel_->setToolTip(toolSelect_ ? tr("S: back to Select") : tr("B: back to %1 (the brush used last)").arg(theme::brushTitle(toolMode_)));
         toolLabel_->adjustSize();
     }
     if (toolLabel_->isVisibleTo(this) != shown) {
@@ -1212,20 +1353,24 @@ QString OverlayHost::statsText() const {
     return words.join(QLatin1Char(' '));
 }
 
-void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& /*badgeColor*/, std::size_t guides) {
+void OverlayHost::setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& /*badgeColor*/, std::size_t guides,
+                           const QString& guidesFrom) {
     // One quiet line in the number font: "25,843 strands · 104 guides · 63 ms per dab · GPU".
     const QLocale english(QLocale::English);
     QStringList parts;
     parts << english.toString(static_cast<qulonglong>(strands)) + tr(" strands");
     if (guides != static_cast<std::size_t>(-1)) {
-        parts << english.toString(static_cast<qulonglong>(guides)) + (guides == 1 ? tr(" guide") : tr(" guides"));
+        parts << english.toString(static_cast<qulonglong>(guides)) + (guides == 1 ? tr(" guide") : tr(" guides")) +
+                     (!guidesFrom.isEmpty() && guides > 0 ? tr(" from %1").arg(guidesFrom) : QString());
     }
-    parts << QString::number(msPerDab, 'f', msPerDab < 10.0 ? 1 : 0) + tr(" ms per dab");
-    if (!badge.isEmpty()) parts << badge;
+    if (msPerDab > 0.0) {
+        parts << QString::number(msPerDab, 'f', msPerDab < 10.0 ? 1 : 0) + tr(" ms per dab");
+        if (!badge.isEmpty()) parts << badge;
+    }
     ShadowText::Run line;
     line.text = parts.join(QStringLiteral(" · "));
     line.font = theme::numberFont(12);
-    line.color = theme::textMuted();
+    line.color = theme::hudTextDim();
     // Set after every frame: the same line changes nothing, and a new one lays the overlay out
     // again only when its size changed.
     const QSize before = stats_->sizeHint();
@@ -1236,15 +1381,16 @@ void OverlayHost::setRefine(bool refining, int frames, int target, double msPerF
     std::vector<ShadowText::Run> runs;
     ShadowText::Run lead;
     lead.dot = refining && frames < target ? theme::yellow() : theme::emerald();
-    lead.text = refining ? tr("Refining") : tr("Interactive");
+    lead.text = refining ? tr("Refining") : QString();
     lead.font = theme::uiFont(12, 500);
-    lead.color = theme::textSoft();
+    lead.color = theme::hudText();
     runs.push_back(lead);
     ShadowText::Run numbers;
-    numbers.text = refining ? QStringLiteral("%1 / %2").arg(frames).arg(target) : QStringLiteral("%1 ms").arg(msPerFrame, 0, 'f', 1);
+    numbers.text = refining ? QStringLiteral("%1 / %2").arg(frames).arg(target) : msPerFrame > 0.05 ? QStringLiteral("%1 ms").arg(msPerFrame, 0, 'f', 1)
+                                                                                       : tr("Ready");
     numbers.font = theme::numberFont(12);
-    numbers.color = theme::textSoft();
-    numbers.gapBefore = 6;
+    numbers.color = theme::hudText();
+    numbers.gapBefore = refining ? 6 : 0;
     runs.push_back(numbers);
     const QSize before = refine_->sizeHint();
     if (refine_->setRuns(runs) && refine_->sizeHint() != before) relayout();
@@ -1488,8 +1634,8 @@ void OverlayHost::refreshStarter() {
         return;
     }
     // Each step numbered in a small circle: the next one's filled with the accent, the others
-    // outlined; a done step struck through and dim. The next one's tip below them.
-    auto badge = [this](int n, bool filled) {
+    // outlined; a done step ticked (a check in the circle) and dim. The next one's tip below them.
+    auto badge = [this](int n, bool filled, bool done) {
         const qreal dpr = devicePixelRatioF();
         QPixmap pm(QSize(16, 16) * dpr);
         pm.setDevicePixelRatio(dpr);
@@ -1507,7 +1653,17 @@ void OverlayHost::refreshStarter() {
             p.setBrush(Qt::NoBrush);
         }
         p.drawEllipse(ring);
-        p.setFont(theme::numberFont(9, 700));
+        if (done) {
+            QPainterPath tick;
+            tick.moveTo(4.6, 8.2);
+            tick.lineTo(7.0, 10.6);
+            tick.lineTo(11.4, 5.6);
+            p.setPen(QPen(theme::textDim(), 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            p.setBrush(Qt::NoBrush);
+            p.drawPath(tick);
+            return QIcon(pm);
+        }
+        p.setFont(theme::numberFont(11, 600));
         p.setPen(filled ? theme::uiColor("accentText") : theme::textMuted());
         p.drawText(QRectF(0, 0, 16, 16), Qt::AlignCenter, QString::number(n));
         return QIcon(pm);
@@ -1521,11 +1677,9 @@ void OverlayHost::refreshStarter() {
         const bool isNext = !done && next.isEmpty();
         if (isNext) next = QString::fromStdString(step.value("tip", std::string()));
         b->setText(QString::fromStdString(step.value("label", std::string())));
-        b->setIcon(badge(++n, isNext));
+        b->setIcon(badge(++n, isNext, done));
         b->setIconSize(QSize(16, 16));
-        QFont font = theme::uiFont(12, isNext ? 600 : 500);
-        font.setStrikeOut(done);
-        b->setFont(font);
+        b->setFont(theme::uiFont(12, isNext ? 600 : 500));
         b->setProperty("done", done);
         b->setProperty("next", isNext);
         b->style()->unpolish(b);
@@ -1572,10 +1726,26 @@ void OverlayHost::setUndoRedo(bool canUndo, bool canRedo, const QString& undoTip
     // Dim while there is nothing to undo or redo; the tip names the step and its keys.
     undo_->setEnabled(canUndo);
     redo_->setEnabled(canRedo);
-    undo_->setIconColor(canUndo ? theme::text() : theme::textMuted(), theme::text());
-    redo_->setIconColor(canRedo ? theme::text() : theme::textMuted(), theme::text());
+    undo_->setIconColor(canUndo ? theme::hudText() : theme::hudTextDim(), theme::hudText());
+    redo_->setIconColor(canRedo ? theme::hudText() : theme::hudTextDim(), theme::hudText());
     undo_->setToolTip(undoTip);
     redo_->setToolTip(redoTip);
+}
+
+void OverlayHost::setGraphOpen(bool open) {
+    graphHandle_->setText(tr("Graph"));
+    graphHandle_->setProperty("open", open);
+    graphHandle_->style()->unpolish(graphHandle_);
+    graphHandle_->style()->polish(graphHandle_);
+    const int glyph = theme::component("graphChip", "icon", 12);
+    graphHandle_->setIconSize(QSize(glyph, glyph));
+    // Open: the chevron down (it closes), in the chosen ink; closed: up, in the chip's text.
+    graphHandle_->setIcon(tintedIcon(open ? QStringLiteral(":/groomlab/icons/ui_chevron_down.svg") : QStringLiteral(":/groomlab/icons/ui_chevron_up.svg"),
+                                     open ? theme::componentColor("graphChip", "onText", theme::accentInk())
+                                          : theme::componentColor("graphChip", "text", theme::hudTextDim()),
+                                     glyph, devicePixelRatioF()));
+    graphHandle_->adjustSize();
+    relayout();
 }
 
 void OverlayHost::relayout() {
@@ -1608,6 +1778,18 @@ void OverlayHost::relayout() {
     place(prompt_, layout.prompt);
     place(emptyCard_, layout.emptyCard);
     place(starter_, layout.starter);
+    // The Graph handle at the bottom middle, with a groom open: clear of the stats pill on its line
+    // (a narrow view: just after the pill).
+    if (graphHandle_) {
+        graphHandle_->setVisible(groomOpen());
+        graphHandle_->adjustSize();
+        const int gap = theme::component("graphChip", "gap", 12);
+        QRect r(QPoint((size.width() - graphHandle_->width()) / 2, size.height() - graphHandle_->height() - gap), graphHandle_->size());
+        const QRect stats = stats_->isVisibleTo(this) ? stats_->geometry() : QRect();
+        if (!stats.isNull() && r.adjusted(-gap, 0, gap, 0).intersects(stats)) r.moveLeft(stats.right() + gap);
+        graphHandle_->setGeometry(r);
+        graphHandle_->raise();
+    }
 }
 
 }  // namespace groomlab::app

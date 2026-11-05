@@ -184,7 +184,7 @@
       {"submenu": "Graph Presets", "id": "graphPresets", "hosts": ["app"], "tip": "Looks to start from (Apply replaces the graph, Insert adds one after the selected node), Save as Preset, Copy and Paste Graph", "ref": "graph/presetMenu"},
       "-",
       {"submenu": "Mode", "id": "mode", "hosts": ["app"], "items": ["view.mode.groom", "view.mode.look", "view.mode.cards", "view.mode.export"]},
-      {"submenu": "Panels", "id": "panels", "hosts": ["app"], "items": [{"generator": "panels"}]},
+      {"submenu": "Panels", "id": "panels", "hosts": ["app"], "items": [{"generator": "panels"}, "-", "view.foldGroomTools", "view.foldProperties"]},
       "view.railLabels",
       "view.turntable",
       "display.toggleGuides"

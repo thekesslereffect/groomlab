@@ -8,6 +8,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QMenu>
+#include <QPushButton>
 #include <QSignalBlocker>
 #include <QRegularExpression>
 #include <QTimer>
@@ -136,10 +137,22 @@ CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
     });
     connect(key_, &QToolButton::clicked, this, [this] { keyWeight(currentLayer()); });
 
+    emptyIcon_ = emptyIcon(QStringLiteral("layers"), this);
+    emptyIcon_->hide();
+    layout->addWidget(emptyIcon_, 0, Qt::AlignHCenter);
     hint_ = new QLabel(tr("Strokes edit the guides."), this);
     hint_->setWordWrap(true);
     hint_->setProperty("role", "hint");
     layout->addWidget(hint_);
+    newButton_ = new QPushButton(this);
+    newButton_->setObjectName(QStringLiteral("correctiveFirst"));
+    newButton_->setProperty("role", "primary");
+    newButton_->hide();
+    connect(newButton_, &QPushButton::clicked, this, [this] {
+        const auto it = bindings_.find("corrective.new");
+        if (it != bindings_.end()) it->second.trigger(ui::json(), false);
+    });
+    layout->addWidget(newButton_, 0, Qt::AlignHCenter);
     fitRows(tree_);
     setEnabled(false);
 }
@@ -284,7 +297,7 @@ void CorrectivesPanel::refresh() {
     itemBar_->refresh();
     // The box is the picked row's (a corrective, the base groom or a Sculpt node).
     QTreeWidgetItem* picked = tree_->currentItem();
-    itemBar_->setTitle(picked ? picked->text(0) : QString());
+    itemBar_->setTitle(QString());  // (the picked row above names it: the drawer's bar holds its actions alone)
 }
 
 void CorrectivesPanel::refreshWeights() {
@@ -301,6 +314,9 @@ void CorrectivesPanel::refreshWeights() {
         item->setText(1, QStringLiteral("%1%").arg(std::lround(100.0f * w)));
     }
     const CorrectiveLayer* layer = target_.empty() ? nullptr : stack_->layer(target_);
+    // The base groom has no weight: the row shows only for a corrective (no dead slider).
+    weight_->setVisible(layer != nullptr);
+    key_->setVisible(layer != nullptr);
     weight_->setEnabled(layer != nullptr);
     key_->setEnabled(layer != nullptr);
     if (layer) weight_->setValue(layer->weightCurve.empty() ? layer->weight : layer->weightAt(now));
@@ -402,8 +418,22 @@ void CorrectivesPanel::applyTarget() {
                    : shot ? tr("Strokes sculpt the groom as shown at frame %1 into the corrective %2.")
                                 .arg(std::lround(document_->frame()))
                                 .arg(qs(target_))
-                          : tr("Strokes edit the guides."));
+                          : stack_ && !stack_->layers.empty() ? tr("Strokes edit the guides. Pick a corrective to sculpt it at this frame.")
+                                                                : tr("Correctives sculpt per-shot fixes on top of the groom, keyed over time."));
     if (session_) session_->setShotSculpt(shot, document_ ? document_->time() : 0.0, document_ ? std::lround(document_->frame()) : 0, target_);
+    // The base groom is not a layer: no layer box for it. No corrective yet: the first one, labeled.
+    box_->setVisible(shot || !node.empty());
+    const bool first = document_ && (!stack_ || stack_->layers.empty());
+    newButton_->setText(tr("New Corrective at Frame %1").arg(document_ ? std::lround(document_->frame()) : 0));
+    newButton_->setVisible(first);
+    // No corrective yet: a title, the line and the one button, centered under the base row (no disc:
+    // the list has its base row).
+    emptyIcon_->setVisible(false);
+    hint_->setAlignment(first ? Qt::AlignHCenter : Qt::AlignLeft);
+    if (first && !theme::glassy()) {
+        hint_->setText(tr("<p style='margin:6px 0 4px 0; font-weight:600; font-size:13px; color:%1'>No correctives yet</p><p style='margin:0'>%2</p>")
+                           .arg(theme::text().name(), hint_->text().toHtmlEscaped()));
+    }
 }
 
 bool CorrectivesPanel::editLayers(const std::string& label, const std::function<void(Correctives&)>& edit) {

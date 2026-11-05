@@ -133,7 +133,7 @@ public:
     // Interpolate node to the Output, or the Output near the right edge), as Maya's frame_readable.
     void frameReadable();
     // The least zoom the view frames at: node names and port labels stay readable in a short dock.
-    static constexpr qreal kReadableScale = 0.8;
+    static constexpr qreal kReadableScale = 0.9;
     // F: the selected node framed (zoomed in no further than 1:1); none selected: fitAll.
     void frameSelected();
     // The view panned (the zoom kept) just enough to show a node's card whole (a node picked
@@ -390,11 +390,14 @@ private:
     int wireAt(const QPointF& scene) const;
     bool bypassButtonAt(const QPointF& scene, int* node) const;
     bool inputsButtonAt(const QPointF& scene, int* node) const;
+    bool viewButtonAt(const QPointF& scene, int* node) const;
+    bool viewable(const Node& node) const;  // a strands output: View Up to Here can show it
     // The backdrop whose title bar (or, `grip`, resize corner) is under a scene point; -1 none.
     int backdropTitleAt(const QPointF& scene, bool* grip = nullptr) const;
     int backdropAt(const QPointF& scene) const;  // anywhere on it
     QRectF bypassButtonRect(const Node& node) const;
     QRectF inputsButtonRect(const Node& node) const;
+    QRectF viewButtonRect(const Node& node) const;  // the header's View eye (left of Expand Inputs / Bypass)
     void drawNode(QPainter& painter, const Node& node, bool selected);
     void forwardToViewport(QEvent* event);
     void addFromSearch();

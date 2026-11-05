@@ -63,6 +63,8 @@ public:
     enum class Tab { Material, Lighting, Render };
 
     explicit LookCard(QWidget* parent = nullptr);
+    // A widget at the Render page's end (the window's render actions: Render out).
+    void addRenderWidget(QWidget* widget);
     void setMaterial(const HairMaterial& material);  // no signals
     void setLighting(const LightingSetup& lighting);
     const HairMaterial& material() const { return material_; }
@@ -128,6 +130,7 @@ private:
     struct LightRow {
         QWidget* host = nullptr;
         QCheckBox* enabled = nullptr;
+        QLabel* name = nullptr;  // the header's title (the switch at its end, as every switch row)
         ValueSlider* azimuth = nullptr;
         ValueSlider* elevation = nullptr;
         ValueSlider* intensity = nullptr;
@@ -219,10 +222,10 @@ public:
     // The active tool's name at the top-left ("Comb" with the key that brings it back), Groom mode.
     void setTool(const std::string& brushMode, bool select);
     QString toolText() const;  // "" when hidden
-    // The stats line (Groom): strands, the guides (npos: not said), the time per dab (0: the
-    // evaluation's), the path's badge.
+    // The stats line (Groom): strands, the guides (npos: not said; guidesFrom: where guides the
+    // groom cannot brush come from, "the graph" or "the file"), the time per dab (0: none yet).
     void setStats(std::size_t strands, double msPerDab, const QString& badge, const QColor& badgeColor,
-                  std::size_t guides = static_cast<std::size_t>(-1));
+                  std::size_t guides = static_cast<std::size_t>(-1), const QString& guidesFrom = QString());
     QString statsText() const;  // the stats line's words ("" hidden)
     // GroomLab > Review > Strand Count HUD: the stats line shown (on by default) or not.
     void setStatsWanted(bool on);
@@ -290,6 +293,7 @@ signals:
     void presetsRequested();
     void fileDropped(const QString& path);
     void undoRequested();
+    void graphToggleRequested();  // the Graph handle at the viewport's bottom: show or hide the Graph Editor
     void redoRequested();
     void starterStepRequested(const QString& id);  // "guides" or "look"
     void starterDismissRequested();
@@ -335,6 +339,12 @@ private:
     ShadowText* stats_ = nullptr;
     bool statsWanted_ = true;
     ShadowText* refine_ = nullptr;
+    ShadowText* readout_ = nullptr;  // a radius or strength drag's value, beside the ring
+    QToolButton* graphHandle_ = nullptr;  // "Graph ▴" at the viewport's bottom middle
+public:
+    void setGraphOpen(bool open);  // the handle's arrow (no signal)
+    QToolButton* graphHandle() const { return graphHandle_; }
+private:
     GlassPanel* toast_ = nullptr;
     QLabel* toastText_ = nullptr;
     QLabel* toastDot_ = nullptr;

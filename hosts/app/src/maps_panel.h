@@ -127,6 +127,7 @@ signals:
     // Create with For set to a setting: the host makes (or finds) the map node.param reads, links
     // it and paints it (MainWindow::paintParam).
     void paintParamRequested(const std::string& node, const std::string& param, const std::string& kind);
+    void mapNodeRequested(const std::string& map);  // Add Map Node: a Map node reading the map, to wire
 
 protected:
     void showEvent(QShowEvent* event) override;
@@ -155,6 +156,7 @@ private:
     QListWidget* list_ = nullptr;
     QLabel* hint_ = nullptr;  // shown while the list is empty
     QLabel* users_ = nullptr;  // Read by
+    QPushButton* useMap_ = nullptr;  // unused: Add Map Node
     QGroupBox* newBox_ = nullptr;
     QComboBox* newFor_ = nullptr;    // nothing, a common setting, or Other (newOther_)
     QComboBox* newOther_ = nullptr;  // every mappable param of the graph
@@ -163,7 +165,7 @@ private:
     QCheckBox* newColor_ = nullptr;
     ValueSlider* newValue_ = nullptr;
     QSpinBox* newResolution_ = nullptr;
-    QToolButton* show_ = nullptr;
+    QCheckBox* show_ = nullptr;  // Show on scalp (a switch; its channel beside it)
     QComboBox* channel_ = nullptr;
     ValueSlider* paintValue_ = nullptr;
     QWidget* valueRow_ = nullptr;

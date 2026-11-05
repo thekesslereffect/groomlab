@@ -131,6 +131,14 @@ class _GroomTab(QtWidgets.QWidget):
     def light_refresh(self):
         pass
 
+    def show_empty(self, view, count, hide_view=True):
+        """The list's empty state (the app's: a soft-accent disc, a title, a sentence) while the
+        groom has none of its items; the list itself then hidden (`hide_view`)."""
+        empty = count == 0 and bool(self.groom)
+        self.empty.setVisible(empty)
+        if hide_view:
+            view.setVisible(not empty)
+
 
 # Deleting a texture map deletes its file too (the maps list's right-click menu turns it off).
 DELETE_MAP_FILES_VAR = "groomLabDeleteMapFiles"
@@ -377,6 +385,10 @@ class GuidesTab(_GroomTab):
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.context_menu)
         column.addWidget(self.tree)
+        self.empty = widgets.EmptyState("spline", "No guide groups yet", "Place or Draw starts the first group.")
+        self.empty.setObjectName("groupsEmpty")
+        self.empty.setVisible(False)
+        column.addWidget(self.empty)
 
         # The picked group's box: rename, select, delete, then its Segments and Edit guides.
         self.box = widgets.ItemBox([glyphs[k] for k in ("group.rename", "group.select", "group.delete") if k in glyphs])
@@ -540,6 +552,7 @@ class GuidesTab(_GroomTab):
         if not self.groom:
             self.section.set_count(None)
             fit_rows(self.tree)
+            self.show_empty(self.tree, None)
             self.sync_segments()
             return
         items = self._rows
@@ -581,6 +594,7 @@ class GuidesTab(_GroomTab):
         self.tree.expandAll()
         self.section.set_count(len(groups))
         fit_rows(self.tree)
+        self.show_empty(self.tree, len(groups))
         picked = getattr(self.owner, "current_group", None)
         current = (picked() if picked else "") or before
         if current in items:
@@ -973,6 +987,11 @@ class PaintTab(_GroomTab):
             lambda pos: self.list_menu(self.list.viewport().mapToGlobal(pos)))
         column.addWidget(self.list)
         fit_rows(self.list)
+        self.empty = widgets.EmptyState("paint", "No maps yet", "+ above makes one: for a setting such as Density, "
+                                        "or blank.")
+        self.empty.setObjectName("mapsEmpty")
+        self.empty.setVisible(False)
+        column.addWidget(self.empty)
 
         # The picked map's box: rename, convert, delete; where it shows, and what reads it.
         glyphs["map.convert"].setObjectName("paintConvert")
@@ -995,14 +1014,10 @@ class PaintTab(_GroomTab):
         self.view_channel.setToolTip(definitions.get("choices/scalpChannel")["tip"])
         self.view_channel.currentIndexChanged.connect(lambda _i: self.view_channel_changed())
         self.box.add(widgets.small_label("Show on"))
-        views = QtWidgets.QHBoxLayout()
-        views.setContentsMargins(0, 0, 0, 0)
-        views.setSpacing(theme.px(4))
-        for b in (self.view_guides, self.view_strands, self.view_scalp):
-            views.addWidget(b)
-        views.addStretch(1)
-        views.addWidget(self.view_channel)
-        self.box.add(views)
+        self.box.add(widgets.chip_row((self.view_guides, self.view_strands, self.view_scalp)))
+        # A color map: which of its channels the scalp shows.
+        self.view_channel_row, _label = widgets.field_row("Channel", self.view_channel)
+        self.box.add(self.view_channel_row)
         self.users = widgets.small_label("", wrap=True)
         self.box.add(self.users)
 
@@ -1023,7 +1038,7 @@ class PaintTab(_GroomTab):
             button.clicked.connect(lambda _checked=False, value=choice["value"]: self.paint_mode_changed(value))
             self.mode_group.addButton(button)
             self.mode_buttons[choice["value"]] = button
-        modes = widgets.chip_row(self.mode_buttons.values())
+        modes = widgets.seg_row(self.mode_buttons.values())  # one of them: segments on a track
         modes.setToolTip(definitions.get("choices/paintMode")["tip"])
         controls.addWidget(widgets.small_label("Mode"))
         controls.addWidget(modes)
@@ -1182,6 +1197,7 @@ class PaintTab(_GroomTab):
         self.list.blockSignals(False)
         self.section.set_count(self.list.count() if self.groom else None)
         fit_rows(self.list)
+        self.show_empty(self.list, self.list.count())
         for b in self.box_glyphs:
             b.setEnabled(self.list.currentItem() is not None)
         self.box.set_title(self.current() or "")
@@ -1284,7 +1300,7 @@ class PaintTab(_GroomTab):
     def _sync_color_controls(self):
         """A gray map shows the value; a color map the swatch and channels (the value too: Fill with it)."""
         color = self.current_channels() == 4
-        for widget in (self.color_label, self.color_row, self.view_channel):
+        for widget in (self.color_label, self.color_row, self.view_channel_row):
             widget.setVisible(color)
         self.value_row.setVisible(not color)
         if self.groom:
@@ -1658,6 +1674,11 @@ class CorrectivesBox(_GroomTab):
         self.tree.customContextMenuRequested.connect(self.context_menu)
         column.addWidget(self.tree)
         fit_rows(self.tree)
+        self.empty = widgets.EmptyState("layers", "No correctives yet", "Correctives sculpt per-shot fixes on top of "
+                                        "the groom, keyed over time.")
+        self.empty.setObjectName("correctivesEmpty")
+        self.empty.setVisible(False)
+        column.addWidget(self.empty)
 
         # The picked layer's box: solo, up, down, delete; its weight and the key.
         self.box_glyphs = [glyphs[k] for k in ("corrective.solo", "corrective.up", "corrective.down", "corrective.delete")]
@@ -1819,6 +1840,7 @@ class CorrectivesBox(_GroomTab):
             self.tree.clear()
             self.section.set_count(None)
             fit_rows(self.tree)
+            self.show_empty(self.tree, None, hide_view=False)
             self._state = None
             self._layers = None
             return
@@ -1884,6 +1906,7 @@ class CorrectivesBox(_GroomTab):
             self.tree.resizeColumnToContents(column)
         self.section.set_count(len(layers))
         fit_rows(self.tree)
+        self.show_empty(self.tree, len(layers) + len(nodes), hide_view=False)  # (the base groom stays listed)
         layer = next((l for l in layers if l["name"] == target), None)
         row = self.tree.currentItem()
         self.box.set_title(row.text(0) if row is not None else "")
@@ -1955,6 +1978,10 @@ class ReferenceTab(_GroomTab):
             lambda pos: self.list_menu(self.list.viewport().mapToGlobal(pos)))
         column.addWidget(self.list)
         fit_rows(self.list)
+        self.empty = widgets.EmptyState("imagePlus", "No photos yet", "Import one to groom to: each photo is a camera.")
+        self.empty.setObjectName("photosEmpty")
+        self.empty.setVisible(False)
+        column.addWidget(self.empty)
 
         # The picked photo: rename, show or hide, delete; how it shows (looking through, locked,
         # its side, opacity), its lens and Align Photo....
@@ -2160,6 +2187,7 @@ class ReferenceTab(_GroomTab):
             self._shown = None
             self.section.set_count(len(rows))
             fit_rows(self.list)
+            self.show_empty(self.list, len(rows))
         self.show_controls()
         self.show_generate()
 

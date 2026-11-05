@@ -14,15 +14,49 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPainter>
+#include <QStyle>
+#include <QStyleOptionFrame>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
+#include "glass.h"
 #include "theme.h"
 
 namespace groomlab::app {
 
 namespace {
+
+// A path field that, while not being edited, shows a long path cut in its middle (the drive and
+// the file name both in sight); editing shows it whole. Its text is the whole path either way.
+class PathEdit : public QLineEdit {
+public:
+    using QLineEdit::QLineEdit;
+
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        const QString full = text();
+        if (hasFocus() || full.isEmpty() || !full.contains(QLatin1Char('/'))) {
+            QLineEdit::paintEvent(event);
+            return;
+        }
+        QStyleOptionFrame frame;
+        initStyleOption(&frame);
+        QPainter painter(this);
+        style()->drawPrimitive(QStyle::PE_PanelLineEdit, &frame, &painter, this);
+        painter.setFont(font());
+        painter.setPen(palette().color(QPalette::Text));
+        const QRect r = textRect();
+        painter.drawText(r, Qt::AlignVCenter | Qt::AlignLeft, fontMetrics().elidedText(QStringLiteral("…/") + QFileInfo(full).fileName(), Qt::ElideMiddle, r.width()));
+    }
+
+private:
+    QRect textRect() const {
+        QStyleOptionFrame frame;
+        initStyleOption(&frame);
+        return style()->subElementRect(QStyle::SE_LineEditContents, &frame, this).adjusted(2, 0, -2, 0);
+    }
+};
 
 struct TargetInfo {
     const char* name;
@@ -78,9 +112,10 @@ private:
 };
 
 QLabel* captionLabel(const QString& text, QWidget* parent) {
+    // A row's label, as Properties' label column: regular, dim.
     auto* label = new QLabel(text, parent);
-    label->setFont(theme::uiFont(12, 700));
-    label->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textMuted().name()));
+    label->setFont(theme::uiFont(12, 400));
+    label->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
     return label;
 }
 
@@ -99,27 +134,37 @@ bool ExportPanel::targetFromName(const std::string& name, Target* target) {
 }
 
 ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
-    setFixedWidth(316);
+    setMinimumWidth(280);  // docked: as wide as the dock
     // The rows scroll when the panel is placed shorter than them (a small screen, large text).
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     auto* body = new QWidget;
     outer->addWidget(new FitScrollArea(body, this));
     auto* layout = new QVBoxLayout(body);
-    layout->setContentsMargins(18, 16, 18, 16);
-    layout->setSpacing(12);
+    layout->setContentsMargins(12, 9, 18, 12);  // the cards where the Properties dock's end (12 px, its scroll bar's room and the dock's 6)
+    layout->setSpacing(8);
+    // Two cards (the style sheet's tray), as every dock's sections: the format, then the output's options;
+    // the Export button under them.
+    auto card = [&](const char* name) {
+        auto* w = new QWidget(body);
+        w->setObjectName(QLatin1String(name));
+        if (!theme::glassy()) {
+            w->setProperty("role", "tray");
+            w->setAttribute(Qt::WA_StyledBackground, true);
+        }
+        auto* l = new QVBoxLayout(w);
+        l->setContentsMargins(12, 10, 12, 12);
+        l->setSpacing(8);
+        layout->addWidget(w);
+        return l;
+    };
+    QVBoxLayout* formatLayout = card("formatCard");
+    QVBoxLayout* outputLayout = card("outputCard");
 
-    auto* title = new QHBoxLayout();
-    title->setSpacing(10);
-    auto* dot = new QLabel(this);
-    dot->setFixedSize(9, 9);
-    dot->setStyleSheet(QStringLiteral("background: %1; border-radius: 4px;").arg(theme::emerald().name()));
-    title->addWidget(dot);
-    auto* titleLabel = new QLabel(tr("Export"), this);
-    titleLabel->setFont(theme::uiFont(15, 800));
-    titleLabel->setStyleSheet(QStringLiteral("color: %1;").arg(theme::text().name()));
-    title->addWidget(titleLabel, 1);
-    layout->addLayout(title);
+    // The mode switch names the mode: the panel starts with its first section's header.
+    auto* titleLabel = new QLabel(tr("Format"), this);
+    titleLabel->setProperty("role", "listTitle");
+    formatLayout->addWidget(titleLabel);
 
     // ---- The targets as a column of pills (radio-like).
     auto* targetGrid = new QGridLayout();
@@ -127,37 +172,54 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     for (int i = 0; i < static_cast<int>(Target::Count); ++i) {
         auto* b = new RoundButton(this);
         b->setText(tr(kTargets[i].title));
-        b->setDiameter(32);
-        b->setRadius(11.0);
+        b->setDiameter(theme::rowHeight() + 4);
         b->setPadding(12);
-        b->setFontSize(13);
-        b->setFontWeight(700);
-        b->setFill(theme::chip(), theme::checkedFill(theme::emerald()));
-        b->setTextColor(theme::textSoft(), theme::checkedText(theme::ink()));
+        b->setFontSize(12);
+        b->setFontWeight(500);
+        b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        // A one-of choice: the chosen format raised in a neutral tone (the accent is for what is on).
+        b->setFill(theme::glassy() ? theme::chip() : QColor(0, 0, 0, 0), theme::glassy() ? theme::checkedFill(theme::emerald()) : theme::segmentOn());
+        b->setTextColor(theme::glassy() ? theme::textSoft() : theme::textDim(), theme::glassy() ? theme::checkedText(theme::ink()) : theme::text());
         b->setCheckable(true);
         b->setToolTip(tr(kTargets[i].description));
         connect(b, &QAbstractButton::clicked, this, [this, i] {
             setTarget(static_cast<Target>(i));
         });
         targets_.push_back(b);
-        targetGrid->addWidget(b, i / 2, i % 2);
+        // Two columns; an odd last one the row's width (no hole beside it).
+        const bool lone = i == static_cast<int>(Target::Count) - 1 && static_cast<int>(Target::Count) % 2 == 1;
+        targetGrid->addWidget(b, i / 2, i % 2, 1, lone ? 2 : 1);
     }
-    layout->addLayout(targetGrid);
+    {
+        // A one-of choice: the formats as segments on a sunken track, the chosen one raised.
+        auto* track = new QWidget(this);
+        track->setObjectName(QStringLiteral("formatTrack"));
+        if (!theme::glassy()) {
+            track->setProperty("role", "segTrack");
+            track->setAttribute(Qt::WA_StyledBackground, true);
+            targetGrid->setContentsMargins(2, 2, 2, 2);
+            targetGrid->setSpacing(2);
+        }
+        track->setLayout(targetGrid);
+        formatLayout->addWidget(track);
+    }
     description_ = new QLabel(this);
     description_->setWordWrap(true);
     description_->setFont(theme::uiFont(12, 500));
     description_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
-    layout->addWidget(description_);
+    formatLayout->addWidget(description_);
 
     // ---- The frames and the density.
-    auto* frames = new QGridLayout();
-    frames->setHorizontalSpacing(8);
-    frames->setVerticalSpacing(6);
     range_ = new QCheckBox(tr("Frame range"), this);
     range_->setToolTip(tr("Off: the current frame alone (a static groom); on: every frame of the range (a cache)"));
-    frames->addWidget(range_, 0, 0, 1, 4);
+    outputLayout->addWidget(theme::glassy() ? static_cast<QWidget*>(range_) : switchRow(this, range_));
+    framesBox_ = new QWidget(this);
+    auto* frames = new QGridLayout(framesBox_);
+    frames->setContentsMargins(0, 0, 0, 0);
+    frames->setHorizontalSpacing(8);
+    frames->setVerticalSpacing(6);
     auto spin = [this](int min, int max, const QString& tip) {
-        auto* s = new QSpinBox(this);
+        auto* s = new QSpinBox(framesBox_);
         s->setRange(min, max);
         s->setFont(theme::numberFont(12));
         s->setButtonSymbols(QAbstractSpinBox::NoButtons);
@@ -166,20 +228,20 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     };
     first_ = spin(-100000, 1000000, tr("The first frame"));
     last_ = spin(-100000, 1000000, tr("The last frame"));
-    step_ = new QDoubleSpinBox(this);
+    step_ = new QDoubleSpinBox(framesBox_);
     step_->setRange(0.01, 1000.0);
     step_->setDecimals(2);
     step_->setValue(1.0);
     step_->setFont(theme::numberFont(12));
     step_->setButtonSymbols(QAbstractSpinBox::NoButtons);
     step_->setToolTip(tr("Frames between samples (0.5: twice a frame)"));
-    frames->addWidget(captionLabel(tr("From"), this), 1, 0);
-    frames->addWidget(first_, 1, 1);
-    frames->addWidget(captionLabel(tr("to"), this), 1, 2);
-    frames->addWidget(last_, 1, 3);
-    frames->addWidget(captionLabel(tr("Step"), this), 2, 0);
-    frames->addWidget(step_, 2, 1);
-    layout->addLayout(frames);
+    frames->addWidget(captionLabel(tr("From"), framesBox_), 0, 0);
+    frames->addWidget(first_, 0, 1);
+    frames->addWidget(captionLabel(tr("to"), framesBox_), 0, 2);
+    frames->addWidget(last_, 0, 3);
+    frames->addWidget(captionLabel(tr("Step"), framesBox_), 1, 0);
+    frames->addWidget(step_, 1, 1);
+    outputLayout->addWidget(framesBox_);
     density_ = new ValueSlider(this);
     density_->setCaption(tr("Density"));
     density_->setRange(0.01, 1.0);
@@ -187,7 +249,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     density_->setFill(theme::yellow());
     density_->setFormat([](double v) { return QString::number(std::lround(v * 100.0)) + QStringLiteral("%"); });
     density_->setToolTip(tr("The share of the strands written (a lighter groom for a game's lower LOD)"));
-    layout->addWidget(density_);
+    outputLayout->addWidget(density_);
 
     // ---- Each target's own options. Unreal's and Unity's are the Maya host's export's
     // (engine_export.h): groom groups, the feathers' shafts and a lighter groom of barbs.
@@ -227,7 +289,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     barbWidth_->setToolTip(tr("Each barb kept this many times as wide, so the vanes keep their coverage"));
     engineLayout->addWidget(captionLabel(tr("Barb width"), engineOptions_), 3, 0);
     engineLayout->addWidget(barbWidth_, 3, 1);
-    layout->addWidget(engineOptions_);
+    outputLayout->addWidget(engineOptions_);
 
     unrealOptions_ = new QWidget(this);
     auto* unrealLayout = new QHBoxLayout(unrealOptions_);
@@ -244,7 +306,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     unrealLayout->addWidget(featherGuides_);
     unrealLayout->addWidget(iridescenceAo_);
     unrealLayout->addStretch(1);
-    layout->addWidget(unrealOptions_);
+    outputLayout->addWidget(unrealOptions_);
 
     unityOptions_ = new QWidget(this);
     auto* unityLayout = new QGridLayout(unityOptions_);
@@ -278,7 +340,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     barbPoints_->setToolTip(tr("The feather groups' strands resampled to this many points (with groom groups)"));
     unityLayout->addWidget(captionLabel(tr("Barb points"), unityOptions_), 2, 0);
     unityLayout->addWidget(barbPoints_, 2, 1);
-    layout->addWidget(unityOptions_);
+    outputLayout->addWidget(unityOptions_);
 
     cardOptions_ = new QWidget(this);
     auto* cardLayout = new QVBoxLayout(cardOptions_);
@@ -303,7 +365,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     occlusion_->setFill(theme::purple());
     occlusion_->setFormat([](double v) { return QString::number(v, 'f', 2); });
     cardLayout->addWidget(occlusion_);
-    layout->addWidget(cardOptions_);
+    outputLayout->addWidget(cardOptions_);
 
     // ---- Card maps: the preset, the output's settings, and the packing under Advanced.
     mapOptions_ = new QWidget(this);
@@ -422,14 +484,14 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     packingLayout->addLayout(saveRowMaps);
     packing_->setVisible(false);
     mapLayout->addWidget(packing_);
-    layout->addWidget(mapOptions_);
+    outputLayout->addWidget(mapOptions_);
     connect(mapPreset_, &QComboBox::currentIndexChanged, this, [this] {
         if (!filling_) setMapPreset(mapPreset_->currentText());
     });
     connect(mapFormat_, &QComboBox::currentIndexChanged, this, [this] { refreshBitDepths(mapBitDepth_->currentData().toInt()); });
     connect(mapAdvanced_, &QCheckBox::toggled, this, [this](bool on) {
         packing_->setVisible(on);
-        adjustSize();
+        if (!docked()) adjustSize();  // docked: the dock sizes it
     });
     connect(mapNormal_, &QComboBox::currentIndexChanged, this, [this] { packingEdited(); });
     connect(addFile, &QAbstractButton::clicked, this, [this] { addMapFile(); });
@@ -440,9 +502,10 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     // ---- The output and the button.
     auto* pathRow = new QHBoxLayout();
     pathRow->setSpacing(6);
-    path_ = new QLineEdit(this);
+    path_ = new PathEdit(this);
     path_->setPlaceholderText(tr("Output file"));
     path_->setFont(theme::monoFont(12));
+    connect(path_, &QLineEdit::textChanged, path_, [this](const QString& text) { path_->setToolTip(text); });
     pathRow->addWidget(path_, 1);
     browse_ = new RoundButton(this);
     browse_->setText(QStringLiteral("..."));
@@ -453,18 +516,18 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     browse_->setFill(theme::chip(), theme::chip());
     browse_->setToolTip(tr("Choose the output file"));
     pathRow->addWidget(browse_);
-    layout->addLayout(pathRow);
+    outputLayout->addLayout(pathRow);
     export_ = new RoundButton(this);
     export_->setText(tr("Export"));
     export_->setIcon(QStringLiteral(":/groomlab/icons/ui_export.svg"), 16);
     export_->setIconColor(theme::actionText(theme::ink()), theme::actionText(theme::ink()));
-    export_->setDiameter(38);
-    export_->setRadius(13.0);
+    export_->setDiameter(30);
     export_->setPadding(16);
-    export_->setFontSize(14);
+    export_->setFontSize(13);
+    export_->setFontWeight(600);
     export_->setFill(theme::actionFill(theme::emerald()), theme::actionFill(theme::emerald()));
     export_->setTextColor(theme::actionText(theme::ink()), theme::actionText(theme::ink()));
-    layout->addWidget(export_);
+    outputLayout->addWidget(export_);  // the card's primary, inside it
     progressBar_ = new ProgressBar(this);
     progressBar_->hide();
     layout->addWidget(progressBar_);
@@ -474,30 +537,8 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     status_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
     layout->addWidget(status_);
 
-    // ---- Save, as before.
-    auto* saveRow = new QHBoxLayout();
-    saveRow->setSpacing(8);
-    auto saveButton = [this](const QString& text, const QString& dim) {
-        auto* b = new RoundButton(this);
-        b->setText(text);
-        b->setDimText(dim);
-        b->setDiameter(32);
-        b->setRadius(11.0);
-        b->setPadding(12);
-        b->setFontSize(13);
-        b->setFill(theme::chip(), theme::chip());
-        b->setTextColor(theme::text(), theme::text());
-        return b;
-    };
-    RoundButton* save = saveButton(tr("Save"), QStringLiteral("Ctrl+S"));
-    RoundButton* saveAs = saveButton(tr("Save as..."), QStringLiteral("Ctrl+Shift+S"));
-    saveRow->addWidget(save);
-    saveRow->addWidget(saveAs);
-    saveRow->addStretch(1);
-    layout->addLayout(saveRow);
+    // (Saving the groom is File > Save, Ctrl+S: not an export's.)
     layout->addStretch(1);  // docked in a tall window: the rows at the top
-    connect(save, &QAbstractButton::clicked, this, &ExportPanel::saveRequested);
-    connect(saveAs, &QAbstractButton::clicked, this, &ExportPanel::saveAsRequested);
 
     connect(browse_, &QAbstractButton::clicked, this, &ExportPanel::browseRequested);
     connect(export_, &QAbstractButton::clicked, this, [this] {
@@ -618,7 +659,7 @@ void ExportPanel::fillPacking(const std::vector<CardMapFile>& files) {
     for (PackRow& row : packRows_) delete row.box;
     packRows_.clear();
     for (const CardMapFile& f : files) addPackRow(f);
-    adjustSize();
+    if (!docked()) adjustSize();  // docked: the dock sizes it
 }
 
 void ExportPanel::addPackRow(const CardMapFile& file) {
@@ -745,7 +786,7 @@ void ExportPanel::addMapFile() {
     f.channels = {"depth"};
     addPackRow(f);
     packingEdited();
-    adjustSize();
+    if (!docked()) adjustSize();  // docked: the dock sizes it
 }
 
 void ExportPanel::removeMapFile(int file) {
@@ -753,7 +794,7 @@ void ExportPanel::removeMapFile(int file) {
     packRows_[static_cast<std::size_t>(file)].box->deleteLater();
     packRows_.erase(packRows_.begin() + file);
     packingEdited();
-    adjustSize();
+    if (!docked()) adjustSize();  // docked: the dock sizes it
 }
 
 bool ExportPanel::saveMapPreset(const QString& nameIn) {
@@ -805,6 +846,12 @@ QString ExportPanel::outputPath() const { return path_->text().trimmed(); }
 
 void ExportPanel::setOutputPath(const QString& path) { path_->setText(path); }
 
+void ExportPanel::setCardsAvailable(bool available) {
+    if (available == cardsAvailable_) return;
+    cardsAvailable_ = available;
+    refresh();
+}
+
 void ExportPanel::setDocumentState(bool open, double frame, bool animated, double first, double last, const QString& groomPath) {
     updating_ = true;
     frame_ = frame;
@@ -854,12 +901,22 @@ void ExportPanel::setStatus(const QString& text, bool error) {
 }
 
 void ExportPanel::refresh() {
-    for (int i = 0; i < static_cast<int>(targets_.size()); ++i) targets_[static_cast<std::size_t>(i)]->setChecked(i == static_cast<int>(target_));
-    description_->setText(tr(kTargets[static_cast<int>(target_)].description));
+    for (int i = 0; i < static_cast<int>(targets_.size()); ++i) {
+        RoundButton* b = targets_[static_cast<std::size_t>(i)];
+        b->setChecked(i == static_cast<int>(target_));
+        const bool cards = static_cast<Target>(i) == Target::Cards || static_cast<Target>(i) == Target::CardMaps;
+        b->setEnabled(!cards || cardsAvailable_);
+        b->setToolTip(cards && !cardsAvailable_ ? tr("Needs cards: the Cards tab > Make Cards") : tr(kTargets[i].description));
+    }
+    // The chosen format's line; while the card formats are off, why (in the line under the formats).
+    description_->setText(tr(kTargets[static_cast<int>(target_)].description) +
+                          (cardsAvailable_ ? QString() : tr("<br><span style='color:%1'>Cards (glTF) and Card maps need cards: the Cards tab &gt; Make Cards.</span>")
+                                                             .arg(theme::textMuted().name())));
     const bool maps = target_ == Target::CardMaps;
     const bool cards = target_ == Target::Cards;
     const bool range = range_->isChecked() && range_->isEnabled() && !cards && !maps;
     range_->setVisible(!cards && !maps);
+    framesBox_->setVisible(range);
     first_->setEnabled(range);
     last_->setEnabled(range);
     step_->setEnabled(range);
@@ -869,7 +926,7 @@ void ExportPanel::refresh() {
     cardOptions_->setVisible(cards);
     mapOptions_->setVisible(maps);
     density_->setVisible(!cards && !maps);
-    adjustSize();
+    if (!docked()) adjustSize();  // docked: the dock sizes it
 }
 
 }  // namespace groomlab::app

@@ -2,6 +2,7 @@
 #include "main_window.h"
 
 #include <algorithm>
+#include <cmath>
 #include <thread>
 
 #include <QAction>
@@ -15,7 +16,11 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QKeySequence>
+#include <QGridLayout>
 #include <QLabel>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QLineEdit>
 #include <QDockWidget>
 #include <QListWidget>
 #include <QMenu>
@@ -29,6 +34,7 @@
 
 #include "app_actions.h"
 #include "app_shell.h"
+#include "icon_rail.h"
 #include "groom_tools.h"
 #include "cards_panel.h"
 #include "correctives_panel.h"
@@ -56,10 +62,33 @@ MainWindow::MainWindow() {
     setStyleSheet(theme::styleSheet());
     // The viewport's overlays (guide levels, selection, frozen, parts...) in the theme's colors.
     settings_.theme = theme::displayTheme();
+    {
+        // The brush ring in the theme's tone (viewport.brushRing, else the accent's ink), linear.
+        const QColor named = theme::viewportColor("brushRing");
+        const QColor ring = named.isValid() ? named : theme::accentInk();
+        auto lin = [](qreal c) { return static_cast<float>(c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4)); };
+        brush_.setRingTone({lin(ring.redF()), lin(ring.greenF()), lin(ring.blueF())});
+    }
     viewport_ = new Viewport();
-    host_ = new OverlayHost(viewport_, this);
-    setCentralWidget(host_);
+    // The central column: the viewport (its overlays) over the timeline's bar, between the side docks.
+    auto* central = new QWidget(this);
+    central->setObjectName(QStringLiteral("viewportColumn"));
+    auto* column = new QVBoxLayout(central);
+    column->setContentsMargins(0, 0, 0, 0);
+    column->setSpacing(0);
+    host_ = new OverlayHost(viewport_, central);
+    column->addWidget(host_, 1);
+    setCentralWidget(central);
     shell_ = new AppShell(this, host_);
+    column->addWidget(shell_->timeline());
+    // The Properties tabs are the modes: Cards and Export theirs, the groom's and the look's tabs Groom.
+    connect(shell_, &AppShell::propertiesTabPicked, this, [this](int tab) {
+        const auto t = static_cast<AppShell::PropertiesTab>(tab);
+        const QString mode = t == AppShell::PropertiesTab::Cards    ? QStringLiteral("cards")
+                             : t == AppShell::PropertiesTab::Export ? QStringLiteral("export")
+                                                                    : QStringLiteral("groom");
+        setUiMode(mode);
+    });
     graph_ = shell_->graph();
     viewport_->setBrushSession(&brush_);
     // The GPU look preview runs in the viewport's frames (and the headless benchmarks'), on by
@@ -230,45 +259,45 @@ void MainWindow::buildMenuBar() {
 }
 
 void MainWindow::buildMenuCorner() {
-    // The design's corner of the menu bar: the groom's file name (muted), Render ▾ (ghost) and
-    // Export ▾ (the accent): what comes after grooming one click away, where Maya's and Blender's
-    // Groom Tools have their Output strip (palette.output, which the app's Groom Tools leave out;
-    // its Simulate Range, Studio, Transfer and Import are in the GroomLab menu). The menus are
-    // menus.json's output.render and output.export, with the window's bindings; the tips are
-    // palette.output's.
+    // No corner on the menu bar: the Properties dock's tabs are the modes (Attributes, Material,
+    // Lighting and Render groom and look; Cards and Export their own), the Render tab holds the
+    // render actions (menus.json's output.render, also in the GroomLab menu) and the Export tab
+    // the export. menuCorner_, modeSwitch_ and the corner buttons stay null.
     const ui::Bindings bindings = AppActions::bindings(*this);
-    ui::FillOptions options = AppActions::fillOptions(*this);
-    options.liveShortcuts = false;  // the menu bar holds the keys; here they show as text
-    auto tipOf = [](const char* id) {
-        for (const ui::json& entry : ui::Definitions::shipped().get("palette/output")) {
-            if (entry.is_object() && entry.value("id", std::string()) == id) return QString::fromStdString(ui::hostText("tip", ui::kHost, {&entry}));
+    ui::ResolveOptions resolve = AppActions::fillOptions(*this).resolve;
+    resolve.state.reset();
+    resolve.keep = [&bindings](const std::string& id) { return bindings.count(id) > 0; };
+    resolve.dropGenerators = true;
+    auto* card = new QWidget();
+    card->setObjectName(QStringLiteral("renderActions"));
+    auto* column = new QVBoxLayout(card);
+    column->setContentsMargins(0, 0, 0, 0);
+    column->setSpacing(6);
+    auto* title = new QLabel(tr("Render out"), card);
+    title->setStyleSheet(QStringLiteral("color: %1; font-size: 12px; font-weight: 600; margin-top: 4px;").arg(theme::text().name()));
+    column->addWidget(title);
+    for (const ui::Item& item : ui::Definitions::shipped().resolve(ui::Definitions::shipped().get("menus/output.render"), resolve)) {
+        if (item.kind == ui::Item::Kind::Divider) {
+            column->addSpacing(4);
+            continue;
         }
-        return QString();
-    };
-    menuCorner_ = new QWidget(menuBar());
-    menuCorner_->setObjectName(QStringLiteral("menuCorner"));
-    auto* row = new QHBoxLayout(menuCorner_);
-    row->setContentsMargins(0, 2, 6, 2);
-    row->setSpacing(4);
-    cornerName_ = new QLabel(menuCorner_);
-    cornerName_->setObjectName(QStringLiteral("cornerFileName"));
-    cornerName_->setProperty("role", "cornerName");
-    row->addWidget(cornerName_);
-    row->addSpacing(8);
-    auto button = [&](const char* ref, const QString& text, const char* tipId, const char* role, const char* name) {
-        QToolButton* b = GroomTools::menuButton(ref, text + QStringLiteral("  ▾"), tipOf(tipId), bindings, options, menuCorner_,
-                                                QStringLiteral("corner_"));
-        b->setObjectName(QLatin1String(name));
-        b->menu()->setObjectName(QLatin1String(name) + QStringLiteral("Menu"));
-        b->setProperty("role", role);
-        b->setCursor(Qt::PointingHandCursor);
-        row->addWidget(b);
-        return b;
-    };
-    cornerRender_ = button("menus/output.render", tr("Render"), "render", "cornerGhost", "cornerRender");
-    cornerExport_ = button("menus/output.export", tr("Export"), "export", "cornerPrimary", "cornerExport");
-    menuBar()->setCornerWidget(menuCorner_, Qt::TopRightCorner);
-    fitMenuCorner();
+        if (item.kind != ui::Item::Kind::Action) continue;
+        auto* b = new QPushButton(QString::fromStdString(item.label), card);
+        b->setObjectName(QStringLiteral("render_") + QString::fromStdString(item.id));
+        b->setToolTip(QString::fromStdString(item.tip));
+        b->setProperty("role", "disclosure");  // (outlined: an action that opens a render)
+        const ui::Binding binding = bindings.at(item.id);
+        connect(b, &QPushButton::clicked, this, [binding, value = item.value] { binding.trigger(value, false); });
+        column->addWidget(b);
+    }
+    shell_->lookCard()->addRenderWidget(card);
+    // The Properties pages' shortcuts in the rail's tooltips (the actions' live keys: Ctrl+1 Attributes...).
+    shell_->setFoldKeys(QKeySequence(Qt::CTRL | Qt::Key_BracketLeft).toString(QKeySequence::NativeText),
+                        QKeySequence(Qt::CTRL | Qt::Key_BracketRight).toString(QKeySequence::NativeText));
+    shell_->setPageKeys([&bindings](const std::string& id) {
+        const auto it = bindings.find(id);
+        return it == bindings.end() || it->second.keys.isEmpty() ? QString() : it->second.keys.first().toString(QKeySequence::NativeText);
+    });
 }
 
 void MainWindow::fitMenuCorner() {
@@ -320,6 +349,12 @@ void MainWindow::saveLayout() {
     QSettings settings;
     settings.setValue(QStringLiteral("ui/windowGeometry"), saveGeometry());
     settings.setValue(QStringLiteral("ui/windowState"), saveState(kLayoutVersion));
+    // The side docks folded to their rails, and the widths they open at again.
+    for (const bool left : {true, false}) {
+        const QString side = left ? QStringLiteral("Left") : QStringLiteral("Right");
+        settings.setValue(QStringLiteral("ui/fold") + side, shell_->folded(left));
+        settings.setValue(QStringLiteral("ui/openWidth") + side, shell_->openWidth(left));
+    }
 }
 
 bool MainWindow::restoreLayout() {
@@ -331,6 +366,11 @@ bool MainWindow::restoreLayout() {
     if (!restoreState(state, kLayoutVersion)) return false;
     layoutShown_ = true;  // the saved sizes, not the defaults
     shell_->layoutRestored();
+    for (const bool left : {true, false}) {
+        const QString side = left ? QStringLiteral("Left") : QStringLiteral("Right");
+        shell_->restoreFold(left, settings.value(QStringLiteral("ui/fold") + side, false).toBool(),
+                            settings.value(QStringLiteral("ui/openWidth") + side, 0).toInt());
+    }
     return true;
 }
 
@@ -380,6 +420,8 @@ bool MainWindow::chooseTheme(const QString& name) {
         theme::setTheme(name);
         restyle(before, sheet);
         fitMenuCorner();  // (the new theme's font and padding)
+        shell_->leftRail()->refreshIcons();  // (the rails' icons in the new theme's tones)
+        shell_->rightRail()->refreshIcons();
     }
     theme::saveTheme(name);
     for (QAction* a : findChildren<QAction*>()) {
@@ -430,18 +472,84 @@ bool MainWindow::showHelp(const QString& page) {
         title = tr("Keyboard Shortcuts");
         // The one shortcut table every host shows (groomlab/shortcuts.h: the docs site reads the
         // same rows), the app's, a heading row per context (File, Modes, Brush, Viewport, Graph).
-        text = QStringLiteral("<table cellspacing='0' cellpadding='3'>");
-        std::string context;
+        // Keycaps (one per key, a row's alternatives under each other) beside the action, rows of
+        // a context with one action merged ("B + drag", "Middle-drag": Brush radius), caps group
+        // headers; filtered by the field over it.
+        struct Row {
+            std::string context, action;
+            QStringList keys;
+        };
+        std::vector<Row> rows;
+        const QString filter = helpFilter_ ? helpFilter_->text().trimmed() : QString();
         for (const Shortcut& s : shortcutsFor(kShortcutApp)) {
-            if (s.context != context) {
-                context = s.context;
-                text += QStringLiteral("<tr><td colspan='2' style='padding-top:8px; color:%1'><b>%2</b></td></tr>")
-                            .arg(theme::textMuted().name(), QString::fromStdString(context).toHtmlEscaped());
+            if (!filter.isEmpty() && !QString::fromStdString(s.keys).contains(filter, Qt::CaseInsensitive) &&
+                !QString::fromStdString(s.action).contains(filter, Qt::CaseInsensitive) &&
+                !QString::fromStdString(s.context).contains(filter, Qt::CaseInsensitive)) {
+                continue;
             }
-            text += QStringLiteral("<tr><td><b>%1</b></td><td>%2</td></tr>")
-                        .arg(QString::fromStdString(s.keys).toHtmlEscaped(), QString::fromStdString(s.action).toHtmlEscaped());
+            // Alternatives on their own caps ("Ctrl+Z / Ctrl+Y"); a run of one key's variants stays
+            // one cap ("Ctrl+1 / 2 / 3 / 4").
+            QStringList keys = QString::fromStdString(s.keys).split(QStringLiteral(" / "));
+            if (std::all_of(keys.begin() + 1, keys.end(), [](const QString& k) { return k.size() <= 2; })) keys = {QString::fromStdString(s.keys)};
+            auto same = std::find_if(rows.begin(), rows.end(), [&](const Row& r) { return r.context == s.context && r.action == s.action; });
+            if (same != rows.end()) same->keys << keys;
+            else rows.push_back({s.context, s.action, keys});
         }
-        text += QStringLiteral("</table>");
+        auto* grid = static_cast<QGridLayout*>(shortcutSheet_->layout());
+        while (QLayoutItem* item = grid->takeAt(0)) {
+            if (QWidget* w = item->widget()) w->deleteLater();
+            delete item;
+        }
+        grid->setContentsMargins(0, 0, 0, 12);
+        grid->setHorizontalSpacing(0);
+        grid->setVerticalSpacing(8);
+        grid->setColumnStretch(0, 1);
+        // Each group a card (the style sheet's tray): its title, then a keycap column and the actions.
+        int line = 0;
+        std::string context;
+        QVBoxLayout* card = nullptr;
+        QWidget* cardHost = nullptr;
+        for (const Row& r : rows) {
+            if (r.context != context || !card) {
+                context = r.context;
+                cardHost = new QWidget(shortcutSheet_);
+                if (!theme::glassy()) {
+                    cardHost->setProperty("role", "tray");
+                    cardHost->setAttribute(Qt::WA_StyledBackground, true);
+                }
+                card = new QVBoxLayout(cardHost);
+                card->setContentsMargins(12, 10, 12, 12);
+                card->setSpacing(6);
+                auto* group = new QLabel(QString::fromStdString(r.context), cardHost);
+                group->setProperty("role", "keyGroup");
+                card->addWidget(group);
+                grid->addWidget(cardHost, line++, 0);
+            }
+            // A row: the action, then its keys at the right on one line (an alternative after a dot).
+            auto* rowLine = new QHBoxLayout();
+            rowLine->setSpacing(8);
+            auto* action = new QLabel(QString::fromStdString(r.action), cardHost);
+            action->setProperty("role", "keyAction");
+            action->setWordWrap(true);
+            action->setMinimumHeight(20);
+            rowLine->addWidget(action, 1);
+            // Its keys at the right: one, or several stacked (the action never wraps beside them).
+            auto* capColumn = new QVBoxLayout();
+            capColumn->setSpacing(3);
+            for (const QString& k : r.keys) {
+                auto* cap = new QLabel(k, cardHost);
+                cap->setProperty("role", "keycap");
+                cap->setMinimumHeight(20);
+                capColumn->addWidget(cap, 0, Qt::AlignRight);
+            }
+            rowLine->addLayout(capColumn);
+            card->addLayout(rowLine);
+        }
+        if (rows.empty()) {
+            auto* none = new QLabel(tr("No shortcut matches."), shortcutSheet_);
+            none->setProperty("role", "hint");
+            grid->addWidget(none, 0, 0, 1, 2);
+        }
     } else if (page == QStringLiteral("about")) {
         title = tr("About GroomLab");
         text = tr("<p><b>GroomLab</b> %1</p><p>Hair, fur and feather grooming: the Maya plugin and this standalone app share "
@@ -456,6 +564,10 @@ bool MainWindow::showHelp(const QString& page) {
         return false;
     }
     help_->setText(text.replace(QStringLiteral("@link@"), theme::linkText().name()));
+    const bool sheet = page == QStringLiteral("shortcuts");
+    if (helpFilter_) helpFilter_->setVisible(sheet);
+    if (shortcutSheet_) shortcutSheet_->setVisible(sheet);
+    help_->setVisible(!sheet);
     shell_->setPanelTitle(AppShell::Panel::Help, title, theme::blue());
     shell_->showPanel(AppShell::Panel::Help, true);
     return true;
@@ -504,12 +616,7 @@ void MainWindow::refreshTitle() {
     }
     setWindowTitle(title);
     shell_->setFileName(name, dirty);
-    if (cornerName_) {
-        cornerName_->setText(name + (dirty ? QStringLiteral(" *") : QString()));
-        cornerName_->setToolTip(document_ && !document_->path().empty() ? QString::fromStdString(document_->path()) : QString());
-        cornerName_->setVisible(!name.isEmpty());
-        fitMenuCorner();
-    }
+    if (modeSwitch_) modeSwitch_->setEnabled(document_ != nullptr);
     refreshExportState();
 }
 

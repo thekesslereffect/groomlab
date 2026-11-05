@@ -289,13 +289,50 @@ void BrushSession::rebuildOverlay(const QPointF& at, bool withLines) {
                 const Vec3f n = ortho ? along : (center - eye).normalized();
                 const Vec3f u = (std::abs(n.y) < 0.9f ? Vec3f{0.0f, 1.0f, 0.0f} : Vec3f{1.0f, 0.0f, 0.0f}).cross(n).normalized();
                 const Vec3f v = n.cross(u);
-                std::vector<Vec3f> ring;
-                constexpr int kSegments = 48;
-                for (int k = 0; k <= kSegments; ++k) {
-                    const float a = 2.0f * kPi * static_cast<float>(k) / kSegments;
-                    ring.push_back(center + u * (std::cos(a) * radius) + v * (std::sin(a) * radius));
+                constexpr int kSegments = 96;
+                auto circle = [&](float r) {
+                    std::vector<Vec3f> pts;
+                    for (int k = 0; k <= kSegments; ++k) {
+                        const float a = 2.0f * kPi * static_cast<float>(k) / kSegments;
+                        pts.push_back(center + u * (std::cos(a) * r) + v * (std::sin(a) * r));
+                    }
+                    return pts;
+                };
+                // One screen pixel at the ring's depth (its radius over its screen radius).
+                const float px = radius / std::max(1.0f, creating ? 6.0f : s.screenRadius);
+                // A ring that reads on any hair: a dark halo just outside and inside it, then the tone
+                // thickened to about two pixels; dashed: long dashes, short gaps.
+                auto stroke = [&](float r, const std::array<float, 3>& color, bool dash) {
+                    auto draw = [&](const std::vector<Vec3f>& pts, const std::array<float, 3>& c) {
+                        if (!dash) {
+                            appendColoredLine(overlay_, pts, c);
+                            return;
+                        }
+                        for (std::size_t k = 0; k + 3 < pts.size(); k += 4) appendColoredLine(overlay_, {pts[k], pts[k + 1], pts[k + 2], pts[k + 3]}, c);
+                    };
+                    // The halo opposite the ring: dark under a light ring, light under a dark one.
+                    const float lum = 0.2126f * color[0] + 0.7152f * color[1] + 0.0722f * color[2];
+                    const std::array<float, 3> halo = lum > 0.18f ? std::array<float, 3>{0.0f, 0.0f, 0.0f} : std::array<float, 3>{1.0f, 1.0f, 1.0f};
+                    draw(circle(r + 1.6f * px), halo);
+                    draw(circle(std::max(0.0f, r - 1.6f * px)), halo);
+                    draw(circle(r), color);
+                    draw(circle(r + 0.6f * px), color);
+                };
+                // The shaping brushes' ring in the theme's tone (the creating, Part, Flow and erasing
+                // tools keep their own); a held key's state on the ring itself.
+                const bool shaping = s.tool == BrushToolSettings::Tool::Brush && s.brush.mode != BrushMode::Erase;
+                std::array<float, 3> tone = shaping && ringToneSet_ ? ringTone_ : brushRingColor(s);
+                if (!creating && hoverState_ == 1) tone = {0.89f, 0.09f, 0.10f};  // Reverse: the error red (#F2555A), dashed
+                if (!creating && hoverState_ == 2) tone = {0.12f, 0.66f, 0.32f};  // Smooth: its own green (#5FD39A)
+                if (creating) appendColoredLine(overlay_, circle(radius), tone);  // (Place and Draw's dot)
+                else stroke(radius, tone, hoverState_ == 1);
+                // The falloff: a dashed inner ring where the full strength ends (hardness of the radius), a step dimmer.
+                const float hard = s.brush.hardness;
+                if (!creating && hard > 0.04f && hard < 0.96f) {
+                    std::array<float, 3> inner = tone;
+                    for (float& c : inner) c *= 0.7f;
+                    stroke(radius * hard, inner, true);
                 }
-                appendColoredLine(overlay_, ring, brushRingColor(s));
                 ringValid_ = true;
                 ringCenter_ = center;
                 ringRadius_ = radius;

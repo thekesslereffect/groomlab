@@ -10,14 +10,26 @@
     "purple": "#A36BFF"
   },
   "ui": {
+    "toolOn": "category",
+    "checkRadius": 7,
+    "card": "#2C2E34",
+    "sunken": "#1F2024",
+    "textDisabled": "#6E747E",
+    "accentFill": "#1D64E0",
+    "accentSoft": "#233A63",
+    "accentInk": "#9EC2FF",
+    "selection": "#233A63",
+    "selectionText": "#F5F5F7",
+    "sliderFill": "#2B3F66",
+    "cardRadius": 14,
     "background": "#1C1D21",
     "panel": "#26282D",
-    "raised": "#32353C",
-    "hover": "#3C4048",
+    "raised": "#34373E",
+    "hover": "#3E424A",
     "border": "#2E3137",
     "text": "#F5F5F7",
-    "textDim": "#9BA1AB",
-    "textMuted": "#6E747E",
+    "textDim": "#BEC3CB",
+    "textMuted": "#9BA1AB",
     "accent": "blue",
     "accentText": "#FFFFFF",
     "warning": "yellow",
@@ -30,7 +42,7 @@
     "fontSize": 12,
     "rowHeight": 26,
     "sliders": ["blue", "yellow", "emerald", "red"],
-    "glass": true
+    "glass": false
   },
   "graph": {
     "canvas": "#1C1D21",
@@ -86,6 +98,7 @@
     "ink": "white"
   },
   "viewport": {
+    "brushRing": "#FFC53D",
     "pointSize": 6,
     "selected": "white",
     "softSelected": "yellow",

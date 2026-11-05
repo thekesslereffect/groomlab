@@ -16,6 +16,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -101,6 +102,7 @@ class OverlayHost;
 class ParamPanel;
 class PhotosPanel;
 class PropertiesPanel;
+class Segmented;
 class ValueSlider;
 class Viewport;
 class TransferWindow;
@@ -335,6 +337,8 @@ public:
     // Selects a node in the graph (shown if it was not), so its params show beside it; false
     // (and a message) for no such node.
     bool selectUiNode(const QString& name);
+    bool foldUiDocks(const QString& which);  // left, right or both docks folded to their rails (their open icon clicked)
+    bool viewUiNode(const QString& name);  // View Up to Here on the node (its header's eye); false: no such node
     // The tool tiles' names shown ("rail", "all" or "labels": the scripted screenshot's --ui-hover;
     // "panels": nothing more, the docks name their panels); false for another word.
     bool setUiHover(const QString& name);
@@ -360,7 +364,7 @@ public:
     // then Render ▾ (a ghost button) and Export ▾ (the accent), with menus.json's output.render and
     // output.export menus.
     QWidget* menuCorner() const { return menuCorner_; }
-    QLabel* cornerFileName() const { return cornerName_; }
+    Segmented* modeSwitch() const { return modeSwitch_; }
     QToolButton* cornerRender() const { return cornerRender_; }
     QToolButton* cornerExport() const { return cornerExport_; }
     AppShell* shell() { return shell_; }
@@ -721,6 +725,8 @@ private:
     LookPanel* look_ = nullptr;
     GroomTools* groomTools_ = nullptr;  // the Groom Tools dock (the shell's)
     QLabel* help_ = nullptr;  // the Help pages' text
+    QLineEdit* helpFilter_ = nullptr;  // the shortcut sheet's filter (shown on that page)
+    QWidget* shortcutSheet_ = nullptr;  // the shortcut sheet: keycaps and actions in a grid
     UpdateChecker* updates_ = nullptr;  // Help > Check for Updates (made on first use)
     GuidesPanel* guidesPanel_ = nullptr;
     CorrectivesPanel* correctives_ = nullptr;
@@ -806,7 +812,9 @@ private:
     QAction* saveAs_ = nullptr;
     QAction* export_ = nullptr;
     QWidget* menuCorner_ = nullptr;
-    QLabel* cornerName_ = nullptr;
+    Segmented* modeSwitch_ = nullptr;
+    const GroomDocument* starterDocument_ = nullptr;  // the groom the first-groom steps count for
+    std::set<std::string> starterBase_;              // ... a new groom's own nodes (not a look given)
     QToolButton* cornerRender_ = nullptr;
     QToolButton* cornerExport_ = nullptr;
     QAction* saveImage_ = nullptr;

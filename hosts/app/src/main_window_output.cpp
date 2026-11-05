@@ -681,6 +681,7 @@ void MainWindow::restyle(const std::vector<QColor>& before, const QString& sheet
     settings_.theme = theme::displayTheme();
     refreshTool();
     refreshStats();
+    host_->setGraphOpen(graphShown());  // (its chevron in the new theme's ink)
     redisplay();
     for (QWidget* w : QApplication::allWidgets()) w->update();
 }

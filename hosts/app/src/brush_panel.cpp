@@ -66,14 +66,19 @@ QLabel* hintLabel(const QString& text, QWidget* parent) {
 
 // A row's name in a label column (combos and toggles only: Stamp, Place, Mirror).
 QHBoxLayout* labeledRow(QVBoxLayout* into, const QString& name, QWidget* parent) {
-    auto* row = new QHBoxLayout();
-    row->setContentsMargins(0, 0, 0, 0);
+    // A field row (the style sheet's propField, as Properties'): the name inside at its left, the
+    // controls after it, flat in the field.
+    auto* box = new QFrame(parent);
+    box->setProperty("role", "propField");
+    box->setMinimumHeight(theme::rowHeight());
+    auto* row = new QHBoxLayout(box);
+    row->setContentsMargins(8, 0, 2, 0);
     row->setSpacing(6);
-    auto* label = new QLabel(name, parent);
-    label->setProperty("role", "rowLabel");
+    auto* label = new QLabel(name, box);
+    label->setProperty("role", "propLabel");
     label->setMinimumWidth(58);
     row->addWidget(label);
-    into->addLayout(row);
+    into->addWidget(box);
     return row;
 }
 
@@ -96,34 +101,60 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     setObjectName(QStringLiteral("toolCard"));
     setProperty("role", "toolCard");
     card_ = new QVBoxLayout(this);
-    card_->setContentsMargins(0, 8, 0, 2);
+    card_->setContentsMargins(10, 6, 10, 10);  // the card's padding (a card, as Properties' sections)
     card_->setSpacing(4);
+
+    // ---- The header: the tool's icon and name (setTool), the card's title.
+    {
+        auto* head = new QHBoxLayout();
+        head->setContentsMargins(0, 2, 0, 4);
+        head->setSpacing(8);
+        toolIcon_ = new QLabel(this);
+        toolIcon_->setObjectName(QStringLiteral("toolCardIcon"));
+        toolIcon_->setFixedSize(18, 18);
+        head->addWidget(toolIcon_);
+        toolTitle_ = new QLabel(this);
+        toolTitle_->setObjectName(QStringLiteral("toolCardTitle"));
+        toolTitle_->setStyleSheet(QStringLiteral("color: %1; font-size: 13px; font-weight: 600;").arg(theme::text().name()));
+        head->addWidget(toolTitle_, 1);
+        card_->addLayout(head);
+        toolHint_ = new QLabel(this);
+        toolHint_->setObjectName(QStringLiteral("toolCardHint"));
+        toolHint_->setWordWrap(true);
+        toolHint_->setStyleSheet(QStringLiteral("color: %1; font-size: 12px; padding-bottom: 4px;").arg(theme::textDim().name()));
+        toolHint_->hide();
+        card_->addWidget(toolHint_);
+    }
 
     // ---- Brush: how the stroke feels.
     brush_ = new CardBlock(text("brushBlock"), this);
     brush_->setObjectName(QStringLiteral("brushBlock"));
+    brush_->titleLabel()->hide();  // (the card's header names the tool: no "Brush" over its first block)
     QVBoxLayout* rows = brush_->rows();
     radius_ = slider(rows, settingLabel("radius"), 5.0, 400.0, 1.0, 2000.0, 0, [this] { return session_->settings().screenRadius; },
                      [this](double v) { session_->settings().setScreenRadius(static_cast<float>(v)); },
                      withShortcut(tr("Screen pixels: the circle's radius on screen, whatever the zoom (middle-drag sets it too)"), "brush.radius"));
     radius_->setObjectName(QStringLiteral("radius"));
+    radius_->setFixedHeight(theme::rowHeight() + 4);  // the brush's two numbers: the card's tallest fields
     radius_->setFormat([](double v) { return QString::number(std::lround(v)) + QStringLiteral(" px"); });
     strength_ = slider(rows, settingLabel("strength"), 0.0, 1.0, -10.0, 10.0, 2, [this] { return session_->settings().brush.strength; },
                        [this](double v) { session_->settings().brush.strength = static_cast<float>(v); },
                        withShortcut(settingHint("strength") + tr(" (Shift+middle-drag sets it too)"), "brush.strength"));
     strength_->setObjectName(QStringLiteral("strength"));
+    strength_->setFixedHeight(theme::rowHeight() + 4);
     // Falloff as the catalog names it in both hosts: 0 hard to the edge, 1 soft from the center
     // (the core's hardness is 1 - falloff).
     falloff_ = slider(rows, settingLabel("falloff"), 0.0, 1.0, 0.0, 1.0, 2, [this] { return 1.0 - session_->settings().brush.hardness; },
                       [this](double v) { session_->settings().setHardness(static_cast<float>(1.0 - v)); }, settingHint("falloff"));
     falloff_->setObjectName(QStringLiteral("falloff"));
+    falloff_->setFixedHeight(theme::rowHeight() + 4);
     smooth_ = slider(rows, settingLabel("smoothStrength"), 0.0, 3.0, 0.0, 100.0, 2, [this] { return session_->settings().smoothStrength; },
                      [this](double v) { session_->settings().setSmoothStrength(static_cast<float>(v)); }, settingHint("smoothStrength"));
     smooth_->setObjectName(QStringLiteral("smoothStrength"));
     {
-        // The chips, in a fixed order (a chip never moves between tools): Pressure, Keep off scalp,
-        // Stretch (Comb: lengths change with the pull), Straighten (Smooth: toward the straight
-        // line), Falloff curve, Root to tip, then the app's own Propagate and Pointwise.
+        // The chips, in a fixed order (a chip never moves between tools): the toggles (Pressure,
+        // Keep off scalp, Stretch for Comb, Straighten for Smooth, the app's own Propagate and
+        // Pointwise), then the curves, which open an editor (a chevron says so).
         FlowLayout* chips = nullptr;
         rows->addWidget(chipRow(brush_, &chips));
         pressure_ = settingChip(chips, "pressure", tr("Pressure"), [this] { return session_->settings().pressure; },
@@ -139,14 +170,6 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         auto* ramps = new QVBoxLayout();
         ramps->setContentsMargins(0, 0, 0, 0);
         ramps->setSpacing(4);
-        curve(chips, ramps, "falloffProfile", tr("Falloff curve"), "[[0, 1], [0.5, 0.56], [1, 0]]",
-              [this] { return session_->settings().falloffProfileJson(); }, [this](const std::string& v) { session_->settings().setFalloffProfile(v); });
-        falloffCurve_ = findChild<QToolButton*>(QStringLiteral("falloffProfile"));
-        falloffRamp_ = findChild<QWidget*>(QStringLiteral("falloffProfileCurve"));
-        curve(chips, ramps, "strengthProfile", tr("Root to tip"), "[[0, 0.25], [1, 1]]",
-              [this] { return session_->settings().strengthProfileJson(); }, [this](const std::string& v) { session_->settings().setStrengthProfile(v); });
-        strengthCurve_ = findChild<QToolButton*>(QStringLiteral("strengthProfile"));
-        strengthRamp_ = findChild<QWidget*>(QStringLiteral("strengthProfileCurve"));
         propagate_ = chip(chips, tr("Propagate"), [this] { return session_->settings().brush.propagate; },
                           [this](bool on) { session_->settings().brush.propagate = on; },
                           tr("Also edit the locked descendants (children that keep their own shape)"));
@@ -155,11 +178,21 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
                           [this](bool on) { session_->settings().brush.pointwise = on; },
                           tr("Paint a per-point layer along the guide instead of one value per guide"));
         pointwise_->setObjectName(QStringLiteral("pointwise"));
+        curve(chips, ramps, "falloffProfile", tr("Falloff curve"), "[[0, 1], [0.5, 0.56], [1, 0]]",
+              [this] { return session_->settings().falloffProfileJson(); }, [this](const std::string& v) { session_->settings().setFalloffProfile(v); });
+        falloffCurve_ = findChild<QToolButton*>(QStringLiteral("falloffProfile"));
+        falloffRamp_ = findChild<QWidget*>(QStringLiteral("falloffProfileCurve"));
+        curve(chips, ramps, "strengthProfile", tr("Root to tip"), "[[0, 0.25], [1, 1]]",
+              [this] { return session_->settings().strengthProfileJson(); }, [this](const std::string& v) { session_->settings().setStrengthProfile(v); });
+        strengthCurve_ = findChild<QToolButton*>(QStringLiteral("strengthProfile"));
+        strengthRamp_ = findChild<QWidget*>(QStringLiteral("strengthProfileCurve"));
         rows->addLayout(ramps);
     }
     card_->addWidget(brush_);
 
-    // ---- Paint: the maps panel's Mode, Value + Fill and color (setPaintControls), the stamp.
+    // ---- Paint: the maps panel's Mode, Value + Fill and color (setPaintControls). What a stroke
+    // paints comes first, right under the header (untitled: the header names the tool); Brush
+    // follows it, titled, the alpha stamp at its end (setTool).
     if (shippedBrushAlphaDir().empty()) setShippedBrushAlphaDir(shippedAlphaFolder());
     paint_ = new CardBlock(tr("Paint"), this);
     paint_->setObjectName(QStringLiteral("paintBlock"));
@@ -167,7 +200,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     paintSlot_->setContentsMargins(0, 0, 0, 0);
     paintSlot_->setSpacing(4);
     paint_->rows()->addLayout(paintSlot_);
-    alphaBox_ = new QWidget(paint_);
+    alphaBox_ = new QWidget(brush_);
     alphaBox_->setObjectName(QStringLiteral("alphaBox"));
     {
         auto* column = new QVBoxLayout(alphaBox_);
@@ -233,14 +266,14 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         invert->setObjectName(QStringLiteral("alphaInvert"));
         column->addWidget(alphaOptions_);
     }
-    paint_->rows()->addWidget(alphaBox_);
+    brush_->rows()->addWidget(alphaBox_);  // the brush's stamp, under its curves
     // Shown for Paint on a scalp map (a guide map takes no alpha), its rows while one is picked.
     refreshers_.push_back([this] {
         const groomlab::BrushEntry* entry = tool_.empty() ? nullptr : brushEntry(tool_);
         alphaBox_->setVisible(entry && entry->hasSetting("alpha") && session_->settings().paintKind != "guides");
         alphaOptions_->setVisible(!alpha_->path().empty());
     });
-    card_->addWidget(paint_);
+    card_->insertWidget(card_->indexOf(brush_), paint_);  // above Brush
 
     // ---- New guides (Place, Draw).
     newGuides_ = new CardBlock(tr("New guides"), this);
@@ -282,7 +315,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     paints_->setToolTip(settingHint("tubeChannel"));
     {
         FlowLayout* chips = nullptr;
-        paints_->rows()->addWidget(chipRow(paints_, &chips));
+        paints_->rows()->addWidget(segmentRow(paints_, &chips));
         auto* group = new QButtonGroup(paints_);
         group->setExclusive(true);
         for (const ui::json& item : defs().choices("tubeChannel")) {
@@ -352,7 +385,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         lengthKey_ = field("lengthKey", tr("Key length"), 50.0, 0.0001, 1e6,
                            tr("The length the selected key gives the guide nearest it (its scale set to match)"));
         FlowLayout* chips = nullptr;
-        rows->addWidget(chipRow(keys_, &chips, tr("Guides")));
+        rows->addWidget(segmentRow(keys_, &chips, tr("Guides")));
         auto* group = new QButtonGroup(keys_);
         group->setExclusive(true);
         for (const auto& [value, label, tip] : {std::tuple<const char*, QString, QString>{
@@ -564,8 +597,9 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         symmetryMode_->setEnabled(false);
         connect(symmetry_, &QCheckBox::toggled, this, [this](bool) { symmetryEdited(); });
         connect(symmetryMode_, &QComboBox::currentIndexChanged, this, [this](int) { symmetryEdited(); });
-        row->addWidget(symmetry_);
         row->addWidget(symmetryMode_, 1);
+        row->addWidget(symmetry_);  // (the switch at the row's end, as every switch row)
+        row->addSpacing(6);
         symmetryCenter_ = new ValueSlider(mirrorRow_);
         symmetryCenter_->setObjectName(QStringLiteral("symmetryCenter"));
         symmetryCenter_->setCaption(tr("Center"));
@@ -629,7 +663,8 @@ QToolButton* BrushPanel::settingChip(FlowLayout* into, const char* id, const QSt
 void BrushPanel::curve(FlowLayout* chips, QVBoxLayout* editors, const std::string& setting, const QString& label, const std::string& start,
                        std::function<std::string()> get, std::function<void(const std::string&)> set) {
     const QString hint = settingHint(setting.c_str());
-    QToolButton* on = makeChip(label, hint, this);
+    QToolButton* on = makeChip(label + QStringLiteral("  ▾"), hint, this);
+    on->setProperty("disclosure", true);  // opens an editor below: outlined, not a toggle's fill
     on->setObjectName(qs(setting));
     chips->addWidget(on);
     auto* holder = new QWidget(this);
@@ -655,7 +690,8 @@ void BrushPanel::curve(FlowLayout* chips, QVBoxLayout* editors, const std::strin
         }
         edited();
     };
-    connect(on, &QToolButton::toggled, this, [holder, push](bool checked) {
+    connect(on, &QToolButton::toggled, this, [on, label, holder, push](bool checked) {
+        on->setText(label + (checked ? QStringLiteral("  ▴") : QStringLiteral("  ▾")));  // the editor opens below
         holder->setVisible(checked);
         push();
     });
@@ -689,11 +725,20 @@ void BrushPanel::setPaintControls(QWidget* controls) {
     controls->show();
 }
 
+void BrushPanel::setSubtitle(const QString& text) {
+    toolHint_->setText(text);
+    toolHint_->setVisible(!text.isEmpty());
+}
+
 void BrushPanel::setTool(const std::string& id) {
     tool_ = id;
     const groomlab::BrushEntry* entry = id.empty() ? nullptr : brushEntry(id);
     auto uses = [entry](const char* setting) { return entry && entry->hasSetting(setting); };
     hasSettings_ = entry != nullptr;
+    toolTitle_->setText(entry ? QString::fromStdString(entry->label) : QString());
+    toolIcon_->setPixmap(entry ? tintedIcon(QStringLiteral(":/groomlab/icons/groomLab_%1.svg").arg(QString::fromStdString(entry->icon)),
+                                            theme::accentInk(), 18, devicePixelRatioF())
+                               : QPixmap());
     // Brush.
     const bool brush = uses("radius");
     for (ValueSlider* s : {radius_, strength_, falloff_}) s->setVisible(brush);
@@ -707,6 +752,7 @@ void BrushPanel::setTool(const std::string& id) {
     propagate_->setVisible(uses("strengthProfile"));  // the shaping brushes (the app's own)
     pointwise_->setVisible(uses("map") && id == "paint");
     brush_->setVisible(brush || uses("smoothStrength"));
+    brush_->titleLabel()->setVisible(uses("map"));  // under Paint's own block: titled
     // The strength's span: -1..1 for the tools that work both ways, else 0..1 (Maya's).
     if (entry) {
         strength_->setRange(entry->signedStrength ? -1.0 : 0.0, 1.0);
@@ -714,6 +760,7 @@ void BrushPanel::setTool(const std::string& id) {
     }
     // The tool's own block.
     paint_->setVisible(uses("map"));
+    paint_->titleLabel()->setVisible(id != "paint");  // (the Paint card's header says it)
     newGuides_->setVisible(uses("newGuides"));
     spacing_->setVisible(uses("spacing"));
     placeCollide_->setVisible(uses("newGuides") && uses("collide"));

@@ -486,8 +486,8 @@ choice is remembered.
   solid colored headers; tool icons emerald (create), blue (shape), red (trim) and yellow
   (paint). Every theme extends it.
 - **Studio**: low-key greys with one quiet accent; small corners, tinted nodes, muted guides.
-- **Polar**: near-black and monochrome after polar.sh (Night, Ash, Mist and Snow) with Ether
-  indigo as the one accent; soft corners, tinted nodes, grey tool icons.
+- **Paper**: the light theme: warm paper surfaces and ink text with one deep teal accent, for
+  bright rooms and reading the groom against light; tinted nodes, ink tool icons.
 - **Your own:** **Theme > New Theme from Current...** copies the active theme into your themes
   folder (`<Maya user app dir>/groomlab/themes`) and opens it; edit the JSON, then **Theme >
   Reload Theme**. A theme may set only what it changes and `"extends"` another (default

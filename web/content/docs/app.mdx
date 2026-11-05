@@ -61,7 +61,7 @@ beside the graph; the groom updates as you drag. **Tab** over the graph adds a n
 
 **File > Save** (Ctrl+S) writes a `.groom` file that Maya and Blender open. **Export** mode
 (Ctrl+4, or **File > Export**, Ctrl+E) writes Alembic, USD, an Unreal groom, Unity strands or glTF
-cards; **Export** in the menu bar's corner and **GroomLab > Export** have the same targets.
+cards; the **Export** tab of Properties and **GroomLab > Export** have the same targets.
 
 </Step>
 </Steps>
@@ -140,12 +140,23 @@ it. There is no tool bar.
 | Viewport, top right | **Undo** and **Redo**. |
 | Viewport, top left and bottom | The active tool's name, the strand count line (**GroomLab > Review > Strand Count HUD**), messages and, for a new groom, the **Your first groom** card. |
 
-The modes **Groom**, **Look**, **Cards** and **Export** are in **View > Mode** (Ctrl+1 to Ctrl+4).
-Groom mode shows the Groom Tools; the other modes hide them and give Properties their own panel.
-Docks can be moved, tabbed together or floated; **View > Panels** shows or hides each one, and the
-layout is kept for the next start.
+Both side docks have an icon rail on their outer edge in place of tabs. The Groom Tools rail holds
+**Tools**, **Paint**, **Correctives** and **Photos**; the Properties rail holds the app's modes:
+**Attributes**, **Material**, **Lighting** and **Render** (grooming and the look, with the Groom
+Tools), **Cards** and **Export**. Hover an icon for its name; the open page's name is the title at
+the top of the dock. **View > Mode** picks the pages too: Ctrl+1 **Attributes**, Ctrl+2
+**Material**, Ctrl+3 **Cards**, Ctrl+4 **Export**. The **Render** page also holds the render
+actions (RenderMan, V-Ray).
 
-A timeline appears at the bottom when the groom is animated (a scalp or guide cache, or a graph
+Click the open page's icon again to fold the dock down to its rail and give the viewport the room; a
+small bar marks the page it opens on. Any icon (or a mode's shortcut) opens it again at its width.
+**View > Panels > Fold Groom Tools** and **Fold Properties** do the same from the keyboard (Ctrl+[ and
+Ctrl+], or Alt+Shift+Left and Alt+Shift+Right on keyboards where brackets need AltGr); Shift+1 to Shift+4 open the Groom Tools' pages.
+Docks can be moved, tabbed together or floated (a floated dock always opens); **View > Panels**
+shows or hides each one, and the layout, folds included, is kept for the next start. The **Graph**
+button at the bottom of the viewport shows or hides the Graph Editor (Tab too).
+
+A timeline bar appears under the viewport when the groom is animated (a scalp or guide cache, or a graph
 that reads the time). It supports play, scrub and loop; **Follow** toggles
 [follow-the-scalp](/docs/motion-and-simulation#follow-the-scalp). With a Simulate node in the
 graph it also shows **Simulate**, **Bake** and **Clear** (also in **GroomLab > Simulate**); while it
@@ -169,7 +180,7 @@ list, then the picked tool's card:
 - **Photos**: reference photos to groom to ([Photos](#photos)).
 
 **Simulate Range**, **Studio**, **Transfer Groom to Scalp...** and **Import** are in the
-**GroomLab** menu; **Render** and **Export** are also in the menu bar's corner.
+**GroomLab** menu; the render actions are also in the **Render** tab of Properties, and the export in its **Export** tab.
 
 ## Groom with brushes
 
@@ -463,7 +474,7 @@ the last bake. See [Game export](/docs/game-export).
 
 Set the frames (the current frame, or a range for an animated groom), the density and the target's
 options, then the output file (type a path or pick it with **...**). **Export** shows progress and
-can be cancelled. The same targets are in **Export** in the menu bar's corner and **GroomLab > Export**, with
+can be cancelled. The same targets are in **GroomLab > Export**, with
 **Scales Instancer (USD)...**. The FBX exports are only available in Maya and Blender.
 
 ## Save and open in Maya
@@ -503,7 +514,7 @@ made.
 same themes as Maya: **Charcoal** (the default: neutral grey panels with thin borders, one blue
 accent for the primary buttons and what is on, the Inter font, underlined tabs, uppercase section
 headers and node headers filled with their category's color), **Playful** (translucent
-panels, bright primaries), **Polar** and **Studio**. The window restyles at once, and the choice is
+panels, bright primaries), **Studio** and **Paper** (light). The window restyles at once, and the choice is
 kept for the next start. A scripted run takes `--theme charcoal` (or another name) for that run
 alone.
 

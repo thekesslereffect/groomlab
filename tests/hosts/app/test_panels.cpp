@@ -809,7 +809,10 @@ TEST(AppPanels, ValueSliderPaintsItsFillStateAndDisabledLook) {
     const int y = 3;  // above the texts, inside the edge
     const QColor filled = shot.pixelColor(12, y), empty = shot.pixelColor(188, y);
     EXPECT_NE(filled.rgb(), empty.rgb()) << "the fill covers the value's share from the left";
-    if (!theme::glassy()) EXPECT_EQ(slider.fillColor(), theme::uiColor("selection")) << "a solid theme fills with its selection tone";
+    if (!theme::glassy()) {
+        EXPECT_EQ(slider.fillColor(), theme::uiColor("sliderFill")) << "a solid theme fills with its slider tone";
+        EXPECT_NE(slider.fillColor(), theme::uiColor("selection")) << "a slider never looks like a selected row";
+    }
     // A driven param: tinted; disabled: faded.
     slider.setStateColor(QColor(0xCF, 0xC2, 0x7A));
     EXPECT_NE(slider.grab().toImage().pixelColor(188, y).rgb(), empty.rgb()) << "the state color shows";
@@ -863,7 +866,8 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     tools.setTool("comb");
     EXPECT_TRUE(tools.tile("comb")->isChecked());
     EXPECT_FALSE(tools.tile("cut")->isChecked());
-    EXPECT_EQ(tools.card()->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr) << "the card: only the settings, no title";
+    ASSERT_NE(tools.card()->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr) << "the card's header names the tool";
+    EXPECT_EQ(tools.card()->findChild<QLabel*>(QStringLiteral("toolCardTitle"))->text(), QStringLiteral("Comb"));
     // The mode switcher says when any segment is clicked, the current one too.
     Segmented modes;
     modes.setItems({{"A", Qt::red, Qt::white}, {"B", Qt::blue, Qt::white}});
@@ -1186,9 +1190,9 @@ TEST(AppPanels, EmptyStateCardAndPillsInEveryMode) {
         ASSERT_TRUE(window.setUiMode(QLatin1String(mode)));
         EXPECT_TRUE(host->undoButton()->isVisibleTo(&window)) << mode;
         EXPECT_TRUE(host->redoButton()->isVisibleTo(&window)) << mode;
-        // The modes are workspaces: the Groom Tools in Groom mode alone, the Properties dock the
-        // mode's panel.
-        EXPECT_EQ(shell->groomToolsDock()->isVisibleTo(&window), QLatin1String(mode) == QLatin1String("groom")) << mode;
+        // The modes are the Properties tabs: the Groom Tools stay in every one, the Properties dock
+        // shows the mode's tab.
+        EXPECT_TRUE(shell->groomToolsDock()->isVisibleTo(&window)) << mode;
         EXPECT_TRUE(shell->propertiesDock()->isVisibleTo(&window)) << mode;
     }
     ASSERT_TRUE(window.setUiMode(QStringLiteral("look")));
@@ -1258,7 +1262,7 @@ TEST(AppPanels, ViewThemeSavesTheChoiceForTheNextStart) {
     MainWindow window;
     window.resize(1280, 720);
     window.show();
-    EXPECT_TRUE(theme::glassy());
+    EXPECT_FALSE(theme::glassy()) << "every shipped theme is solid";
     EXPECT_TRUE(window.styleSheet().contains(theme::uiColor("panel").name())) << "the docks' solid panel";
     window.overlay()->toast(QStringLiteral("glass"), false);
     QWidget* toast = nullptr;
@@ -1266,7 +1270,7 @@ TEST(AppPanels, ViewThemeSavesTheChoiceForTheNextStart) {
         if (label->text() == QStringLiteral("glass")) toast = label->parentWidget();
     }
     ASSERT_NE(qobject_cast<GlassPanel*>(toast), nullptr);
-    EXPECT_LT(static_cast<GlassPanel*>(toast)->color().alpha(), 255) << "glass over the viewport";
+    EXPECT_EQ(static_cast<GlassPanel*>(toast)->color().alpha(), 255) << "a solid toast over the viewport";
 }
 
 TEST(AppPanels, UnsavedChangesAreAskedAboutAndMessagesToast) {
@@ -1902,11 +1906,11 @@ TEST(AppPanels, ParamPanelShowsCompoundParamsAndTheDescription) {
     panel.setDocument(doc.get());
     panel.showNode("");
     EXPECT_EQ(panel.description(), "");
-    EXPECT_FALSE(panel.findChild<QCheckBox*>()->isVisibleTo(&panel)) << "no Bypass box without a node";
+    EXPECT_FALSE(panel.findChild<QCheckBox*>(QStringLiteral("nodeBypass"))->isVisibleTo(&panel)) << "no Bypass box without a node";
     const std::string clump = nodeOfType(*doc, "Clump");
     panel.showNode(clump);
     EXPECT_FALSE(panel.description().isEmpty()) << "the operator's description, as Maya's Attribute Editor";
-    EXPECT_TRUE(panel.findChild<QCheckBox*>()->isVisibleTo(&panel));
+    EXPECT_FALSE(panel.findChild<QCheckBox*>(QStringLiteral("nodeBypass"))->isVisibleTo(&panel)) << "Bypass is the node header's toggle, not a row";
     EXPECT_GT(panel.sizeHint().height(), 200);
     // When the node runs, beside Bypass: picking Render Only sets it on the node (one undo step).
     auto* evaluation = panel.findChild<QComboBox*>(QStringLiteral("nodeEvaluation"));
@@ -3245,19 +3249,28 @@ TEST(AppPanels, TheShortcutSheetListsTheSharedTable) {
     window.resize(1280, 720);
     window.show();
     ASSERT_TRUE(window.showHelp(QStringLiteral("shortcuts")));
-    QString sheet;
-    for (const QLabel* label : window.shell()->panel(AppShell::Panel::Help)->findChildren<QLabel*>()) {
-        if (label->text().contains(QStringLiteral("<table"))) sheet = label->text();
+    // The sheet: keycaps, actions and caps group headers as labels in a grid.
+    QWidget* grid = window.shell()->panel(AppShell::Panel::Help)->findChild<QWidget*>(QStringLiteral("shortcutSheet"));
+    ASSERT_NE(grid, nullptr);
+    QStringList caps, actions, groups;
+    for (const QLabel* label : grid->findChildren<QLabel*>()) {
+        const QString role = label->property("role").toString();
+        if (role == QStringLiteral("keycap")) caps << label->text();
+        else if (role == QStringLiteral("keyAction")) actions << label->text();
+        else if (role == QStringLiteral("keyGroup")) groups << label->text();
     }
-    ASSERT_FALSE(sheet.isEmpty());
+    const QString sheet = actions.join(QLatin1Char('\n'));
     const std::vector<Shortcut> rows = shortcutsFor(kShortcutApp);
     ASSERT_GT(rows.size(), 20u);
     for (const Shortcut& s : rows) {
-        EXPECT_TRUE(sheet.contains(QString::fromStdString(s.keys).toHtmlEscaped())) << s.id;
-        EXPECT_TRUE(sheet.contains(QString::fromStdString(s.action).toHtmlEscaped())) << s.id;
+        // Each key a cap of its own ("Ctrl+S / Ctrl+Shift+S": two; "Ctrl+1 / 2 / 3 / 4": one).
+        QStringList keys = QString::fromStdString(s.keys).split(QStringLiteral(" / "));
+        if (std::all_of(keys.begin() + 1, keys.end(), [](const QString& k) { return k.size() <= 2; })) keys = {QString::fromStdString(s.keys)};
+        for (const QString& key : keys) EXPECT_TRUE(caps.contains(key)) << s.id;
+        EXPECT_TRUE(actions.contains(QString::fromStdString(s.action))) << s.id;
     }
     for (const char* context : {"File", "Modes", "Brush", "Viewport", "Graph"}) {
-        EXPECT_TRUE(sheet.contains(QStringLiteral("<b>%1</b>").arg(QLatin1String(context)))) << context;
+        EXPECT_TRUE(groups.contains(QString::fromLatin1(context))) << context << ": a heading as written";
     }
     for (const Shortcut& s : shortcutsFor(kShortcutMaya)) {
         if (!(s.hosts & kShortcutApp) && s.id == "graph.view") EXPECT_FALSE(sheet.contains(QString::fromStdString(s.action)));
@@ -4220,55 +4233,43 @@ TEST(AppPanels, GroomToolsTilesPickToolsAndTheEyeHidesTheGroom) {
     EXPECT_EQ(tools->findChild<QWidget*>(QStringLiteral("outputStrip")), nullptr);
 }
 
-TEST(AppPanels, MenuBarCornerHasTheFileNameRenderAndExport) {
+TEST(AppPanels, PropertiesTabsAreTheModesAndHoldRenderAndExport) {
+    // No mode switch and no Render / Quick Export dropdowns on the menu bar: the Properties tabs
+    // (Attributes, Material, Lighting, Render, Cards, Export) are the modes; the Render tab holds
+    // the render actions, the Export tab the export.
     MainWindow window;
     window.resize(1280, 720);
     window.show();
-    QWidget* corner = window.menuCorner();
-    ASSERT_NE(corner, nullptr);
-    EXPECT_EQ(window.menuBar()->cornerWidget(Qt::TopRightCorner), corner);
-    EXPECT_FALSE(window.cornerFileName()->isVisibleTo(&window)) << "no groom, no name";
+    EXPECT_EQ(window.menuBar()->cornerWidget(Qt::TopRightCorner), nullptr);
+    EXPECT_EQ(window.modeSwitch(), nullptr);
+    EXPECT_EQ(window.cornerRender(), nullptr);
+    EXPECT_EQ(window.cornerExport(), nullptr);
     ASSERT_TRUE(window.openGroom(QString::fromStdString(kSampleGroom)));
     QCoreApplication::processEvents();
-    EXPECT_TRUE(window.cornerFileName()->isVisibleTo(&window));
-    EXPECT_EQ(window.cornerFileName()->text(), QFileInfo(QString::fromStdString(kSampleGroom)).fileName());
-    EXPECT_EQ(window.cornerFileName()->property("role").toString(), QStringLiteral("cornerName"));
-    // Render (a ghost button) left of Export (the accent), at the bar's right.
-    QToolButton* render = window.cornerRender();
-    QToolButton* exportButton = window.cornerExport();
-    ASSERT_TRUE(render && exportButton);
-    EXPECT_EQ(render->property("role").toString(), QStringLiteral("cornerGhost"));
-    EXPECT_EQ(exportButton->property("role").toString(), QStringLiteral("cornerPrimary"));
-    EXPECT_TRUE(render->text().startsWith(QStringLiteral("Render")));
-    EXPECT_TRUE(exportButton->text().startsWith(QStringLiteral("Export")));
-    EXPECT_LT(render->mapTo(&window, QPoint(0, 0)).x(), exportButton->mapTo(&window, QPoint(0, 0)).x());
-    EXPECT_GT(exportButton->mapTo(&window, QPoint(0, 0)).x(), window.width() / 2);
-    EXPECT_FALSE(render->toolTip().isEmpty());
-    EXPECT_FALSE(exportButton->toolTip().isEmpty());
-    // Whole, never cut short: the bar lays the corner out again as the name changes.
-    for (QWidget* w : {static_cast<QWidget*>(window.cornerFileName()), static_cast<QWidget*>(render), static_cast<QWidget*>(exportButton)}) {
-        EXPECT_GE(w->width(), w->sizeHint().width()) << w->objectName().toStdString();
-    }
-    EXPECT_GE(corner->width(), corner->sizeHint().width());
-    // Their menus: menus.json's output.export and output.render, the window's actions under
-    // another name (the menu bar's keep theirs).
-    auto texts = [](QMenu* menu) {
-        std::vector<std::string> out;
-        for (QAction* a : menu->actions()) {
-            if (!a->isSeparator() && a->isVisible()) out.push_back(a->text().section(QLatin1Char('\t'), 0, 0).toStdString());
-        }
-        return out;
-    };
-    ASSERT_NE(exportButton->menu(), nullptr);
-    ASSERT_NE(render->menu(), nullptr);
-    const std::vector<std::string> exports = texts(exportButton->menu());
-    ASSERT_GE(exports.size(), 4u);
-    EXPECT_TRUE(std::any_of(exports.begin(), exports.end(), [](const std::string& t) { return t.find("Groom File") != std::string::npos; }))
-        << "the groom file too: " << json(exports).dump();
-    EXPECT_FALSE(texts(render->menu()).empty());
-    for (QAction* a : exportButton->menu()->actions()) {
-        if (!a->objectName().isEmpty()) EXPECT_TRUE(a->objectName().startsWith(QStringLiteral("corner_"))) << a->objectName().toStdString();
-    }
+    QTabBar* tabs = window.shell()->propertiesTabs();
+    ASSERT_EQ(tabs->count(), 6);
+    QStringList names;
+    for (int i = 0; i < tabs->count(); ++i) names << tabs->tabText(i);
+    EXPECT_EQ(names, (QStringList{QStringLiteral("Attributes"), QStringLiteral("Material"), QStringLiteral("Lighting"),
+                                  QStringLiteral("Render"), QStringLiteral("Cards"), QStringLiteral("Export")}));
+    // A tab picks its mode; a mode picks its tab.
+    tabs->setCurrentIndex(static_cast<int>(AppShell::PropertiesTab::Cards));
+    EXPECT_EQ(window.shell()->mode(), OverlayHost::Mode::Cards);
+    EXPECT_TRUE(window.shell()->cardsPanel()->isVisibleTo(&window));
+    tabs->setCurrentIndex(static_cast<int>(AppShell::PropertiesTab::Export));
+    EXPECT_EQ(window.shell()->mode(), OverlayHost::Mode::Export);
+    tabs->setCurrentIndex(static_cast<int>(AppShell::PropertiesTab::Material));
+    EXPECT_EQ(window.shell()->mode(), OverlayHost::Mode::Groom);
+    EXPECT_TRUE(window.shell()->groomToolsDock()->isVisibleTo(&window)) << "the Groom Tools stay";
+    ASSERT_TRUE(window.setUiMode(QStringLiteral("export")));
+    EXPECT_EQ(window.shell()->propertiesTab(), AppShell::PropertiesTab::Export);
+    ASSERT_TRUE(window.setUiMode(QStringLiteral("groom")));
+    EXPECT_EQ(window.shell()->propertiesTab(), AppShell::PropertiesTab::Attributes);
+    EXPECT_TRUE(window.windowTitle().startsWith(QFileInfo(QString::fromStdString(kSampleGroom)).fileName()));
+    // The Render tab: the render actions (menus.json's output.render) as buttons.
+    QWidget* render = window.findChild<QWidget*>(QStringLiteral("renderActions"));
+    ASSERT_NE(render, nullptr);
+    EXPECT_FALSE(render->findChildren<QPushButton*>().isEmpty());
     // What the Groom Tools' Output strip had stays one menu away: the GroomLab menu holds Simulate
     // Range, Studio, Transfer and Import.
     QMenu* groomlab = nullptr;
@@ -4332,8 +4333,13 @@ TEST(AppPanels, ThemesGiveTheGraphStatusColors) {
                                 theme::windowButtonHover()}) {
             EXPECT_TRUE(c.isValid()) << name.toStdString();
         }
-        // Every theme is dark: the error words stay readable on its panels.
-        EXPECT_GT(theme::errorText().lightnessF(), theme::glassPanel().lightnessF() + 0.2) << name.toStdString();
+        // The error words stay readable on its panels, dark or light (3:1 at least).
+        auto lum = [](const QColor& c) {
+            auto ch = [](qreal v) { return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4); };
+            return 0.2126 * ch(c.redF()) + 0.7152 * ch(c.greenF()) + 0.0722 * ch(c.blueF());
+        };
+        const qreal a = lum(theme::errorText()), b = lum(theme::glassPanel());
+        EXPECT_GE((std::max(a, b) + 0.05) / (std::min(a, b) + 0.05), 3.0) << name.toStdString();
         EXPECT_TRUE(theme::nodeCategoryColor("deform").isValid());
         EXPECT_TRUE(theme::nodeCategoryColor("collide").isValid());
     }

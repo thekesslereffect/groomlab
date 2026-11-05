@@ -10,6 +10,7 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QFrame>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -223,14 +224,15 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     paintLayout->setSpacing(4);
     {
         FlowLayout* row = nullptr;
-        paintLayout->addWidget(chipRow(paintBox, &row, tr("Mode")));
+        paintLayout->addWidget(segmentRow(paintBox, &row, tr("Mode")));
         auto* group = new QButtonGroup(paintBox);
         group->setExclusive(true);
         for (const ui::json& choice : defs().choices("paintMode")) {
             const std::string value = choice.value("value", std::string());
             auto* button = new QToolButton(paintBox);
-            button->setText(qs(choice.value("label", std::string())));
-            button->setToolTip(qs(choice.value("tip", std::string())));
+            // Clamp Maximum reads Max in the track (four in one row; its tip says it whole).
+            button->setText(value == "clampMaximum" ? tr("Max") : qs(choice.value("label", std::string())));
+            button->setToolTip(value == "clampMaximum" ? tr("Clamp Maximum: ") + qs(choice.value("tip", std::string())) : qs(choice.value("tip", std::string())));
             button->setCheckable(true);
             button->setProperty("role", "chip");
             button->setProperty("paintMode", qs(value));
@@ -322,17 +324,31 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     itemBar_ = new ListBar(box_);
     itemBar_->setObjectName(QStringLiteral("mapItemBar"));
     boxRows->addWidget(itemBar_);
-    FlowLayout* showChips = nullptr;
-    boxRows->addWidget(chipRow(box_, &showChips, tr("Show on")));
-    show_ = makeChip(tr("Scalp"), tr("Show the map on the scalp (black to white), whatever its kind"), box_);
+    // Show on scalp: a switch (a check box, not a chip that reads as a choice), the channel beside it.
+    // A field row: the name, the channel at the value column, the switch at the row's end.
+    auto* showBox = new QFrame(box_);
+    showBox->setProperty("role", "propField");
+    showBox->setMinimumHeight(theme::rowHeight());
+    auto* showRow = new QHBoxLayout(showBox);
+    showRow->setContentsMargins(8, 0, 2, 0);
+    showRow->setSpacing(8);
+    auto* showLabel = new QLabel(tr("Show on scalp"), showBox);
+    showLabel->setProperty("role", "propLabel");
+    showLabel->setToolTip(tr("Show the map on the scalp (black to white), whatever its kind"));
+    showRow->addWidget(showLabel);
+    show_ = new QCheckBox(showBox);
+    show_->setToolTip(showLabel->toolTip());
     show_->setObjectName(QStringLiteral("paintShowOnScalp"));
-    showChips->addWidget(show_);
+    boxRows->addWidget(showBox);
     channel_ = new QComboBox(box_);
     channel_->setObjectName(QStringLiteral("paintScalpChannel"));
     for (const ui::json& c : defs().choices("scalpChannel")) channel_->addItem(qs(c.value("label", std::string())), qs(c.value("value", std::string())));
     channel_->setToolTip(qs(defs().get("choices/scalpChannel").value("tip", std::string())));
-    showChips->addWidget(channel_);
-    connect(show_, &QToolButton::toggled, this, [this](bool on) {
+    showRow->addWidget(channel_, 1);
+    showRow->addItem(new QSpacerItem(0, 0, QSizePolicy::Expanding, QSizePolicy::Minimum));  // (no channel: the switch still at the end)
+    showRow->addWidget(show_);
+    showRow->addSpacing(6);
+    connect(show_, &QCheckBox::toggled, this, [this](bool on) {
         if (updating_) return;
         showSelected(on);
     });
@@ -345,6 +361,15 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
     users_->setWordWrap(true);
     users_->setProperty("role", "hint");
     boxRows->addWidget(users_);
+    useMap_ = new QPushButton(tr("Add Map Node"), box_);
+    useMap_->setObjectName(QStringLiteral("mapAddNode"));
+    useMap_->setToolTip(tr("A Map node reading this map in the graph: wire it into the setting it should drive"));
+    useMap_->hide();
+    connect(useMap_, &QPushButton::clicked, this, [this] {
+        const std::string picked = selectedMap();
+        if (!picked.empty()) emit mapNodeRequested(picked);
+    });
+    boxRows->addWidget(useMap_, 0, Qt::AlignLeft);
     layout->addWidget(box_);
     fitRows(list_);
     setEnabled(false);
@@ -654,14 +679,16 @@ void MapsPanel::refreshRows() {
             for (const auto& [node, param] : document_->mapUsers(picked)) users << qs(node) + QLatin1Char('.') + qs(param);
         }
         users_->setText(!users.isEmpty() ? tr("Read by %1").arg(users.join(QStringLiteral(", ")))
-                        : !picked.empty() ? tr("Not read by the graph yet")
+                        : !picked.empty() ? tr("Not used by the graph yet.")
                                           : QString());
         users_->setToolTip(users.isEmpty() && !picked.empty()
                                ? tr("+ New Map > For a setting makes a map a setting reads; or in the Graph Editor, right-click a param > "
                                     "Paint, or add a Map node.")
                                : QString());
+        useMap_->setVisible(users.isEmpty() && !picked.empty());
     } else {
         users_->clear();
+        useMap_->hide();
     }
     const bool has = !picked.empty();
     paint_->setEnabled(has);
@@ -671,7 +698,7 @@ void MapsPanel::refreshRows() {
     box_->setVisible(has);
     bar_->refresh();
     itemBar_->refresh();
-    itemBar_->setTitle(qs(picked));  // the box is the picked map's
+    itemBar_->setTitle(QString());  // the box is the picked map's (the row above names it: its actions alone)
     updating_ = false;
 }
 

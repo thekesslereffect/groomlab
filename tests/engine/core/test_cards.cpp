@@ -50,8 +50,9 @@ TEST(Cards, OneCardPerClumpWithAtlasUVs) {
     const CardMesh mesh = buildCards(*s, plane.get(), settings);
     ASSERT_GE(mesh.cards.size(), 8u);  // about the 12 clumps (a few more on a small plane: its edges)
     ASSERT_LE(mesh.cards.size(), 17u);
-    EXPECT_EQ(mesh.vertexCount(), mesh.cards.size() * 2 * 7);
-    EXPECT_EQ(mesh.quads.size(), mesh.cards.size() * 6 * 4);
+    const std::size_t across = static_cast<std::size_t>(settings.widthSegments);  // (2 by default: a center loop)
+    EXPECT_EQ(mesh.vertexCount(), mesh.cards.size() * (across + 1) * 7);
+    EXPECT_EQ(mesh.quads.size(), mesh.cards.size() * 6 * across * 4);
     for (std::size_t i = 0; i < mesh.vertexCount(); ++i) {
         EXPECT_GE(mesh.u[i], 0.0f);
         EXPECT_LE(mesh.u[i], 1.0f);
@@ -116,7 +117,9 @@ TEST(Cards, ATipNeverFlaresBackOutToItsRootsWidth) {
     const std::size_t n = card.refWidth.size();
     const float body = card.refWidth[3 * n / 4];
     for (std::size_t k = 3 * n / 4 + 1; k < n; ++k) EXPECT_LE(card.refWidth[k], body + 1e-6f) << "station " << k;
-    EXPECT_LT(card.refWidth.back(), 0.5f * card.refWidth.front()) << "the tip as wide as the root";
+    // A hair card is a rectangular grid: only its width profile tapers it (constant by default),
+    // so the tip is as wide as the root and never wider.
+    EXPECT_LE(card.refWidth.back(), card.refWidth.front() + 1e-6f) << "the tip wider than the root";
 }
 
 TEST(Cards, AFlyawayNodesStraysGetCardsOfTheirOwn) {
@@ -815,8 +818,8 @@ TEST(Cards, CardBasesSitOnACurvedScalp) {
         EXPECT_GT(flyaways, 0u);
         EXPECT_LT(worst, 1.5f * strandWidth) << "root rows off the scalp by up to " << worst / strandWidth << " strand widths";
     }
-    // Only the root transition moved: hair cards ease over at least their first two quads, and
-    // every UV stays the stations'.
+    // Only the root transition moved: hair cards hold their root quad rigid and ease out over the
+    // next two (three stations in all), and every UV stays the stations'.
     settings.layers = 1;
     const CardMesh seated = buildCards(*s, d.scalp.get(), settings);
     CardMesh loose = seated;
@@ -831,7 +834,7 @@ TEST(Cards, CardBasesSitOnACurvedScalp) {
         for (std::size_t v = 0; v < row * static_cast<std::size_t>(card.stations); ++v) {
             const std::size_t at = card.firstVertex + v;
             const std::size_t station = v / row;
-            if (station < 2) {
+            if (station < 3) {
                 moved += (seated.positions[at] - loose.positions[at]).length() > 1e-6f ? 1 : 0;
             } else {
                 EXPECT_EQ(seated.positions[at], loose.positions[at]);
@@ -1330,10 +1333,11 @@ TEST(Cards, ACardSharingATextureUsesTheBakedCardsWidthProfile) {
         const std::size_t left = card.firstVertex + static_cast<std::size_t>(card.stations - 1) * columns;
         return std::abs(m.u[left + columns - 1] - m.u[left]);
     };
+    // The sharer keeps its own shape; its UVs span the owner's texture by its own width there (the
+    // owner's baked frame), so its taper takes the middle of the owner's texture at the tip.
     const float cellWidth = sharer.cell[2] - sharer.cell[0];
-    EXPECT_NEAR(tipRange(mesh, sharer), cellWidth, 1e-5f);
+    EXPECT_NEAR(tipRange(mesh, sharer), cellWidth * sharer.width.back() / owner.textureWidth, 1e-4f);
     EXPECT_EQ(sharer.textureRefWidth, owner.refWidth);
-    EXPECT_NEAR(sharer.width.back(), owner.refWidth.back(), 1e-5f);
 
     // The same profile survives saving the bake and applying it to rebuilt geometry.
     const CardAtlas atlas = CardAtlas::fromJson(captureCardAtlas(mesh, s.get()).toJson());
@@ -1608,7 +1612,8 @@ TEST(Cards, WidthProfileShapesTheMeshAndBakeInTheFinalGrid) {
     };
     const int yTop = y0 + static_cast<int>(0.15f * static_cast<float>(y1 - y0)), yBottom = y0 + static_cast<int>(0.85f * static_cast<float>(y1 - y0));
     const std::vector<int> top = row(yTop), bottom = row(yBottom);
-    ASSERT_GE(top.size(), static_cast<std::size_t>(kStrands));
+    // (The narrow end clips the outer strands: fewer show there.)
+    ASSERT_FALSE(top.empty());
     ASSERT_GE(bottom.size(), static_cast<std::size_t>(kStrands));
     EXPECT_NE(top, bottom);
 }

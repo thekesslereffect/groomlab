@@ -50,6 +50,8 @@ public:
     // The document's state the panel shows: its frame, the caches' range (a range is offered
     // when the groom animates), and the default output beside the groom.
     void setDocumentState(bool open, double frame, bool animated, double first, double last, const QString& groomPath);
+    // The card targets need cards (a Cards node): without, they are off and say how to get them.
+    void setCardsAvailable(bool available);
     // A running export: the button becomes Cancel, the bar fills; done, the line says so.
     void setProgress(std::size_t done, std::size_t count);
     void setBusy(bool busy);
@@ -100,10 +102,12 @@ private:
 
     Target target_ = Target::Alembic;
     bool busy_ = false;
+    bool cardsAvailable_ = true;
     bool updating_ = false;
     std::vector<RoundButton*> targets_;
     QLabel* description_ = nullptr;
     QCheckBox* range_ = nullptr;
+    QWidget* framesBox_ = nullptr;  // From, to and Step: shown while Frame range is on
     QSpinBox* first_ = nullptr;
     QSpinBox* last_ = nullptr;
     QDoubleSpinBox* step_ = nullptr;

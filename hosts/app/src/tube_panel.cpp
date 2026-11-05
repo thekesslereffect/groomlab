@@ -10,6 +10,7 @@
 #include <QComboBox>
 #include <QEvent>
 #include <QFormLayout>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
@@ -167,15 +168,19 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
                     &TubePanel::deleteShape);
     delete_->setText(tr("Delete"));
     {
-        editPicker_ = new QHBoxLayout();
-        editPicker_->setContentsMargins(0, 0, 0, 0);
+        // The shape and Apply in one field row (the combo flat in it, Apply its trailing action).
+        auto* pickBox = new QFrame(profileBlock_);
+        pickBox->setProperty("role", "propField");
+        pickBox->setMinimumHeight(theme::rowHeight());
+        editPicker_ = new QHBoxLayout(pickBox);
+        editPicker_->setContentsMargins(4, 0, 2, 0);
         editPicker_->setSpacing(4);
         apply_ = new QPushButton(tr("Apply"), profileBlock_);
         apply_->setObjectName(QStringLiteral("tubeShapeApply"));
         apply_->setToolTip(tr("Give the selected guides this profile"));
         connect(apply_, &QPushButton::clicked, this, [this] { applyShape(); });
         editPicker_->addWidget(apply_);
-        profileBlock_->rows()->addLayout(editPicker_);
+        profileBlock_->rows()->addWidget(pickBox);
         // The editor: the chosen shape's outline (at most 200 px square), and the library's edits.
         editor_ = new TubeShapeEditor(profileBlock_);
         editor_->setMaximumWidth(200);
@@ -184,6 +189,12 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         });
         connect(editor_, &TubeShapeEditor::committed, this, [this](const std::vector<SectionPoint>& points) { shapeCommitted(points); });
         profileBlock_->rows()->addWidget(editor_, 0, Qt::AlignHCenter);
+        // Under the drawing, never over it.
+        builtinNote_ = new QLabel(tr("Built-in shape: Duplicate to edit"), profileBlock_);
+        builtinNote_->setProperty("role", "hint");
+        builtinNote_->setAlignment(Qt::AlignHCenter);
+        builtinNote_->hide();
+        profileBlock_->rows()->addWidget(builtinNote_);
         // The outline's options: a library shape's (a built-in is read-only).
         shapeOptions_ = new QWidget(profileBlock_);
         shapeOptions_->setObjectName(QStringLiteral("tubeShapeOptions"));
@@ -226,6 +237,7 @@ TubePanel::TubePanel(QWidget* parent) : QWidget(parent) {
         smooth_ = new QToolButton(selectedBlock_);
         smooth_->setObjectName(QStringLiteral("tubeSmooth"));
         smooth_->setProperty("role", "ghost");
+        smooth_->setProperty("outlined", true);  // a block header's action: an outlined split button
         smooth_->setText(tr("Smooth"));
         smooth_->setAutoRaise(true);
         smooth_->setPopupMode(QToolButton::MenuButtonPopup);
@@ -449,6 +461,7 @@ void TubePanel::showChoice(bool mixed) {
     }
     if (const LibraryShape* custom = library(choice_)) {
         editor_->setShape(custom->points, custom->smooth, true);
+        builtinNote_->hide();
         preview_->setShape(custom->points, custom->smooth, false);
         if (mirror_->isChecked() && editor_->setMirror(true)) {
             const std::vector<SectionPoint> made = editor_->points();
@@ -460,7 +473,8 @@ void TubePanel::showChoice(bool mixed) {
         parseTubeShape(choice_, &shape);
         bool smooth = true;
         const std::vector<SectionPoint> points = builtinTubeShapePoints(shape, &smooth);
-        editor_->setShape(points, smooth, false, tr("Built in: Duplicate it to edit a copy"));
+        editor_->setShape(points, smooth, false, QString());
+        builtinNote_->show();
         preview_->setShape(points, smooth, false);
     }
     updating_ = true;

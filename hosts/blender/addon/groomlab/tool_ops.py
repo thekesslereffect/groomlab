@@ -32,17 +32,17 @@ PIE_KEY = "Y"
 # here for when the helper isn't running (Preferences); a test checks them against the helper's.
 SHORTCUTS = (
     ("Ctrl+Z / Ctrl+Shift+Z", "Undo / redo the groom's edits"),
-    ("B + drag", "The brush radius"),
-    ("M + drag", "The brush strength"),
-    ("Ctrl (stroke)", "The opposite: Length shortens, Lift lays down, Shape shrinks; painting, toward 0 (unfreeze, erase)"),
-    ("Shift + drag", "Smooth with any brush: the guides (Comb, Length...), a painted map or guide attribute, the Tube brush's channel"),
-    ("S", "Select guides (Shift: toggle, Ctrl: deselect)"),
-    ("Page Up / Page Down", "The brush level (parents / children)"),
-    ("Y", "The pie menu: every brush"),
-    ("Esc / right-click", "Cancel the stroke; Esc again leaves the tool"),
-    ("Tab", "Add a node at the cursor"),
-    ("B", "Bypass the selected nodes (again: turn them back on)"),
-    ("V", "View the groom up to the node"),
+    ("B + drag", "Brush radius"),
+    ("M + drag", "Brush strength"),
+    ("Ctrl (stroke)", "Reverse the brush"),
+    ("Shift + drag", "Smooth with any brush"),
+    ("S", "Select guides"),
+    ("Page Up / Page Down", "Brush level up / down"),
+    ("Y", "Brush pie menu"),
+    ("Esc / right-click", "Cancel stroke / leave tool"),
+    ("Tab", "Add a node"),
+    ("B", "Bypass nodes"),
+    ("V", "View up to node"),
 )
 
 

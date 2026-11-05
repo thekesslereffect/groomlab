@@ -89,8 +89,27 @@ QPushButton* smallButton(const QString& text, const QString& tip) {
 }
 
 // A value as the rows show it, muted (an input's name, a count).
+// A one-line value that is cut with an ellipsis where its room ends (never mid-letter), the whole
+// text in its tooltip.
+class ElidedLabel : public QLabel {
+public:
+    using QLabel::QLabel;
+
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        if (wordWrap() || fontMetrics().horizontalAdvance(text()) <= contentsRect().width()) {
+            QLabel::paintEvent(event);
+            return;
+        }
+        QPainter painter(this);
+        painter.setFont(font());
+        painter.setPen(palette().color(foregroundRole()));
+        painter.drawText(contentsRect(), Qt::AlignVCenter | Qt::AlignLeft, fontMetrics().elidedText(text(), Qt::ElideRight, contentsRect().width()));
+    }
+};
+
 QLabel* valueLabel(const QString& text = {}) {
-    auto* l = new QLabel(text);
+    auto* l = new ElidedLabel(text);
     l->setWordWrap(true);
     l->setTextInteractionFlags(Qt::TextSelectableByMouse);
     l->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textSoft().name()));
@@ -184,8 +203,11 @@ void MainWindow::buildProperties() {
     // ghost icon button (the File row's two: Reload and Save).
     {
         inputsBlock_ = new QWidget();
+        // One field-toned list (the style sheet's fieldList): its rows on the fields' value column.
+        inputsBlock_->setProperty("role", "fieldList");
+        inputsBlock_->setAttribute(Qt::WA_StyledBackground, true);
         auto* grid = new QGridLayout(inputsBlock_);
-        grid->setContentsMargins(0, 0, 0, 0);
+        grid->setContentsMargins(8, 3, 2, 3);
         grid->setHorizontalSpacing(8);
         grid->setVerticalSpacing(2);
         grid->setColumnStretch(2, 1);
@@ -200,7 +222,8 @@ void MainWindow::buildProperties() {
             auto* label = new QLabel(PropertiesPanel::partLabel("inputs", part));
             label->setProperty("role", "propLabel");
             label->setToolTip(PropertiesPanel::partTip("inputs", part));
-            label->setMinimumWidth(56);
+            label->setMinimumWidth(80);  // (with the icon: the fields' 104 px label column)
+            label->setObjectName(QStringLiteral("inputsLabel_") + QLatin1String(part));
             // One line (the row's height; the whole text in the tip when it is cut).
             auto* value = valueLabel();
             value->setWordWrap(false);
@@ -213,11 +236,18 @@ void MainWindow::buildProperties() {
             line->setContentsMargins(0, 0, 0, 0);
             line->setSpacing(0);
             for (QToolButton* b : buttons) line->addWidget(b);
+            // The value, then this row's own actions (a row with one glyph leaves its value the room).
+            auto* tail = new QWidget();
+            auto* tailLine = new QHBoxLayout(tail);
+            tailLine->setContentsMargins(0, 0, 0, 0);
+            tailLine->setSpacing(2);
+            tailLine->addWidget(value, 1);
+            tailLine->addWidget(actions, 0, Qt::AlignVCenter);
             grid->addWidget(mark, row, 0, Qt::AlignTop);
             grid->addWidget(label, row, 1, Qt::AlignVCenter);
-            grid->addWidget(value, row, 2, Qt::AlignVCenter);
-            grid->addWidget(actions, row, 3, Qt::AlignRight | Qt::AlignVCenter);
-            grid->setRowMinimumHeight(row, 22);
+            grid->addWidget(tail, row, 2, 1, 2, Qt::AlignVCenter);
+            grid->setRowMinimumHeight(row, 24);
+            value->setProperty("row", row);
             ++row;
         };
         auto* transfer = inputAction("link", tr("Transfer to another mesh: the guides, parts and flow re-rooted, the maps projected"),
@@ -250,6 +280,9 @@ void MainWindow::buildProperties() {
         scalpTriangles_ = valueLabel();
         scalpTriangles_->setObjectName(QStringLiteral("scalpSubdivisionTriangles"));
         scalpTriangles_->setWordWrap(false);
+        // The count gives way first (elided, whole in its tooltip): the row never pushes the dock wider.
+        scalpTriangles_->hide();  // shown when the count is a warning (refreshScalpSubdivision)
+        scalpSubdivision_->setMinimumWidth(64);
         auto* row = hbox({scalpSubdivision_, scalpTriangles_});
         p->setControl("scalpSubdivision", row);
         scalpSubdivision_->setToolTip(row->toolTip());
@@ -275,7 +308,7 @@ void MainWindow::buildProperties() {
     });
     {
         groomScale_ = valueLabel(QStringLiteral("1.00x"));
-        auto* setReference = smallButton(tr("Set Scale Reference"), QString());
+        auto* setReference = smallButton(tr("Set Reference"), QString());
         setReference->setObjectName(QStringLiteral("propSetScaleReference"));
         connect(setReference, &QPushButton::clicked, this, [this] {
             if (!document_) return;
@@ -445,6 +478,23 @@ void MainWindow::buildProperties() {
     lodSlider("cullMargin", &LodSettings::margin, 1.0, 3);
     lodCheck("backfaceCull", &LodSettings::backface);
     lodSlider("backfaceAngle", &LodSettings::backfaceAngle, 90.0, 1);
+    // A switch's settings follow it: off, they are dimmed (they do nothing until it is on).
+    auto follows = [p](const char* driver, std::initializer_list<const char*> keys) {
+        auto* c = qobject_cast<QCheckBox*>(p->control(driver));
+        if (!c) return;
+        std::vector<std::string> deps(keys.begin(), keys.end());
+        auto apply = [p, deps](bool on) {
+            for (const std::string& k : deps) {
+                if (QWidget* w = p->control(k)) w->setEnabled(on);
+                if (QLabel* l = p->label(k)) l->setEnabled(on);
+            }
+        };
+        connect(c, &QCheckBox::toggled, p, apply);
+        apply(c->isChecked());
+    };
+    follows("lodDistance", {"lodNear", "lodFar", "lodMinDensity", "lodWidthCompensation"});
+    follows("cameraCull", {"cullMargin"});
+    follows("backfaceCull", {"backfaceAngle"});
 
     p->finish();
     shell_->setPanelContent(AppShell::Panel::Display, tr("Properties"), theme::purple(), p);
@@ -556,7 +606,16 @@ void MainWindow::refreshProperties() {
         auto* l = inputsBlock_->findChild<QLabel*>(QStringLiteral("inputs_") + QLatin1String(part));
         if (!l) return;
         l->setText(text);
+        l->setToolTip(text);
         const bool none = text == tr("none") || text.startsWith(tr("none yet")) || text == QStringLiteral("—");
+        const QString key = QLatin1String(part);
+        if (key == QStringLiteral("rest") || key == QStringLiteral("scalps")) {
+            const bool shown = !none;
+            for (const QString& name : {QStringLiteral("inputsIcon_"), QStringLiteral("inputsLabel_"), QStringLiteral("inputs_"), QStringLiteral("inputsActions_")}) {
+                if (auto* w = inputsBlock_->findChild<QWidget*>(name + key)) w->setVisible(shown);
+            }
+            if (auto* grid = qobject_cast<QGridLayout*>(inputsBlock_->layout())) grid->setRowMinimumHeight(l->property("row").toInt(), shown ? 24 : 0);
+        }
         l->setStyleSheet(none ? QStringLiteral("color: %1; font-style: italic;").arg(theme::textMuted().name())
                               : QStringLiteral("color: %1;").arg(theme::textSoft().name()));
     };
@@ -573,8 +632,13 @@ void MainWindow::refreshProperties() {
             guides = h->guides().size();
             groups = h->groups().size();
         }
-        set("guides", guides ? tr("%1 guides in %2 group%3").arg(guides).arg(groups).arg(groups == 1 ? QString() : QStringLiteral("s"))
-                             : tr("none yet: place them"));
+        // None of its own: the guides the graph makes or the file holds (as the stats line says
+        // them), else none yet.
+        const ViewResult& view = document_->lastView();
+        const std::size_t made = view.hierarchy ? view.hierarchy->guides().size() : file.data.guides ? file.data.guides->guides().size() : 0;
+        set("guides", guides  ? tr("%1 guides · %2 group%3").arg(guides).arg(groups).arg(groups == 1 ? QString() : QStringLiteral("s"))
+                      : made  ? tr("%1 from %2").arg(made).arg(view.hierarchy ? tr("the graph") : tr("the file"))
+                              : tr("none yet: place them"));
         QStringList colliders;
         for (const auto& [name, mesh] : file.data.meshes) colliders << qs(name);
         for (const SurfacePtr& prop : props_) {
@@ -699,6 +763,9 @@ void MainWindow::refreshScalpSubdivision() {
     }
     scalpTriangles_->setText(text);
     scalpTriangles_->setToolTip(tip);
+    // The combo says it too (the count beside it shows only when it is a warning: too many).
+    scalpSubdivision_->setToolTip(text + QStringLiteral(": ") + tip);
+    scalpTriangles_->setVisible(triangles > kLargeScalpTriangles);
     scalpTriangles_->setStyleSheet(QStringLiteral("color: %1;").arg(
         (triangles > kLargeScalpTriangles ? theme::warningText() : theme::textSoft()).name()));
 }
@@ -723,6 +790,14 @@ void MainWindow::refreshControlSliders() {
     grid->setVerticalSpacing(5);
     grid->setColumnStretch(0, 2);
     grid->setColumnStretch(1, 3);
+    // A folded Controls card with none says so ("Controls · none").
+    for (QWidget* w = controlsBlock_->parentWidget(); w; w = w->parentWidget()) {
+        if (auto* section = qobject_cast<PropertySection*>(w)) {
+            section->setProperty("emptySummary", sliders.empty() ? tr("none") : QString());
+            if (!section->expanded()) section->setExpanded(false);
+            break;
+        }
+    }
     if (sliders.empty()) {
         auto* none = new QLabel(tr("No sliders yet: in the Graph Editor, right-click a param > Drive with Slider."), controlsBlock_);
         none->setProperty("role", "hint");
@@ -736,7 +811,10 @@ void MainWindow::refreshControlSliders() {
         auto* s = rowSlider(c.min, c.max, 3, (c.max - c.min) / 100.0, theme::purple());
         s->setParent(controlsBlock_);
         s->setObjectName(QStringLiteral("control_") + qs(c.name));
-        s->setCaption(qs(c.name));
+        // A control's name as a label: its first letter capitalized ("frizz": Frizz).
+        QString caption = qs(c.name);
+        if (!caption.isEmpty()) caption[0] = caption[0].toUpper();
+        s->setCaption(caption);
         s->setValue(c.value);
         s->setToolTip(tr("The Control node %1's value (its slider spans %2 to %3; values past it are not clamped)")
                           .arg(qs(c.node))
@@ -753,6 +831,13 @@ void MainWindow::refreshControlSliders() {
         });
         grid->addWidget(s, row, 0, 1, 2);
         ++row;
+    }
+    // A folded Controls card says its first slider in its title (the summary, now the sliders are there).
+    for (QWidget* w = controlsBlock_->parentWidget(); w; w = w->parentWidget()) {
+        if (auto* section = qobject_cast<PropertySection*>(w)) {
+            if (!section->expanded()) section->setExpanded(false);
+            break;
+        }
     }
 }
 
@@ -798,8 +883,13 @@ void MainWindow::refreshHairColorRows() {
             if (!only.empty() && only != mode) continue;
             const QString label = qs(ui::hostText("label", ui::kHost, {&part})), tip = qs(ui::hostText("tip", ui::kHost, {&part}));
             if (kind == "heading") {
-                auto* h = new QLabel(label.toUpper(), hairColorBlock_);
-                h->setProperty("role", "subheading");
+                // The nested sections' header (their chevron, their weight): one subsection style.
+                auto* h = new QPushButton(label, hairColorBlock_);
+                h->setProperty("role", "propSubsection");
+                h->setFlat(true);
+                h->setFocusPolicy(Qt::NoFocus);
+                h->setIcon(QIcon(tintedIcon(QStringLiteral(":/groomlab/icons/ui_chevron_down.svg"), theme::textMuted(), 10, h->devicePixelRatioF())));
+                h->setIconSize(QSize(10, 10));
                 grid->addWidget(h, row++, 0, 1, 2);
                 continue;
             }
@@ -828,7 +918,7 @@ void MainWindow::refreshHairColorRows() {
                     RGB dye{1.0f, 1.0f, 1.0f};
                     if (d.is_array() && d.size() == 3) dye = {d[0].get<float>(), d[1].get<float>(), d[2].get<float>()};
                     rgb = melaninColor(m.get<float>(), r.get<float>(), dye);
-                    e->setEnabled(false);
+                    e->setReadOnly(true);  // a value to read, not a disabled control
                 } else if (v.is_array() && v.size() == 3) {
                     rgb = {v[0].get<float>(), v[1].get<float>(), v[2].get<float>()};
                 }
@@ -855,8 +945,9 @@ void MainWindow::refreshHairColorRows() {
                 grid->addWidget(control, row++, 0, 1, 2);
                 continue;
             }
-            grid->addWidget(l, row, 0);
-            grid->addWidget(control, row++, 1);
+            // Every other control in a field row, as the number fields: one row type down the card.
+            if (qobject_cast<QComboBox*>(control)) control->setMinimumWidth(140);
+            grid->addWidget(fieldRow(hairColorBlock_, l, control), row++, 0, 1, 2);
         }
     }
     auto* edit = smallButton(node.empty() ? tr("Graph Editor") : tr("Edit in Graph Editor"),

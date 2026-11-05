@@ -4,14 +4,14 @@
 // The active tool's card in the Groom Tools (groom_tools.h), as the redesign lays it out
 // (research/ui-redesign/QT.md, "Groom Tools layout"; the core's brush catalog, brush_catalog.h,
 // says which settings each tool uses). Always the same blocks in the same order, a block only
-// when it has rows:
+// when it has rows (Paint's own block alone comes first, untitled, Brush under it, titled):
 //
 //   Brush        Radius (px), Strength (± for the tools that work both ways), Falloff, Smooth (Paint);
 //                chips Pressure, Keep off scalp, Stretch (Comb), Straighten (Smooth), Falloff curve, Root to tip (a curve chip that is on shows
 //                its ramp under the chips), and the app's own Propagate (the shaping brushes) and
-//                Pointwise (Paint)
+//                Pointwise (Paint), the alpha stamp (Paint on a scalp map)
 //   the tool's own block, named for what it sets:
-//     Paint        the maps panel's Mode, Value + Fill and color (setPaintControls), the alpha stamp
+//     Paint        the maps panel's Mode, Value + Fill and color (setPaintControls)
 //     New guides   Length, Segments, Spacing (Place); Match nearby, Solo new, Keep off scalp
 //     Paints       Width, Flatness, Twist (Shape)
 //     Erases       Guides, Parts, Flow, a short note
@@ -67,6 +67,7 @@ public:
     explicit BrushPanel(QWidget* parent = nullptr);
 
     void setSession(BrushSession* session);  // null: nothing to edit
+    void setSubtitle(const QString& text);   // the header's second line: what the tool does
     // The tool whose card shows (a catalog id: comb, place, freeze, paint, select...; "" none).
     void setTool(const std::string& id);
     const std::string& tool() const { return tool_; }
@@ -103,6 +104,9 @@ signals:
     void lengthsPreviewed();    // the Keys block changed the Length Keys preview: evaluate and redraw
 
 private:
+    QLabel* toolIcon_ = nullptr;   // the card's header: the tool's icon and name
+    QLabel* toolTitle_ = nullptr;
+    QLabel* toolHint_ = nullptr;   // under the title: what the tool does (setSubtitle)
     // A fill field (the name inside) bound to a float: its span `min`..`max`, a typed value
     // reaching `limitMin`..`limitMax`.
     ValueSlider* slider(QVBoxLayout* into, const QString& label, double min, double max, double limitMin, double limitMax, int decimals,

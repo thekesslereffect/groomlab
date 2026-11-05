@@ -33,6 +33,7 @@
 class QFrame;
 class QLabel;
 class QMenu;
+class QPushButton;
 class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -119,6 +120,7 @@ private:
     GroomDocument* document_ = nullptr;
     BrushSession* session_ = nullptr;
     ui::Bindings bindings_;
+    QPushButton* newButton_ = nullptr;  // no corrective yet: the first one, labeled (the header's + New)
     ui::FillOptions options_;
     ListHeader* header_ = nullptr;
     ListBar* bar_ = nullptr;
@@ -128,6 +130,7 @@ private:
     ValueSlider* weight_ = nullptr;
     QToolButton* key_ = nullptr;
     QLabel* hint_ = nullptr;
+    QLabel* emptyIcon_ = nullptr;  // no corrective yet: the empty state's icon
     std::string target_;
     std::string shownKey_;
     std::shared_ptr<Correctives> stack_;  // the stack as last read (the weights read again per frame from it)

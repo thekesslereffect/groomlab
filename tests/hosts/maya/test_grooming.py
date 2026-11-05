@@ -1814,7 +1814,9 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(len(nodes), 1)
         vertices = cmds.polyEvaluate(mesh, vertex=True)
         groomlab.create_cards(self.groom, max_cards=24, segments=6, width_segments=3, curvature=0.5, twist=45, taper=0.3)
-        self.assertEqual(cmds.polyEvaluate(mesh, vertex=True), vertices * 2)  # 4 across instead of 2
+        reshaped = cmds.polyEvaluate(mesh, vertex=True)
+        self.assertNotEqual(reshaped, vertices)
+        self.assertEqual(reshaped % 4, 0)  # 4 across (3 by default)
         self.assertEqual(groomlab.errors(self.groom), [])
 
         folder = tempfile.mkdtemp(prefix="groomlab_cards_")
@@ -1914,7 +1916,7 @@ class GroomingTest(unittest.TestCase):
         groomlab.create_cards(self.groom, max_cards=20)
         folder = tempfile.mkdtemp(prefix="groomlab_nomesh_")
         paths = groomlab.bake_cards(self.groom, folder, resolution=128, name="bare")
-        self.assertEqual(len(paths), 8)  # seven maps and the atlas
+        self.assertEqual(len(paths), 9)  # seven maps, the world-space AO and the atlas
         self.assertIsNone(groomlab.card_mesh(self.groom))  # none made
         self.assertIn("bare_Color.tga", cmds.getAttr(self.groom + ".cardMaps"))
         first = cmds.getAttr(self.groom + ".cardMaps")
@@ -1931,12 +1933,16 @@ class GroomingTest(unittest.TestCase):
         self.assertIn("ao_world", sources["channels"])
         self.assertIn("translucency", [s["name"] for s in sources["sources"]])
         stored = cmds.getAttr(self.groom + ".cardMaps")
-        # The default preset: Bake Maps' six files, byte for byte, and the groom's own bake untouched.
+        # The default preset: Bake Maps' files (the maps and the world-space AO), byte for byte, and
+        # the groom's own bake untouched.
         baked = groomlab.bake_cards(self.groom, folder, resolution=64, name="old", store=False)
         paths = groomlab.bake_card_maps(self.groom, resolution=64, directory=folder, name="new")
-        self.assertEqual([os.path.basename(p) for p in paths], ["new_%s.tga" % m for m in groomlab.CARD_MAPS])
-        for old, new in zip([p for p in baked if p.endswith(".tga")], paths):
-            with open(old, "rb") as a, open(new, "rb") as b:
+        maps = list(groomlab.CARD_MAPS)
+        maps.insert(maps.index("Normal"), "AO_world")
+        self.assertEqual([os.path.basename(p) for p in paths], ["new_%s.tga" % m for m in maps])
+        old_by_map = {os.path.basename(p)[len("old_"):]: p for p in baked if p.endswith(".tga")}
+        for new in paths:
+            with open(old_by_map[os.path.basename(new)[len("new_"):]], "rb") as a, open(new, "rb") as b:
                 self.assertEqual(a.read(), b.read(), new)
         self.assertEqual(cmds.getAttr(self.groom + ".cardMaps"), stored)
         # Every map its own file, as 16-bit PNG, supersampled, named by a template.
@@ -2181,7 +2187,7 @@ class GroomingTest(unittest.TestCase):
         folder = tempfile.mkdtemp(prefix="groomlab_unreal_cards_")
         result = groomlab.export_cards_unreal(self.groom, folder, name="hero", resolution=128)
         self.assertTrue(os.path.getsize(result["fbx"]) > 1000)
-        self.assertEqual(len(result["maps"]), 9)  # the cards' seven and the scalp's two
+        self.assertEqual(len(result["maps"]), 10)  # the cards' seven, their world-space AO and the scalp's two
         self.assertTrue(os.path.getsize(result["scalpCap"]) > 1000)
         with open(result["manifest"]) as f:
             manifest = json.load(f)
@@ -2253,7 +2259,7 @@ class GroomingTest(unittest.TestCase):
         self.assertGreater(os.path.getsize(result["scalpCap"]), 1000)
         self.assertEqual(fbx_unit_scale(result["fbx"]), 100.0)  # meters: 100 cm per unit
         written = sorted(os.path.basename(p) for p in result["maps"])
-        self.assertEqual(written, sorted("%s_%s.png" % (name, m) for m in groomlab.UNITY_CARD_MAPS + ("ScalpBaseColor",)))
+        self.assertEqual(written, sorted("%s_%s.png" % (name, m) for m in groomlab.UNITY_CARD_MAPS + ("AO_world", "ScalpBaseColor")))
         kinds = {}
         for p in result["maps"]:
             with open(p, "rb") as f:
@@ -2786,7 +2792,9 @@ class GroomingTest(unittest.TestCase):
                              preset["triangles"] // (4 * preset["featherSegments"]))
             levels[lod] = groomlab.card_stats(self.groom, node=feathers)
             self.assertLessEqual(levels[lod]["triangles"], preset["triangles"])
-            self.assertEqual(levels[lod]["triangles"], 4 * preset["featherSegments"] * levels[lod]["cards"])
+            # (segments by length: the longest feathers featherSegments, shorter ones fewer)
+            self.assertLessEqual(levels[lod]["triangles"], 4 * preset["featherSegments"] * levels[lod]["cards"])
+            self.assertGreater(levels[lod]["triangles"], 2 * preset["featherSegments"] * levels[lod]["cards"])
             self.assertEqual(groomlab.errors(self.groom), [])
         self.assertGreater(levels["hero"]["triangles"], levels["mid"]["triangles"])
         self.assertGreater(levels["mid"]["triangles"], levels["low"]["triangles"])
@@ -2829,11 +2837,11 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(material["alphaMode"], "MASK")
         self.assertTrue(material["doubleSided"])
         # The spine goes out with the cards: the feather cards' triangles are 4 a segment (the low
-        # preset: a V each), 2 without it; the spine's TEXCOORD_1 x is 0.5.
+        # preset: a V each), 2 without it. TEXCOORD_1 is the world-space AO's unique layout.
         spined = stats["nodes"][feathers]
         self.assertEqual(spined["triangles"], 4 * spined["cards"])
-        across = gltf_accessor(doc, binary, cards["attributes"]["TEXCOORD_1"])[0::2]
-        self.assertGreaterEqual(sum(1 for x in across if abs(x - 0.5) < 1e-6), 2 * spined["cards"])  # 2 stations a V
+        uv1 = gltf_accessor(doc, binary, cards["attributes"]["TEXCOORD_1"])
+        self.assertTrue(all(0.0 <= x <= 1.0 for x in uv1))
         groomlab.set_param(self.groom, feathers, "featherSpine", False)
         groomlab.export_cards_gltf(self.groom, folder + "/flat.glb", resolution=64, cap=False)
         doc, binary = parse_glb(folder + "/flat.glb")
@@ -4048,7 +4056,7 @@ class ControlsAndExamplesTest(unittest.TestCase):
         folder = tempfile.mkdtemp()
         os.environ["GROOMLAB_USER_THEMES"] = folder
         try:
-            self.assertTrue({"playful", "studio", "polar", "charcoal"} <= set(theme.list_themes()))
+            self.assertTrue({"playful", "studio", "paper", "charcoal"} <= set(theme.list_themes()))
             # Charcoal's file sets every key Playful's does (nothing falls back to Playful's colors),
             # and every color in every shipped theme resolves.
             def keys(data, prefix=""):
@@ -4063,6 +4071,20 @@ class ControlsAndExamplesTest(unittest.TestCase):
                 with open(os.path.join(theme.SHIPPED_DIR, name + ".json"), encoding="utf-8") as f:
                     return json.load(f)
             self.assertEqual(keys(raw("playful")) - keys(raw("charcoal")), set())
+            # The components every host draws (sizes and color roles, read from Charcoal's file for every theme).
+            for component in ("iconRail", "pageTitle", "graphChip"):
+                self.assertIn(component, raw("charcoal")["components"])
+            for key in ("width", "button", "icon", "radius", "padding", "fill", "edge", "ink", "inkOn", "marker"):
+                self.assertIn(key, raw("charcoal")["components"]["iconRail"])
+            charcoal = raw("charcoal")
+            known = set(charcoal["derived"]) | set(charcoal["ui"]) | set(charcoal["palette"])
+            styles = {"dashed", "solid"}  # (brushRing.falloff: a line style, not a color)
+            for component, values in charcoal["components"].items():
+                for key, value in values.items():
+                    if key == "about" or not isinstance(value, str):
+                        continue
+                    self.assertTrue(value.startswith("#") or value in known or value in styles,
+                                    "components.%s.%s: %r is no token" % (component, key, value))
             for name in (f[:-5] for f in os.listdir(theme.SHIPPED_DIR) if f.endswith(".json")):
                 t = theme.Theme(name, theme.load(name))
                 for path in ("ui.background", "ui.panel", "ui.text", "ui.accent", "graph.node", "graph.selected",
@@ -4074,11 +4096,11 @@ class ControlsAndExamplesTest(unittest.TestCase):
                 self.assertTrue(theme.stylesheet(t))
             charcoal = theme.Theme("charcoal", theme.load("charcoal"))
             self.assertIs(charcoal.get("ui.glass"), False)
-            self.assertEqual(charcoal.get("graph.headerStyle"), "filled")
-            self.assertIs(charcoal.get("graph.shadow"), False)
+            self.assertEqual(charcoal.get("graph.headerStyle"), "tinted")
+            self.assertIs(charcoal.get("graph.shadow"), True)  # the nodes lift off the canvas (every host draws it)
             self.assertIn("solid %s" % charcoal.color("ui.outline"), theme.stylesheet(charcoal))
-            polar = theme.Theme("polar", theme.load("polar"))
-            self.assertEqual(polar.hex("accent"), "#3619CC")          # Ether
+            paper = theme.Theme("paper", theme.load("paper"))
+            self.assertEqual(paper.hex("accent"), "#0F766E")          # deep teal (the light theme)
             playful = theme.Theme("playful", theme.load("playful"))
             self.assertEqual(playful.hex("blue"), "#2F7BF6")          # palette names resolve
             self.assertEqual(playful.hex("accent"), "#2F7BF6")        # ui.accent -> blue
@@ -4102,12 +4124,12 @@ class ControlsAndExamplesTest(unittest.TestCase):
             with open(os.path.join(folder, "dense.json"), "w") as f:
                 json.dump({"extends": "studio", "ui": {"textMuted": "#737373", "rowHeight": 26}}, f)
             sheet = theme.stylesheet(theme.Theme("dense", theme.load("dense")))
-            self.assertIn("border-radius: 0; color: #737373", sheet)  # the section headers
+            self.assertIn('QLabel[role="count"] { color: #737373', sheet)  # the lists' counts, the quietest text
             self.assertIn("min-height: %dpx; padding-top: 0" % (theme.px(26) - 2 * theme.px(1)), sheet)
             with open(os.path.join(folder, "loose.json"), "w") as f:
                 json.dump({"extends": "studio", "ui": {"textMuted": None, "rowHeight": None}}, f)
             sheet = theme.stylesheet(theme.Theme("loose", theme.load("loose")))
-            self.assertIn("border-radius: 0; color: %s" % dim, sheet)
+            self.assertIn('QLabel[role="count"] { color: %s' % dim, sheet)
             self.assertNotIn("padding-top: 0; padding-bottom: 0", sheet)
             # Who never picked a theme gets Charcoal; every theme still extends Playful.
             cmds.optionVar(remove=theme.THEME_VAR)

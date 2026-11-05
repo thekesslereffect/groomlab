@@ -268,6 +268,7 @@ void MainWindow::refreshExportState() {
     panel->setDocumentState(document_ != nullptr, document_ ? document_->frame() : 1.0, animated,
                             animated ? timeline->first() : 1.0, animated ? timeline->last() : 1.0,
                             document_ ? QString::fromStdString(document_->path()) : QString());
+    panel->setCardsAvailable(!document_ || !document_->cardsNodes().empty());
 }
 
 bool MainWindow::setExportTarget(const QString& target) {
@@ -600,10 +601,11 @@ void MainWindow::reevaluate(bool quiet) {
     // renderers write only those.
     const HairChanges changes{shown.strandsSerial, shown.changesBase, shown.strandsChanges};
     // (The Groom Tools' eye off: the renderers hold them, drawing none.)
-    viewport_->renderer().setHairStrands(showCards ? nullptr : shown.strands, shown.versions.strands, changes);
+    // (A Scatter viewed alone: its roots are dots, with the guides': no hair to shade.)
+    viewport_->renderer().setHairStrands(showCards || shown.viewedRoots ? nullptr : shown.strands, shown.versions.strands, changes);
     if (headless_) {
         headless_->renderer.setScalp(scalp);
-        headless_->renderer.setHairStrands(showCards ? nullptr : shown.strands, shown.versions.strands, changes);
+        headless_->renderer.setHairStrands(showCards || shown.viewedRoots ? nullptr : shown.strands, shown.versions.strands, changes);
     }
     if (textured) {
         if (!cardSurface_ || cardSurfaceVersion_ != shown.versions.cards || cardSurfaceMap_ != bake->preview) {
@@ -868,6 +870,7 @@ void MainWindow::graphEdited() {
     refreshNodes();
     refreshGroomColor();
     refreshStarter();  // a look node added: the first-groom step ticks
+    shell_->exportPanel()->setCardsAvailable(!document_ || !document_->cardsNodes().empty());  // (a Cards node added or gone)
     shell_->setNodeCount(document_ ? static_cast<int>(document_->nodes().size()) : 0);
     if (graphShown()) graph_->refresh();
     params_->refresh();
@@ -886,8 +889,22 @@ void MainWindow::refreshStarter() {
     bool guides = false, look = false;
     if (document_) {
         if (const HierarchyPtr h = document_->session().authoredHierarchy()) guides = !h->guides().empty();
+        // A groom opened from a file with hair already (baked strands, guides the graph makes) is
+        // past its first steps: the card is for one started on a mesh here (untitled).
+        const ViewResult& view = document_->lastView();
+        if (!guides && !document_->path().empty() && view.strands && view.strands->strandCount() > 0) guides = true;
         const ui::json& types = ui::Definitions::shipped().get("palette/starter/lookTypes");
+        // A new groom's own graph has look nodes already: only one added since counts (a groom
+        // from a file counts what it has).
+        if (starterDocument_ != document_.get()) {
+            starterDocument_ = document_.get();
+            starterBase_.clear();
+            if (document_->path().empty()) {
+                for (const GroomDocument::NodeInfo& n : document_->nodes()) starterBase_.insert(n.name);
+            }
+        }
         for (const GroomDocument::NodeInfo& n : document_->nodes()) {
+            if (starterBase_.count(n.name)) continue;
             if (std::find(types.begin(), types.end(), n.type) != types.end()) look = true;
         }
     }

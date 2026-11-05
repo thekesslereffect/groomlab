@@ -45,6 +45,7 @@ QString str(const json& value) { return value.is_string() ? QString::fromStdStri
 // The Look card's lighting presets by name, as the Studio menu shows them.
 QString lightingLabel(const std::string& name) {
     if (name == "env") return QObject::tr("Environment");
+    if (name == "rim") return QObject::tr("Backlit");  // (the preset; Rim is one of its lights)
     QString label = QString::fromStdString(name);
     if (!label.isEmpty()) label[0] = label[0].toUpper();
     return label;
@@ -133,13 +134,28 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
         const QString name = QLatin1String(modes[i].first);
         const Mode mode = modes[i].second;
         // Ctrl+1..4, as the mode pills' tooltips say.
-        b["view.mode." + name.toStdString()] = {[m, name](const json&, bool) { m->setUiMode(name); },
+        // Groom's opens Attributes (also from a look page), the others their page; a folded dock opens.
+        b["view.mode." + name.toStdString()] = {[m, name, mode](const json&, bool) {
+                                                    m->setUiMode(name);
+                                                    if (mode == Mode::Groom) m->shell_->setPropertiesTab(AppShell::PropertiesTab::Attributes);
+                                                    else m->shell_->unfold(false);
+                                                },
                                                 [m, mode](const json&) { return m->shell_->mode() == mode; },
                                                 {},
                                                 {},
                                                 {QKeySequence(Qt::CTRL | Qt::Key(Qt::Key_1 + i))},
                                                 QStringLiteral("mode_") + name};
     }
+    // The folds (the open page's icon too); the keys in the rails' tooltips.
+    // (a floating dock does not fold: the action off; Alt+Shift+Left/Right where brackets take AltGr)
+    b["view.foldGroomTools"] = {[m](const json&, bool) { m->shell_->toggleFold(true); }, [m](const json&) { return m->shell_->folded(true); },
+                                [m] { return !m->shell_->groomToolsDock()->isFloating(); }, {},
+                                {QKeySequence(Qt::CTRL | Qt::Key_BracketLeft), QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_Left)},
+                                QStringLiteral("foldGroomTools")};
+    b["view.foldProperties"] = {[m](const json&, bool) { m->shell_->toggleFold(false); }, [m](const json&) { return m->shell_->folded(false); },
+                                [m] { return !m->shell_->propertiesDock()->isFloating(); }, {},
+                                {QKeySequence(Qt::CTRL | Qt::Key_BracketRight), QKeySequence(Qt::ALT | Qt::SHIFT | Qt::Key_Right)},
+                                QStringLiteral("foldProperties")};
     b["view.railLabels"] = {[m](const json&, bool on) { m->setRailLabels(on); }, [m](const json&) { return m->railLabels(); }, {}, {}, {},
                             QStringLiteral("railLabels")};
     b["view.turntable"] = {[m](const json&, bool on) { m->setTurntable(on); }, [m](const json&) { return m->turntable(); }, {}, {}, {},

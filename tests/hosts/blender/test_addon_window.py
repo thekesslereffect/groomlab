@@ -3,11 +3,13 @@
 
 - typed values: arithmetic, a leading * or / on the current value, junk refused;
 - the PNG reader on the add-on's own icons (what the window draws them from, without bpy.data);
-- the theme read from the extension (the app's charcoal colors, as linear for the 3D view's overlay);
+- the theme read from the extension (the app's charcoal colors, as linear for the 3D view's overlay),
+  its derived tokens (a theme with base tones only gets the app's formulas) and components' sizes;
 - Prop over a real property (range, clamping, int rounding, text);
 - the window's operators and gizmo group registered, Toggle shows and hides it;
 - the sidebar's Groom Tools panel drawn into drawn.DrawnLayout (what the window lays out): its
-  empty state's actions recorded as the sidebar draws them.
+  empty state's actions recorded as the sidebar draws them, on the window's cards, no tab row (the
+  window's rail: palette.json's pages, their icons shipped).
 
 Drawing and input need a window: build/probe/blender_window drives them with simulated events."""
 
@@ -63,9 +65,30 @@ class Assets(unittest.TestCase):
         self.assertTrue(os.path.isfile(uikit.FONT_FILE), uikit.FONT_FILE)
         self.assertTrue(os.path.isfile(uikit.THEME_FILE), uikit.THEME_FILE)
         t = uikit.Theme()
-        self.assertAlmostEqual(t.panel[0], uikit.linear(0x1C / 255.0), places=5)  # charcoal's #1C1C1C
-        self.assertAlmostEqual(t.accent[2], uikit.linear(0xEF / 255.0), places=5)  # #5B8DEF
-        self.assertEqual(t.row, 26.0)
+        self.assertAlmostEqual(t.panel[0], uikit.linear(0x17 / 255.0), places=5)  # charcoal's #17181B
+        self.assertAlmostEqual(t.accent[2], uikit.linear(0xFF / 255.0), places=5)  # #8B7DFF
+        self.assertEqual(t.row, 28.0)
+
+    def test_derived_tokens_and_components(self):
+        t = uikit.Theme()
+        self.assertAlmostEqual(t.card[0], uikit.linear(0x1F / 255.0), places=5)  # charcoal's own ui.card
+        self.assertAlmostEqual(t.accentSoft[2], uikit.linear(0x50 / 255.0), places=5)  # #2C2850
+        self.assertEqual(t.size("iconRail", "width", 0), 44.0)
+        self.assertEqual(t.size("iconRail", "padding", 0, 1), 10.0)
+        self.assertEqual(t.role("chip", "onText", "text"), t.accentInk)
+        self.assertEqual(t.role("segTrack", "track", "text"), t.sunken)
+        # Base tones only: the derived formulas (charcoal.json's "derived"), its components Charcoal's.
+        import json
+        path = os.path.join(bu.TMP, "base_tones.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"ui": {"background": "#000000", "panel": "#202020", "raised": "#404040", "hover": "#606060",
+                              "text": "#FFFFFF", "textDim": "#808080", "accent": "#FF0000"}}, f)
+        b = uikit.Theme(path)
+        mix = lambda a, c, k: a + (c - a) * k  # noqa: E731
+        self.assertAlmostEqual(b.card[0], uikit.linear(mix(0x20, 0x40, 0.45) / 255.0), places=5)
+        self.assertAlmostEqual(b.accentSoft[0], uikit.linear(mix(mix(0x20, 0x40, 0.45), 0xFF, 0.22) / 255.0), places=5)
+        self.assertAlmostEqual(b.sunken[0], uikit.linear(mix(0x00, 0x20, 0.3) / 255.0), places=5)
+        self.assertEqual(b.size("card", "radius", 0), 10.0)
 
 
 class Props(unittest.TestCase):
@@ -123,6 +146,26 @@ class Drawn(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(uikit.ICON_DIR, "ui_plus.png")))
         for name in set(drawn.ICONS.values()):
             self.assertTrue(os.path.isfile(os.path.join(uikit.ICON_DIR, name + ".png")), name)
+
+    def test_window_rail_and_cards(self):
+        rail = window._rail(bpy.context)
+        self.assertEqual([p[0] for p in rail.pages], ["TOOLS", "PAINT", "CORRECTIVES", "PHOTOS"])
+        for _ident, _label, _tip, icon in rail.pages:
+            self.assertTrue(os.path.isfile(os.path.join(uikit.ICON_DIR, icon + ".png")), icon)
+        rec = drawn.DrawnLayout("column")
+        drawn.draw_panel(palette.VIEW3D_PT_groomlab_tools, rec, bpy.context)
+        roles, props = [], []
+
+        def walk(node):
+            for child in node.children:
+                if isinstance(child, drawn.DrawnLayout):
+                    roles.append(child.groomlab_role)
+                    walk(child)
+                elif child.kind == "prop":
+                    props.append(child.args["prop"])
+        walk(rec)
+        self.assertNotIn("tab", props)  # (the rail switches the pages)
+        self.assertIn("primary", roles)  # the empty state's Create Groom in the accent
 
 
 class Editors(unittest.TestCase):

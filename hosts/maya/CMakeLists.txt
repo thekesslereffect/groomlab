@@ -232,6 +232,10 @@ install(DIRECTORY presets/ DESTINATION "${GROOMLAB_MODULE_DIR}/presets" COMPONEN
 install(DIRECTORY icons/ DESTINATION "${GROOMLAB_MODULE_DIR}/icons" COMPONENT GroomLab)  # on XBMLANGPATH
 install(DIRECTORY expressions/ DESTINATION "${GROOMLAB_MODULE_DIR}/expressions" COMPONENT GroomLab)  # the expression library's examples
 install(DIRECTORY themes/ DESTINATION "${GROOMLAB_MODULE_DIR}/themes" COMPONENT GroomLab)  # UI themes (JSON)
+# Retired themes an earlier install left in the module (install never deletes): Polar (replaced by Paper).
+install(CODE "foreach(_gone polar.json)
+    file(REMOVE \"\${CMAKE_INSTALL_PREFIX}/${GROOMLAB_MODULE_DIR}/themes/\${_gone}\")
+endforeach()" COMPONENT GroomLab)
 # The UI font of GroomLab's windows (the app's Inter, SIL OFL 1.1: its license travels with it), loaded
 # by scripts/groomlab/ui/theme.py for GroomLab's own windows only.
 install(FILES "${PROJECT_SOURCE_DIR}/hosts/app/fonts/Inter[opsz,wght].ttf" "${PROJECT_SOURCE_DIR}/hosts/app/fonts/OFL-Inter.txt"

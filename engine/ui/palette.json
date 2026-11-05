@@ -3,10 +3,10 @@
   "version": 1,
   "palette": {
     "tabs": [
-      {"id": "tools", "label": "Tools", "tip": "The brushes, guide groups and edits"},
-      {"id": "paint", "label": "Paint", "tip": "Painted maps and the painting brushes"},
-      {"id": "correctives", "label": "Correctives", "tip": "Correctives: sculpt layers on top of the groom", "aliases": ["sculpt"]},
-      {"id": "photos", "label": "Photos", "tip": "Reference photos as cameras to groom to", "aliases": ["reference"]}
+      {"id": "tools", "label": "Tools", "icon": "ui_tools", "tip": "The brushes, guide groups and edits"},
+      {"id": "paint", "label": "Paint", "icon": "groomLab_paint", "tip": "Painted maps and the painting brushes"},
+      {"id": "correctives", "label": "Correctives", "icon": "ui_layers", "tip": "Correctives: sculpt layers on top of the groom", "aliases": ["sculpt"]},
+      {"id": "photos", "label": "Photos", "icon": "ui_image_plus", "tip": "Reference photos as cameras to groom to", "aliases": ["reference"]}
     ],
     "header": {
       "groom": {"tip": "The current groom: every tool and the Graph Editor work on it. Pick one here or in the Graph Editor, or select a groom; it stays current whatever else you select"},
@@ -39,7 +39,7 @@
       "dismissTip": "Hide these steps (for good)",
       "steps": [
         {"id": "guides", "label": "Place some guides", "tip": "Place: click the scalp, or drag to lay down many."},
-        {"id": "look", "label": "Give it a look", "tip": "Graph Editor: add Clump, Noise or Curl after Interpolate."}
+        {"id": "look", "label": "Give it a look", "tip": "Graph Editor > Presets picks a whole look; or add Clump, Curl or Noise."}
       ],
       "lookTypes": ["Clump", "Noise", "Curl", "Flyaway", "Tangle", "Wet", "Twist", "Braid", "Gravity", "Displace",
                     "HairColor", "Bend", "Direction", "Transform", "SelfCollide", "Static"]

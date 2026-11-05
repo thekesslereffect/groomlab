@@ -2139,7 +2139,8 @@ def cards_check(snapshots=None):
            ["%.0f" % c for c in strand_color]))
     check("baked cards cover about what their strands do on %s (%d pixels against %d)" % (api, cards, strands),
           strands > 2000 and 0.75 * strands < cards < 1.25 * strands)
-    check("baked cards show their strands' color on %s (off by %.0f of 255)" % (api, off), off < 25)
+    # (Up to 30: the grid cards of PR #50 shade a little darker than their strands.)
+    check("baked cards show their strands' color on %s (off by %.0f of 255)" % (api, off), off < 30)
     # With the viewport's multisample anti-aliasing the cards' coverage becomes the samples they cover
     # (cardDraws: sampled), with Maya's hair graph and GroomLab's hair alike; about as many hair
     # pixels as cut out.

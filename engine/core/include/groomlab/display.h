@@ -121,6 +121,11 @@ struct DisplayTheme {
 constexpr std::array<float, 3> kDefaultStrandColor{0.62f, 0.45f, 0.28f};
 // The guide levels a viewport draws (deeper ones are not drawn).
 constexpr int kMaxDrawnGuideLevels = 8;
+// The automatic guide colors' saturation and value (linear: a viewport shows them sRGB-encoded,
+// so about 0.8 on screen): soft enough that the hair under the guides stays readable, distinct
+// enough to tell groups apart.
+constexpr float kGuideSaturation = 0.6f;
+constexpr float kGuideValue = 0.6f;
 
 std::array<float, 3> hueColor(float hue, float saturation, float value);
 
@@ -374,7 +379,7 @@ struct DisplaySettings {
     // Guides.
     bool guides = true, tubes = false;
     bool movingGuides = true;  // the moving guides (DisplayInputs::movingGuides) over the groomed ones
-    float guideWidth = 4.0f;
+    float guideWidth = 2.0f;
     // 1: the painted layer guideColorLayer, black 0 to white 1; anything else (0): each group's
     // color (its own, else autoGuideColors').
     int guideColorMode = 0;
@@ -382,7 +387,7 @@ struct DisplaySettings {
     std::string guideColorSeed;
     std::string guideColorLayer;
     std::string isolateGroup;  // a guide group's name: it and its child groups at full color, the others dimmed
-    int guidePoints = 2;     // dots: 0 off, 1 roots and tips, 2 all
+    int guidePoints = 1;     // dots: 0 off, 1 roots and tips, 2 all
     int guideSmoothing = 4;  // pieces per segment (1 straight)
     std::string hiddenGuideGroups, guideGroupColors;
     // Overlays and cards.

@@ -16,6 +16,7 @@ An action shows when actions.py binds it (the rest is hidden). Drawing never wri
 the lists (groups, maps, parts, tubes, correctives) are refreshed by the tools after each edit, or
 by a timer when the panel shows another groom than they were filled for."""
 
+import re
 import json
 import os
 
@@ -91,11 +92,47 @@ def section_shown(section_id, context):
     return not s.get("tabs") or TABS.get(t.tab, "") in s["tabs"]
 
 
+def in_window(layout):
+    """Whether the panel draws in the GroomLab window (window.py: drawn.DrawnLayout), not the sidebar."""
+    return hasattr(layout, "groomlab_role")
+
+
+SMOOTHING = ("Shape", "Trim")  # the groups whose tools smooth on Shift+drag (Create's, Paint's and Guides' don't say)
+
+
+def short_hint(hint, category=""):
+    """A tool's line on its card, as the app's (groom_tools.cpp refreshCard): the hint's first
+    clause without its asides in parentheses (cut at ". " or "; " past 24 characters), then, for
+    the Shape and Trim tools, the Shift+drag smoothing they share;
+    the whole hint is the tool name's tooltip."""
+    short = re.sub(r"\s*\([^()]*\)", "", hint)  # (asides in parentheses: the tooltip's)
+    for stop in (". ", "; ", " ("):
+        at = short.find(stop)
+        if at > 24:
+            short = short[:at] + "."
+    if not short.endswith("."):
+        short += "."
+    return short + (" Shift+drag smooths." if category in SMOOTHING else "")
+
+
+def look(layout, role):
+    """The GroomLab window's look (the app's cards, titles, hints: drawn.DrawnLayout.groomlab_role):
+    in the window a column of `layout` in that role; in the sidebar `layout` itself, so the sidebar
+    draws as Blender's own."""
+    if not in_window(layout):
+        return layout
+    sub = layout.column()
+    sub.groomlab_role = role
+    return sub
+
+
 def tile(layout, tool, active):
     """A tool's tile: its icon and name (the name and hint in the tooltip: GROOMLAB_OT_tool.description)."""
     info = tools.tool_info(tool)
-    op = layout.operator("groomlab.tool", text=info["label"] if info else tool, icon_value=icons.icon(tool),
-                         depress=active == tool)
+    text = info["label"] if info else tool
+    if tool == "lengths" and in_window(layout):  # (a tile's word fits its width: the app's "Keys")
+        text = "Keys"
+    op = layout.operator("groomlab.tool", text=text, icon_value=icons.icon(tool), depress=active == tool)
     op.tool = tool
     return op
 
@@ -159,8 +196,11 @@ def draw_bar(layout, path, key, context):
 
 
 def list_with_menu(layout, list_type, data, prop, active_prop, menu_idname, rows=4):
-    """A list with its right-click menu also behind a button beside it (Blender's specials menu)."""
+    """A list with its right-click menu also behind a button beside it (Blender's specials menu);
+    the window leaves an empty list out (its card's empty state says what to do)."""
     row = layout.row()
+    if in_window(layout) and not len(getattr(data, prop)):
+        return row
     row.template_list(list_type, "", data, prop, data, active_prop, rows=rows)
     if menu_idname:
         col = row.column(align=True)
@@ -168,22 +208,43 @@ def list_with_menu(layout, list_type, data, prop, active_prop, menu_idname, rows
     return row
 
 
-def block(layout, title, actions=None):
+def block(layout, title, actions=None, titled=True):
     """One of the tool card's blocks (Maya's widgets.Block): a hairline, its small title (and any
-    action icons on its right), then its rows: (column, header row)."""
+    action icons on its right), then its rows: (column, header row). titled=False: the window's
+    blocks the app draws untitled (Brush: the sliders right under the tool's line)."""
     layout.separator(type="LINE")
     col = layout.column()
     head = col.row(align=True)
-    head.label(text=title)
+    if titled or not in_window(layout):
+        look(head, "tray").label(text=title)
     return col, head
 
 
 def section_header(layout, title, count=None):
-    """A list's header (Guide groups, Maps, Layers): its name and how many; the row for its icons."""
+    """A list's header (Guide groups, Maps, Layers): its name and how many; the row for its icons.
+    In the window (the section on its card) the name as the card's title, the count beside it."""
+    if in_window(layout):
+        row = layout.row(align=True)
+        names = row.row(align=True)
+        names.alignment = "LEFT"
+        look(names, "title").label(text=title)
+        if count is not None:
+            look(names, "count").label(text="%d" % count)
+        return row
     layout.separator(type="LINE")
     row = layout.row(align=True)
     row.label(text=title.upper() + ("   %d" % count if count is not None else ""))
     return row
+
+
+def empty_state(layout, title, text, icon, chars):
+    """The window's empty state (components.emptyState): a disc with the icon, a title, a line; the
+    sidebar draws nothing."""
+    if not in_window(layout):
+        return
+    col = look(layout, "empty")
+    col.label(text=title, icon=icon)
+    _wrap(col, text, width=chars)
 
 
 def bar_icons(layout, path, key, context, ids, glyphs=None):
@@ -277,22 +338,24 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             _wrap(layout, t.status, icon="INFO", width=_chars(context))
         # The tabs, then the tool grid (the Tools and Correctives tabs; on Paint, one full-width
         # Paint button), the list the tab works on right under it, then the tool's card.
-        layout.row().prop(t, "tab", expand=True)
+        if not in_window(layout):  # (the GroomLab window's pages are on its rail)
+            layout.row().prop(t, "tab", expand=True)
         if t.tab in ("TOOLS", "CORRECTIVES"):
             layers = t.tab == "CORRECTIVES"  # only the tools that work on a corrective
             for category, tlist in tools.sections():
                 ids = [x["id"] for x in tlist if not layers or x.get("corrective")]
                 if category == "Paint" or ids == ["paint"] or not ids:
                     continue  # the painting brush lives on the Paint tab, beside the maps it paints
-                layout.label(text=category)
-                grid = tool_grid(layout, ids, t.tool)
+                tray = look(layout, "card")  # (the window: a tray, its title inside)
+                look(tray, "tray").label(text=category)
+                grid = tool_grid(tray, ids, t.tool)
                 if "freeze" in ids:  # beside Freeze, a tile: every guide brushable again (its tooltip says so)
                     sub = grid.row(align=True)
                     sub.scale_y = TILE_SCALE
-                    sub.operator("groomlab.guides_edit", text="Unfreeze All",
+                    sub.operator("groomlab.guides_edit", text="Unfreeze" if in_window(layout) else "Unfreeze All",
                                  icon_value=icons.icon("unfreeze")).action = "UNFREEZE_ALL"
         elif t.tab == "PAINT":  # Paint: one full-width button over the maps
-            row = layout.row()
+            row = look(layout, "card").row()
             row.scale_y = TILE_SCALE
             tile(row, "paint", t.tool)
         if t.tab == "PHOTOS":
@@ -319,18 +382,19 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         """palette.json's empty state: Create Groom, Add Sample Mesh, Import (what Blender runs)."""
         empty = defs.get("palette/empty")
         box = layout.box()
-        box.label(text=empty["title"])
-        _wrap(box, "Select the scalp mesh, then:", width=_chars(context))
+        look(box, "title").label(text=empty["title"])
+        _wrap(look(box, "about"), "Select the scalp mesh, then:", width=_chars(context))
         for item in menu.resolve(empty["items"], context):
             if item["kind"] == "action":
-                menu.draw_action(box, item, context, icon="ADD" if item["id"] == "groom.create" else None)
+                first = item["id"] == "groom.create"
+                menu.draw_action(look(box, "primary") if first else box, item, context, icon="ADD" if first else None)
             elif item["kind"] == "submenu":
                 box.menu(menu.submenu_idname("empty", item["id"]), text=item["label"], icon="IMPORT")
 
     def draw_starter(self, layout, context):
         box = layout.box()
         row = box.row()
-        row.label(text=defs.get("palette/starter/title"))
+        look(row, "title").label(text=defs.get("palette/starter/title"))
         row.prop(context.scene.groomlab_tools, "starter_dismissed", text="", icon="X", emboss=False)
         first = True
         for key, text, tip in STARTER:
@@ -346,12 +410,16 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         """The Tools tab's list (palette.json's one section, Guide groups): the groups (a click picks
         the one brushes edit and new guides go into), Isolate and + in the header; the picked
         group's box: rename, select, delete, its Segments and Edit Guides."""
+        layout = look(layout, "card")
         head = section_header(layout, defs.section("groups")["label"], len(t.groups))
         sub = head.row(align=True)
         sub.alignment = "RIGHT"
         sub.prop(t, "isolate", text="", icon="SOLO_ON" if t.isolate else "SOLO_OFF", emboss=False)
         bar_icons(sub, "lists/groups/bar", "groupsbar", context, ("group.new",))
         lists = defs.get("lists/groups")
+        if not t.groups:
+            empty_state(layout, "No guide groups yet", "Place or Draw starts the first group.", "CURVES",
+                        _chars(context))
         list_with_menu(layout, "GROOMLAB_UL_groups", t, "groups", "group_index", "GROOMLAB_MT_group_context", rows=3)
         box = layout.box()
         picked = t.group  # (empty: every group)
@@ -367,10 +435,14 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
     def draw_maps(self, layout, context, t):
         """The Paint tab's list (right under the Paint tile, over the Paint card): the maps, then the picked map's box: its
         actions, where it shows, what reads it."""
+        layout = look(layout, "card")
         head = section_header(layout, "Maps", len(t.maps))
         sub = head.row(align=True)
         sub.alignment = "RIGHT"
         bar_icons(sub, "lists/maps/bar", "mapsbar", context, ("map.import", "map.new"))
+        if not t.maps:
+            empty_state(layout, "No maps yet", "+ New Map: a setting such as Density to paint, or a blank one.",
+                        "TEXTURE", _chars(context))
         list_with_menu(layout, "GROOMLAB_UL_maps", t, "maps", "map_index", "GROOMLAB_MT_map_context", rows=3)
         m = tools.current_map(context.scene)
         box = layout.box()
@@ -390,6 +462,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         """The Correctives tab's list (Maya's CorrectivesBox; over the card): the stack, top first, the Sculpt
         nodes, the base groom; the picked row is what brushes edit; its box: solo, up, down,
         delete, the weight keyed with Blender's keyframes."""
+        layout = look(layout, "card")
         head = section_header(layout, "Correctives", sum(1 for r in t.correctives if r.kind == "layer"))
         sub = head.row(align=True)
         sub.alignment = "RIGHT"
@@ -476,14 +549,24 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         """The tool's card: only its settings, in blocks: Brush, the tool's own, Applies to (the
         name, the hint and the gestures are its tile's tooltip)."""
         info = tools.tool_info(tool) if tool else None
-        layout.separator(type="LINE")  # a plain section: a hairline, no box
+        if not in_window(layout):
+            layout.separator(type="LINE")  # a plain section: a hairline, no box
         if info is None:
-            _wrap(layout, NO_TOOL, width=_chars(context))
+            _wrap(look(look(layout, "card"), "about"), NO_TOOL, width=_chars(context))
             return
         uses = set(info["settings"])
-        card = layout.column()
-        if "radius" in uses:  # Brush: how the stroke feels
-            col, _ = block(card, defs.text("brushBlock"))
+        card = look(layout, "card") if in_window(layout) else layout.column()
+        if in_window(card):  # the window's card heads with the tool: its icon, its name, its line
+            head = look(card, "tool")
+            head.groomlab_tip = info.get("hint", "")  # (the whole hint on the name's hover, as the app)
+            head.label(text=info["label"], icon_value=icons.icon(tool))
+            if info.get("hint"):
+                _wrap(look(card, "about"), short_hint(info["hint"], info.get("category", "")), width=_chars(context))
+        paints = "map" in uses
+        if paints:  # Paint: what a stroke paints first, untitled (the header names the tool)
+            self.draw_paint_block(card, context, t, info)
+        if "radius" in uses:  # Brush: how the stroke feels (titled under Paint's block)
+            col, _ = block(card, defs.text("brushBlock"), titled=paints)
             sliders = col.column(align=True)
             sliders.prop(t, "radius", text=label("radius", "Radius"), slider=True)
             sliders.prop(t, "strength", text="Strength (±)" if info.get("signed") else label("strength", "Strength"),
@@ -498,14 +581,17 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                                                        ("stretch", "stretch", "Stretch"),  # Comb's
                                                        ("straighten", "straighten", "Straighten"))  # Smooth's
                        if k in uses]
-            if toggles:
-                row = col.row(align=True)
+            if toggles:  # (the window: chips two to a row, the app's)
+                row = col.grid_flow(columns=2, even_columns=True) if in_window(col) else col.row(align=True)
                 for _k, p, text in toggles:
                     row.prop(t, p, text=text, toggle=True)
             if "falloffProfile" in uses:
                 col.prop(t, "falloff_curve", text=label("falloffProfile", "Falloff curve"))
             if "strengthProfile" in uses:
                 col.prop(t, "strength_profile", text=label("strengthProfile", "Root to tip"))
+            m = tools.current_map(context.scene) if "alpha" in uses else None
+            if m is not None and m.kind in ("vertices", "texture"):  # the stamp (a guide map takes none)
+                self.draw_alpha(col, t)
         self.draw_tool_blocks(card, context, t, info, uses)
         if "targets" in uses or "symmetry" in uses:  # Applies to: where the stroke lands
             col, _ = block(card, defs.text("appliesBlock"))
@@ -522,27 +608,28 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("groomlab.tool_exit", text="Leave Tool (Esc)", icon="CANCEL")
 
+    def draw_paint_block(self, card, context, t, info):
+        """Paint's own block: the mode, the value (or color) and Fill; first on its card, untitled
+        (the window: the header names the tool), Brush under it."""
+        col, _ = block(card, info["label"], titled=False)
+        m = tools.current_map(context.scene)
+        col.label(text="Mode")
+        col.row(align=True).prop(t, "paint_mode", expand=True)
+        if m is None or m.channels == 1:
+            row = col.row(align=True)
+            row.prop(t, "value", slider=True)
+            fill = row.row(align=True)
+            fill.enabled = m is not None
+            fill.operator("groomlab.map_fill", text="Fill")
+        if m is not None and m.channels > 1:
+            row = col.row(align=True)
+            row.prop(t, "paint_color", text="Color")
+            for ch in ("channel_r", "channel_g", "channel_b", "channel_a"):
+                row.prop(t, ch, toggle=True)
+            row.operator("groomlab.map_fill", text="Fill")
+
     def draw_tool_blocks(self, card, context, t, info, uses):
-        """The tool's own blocks, named for what they set."""
-        if "map" in uses:  # Paint: the mode, the value (or color) and Fill, the stamp
-            col, _ = block(card, info["label"])
-            m = tools.current_map(context.scene)
-            col.label(text="Mode")
-            col.row(align=True).prop(t, "paint_mode", expand=True)
-            if m is None or m.channels == 1:
-                row = col.row(align=True)
-                row.prop(t, "value", slider=True)
-                fill = row.row(align=True)
-                fill.enabled = m is not None
-                fill.operator("groomlab.map_fill", text="Fill")
-            if m is not None and m.channels > 1:
-                row = col.row(align=True)
-                row.prop(t, "paint_color", text="Color")
-                for ch in ("channel_r", "channel_g", "channel_b", "channel_a"):
-                    row.prop(t, ch, toggle=True)
-                row.operator("groomlab.map_fill", text="Fill")
-            if "alpha" in uses and m is not None and m.kind in ("vertices", "texture"):  # a guide map takes no stamp
-                self.draw_alpha(col, t)
+        """The tool's own blocks, named for what they set (Paint's: draw_paint_block, first)."""
         if "newGuides" in uses:  # Place, Draw: the new guides and the tube they get
             col, _ = block(card, label("newGuides", "New guides"))
             sliders = col.column(align=True)

@@ -4,7 +4,7 @@
 // The app's look: GroomLab's themes (hosts/maya/themes/*.json; Charcoal by default: calm neutral
 // greys, flat, thin borders, as the Maya host wears it) in the standalone app's docked window
 // (app_shell.h: menu bar, tool bar, solid docks, clean and dark like Plasticity). Glass themes
-// (Playful, Polar) keep their translucent pieces over the viewport; every theme's docks are solid.
+// (a theme with ui.glass) keep their translucent pieces over the viewport; every theme's docks are solid.
 // This module holds the colors, the fonts (Inter for the words and, with tabular digits, the
 // numbers; JetBrains Mono for code, hex colors and paths; bundled as resources), the sizes, the viewport's overlay colors (displayTheme), the layout of what stays
 // over the viewport (pure geometry, so the tests check it without a window), the brush tiles'
@@ -34,7 +34,7 @@ namespace groomlab::app::theme {
 // before the window is built, and GroomLab > Theme switches it live (MainWindow::restyle: the
 // window's style sheet made again, the widgets' own sheets given the new colors, everything
 // repainted; the painted widgets read the theme when they paint).
-QStringList themeNames();                  // "charcoal", "playful", "polar", "studio" and the user's (sorted)
+QStringList themeNames();                  // "charcoal", "paper", "playful", "studio" and the user's (sorted)
 QString themeLabel(const QString& name);   // "Charcoal"
 QString defaultTheme();                    // "charcoal" (themes without "extends" still extend Playful)
 QString currentTheme();                    // defaultTheme() until setTheme
@@ -95,12 +95,32 @@ QColor segmentText(const QColor& own);
 QColor checkedFill(const QColor& own);
 QColor checkedText(const QColor& own);
 // A slider's fill, as the Maya host's ui.sliders: a theme with one slider color (Charcoal's
-// silver, Polar's and Studio's accent) gives every slider that color; a cycle (Playful's four
+// silver, Paper's accent) gives every slider that color; a cycle (Playful's four
 // primaries) keeps the color the slider asks for.
 QColor sliderFill(const QColor& own);
 // A filled action button, the primary action (chrome, not meaning): its own colors on glass; on
 // a solid theme the accent pill and the accent's text.
 QColor actionFill(const QColor& own);
+// The filled primary action's tone (ui.accentFill, else the accent) and text that is disabled
+// (ui.textDisabled, else the muted text): dimmer than any text that can be read.
+QColor accentFill();
+QColor textDisabled();
+QColor viewportColor(const std::string& key);  // viewport.<key> (invalid when the theme has none)
+bool isLight();
+QColor segmentOn();    // the chosen cell on a sunken track (ui.segmentOn)
+QColor swatchEdge();   // a color swatch's 1 px edge
+QColor hudFill();      // the chips over the viewport (viewport.hudFill)
+QColor hudText();      // their text (viewport.hudText)
+QColor hudTextDim();
+int checkRadius();     // a check box's corner (ui.checkRadius)
+bool toolOnCategory(); // ui.toolOn "category": a chosen tool tile in its category's color                                  // a light theme (its panel brighter than mid grey)
+QColor towardText(const QColor& c, double t);    // c a step toward the text: more contrast on any theme
+QColor card();        // a section's card on the panel (ui.card)
+QColor sunken();      // the track under segments and pill tabs (ui.sunken)
+QColor accentSoft();  // what is chosen: the accent as a soft wash (ui.accentSoft)
+QColor accentInk();   // text and icons in the accent on a dark surface (ui.accentInk)
+QColor cardRule();    // the rule between a card's blocks and beside the rails (ui.cardRule; derived.cardRule)
+QColor accentEdge();  // the chosen's edge: the soft accent toward the accent (derived.accentEdge)
 QColor actionText(const QColor& own);
 // Words that say something went wrong or needs a look (an export's failure, a node's error
 // line): the theme's ui.error and ui.warning, readable on the panels.
@@ -135,8 +155,18 @@ QFont numberFont(int pixelSize, int weight = QFont::Medium);
 // (radius + 2); ui.rowHeight, every control's height (26 unless the theme says).
 int controlRadius();
 int smallRadius();
+int cardRadius();  // a section's card (ui.cardRadius)
 int panelRadius();
 int rowHeight();
+// A component's size from the components block (components.<name>.<key>: Charcoal's, as
+// hosts/maya/themes/charcoal.json writes it for every theme and host), or `fallback`.
+// (`index`: an entry of an array value, as iconRail.padding's [x, y])
+int component(const char* name, const char* key, int fallback, int index = -1);
+double componentReal(const char* name, const char* key, double fallback);
+// A component's color: the role its key names (components.iconRail.ink: "textMuted"), a token
+// (text, textMuted, accentSoft, cardRule, hudFill...), a ui or palette key, or "#RRGGBB"; else `fallback`.
+QColor componentColor(const char* name, const char* key, const QColor& fallback);
+QColor role(const std::string& name);  // a token by its name ("accentInk"); invalid for none
 // The UI's text size in pixels: ui.fontSize (11-14, 12 unless the theme says; a glass theme's 13),
 // the style sheet's and the painted fields'.
 int fontSize();
@@ -171,7 +201,8 @@ QString brushTitle(const std::string& name);       // the catalog's label ("comb
 QColor nodeCategoryColor(const std::string& category);
 // A port's color by its type name ("strands", "guides", "mesh", "field", "curve", "curves").
 QColor portColor(const std::string& type);
-QColor nodeBody();  // #2A2C31 (opaque)
+QColor nodeBody();
+bool isPortType(const std::string& portType);  // one of graph.ports' types (Strands, Guides, ...; either case)  // #2A2C31 (opaque)
 // The Graph Editor's opaque canvas and its grid (graph.canvas, graph.grid; else the backdrop and
 // a lighter line).
 QColor graphCanvas();
@@ -191,6 +222,7 @@ qreal nodeRadius();        // graph.cornerRadius (14 in Playful)
 // graph.headerStyle: "tinted" (a wash and an accent bar), "minimal" (no header fill, a category
 // dot by the title) or "filled" (the default: the header in the category color).
 QString headerStyle();
+bool nodeShadow();         // graph.shadow: a soft shadow under each node
 bool tintedHeaders();      // headerStyle() == "tinted"
 // graph.canvasStyle: "lines" (the default: a grid of lines), "dots" (a dot at every grid
 // crossing) or "plain"; drawn in graph.grid.

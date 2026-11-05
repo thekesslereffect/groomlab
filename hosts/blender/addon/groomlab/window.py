@@ -92,7 +92,7 @@ def _pointer_choice(data, name, label, rna):
             uikit.changed.append(label or name)
 
     return uikit.Choice(label, [(o.name, o.name, "") for o in objects], lambda: current.name if current else "", set_,
-                        rna.description)
+                        rna.description, placeholder="No groom" if name == "groom" else "None")
 
 
 def _preview_of(icon_value):
@@ -182,12 +182,15 @@ def content(layout, context):
     if space is not None and not space.show_gizmo:
         rec.label(text="Viewport Gizmos are off: no hover or tooltips", icon="INFO")
     drawn.set_folds(state.folds)
-    palette.CHARS[0] = max(20, int(layout.w / (6.4 * layout.s)))  # wrapped hints at the window's width
+    # Wrapped hints at the width of a card's rows (components.card's padding inside the column).
+    inner = layout.w - 2 * layout.win.theme.size("card", "padding", 12) * layout.s
+    palette.CHARS[0] = max(20, int(inner / (6.1 * layout.s)))
     try:
         drawn.draw_panel(palette.VIEW3D_PT_groomlab_tools, rec, context)
         for cls in (palette.VIEW3D_PT_groomlab_tools_sculpting, palette.VIEW3D_PT_groomlab_tools_display):
             if cls.poll(context):
-                head, body = rec.panel("sub:" + cls.__name__, default_closed=True)
+                card = palette.look(rec, "card")  # (the sub-panels: folding sections on their cards)
+                head, body = card.panel("sub:" + cls.__name__, default_closed=True)
                 head.label(text=cls.bl_label)
                 if body is not None:
                     drawn.draw_panel(cls, body, context)
@@ -195,6 +198,28 @@ def content(layout, context):
         palette.CHARS[0] = None
     _list_areas.clear()
     drawn.place(rec, layout, context, ACTIONS)
+
+
+def _rail_icon(name):
+    """A page's icon (palette.json's tabs' "icon") as one of the add-on's PNGs: the app's glyphs by
+    name, Maya's groomLab_<tool> as the tool's own."""
+    import os
+    if not os.path.isfile(os.path.join(uikit.ICON_DIR, name + ".png")) and name.startswith("groomLab_"):
+        name = name[len("groomLab_"):]
+    return name
+
+
+def _rail(context):
+    """The window's pages (palette.json's tabs: Tools, Paint, Correctives, Photos) on its rail."""
+    from . import definitions
+    t = getattr(context.scene, "groomlab_tools", None)
+    if t is None:
+        return None
+    ids = {i for i, _n, _d in uikit.Prop(t, "tab").items()}
+    pages = [(p["id"].upper(), p["label"], p.get("tip", ""), _rail_icon(p.get("icon", "ui_tools")))
+             for p in definitions.tabs() if p["id"].upper() in ids]
+    return uikit.Rail(pages, lambda: bpy.context.scene.groomlab_tools.tab,
+                      lambda ident: uikit.Prop(bpy.context.scene.groomlab_tools, "tab").set(ident))
 
 
 def _window(context, region=None, reuse=False):
@@ -206,7 +231,7 @@ def _window(context, region=None, reuse=False):
         hit = _cache.get(key)
         if hit is not None and time.time() - hit[0] < CACHE_SECONDS and state.interaction is None:
             return hit[1]
-    win = uikit.Window(state, context, region, TITLE, "logo", content)
+    win = uikit.Window(state, context, region, TITLE, "logo", content, rail=_rail(context))
     _cache[key] = (time.time(), win)
     return win
 

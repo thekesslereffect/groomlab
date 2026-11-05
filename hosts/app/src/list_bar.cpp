@@ -174,8 +174,9 @@ void ListBar::setTitle(const QString& text) {
         title_ = new QLabel(this);
         title_->setObjectName(QStringLiteral("listBarTitle"));
         QFont font = title_->font();
-        font.setWeight(QFont::DemiBold);
+        font.setWeight(mutedTitle_ ? QFont::Normal : QFont::DemiBold);
         title_->setFont(font);
+        if (mutedTitle_) title_->setStyleSheet(QStringLiteral("color: %1; font-size: 12px; font-weight: 400;").arg(theme::textDim().name()));
     }
     titleText_ = text;
     title_->setToolTip(text);

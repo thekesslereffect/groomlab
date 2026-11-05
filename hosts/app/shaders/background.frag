@@ -62,7 +62,7 @@ void main() {
     vec3 dir = normalize(far.xyz / far.w - view.xyz);
     if (mode < 1.5) {
         float t = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
-        fragColor = vec4(mix(bg.rgb * 0.45, bg.rgb * 1.6, t), 1.0);
+        fragColor = vec4(mix(bg.rgb * 0.75, bg.rgb * 1.25, t), 1.0);
         return;
     }
     float c = cos(env.y), s = sin(env.y);

@@ -266,7 +266,7 @@ std::map<GroupId, std::array<float, 3>> autoGuideColors(const GuideHierarchy& h,
         hues[g->id] = best;
     }
     std::map<GroupId, std::array<float, 3>> colors;
-    for (const auto& [id, hue] : hues) colors[id] = hueColor(hue, 0.75f, 0.95f);
+    for (const auto& [id, hue] : hues) colors[id] = hueColor(hue, kGuideSaturation, kGuideValue);
     return colors;
 }
 
@@ -1773,9 +1773,8 @@ void DisplayBuilder::buildStrands(const DisplayInputs& in, const DisplaySettings
     if (!shown) {
         // hidden: nothing
     } else if (rootDots) {
-        // A Scatter shown alone: its roots as dots on the scalp, so the spacing reads (flat, as
-        // they are; dimmed for a stroke).
-        appendRootDots(sculpt == 1 ? dimBatch : strandBatch, *shown, scalp);
+        // A Scatter shown alone: its roots draw as dots with the guides' (a viewed Clump's
+        // centers' design: buildGuides), the strands themselves not drawn.
     } else if (s.ribbons && writeLines_ && ribbonLines_) {
         // As lines the host expands into ribbons (materialized(): strandRibbons' triangles): lit in
         // the strands' own colors where they vary, unlit in one color a strand (keyed, so a host
@@ -1973,6 +1972,12 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
         key = hashCombine(key, clumpCentersHash_);
         for (const float c : theme.clumpCenters) key = hashFloat(key, c);
     }
+    // A Scatter viewed alone: its roots as dots, the clump centers' design (and color).
+    const StrandSet* viewedRoots = in.viewedRoots && in.strands ? in.strands.get() : nullptr;
+    if (viewedRoots) {
+        key = hashCombine(hashCombine(key, 0x5ca77e5u), hash64(in.strandsVersion));
+        for (const float c : theme.clumpCenters) key = hashFloat(key, c);
+    }
     const GuideSet* moving = s.guides && s.movingGuides && in.movingGuides && !in.movingGuides->empty() ? in.movingGuides.get() : nullptr;
     if (moving) {
         key = hashCombine(key, in.movingGuides->contentHash());
@@ -2098,6 +2103,17 @@ void DisplayBuilder::buildGuides(const DisplayInputs& in, const DisplaySettings&
     if (in.clumpCenters) {
         for (const Vec3f& p : *in.clumpCenters) {
             dots.points.push_back(p);
+            dots.colors.push_back(theme.clumpCenters);
+        }
+    }
+    // A viewed Scatter's roots: the same dots, one at each strand's root.
+    if (viewedRoots) {
+        const std::size_t count = viewedRoots->strandCount();
+        dots.points.reserve(dots.points.size() + count);
+        dots.colors.reserve(dots.colors.size() + count);
+        for (std::size_t k = 0; k < count; ++k) {
+            if (viewedRoots->strandPointCount(k) == 0) continue;
+            dots.points.push_back(viewedRoots->strandPoints(k)[0]);
             dots.colors.push_back(theme.clumpCenters);
         }
     }

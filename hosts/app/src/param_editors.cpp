@@ -332,6 +332,7 @@ ColorEditor::ColorEditor(QWidget* parent) : QWidget(parent) {
     swatch_->setRadius(9.0);
     swatch_->setFixedWidth(36);
     swatch_->setToolTip(tr("Pick the color (shown in sRGB, stored linear)"));
+    if (!theme::glassy()) swatch_->setEdge(theme::swatchEdge());  // a black or white color keeps its shape
     layout->addWidget(swatch_);
     hex_ = new QLineEdit(this);
     hex_->setMaxLength(7);
@@ -361,6 +362,12 @@ ColorEditor::ColorEditor(QWidget* parent) : QWidget(parent) {
         dialog->open();
     });
     refresh();
+}
+
+void ColorEditor::setReadOnly(bool readOnly) {
+    hex_->setReadOnly(readOnly);
+    swatch_->setAttribute(Qt::WA_TransparentForMouseEvents, readOnly);
+    swatch_->setCursor(readOnly ? Qt::ArrowCursor : Qt::PointingHandCursor);
 }
 
 QColor ColorEditor::shown() const {

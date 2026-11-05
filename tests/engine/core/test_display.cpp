@@ -1241,8 +1241,8 @@ TEST(Display, EveryGuideGroupHasItsOwnColor) {
         const auto colors = autoGuideColors(h, seed);
         ASSERT_EQ(colors.size(), h.groups().size());
         for (const auto& [id, c] : colors) {
-            EXPECT_NEAR(std::max({c[0], c[1], c[2]}), 0.95f, 1e-5f);  // bright and saturated, never gray
-            EXPECT_GT(std::max({c[0], c[1], c[2]}) - std::min({c[0], c[1], c[2]}), 0.5f);
+            EXPECT_NEAR(std::max({c[0], c[1], c[2]}), kGuideValue, 1e-5f);  // soft but colored, never gray
+            EXPECT_NEAR(std::max({c[0], c[1], c[2]}) - std::min({c[0], c[1], c[2]}), kGuideValue * kGuideSaturation, 1e-5f);
         }
         auto apart = [&](GroupId a, GroupId b) { return hueApart(colors.at(a), colors.at(b)); };
         // Parents and their children.
@@ -1435,8 +1435,8 @@ TEST(Display, GuideColorsStartFromTheGroomsOwnHue) {
     // The first group starts at the groom's hue, the next a golden-ratio step on.
     GuideHierarchy h;
     const GroupId first = h.addGroup("primary"), second = h.addGroup("bangs"), third = h.addGroup("nape");
-    EXPECT_EQ(autoGuideColors(h, 0.0f).at(first), hueColor(std::fmod(0.6f + 0.618034f * static_cast<float>(first), 1.0f), 0.75f, 0.95f));
-    EXPECT_EQ(autoGuideColors(h, 0.0f).at(third), hueColor(std::fmod(0.6f + 0.618034f * static_cast<float>(third), 1.0f), 0.75f, 0.95f));
+    EXPECT_EQ(autoGuideColors(h, 0.0f).at(first), hueColor(std::fmod(0.6f + 0.618034f * static_cast<float>(first), 1.0f), kGuideSaturation, kGuideValue));
+    EXPECT_EQ(autoGuideColors(h, 0.0f).at(third), hueColor(std::fmod(0.6f + 0.618034f * static_cast<float>(third), 1.0f), kGuideSaturation, kGuideValue));
     EXPECT_GE(hueApart(autoGuideColors(h, groom1).at(first), autoGuideColors(h, groom2).at(first)), 0.1f);
     // Maya's own names a digit apart: well apart (FNV alone put them 0.004 of a turn apart).
     EXPECT_GE(hueApart(autoGuideColors(h, guideHueSeed("groomLab1")).at(first), autoGuideColors(h, guideHueSeed("groomLab2")).at(first)), 0.1f);

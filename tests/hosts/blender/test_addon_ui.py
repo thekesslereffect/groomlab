@@ -421,6 +421,8 @@ class ToolsTest(unittest.TestCase):
         self.assertIn(("menu", "GROOMLAB_MT_mapsbar_mapconvert", ""), log)
         self.assertTrue(any(e[0] == "label" and e[1].startswith("Read by nothing") for e in log))
         self.assertIn(("prop", "paint_mode"), log)  # the Paint card's own block: Mode, Value and Fill
+        # What a stroke paints first, the brush under it.
+        self.assertLess(log.index(("prop", "paint_mode")), log.index(("prop", "radius")))
         self.assertIn("Fill", texts(log, "groomlab.map_fill"))
         ctx = drawn(bpy.types.GROOMLAB_MT_map_context)
         self.assertEqual(texts(ctx), ["New Map...", "Import Image as Map...", "Rename...", "Make Color (r g b a)",

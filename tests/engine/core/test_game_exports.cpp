@@ -396,11 +396,15 @@ TEST(GameExports, CardsRoundTripThroughGlb) {
     const std::vector<float> tints = floatsOf(g, attributes["_TINT"]);
     ASSERT_EQ(tints.size(), 3 * n);
     for (std::size_t i = 0; i < 3 * n; ++i) EXPECT_FLOAT_EQ(tints[i], cards.tints[i / 3][i % 3]);
-    // TEXCOORD_1's y runs root (0) to tip (1) on every card.
-    for (const CardMesh::Card& card : cards.cards) {
-        const std::size_t root = card.firstVertex, tip = card.firstVertex + static_cast<std::size_t>(card.stations - 1) * static_cast<std::size_t>(card.across + 1);
-        EXPECT_FLOAT_EQ(uv1[2 * root + 1], 0.0f);
-        EXPECT_FLOAT_EQ(uv1[2 * tip + 1], 1.0f);
+    // TEXCOORD_1: the unique layout the world-space AO is baked in (every card its own cell, none
+    // shared or mirrored), V flipped as TEXCOORD_0's.
+    {
+        CardMesh unique = cards;
+        layoutCardsUnique(unique, unique.padding);
+        for (std::size_t i = 0; i < n; ++i) {
+            EXPECT_FLOAT_EQ(uv1[2 * i], unique.u[i]);
+            EXPECT_FLOAT_EQ(uv1[2 * i + 1], 1.0f - unique.v[i]);
+        }
     }
     // Triangles face the way their normals do.
     const std::vector<float> normals = floatsOf(g, attributes["NORMAL"]);
@@ -539,13 +543,13 @@ TEST(GameExports, FeatherCardsCarryTheirSpineIntoGltf) {
     const std::vector<float> normals = floatsOf(g, p["attributes"]["NORMAL"]);
     const std::vector<float> uv1 = floatsOf(g, p["attributes"]["TEXCOORD_1"]);
     ASSERT_EQ(uv1.size(), 2 * cards.vertexCount());
+    // TEXCOORD_1 the unique world-AO layout: the spine (the middle column) between its edges.
     bool folded = false;
     for (const CardMesh::Card& c : cards.cards) {
         for (int k = 0; k < c.stations; ++k) {
             const std::size_t row = c.firstVertex + 3 * static_cast<std::size_t>(k);
-            EXPECT_FLOAT_EQ(uv1[2 * row], 0.0f);
-            EXPECT_FLOAT_EQ(uv1[2 * (row + 1)], 0.5f);
-            EXPECT_FLOAT_EQ(uv1[2 * (row + 2)], 1.0f);
+            const float left = uv1[2 * row], spine = uv1[2 * (row + 1)], right = uv1[2 * (row + 2)];
+            EXPECT_GT((spine - left) * (right - spine), 0.0f) << k;
             for (std::size_t v = row; v < row + 3; ++v) {
                 const Vec3f n(normals[3 * v], normals[3 * v + 1], normals[3 * v + 2]);
                 EXPECT_NEAR(n.dot(cards.normals[v]), 1.0f, 1e-4f);  // Y up already: as they are

@@ -147,6 +147,8 @@ int main(int argc, char** argv) {
     int benchmarkOrbit = 0;
     bool drawDabs = false;
     int gpuPreview = -1;  // -1: the preference
+    QString uiView;  // --ui-view: View Up to Here on that node (its eye)
+    QString uiFold;  // --ui-fold left|right|both: those docks folded to their rails
     QString uiScreenshot, uiMode, uiPanel, uiLookTab, uiNode, uiHover, uiPreset, uiMenu, uiPrompt, uiPaintParam, uiSearch, themeName, uiTheme;
     bool hasUiSearch = false;
     bool uiGraph = false;
@@ -317,6 +319,10 @@ int main(int argc, char** argv) {
             uiLookTab = QString::fromLocal8Bit(argv[++i]);
         } else if (std::strcmp(arg, "--ui-node") == 0 && hasValue) {
             uiNode = QString::fromLocal8Bit(argv[++i]);
+        } else if (std::strcmp(arg, "--ui-view") == 0 && hasValue) {
+            uiView = QString::fromLocal8Bit(argv[++i]);
+        } else if (std::strcmp(arg, "--ui-fold") == 0 && hasValue) {
+            uiFold = QString::fromLocal8Bit(argv[++i]);
         } else if (std::strcmp(arg, "--ui-hover") == 0 && hasValue) {
             uiHover = QString::fromLocal8Bit(argv[++i]);
         } else if (std::strcmp(arg, "--ui-preset") == 0 && hasValue) {
@@ -423,7 +429,7 @@ int main(int argc, char** argv) {
                         "                [--screenshot out.png [--size WxH] [--frames N]] [--benchmark N]\n"
                         "                [--live-benchmark N [--live-mode orbit|hover|stroke|param|param-commit]]\n"
                         "                [--gpu-preview on|off] [--benchmark-drag node.param=from,to[,steps]]... [--benchmark-orbit N] [--draw-dabs]\n"
-                        "                [--display name=value]... [--theme charcoal|playful|polar|studio]\n"
+                        "                [--display name=value]... [--theme charcoal|paper|playful|studio]\n"
                         "                [--ui-screenshot out.png [--ui-mode groom|look|cards|export] [--ui-graph] [--ui-panel name]\n"
                         "                                         [--ui-look-tab material|lighting|render[,more]] [--ui-node name]\n"
                         "                                         [--ui-hover rail|panels|all|labels] [--ui-preset name] [--ui-menu presets|add|edit|node|groups|editguides|maps|convert|correctives|marking|bar:Menu/Submenu]\n"
@@ -621,11 +627,13 @@ int main(int argc, char** argv) {
         if (uiGraph) window.setGraphShown(true);
         if (!uiPreset.isEmpty() && !window.applyPreset(uiPreset)) return 1;
         if (!uiNode.isEmpty() && !window.selectUiNode(uiNode)) return 1;
+        if (!uiView.isEmpty() && !window.viewUiNode(uiView)) return 1;
         if (!uiPaintParam.isEmpty()) {
             const int dot = uiPaintParam.indexOf(QLatin1Char('.'));
             if (dot <= 0 || !window.paintParam(uiPaintParam.left(dot), uiPaintParam.mid(dot + 1))) return 1;
         }
         if (!uiPanel.isEmpty() && !window.showUiPanel(uiPanel)) return 1;
+        if (!uiFold.isEmpty() && !window.foldUiDocks(uiFold)) return 1;
         if (!uiHover.isEmpty() && !window.setUiHover(uiHover)) return 1;
         if (!uiMenu.isEmpty() && !window.setUiMenu(uiMenu)) return 1;
         if (!uiTheme.isEmpty() && !window.chooseTheme(uiTheme)) return 1;

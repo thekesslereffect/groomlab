@@ -198,7 +198,11 @@ std::string writeCardBake(const CardBake& bake, const CardBakePaths& at, bool pr
         colorAlpha.empty() ? std::make_pair(3, &t.color) : std::make_pair(4, static_cast<const std::vector<std::uint8_t>*>(&colorAlpha)), {1, &t.occlusion}, {3, &t.normal}};
     const std::vector<std::string> paths = at.maps();
     parallelFor(0, maps.size(), [&](std::size_t i) { writeTga(paths[i], t.size, t.size, maps[i].first, *maps[i].second); }, 1);
-    writeTga(at.map("AO_world"), t.size, t.size, 1, t.worldOcclusion);
+    // The world-space AO (its own unique layout), when the bake made one (bakeCardsInMemory does;
+    // textures baked by hand may not).
+    if (t.worldOcclusion.size() == t.occlusion.size() && !t.worldOcclusion.empty()) {
+        writeTga(at.map("AO_world"), t.size, t.size, 1, t.worldOcclusion);
+    }
     // The atlas: every card's cell by its strands, so the cards rebuilt from now on (guides
     // brushed, the groom re-evaluated) keep the texture they were baked with.
     {

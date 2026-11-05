@@ -25,11 +25,27 @@
 
 class QLineEdit;
 
+class QFrame;
+class QLabel;
+class QCheckBox;
+class QAbstractScrollArea;
+
 namespace groomlab::app {
 
 // An icon from the resources (hosts/app/icons/*.svg) tinted to one color (its own colors become
 // alpha), `size` pixels square at the device pixel ratio.
 QPixmap tintedIcon(const QString& resource, const QColor& color, int size, qreal devicePixelRatio);
+// One field row (the style sheet's propField, as a number field): `label` inside at its left (104 px
+// at least, so the values line up), `control` at its right. Both reparented into the row.
+QFrame* fieldRow(QWidget* parent, QWidget* label, QWidget* control);
+// A check box as a field row: its text as the row's label at the left, the box at the row's end. The
+// row shows, hides and dims with the box (code that shows or hides the box keeps working).
+QFrame* switchRow(QWidget* parent, QCheckBox* box);
+// An empty state's icon: a 40 px soft-accent disc with ui_<icon>.svg in the accent's ink.
+QLabel* emptyIcon(const QString& icon, QWidget* parent);
+// A soft fade at a scroll area's bottom edge while there is more below (a row half out of view reads
+// as more to scroll to, not as cut off), in the card's tone.
+void addScrollFade(QAbstractScrollArea* area);
 // The icon as drawn (the three-strand logo keeps its colors).
 QPixmap coloredIcon(const QString& resource, int size, qreal devicePixelRatio);
 // A tool icon in two tones, as the Maya host recolors them (widgets.icon_svg): the SVG's
@@ -120,6 +136,7 @@ public:
     void setRadius(qreal radius);
     // A ring around the button when checked (a swatch's selection).
     void setCheckedRing(const QColor& color, qreal width);
+    void setEdge(const QColor& color);  // a 1 px edge at rest (a swatch on a panel of its own tone)
     // A tile: the circle (the diameter) at the left with a name beside it at `labelX`, faded by
     // `opacity` (the brush rail's rows as they widen). The whole widget is the hit target and
     // the hover covers it as one, under the circle and the name; "" goes back to a plain button.
@@ -146,6 +163,7 @@ private:
     bool hover_ = false;
     qreal radius_ = -1.0;
     QColor ring_;
+    QColor edge_;
     qreal ringWidth_ = 0.0;
     QString tileLabel_;
     int tileLabelX_ = 0;
@@ -324,6 +342,8 @@ public:
     bool setRuns(std::vector<Run> runs);
     const std::vector<Run>& runs() const { return runs_; }
     void setShadow(bool shadow);
+    // A chip behind the whole line (a pill of `fill` with a faint edge; invalid: none, the words over the view).
+    void setChip(const QColor& fill);
     QSize sizeHint() const override;
 
 protected:
@@ -332,6 +352,7 @@ protected:
 private:
     std::vector<Run> runs_;
     bool shadow_ = true;
+    QColor chip_;
 };
 
 }  // namespace groomlab::app

@@ -6,6 +6,7 @@
 #include <QFileInfo>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include <QCheckBox>
@@ -13,11 +14,13 @@
 #include <QDoubleSpinBox>
 #include <QFormLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
 #include <QSplitter>
+#include <QGridLayout>
 #include <QVBoxLayout>
 
 #include <QDockWidget>
@@ -103,6 +106,13 @@ void MainWindow::buildPanels() {
         refreshTool();
     });
     connect(maps_, &MapsPanel::message, this, [this](const QString& text) { report(text); });
+    connect(maps_, &MapsPanel::mapNodeRequested, this, [this](const std::string& map) {
+        // A Map node reading the map, in the Graph Editor (shown) to wire into a setting.
+        if (!document_) return;
+        setGraphShown(true);
+        const qreal nan = std::numeric_limits<qreal>::quiet_NaN();
+        if (!graph_->addNodeOfType("Map", QPointF(nan, nan), false, -1, nlohmann::json{{"name", map}}, map).empty()) graphEdited();
+    });
     connect(maps_, &MapsPanel::paintParamRequested, this, [this](const std::string& node, const std::string& param, const std::string& kind) {
         paintParam(QString::fromStdString(node), QString::fromStdString(param), QString::fromStdString(kind));
     });
@@ -114,7 +124,33 @@ void MainWindow::buildPanels() {
     help_->setTextFormat(Qt::RichText);
     help_->setOpenExternalLinks(true);
     help_->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    shell_->setPanelContent(AppShell::Panel::Help, tr("Help"), theme::blue(), new FitScrollArea(help_));  // scrolls when short
+    {
+        // The page over a filter (the shortcut sheet's: type a key or a word).
+        auto* helpPage = new QWidget();
+        auto* helpColumn = new QVBoxLayout(helpPage);
+        helpColumn->setContentsMargins(12, 10, 24, 0);
+        helpColumn->setSpacing(8);
+        helpFilter_ = new QLineEdit(helpPage);
+        helpFilter_->setObjectName(QStringLiteral("shortcutFilter"));
+        helpFilter_->setPlaceholderText(tr("Filter shortcuts (a key or a word)"));
+        helpFilter_->setClearButtonEnabled(true);
+        helpFilter_->hide();
+        connect(helpFilter_, &QLineEdit::textChanged, this, [this] { showHelp(QStringLiteral("shortcuts")); });
+        helpColumn->addWidget(helpFilter_);
+        auto* helpBody = new QWidget();
+        auto* helpBodyColumn = new QVBoxLayout(helpBody);
+        helpBodyColumn->setContentsMargins(0, 0, 0, 0);
+        helpBodyColumn->setSpacing(0);
+        helpBodyColumn->addWidget(help_);
+        shortcutSheet_ = new QWidget(helpBody);
+        shortcutSheet_->setObjectName(QStringLiteral("shortcutSheet"));
+        new QGridLayout(shortcutSheet_);
+        shortcutSheet_->hide();
+        helpBodyColumn->addWidget(shortcutSheet_);
+        helpBodyColumn->addStretch(1);
+        helpColumn->addWidget(new FitScrollArea(helpBody), 1);  // scrolls when short
+        shell_->setPanelContent(AppShell::Panel::Help, tr("Help"), theme::blue(), helpPage);
+    }
     // The Groom Tools (groom_tools.h): the tiles pick the tool, the card and the rows edit the
     // brush settings, the sections the strands while sculpting; the guides panel is its Guide
     // groups & edits (the parts are the Part tool's card's).
@@ -199,6 +235,7 @@ void MainWindow::buildPanels() {
     // A row clicked: the group the brushes edit and new guides go into (Maya's pick_group): the
     // Groom Tools set it (settingsChanged, isolateChanged).
     connect(guidesPanel_, &GuidesPanel::message, this, [this](const QString& text) { report(text); });
+    connect(guidesPanel_, &GuidesPanel::bakeRequested, this, [this](const std::string& node) { AppActions::askBakeNode(*this, node); });
     connect(look_, &LookPanel::materialChanged, this, [this] {
         if (updatingLook_) return;
         shell_->lookCard()->setMaterial(look_->material());
@@ -237,6 +274,7 @@ void MainWindow::wireOverlay() {
     connect(markingMenu_, &MarkingMenu::picked, this, [this](const MarkingMenu::Item& item) { AppActions::runMarkingMenuItem(*this, item); });
     connect(markingMenu_, &MarkingMenu::dismissed, this, [this] { viewport_->setFocus(); });
     connect(host_, &OverlayHost::undoRequested, this, [this] { undo(); });
+    connect(host_, &OverlayHost::graphToggleRequested, this, [this] { setGraphShown(!graphShown()); });
     connect(host_, &OverlayHost::redoRequested, this, [this] { redo(); });
     connect(host_, &OverlayHost::presetsRequested, this, [this] { showPresetsMenu(); });
     // The Graph Editor closed or shown by its own button or View > Panels: the graph follows (it

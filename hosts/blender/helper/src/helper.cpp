@@ -1722,6 +1722,8 @@ json Helper::run(const std::string& cmd, const json& args) {
         }
         r["milliseconds"] = evalMs;
         r["following"] = s.groom->following();
+        // A viewed Scatter: its roots, drawn as dots by the overlay (display), no hair curves.
+        r["viewedRoots"] = view.viewedRoots;
         r["look"] = json::parse(s.groom->hairLookJson());
         return r;
     }

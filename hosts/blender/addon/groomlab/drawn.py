@@ -9,7 +9,12 @@ widgets: one source for the sidebar and the window, so they show the same sectio
 
 What has no drawn counterpart opens Blender's own: a menu button calls the menu, a color swatch
 Blender's color picker. Blender's icons map to the app's glyphs (ICONS); one without a glyph is left
-out."""
+out.
+
+The app's look where UILayout has no word for it: a panel sets a sub-layout's groomlab_role
+(palette.look(); the sidebar's layouts have no such attribute and draw as they always did): "card"
+a section on its card, "title" / "tray" / "hint" / "tool" / "status" / "count" its labels' roles, "empty" an empty state (its first label's icon on a disc, its labels centered),
+"primary" its operators in the accent."""
 
 import bpy
 
@@ -86,6 +91,8 @@ class DrawnLayout(object):
         self.ui_units_y = 0.0
         self.active_default = False
         self.activate_init = False
+        self.groomlab_role = None  # the window's look for what it holds (the module's docstring)
+        self.groomlab_tip = ""     # its labels' tooltip (the window: a hover shows it)
 
     def _child(self, kind, **kw):
         child = DrawnLayout(kind, **kw)
@@ -128,7 +135,8 @@ class DrawnLayout(object):
 
     # Leaves
     def label(self, text="", text_ctxt="", translate=True, icon="NONE", icon_value=0):
-        self._item("label", text=text, icon=icon_name(icon, icon_value))
+        first = not any(isinstance(c, Item) and c.kind == "label" for c in self.children)
+        self._item("label", text=text, icon=icon_name(icon, icon_value), first=first, tip=self.groomlab_tip)
 
     def separator(self, factor=1.0, type="AUTO"):
         self._item("separator", factor=factor, line=type == "LINE")
@@ -321,7 +329,8 @@ class MenuButton(uikit.Button):
     """A menu's button: a press opens it drawn (editors.PopupMenu), else as Blender's own popup."""
 
     def __init__(self, wid, rect, text, icon, menu_name):
-        super().__init__(wid, rect, text, None, icon, flat=not text, align="left" if text else "center")
+        # (a named menu: the app's disclosure, outlined with a small chevron and no icon)
+        super().__init__(wid, rect, text, None, None if text else icon, flat=not text, menu=bool(text))
         self.menu_name = menu_name
 
     def press(self, win, context, event):
@@ -335,16 +344,20 @@ class MenuButton(uikit.Button):
 # ---- Laying out -------------------------------------------------------------------------------
 
 class _State(object):
-    """What children take from their layouts: enabled, active, alert, the height scale, emboss."""
+    """What children take from their layouts: enabled, active, alert, the height scale, emboss, the
+    role (DrawnLayout.groomlab_role) and whether they are on a card."""
 
-    def __init__(self, enabled=True, active=True, alert=False, scale_y=1.0, in_list=False, tiles=False):
+    def __init__(self, enabled=True, active=True, alert=False, scale_y=1.0, in_list=False, tiles=False, role=None,
+                 in_card=False):
         self.enabled, self.active, self.alert, self.scale_y = enabled, active, alert, scale_y
-        self.in_list, self.tiles = in_list, tiles
+        self.in_list, self.tiles, self.role, self.in_card = in_list, tiles, role, in_card
 
     def under(self, layout):
+        role = layout.groomlab_role
         return _State(self.enabled and layout.enabled, self.active and layout.active, self.alert or layout.alert,
                       self.scale_y * (layout.scale_y or 1.0), self.in_list,
-                      self.tiles or (layout.kind == "grid" and (layout.scale_y or 1.0) >= 1.3))
+                      self.tiles or (layout.kind == "grid" and (layout.scale_y or 1.0) >= 1.3),
+                      self.role if role in (None, "card") else role, self.in_card or role == "card")
 
 
 class Placer(object):
@@ -364,18 +377,50 @@ class Placer(object):
 
     # Sizes
     def gap(self, layout, horizontal):
+        if layout.groomlab_role in ("about", "hint", "empty", "status"):
+            return 0.0  # a wrapped text's lines
+        if layout.groomlab_role == "card" or (layout.kind == "column" and layout.groomlab_role is None
+                                               and not layout.align and self.cards(layout)):
+            return self.ui.win.theme.size("card", "gap", 8) * self.s  # between cards
         if layout.align:
-            return 1 * self.s if horizontal else 2 * self.s
-        return 4 * self.s if horizontal else 5 * self.s
+            return 4 * self.s if horizontal else 6 * self.s
+        return 6 * self.s if horizontal else 6 * self.s
+
+    def cards(self, layout):
+        """Whether a column holds cards (its gaps then the cards' own)."""
+        return any(isinstance(c, DrawnLayout) and c.groomlab_role == "card" for c in layout.children)
+
+    # The text roles' line heights (a wrapped hint's lines close together).
+    LINE = {"title": 24, "tray": 18, "about": 17, "hint": 15, "emptyBody": 15, "emptyTitle": 22, "tool": 24, "status": 16,
+            "count": 18}
+
+    def label_style(self, st, first=False):
+        role = st.role
+        if role == "empty":
+            return "emptyTitle" if first else "emptyBody"
+        return role if role in self.LINE else None
 
     def item_height(self, item, st):
         kind = item.kind
         if kind == "separator":
             return (9 if item.args.get("line") else 6) * self.s * item.args.get("factor", 1.0)
         if kind == "label":
+            style = self.label_style(st, item.args.get("first", False))
+            if style is not None:
+                h = self.LINE[style] * self.s
+                if style == "emptyTitle" and item.args.get("icon"):
+                    h += self.ui.win.theme.size("emptyState", "disc", 40) * self.s + 8 * self.s
+                return h
             return self.label_h * max(1.0, st.scale_y)
         if kind == "operator" and st.tiles:
             return 54 * self.s  # a tool tile: its icon over its name (the app's 56 x 54)
+        if kind in ("operator", "menu", "popover") and st.scale_y <= 1.0:
+            return self.row_h - 2 * self.s  # buttons and chips a little under the fields (the app's)
+        if kind == "prop" and st.scale_y <= 1.0:
+            rna = _rna(item.args["data"], item.args["prop"])
+            if rna is not None and rna.type == "BOOLEAN" and (item.args.get("toggle") in (True, 1)
+                                                              or item.args.get("has_icon")):
+                return self.row_h - 2 * self.s
         if kind == "icon_view":
             return 44 * self.s
         if kind == "profile":
@@ -430,8 +475,11 @@ class Placer(object):
             h = self.item_height(node, st)
             self.leaf(node, (x, top - h, w, h), st)
             return h
+        outer = st
         st = st.under(node)
         kind = node.kind
+        if node.groomlab_role == "card" and not outer.in_card:
+            return self.place_card(node, x, top, w, st)
         if kind == "row":
             return self.place_row(node, x, top, w, st)
         if kind == "split":
@@ -441,13 +489,23 @@ class Placer(object):
         if kind == "panel":
             return self.place_panel(node, x, top, w, st)
         if kind == "box":
-            pad = 6 * self.s
-            backdrop = uikit.Backdrop(self.wid("box"), (x, top, w, 0))
-            self.widgets.append(backdrop)
-            h = self.place_column(node, x + pad, top - pad, w - 2 * pad, st) + 2 * pad
-            backdrop.rect = (x, top - h, w, h)
-            return h
+            if outer.in_card:  # the app's item box: a rule over its rows, on the card
+                pad = 8 * self.s
+                self.widgets.append(uikit.Backdrop(self.wid("rule"), (x, top - 1 * self.s, w, 1 * self.s), "rule"))
+                return self.place_column(node, x, top - pad, w, st) + pad
+            return self.place_card(node, x, top, w, st)
         return self.place_column(node, x, top, w, st)
+
+    def place_card(self, node, x, top, w, st):
+        """A section on its card (components.card): its padding round its rows."""
+        theme = self.ui.win.theme
+        pad = theme.size("card", "padding", 12) * self.s
+        st.in_card = True
+        backdrop = uikit.Backdrop(self.wid("card"), (x, top, w, 0), "card")
+        self.widgets.append(backdrop)
+        h = self.place_column(node, x + pad, top - pad + 2 * self.s, w - 2 * pad, st) + 2 * pad - 2 * self.s
+        backdrop.rect = (x, top - h, w, h)
+        return h
 
     def place_column(self, node, x, top, w, st):
         y = top
@@ -477,9 +535,18 @@ class Placer(object):
             start = x
         h = 0.0
         cx = start
+        placed = []
         for child, cw in zip(children, widths):
-            h = max(h, self.place(child, cx, top, cw, st))
+            first = len(self.widgets)
+            ch = self.place(child, cx, top, cw, st)
+            placed.append((first, len(self.widgets), ch))
+            h = max(h, ch)
             cx += cw + gap
+        for first, last, ch in placed:  # the shorter ones centered on the row (a chip beside a field)
+            dy = (h - ch) * 0.5
+            if dy > 0.5:
+                for wd in self.widgets[first:last]:
+                    wd.rect = (wd.rect[0], wd.rect[1] - dy, wd.rect[2], wd.rect[3])
         return h
 
     def share(self, children, naturals, w, gap):
@@ -531,7 +598,7 @@ class Placer(object):
         children = node.children
         if not children:
             return 0.0
-        gap = self.gap(node, True) if not st.tiles else 6 * self.s
+        gap = self.gap(node, True) if not st.tiles else 2 * self.s
         cols = node.columns or max(1, int((w + gap) // (110 * self.s)))
         if st.tiles:  # tool tiles: the app's 56 px minimum, as many as fit, at most `columns`
             cols = max(1, min(cols, int((w + gap) // (56 * self.s + gap))))
@@ -555,10 +622,11 @@ class Placer(object):
         def toggle(fold_id=fold_id, open_=open_):
             _folds[fold_id] = not open_
 
+        h = 22 * self.s
         self.widgets.append(uikit.PanelHeader(self.wid("panel", fold_id), (x, top - h, w, h), title, open_, toggle))
         total = h
         if open_ and node.body is not None:
-            total += 4 * self.s
+            total += 8 * self.s
             total += self.place(node.body, x, top - total, w, st)
         return total
 
@@ -568,8 +636,17 @@ class Placer(object):
         a = item.args
         kind = item.kind
         if kind == "label":
-            widget = uikit.Label(self.wid("label"), rect, a.get("text", ""), icon=a.get("icon") or None,
-                                 bright=st.in_list)
+            style = self.label_style(st, a.get("first", False)) or ("bright" if st.in_list else None)
+            align = "center" if st.role == "empty" else "left"
+            icon = a.get("icon") or None
+            if style == "emptyTitle" and icon:  # the empty state's disc over its title
+                disc = self.ui.win.theme.size("emptyState", "disc", 40) * self.s
+                x, y, w, h = rect
+                self.widgets.append(uikit.EmptyIcon(self.wid("emptyicon"), (x, y + h - disc, w, disc), icon))
+                rect, icon = (x, y, w, h - disc - 8 * self.s), None
+            widget = uikit.Label(self.wid("label"), rect, a.get("text", ""), icon=icon, style=style, align=align)
+            if a.get("tip"):  # (a label with a tooltip takes the hover)
+                widget.tooltip, widget.passive = a["tip"], False
         elif kind == "separator":
             if a.get("line"):
                 widget = uikit.Backdrop(self.wid("line"), rect, "line")
@@ -584,7 +661,7 @@ class Placer(object):
             else:
                 call = (lambda ctx, n=name: bpy.ops.wm.call_panel(name=n)) if name else (lambda ctx: None)
                 widget = uikit.Button(self.wid(kind, name), rect, text, call, icon or None, flat=not text,
-                                      align="left" if text else "center")
+                                      align="center", menu=bool(text))
         elif kind == "prop":
             widget = self.prop(item, rect, st)
         elif kind == "enum_choice":
@@ -623,8 +700,8 @@ class Placer(object):
             return uikit.Tile(self.wid("tile", props.get("tool", idname)), rect, text, run, a["icon"],
                               bool(a.get("depress")), tooltip=tip)
         return uikit.Button(self.wid("op", idname), rect, text, run, a.get("icon") or None, tooltip=tip,
-                            flat=not a.get("emboss", True), depress=bool(a.get("depress")),
-                            align="left" if (text and st.in_list) else "center")
+                            primary=st.role == "primary" and bool(text), flat=not a.get("emboss", True),
+                            depress=bool(a.get("depress")), align="left" if (text and st.in_list) else "center")
 
     def prop(self, item, rect, st):
         a = item.args
@@ -644,9 +721,12 @@ class Placer(object):
             return uikit.Check(self.wid("check", key), rect, prop)
         if kind in ("INT", "FLOAT") and getattr(rna, "is_array", False) and rna.array_length > 1:
             if rna.subtype in ("COLOR", "COLOR_GAMMA"):
-                if st.in_list:  # a list row's color: a small square at its left, as the app's dot
-                    side = min(rect[2], rect[3] - 8 * self.s)
-                    rect = (rect[0], rect[1] + (rect[3] - side) * 0.5, side, side)
+                if st.in_list:  # a list row's color: a dot at its left, as the app's
+                    side = min(rect[2], 10 * self.s)
+                    rect = (rect[0] + 2 * self.s, rect[1] + (rect[3] - side) * 0.5, side, side)
+                    swatch = uikit.ColorSwatch(self.wid("color", key), rect, prop, self.actions.get("color"))
+                    swatch.dot = True
+                    return swatch
                 return uikit.ColorSwatch(self.wid("color", key), rect, prop, self.actions.get("color"))
             return uikit.Label(self.wid("label"), rect, "%s: %s" % (prop.label, ", ".join(
                 "%.3g" % v for v in getattr(data, name))))
@@ -685,13 +765,16 @@ class Placer(object):
         self.widgets.append(toggle)
 
     def segments(self, prop, items, rect, st, key):
-        x, y, w, h = rect
+        """An enum expanded: its choices on a sunken track (components.segTrack)."""
+        self.widgets.append(uikit.Backdrop(self.wid("track", key), rect, "track"))
+        pad = self.ui.win.theme.size("segTrack", "padding", 2) * self.s
+        x, y, w, h = uikit.inset(rect, pad)
         gap = 1 * self.s
         n = max(1, len(items))
         cw = (w - gap * (n - 1)) / n
         for i, (ident, name, tip) in enumerate(items):
             seg = uikit.Segment(self.wid("enum", key + "." + ident), (x + i * (cw + gap), y, cw, h), prop, ident,
-                                name, tooltip=tip)
+                                name, tooltip=tip, tracked=True)
             seg.disabled, seg.dim, seg.alert = not st.enabled, not st.active, st.alert
             self.widgets.append(seg)
 
@@ -713,14 +796,31 @@ class Placer(object):
             return editors.PopupMenu(win, entries, (event.mouse_region_x, event.mouse_region_y, 0, 0), armed=True)
         return open_menu
 
-    def list_rows(self, item):
+    def list_items(self, item):
+        """The indices of the rows a list shows: its UIList's filter_items' (the Photos list: the
+        photo cameras of bpy.data.objects), else every one."""
         a = item.args
         coll = getattr(a["data"], a["prop"])
-        return len(coll), max(a.get("rows", 5), min(len(coll), 8))
+        cls = getattr(bpy.types, a["cls"], None)
+        indices = list(range(len(coll)))
+        filter_items = getattr(cls, "filter_items", None) if cls is not None else None
+        if filter_items is not None:
+            try:
+                flags, _order = filter_items(_UIListSelf(), self.context, a["data"], a["prop"])
+                if flags:
+                    indices = [i for i in indices if i < len(flags) and flags[i] & _UIListSelf.bitflag_filter_item]
+            except Exception:  # noqa: BLE001 - a filter that cannot run here: every row
+                pass
+        return indices
+
+    def list_rows(self, item):
+        """(rows, rows shown): the window's lists as long as they are, up to 8 (the app's)."""
+        count = len(self.list_items(item))
+        return count, min(count, 8)
 
     def list_height(self, item):
         count, shown = self.list_rows(item)
-        return shown * (self.row_h - 2 * self.s) + 4 * self.s
+        return shown * (self.row_h - 2 * self.s) + (4 * self.s if shown else 0.0)
 
     def list(self, item, rect, st):
         a = item.args
@@ -728,7 +828,8 @@ class Placer(object):
         data, coll = a["data"], getattr(a["data"], a["prop"])
         active_data, active_prop = a["active_data"], a["active_prop"]
         list_id = "%s.%s" % (a["cls"], a["prop"])
-        count, shown = self.list_rows(item)
+        rows = self.list_items(item)
+        count, shown = len(rows), min(len(rows), 8)
         x, y, w, h = rect
         self.widgets.append(uikit.Backdrop(self.wid("list", list_id), rect, "list"))
         first = max(0, min(self.actions["list_scroll"](list_id), count - shown))
@@ -736,7 +837,7 @@ class Placer(object):
         row_h = self.row_h - 2 * self.s
         top = y + h - 2 * self.s
         fake = _UIListSelf()
-        for index in range(first, min(count, first + shown)):
+        for index in rows[first:first + shown]:
             r = (x + 2 * self.s, top - row_h, w - 4 * self.s, row_h)
 
             def pick(ctx, index=index):

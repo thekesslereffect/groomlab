@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // MainWindow: the UI, graph presets and params driven by name (scripted runs and the tests).
 
+#include "icon_rail.h"
 #include "main_window_internal.h"
+#include "glass.h"
 
 #include <QScrollBar>
 #include <QTimer>
@@ -68,6 +70,7 @@ bool MainWindow::setUiMode(const QString& name) {
         report(tr("No UI mode '%1' (groom, look, cards, export)").arg(name));
         return false;
     }
+    if (modeSwitch_) modeSwitch_->setCurrent(static_cast<int>(mode));
     if (mode != shell_->mode()) {
         shell_->setMode(mode);
         // The brushes belong to Groom mode: elsewhere the mouse is the camera's. Cards mode shows
@@ -210,8 +213,16 @@ bool MainWindow::setUiLookTab(const QString& name) {
 
 bool MainWindow::setUiHover(const QString& name) {
     const QString n = name.toLower();
+    if (n == QStringLiteral("brush") || n == QStringLiteral("brush-radius")) {
+        // The brush over the view's middle: its ring (and falloff ring), and the radius drag's readout.
+        Viewport* view = host_->viewport();
+        const QPointF at(view->width() * 0.5, view->height() * 0.42);
+        const int radius = static_cast<int>(std::lround(brush_.settings().screenRadius));
+        view->previewBrush(at, n == QStringLiteral("brush") ? tr("\u2212  Reverse") : tr("Radius  %1 px").arg(radius), n == QStringLiteral("brush") ? 1 : 0);
+        return true;
+    }
     if (n != QStringLiteral("rail") && n != QStringLiteral("panels") && n != QStringLiteral("all") && n != QStringLiteral("labels")) {
-        report(tr("No hover state '%1' (rail, panels, all, labels)").arg(name));
+        report(tr("No hover state '%1' (rail, panels, all, labels, brush, brush-radius)").arg(name));
         return false;
     }
     // The tiles' names under their icons (not saved); the panels' names are their docks'.
@@ -633,6 +644,25 @@ void MainWindow::pasteGraph() {
     notify(tr("Pasted %1 (Ctrl+Z undoes it)").arg(QString::fromStdString(presetMessage(applied))));
 }
 
+bool MainWindow::foldUiDocks(const QString& which) {
+    const bool left = which == QStringLiteral("left") || which == QStringLiteral("both");
+    const bool right = which == QStringLiteral("right") || which == QStringLiteral("both");
+    if (!left && !right) {
+        report(tr("No dock '%1' to fold (left, right or both)").arg(which));
+        return false;
+    }
+    for (IconRail* rail : {left ? shell_->leftRail() : nullptr, right ? shell_->rightRail() : nullptr}) {
+        if (rail && !rail->collapsed() && rail->button(rail->current())) rail->button(rail->current())->click();
+    }
+    return true;
+}
+
+bool MainWindow::viewUiNode(const QString& name) {
+    if (!selectUiNode(name)) return false;
+    graph_->setViewedNode(name.toStdString());
+    return true;
+}
+
 bool MainWindow::selectUiNode(const QString& name) {
     if (!document_) {
         report(tr("No groom open: no node '%1' to select").arg(name));
@@ -734,7 +764,7 @@ QImage MainWindow::grabUi(const QImage& scene) {
         if (!w || w == host_ || w->isWindow() || !w->isVisible()) continue;
         w->render(&painter, w->pos(), QRegion(), QWidget::DrawWindowBackground | QWidget::DrawChildren);
     }
-    const QPoint at = host_->pos();
+    const QPoint at = host_->mapTo(this, QPoint());  // (the viewport's column holds it: its place in the window)
     const QSize pixels = host_->size() * ratio;
     QImage frame = scene.isNull() ? viewport_->grabFramebuffer() : scene;
     if (frame.isNull()) {

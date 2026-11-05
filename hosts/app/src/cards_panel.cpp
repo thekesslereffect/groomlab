@@ -24,17 +24,11 @@ using nlohmann::json;
 
 namespace {
 
-QLabel* dotLabel(const QColor& color, int size, QWidget* parent) {
-    auto* dot = new QLabel(parent);
-    dot->setFixedSize(size, size);
-    dot->setStyleSheet(QStringLiteral("background: %1; border-radius: %2px;").arg(color.name()).arg(size / 2));
-    return dot;
-}
-
 QLabel* captionLabel(const QString& text, QWidget* parent) {
+    // A row's label, as Properties' label column: regular, dim.
     auto* label = new QLabel(text, parent);
-    label->setFont(theme::uiFont(12, 700));
-    label->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textMuted().name()));
+    label->setFont(theme::uiFont(12, 400));
+    label->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
     return label;
 }
 
@@ -46,67 +40,70 @@ int lodCount() { return static_cast<int>(cardLodPresets().size()); }
 }  // namespace
 
 CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
-    setFixedWidth(316);
+    setMinimumWidth(280);  // docked: as wide as the dock
     // The rows scroll when the panel is placed shorter than them (a small screen, large text).
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     auto* body = new QWidget;
     outer->addWidget(new FitScrollArea(body, this));
-    auto* layout = new QVBoxLayout(body);
-    layout->setContentsMargins(18, 16, 18, 16);
+    // The panel on a card (the style sheet's tray), 12 px in, as every dock's sections; it ends
+    // where its content does.
+    auto* bodyLayout = new QVBoxLayout(body);
+    bodyLayout->setContentsMargins(12, 9, 18, 12);  // (where the Properties dock's cards end)
+    auto* sheet = new QWidget(body);
+    sheet->setObjectName(QStringLiteral("cardsSheet"));
+    if (!theme::glassy()) {
+        sheet->setProperty("role", "tray");
+        sheet->setAttribute(Qt::WA_StyledBackground, true);
+    }
+    bodyLayout->addWidget(sheet);
+    bodyLayout->addStretch(1);
+    auto* layout = new QVBoxLayout(sheet);
+    layout->setContentsMargins(12, 10, 12, 12);
     layout->setSpacing(10);
 
     // ---- The title row: the node to edit.
     auto* title = new QHBoxLayout();
     title->setSpacing(10);
-    title->addWidget(dotLabel(theme::blue(), 9, this));
-    auto* titleLabel = new QLabel(tr("Cards"), this);
-    titleLabel->setFont(theme::uiFont(15, 800));
-    titleLabel->setStyleSheet(QStringLiteral("color: %1;").arg(theme::text().name()));
+    // The mode switch names the mode: a section header, then the node it edits.
+    auto* titleLabel = new QLabel(tr("Game Cards"), this);
+    titleLabel->setProperty("role", "listTitle");
+    titleRowLabel_ = titleLabel;
     title->addWidget(titleLabel);
     title->addStretch(1);
     nodes_ = new QComboBox(this);
     nodes_->setToolTip(tr("The Cards node the panel edits"));
     nodes_->setMinimumWidth(110);
     title->addWidget(nodes_);
-    add_ = new RoundButton(this);
-    add_->setText(tr("Add Cards node"));
-    add_->setDiameter(30);
-    add_->setRadius(10.0);
-    add_->setPadding(12);
-    add_->setFontSize(12);
-    add_->setFill(theme::actionFill(theme::blue()), theme::actionFill(theme::blue()));
-    add_->setTextColor(theme::actionText(Qt::white), theme::actionText(Qt::white));
-    add_->setToolTip(tr("A Cards node between the groom and its output: the cards are made from every strand"));
-    title->addWidget(add_);
     layout->addLayout(title);
 
-    // ---- The preview switch.
-    auto* previewRow = new QHBoxLayout();
+    // ---- The preview switch (with a Cards node).
+    previewBox_ = new QWidget(this);
+    auto* previewRow = new QHBoxLayout(previewBox_);
+    previewRow->setContentsMargins(0, 0, 0, 0);
     previewRow->setSpacing(8);
-    preview_ = new Segmented(this);
+    preview_ = new Segmented(previewBox_);
     preview_->setItems({{tr("Strands"), theme::yellow(), theme::ink()}, {tr("Cards"), theme::blue(), Qt::white}});
     preview_->setBackground(theme::chip());
-    preview_->setSegmentHeight(30);
+    preview_->setSegmentHeight(theme::rowHeight());
     preview_->setPadding(3);
     preview_->setFontSize(12);
     preview_->setStretch(true);
     preview_->setToolTip(tr("What the viewport shows: the strands, or the cards made from them"));
     previewRow->addWidget(preview_, 1);
-    textures_ = new RoundButton(this);
+    textures_ = new RoundButton(previewBox_);
     textures_->setText(tr("Maps"));
-    textures_->setDiameter(30);
-    textures_->setRadius(10.0);
+    textures_->setDiameter(theme::rowHeight() + 6);
     textures_->setPadding(12);
     textures_->setFontSize(12);
-    textures_->setFontWeight(800);
-    textures_->setFill(theme::chip(), theme::emeraldChip());
-    textures_->setTextColor(theme::textMuted(), theme::emeraldSoft());
+    textures_->setFontWeight(600);
+    textures_->setFill(theme::chip(), theme::checkedFill(theme::emeraldChip()));
+    textures_->setTextColor(theme::textDim(), theme::checkedText(theme::emeraldSoft()));
     textures_->setCheckable(true);
     textures_->setChecked(true);
     textures_->setToolTip(tr("The cards with their baked maps (after a bake), else flat in the theme's card color"));
     previewRow->addWidget(textures_);
-    layout->addLayout(previewRow);
+    layout->addWidget(previewBox_);
 
     settings_ = new QWidget(this);
     auto* settingsLayout = new QVBoxLayout(settings_);
@@ -155,16 +152,31 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
 
     // ---- The stats and the bake.
     stats_ = new QLabel(this);
-    stats_->setFont(theme::uiFont(12, 600));
+    stats_->setFont(theme::uiFont(12, 400));
     stats_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textDim().name()));
     stats_->setWordWrap(true);
+    emptyIcon_ = emptyIcon(QStringLiteral("cards"), this);  // (the Cards page's own glyph)
+    layout->addWidget(emptyIcon_, 0, Qt::AlignHCenter);
     layout->addWidget(stats_);
-    auto* bakeRow = new QHBoxLayout();
+    // No Cards node yet: the one thing to do, full width.
+    add_ = new RoundButton(this);
+    add_->setText(tr("Make Cards"));
+    add_->setDiameter(30);
+    add_->setPadding(14);
+    add_->setFontSize(13);
+    add_->setFontWeight(600);
+    add_->setFill(theme::actionFill(theme::blue()), theme::actionFill(theme::blue()));
+    add_->setTextColor(theme::actionText(Qt::white), theme::actionText(Qt::white));
+    add_->setMinimumWidth(160);
+    add_->setToolTip(tr("A Cards node between the groom and its output: the cards are made from every strand"));
+    layout->addWidget(add_, 0, Qt::AlignHCenter);
+    bakeBox_ = new QWidget(this);
+    auto* bakeRow = new QHBoxLayout(bakeBox_);
+    bakeRow->setContentsMargins(0, 0, 0, 0);
     bakeRow->setSpacing(8);
-    bake_ = new RoundButton(this);
-    bake_->setText(tr("Bake maps"));
-    bake_->setDiameter(36);
-    bake_->setRadius(12.0);
+    bake_ = new RoundButton(bakeBox_);
+    bake_->setText(tr("Bake Maps"));
+    bake_->setDiameter(30);
     bake_->setPadding(14);
     bake_->setFontSize(13);
     bake_->setFill(theme::actionFill(theme::yellow()), theme::actionFill(theme::yellow()));
@@ -172,12 +184,12 @@ CardsPanel::CardsPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     bake_->setToolTip(tr("Bake the cards' maps (depth, coverage, tangent, attribute, color, occlusion, normal) as TGA files beside the "
                          "groom, in Unreal's hair card layout; the viewport shows them on the cards"));
     bakeRow->addWidget(bake_, 1);
-    bakeResolution_ = new QComboBox(this);
-    bakeResolution_->addItem(tr("node's"), 0);
-    for (const int size : {256, 512, 1024, 2048, 4096}) bakeResolution_->addItem(QStringLiteral("%1").arg(size), size);
-    bakeResolution_->setToolTip(tr("The bake's resolution (the node's atlasSize by default)"));
+    bakeResolution_ = new QComboBox(bakeBox_);
+    bakeResolution_->addItem(tr("Atlas size"), 0);
+    for (const int size : {256, 512, 1024, 2048, 4096}) bakeResolution_->addItem(QStringLiteral("%1 px").arg(size), size);
+    bakeResolution_->setToolTip(tr("The bake's resolution (Atlas size: the node's atlasSize)"));
     bakeRow->addWidget(bakeResolution_);
-    layout->addLayout(bakeRow);
+    layout->addWidget(bakeBox_);
     bakeStatus_ = new QLabel(this);
     bakeStatus_->setFont(theme::uiFont(12, 500));
     bakeStatus_->setStyleSheet(QStringLiteral("color: %1;").arg(theme::textMuted().name()));
@@ -283,6 +295,7 @@ std::string CardsPanel::lod() const {
 }
 
 void CardsPanel::setStats(std::size_t cards, std::size_t triangles, std::size_t textures, bool stale) {
+    if (!document_ || node_.empty()) return;  // refresh's message says what to do instead
     const QLocale locale(QLocale::English);
     QString text = tr("%1 cards · %2 triangles · %3 textures")
                        .arg(locale.toString(static_cast<qulonglong>(cards)), locale.toString(static_cast<qulonglong>(triangles)),
@@ -310,6 +323,13 @@ void CardsPanel::refresh() {
     nodes_->setVisible(!nodes.empty());
     add_->setVisible(document_ && nodes.empty());
     settings_->setVisible(!node_.empty());
+    previewBox_->setVisible(!node_.empty());
+    bakeBox_->setVisible(!node_.empty());
+    // The empty state centered (the header and the node picker go with the node).
+    stats_->setAlignment(node_.empty() ? Qt::AlignHCenter : Qt::AlignLeft);
+    emptyIcon_->setVisible(node_.empty() && !theme::glassy());
+    stats_->setContentsMargins(node_.empty() ? 18 : 0, 0, node_.empty() ? 18 : 0, node_.empty() ? 6 : 0);  // (a balanced block)
+    titleRowLabel_->setVisible(!node_.empty());
     bake_->setEnabled(!node_.empty());
     if (!node_.empty()) {
         for (Slider& s : sliders_) {
@@ -342,11 +362,12 @@ void CardsPanel::refresh() {
     if (!document_) {
         stats_->setText(tr("No groom open"));
     } else if (node_.empty()) {
-        stats_->setText(tr("Hair cards for game engines are made by a Cards node: add one to the graph."));
+        stats_->setText(tr("<p style='margin:0 0 6px 0; font-weight:600; color:%1'>No cards yet</p>"
+                           "<p style='margin:0'>Turn this groom into hair cards for Unreal, Unity or glTF.</p>").arg(theme::text().name()));
     }
     refreshAtlas();
     updating_ = false;
-    adjustSize();
+    if (!docked()) adjustSize();  // docked: the dock sizes it
 }
 
 void CardsPanel::refreshAtlas() {

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include <QRegularExpression>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
@@ -507,13 +508,21 @@ TEST(AppGroomTools, TheCardsBlocksInOrderPerTool) {
         tools.setTool(tool);
         EXPECT_EQ(card->blockTitles(), want) << tool;
         EXPECT_FALSE(card->isHidden()) << tool;
-        EXPECT_TRUE(tools.noToolLabel()->isHidden()) << tool;
         const groomlab::BrushEntry* e = brushEntry(tool);
+        // Over the card: what the tool does (the catalog's hint, its first sentence without its
+        // asides in parentheses); the whole hint in its tooltip when that cut it.
+        const QString hint = QString::fromStdString(e->hint);
+        const QString plain = QString(hint).remove(QRegularExpression(QStringLiteral(R"(\s*\([^()]*\))")));
+        EXPECT_TRUE(tools.noToolLabel()->text().startsWith(plain.left(16))) << tool;
+        EXPECT_FALSE(tools.noToolLabel()->text().contains(QLatin1Char('('))) << tool;
+        if (tools.noToolLabel()->text().size() < hint.size()) EXPECT_EQ(tools.noToolLabel()->toolTip(), hint) << tool;
         EXPECT_TRUE(tools.tile(tool)->toolTip().contains(QString::fromStdString(e->hint).left(20).toHtmlEscaped())) << tool << ": the tile has the hint";
     }
-    // The card is only the settings: no title, no hint line; the gestures are a brush tile's tip.
+    // The card's header: the tool's name and what it does (its first sentence); the gestures are a brush tile's tip.
     tools.setTool("comb");
-    EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr);
+    ASSERT_NE(card->findChild<QLabel*>(QStringLiteral("toolCardTitle")), nullptr);
+    EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardTitle"))->text(), QStringLiteral("Comb"));
+    EXPECT_FALSE(card->findChild<QLabel*>(QStringLiteral("toolCardHint"))->isHidden());
     EXPECT_EQ(card->findChild<QLabel*>(QStringLiteral("toolCardShort")), nullptr);
     EXPECT_TRUE(tools.tile("comb")->toolTip().contains(QStringLiteral("Page Up / Down")));
     EXPECT_FALSE(tools.tile("part")->toolTip().contains(QStringLiteral("Page Up / Down"))) << "not a brush";
@@ -577,9 +586,15 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     BrushPanel* card = tools.card();
     EXPECT_EQ(card->tool(), "paint") << "the Paint tab's card is Paint's";
     EXPECT_FALSE(card->isHidden());
-    EXPECT_EQ(card->blockTitles(), (std::vector<std::string>{"Brush", "Paint", "Applies to"}));
+    // What a stroke paints first (untitled under the header), then Brush, titled, with the stamp.
+    EXPECT_EQ(card->blockTitles(), (std::vector<std::string>{"Paint", "Brush", "Applies to"}));
     auto* block = card->findChild<CardBlock*>(QStringLiteral("paintBlock"));
     ASSERT_NE(block, nullptr);
+    auto* brushBlock = card->findChild<CardBlock*>(QStringLiteral("brushBlock"));
+    ASSERT_NE(brushBlock, nullptr);
+    EXPECT_TRUE(block->titleLabel()->isHidden());
+    EXPECT_FALSE(brushBlock->titleLabel()->isHidden());
+    EXPECT_TRUE(brushBlock->isAncestorOf(card->findChild<QWidget*>(QStringLiteral("alphaBox"))));
     EXPECT_TRUE(block->isAncestorOf(maps.paintControls())) << "Mode, Value + Fill, the color: the card's";
     EXPECT_FALSE(maps.isAncestorOf(maps.paintControls()));
     auto* fill = card->findChild<QPushButton*>(QStringLiteral("paintFill"));
@@ -588,13 +603,14 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     bool value = false;
     for (ValueSlider* s : block->findChildren<ValueSlider*>()) value = value || s->caption() == QStringLiteral("Value");
     EXPECT_TRUE(value);
-    // The Maps list over the card, right under the grid: the header's + New Map and Import glyphs,
-    // the picked map's box.
+    // The tool's card right under the grid, the tab's list under it; on Paint the Maps list first
+    // (what is painted, then how): the header's + New Map and Import glyphs, the picked map's box.
     EXPECT_EQ(maps.bar()->ids(), (std::vector<std::string>{"map.new", "map.import"}));
     QLayout* work = tools.card()->parentWidget()->layout();
     ASSERT_NE(work, nullptr);
-    for (const char* tab : {"tools", "paint", "correctives", "photos"})
-        EXPECT_LT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_") + QLatin1String(tab))), work->indexOf(tools.card())) << tab;
+    EXPECT_LT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_paint"))), work->indexOf(tools.card())) << "Paint: the maps first";
+    ASSERT_TRUE(tools.showTab(QStringLiteral("tools")));
+    EXPECT_GT(work->indexOf(tools.findChild<QWidget*>(QStringLiteral("list_tools"))), work->indexOf(tools.card())) << "Tools: the card first";
     // Photos: no card.
     ASSERT_TRUE(tools.showTab(QStringLiteral("photos")));
     EXPECT_TRUE(card->isHidden());
