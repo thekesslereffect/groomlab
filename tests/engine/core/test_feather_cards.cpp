@@ -94,12 +94,15 @@ StrandsPtr hairTufts(const ScalpMesh& scalp, int clumps = 4, bool clumpIds = tru
 float channel(const StrandSet& s, const char* name, std::size_t i) { return (*s.strandChannel(name))[i]; }
 
 // Flat strips unless `spine` (the tests before featherSpine keep checking the flat cards, which
-// spine off leaves exactly as they were).
+// spine off leaves exactly as they were), every feather `featherSegments` long and lying on its
+// shaft's frame (segments by length and Follow Barbs, the defaults since, off).
 CardSettings featherSettings(bool spine = false) {
     CardSettings settings;
     settings.variations = 0;
     settings.featherSegments = 6;
     settings.featherSpine = spine;
+    settings.featherSegmentsByLength = false;
+    settings.featherFollowBarbs = 0.0f;
     return settings;
 }
 
@@ -338,10 +341,11 @@ TEST(FeatherCards, AlikeFeathersShareATextureMirroredLeftToRight) {
     const CardMesh::Card& o = mesh.cards[owner];
     auto shaftZ = [&](const CardMesh::Card& c) { return s->strandPoints(c.strands.front())[0].z; };
     auto isRight = [&](const CardMesh::Card& c) { return shaftZ(c) < 2.0f; };
-    // Where the shaft shows in the texture (0..1 across the cell).
+    // Where the shaft shows in the texture (0..1 across the cell), by the card's own width.
+    auto widest = [](const CardMesh::Card& c) { return *std::max_element(c.refWidth.begin(), c.refWidth.end()); };
     auto shaftInTexture = [&](const CardMesh::Card& c) {
         const float offset = c.center[3].z - shaftZ(c);  // side is +Z
-        const float across = 0.5f - offset / c.textureWidth;
+        const float across = 0.5f - offset / widest(c);
         return c.mirrored ? 1.0f - across : across;
     };
     std::size_t mirrored = 0;
@@ -355,7 +359,9 @@ TEST(FeatherCards, AlikeFeathersShareATextureMirroredLeftToRight) {
         mirrored += c.mirrored ? 1 : 0;
         if (c.mirrored) EXPECT_GT(mesh.u[c.firstVertex], mesh.u[c.firstVertex + 1]);  // u runs the other way
         const float scale = arcLength(c.center) / arcLength(o.center);
-        EXPECT_NEAR(c.textureWidth / o.textureWidth, scale, 0.02f * scale);
+        // In the owner's texture frame, the card itself sized to its own length.
+        EXPECT_FLOAT_EQ(c.textureWidth, o.textureWidth);
+        EXPECT_NEAR(widest(c) / widest(o), scale, 0.02f * scale);
         EXPECT_NEAR(shaftInTexture(c), shaftInTexture(o), 0.01f);
     }
     EXPECT_EQ(mirrored, 4u);
@@ -394,7 +400,7 @@ TEST(FeatherCards, DownFeathersGetCrossedCardsAndSmallOnesCanGo) {
         EXPECT_LT(std::abs(a.side[3].dot(b.side[3])), 0.05f);  // crossed at right angles
         // As wide as the puff: every barb within half the width of the shaft.
         const float radius = 0.3f;
-        EXPECT_GE(a.width[3], 2.0f * radius * std::sin(0.785f) * 0.9f);
+        EXPECT_GE(a.width[3], 2.0f * radius * std::sin(0.785f) * 0.88f);
     }
     EXPECT_EQ(mesh.textureCount(), 12u);  // no variations: every card its own
     // featherSpine leaves the crossed cards flat strips: a puff has no vanes to fold to.

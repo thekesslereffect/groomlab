@@ -121,7 +121,8 @@ FurMaps furMaps(int size, int dilate = 8) {
 }
 
 // The 8-bit maps of the bake as they were before the full-precision maps came (recorded from
-// that code): the old maps, and so the "Unreal Hair Cards" preset, are the same bytes.
+// that code; the first again for the grid cards of PR #50): the old maps, and so the "Unreal Hair
+// Cards" preset, are the same bytes.
 TEST(CardMaps, TheOldBakeIsTheSameBytes) {
     const StrandsPtr s = clumpedFur();
     const auto plane = test::makePlane(16);
@@ -130,7 +131,7 @@ TEST(CardMaps, TheOldBakeIsTheSameBytes) {
     bake.size = 256;
     bake.scalp = plane.get();
     bake.dilate = 8;  // (the padding the old bake had: Full came after)
-    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0xe9a3a537932e37e6ull);
+    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0x0e0cf5db8107e91full);
     bake.size = 128;
     bake.dilate = 0;
     bake.occlusion = 0.0f;
@@ -173,13 +174,20 @@ TEST(CardMaps, TheUnrealPresetWritesTheBakesOwnFiles) {
     const auto preset = findCardMapPreset("Unreal Hair Cards");
     ASSERT_TRUE(preset);
     const std::vector<std::string> paths = writeCardMaps(*bake.maps, *preset, settings, (dir / "new").generic_u8string(), "fur");
-    ASSERT_EQ(paths.size(), 7u);
-    for (std::size_t i = 0; i < paths.size(); ++i) {
-        const std::string map = cardMapNames()[i];
-        EXPECT_EQ(fs::path(paths[i]).filename().u8string(), "fur_" + map + ".tga");
+    ASSERT_EQ(paths.size(), cardMapNames().size() + 1);  // and the world-space AO, in its own layout
+    auto written = [&](const std::string& map) {
+        for (const std::string& p : paths) {
+            if (fs::path(p).filename().u8string() == "fur_" + map + ".tga") return p;
+        }
+        return std::string();
+    };
+    EXPECT_FALSE(written("AO_world").empty());
+    for (const std::string& map : cardMapNames()) {
+        const std::string path = written(map);
+        ASSERT_FALSE(path.empty()) << map;
         const std::vector<std::uint8_t> a = fileBytes((dir / "old" / ("fur_" + map + ".tga")).u8string());
         ASSERT_FALSE(a.empty()) << map;
-        EXPECT_TRUE(a == fileBytes(paths[i])) << map;
+        EXPECT_TRUE(a == fileBytes(path)) << map;
     }
 }
 
@@ -189,7 +197,7 @@ TEST(CardMaps, TheUnrealPresetWritesTheBakesOwnFiles) {
 TEST(CardMaps, ThinnestStrandBakesStrandsToScaleAtZero) {
     const MeshPtr plane = test::makePlane(16);
     const StrandsPtr solid = furWithCards(plane, 1.0), scaled = furWithCards(plane, 0.0);
-    ASSERT_EQ(combineCardLayers(solid->cardLayers()).thinnestStrand, 0.0f);
+    ASSERT_EQ(combineCardLayers(solid->cardLayers()).thinnestStrand, 1.0f);
     ASSERT_EQ(combineCardLayers(scaled->cardLayers()).thinnestStrand, 0.0f);
     auto sum = [](const std::vector<std::uint8_t>& v) {
         double s = 0;
@@ -459,6 +467,7 @@ TEST(CardMaps, SupersamplingBakesBiggerAndBringsItDown) {
     const FurMaps f = furMaps(256);
     CardBakeSettings base;
     base.scalp = f.plane.get();
+    base.minStrandTexels = 1.0f;  // (0, to scale, by default: here to see it scale with the bake)
     CardMapExport settings;
     settings.supersample = 2;
     const CardBakeSettings bake = cardMapBakeSettings(base, settings, 256);

@@ -333,7 +333,7 @@ class AddonTest(unittest.TestCase):
                                                  directory=folder, name="head")
         self.assertEqual(result, {"FINISHED"})
         self.assertEqual(sorted(os.listdir(folder)), sorted("head_%s.png" % m for m in
-                                                            ("BaseColor", "Normal", "Mask", "Tangent", "Data")))
+                                                            ("AO_world", "BaseColor", "Normal", "Mask", "Tangent", "Data")))
         graph.remove_node(head, cards)
         # A .groom opened with its own scalp: the same groom.
         path = self.assert_saved_groom_is_cli(head, "files")

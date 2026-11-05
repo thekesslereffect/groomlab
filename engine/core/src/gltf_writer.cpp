@@ -470,14 +470,39 @@ int addCardsToGltf(GltfDocument& doc, const CardMesh& cards, const CardTextures&
         const std::vector<float>* worldU = &cards.worldU;
         const std::vector<float>* worldV = &cards.worldV;
         CardMesh unique;
+        // Laying the cards out again needs each card's stations (a mesh built by buildCards has
+        // them); one made by hand or without them keeps the per-card grid: across 0..1 by column,
+        // root (0) to tip (1).
+        const bool rebuildable = std::all_of(cards.cards.begin(), cards.cards.end(), [](const CardMesh::Card& c) {
+            return c.stations >= 2 && c.center.size() == static_cast<std::size_t>(c.stations) &&
+                   c.width.size() == static_cast<std::size_t>(c.stations);
+        });
         if (worldU->size() != n || worldV->size() != n) {
-            unique = cards;
-            layoutCardsUnique(unique, unique.padding);
-            worldU = &unique.u;
-            worldV = &unique.v;
+            if (rebuildable) {
+                unique = cards;
+                layoutCardsUnique(unique, unique.padding);
+                worldU = &unique.u;
+                worldV = &unique.v;
+            } else {
+                worldU = worldV = nullptr;
+            }
         }
-        p.uv1.resize(n);
-        for (std::size_t i = 0; i < n; ++i) p.uv1[i] = {(*worldU)[i], 1.0f - (*worldV)[i]};
+        p.uv1.assign(n, {0.0f, 0.0f});
+        if (worldU && worldU->size() == n && worldV->size() == n) {
+            for (std::size_t i = 0; i < n; ++i) p.uv1[i] = {(*worldU)[i], 1.0f - (*worldV)[i]};
+        } else {
+            for (const CardMesh::Card& card : cards.cards) {
+                const int across = std::max(card.across, 1);
+                for (int k = 0; k < card.stations; ++k) {
+                    const float along = card.stations > 1 ? static_cast<float>(k) / static_cast<float>(card.stations - 1) : 0.0f;
+                    for (int e = 0; e <= across; ++e) {
+                        const std::size_t i = card.firstVertex + static_cast<std::size_t>(k) * static_cast<std::size_t>(across + 1) +
+                                              static_cast<std::size_t>(e);
+                        if (i < n) p.uv1[i] = {static_cast<float>(e) / static_cast<float>(across), along};
+                    }
+                }
+            }
+        }
     }
 
     const std::vector<std::uint8_t> rgba = interleave(textures.size, textures.color, textures.coverage);

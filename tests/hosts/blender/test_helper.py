@@ -579,7 +579,8 @@ class GroomTest(HelperTestCase):
         self.assertIn("normal.y", listed["sources"]["channels"])
         r = self.h.call("bake_card_maps", session=s, directory=self.tmp, name="head", resolution=64)
         self.assertEqual([os.path.basename(p) for p in r["paths"]],
-                         ["head_%s.tga" % m for m in ("Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "Normal")])
+                         ["head_%s.tga" % m for m in ("Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "AO_world",
+                                                      "Normal")])
         self.assertEqual(r["size"], 64)
         self.assertGreater(r["cards"], 0)
         mine = {"name": "Helper Packed", "files": [{"map": "Pack", "channels": ["depth", "root", "id", "coverage"]}]}
@@ -2295,7 +2296,7 @@ class PipelineTest(HelperTestCase):
         r = self.call("export", session=s, format="gltfCards", path=os.path.join(self.tmp, "lods.gltf"), name="head",
                       resolution=32, lods=["mid", "low"], cap=False)
         self.assertEqual(r["meshes"], ["head_mid", "head_low"])
-        self.assertEqual(len(r["files"]), 2 + 6)  # the .gltf, its .bin, three PNGs a mesh
+        self.assertEqual(len(r["files"]), 2 + 8)  # the .gltf, its .bin, four PNGs a mesh (one the world-space AO)
         self.assertEqual(self.call("get_graph", session=s)["graph"], graph, "the levels of detail are baked from copies")
         self.assertEqual(self.h.request("export", session=s, format="gltfCards", path=glb, lods=["huge"])["error"]["code"],
                          "bad_request")
@@ -2303,8 +2304,8 @@ class PipelineTest(HelperTestCase):
         out = os.path.join(self.tmp, "unreal")
         r = self.call("export", session=s, format="unrealCards", directory=out, name="head", resolution=64)
         self.assertEqual(sorted(os.path.basename(p) for p in r["maps"]),
-                         sorted(["head_%s.tga" % m for m in ("Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "Normal",
-                                                              "ScalpColor", "ScalpCoverage")]))
+                         sorted(["head_%s.tga" % m for m in ("Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "AO_world",
+                                                              "Normal", "ScalpColor", "ScalpCoverage")]))
         with open(r["manifest"]) as f:
             manifest = json.load(f)
         self.assertEqual(manifest["mesh"], "head_cards.fbx")

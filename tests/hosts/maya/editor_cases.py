@@ -939,10 +939,10 @@ class GraphEditorTest(unittest.TestCase):
             try:
                 self.assertEqual(panel.groom, self.groom)
                 self.assertEqual(panel.preset.currentText(), "Unreal Hair Cards")
-                self.assertEqual(panel.table.rowCount(), 7)
+                self.assertEqual(panel.table.rowCount(), 8)  # the seven maps and the world-space AO
                 self.assertEqual(panel.format.currentData(), "tga")
                 panel.preset.setCurrentIndex(panel.preset.findText("Unity HDRP Hair"))
-                self.assertEqual(panel.table.rowCount(), 5)
+                self.assertEqual(panel.table.rowCount(), 6)
                 self.assertEqual(panel.format.currentData(), "png")
                 self.assertEqual(panel.normal.currentData(), "opengl")
                 # Edited: Custom.
@@ -957,9 +957,9 @@ class GraphEditorTest(unittest.TestCase):
                 panel.name.setText("ui")
                 paths = panel.export()
                 self.assertEqual(sorted(os.path.basename(p) for p in paths),
-                                 sorted("ui_%s.png" % m for m in ("BaseColor", "Normal", "Mask", "Tangent", "Data")))
+                                 sorted("ui_%s.png" % m for m in ("BaseColor", "Normal", "Mask", "AO_world", "Tangent", "Data")))
                 self.assertTrue(panel.preview.isVisibleTo(panel), "the maps as thumbnails")
-                self.assertIn("Wrote 5 maps", panel.status.text())
+                self.assertIn("Wrote 6 maps", panel.status.text())
                 # Saved as a preset, then deleted.
                 panel.save_name.setText("UI Packed")
                 self.assertTrue(panel.save_preset())
