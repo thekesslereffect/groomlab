@@ -67,7 +67,7 @@ std::vector<std::string> splitPaths(const std::string& list) {
     return out;
 }
 
-enum Source { kDepth, kCoverage, kTangent, kFlow, kNormal, kColor, kAo, kRoot, kSeed, kId, kRootUv, kSpecular, kTranslucency, kIridescence };
+enum Source { kDepth, kCoverage, kTangent, kFlow, kNormal, kColor, kAo, kAoWorld, kRoot, kSeed, kId, kRootUv, kSpecular, kTranslucency, kIridescence };
 
 // How far the translucency's strand count is softened: a few texels at 2K, scaled with the size.
 int translucencyRadius(int size) { return std::max(1, static_cast<int>(std::lround(4.0f * static_cast<float>(size) / 2048.0f))); }
@@ -128,6 +128,8 @@ const std::vector<CardMapSource>& cardMapSources() {
         {"normal", "Normal", 3, "xyz", false, "Tangent-space normal of the strands as round fibers: out of the card at a strand's middle, turning to its sides at its edges"},
         {"color", "Color (albedo)", 3, "rgb", true, "The strands' color (sRGB in an sRGB file, else linear)"},
         {"ao", "Ambient occlusion", 1, "x", false, "How open the hair is (1) or how much hair lies further out (darker)"},
+        {"ao_world", "Ambient occlusion (world)", 1, "x", false,
+         "Neighbour and world occlusion for the mesh's unique aoWorld UV set (1 open, darker where other cards occlude it)"},
         {"root", "Root to tip", 1, "x", false, "0 at each strand's root, 1 at its tip (Unreal's CoordU)"},
         {"seed", "Seed (per strand)", 1, "x", false, "A random value per strand (Unreal's Seed)"},
         {"id", "ID (per clump)", 1, "x", false, "A random value per clump (the strands' clumpId; per card without one)"},
@@ -218,6 +220,7 @@ CardTextures cardTexturesFromMaps(const CardMaps& m) {
     t.coverage.resize(pixels);
     t.depth.resize(pixels);
     t.occlusion.resize(pixels);
+    if (m.aoWorld.size() == pixels) t.worldOcclusion.resize(pixels);
     t.tangent.resize(pixels * 3);
     t.normal.resize(pixels * 3);
     t.color.resize(pixels * 3);
@@ -228,6 +231,7 @@ CardTextures cardTexturesFromMaps(const CardMaps& m) {
             t.coverage[p] = to8(m.coverage[p]);
             t.depth[p] = to8(m.depth[p]);
             t.occlusion[p] = to8(m.ao[p]);
+            if (!t.worldOcclusion.empty()) t.worldOcclusion[p] = to8(m.aoWorld[p]);
             for (std::size_t k = 0; k < 3; ++k) {
                 t.tangent[p * 3 + k] = to8(0.5f + 0.5f * m.tangent[p * 3 + k]);
                 const float normal = m.normal[p * 3 + k];
@@ -258,7 +262,11 @@ CardMaps downsampleCardMaps(const CardMaps& m, int factor) {
     const auto n = static_cast<std::size_t>(out.size), big = static_cast<std::size_t>(m.size);
     const std::size_t pixels = n * n;
     std::vector<std::vector<float>*> scalars = {&out.depth, &out.ao, &out.rootU, &out.rootV, &out.seed, &out.root, &out.id, &out.iridescence};
-    const std::vector<const std::vector<float>*> from = {&m.depth, &m.ao, &m.rootU, &m.rootV, &m.seed, &m.root, &m.id, &m.iridescence};
+    std::vector<const std::vector<float>*> from = {&m.depth, &m.ao, &m.rootU, &m.rootV, &m.seed, &m.root, &m.id, &m.iridescence};
+    if (m.aoWorld.size() == m.ao.size()) {
+        scalars.push_back(&out.aoWorld);
+        from.push_back(&m.aoWorld);
+    }
     for (auto* v : scalars) v->assign(pixels, 0.0f);
     out.coverage.assign(pixels, 0.0f);
     out.layers.assign(pixels, 0.0f);
@@ -345,40 +353,44 @@ const std::vector<CardMapPreset>& builtinCardMapPresets() {
         // reads them), plus color, occlusion and the normal. The bake's own files, byte for byte.
         preset("Unreal Hair Cards",
                "Unreal's hair card textures, as Bake Maps writes them: Depth, Coverage, Tangent, Attribute (root U, root V, "
-               "seed, root to tip), Color (with the iridescence in alpha when the groom has any), AO and Normal (DirectX)",
+                "seed, root to tip), Color (with the iridescence in alpha when the groom has any), AO, AO_world and Normal (DirectX)",
                "tga", "directx",
                {file("Depth", {"depth"}), file("Coverage", {"coverage"}), file("Tangent", {"tangent.x", "tangent.y", "tangent.z"}),
                 file("Attribute", {"rootuv.u", "rootuv.v", "seed", "root"}),
                 file("Color", {"color.r", "color.g", "color.b", "iridescence?"}), file("AO", {"ao"}),
+                file("AO_world", {"ao_world"}),
                 file("Normal", {"normal.x", "normal.y", "normal.z"})}),
         // Four textures for a hair card material of your own (Hair shading model, Masked): the
         // color with occlusion in alpha (sRGB on; alpha stays linear), the data (sRGB off), the
         // tangent and the normal.
         preset("Unreal (packed)",
-               "Four textures for an Unreal hair card material of your own: Color (RGB) + AO (A), Data (depth, root to "
-               "tip, seed, coverage: R G B A, sRGB off), Tangent and Normal (DirectX)",
+               "An Unreal hair card material layout: Color (RGB) + local AO (A), AO_world for the unique aoWorld UV set, "
+               "Data (depth, root to tip, seed, coverage: R G B A, sRGB off), Tangent and Normal (DirectX)",
                "tga", "directx",
-               {file("Color", {"color.r", "color.g", "color.b", "ao"}), file("Data", {"depth", "root", "seed", "coverage"}),
+               {file("Color", {"color.r", "color.g", "color.b", "ao"}), file("AO_world", {"ao_world"}),
+                file("Data", {"depth", "root", "seed", "coverage"}),
                 file("Tangent", {"tangent.x", "tangent.y", "tangent.z"}), file("Normal", {"normal.x", "normal.y", "normal.z"})}),
         // Unity HDRP's Hair shader graph: base color and alpha, a normal map (OpenGL's green), the
         // Lit mask map's layout (metallic 0, AO, detail: root to tip, smoothness: the specular),
         // the strand direction, and the rest for the graph (depth, ID, thickness).
         preset("Unity HDRP Hair",
                "Unity HDRP Hair: BaseColor (RGB, alpha coverage), Normal (OpenGL), Mask (0, AO, root to tip, smoothness from "
-               "the specular), Tangent (the strand direction) and Data (depth, clump ID, translucency as thickness)",
+               "the specular), AO_world for the unique aoWorld UV set, Tangent (the strand direction) and Data "
+               "(depth, clump ID, translucency as thickness)",
                "png", "opengl",
                {file("BaseColor", {"color.r", "color.g", "color.b", "coverage"}),
                 file("Normal", {"normal.x", "normal.y", "normal.z"}), file("Mask", {"0", "ao", "root", "specular"}),
+                file("AO_world", {"ao_world"}),
                 file("Tangent", {"tangent.x", "tangent.y", "tangent.z"}), file("Data", {"depth", "id", "translucency"})}),
         // Every map its own file (FiberShop's simple mode).
         preset("Separate maps (all)",
-               "Every map its own file: Albedo, Alpha, Depth, Direction (flow), Tangent, Normal, Root, ID, Seed, AO, Specular, "
+               "Every map its own file: Albedo, Alpha, Depth, Direction (flow), Tangent, Normal, Root, ID, Seed, AO, AO_world, Specular, "
                "Translucency and Root UV (Iridescence when the groom has any)",
                "png", "opengl",
                {file("Albedo", {"color.r", "color.g", "color.b"}), file("Alpha", {"coverage"}), file("Depth", {"depth"}),
                 file("Direction", {"flow.x", "flow.y"}), file("Tangent", {"tangent.x", "tangent.y", "tangent.z"}),
                 file("Normal", {"normal.x", "normal.y", "normal.z"}), file("Root", {"root"}), file("ID", {"id"}), file("Seed", {"seed"}),
-                file("AO", {"ao"}), file("Specular", {"specular"}), file("Translucency", {"translucency"}),
+                file("AO", {"ao"}), file("AO_world", {"ao_world"}), file("Specular", {"specular"}), file("Translucency", {"translucency"}),
                 file("RootUV", {"rootuv.u", "rootuv.v"}), file("Iridescence", {"iridescence?"})}),
     };
     return presets;
@@ -611,7 +623,7 @@ CardBakeSettings cardMapBakeSettings(const CardBakeSettings& base, const CardMap
     CardBakeSettings out = base;
     const int factor = cardMapSupersample(resolution, settings.supersample);
     out.size = resolution * factor;
-    out.dilate = settings.padding >= 0 ? settings.padding * factor : -1;  // (-1: Full, to the neighbouring cards)
+    out.dilate = settings.padding >= 0 ? settings.padding * factor : base.dilate;
     out.minStrandTexels = base.minStrandTexels * static_cast<float>(factor);
     return out;
 }
@@ -684,6 +696,7 @@ std::vector<float> packFile(const CardMaps& maps, const CardMapFile& file, const
                 }
                 case kColor: v = srgb ? linearToSrgb(maps.color[p * 3 + k]) : maps.color[p * 3 + k]; break;
                 case kAo: v = maps.ao[p]; break;
+                case kAoWorld: v = maps.aoWorld.empty() ? 1.0f : maps.aoWorld[p]; break;
                 case kRoot: v = maps.root[p]; break;
                 case kSeed: v = maps.seed[p]; break;
                 case kId: v = maps.id[p]; break;

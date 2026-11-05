@@ -73,11 +73,15 @@ struct CardSettings {
     int layers = 1;
     // Fit: card width per station covers every member strand across it (plus `margin` of the
     // width kept clear each side, so the bake never touches the cell's edges) and the length
-    // covers the longest member. `fitTwist` (0..1) turns each station's plane to the strands'
-    // principal direction across (a PCA of their offsets), so the card lies the way they do;
+    // covers the longest member. `fitTwist` (0..1) rotates the whole card, including its freely
+    // turning root row, toward the strands' principal direction across (a PCA of their offsets);
     // 0 keeps the rotation-minimizing frame facing out of the scalp (the old look).
     float margin = 0.1f;
     float fitTwist = 1.0f;
+    // How much a hair card uses one best-fit plane along its centerline: 1 removes the
+    // station-to-station twist that makes non-planar quads show a wavy diagonal, 0 follows the
+    // rotation-minimizing frame. The overall plane still follows fitTwist's card-wide rotation.
+    float flatten = 1.0f;
     // Ruffle (0..1): alternate cards of a clump push in and out along their normal (a share of
     // their width) and turn a little the other way, so layered cards never lie in one plane
     // (no z-fighting, more volume).
@@ -91,7 +95,7 @@ struct CardSettings {
     Ramp widthProfile = Ramp::constant(1.0f);  // width along the card, root to tip (taper)
     float twist = 0.0f;        // degrees the card turns around its length, root to tip (on top of the fit)
     float curvature = 0.0f;    // 0 flat, 1 a half-tube bowed out of the scalp (less flat-looking cards)
-    int widthSegments = 1;     // quads across (curvature needs 2 or more)
+    int widthSegments = 2;     // quads across; one center edge loop by default
     float minWidth = 0.002f;   // scene units
     int minStrands = 3;        // smaller groups make no card (their strands are flyaways)
     // Cards per group of strands: a single ribbon, or `crossCount` crossed around
@@ -110,7 +114,7 @@ struct CardSettings {
     bool braids = true;
     // Segments by length: each card gets segments in proportion to its length
     // (`segments` for the longest, at least `minSegments`); the UVs don't change.
-    bool segmentsByLength = false;
+    bool segmentsByLength = true;
     int minSegments = 2;
     // Vertex normals: true bends them to the hair volume (out from the scalp
     // under each station), so cards shade like the strands around them instead
@@ -135,6 +139,9 @@ struct CardSettings {
     enum class FeatherMode { Auto, PerFeather, PerVane, Off };
     FeatherMode featherMode = FeatherMode::Auto;
     int featherSegments = 6;
+    bool featherSegmentsByLength = true;
+    int featherMinSegments = 2;
+    float featherFollowBarbs = 0.5f;
     float featherMinLength = 0.0f;
     // A spine down each vaned feather's card: a column of vertices on the shaft (each segment two
     // quads, 4 x featherSegments triangles a card), each half folding out of the vane plane to
@@ -151,8 +158,8 @@ struct CardSettings {
     // Separation: cards closer than a gap to another card, or passing through it, are pushed apart
     // along their normals (separateCards), roots held. The gap is a share of the narrower card's
     // width: `separation` for hair cards (0: none), `featherSeparation` for feather cards (the
-    // larger share between a hair and a feather card), in `separationIterations` passes. Only the mesh moves (Card::refShift): the texture,
-    // baked from where the strands are, stays as it is.
+    // larger share between a hair and a feather card), in `separationIterations` passes. The
+    // texture is baked against the separated final card so it lines up with the mesh.
     float separation = 0.0f;
     float featherSeparation = 0.0f;
     int separationIterations = 8;
@@ -167,7 +174,10 @@ constexpr float kCardTintMax = 2.0f;
 struct CardMesh {
     std::vector<Vec3f> positions;        // (widthSegments + 1) per station, across the card
     std::vector<Vec3f> normals;
-    std::vector<float> u, v;             // atlas UVs per vertex
+    std::vector<float> u, v;             // shared-variation atlas UVs per vertex
+    // Unique, non-overlapping UVs for every card. AO_world uses these so neighbouring cards can
+    // occlude one another without changing the reusable variation textures above.
+    std::vector<float> worldU, worldV;
     // Per vertex, linear RGB: the color the card's own strands have there over its texture's
     // (Card::colors), 0..kCardTintMax, 1 none. A host multiplies the texture's color by it; the
     // exports carry it as a vertex color of half its value (1 = twice the texture).
@@ -192,11 +202,13 @@ struct CardMesh {
         // Per reference station, how far the card's mesh moved off its strands to clear the cards
         // around it (separateCards; empty: none): the stations carry it, the texture doesn't.
         std::vector<Vec3f> refShift;
-        // The card's texture-space width: the widest station (refWidth's max). The texture
-        // keeps this one scale along the whole card: a point at offset x across a station
-        // maps to u = 0.5 + x / textureWidth of the cell, so narrower stations (a taper)
-        // show the middle band of the texture and a straight strand bakes straight.
+        // The card's widest station, used to size its atlas cell and as the bake's stable frame.
+        // Hair UV rows are compensated relative to that card's own widest final row, so a
+        // tip-only taper leaves the root on its cell boundaries and cannot enter adjacent cells.
         float textureWidth = 0.0f;
+        // Width at the reference stations of the card this texture was baked from. For a
+        // shared or reapplied cell this can differ from refWidth.
+        std::vector<float> textureRefWidth;
         std::vector<float> width;        // per station
         std::vector<std::size_t> strands;  // member strand indices (into `source`)
         int clump = -1;                  // the clump (cluster) the card was made from (-1: a flyaway or braid card)
@@ -219,6 +231,17 @@ struct CardMesh {
         // (fold*) and at the fixed resolution (refFold*); right is the half toward +side.
         bool spine = false;
         float spineOffset = 0.0f;
+        // Per final/reference station and vane, how far the feather's own outer barbs travel
+        // along its curved shaft. Feather-spine rows use the two measured profiles independently
+        // so an asymmetric feather's cross edges follow both vane directions.
+        std::vector<float> featherBarbShiftRight, featherBarbShiftLeft;
+        std::vector<float> refFeatherBarbShiftRight, refFeatherBarbShiftLeft;
+        // Normalized positions of the final rows along the reference card. Hair is uniform;
+        // feathers distribute rows toward outline changes and the root.
+        std::vector<float> stationAlong;
+        // Final feather outer-edge samples, equally spaced by each silhouette's physical
+        // arc length. The shaft samples solve Follow Barbs against these fixed edge samples.
+        std::vector<float> featherEdgeAlongRight, featherEdgeAlongLeft;
         std::vector<float> foldRight, foldLeft, refFoldRight, refFoldLeft;
         int across = 1;                  // quads across
         float curvature = 0.0f;
@@ -261,7 +284,8 @@ struct CardMesh {
     std::vector<std::string> nodes;
     float padding = 0.004f;              // atlas units between textures (layoutCards)
     int atlasSize = 0;                   // suggested bake resolution (0: none)
-    float thinnestStrand = 1.0f;         // the narrowest a strand bakes, in texels (CardBakeSettings::minStrandTexels)
+    float thinnestStrand = 0.0f;         // the narrowest a strand bakes, in texels (CardBakeSettings::minStrandTexels)
+    bool dilate = true;                  // bake values outside coverage: true infinite, false none
     std::size_t vertexCount() const { return positions.size(); }
     std::size_t triangleCount() const { return quads.size() / 2; }
     std::size_t textureCount() const;    // cards with a texture of their own
@@ -304,6 +328,8 @@ std::vector<CardNodeSummary> summarizeCardNodes(const CardMesh& mesh, const Stra
 // Packs the cards' textures into the atlas (by their size in the world) and
 // builds the vertices, normals, UVs and quads. Rebuilds from scratch.
 void layoutCards(CardMesh& mesh, float padding);
+// Gives every card its own cell (no shared variations) and rebuilds its vertices and UVs.
+void layoutCardsUnique(CardMesh& mesh, float padding);
 
 // makeCards + layoutCards.
 CardMesh buildCards(const StrandSet& strands, const ScalpMesh* scalp, const CardSettings& settings);
@@ -320,6 +346,7 @@ struct CardAtlas {
         float cell[4] = {0, 0, 1, 1};        // u0, v0, u1, v1
         bool mirrored = false;
         float textureWidth = 0.0f;           // the card's texture-space width at the bake
+        std::vector<float> textureRefWidth;   // baked card's taper, root to tip
         bool flyaway = false;
         bool feather = false;                // a feather's card (a card with no strands in common takes one of its kind)
         // The mean color of the strands the cell was baked from, root to tip (Card::colors):
@@ -354,12 +381,12 @@ struct CardBakeSettings {
     const ScalpMesh* scalp = nullptr;             // root UVs (attribute map); null: zeros
     std::array<float, 3> color = {0.3f, 0.2f, 0.12f};  // linear, for strands without melanin channels
     float strandWidth = 0.0f;                     // scene units; 0: the strands' own (or a fallback)
-    // The narrowest a strand bakes, in texels, at full coverage: a viewport draws every strand
-    // at least a pixel wide and opaque, and a real hair's width is a fraction of a texel, so
-    // strands baked to scale came out faint, and cut out (coverage under the cards' cutoff)
-    // where the strands' own drawing is solid. 0: to scale (thinner ones fainter).
-    float minStrandTexels = 1.0f;
+    // The narrowest a strand bakes, in texels, at full coverage. 0 preserves the upstream Width
+    // node exactly: subpixel strands use antialiased fractional coverage and retain their taper.
+    // Raise this only when an alpha-tested material deliberately needs minimum solid pixels.
+    float minStrandTexels = 0.0f;
     float occlusion = 1.0f;                       // ambient occlusion strength (0: none)
+    bool worldOcclusion = false;                  // direct bake mode: one global field from the original groom
     // Texels the values (every map but the coverage) spread past the strands, so mip maps and
     // filtering at the cards' edges don't pull in the empty texels' (mip padding). -1: all the way
     // (two averaged rings, then each empty texel takes its nearest strand texel's values), so
@@ -396,6 +423,7 @@ struct CardTextures {
     std::vector<std::uint8_t> attribute;
     std::vector<std::uint8_t> color;      // 3: base color (sRGB)
     std::vector<std::uint8_t> occlusion;  // 1: ambient occlusion (255: open)
+    std::vector<std::uint8_t> worldOcclusion;  // 1: low-poly card-to-card AO in CardMesh::worldU/worldV
     // 1: the strands' iridescence (FeatherColor's channel: 255 full); empty when they have none.
     // Written as the Color map's alpha (Unity's: its Mask map's red, the metallic it leaves at 0).
     std::vector<std::uint8_t> iridescence;

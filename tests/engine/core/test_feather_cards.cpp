@@ -938,15 +938,16 @@ TEST(CardPresets, OneTableForEveryHost) {
     EXPECT_THROW(cardNodeKind(graph, "nothing"), std::invalid_argument);
 }
 
-// A card bake as every host names, writes and records it (card_files.h): the seven maps of
-// Unreal's layout, the atlas and the preview at <folder>/<name>_, a groom file's at
+// A card bake as every host names, writes and records it (card_files.h): Unreal's seven shared
+// maps, the unique AO_world map, the atlas and the preview at <folder>/<name>_, a groom file's at
 // <stem>_cards/<stem>_ beside it, and the cardMaps text formatted, parsed and moved.
 TEST(CardFiles, OneLayoutAndRecordForEveryHost) {
     EXPECT_EQ(cardMapNames(), (std::vector<std::string>{"Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "Normal"}));
     const CardBakePaths at = CardBakePaths::in("C:\\bakes\\hair", "hair");
     EXPECT_EQ(at.prefix, "C:/bakes/hair/hair_");
     EXPECT_EQ(at.map("Color"), "C:/bakes/hair/hair_Color.tga");
-    EXPECT_EQ(at.files().size(), 8u);
+    EXPECT_EQ(at.map("AO_world"), "C:/bakes/hair/hair_AO_world.tga");
+    EXPECT_EQ(at.files().size(), 9u);
     EXPECT_EQ(at.files().back(), at.atlas());
     EXPECT_EQ(at.preview(), "C:/bakes/hair/hair_Preview.png");
     EXPECT_EQ(groomFileCardBakePrefix("bob"), "bob_cards/bob_");
@@ -954,7 +955,8 @@ TEST(CardFiles, OneLayoutAndRecordForEveryHost) {
 
     const std::string text = formatCardMaps("groomlab/s/cards/hair/hair_", "cards:12", 3);
     EXPECT_EQ(text, "Color=groomlab/s/cards/hair/hair_Color.tga;Coverage=groomlab/s/cards/hair/hair_Coverage.tga;"
-                    "AO=groomlab/s/cards/hair/hair_AO.tga;Atlas=groomlab/s/cards/hair/hair_Atlas.json;Strands=cards:12;Bake=3");
+                    "AO=groomlab/s/cards/hair/hair_AO.tga;AOWorld=groomlab/s/cards/hair/hair_AO_world.tga;"
+                    "Atlas=groomlab/s/cards/hair/hair_Atlas.json;Strands=cards:12;Bake=3");
     EXPECT_EQ(formatCardMaps("x_", "", 0).find("Strands"), std::string::npos);
     EXPECT_EQ(cardMapsPrefix(text), "groomlab/s/cards/hair/hair_");
     EXPECT_EQ(cardMapsPrefix(""), "");

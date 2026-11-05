@@ -10,7 +10,7 @@
 // sources are those, plus a few derived from them (flow, specular, translucency): see
 // cardMapSources() for each one's meaning and channels. bakeCardTextures (cards.h) is this bake
 // quantized to 8 bits in Unreal's hair card layout, so the old maps and the "Unreal Hair Cards"
-// preset written as 8-bit TGA are the same bytes.
+// preset written as 8-bit TGA uses those maps plus AO_world from the unique aoWorld UV layout.
 //
 // A preset (CardMapPreset) is a list of output files, each with one to four channels (R, G, B, A),
 // each channel a source's channel ("depth", "tangent.x", "color.r"), a constant ("0", "1",
@@ -43,6 +43,9 @@ struct CardMaps {
     std::vector<float> coverage;       // 0..1 opacity
     std::vector<float> depth;          // 0..1: 0.5 on the card plane, higher in front
     std::vector<float> ao;             // 0..1 (1: open)
+    // Low-poly card-to-card occlusion in the unique aoWorld UV layout. Empty for a direct
+    // single-layout bake; bakeCardMapsInMemory fills it from the final card surfaces.
+    std::vector<float> aoWorld;
     std::vector<float> rootU, rootV;   // the strands' root UV on the scalp (0 without one)
     std::vector<float> seed;           // a random value per strand (0..1)
     std::vector<float> root;           // 0 at the root .. 1 at the tip, along each strand
@@ -56,6 +59,11 @@ struct CardMaps {
 
 // Renders the strands into the cards' atlas (see bakeCardTextures, cards.h, for the settings).
 CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const CardBakeSettings& settings);
+// World AO received independently by every final card, from one global density field built from
+// the original pre-card groom. The result covers the full card so its material's coverage map is
+// the single silhouette and the two maps cannot become misaligned.
+std::vector<float> bakeStrandWorldAo(const StrandSet& strands, const CardMesh& cards, int size,
+                                    float occlusion, int dilate);
 // The maps a `factor` times smaller (a box filter: coverage averaged, the other values weighted
 // by it, directions renormalized): a supersampled bake brought down to the export's size.
 CardMaps downsampleCardMaps(const CardMaps& maps, int factor);
@@ -71,7 +79,7 @@ struct CardMapSource {
     bool color = false;       // color data (sRGB in an sRGB file); else data, always linear
     std::string description;
 };
-// depth, coverage, tangent, flow, normal, color, ao, root, seed, id, rootuv, specular,
+// depth, coverage, tangent, flow, normal, color, ao, ao_world, root, seed, id, rootuv, specular,
 // translucency, iridescence.
 const std::vector<CardMapSource>& cardMapSources();
 
@@ -83,7 +91,7 @@ struct CardMapChannel {
     bool invert = false;
     bool optional = false;    // "?": left out when the groom has none of it
 };
-// Parses "depth", "tangent.y", "color.g", "rootuv.v", "0", "1", "0.5", "1-ao", "iridescence?".
+// Parses "depth", "tangent.y", "color.g", "rootuv.v", "ao_world", "0", "1", "0.5", "1-ao", "iridescence?".
 // Channel letters: r g b a, x y z w or u v, by position. Throws std::invalid_argument saying why.
 CardMapChannel parseCardMapChannel(const std::string& text);
 // Every channel name a packing table offers: each one-channel source, each channel of the others

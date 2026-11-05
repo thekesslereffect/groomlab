@@ -2222,6 +2222,30 @@ MStatus GroomShape::computeCards(MDataBlock& data, Lane& lane) {
                         vs, meshObject, &status);
             if (status) {
                 mesh.assignUVs(counts, connects);  // UV ids follow the vertex ids
+                // A second, unique atlas for AO_world: every card owns a non-overlapping shell,
+                // even when map1 deliberately shares a small set of texture variations.
+                CardMesh unique;
+                const std::vector<float>* worldU = &cards->worldU;
+                const std::vector<float>* worldV = &cards->worldV;
+                if (worldU->size() != cards->positions.size() || worldV->size() != cards->positions.size()) {
+                    unique = *cards;
+                    layoutCardsUnique(unique, unique.padding);
+                    worldU = &unique.u;
+                    worldV = &unique.v;
+                }
+                if (worldU->size() == cards->positions.size() && worldV->size() == cards->positions.size()) {
+                    MString worldSet("aoWorld");
+                    worldSet = mesh.createUVSetDataMesh(worldSet);
+                    MFloatArray worldUs, worldVs;
+                    worldUs.setLength(static_cast<unsigned>(worldU->size()));
+                    worldVs.setLength(static_cast<unsigned>(worldV->size()));
+                    for (unsigned i = 0; i < worldUs.length(); ++i) {
+                        worldUs[i] = (*worldU)[i];
+                        worldVs[i] = (*worldV)[i];
+                    }
+                    mesh.setUVs(worldUs, worldVs, &worldSet);
+                    mesh.assignUVs(counts, connects, &worldSet);
+                }
                 // What the cards shade with in the groom's own drawing, for whatever takes this
                 // mesh (Export for Unreal's FBX): the strands' lit normals (locked), and each
                 // card's tint as the color set groomLabTint (half the tint: 0.5 none).
@@ -2414,6 +2438,7 @@ std::vector<std::string> GroomShape::bakeCards(const std::string& directory, con
         png("BaseColor", 4, baseColor);
         png("Mask", 4, mask);
         png("AO", 1, t.occlusion);
+        png("AO_world", 1, t.worldOcclusion);
         png("Tangent", 3, t.tangent);
         png("Depth", 1, t.depth);
         png("Attribute", 4, t.attribute);

@@ -45,6 +45,7 @@ struct GltfMaterial {
     int baseColorTexture = -1;          // an index into GltfDocument::textures; -1: none
     int metallicRoughnessTexture = -1;  // G roughness, B metallic
     int occlusionTexture = -1;          // R occlusion
+    int occlusionTexCoord = 0;           // TEXCOORD_n used by occlusionTexture
     int normalTexture = -1;             // tangent space, OpenGL's green (y up)
     float metallic = 0.0f;
     float roughness = 0.5f;
@@ -106,8 +107,7 @@ struct CardGltfSettings {
     float scale = 0.01f;           // scene units to meters (Maya's centimeters: 0.01)
     bool zUp = false;              // the scene is Z up: rotate to glTF's Y up
     bool tangents = true;          // TANGENT: +U across the card, the bitangent root to tip
-    // TEXCOORD_1: x across the card 0..1 by column (a feather card's spine, its middle column, at
-    // 0.5 wherever the rachis sits: |2x - 1| is 0 on it and 1 at the edges), y root 0 to tip 1.
+    // TEXCOORD_1: the unique aoWorld atlas used by low-poly card-to-card occlusion.
     bool rootToTip = true;
     GltfMaterial::AlphaMode alphaMode = GltfMaterial::AlphaMode::Mask;
     float alphaCutoff = 0.5f;

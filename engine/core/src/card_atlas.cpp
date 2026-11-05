@@ -37,8 +37,8 @@ using detail::kMeans;
 namespace {
 
 // What a card's texture looks like, for grouping alike cards: its size, where
-// its strands lie on it, and its color.
-std::vector<float> describeCard(const CardMesh::Card& card, const StrandSet& s, const StrandColors& colors) {
+// its strands lie on it, their root-to-tip flow, and its color.
+std::vector<float> describeCard(const CardMesh::Card& card, const StrandSet& s, const StrandColors& colors, bool mirrored = false) {
     constexpr int kAlong = 6, kAcross = 4, kSamples = 12;
     std::vector<float> f;
     const CardShape shape(card);
@@ -49,6 +49,7 @@ std::vector<float> describeCard(const CardMesh::Card& card, const StrandSet& s, 
     f.push_back(2.0f * pm::log(length));
     f.push_back(2.0f * pm::log(width));
     std::vector<float> hist(kAlong * kAcross, 0.0f);
+    std::array<float, kAlong> sum{}, sum2{}, count{}, slope{}, slopeCount{};
     const std::size_t stride = std::max<std::size_t>(1, card.strands.size() / 48);
     float total = 0.0f;
     std::array<float, 3> color{0, 0, 0};
@@ -57,12 +58,25 @@ std::vector<float> describeCard(const CardMesh::Card& card, const StrandSet& s, 
         const std::size_t si = card.strands[m];
         const auto pts = resampleByArcLength(s.strandPoints(si), s.strandPointCount(si), kSamples);
         int segment = -1;
+        float previousAcross = 0.0f, previousAlong = 0.0f;
+        bool previousValid = false;
         for (const Vec3f& p : pts) {
             const CardPoint cp = projectOntoCard(card, p, segment);
             if (cp.along < 0.0f || cp.along > 1.0f || cp.across < 0.0f || cp.across > 1.0f) continue;
+            const float across = mirrored ? 1.0f - cp.across : cp.across;
             const int a = std::min(kAlong - 1, static_cast<int>(cp.along * kAlong));
-            const int b = std::min(kAcross - 1, static_cast<int>(cp.across * kAcross));
+            const int b = std::min(kAcross - 1, static_cast<int>(across * kAcross));
             hist[static_cast<std::size_t>(a * kAcross + b)] += 1.0f;
+            sum[static_cast<std::size_t>(a)] += across;
+            sum2[static_cast<std::size_t>(a)] += across * across;
+            count[static_cast<std::size_t>(a)] += 1.0f;
+            if (previousValid && cp.along > previousAlong + 1e-6f) {
+                slope[static_cast<std::size_t>(a)] += std::clamp((across - previousAcross) / (cp.along - previousAlong), -4.0f, 4.0f);
+                slopeCount[static_cast<std::size_t>(a)] += 1.0f;
+            }
+            previousAcross = across;
+            previousAlong = cp.along;
+            previousValid = true;
             total += 1.0f;
         }
         const auto c = colors(si);
@@ -70,6 +84,17 @@ std::vector<float> describeCard(const CardMesh::Card& card, const StrandSet& s, 
         colored += 1.0f;
     }
     for (const float h : hist) f.push_back(3.0f * (total > 0 ? h / total : 0.0f) * std::sqrt(static_cast<float>(kAlong * kAcross)));
+    // Mean position, spread and direction in each root-to-tip band. These keep a straight card
+    // from sharing a visibly zigzagging or side-drifting bake merely because its coarse occupancy
+    // histogram and dimensions happen to match.
+    for (int a = 0; a < kAlong; ++a) {
+        const std::size_t i = static_cast<std::size_t>(a);
+        const float mean = count[i] > 0.0f ? sum[i] / count[i] : 0.5f;
+        const float variance = count[i] > 0.0f ? std::max(0.0f, sum2[i] / count[i] - mean * mean) : 0.0f;
+        f.push_back(5.0f * (mean - 0.5f));
+        f.push_back(4.0f * std::sqrt(variance));
+        f.push_back(2.0f * (slopeCount[i] > 0.0f ? slope[i] / slopeCount[i] : 0.0f));
+    }
     for (const float c : color) f.push_back(4.0f * (colored > 0 ? c / colored : 0.0f));
     return f;
 }
@@ -155,11 +180,12 @@ void shareCardTextures(std::vector<CardMesh::Card>& cards, const StrandSet* stra
     const std::size_t n = cards.size();
     for (CardMesh::Card& c : cards) c.variationOf = -1, c.mirrored = false;
     if (variations <= 0 || n <= static_cast<std::size_t>(variations)) return;
-    std::vector<std::vector<float>> features(n);
+    std::vector<std::vector<float>> features(n), mirroredFeatures(n);
     const ColorCache colors(cards, strands, {0, 0, 0});
     parallelFor(0, n, [&](std::size_t i) {
         const StrandSet* s = cards[i].source ? cards[i].source.get() : strands;
         features[i] = s ? describeCard(cards[i], *s, colors.of(*s)) : std::vector<float>{0.0f};
+        mirroredFeatures[i] = s ? describeCard(cards[i], *s, colors.of(*s), true) : features[i];
     });
     const std::size_t dims = features[0].size();
     const std::vector<int> labels = kMeans(features, static_cast<std::size_t>(variations), 30);
@@ -186,12 +212,15 @@ void shareCardTextures(std::vector<CardMesh::Card>& cards, const StrandSet* stra
             representative[g] = static_cast<int>(i);
         }
     }
-    std::vector<int> seen(k, 0);
     for (std::size_t i = 0; i < n; ++i) {
         const int rep = representative[group[i]];
         if (rep == static_cast<int>(i)) continue;
+        const float direct = distance2(features[i], features[static_cast<std::size_t>(rep)]);
+        const float reversed = distance2(features[i], mirroredFeatures[static_cast<std::size_t>(rep)]);
         cards[i].variationOf = rep;
-        cards[i].mirrored = mirror && (++seen[group[i]] % 2 == 1);
+        // Mirror only when the owner's mirrored strand flow is genuinely a closer match. Blindly
+        // alternating receivers turns a compatible curved bake into the opposite curve.
+        cards[i].mirrored = mirror && reversed < direct;
     }
 }
 
@@ -215,6 +244,7 @@ CardMesh combineCardLayers(const std::vector<std::shared_ptr<const CardMesh>>& l
         out.padding = first ? layer->padding : std::min(out.padding, layer->padding);
         out.atlasSize = std::max(out.atlasSize, layer->atlasSize);
         out.thinnestStrand = first ? layer->thinnestStrand : std::max(out.thinnestStrand, layer->thinnestStrand);
+        out.dilate = first ? layer->dilate : (out.dilate && layer->dilate);
         first = false;
     }
     return out;
@@ -256,26 +286,11 @@ std::vector<CardNodeSummary> summarizeCardNodes(const CardMesh& mesh, const Stra
         for (const CardMesh::Card* card : members[n]) {
             if (card->feather >= 0) feathers.insert(card->feather);
             const auto columns = static_cast<std::size_t>(std::max(card->across, 1) + 1);
-            if (!card->refShift.empty()) {
-                // Moved off its strands to clear its neighbours (separateCards): the vertices it
-                // would have without the move (its texture is made from those, and a change of the
-                // separation leaves them alone), as the mesh would hold them.
-                CardMesh::Card still = *card;
-                still.refShift.clear();
-                detail::sampleStations(still);
-                const std::vector<Vec3f> root = detail::cardRow(still, 0);
-                for (int k = 0; k < still.stations; ++k) {
-                    for (const Vec3f& p : detail::cardVertexRow(still, static_cast<std::size_t>(k), root)) {
-                        h = hashFloat(hashFloat(hashFloat(h, p.x), p.y), p.z);
-                    }
-                }
-            } else {
-                const std::size_t first = card->firstVertex;
-                const std::size_t end = std::min(mesh.positions.size(), first + columns * static_cast<std::size_t>(card->stations));
-                for (std::size_t v = first; v < end; ++v) {
-                    const Vec3f& p = mesh.positions[v];
-                    h = hashFloat(hashFloat(hashFloat(h, p.x), p.y), p.z);
-                }
+            const std::size_t first = card->firstVertex;
+            const std::size_t end = std::min(mesh.positions.size(), first + columns * static_cast<std::size_t>(card->stations));
+            for (std::size_t v = first; v < end; ++v) {
+                const Vec3f& p = mesh.positions[v];
+                h = hashFloat(hashFloat(hashFloat(h, p.x), p.y), p.z);
             }
             summary.triangles += 2 * (columns - 1) * static_cast<std::size_t>(std::max(card->stations - 1, 0));
             if (card->variationOf < 0) ++summary.textures;
@@ -318,12 +333,22 @@ void layoutCards(CardMesh& mesh, float padding) {
     for (std::size_t c = 0; c < n; ++c) {
         CardMesh::Card& card = mesh.cards[c];
         // Its texture is baked from its own strands, or from the card's it shares: their colors.
-        card.textureColors = card.variationOf < 0 ? card.colors : mesh.cards[static_cast<std::size_t>(card.variationOf)].colors;
+        const CardMesh::Card& owner = card.variationOf < 0 ? card : mesh.cards[static_cast<std::size_t>(card.variationOf)];
+        card.textureColors = owner.colors;
+        card.textureRefWidth = owner.refWidth;
+        card.textureWidth = textureWidthOf(owner);
         if (card.variationOf < 0) continue;
-        std::copy(std::begin(mesh.cards[static_cast<std::size_t>(card.variationOf)].cell),
-                  std::end(mesh.cards[static_cast<std::size_t>(card.variationOf)].cell), card.cell);
+        std::copy(std::begin(owner.cell), std::end(owner.cell), card.cell);
     }
     buildCardVertices(mesh, false);
+}
+
+void layoutCardsUnique(CardMesh& mesh, float padding) {
+    for (CardMesh::Card& card : mesh.cards) {
+        card.variationOf = -1;
+        card.mirrored = false;
+    }
+    layoutCards(mesh, padding);
 }
 
 // The vertices, normals, UVs and quads of laid-out cards (their cells set). With `holdInCell`
@@ -351,18 +376,92 @@ void buildCardVertices(CardMesh& mesh, bool holdInCell) {
         card.firstVertex = static_cast<std::uint32_t>(mesh.positions.size());
         const int across = std::max(card.across, 1);
         const auto columnsAcross = static_cast<std::uint32_t>(across + 1);
-        // The texture keeps one scale along the card: a vertex at offset x across a station
-        // gets u = 0.5 + x / textureWidth of the cell, so a narrower station (a taper) shows
-        // the middle band of the texture and the texel density across is even.
+        // UVs keep a regular row/column grid. Their U span follows the final physical width, so
+        // Width Profile samples the matching part of the bake instead of stretching it across
+        // every tapered row.
         const float textureWidth = textureWidthOf(card);
+        const float hairGridWidth = card.width.empty() ? textureWidth
+                                                       : std::max(*std::max_element(card.width.begin(), card.width.end()), 1e-9f);
+        // A shared feather is made from its owner's outline scaled to this feather's length.
+        // Normalize by that final scaled envelope, never by the owner's unscaled scene width;
+        // otherwise long receivers widen past their atlas cell and sample neighbouring feathers.
+        const float featherGridWidth = card.width.empty() ? textureWidth
+                                                          : std::max(*std::max_element(card.width.begin(), card.width.end()), 1e-9f);
         const bool spine = card.spine && across == 2;
         // Seated (Card::base): the rows near the root bend from where the stations put them to
         // the base, all the way at the root row, none from a tenth of the card on.
         const std::vector<Vec3f> root = detail::cardRow(card, 0);
+        std::vector<std::vector<Vec3f>> rows(static_cast<std::size_t>(card.stations));
+        for (int station = 0; station < card.stations; ++station) {
+            rows[static_cast<std::size_t>(station)] = detail::cardVertexRow(card, static_cast<std::size_t>(station), root);
+        }
+        auto stationSample = [&](float at) {
+            const float wanted = std::clamp(at, 0.0f, 1.0f);
+            if (card.stationAlong.size() == static_cast<std::size_t>(card.stations)) {
+                const auto upper = std::upper_bound(card.stationAlong.begin(), card.stationAlong.end(), wanted);
+                const std::size_t b = std::clamp(static_cast<std::size_t>(upper - card.stationAlong.begin()), std::size_t{1},
+                                                 card.stationAlong.size() - 1);
+                const std::size_t a = b - 1;
+                const float span = card.stationAlong[b] - card.stationAlong[a];
+                const float t = span > 1e-9f ? (wanted - card.stationAlong[a]) / span : 0.0f;
+                return std::make_pair(a, std::clamp(t, 0.0f, 1.0f));
+            }
+            const float station = wanted * static_cast<float>(card.stations - 1);
+            const std::size_t a = std::min(static_cast<std::size_t>(station), static_cast<std::size_t>(card.stations - 2));
+            return std::make_pair(a, station - static_cast<float>(a));
+        };
+        auto sampleEdge = [&](float at, int edge) {
+            const auto [a, t] = stationSample(at);
+            return rows[a][static_cast<std::size_t>(edge)] * (1.0f - t) + rows[a + 1][static_cast<std::size_t>(edge)] * t;
+        };
+        auto sampleWidth = [&](float at) {
+            const auto [a, t] = stationSample(at);
+            return card.width[a] * (1.0f - t) + card.width[a + 1] * t;
+        };
+        // Feather outer-edge stations follow the measured barb direction, but remain ordered.
+        // The previous independent clamp let several rows land on the tip, collapsing the last
+        // quads. Root and tip are fixed, the correction eases out at both, and every edge segment
+        // retains at least a quarter of its ordinary station spacing.
+        auto featherEdgeAlong = [&](const std::vector<float>& shifts) {
+            std::vector<float> edge(static_cast<std::size_t>(card.stations));
+            for (int station = 0; station < card.stations; ++station) {
+                const float at = card.stationAlong.size() == static_cast<std::size_t>(card.stations)
+                                     ? card.stationAlong[static_cast<std::size_t>(station)]
+                                     : static_cast<float>(station) / static_cast<float>(card.stations - 1);
+                const float shift = static_cast<std::size_t>(station) < shifts.size() ? shifts[static_cast<std::size_t>(station)] : 0.0f;
+                edge[static_cast<std::size_t>(station)] = std::clamp(at + shift, 0.0f, 1.0f);
+            }
+            edge.front() = 0.0f;
+            edge.back() = 1.0f;
+            const float absoluteMinStep = 0.3f / static_cast<float>(card.stations - 1);
+            for (std::size_t station = 1; station + 1 < edge.size(); ++station) {
+                const float baseStep = card.stationAlong.size() == edge.size()
+                                           ? card.stationAlong[station] - card.stationAlong[station - 1]
+                                           : 1.0f / static_cast<float>(card.stations - 1);
+                edge[station] = std::max(edge[station], edge[station - 1] + std::max(0.25f * baseStep, absoluteMinStep));
+            }
+            for (std::size_t station = edge.size() - 1; station-- > 1;) {
+                const float baseStep = card.stationAlong.size() == edge.size()
+                                           ? card.stationAlong[station + 1] - card.stationAlong[station]
+                                           : 1.0f / static_cast<float>(card.stations - 1);
+                edge[station] = std::min(edge[station], edge[station + 1] - std::max(0.25f * baseStep, absoluteMinStep));
+            }
+            return edge;
+        };
+        const std::vector<float> featherEdgeAlongLeft =
+            card.featherEdgeAlongLeft.size() == static_cast<std::size_t>(card.stations)
+                ? card.featherEdgeAlongLeft
+                : featherEdgeAlong(card.featherBarbShiftLeft);
+        const std::vector<float> featherEdgeAlongRight =
+            card.featherEdgeAlongRight.size() == static_cast<std::size_t>(card.stations)
+                ? card.featherEdgeAlongRight
+                : featherEdgeAlong(card.featherBarbShiftRight);
         for (int k = 0; k < card.stations; ++k) {
             const std::size_t i = static_cast<std::size_t>(k);
-            const float along = static_cast<float>(k) / static_cast<float>(card.stations - 1);
-            std::vector<Vec3f> points = detail::cardVertexRow(card, i, root);
+            const float along = card.stationAlong.size() == static_cast<std::size_t>(card.stations)
+                                    ? card.stationAlong[i]
+                                    : static_cast<float>(k) / static_cast<float>(card.stations - 1);
+            std::vector<Vec3f> points = rows[i];
             const std::array<float, 3> tint = detail::cardTint(card, along);
             if (spine) {
                 // Left edge, the spine on the shaft, right edge; each edge lifted along the normal
@@ -376,27 +475,38 @@ void buildCardVertices(CardMesh& mesh, bool holdInCell) {
                 const Vec3f normalR = (normal - side * foldR).normalized(), normalL = (normal + side * foldL).normalized();
                 const float offsets[3] = {-halfW, at, halfW};
                 const Vec3f normals[3] = {normalL, (normalL + normalR).normalized(), normalR};
+                // A feather's barbs leave the shaft diagonally. Move each outer vertex to the
+                // matching place along the existing edge and give it that V; the center column
+                // remains on the shaft station. Topology and texture flow then follow the barbs.
+                const float edgeAlong[3] = {featherEdgeAlongLeft[i], along, featherEdgeAlongRight[i]};
+                points[0] = sampleEdge(edgeAlong[0], 0);
+                points[2] = sampleEdge(edgeAlong[2], 2);
                 for (int e = 0; e < 3; ++e) {
                     mesh.positions.push_back(points[static_cast<std::size_t>(e)]);
                     mesh.normals.push_back(normals[e]);
-                    float acrossTexture = 0.5f + offsets[e] / textureWidth;
+                    const float edgeHalfW = 0.5f * sampleWidth(edgeAlong[e]);
+                    const float textureOffset = e == 0 ? -edgeHalfW : e == 2 ? edgeHalfW : offsets[e];
+                    float acrossTexture = 0.5f + textureOffset / featherGridWidth;
                     if (holdInCell) acrossTexture = std::clamp(acrossTexture, 0.0f, 1.0f);
                     mesh.u.push_back(u0 + (u1 - u0) * acrossTexture);
-                    mesh.v.push_back(card.cell[1] + (card.cell[3] - card.cell[1]) * along);
+                    mesh.v.push_back(card.cell[1] + (card.cell[3] - card.cell[1]) * edgeAlong[e]);
                     mesh.tints.push_back(tint);
                     if (iridescent) mesh.iridescence.push_back(iridescenceAcross(card, static_cast<float>(e - 1)));
                 }
             }
             for (int e = 0; e <= across && !spine; ++e) {
                 const float x = 2.0f * static_cast<float>(e) / static_cast<float>(across) - 1.0f;
-                const float halfW = 0.5f * card.width[i];
                 mesh.positions.push_back(points[static_cast<std::size_t>(e)]);
                 // The bowed surface's normal: tilt by its slope across.
                 const float slope = -2.0f * card.curvature * x;
                 mesh.normals.push_back(card.shading.size() == card.center.size()
                                            ? card.shading[i]
                                            : (card.normal[i] - card.side[i] * slope).normalized());
-                float acrossTexture = 0.5f + x * halfW / textureWidth;
+                // Normalize hair by this card's own widest final row, not by a shared texture
+                // owner's scene-space width. Otherwise a wider receiver expands past its atlas
+                // cell even when its root profile was never changed.
+                const float uvFrameWidth = card.feather < 0 ? hairGridWidth : featherGridWidth;
+                float acrossTexture = 0.5f + x * (0.5f * card.width[i]) / uvFrameWidth;
                 if (holdInCell) acrossTexture = std::clamp(acrossTexture, 0.0f, 1.0f);
                 mesh.u.push_back(u0 + (u1 - u0) * acrossTexture);
                 mesh.v.push_back(card.cell[1] + (card.cell[3] - card.cell[1]) * along);
@@ -439,6 +549,7 @@ CardAtlas captureCardAtlas(const CardMesh& mesh, const StrandSet* strands) {
         std::copy(std::begin(card.cell), std::end(card.cell), entry.cell);
         entry.mirrored = card.mirrored;
         entry.textureWidth = textureWidthOf(card);
+        entry.textureRefWidth = card.textureRefWidth.empty() ? card.refWidth : card.textureRefWidth;
         entry.flyaway = card.flyaway;
         entry.feather = card.feather >= 0;
         entry.colors = card.textureColors.empty() ? card.colors : card.textureColors;  // what the cell shows
@@ -513,6 +624,7 @@ std::size_t applyCardAtlas(CardMesh& mesh, const CardAtlas& atlas, const StrandS
         std::copy(std::begin(entry.cell), std::end(entry.cell), card.cell);
         card.mirrored = entry.mirrored;
         if (entry.textureWidth > 0.0f) card.textureWidth = entry.textureWidth;
+        card.textureRefWidth = entry.textureRefWidth;
         // Tinted from the colors the cell was baked with (none recorded: its own, no tint).
         card.textureColors = entry.colors.size() == card.colors.size() ? entry.colors : card.colors;
         card.variationOf = -1;  // the cell is its own now (from the bake), not another card's
@@ -532,6 +644,7 @@ std::string CardAtlas::toJson() const {
         e["cell"] = {entry.cell[0], entry.cell[1], entry.cell[2], entry.cell[3]};
         e["mirrored"] = entry.mirrored;
         e["textureWidth"] = entry.textureWidth;
+        if (!entry.textureRefWidth.empty()) e["textureRefWidth"] = entry.textureRefWidth;
         e["flyaway"] = entry.flyaway;
         e["feather"] = entry.feather;
         if (!entry.colors.empty()) e["colors"] = entry.colors;
@@ -561,6 +674,9 @@ CardAtlas CardAtlas::fromJson(const std::string& json) {
         }
         entry.mirrored = e.value("mirrored", false);
         entry.textureWidth = e.value("textureWidth", 0.0f);
+        if (e.contains("textureRefWidth") && e["textureRefWidth"].is_array()) {
+            entry.textureRefWidth = e["textureRefWidth"].get<std::vector<float>>();
+        }
         entry.flyaway = e.value("flyaway", false);
         entry.feather = e.value("feather", false);
         if (e.contains("colors") && e["colors"].is_array()) entry.colors = e["colors"].get<std::vector<std::array<float, 3>>>();

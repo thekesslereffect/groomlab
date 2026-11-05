@@ -48,7 +48,7 @@ std::vector<Vec3f> cardVertexRow(const CardMesh::Card& card, std::size_t i, cons
 // (within a few `clearance` of it): a card of strands rooted elsewhere (a feather held off the
 // body, curves not grown from this scalp) keeps the row its stations give. `rigid` (0..1): the row
 // toward moving as a whole (its lowest vertex onto the skin), so it stays parallel to the rows
-// above and the first quads flat (a flattened feather card: CardSettings::featherFlatten).
+// above and the first quads flat (a flattened feather or hair card).
 void seatCard(CardMesh::Card& card, const ScalpMesh& scalp, const Vec3f& root, float clearance, float rigid = 0.0f);
 
 // The fixed-resolution shape when there is one (cards made here), else the stations.
@@ -59,11 +59,13 @@ struct CardShape {
     const std::vector<float>& width;
     const std::vector<float>& foldRight;  // a spine card's folds (Card::spine); may be empty
     const std::vector<float>& foldLeft;
-    explicit CardShape(const CardMesh::Card& c)
-        : center(c.refCenter.size() >= 2 ? c.refCenter : c.center), side(c.refCenter.size() >= 2 ? c.refSide : c.side),
-          normal(c.refCenter.size() >= 2 ? c.refNormal : c.normal), width(c.refCenter.size() >= 2 ? c.refWidth : c.width),
-          foldRight(c.refCenter.size() >= 2 ? c.refFoldRight : c.foldRight),
-          foldLeft(c.refCenter.size() >= 2 ? c.refFoldLeft : c.foldLeft) {}
+    explicit CardShape(const CardMesh::Card& c, bool finalMesh = false)
+        : center(finalMesh || c.refCenter.size() < 2 ? c.center : c.refCenter),
+          side(finalMesh || c.refCenter.size() < 2 ? c.side : c.refSide),
+          normal(finalMesh || c.refCenter.size() < 2 ? c.normal : c.refNormal),
+          width(finalMesh || c.refCenter.size() < 2 ? c.width : c.refWidth),
+          foldRight(finalMesh || c.refCenter.size() < 2 ? c.foldRight : c.refFoldRight),
+          foldLeft(finalMesh || c.refCenter.size() < 2 ? c.foldLeft : c.refFoldLeft) {}
 };
 
 // The card's texture-space width (Card::textureWidth); a card built by hand without one
@@ -79,7 +81,12 @@ struct CardPoint {
     Vec3f side, normal, forward;
 };
 
-CardPoint projectOntoCard(const CardMesh::Card& card, const Vec3f& p, int& segment);
+CardPoint projectOntoCard(const CardMesh::Card& card, const Vec3f& p, int& segment, bool finalMesh = false);
+
+// Width of the final sampled mesh grid at an along coordinate. The bake projects smoothly in
+// the fixed-resolution reference frame, then uses this width so Width Profile is reflected
+// without encoding the low-resolution mesh's station facets into the texture.
+float finalWidthAt(const CardMesh::Card& card, float along);
 
 // Linear RGB per strand, as every exporter has it (strandColors: HairColor's RGB channels,
 // else melanin channels), and per point where HairColor blends toward a tip color (pointColors,
