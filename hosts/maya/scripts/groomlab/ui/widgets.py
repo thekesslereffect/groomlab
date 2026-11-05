@@ -29,8 +29,8 @@ _ranges = None  # key -> [lo, hi], loaded from the optionVar on first use
 # darker shade and a lighter tint of it; "ink" is hair and neutral parts.
 ICON_GROUPS = {
     "create": ("place", "draw", "part", "flow"),
-    "shape": ("comb", "slide", "smooth", "lift", "twist", "attract"),
-    "trim": ("cut", "length", "lengths", "shape", "erase"),
+    "shape": ("comb", "slide", "smooth", "lift", "twist", "attract", "shape"),  # "shape": the Tube brush
+    "trim": ("cut", "length", "lengths", "erase"),
     "paint": ("paint", "freeze", "unfreeze", "select"),  # the guide tools share one color
 }
 PLACEHOLDERS = {"main": "#3D7EFF", "shade": "#1F4FB3", "tint": "#A8C7FF", "ink": "#F2F2F5", "shine": "#FFFFFF",

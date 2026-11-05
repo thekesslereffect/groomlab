@@ -190,7 +190,9 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     }
     card_->addWidget(brush_);
 
-    // ---- Paint: the maps panel's Mode, Value + Fill and color (setPaintControls), the stamp.
+    // ---- Paint: the maps panel's Mode, Value + Fill and color (setPaintControls). What a stroke
+    // paints comes first, right under the header (untitled: the header names the tool); Brush
+    // follows it, titled, the alpha stamp at its end (setTool).
     if (shippedBrushAlphaDir().empty()) setShippedBrushAlphaDir(shippedAlphaFolder());
     paint_ = new CardBlock(tr("Paint"), this);
     paint_->setObjectName(QStringLiteral("paintBlock"));
@@ -198,7 +200,7 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
     paintSlot_->setContentsMargins(0, 0, 0, 0);
     paintSlot_->setSpacing(4);
     paint_->rows()->addLayout(paintSlot_);
-    alphaBox_ = new QWidget(paint_);
+    alphaBox_ = new QWidget(brush_);
     alphaBox_->setObjectName(QStringLiteral("alphaBox"));
     {
         auto* column = new QVBoxLayout(alphaBox_);
@@ -264,14 +266,14 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         invert->setObjectName(QStringLiteral("alphaInvert"));
         column->addWidget(alphaOptions_);
     }
-    paint_->rows()->addWidget(alphaBox_);
+    brush_->rows()->addWidget(alphaBox_);  // the brush's stamp, under its curves
     // Shown for Paint on a scalp map (a guide map takes no alpha), its rows while one is picked.
     refreshers_.push_back([this] {
         const groomlab::BrushEntry* entry = tool_.empty() ? nullptr : brushEntry(tool_);
         alphaBox_->setVisible(entry && entry->hasSetting("alpha") && session_->settings().paintKind != "guides");
         alphaOptions_->setVisible(!alpha_->path().empty());
     });
-    card_->addWidget(paint_);
+    card_->insertWidget(card_->indexOf(brush_), paint_);  // above Brush
 
     // ---- New guides (Place, Draw).
     newGuides_ = new CardBlock(tr("New guides"), this);
@@ -750,6 +752,7 @@ void BrushPanel::setTool(const std::string& id) {
     propagate_->setVisible(uses("strengthProfile"));  // the shaping brushes (the app's own)
     pointwise_->setVisible(uses("map") && id == "paint");
     brush_->setVisible(brush || uses("smoothStrength"));
+    brush_->titleLabel()->setVisible(uses("map"));  // under Paint's own block: titled
     // The strength's span: -1..1 for the tools that work both ways, else 0..1 (Maya's).
     if (entry) {
         strength_->setRange(entry->signedStrength ? -1.0 : 0.0, 1.0);

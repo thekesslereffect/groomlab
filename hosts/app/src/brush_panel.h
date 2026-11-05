@@ -4,14 +4,14 @@
 // The active tool's card in the Groom Tools (groom_tools.h), as the redesign lays it out
 // (research/ui-redesign/QT.md, "Groom Tools layout"; the core's brush catalog, brush_catalog.h,
 // says which settings each tool uses). Always the same blocks in the same order, a block only
-// when it has rows:
+// when it has rows (Paint's own block alone comes first, untitled, Brush under it, titled):
 //
 //   Brush        Radius (px), Strength (± for the tools that work both ways), Falloff, Smooth (Paint);
 //                chips Pressure, Keep off scalp, Stretch (Comb), Straighten (Smooth), Falloff curve, Root to tip (a curve chip that is on shows
 //                its ramp under the chips), and the app's own Propagate (the shaping brushes) and
-//                Pointwise (Paint)
+//                Pointwise (Paint), the alpha stamp (Paint on a scalp map)
 //   the tool's own block, named for what it sets:
-//     Paint        the maps panel's Mode, Value + Fill and color (setPaintControls), the alpha stamp
+//     Paint        the maps panel's Mode, Value + Fill and color (setPaintControls)
 //     New guides   Length, Segments, Spacing (Place); Match nearby, Solo new, Keep off scalp
 //     Paints       Width, Flatness, Twist (Shape)
 //     Erases       Guides, Parts, Flow, a short note

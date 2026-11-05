@@ -562,8 +562,11 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
             head.label(text=info["label"], icon_value=icons.icon(tool))
             if info.get("hint"):
                 _wrap(look(card, "about"), short_hint(info["hint"], info.get("category", "")), width=_chars(context))
-        if "radius" in uses:  # Brush: how the stroke feels
-            col, _ = block(card, defs.text("brushBlock"), titled=False)
+        paints = "map" in uses
+        if paints:  # Paint: what a stroke paints first, untitled (the header names the tool)
+            self.draw_paint_block(card, context, t, info)
+        if "radius" in uses:  # Brush: how the stroke feels (titled under Paint's block)
+            col, _ = block(card, defs.text("brushBlock"), titled=paints)
             sliders = col.column(align=True)
             sliders.prop(t, "radius", text=label("radius", "Radius"), slider=True)
             sliders.prop(t, "strength", text="Strength (±)" if info.get("signed") else label("strength", "Strength"),
@@ -586,6 +589,9 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 col.prop(t, "falloff_curve", text=label("falloffProfile", "Falloff curve"))
             if "strengthProfile" in uses:
                 col.prop(t, "strength_profile", text=label("strengthProfile", "Root to tip"))
+            m = tools.current_map(context.scene) if "alpha" in uses else None
+            if m is not None and m.kind in ("vertices", "texture"):  # the stamp (a guide map takes none)
+                self.draw_alpha(col, t)
         self.draw_tool_blocks(card, context, t, info, uses)
         if "targets" in uses or "symmetry" in uses:  # Applies to: where the stroke lands
             col, _ = block(card, defs.text("appliesBlock"))
@@ -602,27 +608,28 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("groomlab.tool_exit", text="Leave Tool (Esc)", icon="CANCEL")
 
+    def draw_paint_block(self, card, context, t, info):
+        """Paint's own block: the mode, the value (or color) and Fill; first on its card, untitled
+        (the window: the header names the tool), Brush under it."""
+        col, _ = block(card, info["label"], titled=False)
+        m = tools.current_map(context.scene)
+        col.label(text="Mode")
+        col.row(align=True).prop(t, "paint_mode", expand=True)
+        if m is None or m.channels == 1:
+            row = col.row(align=True)
+            row.prop(t, "value", slider=True)
+            fill = row.row(align=True)
+            fill.enabled = m is not None
+            fill.operator("groomlab.map_fill", text="Fill")
+        if m is not None and m.channels > 1:
+            row = col.row(align=True)
+            row.prop(t, "paint_color", text="Color")
+            for ch in ("channel_r", "channel_g", "channel_b", "channel_a"):
+                row.prop(t, ch, toggle=True)
+            row.operator("groomlab.map_fill", text="Fill")
+
     def draw_tool_blocks(self, card, context, t, info, uses):
-        """The tool's own blocks, named for what they set."""
-        if "map" in uses:  # Paint: the mode, the value (or color) and Fill, the stamp
-            col, _ = block(card, info["label"])
-            m = tools.current_map(context.scene)
-            col.label(text="Mode")
-            col.row(align=True).prop(t, "paint_mode", expand=True)
-            if m is None or m.channels == 1:
-                row = col.row(align=True)
-                row.prop(t, "value", slider=True)
-                fill = row.row(align=True)
-                fill.enabled = m is not None
-                fill.operator("groomlab.map_fill", text="Fill")
-            if m is not None and m.channels > 1:
-                row = col.row(align=True)
-                row.prop(t, "paint_color", text="Color")
-                for ch in ("channel_r", "channel_g", "channel_b", "channel_a"):
-                    row.prop(t, ch, toggle=True)
-                row.operator("groomlab.map_fill", text="Fill")
-            if "alpha" in uses and m is not None and m.kind in ("vertices", "texture"):  # a guide map takes no stamp
-                self.draw_alpha(col, t)
+        """The tool's own blocks, named for what they set (Paint's: draw_paint_block, first)."""
         if "newGuides" in uses:  # Place, Draw: the new guides and the tube they get
             col, _ = block(card, label("newGuides", "New guides"))
             sliders = col.column(align=True)

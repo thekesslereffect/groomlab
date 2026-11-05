@@ -1115,7 +1115,7 @@ class ToolPalette(QtWidgets.QWidget):
         self.hint.setObjectName("noTool")
         # The tool's card (under the tools; on Paint under the maps): its icon and name, what it
         # does, then its settings in blocks: Brush (untitled: the header names the tool), the
-        # tool's own, Applies to.
+        # tool's own, Applies to. Paint: its own block first (what a stroke paints), then Brush.
         self.settings = QtWidgets.QFrame()
         self.settings.setObjectName("toolCard")
         self.settings.setProperty("role", "toolCard")
@@ -1196,15 +1196,20 @@ class ToolPalette(QtWidgets.QWidget):
         self.brush_block.add(self.brush_chips)
         self.brush_block.add(self.falloff_curve)
         self.brush_block.add(self.strength_curve)
-        card.addWidget(self.brush_block)
+        # The alpha stamp (Paint on a scalp map): the brush's, under its curves.
+        self.alpha_box = self.alpha_setting()
+        self.brush_block.add(self.alpha_box)
 
         # -- The tool's own blocks, named for what they set --------------------------
-        # Paint: the mode, the value (or color) and Fill (the map's: the Paint tab's), the alpha stamp.
+        # Paint: the mode, the value (or color) and Fill (the map's: the Paint tab's). What a stroke
+        # paints comes first, right under the card's header (untitled: the header names the tool);
+        # Brush follows, titled (show_tool_settings).
         self.paint_block = widgets.Block(NAMES.get("paint", "Paint"), name="paintBlock")
+        self.paint_block.rule.setVisible(False)
+        self.paint_block.title.setVisible(False)
         self.paint_block.add(self.paint_tab.paint_controls)
-        self.alpha_box = self.alpha_setting()
-        self.paint_block.add(self.alpha_box)
         card.addWidget(self.paint_block)
+        card.addWidget(self.brush_block)
 
         # Place and Draw: the new guides, and the tube they get.
         from groomlab import units
@@ -2248,7 +2253,7 @@ class ToolPalette(QtWidgets.QWidget):
     def show_tool_settings(self):
         """The card shows what its tool uses (the catalog's settings for it: card_tool()), and
         nothing else; with no tool, one line on how to start. Its blocks, in order: Brush, the
-        tool's own, Applies to."""
+        tool's own, Applies to (Paint: its own block, then Brush, titled)."""
         tool = self.card_tool()
         uses = TOOL_SETTINGS.get(tool, set())
         photos = self.current_tab() == "photos"
@@ -2267,7 +2272,11 @@ class ToolPalette(QtWidgets.QWidget):
                                        (self.strength_curve_box, self.strength_curve, "strengthProfile")):
             chip_.setVisible(setting in uses)
             editor.setVisible(setting in uses and chip_.isChecked())
-        self.paint_block.setVisible("map" in uses)
+        paints = "map" in uses
+        self.paint_block.setVisible(paints)
+        # Under Paint's own block the Brush block is titled (otherwise first, untitled).
+        self.brush_block.rule.setVisible(paints)
+        self.brush_block.title.setVisible(paints)
         self.sync_alpha()
         self.create_box.setVisible("newGuides" in uses)
         self.spacing.setVisible("spacing" in uses)

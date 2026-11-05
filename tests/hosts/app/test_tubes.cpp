@@ -586,9 +586,15 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     BrushPanel* card = tools.card();
     EXPECT_EQ(card->tool(), "paint") << "the Paint tab's card is Paint's";
     EXPECT_FALSE(card->isHidden());
-    EXPECT_EQ(card->blockTitles(), (std::vector<std::string>{"Brush", "Paint", "Applies to"}));
+    // What a stroke paints first (untitled under the header), then Brush, titled, with the stamp.
+    EXPECT_EQ(card->blockTitles(), (std::vector<std::string>{"Paint", "Brush", "Applies to"}));
     auto* block = card->findChild<CardBlock*>(QStringLiteral("paintBlock"));
     ASSERT_NE(block, nullptr);
+    auto* brushBlock = card->findChild<CardBlock*>(QStringLiteral("brushBlock"));
+    ASSERT_NE(brushBlock, nullptr);
+    EXPECT_TRUE(block->titleLabel()->isHidden());
+    EXPECT_FALSE(brushBlock->titleLabel()->isHidden());
+    EXPECT_TRUE(brushBlock->isAncestorOf(card->findChild<QWidget*>(QStringLiteral("alphaBox"))));
     EXPECT_TRUE(block->isAncestorOf(maps.paintControls())) << "Mode, Value + Fill, the color: the card's";
     EXPECT_FALSE(maps.isAncestorOf(maps.paintControls()));
     auto* fill = card->findChild<QPushButton*>(QStringLiteral("paintFill"));

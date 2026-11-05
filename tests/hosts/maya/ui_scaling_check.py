@@ -527,8 +527,12 @@ def main():
             tools.tool = None
             tools.tabs.setCurrentIndex(palette.TABS.index("paint"))
             settle()
-            _expect(shown_blocks() == ["Brush", "Paint", "Applies to"], "the Paint tab's card: %r" % shown_blocks())
+            # What a stroke paints first (untitled under the header), then Brush, titled.
+            _expect(shown_blocks() == ["Paint", "Brush", "Applies to"], "the Paint tab's card: %r" % shown_blocks())
             _expect(tools.paint_block.isAncestorOf(tools.paint_tab.value), "Value and Fill in the Paint block")
+            _expect(not tools.paint_block.title.isVisibleTo(tools) and tools.brush_block.title.isVisibleTo(tools),
+                    "Paint's block untitled, Brush titled")
+            _expect(tools.brush_block.isAncestorOf(tools.alpha_box), "the alpha stamp in the Brush block")
             _expect(tools.paint_tiles.isVisibleTo(tools) and not tools.tool_palette.isVisibleTo(tools),
                     "the Paint button alone on top")
             from groomlab.ui.qt import QtCore
