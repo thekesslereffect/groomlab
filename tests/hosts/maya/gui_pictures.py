@@ -62,7 +62,7 @@ def pixels(path):
     if image.isNull():
         return None, None
     image = image.convertToFormat(QtGui.QImage.Format_RGB32)
-    return image.size(), bytes(image.constBits())[:image.byteCount()]
+    return image.size(), bytes(image.constBits())[:image.sizeInBytes()]
 
 
 def compare(a, b):

@@ -1215,7 +1215,7 @@ class EdgeItem(QtWidgets.QGraphicsPathItem):
         # A pin where it was double-clicked (Unreal's reroute node): the link runs through it.
         editor, link, at = self.dst_item.editor, self.link(), event.scenePos()
         index = self.piece_at(at)
-        later(lambda: editor.add_pin(link, at, index))()
+        later(lambda: editor.add_pin(link, at, index))
         event.accept()
 
     def bypassed(self):
@@ -1374,7 +1374,7 @@ class PinItem(QtWidgets.QGraphicsItem):
         onto = next((i for i in self.collidingItems() if isinstance(i, PinItem)), None)
         if onto is not None:
             editor, keep, drop = self.editor, onto.pin, self.pin
-            later(lambda: editor.merge_pins(keep, drop))()  # it rebuilds the scene: after this event
+            later(lambda: editor.merge_pins(keep, drop))  # it rebuilds the scene: after this event
 
 
 # Tab search's entries for the groom's painted maps: MAP_ENTRY + the map's name, in this section.
@@ -1496,12 +1496,12 @@ class BackdropItem(QtWidgets.QGraphicsItem):
     def __init__(self, editor, data):
         super(BackdropItem, self).__init__()
         self.editor, self.data = editor, data
+        self._carried = []  # before setPos: its itemChange reads them
+        self._resizing = None
         self.setZValue(-20)
         self.setFlags(QtWidgets.QGraphicsItem.ItemIsMovable | QtWidgets.QGraphicsItem.ItemIsSelectable |
                       QtWidgets.QGraphicsItem.ItemSendsGeometryChanges)
         self.setPos(data["x"], data["y"])
-        self._carried = []
-        self._resizing = None
 
     def rect(self):
         return QtCore.QRectF(0, 0, self.data["w"], self.data["h"])
@@ -1934,7 +1934,7 @@ class GraphScene(QtWidgets.QGraphicsScene):
         self.editor.commit_layout()
         if node is not None and wire is not None:
             editor, name, link = self.editor, node.name, wire.link()
-            later(lambda: editor.insert_on_wire(name, link))()  # it rebuilds the scene: after this event
+            later(lambda: editor.insert_on_wire(name, link))  # it rebuilds the scene: after this event
 
     def keyPressEvent(self, event):
         ctrl = bool(event.modifiers() & QtCore.Qt.ControlModifier)
@@ -2031,7 +2031,7 @@ class GraphView(QtWidgets.QGraphicsView):
         event.acceptProposedAction()
         at = self.mapToScene(qt.event_pos(event))
         editor = self.scene().editor
-        later(lambda: editor.import_nodes(files, at=(at.x(), at.y())))()
+        later(lambda: editor.import_nodes(files, at=(at.x(), at.y())))
 
     def wheelEvent(self, event):
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15

@@ -175,7 +175,7 @@ def compare_scene(folder):
 def pixels(path):
     from groomlab.ui.qt import QtGui
     image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
-    return image.width(), image.height(), bytes(image.constBits())[:image.byteCount()]
+    return image.width(), image.height(), bytes(image.constBits())[:image.sizeInBytes()]
 
 
 def hair_stats(path, background):

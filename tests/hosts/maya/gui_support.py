@@ -247,7 +247,7 @@ def clear_of_cursor(window):
     frame = window.frameGeometry()
     if not frame.contains(cursor):
         return
-    screen = QtWidgets.QApplication.desktop().availableGeometry(window)
+    screen = window.screen().availableGeometry()  # (Qt 6 has no QApplication.desktop())
     x = screen.left() if cursor.x() > screen.center().x() else max(screen.left(), screen.right() - frame.width())
     window.move(x, window.y())
     QtWidgets.QApplication.processEvents()

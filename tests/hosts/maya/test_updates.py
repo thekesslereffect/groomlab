@@ -33,7 +33,13 @@ maya.standalone.initialize(name="python")
 from maya import cmds  # noqa: E402
 
 from groomlab import updates  # noqa: E402
-from fake_downloads import ZIP_NAME, FakeDownloads, write  # noqa: E402
+from fake_downloads import ZIP_NAME, FakeDownloads, this_maya, write  # noqa: E402
+
+# The running Maya, and others: a release for another Maya (never 2022, whose plugin a zip always
+# has at its root), and two that leave this one out.
+THIS = this_maya()
+OTHER = "2025" if THIS != "2025" else "2024"
+NOT_THIS = sorted(y for y in ("2024", "2025", "2026", "2027") if y != THIS)[:2]
 
 
 def _closed_port():
@@ -90,30 +96,30 @@ class UpdatesTest(unittest.TestCase):
         self.assertFalse(result["newer"] or result["installable"])
         self.assertIn("latest version", result["message"])
         # A release for another Maya: said, not offered.
-        self.site.publish(self.zip_body, maya="2025")
+        self.site.publish(self.zip_body, maya=OTHER)
         result = updates.check()
         self.assertTrue(result["newer"])
         self.assertFalse(result["installable"])
-        self.assertIn("Maya 2025", result["message"])
-        self.assertIn("Maya 2025", updates.install(result["info"])["message"])
+        self.assertIn("Maya " + OTHER, result["message"])
+        self.assertIn("Maya " + OTHER, updates.install(result["info"])["message"])
 
     def test_one_release_for_every_maya(self):
         # A zip with a build for several Mayas (mayaVersions): offered in each of them, the betas said.
-        self.site.publish(self.zip_body, mayaVersions=["2022", "2025"], mayaBeta=["2025"])
+        self.site.publish(self.zip_body, mayaVersions=sorted([THIS, OTHER]), mayaBeta=[OTHER])
         result = updates.check()
         self.assertTrue(result["installable"], result["message"])
         self.assertNotIn("beta", result["message"])  # this Maya's build is the tested one
-        self.assertEqual(updates.release_mayas(result["info"]), ["2022", "2025"])
-        self.assertTrue(updates.beta_for(result["info"], 2025))
-        self.assertFalse(updates.beta_for(result["info"], 2022))
+        self.assertEqual(updates.release_mayas(result["info"]), sorted([THIS, OTHER]))
+        self.assertTrue(updates.beta_for(result["info"], int(OTHER)))
+        self.assertFalse(updates.beta_for(result["info"], int(THIS)))
         # A release whose builds leave this Maya out: said, not offered (maya, what releases before
         # mayaVersions named alone, is not read when mayaVersions is there).
-        self.site.publish(self.zip_body, mayaVersions=["2025", "2026"])
+        self.site.publish(self.zip_body, mayaVersions=NOT_THIS)
         result = updates.check()
         self.assertTrue(result["newer"])
         self.assertFalse(result["installable"])
-        self.assertIn("Maya 2025, 2026", result["message"])
-        self.assertIn("Maya 2025, 2026", updates.install(result["info"])["message"])
+        self.assertIn("Maya " + ", ".join(NOT_THIS), result["message"])
+        self.assertIn("Maya " + ", ".join(NOT_THIS), updates.install(result["info"])["message"])
         self.assertEqual(updates.release_mayas({"maya": "2022"}), ["2022"])
         self.assertEqual(updates.release_mayas({}), [])
         # A zip without the running Maya's build is refused when it is unpacked.
@@ -121,11 +127,12 @@ class UpdatesTest(unittest.TestCase):
         with open(zip_path, "wb") as f:
             f.write(self.zip_body)
         with self.assertRaises(updates.UpdateError) as caught:
-            updates._unpack(zip_path, os.path.join(self.site.root, "unpacked-2025"), "0.2.0", 2025)
-        self.assertIn("no GroomLab for Maya 2025", str(caught.exception))
+            updates._unpack(zip_path, os.path.join(self.site.root, "unpacked-other"), "0.2.0", int(OTHER))
+        self.assertIn("no GroomLab for Maya " + OTHER, str(caught.exception))
         with open(zip_path, "wb") as f:
-            f.write(self.site.release_zip(extra={"GroomLab-0.2.0/GroomLab/maya2025/plug-ins/GroomLab.mll": "2025"}))
-        self.assertTrue(os.path.isdir(updates._unpack(zip_path, os.path.join(self.site.root, "unpacked"), "0.2.0", 2025)))
+            f.write(self.site.release_zip(extra={"GroomLab-0.2.0/GroomLab/maya%s/plug-ins/GroomLab.mll" % OTHER: OTHER}))
+        self.assertTrue(os.path.isdir(updates._unpack(zip_path, os.path.join(self.site.root, "unpacked"), "0.2.0",
+                                                      int(OTHER))))
 
     def test_install_unpacks_beside_and_rewrites_the_mod(self):
         result = updates.check()
@@ -141,8 +148,8 @@ class UpdatesTest(unittest.TestCase):
         # old one is GroomLab.mod.bak; nothing else is left in the modules folder.
         with open(self.mod) as f:
             text = f.read()
-        self.assertEqual(text, "+ MAYAVERSION:2022 GroomLab 0.2.0 %s\nPYTHONPATH+:=python\n"
-                               "MTOA_EXTENSIONS_PATH+:=extensions\n" % new_module)
+        self.assertEqual(text, "+ MAYAVERSION:%s GroomLab 0.2.0 %s\nPYTHONPATH+:=python\n"
+                               "MTOA_EXTENSIONS_PATH+:=extensions\n" % (THIS, new_module))
         with open(self.mod + ".bak") as f:
             self.assertEqual(f.read(), self.site.mod_text)
         self.assertEqual(updates.find_mod_file(new_module), self.mod)
