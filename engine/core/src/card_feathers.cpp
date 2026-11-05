@@ -45,6 +45,8 @@ struct FeatherShape {
     // How each vane leaves the vane plane at each station: the tangent of its angle out of it
     // (toward the normal positive), right vane and left (0 for a down feather).
     std::vector<float> foldRight, foldLeft;
+    // Outer-barb slope (travel along shaft / travel across), independently for both vanes.
+    std::vector<float> barbSlopeRight, barbSlopeLeft;
     float length = 0.0f;
     float strandWidth = 0.0f;
     Vec3f root;  // where the shaft grows
@@ -289,18 +291,85 @@ FeatherShape measureFeather(const StrandSet& s, const Feather& feather, const Sc
         }
     }
 
-    // The barbs' mean angle from the shaft where they grow and at their tips (their curl).
+    // The barbs' mean angle from the shaft where they grow and at their tips (their curl), and
+    // their actual travel along this feather. The latter drives topology. Measure in each barb's
+    // own root frame: an outer point on a wide curved feather can be closer to an unrelated part
+    // of the shaft, so nearest-centerline projection gives the large vane a false direction.
+    // Measuring each vane separately preserves asymmetric barb directions.
     float angles = 0.0f;
+    std::vector<float> shiftSum[2] = {std::vector<float>(K, 0.0f), std::vector<float>(K, 0.0f)};
+    std::vector<float> shiftWeight[2] = {std::vector<float>(K, 0.0f), std::vector<float>(K, 0.0f)};
     for (const std::size_t b : barbs) {
         const Vec3f* bp = s.strandPoints(b);
         const std::size_t n = s.strandPointCount(b);
-        const Vec3f& t = f.tangent[stationOf(bp[0])];
+        const std::size_t station = stationOf(bp[0]);
+        const Vec3f& t = f.tangent[station];
         const Vec3f d0 = (bp[1] - bp[0]).normalized(), d1 = (bp[n - 1] - bp[n - 2]).normalized();
         f.rootAngle += pm::acos(std::clamp(d0.dot(t), -1.0f, 1.0f));
         f.tipAngle += pm::acos(std::clamp(d1.dot(t), -1.0f, 1.0f));
+        const float vane = sides ? (*sides)[b] : 0.0f;
+        if (std::abs(vane) < 0.5f || f.down) {
+            angles += 1.0f;
+            continue;
+        }
+        const int h = vane > 0.0f ? 0 : 1;
+        // Follow the point that actually reaches this vane's outer envelope. A long curved barb
+        // can curl back at its final point, so its endpoint is not necessarily the visible edge.
+        float farthest = 0.0f, travel = 0.0f;
+        for (std::size_t p = 1; p < n; ++p) {
+            const Vec3f chord = bp[p] - bp[0];
+            const float along = chord.dot(t);
+            const float lateral = (chord - t * along).length();
+            if (lateral > farthest) farthest = lateral, travel = along;
+        }
+        // Weighted mean slope. Accumulating travel and weighting by lateral reach is equivalent
+        // to sum(reach * travel/reach), and gives the long visible barbs the most influence.
+        shiftSum[h][station] += travel;
+        shiftWeight[h][station] += farthest;
         angles += 1.0f;
     }
     if (angles > 0.0f) f.rootAngle /= angles, f.tipAngle /= angles;
+    for (int h = 0; h < 2; ++h) {
+        std::vector<float>& shift = h == 0 ? f.barbSlopeRight : f.barbSlopeLeft;
+        shift.assign(K, 0.0f);
+        std::vector<std::size_t> known;
+        for (std::size_t k = 0; k < K; ++k) {
+            if (shiftWeight[h][k] > 1e-9f) {
+                shift[k] = std::clamp(shiftSum[h][k] / shiftWeight[h][k], -4.0f, 4.0f);
+                known.push_back(k);
+            }
+        }
+        if (!known.empty()) {
+            // Outside the roots that actually carry barbs there is no measured direction to
+            // follow. Fade to an ordinary cross-row at the shaft ends instead of extending the
+            // last slope through the bare tip and then snapping its endpoint back: that snap
+            // accumulated several topology rows at the tip.
+            if (known.front() > 0) {
+                for (std::size_t k = 0; k < known.front(); ++k) {
+                    shift[k] = shift[known.front()] * static_cast<float>(k) / static_cast<float>(known.front());
+                }
+            }
+            for (std::size_t n = 0; n + 1 < known.size(); ++n) {
+                const std::size_t a = known[n], b = known[n + 1];
+                for (std::size_t k = a + 1; k < b; ++k) {
+                    const float t = static_cast<float>(k - a) / static_cast<float>(b - a);
+                    shift[k] = shift[a] * (1.0f - t) + shift[b] * t;
+                }
+            }
+            if (known.back() + 1 < K) {
+                const float span = static_cast<float>(K - 1 - known.back());
+                for (std::size_t k = known.back() + 1; k < K; ++k) {
+                    shift[k] = shift[known.back()] * static_cast<float>(K - 1 - k) / span;
+                }
+            }
+            for (int pass = 0; pass < 2; ++pass) {
+                const std::vector<float> previous = shift;
+                for (std::size_t k = 1; k + 1 < K; ++k) {
+                    shift[k] = 0.25f * previous[k - 1] + 0.5f * previous[k] + 0.25f * previous[k + 1];
+                }
+            }
+        }
+    }
 
     // The strands' width, as a hair card's (the default 1: not real widths).
     if (!s.widths().empty()) {
@@ -350,10 +419,10 @@ FeatherLayout layoutFeather(const FeatherShape& f, const CardSettings& settings)
 // laid out as `layout` says; with `spine`, a column on the shaft and each half folded to its
 // vane (Card::spine).
 CardMesh::Card makeFeatherCard(const FeatherShape& f, const std::vector<std::size_t>& strands, const FeatherLayout& layout,
-                               float turn, bool spine, const CardSettings& settings, const ScalpMesh* scalp) {
+                               float turn, bool spine, int segments, const CardSettings& settings, const ScalpMesh* scalp) {
     CardMesh::Card card;
     card.strands = strands;
-    card.stations = std::clamp(settings.featherSegments, 1, 256) + 1;
+    card.stations = std::clamp(segments, 1, 256) + 1;
     card.across = 1;
     // The shaft's place across the row is useful even for a flat strip: rigid scalp seating
     // anchors this point, rather than whichever outer edge happens to be lowest.
@@ -373,6 +442,19 @@ CardMesh::Card makeFeatherCard(const FeatherShape& f, const std::vector<std::siz
     }
     card.refWidth = layout.width;
     card.textureWidth = layout.textureWidth;
+    card.refFeatherBarbShiftRight.resize(kRefStations);
+    card.refFeatherBarbShiftLeft.resize(kRefStations);
+    const float followBarbs = std::clamp(settings.featherFollowBarbs, 0.0f, 1.0f);
+    for (std::size_t k = 0; k < kRefStations; ++k) {
+        const float halfWidth = 0.5f * layout.width[k];
+        // The shaft is at spineOffset=-layout.offset within the card. Extrapolate the measured
+        // barb slope all the way to each actual padded/asymmetric card edge; using barb-tip
+        // travel directly made wide cards' rows too horizontal.
+        const float rightReach = std::max(halfWidth + layout.offset, 0.0f);
+        const float leftReach = std::max(halfWidth - layout.offset, 0.0f);
+        card.refFeatherBarbShiftRight[k] = std::clamp(f.barbSlopeRight[k] * rightReach / f.length * followBarbs, -0.75f, 0.75f);
+        card.refFeatherBarbShiftLeft[k] = std::clamp(f.barbSlopeLeft[k] * leftReach / f.length * followBarbs, -0.75f, 0.75f);
+    }
     // Clear of the scalp, as a hair card: a feather lying on the body sits a hair above it.
     if (scalp) {
         const float clearance = 0.01f * std::max(arcLength(card.refCenter), 1e-6f);
@@ -393,6 +475,75 @@ CardMesh::Card makeFeatherCard(const FeatherShape& f, const std::vector<std::siz
         for (std::size_t k = 0; k < kRefStations; ++k) {
             if (push[k] > 0.0f) card.refCenter[k] += skin[k] * push[k];
         }
+    }
+    // Place the requested rows after Follow Barbs has shaped the dense reference card. Sample
+    // by both outer silhouettes' physical travel (with a modest root bias), rather than at equal
+    // shaft fractions: outline corners and width changes keep density, while long straight and
+    // tapering regions no longer collect non-contributing loops near the tip.
+    std::vector<Vec3f> leftBase(kRefStations), rightBase(kRefStations);
+    for (std::size_t k = 0; k < kRefStations; ++k) {
+        const float halfWidth = 0.5f * card.refWidth[k];
+        const float at = std::clamp(card.spineOffset, -halfWidth, halfWidth);
+        const float foldR = card.spine && k < card.refFoldRight.size() ? card.refFoldRight[k] : 0.0f;
+        const float foldL = card.spine && k < card.refFoldLeft.size() ? card.refFoldLeft[k] : 0.0f;
+        leftBase[k] = card.refCenter[k] - card.refSide[k] * halfWidth + card.refNormal[k] * ((halfWidth + at) * foldL);
+        rightBase[k] = card.refCenter[k] + card.refSide[k] * halfWidth + card.refNormal[k] * ((halfWidth - at) * foldR);
+    }
+    auto sampleDense = [&](const std::vector<Vec3f>& edge, float along) {
+        const float fAt = std::clamp(along, 0.0f, 1.0f) * static_cast<float>(kRefStations - 1);
+        const std::size_t a = std::min(static_cast<std::size_t>(fAt), kRefStations - 2);
+        const float w = fAt - static_cast<float>(a);
+        return edge[a] * (1.0f - w) + edge[a + 1] * w;
+    };
+    auto equalArcSamples = [&](const std::vector<Vec3f>& edge) {
+        std::vector<float> cumulative(kRefStations, 0.0f);
+        for (std::size_t k = 1; k < kRefStations; ++k) {
+            cumulative[k] = cumulative[k - 1] + (edge[k] - edge[k - 1]).length();
+        }
+        std::vector<float> samples(static_cast<std::size_t>(card.stations), 0.0f);
+        samples.back() = 1.0f;
+        for (int station = 1; station + 1 < card.stations; ++station) {
+            const float target = cumulative.back() * static_cast<float>(station) / static_cast<float>(card.stations - 1);
+            const auto upper = std::lower_bound(cumulative.begin() + 1, cumulative.end(), target);
+            const std::size_t b = std::min(static_cast<std::size_t>(upper - cumulative.begin()), kRefStations - 1);
+            const std::size_t a = b - 1;
+            const float span = cumulative[b] - cumulative[a];
+            const float w = span > 1e-9f ? (target - cumulative[a]) / span : 0.0f;
+            samples[static_cast<std::size_t>(station)] =
+                (static_cast<float>(a) + std::clamp(w, 0.0f, 1.0f)) / static_cast<float>(kRefStations - 1);
+        }
+        return samples;
+    };
+    card.featherEdgeAlongLeft = equalArcSamples(leftBase);
+    card.featherEdgeAlongRight = equalArcSamples(rightBase);
+    auto sampleShift = [&](const std::vector<float>& shift, float along) {
+        const float fAt = std::clamp(along, 0.0f, 1.0f) * static_cast<float>(kRefStations - 1);
+        const std::size_t a = std::min(static_cast<std::size_t>(fAt), kRefStations - 2);
+        const float w = fAt - static_cast<float>(a);
+        return shift[a] * (1.0f - w) + shift[a + 1] * w;
+    };
+    card.stationAlong.resize(static_cast<std::size_t>(card.stations));
+    for (int station = 0; station < card.stations; ++station) {
+        const std::size_t i = static_cast<std::size_t>(station);
+        float leftRoot = card.featherEdgeAlongLeft[i], rightRoot = card.featherEdgeAlongRight[i];
+        // Solve edge = shaft + measured shift. A few fixed-point iterations account for the
+        // shift profile changing along the feather; average both vanes at their shared shaft.
+        for (int pass = 0; pass < 3; ++pass) {
+            leftRoot = card.featherEdgeAlongLeft[i] - sampleShift(card.refFeatherBarbShiftLeft, leftRoot);
+            rightRoot = card.featherEdgeAlongRight[i] - sampleShift(card.refFeatherBarbShiftRight, rightRoot);
+        }
+        card.stationAlong[i] = std::clamp(0.5f * (leftRoot + rightRoot), 0.0f, 1.0f);
+    }
+    card.stationAlong.front() = 0.0f;
+    card.stationAlong.back() = 1.0f;
+    // Importance peaks can otherwise put two useful samples almost on top of one another.
+    // Preserve adaptive placement but reserve every row at least 40% of uniform shaft spacing.
+    const float minStationStep = 0.4f / static_cast<float>(card.stations - 1);
+    for (std::size_t station = 1; station + 1 < card.stationAlong.size(); ++station) {
+        card.stationAlong[station] = std::max(card.stationAlong[station], card.stationAlong[station - 1] + minStationStep);
+    }
+    for (std::size_t station = card.stationAlong.size() - 1; station-- > 1;) {
+        card.stationAlong[station] = std::min(card.stationAlong[station], card.stationAlong[station + 1] - minStationStep);
     }
     sampleStations(card);
     // Its base on the skin where the shaft grows, as a hair card's.
@@ -496,6 +647,14 @@ std::vector<CardMesh::Card> makeFeatherCards(const StrandSet& s, const ScalpMesh
     }
     if (kept.empty()) return out;
 
+    const int maxFeatherSegments = std::clamp(settings.featherSegments, 1, 256);
+    const int minFeatherSegments = std::clamp(settings.featherMinSegments, 1, maxFeatherSegments);
+    auto segmentsOf = [&](const FeatherShape& f) {
+        if (!settings.featherSegmentsByLength || !(longest > 0.0f)) return maxFeatherSegments;
+        return std::clamp(static_cast<int>(std::lround(static_cast<float>(maxFeatherSegments) * f.length / longest)),
+                          minFeatherSegments, maxFeatherSegments);
+    };
+
     std::vector<FeatherLayout> layouts(feathers.size());
     for (const std::size_t i : kept) layouts[i] = layoutFeather(shapes[i], settings);
 
@@ -586,7 +745,7 @@ std::vector<CardMesh::Card> makeFeatherCards(const StrandSet& s, const ScalpMesh
                 mirrored = ++seen[r] % 2 == 1;
             }
             CardMesh::Card card = makeFeatherCard(f, strands, shared ? layouts[r].scaled(scale, mirrored) : layouts[i], 0.0f,
-                                                  settings.featherSpine, settings, scalp);
+                                                  settings.featherSpine, segmentsOf(f), settings, scalp);
             card.variationOf = shared ? static_cast<int>(firstCard[r]) : -1;
             card.mirrored = mirrored;
             card.feather = ordinal;
@@ -598,7 +757,7 @@ std::vector<CardMesh::Card> makeFeatherCards(const StrandSet& s, const ScalpMesh
             for (int j = 0; j < cross; ++j) {
                 // Flat: the puff has no vanes to fold to, and the shaft already runs down its middle.
                 CardMesh::Card card = makeFeatherCard(f, strands, layout, 3.14159265f * static_cast<float>(j) / static_cast<float>(cross),
-                                                      false, settings, scalp);
+                                                      false, segmentsOf(f), settings, scalp);
                 const bool owner = !shared && j == 0;
                 if (settings.variations > 0 && !owner) {
                     card.variationOf = static_cast<int>(firstCard[r]);

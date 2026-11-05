@@ -199,6 +199,7 @@ json build(const GltfDocument& doc, Buffer& buffer, bool imagesInBuffer) {
         if (m.alphaMode == GltfMaterial::AlphaMode::Mask) material["alphaCutoff"] = std::clamp(m.alphaCutoff, 0.0f, 1.0f);
         if (m.occlusionTexture >= 0) {
             json occlusion = textureRef(m.occlusionTexture, m.name);
+            occlusion["texCoord"] = std::max(m.occlusionTexCoord, 0);
             occlusion["strength"] = std::clamp(m.occlusionStrength, 0.0f, 1.0f);
             material["occlusionTexture"] = occlusion;
         }
@@ -466,20 +467,17 @@ int addCardsToGltf(GltfDocument& doc, const CardMesh& cards, const CardTextures&
     if (settings.tangents) p.tangents = meshTangents(p.positions, p.normals, mayaUVs, p.indices);
     if (cards.tints.size() == n) p.tints = cards.tints;  // each card's own color over its shared texture's
     if (settings.rootToTip) {
-        // Across 0..1 by column and root (0) to tip (1), per card, whatever cell or mirroring it
-        // has: a feather card's spine (its middle column, wherever the rachis sits) is 0.5.
-        p.uv1.assign(n, {0.0f, 0.0f});
-        for (const CardMesh::Card& card : cards.cards) {
-            const int across = std::max(card.across, 1);
-            for (int k = 0; k < card.stations; ++k) {
-                const float along = card.stations > 1 ? static_cast<float>(k) / static_cast<float>(card.stations - 1) : 0.0f;
-                for (int e = 0; e <= across; ++e) {
-                    const std::size_t i = card.firstVertex + static_cast<std::size_t>(k) * static_cast<std::size_t>(across + 1) +
-                                          static_cast<std::size_t>(e);
-                    if (i < n) p.uv1[i] = {static_cast<float>(e) / static_cast<float>(across), along};
-                }
-            }
+        const std::vector<float>* worldU = &cards.worldU;
+        const std::vector<float>* worldV = &cards.worldV;
+        CardMesh unique;
+        if (worldU->size() != n || worldV->size() != n) {
+            unique = cards;
+            layoutCardsUnique(unique, unique.padding);
+            worldU = &unique.u;
+            worldV = &unique.v;
         }
+        p.uv1.resize(n);
+        for (std::size_t i = 0; i < n; ++i) p.uv1[i] = {(*worldU)[i], 1.0f - (*worldV)[i]};
     }
 
     const std::vector<std::uint8_t> rgba = interleave(textures.size, textures.color, textures.coverage);
@@ -493,24 +491,33 @@ int addCardsToGltf(GltfDocument& doc, const CardMesh& cards, const CardTextures&
     const bool hasNormal = textures.normal.size() == textures.tangent.size() && !textures.normal.empty();
     const std::vector<std::uint8_t> normal = hasNormal ? cardNormalOpenGl(textures) : std::vector<std::uint8_t>();
     // The maps encoded side by side.
+    const bool hasWorldAo = textures.worldOcclusion.size() == textures.occlusion.size() && !textures.worldOcclusion.empty();
     std::vector<PngImage> images = {{textures.size, textures.size, 4, &rgba}, {textures.size, textures.size, 3, &orm}};
+    if (hasWorldAo) images.push_back({textures.size, textures.size, 1, &textures.worldOcclusion});
     if (hasNormal) images.push_back({textures.size, textures.size, 3, &normal});
     std::vector<std::vector<std::uint8_t>> pngs = encodePngs(images);
     const int baseColor = static_cast<int>(doc.textures.size());
     doc.textures.push_back({settings.name + "_BaseColor", std::move(pngs[0])});
     const int ormTexture = static_cast<int>(doc.textures.size());
     doc.textures.push_back({settings.name + "_ORM", std::move(pngs[1])});
+    int worldAoTexture = -1;
+    std::size_t nextPng = 2;
+    if (hasWorldAo) {
+        worldAoTexture = static_cast<int>(doc.textures.size());
+        doc.textures.push_back({settings.name + "_AO_world", std::move(pngs[nextPng++])});
+    }
     int normalTexture = -1;
     if (hasNormal) {
         normalTexture = static_cast<int>(doc.textures.size());
-        doc.textures.push_back({settings.name + "_Normal", std::move(pngs[2])});
+        doc.textures.push_back({settings.name + "_Normal", std::move(pngs[nextPng])});
     }
 
     GltfMaterial m;
     m.name = settings.name + "_Mat";
     m.baseColorTexture = baseColor;
     m.metallicRoughnessTexture = ormTexture;
-    m.occlusionTexture = ormTexture;
+    m.occlusionTexture = hasWorldAo ? worldAoTexture : ormTexture;
+    m.occlusionTexCoord = hasWorldAo ? 1 : 0;
     m.normalTexture = normalTexture;
     m.metallic = 0.0f;
     m.roughness = settings.roughness;

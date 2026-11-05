@@ -130,11 +130,11 @@ TEST(CardMaps, TheOldBakeIsTheSameBytes) {
     bake.size = 256;
     bake.scalp = plane.get();
     bake.dilate = 8;  // (the padding the old bake had: Full came after)
-    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0x1c9a8b4fb555cc23ull);
+    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0xe9a3a537932e37e6ull);
     bake.size = 128;
     bake.dilate = 0;
     bake.occlusion = 0.0f;
-    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0x9b570032af2becffull);
+    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0xf3966511dcf857a1ull);
 }
 
 TEST(CardMaps, TheUnrealPresetWritesTheBakesOwnFiles) {
@@ -144,6 +144,25 @@ TEST(CardMaps, TheUnrealPresetWritesTheBakesOwnFiles) {
     const fs::path dir = freshFolder("unreal");
     // The bake as Bake Maps writes it...
     const CardBake old = bakeCardsInMemory(strands, plane, 128);
+    EXPECT_EQ(old.cards->worldU.size(), old.cards->positions.size());
+    EXPECT_EQ(old.cards->worldV.size(), old.cards->positions.size());
+    EXPECT_EQ(old.textures.worldOcclusion.size(), old.textures.occlusion.size());
+    EXPECT_NE(old.textures.worldOcclusion, old.textures.occlusion);
+    std::vector<std::array<float, 4>> worldCells;
+    for (const CardMesh::Card& card : old.cards->cards) {
+        const std::size_t count = static_cast<std::size_t>(card.stations) * static_cast<std::size_t>(card.across + 1);
+        const auto ub = old.cards->worldU.begin() + card.firstVertex, ue = ub + count;
+        const auto vb = old.cards->worldV.begin() + card.firstVertex, ve = vb + count;
+        worldCells.push_back({*std::min_element(ub, ue), *std::min_element(vb, ve),
+                              *std::max_element(ub, ue), *std::max_element(vb, ve)});
+    }
+    for (std::size_t a = 0; a < worldCells.size(); ++a) {
+        for (std::size_t b = a + 1; b < worldCells.size(); ++b) {
+            const auto& x = worldCells[a];
+            const auto& y = worldCells[b];
+            EXPECT_TRUE(x[2] <= y[0] || y[2] <= x[0] || x[3] <= y[1] || y[3] <= x[1]);
+        }
+    }
     writeCardBake(old, CardBakePaths::in((dir / "old").generic_u8string(), "fur"), false);
     // ... and the export with the default preset at the same size.
     CardMapExport settings;
@@ -170,7 +189,7 @@ TEST(CardMaps, TheUnrealPresetWritesTheBakesOwnFiles) {
 TEST(CardMaps, ThinnestStrandBakesStrandsToScaleAtZero) {
     const MeshPtr plane = test::makePlane(16);
     const StrandsPtr solid = furWithCards(plane, 1.0), scaled = furWithCards(plane, 0.0);
-    ASSERT_EQ(combineCardLayers(solid->cardLayers()).thinnestStrand, 1.0f);
+    ASSERT_EQ(combineCardLayers(solid->cardLayers()).thinnestStrand, 0.0f);
     ASSERT_EQ(combineCardLayers(scaled->cardLayers()).thinnestStrand, 0.0f);
     auto sum = [](const std::vector<std::uint8_t>& v) {
         double s = 0;
@@ -424,6 +443,9 @@ TEST(CardMaps, PaddingSpreadsValuesPastTheStrands) {
     EXPECT_LT(empty, emptyBare / 20) << empty << " of " << emptyBare;
     EXPECT_EQ(full.maps.coverage, padded.maps.coverage);
     EXPECT_EQ(cardMapBakeSettings({}, CardMapExport{}, 1024).dilate, -1);
+    CardBakeSettings noDilation;
+    noDilation.dilate = 0;
+    EXPECT_EQ(cardMapBakeSettings(noDilation, CardMapExport{}, 1024).dilate, 0);
     CardMapExport limited;
     limited.padding = 6;
     limited.supersample = 2;
@@ -666,7 +688,7 @@ TEST(CardMaps, ExportWritesThePresetsFilesInAnyFormat) {
     const auto unity = findCardMapPreset("Unity HDRP Hair");
     ASSERT_TRUE(unity);
     const std::vector<std::string> pngs = writeCardMaps(f.maps, *unity, settings, dir.u8string(), "fur");
-    ASSERT_EQ(pngs.size(), 5u);
+    ASSERT_EQ(pngs.size(), 6u);
     const std::vector<std::uint8_t> bytes = fileBytes(pngs.front());
     int rw = 0, rh = 0, rc = 0;
     stbi_us* data = stbi_load_16_from_memory(bytes.data(), static_cast<int>(bytes.size()), &rw, &rh, &rc, 0);

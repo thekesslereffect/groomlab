@@ -433,9 +433,8 @@ class CardsOp : public Operator {
 public:
     std::string typeName() const override { return op::kCards; }
     std::string category() const override { return "look"; }
-    // 2: featherFlatten 1 and featherSeparation 0 by default (nodes saved before keep 0 and 0.05:
-    // ParamSpec::formerDefault).
-    int version() const override { return 2; }
+    // 2: featherFlatten 1 and featherSeparation 0 by default. 3: hair-card flatten 1 by default.
+    int version() const override { return 41; }
     // The guides: what cardsFrom guides lays the cards along.
     std::vector<PortSpec> inputs() const override { return {{"strands", PortType::Strands}, {"guides", PortType::Guides, true}}; }
     std::vector<ParamSpec> paramSpecs() const override {
@@ -466,7 +465,7 @@ public:
                 .when("featherMode", {"auto", "perVane", "off"}),
             notAnimatable({"segments", std::int64_t{8}, "Quads along each card"}).range(1, 256).soft(1, 32).in("Shape")
                 .when("featherMode", {"auto", "perVane", "off"}),
-            notAnimatable({"widthSegments", std::int64_t{1}, "Quads across each card (2 or more for curvature)"})
+            notAnimatable({"widthSegments", std::int64_t{2}, "Quads across each card (2 gives one center edge loop)"})
                 .range(1, 16)
                 .in("Shape")
                 .when("featherMode", {"auto", "perVane", "off"}),
@@ -479,8 +478,9 @@ public:
                 .range(0, 0.45)
                 .in("Shape")
                 .adv(),
-            ParamSpec{"fitTwist", 1.0, "How much each station turns to the way its strands lie across (their principal "
-                                       "direction): 1 follows them, 0 faces out of the scalp", "fraction"}
+            ParamSpec{"fitTwist", 1.0, "How much the whole card, including its root row, rotates to the way its "
+                                       "strands lie across (their principal direction): 1 follows them, 0 faces out "
+                                       "of the scalp", "fraction"}
                 .range(0, 1)
                 .in("Shape")
                 .when("featherMode", {"auto", "perVane", "off"})
@@ -538,7 +538,7 @@ public:
                                            "are carded by their clumps"})
                 .when("featherMode", {"auto", "perVane", "off"})
                 .adv(),
-            notAnimatable({"segmentsByLength", false, "Segments in proportion to each card's length: `segments` for the longest, "
+            notAnimatable({"segmentsByLength", true, "Segments in proportion to each card's length: `segments` for the longest, "
                                                       "fewer for short ones (the UVs don't change)"})
                 .in("Shape")
                 .when("featherMode", {"auto", "perVane", "off"})
@@ -559,11 +559,25 @@ public:
                       "perVane cards everything as hair (a card per vane or split); off cards only the hair", "",
                       {"auto", "perFeather", "perVane", "off"}}
                 .in("Feathers"),
-            notAnimatable({"featherSegments", std::int64_t{6}, "Quads along each feather's card (it bends with the shaft)"})
+            ParamSpec{"followBarbs", 0.5, "Follow Barbs: turns feather cross-edges to follow each vane's barb direction; "
+                                                   "0 keeps ordinary rows across the shaft, 1 fully follows the barbs", "fraction"}
+                .range(0, 1)
+                .in("Feathers")
+                .when("featherMode", {"auto", "perFeather"}),
+            notAnimatable({"featherSegments", std::int64_t{6}, "Quads along each feather's card after Follow Barbs shapes it"})
                 .range(1, 256)
                 .soft(1, 16)
                 .in("Feathers")
                 .when("featherMode", {"auto", "perFeather"}),
+            notAnimatable({"featherSegmentsByLength", true, "Segments in proportion to each feather's length: Feather Segments "
+                                                                 "for the longest, fewer for short feathers"})
+                .in("Feathers")
+                .when("featherMode", {"auto", "perFeather"}),
+            notAnimatable({"featherMinSegments", std::int64_t{2}, "With Feather Segments by Length: the fewest segments a feather gets"})
+                .range(1, 256)
+                .soft(1, 16)
+                .in("Feathers")
+                .when("featherSegmentsByLength", {"true"}),
             notAnimatable({"featherMinLength", 0.0, "Feathers shorter than this share of the longest make no card (drop small down "
                                                     "feathers at low LODs)", "fraction"})
                 .range(0, 1)
@@ -574,6 +588,13 @@ public:
                                                  "vane (lift, droop, cupping): two quads per segment. Off: a flat strip"})
                 .in("Feathers")
                 .when("featherMode", {"auto", "perFeather"})
+                .adv(),
+            ParamSpec{"flatten", 1.0, "How flat each hair card lies: 1 uses one best-fit plane along its centerline, "
+                                      "preventing twisted quads from showing a wavy diagonal; 0 follows the "
+                                      "rotation-minimizing frame",
+                      "fraction"}
+                .range(0, 1)
+                .in("Shape")
                 .adv(),
             notAnimatable({"featherFlatten", 1.0, "How flat each feather card lies: 1 one plane along the shaft and one fold per "
                                                   "half (every quad flat), 0 turning and folding with its barbs station by "
@@ -586,15 +607,15 @@ public:
                 .adv(),
             ParamSpec{"separation", 0.0, "Cards closer than this gap to another card, or passing through it, are pushed apart "
                                          "along their normals, roots held (a share of the narrower card's width; 0: off). "
-                                         "Only the mesh moves: the texture stays as baked", "fraction"}
+                                         "The texture is baked against the separated final card", "fraction"}
                 .range(0, 1)
                 .soft(0, 0.2)
                 .in("Separation")
                 .when("featherMode", {"auto", "perVane", "off"}),
             ParamSpec{"featherSeparation", 0.0, "Feather cards closer than this gap to another card, or passing through it, are "
                                                  "pushed apart along their normals, roots held, so overlapping feathers lie on each "
-                                                 "other instead of clipping (a share of the narrower card's width; 0: off). Only the "
-                                                 "mesh moves: the texture stays as baked", "fraction"}
+                                                 "other instead of clipping (a share of the narrower card's width; 0: off). The "
+                                                 "texture is baked against the separated final card", "fraction"}
                 .range(0, 1)
                 .soft(0, 0.2)
                 .in("Separation")
@@ -611,6 +632,11 @@ public:
                 .range(16, 16384)
                 .soft(256, 8192)
                 .in("Texture"),
+            notAnimatable({"padding", std::string("Full"),
+                           "How baked values spread outside strand coverage: Full fills all empty texels from the nearest "
+                           "strand for mip-safe textures; None leaves them undilated. Coverage is never padded", "",
+                           {"Full", "None"}})
+                .in("Texture"),
             notAnimatable({"strandsRootFade", 0.06, "Share of each strands card, from its root, over which coverage fades in so "
                                                       "hair cards blend into the scalp and each other (0: none)", "fraction"})
                 .range(0, 1)
@@ -623,15 +649,15 @@ public:
                 .soft(0, 0.2)
                 .in("Texture")
                 .when("featherMode", {"auto", "perFeather"}),
-            notAnimatable({"thinnestStrand", 1.0, "The narrowest a strand bakes, in the atlas's pixels, solid: 1 keeps every strand at "
-                                                  "least a pixel wide, so cards cut out at a cutoff (alpha tested) don't break up, though they "
-                                                  "read denser than the groom; 0 bakes the strands to scale, a thinner one fainter (as "
-                                                  "renders and the viewport's width coverage show them), for blended or dithered cards. "
-                                                  "Several Cards nodes share one bake, at the largest of theirs", "pixels"})
+            notAnimatable({"thinnestStrand", 0.0, "Minimum solid strand width in atlas pixels. 0 preserves the upstream Width node "
+                                                  "and its root-to-tip profile with antialiased fractional coverage; raise it only for "
+                                                  "alpha-tested cards that need minimum solid pixels. Several Cards nodes share one "
+                                                  "bake, at the largest of theirs", "pixels"})
                 .range(0, 8)
                 .soft(0, 2)
                 .in("Texture")
-                .adv(),
+                .adv()
+                .formerDefault(25, 1.0),
         };
     }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
@@ -668,6 +694,7 @@ public:
         s.widthProfile = params().getRamp("widthProfile");
         s.margin = static_cast<float>(params().getDouble("margin"));
         s.fitTwist = static_cast<float>(params().getDouble("fitTwist"));
+        s.flatten = static_cast<float>(params().getDouble("flatten"));
         s.twist = static_cast<float>(params().getDouble("twist"));
         s.curvature = static_cast<float>(params().getDouble("curvature"));
         s.ruffle = static_cast<float>(params().getDouble("ruffle"));
@@ -692,6 +719,9 @@ public:
                         : featherMode == "off"      ? CardSettings::FeatherMode::Off
                                                     : CardSettings::FeatherMode::Auto;
         s.featherSegments = static_cast<int>(params().getInt("featherSegments"));
+        s.featherSegmentsByLength = params().getBool("featherSegmentsByLength");
+        s.featherMinSegments = static_cast<int>(params().getInt("featherMinSegments"));
+        s.featherFollowBarbs = static_cast<float>(params().getDouble("followBarbs"));
         s.featherMinLength = static_cast<float>(params().getDouble("featherMinLength"));
         s.featherSpine = params().getBool("featherSpine");
         s.featherFlatten = static_cast<float>(params().getDouble("featherFlatten"));
@@ -720,6 +750,7 @@ public:
         }
         layer->atlasSize = static_cast<int>(params().getInt("atlasSize"));
         layer->thinnestStrand = static_cast<float>(params().getDouble("thinnestStrand"));
+        layer->dilate = params().getString("padding") != "None";
         auto out = std::make_shared<StrandSet>(*in);
         out->addCardLayer(std::move(layer));
         return StrandsPtr(out);

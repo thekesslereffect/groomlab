@@ -2,6 +2,7 @@
 #include "groomlab/card_files.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -24,6 +25,7 @@ const std::vector<std::string>& cardBakeSuffixes() {
     static const std::vector<std::string> suffixes = [] {
         std::vector<std::string> out;
         for (const std::string& map : cardMapNames()) out.push_back(map + ".tga");
+        out.push_back("AO_world.tga");
         out.push_back("Atlas.json");
         return out;
     }();
@@ -64,7 +66,8 @@ bool CardBakePaths::exists() const {
 std::string groomFileCardBakePrefix(const std::string& stem) { return stem + "_cards/" + stem + "_"; }
 
 std::string formatCardMaps(const std::string& prefix, const std::string& stamp, int bake) {
-    return "Color=" + prefix + "Color.tga;Coverage=" + prefix + "Coverage.tga;AO=" + prefix + "AO.tga;Atlas=" + prefix +
+    return "Color=" + prefix + "Color.tga;Coverage=" + prefix + "Coverage.tga;AO=" + prefix + "AO.tga;AOWorld=" +
+           prefix + "AO_world.tga;Atlas=" + prefix +
            "Atlas.json" + (stamp.empty() ? std::string() : ";Strands=" + stamp) + ";Bake=" + std::to_string(bake);
 }
 
@@ -99,7 +102,8 @@ std::string withCardMapsPrefix(const std::string& cardMaps, const std::string& p
             for (char& c : from) {
                 if (c == '\\') c = '/';
             }
-            if ((key == "Color" || key == "Coverage" || key == "AO" || key == "Atlas") && value.compare(0, from.size(), from) == 0) {
+            if ((key == "Color" || key == "Coverage" || key == "AO" || key == "AOWorld" || key == "Atlas") &&
+                value.compare(0, from.size(), from) == 0) {
                 entry = key + "=" + prefix + value.substr(from.size());
             }
         }
@@ -121,6 +125,10 @@ CardBake laidOutCards(StrandsPtr strands, MeshPtr scalp) {
     bake.cards = std::make_shared<CardMesh>(combineCardLayers(bake.strands->cardLayers()));
     if (bake.cards->cards.empty()) throw std::runtime_error("no cards: the Cards node made none (too few strands per clump?)");
     layoutCards(*bake.cards, bake.cards->padding);
+    CardMesh unique = *bake.cards;
+    layoutCardsUnique(unique, unique.padding);
+    bake.cards->worldU = unique.u;
+    bake.cards->worldV = unique.v;
     return bake;
 }
 
@@ -140,9 +148,13 @@ CardBake bakeCardMapsInMemory(StrandsPtr strands, MeshPtr scalp, const CardMapEx
     base.occlusion = occlusion;
     base.colorToRec709 = colorToRec709;
     base.minStrandTexels = bake.cards->thinnestStrand;  // (the Cards nodes' Thinnest Strand)
+    base.dilate = bake.cards->dilate ? -1 : 0;
     const CardBakeSettings bakeSettings = cardMapBakeSettings(base, settings, resolution);
     CardMaps maps = bakeCardMaps(*bake.strands, *bake.cards, bakeSettings);
     if (maps.size > resolution) maps = downsampleCardMaps(maps, maps.size / resolution);
+    CardMesh unique = *bake.cards;
+    layoutCardsUnique(unique, unique.padding);
+    maps.aoWorld = bakeStrandWorldAo(*bake.strands, unique, resolution, occlusion, bakeSettings.dilate);
     bake.maps = std::make_shared<const CardMaps>(std::move(maps));
     return bake;
 }
@@ -155,7 +167,14 @@ CardBake bakeCardsInMemory(StrandsPtr strands, MeshPtr scalp, int resolution, fl
     settings.occlusion = occlusion;
     settings.colorToRec709 = colorToRec709;
     settings.minStrandTexels = bake.cards->thinnestStrand;  // (the Cards nodes' Thinnest Strand)
+    settings.dilate = bake.cards->dilate ? -1 : 0;
     bake.textures = bakeCardTextures(*bake.strands, *bake.cards, settings);
+    CardMesh unique = *bake.cards;
+    layoutCardsUnique(unique, unique.padding);
+    std::vector<float> world = bakeStrandWorldAo(*bake.strands, unique, settings.size, occlusion, settings.dilate);
+    bake.textures.worldOcclusion.resize(world.size());
+    for (std::size_t p = 0; p < world.size(); ++p)
+        bake.textures.worldOcclusion[p] = static_cast<std::uint8_t>(std::lround(255.0f * std::clamp(world[p], 0.0f, 1.0f)));
     return bake;
 }
 
@@ -179,6 +198,7 @@ std::string writeCardBake(const CardBake& bake, const CardBakePaths& at, bool pr
         colorAlpha.empty() ? std::make_pair(3, &t.color) : std::make_pair(4, static_cast<const std::vector<std::uint8_t>*>(&colorAlpha)), {1, &t.occlusion}, {3, &t.normal}};
     const std::vector<std::string> paths = at.maps();
     parallelFor(0, maps.size(), [&](std::size_t i) { writeTga(paths[i], t.size, t.size, maps[i].first, *maps[i].second); }, 1);
+    writeTga(at.map("AO_world"), t.size, t.size, 1, t.worldOcclusion);
     // The atlas: every card's cell by its strands, so the cards rebuilt from now on (guides
     // brushed, the groom re-evaluated) keep the texture they were baked with.
     {

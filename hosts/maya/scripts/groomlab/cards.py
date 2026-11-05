@@ -19,7 +19,8 @@ from groomlab.paths import asset_folder, asset_name, resolve_path
 @undoable("cards")
 def create_cards(groom, segments=None, width_scale=None, density=None, clump_channel=None,
                  width_segments=None, curvature=None, twist=None, taper=None, before="output",
-                 lod=None, cards_per_clump=None, layers=None, flyaway_cards=None, fit_twist=None, ruffle=None,
+                 lod=None, cards_per_clump=None, layers=None, flyaway_cards=None, fit_twist=None, flatten=None,
+                 ruffle=None,
                  margin=None, max_cards=None, braids=None, node=None, from_guides=None):
     """Game cards for the groom, shown in its cards view (displayCards); returns the Cards node
     (`node`, else the first in the graph).
@@ -44,7 +45,8 @@ def create_cards(groom, segments=None, width_scale=None, density=None, clump_cha
     `cards_per_clump` x `layers` cards (1 x 1: one flat card per clump; a hero
     groom wants 4-8 x 2): its strands split into groups lying together, in
     inner and outer depth layers, each group a card along its own mean curve,
-    turned the way its strands lie (`fit_twist`, 1), as wide as they spread
+    rotated as a whole toward the way its strands lie (`fit_twist`, 1), flattened toward one
+    best-fit plane (`flatten`, 1) so twisted quads do not show a wavy diagonal, as wide as they spread
     plus a `margin` kept clear of the texture's edges (x `width_scale`, x the
     `taper` ramp root to tip), as long as the longest reaches; `twist` degrees
     more round its length, bowed by `curvature` over `width_segments` quads
@@ -73,7 +75,8 @@ def create_cards(groom, segments=None, width_scale=None, density=None, clump_cha
     given = {"clumpChannel": clump_channel, "segments": segments, "widthSegments": width_segments,
              "widthScale": width_scale, "curvature": curvature, "twist": twist,
              "cardsPerClump": cards_per_clump, "layers": layers, "flyawayCards": flyaway_cards,
-             "fitTwist": fit_twist, "ruffle": ruffle, "margin": margin, "maxCards": max_cards, "braids": braids}
+             "fitTwist": fit_twist, "flatten": flatten, "ruffle": ruffle,
+             "margin": margin, "maxCards": max_cards, "braids": braids}
     kinds = {"clumpChannel": str, "segments": int, "widthSegments": int, "cardsPerClump": int,
              "layers": int, "flyawayCards": int, "maxCards": int, "braids": bool}
     params = {k: kinds.get(k, float)(v) for k, v in given.items() if v is not None}
@@ -349,8 +352,9 @@ def bake_cards(groom, directory=None, resolution=None, name=None, occlusion=1.0,
     folder, asset_folder("cards")/<asset_name>) as TGA files, in Unreal's hair card layout:
     <name>_Depth, _Coverage (opacity), _Tangent (strand direction in card space),
     _Attribute (root U, root V, seed, coordU root to tip), _Color (the strands' color,
-    sRGB), _AO (ambient occlusion) and _Normal (the strands' normal in card tangent space,
-    DirectX's green); `name` defaults to the groom's asset_name. By default
+    sRGB), _AO (only that reusable card variation's own strand occlusion), _AO_world
+    (neighbour/world occlusion on the mesh's unique aoWorld UV set), and _Normal (the strands'
+    normal in card tangent space, DirectX's green); `name` defaults to the groom's asset_name. By default
     no file the groom doesn't own is written over (a free name_2... instead), and never
     another groom's bake. `resolution` defaults to the Cards node's atlasSize. No card mesh is
     needed: with `store` the groom's cards view shows the cards with these maps from then on
@@ -431,12 +435,14 @@ def bake_card_maps(groom, preset=CARD_MAP_PRESET, resolution=None, format=None, 
     """Bakes the groom's cards and writes their maps as `preset` packs them: a preset's name (see
     card_map_presets) or a dict {"name", "files": [{"map", "channels": [R, G, B, A]}], "normal",
     "format", "bitDepth"}. An export: the groom's own bake (its cards view) is left as it was.
+    The `ao` source is local to each reusable card texture; `ao_world` is neighbour/world
+    occlusion in the mesh's unique `aoWorld` UV set.
 
     resolution: texels square, up to 8192 (default: the Cards nodes' atlasSize). format: "tga",
     "png", "tiff" or "exr" (default: the preset's); bit_depth 8 or 16 (PNG, TIFF), 16 or 32 (EXR:
     half or float; TIFF 32 float) (default: the preset's, else the format's). padding: texels the
-    values spread past the strands so mip maps don't bleed (default: 8 at 2K and below, scaled
-    above). supersample: 1, 2 or 4 samples a texel each way (anti-aliased; the bake no bigger than
+    values spread past the strands so mip maps don't bleed (default: Full, to the neighbouring
+    cards). supersample: 1, 2 or 4 samples a texel each way (anti-aliased; the bake no bigger than
     8192). directory defaults to the scene's exports folder, name to the groom's asset_name;
     files are <name_template>.<ext> with {name}, {map} and {res}. Returns the paths written."""
     directory = (directory or asset_folder("exports")).replace("\\", "/")

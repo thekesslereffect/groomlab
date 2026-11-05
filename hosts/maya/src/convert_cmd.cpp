@@ -353,7 +353,7 @@ MStatus ConvertCmd::build() {
         const MIntArray uvIds(m.faceUVs.data(), static_cast<unsigned>(m.faceUVs.size()));
         meshFn.assignUVs(counts, uvIds);
         if (!strandMesh_.u2.empty()) {
-            MString set("strandUVs");
+            MString set(strandMesh_.uv2Name.empty() ? "strandUVs" : strandMesh_.uv2Name.c_str());
             meshFn.createUVSet(set);
             const MFloatArray u2(strandMesh_.u2.data(), static_cast<unsigned>(strandMesh_.u2.size()));
             const MFloatArray v2(strandMesh_.v2.data(), static_cast<unsigned>(strandMesh_.v2.size()));

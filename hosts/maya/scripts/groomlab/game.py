@@ -12,7 +12,7 @@ from groomlab.paths import asset_folder, asset_name
 from groomlab.shading import hair_look
 from groomlab.cards import (
     CARD_MAPS, CARD_NORMALS_NOTE, CARD_TINT_NOTE, FEATHER_CARD_NOTE, SCALP_MAPS, bake_cards, bake_scalp, card_material,
-    card_mesh, card_stats, cards_preset, create_card_mesh, scalp_cap, _card_maps, _cards_nodes, _existing_scalp_cap,
+    card_stats, cards_preset, scalp_cap, _card_maps, _cards_nodes, _existing_scalp_cap,
     _file_texture, _pointed_textures)
 from groomlab.exports import export_scales, has_scales
 from groomlab.feathers import export_rachis, rachis_width
@@ -113,17 +113,13 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
     by_map = {m: next((p for p in paths if p.endswith("_%s.tga" % m)), None) for m in CARD_MAPS + SCALP_MAPS}
     # The geometry to write: the live mesh and hair cap if there are, their materials pointed
     # at the exported maps while they are written, else meshes of their own, removed afterwards.
-    mesh = card_mesh(groom)
-    temporary = mesh is None
+    from groomlab import utils
+    mesh = utils.to_mesh(groom, make="cards", max_strands=100000000, name=name + "CardsExportSource")["mesh"]
     put_back = []
     selection = cmds.ls(selection=True)
     view = cmds.getAttr(groom + ".displayCards")
     try:
-        if temporary:
-            mesh = create_card_mesh(groom)
-            card_material(mesh, {m: by_map[m] for m in CARD_MAPS})
-        else:
-            put_back += _pointed_textures(mesh, by_map)
+        card_material(mesh, {m: by_map[m] for m in CARD_MAPS})
         cap = None
         if scalp:
             cap = _existing_scalp_cap(groom)
@@ -132,7 +128,8 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
             else:
                 cap = scalp_cap(groom, {m: by_map[m] for m in SCALP_MAPS})
         cmds.setAttr(groom + ".displayCards", True)  # written visible (their visibility follows the view)
-        cmds.select(mesh, replace=True)
+        export_mesh = _static_card_export_mesh(mesh)
+        cmds.select(export_mesh, replace=True)
         for command in ("FBXResetExport", "FBXExportInputConnections -v false", "FBXExportSmoothingGroups -v true",
                         "FBXExportTriangulate -v false", "FBXExportEmbeddedTextures -v false"):
             mel.eval(command)
@@ -170,7 +167,7 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
             "ScalpCoverage": "R: how much hair covers the skin, in the scalp's UVs",
         },
         "scalpCap": os.path.basename(cap_fbx) if cap_fbx else None,
-        "uv": "UV0: the atlas; V runs root (low) to tip (high); cards sharing a texture may be mirrored in U",
+        "uv": "UV0/map1: the shared texture atlas; UV1/aoWorld: a unique non-overlapping island per card for AO_world",
         "vertexColor": CARD_TINT_NOTE,
         "normals": CARD_NORMALS_NOTE,
         "featherCards": FEATHER_CARD_NOTE,
@@ -295,6 +292,39 @@ def _shading_groups(node):
     return shapes[0], cmds.listConnections(shapes[0], type="shadingEngine") or []
 
 
+def _require_card_uv_sets(node):
+    """Evaluate a card mesh and fail closed unless both exported atlas UV sets are present."""
+    shape = (cmds.listRelatives(node, shapes=True, fullPath=True) or [node])[0]
+    sets = cmds.polyUVSet(shape, query=True, allUVSets=True) or []
+    missing = [name for name in ("map1", "aoWorld") if name not in sets]
+    if missing:
+        raise RuntimeError("card mesh is missing UV set%s %s" %
+                           ("s" if len(missing) > 1 else "", ", ".join(missing)))
+    cmds.polyUVSet(shape, currentUVSet=True, uvSet="map1")
+    return shape
+
+
+def _static_card_export_mesh(node):
+    """A history-free evaluated copy, so FBX receives every UV set on the mesh data itself."""
+    _require_card_uv_sets(node)
+    copy = cmds.duplicate(node, returnRootsOnly=True, name=node.split("|")[-1] + "Export")[0]
+    cmds.delete(copy, constructionHistory=True)
+    _require_card_uv_sets(copy)
+    shape = (cmds.listRelatives(copy, shapes=True, fullPath=True) or [copy])[0]
+    sets = cmds.polyUVSet(shape, query=True, allUVSets=True) or []
+    if "map2" in sets:
+        cmds.polyUVSet(shape, delete=True, uvSet="map2")
+    # Export exactly two concrete sets. Keeping aoWorld and adding a copied alias produced three
+    # sets, which Autodesk FBX could collapse back to UV0. Renaming the evaluated second set makes
+    # it unambiguously FBX UV channel 1 while preserving its unique per-card coordinates.
+    cmds.polyUVSet(shape, rename=True, uvSet="aoWorld", newUVSet="map2")
+    sets = cmds.polyUVSet(shape, query=True, allUVSets=True) or []
+    if "map2" not in sets:
+        raise RuntimeError("could not rename the AO-world UV set to FBX UV1 map2")
+    cmds.polyUVSet(shape, currentUVSet=True, uvSet="map1")
+    return copy
+
+
 def export_cards_unity(groom, directory=None, name=None, resolution=None, occlusion=1.0, scalp=True, lod=None):
     """Game cards for Unity: the card mesh as FBX in Unity's conventions (Y up, meters, a material
     named <name>_cards_mat with the base color map) and its maps as PNG into `directory`
@@ -334,14 +364,15 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
     before = set(cmds.ls(long=True))
     selection = cmds.ls(selection=True)
     view = cmds.getAttr(groom + ".displayCards")
-    live = card_mesh(groom)
+    from groomlab import utils
+    live = None
     live_cap = _existing_scalp_cap(groom) if scalp else None
     # The meshes to write: the live card mesh and hair cap when there are (their own shading
     # put back afterwards), else meshes of their own, removed afterwards; either way with a
     # material made for Unity while they are written.
     put_back = [(_shading_groups(n)) for n in (live, live_cap) if n]
     try:
-        mesh = live or create_card_mesh(groom)
+        mesh = utils.to_mesh(groom, make="cards", max_strands=100000000, name=name + "CardsExportSource")["mesh"]
         _unity_material(mesh, name + "_cards_mat", by_map["BaseColor"])
         cap = None
         if scalp:
@@ -353,7 +384,8 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
                         "FBXExportTriangulate -v false", "FBXExportEmbeddedTextures -v false",
                         "FBXExportUpAxis y", "FBXExportConvertUnitString m", "FBXExportScaleFactor 1.0"):
             mel.eval(command)
-        cmds.select(mesh, replace=True)
+        export_mesh = _static_card_export_mesh(mesh)
+        cmds.select(export_mesh, replace=True)
         mel.eval('FBXExport -f "%s" -s' % fbx)
         if cap:
             cap_fbx = os.path.join(directory, name + "_scalpCap.fbx").replace("\\", "/")
@@ -418,7 +450,7 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
             },
             "scalpCap": "Transparent (alpha blend) with ScalpBaseColor, drawn under the cards",
         },
-        "uv": "UV0: the atlas; V runs root (low) to tip (high); cards sharing a texture may be mirrored in U",
+        "uv": "UV0/map1: the shared texture atlas; UV1/aoWorld: a unique non-overlapping island per card for AO_world",
         "vertexColor": CARD_TINT_NOTE,
         "normals": CARD_NORMALS_NOTE,
         "featherCards": FEATHER_CARD_NOTE,
@@ -439,8 +471,7 @@ def export_cards_gltf(groom, path=None, lod=None, lods=None, resolution=None, bi
     at `alpha_cutoff`), "blend" or "opaque", double-sided, <mesh>_ORM as occlusion (R) and
     metallic-roughness (G and B at 1: the factors apply, metallic 0 and the hair look's
     roughness). Vertices carry NORMAL, TANGENT (+U across the card; the bitangent runs root to
-    tip), TEXCOORD_0 (the atlas) and TEXCOORD_1 (x across the card, 0.5 on a feather card's
-    spine; y root 0 to tip 1).
+    tip), TEXCOORD_0 (the shared texture atlas) and TEXCOORD_1 (the unique aoWorld atlas).
 
     `lods` (e.g. ["hero", "mid", "low"]) bakes a mesh <name>_<lod> for each preset (see
     cards_preset) from a copy of the graph, the groom untouched; without, one mesh <name>_cards
