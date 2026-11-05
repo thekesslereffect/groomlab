@@ -214,11 +214,12 @@ named `<groom>_<map>`) renders the strands into the atlas as TGA files in Unreal
 | `_Attribute` | R, G: root UV on the scalp; B: seed per strand; A: coordU, 0 root to 1 tip along each strand (a feather's barbs: from the shaft out) |
 | `_Color` | base color, sRGB: the strands' color as the viewport shows it (the color nodes' RGB channels, per point along the strands where a tip color, Bands or FeatherColor vary it, else melanin); with FeatherColor's iridescence an RGBA map, its alpha the iridescence (255 full) |
 | `_AO` | ambient occlusion from the hair around (1 open) |
+| `_AO_world` | the whole groom's ambient occlusion (1 open), in the card mesh's second UV set (`aoWorld`, UV1: each card its own island), so it changes card to card where the shared textures can't |
 | `_Normal` | the strands' normal as round fibers, in card tangent space: x across (U), y along V, z out, so a strand's middle faces out of the card and its edges turn to the sides; 0.5 + 0.5 n with DirectX's green (Unreal's: y down). A normal map, separate from `_Tangent` (the strands' direction): for a card material without Unreal's Hair shading model, whose Normal pin is the tangent |
 
-Strands are drawn at their own width, at least a texel wide and opaque (`minStrandTexels`: a
-viewport draws every strand at least a pixel wide, and a hair's width is a fraction of a texel, so
-to scale they baked faint and the cards' cutoff left them out), where they actually lie
+Strands are drawn at their own width, to scale by default; with the Cards node's Thinnest Strand
+at 1 (`minStrandTexels`) at least a texel wide and opaque (a hair's width is a fraction of a texel,
+so to scale they bake fainter), where they actually lie
 on the card (a short strand ends partway, it isn't stretched), front ones over back ones, and
 colors spread a few pixels past them so mip maps don't pull in black. Every texture keeps its
 edge rows and columns clear (the card's margin, and strands past an edge drawn along it), so
@@ -618,7 +619,8 @@ The Cards node's **Export Unity Cards...**, GroomLab > Export > Unity Cards..., 
 writes into `directory` (default: the scene's exports folder), named like Export Unreal Cards
 (`<asset>_<lod>`):
 - `<name>_cards.fbx`: the card mesh, **Y up, in meters** (the FBX is converted from centimeters,
-  so Unity imports it at scale 1 whatever Convert Units says), UV0 the atlas (V root to tip), a
+  so Unity imports it at scale 1 whatever Convert Units says), UV0 the atlas (V root to tip), UV1
+  (`aoWorld`) each card's own island for `_AO_world`, a
   material `<name>_cards_mat` with the base color map (its alpha as transparency).
   `<name>_scalpCap.fbx` (`<name>_scalpCap_mat`) is the hair cap when the scalp has UVs.
 - PNG maps (Unity's preferred format), baked from the same cards:
@@ -628,6 +630,7 @@ writes into `directory` (default: the scene's exports folder), named like Export
 | `_BaseColor` | RGB: base color (sRGB); A: coverage (alpha clipping at 0.5) |
 | `_Mask` | HDRP's mask map layout. R: metallic (0; with FeatherColor's iridescence, the iridescence instead: a material reads it from there); G: ambient occlusion; B: root (0) to tip (1); A: smoothness (1 - the hair look's roughness) |
 | `_AO` | ambient occlusion (1 open), gray: URP's occlusion map |
+| `_AO_world` | the whole groom's ambient occlusion (1 open), gray, in UV1 (`aoWorld`): sample it with UV1 in a Shader Graph (URP/Lit reads occlusion on UV0 only) |
 | `_Tangent` | strand direction in tangent space (R along +U, G along +V root to tip, B out), 0.5 + 0.5 t: HDRP Hair's strand direction |
 | `_Depth` | distance off the card plane (0.5 on it), for pixel depth offset |
 | `_Attribute` | R, G: root UV on the scalp; B: seed per strand; A: root to tip |

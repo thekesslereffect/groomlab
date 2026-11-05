@@ -86,10 +86,10 @@ space: **Auto** writes it sRGB in TGA, PNG and TIFF and linear in EXR.
 
 | Preset | Files (R, G, B, A) |
 | --- | --- |
-| **Unreal Hair Cards** (TGA) | `Depth`, `Coverage`, `Tangent` (xyz), `Attribute` (root U, root V, seed, root to tip), `Color` (RGB, plus the iridescence in alpha when the groom has any), `AO` |
-| **Unreal (packed)** (TGA) | `Color` (RGB + AO in alpha), `Data` (depth, root to tip, seed, coverage), `Tangent` (xyz) |
-| **Unity HDRP Hair** (PNG) | `BaseColor` (RGB + coverage), `Normal` (OpenGL), `Mask` (0, AO, root to tip, specular as smoothness), `Tangent` (xyz), `Data` (depth, ID, translucency) |
-| **Separate maps (all)** (PNG) | Every map in its own file: `Albedo`, `Alpha`, `Depth`, `Direction` (flow), `Tangent`, `Normal`, `Root`, `ID`, `Seed`, `AO`, `Specular`, `Translucency`, `RootUV`, and `Iridescence` when the groom has any |
+| **Unreal Hair Cards** (TGA) | `Depth`, `Coverage`, `Tangent` (xyz), `Attribute` (root U, root V, seed, root to tip), `Color` (RGB, plus the iridescence in alpha when the groom has any), `AO`, `AO_world` (the whole groom's AO, in the second UV set) |
+| **Unreal (packed)** (TGA) | `Color` (RGB + AO in alpha), `AO_world` (in the second UV set), `Data` (depth, root to tip, seed, coverage), `Tangent` (xyz) |
+| **Unity HDRP Hair** (PNG) | `BaseColor` (RGB + coverage), `Normal` (OpenGL), `Mask` (0, AO, root to tip, specular as smoothness), `AO_world` (in the second UV set), `Tangent` (xyz), `Data` (depth, ID, translucency) |
+| **Separate maps (all)** (PNG) | Every map in its own file: `Albedo`, `Alpha`, `Depth`, `Direction` (flow), `Tangent`, `Normal`, `Root`, `ID`, `Seed`, `AO`, `AO_world`, `Specular`, `Translucency`, `RootUV`, and `Iridescence` when the groom has any |
 
 The Unreal presets use DirectX normals; Unity and Separate maps use OpenGL normals.
 

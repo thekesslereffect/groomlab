@@ -125,8 +125,9 @@ bool groomSpaceOf(const json& args) {
     return space == "groom";
 }
 
-// The cards as Maya's card mesh has them: a quad per card segment, the atlas UVs, the strands'
-// own normals, the tint as color set groomLabTint (half its value: 0.5 none), linear.
+// The cards as Maya's card mesh has them: a quad per card segment, the atlas UVs, the second UV
+// set aoWorld (each card its own island, the layout AO_world is baked in), the strands' own
+// normals, the tint as color set groomLabTint (half its value: 0.5 none), linear.
 MeshOut cardsMesh(const CardMesh& cards, const std::string& key) {
     MeshOut m;
     m.key = key;
@@ -135,10 +136,28 @@ MeshOut cardsMesh(const CardMesh& cards, const std::string& key) {
     m.faceCounts.assign(quads, 4);
     m.faceIndices.reserve(cards.quads.size());
     std::vector<float>& tint = m.colors["groomLabTint"];
+    // The unique layout: as the bake laid it out, else laid out again (cards that carry their stations).
+    const std::size_t n = cards.positions.size();
+    std::vector<float> worldU = cards.worldU, worldV = cards.worldV;
+    if (worldU.size() != n || worldV.size() != n) {
+        const bool rebuildable = !cards.cards.empty() && std::all_of(cards.cards.begin(), cards.cards.end(), [](const CardMesh::Card& c) {
+            return c.stations >= 2 && c.center.size() == static_cast<std::size_t>(c.stations) &&
+                   c.width.size() == static_cast<std::size_t>(c.stations);
+        });
+        worldU.clear();
+        worldV.clear();
+        if (rebuildable) {
+            CardMesh unique = cards;
+            layoutCardsUnique(unique, unique.padding);
+            if (unique.u.size() == n && unique.v.size() == n) worldU = std::move(unique.u), worldV = std::move(unique.v);
+        }
+    }
+    std::vector<float>* aoWorld = worldU.empty() ? nullptr : &m.uvSets["aoWorld"];
     for (const std::uint32_t v : cards.quads) {
         m.faceIndices.push_back(static_cast<std::int32_t>(v));
         m.uvs.push_back(v < cards.u.size() ? cards.u[v] : 0.0f);
         m.uvs.push_back(v < cards.v.size() ? cards.v[v] : 0.0f);
+        if (aoWorld) aoWorld->insert(aoWorld->end(), {v < n ? worldU[v] : 0.0f, v < n ? worldV[v] : 0.0f});
         m.normals.push_back(v < cards.normals.size() ? cards.normals[v] : Vec3f{0.0f, 1.0f, 0.0f});
         const std::array<float, 3> t = v < cards.tints.size() ? cards.tints[v] : std::array<float, 3>{1.0f, 1.0f, 1.0f};
         tint.insert(tint.end(), {0.5f * t[0], 0.5f * t[1], 0.5f * t[2], 1.0f});
@@ -383,6 +402,10 @@ const char* const kCardTintNote =
     "as light), linear: its own strands' color over the color its shared texture was baked from, root to tip "
     "(textures are shared by shape; the tint gives each card its own color, tips and bands included). "
     "In the material, multiply the Color map's RGB by 2 x the vertex color's RGB (read unconverted, as linear).";
+// (Maya's groomlab/game.py AO_WORLD_NOTE.)
+const char* const kAoWorldNote =
+    "R (gray): ambient occlusion of the whole groom (1 open), linear, in the second UV set (UV1, aoWorld: each card "
+    "its own island), so it varies card to card where the shared maps can't";
 const char* const kCardNormalsNote =
     "Normals: the strands' own (locked), out of the scalp at the card's roots and leaning along the card as "
     "the groom's lit strands are drawn: shade the cards with them, the same from either side.";
@@ -605,12 +628,14 @@ json exportEngineCards(Session& s, const json& args, bool unity) {
                             "along each strand; on a feather's card along each barb, from the shaft out)"},
               {"Color", "RGB: base color, sRGB"},
               {"AO", "R: ambient occlusion (1 open)"},
+              {"AO_world", kAoWorldNote},
               {"Normal", "RGB: the strands' normal as round fibers in tangent space (x across U, y along V, z out), "
                          "DirectX's green (Unreal's), linear"},
               {"ScalpColor", "RGB: the hair's color on the scalp (sRGB), in the scalp's UVs, for the hair cap"},
               {"ScalpCoverage", "R: how much hair covers the skin, in the scalp's UVs"}}},
             {"scalpCap", withScalp ? json(baseName(capFbx)) : json()},
-            {"uv", "UV0: the atlas; V runs root (low) to tip (high); cards sharing a texture may be mirrored in U"},
+            {"uv", "UV0: the atlas; V runs root (low) to tip (high); cards sharing a texture may be mirrored in U. "
+                   "UV1 (aoWorld): a unique non-overlapping island per card, for AO_world"},
             {"vertexColor", kCardTintNote},
             {"normals", kCardNormalsNote},
             {"featherCards", kFeatherCardNote}};
@@ -629,6 +654,7 @@ json exportEngineCards(Session& s, const json& args, bool unity) {
               {"Mask", "HDRP mask map layout. R: metallic (0); G: ambient occlusion (1 open); "
                        "B: root (0) to tip (1) along the strands; A: smoothness (1 - the hair look's roughness)"},
               {"AO", "R (gray): ambient occlusion (1 open)"},
+              {"AO_world", kAoWorldNote},
               {"Tangent", "RGB: strand direction in tangent space (R along +U, G along +V root to tip, B out), "
                           "0.5 + 0.5 * t, linear (import without sRGB)"},
               {"Depth", "R (gray): distance off the card plane (0.5 on it, higher in front), linear"},
@@ -638,8 +664,8 @@ json exportEngineCards(Session& s, const json& args, bool unity) {
                          "OpenGL's green, linear (import as a Normal map)"},
               {"ScalpBaseColor", "RGB: the hair's color on the scalp (sRGB); A: how much hair covers the skin"}}},
             {"import",
-             {{"textures", "BaseColor and ScalpBaseColor sRGB with Alpha Is Transparency; Mask, AO, Tangent, "
-                           "Depth and Attribute linear (sRGB off); Normal as Texture Type Normal map"},
+             {{"textures", "BaseColor and ScalpBaseColor sRGB with Alpha Is Transparency; Mask, AO, AO_world, "
+                           "Tangent, Depth and Attribute linear (sRGB off); Normal as Texture Type Normal map"},
               {"model", "Convert Units on (the FBX is in meters, so its scale stays 1)"}}},
             {"materials",
              {{"HDRP",
@@ -649,16 +675,19 @@ json exportEngineCards(Session& s, const json& args, bool unity) {
                 {"Mask Map", mapOr("Mask")},
                 {"Normal Map", mapOr("Normal")},
                 {"Hair Strand Direction", "Tangent map * 2 - 1 (strands run +V, root to tip)"},
+                {"Ambient Occlusion", "AO_world sampled with UV1 (in the Shader Graph), times the Mask map's G"},
                 {"Smoothness", smoothness}}},
               {"URP",
                {{"shader", "Universal Render Pipeline/Lit"},
                 {"Base Map", mapOr("BaseColor")},
                 {"Alpha Clipping", true}, {"Threshold", 0.5}, {"Render Face", "Both"},
                 {"Occlusion Map", mapOr("AO")},
+                {"Occlusion (whole groom)", "URP/Lit reads occlusion on UV0 only: AO_world needs a Shader Graph sampling it with UV1"},
                 {"Normal Map", mapOr("Normal")},
                 {"Smoothness", smoothness}}},
               {"scalpCap", "Transparent (alpha blend) with ScalpBaseColor, drawn under the cards"}}},
-            {"uv", "UV0: the atlas; V runs root (low) to tip (high); cards sharing a texture may be mirrored in U"},
+            {"uv", "UV0: the atlas; V runs root (low) to tip (high); cards sharing a texture may be mirrored in U. "
+                   "UV1 (aoWorld): a unique non-overlapping island per card, for AO_world"},
             {"vertexColor", kCardTintNote},
             {"normals", kCardNormalsNote},
             {"featherCards", kFeatherCardNote}};

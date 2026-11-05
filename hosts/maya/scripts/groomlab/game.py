@@ -110,7 +110,7 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
             scalp = False
     if not cmds.pluginInfo("fbxmaya", query=True, loaded=True):
         cmds.loadPlugin("fbxmaya", quiet=True)
-    by_map = {m: next((p for p in paths if p.endswith("_%s.tga" % m)), None) for m in CARD_MAPS + SCALP_MAPS}
+    by_map = {m: next((p for p in paths if p.endswith("_%s.tga" % m)), None) for m in CARD_MAPS + (AO_WORLD,) + SCALP_MAPS}
     # The geometry to write: the live mesh and hair cap if there are, their materials pointed
     # at the exported maps while they are written, else meshes of their own, removed afterwards.
     from groomlab import utils
@@ -146,7 +146,7 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
         made = [n for n in cmds.ls(long=True) if n not in before]  # what the export made for itself
         cmds.delete([n for n in made if cmds.objExists(n)])
     stats = card_stats(groom)
-    maps = {m: os.path.basename(p) for m in CARD_MAPS + SCALP_MAPS
+    maps = {m: os.path.basename(p) for m in CARD_MAPS + (AO_WORLD,) + SCALP_MAPS
             for p in paths if p.endswith("_%s.tga" % m)}
     manifest = {
         "mesh": os.path.basename(fbx),
@@ -161,6 +161,7 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
                          "along each strand; on a feather's card along each barb, from the shaft out)",
             "Color": "RGB: base color, sRGB",
             "AO": "R: ambient occlusion (1 open)",
+            "AO_world": AO_WORLD_NOTE,
             "Normal": "RGB: the strands' normal as round fibers in tangent space (x across U, y along V, z out), "
                       "DirectX's green (Unreal's), linear",
             "ScalpColor": "RGB: the hair's color on the scalp (sRGB), in the scalp's UVs, for the hair cap",
@@ -182,7 +183,12 @@ def export_cards_unreal(groom, directory=None, name=None, resolution=None, occlu
 # (HairSim.MIN/MAX_STRAND_PARTICLE_COUNT) and takes up to 64,000 strands a group (MAX_STRAND_COUNT).
 UNITY_STRAND_POINTS = (3, 128)
 UNITY_MAX_STRANDS = 64000
-UNITY_CARD_MAPS = ("BaseColor", "Mask", "AO", "Tangent", "Depth", "Attribute", "Normal")
+UNITY_CARD_MAPS = ("BaseColor", "Mask", "AO", "AO_world", "Tangent", "Depth", "Attribute", "Normal")
+# The world-space ambient occlusion every card bake writes beside the maps: each card's own island
+# in the mesh's second UV set (aoWorld), so the occlusion of the whole groom, not the shared texture's.
+AO_WORLD = "AO_world"
+AO_WORLD_NOTE = ("R (gray): ambient occlusion of the whole groom (1 open), linear, in the second UV set (UV1, "
+                 "aoWorld: each card its own island), so it varies card to card where the shared maps can't")
 
 
 def _unity_points(value, what):
@@ -334,7 +340,8 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
 
     Maps: <name>_BaseColor (RGB color, sRGB; A coverage, for alpha clipping), _Mask (HDRP's
     mask map: R metallic 0, G ambient occlusion, B root (0) to tip (1), A smoothness from the
-    hair look), _AO, _Tangent (strand direction in tangent space), _Depth, _Attribute and _Normal
+    hair look), _AO, _AO_world (the whole groom's occlusion in the second UV set, aoWorld),
+    _Tangent (strand direction in tangent space), _Depth, _Attribute and _Normal
     (the strands' normal in tangent space, OpenGL's green). With
     `scalp` (and a scalp with UVs), <name>_ScalpBaseColor (color, coverage in alpha) and the
     hair cap <name>_scalpCap.fbx. The groom keeps its own bake (cardMaps and materials are
@@ -416,6 +423,7 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
             "Mask": "HDRP mask map layout. R: metallic (0); G: ambient occlusion (1 open); "
                     "B: root (0) to tip (1) along the strands; A: smoothness (1 - the hair look's roughness)",
             "AO": "R (gray): ambient occlusion (1 open)",
+            "AO_world": AO_WORLD_NOTE,
             "Tangent": "RGB: strand direction in tangent space (R along +U, G along +V root to tip, B out), "
                        "0.5 + 0.5 * t, linear (import without sRGB)",
             "Depth": "R (gray): distance off the card plane (0.5 on it, higher in front), linear",
@@ -426,8 +434,8 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
             "ScalpBaseColor": "RGB: the hair's color on the scalp (sRGB); A: how much hair covers the skin",
         },
         "import": {
-            "textures": "BaseColor and ScalpBaseColor sRGB with Alpha Is Transparency; Mask, AO, Tangent, "
-                        "Depth and Attribute linear (sRGB off); Normal as Texture Type Normal map",
+            "textures": "BaseColor and ScalpBaseColor sRGB with Alpha Is Transparency; Mask, AO, AO_world, "
+                        "Tangent, Depth and Attribute linear (sRGB off); Normal as Texture Type Normal map",
             "model": "Convert Units on (the FBX is in meters, so its scale stays 1)",
         },
         "materials": {
@@ -438,6 +446,7 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
                 "Mask Map": maps.get("Mask"),
                 "Normal Map": maps.get("Normal"),
                 "Hair Strand Direction": "Tangent map * 2 - 1 (strands run +V, root to tip)",
+                "Ambient Occlusion": "AO_world sampled with UV1 (in the Shader Graph), times the Mask map's G",
                 "Smoothness": smoothness,
             },
             "URP": {
@@ -445,6 +454,8 @@ def export_cards_unity(groom, directory=None, name=None, resolution=None, occlus
                 "Base Map": maps.get("BaseColor"),
                 "Alpha Clipping": True, "Threshold": 0.5, "Render Face": "Both",
                 "Occlusion Map": maps.get("AO"),
+                "Occlusion (whole groom)": "URP/Lit reads occlusion on UV0 only: AO_world needs a Shader Graph "
+                                           "sampling it with UV1",
                 "Normal Map": maps.get("Normal"),
                 "Smoothness": smoothness,
             },

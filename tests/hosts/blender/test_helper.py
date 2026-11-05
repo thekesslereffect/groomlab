@@ -2312,11 +2312,17 @@ class PipelineTest(HelperTestCase):
         self.assertEqual(manifest["scalpCap"], "head_scalpCap.fbx")
         self.assertGreater(manifest["cards"], 0)
         self.assertEqual(manifest["maps"]["Color"], "head_Color.tga")
+        self.assertEqual(manifest["maps"]["AO_world"], "head_AO_world.tga")
+        self.assertIn("AO_world", manifest["channels"])
         cards = r["meshes"]["cards"]
         m = self.mesh(cards)
         self.assertTrue((m["faceCounts"] == 4).all())
         self.assertEqual(cards["corners"], len(m["faceIndices"]))
         self.assertEqual(self.h.array(cards["uvs"]).shape, (cards["corners"], 2))
+        # The second UV set, AO_world's: each card its own island, inside 0..1.
+        ao_world = self.h.array(cards["uvSets"]["aoWorld"])
+        self.assertEqual(ao_world.shape, (cards["corners"], 2))
+        self.assertTrue(((ao_world >= 0.0) & (ao_world <= 1.0)).all())
         self.assertEqual(self.h.array(cards["normals"]).shape, (cards["corners"], 3))
         tint = self.h.array(cards["colors"]["groomLabTint"])
         self.assertEqual(tint.shape, (cards["corners"], 4))

@@ -2192,6 +2192,8 @@ class GroomingTest(unittest.TestCase):
         with open(result["manifest"]) as f:
             manifest = json.load(f)
         self.assertEqual(manifest["maps"]["Coverage"], "hero_Coverage.tga")
+        self.assertEqual(manifest["maps"]["AO_world"], "hero_AO_world.tga")
+        self.assertIn("AO_world", manifest["channels"])
         self.assertEqual(manifest["triangles"], stats["low"]["triangles"])
         self.assertIn("coordU", manifest["channels"]["Attribute"])
         self.assertEqual(manifest["maps"]["ScalpColor"], "hero_ScalpColor.tga")
@@ -2259,7 +2261,7 @@ class GroomingTest(unittest.TestCase):
         self.assertGreater(os.path.getsize(result["scalpCap"]), 1000)
         self.assertEqual(fbx_unit_scale(result["fbx"]), 100.0)  # meters: 100 cm per unit
         written = sorted(os.path.basename(p) for p in result["maps"])
-        self.assertEqual(written, sorted("%s_%s.png" % (name, m) for m in groomlab.UNITY_CARD_MAPS + ("AO_world", "ScalpBaseColor")))
+        self.assertEqual(written, sorted("%s_%s.png" % (name, m) for m in groomlab.UNITY_CARD_MAPS + ("ScalpBaseColor",)))
         kinds = {}
         for p in result["maps"]:
             with open(p, "rb") as f:
@@ -2275,6 +2277,8 @@ class GroomingTest(unittest.TestCase):
             manifest = json.load(f)
         self.assertEqual(manifest["engine"], "Unity")
         self.assertEqual(manifest["maps"]["BaseColor"], name + "_BaseColor.png")
+        self.assertEqual(manifest["maps"]["AO_world"], name + "_AO_world.png")
+        self.assertIn("UV1", manifest["materials"]["HDRP"]["Ambient Occlusion"])
         self.assertIn("coverage", manifest["channels"]["BaseColor"])
         self.assertIn("Alpha Clipping", manifest["materials"]["URP"])
         self.assertEqual(manifest["scalpCap"], name + "_scalpCap.fbx")
