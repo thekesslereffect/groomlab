@@ -1,25 +1,24 @@
 {
   "version": 1,
   "size": 20.0,
-  "about": {"title": "Box braids", "description": "Box braids all over the head with nothing to draw first: Braid picks one braid per patch of scalp, about 2.6 cm apart however big the head, and plaits each.", "category": "Hair"},
+  "about": {"title": "Box braids", "category": "Braids", "description": "Box braids all over the head with nothing to draw first: Braid picks one braid per patch of scalp, about 2.6 cm apart however big the head, plaits each to a sealed end (end bound) and gathers every strand into the nearest."},
   "exposed": [
     {"node": "braid", "param": "region", "name": "braidSpacing"},
     {"node": "braid", "param": "style", "name": "braidStyle"},
     {"node": "braid", "param": "width", "name": "braidWidth"},
-    {"node": "braid", "param": "crossings", "name": "crossings"},
+    {"node": "braid", "param": "tightness", "name": "tightness"},
     {"node": "braid", "param": "fuzz", "name": "fuzz"},
-    {"node": "color", "param": "melanin", "name": "melanin"},
-    {"node": "width", "param": "width", "name": "width"}
+    {"node": "color", "param": "melanin", "name": "melanin"}
   ],
   "nodes": [
     {"name": "scalp", "type": "Scalp", "ui": {"x": 0, "y": 0}},
     {"name": "guides", "type": "Guides", "ui": {"x": 0, "y": 180}},
     {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 25.0}, "ui": {"x": 240, "y": 0}},
     {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
-    {"name": "braid", "type": "Braid", "params": {"style": "three", "width": 1.2, "crossings": 0.3, "region": 2.6, "fuzz": 0.2}, "ui": {"x": 960, "y": 0}},
-    {"name": "color", "type": "HairColor", "params": {"melanin": 0.92, "redness": 0.08, "melaninRandom": 0.05}, "ui": {"x": 1200, "y": 0}},
-    {"name": "width", "type": "Width", "params": {"width": 0.008, "profile": [[0, 1], [1, 0.3]]}, "ui": {"x": 1440, "y": 0}},
-    {"name": "output", "type": "Output", "ui": {"x": 1920, "y": 0}}
+    {"name": "braid", "type": "Braid", "params": {"style": "three", "width": 2.4, "tightness": 2.5, "region": 2.6, "fuzz": 0.2, "strays": 0.0, "end": "bound"}, "ui": {"x": 720, "y": 0}},
+    {"name": "color", "type": "HairColor", "params": {"melanin": 0.92, "redness": 0.08, "melaninRandom": 0.05}, "ui": {"x": 960, "y": 0}},
+    {"name": "width", "type": "Width", "params": {"width": 0.008, "profile": [[0, 1], [1, 0.3]]}, "ui": {"x": 1200, "y": 0}},
+    {"name": "output", "type": "Output", "ui": {"x": 1440, "y": 0}}
   ],
   "connections": [
     {"from": "scalp", "to": "scatter", "input": "scalp"},

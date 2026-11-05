@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "size": 20.0,
+  "about": {"title": "Box braids, curly ends", "category": "Braids", "description": "Box braids tied off near the end (a hair tie on each: the built-in groomlab:hairTie), the ends below curling. The Braid writes braidTail per point (0 in the braid, 1 at the tip): the Curl's radius mapped by it curls the ends alone. Clump or Noise after the Braid with affect $braidTail would shape them the same way."},
+  "exposed": [
+    {"node": "braid", "param": "region", "name": "braidSpacing"},
+    {"node": "braid", "param": "width", "name": "braidWidth"},
+    {"node": "braid", "param": "tightness", "name": "tightness"},
+    {"node": "braid", "param": "tail", "name": "curlyLength"},
+    {"node": "curlyEnds", "param": "frequency", "name": "curlFrequency"},
+    {"node": "color", "param": "melanin", "name": "melanin"}
+  ],
+  "nodes": [
+    {"name": "scalp", "type": "Scalp", "ui": {"x": 0, "y": 0}},
+    {"name": "guides", "type": "Guides", "ui": {"x": 0, "y": 180}},
+    {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 25.0}, "ui": {"x": 240, "y": 0}},
+    {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
+    {"name": "braid", "type": "Braid", "params": {"style": "three", "width": 2.4, "tightness": 2.5, "region": 2.6, "fuzz": 0.2, "strays": 0.0, "end": "tuft", "tail": 0.3, "ties": 1, "cinch": 0.35}, "ui": {"x": 720, "y": 0}},
+    {"name": "curlyEnds", "type": "Curl", "params": {"radius": {"expression": "$braidTail", "min": 0.0, "max": 0.35}, "frequency": 0.8, "randomness": 0.3, "profile": [[0, 1], [1, 1]]}, "ui": {"x": 960, "y": 0}},
+    {"name": "hairTies", "type": "Instance", "params": {"prototype": "groomlab:hairTie", "probability": 1.0, "count": 1, "tMin": 0.0, "tMax": 0.0, "sizeMode": "fitStrand", "fitScale": 1.0, "fitWidth": true, "aspect": 1.0, "scaleByWidth": false, "scaleRandom": 0.0, "spinRandom": 1.0}, "ui": {"x": 1200, "y": 0}},
+    {"name": "color", "type": "HairColor", "params": {"melanin": 0.92, "redness": 0.08, "melaninRandom": 0.05}, "ui": {"x": 1440, "y": 0}},
+    {"name": "width", "type": "Width", "params": {"width": 0.008, "profile": [[0, 1], [1, 0.3]]}, "ui": {"x": 1680, "y": 0}},
+    {"name": "output", "type": "Output", "ui": {"x": 1920, "y": 0}}
+  ],
+  "connections": [
+    {"from": "scalp", "to": "scatter", "input": "scalp"},
+    {"from": "scatter", "to": "interpolate", "input": "strands"},
+    {"from": "guides", "to": "interpolate", "input": "guides"},
+    {"from": "scalp", "to": "interpolate", "input": "scalp"},
+    {"from": "interpolate", "to": "braid", "input": "strands"},
+    {"from": "braid", "to": "curlyEnds", "input": "strands"},
+    {"from": "curlyEnds", "to": "hairTies", "input": "strands"},
+    {"from": "braid", "output": "ties", "to": "hairTies", "input": "along"},
+    {"from": "hairTies", "to": "color", "input": "strands"},
+    {"from": "color", "to": "width", "input": "strands"},
+    {"from": "width", "to": "output", "input": "strands"}
+  ],
+  "output": "output"
+}

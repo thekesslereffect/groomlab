@@ -8,7 +8,9 @@
 #include <stdexcept>
 
 #include "groomlab/export_view.h"
+#include "groomlab/instances.h"
 #include "groomlab/png.h"
+#include "groomlab/scales.h"
 #include "groomlab/scalp_mesh.h"
 #include "groomlab/strand_set.h"
 
@@ -179,7 +181,7 @@ PreviewImage renderPreview(const ScalpMesh* scalp, const StrandSet* strands, con
         const float extent = std::max({hi[0] - lo[0], hi[1] - lo[1], 1e-6f});
         r.scale = 0.9f * static_cast<float>(inner) / extent;
         r.offsetX = r.offsetY = 0.5f * static_cast<float>(inner);
-        const float depthRange = std::max(hi[2] - lo[2], 1e-6f) * r.scale;
+        const float depthRange = std::max(hi[2] - lo[2], 1e-6f);  // scene units, as project()'s depth
 
         // The light: from above and to the right of the camera, the same in every view.
         const Vec3f light = (views[static_cast<std::size_t>(v)].back + r.up * 0.8f + r.right * 0.5f).normalized();
@@ -200,9 +202,38 @@ PreviewImage renderPreview(const ScalpMesh* scalp, const StrandSet* strands, con
                              screen[static_cast<std::size_t>(t[2])], col);
             }
         }
+        // Instances placed by a matrix with a built-in mesh (beads, cuffs, hair ties): shaded like
+        // the skin in a color of their prototype's. (Scene meshes are the host's: not drawn.)
+        if (strands && strands->instances() && !strands->instances()->empty()) {
+            static const Color kAccessory[4] = {{0.75f, 0.55f, 0.18f}, {0.62f, 0.64f, 0.68f}, {0.20f, 0.45f, 0.55f}, {0.55f, 0.16f, 0.14f}};
+            const InstanceSet& set = *strands->instances();
+            for (const InstanceSet::Placed& placed : set.resolve(*strands, scalp)) {
+                if (placed.meshed || placed.prototype >= set.prototypes.size()) continue;
+                const InstancePrototype* mesh = builtinPrototype(set.prototypes[placed.prototype]);
+                if (!mesh) continue;
+                std::vector<Vec3f> world(mesh->points.size()), screen(mesh->points.size());
+                for (std::size_t i = 0; i < world.size(); ++i) {
+                    const Vec3f& q = mesh->points[i];
+                    world[i] = placed.origin + placed.x * q.x + placed.y * q.y + placed.z * q.z;
+                    screen[i] = r.project(world[i]);
+                }
+                const Color& base = kAccessory[placed.prototype % 4];
+                for (std::size_t t = 0; t + 2 < mesh->triangles.size(); t += 3) {
+                    const std::uint32_t ia = mesh->triangles[t], ib = mesh->triangles[t + 1], ic = mesh->triangles[t + 2];
+                    Vec3f n = (world[ib] - world[ia]).cross(world[ic] - world[ia]);
+                    if (!(n.length() > 0.0f)) continue;
+                    n = n.normalized();
+                    if (n.dot(toEye) < 0.0f) n = -n;
+                    const float shade = 0.2f + 0.8f * std::max(0.0f, n.dot(light));
+                    const float spec = std::pow(std::max(0.0f, n.dot((light + toEye).normalized())), 40.0f);
+                    drawTriangle(r, screen[ia], screen[ib], screen[ic],
+                                 {base[0] * shade + 0.3f * spec, base[1] * shade + 0.3f * spec, base[2] * shade + 0.3f * spec});
+                }
+            }
+        }
         // Strands: Kajiya-Kay diffuse and highlight from each segment's tangent, a little darker
         // toward the root (the hair's own shadow).
-        const float bias = 0.004f * depthRange;
+        const float bias = std::min(0.006f * depthRange, 2.0f / r.scale);  // (at most a couple of pixels deep)
         const Vec3f halfway = (light + toEye).normalized();
         for (const std::size_t s : drawn) {
             const Vec3f* p = strands->strandPoints(s);

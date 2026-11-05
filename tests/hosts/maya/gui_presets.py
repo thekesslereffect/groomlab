@@ -149,7 +149,7 @@ def _uses_guides(preset):
     return False
 
 
-HAIR_CATEGORIES = ("Hair", "Motion", "Techniques", "Games", "Add-ons")
+HAIR_CATEGORIES = ("Hair", "Braids", "Motion", "Techniques", "Games", "Add-ons")
 
 
 def comb_graph(length, spacing, colliders=()):

@@ -65,6 +65,10 @@ const std::map<std::string, std::string> kCannot = {
     {"flow_with_guides", "needs a painted map (guideAreas) the sphere has none of"},
     {"parity_nodes", "its uvGrid Scatter needs UVs the sphere has none of"},
     {"hand_placed_feathers", "grows on the guides drawn into its feathers group, which the sphere has none of"},
+    {"braids_cornrows", "braids along the paths drawn into its braids group, which the sphere has none of"},
+    {"braids_french", "braids along the path drawn into its braids group, which the sphere has none of"},
+    {"braids_fishtail_ponytail", "braids along the path drawn into its braids group, which the sphere has none of"},
+    {"braids_loose", "braids along the path drawn into its braids group, which the sphere has none of"},
 };
 
 // The sphere; bulged: its points beyond kBulgeFrom pushed out; as a pose: on the unbulged rest

@@ -147,6 +147,14 @@ groomlab.add_instances(groom, flake, probability=0.08, scale=0.03, orient="rando
   groomlab.add_instances(groom, "leaf", probability=1.0, t_range=(0, 0), size_mode="fitStrand",
                          fit_scale=1.0, aspect=0.25, orient="strand")
   ```
+- **Round a braid (`fitWidth`, the `along` input):** connect a Braid node's `ties` output to
+  the Instance node's `along` input and the instances go on the braid's ties instead of on the
+  hair: beads, cuffs and hair ties. The hair passes through untouched; the tie strands travel with
+  the instances (never drawn or rendered). With `sizeMode` fitStrand, `fitScale` 1 and `tMin` =
+  `tMax` = 0 each one spans its tie, and `fitWidth` makes it as thick across as the braid there
+  (times `aspect`). The built-in meshes `groomlab:bead`, `groomlab:cuff` and `groomlab:hairTie`
+  are rings round a bore of radius 0.5 up +Y from 0 to 1, made for this (the `braids_beaded`
+  preset).
 - **Following the strands:** instances remember their strand and position along it, so nodes
   after the Instance node (curl, collide, simulation) carry them along, and preview density
   thins them with the strands. `add_instances` puts the node just before the output.

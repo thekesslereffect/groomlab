@@ -11,44 +11,57 @@ Editor, select the curves and click the node's **Paths from Selected Curves** (t
 in its paths group; a Guides node for them is made and connected). By script:
 
 ```python
-groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.15, crossings=2.5, region=0.3)
+groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=1.0, region=0.3)
 ```
 
 - **Paths:** the curves become the guide group `braids`, and a Guides node reads it into a
   Braid node placed after Interpolate. Noise and frizz later in the graph add flyaways.
-- **Styles:** `three` (classic), `fishtail`, `rope` (two-strand twist) and `cornrow` (flat on
-  the scalp). `dutch` raises the braid by crossing the lobes under.
+- **The weave:** a pattern of crossings, as a braider makes it. The hair is split into sections,
+  each with a slot across the braid; each step takes an outer section across the others, over
+  one and under the next, and the sections it passes shift one slot to fill the gap. Each
+  section is a band along its own course, so sections pass over and under each other instead of
+  through.
+- **Styles:** `three` (right over the middle, then left), `four` and `five` (an outer section to
+  the middle, over then under: the four- and five-strand flat braids), `fishtail` (thin strips,
+  `sections` a side, six by default: the outer strip of one half crosses over to the other's
+  inner edge), `rope` (`sections` plies twisted round each other, two by default) and `cornrow`
+  (three crossing under, raised off the scalp it lies on). `dutch` crosses under instead of over
+  (a raised braid; a rope twists the other way).
+- **Size and look:** `width` is the braid's width (along a `widthProfile` curve), `tightness`
+  how close the crossings are (1 a natural braid, 2 twice as many in the same length). A
+  crossing is a share of the width long, so a tapering braid's crossings shrink with it, at any
+  scene scale. `flatness` goes from round sections (0) to flat bands (1). The braid faces out of
+  the scalp at its root, or (a path leaving along the scalp normal, a ponytail) away from the
+  head; `roll` turns its face about the path.
 - **Which strands:** those rooted within `region` of a braid's root. They leave the scalp over
-  the first `gather` of their length, and over the last `tail` the lobes let go and the ends
-  fan out. The hair is parted into the sections as it lies: a strand goes into the section on
-  its side of the braid, so the sections leave the scalp without crossing each other.
-- **Resolution:** a braided strand gets `resolution` points per weave repeat (12 by default, at
-  most `maxSegments`), however few it came with, so the braid is drawn as a round, woven volume
-  instead of a few flat zigzags. A Resample later in the graph keeps those points on braided
-  strands (it resamples the rest); lower `resolution` for lighter exports (0: the strands' own
-  points).
+  the first `gather` of their length, sweeping over the scalp into the braid (a quarter of its
+  width above it) instead of through the head, and over the last `tail` the sections let go and
+  the ends fan out. The hair is parted into the sections as it lies: a strand goes into the
+  section on its side of the braid, so the sections leave the scalp without crossing each other.
+- **Points:** a braided strand gets the points its weave needs (four a crossing, at most 1024),
+  however few it came with. A Resample later in the graph keeps those points on braided strands
+  (it resamples the rest).
 - **Seeing the weave:** `display` paths shows each braid's path and the center curve of each
   of its sections in place of the hair (a `braidSection` channel tells them apart: -1 the path),
-  handy for tuning `crossings`, `width` and the feed; set it back to hair before rendering.
+  handy for tuning `tightness`, `width` and the feed; set it back to hair before rendering.
 - **Paths output:** the node's second output, `paths`, hands on the paths it braids along as
   guides (the braids input's, evenly resampled, or those it picked for box braids), for nodes
   downstream: a second Braid, a Twist's axes, cards.
-- **Feed** (`feed`, on for cornrows by default in `add_braid`): strands within `feedDistance`
-  of anywhere along a path join it where they reach it (their own shape, e.g. guides combed
-  toward the braid, or straight from the root) and run along it from there, as hair is picked
-  up into cornrows and French braids; the root region (`region`) joins as well. `feedUntil`
-  (0-1) picks up strands along that first share of the path only: past it the braid hangs free,
-  a French braid becoming a plain braid off the head (0: only the root region joins). A strand
-  picked up along the path joins the outer section on its side, as a braider adds hair, and with
-  `feedGrowth` (1 by default) the braid thickens with the hair it has picked up: narrow where it
-  starts, its full `width` where it holds all its hair (0: `widthProfile` alone). With
-  `endAtPath` (on by default) each strand is fitted to the path: however long it is and
-  wherever it joined, it ends within the braid's last stretch (staggered over `tail`). Off,
-  longer strands hang straight on past the path's end.
+- **Feed** (`feed`, on for cornrows by default in `add_braid`): strands within `region` of
+  anywhere along a path join it, as hair is picked up into cornrows and French braids; each
+  strand goes to the nearer braid, so two rows part halfway. A strand is drawn from its root
+  along the scalp, swept on as a braider pulls hair into the next crossing: it joins about as far
+  along the path as its root lies off it, and on a flat braid (three, four, five, cornrow) at the
+  next crossing made from its side, into the outer section there. Every crossing so takes in a
+  band of hair from its own side, the look of cornrows and French braids. `feedUntil` (0-1) picks
+  up strands along that first share of the path only: past it the braid hangs free, a French
+  braid becoming a plain braid off the head (0: only the root region joins); hair that would join
+  past it (or in the `tail`) joins the last crossing before. The braid thickens with the hair it
+  has picked up (narrow where it starts, its full `width` where it holds all its hair), and each
+  strand is fitted to the path: however long it is and wherever it joined, it ends within the
+  braid's last stretch (staggered over `tail`).
 - **Ponytail braids:** draw the path from the ponytail base and give it a large `region`
-  (0.45, say). With `alongScalp` (on by default) hair drawn in from afar sweeps over the scalp
-  into the base (pressed a quarter of the braid's width above it) instead of cutting straight
-  through the head; off, it goes in straight lines.
+  (0.45, say): the hair sweeps over the scalp into the base.
 - **Box braids:** no drawn paths: leave the Braid's `braids` input open and it picks its own
   paths among the strands, about `region` apart, and every strand joins the path nearest it (the
   `braids` preset).
@@ -58,14 +71,28 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.15, crossings=
   scalp); the Cards node uses them to build braid cards.
 - **Braid paths are not hair:** the other Guides nodes list the paths group in `exclude`, so
   Interpolate never uses a path as a hair guide.
-- **Shape:** `width` along a `widthProfile` curve, `crossings` per unit of length, `lobeFill`,
-  `strays` (loose strands) and `fuzz`.
-- **Look:** `sections` weaves more strands (4-8 for a four- or five-strand braid or cornrow, 3+
-  plies for a rope; 0 keeps the style's own). `depth` sets the braid's thickness out of the scalp
-  against its width (below 1 flatter, above rounder). `phase` slides the weave along the braid
-  (in repeats), `crossingsProfile` varies the crossings from start to end (a curve times `crossings`:
-  loose at the top, tight at the tail, say), and `sectionTwist` twists each section's hair around
-  itself per repeat, as real sections do.
+- **Loose hair:** `strays` (a share left loose) and `fuzz` (a wander within the sections).
+- **Loose braids:** `pancake` pulls the sections apart and loosens them (a braid pulled out by
+  hand); `loops` is the share of the crossings where a bundle of one section's hair breaks away
+  from the braid in an arc (`loopSize` braid widths out, each a little more or less) and comes
+  back, as sections do from a loose braid. Ties still hold them (the `braids_loose` preset).
+- **Ends** (`end`): `fan` (over the last `tail` the sections let go and the ends spread),
+  `tuft` (they let go into a gathered tuft, as below a hair tie) or `bound` (woven right to the
+  tip, narrowing: sealed box-braid ends, no tail).
+- **Ties, beads, cuffs** (`ties`): that many ties along each braid, the last where the weave ends,
+  the rest spread back toward where the braid forms (or `tieSpacing` braid widths apart), each
+  `tieLength` braid widths long. The braid tightens inside each (`cinch`) and its hair is held
+  within it. The node's third output, `ties`, hands them on as short strands along the braid, as
+  wide as it is there: connect it to an Instance node's `along` input (its `strands` input the
+  braided hair) with `sizeMode` fitStrand, `fitScale` 1, `tMin` = `tMax` = 0, `fitWidth` on and
+  `aspect` 1, and a mesh goes round each tie: the built-in `groomlab:bead`, `groomlab:cuff` and
+  `groomlab:hairTie`, or a mesh of your own modelled round a bore of radius 0.5 up +Y from 0 to 1
+  (the `braids_beaded` preset).
+- **Shaping the ends** (`braidTail`): the node writes a per-point channel, 0 within the braid and
+  rising to 1 down its tail, so nodes after it can work on the ends alone: a Curl whose `radius`
+  is mapped by the expression `$braidTail` curls the ends (the `braids_curly_ends` preset), a
+  Clump or Noise with `affect` set to `$braidTail` clumps or frizzes them. (`affect` mixes per
+  point only for nodes that keep the points: for Curl, map its per-point `radius` instead.)
 
 ## Scales
 

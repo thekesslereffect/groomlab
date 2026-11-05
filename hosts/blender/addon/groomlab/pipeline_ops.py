@@ -545,7 +545,8 @@ class GROOMLAB_OT_add_braid(_Tipped, GroomOperator):
     bl_options = {"REGISTER", "UNDO"}
 
     style: EnumProperty(name="Style", items=[
-        ("three", "Three", "A classic plait"), ("fishtail", "Fishtail", "A fishtail braid"),
+        ("three", "Three", "A classic plait"), ("four", "Four", "A four-strand braid"),
+        ("five", "Five", "A five-strand braid"), ("fishtail", "Fishtail", "A fishtail braid"),
         ("rope", "Rope", "Two strands twisted"), ("cornrow", "Cornrow", "Fed along the scalp")], default="three")
 
     def invoke(self, context, event):

@@ -305,7 +305,14 @@ gets more clumps of the same size than a head, not the same number stretched ove
 | Hair | `hair_basics` | The chain every groom builds on: Scatter, Interpolate, Clump (picking its own centers by `size`), a little Noise, HairColor, Width, Resample |
 | Hair | `cinematic_hair` | The hero showcase: big locks and finer clumps inside them (two Clump levels picking their own centers by `size`, the strands waved by a Noise before each Clump: `lockWave`, `clumpWave`), restrained noise, frizz on a few strands near the tips (a Noise named `frizzNoise`), a few flyaways, uneven lengths and widths, color variation |
 | Hair | `curly` | Ringlets: small clumps curled together by Curl with `coherence` `clump`, a little frizz, the segments curls need |
-| Hair | `braids` | Box braids with no curves to draw: the Braid node picks its own paths, one per 2.6 cm of scalp (`region`, exposed as `braidSpacing`) |
+| Braids | `braids` | Box braids with no curves to draw: the Braid node picks its own paths, one per 2.6 cm of scalp (`region`, exposed as `braidSpacing`), every strand into the nearest, woven to a sealed end (`end` bound) |
+| Braids | `braids_beaded` | Box braids with beads and cuffs near the tips: the Braid's `ties` tighten it (`cinch`) and its `ties` output feeds an Instance node's `along` input, the built-in `groomlab:bead` and `groomlab:cuff` round each tie (`fitWidth`) |
+| Braids | `braids_curly_ends` | Box braids tied off near the end (`groomlab:hairTie`), the ends curling: a Curl's `radius` mapped by the Braid's per-point `braidTail` |
+| Braids | `braids_twists` | Two-strand twists all over the head: the Braid's `rope` style (`sections` 3 for three-strand twists) |
+| Braids | `braids_cornrows` | Cornrows along rows you draw (the braids group): `feed` picks the hair up into every crossing from its side, the rows parting halfway, hanging as braids past `feedUntil`, a bead at each end |
+| Braids | `braids_french` | A French braid along one path you draw down the back: fed from both sides down the head, hanging free past `feedUntil`, a hair tie and a tuft at the end (`dutch` for a Dutch braid) |
+| Braids | `braids_loose` | A loose braid along one path you draw (over a shoulder, down the back): `pancake` pulls it apart by hand, `loops` and `loopSize` pull sections of hair out of the braid and back |
+| Braids | `braids_fishtail_ponytail` | A fishtail ponytail from one path you draw from its base: the hair within `region` sweeps over the scalp into it, a hair tie at the base and the end |
 | Hair | `parted_style` | A part drawn with the Part tool: Interpolate and Clump respect it, the Part node opens it |
 | Hair | `tube_locks` | Tube locks (anime): Interpolate with `fillTubes` and `tubeBlend` fills each guide's tube, a Clump with `followTubes` and soft clumps, light Noise, HairColor, tapered Width, Resample; place guides, shape their tubes with the Shape brush |
 | Fur | `creature_fur` | Fur for a whole animal: laid by flow arrows (Flow, no guides), soft tufts about a centimetre across, lighter tips |

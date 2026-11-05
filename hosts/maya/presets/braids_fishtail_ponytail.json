@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "size": 20.0,
+  "about": {"title": "Fishtail ponytail", "category": "Braids", "description": "Draw one path from where the ponytail sits down the back. All the hair within region of its start sweeps over the scalp into it and is braided in a fishtail (sections: strips a side), tied at the base and the end. Change style for a three-strand ponytail."},
+  "requires": {"groups": [{"name": "braids", "draw": true}]},
+  "exposed": [
+    {"node": "braid", "param": "region", "name": "gathers"},
+    {"node": "braid", "param": "style", "name": "braidStyle"},
+    {"node": "braid", "param": "sections", "name": "strips"},
+    {"node": "braid", "param": "width", "name": "braidWidth"},
+    {"node": "braid", "param": "tightness", "name": "tightness"},
+    {"node": "color", "param": "melanin", "name": "melanin"}
+  ],
+  "nodes": [
+    {"name": "scalp", "type": "Scalp", "ui": {"x": 0, "y": 0}},
+    {"name": "guides", "type": "Guides", "params": {"exclude": "braids"}, "ui": {"x": 0, "y": 180}},
+    {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 25.0}, "ui": {"x": 240, "y": 0}},
+    {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
+    {"name": "braidPaths", "type": "Guides", "params": {"group": "braids"}, "ui": {"x": 480, "y": 360}},
+    {"name": "braid", "type": "Braid", "params": {"style": "fishtail", "width": 3.5, "tightness": 1.0, "region": 12.0, "gather": 0.35, "fuzz": 0.06, "strays": 0.01, "end": "tuft", "tail": 0.15, "ties": 2, "tieSpacing": 0.0, "cinch": 0.35}, "ui": {"x": 720, "y": 0}},
+    {"name": "hairTie", "type": "Instance", "params": {"prototype": "groomlab:hairTie", "probability": 1.0, "count": 1, "tMin": 0.0, "tMax": 0.0, "sizeMode": "fitStrand", "fitScale": 1.0, "fitWidth": true, "aspect": 1.0, "scaleByWidth": false, "scaleRandom": 0.0, "spinRandom": 1.0}, "ui": {"x": 960, "y": 0}},
+    {"name": "color", "type": "HairColor", "params": {"melanin": 0.92, "redness": 0.08, "melaninRandom": 0.05}, "ui": {"x": 1200, "y": 0}},
+    {"name": "width", "type": "Width", "params": {"width": 0.008, "profile": [[0, 1], [1, 0.3]]}, "ui": {"x": 1440, "y": 0}},
+    {"name": "output", "type": "Output", "ui": {"x": 1680, "y": 0}}
+  ],
+  "connections": [
+    {"from": "scalp", "to": "scatter", "input": "scalp"},
+    {"from": "scatter", "to": "interpolate", "input": "strands"},
+    {"from": "guides", "to": "interpolate", "input": "guides"},
+    {"from": "scalp", "to": "interpolate", "input": "scalp"},
+    {"from": "braidPaths", "to": "braid", "input": "braids"},
+    {"from": "interpolate", "to": "braid", "input": "strands"},
+    {"from": "braid", "to": "hairTie", "input": "strands"},
+    {"from": "braid", "output": "ties", "to": "hairTie", "input": "along"},
+    {"from": "hairTie", "to": "color", "input": "strands"},
+    {"from": "color", "to": "width", "input": "strands"},
+    {"from": "width", "to": "output", "input": "strands"}
+  ],
+  "output": "output"
+}

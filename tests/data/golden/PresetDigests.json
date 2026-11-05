@@ -43,21 +43,155 @@
   },
   "braids": {
    "channels": {
+    "point.braidTail": "af470ec41f62ffc5",
     "strand.braidFlat": "30608ee6eb63767c",
-    "strand.braidId": "58640729abd2668f",
+    "strand.braidId": "23594d4345e1c229",
     "strand.colorB": "4a741e546dd869a7",
     "strand.colorG": "db7ef9c139c76486",
     "strand.colorR": "549d7c4e72a8a5e9",
     "strand.melanin": "c720e5903ce46757",
     "strand.melaninRedness": "ba12ffef6db79a34"
    },
-   "everything": "fe8c48bdfdf75221",
+   "everything": "9c8731293088e6c0",
    "ids": "20ed751c376a9e91",
-   "points": 207885,
-   "positions": "b4e9d1dab3bdbdef",
+   "points": 532665,
+   "positions": "92540a9f86c80124",
    "roots": "3489599712871aca",
    "strands": 5073,
-   "widths": "27f0b8b5abc765de"
+   "widths": "2a893c42445faed9"
+  },
+  "braids_beaded": {
+   "channels": {
+    "point.braidTail": "af470ec41f62ffc5",
+    "strand.braidFlat": "30608ee6eb63767c",
+    "strand.braidId": "23594d4345e1c229",
+    "strand.colorB": "4a741e546dd869a7",
+    "strand.colorG": "db7ef9c139c76486",
+    "strand.colorR": "549d7c4e72a8a5e9",
+    "strand.melanin": "c720e5903ce46757",
+    "strand.melaninRedness": "ba12ffef6db79a34"
+   },
+   "everything": "ace5cd64d45021d4",
+   "ids": "20ed751c376a9e91",
+   "points": 532665,
+   "positions": "046dc0aa1a8fbf7b",
+   "roots": "3489599712871aca",
+   "strands": 5073,
+   "widths": "fa18672a0fe34b0e"
+  },
+  "braids_cornrows": {
+   "channels": {
+    "point.braidTail": "68cfa8c799cdc9de",
+    "strand.braidFlat": "0ee8a4b6d97b72dd",
+    "strand.braidId": "edb37ce2800347e3",
+    "strand.colorB": "4a741e546dd869a7",
+    "strand.colorG": "db7ef9c139c76486",
+    "strand.colorR": "549d7c4e72a8a5e9",
+    "strand.melanin": "c720e5903ce46757",
+    "strand.melaninRedness": "ba12ffef6db79a34"
+   },
+   "everything": "174639e75cef1c1e",
+   "ids": "20ed751c376a9e91",
+   "points": 64866,
+   "positions": "a45fe6d28e3df6ce",
+   "roots": "3489599712871aca",
+   "strands": 5073,
+   "widths": "81e315ca34500ecf"
+  },
+  "braids_curly_ends": {
+   "channels": {
+    "point.braidTail": "5fa36e04d26e5613",
+    "strand.braidFlat": "30608ee6eb63767c",
+    "strand.braidId": "23594d4345e1c229",
+    "strand.colorB": "4a741e546dd869a7",
+    "strand.colorG": "db7ef9c139c76486",
+    "strand.colorR": "549d7c4e72a8a5e9",
+    "strand.melanin": "c720e5903ce46757",
+    "strand.melaninRedness": "ba12ffef6db79a34"
+   },
+   "everything": "80d0ff4f337ad0a6",
+   "ids": "20ed751c376a9e91",
+   "points": 533393,
+   "positions": "b79729ea6065c9ea",
+   "roots": "3489599712871aca",
+   "strands": 5073,
+   "widths": "1fca5b442db30ca8"
+  },
+  "braids_fishtail_ponytail": {
+   "channels": {
+    "point.braidTail": "4a8e472769aa423c",
+    "strand.braidFlat": "30608ee6eb63767c",
+    "strand.braidId": "7f62b807d0d8520c",
+    "strand.colorB": "4a741e546dd869a7",
+    "strand.colorG": "db7ef9c139c76486",
+    "strand.colorR": "549d7c4e72a8a5e9",
+    "strand.melanin": "c720e5903ce46757",
+    "strand.melaninRedness": "ba12ffef6db79a34"
+   },
+   "everything": "a4ac6524ea28abe2",
+   "ids": "20ed751c376a9e91",
+   "points": 392692,
+   "positions": "61ffb524d073f809",
+   "roots": "3489599712871aca",
+   "strands": 5073,
+   "widths": "666aa5b196671e6c"
+  },
+  "braids_french": {
+   "channels": {
+    "point.braidTail": "09957cab58def47e",
+    "strand.braidFlat": "30608ee6eb63767c",
+    "strand.braidId": "1c0d56218c4c95ac",
+    "strand.colorB": "4a741e546dd869a7",
+    "strand.colorG": "db7ef9c139c76486",
+    "strand.colorR": "549d7c4e72a8a5e9",
+    "strand.melanin": "c720e5903ce46757",
+    "strand.melaninRedness": "ba12ffef6db79a34"
+   },
+   "everything": "715cdf5136c97a90",
+   "ids": "20ed751c376a9e91",
+   "points": 93393,
+   "positions": "db92d0b094bcbb47",
+   "roots": "3489599712871aca",
+   "strands": 5073,
+   "widths": "e23bb63e1cac2425"
+  },
+  "braids_loose": {
+   "channels": {
+    "point.braidTail": "57da2b5334ff3e48",
+    "strand.braidFlat": "30608ee6eb63767c",
+    "strand.braidId": "7e594d557a992abb",
+    "strand.colorB": "4a741e546dd869a7",
+    "strand.colorG": "db7ef9c139c76486",
+    "strand.colorR": "549d7c4e72a8a5e9",
+    "strand.melanin": "c720e5903ce46757",
+    "strand.melaninRedness": "ba12ffef6db79a34"
+   },
+   "everything": "586020dc03e94158",
+   "ids": "20ed751c376a9e91",
+   "points": 89037,
+   "positions": "06c659ff9e0e97a3",
+   "roots": "3489599712871aca",
+   "strands": 5073,
+   "widths": "ca0b3ef49dee5e1f"
+  },
+  "braids_twists": {
+   "channels": {
+    "point.braidTail": "912f7088c1a2d0fa",
+    "strand.braidFlat": "30608ee6eb63767c",
+    "strand.braidId": "23594d4345e1c229",
+    "strand.colorB": "4a741e546dd869a7",
+    "strand.colorG": "db7ef9c139c76486",
+    "strand.colorR": "549d7c4e72a8a5e9",
+    "strand.melanin": "c720e5903ce46757",
+    "strand.melaninRedness": "ba12ffef6db79a34"
+   },
+   "everything": "0eece66a6d8159f0",
+   "ids": "20ed751c376a9e91",
+   "points": 172482,
+   "positions": "1777daa173e2980a",
+   "roots": "3489599712871aca",
+   "strands": 5073,
+   "widths": "658d9a8eb0501119"
   },
   "cards_mid": {
    "channels": {},

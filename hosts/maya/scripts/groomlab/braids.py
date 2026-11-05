@@ -70,22 +70,23 @@ def set_instance_prototype(groom, node, mesh, model=None):
 
 
 @undoable("braid")
-def add_braid(groom, curves=None, style="three", group="braids", width=0.12, crossings=2.5, region=0.25,
-              dutch=False, after="interpolate", feed=None, feed_distance=None, feed_until=None, along_scalp=None):
+def add_braid(groom, curves=None, style="three", group="braids", width=0.25, tightness=1.0, region=0.25,
+              dutch=False, after="interpolate", feed=None, feed_until=None):
     """Braid strands along paths; returns the Braid node's name.
 
     `curves` (drawn from the scalp along the braid) become the guide group
     `group` (default "braids"); without curves the group's guides are used
     (draw them with the Draw tool and group "braids"). style: "three",
-    "fishtail", "rope" or "cornrow"; dutch raises the braid. Strands rooted
+    "four", "five", "fishtail", "rope" or "cornrow"; dutch raises the braid;
+    tightness sets how close the crossings are (1 natural). Strands rooted
     within `region` of a path's root join its braid (large, e.g. 0.45: a
-    ponytail braid the hair sweeps over the scalp into, with `along_scalp`,
-    on by default). With `feed` (the default for cornrows) strands within
-    `feed_distance` of anywhere along the path join where they grow, as in
-    cornrows and French braids, but only along the first `feed_until` (0-1)
-    of the path: past it the braid hangs free. The Braid node goes after
-    `after`, so noise and frizz later add flyaways. It writes the `braidId`
-    and `braidFlat` strand channels the Cards node builds braid cards from.
+    ponytail braid the hair sweeps over the scalp into). With `feed` (the
+    default for cornrows) strands within `region` of anywhere along the path
+    join where they grow, as in cornrows and French braids, but only along
+    the first `feed_until` (0-1) of the path: past it the braid hangs free.
+    The Braid node goes after `after`, so noise and frizz later add
+    flyaways. It writes the `braidId` and `braidFlat` strand channels the
+    Cards node builds braid cards from.
     """
     if feed is None:
         feed = style == "cornrow"
@@ -97,14 +98,10 @@ def add_braid(groom, curves=None, style="three", group="braids", width=0.12, cro
     paths = next((n for n in model.order if model.node_type(n) == "Guides" and model.param(n, "group") == group), None)
     if paths is None:
         paths = model.add_node("Guides", name=model.unique_name("braidPaths"), params={"group": group})
-    params = {"style": style, "width": width, "crossings": crossings, "region": region, "dutch": dutch,
+    params = {"style": style, "width": width, "tightness": tightness, "region": region, "dutch": dutch,
               "feed": bool(feed)}
-    if feed_distance is not None:
-        params["feedDistance"] = float(feed_distance)
     if feed_until is not None:
         params["feedUntil"] = float(feed_until)
-    if along_scalp is not None:
-        params["alongScalp"] = bool(along_scalp)
     braid = model.add_node("Braid", name=model.unique_name("braid"), params=params)
     model.insert_after(after, braid)
     model.connect(paths, braid, "braids")

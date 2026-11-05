@@ -3419,32 +3419,32 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(groomlab.follow_scene_files(), [])  # once
 
     def test_cornrows_ponytail_and_braid_cards(self):
-        # Two cornrows over the crown (feed: strands picked up along the rows, within
-        # feed_distance, over the first feed_until of each row), a ponytail braid gathering a
-        # wide region over the scalp, and cards: one card set per braid.
+        # Two cornrows over the crown (feed: strands picked up along the rows, within region,
+        # over the first feed_until of each row), a ponytail braid gathering a wide region over
+        # the scalp, and cards: one card set per braid.
         def on_sphere(points):
             return [tuple(c / math.sqrt(sum(v * v for v in p)) * 1.01 for c in p) for p in points]
         rows = []
         for z in (-0.25, 0.25):
             rows.append(cmds.curve(degree=1, point=on_sphere([(-0.7, 0.7, z), (-0.3, 0.95, z), (0.3, 0.95, z), (0.7, 0.7, z)])))
-        node = groomlab.add_braid(self.groom, rows, style="cornrow", width=0.12, region=0.15, feed_distance=0.12,
-                                  feed_until=0.8)
+        node = groomlab.add_braid(self.groom, rows, style="cornrow", width=0.12, region=0.15, feed_until=0.8)
         params = {n["name"]: n.get("params", {}) for n in groomlab.get_graph(self.groom)["nodes"]}[node]
         self.assertTrue(params["feed"])
-        self.assertAlmostEqual(params["feedDistance"], 0.12)
+        self.assertAlmostEqual(params["region"], 0.15)
         self.assertAlmostEqual(params["feedUntil"], 0.8)
         self.assertEqual(groomlab.errors(self.groom), [])
         stats = json.loads(cmds.groomLabGraphStats(self.groom))
         self.assertIn("braidId", stats["channels"].get(node, []))
         self.assertIn("braidFlat", stats["channels"].get(node, []))
         # The ponytail: a path from the back of the head hanging down, gathering a wide region
-        # over the scalp (along_scalp), not through it.
+        # over the scalp, not through it.
         tail = cmds.curve(degree=2, point=[(0.0, 0.3, -0.95), (0.0, -0.2, -1.3), (0.0, -1.0, -1.4)])
-        pony = groomlab.add_braid(self.groom, [tail], style="three", group="ponytail", width=0.2, region=0.8,
-                                  feed=False, along_scalp=True)
+        pony = groomlab.add_braid(self.groom, [tail], style="five", group="ponytail", width=0.3, region=0.8,
+                                  feed=False, tightness=1.5)
         params = {n["name"]: n.get("params", {}) for n in groomlab.get_graph(self.groom)["nodes"]}[pony]
         self.assertFalse(params["feed"])
-        self.assertTrue(params["alongScalp"])
+        self.assertEqual(params["style"], "five")
+        self.assertAlmostEqual(params["tightness"], 1.5)
         self.assertEqual(groomlab.errors(self.groom), [])
         # Cards: braids make card sets of their own (Cards.braids, on by default); off, the
         # braided strands are carded by clump like the rest. Both evaluate and draw.

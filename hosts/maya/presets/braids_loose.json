@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "size": 20.0,
+  "about": {"title": "Loose braid", "category": "Braids", "description": "Draw one path from where the braid starts (the nape, behind an ear) down over a shoulder or the back. All the hair within region of its start goes into a loose three-strand braid: pulled apart by hand (pancake), with sections of hair looping out of the braid and back (loops, loopSize), the ends gathered loosely."},
+  "requires": {"groups": [{"name": "braids", "draw": true}]},
+  "exposed": [
+    {"node": "braid", "param": "region", "name": "gathers"},
+    {"node": "braid", "param": "width", "name": "braidWidth"},
+    {"node": "braid", "param": "pancake", "name": "pancake"},
+    {"node": "braid", "param": "loops", "name": "loops"},
+    {"node": "braid", "param": "loopSize", "name": "loopSize"},
+    {"node": "braid", "param": "tightness", "name": "tightness"},
+    {"node": "color", "param": "melanin", "name": "melanin"}
+  ],
+  "nodes": [
+    {"name": "scalp", "type": "Scalp", "ui": {"x": 0, "y": 0}},
+    {"name": "guides", "type": "Guides", "params": {"exclude": "braids"}, "ui": {"x": 0, "y": 180}},
+    {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 25.0}, "ui": {"x": 240, "y": 0}},
+    {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
+    {"name": "braidPaths", "type": "Guides", "params": {"group": "braids"}, "ui": {"x": 480, "y": 360}},
+    {"name": "braid", "type": "Braid", "params": {"style": "three", "width": 4.5, "tightness": 0.9, "region": 12.0, "gather": 0.3, "fuzz": 0.15, "strays": 0.02, "end": "tuft", "tail": 0.18, "pancake": 0.5, "loops": 0.3, "loopSize": 0.5}, "ui": {"x": 720, "y": 0}},
+    {"name": "color", "type": "HairColor", "params": {"melanin": 0.92, "redness": 0.08, "melaninRandom": 0.05}, "ui": {"x": 960, "y": 0}},
+    {"name": "width", "type": "Width", "params": {"width": 0.008, "profile": [[0, 1], [1, 0.3]]}, "ui": {"x": 1200, "y": 0}},
+    {"name": "output", "type": "Output", "ui": {"x": 1440, "y": 0}}
+  ],
+  "connections": [
+    {"from": "scalp", "to": "scatter", "input": "scalp"},
+    {"from": "scatter", "to": "interpolate", "input": "strands"},
+    {"from": "guides", "to": "interpolate", "input": "guides"},
+    {"from": "scalp", "to": "interpolate", "input": "scalp"},
+    {"from": "braidPaths", "to": "braid", "input": "braids"},
+    {"from": "interpolate", "to": "braid", "input": "strands"},
+    {"from": "braid", "to": "color", "input": "strands"},
+    {"from": "color", "to": "width", "input": "strands"},
+    {"from": "width", "to": "output", "input": "strands"}
+  ],
+  "output": "output"
+}

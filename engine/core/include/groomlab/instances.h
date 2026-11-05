@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -50,6 +51,10 @@ public:
     // The strands only lay the scales out (a Scales node, showStrands off):
     // hosts draw and render the scales, not the strands.
     bool hidesStrands = false;
+    // Strands instances may sit on that are not hair (a Braid node's ties, the Instance node's
+    // `along` input): never drawn or rendered, only placed on. resolve() looks an instance's strand
+    // up among these when the final strands do not hold it. Null: none.
+    std::shared_ptr<const StrandSet> anchors;
 
     struct Instance {
         std::uint32_t prototype = 0;
@@ -80,6 +85,9 @@ public:
         bool fitStrand = false;
         float aspect = 1.0f;
         float restLength = -1.0f;
+        // Fitted across to its strand's width where it sits (times `aspect`) instead of to its
+        // length: a bead or a cuff round a braid's tie, as thick as the braid there.
+        bool fitWidth = false;
         // A scale (the Scales node's): at its strand's root, +Y along the
         // strand's direction laid onto the skin, +Z the skin's normal (`direction` holds the
         // normal the node saw, for a host without the scalp). +Y is `scale` times the strand's
@@ -151,7 +159,11 @@ public:
     // on), else the normal the node saw; they lie flat on it here (scales.h
     // tilts and bends them). One bent along its strand (deform) takes the strand's tangent for
     // +Y and its vane normal, else the skin's normal at the root (from `scalp`), for +Z.
+    // Instances on `anchors` are placed on those when `strands` does not hold their strand.
     std::vector<Placed> resolve(const StrandSet& strands, const ScalpMesh* scalp = nullptr) const;
+
+private:
+    std::vector<Placed> resolveIn(const StrandSet& strands, const ScalpMesh* scalp) const;
 };
 
 // An Instance node's prototype param as names: one, or several separated by spaces or commas
