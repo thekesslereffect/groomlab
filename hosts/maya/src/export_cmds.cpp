@@ -396,10 +396,8 @@ MStatus guidesAtFrame(const char* command, const MObject& node, const MString& g
             frames.groom->setScalp(scalpFromNode(node, &frames.inputs, nullptr, false));  // the maps as first read
             frames.groom->setGuidePoses(guidePosesFromNode(node, &frames.inputs));
         }
-        const HierarchyPtr h = frames.groom->hierarchy();
-        const GroupId gid = h ? h->findGroup(group.asChar()) : kNoGroup;
-        if (gid == kNoGroup) return fail(command, "no guide group named " + group);
-        *out = toCurves(h->flattenGroup(gid));
+        // "*": every guide the Guides node feeds (what a GuideCache node poses), else one group's.
+        *out = toCurves(guidesToSimulate(frames.groom->hierarchy(), frames.groom->data().guides, group.asChar()));
         return MS::kSuccess;
     } catch (const std::exception& e) {
         return fail(command, e.what());

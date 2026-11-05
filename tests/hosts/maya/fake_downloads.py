@@ -2,7 +2,9 @@
 """A fake GroomLab downloads site for the update tests (test_updates.py, gui_updates.py): an
 http.server on 127.0.0.1 serving maya/latest.json and a release zip from a temporary folder, beside a
 fake packaged install (GroomLab-0.1.0/GroomLab with VERSION.txt, a modules folder whose GroomLab.mod
-points at it). Nothing goes to the real downloads domain.
+points at it). Nothing goes to the real downloads domain. The install and the release are the
+running Maya's (site.maya: Maya 2022's plugin at the module's root, any other's in maya<year>/, as
+tools/package_release.py lays them out).
 
     site = FakeDownloads()            # .root, .module, .modules, .mod, .mod_text, .state, .url, .requests
     site.publish(site.release_zip())  # latest.json for GroomLab 0.2.0 (site.info)
@@ -25,6 +27,12 @@ ZIP_NAME = "GroomLab-0.2.0-Maya2022-Windows.zip"
 REAL_LATEST_URL = "https://downloads.getgroomlab.com/maya/latest.json"
 
 
+def this_maya():
+    """The running Maya's year as a string ("2022" when it can't be told)."""
+    from groomlab import updates
+    return str(updates.maya_major() or 2022)
+
+
 def write(path, text):
     folder = os.path.dirname(path)
     if not os.path.isdir(folder):
@@ -36,6 +44,7 @@ def write(path, text):
 class FakeDownloads(object):
     def __init__(self):
         self.root = tempfile.mkdtemp(prefix="groomlab_updates_").replace("\\", "/")
+        self.maya = this_maya()
         # The install: a path with a space in it, as a user's Documents folder may have.
         self.installs = self.root + "/My Tools"
         self.module = self.installs + "/GroomLab-0.1.0/GroomLab"
@@ -43,7 +52,7 @@ class FakeDownloads(object):
         write(self.module + "/plug-ins/GroomLab.mll", "the running plugin")
         self.modules = self.root + "/modules"
         self.mod = self.modules + "/GroomLab.mod"
-        self.mod_text = "+ MAYAVERSION:2022 GroomLab 0.1.0 %s\nPYTHONPATH+:=python\n" % self.module
+        self.mod_text = "+ MAYAVERSION:%s GroomLab 0.1.0 %s\nPYTHONPATH+:=python\n" % (self.maya, self.module)
         write(self.mod, self.mod_text)
         self.state = self.root + "/state"
         self.site = self.root + "/site"
@@ -77,10 +86,12 @@ class FakeDownloads(object):
         top = "GroomLab-%s/" % version
         with zipfile.ZipFile(path, "w") as z:
             z.writestr(top + "GroomLab/plug-ins/GroomLab.mll", "the new plugin")
+            if self.maya != "2022":  # the running Maya's build
+                z.writestr(top + "GroomLab/maya%s/plug-ins/GroomLab.mll" % self.maya, "the new plugin")
             z.writestr(top + "GroomLab/VERSION.txt", "GroomLab %s (def5678, RelWithDebInfo)\n" % version)
             z.writestr(top + "GroomLab/scripts/groomlab/__init__.py", "")
-            z.writestr(top + "GroomLab.mod", "+ MAYAVERSION:2022 GroomLab %s GroomLab\nPYTHONPATH+:=python\n"
-                       "MTOA_EXTENSIONS_PATH+:=extensions\n" % version)
+            z.writestr(top + "GroomLab.mod", "+ MAYAVERSION:%s GroomLab %s GroomLab\nPYTHONPATH+:=python\n"
+                       "MTOA_EXTENSIONS_PATH+:=extensions\n" % (self.maya, version))
             z.writestr(top + "install.mel", "// installer\n")
             for name, data in (extra or {}).items():
                 z.writestr(name, data)
@@ -90,14 +101,14 @@ class FakeDownloads(object):
         return body
 
     def publish(self, body, version="0.2.0", sha256=None, notes="Faster brushes.\nThe Graph Editor remembers its zoom.",
-                maya="2022", **extra):
-        """Serves body as the release zip and a latest.json naming it (self.info; `extra`: more fields,
-        mayaVersions and mayaBeta)."""
+                maya=None, **extra):
+        """Serves body as the release zip and a latest.json naming it (self.info; `maya` the running
+        Maya's by default; `extra`: more fields, mayaVersions and mayaBeta)."""
         with open(os.path.join(self.site, "maya", ZIP_NAME), "wb") as f:
             f.write(body)
         self.info = {"version": version, "file": "maya/" + ZIP_NAME, "url": self.url + "/maya/" + ZIP_NAME,
                      "sha256": sha256 or hashlib.sha256(body).hexdigest(), "size": len(body),
-                     "date": "2026-10-05T00:00:00Z", "notes": notes, "maya": maya, "platform": "windows"}
+                     "date": "2026-10-05T00:00:00Z", "notes": notes, "maya": maya or self.maya, "platform": "windows"}
         self.info.update(extra)
         self.write_latest(json.dumps(self.info))
         return self.info

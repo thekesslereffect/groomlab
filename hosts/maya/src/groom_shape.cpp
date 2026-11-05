@@ -2620,6 +2620,11 @@ std::shared_ptr<const std::vector<groomlab::Vec3f>> GroomShape::clumpCenters() {
     return f ? f->view.clumpCenters : nullptr;
 }
 
+groomlab::GuidesPtr GroomShape::movingGuides() {
+    const FramePtr f = frame();
+    return f ? f->view.movingGuides : nullptr;
+}
+
 std::string GroomShape::viewedNode() {
     const FramePtr f = frame();
     return f ? f->view.viewedNode : std::string();

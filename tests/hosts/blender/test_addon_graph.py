@@ -616,6 +616,35 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(rt.errors, [])
         self.assert_tree_is_graph()
 
+    def test_6b_guides_for_simulation_and_a_guide_cache(self):
+        # Simulate > Export Guides for Simulation, then Load Guide Cache: the guides as Alembic
+        # curves, read back by a GuideCache node right after the Guides node (again: the same node).
+        head = self.head
+        rt = groom.runtime(head)
+        abc = os.path.join(bu.TMP, "sim_guides.abc")
+        scene = bpy.context.scene
+        scene.frame_start, scene.frame_end = 1, 2
+        with bpy.context.temp_override(active_object=head, object=head):
+            self.assertEqual(bpy.ops.groomlab.export_guides_sim(filepath=abc), {"FINISHED"})
+            self.assertTrue(os.path.isfile(abc))
+            self.assertEqual(bpy.ops.groomlab.load_guide_cache(filepath=abc), {"FINISHED"})
+            self.assertEqual(bpy.ops.groomlab.load_guide_cache(filepath=abc), {"FINISHED"})
+        caches = [n for n in helper_graph(head)["nodes"] if n["type"] == "GuideCache"]
+        self.assertEqual(len(caches), 1)
+        node = caches[0]["name"]
+        links = helper_graph(head)["connections"]
+        self.assertTrue(any(c["to"] == node and c["input"] == "guides" for c in links))
+        self.assertTrue(any(c["from"] == node for c in links))
+        settle(head)
+        self.assertEqual(rt.errors, [])
+        self.assertNotIn(node, rt.notes)  # every guide had its curve
+        # Back as it was: the node removed (the graph's own undo is the editor's; here by hand).
+        with gt.building():
+            tree = self.tree()
+            tree.nodes.remove(node_of(tree, node))
+        gt.sync_from_tree(self.tree())
+        settle(head)
+
     def test_6_view_and_output(self):
         head, tree = self.head, self.tree()
         rt = groom.runtime(head)

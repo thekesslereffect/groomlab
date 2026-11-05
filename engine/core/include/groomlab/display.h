@@ -111,6 +111,7 @@ struct DisplayTheme {
     RGBA instances{0.75f, 0.9f, 1.0f, 1.0f};
     RGBA cards{0.58f, 0.5f, 0.42f, 1.0f};  // game cards without their maps (before a bake, or textures off)
     RGB clumpCenters{1.0f, 0.3f, 0.85f};    // the dots of a viewed Clump's centers
+    RGB movingGuides{1.0f, 0.66f, 0.22f};   // the guides as a GuideCache or Simulate node moves them
     std::uint64_t version = 1;  // bumped on every change: guides rebuild
 };
 
@@ -377,6 +378,7 @@ struct DisplaySettings {
     bool hair = true;
     // Guides.
     bool guides = true, tubes = false;
+    bool movingGuides = true;  // the moving guides (DisplayInputs::movingGuides) over the groomed ones
     float guideWidth = 2.0f;
     // 1: the painted layer guideColorLayer, black 0 to white 1; anything else (0): each group's
     // color (its own, else autoGuideColors').
@@ -405,6 +407,9 @@ struct DisplayInputs {
     // A viewed Clump's clump centers, each its root on the scalp: dots in the
     // theme's clumpCenters color, with the guides' (ViewResult::clumpCenters). Null: none.
     std::shared_ptr<const std::vector<Vec3f>> clumpCenters;
+    // The guides as a GuideCache or Simulate node moves them (ViewResult::movingGuides): drawn over
+    // the groomed guides in the theme's movingGuides color, the groomed ones dimmed. Null: none.
+    GuidesPtr movingGuides;
     MeshPtr scalp;
     HierarchyPtr hierarchy;
     PartsPtr parts;

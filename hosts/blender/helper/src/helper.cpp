@@ -881,9 +881,9 @@ EngineExportOptions engineOptions(const json& args, bool unreal) {
 std::unique_ptr<ExportJob> openExport(Session& s, const json& args) {
     std::string format = optString(args, "format", "alembic");
     const bool engine = format == "unrealGroom" || format == "unityStrands";
-    if (format != "alembic" && format != "usd" && format != "scalesUsd" && format != "vrscene" && !engine) {
-        fail("bad_request", "format is alembic, usd, scalesUsd, vrscene, unrealGroom, unityStrands, gltfCards, unrealCards, "
-                            "unityCards, unityFeathers or scalesFbx");
+    if (format != "alembic" && format != "usd" && format != "scalesUsd" && format != "vrscene" && format != "guides" && !engine) {
+        fail("bad_request", "format is alembic, usd, scalesUsd, vrscene, guides, unrealGroom, unityStrands, gltfCards, "
+                            "unrealCards, unityCards, unityFeathers or scalesFbx");
     }
     // The scales: Maya's export_alembic / export_usd's `scales` ("Scales Instancer (USD)" is a USD
     // export with the scales as a PointInstancer of their plates).
@@ -937,6 +937,21 @@ std::unique_ptr<ExportJob> openExport(Session& s, const json& args) {
             o.scale *= scale;
             o.comment = s.file.source.empty() ? std::string("GroomLab for Blender") : s.file.source;
             job->vrscene = std::make_unique<VrsceneWriter>(job->path, name, o);
+        } else if (format == "guides") {
+            // Export Guides for Simulation (Maya's groomLabExportAlembic -guideGroup): a guide group's
+            // curves as the groom poses them each frame, each with its guide's ID as strandId, for
+            // another package to simulate (a GuideCache node reads the result back).
+#if GROOMLAB_HAS_ALEMBIC
+            job->guideGroup = optString(args, "group", "*");  // "*": every guide the Guides node feeds
+            if (job->guideGroup != "*") {
+                const HierarchyPtr h = s.groom->hierarchy();
+                if (!h || h->findGroup(job->guideGroup) == kNoGroup) fail("not_found", "no guide group named " + job->guideGroup);
+            }
+            job->abc = std::make_unique<AlembicCurvesWriter>(job->path, name + "Guides", frameToSeconds(start, job->fps),
+                                                             frameToSeconds(step, job->fps));
+#else
+            fail("unsupported", "this helper was built without Alembic");
+#endif
         } else if (engine) {
 #if GROOMLAB_HAS_ALEMBIC
             job->unreal = format == "unrealGroom";
@@ -979,6 +994,27 @@ std::size_t exportFrame(Session& s, ExportJob& job, double frame, float density)
     if (frame <= job.lastFrame) fail("bad_request", "export frames must increase");
     s.seconds = frameToSeconds(frame, s.groom->framesPerSecond());
     feedTime(s);
+#if GROOMLAB_HAS_ALEMBIC
+    if (!job.guideGroup.empty()) {  // Export Guides for Simulation: the guides at this frame
+        ViewRequest at;  // (the groom evaluated at the frame: its hierarchy posed on that scalp)
+        at.time = s.seconds;
+        at.wantBounds = false;
+        const ViewResult& view = s.groom->evaluate(at);
+        StrandSet curves;
+        try {
+            const GuideSet guides = guidesToSimulate(view.hierarchy, s.groom->data().guides, job.guideGroup);
+            for (const Guide& g : guides.guides()) {
+                if (g.points.size() >= 2) curves.addStrand(g.id, g.points, {}, g.root);
+            }
+            job.abc->writeFrame(curves);
+        } catch (const std::exception& e) {
+            fail("io", e.what());
+        }
+        job.lastFrame = frame;
+        ++job.frames;
+        return curves.strandCount();
+    }
+#endif
     ViewRequest request;
     request.density = density;
     request.time = s.seconds;

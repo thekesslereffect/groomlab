@@ -86,7 +86,7 @@ class GraphEditorTest(unittest.TestCase):
 
     def test_motion_nodes_come_from_the_add_menu_and_notes_badge_them(self):
         cats = dict(self.ge.categories(self.editor.catalog))
-        self.assertEqual(cats["Motion"], ["Wind", "Jiggle", "Simulate"])
+        self.assertEqual(cats["Motion"], ["Wind", "Jiggle", "Simulate", "GuideCache"])
         self.editor.items["resample"].setSelected(True)
         name = self.editor.add_node("Jiggle")
         self.assertEqual(self.editor.model.source_of(name, "strands"), "resample")
@@ -3749,12 +3749,12 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertEqual(entries_of("Add"), ["Feathers...", "Braid on Curves...", "Cards", "Collider", "Wind",
                                                  "Jiggle"])
             self.assertEqual(entries_of("Simulate"), ["Add Simulate Node", "Simulate Range", "Bake Simulation",
-                                                      "Clear Simulation", "Legacy"])
+                                                      "Clear Simulation", "Export Guides for Simulation...",
+                                                      "Load Guide Cache...", "Legacy"])
             simulate = next(menu.MENU + "|" + i for i in cmds.menu(menu.MENU, query=True, itemArray=True)
                             if cmds.menuItem(i, query=True, label=True) == "Simulate")
             self.assertEqual(entries_of("Legacy", parent=simulate),
-                             ["Simulate Guides (nHair)...", "Bake Simulation to Cache...", "Remove Simulation",
-                              "Export Guides for Simulation...", "Load Guide Cache..."])
+                             ["Simulate Guides (nHair)...", "Bake Simulation to Cache...", "Remove Simulation"])
             self.assertEqual(entries_of("Review"), ["Density Heatmap", "Strand Count HUD", "Turntable",
                                                     "Render Turntable..."])
             for item in (menu.HEATMAP_ITEM, menu.HUD_ITEM):  # check items, their state as the menu opens

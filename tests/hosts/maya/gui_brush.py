@@ -57,7 +57,7 @@ def view_pixels(name, what, test):
     path = os.path.join(folder, "groomlab_brush_%s.png" % name)
     image.writeToFile(path, "png")
     picture = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
-    data = bytes(picture.constBits())[:picture.byteCount()]  # b, g, r, a
+    data = bytes(picture.constBits())[:picture.sizeInBytes()]  # b, g, r, a
     count = sum(1 for i in range(0, len(data), 4) if test(data[i + 2], data[i + 1], data[i]))
     say("%s: %d %s pixels (%s)" % (name, count, what, path))
     return count

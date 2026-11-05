@@ -6055,6 +6055,27 @@ class SimulateTest(unittest.TestCase):
         self.assertEqual(groomlab.errors(self.groom), [])
         return node
 
+    def test_guides_for_simulation_come_back_through_a_guide_cache_node(self):
+        # Export Guides for Simulation, then Load Guide Cache (every host's): a GuideCache node right
+        # after the Guides node feeding all it fed; loading again repoints that node.
+        from groomlab import graph as gm
+        path = os.path.join(tempfile.mkdtemp(), "sim_guides.abc")
+        sim.export_guides(self.groom, path, start=1, end=2)
+        self.assertTrue(os.path.isfile(path))
+        node = sim.add_guide_cache(self.groom, path)
+        self.assertEqual(groomlab.errors(self.groom), [])
+        model = gm.GraphModel.from_groom(self.groom)
+        self.assertEqual(model.node_type(node), "GuideCache")
+        self.assertEqual(model.node_type(model.source_of(node, "guides")), "Guides")
+        self.assertTrue(any(model.node_type(dst) == "Interpolate" for dst, _ in model.downstream_of(node)))
+        again = os.path.join(os.path.dirname(path), "sim_guides_v2.abc")
+        sim.export_guides(self.groom, again, start=1, end=1)
+        self.assertEqual(sim.add_guide_cache(self.groom, again), node)  # the same node, the new file
+        model = gm.GraphModel.from_groom(self.groom)
+        self.assertEqual(len([n for n in model.order if model.node_type(n) == "GuideCache"]), 1)
+        self.assertTrue(model.param(node, "path").endswith("sim_guides_v2.abc"))
+        self.assertEqual(groomlab.errors(self.groom), [])
+
     def test_simulate_presets_set_the_node_in_one_step(self):
         # The core's presets (every host's): Fur sets the motion settings in one undo step, Default
         # puts back the node's defaults, both the same params; gravity is left alone.

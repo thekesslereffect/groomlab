@@ -37,6 +37,8 @@ void AppActions::addOutputBindings(ui::Bindings& b, MainWindow& w) {
     b["add.wind"] = {run([m] { m->addMotionNode(QStringLiteral("Wind")); }), {}, groomOpen};
     b["add.jiggle"] = {run([m] { m->addMotionNode(QStringLiteral("Jiggle")); }), {}, groomOpen};
     b["sim.add"] = {run([m] { m->addSimulateNode(); }), {}, groomOpen};
+    b["nhair.exportGuides"] = {run([m] { m->exportGuidesForSimulation(); }), {}, groomOpen};
+    b["nhair.loadCache"] = {run([m] { m->loadGuideCache(); }), {}, groomOpen};
 
     // Utilities and Export.
     b["strands.toMesh"] = {run([m] { m->askStrandsToMesh(); }), {}, groomOpen};

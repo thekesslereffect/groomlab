@@ -80,6 +80,7 @@ void registerAlembicOperators(OperatorRegistry& registry) {
     registry.registerType(op::kImportCurves,
                           {"source", "Curves from an Alembic file, as strands or guides.", "alembic abc curves file"},
                           [] { return std::make_unique<ImportCurvesOp>(); });
+    registerGuideCacheOperator(registry);
 }
 
 }  // namespace groomlab

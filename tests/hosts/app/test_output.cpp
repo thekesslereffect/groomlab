@@ -643,6 +643,47 @@ TEST(AppOutput, ThemesSwitchLiveWithTheUsersFolder) {
 
 // GroomLab > Studio lights the viewport in the mode at hand: it no longer switches to Look mode,
 // which hid the Groom Tools; the Properties dock shows its Lighting tab, lookdev on.
+TEST(AppOutput, GuidesForSimulationComeBackThroughAGuideCacheNode) {
+    // Simulate > Export Guides for Simulation, then Load Guide Cache (every host's): the primary
+    // guides as Alembic curves over the timeline, read back by a GuideCache node right after the
+    // Guides node; loading again repoints that node.
+    MainWindow window;
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(sampleCopy("groomlab_app_output_guidecache"))));
+    const fs::path dir = fs::temp_directory_path() / "groomlab_app_guide_cache";
+    fs::create_directories(dir);
+    const QString abc = QString::fromStdString((dir / "sim_guides.abc").u8string());
+    ASSERT_TRUE(window.exportGuidesForSimulation(abc));
+    EXPECT_TRUE(fs::exists(dir / "sim_guides.abc"));
+    ASSERT_TRUE(window.loadGuideCache(abc));
+    auto caches = [&] {
+        std::vector<json> out;
+        const json graph = json::parse(window.document()->graphJson());
+        for (const json& n : graph["nodes"]) {
+            if (n.value("type", std::string()) == "GuideCache") out.push_back(n);
+        }
+        return out;
+    };
+    ASSERT_EQ(caches().size(), 1u);
+    const std::string node = caches().front().value("name", std::string());
+    bool fromGuides = false, toInterpolate = false;
+    const json graph = json::parse(window.document()->graphJson());
+    for (const json& c : graph["connections"]) {
+        const std::string from = c.value("from", std::string()), to = c.value("to", std::string());
+        for (const json& n : graph["nodes"]) {
+            if (n.value("name", std::string()) == from && to == node && n.value("type", std::string()) == "Guides") fromGuides = true;
+            if (n.value("name", std::string()) == to && from == node && n.value("type", std::string()) == "Interpolate") toInterpolate = true;
+        }
+    }
+    EXPECT_TRUE(fromGuides);
+    EXPECT_TRUE(toInterpolate);
+    const QString again = QString::fromStdString((dir / "sim_guides_v2.abc").u8string());
+    ASSERT_TRUE(window.exportGuidesForSimulation(again));
+    ASSERT_TRUE(window.loadGuideCache(again));
+    ASSERT_EQ(caches().size(), 1u);  // the same node, the new file
+    EXPECT_EQ(caches().front()["params"].value("path", std::string()), again.toStdString());
+    fs::remove_all(dir);
+}
+
 TEST(AppOutput, StudioLightingKeepsTheModeAndTheGroomTools) {
     MainWindow window;
     ASSERT_TRUE(window.openGroom(QString::fromStdString(sampleCopy("groomlab_app_output_studio"))));

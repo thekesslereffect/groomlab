@@ -167,6 +167,56 @@ bool MainWindow::addSimulateNode() {
     return true;
 }
 
+bool MainWindow::exportGuidesForSimulation(const QString& given) {
+    if (!document_) {
+        report(tr("No groom open to export the guides of"));
+        return false;
+    }
+    if (refuseWhileBusy(tr("exporting the guides"))) return false;
+    QString path = given;
+    if (path.isEmpty()) {
+        const QString start = document_->path().empty() ? QString() : QFileInfo(QString::fromStdString(document_->path())).completeBaseName() + QStringLiteral("_guides.abc");
+        path = QFileDialog::getSaveFileName(this, tr("Export Guides for Simulation"), start, tr("Alembic (*.abc)"));
+        if (path.isEmpty()) return false;
+    }
+    settleCommit();
+    ExportOptions options;
+    options.frames.first = shell_->timeline()->first();
+    options.frames.last = shell_->timeline()->last();
+    try {
+        const ExportResult r = document_->exportGuides(path.toStdString(), "*", options);
+        notify(tr("Wrote %n frames of the guides (%1 curves): simulate them, then Load Guide Cache", "", static_cast<int>(r.frames))
+                   .arg(r.strands));
+    } catch (const std::exception& e) {
+        report(tr("Cannot export the guides: %1 (%2)").arg(QString::fromUtf8(e.what()), path));
+        reevaluate(true);
+        return false;
+    }
+    reevaluate(true);  // (the view back at the document's frame)
+    return true;
+}
+
+bool MainWindow::loadGuideCache(const QString& given) {
+    if (!document_) {
+        report(tr("No groom open to load a guide cache on"));
+        return false;
+    }
+    QString path = given;
+    if (path.isEmpty()) {
+        path = QFileDialog::getOpenFileName(this, tr("Load Guide Cache"), QString(), tr("Alembic (*.abc)"));
+        if (path.isEmpty()) return false;
+    }
+    std::string made;
+    const std::string error = document_->addGuideCacheNode(path.toStdString(), &made);
+    if (!error.empty()) {
+        report(tr("Cannot load the guide cache: %1").arg(QString::fromStdString(error)));
+        return false;
+    }
+    graphEdited();
+    notify(tr("The guides follow %1 (the %2 node)").arg(QFileInfo(path).fileName(), QString::fromStdString(made)));
+    return true;
+}
+
 bool MainWindow::addCollider(const QString& prop) {
     if (!document_) {
         report(tr("No groom open to add a collider to"));

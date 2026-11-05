@@ -79,12 +79,84 @@ def QtSvg():
 
 
 def QtTest():
-    """The QtTest module of the binding (the tests' QTest)."""
-    if QT6:
-        from PySide6 import QtTest as module
-    else:
-        from PySide2 import QtTest as module
+    """The QtTest module of the binding (the tests' QTest), else (Maya 2027's PySide6 ships none)
+    _EventTest: the same calls made of plain events."""
+    try:
+        if QT6:
+            from PySide6 import QtTest as module
+        else:
+            from PySide2 import QtTest as module
+    except ImportError:
+        return _EventTest
     return module
+
+
+class _EventTest(object):
+    """A stand-in for the QtTest module: QTest's mouse, key and wait calls the tests make, sent as
+    events to the widget (no real cursor or keyboard; mouseMove moves no cursor either)."""
+
+    class QTest(object):
+        _TEXT = {"Key_Return": "\r", "Key_Enter": "\r", "Key_Escape": "\x1b", "Key_Tab": "\t",
+                 "Key_Backspace": "\b", "Key_Space": " "}
+
+        @staticmethod
+        def _mouse(kind, widget, button, modifiers, pos, buttons):
+            pos = widget.rect().center() if pos is None else pos
+            local = QtCore.QPointF(pos)
+            event = QtGui.QMouseEvent(kind, local, QtCore.QPointF(widget.mapToGlobal(pos)), button, buttons,
+                                      QtCore.Qt.NoModifier if modifiers is None else modifiers)
+            QtWidgets.QApplication.sendEvent(widget, event)
+
+        @classmethod
+        def mousePress(cls, widget, button, modifiers=None, pos=None, delay=-1):
+            cls._mouse(QtCore.QEvent.MouseButtonPress, widget, button, modifiers, pos, button)
+
+        @classmethod
+        def mouseRelease(cls, widget, button, modifiers=None, pos=None, delay=-1):
+            cls._mouse(QtCore.QEvent.MouseButtonRelease, widget, button, modifiers, pos, QtCore.Qt.NoButton)
+
+        @classmethod
+        def mouseClick(cls, widget, button, modifiers=None, pos=None, delay=-1):
+            cls.mousePress(widget, button, modifiers, pos)
+            cls.mouseRelease(widget, button, modifiers, pos)
+
+        @classmethod
+        def mouseDClick(cls, widget, button, modifiers=None, pos=None, delay=-1):
+            cls.mouseClick(widget, button, modifiers, pos)
+            cls._mouse(QtCore.QEvent.MouseButtonDblClick, widget, button, modifiers, pos, button)
+            cls.mouseRelease(widget, button, modifiers, pos)
+
+        @classmethod
+        def mouseMove(cls, widget, pos=None, delay=-1):
+            cls._mouse(QtCore.QEvent.MouseMove, widget, QtCore.Qt.NoButton, None, pos, QtCore.Qt.NoButton)
+
+        @classmethod
+        def keyClick(cls, widget, key, modifiers=None, delay=-1):
+            modifiers = QtCore.Qt.NoModifier if modifiers is None else modifiers
+            if isinstance(key, str):  # a character: its key, and the character as the text
+                text, code = key, ord(key.upper()) if len(key) == 1 else 0
+            else:
+                code = int(getattr(key, "value", key))
+                name = getattr(key, "name", "")
+                text = cls._TEXT.get(name if isinstance(name, str) else "", "")
+                if not text and 0x20 <= code <= 0x7E:  # a letter, digit or sign: lower case unless Shift
+                    text = chr(code) if modifiers & QtCore.Qt.ShiftModifier else chr(code).lower()
+                if modifiers & QtCore.Qt.ControlModifier:
+                    text = ""
+            for kind in (QtCore.QEvent.KeyPress, QtCore.QEvent.KeyRelease):
+                QtWidgets.QApplication.sendEvent(widget, QtGui.QKeyEvent(kind, code, modifiers, text))
+
+        @classmethod
+        def keyClicks(cls, widget, text, modifiers=None, delay=-1):
+            for char in text:
+                cls.keyClick(widget, char, modifiers)
+
+        @staticmethod
+        def qWait(ms):
+            timer = QtCore.QElapsedTimer()
+            timer.start()
+            while timer.elapsed() < ms:
+                QtWidgets.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 10)
 
 
 def exec_(obj, *args):

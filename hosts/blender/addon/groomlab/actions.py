@@ -49,6 +49,8 @@ BINDINGS = {
     "sim.range": ("groomlab.simulate_range", {"bake": False}),
     "sim.bake": ("groomlab.simulate_range", {"bake": True}),
     "sim.clear": ("groomlab.simulate_clear", {}),
+    "nhair.exportGuides": ("groomlab.export_guides_sim", {}),
+    "nhair.loadCache": ("groomlab.load_guide_cache", {}),
     "display.showAllHair": ("groomlab.eye", {"what": "STRANDS", "mode": "SHOW", "every": True}),
     "display.hideAllHair": ("groomlab.eye", {"what": "STRANDS", "mode": "HIDE", "every": True}),
     "display.showAllGuides": ("groomlab.eye", {"what": "GUIDES", "mode": "SHOW", "every": True}),

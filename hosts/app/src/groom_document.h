@@ -606,6 +606,9 @@ public:
     std::string addMotionNode(const std::string& type, const nlohmann::json& params, std::string* made = nullptr);
     // A Simulate node between the guides and every Interpolate they feed (Maya's sim.add_simulate).
     std::string addSimulateNode(std::string* made = nullptr);
+    // Load Guide Cache (every host's): a GuideCache node reading `path` right after the Guides
+    // node, feeding all it fed (one already there reads the new file); an error, or "".
+    std::string addGuideCacheNode(const std::string& path, std::string* made = nullptr);
     // A ColliderMesh node reading the session's mesh `meshName` (a prop's name) and a Collide node
     // just before the output fed by it (and by the scalp): Maya's add_collider. An existing
     // ColliderMesh of that name: the graph left alone (*made its name).
@@ -669,6 +672,11 @@ public:
     // after each frame. The document's time is left as it was.
     // Alembic curves (AlembicCurvesWriter: strandId, the channels, Cd, root UVs).
     ExportResult exportAlembic(const std::string& path, const ExportOptions& options, const ExportProgress& progress = {});
+    // Export Guides for Simulation (every host's): GroomSession::guidesToSimulate's curves each frame
+    // (`group` "*": every guide the Guides node feeds, else a guide group's), each with its guide's
+    // ID as strandId, for another package to simulate (a GuideCache node reads the result back).
+    ExportResult exportGuides(const std::string& path, const std::string& group, const ExportOptions& options,
+                              const ExportProgress& progress = {});
     // USD BasisCurves in a text layer (.usda).
     ExportResult exportUsd(const std::string& path, const ExportOptions& options, const ExportProgress& progress = {});
     // A V-Ray scene (.vrscene: vrscene_writer.h): the strands, their colors and the look's

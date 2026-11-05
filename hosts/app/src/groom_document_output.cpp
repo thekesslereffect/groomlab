@@ -421,6 +421,46 @@ std::string GroomDocument::addSimulateNode(std::string* made) {
     return error;
 }
 
+std::string GroomDocument::addGuideCacheNode(const std::string& path, std::string* made) {
+    std::string name;
+    const MeshPtr& scalp = file().data.scalp;
+    const std::string error = editGraph("load guide cache", [&](json& g) {
+        GraphEdits edit(g, scalp ? presetScalpSize(*scalp) : std::nullopt);
+        const json now = edit.now();
+        const json params = {{"path", path}};
+        // A GuideCache on the Guides node already: it reads the new file.
+        for (const std::string& n : ofType(now, "GuideCache")) {
+            bool fedByGuides = false;
+            for (const std::string& src : ofType(now, "Guides")) {
+                for (const auto& [to, input] : fedBy(now, src)) fedByGuides = fedByGuides || (to == n && input == "guides");
+            }
+            if (fedByGuides) {
+                edit.setParam(n, "path", path);
+                name = n;
+                g = edit.now();
+                return;
+            }
+        }
+        std::string source;
+        for (const std::string& n : ofType(now, "Guides")) {
+            if (!fedBy(now, n).empty()) {
+                source = n;
+                break;
+            }
+        }
+        if (source.empty()) throw std::runtime_error("the groom's graph has no Guides node feeding the groom");
+        const auto consumers = fedBy(now, source);
+        const auto at = positionOf(now, source);
+        name = edit.add("GuideCache", "GuideCache", params,
+                        at ? std::optional<std::pair<double, double>>({at->first + kDX / 2.0, at->second + kDY}) : std::nullopt);
+        for (const auto& [to, input] : consumers) edit.e.connect(name, to, input);
+        edit.e.connect(source, name, "guides");
+        g = edit.now();
+    });
+    if (error.empty() && made) *made = name;
+    return error;
+}
+
 std::string GroomDocument::addCollider(const std::string& meshName, std::string* made) {
     if (meshName.empty() || meshName == "scalp") return "pick another collider name than '" + meshName + "'";
     for (const std::string& n : ofType(graph_, "ColliderMesh")) {

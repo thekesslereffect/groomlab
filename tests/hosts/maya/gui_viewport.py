@@ -475,7 +475,7 @@ def scales_check(snapshots=None):
     # The share of the body's pixels (off the background, as its corner shows it) the scales change.
     from groomlab.ui.qt import QtGui
     image = QtGui.QImage(hidden).convertToFormat(QtGui.QImage.Format_RGB32)
-    data = bytes(image.constBits())[:image.byteCount()]
+    data = bytes(image.constBits())[:image.sizeInBytes()]
     background = data[0:3]
     body = sum(1 for i in range(0, len(data), 4) if abs(data[i] - background[0]) + abs(data[i + 1] - background[1])
                + abs(data[i + 2] - background[2]) > 24) / float(image.width() * image.height())
@@ -574,7 +574,7 @@ def band_ink(path, rows):
     from groomlab.ui.qt import QtGui
     image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
     w, h = image.width(), image.height()
-    data = bytes(image.constBits())[:image.byteCount()]
+    data = bytes(image.constBits())[:image.sizeInBytes()]
 
     def pixel(x, y):
         i = (y * w + x) * 4
@@ -1243,7 +1243,7 @@ def differ(a, b):
         return 1.0
     ia = ia.convertToFormat(QtGui.QImage.Format_RGB32)
     ib = ib.convertToFormat(QtGui.QImage.Format_RGB32)
-    da, db = bytes(ia.constBits())[:ia.byteCount()], bytes(ib.constBits())[:ib.byteCount()]
+    da, db = bytes(ia.constBits())[:ia.sizeInBytes()], bytes(ib.constBits())[:ib.sizeInBytes()]
     pixels = ia.width() * ia.height()
     changed = sum(1 for i in range(0, len(da), 4) if da[i:i + 3] != db[i:i + 3])
     return changed / float(pixels)
@@ -1256,7 +1256,7 @@ def hue_counts(path):
     saturated than the one-pass transmittance they drew as before.)"""
     from groomlab.ui.qt import QtGui
     image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
-    data = bytes(image.constBits())[:image.byteCount()]
+    data = bytes(image.constBits())[:image.sizeInBytes()]
     counts = {"r": 0, "g": 0, "b": 0, "other": 0}
     for i in range(0, len(data), 8):  # every other pixel (BGRA)
         b, g, r = data[i], data[i + 1], data[i + 2]
@@ -1280,7 +1280,7 @@ def hair_pixel_change(before, after, block=6):
 
     def load(path):
         image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
-        return image.width(), image.height(), bytes(image.constBits())[:image.byteCount()]
+        return image.width(), image.height(), bytes(image.constBits())[:image.sizeInBytes()]
 
     w, h, a = load(before)
     _, _, b = load(after)
@@ -1459,7 +1459,7 @@ def hair_luminance(path):
     """The mean luminance of the pixels that are neither the white background nor the gray floor."""
     from groomlab.ui.qt import QtGui
     image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
-    data = bytes(image.constBits())[:image.byteCount()]
+    data = bytes(image.constBits())[:image.sizeInBytes()]
     total, count = 0.0, 0
     for i in range(0, len(data), 4):
         b, g, r = data[i], data[i + 1], data[i + 2]
@@ -1955,7 +1955,7 @@ def overlay_check(snapshots=None):
         cmds.playblast(frame=[1], format="image", compression="png", viewer=False, showOrnaments=False,
                        percent=100, widthHeight=(480, 360), completeFilename=path)
         image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
-        data = bytes(image.constBits())[:image.byteCount()]
+        data = bytes(image.constBits())[:image.sizeInBytes()]
         return path, sum(1 for i in range(0, len(data), 4) if data[i + 1] > 90 and data[i + 1] > 1.4 * data[i + 2])
 
     on_top, green = shot("on_top")
@@ -1987,7 +1987,7 @@ def eyes_check(groom, folder):
         cmds.playblast(frame=[1], format="image", compression="png", viewer=False, showOrnaments=False,
                        percent=100, widthHeight=(480, 360), completeFilename=path)
         image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
-        data = bytes(image.constBits())[:image.byteCount()]
+        data = bytes(image.constBits())[:image.sizeInBytes()]
         guides = hair = 0
         for i in range(0, len(data), 4):
             if data[i + 1] > 90 and data[i + 1] > 1.4 * data[i + 2]:
@@ -2052,7 +2052,7 @@ def clump_centers_check(snapshots=None):
         cmds.playblast(frame=[1], format="image", compression="png", viewer=False, showOrnaments=False,
                        percent=100, widthHeight=(480, 360), completeFilename=path)
         image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
-        data = bytes(image.constBits())[:image.byteCount()]  # B, G, R, A
+        data = bytes(image.constBits())[:image.sizeInBytes()]  # B, G, R, A
         # Every theme's clumpCenters is a magenta: red and blue well over green (the hair brown,
         # the background grey).
         pixels = sum(1 for i in range(0, len(data), 4) if data[i + 2] > 170 and data[i] > 140 and data[i + 1] < 120)
@@ -2117,7 +2117,7 @@ def cards_check(snapshots=None):
         cmds.playblast(frame=[1], format="image", compression="png", viewer=False, showOrnaments=False,
                        percent=100, widthHeight=(480, 360), completeFilename=path)
         image = QtGui.QImage(path).convertToFormat(QtGui.QImage.Format_RGB32)
-        data = bytes(image.constBits())[:image.byteCount()]
+        data = bytes(image.constBits())[:image.sizeInBytes()]
         hair, total = 0, [0, 0, 0]
         for i in range(0, len(data), 4):
             b, g, r = data[i], data[i + 1], data[i + 2]

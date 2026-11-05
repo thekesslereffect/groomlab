@@ -2883,6 +2883,7 @@ json display(ToolState& t, const json& args) {
         in.viewedRoots = true;
         in.strands = last.strands;
     }
+    in.movingGuides = last.movingGuides;  // a GuideCache's or Simulate's guides, over the groomed ones
     // While a Sculpt node is what brushes shape, its output guides are the guides shown (as Maya's
     // and the app's viewports show them).
     const HierarchyPtr sculpted = session.sculptTarget().empty() ? nullptr : session.sculptHierarchy();

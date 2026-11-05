@@ -708,6 +708,18 @@ class GraphTest(SceneMixin, unittest.TestCase):
                 "connections": [{"from": "s", "to": "c", "input": "strands"}, {"from": "guides", "to": "wave", "input": "strands"}]}))
             self.assertTrue(edit.connect_by_hand(source, "c", "centers"), source)
             self.assertEqual(json.loads(edit.to_json())["nodes"][1]["params"]["centersFrom"], "inputCurves", source)
+        # Guides a GuideCache or a Simulate node moves, or an ImportCurves' (through a curve node too):
+        # each clump along its guide as well.
+        for kind in ("GuideCache", "Simulate", "ImportCurves"):
+            for source in ("moved", "wave"):
+                edit = gl.GraphEdit(json.dumps({"version": 1, "nodes": [
+                    {"name": "s", "type": "Scatter"}, {"name": "c", "type": "Clump"}, {"name": "moved", "type": kind},
+                    {"name": "wave", "type": "Noise"}],
+                    "connections": [{"from": "s", "to": "c", "input": "strands"},
+                                    {"from": "moved", "to": "wave", "input": "strands"}]}))
+                self.assertTrue(edit.connect_by_hand(source, "c", "centers"), (kind, source))
+                self.assertEqual(json.loads(edit.to_json())["nodes"][1]["params"]["centersFrom"], "inputCurves",
+                                 (kind, source))
         self.assertEqual(params["Clump"]["flatness"]["default"], 0.0)
         self.assertEqual(params["Noise"]["mode"]["default"], "smooth")
         self.assertEqual(params["Width"]["randomness"]["default"], 0.0)

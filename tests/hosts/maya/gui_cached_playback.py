@@ -118,7 +118,7 @@ def differ(a, b):
         return 1.0
     ia = ia.convertToFormat(QtGui.QImage.Format_RGB32)
     ib = ib.convertToFormat(QtGui.QImage.Format_RGB32)
-    da, db = bytes(ia.constBits())[:ia.byteCount()], bytes(ib.constBits())[:ib.byteCount()]
+    da, db = bytes(ia.constBits())[:ia.sizeInBytes()], bytes(ib.constBits())[:ib.sizeInBytes()]
     changed = sum(1 for i in range(0, len(da), 4) if da[i:i + 3] != db[i:i + 3])
     return changed / float(ia.width() * ia.height())
 

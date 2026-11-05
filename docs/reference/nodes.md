@@ -20,7 +20,8 @@ User guide: [Node graph](https://www.getgroomlab.com/docs/node-graph).
 - **Convert:** `ToGuides`, `ToStrands`, `ToMesh`. **Games:** `Cards`.
 - **Color:** `HairColor`, `Bands`, `FeatherColor`, `RenderData`.
 - **Motion:** `Wind`, `Jiggle` (no simulation cache: see [Motion without a cache](motion-and-simulation.md#motion-without-a-cache)), `Simulate`
-  (the guides simulated, every host: see [Simulating the guides](motion-and-simulation.md#simulating-the-guides)).
+  (the guides simulated, every host: see [Simulating the guides](motion-and-simulation.md#simulating-the-guides)),
+  `GuideCache` (the guides posed from an Alembic cache simulated in another package, by guide ID).
 - **Feathers:** `Propagate` (barbs grown off shafts), `Plume` (feathers laid over one another and off the body).
 - **Utility:** `Attribute`, `Value`, `Group`, `Merge`, `Switch`, `Split` (strands routed to four outputs), `Blend`, `Output`; `Compound` and `Input` for compound nodes.
 - **Fields:** `Map`, `Control` (a keyable slider on the groom), `Expression`, `FieldNoise`, `FieldRemap`, `FieldCombine`, `Layers`, `ColorLayers`, `Curve`.

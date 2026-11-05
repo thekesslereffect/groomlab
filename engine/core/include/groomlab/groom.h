@@ -90,6 +90,13 @@ void setMeshExternals(ExternalInputs& externals, const std::map<std::string, Mes
 // for unknown IDs are ignored. Call after GuideHierarchy::evaluate.
 void applyGuidePoses(GuideHierarchy& hierarchy, const GuideSet& poses, const ScalpMesh* scalp);
 
+// Export Guides for Simulation (every host's): the guides a GuideCache node after the Guides node
+// receives, from an evaluation's hierarchy (ViewResult::hierarchy: bound, posed, corrected) and the
+// flat guides (GroomData::guides): `group` "*" every guide a Guides node of the default settings
+// feeds (the hierarchy's every level, then the flat guides), else one guide group's (throws
+// std::runtime_error for no such group). Each keeps its guide's ID.
+GuideSet guidesToSimulate(const HierarchyPtr& hierarchy, const GuidesPtr& flat, const std::string& group = "*");
+
 // Registers control values for the graph's Control nodes (by name).
 void setControlExternals(ExternalInputs& externals, const std::map<std::string, float>& controls);
 

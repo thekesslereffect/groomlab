@@ -2379,6 +2379,28 @@ class PipelineTest(HelperTestCase):
         self.call("edit_graph", session=s, op="insert_on_link", **{"from": "guides"}, to="interpolate", input="guides", node="sim")
         self.assertEqual(self.call("simulate_status", session=s)["nodes"], ["sim"])
 
+    def test_guides_for_simulation_come_back_through_a_guide_cache_node(self):
+        # Export Guides for Simulation: every guide's curve over the frames ("*"), each curve's
+        # strandId its guide's ID; a GuideCache node reading them back poses every guide.
+        s = self.compat_session()
+        abc = os.path.join(self.tmp, "sim_guides.abc")
+        r = self.call("export", session=s, format="guides", path=abc, frames={"first": 1, "last": 3})  # every guide
+        self.assertEqual(r["frames"], 3)
+        self.assertTrue(os.path.isfile(abc))
+        self.assertGreater(r["strands"], 0)
+        self.assertEqual(self.h.request("export", session=s, format="guides", path=abc, group="nowhere")["error"]["code"],
+                         "not_found")
+        self.call("edit_graph", session=s, op="add_node", type="GuideCache", name="cache")
+        self.call("set_param", session=s, node="cache", param="path", value=abc)
+        self.call("edit_graph", session=s, op="insert_on_link", **{"from": "guides"}, to="interpolate", input="guides",
+                  node="cache")
+        e = self.call("evaluate", session=s)
+        self.assertEqual(e["errors"], [])
+        self.assertNotIn("cache", e["notes"])  # every guide had its curve (no "N of M posed" note)
+        # Curves no guide has (by ID): the note says so and the guides pass through.
+        self.call("set_param", session=s, node="cache", param="matchBy", value="order")
+        self.assertEqual(self.call("evaluate", session=s)["errors"], [])
+
     def test_simulate_range_in_steps_fed_by_the_scalps_frames(self):
         moved, still = self.compat_session(), self.compat_session()
         for s in (moved, still):

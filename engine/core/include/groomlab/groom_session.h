@@ -130,6 +130,10 @@ struct ViewResult {
     // ... or a Clump: its clump centers, each its root on the scalp, drawn as dots
     // (DisplayInputs::clumpCenters). Null otherwise.
     std::shared_ptr<const std::vector<Vec3f>> clumpCenters;
+    // The guides moving: what an Interpolate (feeding what is shown) takes after a GuideCache or
+    // Simulate node that moved them this frame (a cache read, a simulated frame), drawn over the
+    // groomed guides (DisplayInputs::movingGuides). Null when no such node moves them.
+    GuidesPtr movingGuides;
     MeshPtr scalp;                   // with the vertex maps as color sets, refined (GroomSession::scalpSubdivision)
     MeshPtr cageScalp;               // the same before it is refined: what vertex maps are painted on
     // Active: the preview, else the authored one; posed and corrected. While a Sculpt node is the

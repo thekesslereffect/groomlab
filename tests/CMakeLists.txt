@@ -133,7 +133,7 @@ set_source_files_properties(engine/core/test_usd_layout.cpp PROPERTIES SKIP_PREC
 set_source_files_properties(${PROJECT_SOURCE_DIR}/tools/dev/new_node/example_op.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON
     INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/engine/core/example_node")
 if(TARGET groomlab_alembic)
-    target_sources(groomlab_tests PRIVATE engine/io/test_alembic.cpp engine/io/test_import_curves.cpp engine/io/test_sim_cache.cpp engine/io/test_time_determinism.cpp)
+    target_sources(groomlab_tests PRIVATE engine/io/test_alembic.cpp engine/io/test_import_curves.cpp engine/io/test_guide_cache.cpp engine/io/test_sim_cache.cpp engine/io/test_time_determinism.cpp)
     target_link_libraries(groomlab_tests PRIVATE groomlab::alembic Alembic::Alembic)  # tests read files back directly
 endif()
 
