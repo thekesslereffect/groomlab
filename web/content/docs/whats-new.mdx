@@ -13,6 +13,27 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.41.1 (November 6, 2026)
+
+- **Braid cards that capture the weave.** The Cards node's new **Braid Cards** setting gives each
+  braid section its own tube that winds around the braid (**Sections**, the default; **braidSides**
+  sets each tube's sides), or one tube per braid (**Tube**), or the crossed flat cards from before
+  (**Cross**). Hair fed into a braid gets feed cards of its own, lying on the scalp from the roots
+  into the braid, for French braids and cornrows. Rebake and export braid cards made before this
+  update. See [Game export](/docs/game-export).
+- **Paint the selection with a brush.** Ctrl+Shift+drag with a Shape or Trim brush paints guides
+  into the selection, and when the stroke ends every other guide is frozen, so the next strokes
+  only shape what you painted. A drag over no guide clears the selection and unfreezes every guide.
+  See [Guides and brushes](/docs/guides-and-brushes).
+- **Simulated hair grips like real hair.** Friction against the scalp and colliders now follows how
+  hard the hair presses on them: hair rests on gentle slopes and slides off steep ones, and hair on
+  a turning head moves with it instead of being held back. **friction** is the steepest slope hair
+  rests on (0.3: about 27 degrees, 1: never slides). Saved grooms slide a little differently on
+  contact. See [Motion and simulation](/docs/motion-and-simulation).
+- **Fixes:** card AO no longer bands along strands that lie at an angle to the bake (issue #51).
+  Clumps whose hair is all flagged flyaway get cards again. Maya's Graph Editor keeps the params'
+  scroll when the same node is shown again (issue #47).
+
 ## 0.41.0 (November 5, 2026)
 
 - **Braids, rebuilt.** The Braid node follows the real crossing pattern (each outer section over,
