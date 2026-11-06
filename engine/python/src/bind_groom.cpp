@@ -384,6 +384,10 @@ void bindGroom(py::module_& m) {
         .value("Auto", CardSettings::CrossStyle::Auto)
         .value("Single", CardSettings::CrossStyle::Single)
         .value("Cross", CardSettings::CrossStyle::Cross);
+    py::enum_<CardSettings::BraidCards>(m, "BraidCards", "What a braid becomes: a tube along each of its Sections, a Tube around it, or Cross(ed) cards.")
+        .value("Sections", CardSettings::BraidCards::Sections)
+        .value("Tube", CardSettings::BraidCards::Tube)
+        .value("Cross", CardSettings::BraidCards::Cross);
     py::enum_<CardSettings::FeatherMode>(m, "FeatherMode", "How feathers are carded: Auto, PerFeather, PerVane (as hair) or Off.")
         .value("Auto", CardSettings::FeatherMode::Auto)
         .value("PerFeather", CardSettings::FeatherMode::PerFeather)
@@ -410,6 +414,8 @@ void bindGroom(py::module_& m) {
         .def_readwrite("cross_style", &CardSettings::crossStyle)
         .def_readwrite("cross_count", &CardSettings::crossCount)
         .def_readwrite("braids", &CardSettings::braids)
+        .def_readwrite("braid_cards", &CardSettings::braidCards)
+        .def_readwrite("braid_sides", &CardSettings::braidSides)
         .def_readwrite("segments_by_length", &CardSettings::segmentsByLength)
         .def_readwrite("min_segments", &CardSettings::minSegments)
         .def_readwrite("volume_normals", &CardSettings::volumeNormals)
@@ -435,6 +441,11 @@ void bindGroom(py::module_& m) {
         .def_readonly("layer", &CardMesh::Card::layer, "Its depth layer in the clump (0 innermost).")
         .def_readonly("flyaway", &CardMesh::Card::flyaway)
         .def_readonly("braid", &CardMesh::Card::braid, "The braid the card stands for (a Braid node's braidId; -1: none).")
+        .def_readonly("braid_section", &CardMesh::Card::braidSection, "A braid section's tube: its section (-1: none).")
+        .def_readonly("braid_feed", &CardMesh::Card::braidFeed, "A braid's feed card: its strands' way in, from the scalp into the braid.")
+        .def_readonly("tube_aspect", &CardMesh::Card::tubeAspect, "A tube's cross-section: its width along the side over its width along the normal.")
+        .def_readonly("tube_arc", &CardMesh::Card::tubeArc,
+                      "A braid's tube: the angle (radians) its rows wrap around its center line (2 pi closed; 0: a flat card).")
         .def_readonly("feather", &CardMesh::Card::feather, "The feather the card stands for (its index among the node's feathers; -1: hair).")
         .def_readonly("across", &CardMesh::Card::across)
         .def_readonly("spine", &CardMesh::Card::spine, "A feather card with a column on its shaft (across 2: left edge, spine, right edge).")

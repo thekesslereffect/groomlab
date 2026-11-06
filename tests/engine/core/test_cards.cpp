@@ -164,6 +164,40 @@ TEST(Cards, AFlyawayNodesStraysGetCardsOfTheirOwn) {
     }
 }
 
+TEST(Cards, AClumpAFlyawayFlaggedWhollyIsStillHairWithCards) {
+    // A Flyaway with a large fraction (styling the hair, not adding strays) flags most of a clump:
+    // its strands are the clump's hair and make its cards; a clump with a few flagged keeps those
+    // apart as strays (AFlyawayNodesStraysGetCardsOfTheirOwn). The braids scene had no hair cards.
+    const auto scalp = test::makePlane(16);
+    auto s = std::make_shared<StrandSet>();
+    std::vector<float> clump, flag;
+    for (int c = 0; c < 2; ++c) {
+        for (int i = 0; i < 20; ++i) {
+            const float a = 0.314f * static_cast<float>(i);
+            const Vec3f root{1.0f * c + 0.04f * std::cos(a), 0.0f, 0.04f * std::sin(a)};
+            s->addStrand(static_cast<StrandId>(c * 100 + i + 1), test::straightCurve(root, {0.0f, 1.0f, 0.0f}, 8), {},
+                         scalp->closestPoint(root).root);
+            clump.push_back(static_cast<float>(c));
+            flag.push_back(c == 0 || i == 7 ? 1.0f : 0.0f);  // all of clump 0, one of clump 1
+        }
+    }
+    s->addStrandChannel("clumpId", 0.0f) = clump;
+    s->addStrandChannel("flyaway", 0.0f) = flag;
+    CardSettings settings;
+    settings.crossStyle = CardSettings::CrossStyle::Single;
+    const CardMesh mesh = buildCards(*s, scalp.get(), settings);
+    std::size_t held[2] = {0, 0};
+    for (const CardMesh::Card& card : mesh.cards) {
+        EXPECT_FALSE(card.flyaway);
+        for (const std::size_t i : card.strands) ++held[i / 20];
+        if (card.clump >= 0 && clump[card.strands.front()] == 1.0f) {
+            for (const std::size_t i : card.strands) EXPECT_NE(i, 27u) << "clump 1's one stray stays apart";
+        }
+    }
+    EXPECT_EQ(held[0], 20u);  // the wholly flagged clump: all of it on cards
+    EXPECT_EQ(held[1], 19u);
+}
+
 TEST(Cards, ShapeControls) {
     const StrandsPtr s = clumpedFur();
     const auto plane = test::makePlane(16);
@@ -1789,6 +1823,7 @@ TEST(Cards, BraidsGetTheirOwnCrossedCardsAlongTheBraid) {
     for (std::size_t i = 100; i < 112; ++i) clumpId[i] = 5.0f;
     const auto plane = test::makePlane(16);
     CardSettings settings;
+    settings.braidCards = CardSettings::BraidCards::Cross;  // (tubes: BraidSectionsGetATubeEach)
     settings.crossStyle = CardSettings::CrossStyle::Cross;
     settings.crossCount = 2;
     settings.ruffle = 0.0f;
@@ -1865,6 +1900,7 @@ TEST(Cards, ACornrowGetsOneCardLyingOnTheScalp) {
     const auto plane = test::makePlane(16);
     for (const CardSettings::CrossStyle style : {CardSettings::CrossStyle::Auto, CardSettings::CrossStyle::Cross}) {
         CardSettings settings;
+        settings.braidCards = CardSettings::BraidCards::Cross;
         settings.crossStyle = style;
         settings.cardsPerClump = 3;
         const CardMesh mesh = buildCards(*s, plane.get(), settings);
@@ -1879,6 +1915,167 @@ TEST(Cards, ACornrowGetsOneCardLyingOnTheScalp) {
         EXPECT_NEAR(c.refCenter[mid].z, 0.5f, 0.01f);
         EXPECT_GT(c.refWidth[mid], 0.04f);  // the braid's width
         EXPECT_LT(c.refWidth[mid], 0.1f);
+    }
+}
+
+// A three-ply braid standing up off a plane scalp: three sections, each a bundle of `perSection`
+// strands wound tightly around its own axis, the three axes winding around the braid's axis
+// (`turns` times), so every section runs over and under the others. braidId 0, braidSection 0-2.
+std::shared_ptr<StrandSet> threeSectionBraid(int perSection = 30, float turns = 2.0f) {
+    auto s = std::make_shared<StrandSet>();
+    constexpr float kBraidRadius = 0.05f, kBundle = 0.015f;
+    for (int section = 0; section < 3; ++section) {
+        const float start = 6.2831853f * static_cast<float>(section) / 3.0f;
+        const auto axis = [start, turns](float t) {
+            const float a = start + 6.2831853f * turns * t;
+            const Vec3f c{0.5f + kBraidRadius * std::cos(a), t, 0.5f + kBraidRadius * std::sin(a)};
+            return std::make_tuple(c, Vec3f{1, 0, 0}, Vec3f{0, 0, 1});
+        };
+        addWoundStrands(*s, 1 + 100 * section, perSection, axis, kBundle, 0.5f, 49);
+    }
+    std::vector<float>& braidId = s->addStrandChannel("braidId", -1.0f);
+    std::vector<float>& braidSection = s->addStrandChannel("braidSection", -1.0f);
+    s->addStrandChannel("braidFlat", 0.0f);
+    for (std::size_t i = 0; i < s->strandCount(); ++i) {
+        braidId[i] = 0.0f;
+        braidSection[i] = static_cast<float>(i / static_cast<std::size_t>(perSection));
+    }
+    return s;
+}
+
+TEST(Cards, BraidSectionsGetATubeEach) {
+    // braidCards sections (the default): a closed tube along each section, winding with it (the
+    // weave in the mesh), as thick as the section, `braidSides` quads around.
+    const auto s = threeSectionBraid();
+    const auto plane = test::makePlane(16);
+    CardSettings settings;
+    ASSERT_EQ(settings.braidCards, CardSettings::BraidCards::Sections);
+    const CardMesh mesh = buildCards(*s, plane.get(), settings);
+    ASSERT_EQ(mesh.cards.size(), 3u);
+    std::set<int> sections;
+    for (const CardMesh::Card& c : mesh.cards) {
+        sections.insert(c.braidSection);
+        EXPECT_EQ(c.braid, 0);
+        EXPECT_NEAR(c.tubeArc, 6.2831853f, 1e-4f);
+        EXPECT_EQ(c.across, settings.braidSides);
+        EXPECT_EQ(c.strands.size(), 30u);
+        for (const std::size_t i : c.strands) EXPECT_EQ(static_cast<int>(i / 30), c.braidSection);  // its own section's
+        // Along the section's own axis, which winds around the braid's: halfway up (t 0.5) the
+        // section's axis is at angle start + 2 pi turns 0.5 around (0.5, 0.5).
+        const float start = 6.2831853f * static_cast<float>(c.braidSection) / 3.0f;
+        float nearest = 1e9f;
+        for (int k = 0; k <= 200; ++k) {
+            const float t = static_cast<float>(k) / 200.0f, a = start + 6.2831853f * 2.0f * t;
+            const Vec3f axis{0.5f + 0.05f * std::cos(a), t, 0.5f + 0.05f * std::sin(a)};
+            for (const Vec3f& p : c.refCenter) nearest = std::min(nearest, (p - axis).length());
+        }
+        float far = 0.0f;  // the center line keeps to the section's axis all along
+        for (const Vec3f& p : c.refCenter) {
+            float d = 1e9f;
+            for (int k = 0; k <= 400; ++k) {
+                const float t = static_cast<float>(k) / 400.0f, a = start + 6.2831853f * 2.0f * t;
+                d = std::min(d, (p - Vec3f{0.5f + 0.05f * std::cos(a), t, 0.5f + 0.05f * std::sin(a)}).length());
+            }
+            far = std::max(far, d);
+        }
+        EXPECT_LT(far, 0.02f) << "section " << c.braidSection;  // (within its bundle's radius, 0.015, ends too)
+        // As thick as its bundle (0.015 radius), not the whole braid (0.05 and more).
+        const float mid = c.refWidth[c.refWidth.size() / 2];
+        EXPECT_GT(mid, 0.015f);
+        EXPECT_LT(mid, 0.07f);
+        // Edge loops for its turns, more than `segments` gives a card.
+        EXPECT_GT(c.stations, settings.segments + 1);
+        EXPECT_LE(c.stations, 8 * settings.segments + 1);
+    }
+    EXPECT_EQ(sections, (std::set<int>{0, 1, 2}));
+
+    // The mesh: each row a closed ring (its last vertex on its first: the texture's seam), the
+    // normals out of the tube, u within the cell all the way round.
+    for (const CardMesh::Card& c : mesh.cards) {
+        const std::size_t columns = static_cast<std::size_t>(c.across) + 1;
+        for (int k = 0; k < c.stations; ++k) {
+            const std::size_t row = c.firstVertex + static_cast<std::size_t>(k) * columns;
+            EXPECT_LT((mesh.positions[row] - mesh.positions[row + columns - 1]).length(), 1e-5f);
+            float ring = 0.0f;
+            for (std::size_t e = 0; e < columns; ++e) {
+                const Vec3f out = mesh.positions[row + e] - c.center[static_cast<std::size_t>(k)];
+                EXPECT_GT(mesh.normals[row + e].dot(out), 0.0f);
+                ring = std::max(ring, out.length());
+                EXPECT_GE(mesh.u[row + e], std::min(c.cell[0], c.cell[2]));
+                EXPECT_LE(mesh.u[row + e], std::max(c.cell[0], c.cell[2]));
+            }
+            EXPECT_GT(ring, 0.25f * c.width[static_cast<std::size_t>(k)]);
+        }
+    }
+
+    // Tube: one around the whole braid, as thick as the braid.
+    settings.braidCards = CardSettings::BraidCards::Tube;
+    const CardMesh tube = buildCards(*s, plane.get(), settings);
+    ASSERT_EQ(tube.cards.size(), 1u);
+    EXPECT_EQ(tube.cards[0].braidSection, -1);
+    EXPECT_NEAR(tube.cards[0].tubeArc, 6.2831853f, 1e-4f);
+    EXPECT_EQ(tube.cards[0].strands.size(), 90u);
+    EXPECT_GT(tube.cards[0].refWidth[tube.cards[0].refWidth.size() / 2], 0.08f);
+    // Cross: the crossed cards (BraidsGetTheirOwnCrossedCardsAlongTheBraid).
+    settings.braidCards = CardSettings::BraidCards::Cross;
+    for (const CardMesh::Card& c : buildCards(*s, plane.get(), settings).cards) EXPECT_EQ(c.tubeArc, 0.0f);
+}
+
+TEST(Cards, ATubeBakesItsSectionAllTheWayRound) {
+    // A section's tube bakes its hair unrolled: covered across its whole cell (the way round)
+    // and solid there (nothing behind the tube shows through), the outermost hair on top.
+    const auto s = threeSectionBraid(40);
+    const auto plane = test::makePlane(16);
+    const CardMesh mesh = buildCards(*s, plane.get(), {});
+    ASSERT_EQ(mesh.cards.size(), 3u);
+    CardBakeSettings bake;
+    bake.size = 256;
+    bake.scalp = plane.get();
+    bake.dilate = 0;
+    const CardTextures t = bakeCardTextures(*s, mesh, bake);
+    for (const CardMesh::Card& c : mesh.cards) {
+        if (c.variationOf >= 0) continue;
+        const int x0 = static_cast<int>(std::lround(c.cell[0] * t.size)), x1 = static_cast<int>(std::lround(c.cell[2] * t.size)) - 1;
+        const int y0 = static_cast<int>(std::lround((1.0f - c.cell[3]) * t.size)), y1 = static_cast<int>(std::lround((1.0f - c.cell[1]) * t.size)) - 1;
+        // The middle half of its length: every column across covered, solidly.
+        float least = 1.0f, sum = 0.0f, n = 0.0f;
+        for (int y = y0 + (y1 - y0) / 4; y < y1 - (y1 - y0) / 4; ++y) {
+            for (int x = x0 + 1; x < x1 - 1; ++x) {
+                const float cover = t.coverage[static_cast<std::size_t>(y) * static_cast<std::size_t>(t.size) + static_cast<std::size_t>(x)] / 255.0f;
+                least = std::min(least, cover);
+                sum += cover, n += 1.0f;
+            }
+        }
+        EXPECT_GT(sum / n, 0.9f) << "section " << c.braidSection;
+        EXPECT_GT(least, 0.3f) << "section " << c.braidSection;
+    }
+}
+
+TEST(Cards, ACornrowsSectionsLieOnTheScalpWithNoFeedCardWithoutAWayIn) {
+    // A cornrow (braidFlat 1) in sections: a tube per section, along the row over the scalp. Its
+    // strands have no way in (no braidWoven channel: woven from the root), so no feed card (the
+    // feed cards: Braid.FedHairGetsFeedCardsFromTheScalpIntoTheBraid).
+    auto s = threeSectionBraid();
+    // Laid down: x along the scalp, the braid's axis just above the plane.
+    StrandSet laid;
+    for (std::size_t i = 0; i < s->strandCount(); ++i) {
+        std::vector<Vec3f> pts(s->strandPoints(i), s->strandPoints(i) + s->strandPointCount(i));
+        for (Vec3f& p : pts) p = Vec3f{0.2f + 0.6f * p.y, 0.06f + (p.x - 0.5f), p.z};
+        laid.addStrand(s->ids()[i], pts, std::vector<float>(pts.size(), 0.004f));
+    }
+    laid.addStrandChannel("braidId", -1.0f) = *s->strandChannel("braidId");
+    laid.addStrandChannel("braidSection", -1.0f) = *s->strandChannel("braidSection");
+    laid.addStrandChannel("braidFlat", 1.0f);
+    const auto plane = test::makePlane(16);
+    const CardMesh mesh = buildCards(laid, plane.get(), {});
+    ASSERT_EQ(mesh.cards.size(), 3u);
+    for (const CardMesh::Card& c : mesh.cards) {
+        EXPECT_EQ(c.braid, 0);
+        EXPECT_GT(c.tubeArc, 0.0f);
+        EXPECT_FALSE(c.braidFeed);
+        const std::size_t mid = c.refCenter.size() / 2;
+        EXPECT_LT(c.refCenter[mid].y, 0.14f);         // over the scalp
+        EXPECT_NEAR(c.refCenter[mid].x, 0.5f, 0.1f);  // along the row
     }
 }
 

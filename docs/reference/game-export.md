@@ -147,7 +147,9 @@ Game cards as glTF, below).
   without a clump, or in clumps too small for one, and the strays above, get thin **flyaway
   cards** of their own, the farthest from any card first, up to `flyawayCards` (the hero preset
   gives 200), and the rest join the nearest card within reach; only strands far from every card
-  with no flyaway budget left, and strays past the budget, are left out.
+  with no flyaway budget left, and strays past the budget, are left out. A Flyaway node's strays
+  are strays only where they are a few of their clump: a clump mostly flagged (a Flyaway with a
+  large fraction, styling the hair) is carded as the clump's hair.
 - **How close it is:** `cardFitDistances` (C++) measures how far the strands lie from the cards
   that draw them. On the test head (a sphere, two dozen loose clumps) the 95th percentile was
   1.17 clump radii with one flat card per clump and is 0.36 with the hero settings (the fit
@@ -180,17 +182,33 @@ Game cards as glTF, below).
   default: a cross for round tufts standing off the scalp, spikes and fur tufts, which one ribbon
   would show as a flat blade; one ribbon for hair lying along the head). `maxCards` counts them
   all: over budget, the smallest clumps give up their extra cards first.
-- **Braids:** strands a Braid node wove carry a `braidId` channel; with `braids` on (the default)
-  each braid makes its own card set instead of being chopped across the clumps its strands came
-  from: a cross of `crossCount` (at least 2) cards along the braid's axis for a hanging braid, or
-  one ribbon lying along the scalp, facing out of it, for a cornrow (`braidFlat` 1). Braid cards
-  get no sub-cards, layers, ruffle or twist fit, take their cards from `maxCards` first, and carry
-  the braid's id on the card; strands the Braid left loose are carded as usual. Turn `braids` off
-  (`groomlab.create_cards(groom, braids=False)`) to card braided strands by their clumps.
+- **Braids:** strands a Braid node wove carry `braidId`, `braidSection` and `braidWoven` channels;
+  with `braids` on (the default) each braid makes its own cards instead of being chopped across the
+  clumps its strands came from, as `braidCards` says:
+  - `sections` (the default): a tube along each of its sections, winding over and under the others
+    as the section does, so the weave is in the mesh. Each tube is `braidSides` quads around
+    (default 6), elliptical (as flat as its section lies) and as thick as most of its strands, with
+    an edge loop every 30 degrees its section turns (at most 8 x `segments`: the level of detail
+    sets it). Its texture is the section's hair unrolled (across is the way around, the outermost
+    strands on top) and its coverage solid, so nothing behind it shows through.
+  - `tube`: one tube around the whole braid, its texture the braid unrolled (a cornrow gets the
+    upper part of one, open toward the scalp).
+  - `cross`: a cross of `crossCount` (at least 2) flat cards along a hanging braid, one ribbon lying
+    along the scalp, facing out of it, for a cornrow (`braidFlat` 1).
+
+  Tubes are made of the woven part of each strand (`braidWoven`). The hair's way in (a fed
+  strand's along the scalp to where it joins, a box braid's gather) gets feed cards: flat cards on
+  the scalp from the roots into the braid, the way-in parts grouped by where they come from and
+  where they join, each baked from that part alone. Braid cards get no sub-cards,
+  layers, ruffle, twist fit or separation, take their cards from `maxCards` first, and carry the
+  braid's id (and a tube its section) on the card; strands the Braid left loose are carded as
+  usual. Turn `braids` off (`groomlab.create_cards(groom, braids=False)`) to card braided strands by
+  their clumps.
 - **Segments by length:** `segmentsByLength` gives each card segments in proportion to its length
   (`segments` for the longest, at least `minSegments`), so short cards don't carry the edge loops
   long ones need. The UVs and baked maps don't change.
 - **Controls:** `cardsPerClump`, `layers`, `fitTwist`, `ruffle`, `margin`, `flyawayCards`, `braids`,
+  `braidCards`, `braidSides`,
   `segments` along, `widthSegments` across, `widthScale`, `widthProfile` (taper), `twist` (on top
   of the fit), `curvature` (bowed, needs 2+ width segments), `minStrands`, `maxCards`,
   `minWidth`, `atlasSize` (the bake's resolution); `groomlab.create_cards(groom, cards_per_clump=6,

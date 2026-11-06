@@ -36,6 +36,15 @@ baking.
   (off by default). The gap is a share of the narrower card's width, the roots stay where they
   are, and only the mesh moves: the baked maps stay valid. **Separation Iterations** (8) settles
   crowded cards further. (SelfCollide separates strands, not cards.)
+- **Braids become tubes:** a braid from a Braid node gets its own geometry, set by the Cards
+  node's **Braid Cards**. **Sections** (the default) gives each of its sections a tube that winds
+  over and under the others as the hair does, so the weave is in the mesh and shows from every
+  side; each tube's texture is its section's hair, unrolled around it. **Tube** wraps one tube
+  around the whole braid, and **Cross** gives the crossed flat cards of earlier versions.
+  **Braid Sides** sets the quads around each tube (6 by default), and the level of detail sets how
+  closely a tube follows its section's turns. The hair going into a braid (fed hair lying along
+  the scalp, a box braid's gather at the root) gets flat cards of its own, from the scalp into the
+  braid.
 - Cards are always built from the full groom; the viewport preview density does not affect them.
 
 ## Export card maps

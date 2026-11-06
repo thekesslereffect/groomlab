@@ -112,6 +112,20 @@ struct CardSettings {
     // the skin. No sub-cards, layers or ruffle; they take their cards from `maxCards`
     // first. Off: braided strands are carded by their clumps like any other.
     bool braids = true;
+    // What a braid becomes. Sections (the default): a tube along each of its sections (the
+    // Braid node's braidSection channel), winding over and under the others as the section does,
+    // so the weave is in the mesh; each texture is its section's hair unrolled. Tube: one tube
+    // around the whole braid, its texture the braid unrolled (a cornrow, braidFlat, gets the
+    // upper part of one, open toward the scalp). Cross: crossed cards along it (the cards above).
+    // Tubes are `braidSides` quads around, elliptical (as flat as their strands lie) and as thick
+    // as most of their strands at each station; their texture's across is the way around, the
+    // outermost strands on top. A section's tube has as many edge loops as its turns need. With
+    // tubes, the hair's way into a braid (fed hair along the scalp, a box braid's gather) gets feed
+    // cards of its own: flat on the scalp from the roots into the braid, grouped by where the hair
+    // comes from and where it joins.
+    enum class BraidCards { Sections, Tube, Cross };
+    BraidCards braidCards = BraidCards::Sections;
+    int braidSides = 6;
     // Segments by length: each card gets segments in proportion to its length
     // (`segments` for the longest, at least `minSegments`); the UVs don't change.
     bool segmentsByLength = true;
@@ -245,6 +259,22 @@ struct CardMesh {
         std::vector<float> foldRight, foldLeft, refFoldRight, refFoldLeft;
         int across = 1;                  // quads across
         float curvature = 0.0f;
+        // A tube (a braid's: CardSettings::braidCards): its rows wrap this angle (radians) around
+        // the center line instead of lying flat across it; 0: a flat card. 2 pi a closed tube (its
+        // last column on its first, the texture's seam), less an open one facing `normal` (a
+        // cornrow's, open toward the scalp). `width` is its diameter; across the texture is the
+        // angle, from -tubeArc / 2 (u0) to tubeArc / 2 (u1) around from `normal` toward `side`.
+        float tubeArc = 0.0f;
+        // A tube's cross-section is an ellipse: `width` across it along `normal`, tubeAspect times
+        // that along `side` (a flat braid's: wider than it is deep, turned with the braid). The angle
+        // around it is the ellipse's parameter (a point at angle t lies at cos t along the normal's
+        // half-axis, sin t along the side's).
+        float tubeAspect = 1.0f;
+        int braidSection = -1;           // a section's tube: the section of its braid (-1: none)
+        // A braid's feed card: flat on the scalp, holding its strands' way in (from their roots to
+        // where they join the braid: the Braid node's braidWoven under a half), baked from that
+        // part alone.
+        bool braidFeed = false;
         // Its base: where the root row's vertices sit (left edge to right, as across the
         // stations), on the scalp its strands grow from, a strand's width above the skin (plus
         // the node's offset), following the scalp under the card (one standing on edge: its

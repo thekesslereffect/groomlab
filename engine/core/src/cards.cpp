@@ -142,6 +142,15 @@ std::vector<Vec3f> cardRow(const CardMesh::Card& card, std::size_t i) {
     const int across = std::max(card.across, 1);
     std::vector<Vec3f> row;
     row.reserve(static_cast<std::size_t>(across) + 1);
+    if (card.tubeArc > 0.0f) {
+        // A tube: around the center line from -tubeArc / 2 to tubeArc / 2, from the normal
+        // toward the side (a closed tube's last vertex on its first).
+        for (int e = 0; e <= across; ++e) {
+            const float t = card.tubeArc * (static_cast<float>(e) / static_cast<float>(across) - 0.5f);
+            row.push_back(card.center[i] + tubePoint(normal, side, halfW, card.tubeAspect, t).offset);
+        }
+        return row;
+    }
     for (int e = 0; e <= across; ++e) {
         // Across the card, -1..1; curvature bows the middle out along the normal.
         const float x = 2.0f * static_cast<float>(e) / static_cast<float>(across) - 1.0f;
@@ -264,6 +273,24 @@ CardPoint projectOntoCard(const CardMesh::Card& cardIn, const Vec3f& p, int& seg
     out.along = cardIn.stationAlong.size() == card.center.size()
                     ? cardIn.stationAlong[i] * (1.0f - bestT) + cardIn.stationAlong[i + 1] * bestT
                     : (static_cast<float>(bestK) + bestT) / static_cast<float>(card.center.size() - 1);
+    if (cardIn.tubeArc > 0.0f) {
+        // A tube: across is the way around (the angle from the normal toward the side over the
+        // arc), depth how far out of the tube's surface (its radius here), and the frame the
+        // surface's there: side the way around, normal straight out. The texture's width at this
+        // station is the arc's length at the surface, so a strand bakes as wide as it is.
+        const Vec3f radial = d - out.forward * d.dot(out.forward);
+        const float radius = 0.5f * out.width, aspect = std::max(cardIn.tubeAspect, 1e-3f);
+        // The ellipse's parameter of the direction the point lies in, and the surface there.
+        const float t = pm::atan2(radial.dot(out.side) / aspect, radial.dot(out.normal));
+        const TubePoint surface = tubePoint(out.normal, out.side, radius, aspect, t);
+        out.across = t / cardIn.tubeArc + 0.5f;
+        out.depth = radial.length() - surface.offset.length();
+        out.textureWidth = std::max(cardIn.tubeArc * surface.speed, 1e-9f);
+        out.offset = (out.across - 0.5f) * out.textureWidth;
+        out.side = surface.around;
+        out.normal = surface.outward;
+        return out;
+    }
     if (cardIn.spine) {
         // A spine card: across and along stay the flat card's (its vertices keep the flat UVs),
         // depth and frame are the folded half's, so the bake's depth and tangent are in the frame
@@ -545,16 +572,43 @@ struct Offset {
 
 // Samples along each member (by arc length), each at its nearest station of `center`
 // (the samples go root to tip, so the nearest station only ever moves up).
+// `ahead` (0: the next one only): how many stations on a sample may skip to the nearest, for a
+// curve that winds (a braid section's: the next station can lie farther than one past it).
+// The station nearest p of all (where a strand that joins a braid partway along starts).
+std::size_t nearestStation(const std::vector<Vec3f>& center, const Vec3f& p) {
+    std::size_t best = 0;
+    float bestD = std::numeric_limits<float>::max();
+    for (std::size_t j = 0; j < center.size(); ++j) {
+        const float d = (center[j] - p).dot(center[j] - p);
+        if (d < bestD) bestD = d, best = j;
+    }
+    return best;
+}
+
+std::size_t nearestStationAhead(const std::vector<Vec3f>& center, const Vec3f& p, std::size_t k, std::size_t ahead) {
+    if (ahead == 0) {
+        while (k + 1 < center.size() && (center[k + 1] - p).dot(center[k + 1] - p) <= (center[k] - p).dot(center[k] - p)) ++k;
+        return k;
+    }
+    std::size_t best = k;
+    float bestD = (center[k] - p).dot(center[k] - p);
+    for (std::size_t j = k + 1; j < std::min(center.size(), k + ahead + 1); ++j) {
+        const float d = (center[j] - p).dot(center[j] - p);
+        if (d <= bestD) bestD = d, best = j;
+    }
+    return best;
+}
+
 std::vector<Offset> strandOffsets(const StrandSet& s, const std::vector<std::size_t>& members, const std::vector<Vec3f>& center,
-                                  std::size_t samples) {
+                                  std::size_t samples, std::size_t ahead = 0) {
     std::vector<Offset> offsets;
     offsets.reserve(members.size() * samples);
     std::vector<Vec3f> pts(samples);
     for (const std::size_t i : members) {
         resampleByArcLengthInto(s.strandPoints(i), s.strandPointCount(i), pts.data(), samples);
-        std::size_t k = 0;
+        std::size_t k = ahead > 0 ? nearestStation(center, pts.front()) : 0;
         for (const Vec3f& p : pts) {
-            while (k + 1 < center.size() && (center[k + 1] - p).dot(center[k + 1] - p) <= (center[k] - p).dot(center[k] - p)) ++k;
+            k = nearestStationAhead(center, p, k, ahead);
             offsets.push_back({k, p - center[k]});
         }
     }
@@ -768,6 +822,10 @@ private:
 
 // How a card is built from its strands, apart from the settings: which of a cross it is, and
 // its ruffle sign.
+// A cornrow's tube: the part of a tube over the scalp (225 degrees: its edges a little under its
+// center line, toward the skin).
+constexpr float kCornrowArc = 3.92699082f;
+
 struct CardSpec {
     int clump = -1;
     int layer = 0;
@@ -782,6 +840,9 @@ struct CardSpec {
     // cross style, and no fit (woven strands have no axis across to follow).
     int braid = -1;
     int cards = 0;
+    float tubeArc = 0.0f;  // a braid's tube (CardSettings::braidCards): the card's Card::tubeArc
+    int section = -1;      // a braid section's tube: its section (Card::braidSection)
+    bool feed = false;     // a braid's feed card (Card::braidFeed): made of its strands' way in
     // A guide's cards (CardSettings::guideSpines): along this curve instead of the strands' median.
     const std::vector<Vec3f>* spine = nullptr;
 };
@@ -790,6 +851,10 @@ struct CardSpec {
 // past its edges or ends, to them.
 float pointCardDistance(const CardMesh::Card& card, float cardLength, const Vec3f& p, int& segment) {
     const CardPoint cp = projectOntoCard(card, p, segment);
+    if (card.tubeArc > 0.0f) {  // a tube: off its surface, and past its ends
+        const float dy = cardLength * (cp.along < 0.0f ? -cp.along : cp.along > 1.0f ? cp.along - 1.0f : 0.0f);
+        return std::sqrt(cp.depth * cp.depth + dy * dy);
+    }
     // Across, in the station's own width (the card's physical edges), not the texture's.
     const float x = cp.offset / cp.width;  // -0.5 .. 0.5 on the card
     const float dx = cp.width * std::max(0.0f, std::abs(x) - 0.5f);
@@ -829,6 +894,309 @@ Vec3f strandLookNormal(const Vec3f& up, const std::vector<Vec3f>& center, std::s
     return n.length() > 1e-4f ? n.normalized() : up;
 }
 
+// A braid's tube (CardSpec::tubeArc), built at kRefStations along its strands' median curve:
+// a closed tube for a hanging braid, the upper part of one for a cornrow (open toward the scalp
+// it lies on). Its radius at each station is where most of its strands lie out from the curve
+// there (the fuzz and the strays bake onto its surface instead of puffing it up), smoothed, and
+// never far over the braid's typical thickness (the hair gathering into it at the scalp, a
+// fanned end).
+CardMesh::Card buildTubeCard(const StrandSet& s, const std::vector<std::size_t>& members, const ScalpMesh* scalp,
+                             const CardSettings& settings, const CardSpec& spec, const std::vector<Vec3f>& center) {
+    constexpr float kTubeShare = 0.85f;  // the share of its strands a station's radius holds
+    const std::size_t refStations = center.size();  // (kRefStations; a section's tube more: sectionCurve)
+    CardMesh::Card card;
+    card.braidSection = spec.section;
+    card.strands = members;
+    card.braid = spec.braid;
+    card.tubeArc = spec.tubeArc;
+    card.stations = std::max(settings.segments, 1) + 1;
+    const int sides = std::clamp(settings.braidSides, 3, 16);
+    const float closed = 6.28318530718f;
+    card.across = card.tubeArc >= closed - 1e-4f
+                      ? sides
+                      : std::max(2, static_cast<int>(std::lround(static_cast<float>(sides) * card.tubeArc / closed)));
+    card.refCenter = center;
+    const bool hasScalp = scalp && scalp->triangleCount() > 0;
+    std::vector<Vec3f> tangent(refStations);
+    for (std::size_t k = 0; k < refStations; ++k) {
+        tangent[k] = (center[std::min(k + 1, refStations - 1)] - center[k > 0 ? k - 1 : 0]).normalized();
+    }
+    if (card.tubeArc < closed - 1e-4f && hasScalp) {
+        // Open toward the scalp: its normal (the middle of its arc) out of the skin under each station.
+        for (std::size_t k = 0; k < refStations; ++k) {
+            Vec3f up = scalp->closestPoint(center[k]).normal;
+            up = up - tangent[k] * up.dot(tangent[k]);
+            if (up.length() < 1e-4f) up = k > 0 ? card.refNormal.back() : anyPerpendicular(tangent[k]);
+            card.refNormal.push_back(up.normalized());
+            card.refSide.push_back(tangent[k].cross(card.refNormal.back()).normalized());
+        }
+    } else {
+        for (const Frame& f : cardFrames(center, hasScalp ? scalp : nullptr)) {
+            card.refNormal.push_back(f.normal);
+            card.refSide.push_back(f.binormal);
+        }
+    }
+    // The cross-section's shape: a braid is flatter than it is wide (its sections side by side).
+    // The frame turns, station by station, so its side lies along the cross-section's widest way
+    // (the principal direction of the strands' offsets, unwrapped and smoothed along the braid; a
+    // cornrow's stays over the scalp); the aspect is how much wider than deep it is.
+    // (Each sample's nearest station searched a sixteenth of the way ahead: a section winds.)
+    const std::vector<Offset> shapeOffsets =
+        strandOffsets(s, members, center, std::max<std::size_t>(24, refStations), std::max<std::size_t>(4, refStations / 16));
+    if (card.tubeArc >= closed - 1e-4f) {
+        std::vector<float> suu(refStations, 0.0f), svv(refStations, 0.0f), suv(refStations, 0.0f);
+        for (const Offset& o : shapeOffsets) {
+            for (std::size_t k = o.station > 1 ? o.station - 2 : 0; k <= std::min(o.station + 2, refStations - 1); ++k) {
+                const float u = o.d.dot(card.refSide[k]), v = o.d.dot(card.refNormal[k]);
+                suu[k] += u * u, svv[k] += v * v, suv[k] += u * v;
+            }
+        }
+        std::vector<float> angle(refStations, 0.0f), weight(refStations, 0.0f);
+        float previous = 0.0f;
+        for (std::size_t k = 0; k < refStations; ++k) {
+            const float total = suu[k] + svv[k];
+            const float anisotropy = total > 1e-20f ? std::sqrt((suu[k] - svv[k]) * (suu[k] - svv[k]) + 4.0f * suv[k] * suv[k]) / total : 0.0f;
+            float a = 0.5f * pm::atan2(2.0f * suv[k], suu[k] - svv[k]);
+            while (a - previous > 1.5707963f) a -= 3.14159265f;
+            while (a - previous < -1.5707963f) a += 3.14159265f;
+            if (anisotropy > 0.1f) previous = a;
+            angle[k] = a;
+            weight[k] = anisotropy;
+        }
+        // Smoothed, each station's angle pulled toward its clearer neighbours'.
+        for (int pass = 0; pass < 4; ++pass) {
+            std::vector<float> next = angle;
+            for (std::size_t k = 0; k < refStations; ++k) {
+                float sum = 0.0f, w = 0.0f;
+                for (std::size_t j = k > 2 ? k - 2 : 0; j <= std::min(k + 2, refStations - 1); ++j) {
+                    const float wj = weight[j] + 0.05f;
+                    sum += angle[j] * wj, w += wj;
+                }
+                next[k] = sum / w;
+            }
+            angle = next;
+        }
+        for (std::size_t k = 0; k < refStations; ++k) {
+            // Turn the frame by the angle: side to the widest way.
+            const Vec3f side = card.refSide[k] * pm::cos(angle[k]) + card.refNormal[k] * pm::sin(angle[k]);
+            const Vec3f normal = card.refNormal[k] * pm::cos(angle[k]) - card.refSide[k] * pm::sin(angle[k]);
+            card.refSide[k] = side.normalized();
+            card.refNormal[k] = normal.normalized();
+        }
+    }
+    {
+        // How much wider than deep: the strands' spread along the side over their spread along the
+        // normal (a share of each), over the whole braid.
+        std::vector<float> across, deep;
+        for (const Offset& o : shapeOffsets) {
+            across.push_back(std::abs(o.d.dot(card.refSide[o.station])));
+            deep.push_back(std::abs(o.d.dot(card.refNormal[o.station])));
+        }
+        const float wide = percentile(across, 0.8f), tall = percentile(deep, 0.8f);
+        card.tubeAspect = tall > 1e-9f ? std::clamp(wide / tall, 1.0f, 3.0f) : 1.0f;
+    }
+    // The members' widths: the tube's surface lies on its outer strands' outer side.
+    float strandWidth = 0.0f;
+    if (!s.widths().empty()) {
+        float sum = 0.0f, n = 0.0f;
+        for (const std::size_t i : members) {
+            for (std::size_t q = 0; q < s.strandPointCount(i); ++q) sum += s.widths()[s.strandBegin(i) + q], n += 1.0f;
+        }
+        strandWidth = n > 0.0f && sum / n != 1.0f ? sum / n : 0.0f;
+    }
+    const float length = std::max(arcLength(center), 1e-9f);
+    if (strandWidth <= 0.0f) strandWidth = 0.002f * length;
+    // Each strand's farthest point out from the curve at each station (and its neighbours), then
+    // the radius that holds kTubeShare of the strands there.
+    const std::vector<Offset>& offsets = shapeOffsets;
+    const std::size_t samples = offsets.size() / std::max<std::size_t>(members.size(), 1);
+    std::vector<std::vector<float>> out(refStations);
+    std::vector<float> farthest(refStations);
+    for (std::size_t m = 0; m < members.size(); ++m) {
+        std::fill(farthest.begin(), farthest.end(), -1.0f);
+        for (std::size_t j = 0; j < samples; ++j) {
+            const Offset& o = offsets[m * samples + j];
+            // How far out in the ellipse's own measure: its half-axis along the normal it would need.
+            const float x = o.d.dot(card.refNormal[o.station]), y = o.d.dot(card.refSide[o.station]) / card.tubeAspect;
+            const float reach = std::sqrt(x * x + y * y);
+            for (std::size_t k = o.station > 0 ? o.station - 1 : 0; k <= std::min(o.station + 1, refStations - 1); ++k) {
+                farthest[k] = std::max(farthest[k], reach);
+            }
+        }
+        for (std::size_t k = 0; k < refStations; ++k) {
+            if (farthest[k] >= 0.0f) out[k].push_back(farthest[k]);
+        }
+    }
+    std::vector<float> radius(refStations, 0.0f);
+    for (std::size_t k = 0; k < refStations; ++k) radius[k] = percentile(out[k], kTubeShare);
+    for (int pass = 0; pass < 3; ++pass) {
+        std::vector<float> next = radius;
+        for (std::size_t k = 1; k + 1 < refStations; ++k) next[k] = 0.25f * radius[k - 1] + 0.5f * radius[k] + 0.25f * radius[k + 1];
+        radius = next;
+    }
+    std::vector<float> sorted = radius;
+    const float typical = percentile(sorted, 0.5f);
+    const float least = std::max({2.0f * strandWidth, 0.5f * settings.minWidth, 1e-6f});
+    for (std::size_t k = 0; k < refStations; ++k) {
+        const float r = std::clamp(radius[k], least, std::max(1.6f * typical, least));
+        card.refWidth.push_back(2.0f * (r + 0.5f * strandWidth));
+    }
+    // The texture's width: the arc's length around the widest station (an ellipse's perimeter,
+    // Ramanujan's), so its texels are as dense around as along.
+    {
+        const float a0 = 0.5f * *std::max_element(card.refWidth.begin(), card.refWidth.end()), b0 = a0 * card.tubeAspect;
+        const float perimeter = 3.14159265f * (3.0f * (a0 + b0) - std::sqrt((3.0f * a0 + b0) * (a0 + 3.0f * b0)));
+        card.textureWidth = perimeter * card.tubeArc / closed;
+    }
+    if (spec.section >= 0) {
+        // A section's tube: an edge loop for each turn of its curve (one every 30 degrees it
+        // turns, measured on the curve at a quarter of its stations: the weave's turns, not the
+        // wobble between neighbouring stations), however many `segments` asks of a card, so the
+        // mesh follows the weave.
+        const std::vector<Vec3f> coarse = resampleByArcLength(center.data(), center.size(), std::max<std::size_t>(8, refStations / 4));
+        float turning = 0.0f;
+        for (std::size_t k = 1; k + 1 < coarse.size(); ++k) {
+            const Vec3f a = (coarse[k] - coarse[k - 1]).normalized(), b = (coarse[k + 1] - coarse[k]).normalized();
+            turning += pm::acos(std::clamp(a.dot(b), -1.0f, 1.0f));
+        }
+        const int loops = static_cast<int>(std::ceil(turning / 0.524f));
+        // (At most eight times `segments`: the level of detail's say, Low's 4 a third of Hero's.)
+        const int most = std::min(8 * std::max(settings.segments, 1), static_cast<int>(refStations) - 1);
+        card.stations = std::clamp(loops, std::min(std::max(settings.segments, 1), most), most) + 1;
+    }
+    sampleStations(card);
+    return card;
+}
+
+// A braid's strands from where they are woven on (the Braid node's braidWoven at a half or more;
+// the whole strand without the channel): what its tubes are made of. A fed strand's way in, lying
+// along the scalp from its root to where it joins, would pull a tube over the scalp. In the
+// order of `members`.
+StrandSet wovenParts(const StrandSet& s, const std::vector<std::size_t>& members) {
+    StrandSet out;
+    const std::vector<float>* woven = s.pointChannel("braidWoven");
+    const bool widths = !s.widths().empty();
+    for (const std::size_t i : members) {
+        const std::size_t n = s.strandPointCount(i), begin = s.strandBegin(i);
+        std::size_t from = 0;
+        if (woven) {
+            while (from < n && (*woven)[begin + from] < 0.5f) ++from;
+            if (from >= n) from = 0;  // never woven: all of it
+            from = std::min(from, n >= 2 ? n - 2 : 0);
+        }
+        const Vec3f* pts = s.strandPoints(i);
+        std::vector<Vec3f> points(pts + from, pts + n);
+        std::vector<float> w;
+        if (widths) w.assign(s.widths().begin() + static_cast<std::ptrdiff_t>(begin + from), s.widths().begin() + static_cast<std::ptrdiff_t>(begin + n));
+        out.addStrand(s.ids()[i], points, w);
+    }
+    return out;
+}
+
+// A braid's strands from their roots to where they are woven on (braidWoven at a half), and one
+// point on into the braid, so a card of them meets it: their way in. Strands with no way in (none
+// under a half past the root, or no channel) get none: `has` says which made one. In the order of
+// `members` (those with one).
+StrandSet wayInParts(const StrandSet& s, const std::vector<std::size_t>& members, std::vector<char>* has = nullptr) {
+    StrandSet out;
+    const std::vector<float>* woven = s.pointChannel("braidWoven");
+    const bool widths = !s.widths().empty();
+    if (has) has->assign(members.size(), 0);
+    if (!woven) return out;
+    for (std::size_t m = 0; m < members.size(); ++m) {
+        const std::size_t i = members[m];
+        const std::size_t n = s.strandPointCount(i), begin = s.strandBegin(i);
+        std::size_t to = 0;
+        while (to < n && (*woven)[begin + to] < 0.5f) ++to;
+        if (to < 2 || to >= n) continue;  // none (woven from the root, or never)
+        to = std::min(to + 1, n - 1);
+        const Vec3f* pts = s.strandPoints(i);
+        std::vector<Vec3f> points(pts, pts + to + 1);
+        std::vector<float> w;
+        if (widths) w.assign(s.widths().begin() + static_cast<std::ptrdiff_t>(begin), s.widths().begin() + static_cast<std::ptrdiff_t>(begin + to + 1));
+        out.addStrand(s.ids()[i], points, w);
+        if (has) (*has)[m] = 1;
+    }
+    return out;
+}
+
+// A braid section's center line: through its strands where they are, not where their share of
+// their length puts them (a section's strands differ a little in length, and fed ones join it at
+// different places, which would blur the weave). The longest strand first, then each station
+// pulled to the mean of the strands' points nearest it, a few times (onto the middle of the
+// section, or of the whole braid for a braid's tube); as many stations as the weave needs (one
+// about every half its thickness).
+std::vector<Vec3f> sectionCurve(const StrandSet& s, const std::vector<std::size_t>& members) {
+    float longest = 0.0f;
+    for (const std::size_t i : members) longest = std::max(longest, arcLength(s.strandPoints(i), s.strandPointCount(i)));
+    if (longest <= 1e-9f || members.empty()) return medianCurve(s, members);
+    // Each strand at distances from its root (its points, finely).
+    std::vector<std::vector<Vec3f>> fine(members.size());
+    for (std::size_t m = 0; m < members.size(); ++m) {
+        const std::size_t i = members[m];
+        const float length = arcLength(s.strandPoints(i), s.strandPointCount(i));
+        const std::size_t n = std::clamp<std::size_t>(static_cast<std::size_t>(512.0f * length / longest), 2, 512);
+        fine[m] = resampleByArcLength(s.strandPoints(i), s.strandPointCount(i), n);
+    }
+    std::size_t longestStrand = 0;
+    for (std::size_t m = 1; m < members.size(); ++m) {
+        if (fine[m].size() > fine[longestStrand].size()) longestStrand = m;
+    }
+    auto medianAt = [&](std::size_t stations) {
+        return resampleByArcLength(fine[longestStrand].data(), fine[longestStrand].size(), stations);
+    };
+    // How thick the section is: its strands' spread about a coarse center line.
+    std::vector<Vec3f> coarse = medianAt(65);
+    if (coarse.size() < 4) return medianCurve(s, members);
+    std::vector<float> spread;
+    for (std::size_t m = 0; m < members.size(); m += std::max<std::size_t>(1, members.size() / 64)) {
+        std::size_t k = nearestStation(coarse, fine[m].front());
+        for (const Vec3f& p : fine[m]) {
+            k = nearestStationAhead(coarse, p, k, 4);
+            spread.push_back((p - coarse[k]).length());
+        }
+    }
+    const float thick = std::max(percentile(spread, 0.5f), 1e-6f);
+    const std::size_t stations = std::clamp<std::size_t>(static_cast<std::size_t>(std::ceil(longest / (0.5f * thick))) + 1, 33, 257);
+    std::vector<Vec3f> center = medianAt(stations);
+    if (center.size() < 4) return medianCurve(s, members);
+    for (int pass = 0; pass < 5; ++pass) {
+        std::vector<Vec3f> sum(center.size(), Vec3f{});
+        std::vector<float> count(center.size(), 0.0f);
+        for (const std::vector<Vec3f>& f : fine) {
+            std::size_t k = nearestStation(center, f.front());
+            for (const Vec3f& p : f) {
+                k = nearestStationAhead(center, p, k, std::max<std::size_t>(4, center.size() / 16));
+                sum[k] += p, count[k] += 1.0f;
+            }
+        }
+        for (std::size_t k = 0; k < center.size(); ++k) {
+            if (count[k] > 0.0f) center[k] = sum[k] * (1.0f / count[k]);
+        }
+        std::vector<Vec3f> smooth = center;
+        for (std::size_t k = 1; k + 1 < center.size(); ++k) smooth[k] = center[k - 1] * 0.25f + center[k] * 0.5f + center[k + 1] * 0.25f;
+        center = resampleByArcLength(smooth.data(), smooth.size(), smooth.size());
+    }
+    // Out to the strands' ends: the mean of the points nearest an end station lies inside the
+    // ends (none lie past them), so each pass drew the ends in. The line runs on along its end
+    // ways to the farthest root and tip.
+    const Vec3f rootWay = (center[0] - center[1]).normalized(), tipWay = (center.back() - center[center.size() - 2]).normalized();
+    float before = 0.0f, after = 0.0f;
+    for (const std::vector<Vec3f>& f : fine) {
+        before = std::max(before, (f.front() - center.front()).dot(rootWay));
+        after = std::max(after, (f.back() - center.back()).dot(tipWay));
+    }
+    if (before > 0.0f || after > 0.0f) {
+        std::vector<Vec3f> longer;
+        longer.reserve(center.size() + 2);
+        if (before > 0.0f) longer.push_back(center.front() + rootWay * before);
+        longer.insert(longer.end(), center.begin(), center.end());
+        if (after > 0.0f) longer.push_back(center.back() + tipWay * after);
+        center = resampleByArcLength(longer.data(), longer.size(), center.size());
+    }
+    return center;
+}
+
 // The cards of one group of strands (one, or a cross), built at kRefStations: their shape,
 // frame, width and texture don't depend on `segments`, which only picks how many of the
 // stations become the mesh's edge loops. `strays`, when given, receives the members that
@@ -841,8 +1209,50 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
     std::vector<CardMesh::Card> out;
     if (members.empty()) return out;
     const bool hasScalp = scalp && scalp->triangleCount() > 0;
-    std::vector<Vec3f> center =
-        spec.spine ? resampleSmoothCurve(spec.spine->data(), spec.spine->size(), kRefStations) : medianCurve(s, members);
+    if (spec.feed) {
+        // A braid's feed card: made of its strands' way in (flat, along the scalp: a braid's one
+        // card), baked from that part alone (card_bake).
+        std::vector<char> has;
+        const StrandSet way = wayInParts(s, members, &has);
+        std::vector<std::size_t> all, kept;
+        for (std::size_t m = 0; m < members.size(); ++m) {
+            if (has[m]) all.push_back(all.size()), kept.push_back(members[m]);
+        }
+        if (kept.empty()) return out;
+        CardSpec flat = spec;
+        flat.feed = false;
+        flat.cards = 1;
+        flat.crossing = 1;
+        flat.turn = 0;
+        for (CardMesh::Card& card : buildGroupCards(way, all, scalp, settings, flat)) {
+            card.strands = kept;
+            card.braidFeed = true;
+            out.push_back(std::move(card));
+        }
+        return out;
+    }
+    if (spec.tubeArc > 0.0f) {
+        // A braid's tube: made of its strands' woven parts, along their center line.
+        const StrandSet woven = wovenParts(s, members);
+        std::vector<std::size_t> all(members.size());
+        for (std::size_t m = 0; m < members.size(); ++m) all[m] = m;
+        CardMesh::Card card = buildTubeCard(woven, all, scalp, settings, spec, sectionCurve(woven, all));
+        card.strands = members;
+        out.push_back(std::move(card));
+        return out;
+    }
+    std::vector<Vec3f> center = spec.spine ? resampleSmoothCurve(spec.spine->data(), spec.spine->size(), kRefStations)
+                                           : medianCurve(s, members);
+    if (spec.braid >= 0 && !spec.spine && s.pointChannel("braidWoven")) {
+        // A braid's flat cards run along the braid where it is woven: the strands' share of their
+        // length lines up a braid's hair, but not a fed one's (rooted all over the scalp, joining
+        // along the way), whose median cut through the head.
+        const StrandSet woven = wovenParts(s, members);
+        std::vector<std::size_t> all(members.size());
+        for (std::size_t m = 0; m < members.size(); ++m) all[m] = m;
+        const std::vector<Vec3f> along = sectionCurve(woven, all);
+        if (along.size() >= 2) center = resampleByArcLength(along.data(), along.size(), kRefStations);
+    }
     if (spec.spine) {
         // Cards from guides follow the guide's shape, but Clump's past-tip Extend can preserve
         // strands beyond that guide. Keep following the guide's final direction until the card
@@ -1050,6 +1460,18 @@ std::vector<CardMesh::Card> buildGroupCards(const StrandSet& s, const std::vecto
                     card.refSide[k] = side.normalized();
                     card.refNormal[k] = card.refSide[k].cross(tangent[k]).normalized();
                 }
+            }
+        }
+        // A braid's one card (a cornrow's, lying on the scalp): it faces out of the skin under
+        // each station, whichever way a frame carried along a wavering center line would turn.
+        if (spec.braid >= 0 && crossing == 1 && hasScalp) {
+            for (std::size_t k = 0; k < kRefStations; ++k) {
+                const Vec3f tangent = (center[std::min(k + 1, kRefStations - 1)] - center[k > 0 ? k - 1 : 0]).normalized();
+                Vec3f up = scalp->closestPoint(center[k]).normal;
+                up = up - tangent * up.dot(tangent);
+                if (up.length() < 1e-4f) continue;
+                card.refNormal[k] = up.normalized();
+                card.refSide[k] = tangent.cross(card.refNormal[k]).normalized();
             }
         }
         // Authored Twist stays on top of the fitted/flattened card. Flatten is a remedy for the
@@ -1276,11 +1698,15 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
     std::vector<CardSpec> specs;
     int groups = 0;
     {
+        // (Per section too, for section tubes: the key the braid's id times 64 plus its section + 1.)
+        const bool bySection = settings.braidCards == CardSettings::BraidCards::Sections && s.strandChannel("braidSection");
+        const std::vector<float>* sectionOf = s.strandChannel("braidSection");
         std::map<long long, std::vector<std::size_t>> byBraid;
         if (settings.braids) {
             if (const std::vector<float>* ids = s.strandChannel("braidId")) {
                 for (std::size_t i = 0; i < s.strandCount(); ++i) {
-                    const long long key = std::llround((*ids)[i]);
+                    long long key = std::llround((*ids)[i]);
+                    if (key >= 0 && bySection) key = key * 64 + std::clamp<long long>(std::llround((*sectionOf)[i]), -1, 62) + 1;
                     if (key < 0 || braided[i] || s.strandPointCount(i) < 2 ||
                         arcLength(s.strandPoints(i), s.strandPointCount(i)) <= 0.0f) {
                         continue;
@@ -1310,20 +1736,84 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
                 for (const std::size_t i : members) flatness += (*flat)[i] / static_cast<float>(members.size());
             }
             CardSpec spec;
-            spec.braid = static_cast<int>(braids[b].first);
+            spec.braid = static_cast<int>(bySection ? braids[b].first / 64 : braids[b].first);
             spec.cards = flatness > 0.5f ? 1 : std::max(settings.crossCount, 2);
+            if (bySection) {
+                // A section's tube, closed (a cornrow's sections too: they wind over each other).
+                spec.cards = 1;
+                spec.section = static_cast<int>(braids[b].first % 64) - 1;
+                spec.tubeArc = 6.28318530718f;
+            } else if (settings.braidCards != CardSettings::BraidCards::Cross) {
+                // A tube: closed around a hanging braid, its upper part over a cornrow.
+                spec.cards = 1;
+                spec.tubeArc = flatness > 0.5f ? kCornrowArc : 6.28318530718f;
+            }
             braidCards[b] = buildGroupCards(s, members, skin, settings, spec);
+            if (spec.tubeArc > 0.0f && (!bySection || spec.section == 0)) {
+                // The tubes stand for the braid where it is woven; the hair's way into it (fed hair
+                // along the scalp, a box braid's gather) gets feed cards: its strands' way-in parts
+                // grouped by where they come from, run and join (k-means), so each group's strands
+                // lie together, a narrow card of them from the scalp into the braid. As many as a
+                // clump's hair gets: about 120 / cardsPerClump strands a card (the level of
+                // detail's say), at most 128 a braid.
+                std::vector<std::size_t> whole;
+                if (bySection) {
+                    const long long id = braids[b].first / 64;
+                    for (const auto& [key, others] : braids) {
+                        if (key / 64 == id) whole.insert(whole.end(), others.begin(), others.end());
+                    }
+                    std::sort(whole.begin(), whole.end());
+                } else {
+                    whole = members;
+                }
+                std::vector<char> has;
+                const StrandSet way = wayInParts(s, whole, &has);
+                std::vector<std::size_t> fed;
+                for (std::size_t m = 0; m < whole.size(); ++m) {
+                    if (has[m]) fed.push_back(whole[m]);
+                }
+                if (static_cast<int>(fed.size()) >= std::max(settings.minStrands, 1)) {
+                    std::vector<std::vector<float>> where(way.strandCount());
+                    for (std::size_t w = 0; w < way.strandCount(); ++w) {
+                        const std::size_t n = way.strandPointCount(w);
+                        const Vec3f r = way.strandPoints(w)[0], m = way.strandPoints(w)[n / 2], j = way.strandPoints(w)[n - 1];
+                        where[w] = {r.x, r.y, r.z, m.x, m.y, m.z, j.x, j.y, j.z};
+                    }
+                    const float perCard = std::clamp(120.0f / static_cast<float>(std::max(settings.cardsPerClump, 1)), 12.0f, 120.0f);
+                    const int groups = std::clamp(static_cast<int>(std::lround(static_cast<float>(fed.size()) / perCard)), 1, 128);
+                    const std::vector<int> label = kMeans(where, static_cast<std::size_t>(groups), 12);
+                    std::map<int, std::vector<std::size_t>> byGroup;
+                    for (std::size_t w = 0; w < fed.size(); ++w) byGroup[label[w]].push_back(fed[w]);
+                    CardSpec feed;
+                    feed.braid = spec.braid;
+                    feed.feed = true;
+                    for (auto& [g, strands] : byGroup) {
+                        if (static_cast<int>(strands.size()) < std::max(settings.minStrands, 1)) continue;
+                        for (CardMesh::Card& card : buildGroupCards(s, strands, skin, settings, feed)) braidCards[b].push_back(std::move(card));
+                    }
+                }
+            }
         }, 1);
         for (std::size_t b = 0; b < braids.size(); ++b) {
             if (braidCards[b].empty()) continue;
             CardSpec spec;
-            spec.braid = static_cast<int>(braids[b].first);
+            spec.braid = static_cast<int>(bySection ? braids[b].first / 64 : braids[b].first);
             spec.cards = static_cast<int>(braidCards[b].size());
             spec.crossing = spec.cards;
             spec.group = groups++;
             for (std::size_t j = 0; j < braidCards[b].size(); ++j) {
-                spec.turn = static_cast<int>(j);
-                specs.push_back(spec);
+                // Each card rebuilt as it was: a tube as a tube (of its section), a cornrow's flat
+                // card under its tubes as the one card it is, a cross's card as its turn.
+                const CardMesh::Card& card = braidCards[b][j];
+                CardSpec own = spec;
+                own.tubeArc = card.tubeArc;
+                own.section = card.braidSection;
+                own.feed = card.braidFeed;
+                own.turn = static_cast<int>(j);
+                if (spec.cards > 1 && (card.tubeArc > 0.0f || braidCards[b].front().tubeArc > 0.0f)) {
+                    own.cards = 1, own.crossing = 1, own.turn = 0;
+                }
+                specs.push_back(own);
                 out.push_back(std::move(braidCards[b][j]));
             }
         }
@@ -1384,10 +1874,24 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
     // widen it): each gets a thin card of its own, first of the flyaway cards' budget.
     const std::vector<float>* flyawayFlag = s.strandChannel("flyaway");
     if (flyawayFlag && flyawayFlag->size() != s.strandCount()) flyawayFlag = nullptr;
+    // Strays are a few strands leaving their clump: where most of a clump is flagged (a Flyaway
+    // with a large fraction, styling the hair rather than adding strays), its strands are the
+    // clump's hair and make its cards, or the hair would make no card at all.
+    std::vector<float> flaggedShare(static_cast<std::size_t>(clusterCount), 0.0f);
+    if (flyawayFlag) {
+        std::vector<float> total(static_cast<std::size_t>(clusterCount), 0.0f);
+        for (std::size_t i = 0; i < s.strandCount(); ++i) {
+            if (braided[i] || cluster[i] < 0) continue;
+            total[static_cast<std::size_t>(cluster[i])] += 1.0f;
+            if ((*flyawayFlag)[i] > 0.5f) flaggedShare[static_cast<std::size_t>(cluster[i])] += 1.0f;
+        }
+        for (std::size_t c = 0; c < flaggedShare.size(); ++c) flaggedShare[c] = total[c] > 0.0f ? flaggedShare[c] / total[c] : 0.0f;
+    }
     std::vector<char> isFlyaway(s.strandCount(), 0);
     for (std::size_t i = 0; i < s.strandCount(); ++i) {
         if (braided[i] || s.strandPointCount(i) < 2 || arcLength(s.strandPoints(i), s.strandPointCount(i)) <= 0.0f) continue;
-        if (flyawayFlag && (*flyawayFlag)[i] > 0.5f) {
+        const bool clumpOfStrays = cluster[i] >= 0 && flaggedShare[static_cast<std::size_t>(cluster[i])] > 0.5f;
+        if (flyawayFlag && (*flyawayFlag)[i] > 0.5f && !clumpOfStrays) {
             isFlyaway[i] = 1;
             pool.push_back(i);
         } else if (cluster[i] >= 0) {
@@ -1607,6 +2111,7 @@ std::vector<CardMesh::Card> makeCards(const StrandSet& s, const ScalpMesh* scalp
         const int most = std::max(settings.segments, 1);
         const int least = std::clamp(settings.minSegments, 1, most);
         for (std::size_t c = 0; c < out.size(); ++c) {
+            if (out[c].braidSection >= 0) continue;  // (its loops follow its turns: buildTubeCard)
             const int segments = std::clamp(static_cast<int>(std::lround(static_cast<float>(most) * lengths[c] / reference)), least, most);
             out[c].stations = segments + 1;
             sampleStations(out[c]);

@@ -232,7 +232,8 @@ void separateCards(std::vector<CardMesh::Card>& cards, float hairGap, float feat
         // The pairs whose boxes meet (sorted by their low x: the sweep), each card's partners in order.
         std::vector<std::size_t> order;
         for (std::size_t c = 0; c < count; ++c) {
-            if (!shapes[c].center.empty()) order.push_back(c);
+            // (A braid's tube keeps its place: it has no one normal to move along.)
+            if (!shapes[c].center.empty() && cards[c].tubeArc <= 0.0f) order.push_back(c);
         }
         std::sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
             return shapes[a].box.lo.x < shapes[b].box.lo.x || (shapes[a].box.lo.x == shapes[b].box.lo.x && a < b);

@@ -1983,6 +1983,86 @@ TEST(Braid, TwoCornrowsEachTakeTheirOwnStrandsAndWriteTheChannels) {
     EXPECT_GT(inBraid, 200u);
 }
 
+TEST(Braid, EveryBraidedStrandHasItsSectionAndIsWovenOnFromItsWayIn) {
+    // braidSection: the section a braided strand runs in (0 to sections - 1), -1 when loose;
+    // braidWoven: 0 at its root, rising to 1 in the braid (a fed strand's way in along the
+    // scalp stays 0). Cards make a tube per section of the woven part.
+    for (const bool feed : {false, true}) {
+        BraidScene scene(feed ? "cornrow" : "three");
+        if (feed) {
+            scene.setParam("feed", true);
+            scene.setParam("region", 0.1);
+        }
+        const StrandsPtr after = scene.lg.eval(scene.braid);
+        const std::vector<float>* ids = after->strandChannel("braidId");
+        const std::vector<float>* sections = after->strandChannel("braidSection");
+        const std::vector<float>* woven = after->pointChannel("braidWoven");
+        ASSERT_TRUE(ids && sections && woven);
+        std::set<int> seen;
+        std::size_t braided = 0, wayIn = 0;
+        for (std::size_t s = 0; s < after->strandCount(); ++s) {
+            const std::size_t begin = after->strandBegin(s), n = after->strandPointCount(s);
+            if ((*ids)[s] < 0.0f) {
+                EXPECT_FLOAT_EQ((*sections)[s], -1.0f) << s;
+                for (std::size_t i = 0; i < n; ++i) EXPECT_FLOAT_EQ((*woven)[begin + i], 0.0f) << s;
+                continue;
+            }
+            ++braided;
+            const int section = static_cast<int>((*sections)[s]);
+            EXPECT_GE(section, 0) << s;
+            EXPECT_LT(section, 3) << s;  // three sections
+            seen.insert(section);
+            EXPECT_FLOAT_EQ((*woven)[begin], 0.0f) << s;      // its root, on the scalp
+            EXPECT_GT((*woven)[begin + n - 1], 0.99f) << s;   // in the braid by its end
+            for (std::size_t i = 1; i < n; ++i) {
+                EXPECT_GE((*woven)[begin + i], 0.0f);
+                EXPECT_LE((*woven)[begin + i], 1.0f);
+            }
+            // A fed strand lies along the scalp a way before it joins: woven 0 there.
+            if (feed && n > 4 && (*woven)[begin + 2] < 0.5f) ++wayIn;
+        }
+        EXPECT_GT(braided, 50u) << feed;
+        // (Fed hair joins the outer section on its side: the middle one holds only the root region's.)
+        EXPECT_TRUE(seen.count(0) && seen.count(2)) << feed;
+        if (!feed) EXPECT_EQ(seen, (std::set<int>{0, 1, 2}));
+        if (feed) EXPECT_GT(wayIn, braided / 4);
+    }
+}
+
+TEST(Braid, FedHairGetsFeedCardsFromTheScalpIntoTheBraid) {
+    // Cards of a fed cornrow (braidCards sections, the default): its section tubes, and the hair's
+    // way in (from the roots along the scalp to where it joins) on feed cards lying on the scalp,
+    // each of strands the braid fed, ending where they join it.
+    BraidScene row("cornrow", {{0.2f, 0.01f, 0.5f}, {0.8f, 0.01f, 0.5f}});
+    row.setParam("feed", true);
+    row.setParam("region", 0.15);
+    const StrandsPtr braided = row.lg.eval(row.braid);
+    const auto plane = test::makePlane(16);
+    const CardMesh mesh = buildCards(*braided, plane.get(), {});
+    const std::vector<float>* ids = braided->strandChannel("braidId");
+    std::size_t tubes = 0, feeds = 0, inward = 0;
+    for (const CardMesh::Card& c : mesh.cards) {
+        if (c.braid < 0) continue;
+        if (c.tubeArc > 0.0f) {
+            ++tubes;
+            EXPECT_FALSE(c.braidFeed);
+            continue;
+        }
+        ASSERT_TRUE(c.braidFeed) << "a cornrow's flat card is a feed card";
+        ++feeds;
+        for (const std::size_t i : c.strands) EXPECT_GE((*ids)[i], 0.0f);
+        const std::size_t mid = c.refCenter.size() / 2;
+        EXPECT_LT(c.refCenter[mid].y, 0.06f);                     // on the scalp
+        EXPECT_GT(c.refNormal[mid].dot(Vec3f{0, 1, 0}), 0.8f);   // facing out of it
+        // From the roots (away from the row) to the row (the region's, about the row's start, may
+        // gather from both sides).
+        if (std::abs(c.refCenter.front().z - 0.5f) > std::abs(c.refCenter.back().z - 0.5f)) ++inward;
+    }
+    EXPECT_GE(tubes, 2u);
+    EXPECT_GE(feeds, 2u);
+    EXPECT_GE(2 * inward, feeds);
+}
+
 TEST(Braid, BoxBraidsPickTheirOwnPaths) {
     // No braids input: paths picked among the strands about `region` apart, each taking the strands
     // around it.

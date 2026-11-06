@@ -66,10 +66,13 @@
 // Output channels, per strand: `braidId` (the path's index among the guides, or for paths of its own a
 // number from the picked strand's ID; -1 when not
 // braided) and `braidFlat` (1 for a cornrow, lying on the scalp), for nodes
-// downstream (Cards builds braid cards from them); with display paths, `braidSection`
-// (-1 the path, else the section). Per point, `braidTail`: 0 within the braid,
+// downstream (Cards builds braid cards from them), and `braidSection` (the section of the
+// braid the strand runs in, -1 when not braided; with display paths, -1 the path, else the
+// section: Cards makes a tube per section from it). Per point, `braidTail`: 0 within the braid,
 // rising to 1 down its tail (fan, tuft), a mask for nodes after it (Curl, Clump,
-// Noise with affect $braidTail shape the ends alone).
+// Noise with affect $braidTail shape the ends alone), and `braidWoven`: 0 on the way in (from
+// the root to where the strand joins the braid: along the scalp when fed), rising to 1 in the
+// braid (Cards builds a braid's tubes from the woven part).
 
 #include <algorithm>
 #include <array>
@@ -428,6 +431,8 @@ struct BraidChannels {
     std::vector<float>* id;    // the path braided into, -1 when loose
     std::vector<float>* flat;  // 1 when the braid lies on the scalp (cornrow)
     std::vector<float>* tail = nullptr;  // per point: 0 in the braid, rising to 1 down its tail
+    std::vector<float>* section = nullptr;  // the section a strand runs in, -1 when loose
+    std::vector<float>* woven = nullptr;    // per point: 0 on the way in, rising to 1 in the braid
     int first = 0;             // this node's ids start here (after an earlier Braid node's)
     // Paths of its own: each path's number, from its strand's ID (stableGroupNumbers), so an edit
     // of the scalp in one place renumbers no braid elsewhere; null: the path's index (the guides').
@@ -783,11 +788,12 @@ struct Braider {
     }
     // Without feed, the strand's points along its path from root to tip (pts[0], its root, stays);
     // `tails` (null: not asked) gets each point's braidTail.
-    void braidAlong(Vec3f* pts, std::size_t n, const BraidPath& path, const StrandDraws& d, float* tails) const {
+    int braidAlong(Vec3f* pts, std::size_t n, const BraidPath& path, const StrandDraws& d, float* tails, float* woven = nullptr) const {
         // The section on its side where it comes in, halfway through the gather.
         const float in = 0.5f * gather * path.length;
         const int section = sectionOfRoot(pts[0] - path.root, path.frames.front(), path.weaveAt(in), d.lobe);
         if (tails) tails[0] = 0.0f;
+        if (woven) woven[0] = 0.0f;
         for (std::size_t i = 1; i < n; ++i) {
             const float u = static_cast<float>(i) / static_cast<float>(n - 1);
             const Vec3f braided = braidedAt(path, u * path.length, section, d);
@@ -795,7 +801,9 @@ struct Braider {
             pts[i] = pts[i] * (1.0f - blend) + braided * blend;
             overScalp.apply(pts[i], blend, (pts[i] - pts[0]).length());
             if (tails) tails[i] = tailAt(path, u * path.length);
+            if (woven) woven[i] = blend;
         }
+        return section;
     }
 };
 
@@ -928,7 +936,7 @@ class BraidOp : public Operator {
 public:
     std::string typeName() const override { return op::kBraid; }
     std::vector<ChannelWrite> channelWrites() const override {
-        return {{"braidId", ""}, {"braidFlat", ""}, {"braidSection", ""}, {"braidTail", ""}};
+        return {{"braidId", ""}, {"braidFlat", ""}, {"braidSection", ""}, {"braidTail", ""}, {"braidWoven", ""}};
     }
     std::string category() const override { return "look"; }
     std::vector<std::string> externalInputs() const override { return {"scalp"}; }
@@ -1171,10 +1179,11 @@ private:
         // A Braid node after another keeps the earlier braids' ids and numbers its own on from
         // them, so every braid in the groom has an id of its own (the Cards node's card sets).
         int firstId = 0;
-        std::vector<float> earlierIds, earlierFlat;
+        std::vector<float> earlierIds, earlierFlat, earlierSections;
         if (const std::vector<float>* had = in->strandChannel("braidId")) {
             earlierIds = *had;
             if (const std::vector<float>* flat = in->strandChannel("braidFlat")) earlierFlat = *flat;
+            if (const std::vector<float>* sections = in->strandChannel("braidSection")) earlierSections = *sections;
             float highest = -1.0f;  // of the core strands (preview_core.h): the same at every preview density
             const PreviewCore core(*in);
             for (std::size_t s = 0; s < earlierIds.size(); ++s) {
@@ -1182,7 +1191,7 @@ private:
             }
             firstId = static_cast<int>(groupNumberBase(static_cast<std::int64_t>(highest)));
         }
-        BraidChannels channels{nullptr, nullptr, nullptr, firstId};
+        BraidChannels channels{nullptr, nullptr, nullptr, nullptr, nullptr, firstId};
         std::vector<float> numbers;
         if (own) {
             std::vector<std::uint64_t> ids(br.paths.size());
@@ -1266,13 +1275,17 @@ private:
             channels.id = made->copyStrandChannelFrom("braidId", *last);
             channels.flat = made->copyStrandChannelFrom("braidFlat", *last);
             channels.tail = made->copyPointChannelFrom("braidTail", *last);
-            if (!channels.id || !channels.flat || !channels.tail) return false;
+            channels.section = made->copyStrandChannelFrom("braidSection", *last);
+            channels.woven = made->copyPointChannelFrom("braidWoven", *last);
+            if (!channels.id || !channels.flat || !channels.tail || !channels.section || !channels.woven) return false;
             forEachListed(changes->strands, [&](std::size_t s) {
                 for (const auto& [from, to] : strandValues) (*to)[s] = (*from)[s];
                 resampleStrand(*in, *made, s, false, widths, inPoint, outPoint, outWidths);
                 (*channels.id)[s] = -1.0f;
                 (*channels.flat)[s] = 0.0f;
+                (*channels.section)[s] = -1.0f;
                 std::fill_n(channels.tail->begin() + static_cast<std::ptrdiff_t>(made->strandBegin(s)), made->strandPointCount(s), 0.0f);
+                std::fill_n(channels.woven->begin() + static_cast<std::ptrdiff_t>(made->strandBegin(s)), made->strandPointCount(s), 0.0f);
                 braidOne(br, *made, s, channels);
             });
             *result = StrandsPtr(made);
@@ -1292,9 +1305,12 @@ private:
         channels.id = &out->addStrandChannel("braidId", -1.0f);
         channels.flat = &out->addStrandChannel("braidFlat", 0.0f);
         channels.tail = &out->addPointChannel("braidTail", 0.0f);
+        channels.section = &out->addStrandChannel("braidSection", -1.0f);
+        channels.woven = &out->addPointChannel("braidWoven", 0.0f);
         if (!earlierIds.empty()) {
             *channels.id = earlierIds;
             if (earlierFlat.size() == channels.flat->size()) *channels.flat = earlierFlat;
+            if (earlierSections.size() == channels.section->size()) *channels.section = earlierSections;
         }
         if (feed) {
             const FeedIndex index(br.paths, br.feedUntil);
@@ -1305,7 +1321,8 @@ private:
                 const FedPlan plan = planFed(br, index, pts, n, out->ids()[s], along);
                 if (plan.path < 0) return;
                 channels.set(s, plan.path, br.style);
-                feedOne(br, plan, pts, n, along, channels.tail->data() + out->strandBegin(s));
+                (*channels.section)[s] = static_cast<float>(feedOne(br, plan, pts, n, along, channels.tail->data() + out->strandBegin(s),
+                                                                    channels.woven->data() + out->strandBegin(s)));
             });
         } else {
             parallelFor(0, count, [&](std::size_t s) { braidOne(br, *out, s, channels); });
@@ -1324,14 +1341,17 @@ private:
         const StrandDraws draws = br.drawsFor(out.ids()[s]);
         if (draws.stray) return;
         channels.set(s, best, br.style);
-        br.braidAlong(pts, n, br.paths[static_cast<std::size_t>(best)], draws,
-                      channels.tail ? channels.tail->data() + out.strandBegin(s) : nullptr);
+        const int section = br.braidAlong(pts, n, br.paths[static_cast<std::size_t>(best)], draws,
+                                          channels.tail ? channels.tail->data() + out.strandBegin(s) : nullptr,
+                                          channels.woven ? channels.woven->data() + out.strandBegin(s) : nullptr);
+        if (channels.section) (*channels.section)[s] = static_cast<float>(section);
     }
 
     // Feed mode: a strand is drawn in from its root to where it joins the path, and runs along it
     // by its own length.
-    static void feedOne(const Braider& br, const FedPlan& plan, Vec3f* pts, std::size_t n, const std::vector<float>& along,
-                        float* tail) {
+    // Returns the section it joins.
+    static int feedOne(const Braider& br, const FedPlan& plan, Vec3f* pts, std::size_t n, const std::vector<float>& along,
+                       float* tail, float* woven) {
         const BraidPath& path = br.paths[static_cast<std::size_t>(plan.path)];
         // Picked up along the path: the outer section on its side, as a braider adds hair; from
         // the root region: the section on its side of the region.
@@ -1352,6 +1372,7 @@ private:
         const Vec3f way = (joins - root) / plan.approach;
         const float turn = std::min(0.5f * br.widthAt(path, plan.joinAt), 0.4f * plan.approach);
         tail[0] = 0.0f;
+        woven[0] = 0.0f;
         for (std::size_t i = 1; i < n; ++i) {
             const float fitted = along[i] * plan.squeeze;
             Vec3f straight = root + way * fitted;
@@ -1363,6 +1384,7 @@ private:
             const float at = plan.joinAt + fitted - plan.approach;
             const float w = turn > 0.0f ? smoothstep(plan.approach - turn, plan.approach + turn, fitted)
                                         : (fitted < plan.approach ? 0.0f : 1.0f);
+            woven[i] = std::max(w, 0.0f);
             if (w <= 0.0f) {
                 pts[i] = straight;
                 tail[i] = 0.0f;
@@ -1372,6 +1394,7 @@ private:
             pts[i] = straight + (braided - straight) * w;
             tail[i] = fitted < plan.approach ? 0.0f : br.tailAt(path, at);
         }
+        return section;
     }
 
     // The ties: a short strand along each braid at each of its ties (its middle raised as the braid

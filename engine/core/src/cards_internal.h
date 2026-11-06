@@ -14,6 +14,7 @@
 #include "groomlab/cards.h"
 #include "groomlab/frames.h"
 #include "groomlab/math.h"
+#include "groomlab/portable_math.h"
 #include "groomlab/scalp_mesh.h"
 #include "groomlab/strand_set.h"
 
@@ -26,6 +27,24 @@ constexpr const char* kFeatherIdChannel = "featherId";  // the shaft's number in
 constexpr const char* kFeatherSideChannel = "side";     // -1 left, +1 right, 0 around
 constexpr const char* kShaftUChannel = "shaftU";        // where a barb grows along its shaft
 constexpr const char* kIsShaftChannel = "isShaft";      // 1 for the kept shafts
+
+// A tube's surface at angle t around its center line (Card::tubeArc, Card::tubeAspect), for a
+// half-axis `radius` along the normal: its offset from the center line, its outward normal, and
+// how fast it moves with t (the arc length per radian there).
+struct TubePoint {
+    Vec3f offset, outward, around;  // around: unit, the way t grows
+    float speed = 0.0f;
+};
+inline TubePoint tubePoint(const Vec3f& normal, const Vec3f& side, float radius, float aspect, float t) {
+    const float c = pm::cos(t), s = pm::sin(t);
+    TubePoint out;
+    out.offset = normal * (radius * c) + side * (radius * aspect * s);
+    out.outward = (normal * (c * aspect) + side * s).normalized();
+    const Vec3f d = normal * (-radius * s) + side * (radius * aspect * c);
+    out.speed = d.length();
+    out.around = out.speed > 1e-12f ? d * (1.0f / out.speed) : side;
+    return out;
+}
 
 // The card's stations (mesh edge loops) sampled from its fixed-resolution shape.
 void sampleStations(CardMesh::Card& card);

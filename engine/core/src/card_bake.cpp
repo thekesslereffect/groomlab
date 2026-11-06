@@ -349,6 +349,13 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
         const float cellW = (card.cell[2] - card.cell[0]) * static_cast<float>(size);
         const float cellH = (card.cell[3] - card.cell[1]) * static_cast<float>(size);
         const float textureFrameWidth = textureWidthOf(card);
+        // A braid's tube (Card::tubeArc): across its cell is the way around it. A closed one's
+        // strands cross the seam (the cell's left and right edges are one place on the tube).
+        const bool tube = card.tubeArc > 0.0f;
+        const bool tubeClosed = card.tubeArc >= 6.2831f;
+        const bool tubeOpen = tube && !tubeClosed;
+        const std::vector<float>* woven = tube ? s.pointChannel("braidWoven") : nullptr;
+        const std::vector<float>* feedWoven = card.braidFeed ? s.pointChannel("braidWoven") : nullptr;
         const int w = x1 - x0, h = y1 - y0;
         std::vector<StrandStamp> stamp(static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
         std::vector<int> stampOwner(stamp.size(), -1);
@@ -428,6 +435,21 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                                   pts[k], cp.normal, aoPhase + 2.39996322973f * static_cast<float>(k)))
                             : 1.0f;
                 sm.in = cp.along >= -0.1f && cp.along <= 1.1f;
+                if (tubeOpen && (cp.across < 0.0f || cp.across > 1.0f)) sm.in = false;
+                if (card.braidFeed && feedWoven) {
+                    // A braid's feed card holds its strands' way in (the braid's tubes the rest).
+                    const float f = coordU * static_cast<float>(n - 1);
+                    const std::size_t i = std::min(static_cast<std::size_t>(f), n - 2);
+                    const float a = f - static_cast<float>(i);
+                    if ((*feedWoven)[begin + i] * (1.0f - a) + (*feedWoven)[begin + i + 1] * a > 0.75f) sm.in = false;
+                }
+                if (tube && woven) {
+                    // A braid's tube holds its woven part only (a fed strand's way in lies on the scalp).
+                    const float f = coordU * static_cast<float>(n - 1);
+                    const std::size_t i = std::min(static_cast<std::size_t>(f), n - 2);
+                    const float a = f - static_cast<float>(i);
+                    if ((*woven)[begin + i] * (1.0f - a) + (*woven)[begin + i + 1] * a < 0.5f) sm.in = false;
+                }
                 // A mixed Cards node keeps independent hair and feather root fades. Values
                 // stored on the card come from its node; direct core callers fall back to the
                 // bake settings.
@@ -460,18 +482,32 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
             // (a card narrower than its hair: widthScale under 1) is drawn along that edge
             // rather than cut off, and nothing bleeds into the neighbouring texture.
             const int self = static_cast<int>(m);
-            for (std::size_t k = 0; k + 1 < samples; ++k) {
+            for (std::size_t piece = 0; piece < 2 * (samples - 1); ++piece) {
+                const std::size_t k = piece / 2;
+                // Each capsule once; a closed tube's across the seam a second time, shifted a cell
+                // over (its other end on the far edge).
+                const bool second = piece % 2 == 1;
                 Sample a = line[k];
                 Sample c = line[k + 1];
                 if (!a.in && !c.in) continue;
+                float wrap = 0.0f;  // the cell widths c moves to land beside a
+                if (tubeClosed && std::abs(c.x - a.x) > 0.5f * cellW) wrap = c.x > a.x ? -cellW : cellW;
+                if (second && wrap == 0.0f) continue;
+                if (wrap != 0.0f) {
+                    c.x += wrap;
+                    if (second) a.x -= wrap, c.x -= wrap;  // both moved back: the copy on a's far side
+                }
                 // No wider than the cell lets it stay clear of the edge rows and columns from the
                 // middle (a cell narrower than its hair: the strand draws thinner there).
                 const float inside = 0.5f * static_cast<float>(std::min(x1 - x0, y1 - y0)) - 1.5f;
                 const float r = std::min(std::max(0.5f * (a.radius + c.radius), 0.5f * settings.minStrandTexels), std::max(inside, 0.0f));
                 const float keep = std::max(r, 0.5f) + 1.5f;
                 for (Sample* sample : {&a, &c}) {
-                    sample->x = static_cast<float>(x1 - x0) > 2.0f * keep ? std::clamp(sample->x, static_cast<float>(x0) + keep, static_cast<float>(x1) - keep)
-                                                                          : 0.5f * static_cast<float>(x0 + x1);
+                    if (!tube) {
+                        sample->x = static_cast<float>(x1 - x0) > 2.0f * keep
+                                        ? std::clamp(sample->x, static_cast<float>(x0) + keep, static_cast<float>(x1) - keep)
+                                        : 0.5f * static_cast<float>(x0 + x1);
+                    }
                     // Keep ordinary ends inside their cell for mip padding. A feather's root is
                     // different: its card begins exactly at the shaft root, so putting the first
                     // sample `keep` texels inward exposes a blank strip at the scalp. Let that
@@ -496,7 +532,7 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                     for (int x = bx0; x <= bx1; ++x) {
                         const float px = static_cast<float>(x) + 0.5f - a.x, py = static_cast<float>(y) + 0.5f - a.y;
                         const float tt = std::clamp((px * ex + py * ey) / len2, 0.0f, 1.0f);
-                        if (card.feather < 0) {
+                        if (card.feather < 0 && !tube) {
                             // The bake still changes with Width Profile: crop the fixed-frame
                             // strands to the final tapered grid. This is post-profile baking
                             // without changing their lateral trajectory inside the texture.
@@ -561,6 +597,46 @@ CardMaps bakeCardMaps(const StrandSet& strands, const CardMesh& cards, const Car
                 }
             }
             touched.clear();
+        }
+    }, 1);
+
+    // A tube's coverage closed: its surface is the braid's hair all the way round, nothing behind
+    // it may show through the gaps between a few strands. Each texel takes the most of its
+    // neighbours' (one texel grown) and is raised, so the gaps fill while the tail and the fuzz at
+    // the ends stay soft. Each tube writes only its own cell (and its cells never touch).
+    parallelFor(0, baking.size(), [&](std::size_t o) {
+        const CardMesh::Card& card = cards.cards[baking[o]];
+        if (card.tubeArc <= 0.0f) return;
+        const int x0 = std::clamp(static_cast<int>(std::lround(card.cell[0] * size)), 0, size);
+        const int x1 = std::clamp(static_cast<int>(std::lround(card.cell[2] * size)) - 1, 0, size);
+        const int y0 = std::clamp(static_cast<int>(std::lround((1.0f - card.cell[3]) * size)), 0, size);
+        const int y1 = std::clamp(static_cast<int>(std::lround((1.0f - card.cell[1]) * size)) - 1, 0, size);
+        if (x1 <= x0 || y1 <= y0) return;
+        const int w = x1 - x0, h = y1 - y0;
+        std::vector<float> grown(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0.0f);
+        const bool closed = card.tubeArc >= 6.2831f;
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float most = 0.0f;
+                for (int dy = -1; dy <= 1; ++dy) {
+                    const int yy = y + dy;
+                    if (yy < 0 || yy >= h) continue;
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        int xx = x + dx;
+                        if (closed) xx = (xx + w) % w;  // round the seam
+                        if (xx < 0 || xx >= w) continue;
+                        const std::size_t p = static_cast<std::size_t>(y0 + yy) * static_cast<std::size_t>(size) + static_cast<std::size_t>(x0 + xx);
+                        most = std::max(most, 1.0f - b.open[p]);
+                    }
+                }
+                grown[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)] = std::min(1.0f, 2.5f * most);
+            }
+        }
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                const std::size_t p = static_cast<std::size_t>(y0 + y) * static_cast<std::size_t>(size) + static_cast<std::size_t>(x0 + x);
+                b.open[p] = 1.0f - std::max(1.0f - b.open[p], grown[static_cast<std::size_t>(y) * static_cast<std::size_t>(w) + static_cast<std::size_t>(x)]);
+            }
         }
     }, 1);
 

@@ -48,6 +48,7 @@ std::vector<float> describeCard(const CardMesh::Card& card, const StrandSet& s, 
     const float width = std::max(textureWidthOf(card), 1e-6f);
     f.push_back(2.0f * pm::log(length));
     f.push_back(2.0f * pm::log(width));
+    f.push_back(20.0f * card.tubeArc);
     std::vector<float> hist(kAlong * kAcross, 0.0f);
     std::array<float, kAlong> sum{}, sum2{}, count{}, slope{}, slopeCount{};
     const std::size_t stride = std::max<std::size_t>(1, card.strands.size() / 48);
@@ -215,6 +216,12 @@ void shareCardTextures(std::vector<CardMesh::Card>& cards, const StrandSet* stra
     for (std::size_t i = 0; i < n; ++i) {
         const int rep = representative[group[i]];
         if (rep == static_cast<int>(i)) continue;
+        // A tube's texture is its braid unrolled, a flat card's its strands across it: neither
+        // shows the other's (the features below keep them apart; this never lets one through).
+        if ((cards[i].tubeArc > 0.0f) != (cards[static_cast<std::size_t>(rep)].tubeArc > 0.0f) ||
+            std::abs(cards[i].tubeArc - cards[static_cast<std::size_t>(rep)].tubeArc) > 1e-3f) {
+            continue;
+        }
         const float direct = distance2(features[i], features[static_cast<std::size_t>(rep)]);
         const float reversed = distance2(features[i], mirroredFeatures[static_cast<std::size_t>(rep)]);
         cards[i].variationOf = rep;
@@ -494,7 +501,26 @@ void buildCardVertices(CardMesh& mesh, bool holdInCell) {
                     if (iridescent) mesh.iridescence.push_back(iridescenceAcross(card, static_cast<float>(e - 1)));
                 }
             }
-            for (int e = 0; e <= across && !spine; ++e) {
+            for (int e = 0; e <= across && !spine && card.tubeArc > 0.0f; ++e) {
+                // A tube: around its center line, the texture's u the way around (a closed tube's
+                // last column on its first, at the cell's other edge: the seam), each vertex's
+                // normal straight out of it.
+                const float around = static_cast<float>(e) / static_cast<float>(across);
+                const float t = card.tubeArc * (around - 0.5f);
+                mesh.positions.push_back(points[static_cast<std::size_t>(e)]);
+                mesh.normals.push_back(detail::tubePoint(card.normal[i], card.side[i], 0.5f * card.width[i], card.tubeAspect, t).outward);
+                // A closed tube's seam held a texel and a half inside its cell's edges: the bake
+                // leaves the cell's last column to the gap and nothing covers past its edge, so
+                // filtering there would cut a slit down the tube.
+                const float texel = 1.0f / static_cast<float>(mesh.atlasSize > 0 ? mesh.atlasSize : 2048);
+                const float inset = card.tubeArc >= 6.2831f ? std::min(1.5f * texel, 0.1f * std::abs(u1 - u0)) : 0.0f;
+                const float a0 = u0 + (u1 > u0 ? inset : -inset), a1 = u1 - (u1 > u0 ? inset : -inset);
+                mesh.u.push_back(a0 + (a1 - a0) * around);
+                mesh.v.push_back(card.cell[1] + (card.cell[3] - card.cell[1]) * along);
+                mesh.tints.push_back(tint);
+                if (iridescent) mesh.iridescence.push_back(iridescenceAcross(card, 2.0f * around - 1.0f));
+            }
+            for (int e = 0; e <= across && !spine && card.tubeArc <= 0.0f; ++e) {
                 const float x = 2.0f * static_cast<float>(e) / static_cast<float>(across) - 1.0f;
                 mesh.positions.push_back(points[static_cast<std::size_t>(e)]);
                 // The bowed surface's normal: tilt by its slope across.

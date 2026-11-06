@@ -67,8 +67,11 @@ groomlab.add_braid(groom, ["braidCurve1"], style="three", width=0.25, tightness=
   `braids` preset).
 - **Channels:** the node writes `braidId` per strand (the path's index in the paths group, or
   for paths of its own a number from the picked strand's ID, so an edit elsewhere renumbers no
-  braid; -1 for strands not braided, strays included) and `braidFlat` (1 for a cornrow, lying on the
-  scalp); the Cards node uses them to build braid cards.
+  braid; -1 for strands not braided, strays included), `braidFlat` (1 for a cornrow, lying on the
+  scalp), `braidSection` (the section the strand runs in, -1 when not braided) and, per point,
+  `braidTail` (rising down a fanned or tufted end) and `braidWoven` (0 on the way in from the
+  root, rising to 1 in the braid); the Cards node uses them to build braid cards (a tube per
+  section by default: [game export](game-export.md)).
 - **Braid paths are not hair:** the other Guides nodes list the paths group in `exclude`, so
   Interpolate never uses a path as a hair guide.
 - **Loose hair:** `strays` (a share left loose) and `fuzz` (a wander within the sections).

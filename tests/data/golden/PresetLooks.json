@@ -64,6 +64,7 @@
   "channels": {
    "braidFlat": 0.0,
    "braidId": 11128050194.0,
+   "braidSection": 5091.0,
    "colorB": 0.00048378883484545554,
    "colorG": 0.05322813025532014,
    "colorR": 0.7250988504092675,
@@ -94,6 +95,7 @@
   "channels": {
    "braidFlat": 0.0,
    "braidId": 11128050194.0,
+   "braidSection": 5091.0,
    "colorB": 0.00048378883484545554,
    "colorG": 0.05322813025532014,
    "colorR": 0.7250988504092675,
@@ -124,6 +126,7 @@
   "channels": {
    "braidFlat": 203.0,
    "braidId": -4454.0,
+   "braidSection": -4639.0,
    "colorB": 0.00048378883484545554,
    "colorG": 0.05322813025532014,
    "colorR": 0.7250988504092675,
@@ -154,6 +157,7 @@
   "channels": {
    "braidFlat": 0.0,
    "braidId": 11128050194.0,
+   "braidSection": 5091.0,
    "colorB": 0.00048378883484545554,
    "colorG": 0.05322813025532014,
    "colorR": 0.7250988504092675,
@@ -184,6 +188,7 @@
   "channels": {
    "braidFlat": 0.0,
    "braidId": 7060.0,
+   "braidSection": 19523.0,
    "colorB": 0.00048378883484545554,
    "colorG": 0.05322813025532014,
    "colorR": 0.7250988504092675,
@@ -214,6 +219,7 @@
   "channels": {
    "braidFlat": 0.0,
    "braidId": 2952.0,
+   "braidSection": -499.0,
    "colorB": 0.00048378883484545554,
    "colorG": 0.05322813025532014,
    "colorR": 0.7250988504092675,
@@ -244,6 +250,7 @@
   "channels": {
    "braidFlat": 0.0,
    "braidId": 6930.0,
+   "braidSection": 2953.0,
    "colorB": 0.00048378883484545554,
    "colorG": 0.05322813025532014,
    "colorR": 0.7250988504092675,
@@ -274,6 +281,7 @@
   "channels": {
    "braidFlat": 0.0,
    "braidId": 11128050194.0,
+   "braidSection": 2515.0,
    "colorB": 0.00048378883484545554,
    "colorG": 0.05322813025532014,
    "colorR": 0.7250988504092675,

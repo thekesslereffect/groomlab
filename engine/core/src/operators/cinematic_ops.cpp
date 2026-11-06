@@ -533,10 +533,22 @@ public:
                                                           "an X, 3 a star, up to 6"})
                 .range(2, 6)
                 .adv(),
-            notAnimatable({"braids", true, "Braided strands (a Braid node's braidId channel) make one card set per braid: "
-                                           "cards crossed along the braid, a cornrow one card lying on the scalp; off, they "
-                                           "are carded by their clumps"})
+            notAnimatable({"braids", true, "Braided strands (a Braid node's braidId channel) make one card set per braid "
+                                           "(braidCards); off, they are carded by their clumps"})
                 .when("featherMode", {"auto", "perVane", "off"})
+                .adv(),
+            ParamSpec{"braidCards", std::string("sections"), "What a braid becomes: sections (a tube along each of its "
+                                                             "sections, winding over and under the others: the weave in "
+                                                             "the mesh), tube (one tube around the braid, its texture the "
+                                                             "braid unrolled; a cornrow the top of one, open to the scalp) "
+                                                             "or cross (crossCount flat cards crossed along it, a cornrow "
+                                                             "one lying on the scalp)", "", {"sections", "tube", "cross"}}
+                .when("featherMode", {"auto", "perVane", "off"})
+                .adv(),
+            notAnimatable({"braidSides", std::int64_t{6}, "Quads around a braid's tubes (braidCards sections or tube; a "
+                                                          "cornrow's open tube gets its share)"})
+                .range(3, 16)
+                .when("braidCards", {"sections", "tube"})
                 .adv(),
             notAnimatable({"segmentsByLength", true, "Segments in proportion to each card's length: `segments` for the longest, "
                                                       "fewer for short ones (the UVs don't change)"})
@@ -711,6 +723,11 @@ public:
                                           : CardSettings::CrossStyle::Auto;
         s.crossCount = static_cast<int>(params().getInt("crossCount"));
         s.braids = params().getBool("braids");
+        const std::string braidCards = params().getString("braidCards");
+        s.braidCards = braidCards == "cross"  ? CardSettings::BraidCards::Cross
+                       : braidCards == "tube" ? CardSettings::BraidCards::Tube
+                                              : CardSettings::BraidCards::Sections;
+        s.braidSides = static_cast<int>(params().getInt("braidSides"));
         s.segmentsByLength = params().getBool("segmentsByLength");
         s.minSegments = static_cast<int>(params().getInt("minSegments"));
         const std::string featherMode = params().getString("featherMode");
