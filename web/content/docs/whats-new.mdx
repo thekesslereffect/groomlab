@@ -13,6 +13,43 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.41.0 (November 5, 2026)
+
+- **Braids, rebuilt.** The Braid node follows the real crossing pattern (each outer section over,
+  then under, to the middle) for three, four and five strand braids, fishtails, ropes and
+  cornrows. **Feed** draws hair in from its root along the scalp, lying on the scalp and curving
+  into the braid, for French braids and cornrows. **Ties** narrow the braid and hold the hair, and
+  their new **ties** output feeds an Instance node's new **along** input for beads, cuffs and hair
+  ties. Ends fan, tuft or stay bound; **pancake** and **loops** loosen a braid. A new **Braids**
+  preset category (box braids, beaded, cornrows, French, fishtail ponytail and more) shows each
+  look. Param change: **tightness**, **flatness** and **roll** shape the braid now, and **width**
+  is the braid's true width (default 0.25); crossings, depth, phase, sectionTwist, lobeFill,
+  alongScalp, feedDistance, feedGrowth, endAtPath and resolution are gone, so braids in saved
+  grooms change shape: set width and tightness again.
+- **Guides simulated in another package drive the groom** (the app, Maya and Blender). **Simulate
+  > Export Guides for Simulation** writes the guides to Alembic; simulate them in Houdini or
+  elsewhere, then **Load Guide Cache** adds a **GuideCache** node that moves the guides at each
+  frame, keeping their groups, maps and brushed shapes. The viewport draws the moving guides in
+  amber over the groomed ones, and Clump centers linked from a GuideCache or Simulate node follow
+  the simulated guides. See [Motion and simulation](/docs/motion-and-simulation).
+- **Cards, cleaner** (thanks to Omar Hesham, PR #50). Hair cards are regular grids (2 width
+  segments by default), rectangular unless the width profile tapers them, and reach the strands'
+  true ends; Fit Twist turns the whole card, and the bakes follow the strands' widths and the card's
+  final shape (issues #39, #42, #43, #45, #46). Feather cards follow their barbs (**Follow Barbs**,
+  50% by default) and are segmented by length (issue #48). A new **AO_world** map holds the
+  occlusion between cards, in a second UV set that the glTF, ToMesh, Unreal and Unity exports
+  carry (issue #44). Strands bake to scale by default. Rebake and export cards made before this
+  update.
+- **A new look in every host.** The app, Maya's Groom Tools and Blender's GroomLab window share one
+  redesigned look: cards, flat tool tiles, an icon rail, field sliders, the tool's settings right
+  under the tools. The app gets a **Groom | Look | Cards | Export** switch and a shortcut cheat
+  sheet. The **Paper** theme (light) replaces Polar.
+- **Fixes:** Maya 2025 and newer (Qt 6) no longer print errors when dropping a node on a wire,
+  adding a pin or dropping files in the Graph Editor. Undoing a guide stroke in Maya redraws right
+  away (issue #22, thanks to Omar Hesham, PR #40). V-Ray renders a groom that has an Arnold or
+  RenderMan hair material with GroomLab's hair instead of none. RenderMan for Maya warns that XPU
+  renders no grooms (render them with RIS).
+
 ## 0.40.0 (November 2, 2026)
 
 - **V-Ray for Maya renders grooms with nothing to set up** (Maya 2024 to 2027, V-Ray 7), as Arnold

@@ -4358,11 +4358,11 @@ TEST(AppPanels, CardMapsPanelPicksPresetsEditsThePackingAndExports) {
     panel.setTarget(ExportPanel::Target::CardMaps);
     EXPECT_STREQ(ExportPanel::targetName(ExportPanel::Target::CardMaps), "maps");
     EXPECT_EQ(panel.mapPreset(), QStringLiteral("Unreal Hair Cards"));
-    EXPECT_EQ(panel.mapFileCount(), 7);
+    EXPECT_EQ(panel.mapFileCount(), 8);
     EXPECT_EQ(panel.options().mapSettings.format, "tga");
     EXPECT_EQ(panel.options().mapPreset.files[3].channels, (std::vector<std::string>{"rootuv.u", "rootuv.v", "seed", "root"}));
     ASSERT_TRUE(panel.setMapPreset(QStringLiteral("Unity HDRP Hair")));
-    EXPECT_EQ(panel.mapFileCount(), 5);
+    EXPECT_EQ(panel.mapFileCount(), 6);
     EXPECT_EQ(panel.options().mapSettings.format, "png");
     EXPECT_EQ(panel.options().mapPreset.normal, "opengl");
     EXPECT_FALSE(panel.setMapPreset(QStringLiteral("Nothing")));
@@ -4371,9 +4371,9 @@ TEST(AppPanels, CardMapsPanelPicksPresetsEditsThePackingAndExports) {
     EXPECT_EQ(panel.mapPreset(), QStringLiteral("Custom"));
     EXPECT_EQ(panel.mapPacking().files[2].channels, (std::vector<std::string>{"0", "ao", "root", "1-ao"}));
     panel.addMapFile();
+    EXPECT_EQ(panel.mapFileCount(), 7);
+    panel.removeMapFile(6);
     EXPECT_EQ(panel.mapFileCount(), 6);
-    panel.removeMapFile(5);
-    EXPECT_EQ(panel.mapFileCount(), 5);
     // Saved under a name of our own; a built-in's name is refused.
     EXPECT_FALSE(panel.saveMapPreset(QStringLiteral("Unreal Hair Cards")));
     ASSERT_TRUE(panel.saveMapPreset(QStringLiteral("My Unity")));
@@ -4391,7 +4391,7 @@ TEST(AppPanels, CardMapsPanelPicksPresetsEditsThePackingAndExports) {
     const std::filesystem::path out = std::filesystem::temp_directory_path() / "groomlab_app_card_maps";
     std::filesystem::remove_all(out);
     const ExportResult result = doc->exportCardMaps((out / "hair").u8string(), panel.options());
-    ASSERT_EQ(result.files.size(), 5u);
+    ASSERT_EQ(result.files.size(), 6u);
     EXPECT_EQ(std::filesystem::u8path(result.files[0]).filename().u8string(), "hair_BaseColor.png");
     const QImage base(QString::fromStdString(result.files[0]));
     ASSERT_FALSE(base.isNull());

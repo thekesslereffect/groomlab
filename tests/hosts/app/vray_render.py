@@ -74,9 +74,10 @@ def read_png(path):
 
 
 def hair_pixels(rows, background):
-    """The pixels that differ from the background color clearly."""
+    """The pixels that differ from the background color clearly. (12 of 255: the solid backdrop
+    varies by 1 or 2, and the dark brown tips sit close to the app's grey backdrop.)"""
     return [(x, y, p) for y, row in enumerate(rows) for x, p in enumerate(row)
-            if max(abs(p[k] - background[k]) for k in range(3)) > 24]
+            if max(abs(p[k] - background[k]) for k in range(3)) > 12]
 
 
 def main(exe, vray, work):
