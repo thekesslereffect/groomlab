@@ -1050,6 +1050,34 @@ class GraphEditorTest(unittest.TestCase):
         self.assertNotIn("Paint", [a.text() for a in self.editor.params.build_param_menu("output", "strands").actions()]
                          if self.editor.model.param_spec("output", "strands") else ["x"])
 
+    def test_the_params_keep_their_scroll_when_the_node_is_shown_again(self):
+        # Issue #47: a node's action (Bake Maps reloads the editor) or a param's edit rebuilds the
+        # panel for the same node; its params stay where they were scrolled to. Another node starts at
+        # its top.
+        self.editor.resize(1200, 360)
+        self.editor.show()
+        params = self.editor.params
+        self.editor.items["interpolate"].setSelected(True)  # shows its params
+        wait(50)
+        self.assertEqual(params.node, "interpolate")
+        bar = params.verticalScrollBar()
+        self.assertGreater(bar.maximum(), 40, "the Interpolate params scroll in a short panel")
+        bar.setValue(bar.maximum() // 2)
+        kept = bar.value()
+        params.show_node("interpolate")
+        self.assertEqual(bar.value(), kept)
+        wait(50)
+        self.assertEqual(bar.value(), kept)
+        self.editor.reload()  # as an action's click does
+        wait(50)
+        self.assertEqual(params.node, "interpolate")
+        self.assertEqual(bar.value(), kept)
+        self.editor.scene.clearSelection()
+        self.editor.items["scatter"].setSelected(True)
+        wait(50)
+        self.assertEqual(params.node, "scatter")
+        self.assertEqual(bar.value(), 0)
+
     def test_any_param_exposed_and_set_by_a_value(self):
         from groomlab.ui.qt import QtWidgets
         # A seed (no field can drive it) offers Expose as Input too: a Value port a Value node sets.

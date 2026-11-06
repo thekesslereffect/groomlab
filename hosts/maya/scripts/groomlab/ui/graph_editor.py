@@ -2268,6 +2268,9 @@ class ParamPanel(QtWidgets.QScrollArea):
                 self.show_script_editor(name)
             return
         self.editing_script = None
+        # The same node shown again (an action's reload, a param's note or warning, keys): the params
+        # stay where they were scrolled to; another node starts at its top (issue #47).
+        keep = self.verticalScrollBar().value() if name is not None and name == getattr(self, "node", None) else 0
         self.node = name
         self.key_widgets = {}  # param -> its number field(s): keyed params show their state and value per frame
         self.sections = []  # [(section, its header or None, [(spec, row)])]: update_visibility's
@@ -2412,6 +2415,38 @@ class ParamPanel(QtWidgets.QScrollArea):
         self.align_labels()
         self.update_visibility()
         self.refresh_keys()
+        self.keep_scroll(body, keep)
+
+    def keep_scroll(self, body, value):
+        """The params of `body` (just shown) scrolled to `value` once they are laid out: the scroll
+        bar's range only grows to it when Qt lays the new widgets out, after this event."""
+        bar = self.verticalScrollBar()
+        if value <= 0:
+            return
+
+        def apply(*_):
+            if not widgets.alive(body) or self.widget() is not body:
+                done()
+                return
+            bar.setValue(min(value, bar.maximum()))
+            if bar.maximum() >= value:
+                done()
+
+        following = [True]
+
+        def done():
+            if not following[0]:
+                return
+            following[0] = False
+            try:
+                bar.rangeChanged.disconnect(apply)
+            except (RuntimeError, TypeError):
+                pass
+
+        bar.rangeChanged.connect(apply)
+        apply()
+        # Laid out by now: stop following the range (the user's own scrolling and later growth are theirs).
+        later(lambda: (apply(), done()))
 
     def update_error(self):
         """The red line under the node's header: its error from the last evaluation (or an amber

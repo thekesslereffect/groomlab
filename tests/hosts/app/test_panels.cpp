@@ -198,6 +198,39 @@ TEST(AppPanels, NodePanelAsTallAsItsRowsShowsThemWithoutScrolling) {
     }
 }
 
+TEST(AppPanels, ParamPanelKeepsItsScrollWhenTheSameNodeIsBuiltAgain) {
+    // An action (a bake, an export) or a param's edit rebuilds the panel for the same node; its rows
+    // stay where they were scrolled to (Maya's lost it: issue #47). Another node starts at its top.
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    ParamPanel panel;
+    panel.setDocument(doc.get());
+    panel.resize(340, 300);
+    panel.show();
+    const std::string interpolate = nodeOfType(*doc, "Interpolate");
+    panel.showNode(interpolate);
+    QApplication::processEvents();
+    QScrollArea* area = nullptr;
+    for (QScrollArea* a : panel.findChildren<QScrollArea*>()) {
+        if (a->verticalScrollBar()->maximum() > 0) area = a;
+    }
+    ASSERT_TRUE(area) << "the Interpolate rows scroll in a short panel";
+    QScrollBar* bar = area->verticalScrollBar();
+    bar->setValue(bar->maximum() / 2);
+    const int kept = bar->value();
+    ASSERT_GT(kept, 0);
+    panel.rebuildNow();
+    QApplication::processEvents();
+    EXPECT_EQ(bar->value(), kept);
+    panel.refresh();  // a param's edit: the rebuild waits for the event loop
+    QApplication::processEvents();
+    QApplication::processEvents();
+    EXPECT_EQ(bar->value(), kept);
+    panel.showNode(nodeOfType(*doc, "Scatter"));
+    QApplication::processEvents();
+    EXPECT_EQ(bar->value(), 0);
+}
+
 TEST(AppPanels, ParamEditorsRoundTripEveryKindWithoutLosingMaps) {
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
