@@ -396,8 +396,13 @@ to x1, so you can come back, drag a key and apply again without scaling twice.
   Ctrl+Freeze unfreezes). Comb, Slide, Smooth and Erase have no opposite.
 - **Shift+drag** smooths with any brush: with Comb, Length or another guide brush it smooths the
   guides (as the **Smooth** brush, at the brush's radius and strength); painting maps or the
-  freeze mask, it smooths the paint; with the **Tube** brush, the tube channel it paints. To
-  select guides, use the **Select** tool (see [Freeze and solo](#freeze-and-solo)).
+  freeze mask, it smooths the paint; with the **Tube** brush, the tube channel it paints.
+- **Ctrl+Shift+drag** with a Shape or Trim brush (Comb, Slide, Smooth, Lift, Swing, Attract,
+  Tube, Cut, Length, Erase) paints guides into the selection: the guides the brush passes over
+  are added, and when you let go every other guide is frozen, so the next strokes work on those
+  alone. Drag over no guide to clear the selection and unfreeze everything; a click on nothing
+  changes nothing. Press the two keys in either order. The **Select** tool still has its lasso,
+  box and click (see [Freeze and solo](#freeze-and-solo)).
 - **Alt+Shift+X** turns symmetry on or off, after **GroomLab > Install GroomLab Hotkeys**.
 - **B** + drag sets the radius, **M** + drag the strength, after **GroomLab > Install GroomLab
   Hotkeys** (or middle-drag and Shift+middle-drag).
@@ -487,7 +492,7 @@ With no tool picked, the card says how to start.
 
 A stroke never reaches what is on the far side of the head from the camera (guides, parts, flow
 arrows or paint), and brushes work on every unfrozen guide of the picked group; to brush only some
-guides, Shift+drag them into the selection (the rest freeze) or freeze the others. How the strands
+guides, Ctrl+Shift+drag them into the selection (the rest freeze) or freeze the others. How the strands
 draw while you sculpt is the groom's setting: Attribute Editor > **Sculpting** (the app:
 Properties > **Sculpting**; Blender: **While sculpting** under the Groom Tools).
 

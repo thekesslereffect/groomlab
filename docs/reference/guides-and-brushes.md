@@ -313,7 +313,13 @@ groomlab.brush_tool("place", length=0.6)                        # click the scal
   shortens, Lift lays down, Twist, Attract and Shape flip, Cut grows,
   painting goes toward 0; Comb, Slide, Smooth and Erase have none). Shift+drag smooths with
   every brush (`useShiftSmoothing`): the guides with a guide brush, a painted map or Freeze, the
-  Tube brush's channel. Selecting is the Select tool's (its lasso, solo and buttons).
+  Tube brush's channel. Ctrl and Shift together (either first) with a Shape or Trim brush paint
+  the selection (`BrushTool::selectingPaint`, `StrokeHost::paintSelection`): the guides the circle
+  passes over (its level or group, what the view shows, their mirrors with symmetry) join the
+  selection as it goes, and when it ends every other guide freezes (the Select tool's solo, one
+  undo step). A drag over no guide clears the selection and unfreezes every guide; a click on none
+  changes nothing, so a click a few pixels off a guide never loses a selection (issue #23). The
+  Select tool keeps its lasso, box and click.
   - **Your own keys:** every tool also has a runtime command (category GroomLab) you can bind.
 
 - **Which guides:** `level` (or `group`) picks the guides a brush edits. Children still follow

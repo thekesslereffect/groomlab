@@ -9,6 +9,7 @@
 #include <limits>
 #include <stdexcept>
 
+#include "groomlab/brush_catalog.h"
 #include "groomlab/curve.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_selection.h"
@@ -231,6 +232,21 @@ void SessionStrokeHost::commit(StrokeEdit edit) {
     applyEdit(edit, true);  // a texture map's paint holds the stroke already
     done_.push_back(std::move(edit));
     undone_.clear();
+}
+
+bool SessionStrokeHost::paintSelection(const std::vector<GuideId>& selection, bool final) {
+    selection_ = selection;
+    if (!final) return true;
+    // Every other guide frozen (none selected: every guide unfrozen), one committed edit.
+    const std::shared_ptr<const GuideHierarchy> stored = session_.authoredHierarchy();
+    GuideHierarchy h = stored ? *stored : GuideHierarchy{};
+    if (freezeToSelection(h, selection)) {
+        StrokeEdit edit;
+        edit.mode = "select";
+        edit.set(StrokeField::Guides, h.toJson());
+        commit(std::move(edit));
+    }
+    return true;
 }
 
 bool SessionStrokeHost::undo() {
@@ -1027,6 +1043,20 @@ void BrushTool::press(StrokeHost& host, const ToolView& view, float x, float y, 
     }
     inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
+    // Ctrl and Shift together (however they were pressed) with a Shape or Trim brush: paint the
+    // selection.
+    const bool both = (modifiers & kStrokeCtrl) && (modifiers & kStrokeShift);
+    if (both && paintsSelection() && host.attach()) {
+        selecting_ = true;
+        selectMoved_ = false;
+        selectBase_ = host.selectedGuides();
+        selectPicked_.clear();
+        selectSeen_.clear();
+        pressX_ = x;
+        pressY_ = y;
+        paintSelectionAt(host, view, x, y);
+        return;
+    }
     if (modifiers & kStrokeShift) {
         // Every brush's Shift+drag smooths (decided on drag: the guides, a painted map, the Tube
         // brush's channel); a release without one does nothing. Selecting is the Select tool's.
@@ -1044,6 +1074,11 @@ void BrushTool::drag(StrokeHost& host, const ToolView& view, float x, float y, f
         return;
     }
     pressure_ = pressure;
+    if (selecting_) {
+        if (pm::hypot(x - pressX_, y - pressY_) > 4.0f) selectMoved_ = true;
+        paintSelectionAt(host, view, x, y);
+        return;
+    }
     if (shiftPending_) {
         const float moved = pm::hypot(x - pressX_, y - pressY_);
         if (moved > 4.0f && settings.tool == BrushToolSettings::Tool::Brush) {
@@ -1071,6 +1106,20 @@ StrokeRelease BrushTool::release(StrokeHost& host, const ToolView& view) {
         shiftPending_ = false;  // a Shift+click: nothing (no drag, no smoothing)
         return StrokeRelease::None;
     }
+    if (selecting_) {
+        selecting_ = false;
+        if (!selectPicked_.empty()) {
+            // The painted guides join the selection; every other guide is frozen.
+            host.paintSelection(combineSelection(selectBase_, selectPicked_, SelectMode::Add), true);
+            return StrokeRelease::Stroke;
+        }
+        if (selectMoved_) {
+            // A drag over no guide: the selection cleared, every guide unfrozen.
+            host.paintSelection({}, true);
+            return StrokeRelease::Stroke;
+        }
+        return StrokeRelease::None;  // a click on nothing: nothing shown, nothing changed
+    }
     const bool stroked = stroking_;
     if (stroking_) end(host, view);
     if (shiftSmoothing_) {
@@ -1082,6 +1131,16 @@ StrokeRelease BrushTool::release(StrokeHost& host, const ToolView& view) {
 
 bool BrushTool::stroke(StrokeHost& host, const ToolView& view, const std::vector<std::array<float, 2>>& points, float pressure,
                        unsigned modifiers, const std::function<void()>& afterDab) {
+    if (points.empty()) return false;
+    if ((modifiers & kStrokeCtrl) && (modifiers & kStrokeShift) && paintsSelection()) {
+        // A guide brush's Ctrl+Shift: the selection painted, as the mouse would.
+        press(host, view, points[0][0], points[0][1], pressure, modifiers);
+        for (std::size_t i = 1; i < points.size(); ++i) {
+            drag(host, view, points[i][0], points[i][1], pressure);
+            if (afterDab) afterDab();
+        }
+        return release(host, view) == StrokeRelease::Stroke;
+    }
     inverted_ = (modifiers & kStrokeCtrl) != 0;
     pressure_ = pressure;
     const BrushMode saved = settings.brush.mode;
@@ -1099,6 +1158,36 @@ bool BrushTool::stroke(StrokeHost& host, const ToolView& view, const std::vector
     end(host, view);
     endShiftSmoothing(settings.brush, saved);
     return result;
+}
+
+bool BrushTool::paintsSelection() const {
+    const BrushEntry* entry = settings.tool == BrushToolSettings::Tool::Brush ? brushEntry(settings.modeName()) : nullptr;
+    return entry && (entry->category == BrushCategory::Shape || entry->category == BrushCategory::Trim);
+}
+
+void BrushTool::paintSelectionAt(StrokeHost& host, const ToolView& view, float x, float y) {
+    const std::shared_ptr<const GuideHierarchy> h = host.shownHierarchy();
+    if (!h) return;
+    // The guides of the brush's level or group (not hidden) with a point in its circle, only what
+    // the view shows (nothing behind the scalp), and with symmetry their mirror guides.
+    const std::vector<GuideId> candidates = guidesAt(*h, settings.brush.level, settings.brush.group, host.hiddenGroups());
+    const float radius = std::max(settings.screenRadius, 1.0f);
+    std::vector<std::array<float, 2>> ring;
+    for (int k = 0; k < 24; ++k) {
+        const float a = 6.2831853f * static_cast<float>(k) / 24.0f;
+        ring.push_back({x + radius * pm::cos(a), y + radius * pm::sin(a)});
+    }
+    const MeshPtr scalp = host.scalp();
+    const ViewProjector project = visibleProjector(
+        [&view](const Vec3f& p, std::array<float, 2>* out) { return view.project(p, (*out)[0], (*out)[1]); },
+        scalp ? visibility(scalp, view) : nullptr);
+    std::vector<GuideId> picked = pickGuides(*h, candidates, project, ring, false, 0.0f);
+    picked = withMirrorGuides(*h, picked, StrokeSymmetry::of(settings.brush, scalp.get()));
+    bool grew = false;
+    for (const GuideId id : picked) {
+        if (selectSeen_.insert(id).second) selectPicked_.push_back(id), grew = true;
+    }
+    if (grew) host.paintSelection(combineSelection(selectBase_, selectPicked_, SelectMode::Add), false);
 }
 
 int BrushTool::pickLevel(StrokeHost& host, const ToolView& view, float x, float y) {

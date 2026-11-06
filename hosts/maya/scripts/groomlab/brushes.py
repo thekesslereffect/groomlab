@@ -227,7 +227,10 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
       pushes apart, Direction turns away, Noise smooths, Shape shrinks, rounds or untwists, Cut
       grows; painting, toward 0 (Comb, Slide, Smooth and Erase have none).
     - Shift+drag smooths with every brush: the guides (a guide brush), a painted map or Freeze,
-      the Tube brush's channel. Selecting guides is the Select tool's.
+      the Tube brush's channel.
+    - Ctrl+Shift+drag with a Shape or Trim brush (in either order) paints guides into the
+      selection, every other guide frozen when it ends; a drag over no guide clears the
+      selection and unfreezes every guide (a click on none changes nothing).
     """
     _check_mode(mode)
     ensure_plugin()

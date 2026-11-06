@@ -103,7 +103,7 @@ SMOOTHING = ("Shape", "Trim")  # the groups whose tools smooth on Shift+drag (Cr
 def short_hint(hint, category=""):
     """A tool's line on its card, as the app's (groom_tools.cpp refreshCard): the hint's first
     clause without its asides in parentheses (cut at ". " or "; " past 24 characters), then, for
-    the Shape and Trim tools, the Shift+drag smoothing they share;
+    the Shape and Trim tools, the Shift+drag smoothing and Ctrl+Shift+drag selecting they share;
     the whole hint is the tool name's tooltip."""
     short = re.sub(r"\s*\([^()]*\)", "", hint)  # (asides in parentheses: the tooltip's)
     for stop in (". ", "; ", " ("):
@@ -112,7 +112,7 @@ def short_hint(hint, category=""):
             short = short[:at] + "."
     if not short.endswith("."):
         short += "."
-    return short + (" Shift+drag smooths." if category in SMOOTHING else "")
+    return short + (" Shift+drag smooths, Ctrl+Shift+drag selects." if category in SMOOTHING else "")
 
 
 def look(layout, role):

@@ -72,7 +72,7 @@ def short_hint(hint, category=""):
             short = short[:at] + "."
     if not short.endswith("."):
         short += "."
-    return short + (" Shift+drag smooths." if category in SMOOTHING else "")
+    return short + (" Shift+drag smooths, Ctrl+Shift+drag selects." if category in SMOOTHING else "")
 
 
 def rail_icon(name):

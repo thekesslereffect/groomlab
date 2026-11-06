@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <set>
 
 #include "groomlab/brush.h"
 #include "groomlab/curve.h"
@@ -381,6 +382,97 @@ TEST(Stroke, CtrlIsTheOppositeShiftSmooths) {
     EXPECT_EQ(tool.toolModeName(), "paint");
     tool.release(*g.host, view);
     EXPECT_EQ(tool.settings.brush.mode, BrushMode::Attribute);
+}
+
+// Whether a guide is frozen (its freeze attribute, or an ancestor's, at a half or more).
+bool frozenGuide(const GuideHierarchy& h, const HierarchyGuide& guide) {
+    float value = 0.0f;
+    return h.effectiveAttribute(guide, "freeze", &value) && value >= 0.5f;
+}
+
+TEST(Stroke, CtrlShiftWithAGuideBrushPaintsTheSelectionTheRestFreeze) {
+    // Ctrl and Shift together with a Shape or Trim brush (in either order: the press reads both)
+    // paint the selection: the guides the circle passes over join it, shown as it goes; when it
+    // ends every other guide is frozen (one undo step) and no guide moved. A drag over no guide
+    // clears the selection and unfreezes all; a click on none changes nothing (issue #23: a click
+    // a few pixels off a guide lost the selection). Shift alone still smooths.
+    const ToolView view = frontView();
+    const auto path = screenLine(view, {-0.3f, 1.1f, 0.6f}, {0.3f, 1.1f, 0.6f}, 12);
+    for (const char* mode : {"comb", "cut"}) {
+        Groom g;
+        const std::string before = g.guides();
+        BrushTool tool;
+        tool.settings.setMode(mode);
+        tool.settings.screenRadius = 40.0f;
+        tool.press(*g.host, view, path[0][0], path[0][1], 1.0f, kStrokeShift | kStrokeCtrl);
+        EXPECT_TRUE(tool.selectingPaint()) << mode;
+        EXPECT_FALSE(tool.stroking());
+        std::size_t shown = g.host->selectedGuides().size();
+        for (std::size_t i = 1; i < path.size(); ++i) {
+            tool.drag(*g.host, view, path[i][0], path[i][1], 1.0f);
+            EXPECT_GE(g.host->selectedGuides().size(), shown);  // shown as it goes, only growing
+            shown = g.host->selectedGuides().size();
+        }
+        EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::Stroke);
+        EXPECT_FALSE(tool.selectingPaint());
+        const std::vector<GuideId> selected = g.host->selectedGuides();
+        ASSERT_FALSE(selected.empty()) << mode;
+        ASSERT_EQ(g.host->edits().size(), 1u);
+        const GuideHierarchy h = GuideHierarchy::fromJson(g.guides());
+        const std::set<GuideId> chosen(selected.begin(), selected.end());
+        std::size_t frozen = 0;
+        for (const HierarchyGuide& guide : h.guides()) {
+            const bool isFrozen = frozenGuide(h, guide);
+            EXPECT_EQ(isFrozen, !chosen.count(guide.id)) << mode << " guide " << guide.id;
+            frozen += isFrozen ? 1 : 0;
+        }
+        EXPECT_GT(frozen, 0u);
+        const GuideHierarchy old = GuideHierarchy::fromJson(before);
+        for (std::size_t i = 0; i < h.guides().size(); ++i) {
+            ASSERT_EQ(h.guides()[i].points.size(), old.guides()[i].points.size());
+            for (std::size_t k = 0; k < h.guides()[i].points.size(); ++k) {
+                EXPECT_LT((h.guides()[i].points[k] - old.guides()[i].points[k]).length(), 1e-5f) << "a selecting stroke moved a guide";
+            }
+        }
+        // Another drag adds to the selection.
+        const auto lower = screenLine(view, {-0.3f, 0.9f, 0.8f}, {0.3f, 0.9f, 0.8f}, 12);
+        tool.press(*g.host, view, lower[0][0], lower[0][1], 1.0f, kStrokeCtrl | kStrokeShift);
+        for (std::size_t i = 1; i < lower.size(); ++i) tool.drag(*g.host, view, lower[i][0], lower[i][1], 1.0f);
+        tool.release(*g.host, view);
+        const std::vector<GuideId> more = g.host->selectedGuides();
+        EXPECT_GE(more.size(), selected.size());
+        for (const GuideId id : selected) EXPECT_NE(std::find(more.begin(), more.end(), id), more.end());
+        // A click on nothing (a corner of the view): nothing changes.
+        const std::size_t steps = g.host->edits().size();
+        tool.press(*g.host, view, 4.0f, 4.0f, 1.0f, kStrokeCtrl | kStrokeShift);
+        EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::None);
+        EXPECT_EQ(g.host->selectedGuides(), more);
+        EXPECT_EQ(g.host->edits().size(), steps);
+        // A drag over nothing: the selection cleared, every guide unfrozen.
+        tool.press(*g.host, view, 4.0f, 4.0f, 1.0f, kStrokeCtrl | kStrokeShift);
+        for (int k = 1; k <= 8; ++k) tool.drag(*g.host, view, 4.0f + 8.0f * static_cast<float>(k), 4.0f, 1.0f);
+        EXPECT_EQ(tool.release(*g.host, view), StrokeRelease::Stroke);
+        EXPECT_TRUE(g.host->selectedGuides().empty());
+        const GuideHierarchy thawed = GuideHierarchy::fromJson(g.guides());
+        for (const HierarchyGuide& guide : thawed.guides()) EXPECT_FALSE(frozenGuide(thawed, guide));
+        // Undo puts the freeze back.
+        ASSERT_TRUE(g.host->undo());
+        const GuideHierarchy again = GuideHierarchy::fromJson(g.guides());
+        std::size_t refrozen = 0;
+        for (const HierarchyGuide& guide : again.guides()) refrozen += frozenGuide(again, guide) ? 1 : 0;
+        EXPECT_GT(refrozen, 0u);
+    }
+    // Not with other tools: Place's or Paint's Ctrl+Shift does what it did.
+    for (const char* mode : {"paint", "place"}) {
+        Groom g;
+        BrushTool tool;
+        tool.settings.setMode(mode);
+        if (std::string(mode) == "paint") tool.settings.brush.attribute = "mask", tool.settings.paintKind = "guides";
+        tool.press(*g.host, view, path[0][0], path[0][1], 1.0f, kStrokeShift | kStrokeCtrl);
+        EXPECT_FALSE(tool.selectingPaint()) << mode;
+        tool.release(*g.host, view);
+        EXPECT_TRUE(g.host->selectedGuides().empty());
+    }
 }
 
 TEST(Stroke, PaintingGuideWeightReshapesTheHairWhereGuidesGiveWay) {

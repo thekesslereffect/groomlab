@@ -187,9 +187,9 @@ MainWindow::MainWindow() {
         selectMode_->setChecked(mode == Viewport::ToolMode::Select);
         refreshTool();
         if (mode == Viewport::ToolMode::Brush) {
-            notify(tr("Brush: drag to stroke, Ctrl is the opposite, Shift+drag smooths (select guides with the Select "
-                      "tool); B+drag (or middle-drag) sets the radius, M+drag the strength; Alt+Shift+X symmetry; Y+click "
-                      "the marking menu; Alt orbits; Esc leaves"));
+            notify(tr("Brush: drag to stroke, Ctrl is the opposite, Shift+drag smooths, Ctrl+Shift+drag paints guides into "
+                      "the selection (the rest freeze; over no guide, all unfreeze); B+drag (or middle-drag) sets the radius, "
+                      "M+drag the strength; Alt+Shift+X symmetry; Y+click the marking menu; Alt orbits; Esc leaves"));
             if (document_) reevaluate();  // warms the stroke document
         } else if (mode == Viewport::ToolMode::Select) {
             notify(tr("Select: click or box guides (the rest freeze; nothing picked unfreezes all); Shift toggles, Ctrl "

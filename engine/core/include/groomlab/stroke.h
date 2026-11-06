@@ -407,6 +407,11 @@ public:
     virtual void previewSculpt(const std::string& /*node*/, SculptPtr /*edits*/, std::shared_ptr<const GuideHierarchy> /*shown*/) {}
     virtual const ScalpMaps& scalpMaps() = 0;
     virtual std::vector<GuideId> selectedGuides() { return {}; }
+    // A Shape or Trim brush's Ctrl+Shift drag paints the guide selection (BrushTool): `selection` as the
+    // stroke has it so far, shown at once (not `final`), and as it ends (`final`): the host keeps
+    // it as the selection and freezes every other guide (none selected: unfreezes all), one undo
+    // step, as its Select tool's solo does. False: the host has no selection to paint.
+    virtual bool paintSelection(const std::vector<GuideId>& /*selection*/, bool /*final*/) { return false; }
     virtual float softSelectRadius() { return 0.0f; }
     virtual std::set<std::string> hiddenGroups() { return {}; }
     virtual int guideSmoothing() { return 0; }  // how hover lines are drawn (smoothPolyline)
@@ -460,6 +465,8 @@ public:
     std::string storedText(StrokeField field) override;
     const ScalpMaps& scalpMaps() override;
     std::vector<GuideId> selectedGuides() override { return selection_; }
+    // The selection set; final also freezes every other guide (StrokeHost), a committed edit.
+    bool paintSelection(const std::vector<GuideId>& selection, bool final) override;
     float softSelectRadius() override { return softRadius_; }
     std::set<std::string> hiddenGroups() override { return hidden_; }
     int guideSmoothing() override { return smoothing_; }
@@ -557,8 +564,13 @@ enum class StrokeRelease {
 // (nothing the scalp hides with maskByScalp), previews through the host and commits one
 // StrokeEdit when it ends. Ctrl held at the press: the opposite action (signed brushes flip, paint
 // goes to 1 - value, Cut grows, Part and Flow erase). Shift: a drag (Brush tool) smooths, the
-// brush's mode coming back when it ends; a click does nothing (selecting guides is Ctrl+Shift,
-// the hosts' own: a click adds the guide under it, a drag paints the selection). The
+// brush's mode coming back when it ends; a click does nothing. Ctrl and Shift together with a
+// Shape or Trim brush (Comb, Slide, Smooth, Lift, Swing, Attract, Tube; Cut, Length, Erase), in
+// either order: the brush paints
+// the guide selection instead (selectingPaint): the guides its circle passes over join the
+// selection, shown as it goes; when it ends every other guide is frozen. A drag over no guide
+// clears the selection and unfreezes every guide; a click on none changes nothing (a click a
+// few pixels off a guide no longer clears a selection). The
 // pen's pressure scales strength (settings.pressure) and map smoothing. Not thread-safe; kept
 // between strokes (what the scalp hides from the camera, hover's projected guides, a vertex map's
 // neighbors, the texture preview).
@@ -586,12 +598,16 @@ public:
     // undone. `host` may be null (none to tell).
     void cancel(StrokeHost* host);
     // A whole stroke through press, drag and release from points in the view (Shift: smoothing
-    // for this stroke). `afterDab` runs after each point past the first (a host redraws). True
+    // for this stroke; Ctrl and Shift with a guide brush: the selection painted). `afterDab` runs after each point past the first (a host redraws). True
     // when the stroke changed something.
     bool stroke(StrokeHost& host, const ToolView& view, const std::vector<std::array<float, 2>>& points,
                 float pressure = 1.0f, unsigned modifiers = 0, const std::function<void()>& afterDab = {});
 
     bool stroking() const { return stroking_; }
+    // A Ctrl+Shift drag painting the selection, until its release.
+    bool selectingPaint() const { return selecting_; }
+    // The tool's Ctrl+Shift paints the selection: a Shape or Trim brush (brush_catalog.h).
+    bool paintsSelection() const;
     // A Shift press while painting, waiting for a drag (smoothing) or a release (a Shift+click):
     // drags go on.
     bool shiftPending() const { return shiftPending_; }
@@ -689,6 +705,13 @@ private:
     bool sculpt_ = false;
     SculptInput sculptIn_;
     SculptEdits sculptEdits_;
+    // Ctrl+Shift with a Shape brush: the selection painted (StrokeHost::paintSelection). The
+    // selection when it began, the guides the circle has passed over (in order), and whether it
+    // moved (a drag over nothing clears; a click on nothing does not).
+    void paintSelectionAt(StrokeHost& host, const ToolView& view, float x, float y);
+    bool selecting_ = false, selectMoved_ = false;
+    std::vector<GuideId> selectBase_, selectPicked_;
+    std::set<GuideId> selectSeen_;
     // Shift: pending until a drag (smoothing) or a release (a click: pick the level).
     bool shiftPending_ = false;
     bool shiftSmoothing_ = false;

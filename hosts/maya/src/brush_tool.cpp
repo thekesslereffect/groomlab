@@ -23,6 +23,7 @@
 #include <maya/MDistance.h>
 #include <maya/MEvent.h>
 #include <maya/MFnDagNode.h>
+#include <maya/MFnStringArrayData.h>
 #include <maya/MGlobal.h>
 #include <maya/MPoint.h>
 #include <maya/MPointArray.h>
@@ -771,6 +772,27 @@ public:
     std::string storedText(StrokeField field) override { return plug(strokeFieldName(field)).asString().asChar(); }
     const ScalpMaps& scalpMaps() override { return c_.shape_->scalpMaps(); }
     std::vector<GuideId> selectedGuides() override { return readGuideSelection(c_.groom_.node()); }
+    // A Shape brush's Ctrl+Shift drag (BrushTool): the selection shown as it is painted (the
+    // node's guideSelection set directly, the selection before kept), and at its end put back and
+    // set by groomLabGuides -freezeOthers, the Select tool's solo: one undo step back to the
+    // selection before the stroke.
+    bool paintSelection(const std::vector<GuideId>& selection, bool final) override {
+        if (!paintingSelection_) {
+            paintBase_ = readGuideSelection(c_.groom_.node());
+            paintingSelection_ = true;
+        }
+        if (!final) {
+            setSelectionPlug(selection);
+            return true;
+        }
+        setSelectionPlug(paintBase_);
+        paintingSelection_ = false;
+        MString cmd = selection.empty() ? "groomLabGuides -clearSelection -freezeOthers" : "groomLabGuides -select -freezeOthers";
+        for (const GuideId id : selection) cmd += MString(" -guide \"") + std::to_string(id).c_str() + "\"";
+        cmd += MString(" \"") + c_.groom_.fullPathName() + "\"";
+        MGlobal::executeCommand(cmd, false, true);
+        return true;
+    }
     float softSelectRadius() override { return readSoftSelectRadius(c_.groom_.node()); }
     std::set<std::string> hiddenGroups() override { return readHiddenGuideGroups(c_.groom_.node()); }
     int guideSmoothing() override { return MPlug(c_.shape_->thisMObject(), GroomShape::aGuideSmoothing).asInt(); }
@@ -835,6 +857,14 @@ public:
 
 private:
     MPlug plug(const char* name) const { return MFnDagNode(c_.groom_).findPlug(name, true); }
+    void setSelectionPlug(const std::vector<GuideId>& ids) {
+        MStringArray values;
+        for (const GuideId id : ids) values.append(std::to_string(id).c_str());
+        MFnStringArrayData fn;
+        plug("guideSelection").setValue(fn.create(values));
+    }
+    bool paintingSelection_ = false;
+    std::vector<GuideId> paintBase_;
     // A brush shaping guides alone (no map, no shot sculpt, no Sculpt node, none erased): what
     // the GPU draws.
     bool guidesStroke() {
@@ -977,6 +1007,16 @@ bool BrushContext::simulateStroke(const std::vector<std::pair<short, short>>& po
         tool_.release(*host_, view);
         if (draw) M3dView::active3dView().refresh(false, true);
         return tool_.lengths().edited();
+    }
+    if (ctrl && shift && tool_.paintsSelection()) {
+        // A guide brush's Ctrl+Shift drag paints the selection, through press, drag and release as
+        // the mouse does.
+        if (points.empty() || !host_) return false;
+        tool_.press(*host_, view, points[0].first, points[0].second, 1.0f, kStrokeCtrl | kStrokeShift);
+        for (std::size_t i = 1; i < points.size(); ++i) tool_.drag(*host_, view, points[i].first, points[i].second, 1.0f);
+        const bool changed = tool_.release(*host_, view) == StrokeRelease::Stroke;
+        if (draw) M3dView::active3dView().refresh(false, true);
+        return changed;
     }
     BrushToolSettings& s = tool_.settings;
     const BrushMode saved = s.brush.mode;
@@ -1150,7 +1190,7 @@ MStatus BrushContext::drag(MEvent& event, MHWRender::MUIDrawManager& draw) {
     }
     tool_.drag(*host_, activeToolView(), x, y, penPressure());
     unchainUnlessStroking();
-    if (tool_.stroking()) refreshDuringDrag();
+    if (tool_.stroking() || tool_.selectingPaint()) refreshDuringDrag();  // (the selection painted shows as it grows)
     using Tool = BrushToolSettings::Tool;
     const std::vector<Vec3f>& path = tool_.drawnPath();
     if (tool_.stroking() && (s.tool == Tool::Part || s.tool == Tool::Flow) && path.size() > 1) {
@@ -1192,7 +1232,7 @@ MStatus BrushContext::release(MEvent&) {
         MToolsInfo::setDirtyFlag(*this);  // refresh the Tool Settings window
         return MS::kSuccess;
     }
-    expectGpuCommit();
+    if (!tool_.selectingPaint()) expectGpuCommit();  // (painting the selection commits no stroke)
     const StrokeRelease released = tool_.release(*host_, activeToolView());
     unchainUnlessStroking();
     if (released == StrokeRelease::Stroke && shape_) {
@@ -1444,12 +1484,14 @@ MStatus BrushContextCmd::doEditFlags() {
         if (args.isFlagSet(kDebugStrokeFlag[0]) && args.getFlagArgument(kDebugStrokeFlag[0], 0, text)) {
             MStringArray words;
             text.split(' ', words);
-            // "x y x y ...", or "ctrl x y ..." / "shift x y ..." for a stroke with Ctrl (Shift) held.
-            // "draw x y ...": the viewport redrawn after each point, as a drag does.
+            // "x y x y ...", or "ctrl x y ..." / "shift x y ..." / "ctrlshift x y ..." for a stroke
+            // with Ctrl (Shift, both) held. "draw x y ...": the viewport redrawn after each point,
+            // as a drag does.
             const bool draw = words.length() > 0 && words[0] == "draw";
             if (draw) words.remove(0);
-            const bool ctrl = words.length() > 0 && words[0] == "ctrl";
-            const bool shift = words.length() > 0 && words[0] == "shift";
+            const bool both = words.length() > 0 && words[0] == "ctrlshift";
+            const bool ctrl = both || (words.length() > 0 && words[0] == "ctrl");
+            const bool shift = both || (words.length() > 0 && words[0] == "shift");
             // "adjust x y ...": the adjusting button (Length Keys: a key's scale; Maya's middle drag).
             const bool adjust = words.length() > 0 && words[0] == "adjust";
             std::vector<std::pair<short, short>> points;

@@ -69,6 +69,10 @@ public:
     // and redo write their tiles into it.
     void dropTexturePaint() override {}
     void commit(StrokeEdit edit) override;
+    // A Shape or Trim brush's Ctrl+Shift drag (BrushTool): the tools' selection as painted, and at
+    // its end every other guide frozen (none: all unfrozen), one undo step, as the Select tool's
+    // solo.
+    bool paintSelection(const std::vector<GuideId>& selection, bool final) override;
 
     std::map<std::string, KeptTexturePaint> kept;  // by map name
 
@@ -3077,6 +3081,19 @@ std::shared_ptr<TexturePaint> HelperStrokeHost::texturePaint(const std::string& 
     return paint;
 }
 
+bool HelperStrokeHost::paintSelection(const std::vector<GuideId>& selection, bool final) {
+    helper::setSelection(t_, selection);  // (the tools' own, not SessionStrokeHost's)
+    SessionStrokeHost::setSelection(selection, t_.softRadius);
+    if (final) {
+        const std::shared_ptr<const GuideHierarchy> stored = s_.groom->authoredHierarchy();
+        GuideHierarchy probe = stored ? *stored : GuideHierarchy{};
+        if (freezeToSelection(probe, selection)) {
+            editGuides(t_, "solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
+        }
+    }
+    return true;
+}
+
 void HelperStrokeHost::commit(StrokeEdit edit) {
     const std::string map = edit.textureMap;
     const bool maps = edit.text(StrokeField::ScalpMaps).set || !map.empty();
@@ -3391,6 +3408,7 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
         rebuildOverlay(t, x, y, false);
         result = overlayJson(t, optBool(args, "overlay", true));
         result["stroking"] = t.tool.stroking() || t.tool.lengthsPressed();
+        result["selecting"] = t.tool.selectingPaint();  // a Ctrl+Shift drag painting the selection
         result["mode"] = t.tool.toolModeName();
         result["graphChanged"] = s.groom->data().graphJson != graphBefore;
         result["view"] = viewJson(t);
@@ -3399,7 +3417,9 @@ bool runToolCommandIn(Session& s, ToolState& t, const std::string& cmd, const js
     }
     if (cmd == "stroke_drag") {
         // (A Shift press has no stroke yet: its drag starts the smoothing.)
-        if (!t.tool.stroking() && !t.tool.shiftPending() && !t.tool.lengthsPressed()) fail("state", "no stroke: stroke_begin first");
+        if (!t.tool.stroking() && !t.tool.shiftPending() && !t.tool.lengthsPressed() && !t.tool.selectingPaint()) {
+            fail("state", "no stroke: stroke_begin first");
+        }
         if (args.contains("view") && !args["view"].is_null()) setView(t, args["view"]);
         const float pressure = static_cast<float>(optNumber(args, "pressure", 1.0));
         std::vector<Pixel> points;

@@ -348,6 +348,32 @@ def step_redo():
     cmds.undo()
     check("one undo takes the smoothing back", cmds.getAttr(groom + ".guideData") == data)
 
+    # Ctrl+Shift with a guide brush paints the selection: the guides it passes over selected, the
+    # rest frozen (one undo step, back to no selection and nothing frozen), no guide moved; a click
+    # on nothing changes nothing; a drag over nothing unfreezes all and clears the selection.
+    def frozen_ids():
+        return [str(g["id"]) for g in jsonlib.loads(cmds.getAttr(groom + ".guideData"))["guides"]
+                if g.get("attributes", {}).get("freeze", 0.0) > 0.5]
+    gl.clear_guide_selection(groom)
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="ctrlshift " + " ".join("%d %d" % (tx - 200 + 20 * k, ty) for k in range(14)))
+    picked = gl.selected_guides(groom)
+    frozen = frozen_ids()
+    check("Ctrl+Shift drag with Comb selects the guides it passes over (%d), the rest frozen (%d)" % (len(picked), len(frozen)),
+          picked and frozen and not set(map(str, picked)) & set(frozen))
+    shape = jsonlib.loads(cmds.getAttr(groom + ".guideData"))
+    moved = [g["id"] for g, h in zip(shape["guides"], jsonlib.loads(data)["guides"])
+             if any(abs(a - b) > 1e-4 for a, b in zip(g.get("points", []), h.get("points", [])))]
+    check("... no guide moved (%d moved)" % len(moved), not moved)
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="ctrlshift 5 5")
+    check("... a Ctrl+Shift click on nothing changes nothing", gl.selected_guides(groom) == picked and frozen_ids() == frozen)
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke="ctrlshift " + " ".join("%d 5" % (5 + 10 * k) for k in range(8)))
+    check("... a Ctrl+Shift drag over nothing clears the selection and unfreezes all",
+          not gl.selected_guides(groom) and not frozen_ids())
+    cmds.undo()
+    check("... undo: the selection and the freeze back", frozen_ids() == frozen and gl.selected_guides(groom) == picked)
+    cmds.undo()
+    check("... undo again: none selected, none frozen", not gl.selected_guides(groom) and not frozen_ids())
+
     before = len(cmds.groomLabGuides(groom, listGuides="primary"))
     state["groomlab"].brush_tool("place", length=0.7)
     px, py = to_view((0.3, 0.3, 0.9))

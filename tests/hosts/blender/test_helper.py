@@ -1239,6 +1239,40 @@ class ToolsTest(HelperTestCase):
         self.call("undo")
         self.assertGreaterEqual(self.call("guides_info")["frozen"], 2)
 
+    def test_ctrl_shift_with_a_guide_brush_paints_the_selection(self):
+        # A Shape or Trim brush's Ctrl+Shift drag (stroke_begin with both): the guides the brush
+        # passes over selected (shown as it goes), the rest frozen in one undo step, no guide moved;
+        # a click on nothing changes nothing; a drag over nothing clears and unfreezes all.
+        self.place_guides(6)
+        g = self.guides()
+        tips = sorted((self.cam.pixel(pts[-1]) for pts in g.values()), key=lambda p: p[0])
+        self.call("tool_set", tool="comb", settings=dict(BASE))
+        r = self.call("stroke_begin", view=self.cam.view(), x=tips[0][0], y=tips[0][1], ctrl=True, shift=True)
+        self.assertTrue(r["selecting"])
+        self.assertFalse(r["stroking"])
+        self.call("stroke_drag", points=[[tips[1][0], tips[1][1], 1.0]])
+        self.assertTrue(self.call("selection_get")["selection"])  # shown as it goes
+        end = self.call("stroke_end")
+        self.assertEqual(end["released"], "stroke")
+        selected = self.call("selection_get")["selection"]
+        info = self.call("guides_info")
+        self.assertTrue(selected)
+        self.assertEqual(info["frozen"], info["guides"] - len(selected))
+        self.assertEqual(self.call("undo_state")["undoLabel"], "solo selection")
+        for gid, pts in self.guides().items():
+            np.testing.assert_allclose(pts, g[gid], atol=1e-5)  # selecting moves no guide
+        # A click on nothing: nothing changes.
+        self.call("stroke_begin", view=self.cam.view(), x=2.0, y=2.0, ctrl=True, shift=True)
+        self.assertEqual(self.call("stroke_end")["released"], "none")
+        self.assertEqual(self.call("selection_get")["selection"], selected)
+        self.assertEqual(self.call("guides_info")["frozen"], info["frozen"])
+        # A drag over nothing: cleared, all unfrozen.
+        self.call("stroke_begin", view=self.cam.view(), x=2.0, y=2.0, ctrl=True, shift=True)
+        self.call("stroke_drag", points=[[2.0 + 8.0 * k, 2.0, 1.0] for k in range(1, 8)])
+        self.assertEqual(self.call("stroke_end")["released"], "stroke")
+        self.assertFalse(self.call("selection_get")["selection"])
+        self.assertEqual(self.call("guides_info")["frozen"], 0)
+
     def test_lasso_select_and_selected_only(self):
         self.place_guides(6)
         self.begin()

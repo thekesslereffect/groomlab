@@ -18,6 +18,19 @@ public:
     explicit DocumentStrokeHost(GroomDocument& document) : SessionStrokeHost(document.session()), document_(document) {}
 
     std::vector<GuideId> selectedGuides() override { return document_.selection(); }
+    // A shaping brush's Ctrl+Shift drag: the selection shown as it is painted; at its end every
+    // other guide frozen (none: all unfrozen), one undo step, as the Select tool's solo.
+    bool paintSelection(const std::vector<GuideId>& selection, bool final) override {
+        document_.setSelection(selection);
+        if (final) {
+            const std::shared_ptr<const GuideHierarchy> authored = document_.session().authoredHierarchy();
+            GuideHierarchy probe = authored ? *authored : GuideHierarchy{};
+            if (freezeToSelection(probe, selection)) {
+                document_.editGuides("solo selection", [&](GuideHierarchy& g) { freezeToSelection(g, selection); });
+            }
+        }
+        return true;
+    }
     std::set<std::string> hiddenGroups() override { return document_.hiddenGroups(); }
     void commit(StrokeEdit edit) override { document_.commitStroke(std::move(edit)); }
     // Texture maps paint the document's paints (opened from the files beside the groom, written

@@ -1296,6 +1296,49 @@ struct BrushFixture {
     const HierarchyGuide& guide(std::size_t index) const { return doc->session().hierarchy()->guides().at(index); }
 };
 
+TEST(AppBrush, CtrlShiftWithAGuideBrushPaintsTheSelectionTheRestFreeze) {
+    // A Shape or Trim brush's Ctrl+Shift drag: the guides it passes over selected (the document's
+    // selection, as it goes), every other guide frozen in one undo step ("solo selection"), no
+    // guide moved; a drag over nothing clears and unfreezes all.
+    BrushFixture f;
+    const std::string before = f.guides();
+    const HierarchyGuide& g = f.guide(0);
+    const QPointF at = f.widgetPoint(g.points[g.points.size() / 2]);
+    f.session.settings().setMode("comb");
+    f.session.settings().screenRadius = 30.0f;
+    ASSERT_TRUE(f.session.press(at, 1.0f, kStrokeCtrl | kStrokeShift)) << f.session.lastError();
+    EXPECT_FALSE(f.session.stroking());
+    EXPECT_FALSE(f.doc->selection().empty()) << "shown as it goes";
+    f.session.move(at + QPointF(5.0, 0.0), 1.0f);
+    EXPECT_EQ(f.session.release(), StrokeRelease::Stroke);
+    const std::vector<GuideId> selected = f.doc->selection();
+    ASSERT_FALSE(selected.empty());
+    const std::shared_ptr<const GuideHierarchy> h = f.doc->session().authoredHierarchy();
+    // Every guide frozen but the selected ones and their children (soloGuides).
+    std::size_t frozen = 0;
+    const std::set<GuideId> chosen(selected.begin(), selected.end());
+    for (const HierarchyGuide& guide : h->guides()) {
+        float v = 0.0f;
+        const bool isFrozen = h->effectiveAttribute(guide, "freeze", &v) && v >= 0.5f;
+        if (chosen.count(guide.id)) EXPECT_FALSE(isFrozen) << guide.id;
+        frozen += isFrozen ? 1 : 0;
+    }
+    EXPECT_GT(frozen, 0u);
+    EXPECT_LE(frozen, h->guides().size() - selected.size());
+    EXPECT_EQ(f.doc->undoText(), "Undo solo selection");
+    // A drag over nothing (the view's corner).
+    f.session.press(QPointF(3.0, 3.0), 1.0f, kStrokeCtrl | kStrokeShift);
+    for (int k = 1; k <= 6; ++k) f.session.move(QPointF(3.0 + 8.0 * k, 3.0), 1.0f);
+    EXPECT_EQ(f.session.release(), StrokeRelease::Stroke);
+    EXPECT_TRUE(f.doc->selection().empty());
+    const std::shared_ptr<const GuideHierarchy> thawed = f.doc->session().authoredHierarchy();
+    for (const HierarchyGuide& guide : thawed->guides()) {
+        float v = 0.0f;
+        EXPECT_FALSE(thawed->effectiveAttribute(guide, "freeze", &v) && v >= 0.5f);
+    }
+    (void)before;
+}
+
 TEST(AppBrush, StrokesMoveGuidesWithOneUndoStepEach) {
     BrushFixture f;
     const std::string before = f.guides();
