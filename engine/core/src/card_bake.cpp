@@ -76,6 +76,8 @@ public:
             if (c > 0.0f) sum += c, occupied += 1.0f;
         }
         mean_ = occupied > 0.0f ? sum / occupied : 1.0f;
+        // After the mean, so the blur only moves density, not what a voxel's worth of hair is.
+        blur();
     }
     float voxel() const { return voxel_; }
     // Conventional ambient occlusion: cast a small fixed hemisphere around the surface normal,
@@ -97,8 +99,10 @@ public:
             const float hx = cs * h.x - sn * h.y, hy = sn * h.x + cs * h.y;
             const Vec3f ray = (u * hx + v * hy + n * h.z).normalized();
             float opticalDepth = 0.0f;
+            // From 1.65 voxels out: the blurred field reaches further from each strand, and this
+            // start keeps the AO as dark as the unblurred field's 1.25 did (issue #51).
             for (int step = 0; step < 4; ++step) {
-                const float distance = voxel_ * (1.25f + static_cast<float>(step));
+                const float distance = voxel_ * (1.65f + static_cast<float>(step));
                 opticalDepth += density(p + ray * distance) / mean_;
             }
             blocked += 1.0f - pm::exp(-0.35f * opticalDepth);
@@ -107,6 +111,31 @@ public:
     }
 
 private:
+    // A [1 2 1] / 4 pass along each axis. Splatting and reading back trilinearly makes a strand's
+    // density near it depend on where the strand sits between voxel centers: a barb or shaft at a
+    // slight angle to the grid drifts through those positions, and its AO waved in bands a few
+    // voxels long (issue #51). The blur makes the field all but independent of that position.
+    void blur() {
+        const std::size_t stride[3] = {1, static_cast<std::size_t>(dims_[0]),
+                                       static_cast<std::size_t>(dims_[0]) * static_cast<std::size_t>(dims_[1])};
+        std::vector<float> blurred(counts_.size());
+        for (int axis = 0; axis < 3; ++axis) {
+            for (int z = 0; z < dims_[2]; ++z) {
+                for (int y = 0; y < dims_[1]; ++y) {
+                    for (int x = 0; x < dims_[0]; ++x) {
+                        const int at = axis == 0 ? x : axis == 1 ? y : z;
+                        const std::size_t i = static_cast<std::size_t>(x) + static_cast<std::size_t>(y) * stride[1] +
+                                              static_cast<std::size_t>(z) * stride[2];
+                        float v = 2.0f * counts_[i];
+                        if (at > 0) v += counts_[i - stride[axis]];
+                        if (at + 1 < dims_[axis]) v += counts_[i + stride[axis]];
+                        blurred[i] = 0.25f * v;
+                    }
+                }
+            }
+            counts_.swap(blurred);
+        }
+    }
     // Deposit into the eight neighbouring voxel centers. Raw point-to-one-voxel deposition made
     // synchronized feather control points appear as dark horizontal bands in the AO map.
     void splat(const Vec3f& p) {

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -121,8 +122,8 @@ FurMaps furMaps(int size, int dilate = 8) {
 }
 
 // The 8-bit maps of the bake as they were before the full-precision maps came (recorded from
-// that code; the first again for the grid cards of PR #50): the old maps, and so the "Unreal Hair
-// Cards" preset, are the same bytes.
+// that code; the first again for the grid cards of PR #50 and the AO grid's blur, issue #51): the
+// old maps, and so the "Unreal Hair Cards" preset, are the same bytes.
 TEST(CardMaps, TheOldBakeIsTheSameBytes) {
     const StrandsPtr s = clumpedFur();
     const auto plane = test::makePlane(16);
@@ -131,11 +132,55 @@ TEST(CardMaps, TheOldBakeIsTheSameBytes) {
     bake.size = 256;
     bake.scalp = plane.get();
     bake.dilate = 8;  // (the padding the old bake had: Full came after)
-    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0x0e0cf5db8107e91full);
+    EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0x27a1f915d5cb029aull);
     bake.size = 128;
     bake.dilate = 0;
     bake.occlusion = 0.0f;
     EXPECT_EQ(texturesHash(bakeCardTextures(*s, mesh, bake)), 0xf3966511dcf857a1ull);
+}
+
+// Issue #51: a strand at a slight angle to the AO's voxel grid drifts across the voxel centers,
+// and its AO waved along it in bands (the bake read the density the strand splatted near itself,
+// which depended on where it sat between centers). A lone flat card of straight, evenly spaced
+// strands, tilted a few degrees in two axes, bakes its AO the same all along them, card by card.
+TEST(CardMaps, StraightStrandsAtAnAngleToTheAoGridBakeEvenAo) {
+    const auto plane = test::makePlane(16);
+    StrandSet s;
+    const Vec3f dir = Vec3f{std::sin(0.09f), 1.0f, std::sin(0.05f)}.normalized();
+    for (int k = 0; k < 6; ++k) s.addStrand(static_cast<StrandId>(k + 1), test::straightCurve({0.45f + 0.02f * k, 0.0f, 0.5f}, dir, 60));
+    s.addStrandChannel("clumpId", 0.0f);
+    CardSettings settings;
+    settings.variations = 0;
+    const CardMesh mesh = buildCards(s, plane.get(), settings);
+    ASSERT_FALSE(mesh.cards.empty());
+    CardBakeSettings bake;
+    bake.size = 512;
+    bake.scalp = plane.get();
+    bake.dilate = 0;
+    const CardTextures t = bakeCardTextures(s, mesh, bake);
+    for (const CardMesh::Card& card : mesh.cards) {
+        // Down the middle 70% of the card's cell, each row's AO where the coverage is full.
+        const int x0 = static_cast<int>(card.cell[0] * t.size), x1 = static_cast<int>(card.cell[2] * t.size);
+        const float top = (1.0f - card.cell[3]) * static_cast<float>(t.size), height = (card.cell[3] - card.cell[1]) * static_cast<float>(t.size);
+        std::vector<float> rows;
+        for (int y = static_cast<int>(top + 0.15f * height); y < static_cast<int>(top + 0.85f * height); ++y) {
+            float sum = 0.0f, n = 0.0f;
+            for (int x = x0; x < x1; ++x) {
+                const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(t.size) + static_cast<std::size_t>(x);
+                if (t.coverage[i] < 250) continue;
+                sum += static_cast<float>(t.occlusion[i]), n += 1.0f;
+            }
+            if (n > 0.0f) rows.push_back(sum / n);
+        }
+        ASSERT_GT(rows.size(), 50u);
+        float mean = 0.0f;
+        for (const float r : rows) mean += r / static_cast<float>(rows.size());
+        float variance = 0.0f;
+        for (const float r : rows) variance += (r - mean) * (r - mean) / static_cast<float>(rows.size());
+        std::printf("AO along the strands: mean %.1f, std %.2f over %zu rows\n", mean, std::sqrt(variance), rows.size());
+        EXPECT_LT(mean, 254.0f) << "the strands occlude each other";
+        EXPECT_LT(std::sqrt(variance), 1.5f) << "no bands along the strands (the bands measured 3 to 8)";
+    }
 }
 
 TEST(CardMaps, TheUnrealPresetWritesTheBakesOwnFiles) {
