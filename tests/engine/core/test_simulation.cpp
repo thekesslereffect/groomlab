@@ -947,8 +947,8 @@ float hangingStretch(double fps, int substeps, float stiffness, double seconds =
 }
 
 TEST(Simulation, TheLookHoldsAtAnyFrameRateAndSubsteps) {
-    // Root stiffness, stretch, friction and repulsion are shares per reference step (bend's
-    // compliance already was): 24 and 48 fps, 4 and 8 substeps settle the same, within what the
+    // Root stiffness, stretch and repulsion are shares per reference step (bend's compliance
+    // already was), friction Coulomb's: 24 and 48 fps, 4 and 8 substeps settle the same, within what the
     // solver itself gives at another step (its iterations per substep: an inextensible strand
     // without friction or repulsion).
     const std::vector<Vec3f> base = tipsAfter(24.0, 4, 3.0, 0.6f, 0.5f);

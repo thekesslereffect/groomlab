@@ -194,6 +194,11 @@ about one `volumeCellSize` and leaves hair that is already spread out alone. Sta
 0.3 and a cell size about the spacing you want between guides (1 cm on a head); larger cells give
 a fuller, smoother shape.
 
+`friction` works like real friction: hair pressed hard against a surface grips it, and hair barely
+touching it slides. The value is the steepest slope hair rests on without sliding, as a share of a
+right angle: 0.3 holds on slopes up to 27 degrees, 0.5 up to 45, and 1 never slides. On the scalp,
+the hair slides against the scalp as it moves, so a head turn carries the hair resting on it.
+
 Each collision surface has its own friction: `friction` is the scalp's (and the default), and a
 **ColliderMesh** node's `friction` its mesh's (-1 uses the Simulate node's). For example, hair
 catches on a wool collar and slides off a leather jacket. In Maya, `groomlab.add_collider(groom,

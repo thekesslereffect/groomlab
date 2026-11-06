@@ -169,6 +169,16 @@ float shareOver(float a, float h, float reference) {
     if (!(a > 0.0f)) return 0.0f;
     return 1.0f - pm::pow(1.0f - a, h / reference);
 }
+// Coulomb's friction coefficient for a `friction` of 0-1: the steepest slope hair rests on without
+// sliding, as a share of a right angle (0.3: 27 degrees, mu 0.51; 0.5: 45, mu 1). 0 is no friction;
+// 1 and above never slide.
+constexpr float kNeverSlides = 1e30f;
+float frictionCoefficientOf(float friction) {
+    if (!(friction > 0.0f)) return 0.0f;
+    if (friction >= 1.0f) return kNeverSlides;
+    const float a = friction * 1.5707963f;
+    return pm::sin(a) / pm::cos(a);
+}
 // The most one repulsion pass moves a point, as a share of the radius: a point crowded by many
 // others is not thrown out past them.
 constexpr float kMostRepulsion = 0.5f;
@@ -1336,11 +1346,12 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
     const float carry = 1.0f - s.inertia;
     const float scale = (kReferenceStep / h) * (kReferenceStep / h);
     const float bendCompliance = s.bend > 0.0f ? complianceOf(s.bend) * scale : -1.0f;
-    // Length keeping, friction and repulsion: shares per reference substep (as bend's compliance
-    // is), so the look holds at any frame rate and substeps.
+    // Length keeping and repulsion: shares per reference substep (as bend's compliance is), so the
+    // look holds at any frame rate and substeps. Friction is Coulomb's (a slide against how deep
+    // the surface pushed: the same at any step).
     const float stretchShare = shareOver(s.stiffness, h, kReferenceStep);
     const float stretchCompliance = stretchComplianceOf(s.stiffness) * scale;
-    const float frictionShare = shareOver(s.friction, h, kReferenceStep);
+    const float frictionMu = frictionCoefficientOf(s.friction);
     const float repulsionShare = shareOver(s.repulsion, h, kReferenceStep);
     const float twistCompliance = s.twist > 0.0f ? complianceOf(s.twist) * scale : -1.0f;
     // The wind: Wind's gust field (a noise travelling with the air), read at each root.
@@ -1432,7 +1443,7 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
         scalpNow = CollisionSurface::of(in.scalp, offset, fieldDepth, fieldSearch);
     }
     std::vector<CollisionSurface> colliders;
-    std::vector<float> colliderFriction;  // each one's friction share per step (its own, else `friction`)
+    std::vector<float> colliderFriction;  // each one's friction coefficient (its own, else `friction`'s)
     // A collider that moved since the last inputs (the same mesh, other points) is met by each
     // substep where it is then, on the way from there (its points blended): one sweeping through
     // the hair pushes it along the way instead of appearing past it at the first substep. Those
@@ -1459,7 +1470,7 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
             if (sweeping) sweeps.push_back({colliders.size(), before, now});
             colliders.push_back(std::move(c));
             const float own = k < in.colliderFriction.size() ? in.colliderFriction[k] : -1.0f;
-            colliderFriction.push_back(own >= 0.0f ? shareOver(std::min(own, 1.0f), h, kReferenceStep) : frictionShare);
+            colliderFriction.push_back(own >= 0.0f ? frictionCoefficientOf(own) : frictionMu);
         }
     }
     const std::vector<CollisionSurface> collidersNow = sweeps.empty() ? std::vector<CollisionSurface>{} : colliders;
@@ -1486,6 +1497,9 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
         std::size_t g = 0, b = 0, n = 0;
         RootPose r1;
         std::vector<Vec3f> p, tgt, corr;
+        // Each point where the scalp under it carries it over the substep (its root's motion): what
+        // friction against the scalp holds it to (guides rooted on the scalp's rest pose only).
+        std::vector<Vec3f> onScalp;
         std::vector<float> under;
         std::vector<RodSegment> rod;
     };
@@ -1508,6 +1522,10 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
             if (n == 1) x[b] = target(0, r1, a1);
             if (n == 1 && frameEnd && ps.blends) frameTarget[b] = x[b];
             return false;
+        }
+        if (scalpRest.mesh && restRooted.size() == count && restRooted[g]) {
+            st.onScalp.resize(n);
+            for (std::size_t j = 0; j < n; ++j) st.onScalp[j] = r1.toWorld(r0.toLocal(x[b + j]));
         }
         // The share of the root's motion the hair is carried by rigidly (inertia below 1).
         if (carry > 0.0f) {
@@ -1663,24 +1681,34 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
                 }
                 const Vec3f before = p[j];
                 // The friction of the surfaces that pushed it (the largest; each its own or `friction`).
-                float share = -1.0f;
+                float mu = -1.0f;
+                bool againstScalp = false;
                 if (viaRest) {
                     Vec3f at = rest.toWorld(r1.toLocal(p[j]));
                     if (scalpRest.pushOut(at, offset, pushDepth, pushSearch, unused)) {
                         p[j] = r1.toWorld(rest.toLocal(at));
-                        share = frictionShare;
+                        mu = frictionMu;
+                        againstScalp = true;
                     }
                 } else if (scalpNow.mesh) {
-                    if (scalpNow.pushOut(p[j], offset, pushDepth, pushSearch, scalpCursor)) share = frictionShare;
+                    if (scalpNow.pushOut(p[j], offset, pushDepth, pushSearch, scalpCursor)) mu = frictionMu;
                 }
                 for (std::size_t c = 0; c < colliders.size(); ++c) {
-                    if (colliders[c].pushOut(p[j], offset, pushDepth, pushSearch, colliderCursors[c])) share = std::max(share, colliderFriction[c]);
+                    if (colliders[c].pushOut(p[j], offset, pushDepth, pushSearch, colliderCursors[c])) mu = std::max(mu, colliderFriction[c]);
                 }
                 if (p[j] == before) continue;
-                const Vec3f normal = (p[j] - before).normalized();
-                const Vec3f moved = p[j] - x[i];
+                const Vec3f push = p[j] - before;
+                const float depth = push.length();
+                const Vec3f normal = push / depth;
+                // The slide along the surface over the substep: against the scalp as it moved under
+                // the point (its root's motion), else against the world.
+                const Vec3f moved = p[j] - (againstScalp ? st.onScalp[j] : x[i]);
                 const Vec3f sliding = moved - normal * moved.dot(normal);
-                p[j] -= sliding * (share >= 0.0f ? share : frictionShare);
+                const float slide = sliding.length();
+                // Coulomb: a slide within mu times how deep the surface pushed stops (the hair
+                // sticks), a longer one loses that much of it (the hair slides, slowed).
+                const float pushedMu = mu >= 0.0f ? mu : frictionMu;
+                if (slide > 0.0f) p[j] -= sliding * std::min(1.0f, pushedMu * depth / slide);
                 firstPushed = std::min(firstPushed, j);
             }
             if (firstPushed < n) {

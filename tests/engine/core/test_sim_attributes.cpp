@@ -370,6 +370,43 @@ TEST(SimFriction, EachColliderSlidesByItsOwnFriction) {
     EXPECT_LT(stuck, slid * 0.5) << "hair slid along the sticky ball (" << stuck << ") as along the slick one (" << slid << ")";
 }
 
+// Coulomb friction: a limp guide lying across a 20 degree slope from its root rests there when
+// `friction` holds slopes steeper than that (0.3: 27 degrees) and swings down it when not (0.15:
+// 13.5 degrees), at any substeps.
+TEST(SimFriction, HairRestsOnSlopesUpToItsFrictionsAngle) {
+    const float slope = 20.0f * 3.14159265f / 180.0f;
+    const Vec3f up{std::cos(slope), std::sin(slope), 0.0f}, normal{-std::sin(slope), std::cos(slope), 0.0f};
+    const auto flat = test::makePlane(8, 4.0f);
+    std::vector<Vec3f> points = flat->points();
+    for (Vec3f& p : points) {
+        const Vec3f c = p - Vec3f{2.0f, 0.0f, 2.0f};
+        p = up * c.x + normal * c.y + Vec3f{0.0f, 0.0f, c.z};
+    }
+    const MeshPtr plane = std::make_shared<const ScalpMesh>(std::move(points), flat->triangles());  // facing `normal`
+    auto guides = std::make_shared<GuideSet>();
+    const Vec3f root = Vec3f{0.0f, 0.0f, -0.5f} + normal * 0.03f, across{0.0f, 0.0f, 1.0f};
+    guides->add(1, test::straightCurve(root, across, 10));
+    auto slid = [&](float friction, int substeps) {
+        SimSettings s = unitSettings();
+        s.bend = 0.0f;
+        s.twist = 0.0f;
+        s.rootStiffnessProfile = Ramp::constant(0.0f);
+        s.friction = friction;
+        s.substeps = substeps;
+        const std::vector<Vec3f> p = run(s, {guides, nullptr, {plane}}, 48);
+        return (root + across - p.back()).dot(up);  // how far down the slope the tip went
+    };
+    EXPECT_LT(slid(0.3f, 4), 0.03f) << "hair slid on a slope its friction holds";
+    EXPECT_LT(slid(0.3f, 8), 0.03f) << "hair slid on a slope its friction holds (8 substeps)";
+    EXPECT_LT(slid(1.0f, 4), 0.03f) << "friction 1 let hair slide";
+    const float slow = slid(0.15f, 4), free = slid(0.0f, 4);
+    EXPECT_GT(slow, 0.2f) << "hair held on a slope steeper than its friction's";
+    EXPECT_GT(free, slow) << "friction did not slow the slide";
+    // Either side of the slope's angle: 22.5 degrees holds, 18 slides.
+    EXPECT_LT(slid(0.25f, 4), 0.03f) << "hair slid on a slope just under its friction's angle";
+    EXPECT_GT(slid(0.2f, 4), 0.1f) << "hair held on a slope just over its friction's angle";
+}
+
 // ---- Cost ----------------------------------------------------------------------------------------
 
 // 5k guides of 20 points over a head-sized sphere (centimeters), the node's defaults: ms per frame

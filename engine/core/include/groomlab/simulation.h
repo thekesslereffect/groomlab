@@ -53,9 +53,9 @@
 // bit); the guide-guide repulsion, when on, reads the points as they were before its pass,
 // so results never depend on how threads met them, and moves a point at most half its radius a pass.
 // Every share is per a reference time step, not per step (bend, twist and stretch's compliance,
-// the length kept after the iterations, friction and repulsion per 1/96 s, rootStiffnessProfile
-// per 24 fps frame): the look holds at any frame rate and substeps (finer steps only follow the
-// motion more closely).
+// the length kept after the iterations and repulsion per 1/96 s, rootStiffnessProfile per 24 fps
+// frame; friction is Coulomb's, a slide against how deep the surface pushed): the look holds at
+// any frame rate and substeps (finer steps only follow the motion more closely).
 //
 // Water (`water` on): points below the surface (the plane y = waterLevel, or the water mesh on
 // the node's `water` input: below its surface along the closest point's normal) feel buoyancy
@@ -95,7 +95,10 @@
 //
 // Friction per surface: the scalp's is `friction`, each collider's its ColliderMesh node's
 // `friction` (SimInputs::colliderFriction; negative: `friction`); a point pushed out of several
-// takes the largest.
+// takes the largest. Coulomb's law: a point's slide over a substep within mu times how deep the
+// surfaces pushed it stops, a longer one loses that much; mu is the tangent of `friction` times a
+// right angle (1: never slides). Against the scalp the slide is the point's against the scalp as
+// it moved under it (its guide's root's motion), against a collider the world's.
 
 #include <cstdint>
 #include <functional>
@@ -137,7 +140,7 @@ struct SimSettings {
     float inertia = 1.0f;         // the share of the head's motion the hair feels, 0-1
     bool collideScalp = true;
     float collisionOffset = 0.05f;  // distance kept from the scalp and colliders
-    float friction = 0.3f;          // 0-1 of the sliding along a surface taken away (per 1/96 s)
+    float friction = 0.3f;          // Coulomb's, as the steepest slope hair rests on, 0-1 of a right angle (1: sticks)
     float repulsion = 0.0f;         // guide-guide repulsion strength, 0-1 (0: off), per 1/96 s
     float repulsionRadius = 0.2f;   // distance guides keep from each other
     int substeps = 4;

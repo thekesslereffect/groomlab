@@ -101,7 +101,8 @@ public:
                 subdivisionSpec("collider"),
                 // Read by the session for a Simulate node this feeds (SimInputs::colliderFriction).
                 notAnimatable({"friction", -1.0, "How much simulated hair resting on this mesh is kept from sliding, 0-1, "
-                                                 "in a Simulate node it feeds (-1: the Simulate node's friction)"})
+                                                 "in a Simulate node it feeds: the steepest slope it rests on, a share of a "
+                                                 "right angle (1: never slides; -1: the Simulate node's friction)"})
                     .range(-1, 1)};
     }
     std::vector<std::string> externalInputs() const override { return {externalName()}; }

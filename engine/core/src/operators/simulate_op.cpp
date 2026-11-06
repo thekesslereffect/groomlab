@@ -92,7 +92,9 @@ public:
                 .soft(0, 0.5)
                 .in("Collisions"),
             notAnimatable({"friction", 0.3, "How much hair resting on a surface (the scalp, a collider) is kept from sliding, "
-                                            "0-1 (a ColliderMesh node's own friction overrides it for its mesh)"})
+                                            "0-1: hair pressed harder grips more; the steepest slope it rests on, a share "
+                                            "of a right angle (0.3: 27 degrees, 1: never slides). A ColliderMesh node's own "
+                                            "friction overrides it for its mesh"})
                 .range(0, 1)
                 .in("Collisions"),
             notAnimatable({"repulsion", 0.0, "Guides pushed apart where closer than repulsionRadius, 0-1 (0: off)"})
