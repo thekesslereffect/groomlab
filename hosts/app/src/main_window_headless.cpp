@@ -409,6 +409,7 @@ QImage MainWindow::renderOffscreen(const QSize& size, int frames, double* msPerF
     if (document_) {
         document_->display().invalidateAll();
         renderer.setFrame(document_->updateDisplay(settings_));
+        renderer.setScalpMap(document_->shownScalpMap());
         const ViewResult& view = document_->lastView();
         renderer.setScalp(view.scalp ? view.scalp : document_->file().data.scalp);
         renderer.setHairStrands(settings_.cardsView ? nullptr : view.strands, view.versions.strands);

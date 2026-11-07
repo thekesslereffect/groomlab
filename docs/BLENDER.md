@@ -339,7 +339,8 @@ the symmetry in the **host's axes**; strengths, values and pixels are as in Maya
 | `map_for_param` | `node`, `param`, `kind` (vertices, texture, guides), `resolution` (1024) | `{"name", "kind", "made", "graphChanged", "tool", "undo"}`: New Map > For a setting, and the Graph Editor's Paint (On Guides, On Scalp Vertices, As Texture). The map node.param reads, else a white map `<node>_<param>` made and linked to it (the graph's map param; `guides`: a guide layer at 1 on every primary guide, children inheriting it) as one undo step; the Paint tool on it toward 1 (Ctrl: toward 0; on Scatter's density, no hair). The Width and Density brushes it replaced answer `tool_set` with an error naming it |
 | `undo` / `redo` | | `undo_state` + `"done"` |
 | `undo_state` | | `{"canUndo", "canRedo", "undoLabel" ("comb", "place", "generate children", "create map mask"...), "redoLabel", "undoDepth", "redoDepth"}` |
-| `display` | `settings`, `have` {item: version}, `generation`, `map` (name or {name, channel}), `strandColors` {mode, source, min, max, perPoint} | the display buffers (below) |
+| `display` | `settings`, `have` {item: version, `scalpMapImage`: key}, `generation`, `map` (name or {name, channel, textured}), `strandColors` {mode, source, min, max, perPoint} | the display buffers (below) |
+| `maps_move_to` | `dir` ("": the temp folder, nothing copied) | `{"folder", "moved": [{name, from, to}]}`: the maps folder set; the texture maps whose file is in the folder before or a temp maps folder copied into it (the same image there is used as it is, else a free name) and pointed there. Not an undo step |
 | `get_state` | `scalp` (true; false; "maps": only while maps painted on the scalp's vertices live in its color sets, what the add-on asks for: the scalp as JSON is most of the state on a dense mesh), `textures` (true), `texts` (false) | `{"format": "groomlab.groom", "groom": the .groom text (groom space), "textures": [{name, stored, png (base64)}], "tools": {selection, softSelectRadius, hiddenGroups, groupColors}, "texts"?: {guideData, partData, flowData, correctiveData, scalpMaps}}` |
 | `set_state` | `groom` (text or object), `textures`, `tools`, `keepScalp` (true) | groom info: the state adopted as `load_groom` adopts a file, its textures written into the maps folder (the maps repointed), the session's scalp kept |
 
@@ -371,9 +372,16 @@ maps as PNG files (made in the maps folder, painted in place, kept open between 
 file is what they wrote), guide layers on the guides. A groom file's maps are adopted when it is
 read (so they outlive the host's scalp, which has no color sets); `save_groom` and `get_state`
 write them back as Maya reads them (the catalog, vertex maps as the scalp's color sets).
-The maps folder (`set_options mapsDir`, else a folder of the session's in the temp folder) is
-Blender's stand-in for Maya's masks folder: what `map_remove deleteFile` may delete and
-`map_rename` may move. The images themselves travel in the .blend (`get_state`'s `textures`).
+The maps folder is Blender's masks folder, as Maya keeps a scene's: the add-on sends
+`<.blend's folder>/groomlab/<.blend's name>/masks/<scalp>` (`set_options mapsDir` before a session
+is restored, then `maps_move_to`), and the helper's own folder in the temp folder while the file
+is untitled. It is what `map_remove deleteFile` may delete and `map_rename` may move. Before each
+save (`snapshot_all`, given the file being saved: the first save, Save As), `maps_move_to` copies
+the texture maps GroomLab made in another folder (the temp folder, the old file's) into the new
+one and points them there, then the states are kept. The images also travel in the .blend
+(`get_state`'s `textures`): `set_state` reads a map's file where it is when it is still on disk, and
+writes the state's image into the maps folder only when it is gone (another machine, a cleaned
+temp folder).
 
 **Display buffers.** `display` runs a `DisplayBuilder` (one per session) on the guides as they
 are now (`GroomSession::hierarchy()`: a live stroke's preview included), the last evaluation's
@@ -409,7 +417,12 @@ the next `display`):
   (white, orange), `lineWidth` one wider. `parts` (red), `flowArrows` (orange arrows, sinks' rings
   and streamlines), `flowField` (the field over the scalp), `tubes` (shaded triangles with normals),
   `scalpMap` (the map shown, the scalp lifted a hair off its surface with per-vertex colors; a
-  texture map sampled at its vertices; a live stroke's values while painting).
+  live stroke's values while painting). A texture map with `map.textured` (the add-on asks for
+  it, as Maya draws one): the scalp with its `uvs` (n, 2) and an item `scalpMapImage` {key,
+  changed, width, height, arrays.rgba (w*h, 4) uint8, rows bottom-up}: the file's image, or the
+  brush's live one while painting, sent again only when its key moves (`have.scalpMapImage`); the
+  add-on draws it with Blender's IMAGE shader, writing depth. Without `textured`, sampled at the
+  scalp's vertices.
 - `tubeWires` / `selectedTubeWires`: with `tubeWires` true (the host sends it while the Shape brush
   is on, as Maya draws them), every guide's tube the brush can shape (shown, not frozen:
   `activeTubeGuides`) as wire lines (`appendTubeWire`), the selected guides' apart (warm, opaque,

@@ -877,11 +877,30 @@ bool MapsPanel::paintSelected() {
     s.paintTexture = map->kind == "texture" ? document_->textureMapFile(name) : std::string();
     applyPaintSettings();
     emit paintRequested();
+    // A scalp map shows on the scalp while it is painted (Maya's paint_map): a texture map as its
+    // image, a vertex map per vertex.
+    if ((map->kind == "texture" || map->kind == "vertices") && document_->scalpMapDisplay() != name) {
+        showSelected(true);
+        paintShown_ = name;
+    }
     return true;
+}
+
+void MapsPanel::endPainting() {
+    const std::string shown = paintShown_;
+    paintShown_.clear();
+    if (!document_ || shown.empty() || document_->scalpMapDisplay() != shown) return;
+    document_->setScalpMapDisplay({}, document_->scalpMapChannel());
+    {
+        const QSignalBlocker block(show_);
+        show_->setChecked(false);
+    }
+    emit displayChanged();
 }
 
 void MapsPanel::showSelected(bool show) {
     if (!document_) return;
+    paintShown_.clear();  // shown (or hidden) on purpose: painting ending leaves it
     const std::string name = selectedMap();
     const QString channel = channel_->currentData().toString();
     document_->setScalpMapDisplay(show ? name : std::string(), channel.isEmpty() ? std::string("rgb") : channel.toStdString());

@@ -288,7 +288,7 @@ std::string GroomDocument::mapImageFile(const std::string& map, const std::strin
     if (channels) *channels = imageIsGray(*image) ? kGrayMap : kColorMap;
     if (pngPath(path)) return forwardSlashes(std::filesystem::u8path(path).u8string());  // in place: painting edits it
     // Another format is copied into the maps folder as a PNG (painting writes PNG).
-    if (mapsDirectory().empty()) throw std::runtime_error("save the groom first: a JPEG, TGA, PSD... is copied as a PNG into a masks folder beside it");
+    if (mapsDirectory().empty()) throw std::runtime_error("save the groom first: a JPEG, TGA, PSD... is copied as a PNG into the groomlab folder beside it");
     const std::string target = freeMapFile(map);
     Edit::FileState state{target, readBytes(target), std::nullopt};
     std::filesystem::create_directories(std::filesystem::u8path(target).parent_path(), ec);
@@ -556,7 +556,7 @@ std::string GroomDocument::convertMap(const std::string& name, const std::string
             maps.maps[name] = std::move(entry);
         } else if (to == "texture") {
             if (!scalp->hasUVs()) return "the scalp has no UVs for a texture map";
-            if (mapsDirectory().empty()) return "save the groom first: a texture map's image goes in a masks folder beside it";
+            if (mapsDirectory().empty()) return "save the groom first: a texture map's image goes in the groomlab folder beside it";
             const std::string file = freeMapFile(name);
             const TexturePaint paint = from == "guides" ? textureFromGuides(flat, name, *scalp, size, size)
                                                         : textureFromVertexMap(vertices, channels, *scalp, size, size);

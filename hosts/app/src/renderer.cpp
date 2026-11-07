@@ -18,6 +18,7 @@
 
 #include "gpu_preview.h"
 #include "groomlab/math.h"
+#include "groomlab/scalp_paint.h"
 
 // Q_INIT_RESOURCE cannot sit in a namespace: the shaders' resources (a static library's) are
 // pulled in here.
@@ -237,6 +238,7 @@ GroomRenderer::Kind GroomRenderer::kindOf(const DisplayGeometry& g, bool overlay
         return g.lines->colors ? Kind::StrandLinesColored : Kind::StrandLines;
     }
     const bool colored = !g.colors.empty();
+    if (g.triangles && g.mapTexture && !g.uvs.empty()) return Kind::MapTextured;  // the scalp map's image
     if (g.triangles) {
         if (g.surface || g.cardTextures || (!g.normals.empty() && !colored)) return Kind::Surface;
         return colored ? Kind::TrianglesColored : Kind::Triangles;
@@ -266,7 +268,14 @@ void GroomRenderer::setFrame(const DisplayFrame& frame) {
                 gpu.pendingUpdated = item.updated;
                 gpu.pendingColors.reset();
                 gpu.overlay = item.geometry->overlay;
-                gpu.kind = kindOf(*gpu.pending, gpu.overlay);
+                const Kind kind = kindOf(*gpu.pending, gpu.overlay);
+                if (kind != gpu.kind && (kind == Kind::MapTextured || gpu.kind == Kind::MapTextured)) {
+                    // The scalp map between its image and per-vertex colors: its bindings hold the
+                    // texture or not, made again for the new kind.
+                    gpu.bindings.reset();
+                    gpu.bindingsHdr.reset();
+                }
+                gpu.kind = kind;
             }
         } else if (item.recolor && item.recolored) {
             gpu.pendingColors = item.recolored;
@@ -626,6 +635,69 @@ bool GroomRenderer::preparePhoto(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTar
     return g.pipeline != nullptr;
 }
 
+void GroomRenderer::setScalpMap(const ScalpMapView& view) {
+    map_ = view;
+    mapFileKey_.clear();
+    if (map_.kind == "texture" && !map_.preview && !map_.texture.empty()) {
+        mapFileKey_ = "file:" + map_.texture + "@" + std::to_string(fileStamp(map_.texture)) + "#" +
+                      (map_.channels == 4 ? map_.channel : std::string("gray"));
+    }
+}
+
+bool GroomRenderer::prepareMapTexture(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
+    MapGpu& g = mapGpu_;
+    if (map_.kind != "texture") return false;
+    if (!g.sampler) {
+        g.sampler.reset(rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None, QRhiSampler::ClampToEdge,
+                                        QRhiSampler::ClampToEdge));
+        if (!g.sampler->create()) {
+            g.sampler.reset();
+            return false;
+        }
+    }
+    // The image: the brush's live one (each revision), else the file's (as the map shows it).
+    const TexturePreview* preview = map_.preview && map_.preview->width() > 0 && map_.preview->height() > 0 ? map_.preview.get() : nullptr;
+    const std::string key = preview ? "preview:" + std::to_string(preview->layout()) + ":" + std::to_string(preview->revision()) : mapFileKey_;
+    if (key.empty()) return false;
+    if (key == g.key && g.texture) return true;
+    int width = 0, height = 0;
+    const std::uint8_t* pixels = nullptr;
+    std::vector<std::uint8_t> own;
+    if (preview) {
+        width = preview->width();
+        height = preview->height();
+        pixels = preview->rgba().data();
+    } else {
+        TexturePtr texture;
+        try {
+            texture = loadTexture(map_.texture);
+        } catch (const std::exception&) {
+        }
+        const Texture::Image* image = texture ? texture->image() : nullptr;
+        if (!image || image->width <= 0 || image->height <= 0) return false;
+        own = scalpMapCachedPixels(*image, map_.channels, scalpMapPick(map_.channel));
+        width = image->width;
+        height = image->height;
+        pixels = own.data();
+    }
+    if (!g.texture || g.texture->pixelSize() != QSize(width, height)) {
+        g.texture.reset(rhi->newTexture(QRhiTexture::RGBA8, QSize(width, height)));
+        if (!g.texture->create()) {
+            g.texture.reset();
+            return false;
+        }
+        // The scalp map item's bindings held the old texture.
+        GpuItem& item = *items_[static_cast<std::size_t>(DisplayItemId::ScalpMap)];
+        item.bindings.reset();
+        item.bindingsHdr.reset();
+    }
+    // Rows bottom-up as they come: the first row at v 0, the bottom of the scalp's uv space.
+    QRhiTextureSubresourceUploadDescription sub(pixels, static_cast<quint32>(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4));
+    batch->uploadTexture(g.texture.get(), QRhiTextureUploadDescription({0, 0, sub}));
+    g.key = key;
+    return true;
+}
+
 void GroomRenderer::drawPhoto(QRhiCommandBuffer* cb) {
     const PhotoGpu& g = photoGpu_;
     if (!g.pipeline) return;
@@ -652,13 +724,20 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
     const QShader flatFrag = loadShader("flat.frag");
     const QShader surfaceVert = loadShader("surface.vert"), surfaceFrag = loadShader("surface.frag");
     const QShader dotsVert = loadShader("dots.vert");
+    const QShader mapVert = loadShader("map.vert"), mapFrag = loadShader("map.frag");
 
     // A kind's pipeline (`depthWrite` false: the strand lines' blended pass, depth tested alone).
     auto make = [&](Kind kind, bool depthWrite) {
         auto p = std::make_unique<Pipeline>();
         p->layout.reset(rhi->newShaderResourceBindings());
-        p->layout->setBindings({QRhiShaderResourceBinding::uniformBuffer(
-            0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, nullptr)});
+        if (kind == Kind::MapTextured) {
+            p->layout->setBindings({QRhiShaderResourceBinding::uniformBuffer(
+                                        0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, nullptr),
+                                    QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage, nullptr, nullptr)});
+        } else {
+            p->layout->setBindings({QRhiShaderResourceBinding::uniformBuffer(
+                0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, nullptr)});
+        }
         p->layout->create();
 
         auto* ps = rhi->newGraphicsPipeline();
@@ -727,6 +806,13 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
                                       {2, 2, QRhiVertexInputAttribute::Float4, 0}});
                 triangles = true;
                 depthTest = false;  // over the guides, as the guides are over the hair
+                break;
+            case Kind::MapTextured:
+                ps->setShaderStages({{QRhiShaderStage::Vertex, mapVert}, {QRhiShaderStage::Fragment, mapFrag}});
+                layout.setBindings({{kStrideXYZ}, {kStrideUV}});
+                layout.setAttributes({{0, 0, QRhiVertexInputAttribute::Float3, 0},
+                                      {1, 1, QRhiVertexInputAttribute::Float2, 0}});
+                triangles = true;
                 break;
             case Kind::Count:
                 break;
@@ -960,9 +1046,19 @@ void GroomRenderer::upload(QRhi* rhi, QRhiResourceUpdateBatch* batch, GpuItem& i
             uniforms->create();
         }
         if (!bindings) {
-            bindings.reset(rhi->newShaderResourceBindings());
-            bindings->setBindings({QRhiShaderResourceBinding::uniformBuffer(
-                0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, uniforms.get())});
+            if (item.kind == Kind::MapTextured) {
+                // With the map's texture (none yet: made when it is, prepareMapTexture).
+                if (!mapGpu_.texture || !mapGpu_.sampler) return;
+                bindings.reset(rhi->newShaderResourceBindings());
+                bindings->setBindings({QRhiShaderResourceBinding::uniformBuffer(
+                                           0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, uniforms.get()),
+                                       QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage,
+                                                                                 mapGpu_.texture.get(), mapGpu_.sampler.get())});
+            } else {
+                bindings.reset(rhi->newShaderResourceBindings());
+                bindings->setBindings({QRhiShaderResourceBinding::uniformBuffer(
+                    0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage, uniforms.get())});
+            }
             bindings->create();
         }
     };
@@ -1052,6 +1148,10 @@ bool GroomRenderer::setInputs(QRhiCommandBuffer* cb, const GpuItem& item, QRhiBu
             if (!item.offsets || !item.colors) return false;
             inputs.append({item.offsets.get(), 0});
             inputs.append({item.colors.get(), 0});
+            break;
+        case Kind::MapTextured:
+            if (!item.uvs) return false;
+            inputs.append({item.uvs.get(), 0});
             break;
         default:
             break;
@@ -1211,6 +1311,7 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
         main_ = PipelineSet();
         hdr_ = PipelineSet();
         photoGpu_ = PhotoGpu();
+        mapGpu_ = MapGpu();
         if (gpuPreview_) gpuPreview_->releaseResources();
     }
     ensurePipelines(rhi, target->renderPassDescriptor(), target->sampleCount(), main_);
@@ -1236,6 +1337,7 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     const QMatrix4x4 hdrMvp = lookdev ? lookdev_.jitter(size) * mvp : mvp;
 
     QRhiResourceUpdateBatch* batch = rhi->nextResourceUpdateBatch();
+    prepareMapTexture(rhi, batch);
     auto prepare = [&](GpuItem& item, bool skip) {
         item.fresh = false;
         if (!item.shown || skip) return;

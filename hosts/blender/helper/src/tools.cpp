@@ -1063,11 +1063,12 @@ json directionsToHost(Arena& arena, const std::vector<float>& xyz, const HostSpa
 
 std::size_t geometryBytes(const DisplayGeometry& g) {
     return Arena::reserve(g.positions.size() * 4) + Arena::reserve(g.indices.size() * 4) + Arena::reserve(g.colors.size() * 4) +
-           Arena::reserve(g.normals.size() * 4);
+           Arena::reserve(g.normals.size() * 4) + (g.mapTexture ? Arena::reserve(g.uvs.size() * 4) : 0);
 }
 
 // A geometry's arrays in the host's space: positions (n, 3), indices (pairs or triples), colors
-// (n, 4) when per vertex, normals (n, 3) for a shaded surface.
+// (n, 4) when per vertex, normals (n, 3) for a shaded surface, uvs (n, 2) for the scalp map's
+// image (mapTexture).
 json geometryArrays(Arena& arena, const DisplayGeometry& g, const HostSpace& space) {
     json a;
     a["positions"] = positionsToHost(arena, g.positions, space);
@@ -1075,7 +1076,53 @@ json geometryArrays(Arena& arena, const DisplayGeometry& g, const HostSpace& spa
     a["indices"] = put(arena, g.indices.data(), g.indices.size() / per, per);
     if (!g.colors.empty()) a["colors"] = put(arena, g.colors.data(), g.colors.size() / 4, 4);
     if (!g.normals.empty()) a["normals"] = directionsToHost(arena, g.normals, space);
+    if (g.mapTexture && !g.uvs.empty()) a["uvs"] = put(arena, g.uvs.data(), g.uvs.size() / 2, 2);
     return a;
+}
+
+// The scalp map's image as the host's texture takes it: 8-bit RGBA, rows bottom-up (the scalp's
+// uvs, v = 0 the bottom row), as Maya's viewport makes its texture. `key` names the image and
+// changes when it does: the brush's live image (each revision), else the file (its stamp) shown
+// in the channel picked. No pixels: no image.
+struct MapImage {
+    std::string key;
+    std::uint64_t texture = 0;  // which texture (not its texels): the geometry's generation
+    int width = 0, height = 0;
+    const std::uint8_t* pixels = nullptr;
+    std::vector<std::uint8_t> own;  // a file's
+};
+
+MapImage mapImage(const ScalpMapView& view, bool withPixels) {
+    MapImage m;
+    if (view.preview && view.preview->width() > 0 && view.preview->height() > 0) {
+        const TexturePreview& p = *view.preview;
+        m.texture = hashCombine(hash64(0x9E7A), p.layout());
+        m.key = "preview:" + std::to_string(p.layout()) + ":" + std::to_string(p.revision());
+        m.width = p.width();
+        m.height = p.height();
+        m.pixels = p.rgba().data();
+        return m;
+    }
+    const std::string file = view.texture + "@" + std::to_string(fileStamp(view.texture)) + "#" +
+                             (view.channels == 4 ? view.channel : std::string("gray"));
+    m.texture = hashString(hash64(0x9E7B), file);
+    m.key = "file:" + file;
+    if (!withPixels) return m;
+    TexturePtr texture;
+    try {
+        texture = loadTexture(view.texture);
+    } catch (const std::exception&) {
+    }
+    const Texture::Image* image = texture ? texture->image() : nullptr;
+    if (!image || image->width <= 0 || image->height <= 0) {
+        m.key.clear();
+        return m;
+    }
+    m.own = scalpMapCachedPixels(*image, view.channels, scalpMapPick(view.channel));
+    m.width = image->width;
+    m.height = image->height;
+    m.pixels = m.own.data();
+    return m;
 }
 
 json overlayJson(ToolState& t, bool arrays) {
@@ -2650,10 +2697,76 @@ json mapReload(ToolState& t, const json& args) {
     return {{"files", files}};
 }
 
+// A file's bytes ("" when it cannot be read).
+std::string readFile(const std::string& path) {
+    std::ifstream in(fs::u8path(path), std::ios::binary);
+    return in ? std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()) : std::string();
+}
+
+// Whether `path` is in a maps folder a session made in the temp folder while its .blend was
+// untitled: <temp>/groomlab_<pid>_s<n>maps_<k>/ (this session's or an earlier helper's).
+bool inTempMapsFolder(const std::string& path) {
+    std::error_code ec;
+    const fs::path temp = fs::temp_directory_path(ec);
+    if (ec) return false;
+    const fs::path folder = fs::u8path(path).parent_path();
+    const std::string name = folder.filename().u8string();
+    return name.rfind("groomlab_", 0) == 0 && name.find("maps") != std::string::npos && inFolder(folder.generic_u8string(), temp.generic_u8string());
+}
+
+// The host's own maps folder for the groom (Blender: <blend folder>/groomlab/<blend>/masks/<scalp>,
+// "" for an untitled file: the temp folder, nothing copied). The texture maps whose image GroomLab
+// made in another folder (the session's maps folder before, or a temp maps folder of an untitled
+// file, this session's or an earlier one's) are copied into it under the same name (a free one
+// when taken) and point there; not an undo step, as Maya's scene save repoints them. Returns the
+// folder and what was copied.
+json mapsMoveTo(ToolState& t, const json& args) {
+    Session& s = t.session;
+    const std::string dir = optString(args, "dir", "");
+    const std::string old = mapsFolder(s);
+    s.mapsDir = dir;
+    const std::string now = mapsFolder(s);
+    json moved = json::array();
+    if (dir.empty()) return {{"folder", now}, {"moved", moved}};  // untitled: they stay where they are
+    // What the brush holds unwritten goes to its file first.
+    for (const auto& kept : t.host.kept) writeTexture(t, kept.first);
+    ScalpMaps maps = s.groom->scalpMaps();
+    bool changed = false;
+    std::error_code ec;
+    for (auto& [name, entry] : maps.maps) {
+        if (entry.kind != "texture" || entry.texture.empty()) continue;
+        const std::string file = resolveMapFile(s, entry.texture);
+        if (inFolder(file, now) || !(inFolder(file, old) || inTempMapsFolder(file)) || !fs::is_regular_file(fs::u8path(file), ec)) continue;
+        fs::create_directories(fs::u8path(now), ec);
+        // Under its name, or the same image already there (copied before); else a free name.
+        const fs::path wanted = fs::u8path(now) / fs::u8path(file).filename();
+        std::string target = wanted.generic_u8string();
+        if (!fs::exists(wanted, ec) || readFile(target) != readFile(file)) {
+            target = freeFile(target);
+            fs::copy_file(fs::u8path(file), fs::u8path(target), fs::copy_options::none, ec);
+            if (ec) {
+                ec.clear();
+                continue;
+            }
+        }
+        moved.push_back({{"name", name}, {"from", file}, {"to", target}});
+        entry.texture = target;
+        changed = true;
+    }
+    if (changed) {
+        dropPaints(t);
+        s.groom->setScalpMaps(maps);
+        BrushToolSettings& st = t.tool.settings;
+        const auto it = maps.maps.find(st.brush.attribute);
+        if (st.paintKind == "texture" && it != maps.maps.end()) st.paintTexture = it->second.texture;
+    }
+    return {{"folder", now}, {"moved", moved}};
+}
+
 // The map shown on the scalp: the session's view of a vertex map or guide layer; a texture map
-// (its file, or the brush's live image while painting) sampled at the scalp's vertices, as the
-// app shows it.
-ScalpMapView mapView(Session& s, const std::string& name, const std::string& channel) {
+// (its file, or the brush's live image while painting) as it is when `textured` (the host draws
+// the image at the scalp's uvs, as Maya does: scalpMapImage), else sampled at the scalp's vertices.
+ScalpMapView mapView(Session& s, const std::string& name, const std::string& channel, bool textured) {
     ScalpMapView view = s.groom->scalpMapView(name, channel);
     if (view.kind != "texture") return view;
     const MeshPtr scalp = s.groom->scalp();
@@ -2673,6 +2786,7 @@ ScalpMapView mapView(Session& s, const std::string& name, const std::string& cha
         view.kind.clear();
         return view;
     }
+    if (textured) return view;
     const std::size_t per = view.channels == 4 ? 4 : 1;
     auto values = std::make_shared<std::vector<float>>(scalp->pointCount() * per, 0.0f);
     std::vector<std::uint8_t> seen(scalp->pointCount(), 0);
@@ -2907,12 +3021,22 @@ json display(ToolState& t, const json& args) {
         };
         in.selectionHash = hashFloat(hash64(t.selectionVersion), soft);
     }
+    // A texture map is drawn with its image when the host says it draws one (`textured`).
+    bool textured = false;
     if (args.contains("map") && args["map"].is_object()) {
         const json& m = args["map"];
         const std::string name = optString(m, "name", "");
-        if (!name.empty()) in.scalpMap = mapView(s, name, optString(m, "channel", "rgb"));
+        textured = optBool(m, "textured", false);
+        if (!name.empty()) in.scalpMap = mapView(s, name, optString(m, "channel", "rgb"), textured);
     } else if (args.contains("map") && args["map"].is_string() && !args["map"].get<std::string>().empty()) {
-        in.scalpMap = mapView(s, args["map"].get<std::string>(), "rgb");
+        in.scalpMap = mapView(s, args["map"].get<std::string>(), "rgb", false);
+    }
+    MapImage image;
+    const bool imageShown = textured && in.scalpMap.kind == "texture";
+    if (imageShown) {
+        image = mapImage(in.scalpMap, false);
+        in.scalpMapTexture = !image.key.empty();
+        in.scalpMapTextureGeneration = image.texture;
     }
     const DisplayFrame& frame = t.builder.update(in, settings);
     const json& asked = args.contains("settings") ? args["settings"] : json(nullptr);
@@ -2938,6 +3062,13 @@ json display(ToolState& t, const json& args) {
     const std::uint64_t dotsVersion = frame.item(DisplayItemId::Guides).geometryVersion;
     const bool sendDots = dotsVersion != haveVersion(have, "dots");
     if (sendDots) bytes += Arena::reserve(frame.dots.points.size() * 12) * 2;
+    // The scalp map's image when the host holds another (its key).
+    const bool sendImage = imageShown && !image.key.empty() &&
+                           !(have.contains("scalpMapImage") && have["scalpMapImage"].is_string() && have["scalpMapImage"] == image.key);
+    if (sendImage) {
+        image = mapImage(in.scalpMap, true);
+        if (image.pixels) bytes += Arena::reserve(static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height) * 4);
+    }
     t.displayOut.begin(bytes + 64);
 
     json items = json::object();
@@ -2991,6 +3122,18 @@ json display(ToolState& t, const json& args) {
         dots["arrays"] = a;
     }
     items["dots"] = dots;
+    if (imageShown) {
+        json img;
+        img["key"] = image.key;
+        img["changed"] = sendImage && image.pixels;
+        if (sendImage && image.pixels) {
+            img["width"] = image.width;
+            img["height"] = image.height;
+            const std::size_t texels = static_cast<std::size_t>(image.width) * static_cast<std::size_t>(image.height);
+            img["arrays"] = {{"rgba", put(t.displayOut, image.pixels, texels, 4)}};
+        }
+        items["scalpMapImage"] = img;
+    }
 
     json r;
     r["generation"] = t.generation;
@@ -3251,7 +3394,7 @@ bool isToolCommand(const std::string& cmd) {
         "tube_targets", "tube_get", "tube_set", "tube_scale", "tube_smooth", "tube_shapes", "tube_shape_add", "tube_shape_set",
         "tube_shape_rename", "tube_shape_remove", "tube_shape_preview", "guides_preview", "guides_preview_end", "guide_segments",
         "parts_list", "part_add", "part_remove", "parts_clear", "flow_clear", "map_rename", "map_convert", "map_set_channels",
-        "map_fill", "map_import", "map_relink", "map_reload", "map_users",
+        "map_fill", "map_import", "map_relink", "map_reload", "map_users", "maps_move_to",
         // The Length Keys tool's keys (the Keys box).
         "length_state", "length_edit"};
     return kCommands.count(cmd) > 0;
@@ -3347,6 +3490,7 @@ bool runEditCommand(ToolState& t, const std::string& cmd, const json& args, Bloc
         {"map_relink", [](ToolState& t, const json& a, BlockReader&) { return mapRelink(t, a); }},
         {"map_reload", [](ToolState& t, const json& a, BlockReader&) { return mapReload(t, a); }},
         {"map_users", [](ToolState& t, const json& a, BlockReader&) { return mapUsers(t, a); }},
+        {"maps_move_to", [](ToolState& t, const json& a, BlockReader&) { return mapsMoveTo(t, a); }},
     };
     const auto it = kEdits.find(cmd);
     if (it == kEdits.end()) return false;

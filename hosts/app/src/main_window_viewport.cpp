@@ -621,9 +621,11 @@ void MainWindow::redisplay() {
     viewport_->renderer().setWidthCoverage(settings_.widthCoverage, settings_.ribbonWidthScale, density);
     viewport_->renderer().setClumpLod(settings_.clumpLod, settings_.clumpLodError);
     applyLook();
+    viewport_->renderer().setScalpMap(document_->shownScalpMap());
     viewport_->setFrame(frame);
     // The headless view sees the same frame (its rebuilt flags hold until the next update).
     if (headless_) {
+        headless_->renderer.setScalpMap(document_->shownScalpMap());
         headless_->renderer.setHairLook(document_->session().hairLook());
         headless_->renderer.setWidthCoverage(settings_.widthCoverage, settings_.ribbonWidthScale, density);
         headless_->renderer.setClumpLod(settings_.clumpLod, settings_.clumpLodError);

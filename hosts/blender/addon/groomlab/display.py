@@ -3,7 +3,8 @@
 "Display buffers": Maya's Viewport 2.0 geometry from the core's DisplayBuilder) drawn with Blender's
 gpu module. Guides colored by group (frozen ones blue), the selection white and the soft selection
 orange, tubes (shaded, and as wires while the Shape brush is on, the selected ones warm), part
-lines, flow arrows and field, a painted map on the scalp, root and tip dots, and the brush's ring
+lines, flow arrows and field, a painted map on the scalp (a texture map as its image at the scalp's
+uvs, as Maya draws it), root and tip dots, and the brush's ring
 with the guides it would touch. Strand color modes (random, clump, density,
 a color set or channel) go to the hair object as a color attribute the viewport shows.
 
@@ -42,6 +43,7 @@ class Item(object):
         self.indices = np.zeros((0, 2), np.uint32)
         self.colors = None       # (n, 4) per vertex, or None: `color`
         self.normals = None
+        self.uvs = None          # (n, 2): the scalp map's image coordinates (a texture map)
         self.color = (1.0, 1.0, 1.0, 1.0)
         self.width = 1.0
         self.layer = "dormantWire"
@@ -76,6 +78,11 @@ class GroomDisplay(object):
         self.dirty = True
         self.refreshed = 0.0
         self.stroking = False
+        # The scalp map's image (a texture map): its key (the helper sends it again when it changes),
+        # its RGBA bytes (rows bottom-up), and the gpu texture made from them when first drawn.
+        self.image_key = ""
+        self.image_pixels = None
+        self.image_texture = None
 
 
 _displays = {}
@@ -147,7 +154,8 @@ def map_for(scene):
     m = tools.current_map(scene)
     if m is None or not t.show_on_scalp or not (t.tool == "paint" or t.tab == "PAINT"):
         return None
-    return {"name": m.name, "channel": t.scalp_channel}
+    # A texture map comes as its image at the scalp's uvs (scalpMapImage), drawn as Maya draws it.
+    return {"name": m.name, "channel": t.scalp_channel, "textured": True}
 
 
 def strand_colors_for(scalp):
@@ -182,6 +190,8 @@ def refresh(scalp, scene=None, apply_colors=True):
         have["brush"] = gd.brush_version
     if gd.strand_version:
         have["strandColors"] = gd.strand_version
+    if gd.image_key:
+        have["scalpMapImage"] = gd.image_key
     args = {"settings": settings_for(scalp, scene), "have": have, "strandColors": strand_colors_for(scalp)}
     if gd.generation:
         args["generation"] = gd.generation
@@ -219,6 +229,13 @@ def take_display(scalp, r):
                 gd.dots.batch = None
             gd.dots_version = it.get("version", 0)
             continue
+        if name == "scalpMapImage":
+            if it.get("changed") and "arrays" in it:
+                w, h = int(it["width"]), int(it["height"])
+                gd.image_pixels = (w, h, _copy(client, it["arrays"]["rgba"], np.uint8).reshape(-1))
+                gd.image_texture = None
+            gd.image_key = it.get("key") or ""
+            continue
         item = gd.items.get(name)
         if item is None:
             item = gd.items[name] = Item(name)
@@ -236,6 +253,7 @@ def take_display(scalp, r):
             if item.colors is not None and item.colors.shape[1] == 3:
                 item.colors = np.concatenate([item.colors, np.ones((len(item.colors), 1), np.float32)], axis=1)
             item.normals = _copy(client, a["normals"], np.float32) if "normals" in a else None
+            item.uvs = _copy(client, a["uvs"], np.float32) if "uvs" in a else None
             item.batch = None
     brush = r.get("brush") or {}
     take_overlay(scalp, brush.get("overlay"), brush.get("ring"))
@@ -384,6 +402,11 @@ def draw_list(scalp):
         it = gd.items.get(name)
         if it is None or it.empty():
             continue
+        if name == "scalpMap" and it.uvs is not None:
+            # A texture map: its image at the scalp's uvs (none yet: nothing to draw).
+            if gd.image_pixels is not None and len(it.uvs) == len(it.positions):
+                out.append((name, "image", it.positions, it.indices, it.uvs, it.color, it.width, False, True))
+            continue
         colors = it.colors
         if it.primitive == "triangles" and colors is None:
             colors = lit_colors(it)
@@ -411,9 +434,13 @@ def _shader(name):
 
 
 def make_batch(primitive, positions, indices, colors, color):
-    """(batch, shader name) for one draw list entry."""
+    """(batch, shader name) for one draw list entry (an "image" entry's `colors` are its uvs)."""
     from gpu_extras.batch import batch_for_shader
     pos = np.ascontiguousarray(positions, np.float32)
+    if primitive == "image":
+        shader = "IMAGE"
+        return batch_for_shader(_shader(shader), "TRIS", {"pos": pos, "texCoord": np.ascontiguousarray(colors, np.float32)},
+                                indices=np.ascontiguousarray(indices, np.int32)), shader
     if primitive == "points":
         shader = "POINT_FLAT_COLOR"
         cols = colors if colors is not None else np.tile(np.asarray(color, np.float32), (len(pos), 1))
@@ -439,6 +466,16 @@ def _batch_of(gd, name, entry):
     if it.batch is None:
         it.batch = make_batch(entry[1], entry[2], entry[3], entry[4], entry[5])
     return it.batch
+
+
+def image_texture(gd):
+    """The scalp map's image as a gpu texture (made once per image the helper sent)."""
+    if gd.image_texture is None and gd.image_pixels is not None:
+        import gpu
+        w, h, rgba = gd.image_pixels
+        data = gpu.types.Buffer("FLOAT", len(rgba), rgba.astype(np.float32) / 255.0)
+        gd.image_texture = gpu.types.GPUTexture((w, h), format="RGBA8", data=data)
+    return gd.image_texture
 
 
 def pull_matrix(gd, scalp_matrix):
@@ -480,6 +517,9 @@ def draw_groom(scalp, region_size):
             batch, shader_name = _batch_of(gd, name, entry)
             shader = _shader(shader_name)
             gpu.state.depth_test_set("LESS_EQUAL" if depth else "NONE")
+            # The scalp map writes its depth: lifted off the scalp, a fold's far side (the neck under
+            # the jaw) passes the scene's depth too, and without its own the later face would win.
+            gpu.state.depth_mask_set(name == "scalpMap")
             with gpu.matrix.push_pop_projection():
                 if is_pulled:
                     gpu.matrix.load_projection_matrix(pulled)
@@ -489,10 +529,16 @@ def draw_groom(scalp, region_size):
                     shader.uniform_float("lineWidth", float(width))
                 if shader_name in ("POLYLINE_UNIFORM_COLOR", "UNIFORM_COLOR"):
                     shader.uniform_float("color", tuple(color))
+                if shader_name == "IMAGE":
+                    texture = image_texture(gd)
+                    if texture is None:
+                        continue
+                    shader.uniform_sampler("image", texture)
                 if primitive == "points":
                     gpu.state.point_size_set(float(width))
                 batch.draw(shader)
                 drawn += 1
+    gpu.state.depth_mask_set(False)
     gpu.state.depth_test_set("NONE")
     gpu.state.blend_set("NONE")
     return drawn

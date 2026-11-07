@@ -492,6 +492,7 @@ void MainWindow::chooseTool(const QString& id) {
     if (tool == "paint") {
         maps_->paintSelected();  // the map's kind, value and channels on the brush; brush mode (paintRequested)
     } else {
+        maps_->endPainting();  // another brush: done painting
         viewport_->setToolMode(Viewport::ToolMode::Brush);
     }
     groomTools_->refresh();

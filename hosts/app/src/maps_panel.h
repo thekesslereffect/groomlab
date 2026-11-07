@@ -105,8 +105,12 @@ public:
     // The picked map set to the value (a guide layer: on the selected guides when some are), a
     // color map to the color in the channels ticked.
     std::string fillSelected();
-    // Sets the brush session up to paint the selected map and asks the host for brush mode.
+    // Sets the brush session up to paint the selected map and asks the host for brush mode; a
+    // scalp map shows on the scalp while it is painted (Maya's paint_map).
     bool paintSelected();
+    // Painting ended (the host left the Paint brush): the map painting showed on the scalp comes
+    // off it (one shown with the eye on purpose stays), as Maya's end_painting puts it back.
+    void endPainting();
     // Shows the selected map on the scalp (or none).
     void showSelected(bool show);
 
@@ -133,6 +137,7 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
+    std::string paintShown_;  // the map paintSelected showed on the scalp (endPainting hides it)
     void fresh() const;         // refreshed first when stale
     void refreshTargets();      // the For choices from the document's graph (when its nodes changed)
     void targetChanged();       // the form follows For (named for the setting, gray, on the scalp)

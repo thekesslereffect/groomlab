@@ -825,6 +825,24 @@ class ToolsTest(unittest.TestCase):
         self.assertTrue(gd.dirty)
         bpy.ops.groomlab.tool(tool="paint")
         self.assertEqual(t.tab, "PAINT")
+        # A texture map on the scalp: its image at the scalp's uvs (as Maya draws it), not per vertex.
+        self.assertEqual(bpy.ops.groomlab.map_new(name="tex", kind="texture", value=0.5, resolution="512"), {"FINISHED"})
+        t.paint_map = "tex"
+        display.refresh(head)
+        entry = next(e for e in display.draw_list(head) if e[0] == "scalpMap")
+        self.assertEqual(entry[1], "image")
+        self.assertEqual(len(entry[4]), len(entry[2]))  # a uv per vertex
+        w, h, rgba = gd.image_pixels
+        self.assertEqual((w, h, len(rgba)), (512, 512, 512 * 512 * 4))
+        self.assertTrue(gd.image_key)
+        pixels = gd.image_pixels
+        gd.dirty = True
+        display.refresh(head)
+        self.assertIs(gd.image_pixels, pixels)  # the same image: not sent again
+        if not bpy.app.background:
+            self.assertIsNotNone(display.image_texture(gd))
+        bpy.ops.groomlab.map_remove()
+        t.paint_map = "mask"
         # A guide map, filled.
         bpy.ops.groomlab.map_new(name="layer", kind="guides", value=0.0)
         t.value = 0.75
@@ -896,6 +914,11 @@ class ToolsTest(unittest.TestCase):
 
     def test_6_state_in_the_blend_and_a_new_helper(self):
         head = self.head
+        # A texture map made while the file is untitled: in the temp folder until the first save.
+        self.assertEqual(bpy.ops.groomlab.map_new(name="skin", kind="texture", value=0.5, resolution="512"), {"FINISHED"})
+        temp_file = {m.name: m.texture for m in bpy.context.scene.groomlab_tools.maps}["skin"]
+        self.assertFalse(bpy.data.filepath)
+        self.assertTrue(os.path.isfile(temp_file))
         before_texts = texts(head)
         before_hair = bu.hair_arrays(head.groomlab.hair)
         # A helper that crashed: the groom comes back from the state kept in memory.
@@ -912,6 +935,13 @@ class ToolsTest(unittest.TestCase):
         # Saved in the .blend, opened with another helper.
         blend = os.path.join(bu.TMP, "tools.blend")
         bpy.ops.wm.save_as_mainfile(filepath=blend)
+        # Saved: the map copied beside the file, as Maya keeps a scene's (groomlab/<file>/masks/<scalp>).
+        tools.refresh_info(head)
+        skin = {m.name: m.texture for m in bpy.context.scene.groomlab_tools.maps}["skin"]
+        self.assertEqual(os.path.normcase(os.path.abspath(skin)),
+                         os.path.normcase(os.path.abspath(os.path.join(bu.TMP, "groomlab", "tools", "masks", "Head", "skin.png"))))
+        self.assertTrue(os.path.isfile(skin))
+        before_texts["scalpMaps"] = texts(head)["scalpMaps"]
         self.assertTrue(head.groomlab_tools.state)
         state = json.loads(head.groomlab_tools.state)
         self.assertEqual(set(state), {"groom", "textures", "tools"})

@@ -194,7 +194,8 @@ const PaintedMap* GroomDocument::map(const std::string& name) const {
 std::string GroomDocument::mapsDirectory() const {
     if (path_.empty()) return {};
     const std::filesystem::path groom = std::filesystem::u8path(path_);
-    return forwardSlashes((groom.parent_path() / "masks" / groom.stem()).u8string());
+    // As Maya and Blender keep a scene's: <folder>/groomlab/<groom file's name>/masks.
+    return forwardSlashes((groom.parent_path() / "groomlab" / groom.stem() / "masks").u8string());
 }
 
 std::string GroomDocument::textureMapFile(const std::string& name) const {
@@ -249,8 +250,8 @@ std::string GroomDocument::createMap(const std::string& name, const std::string&
     } else if (kind == "texture") {
         if (!scalp->hasUVs()) return "the scalp has no UVs to paint a texture map on";
         const std::string folder = mapsDirectory();
-        if (folder.empty()) return "save the groom first: a texture map's image goes in a masks folder beside it";
-        // masks/<groom>/<name>.png beside the groom file, a free <name>_2.png when that is taken
+        if (folder.empty()) return "save the groom first: a texture map's image goes in the groomlab folder beside it";
+        // groomlab/<groom>/masks/<name>.png beside the groom file, a free <name>_2.png when that is taken
         // (as the Maya host names them), the file written now so the map reads from the start.
         std::filesystem::path file = std::filesystem::u8path(folder) / (name + ".png");
         for (int k = 2; std::filesystem::exists(file); ++k) file = std::filesystem::u8path(folder) / (name + "_" + std::to_string(k) + ".png");
@@ -2181,7 +2182,26 @@ const DisplayFrame& GroomDocument::updateDisplay(const DisplaySettings& settings
     // dab or a tweak is then the items' bookkeeping alone.
     display_.setWriteLines(true);
     DisplayInputs inputs = DisplayInputs::fromView(lastView(), session().hasPreview());
-    if (!scalpMapName_.empty()) inputs.scalpMap = scalpMapView(scalpMapName_, scalpMapChannel_);
+    shownMap_ = ScalpMapView{};
+    if (!scalpMapName_.empty()) {
+        // A texture map as its image at the scalp's uvs (the renderer's texture of it), as Maya
+        // draws it; a vertex map or guide layer per vertex.
+        ScalpMapView view = session().scalpMapView(scalpMapName_, scalpMapChannel_);
+        const MeshPtr scalp = session().scalp();
+        const bool image = view.kind == "texture" && scalp && scalp->hasUVs() &&
+                           (view.preview || (!view.texture.empty() && std::filesystem::is_regular_file(std::filesystem::u8path(view.texture))));
+        if (image) {
+            inputs.scalpMapTexture = true;
+            // Which texture (not its texels): the geometry is built again for another.
+            inputs.scalpMapTextureGeneration =
+                view.preview ? hashCombine(hash64(0x9E7A), view.preview->layout())
+                             : hashText(hash64(0x9E7B), view.texture + "#" + (view.channels == 4 ? view.channel : std::string("gray")));
+            inputs.scalpMap = view;
+            shownMap_ = std::move(view);
+        } else {
+            inputs.scalpMap = scalpMapView(scalpMapName_, scalpMapChannel_);
+        }
+    }
     if (!selection_.empty()) {
         // A hard selection: every selected guide weighs 1 (asked only when it changed).
         const std::vector<GuideId>& ids = selection_;

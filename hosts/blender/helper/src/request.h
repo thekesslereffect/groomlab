@@ -187,6 +187,8 @@ const char* dtypeOf() {
         return "<u4";
     } else if constexpr (std::is_same_v<T, std::int64_t>) {
         return "<i8";
+    } else if constexpr (std::is_same_v<T, std::uint8_t>) {
+        return "|u1";
     } else {
         return "<u8";
     }

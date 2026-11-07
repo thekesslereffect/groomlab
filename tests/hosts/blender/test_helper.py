@@ -1402,6 +1402,25 @@ class ToolsTest(HelperTestCase):
         self.assertGreater(disp["items"]["scalpMap"]["vertexCount"], 0)
         disp = self.call("display", map={"name": "tint", "channel": "rgb"})
         self.assertGreater(disp["items"]["scalpMap"]["vertexCount"], 0)
+        # A host drawing the image (Maya's way, `textured`): the scalp with its uvs and the image,
+        # rows bottom-up 8-bit RGBA, sent again only when its key changes.
+        have = {name: it["version"] for name, it in disp["items"].items() if it.get("version")}
+        disp = self.call("display", map={"name": "tint", "channel": "rgb", "textured": True}, have=have)
+        item, image = disp["items"]["scalpMap"], disp["items"]["scalpMapImage"]
+        self.assertTrue(item["changed"])
+        uvs = self.h.array(item["arrays"]["uvs"])
+        self.assertEqual(uvs.shape, (item["vertexCount"], 2))
+        self.assertTrue(image["changed"])
+        rgba = self.h.array(image["arrays"]["rgba"])
+        self.assertEqual(rgba.dtype, np.uint8)
+        self.assertEqual(rgba.shape, (image["width"] * image["height"], 4))
+        self.assertEqual(image["width"], 64)
+        self.assertTrue((rgba[:, 3] == 255).all())
+        have = {name: it["version"] for name, it in disp["items"].items() if it.get("version")}
+        have["scalpMapImage"] = image["key"]
+        again = self.call("display", map={"name": "tint", "channel": "rgb", "textured": True}, have=have)
+        self.assertFalse(again["items"]["scalpMapImage"]["changed"])
+        self.assertFalse(again["items"]["scalpMap"]["changed"])
         # Saved, a file the CLI evaluates with its maps; removed, one undo step.
         self.call("map_remove", name="mask")
         self.assertNotIn("mask", [m["name"] for m in self.call("maps_list")["maps"]])
@@ -1628,7 +1647,26 @@ class ToolsTest(HelperTestCase):
         ours_mask = np.asarray(json.loads(ours["scalpMaps"])["mask"]["values"])
         np.testing.assert_array_equal(theirs_mask[used], ours_mask[used])
         self.assertEqual(theirs["textures"][0]["png"], state["textures"][0]["png"])
-        self.assertNotEqual(json.loads(theirs["texts"]["scalpMaps"])["tint"]["texture"], json.loads(ours["scalpMaps"])["tint"]["texture"])
+        # The map's file still on disk: read where it is (the file wins over the state's copy).
+        tint = json.loads(ours["scalpMaps"])["tint"]["texture"]
+        self.assertEqual(json.loads(theirs["texts"]["scalpMaps"])["tint"]["texture"], tint)
+        # Gone (another machine, a temp folder cleaned): the state's image written into the maps
+        # folder, the same image there used as it is.
+        moved = os.path.join(self.tmp, "tint_away.png")
+        shutil.move(tint, moved)
+        try:
+            for _ in range(2):
+                u = self.h.call("new_session")["session"]
+                self.h.call("set_scalp", session=u, **self.h.put(points=to_blender(points), faceCounts=counts,
+                                                                 faceIndices=indices, uvs=uvs))
+                folder = os.path.join(self.tmp, "restored", "masks").replace("\\", "/")
+                self.h.call("set_options", session=u, mapsDir=folder)
+                self.h.call("set_state", session=u, groom=state["groom"], textures=state["textures"], tools=state["tools"])
+                restored = json.loads(self.h.call("get_state", session=u, texts=True, textures=False)["texts"]["scalpMaps"])
+                self.assertEqual(restored["tint"]["texture"], folder + "/tint.png")
+                self.h.call("close_session", session=u)
+        finally:
+            shutil.move(moved, tint)
         self.assertEqual(theirs["tools"]["hiddenGroups"], ["primary"])
         self.assertEqual(sorted(theirs["tools"]["selection"]), sorted(state["tools"]["selection"]))
         self.h.call("set_time", session=t, frame=1)
@@ -1799,6 +1837,39 @@ class ToolsTest(HelperTestCase):
         self.assertEqual(self.call("parts_list")["flow"], {"arrows": 0, "sinks": 0})
         self.call("undo")
         self.assertEqual(self.texts()["flowData"], laid)
+
+    def test_maps_move_into_the_files_own_folder(self):
+        # An untitled file's texture maps sit in the temp folder; maps_move_to (the .blend's first
+        # save) copies the ones GroomLab made into the file's maps folder and points them there,
+        # an image linked from elsewhere staying where it is. Not an undo step.
+        self.place_guides(3)
+        temp = self.call("maps_list")["folder"]
+        self.call("map_create", name="tint", kind="texture", color=True, fill=[0.2, 0.3, 0.4], resolution=32)
+        outside = os.path.join(self.tmp, "photo.png")
+        shutil.copyfile(self.call("map_create", name="photo", kind="texture", value=0.25, resolution=32)["file"], outside)
+        self.call("map_relink", name="photo", path=outside)
+        files = {m["name"]: m["file"] for m in self.call("maps_list")["maps"]}
+        self.assertTrue(files["tint"].startswith(temp + "/"), files["tint"])
+        undo = self.call("undo_state")
+        target = os.path.join(self.tmp, "shot", "groomlab", "shot", "masks", "head").replace("\\", "/")
+        r = self.call("maps_move_to", dir=target)
+        self.assertEqual(r["folder"], target)
+        self.assertEqual([m["name"] for m in r["moved"]], ["tint"])
+        files = {m["name"]: m["file"] for m in self.call("maps_list")["maps"]}
+        self.assertEqual(files["tint"], target + "/tint.png")
+        self.assertTrue(os.path.isfile(files["tint"]))
+        self.assertEqual(os.path.normcase(os.path.abspath(files["photo"])), os.path.normcase(os.path.abspath(outside)))
+        self.assertEqual(self.call("undo_state"), undo)
+        # New maps go there too; the same folder again copies nothing.
+        self.call("map_create", name="gray", kind="texture", value=0.5, resolution=32)
+        self.assertEqual({m["name"]: m["file"] for m in self.call("maps_list")["maps"]}["gray"], target + "/gray.png")
+        self.assertEqual(self.call("maps_move_to", dir=target)["moved"], [])
+        # Save As elsewhere: the maps in the old file's folder are copied on.
+        other = os.path.join(self.tmp, "shot_v2", "groomlab", "shot_v2", "masks", "head").replace("\\", "/")
+        moved = self.call("maps_move_to", dir=other)["moved"]
+        self.assertEqual(sorted(m["name"] for m in moved), ["gray", "tint"])
+        self.assertTrue(os.path.isfile(target + "/tint.png"))  # the old file's copy stays
+        self.assertTrue(os.path.isfile(other + "/tint.png"))
 
     def test_map_management(self):
         self.place_guides(3)

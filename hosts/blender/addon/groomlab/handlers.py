@@ -67,7 +67,9 @@ def on_render_post(scene, *args):
 
 @persistent
 def on_save_pre(*args):
-    groom.snapshot_all()
+    # Blender passes the file being saved (bpy.data.filepath is still the old one).
+    path = args[0] if args and isinstance(args[0], str) and args[0] else None
+    groom.snapshot_all(path)
 
 
 @persistent

@@ -182,6 +182,7 @@ MainWindow::MainWindow() {
             viewport_->setToolMode(Viewport::ToolMode::Camera);
             return;
         }
+        if (mode != Viewport::ToolMode::Brush && maps_) maps_->endPainting();  // done painting: its map off the scalp
         cameraMode_->setChecked(mode == Viewport::ToolMode::Camera);
         brushMode_->setChecked(mode == Viewport::ToolMode::Brush);
         selectMode_->setChecked(mode == Viewport::ToolMode::Select);

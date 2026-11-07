@@ -28,7 +28,9 @@ set(GROOMLAB_APP_SHADERS
     shaders/surface.vert
     shaders/surface.frag
     shaders/photo.vert
-    shaders/photo.frag)
+    shaders/photo.frag
+    shaders/map.vert
+    shaders/map.frag)
 # The lookdev path fetches the strands from float textures in the vertex shader (texelFetch:
 # GLSL 150 on OpenGL, older GL takes the line path), the same SPIR-V, HLSL and MSL as the rest.
 set(GROOMLAB_LOOKDEV_SHADERS

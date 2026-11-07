@@ -2221,6 +2221,93 @@ TEST(AppRender, PickedColorsRenderAsArnoldsBaseColor) {
     EXPECT_LT(warm, 1.9) << "but not the dark red of one pass's transmittance squared";
 }
 
+// A texture map on the scalp draws as its image at the scalp's uvs (as Maya's viewport does), not
+// sampled at the scalp's vertices: a checker keeps its hard edges (black and white texels with few
+// grays between), however coarse the scalp.
+TEST(AppRender, ATextureMapDrawsAsItsImageOnTheScalp) {
+    std::unique_ptr<QRhi> rhi = createOffscreenRhi();
+    ASSERT_TRUE(rhi);
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    ASSERT_TRUE(doc->session().scalp() && doc->session().scalp()->hasUVs());
+    QImage checker(256, 256, QImage::Format_RGB32);
+    for (int y = 0; y < 256; ++y) {
+        for (int x = 0; x < 256; ++x) checker.setPixel(x, y, ((x / 16 + y / 16) % 2) ? qRgb(255, 255, 255) : qRgb(0, 0, 0));
+    }
+    const std::string png = tempPath("groomlab_checker_map.png");
+    ASSERT_TRUE(checker.save(QString::fromStdString(png)));
+    std::string made;
+    ASSERT_EQ(doc->importMap(png, &made), "");
+    ASSERT_EQ(doc->createMap("gray", "vertices", false, 0.5f), "");
+    ViewRequest request;
+    request.density = 0.1f;
+    doc->evaluate(request);
+    DisplaySettings settings;
+    settings.guides = false;
+    GroomRenderer renderer;
+    renderer.setScalp(doc->file().data.scalp);
+    renderer.setHairShown(false);
+    renderer.setLookdev(false);
+    OrbitCamera camera;
+    camera.frame(doc->sceneBounds());
+    const QSize size(320, 240);
+    // A vertex map shown first (the item drawn per vertex), then the texture map: the item's
+    // bindings are made again for its image.
+    doc->setScalpMapDisplay("gray");
+    renderer.setFrame(doc->updateDisplay(settings));
+    renderer.setScalpMap(doc->shownScalpMap());
+    renderOffscreen(renderer, camera, size, 1, rhi.get());
+    doc->setScalpMapDisplay(made);
+    const DisplayFrame& frame = doc->updateDisplay(settings);
+    ASSERT_TRUE(frame.item(DisplayItemId::ScalpMap).geometry);
+    EXPECT_TRUE(frame.item(DisplayItemId::ScalpMap).geometry->mapTexture);
+    renderer.setFrame(frame);
+    renderer.setScalpMap(doc->shownScalpMap());
+    const OffscreenResult r = renderOffscreen(renderer, camera, size, 1, rhi.get());
+    if (rhi->backend() == QRhi::Null) {
+        renderer.releaseResources();
+        GTEST_SKIP() << "no GPU device: the pixels are not checked";
+    }
+    ASSERT_FALSE(r.image.isNull());
+    EXPECT_TRUE(r.image.save(QDir::temp().filePath(QStringLiteral("groomlab_app_texture_map.png"))));
+    int black = 0, white = 0, gray = 0;
+    for (int y = 0; y < size.height(); ++y) {
+        for (int x = 0; x < size.width(); ++x) {
+            const QColor c = r.image.pixelColor(x, y);
+            if (std::abs(c.red() - c.green()) > 8 || std::abs(c.green() - c.blue()) > 8) continue;  // (the backdrop's tint)
+            const int v = c.value();
+            if (v < 12) ++black;
+            else if (v > 240) ++white;
+            else if (v > 64 && v < 192) ++gray;
+        }
+    }
+    EXPECT_GT(black, 500) << "the checker's black squares";
+    EXPECT_GT(white, 500) << "the checker's white squares";
+    EXPECT_LT(gray, (black + white) / 4) << "hard edges: the image itself, not colors blended between vertices";
+
+    // The lookdev path (the app's default) shows it the same.
+    renderer.setLookdev(true);
+    LightingSetup lighting = lightingPreset("studio");
+    lighting.quality = Quality::Interactive;
+    lighting.background = Background::Solid;
+    renderer.setLighting(lighting);
+    const OffscreenResult lit = renderOffscreen(renderer, camera, size, 1, rhi.get());
+    ASSERT_FALSE(lit.image.isNull());
+    EXPECT_TRUE(lit.image.save(QDir::temp().filePath(QStringLiteral("groomlab_app_texture_map_lookdev.png"))));
+    if (renderer.lookdevActive()) {
+        int litBlack = 0, litWhite = 0;
+        for (int y = 0; y < size.height(); ++y) {
+            for (int x = 0; x < size.width(); ++x) {
+                const int v = lit.image.pixelColor(x, y).value();
+                if (v < 20) ++litBlack;
+                else if (v > 200) ++litWhite;
+            }
+        }
+        EXPECT_GT(litBlack, 300) << "the checker's black squares (lookdev)";
+        EXPECT_GT(litWhite, 300) << "the checker's white squares (lookdev)";
+    }
+}
+
 TEST(AppRender, DrawsTheSampleGroomOffscreen) {
     std::unique_ptr<QRhi> rhi = createOffscreenRhi();
     ASSERT_TRUE(rhi);
@@ -4625,3 +4712,4 @@ int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
+

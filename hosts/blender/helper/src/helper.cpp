@@ -1272,8 +1272,10 @@ json getState(Session& s, const json& args) {
 }
 
 // A state from getState back into the session: the groom as load_groom adopts a file (the
-// session's scalp kept with `keepScalp`, as the host feeds its own), its textures written into the
-// maps folder.
+// session's scalp kept with `keepScalp`, as the host feeds its own). A texture map whose file is
+// still on disk reads it there (the file wins: painted since, or edited outside); one whose file
+// is gone (another machine, a temp folder cleaned) gets the state's image written into the maps
+// folder (the same image already there is used as it is).
 json setState(Session& s, const json& args) {
     const json& g = need(args, "groom");
     const std::string text = g.is_string() ? g.get<std::string>() : g.dump();
@@ -1286,12 +1288,16 @@ json setState(Session& s, const json& args) {
             const std::string name = needString(t, "name");
             const auto it = file.data.maps.find(name);
             if (it == file.data.maps.end()) continue;
-            const std::string bytes = base64Decode(needString(t, "png"));
             std::error_code ec;
+            const std::string stored = it->second.texture;
+            if (!stored.empty() && fs::u8path(stored).is_absolute() && fs::is_regular_file(fs::u8path(stored), ec)) continue;
+            const std::string bytes = base64Decode(needString(t, "png"));
             fs::create_directories(folder, ec);
             fs::path target = folder / (name + ".png");
-            for (int k = 2; fs::exists(target, ec); ++k) target = folder / (name + "_" + std::to_string(k) + ".png");
-            writeAtomically(target.u8string(), bytes);
+            for (int k = 2; fs::exists(target, ec) && readText(target.u8string()) != bytes; ++k) {
+                target = folder / (name + "_" + std::to_string(k) + ".png");
+            }
+            if (!fs::exists(target, ec)) writeAtomically(target.u8string(), bytes);
             it->second.texture = target.generic_u8string();
         }
     }

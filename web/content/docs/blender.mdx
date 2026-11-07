@@ -227,6 +227,10 @@ step; if the setting already reads a map, that map is picked instead. Strokes pa
 **Value** (1: the setting's full value); **Ctrl** paints toward 0, so Ctrl on the density map
 removes hair.
 
+Texture maps are PNGs beside the .blend, in `groomlab/<file name>/masks/<scalp>/`. In a file not
+saved yet they wait in your temp folder; the first save (and **Save As**) copies them beside the
+file and points the maps there.
+
 ## Correctives
 
 The **Correctives** tab is Maya's stack of sculpt layers: the correctives (top of the stack
@@ -480,7 +484,9 @@ lose the colors and the look. Nothing needs setting up:
 ## Files
 
 - **Save Groom File As...** writes the groom in GroomLab's file conventions (Y up, centimeters).
-  Maya and the GroomLab app open it as evaluated in Blender, with the same guides.
+  Maya and the GroomLab app open it as evaluated in Blender, with the same guides. It starts
+  beside the .blend, named after the groom: a groom file is a source file, kept next to your
+  scene rather than in its `groomlab` folder, and saving again overwrites it.
 - **Import Groom File...** opens a groom from Maya, the app or Blender on the selected mesh, or with
   the scalp stored in the file (**Use the File's Scalp**) when you don't have the head in Blender.
 - **Import > Alembic Curves...** takes the selected groom's guides from an Alembic file's curves (an

@@ -567,6 +567,10 @@ public:
     // The map updateDisplay shows on the scalp ("" none; as the Maya plugin's scalpMapDisplay).
     void setScalpMapDisplay(const std::string& name, const std::string& channel = "rgb");
     const std::string& scalpMapDisplay() const { return scalpMapName_; }
+    // The texture map the last updateDisplay showed as its image (its file, or the brush's live
+    // image): the renderer's texture (GroomRenderer::setScalpMap). Kind "" when none: a vertex
+    // map or guide layer shows per vertex in the frame itself.
+    const ScalpMapView& shownScalpMap() const { return shownMap_; }
     const std::string& scalpMapChannel() const { return scalpMapChannel_; }
 
     // ---- Evaluation and display --------------------------------------------------------------
@@ -901,6 +905,7 @@ private:
     std::uint64_t mapViewKey_ = 0;
     std::shared_ptr<const std::vector<float>> mapViewValues_;
     std::string scalpMapName_, scalpMapChannel_ = "rgb";
+    ScalpMapView shownMap_;
     std::string path_;
     nlohmann::json graph_;
     nlohmann::json specs_;  // by type

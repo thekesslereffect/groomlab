@@ -11,6 +11,7 @@ transform carries the whole groom. The helper turns that into groom space (Y up,
 import hashlib
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -69,6 +70,7 @@ class Runtime(object):
         self.fps = None
         self.space = None
         self.follow = None
+        self.maps_dir = None  # the maps folder sent (maps_dir)
         self.last = {}
         self.notes = {}
         self.errors = []
@@ -202,6 +204,10 @@ def _build(scalp, rt, scene):
     rt.reset()
     rt.space = space_of(scene)
     rt.target = g.guide_target or "auto"
+    # The maps folder first, so a texture map the .blend holds whose file is gone is written there.
+    folder = maps_dir(scalp)
+    if folder:
+        _call("set_options", session=rt.session, mapsDir=folder)
     restored = False
     for fn in build_hooks:
         try:
@@ -228,6 +234,37 @@ def _build(scalp, rt, scene):
             rt.error = "the groom's graph did not load: %s" % e.message
     rt.follow = bool(g.follow_scalp)
     _call("set_options", session=rt.session, followScalp=rt.follow)
+    send_maps_dir(scalp, rt)  # a map still in a temp folder (made while untitled) copied beside the file
+
+
+def _file_safe(name):
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", name) or "_"
+
+
+def maps_dir(scalp, blend_path=None):
+    """Where the groom's texture maps go, as Maya keeps a scene's: <.blend's folder>/groomlab/<.blend's
+    name>/masks/<scalp>, so two .blend files in one folder never share maps; "" while the file is
+    untitled (the helper's temp folder until the first save). `blend_path`: the file about to be
+    saved (else the open one)."""
+    path = bpy.data.filepath if blend_path is None else blend_path
+    if not path:
+        return ""
+    path = os.path.abspath(bpy.path.abspath(path))
+    stem = os.path.splitext(os.path.basename(path))[0]
+    folder = os.path.join(os.path.dirname(path), "groomlab", _file_safe(stem), "masks", _file_safe(scalp.name))
+    return folder.replace("\\", "/")
+
+
+def send_maps_dir(scalp, rt, blend_path=None):
+    """The helper's maps folder for the groom (maps_dir): texture maps GroomLab made in the folder
+    they were in (the temp folder of an untitled file, the .blend's old folder) copied there and
+    pointed at the copies. Returns what was copied."""
+    folder = maps_dir(scalp, blend_path)
+    if folder == rt.maps_dir:
+        return []
+    r = _call("maps_move_to", session=rt.session, dir=folder)
+    rt.maps_dir = folder
+    return r.get("moved") or []
 
 
 def close(scalp):
@@ -842,15 +879,24 @@ def poll():
 
 # ---- Files ------------------------------------------------------------------------------------
 
-def snapshot_all():
-    """Before the .blend is saved: each groom as a .groom text in its scalp object, so the file
-    opens with the whole groom (graph, guides, maps) even without the helper running then."""
-    for fn in before_save:
-        fn()
+def snapshot_all(blend_path=None):
+    """Before the .blend is saved (to `blend_path`): each groom's texture maps in the file's own
+    maps folder (send_maps_dir: the first save of an untitled file, Save As), then each groom as a
+    .groom text in its scalp object, so the file opens with the whole groom (graph, guides, maps)
+    even without the helper running then."""
+    live = []
     for scalp in scalps():
         rt = runtime_if_any(scalp)
         if rt is None or rt.session is None or rt.generation != process.generation() or not process.running():
             continue
+        live.append((scalp, rt))
+        try:
+            send_maps_dir(scalp, rt, blend_path)
+        except HelperError as e:
+            print("GroomLab: the maps of %s were not moved beside the file: %s" % (scalp.name, e))
+    for fn in before_save:  # (the states kept with the maps where they are now)
+        fn()
+    for scalp, rt in live:
         path = os.path.join(tempfile.gettempdir(), "groomlab_snapshot_%s_%d.groom" % (rt.uid, os.getpid()))
         try:
             _call("save_groom", session=rt.session, path=path)

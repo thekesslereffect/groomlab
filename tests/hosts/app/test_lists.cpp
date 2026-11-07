@@ -25,11 +25,13 @@
 #include "groom_document.h"
 #include "groomlab/correctives.h"
 #include "groomlab/guide_selection.h"
+#include "groom_tools.h"
 #include "guides_panel.h"
 #include "list_bar.h"
 #include "main_window.h"
 #include "maps_panel.h"
 #include "overlay.h"
+#include "viewport.h"
 
 namespace groomlab::app {
 namespace {
@@ -399,6 +401,38 @@ TEST(AppLists, CorrectivesStackBarMenuAndKeys) {
     const int rebuilds = panel->rebuilds();
     panel->frameChanged();
     EXPECT_EQ(panel->rebuilds(), rebuilds);
+}
+
+// Painting a scalp map shows it on the scalp (Maya's paint_map); another Groom Tools tab is done
+// painting: the camera again, the map it showed off the scalp (Maya's end_painting, Blender's).
+TEST(AppLists, LeavingThePaintTabEndsPainting) {
+    MainWindow window;
+    window.resize(1280, 800);
+    window.show();
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(sampleCopy("groomlab_app_lists_paint"))));
+    GroomDocument* doc = window.document();
+    auto* maps = window.findChild<MapsPanel*>();
+    auto* tools = window.findChild<GroomTools*>();
+    auto* viewport = window.findChild<Viewport*>();
+    ASSERT_TRUE(maps && tools && viewport);
+    ASSERT_EQ(doc->createMap("tex", "texture", false, 0.5f, 64), "");
+    maps->refresh();
+    ASSERT_TRUE(tools->showTab(QStringLiteral("paint")));
+    maps->selectMap("tex");
+    ASSERT_TRUE(maps->paintSelected());
+    EXPECT_EQ(viewport->toolMode(), Viewport::ToolMode::Brush);
+    EXPECT_EQ(doc->scalpMapDisplay(), "tex");
+    ASSERT_TRUE(tools->showTab(QStringLiteral("tools")));
+    EXPECT_EQ(viewport->toolMode(), Viewport::ToolMode::Camera) << "another tab: done painting";
+    EXPECT_EQ(doc->scalpMapDisplay(), "") << "the map painting showed comes off the scalp";
+    // A map shown on purpose (the maps panel's eye) stays when painting ends.
+    ASSERT_TRUE(tools->showTab(QStringLiteral("paint")));
+    maps->selectMap("tex");
+    maps->showSelected(true);
+    ASSERT_TRUE(maps->paintSelected());
+    ASSERT_TRUE(tools->showTab(QStringLiteral("tools")));
+    EXPECT_EQ(viewport->toolMode(), Viewport::ToolMode::Camera);
+    EXPECT_EQ(doc->scalpMapDisplay(), "tex");
 }
 
 }  // namespace

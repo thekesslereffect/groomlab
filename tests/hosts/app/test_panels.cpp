@@ -518,7 +518,7 @@ TEST(AppPanels, MapsPanelMakesPaintsShowsAndUndoesMaps) {
     EXPECT_EQ(doc->map("detail")->kind, "texture");
     const std::string file = doc->textureMapFile("detail");
     EXPECT_TRUE(std::filesystem::exists(std::filesystem::u8path(file))) << file;
-    EXPECT_EQ(doc->map("detail")->texture, "masks/sample/detail.png") << "stored relative to the groom";
+    EXPECT_EQ(doc->map("detail")->texture, "groomlab/sample/masks/detail.png") << "stored relative to the groom";
     EXPECT_EQ(doc->maps().size(), layersBefore + 4);
     EXPECT_NE(panel.createFromFields(), "") << "a name taken is refused";
     // The same name twice is refused; a bad name too: the rule Maya keeps (scalp_maps.h), so
@@ -568,11 +568,19 @@ TEST(AppPanels, MapsPanelMakesPaintsShowsAndUndoesMaps) {
     panel.selectMap("detail");
     ASSERT_TRUE(panel.paintSelected());
     EXPECT_EQ(session.settings().paintKind, "texture");
+    EXPECT_EQ(doc->scalpMapDisplay(), "detail") << "a scalp map shows on the scalp while it is painted (Maya's paint_map)";
     EXPECT_EQ(session.settings().paintTexture, file);
     const std::uint64_t blankStamp = fileStamp(file);
     const auto blankSize = std::filesystem::file_size(std::filesystem::u8path(file));
     EXPECT_TRUE(session.stroke(stroke)) << session.lastError();
     for (const std::string& warning : session.takeWarnings()) ADD_FAILURE() << warning;
+    {
+        DisplaySettings shown;
+        const DisplayFrame& painting = doc->updateDisplay(shown);
+        ASSERT_TRUE(painting.item(DisplayItemId::ScalpMap).geometry);
+        EXPECT_TRUE(painting.item(DisplayItemId::ScalpMap).geometry->mapTexture) << "the painted texture as its image";
+        EXPECT_EQ(doc->shownScalpMap().kind, "texture");
+    }
     EXPECT_EQ(doc->undoText(), "Undo paint stroke");
     const TexturePtr after = loadTexture(file);
     ASSERT_TRUE(after && after->image());
@@ -599,10 +607,19 @@ TEST(AppPanels, MapsPanelMakesPaintsShowsAndUndoesMaps) {
     EXPECT_TRUE(item.geometry->triangles);
     EXPECT_FALSE(item.geometry->positions.empty());
     EXPECT_FALSE(item.geometry->colors.empty());
-    // A texture map shows too, sampled at the vertices (the file's values).
+    // A texture map shows as its image at the scalp's uvs (as Maya draws it): the item carries a
+    // uv per vertex, the document the view the renderer's texture reads.
     doc->setScalpMapDisplay("detail");
+    const DisplayFrame& textured = doc->updateDisplay(settings);
+    const DisplayItem& map = textured.item(DisplayItemId::ScalpMap);
+    ASSERT_TRUE(map.geometry);
+    EXPECT_TRUE(map.geometry->mapTexture);
+    EXPECT_EQ(map.geometry->uvs.size() / 2, map.geometry->positions.size() / 3);
+    EXPECT_EQ(doc->shownScalpMap().kind, "texture");
+    EXPECT_EQ(doc->shownScalpMap().name, "detail");
+    // (Sampled per vertex still, for what asks for values.)
     const ScalpMapView view = doc->scalpMapView("detail", "rgb");
-    EXPECT_EQ(view.kind, "vertices") << "sampled per vertex for the viewport";
+    EXPECT_EQ(view.kind, "vertices");
     ASSERT_TRUE(view.values);
     EXPECT_EQ(view.values->size(), doc->session().scalp()->pointCount());
 
@@ -635,7 +652,7 @@ TEST(AppPanels, MapsPanelMakesPaintsShowsAndUndoesMaps) {
     ASSERT_TRUE(again->map("tint"));
     EXPECT_EQ(again->map("tint")->channels, kColorMap);
     ASSERT_TRUE(again->map("detail"));
-    EXPECT_EQ(again->map("detail")->texture, "masks/sample/detail.png");
+    EXPECT_EQ(again->map("detail")->texture, "groomlab/sample/masks/detail.png");
     EXPECT_TRUE(again->map("stiff"));
     float sumAgain = 0.0f;
     for (const float v : again->session().scalpMaps().maps.at("density").values) sumAgain += v;

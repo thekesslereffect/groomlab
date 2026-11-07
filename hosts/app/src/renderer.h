@@ -185,6 +185,12 @@ public:
     };
     void setPhoto(const Photo& photo);
     void clearPhoto() { setPhoto({}); }
+
+    // ---- The texture map on the scalp (the Paint view) --------------------------------------------
+    // The image the frame's scalp map item (mapTexture) reads: a texture map's file, or the brush's
+    // live image while painting (uploaded again as its revision moves), as GroomDocument::
+    // shownScalpMap has it. Kind "": none.
+    void setScalpMap(const ScalpMapView& view);
     bool photoShown() const { return !photo_.image.isNull(); }
     const Photo& photo() const { return photo_; }
     // The photo's rectangle in a frame `size` big (pixels, y down): letterboxed at its aspect.
@@ -196,7 +202,7 @@ private:
     // LinesColored: other lines.
     enum class Kind {
         LinesLit, Lines, LinesColored, StrandLines, StrandLinesColored, Overlay, OverlayColored, Triangles, TrianglesColored,
-        Surface, Dots, Count
+        Surface, Dots, MapTextured, Count
     };
     struct GpuItem;
     struct Pipeline;
@@ -302,6 +308,18 @@ private:
         std::uint64_t key = ~0ull;
     };
     PhotoGpu photoGpu_;
+    // The scalp map's image: the view (its preview kept alive), its texture and the key it holds.
+    ScalpMapView map_;
+    std::string mapFileKey_;  // the file's (its stamp), worked out when the view is set
+    struct MapGpu {
+        std::unique_ptr<QRhiTexture> texture;
+        std::unique_ptr<QRhiSampler> sampler;
+        std::string key;
+    };
+    MapGpu mapGpu_;
+    // The image into the texture when it changed (in `batch`); the scalp map item's bindings
+    // (they hold the texture) made again when the texture is new. False: no image.
+    bool prepareMapTexture(QRhi* rhi, QRhiResourceUpdateBatch* batch);
     // The photo's texture and uniforms for this frame (its own batch, before any pass); false
     // when none draws.
     bool preparePhoto(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* target);
