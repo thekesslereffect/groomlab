@@ -38,9 +38,13 @@ SHORTCUTS = (
     ("Shift + drag", "Smooth with any brush"),
     ("S", "Select guides"),
     ("Page Up / Page Down", "Brush level up / down"),
+    ("Alt+Shift+X", "Toggle symmetry"),
     ("Y", "Brush pie menu"),
     ("Esc / right-click", "Cancel stroke / leave tool"),
+    ("Alt+Shift+G", "Toggle guides"),
     ("Tab", "Add a node"),
+    ("Ctrl+D", "Duplicate nodes"),
+    ("Ctrl+G / Ctrl+Shift+G", "Group / ungroup"),
     ("B", "Bypass nodes"),
     ("V", "View up to node"),
 )
@@ -231,6 +235,17 @@ class ToolSession(object):
         if kind == "S" and not (event.ctrl or event.alt or event.oskey or busy):
             self.pick(context, "select")
             return {"RUNNING_MODAL"}
+        if kind in ("X", "G") and event.alt and event.shift and not (event.ctrl or event.oskey or busy):
+            # Maya's GroomLab hotkeys: Alt+Shift+X symmetry on/off, Alt+Shift+G the guides on/off.
+            if kind == "X":
+                t = context.scene.groomlab_tools
+                t.symmetry = not t.symmetry
+                tools.status(context.scene, "Symmetry %s" % ("on" if t.symmetry else "off"))
+            else:
+                d = scalp.groomlab_tools
+                d.show_guides = not d.show_guides
+            display.redraw()
+            return {"RUNNING_MODAL"}
         if kind in ("PAGE_UP", "PAGE_DOWN") and not busy:
             step_level(context, -1 if kind == "PAGE_UP" else 1)
             return {"RUNNING_MODAL"}
@@ -287,7 +302,8 @@ class ToolSession(object):
                            (view, x, y))
             return {"RUNNING_MODAL"}
         if self.tool(context) == "select":
-            mode = "toggle" if event.shift else "deselect" if event.ctrl else "replace"
+            # Maya's select tool: Ctrl+Shift adds, Shift toggles, Ctrl deselects.
+            mode = "add" if event.shift and event.ctrl else "toggle" if event.shift else "deselect" if event.ctrl else "replace"
             self.lasso = (scalp, view, [[x, y]], mode)
             return {"RUNNING_MODAL"}
         pressure = float(getattr(event, "pressure", 1.0) or 1.0)
@@ -322,7 +338,9 @@ class ToolSession(object):
             self.flush(context)
             stroked, self.stroking = self.stroking, None
             try:
-                tools.stroke_end(stroked)
+                r = tools.stroke_end(stroked)
+                if isinstance(r, dict) and r.get("committed"):
+                    tools.push_undo_step((r.get("undo") or {}).get("undoLabel") or "stroke")  # Blender's undo reaches it
                 if self.tool(context) == "lengths":
                     tools.length_state(stroked)  # the Keys box follows the key placed or dragged
                     tools.evaluate_live(stroked)  # the guides at their previewed lengths
@@ -344,6 +362,8 @@ class ToolSession(object):
             try:
                 r = tools.select(lasso_scalp, view, points, mode)
                 tools.status(context.scene, "%d guides selected" % r.get("count", 0))
+                if r.get("froze"):  # (the guides not selected frozen: a step of the groom's history)
+                    tools.push_undo_step("select")
             except HelperError as e:
                 tools.status(context.scene, e.message)
             return {"RUNNING_MODAL"}
@@ -961,6 +981,20 @@ class GROOMLAB_OT_map_remove(MapOperator):
     bl_label = "Delete Map"
     bl_options = {"REGISTER", "UNDO"}
 
+    def invoke(self, context, event):
+        # Maya's delete_map: asked first when the graph reads the map (its readers go back to their own values).
+        name = context.scene.groomlab_tools.paint_map
+        try:
+            users = tools.map_users(active(context), name) if name else []
+        except HelperError:
+            users = []
+        if not users:
+            return self.execute(context)
+        many = len(users) > 1
+        message = "Delete %s? %s go%s back to %s own value%s (undo brings the map back)." % (
+            name, ", ".join("%s.%s" % u for u in users), "" if many else "es", "their" if many else "its", "s" if many else "")
+        return context.window_manager.invoke_confirm(self, event, title="Delete Map", message=message)
+
     def execute(self, context):
         t = context.scene.groomlab_tools
         name = t.paint_map
@@ -1328,6 +1362,118 @@ class GROOMLAB_OT_guides_reparent(GroomToolOperator):
 
 
 # ---- Parts and flow (the Part and Flow tools' cards) -------------------------------------------------
+
+def _selected_curves(context, scalp):
+    return [o for o in context.selected_objects if o.type in ("CURVE", "CURVES") and o is not scalp and
+            o.groomlab.role == "NONE"]
+
+
+class GROOMLAB_OT_guides_from_curves(GroomToolOperator):
+    """Add the selected curve objects as primary guides (each curve's first point its root), in the guide group picked (Maya's From Curves)"""
+    bl_idname = "groomlab.guides_from_curves"
+    bl_label = "Guides from Curves"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        from . import pipeline
+        scalp = active(context)
+        curves = _selected_curves(context, scalp)
+        if not curves:
+            self.report({"ERROR"}, "Select curve objects (Curve or hair Curves) drawn from the scalp")
+            return {"CANCELLED"}
+        _level, group = tools.group_target(context.scene)
+        try:
+            added = pipeline.guides_from_curves(scalp, curves, group or "primary")
+        except HelperError as e:
+            return _fail(self, e)
+        tools.refresh_info(scalp, context.scene)
+        groom.mark(scalp, "eval")
+        tools.status(context.scene, "Added %d guide%s from %d curve object%s" % (added, "" if added == 1 else "s", len(curves),
+                                                                            "" if len(curves) == 1 else "s"))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_guides_to_curves(GroomToolOperator):
+    """A curve object per guide group (the selected guides, else all), tagged with each guide's ID, to edit with Blender's tools and bring back with Curves to Guides"""
+    bl_idname = "groomlab.guides_to_curves"
+    bl_label = "Guides to Curves"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        from . import pipeline
+        try:
+            made = pipeline.guides_to_curves(active(context), context)
+        except HelperError as e:
+            return _fail(self, e)
+        for o in context.selected_objects:
+            o.select_set(False)
+        for o in made:
+            o.select_set(True)
+        if made:
+            context.view_layer.objects.active = made[0]
+        tools.status(context.scene, "Made %d curve object(s): edit them, then Curves to Guides" % len(made))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_curves_to_guides(GroomToolOperator):
+    """Selected curves into the groom: curves from Guides to Curves reshape their guides in place (same IDs), any other curve becomes a new guide"""
+    bl_idname = "groomlab.curves_to_guides"
+    bl_label = "Curves to Guides"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        from . import pipeline
+        scalp = active(context)
+        objects = [o for o in context.selected_objects if o.type in ("CURVE", "CURVES") and o is not scalp and
+                   o.groomlab.role == "NONE"]
+        if not objects:
+            self.report({"ERROR"}, "Select curve objects (from Guides to Curves, or drawn from the scalp)")
+            return {"CANCELLED"}
+        try:
+            r = pipeline.curves_to_guides(scalp, objects)
+        except HelperError as e:
+            return _fail(self, e)
+        tools.refresh_info(scalp, context.scene)
+        tools.status(context.scene, "%d guide(s) reshaped, %d added" % (r["changed"], r["added"]))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_strands_to_curves(GroomToolOperator):
+    """The groom's strands as they show, as a curve object of their own (their widths and channels as attributes)"""
+    bl_idname = "groomlab.strands_to_curves"
+    bl_label = "Strands to Curves"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        from . import pipeline
+        try:
+            obj = pipeline.strands_to_curves(active(context), context)
+        except HelperError as e:
+            return _fail(self, e)
+        tools.status(context.scene, "Made %s (%d curves)" % (obj.name, len(obj.data.curves)))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_parts_from_curves(GroomToolOperator):
+    """Add each selected curve as a part, laid on the scalp (Maya's Parts From Curves)"""
+    bl_idname = "groomlab.parts_from_curves"
+    bl_label = "Parts from Curves"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        from . import pipeline
+        scalp = active(context)
+        lines = [p for o in _selected_curves(context, scalp) for p in pipeline.curve_points(o, scalp)]
+        if not lines:
+            self.report({"ERROR"}, "Select curve objects (Curve or hair Curves) along the parts")
+            return {"CANCELLED"}
+        try:
+            names = [tools.part_add(scalp, points) for points in lines]
+        except HelperError as e:
+            return _fail(self, e)
+        tools.status(context.scene, "Added %d part%s: %s" % (len(names), "" if len(names) == 1 else "s", ", ".join(names)))
+        return {"FINISHED"}
+
 
 class GROOMLAB_OT_part_remove(GroomToolOperator):
     """Remove the part picked above"""
@@ -1950,7 +2096,8 @@ classes = (GROOMLAB_OT_tool_modal, GROOMLAB_OT_tool, GROOMLAB_OT_tool_exit, GROO
            GROOMLAB_OT_map_set_channels, GROOMLAB_OT_map_reload, GROOMLAB_OT_map_show_file,
            GROOMLAB_OT_alpha_add, GROOMLAB_OT_alpha_folder, GROOMLAB_OT_alpha_clear,
            GROOMLAB_OT_group_color, GROOMLAB_OT_group_promote_demote, GROOMLAB_OT_guides_mirror_group,
-           GROOMLAB_OT_guides_reparent, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_flow_clear,
+           GROOMLAB_OT_guides_reparent, GROOMLAB_OT_part_remove, GROOMLAB_OT_parts_clear, GROOMLAB_OT_guides_from_curves, GROOMLAB_OT_parts_from_curves, GROOMLAB_OT_guides_to_curves,
+           GROOMLAB_OT_curves_to_guides, GROOMLAB_OT_strands_to_curves, GROOMLAB_OT_flow_clear,
            GROOMLAB_OT_length_edit,
            GROOMLAB_OT_tube_apply, GROOMLAB_OT_tube_smooth, GROOMLAB_OT_tube_shape_custom, GROOMLAB_OT_tube_shape_new,
            GROOMLAB_OT_tube_shape_rename, GROOMLAB_OT_tube_shape_remove, GROOMLAB_OT_corrective_new,

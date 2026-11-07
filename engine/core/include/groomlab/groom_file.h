@@ -11,7 +11,8 @@
 //    "source": "scene.ma|groomLab1Shape",
 //    "graph": {...}, "hierarchy": {...} | null, "parts": {...}?, "correctives": {...}?, "flow": {...}?,
 //    "sculpts": {"<Sculpt node>": {"guides": {"<guide id>": [t, ax, ay, scale, ...]}}}?,
-//    "controls": {"name": value}?, "maps": {"name": {"kind", "texture", "channels"?}}?,
+//    "controls": {"name": value}?, "controlKeys": {"name": [[frame, value], ...]}?,
+//    "maps": {"name": {"kind", "texture", "channels"?}}?,
 //    "scalp": {"points": [x, y, z, ...], "triangles": [a, b, c, ...], "topology": "9f3a...",
 //              "polygons": [n, ...]?, "subdivision": 2?, "restPoints": [...]?, "uvs": [u, v, ...]?,
 //              "colorSets": {"name": [r, g, b, a, ...]}?},
@@ -83,6 +84,7 @@
 #include <string>
 #include <vector>
 
+#include "groomlab/control_keys.h"
 #include "groomlab/groom.h"
 #include "groomlab/instances.h"
 #include "groomlab/transfer.h"
@@ -131,6 +133,9 @@ struct GroomFile {
     std::vector<std::string> searchPaths;
     // The marker pairs of the last transfer by markers (transfer.h), reused by the next one.
     std::vector<TransferMarker> transferMarkers;
+    // The controls' keys ("controlKeys": the app's param keys, a control's value over the frames;
+    // Maya and Blender key their own attributes instead): applied by the host as its frame changes.
+    std::map<std::string, ControlKeys> controlKeys;
     // The Reference window's photos ("referencePhotos", a JSON array as text; "" none).
     std::string referencePhotos;
     // The guide groups' own colors and the hidden groups ("guideGroupColors", "hiddenGuideGroups":

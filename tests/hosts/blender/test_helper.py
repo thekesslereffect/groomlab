@@ -573,6 +573,11 @@ class GroomTest(HelperTestCase):
         graph["connections"].append({"from": into["from"], "to": "cards", "input": "strands"})
         into["from"] = "cards"
         self.h.call("set_graph", session=s, graph=graph)
+        # Card Stats (Maya's card_stats): the node's cards as they are now.
+        stats = self.h.call("card_stats", session=s, node="cards")
+        self.assertGreater(stats["node"]["cards"], 0)
+        self.assertGreater(stats["node"]["triangles"], 0)
+        self.assertFalse(stats["baked"])
         listed = self.h.call("card_map_presets")
         names = [p["name"] for p in listed["presets"]]
         self.assertEqual(names[:4], ["Unreal Hair Cards", "Unreal (packed)", "Unity HDRP Hair", "Separate maps (all)"])
@@ -1850,13 +1855,14 @@ class ToolsTest(HelperTestCase):
         self.call("map_relink", name="photo", path=outside)
         files = {m["name"]: m["file"] for m in self.call("maps_list")["maps"]}
         self.assertTrue(files["tint"].startswith(temp + "/"), files["tint"])
+        tint = os.path.basename(files["tint"])  # (tint.png, or tint_2.png when a temp folder of an earlier run had one)
         undo = self.call("undo_state")
         target = os.path.join(self.tmp, "shot", "groomlab", "shot", "masks", "head").replace("\\", "/")
         r = self.call("maps_move_to", dir=target)
         self.assertEqual(r["folder"], target)
         self.assertEqual([m["name"] for m in r["moved"]], ["tint"])
         files = {m["name"]: m["file"] for m in self.call("maps_list")["maps"]}
-        self.assertEqual(files["tint"], target + "/tint.png")
+        self.assertEqual(files["tint"], target + "/" + tint)
         self.assertTrue(os.path.isfile(files["tint"]))
         self.assertEqual(os.path.normcase(os.path.abspath(files["photo"])), os.path.normcase(os.path.abspath(outside)))
         self.assertEqual(self.call("undo_state"), undo)
@@ -1868,8 +1874,61 @@ class ToolsTest(HelperTestCase):
         other = os.path.join(self.tmp, "shot_v2", "groomlab", "shot_v2", "masks", "head").replace("\\", "/")
         moved = self.call("maps_move_to", dir=other)["moved"]
         self.assertEqual(sorted(m["name"] for m in moved), ["gray", "tint"])
-        self.assertTrue(os.path.isfile(target + "/tint.png"))  # the old file's copy stays
-        self.assertTrue(os.path.isfile(other + "/tint.png"))
+        self.assertTrue(os.path.isfile(target + "/" + tint))  # the old file's copy stays
+        self.assertTrue(os.path.isfile(other + "/" + tint))
+
+    def test_files_follow_the_blend_on_save_as(self):
+        # Save As (Maya's follow_scene_files): a graph file in the old .blend's groomlab folder is
+        # copied to the same place in the new one's and the graph names the copy; a file elsewhere stays.
+        old_base, new_base = (os.path.join(self.tmp, d).replace("\\", "/") for d in ("a", "b"))
+        old_root, new_root = old_base + "/groomlab/shot", new_base + "/groomlab/shot_v2"
+        inside = old_root + "/caches/guides.abc"
+        outside = os.path.join(self.tmp, "library", "other.abc").replace("\\", "/")
+        for p in (inside, outside):
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(b"abc")
+        graph = self.call("get_graph")["graph"]
+        graph["nodes"] += [{"name": "a", "type": "ImportCurves", "params": {"path": inside}},
+                           {"name": "b", "type": "ImportCurves", "params": {"path": outside}}]
+        self.call("set_graph", graph=graph)
+        r = self.call("files_follow", oldBase=old_base.replace("\\", "/"), oldRoot=old_root, newBase=new_base.replace("\\", "/"),
+                      newRoot=new_root)
+        self.assertTrue(r["graphChanged"])
+        paths = {n["name"]: n["params"].get("path") for n in self.call("get_graph")["graph"]["nodes"] if n["name"] in ("a", "b")}
+        self.assertEqual(paths["a"], new_root + "/caches/guides.abc")
+        self.assertEqual(paths["b"], outside)
+        self.assertTrue(os.path.isfile(new_root + "/caches/guides.abc"))
+        self.assertTrue(os.path.isfile(inside))
+        self.assertEqual(self.call("files_follow", oldBase=old_base, oldRoot=old_root, newBase=new_base, newRoot=new_root)["copied"], [])
+
+    def test_files_collect_into_the_blends_folder(self):
+        # Collect Files (Maya's collect_files): a texture map and a graph file from outside the
+        # .blend's folder copied into its groomlab folders and pointed at; what is inside stays.
+        self.place_guides(3)
+        blend_dir = os.path.join(self.tmp, "proj").replace("\\", "/")
+        root = blend_dir + "/groomlab/shot"
+        library = os.path.join(self.tmp, "library").replace("\\", "/")
+        os.makedirs(library, exist_ok=True)
+        image = library + "/skin.png"
+        shutil.copyfile(self.call("map_create", name="skin", kind="texture", value=0.5, resolution=32)["file"], image)
+        self.call("map_relink", name="skin", path=image)
+        curves = library + "/guides.abc"
+        with open(curves, "wb") as f:
+            f.write(b"abc")
+        graph = self.call("get_graph")["graph"]
+        graph["nodes"].append({"name": "ic", "type": "ImportCurves", "params": {"path": curves}})
+        self.call("set_graph", graph=graph)
+        self.call("set_options", mapsDir=root + "/masks/head")
+        r = self.call("files_collect", dir=blend_dir, masks=root + "/masks", cards=root + "/cards", caches=root + "/caches")
+        self.assertEqual(sorted(c[0] for c in r["copied"]), ["map skin", "param"])
+        files = {m["name"]: m["file"] for m in self.call("maps_list")["maps"]}
+        self.assertEqual(files["skin"], root + "/masks/head/skin.png")
+        path = next(n for n in self.call("get_graph")["graph"]["nodes"] if n["name"] == "ic")["params"]["path"]
+        self.assertEqual(path, root + "/masks/guides.abc")
+        again = self.call("files_collect", dir=blend_dir, masks=root + "/masks", cards=root + "/cards", caches=root + "/caches")
+        self.assertEqual(again["copied"], [])
+        self.assertGreaterEqual(again["inside"], 2)
 
     def test_map_management(self):
         self.place_guides(3)

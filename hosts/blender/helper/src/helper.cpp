@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/brush_alpha.h"
 #include "groomlab/attributes.h"
 #include "groomlab/card_files.h"
@@ -1461,6 +1462,38 @@ json Helper::run(const std::string& cmd, const json& args) {
         if (args.contains("mapsDir") && !args["mapsDir"].is_null()) s.mapsDir = optString(args, "mapsDir", "");
         return {{"followScalp", s.groom->followScalp()}, {"mapsDir", mapsFolderOf(s)}};
     }
+    if (cmd == "files_follow") {
+        // Save As (Maya's follow_scene_files): the files the groom names come along into the new
+        // file's folders. `oldBase`/`newBase` the folders relative paths resolve against,
+        // `oldRoot`/`newRoot` the files' asset folders (<base>/groomlab/<name>), `extraRoots`
+        // [[from, to]] where an untitled file's went; the session's temp Simulate folder into the
+        // new caches. The graph's files, the Simulate bakes, the card bake, the caches; not an
+        // undo step (texture maps: maps_move_to).
+        Session& s = session(args);
+        const std::string newRoot = needString(args, "newRoot");
+        std::vector<std::pair<std::string, std::string>> extra;
+        if (args.contains("extraRoots") && args["extraRoots"].is_array()) {
+            for (const json& pair : args["extraRoots"]) {
+                if (pair.is_array() && pair.size() == 2 && pair[0].is_string() && pair[1].is_string()) extra.emplace_back(pair[0], pair[1]);
+            }
+        }
+        std::error_code ec;
+        extra.emplace_back((fs::temp_directory_path(ec) / blockName("s" + std::to_string(s.id) + "sim", 0)).generic_u8string(), newRoot + "/caches");
+        FileFollower f(optString(args, "oldBase", ""), optString(args, "oldRoot", ""), needString(args, "newBase"), newRoot, extra);
+        bool graphMoved = false;
+        const std::string graph = followGraphFiles(graphText(*s.groom), [&](const std::string& p) { return f.follow(p); }, &graphMoved);
+        if (graphMoved) s.groom->setGraphJson(graph);
+        GroomFile& file = s.file;
+        for (auto& [node, ref] : file.simCaches) ref.file = f.follow(ref.file);
+        file.guideCache.file = f.follow(file.guideCache.file);
+        file.scalpCache.file = f.follow(file.scalpCache.file);
+        if (!file.cardBake.prefix.empty()) {
+            std::vector<std::string> suffixes = cardBakeSuffixes();
+            suffixes.push_back("Preview.png");
+            file.cardBake.prefix = f.followPrefix(file.cardBake.prefix, suffixes);
+        }
+        return {{"copied", f.copied()}, {"warnings", f.warnings()}, {"graphChanged", graphMoved}};
+    }
     if (cmd == "set_space") {
         Session& s = session(args);
         s.space = HostSpace::make(optString(args, "upAxis", "Z"), optNumber(args, "metersPerUnit", 1.0));
@@ -1607,6 +1640,7 @@ json Helper::run(const std::string& cmd, const json& args) {
         std::vector<std::uint64_t> ids;
         std::vector<std::int32_t> counts;
         std::vector<Vec3f> points;
+        json groups = json::array();  // a hierarchy guide's group, by name (Guides to Curves)
         auto take = [&](std::uint64_t id, const std::vector<Vec3f>& p) {
             ids.push_back(id);
             counts.push_back(static_cast<std::int32_t>(p.size()));
@@ -1623,7 +1657,10 @@ json Helper::run(const std::string& cmd, const json& args) {
             const HierarchyPtr rooted = s.groom->authoredHierarchy();
             const GuideHierarchy& h = rooted ? *rooted : *stored;
             for (const HierarchyGuide& g : h.guides()) {
-                if (!g.followsParent()) take(g.id, g.points);
+                if (g.followsParent()) continue;
+                take(g.id, g.points);
+                const GuideGroup* group = h.group(g.group);
+                groups.push_back(group ? group->name : std::string());
             }
         }
         s.guides.begin(Arena::reserve(points.size() * 12) + Arena::reserve(counts.size() * 4) + Arena::reserve(ids.size() * 8));
@@ -1631,8 +1668,10 @@ json Helper::run(const std::string& cmd, const json& args) {
         arrays["points"] = putPoints(s.guides, points, s.space, groom);
         arrays["counts"] = put(s.guides, counts.data(), counts.size(), 1);
         arrays["ids"] = put(s.guides, ids.data(), ids.size(), 1);
-        return {{"source", source}, {"pose", source == "flat" && pose == "rest" && s.restGuides ? "rest" : "now"},
-                {"guides", ids.size()}, {"points", points.size()}, {"arrays", arrays}};
+        json out = {{"source", source}, {"pose", source == "flat" && pose == "rest" && s.restGuides ? "rest" : "now"},
+                    {"guides", ids.size()}, {"points", points.size()}, {"arrays", arrays}};
+        if (source == "hierarchy") out["groups"] = groups;
+        return out;
     }
     if (cmd == "set_guides") {
         Session& s = session(args);

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/card_files.h"
 
+#include "groomlab/asset_files.h"
+
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -46,6 +48,12 @@ CardBakePaths CardBakePaths::besideGroomFile(const std::string& groomPath) {
     return CardBakePaths((groom.parent_path() / fs::u8path(groomFileCardBakePrefix(groom.stem().u8string()))).generic_u8string());
 }
 
+CardBakePaths CardBakePaths::legacyBesideGroomFile(const std::string& groomPath) {
+    const fs::path groom = fs::u8path(groomPath);
+    const std::string stem = groom.stem().u8string();
+    return CardBakePaths((groom.parent_path() / fs::u8path(stem + "_cards/" + stem + "_")).generic_u8string());
+}
+
 std::vector<std::string> CardBakePaths::maps() const {
     std::vector<std::string> out;
     for (const std::string& name : cardMapNames()) out.push_back(map(name));
@@ -63,7 +71,7 @@ bool CardBakePaths::exists() const {
     return !prefix.empty() && fs::exists(fs::u8path(atlas()), ec) && fs::exists(fs::u8path(map("Color")), ec);
 }
 
-std::string groomFileCardBakePrefix(const std::string& stem) { return stem + "_cards/" + stem + "_"; }
+std::string groomFileCardBakePrefix(const std::string& stem) { return "groomlab/" + fileSafeName(stem) + "/cards/" + stem + "_"; }
 
 std::string formatCardMaps(const std::string& prefix, const std::string& stamp, int bake) {
     return "Color=" + prefix + "Color.tga;Coverage=" + prefix + "Coverage.tga;AO=" + prefix + "AO.tga;AOWorld=" +

@@ -6,6 +6,7 @@
 #include "main_window_internal.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -311,6 +312,12 @@ bool MainWindow::exportTo(const QString& target, const QString& path, const Expo
     }
     panel->setTarget(t);
     panel->setOutputPath(path);
+    {
+        // The exports folder (or another) made when it is not there yet.
+        std::error_code ec;
+        const QFileInfo out(path);
+        std::filesystem::create_directories(std::filesystem::u8path((t == ExportPanel::Target::CardMaps ? out.filePath() : out.path()).toStdString()), ec);
+    }
     if (shell_->timeline()->playing()) shell_->timeline()->setPlaying(false);  // (its frames would evaluate meanwhile)
     panel->setBusy(true);
     beginJob(tr("export"), panel->exportButton());
@@ -1260,7 +1267,11 @@ void MainWindow::saveAs() {
         dropAutosave();
         rememberRecentFile(path);
         host_->setRecentFiles(recentFiles());
-        notify(tr("Saved %1").arg(QFileInfo(path).fileName()));
+        // Maya's follow_scene_files note: the groom's files came along into the new folder.
+        const std::size_t copied = document_->savedCopies().size();
+        notify(copied ? tr("Saved %1: %n file(s) copied into its groomlab folder", "", static_cast<int>(copied)).arg(QFileInfo(path).fileName())
+                      : tr("Saved %1").arg(QFileInfo(path).fileName()));
+        for (const std::string& w : document_->saveWarnings()) report(QString::fromStdString(w), false);
     } catch (const std::exception& e) {
         report(tr("Cannot save: %1. Try Save As to another folder").arg(QString::fromUtf8(e.what())));
     }

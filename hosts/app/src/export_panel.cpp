@@ -21,6 +21,7 @@
 #include <QVBoxLayout>
 
 #include "glass.h"
+#include "groomlab/asset_files.h"
 #include "theme.h"
 
 namespace groomlab::app {
@@ -860,7 +861,8 @@ void ExportPanel::setDocumentState(bool open, double frame, bool animated, doubl
     first_->setValue(static_cast<int>(std::lround(first)));
     last_->setValue(static_cast<int>(std::lround(last)));
     export_->setEnabled(open);
-    // The output beside the groom: "<stem>_<target>.<ext>" (an unsaved groom: the user picks).
+    // The output in the groom's exports folder (Maya's): groomlab/<stem>/exports/<stem>_<target>.<ext>
+    // (an unsaved groom: the user picks).
     const QString stem = groomPath.isEmpty() ? QString() : QFileInfo(groomPath).completeBaseName();
     if (stem != groomStem_) {
         groomStem_ = stem;
@@ -868,7 +870,8 @@ void ExportPanel::setDocumentState(bool open, double frame, bool animated, doubl
             const QString suffix = target_ == Target::CardMaps ? QString()
                                                                 : QStringLiteral("_") + QLatin1String(targetName(target_)) + QStringLiteral(".") +
                                                                       defaultExtension();
-            path_->setText(QFileInfo(groomPath).path() + QStringLiteral("/") + stem + suffix);
+            const QString folder = QString::fromStdString(groomlab::assetFolder(QFileInfo(groomPath).absolutePath().toStdString(), stem.toStdString(), "exports"));
+            path_->setText(folder + QStringLiteral("/") + stem + suffix);
         }
     }
     updating_ = false;

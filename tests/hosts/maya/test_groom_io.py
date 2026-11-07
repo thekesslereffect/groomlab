@@ -200,9 +200,9 @@ class GroomFileTest(unittest.TestCase):
         exported = read_json(path)
         self.assertEqual(exported["upAxis"], "Y")
         self.assertEqual([m["new"]["point"] for m in exported["transferMarkers"]], [[5, 1, 0], [6, 0, 0], [5, 0, 1]])
-        self.assertEqual(exported["cardBake"], {"prefix": "hair_cards/hair_", "strands": stamp})
+        self.assertEqual(exported["cardBake"], {"prefix": "groomlab/hair/cards/hair_", "strands": stamp})
         for name in ("Color.tga", "Atlas.json", "Preview.png"):
-            self.assertTrue(os.path.isfile(os.path.join(WORK_DIR, "exports", "hair_cards", "hair_" + name)), name)
+            self.assertTrue(os.path.isfile(os.path.join(WORK_DIR, "exports", "groomlab", "hair", "cards", "hair_" + name)), name)
         self.assertEqual(exported["maps"]["dense"]["texture"], "../source/groomlab/source/masks/hair/dense.png")
 
         new_scene("imported")

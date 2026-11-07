@@ -10,7 +10,8 @@
 // the unique aoWorld UV set), <prefix>Atlas.json (the cells rebuilt cards keep) and
 // <prefix>Preview.png (the viewport's map: the color darkened by half the occlusion, the coverage
 // in alpha; display.h writeCardBakePreview makes one from the maps). A groom file keeps its bake
-// beside it at <stem>_cards/<stem>_ (groom_file.h's "cardBake" names it relative to the file).
+// in its own cards folder beside it, groomlab/<stem>/cards/<stem>_ (asset_files.h's layout;
+// groom_file.h's "cardBake" names it relative to the file); earlier versions at <stem>_cards/<stem>_.
 //
 // A groom records its last bake in one text, the cardMaps attribute (Maya) or the session's
 // card maps (GroomSession::setCardMaps): "Color=<path>;Coverage=<path>;AO=<path>;Atlas=<path>;
@@ -40,8 +41,10 @@ struct CardBakePaths {
     explicit CardBakePaths(std::string at) : prefix(std::move(at)) {}
     // <folder>/<name>_ (forward slashes).
     static CardBakePaths in(const std::string& folder, const std::string& name);
-    // The bake beside a groom file: <its folder>/<stem>_cards/<stem>_.
+    // The bake beside a groom file: <its folder>/groomlab/<stem>/cards/<stem>_.
     static CardBakePaths besideGroomFile(const std::string& groomPath);
+    // Where earlier versions put it: <its folder>/<stem>_cards/<stem>_ (read, never written).
+    static CardBakePaths legacyBesideGroomFile(const std::string& groomPath);
 
     std::string map(const std::string& name) const { return prefix + name + ".tga"; }
     std::string atlas() const { return prefix + "Atlas.json"; }
@@ -58,7 +61,8 @@ struct CardBakePaths {
 // The file suffixes of a bake (Depth.tga ... AO.tga, Atlas.json): CardBakePaths::files without
 // the prefix.
 const std::vector<std::string>& cardBakeSuffixes();
-// "<stem>_cards/<stem>_": where a groom file's bake sits, relative to the file's folder.
+// "groomlab/<stem>/cards/<stem>_": where a groom file's bake sits, relative to the file's folder
+// (the stem made file safe in the folder's name, as assetFolder does).
 std::string groomFileCardBakePrefix(const std::string& stem);
 
 // The cardMaps text of the bake at `prefix` (as the host stores it), with its stamp ("": none

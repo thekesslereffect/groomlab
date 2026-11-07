@@ -17,6 +17,8 @@
 #include <stdexcept>
 
 #include "groomlab/alembic_io.h"
+#include "groomlab/asset_files.h"
+#include "groomlab/card_files.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/paths.h"
 #include "groomlab/presets.h"
@@ -950,6 +952,217 @@ std::string GroomDocument::findMissingFiles(const std::string& folder, bool recu
     }
     if (report) *report = std::move(r);
     return {};
+}
+
+void GroomDocument::followFiles(const std::string& newPath) {
+    const fs::path to = fs::u8path(newPath);
+    const std::string newBase = fs::absolute(to).parent_path().generic_u8string();
+    const std::string newName = to.stem().u8string();
+    const std::string newRoot = groomlab::assetFolder(newBase, newName);
+    std::string oldBase = newBase, oldRoot;
+    std::vector<std::pair<std::string, std::string>> extra;
+    if (!path_.empty()) {
+        const fs::path from = fs::u8path(path_);
+        oldBase = fs::absolute(from).parent_path().generic_u8string();
+        const std::string stem = from.stem().u8string();
+        oldRoot = groomlab::assetFolder(oldBase, stem);
+        // Where earlier versions of the app kept them, beside the groom: into the new folders.
+        extra.push_back({oldBase + "/masks/" + stem, newRoot + "/masks"});
+        extra.push_back({oldBase + "/" + stem + "_cards", newRoot + "/cards"});
+        extra.push_back({oldBase + "/" + stem + "_sim", newRoot + "/caches"});
+    } else if (!scene_->file().directory.empty()) {
+        oldBase = scene_->file().directory;  // a groom made from another file: its paths resolve there
+    }
+    if (!untitledRoot_.empty()) extra.push_back({untitledRoot_, newRoot});
+    FileFollower f(oldBase, oldRoot, newBase, newRoot, extra);
+
+    // Texture maps (no undo step: the groom names the copies, as Maya's save does).
+    ScalpMaps maps = session().scalpMaps();
+    bool mapsMoved = false;
+    for (auto& [name, entry] : maps.maps) {
+        if (entry.kind != "texture" || entry.texture.empty()) continue;
+        const std::string followed = f.follow(entry.texture);
+        if (followed != entry.texture) {
+            entry.texture = followed;
+            mapsMoved = true;
+        }
+    }
+    if (mapsMoved) {
+        session().setScalpMaps(maps);
+        paints_.clear();
+    }
+    // The files the graph reads (images, Alembic files, guide caches; inside compounds too).
+    bool graphMoved = false;
+    fileParams(graph_, "", [&](const std::string&, json& value) {
+        const std::string stored = trimmed(value.get<std::string>());
+        const std::string followed = f.follow(stored);
+        if (followed != stored) {
+            value = followed;
+            graphMoved = true;
+        }
+    });
+    if (graphMoved) applyGraph();
+    // The card bake: every file of its prefix together.
+    if (bake_ && !bake_->prefix.empty()) {
+        std::vector<std::string> suffixes;
+        const std::string prefix = bake_->prefix;
+        for (const std::string& file : CardBakePaths(prefix).files()) suffixes.push_back(file.substr(prefix.size()));
+        suffixes.push_back("Preview.png");
+        const std::string followed = f.followPrefix(prefix, suffixes);
+        if (followed != prefix) {
+            auto moved = [&](std::string& p) {
+                if (p.compare(0, prefix.size(), prefix) == 0) p = followed + p.substr(prefix.size());
+            };
+            bake_->prefix = followed;
+            for (std::string& p : bake_->paths) moved(p);
+            moved(bake_->preview);
+            moved(bake_->atlas);
+            session().setCardMaps(formatCardMaps(followed, bake_->stamp, 0));
+        }
+    }
+    // The Simulate nodes' bakes (what the session holds stays: the same frames).
+    for (auto& [node, ref] : simBakes_) ref.file = f.follow(ref.file);
+    // Reference photos and their masks.
+    if (!referencePhotos().empty()) {
+        json photos = json::parse(referencePhotos(), nullptr, false);
+        bool photosMoved = false;
+        if (photos.is_array()) {
+            for (json& p : photos) {
+                for (const char* key : {"image", "mask"}) {
+                    if (!p.contains(key) || !p[key].is_string()) continue;
+                    const std::string stored = p[key].get<std::string>(), followed = f.follow(stored);
+                    if (followed != stored) {
+                        p[key] = followed;
+                        photosMoved = true;
+                    }
+                }
+            }
+        }
+        if (photosMoved) referencePhotos_ = photos.dump();
+    }
+    savedCopies_ = f.copied();
+    saveWarnings_ = f.warnings();
+    if (!untitledRoot_.empty() && !f.copied().empty()) untitledRoot_.clear();  // saved: its own folders now
+}
+
+std::string GroomDocument::collectFiles(CollectReport* out) {
+    if (path_.empty()) return "save the groom first: its files are collected into its folder";
+    CollectReport r;
+    const std::string dir = fs::absolute(fs::u8path(path_)).parent_path().generic_u8string();
+    auto resolve = [&](const std::string& stored) {
+        if (stored.empty() || isAbsolutePath(stored) || stored.find("<UDIM>") != std::string::npos) {
+            return isAbsolutePath(stored) || stored.empty() ? stored : (fs::u8path(dir) / fs::u8path(stored)).generic_u8string();
+        }
+        const std::string found = resolveMapPath(stored);
+        return found.empty() ? (fs::u8path(dir) / fs::u8path(stored)).generic_u8string() : fs::u8path(found).generic_u8string();
+    };
+    // `stored` from outside the folder into `kind`: the path to store now, or `stored` itself.
+    auto collect = [&](const std::string& what, const std::string& stored, const std::string& kind) -> std::string {
+        if (stored.empty()) return stored;
+        const std::string full = resolve(stored);
+        if (insideFolder(full, dir)) {
+            ++r.inside;
+            return stored;
+        }
+        std::vector<std::string> copied;
+        const std::string copy = collectFile(full, assetFolder(kind), &copied);
+        if (copy.empty()) {
+            r.missing.emplace_back(what, stored);
+            return stored;
+        }
+        r.copied.emplace_back(what, copy);
+        return pathFromGroomFolder(copy, dir);
+    };
+    ScalpMaps maps = session().scalpMaps();
+    bool mapsChanged = false;
+    for (auto& [name, entry] : maps.maps) {
+        if (entry.kind != "texture") continue;
+        const std::string stored = collect("map " + name, entry.texture, "masks");
+        if (stored != entry.texture) entry.texture = stored, mapsChanged = true;
+    }
+    if (mapsChanged) {
+        session().setScalpMaps(maps);
+        paints_.clear();
+    }
+    bool graphChanged = false;
+    fileParams(graph_, "", [&](const std::string& label, json& value) {
+        const std::string stored = trimmed(value.get<std::string>());
+        const std::string now = collect(label, stored, "masks");
+        if (now != stored) value = now, graphChanged = true;
+    });
+    if (graphChanged) applyGraph();
+    if (bake_ && !bake_->prefix.empty() && !insideFolder(bake_->prefix + "x", dir)) {
+        // The card bake as a whole: every file of its prefix into cards.
+        FileFollower f(dir, "", dir, assetFolder(""), {{fs::u8path(bake_->prefix).parent_path().generic_u8string(), assetFolder("cards")}});
+        std::vector<std::string> suffixes;
+        for (const std::string& file : CardBakePaths(bake_->prefix).files()) suffixes.push_back(file.substr(bake_->prefix.size()));
+        suffixes.push_back("Preview.png");
+        const std::string prefix = bake_->prefix, followed = f.followPrefix(prefix, suffixes);
+        if (followed != prefix) {
+            const std::string full = isAbsolutePath(followed) ? followed : (fs::u8path(dir) / fs::u8path(followed)).generic_u8string();
+            auto moved = [&](std::string& p) {
+                if (p.compare(0, prefix.size(), prefix) == 0) p = full + p.substr(prefix.size());
+            };
+            bake_->prefix = full;
+            for (std::string& p : bake_->paths) moved(p);
+            moved(bake_->preview);
+            moved(bake_->atlas);
+            session().setCardMaps(formatCardMaps(full, bake_->stamp, 0));
+            r.copied.emplace_back("card bake", full);
+        }
+    }
+    for (auto& [node, ref] : simBakes_) ref.file = collect("simulation " + node, ref.file, "caches");
+    if (!referencePhotos().empty()) {
+        json photos = json::parse(referencePhotos(), nullptr, false);
+        bool photosChanged = false;
+        if (photos.is_array()) {
+            for (json& p : photos) {
+                for (const char* key : {"image", "mask"}) {
+                    if (!p.contains(key) || !p[key].is_string()) continue;
+                    const std::string stored = p[key].get<std::string>(), now = collect(std::string("photo ") + p.value("name", std::string()), stored, "references");
+                    if (now != stored) p[key] = now, photosChanged = true;
+                }
+            }
+        }
+        if (photosChanged) referencePhotos_ = photos.dump();
+    }
+    if (!r.copied.empty()) dirty_ = true;
+    if (out) *out = std::move(r);
+    return {};
+}
+
+std::string GroomDocument::importReferenceImage(const std::string& path) {
+    std::error_code ec;
+    if (!fs::is_regular_file(fs::u8path(path), ec)) return {};
+    const fs::path folder = fs::u8path(assetFolder("references"));
+    fs::create_directories(folder, ec);
+    const fs::path source = fs::absolute(fs::u8path(path), ec);
+    fs::path target = folder / source.filename();
+    auto same = [&](const fs::path& a, const fs::path& b) {
+        std::error_code e;
+        if (fs::equivalent(a, b, e)) return true;
+        if (fs::file_size(a, e) != fs::file_size(b, e) || e) return false;
+        std::ifstream x(a, std::ios::binary), y(b, std::ios::binary);
+        return std::equal(std::istreambuf_iterator<char>(x), std::istreambuf_iterator<char>(), std::istreambuf_iterator<char>(y));
+    };
+    for (int k = 2; fs::exists(target, ec) && !same(source, target); ++k) {
+        target = folder / (source.stem().u8string() + "_" + std::to_string(k) + source.extension().u8string());
+    }
+    if (!fs::exists(target, ec)) {
+        fs::copy_file(source, target, fs::copy_options::none, ec);
+        if (ec) return {};
+    }
+    const std::string full = target.generic_u8string();
+    return path_.empty() ? full : pathFromGroomFolder(full, fs::u8path(path_).parent_path().generic_u8string());
+}
+
+std::string GroomDocument::referenceImageFile(const std::string& stored) const {
+    if (stored.empty() || isAbsolutePath(stored)) return stored;
+    std::vector<std::string> dirs;
+    if (!path_.empty()) dirs.push_back(fs::u8path(path_).parent_path().generic_u8string());
+    if (!scene_->file().directory.empty()) dirs.push_back(scene_->file().directory);
+    const std::string found = resolvePathIn(stored, dirs);
+    return found.empty() ? stored : fs::u8path(found).generic_u8string();
 }
 
 void GroomDocument::recoveredAs(const std::string& path) {

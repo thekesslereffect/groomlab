@@ -159,7 +159,8 @@ public:
     double time() const { return time_; }  // seconds
     double frame() const { return secondsToFrame(time_, framesPerSecond()); }  // every host's rule (frame_time.h)
     void setTime(double seconds) { time_ = seconds; }
-    void setFrame(double frame) { time_ = frameToSeconds(frame, framesPerSecond()); }
+    // The frame shown; the keyed controls take their values there (controlKeys).
+    void setFrame(double frame);
     // Following the scalp (GroomSession::setFollowScalp): kept in the file ("followScalp").
     bool followScalp() const { return session().followScalp(); }
     void setFollowScalp(bool on);
@@ -312,6 +313,20 @@ public:
     // A control's value (GroomSession::setControls; saved in the file's "controls"): dirty, no undo
     // step (a slider as Maya's keyable attribute, which the host keeps). False for no such control.
     bool setControlValue(const std::string& name, double value);
+    // Param keys (Maya's and Blender's Set Key on a param, the app's own keyframes): a param keyed
+    // drives through a Control node of its own (made as Drive with Slider makes one, an undo step),
+    // whose value is keyed at frames and applied whenever the frame changes (setFrame), saved with
+    // the groom ("controlKeys"). Setting, deleting and removing keys are no undo step (a host's
+    // keyframes, as setControlValue is the host's slider). "" or the error.
+    std::string setParamKey(const std::string& node, const std::string& param);
+    std::string deleteParamKey(const std::string& node, const std::string& param);
+    std::string removeParamAnimation(const std::string& node, const std::string& param);
+    // The control a param reads (a Control node wired into it), "" none; whether it has keys, and
+    // one at the frame shown.
+    std::string controlOf(const std::string& node, const std::string& param) const;
+    bool paramKeyed(const std::string& node, const std::string& param) const;
+    bool paramKeyedHere(const std::string& node, const std::string& param) const;
+    const std::map<std::string, ControlKeys>& controlKeys() const { return controlKeys_; }
     // Bake Node to Guides (Maya's bake.bake_guides): a node's strands (or guides), evaluated now at
     // `density`, become primary guides of root group `group` (made when new). One undo step; the
     // guides made to *count. "" or the error.
@@ -472,6 +487,13 @@ public:
     // history step (the window keeps its own per photo), dirty.
     const std::string& referencePhotos() const;
     void setReferencePhotos(std::string json);
+    // A photo for the Reference window and the Photos tab, copied into assetFolder("references")
+    // (the same image there used as it is, else a free name), as Maya keeps them: the path to
+    // store, relative to the groom's folder (an untitled groom: absolute, taken along when saved).
+    // "" when it cannot be copied (the original's path is stored then).
+    std::string importReferenceImage(const std::string& path);
+    // A stored photo's file: relative to the groom's folder, else as stored.
+    std::string referenceImageFile(const std::string& stored) const;
     // Render overrides (Properties > Rendering > Render Overrides, Maya's renderDensity,
     // renderWidthScale, renderLengthScale): every export and render the document writes takes
     // them (the density times the export's, the widths and lengths scaled); the viewport never.
@@ -550,8 +572,16 @@ public:
     // color map to `color` in the channels of `channelMask` (Maya's fill_map). One undo step.
     std::string fillMap(const std::string& name, float value, bool selectedOnly = false, const PaintColor* color = nullptr,
                         unsigned channelMask = kAllChannels, PaintMode mode = PaintMode::Replace);
-    // Where a texture map's file goes: <groom folder>/masks/<groom name>/ ("" until the groom is
-    // saved), and the file of a texture map resolved against the groom's folder.
+    // Where the groom keeps a kind of file (masks, cards, exports, caches, renders, references), as
+    // Maya keeps a scene's: <groom folder>/groomlab/<groom name>/<kind>; an untitled groom's in a
+    // temp folder of its own, taken along when it is first saved (save).
+    std::string assetFolder(const std::string& kind) const;
+    // What the last save took along (Save As: the files the groom names copied into the new
+    // file's folders, Maya's follow_scene_files): the files copied, and copies under another name.
+    const std::vector<std::string>& savedCopies() const { return savedCopies_; }
+    const std::vector<std::string>& saveWarnings() const { return saveWarnings_; }
+    // Where a texture map's file goes: assetFolder("masks") ("" until the groom is saved), and the
+    // file of a texture map resolved against the groom's folder.
     std::string mapsDirectory() const;
     std::string textureMapFile(const std::string& name) const;
     // The texture map's paint for a stroke (StrokeHost::texturePaint): opened from its file, or
@@ -665,6 +695,17 @@ public:
     // `recursive`): several of one name told apart by the ends of their folders, else reported
     // ambiguous. A map relinked is a step of its own; the params one graph step.
     std::string findMissingFiles(const std::string& folder, bool recursive, RelinkReport* report);
+    // Collect Files (Maya's collect_files): every file the groom uses from outside its folder copied
+    // into its groomlab folder (texture maps and the graph's files into masks, the card bake into
+    // cards, Simulate bakes into caches, photos into references) and the groom pointed at the
+    // copies; a file there already stays, a missing one is reported. Not an undo step (the copies
+    // stay): the groom is marked changed. An error while the groom is unsaved.
+    struct CollectReport {
+        std::vector<std::pair<std::string, std::string>> copied;  // (what, the copy)
+        std::vector<std::pair<std::string, std::string>> missing;  // (what, the path stored)
+        int inside = 0;                                            // files in the groom's folder already
+    };
+    std::string collectFiles(CollectReport* report);
     // A document opened from an autosave copy taking the place of the file it was saved for
     // (`path`, "" an untitled groom): that path, unsaved changes.
     void recoveredAs(const std::string& path);
@@ -708,6 +749,21 @@ public:
     // dropped), the files <folder>/<the settings' name template>.<format's extension>. The
     // groom's own bake stays as it was. result.files the files written, strands the cards.
     ExportResult exportCardMaps(const std::string& path, const ExportOptions& options, const ExportProgress& progress = {});
+    // Unreal or Unity cards (Maya's export_cards_unreal / export_cards_unity, the Blender helper's
+    // unrealCards / unityCards): the card maps (Unreal's TGAs in its hair card layout, or Unity's
+    // HDRP PNGs), the hair cap's maps, the manifest (<name>_cards.json / <name>_unity.json) and the
+    // meshes as FBX (<name>_cards.fbx, <name>_scalpCap.fbx; Unity's in meters with materials on
+    // their base color maps) in `directory`. The files written; `warnings` what could not be.
+    std::vector<std::string> exportEngineCards(const std::string& directory, const std::string& name, bool unity, int resolution = 0,
+                                               float occlusion = 1.0f, std::vector<std::string>* warnings = nullptr);
+    // Unity Feathers (Maya's export_unity_feathers): the strands as Unity's hair package reads them
+    // (<name>_strands.abc: a curves object per groom group, barbs resampled), the feathers' rachis
+    // as an FBX to skin (<name>_rachis.fbx, meters) and the manifest (<name>_unity_feathers.json) in
+    // `directory`. The files written; `warnings` what could not be.
+    std::vector<std::string> exportUnityFeathers(const std::string& directory, const std::string& name,
+                                                 std::vector<std::string>* warnings = nullptr);
+    // The scales' mesh as FBX (Maya's export_scales_fbx; Unity's in meters). Throws without scales.
+    std::vector<std::string> exportScalesFbx(const std::string& path, bool unity = false);
 
     // ---- Cards (groom_exports.cpp) -----------------------------------------------------------
     // The Cards nodes of the graph, by name (the panel's choices).
@@ -925,6 +981,12 @@ private:
     double time_ = 0.0;
     std::optional<CardBakeFiles> bake_;
     std::map<std::string, SimCacheRef> simBakes_;  // the Simulate nodes' bakes the file names, by node
+    // Save As: the files the groom names into the new file's folders (savedCopies, saveWarnings).
+    void followFiles(const std::string& newPath);
+    std::vector<std::string> savedCopies_, saveWarnings_;
+    std::map<std::string, ControlKeys> controlKeys_;  // the keyed controls (the file's "controlKeys")
+    void applyControlKeys();
+    mutable std::string untitledRoot_;  // an untitled groom's asset folder (assetFolder)
     // refinedFileScalp's meshes by level, for the file's scalp they were refined from.
     mutable MeshPtr refinedFrom_;
     mutable std::map<int, MeshPtr> refinedByLevel_;

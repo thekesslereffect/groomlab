@@ -373,7 +373,7 @@ TEST(AppGraphEditor, TheParamMenuExposesPaintsAndDrivesWithASlider) {
     EXPECT_TRUE(has(items, "Drive with Slider"));
     QMenu* paint = submenu(&menu, QStringLiteral("Paint"));
     ASSERT_NE(paint, nullptr);
-    EXPECT_EQ(shown(paint), (std::vector<std::string>{"On Scalp Vertices", "As Texture"})) << "guide layers are not the app's for a setting yet";
+    EXPECT_EQ(shown(paint), (std::vector<std::string>{"On Guides", "On Scalp Vertices", "As Texture"}));
     // Drive with Slider: a Control node feeding the param (exposed), its Default the slider.
     action(&menu, QStringLiteral("Drive with Slider"))->trigger();
     const std::string control = nodeOf(*doc, "Control");

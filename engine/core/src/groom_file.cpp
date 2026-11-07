@@ -427,6 +427,15 @@ std::string groomFileToJson(const GroomFile& file) {
     const json sculpts = parseEmbedded(file.data.sculptsJson, "sculpts");
     if (sculpts.is_object() && !sculpts.empty()) root["sculpts"] = sculpts;
     if (!file.data.controls.empty()) root["controls"] = file.data.controls;  // values when written
+    if (!file.controlKeys.empty()) {
+        json keys = json::object();
+        for (const auto& [name, k] : file.controlKeys) {
+            json list = json::array();
+            for (const auto& [frame, value] : k) list.push_back({frame, value});
+            if (!list.empty()) keys[name] = list;
+        }
+        if (!keys.empty()) root["controlKeys"] = keys;
+    }
     if (!file.data.maps.empty()) {  // the maps painted on the scalp: what each Map node reads
         json maps = json::object();
         for (const auto& [name, info] : file.data.maps) {
@@ -537,6 +546,17 @@ GroomFile groomFileFromJson(const std::string& text, const std::string& baseDir)
         if (root.contains("sculpts") && root.at("sculpts").is_object()) file.data.sculptsJson = root.at("sculpts").dump();
         if (root.contains("controls") && root.at("controls").is_object()) {
             for (const auto& [name, value] : root.at("controls").items()) file.data.controls[name] = value.get<float>();
+        }
+        if (root.contains("controlKeys") && root.at("controlKeys").is_object()) {
+            for (const auto& [name, list] : root.at("controlKeys").items()) {
+                if (!list.is_array()) continue;
+                ControlKeys& k = file.controlKeys[name];
+                for (const json& key : list) {
+                    if (key.is_array() && key.size() == 2 && key[0].is_number() && key[1].is_number()) {
+                        setControlKey(k, key[0].get<double>(), key[1].get<double>());
+                    }
+                }
+            }
         }
         if (root.contains("maps") && root.at("maps").is_object()) {
             for (const auto& [name, info] : root.at("maps").items()) {

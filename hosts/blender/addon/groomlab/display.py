@@ -158,7 +158,15 @@ def map_for(scene):
     return {"name": m.name, "channel": t.scalp_channel, "textured": True}
 
 
-def strand_colors_for(scalp):
+def strand_colors_for(scalp, scene=None):
+    from . import tools
+    scene = scene or groom.scene_of(scalp)
+    t = scene.groomlab_tools if scene is not None else None
+    if t is not None and t.show_on_strands and (t.tool == "paint" or t.tab == "PAINT"):
+        m = tools.current_map(scene)
+        if m is not None:
+            # Painting: the strands by the map, black 0 to white 1 (Maya's show_while_painting).
+            return {"mode": "attribute", "source": m.name, "min": 0.0, "max": 1.0}
     d = scalp.groomlab_tools
     return {"mode": d.strand_color, "source": d.strand_color_source or "clumpId",
             "min": float(d.strand_color_min), "max": float(d.strand_color_max)}
@@ -192,7 +200,7 @@ def refresh(scalp, scene=None, apply_colors=True):
         have["strandColors"] = gd.strand_version
     if gd.image_key:
         have["scalpMapImage"] = gd.image_key
-    args = {"settings": settings_for(scalp, scene), "have": have, "strandColors": strand_colors_for(scalp)}
+    args = {"settings": settings_for(scalp, scene), "have": have, "strandColors": strand_colors_for(scalp, scene)}
     if gd.generation:
         args["generation"] = gd.generation
     m = map_for(scene)

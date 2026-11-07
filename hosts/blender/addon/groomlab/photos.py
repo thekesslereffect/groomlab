@@ -221,10 +221,12 @@ def _place(cam, scalp=None):
 def import_photo(context, path, scalp=None, name=None):
     """A photo camera for the image at `path` (Maya's import_reference): a camera with the photo as
     its background image (60% opaque, in front of the mesh), its sensor fit to the photo's width, in
-    front of the groom's scalp at 35 mm, aimed at it. The photo stays where it is (Blender keeps
-    the path, relative to the .blend once saved). Picked in the Photos tab. Returns the camera."""
+    front of the groom's scalp at 35 mm, aimed at it. The photo is copied into the .blend's
+    references folder (groomlab/<.blend>/references, as Maya keeps a scene's; an untitled file's
+    stays where it is). Picked in the Photos tab. Returns the camera."""
     if not path or not os.path.isfile(path):
         raise ValueError("no image at %s" % path)
+    path = groom.copy_into("references", path)
     image = _load_image(path)
     width, height = int(image.size[0]), int(image.size[1])
     scene = context.scene
@@ -821,6 +823,67 @@ class GROOMLAB_OT_photo_look_through(_Tipped, bpy.types.Operator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_photo_select_camera(_Tipped, bpy.types.Operator):
+    """Select the photo's camera (the active object)"""
+    bl_idname = "groomlab.photo_select_camera"
+    bl_label = "Select Camera"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return _photo_op_poll(context)
+
+    def execute(self, context):
+        cam = current(context.scene)
+        for o in context.selected_objects:
+            o.select_set(False)
+        cam.select_set(True)
+        context.view_layer.objects.active = cam
+        return {"FINISHED"}
+
+
+def add_view(context, cam, scalp=None):
+    """Add Camera (Maya's Add View from Camera): a camera that already shows a photo as its background
+    image becomes a reference photo where it stands (its lens and placement kept). Returns it."""
+    if cam is None or cam.type != "CAMERA":
+        raise ValueError("select a camera that shows a photo as its background image")
+    if is_photo(cam):
+        raise ValueError("%s is a photo already" % cam.name)
+    images = [bg.image for bg in cam.data.background_images if bg.image is not None]
+    if not images:
+        raise ValueError("%s shows no background image: add one (Camera > Background Images), or Import Photo" % cam.name)
+    image = images[0]
+    path = bpy.path.abspath(image.filepath)
+    p = cam.groomlab_photo
+    p.is_photo = True
+    p.image_path = groom.copy_into("references", path) if os.path.isfile(path) else path
+    p.width, p.height = int(image.size[0]), int(image.size[1])
+    cam.data.show_background_images = True
+    context.scene.groomlab_photos.photo = cam
+    sync(scalp)
+    return cam
+
+
+class GROOMLAB_OT_photo_add_view(_Tipped, bpy.types.Operator):
+    """Add View from Camera: the selected camera, already showing a photo as its background image, becomes a reference photo where it stands"""
+    bl_idname = "groomlab.photo_add_view"
+    bl_label = "Add Camera"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj is not None and obj.type == "CAMERA" and not is_photo(obj)
+
+    def execute(self, context):
+        try:
+            add_view(context, context.active_object, active_groom(context))
+        except (ValueError, HelperError) as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_photo_rename(_Tipped, bpy.types.Operator):
     """Rename the photo's camera"""
     bl_idname = "groomlab.photo_rename"
@@ -1261,6 +1324,7 @@ def draw_tab(layout, context, chars):
 
 
 classes = (GroomLabPhotoPair, GroomLabPhoto, GroomLabPhotos, GROOMLAB_OT_photo_import, GROOMLAB_OT_photo_look_through,
+           GROOMLAB_OT_photo_select_camera, GROOMLAB_OT_photo_add_view,
            GROOMLAB_OT_photo_rename, GROOMLAB_OT_photo_remove, GROOMLAB_OT_photo_pick, GROOMLAB_OT_pairs_solve,
            GROOMLAB_OT_photos_morph, GROOMLAB_OT_pairs_clear, GROOMLAB_OT_pairs_delete, GROOMLAB_OT_pairs_repick, GROOMLAB_OT_photos_guides,
            GROOMLAB_UL_photos, GROOMLAB_UL_photo_pairs)

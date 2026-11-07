@@ -452,7 +452,8 @@ none.
 - **LOD** picks **Hero**, **Mid**, **Low** or **Custom**. Sliders set cards per clump,
   layers, width, segments, variations, the atlas size and a card budget.
 - **Bake maps** writes the cards' maps (depth, coverage, tangent, attribute, color, occlusion) as
-  TGA files in a `_cards` folder beside the saved groom file, with a busy cursor while it bakes. The
+  TGA files in the groom's cards folder (`groomlab/<file name>/cards/` beside the saved groom file;
+  an unsaved groom's go along when it is first saved), with a busy cursor while it bakes. The
   baked atlas shows in the panel.
 
 The panel shows card, triangle and texture counts, and indicates when the cards have changed since
@@ -474,8 +475,16 @@ the last bake. See [Game export](/docs/game-export).
 
 Set the frames (the current frame, or a range for an animated groom), the density and the target's
 options, then the output file (type a path or pick it with **...**). **Export** shows progress and
-can be cancelled. The same targets are in **GroomLab > Export**, with
-**Scales Instancer (USD)...**. The FBX exports are only available in Maya and Blender.
+can be cancelled. The same targets are in **GroomLab > Export**, with **Scales Instancer
+(USD)...** and the FBX exports, as in Maya and Blender:
+
+- **Unreal Cards...** and **Unity Cards...** (also on a Cards node's panel): into a folder you pick
+  (the groom's `exports` folder to start), the card maps (Unreal's TGAs in its hair card layout, or
+  Unity's HDRP PNGs), the hair cap's maps, a manifest of what each map holds and how to import them,
+  and the cards and hair cap as FBX (Unity's in meters, its materials on the base color maps).
+- **Unity Feathers...**: the strands for Unity's hair package (a curves object per groom group),
+  the feathers' rachis as an FBX to skin, and a manifest.
+- **Scales Mesh (FBX)...**: the scales bent onto the skin as one mesh.
 
 ## Save and open in Maya
 
@@ -483,13 +492,27 @@ can be cancelled. The same targets are in **GroomLab > Export**, with
 guides, scalp, maps, parts, flow and correctives. Export mode has **Save** and **Save as...** too.
 
 Maya and Blender save a groom file beside the scene file, named after the groom (a source file
-every host opens, outside the scene's `groomlab` folder); the app keeps the maps it paints for it
-in `groomlab/<file name>/masks/` beside it.
+every host opens, outside the scene's `groomlab` folder). The app keeps the files it makes for a
+groom in a `groomlab/<file name>/` folder beside it, one folder per kind as Maya keeps a scene's:
+`masks` (texture maps), `cards` (card bakes), `exports`, `caches` (simulation bakes, guide
+exports), `renders` and `references` (photos, copied in). **Save As** takes them along: the
+groom's files are copied into the new file's folder and the groom names the copies (the old file
+keeps its own; a file already there with other content is never written over). An unsaved
+groom's files wait in a temp folder until the first save.
 
 In Maya, choose **GroomLab > Groom Files > Import Groom File...**. Select the scalp mesh first if
 the scene has it; otherwise GroomLab creates the scalp from the file. To pull later edits into a
 groom linked to the file, save in the app, then choose **GroomLab > Groom Files > Reload from
 Groom File** in Maya (one undo step). See [The .groom format](/docs/groom-format).
+
+## Keys on params
+
+A param's right-click menu in the Graph Editor has **Set Key**, **Delete Key** and **Remove
+Animation**, as in Maya and Blender. A keyed param is driven by a **Control** node of its own (as
+**Drive with Slider** makes one); its value is keyed at the timeline's frame, the groom takes it as
+the frame changes (smooth between keys, never past them), and the keys are saved with the groom
+(`"controlKeys"`). Move the slider in **Properties > Controls**, then **Set Key** again to key the
+new value. **Remove Animation** drops the keys and keeps the value it has now.
 
 ## Not in the app yet
 
@@ -502,11 +525,6 @@ made.
   and V-Ray frames and turntables: [Render in RenderMan](#render-in-renderman),
   [Render in V-Ray](#render-in-v-ray)). The app's viewport refines; export Alembic or USD for other
   renderers.
-- **Exports:** the FBX ones (**Unreal Cards...**, **Unity Cards...**, **Unity Feathers...** and
-  **Scales Mesh (FBX)...**). The app bakes the card maps and writes glTF cards.
-- **Graph Editor:** a param's **Paint > On Guides** (a setting painted on the guides as a guide
-  layer; the app paints settings as vertex or texture maps), and keys on params (**Set Key**,
-  **Delete Key**).
 - **Animation:** Maya's nHair (**Simulate > Legacy**). The app plays a groom file's caches and runs
   the Simulate node.
 - More than one groom in a window, and so **Copy Graph to Other Grooms...** (in the app, **Copy

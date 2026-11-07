@@ -187,13 +187,29 @@ void AppActions::addGraphBindings(ui::Bindings& b, MainWindow& w) {
                          },
                          [m](const json&) { return m->document_ && m->document_->paramExposed(paramTarget().first, paramTarget().second); },
                          paramOn};
-    for (const auto& [id, kind] : {std::pair<const char*, const char*>{"param.paintVertices", "vertices"}, {"param.paintTexture", "texture"}}) {
+    for (const auto& [id, kind] : {std::pair<const char*, const char*>{"param.paintGuides", "guides"}, {"param.paintVertices", "vertices"},
+                                   {"param.paintTexture", "texture"}}) {
         b[id] = {run([m, kind = QString::fromLatin1(kind)] {
                      const auto [node, param] = paramTarget();
                      QTimer::singleShot(0, m, [m, node = qs(node), param = qs(param), kind] { m->paintParam(node, param, kind); });
                  }),
                  {}, paramOn};
     }
+    // Param keys (Maya's and Blender's Set Key): a Control node of its own keyed on the timeline.
+    auto keyed = [m] { return m->document_ && m->document_->paramKeyed(paramTarget().first, paramTarget().second); };
+    auto keyedHere = [m] { return m->document_ && m->document_->paramKeyedHere(paramTarget().first, paramTarget().second); };
+    auto keyRun = [m](std::string (GroomDocument::*act)(const std::string&, const std::string&)) {
+        return [m, act](const json&, bool) {
+            if (!m->document_) return;
+            const auto [node, param] = paramTarget();
+            const std::string error = (m->document_.get()->*act)(node, param);
+            if (!error.empty()) m->report(qs(error));
+            QTimer::singleShot(0, m, [m] { m->graphEdited(); });
+        };
+    };
+    b["param.setKey"] = {keyRun(&GroomDocument::setParamKey), {}, paramOn};
+    b["param.deleteKey"] = {keyRun(&GroomDocument::deleteParamKey), {}, [keyedHere] { return keyedHere(); }};
+    b["param.removeAnimation"] = {keyRun(&GroomDocument::removeParamAnimation), {}, [keyed] { return keyed(); }};
     // Drive with Slider: a Control node feeding the param (its value the slider; selected after).
     b["param.driveWithSlider"] = {run([m] {
                                       if (!m->document_) return;
@@ -390,7 +406,12 @@ std::set<std::string> AppActions::paramState(MainWindow& w, const std::string& n
             s.insert("param.linkable");
             if (p.value("mappable", false)) s.insert("param.mappable");
         }
+        // Keys: a number param with a port can be keyed (through a Control of its own).
+        const json value = w.document_->paramOrDefault(node, param);
+        if (p.contains("port") && p["port"].is_object() && value.is_number()) s.insert("param.canKey");
     }
+    if (w.document_->paramKeyedHere(node, param)) s.insert("param.keyed");
+    if (w.document_->paramKeyed(node, param)) s.insert("param.linked");
     return s;
 }
 

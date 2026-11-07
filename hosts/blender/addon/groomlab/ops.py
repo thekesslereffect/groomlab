@@ -32,7 +32,7 @@ class GroomOperator(bpy.types.Operator):
 
 
 class GROOMLAB_OT_add_groom(bpy.types.Operator):
-    """Grow a GroomLab groom on the selected mesh: place and shape its guides with the Groom Tools, GroomLab makes the hair from them"""
+    """Grow a GroomLab groom on the selected mesh (any selected curves become its primary guides): place and shape its guides with the Groom Tools, GroomLab makes the hair from them"""
     bl_idname = "groomlab.add_groom"
     bl_label = "Create Groom from Selection"
     bl_options = {"REGISTER", "UNDO"}
@@ -54,9 +54,15 @@ class GROOMLAB_OT_add_groom(bpy.types.Operator):
         scalp = context.active_object
         if context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
+        # Selected curves become primary guides (Maya's create_groom_from_selection).
+        curves = [o for o in context.selected_objects if o.type in ("CURVE", "CURVES") and o is not scalp]
+        added = 0
         try:
             groom.create_groom(context, scalp, preset=self.preset, guide_count=self.guides, guide_points=self.guide_points)
             context.scene.groomlab.groom = scalp
+            if curves:
+                from . import pipeline
+                added = pipeline.guides_from_curves(scalp, curves, "primary")
             graph.refresh(scalp)
         except HelperError as e:
             return _fail(self, e)
@@ -65,7 +71,10 @@ class GROOMLAB_OT_add_groom(bpy.types.Operator):
             tools.refresh_info(scalp, context.scene)
         except HelperError:
             pass
-        self.report({"INFO"}, "New groom created: place its guides with Groom Tools > Place")
+        if added:
+            self.report({"INFO"}, "New groom created with %d guide%s from the selected curves" % (added, "" if added == 1 else "s"))
+        else:
+            self.report({"INFO"}, "New groom created: place its guides with Groom Tools > Place")
         return {"FINISHED"}
 
 
@@ -537,16 +546,20 @@ class GROOMLAB_OT_bake_card_maps(GroomOperator):
                          description="Texels the colors spread past the strands so mip maps don't bleed (-1: auto)")
     supersample: EnumProperty(name="Supersampling", items=[("1", "1x (off)", ""), ("2", "2x", ""), ("4", "4x", "")],
                               default="1", description="Anti-aliasing: baked bigger, then brought down")
-    directory: StringProperty(name="Folder", subtype="DIR_PATH", default="//card_maps/")
+    directory: StringProperty(name="Folder", subtype="DIR_PATH", default="", options={"SKIP_SAVE"},
+                              description="Where the maps go (empty: the .blend's groomlab exports folder, as Maya's)")
     name: StringProperty(name="Name", default="", description="The files' {name} (default: the scalp's name)")
 
     def invoke(self, context, event):
         groom.card_map_presets(refresh=True)
+        if not self.directory:
+            self.directory = groom.asset_folder("exports") or os.path.join(bpy.app.tempdir or "", "card_maps")
         return context.window_manager.invoke_props_dialog(self, width=360)
 
     def execute(self, context):
         scalp = active_groom(context)
-        directory = bpy.path.abspath(self.directory or "//card_maps/")
+        directory = bpy.path.abspath(self.directory) if self.directory else (groom.asset_folder("exports") or
+                                                                          os.path.join(bpy.app.tempdir or "", "card_maps"))
         try:
             r = groom.bake_card_maps(scalp, context.scene, self.preset, directory, self.name or scalp.name,
                                      resolution=self.resolution,

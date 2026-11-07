@@ -400,6 +400,8 @@ void MainWindow::buildProperties() {
     guideColorMode_ = combo({tr("Group"), tr("Painted Layer")});
     guideColorMode_->setCurrentIndex(settings_.guideColorMode == 1 ? 1 : 0);
     p->setControl("guideColorMode", guideColorMode_);
+    guideColorLayer_ = combo({});  // the guide layers (refreshDisplayChoices)
+    p->setControl("guideColorLayer", guideColorLayer_);
 
     // ---- Display > Strand Shading.
     lighting_ = check(settings_.lighting);
@@ -545,6 +547,11 @@ void MainWindow::buildProperties() {
     });
     connect(guideColorMode_, &QComboBox::currentIndexChanged, this, [this](int mode) {
         settings_.guideColorMode = mode;
+        properties_->setRowVisible("guideColorLayer", mode == 1);
+        redisplay();
+    });
+    connect(guideColorLayer_, &QComboBox::currentIndexChanged, this, [this](int) {
+        settings_.guideColorLayer = guideColorLayer_->currentData().toString().toStdString();
         redisplay();
     });
     connect(lodError, &ValueSlider::valueChanged, this, [this](double v) {
@@ -660,9 +667,10 @@ void MainWindow::refreshProperties() {
     refreshScalpSubdivision();
     // The display's own state as other panels change it (Isolate, While sculpting).
     {
-        const QSignalBlocker a(isolateGroup_), b(guideColorMode_), c(sculptDisplay_);
+        const QSignalBlocker a(isolateGroup_), b(guideColorMode_), c(sculptDisplay_), d(guideColorLayer_);
         isolateGroup_->setText(QString::fromStdString(settings_.isolateGroup));
         guideColorMode_->setCurrentIndex(settings_.guideColorMode == 1 ? 1 : 0);
+        guideColorLayer_->setCurrentIndex(std::max(0, guideColorLayer_->findData(QString::fromStdString(settings_.guideColorLayer))));
         sculptDisplay_->setCurrentIndex(std::clamp(settings_.sculptDisplay, 0, std::max(0, sculptDisplay_->count() - 1)));
         if (!sculptDensity_->editing()) sculptDensity_->setValue(brush_.sculptDensity);
     }
@@ -671,6 +679,7 @@ void MainWindow::refreshProperties() {
     properties_->setRowVisible("colorSource", mode == kColorSetColors || mode == kAttributeColors || mode == kClumpColors);
     properties_->setRowVisible("colorMin", mode == kAttributeColors);
     properties_->setRowVisible("colorMax", mode == kAttributeColors);
+    properties_->setRowVisible("guideColorLayer", settings_.guideColorMode == 1);
     refreshControlSliders();
     refreshHairColorRows();
 }

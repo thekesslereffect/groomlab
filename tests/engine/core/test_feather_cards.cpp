@@ -956,8 +956,9 @@ TEST(CardFiles, OneLayoutAndRecordForEveryHost) {
     EXPECT_EQ(at.files().size(), 9u);
     EXPECT_EQ(at.files().back(), at.atlas());
     EXPECT_EQ(at.preview(), "C:/bakes/hair/hair_Preview.png");
-    EXPECT_EQ(groomFileCardBakePrefix("bob"), "bob_cards/bob_");
-    EXPECT_EQ(CardBakePaths::besideGroomFile("/shots/a/bob.groom").prefix, "/shots/a/bob_cards/bob_");
+    EXPECT_EQ(groomFileCardBakePrefix("bob"), "groomlab/bob/cards/bob_");
+    EXPECT_EQ(CardBakePaths::besideGroomFile("/shots/a/bob.groom").prefix, "/shots/a/groomlab/bob/cards/bob_");
+    EXPECT_EQ(CardBakePaths::legacyBesideGroomFile("/shots/a/bob.groom").prefix, "/shots/a/bob_cards/bob_");
 
     const std::string text = formatCardMaps("groomlab/s/cards/hair/hair_", "cards:12", 3);
     EXPECT_EQ(text, "Color=groomlab/s/cards/hair/hair_Color.tga;Coverage=groomlab/s/cards/hair/hair_Coverage.tga;"

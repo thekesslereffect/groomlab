@@ -17,6 +17,7 @@
         "add.braid",
         {"submenu": "Cards", "id": "cards", "tip": "A Cards node before the output at a level of detail", "items": ["add.cards.hero", "add.cards.mid", "add.cards.low"]},
         "add.collider",
+        "add.scalp",
         "add.wind",
         "add.jiggle"
       ]},
@@ -55,7 +56,7 @@
         "graph.copyToGrooms",
         "-",
         "files.findMissing",
-        {"id": "files.collect", "hosts": ["maya"]}
+        "files.collect"
       ]},
       "-",
       {"ref": "menus/theme"},

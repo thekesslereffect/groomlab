@@ -23,7 +23,9 @@
 #include <utility>
 #include <vector>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/brush_catalog.h"
+#include "groomlab/card_files.h"
 #include "groomlab/curve.h"
 #include "groomlab/display.h"
 #include "groomlab/correctives.h"
@@ -167,6 +169,10 @@ struct ToolState {
     bool ringValid = false, ringOnScalp = false;
     Vec3f ringCenter, ringNormal;
     float ringRadius = 0.0f;
+    // With symmetry on: the scalp's line of symmetry (symmetrySeam, segment pairs), in red in the
+    // overlay as Maya draws it, made again for another scalp or symmetry.
+    std::vector<Vec3f> seam;
+    std::uint64_t seamKey = 0;
 
     // The display (Maya's buffers) and the strand colors.
     DisplayBuilder builder;
@@ -1025,6 +1031,25 @@ void rebuildOverlay(ToolState& t, float x, float y, bool withLines) {
                 t.ringRadius = radius;
                 t.ringNormal = n;
             }
+        }
+    }
+    if (!t.selectTool) {
+        // Symmetry on: the scalp's line of symmetry in red (Maya's showSymmetry, symmetrySeam).
+        const MeshPtr scalp = t.session.groom->scalp();
+        const StrokeSymmetry sym = scalp ? StrokeSymmetry::of(s.brush, scalp.get()) : StrokeSymmetry{};
+        if (sym.on()) {
+            const std::uint64_t key = hashCombine(hashCombine(scalp->contentHash(), static_cast<std::uint64_t>(sym.axis + 1)),
+                                                  hashCombine(hashFloat(hash64(0x5EA4), sym.center), sym.topology() ? 1u : 0u));
+            if (key != t.seamKey) {
+                Vec3f lo = scalp->points().front(), hi = lo;
+                for (const Vec3f& p : scalp->points()) {
+                    lo = Vec3f(std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z));
+                    hi = Vec3f(std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z));
+                }
+                t.seam = symmetrySeam(*scalp, sym, 0.002f * (hi - lo).length());
+                t.seamKey = key;
+            }
+            for (std::size_t k = 0; k + 1 < t.seam.size(); k += 2) appendColoredLine(t.overlay, {t.seam[k], t.seam[k + 1]}, {1.0f, 0.15f, 0.15f});
         }
     }
     if (t.tool.stroking() && (s.tool == Tool::Part || s.tool == Tool::Flow)) appendColoredLine(t.overlay, t.tool.drawnPath(), brushPathColor(s));
@@ -2763,6 +2788,69 @@ json mapsMoveTo(ToolState& t, const json& args) {
     return {{"folder", now}, {"moved", moved}};
 }
 
+// Collect Files (Maya's collect_files): every file the groom uses from outside `dir` (the .blend's
+// folder) copied into its groomlab folders (texture maps into the maps folder, the graph's files
+// into `masks`, the card bake into `cards`, Simulate bakes into `caches`) and the groom pointed at
+// the copies; a file there already stays, a missing one is reported. Not an undo step.
+json filesCollect(ToolState& t, const json& args) {
+    Session& s = t.session;
+    const std::string dir = needString(args, "dir"), masks = needString(args, "masks"), cards = needString(args, "cards"),
+                      caches = needString(args, "caches");
+    json copied = json::array(), missing = json::array();
+    int inside = 0;
+    auto collect = [&](const std::string& what, const std::string& stored, const std::string& full, const std::string& folder) {
+        if (stored.empty()) return stored;
+        if (insideFolder(full, dir)) {
+            ++inside;
+            return stored;
+        }
+        std::vector<std::string> written;
+        const std::string copy = collectFile(full, folder, &written);
+        if (copy.empty()) {
+            missing.push_back({what, stored});
+            return stored;
+        }
+        copied.push_back({what, copy});
+        return copy;
+    };
+    for (const auto& kept : t.host.kept) writeTexture(t, kept.first);
+    ScalpMaps maps = s.groom->scalpMaps();
+    bool mapsChanged = false;
+    for (auto& [name, entry] : maps.maps) {
+        if (entry.kind != "texture") continue;
+        const std::string now = collect("map " + name, entry.texture, resolveMapFile(s, entry.texture), mapsFolder(s));
+        if (now != entry.texture) entry.texture = now, mapsChanged = true;
+    }
+    if (mapsChanged) {
+        dropPaints(t);
+        s.groom->setScalpMaps(maps);
+    }
+    bool graphChanged = false;
+    const std::string graph = followGraphFiles(
+        s.groom->data().graphJson,
+        [&](const std::string& stored) {
+            const std::string full = isAbsolutePath(stored) || stored.find("<UDIM>") != std::string::npos
+                                         ? (isAbsolutePath(stored) ? stored : (fs::u8path(dir) / fs::u8path(stored)).generic_u8string())
+                                         : resolveGroomPath(s.file, stored, dir);
+            return collect("param", stored, full.empty() ? (fs::u8path(dir) / fs::u8path(stored)).generic_u8string() : full, masks);
+        },
+        &graphChanged);
+    if (graphChanged) s.groom->setGraphJson(graph);
+    for (auto& [node, ref] : s.file.simCaches) ref.file = collect("simulation " + node, ref.file, ref.file, caches);
+    if (!s.file.cardBake.prefix.empty() && !insideFolder(s.file.cardBake.prefix + "x", dir)) {
+        const std::string prefix = s.file.cardBake.prefix;
+        FileFollower f(dir, "", dir, cards, {{fs::u8path(prefix).parent_path().generic_u8string(), cards}});
+        std::vector<std::string> suffixes = cardBakeSuffixes();
+        suffixes.push_back("Preview.png");
+        const std::string now = f.followPrefix(prefix, suffixes);
+        if (now != prefix) {
+            s.file.cardBake.prefix = now;
+            copied.push_back({"card bake", now});
+        }
+    }
+    return {{"copied", copied}, {"missing", missing}, {"inside", inside}, {"mapsChanged", mapsChanged}, {"graphChanged", graphChanged}};
+}
+
 // The map shown on the scalp: the session's view of a vertex map or guide layer; a texture map
 // (its file, or the brush's live image while painting) as it is when `textured` (the host draws
 // the image at the scalp's uvs, as Maya does: scalpMapImage), else sampled at the scalp's vertices.
@@ -3394,7 +3482,7 @@ bool isToolCommand(const std::string& cmd) {
         "tube_targets", "tube_get", "tube_set", "tube_scale", "tube_smooth", "tube_shapes", "tube_shape_add", "tube_shape_set",
         "tube_shape_rename", "tube_shape_remove", "tube_shape_preview", "guides_preview", "guides_preview_end", "guide_segments",
         "parts_list", "part_add", "part_remove", "parts_clear", "flow_clear", "map_rename", "map_convert", "map_set_channels",
-        "map_fill", "map_import", "map_relink", "map_reload", "map_users", "maps_move_to",
+        "map_fill", "map_import", "map_relink", "map_reload", "map_users", "maps_move_to", "files_collect",
         // The Length Keys tool's keys (the Keys box).
         "length_state", "length_edit"};
     return kCommands.count(cmd) > 0;
@@ -3491,6 +3579,7 @@ bool runEditCommand(ToolState& t, const std::string& cmd, const json& args, Bloc
         {"map_reload", [](ToolState& t, const json& a, BlockReader&) { return mapReload(t, a); }},
         {"map_users", [](ToolState& t, const json& a, BlockReader&) { return mapUsers(t, a); }},
         {"maps_move_to", [](ToolState& t, const json& a, BlockReader&) { return mapsMoveTo(t, a); }},
+        {"files_collect", [](ToolState& t, const json& a, BlockReader&) { return filesCollect(t, a); }},
     };
     const auto it = kEdits.find(cmd);
     if (it == kEdits.end()) return false;

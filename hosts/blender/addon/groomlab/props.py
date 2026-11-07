@@ -145,6 +145,7 @@ class GroomLabObject(bpy.types.PropertyGroup):
     show_advanced: BoolProperty(name="Advanced", default=False)
     view_node: StringProperty(description="The node the viewport shows instead of the output (the Graph Editor's View)")
     colliders: CollectionProperty(type=GroomLabCollider)  # Add > Collider's meshes
+    extra_scalps: CollectionProperty(type=GroomLabCollider)  # Add > Scalp's meshes (Maya's extraScalps), in order
 
 
 def _is_scalp(self, obj):

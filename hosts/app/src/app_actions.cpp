@@ -232,13 +232,15 @@ ui::Bindings AppActions::bindings(MainWindow& w) {
                             [m](const json& value) { return value.is_string() && m->look_->lighting().presetName == value.get<std::string>(); }};
 
     // Render: RenderMan (prman) and V-Ray Standalone renders of the groom as the viewport frames
-    // and lights it (the images in the temp folder: the render window saves them elsewhere).
+    // and lights it, in the groom's renders folder (Maya's; an untitled groom's: a temp folder of
+    // its own); the render window saves them elsewhere too.
     auto renderImage = [m](const QString& renderer, const QString& kind) {
         const QString name = m->document_ && !m->document_->path().empty()
                                  ? QFileInfo(QString::fromStdString(m->document_->path())).completeBaseName()
                                  : QStringLiteral("groom");
-        return QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
-            .filePath(QStringLiteral("GroomLab-%3/%1_%2/%1.png").arg(name, kind, renderer));
+        const QString folder = m->document_ ? QString::fromStdString(m->document_->assetFolder("renders"))
+                                            : QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+        return QDir(folder).filePath(QStringLiteral("%3/%1_%2/%1.png").arg(name, kind, renderer));
     };
     b["render.prmanFrame"] = {run([m, renderImage] { m->renderPrman(renderImage(QStringLiteral("prman"), QStringLiteral("frame")), 0, QSize(), false); }),
                               {}, groomOpen, {}, {}, QStringLiteral("prmanFrame")};

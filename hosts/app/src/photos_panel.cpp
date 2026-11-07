@@ -451,7 +451,9 @@ QString PhotosPanel::name(int index) const {
 
 QString PhotosPanel::imagePath(int index) const {
     const json all = photos();
-    return index >= 0 && index < static_cast<int>(all.size()) ? qs(all[index].value("image", std::string())) : QString();
+    if (index < 0 || index >= static_cast<int>(all.size())) return QString();
+    const std::string stored = all[index].value("image", std::string());
+    return qs(document_ ? document_->referenceImageFile(stored) : stored);  // relative to the groom's folder
 }
 
 QSize PhotosPanel::imageSize(int index) const {
@@ -530,7 +532,10 @@ int PhotosPanel::importPhoto(const QString& path) {
         return -1;
     }
     json photo = {{"name", uniqueName(QFileInfo(path).completeBaseName()).toStdString()},
-                  {"image", QFileInfo(path).absoluteFilePath().toStdString()},
+                  {"image", [&] {
+                       const std::string stored = document_->importReferenceImage(QFileInfo(path).absoluteFilePath().toStdString());
+                       return stored.empty() ? QFileInfo(path).absoluteFilePath().toStdString() : stored;  // (kept where it is)
+                   }()},
                   {"width", image.width()},
                   {"height", image.height()},
                   {"mask", nullptr}};

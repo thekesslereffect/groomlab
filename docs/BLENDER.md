@@ -252,6 +252,22 @@ B2 add-on; the tools edit the hierarchy only (a groom with flat guides grows fro
 groom (`load_groom`, `set_state`, `new_groom`) starts the tools over: no stroke, no selection, an
 empty undo stack; the tool and its settings stay.
 
+**Blender's undo.** The helper keeps its own undo stack; Blender's (Ctrl+Z anywhere, Edit > Undo)
+follows it. After each groom edit the add-on stores the helper's `undoDepth` in the scalp's
+`groomlab_tools.undo_depth` (Blender data, so each of Blender's undo steps holds it), and pushes a
+step of its own for the modal tool's strokes and selections (operators with UNDO push theirs).
+`undo_post` / `redo_post` (`tools.sync_undo`) then undo or redo the helper one step at a time until
+its depth is the restored one, and the palette reads its lists again.
+
+**Files beside the .blend.** `groom.asset_folder(kind)` is Maya's `asset_folder`:
+`<.blend's folder>/groomlab/<.blend's name>/<kind>` (masks, cards, exports, caches, renders,
+references), "" while untitled (the helper's temp folders). The defaults go there (simulation bakes,
+scale bakes, card maps, exports, guide exports, photos copied in). Before a save to another path,
+`snapshot_all` moves the maps (`maps_move_to`) and the rest (`files_follow`: the graph's files,
+Simulate bakes, the card bake, caches; core `FileFollower`). Collect Files is `files_collect`.
+Other scalps (Add > Scalp) are kept in `groomlab.extra_scalps` and sent posed every frame as
+colliders are (`set_scalps`); `card_stats` gives a Cards node's counts (evaluated at full density).
+
 **Views.** Every command that reads pixels takes `"view"` (kept: later commands may leave it out):
 
 ```json
@@ -623,8 +639,8 @@ every photo camera (one placed by eye counts as lined up, as in Maya).
 
 Differences from Maya: Maya's Photos window (the photo and the mesh side by side, flow arrows and
 mask touch-ups drawn on the photo, the measured look applied to the graph) is not in Blender: the
-arrows and touch-ups the app or Maya drew are kept and used, not drawn; the photo stays where it is
-(Maya copies it into the scene's references folder); Add Camera (a camera that already shows a photo
+arrows and touch-ups the app or Maya drew are kept and used, not drawn (the photo is copied into the
+.blend's references folder, as Maya's; an untitled file's stays where it is); Add Camera (a camera that already shows a photo
 on an image plane) and Select Camera are Maya's. A landmark pair with a side cleared to pick again
 is written with a null there; the app reads each side's points in order, so such a pair's partners
 shift there until it is picked again.

@@ -21,6 +21,11 @@ add_library(groomlab_core_objects OBJECT
     src/card_atlas.cpp
     src/card_bake.cpp
     src/card_feathers.cpp
+    src/asset_files.cpp
+    src/control_keys.cpp
+    src/engine_cards.cpp
+    src/engine_meshes.cpp
+    src/fbx_writer.cpp
     src/card_files.cpp
     src/card_maps.cpp
     src/card_presets.cpp

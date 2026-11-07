@@ -217,7 +217,7 @@ class DefinitionsTest(unittest.TestCase):
                           "Unity Feathers...", "Unity Cards...", "glTF Cards...", "Card Maps...", "Scales Mesh (FBX)...",
                           "Scales Instancer (USD)..."])
         add = drawn(bpy.types.GROOMLAB_MT_main_add)
-        self.assertEqual(texts(add), ["Feathers...", "Braid on Curves...", "Collider", "Wind", "Jiggle"])
+        self.assertEqual(texts(add), ["Feathers...", "Braid on Curves...", "Collider", "Scalp", "Wind", "Jiggle"])
         self.assertIn(("menu", "GROOMLAB_MT_main_add_cards", "Cards"), add)
         cards = drawn(bpy.types.GROOMLAB_MT_main_add_cards)
         self.assertEqual(texts(cards), ["Hero", "Mid", "Low"])
@@ -236,9 +236,10 @@ class DefinitionsTest(unittest.TestCase):
         self.assertEqual(texts(review), ["Density Heatmap", "Turntable"])
         self.assertIn(("prop", "show_hud"), review)  # Strand Count HUD: a checkbox (checkable)
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_main_utilities)),
-                         ["To Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "Delete All Flow Arrows",
+                         ["Guides to Curves", "Curves to Guides...", "Strands to Curves...",  # (Blender's curve objects)
+                          "To Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "Delete All Flow Arrows",
                           "Transfer Groom to Scalp...",
-                          "Copy Graph to Other Grooms...", "Find Missing Files..."])
+                          "Copy Graph to Other Grooms...", "Find Missing Files...", "Collect Files"])
         help_ = drawn(bpy.types.GROOMLAB_MT_main_help)
         self.assertEqual(texts(help_), ["Docs", "Keyboard Shortcuts", "Check for Updates...", "Discord",
                                         "Support GroomLab", "About GroomLab"])
@@ -252,10 +253,9 @@ class DefinitionsTest(unittest.TestCase):
         # The Photos tab's menus: the photo's (its actions need a photo picked) and the pairs'.
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_photo_context)), ["Import Photo..."])
         edits = drawn(bpy.types.GROOMLAB_MT_guide_edits)
-        self.assertEqual(texts(edits)[:9], ["Children", "Sync +X → -X", "Sync -X → +X", "Mirror Selection",
-                                            "Mirror Group...", "Reparent...", "Promote / Demote...", "Clear Selection",
-                                            "Lock"])
-        self.assertNotIn("From Curves", texts(edits))  # Maya's
+        self.assertEqual(texts(edits)[:10], ["Children", "Sync +X → -X", "Sync -X → +X", "Mirror Selection",
+                                             "Mirror Group...", "Reparent...", "Promote / Demote...", "From Curves",
+                                             "Clear Selection", "Lock"])  # From Curves: Blender's curve objects
         # Groups' right-click menu without a group: New Group only.
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_group_context)), ["New Group..."])
         # Every operator's tooltip from actions.json.

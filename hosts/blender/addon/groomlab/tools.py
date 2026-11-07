@@ -981,6 +981,11 @@ def after_edit(scalp, scene, undo_state=None, refresh=True):
     gt = groom_tools(scalp)
     if undo_state:
         gt.undo = dict(undo_state)
+        if "undoDepth" in undo_state and not _syncing:
+            try:
+                scalp.groomlab_tools.undo_depth = int(undo_state["undoDepth"])  # (Blender's undo step keeps it)
+            except (AttributeError, RuntimeError):
+                pass  # (read-only while drawing)
     if refresh:
         groom.sync_safely(scalp, scene=scene, force_eval=True, topology=False)
         mark_state(scalp)
@@ -1664,19 +1669,65 @@ def _on_load(*args):
         bpy.app.timers.register(_wake, first_interval=0.5)
 
 
+_syncing = False
+
+
+def push_undo_step(label):
+    """A Blender undo step for a groom edit made outside an operator that pushes its own (the modal
+    tool's strokes and selections), so Ctrl+Z and Edit > Undo reach it (sync_undo)."""
+    if bpy.app.background:
+        return
+    try:
+        bpy.ops.ed.undo_push(message="GroomLab: %s" % (label or "edit"))
+    except RuntimeError:
+        pass
+
+
+def sync_undo(scalp):
+    """Blender's undo or redo put back the groom's undo_depth as it was at that step: GroomLab's own
+    history undone or redone to the same place (one helper step at a time), the groom evaluated
+    and the palette read again. Returns the steps taken (negative: undone)."""
+    global _syncing
+    target = scalp.groomlab_tools.undo_depth
+    if target < 0:
+        return 0
+    steps = 0
+    _syncing = True
+    try:
+        depth = int(call(scalp, "undo_state").get("undoDepth", 0))
+        while depth > target:
+            r = call(scalp, "undo")
+            if not r.get("done"):
+                break
+            follow_graph(scalp, r)
+            depth, steps = depth - 1, steps - 1
+        while depth < target:
+            r = call(scalp, "redo")
+            if not r.get("done"):
+                break
+            follow_graph(scalp, r)
+            depth, steps = depth + 1, steps + 1
+        if steps:
+            after_edit(scalp, groom.scene_of(scalp), call(scalp, "undo_state"), refresh=True)
+    finally:
+        _syncing = False
+    return steps
+
+
 @bpy.app.handlers.persistent
 def _on_undo(*args):
-    """Blender's undo and redo put the palette's lists (Blender data: the maps, the groups) back as
-    they were, while the groom in the helper keeps to GroomLab's own undo: the lists read again
-    from the helper, so a map made or removed since still shows as it is."""
+    """Blender's undo and redo: each groom's own history to where Blender's step had it (sync_undo:
+    Ctrl+Z and Edit > Undo take groom edits back), and the palette's lists (Blender data: the maps,
+    the groups) read again from the helper."""
     for scalp in groom.scalps():
         rt = groom.runtime_if_any(scalp)
         if not is_hierarchy(scalp) or rt is None or rt.session is None or rt.generation != process.generation()                 or not process.running():
             continue
         try:
+            sync_undo(scalp)
             refresh_info(scalp)
         except HelperError as e:
-            print("GroomLab: the palette of %s was not read again: %s" % (scalp.name, e.message))
+            print("GroomLab: the groom of %s did not follow the undo: %s" % (scalp.name, e.message))
 
 
 def _wake():

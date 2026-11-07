@@ -69,9 +69,11 @@ GroomFile readForMaya(const std::string& path, std::string* fileUpAxis = nullptr
     if (fileUpAxis) *fileUpAxis = file.upAxis;
     convertUpAxis(file, sceneUpAxis());
     if (file.cardBake.empty()) {
-        // A bake the app wrote beside the groom after saving it (<stem>_cards/<stem>_*), as the app
-        // adopts one: its stamp unknown (every Cards node reads as stale until a bake).
-        const CardBakePaths beside = CardBakePaths::besideGroomFile(path);
+        // A bake the app wrote beside the groom after saving it (groomlab/<stem>/cards/<stem>_*, or
+        // earlier versions' <stem>_cards/<stem>_*), as the app adopts one: its stamp unknown (every
+        // Cards node reads as stale until a bake).
+        CardBakePaths beside = CardBakePaths::besideGroomFile(path);
+        if (!beside.exists()) beside = CardBakePaths::legacyBesideGroomFile(path);
         if (beside.exists()) file.cardBake.prefix = beside.prefix;
     }
     return file;

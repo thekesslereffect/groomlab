@@ -300,7 +300,7 @@ def simulate_bake(scalp, last=None, directory=None, name=None, node=None, path=N
         if value is not None:
             args[key] = value
     if directory is None and bpy.data.filepath:
-        args["directory"] = os.path.join(os.path.dirname(bpy.data.filepath), "groomlab", "caches")
+        args["directory"] = groom.asset_folder("caches")  # (untitled: the helper's temp folder, moved on save)
     return _after_edit(scalp, call(scalp, "simulate_bake", **args))
 
 
@@ -404,6 +404,126 @@ def sync_colliders(scalp, rt, depsgraph=None, force=False, read_pose=True):
 
 
 groom.input_hooks.append(sync_colliders)
+
+
+def kept_scalps(scalp):
+    """[(name, object)] of the groom's other scalps still in the file (Add > Scalp's), in the order
+    they join."""
+    return [(s.name, s.object) for s in scalp.groomlab.extra_scalps if s.object is not None and s.object.type == "MESH"]
+
+
+def sync_extra_scalps(scalp, rt, depsgraph=None, force=False, read_pose=True):
+    """groom.sync's input hook: the groom's other scalps sent when they moved or deformed, each in the
+    scalp's space as posed now (Maya's extraScalps follow their meshes). True when sent."""
+    kept = kept_scalps(scalp)
+    if not kept and "extraScalps" not in rt.keys:
+        return False
+    if not read_pose and "extraScalps" in rt.keys:
+        return False
+    arrays = [(name, mesh_arrays(obj, scalp, depsgraph)) for name, obj in kept]
+    key = groom._key(*[x for name, a in arrays for x in (name, *[a[k] for k in sorted(a)])])
+    if not force and rt.keys.get("extraScalps") == key:
+        return False
+    client = process.client()
+    scalps = []
+    for name, a in arrays:
+        entry = dict(client.put(**a))
+        entry["name"] = name
+        scalps.append(entry)
+    process.call("set_scalps", session=rt.session, scalps=scalps)
+    rt.keys["extraScalps"] = key
+    return True
+
+
+groom.input_hooks.append(sync_extra_scalps)
+
+
+def add_scalp(scalp, obj, name=None, wire=True):
+    """Add > Scalp (Maya's add_scalp): `obj`'s mesh another scalp of the groom, joined after its own:
+    hair grows on it too. Kept posed frame by frame; with `wire`, a Scalp node reading it, a Scatter
+    (the groom's own Scatter's settings, a seed of its own) and an Interpolate (the groom's guides)
+    grow its hair, merged into the strands right after the groom's own Interpolate. Returns its name."""
+    if obj is None or obj.type != "MESH":
+        raise HelperError("bad_request", "a scalp is a mesh object")
+    if obj == scalp:
+        raise HelperError("bad_request", "%s is the groom's scalp already" % obj.name)
+    name = name or "".join(c if c.isalnum() or c == "_" else "_" for c in obj.name)
+    if not name or name == "scalp" or name[0].isdigit():
+        name = "scalp_" + name
+    kept = scalp.groomlab.extra_scalps
+    taken = next((s for s in kept if s.object == obj), None)
+    if taken is not None and taken.name != name:
+        raise HelperError("bad_request", "%s is a scalp of the groom already (%s)" % (obj.name, taken.name))
+    entry = kept.get(name)
+    existing = entry is not None
+    if entry is None:
+        entry = kept.add()
+        entry.name = name
+    entry.object = obj
+    sync_extra_scalps(scalp, _session(scalp), force=True)
+    if existing or not wire:
+        groom.mark(scalp, "eval")
+        return name
+    g = GraphEdits(scalp)
+    if any(g.param(n, "input") == name for n in g.of_type("Scalp")):
+        groom.mark(scalp, "eval")
+        return name
+    own_scalp = next((n for n in g.of_type("Scalp") if g.param(n, "input", "scalp") == "scalp"), None)
+    own_scatter = next((c for c, _ in g.downstream_of(own_scalp) if g.node_type(c) == "Scatter"), None) if own_scalp else None
+    own_interp = next((c for c, _ in g.downstream_of(own_scatter) if g.node_type(c) == "Interpolate"), None) if own_scatter else None
+    guides = next(iter(g.of_type("Guides")), None)
+    node = g.add("Scalp", base="scalp_" + name, params={"input": name, "subdivision": g.param(own_scalp, "subdivision", "matchRender")
+                                                         if own_scalp else "matchRender"})
+    params = dict((g.node(own_scatter) or {}).get("params") or {}) if own_scatter else {}
+    params.pop("seed", None)
+    scatter = g.add("Scatter", base="scatter_" + name, params=params)
+    g.connect(node, scatter, "scalp")
+    last = scatter
+    if own_interp:
+        interp = g.add("Interpolate", base="interpolate_" + name, params=dict((g.node(own_interp) or {}).get("params") or {}))
+        g.connect(scatter, interp, "strands")
+        if guides:
+            g.connect(guides, interp, "guides")
+        g.connect(node, interp, "scalp")
+        last = interp
+    merge = g.add("Merge", base="merge_" + name)
+    anchor = own_interp or own_scatter
+    if anchor and g.downstream_of(anchor):
+        g.insert_after(anchor, merge, node_input="a")
+    elif g.output and g.source_of(g.output, "strands"):
+        g.insert_before(g.output, merge, node_input="a")
+    g.connect(last, merge, "b")
+    x, y = g.position(merge)
+    g.set_positions({n: (x - 660.0 + 220.0 * i, y + 160.0) for i, n in enumerate((node, scatter, last)) if n})
+    g.finish()
+    return name
+
+
+def remove_scalp(scalp, name):
+    """A scalp of the groom's dropped (its nodes stay: delete them in the Graph Editor)."""
+    kept = scalp.groomlab.extra_scalps
+    i = kept.find(name)
+    if i >= 0:
+        kept.remove(i)
+    sync_extra_scalps(scalp, _session(scalp), force=True)
+    groom.mark(scalp, "eval")
+
+
+def prototype_from_selection(scalp, node, obj):
+    """An Instance or Scales node's prototype: `obj`'s mesh (Maya's Prototype from Selection), sent as
+    the graph's mesh of its name and named by the node; hidden, so only its instances show and render.
+    Returns the name."""
+    if obj is None or obj.type != "MESH":
+        raise HelperError("bad_request", "select the mesh to instance")
+    g = GraphEdits(scalp)
+    if g.node_type(node) not in ("Instance", "Scales"):
+        raise HelperError("bad_request", "%s is not an Instance or Scales node" % node)
+    set_prototypes(scalp, [obj], replace=False)
+    g.set_param(node, "prototype", obj.name)
+    g.finish()
+    obj.hide_set(True)
+    obj.hide_render = True
+    return obj.name
 
 
 # ---- Graph inserts: Maya's add_simulate, add_collider, create_cards, add_feathers, add_braid ------------
@@ -802,6 +922,115 @@ def curve_points(obj, scalp):
             else:
                 out.append(np.array([tuple(p.co)[:3] for p in spline.points], np.float32))
     return [(p @ m[:3, :3].T + m[:3, 3]).astype(np.float32) for p in out if len(p) >= 2]
+
+
+GUIDE_CURVES_OF = "groomlab_guides_of"  # a Guides to Curves object: the groom (scalp name) it came from
+
+
+def guides_to_curves(scalp, context=None, selected_only=True):
+    """Guides to Curves (Maya's guides_to_curves): a hair Curves object per guide group (the selected
+    guides, else every primary guide), each curve tagged with its guide's ID (groomlab_id), placed as
+    the scalp is, to edit with Blender's tools and bring back with Curves to Guides. Returns the objects."""
+    from . import tools
+    if not tools.is_hierarchy(scalp):
+        raise HelperError("state", "this groom's guides are Blender curves already")
+    context = context or bpy.context
+    rt = _session(scalp)
+    r = process.call("get_guides", session=rt.session, source="hierarchy")
+    client = process.client()
+    a = r.get("arrays") or {}
+    if not r.get("guides"):
+        raise HelperError("state", "the groom has no guides")
+    points = client.array(a["points"]).astype(np.float32).reshape(-1, 3)
+    counts = client.array(a["counts"]).astype(np.int64).ravel()
+    ids = client.array(a["ids"]).astype(np.int64).ravel()
+    groups = r.get("groups") or [""] * len(ids)
+    wanted = None
+    if selected_only:
+        sel = set(int(i) for i in (tools.call(scalp, "selection_get").get("selection") or []))
+        wanted = sel or None
+    starts = np.concatenate([[0], np.cumsum(counts)])
+    by_group = {}
+    for i, gid in enumerate(ids):
+        if wanted is not None and int(gid) not in wanted:
+            continue
+        by_group.setdefault(groups[i] or "guides", []).append(i)
+    made = []
+    for group, members in sorted(by_group.items()):
+        curves = bpy.data.hair_curves.new("%s_%s_curves" % (scalp.name, group))
+        curves.add_curves([int(counts[i]) for i in members])
+        pts = np.concatenate([points[starts[i]:starts[i + 1]] for i in members]).astype(np.float32)
+        curves.attributes["position"].data.foreach_set("vector", pts.ravel())
+        groom._ids_attribute(curves).data.foreach_set("value", ids[members].astype(np.int32))
+        obj = bpy.data.objects.new(curves.name, curves)
+        obj.matrix_world = scalp.matrix_world.copy()
+        obj[GUIDE_CURVES_OF] = scalp.name
+        obj["groomlab_group"] = group
+        (context.collection or context.scene.collection).objects.link(obj)
+        made.append(obj)
+    return made
+
+
+def curves_to_guides(scalp, objects):
+    """Curves to Guides (Maya's curves_to_guides): curves from Guides to Curves reshape their guides in
+    place (the same IDs), any other curve becomes a new guide (in the group picked). One undo step a
+    kind. Returns {"changed": n, "added": n}."""
+    from . import tools
+    if not tools.is_hierarchy(scalp):
+        raise HelperError("state", "this groom's guides are Blender curves: sculpt them directly")
+    tagged = [o for o in objects if o.get(GUIDE_CURVES_OF) == scalp.name and o.type == "CURVES"]
+    others = [o for o in objects if o not in tagged]
+    out = {"changed": 0, "added": 0}
+    if tagged:
+        rt = _session(scalp)
+        client = process.client()
+        pts, counts, ids = [], [], []
+        for obj in tagged:
+            c = obj.data
+            m = np.array(scalp.matrix_world.inverted() @ obj.matrix_world, np.float64)
+            pos = np.empty(len(c.points) * 3, np.float32)
+            c.attributes["position"].data.foreach_get("vector", pos)
+            pos = pos.reshape(-1, 3).astype(np.float64) @ m[:3, :3].T + m[:3, 3]
+            offsets = np.empty(len(c.curves) + 1, np.int32)
+            c.curve_offset_data.foreach_get("value", offsets)
+            a = c.attributes.get(groom.GUIDE_ID)
+            tags = np.zeros(len(c.curves), np.int32)
+            if a is not None and a.domain == "CURVE":
+                a.data.foreach_get("value", tags)
+            for k in range(len(c.curves)):
+                pts.append(pos[offsets[k]:offsets[k + 1]].astype(np.float32))
+                counts.append(offsets[k + 1] - offsets[k])
+                ids.append(int(tags[k]))
+        _level, group = tools.group_target(bpy.context.scene)
+        r = process.call("set_guides", session=rt.session, target="hierarchy", keepMissing=True, group=group,
+                         **client.put(points=np.concatenate(pts), counts=np.asarray(counts, np.int32),
+                                      ids=np.asarray(ids, np.uint64)))
+        out["changed"] += int(r.get("changed") or 0)
+        out["added"] += len(r.get("added") or [])
+        tools.keep_state(scalp)
+    if others:
+        _level, group = tools.group_target(bpy.context.scene)
+        out["added"] += guides_from_curves(scalp, others, group or "primary")
+    groom.mark(scalp, "eval")
+    return out
+
+
+def strands_to_curves(scalp, context=None):
+    """Strands to Curves (Maya's strands_to_curves): the groom's strands as they show (the hair object:
+    the preview's strands, with their widths and channels as attributes) copied into a standalone
+    hair Curves object of their own. Returns it."""
+    context = context or bpy.context
+    hair = scalp.groomlab.hair
+    if hair is None or hair.type != "CURVES" or not len(hair.data.curves):
+        raise HelperError("state", "the groom shows no strands yet")
+    data = hair.data.copy()
+    data.name = "%s_strands" % scalp.name
+    obj = bpy.data.objects.new(data.name, data)
+    obj.matrix_world = hair.matrix_world.copy()
+    if hasattr(obj, "groomlab"):
+        obj.groomlab.role = "NONE"
+    (context.collection or context.scene.collection).objects.link(obj)
+    return obj
 
 
 def guides_from_curves(scalp, objects, group):
@@ -1367,6 +1596,49 @@ def _match_file(index, stored):
     if scores[0][0] > 1 and scores[0][0] > scores[1][0]:
         return scores[0][1], []
     return None, sorted(candidates)
+
+
+def collect_files(scalps):
+    """Collect Files (Maya's collect_files): every file the grooms use from outside the .blend's folder
+    copied into its groomlab folders (texture maps into the groom's maps folder, the graph's files
+    into masks, card bakes into cards, Simulate bakes into caches, photos into references) and the
+    grooms pointed at the copies; a file there already stays, a missing one is reported. Returns
+    {"copied": [(what, copy)], "missing": [(what, path)], "inside": n}. Raises HelperError while the
+    .blend is untitled."""
+    from . import photos, tools
+    if not bpy.data.filepath:
+        raise HelperError("state", "save the .blend first: its files are collected into its folder")
+    folder = os.path.dirname(os.path.abspath(bpy.data.filepath)).replace("\\", "/")
+    out = {"copied": [], "missing": [], "inside": 0}
+    for scalp in scalps:
+        r = call(scalp, "files_collect", dir=folder, masks=groom.asset_folder("masks"), cards=groom.asset_folder("cards"),
+                 caches=groom.asset_folder("caches"))
+        out["copied"] += [tuple(c) for c in r.get("copied") or []]
+        out["missing"] += [tuple(m) for m in r.get("missing") or []]
+        out["inside"] += int(r.get("inside") or 0)
+        if r.get("mapsChanged") or r.get("graphChanged"):
+            tools.keep_state(scalp)
+            groom.mark(scalp, "eval")
+    # The photos (Maya's references).
+    for cam in photos.list_photos():
+        p = cam.groomlab_photo
+        path = bpy.path.abspath(p.image_path) if p.image_path else ""
+        if not path:
+            continue
+        if os.path.abspath(path).replace("\\", "/").lower().startswith(folder.lower() + "/"):
+            out["inside"] += 1
+            continue
+        if not os.path.isfile(path):
+            out["missing"].append(("photo " + cam.name, path))
+            continue
+        copy = groom.copy_into("references", path)
+        if copy != path:
+            p.image_path = copy
+            for bg in cam.data.background_images:
+                if bg.image is not None and os.path.normcase(bpy.path.abspath(bg.image.filepath)) == os.path.normcase(path):
+                    bg.image.filepath = copy
+            out["copied"].append(("photo " + cam.name, copy))
+    return out
 
 
 def find_missing_files(scalps, folder, recursive=True):

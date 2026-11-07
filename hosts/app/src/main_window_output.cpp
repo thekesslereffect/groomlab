@@ -175,7 +175,12 @@ bool MainWindow::exportGuidesForSimulation(const QString& given) {
     if (refuseWhileBusy(tr("exporting the guides"))) return false;
     QString path = given;
     if (path.isEmpty()) {
-        const QString start = document_->path().empty() ? QString() : QFileInfo(QString::fromStdString(document_->path())).completeBaseName() + QStringLiteral("_guides.abc");
+        // In the groom's caches folder (Maya's), named after the groom.
+        const QString caches = QString::fromStdString(document_->assetFolder("caches"));
+        QDir().mkpath(caches);
+        const QString start = caches + QStringLiteral("/") +
+                              (document_->path().empty() ? QStringLiteral("groom") : QFileInfo(QString::fromStdString(document_->path())).completeBaseName()) +
+                              QStringLiteral("_guides.abc");
         path = QFileDialog::getSaveFileName(this, tr("Export Guides for Simulation"), start, tr("Alembic (*.abc)"));
         if (path.isEmpty()) return false;
     }
@@ -203,7 +208,7 @@ bool MainWindow::loadGuideCache(const QString& given) {
     }
     QString path = given;
     if (path.isEmpty()) {
-        path = QFileDialog::getOpenFileName(this, tr("Load Guide Cache"), QString(), tr("Alembic (*.abc)"));
+        path = QFileDialog::getOpenFileName(this, tr("Load Guide Cache"), QString::fromStdString(document_->assetFolder("caches")), tr("Alembic (*.abc)"));
         if (path.isEmpty()) return false;
     }
     std::string made;
@@ -345,10 +350,14 @@ bool MainWindow::importAlembicCurves(const QString& path, const QString& object)
 namespace {
 
 // A file named after the groom beside it (<folder>/<stem><suffix>), an untitled one's in the temp folder.
+// An export's starting file: <the groom's exports folder>/<groom name><suffix> (Maya's exports
+// folder; made when missing), an unsaved groom's in the temp folder.
 QString besideGroom(const GroomDocument* document, const QString& suffix) {
     if (document && !document->path().empty()) {
         const QFileInfo groom(QString::fromStdString(document->path()));
-        return groom.dir().filePath(groom.completeBaseName() + suffix);
+        const QString folder = QString::fromStdString(document->assetFolder("exports"));
+        QDir().mkpath(folder);
+        return QDir(folder).filePath(groom.completeBaseName() + suffix);
     }
     return QDir::temp().filePath(QStringLiteral("groom") + suffix);
 }
@@ -590,6 +599,109 @@ void MainWindow::askFindMissingFiles() {
     const QString start = document_->path().empty() ? QString() : QFileInfo(QString::fromStdString(document_->path())).absolutePath();
     const QString folder = QFileDialog::getExistingDirectory(this, tr("Folder to look for the missing files in"), start);
     if (!folder.isEmpty()) findMissingFiles(folder);
+}
+
+bool MainWindow::exportEngineCards(const QString& given, bool unity) {
+    if (!document_) {
+        report(tr("No groom open to export"));
+        return false;
+    }
+    if (refuseWhileBusy(tr("exporting the cards"))) return false;
+    QString directory = given;
+    if (directory.isEmpty()) {
+        const QString start = QString::fromStdString(document_->assetFolder("exports"));
+        QDir().mkpath(start);
+        if (!interactive_) {
+            directory = start;
+        } else {
+            directory = QFileDialog::getExistingDirectory(this, unity ? tr("Folder for the Unity cards") : tr("Folder for the Unreal cards"), start);
+            if (directory.isEmpty()) return false;
+        }
+    }
+    settleCommit();
+    const std::string name = document_->path().empty() ? std::string("groom") : QFileInfo(QString::fromStdString(document_->path())).completeBaseName().toStdString();
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        std::vector<std::string> warnings;
+        const std::vector<std::string> files = document_->exportEngineCards(directory.toStdString(), name, unity, 0, 1.0f, &warnings);
+        QApplication::restoreOverrideCursor();
+        for (const std::string& w : warnings) report(QString::fromStdString(w), false);
+        notify(tr("Wrote %n file(s) for %1 into %2", "", static_cast<int>(files.size())).arg(unity ? tr("Unity") : tr("Unreal"), directory));
+    } catch (const std::exception& e) {
+        QApplication::restoreOverrideCursor();
+        report(tr("Cannot export the cards: %1").arg(QString::fromUtf8(e.what())));
+        return false;
+    }
+    return true;
+}
+
+bool MainWindow::exportUnityFeathers(const QString& given) {
+    if (!document_) {
+        report(tr("No groom open to export"));
+        return false;
+    }
+    if (refuseWhileBusy(tr("exporting the feathers"))) return false;
+    QString directory = given;
+    if (directory.isEmpty()) {
+        const QString start = QString::fromStdString(document_->assetFolder("exports"));
+        QDir().mkpath(start);
+        directory = interactive_ ? QFileDialog::getExistingDirectory(this, tr("Folder for the Unity feathers"), start) : start;
+        if (directory.isEmpty()) return false;
+    }
+    settleCommit();
+    const std::string name = document_->path().empty() ? std::string("groom") : QFileInfo(QString::fromStdString(document_->path())).completeBaseName().toStdString();
+    try {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        std::vector<std::string> warnings;
+        const std::vector<std::string> files = document_->exportUnityFeathers(directory.toStdString(), name, &warnings);
+        QApplication::restoreOverrideCursor();
+        for (const std::string& w : warnings) report(QString::fromStdString(w), false);
+        notify(tr("Wrote %n file(s) for Unity's hair package into %1", "", static_cast<int>(files.size())).arg(directory));
+    } catch (const std::exception& e) {
+        QApplication::restoreOverrideCursor();
+        report(tr("Cannot export the feathers: %1").arg(QString::fromUtf8(e.what())));
+        return false;
+    }
+    return true;
+}
+
+bool MainWindow::exportScalesFbx(const QString& given, bool unity) {
+    if (!document_) {
+        report(tr("No groom open to export"));
+        return false;
+    }
+    const QString path = given.isEmpty() ? pickSavePath(tr("Scales Mesh (FBX)"), besideGroom(document_.get(), QStringLiteral("_scales.fbx")), tr("FBX files (*.fbx)"))
+                                         : given;
+    if (path.isEmpty()) return false;
+    settleCommit();
+    try {
+        document_->exportScalesFbx(path.toStdString(), unity);
+        notify(tr("Wrote %1").arg(QFileInfo(path).fileName()));
+    } catch (const std::exception& e) {
+        report(tr("Cannot export the scales: %1").arg(QString::fromUtf8(e.what())));
+        return false;
+    }
+    return true;
+}
+
+bool MainWindow::collectFiles() {
+    if (!document_) return false;
+    GroomDocument::CollectReport r;
+    const std::string error = document_->collectFiles(&r);
+    if (!error.empty()) {
+        report(tr("Cannot collect the files: %1").arg(QString::fromStdString(error)));
+        return false;
+    }
+    if (!r.copied.empty()) {
+        graphEdited();  // (the graph and maps name the copies: evaluate and refresh)
+        refreshTitle();
+    }
+    QString text = r.copied.empty() ? tr("Every file the groom uses is in its folder already")
+                                    : tr("Copied %n file(s) into the groom's groomlab folder", "", static_cast<int>(r.copied.size()));
+    if (!r.missing.empty()) text += tr("; %n missing (Find Missing Files looks for them)", "", static_cast<int>(r.missing.size()));
+    if (r.missing.empty()) notify(text);
+    else report(text);
+    return true;
 }
 
 void MainWindow::askExportScalesUsd() {

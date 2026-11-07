@@ -280,8 +280,8 @@ std::string relativeToFolder(const std::string& full, const fs::path& folder) {
     return pathFromGroomFolder(full, folder.u8string());
 }
 
-// The groom's card bake (cardMaps) copied beside the groom file as <stem>_cards/<stem>_<map>,
-// the layout the app bakes into and opens a groom with, with the viewport's preview map the
+// The groom's card bake (cardMaps) copied beside the groom file into its own cards folder,
+// groomlab/<stem>/cards/<stem>_<map>, the layout the app bakes into and opens a groom with, with the viewport's preview map the
 // app shows it by; the file names it with the bake's stamp. Nothing without a bake (or with
 // its files gone: a warning).
 CardBakeRef exportCardBake(const MObject& node, const fs::path& groomFile) {

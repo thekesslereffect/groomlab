@@ -71,6 +71,18 @@ void MainWindow::refreshDisplayChoices() {
         for (const PaintedMap& m : document_->maps()) scalpMap_->addItem(QString::fromStdString(m.name), QString::fromStdString(m.name));
     }
     scalpMap_->setCurrentIndex(std::max(0, scalpMap_->findData(shown)));
+    // The guide layers Guide Color's Painted Layer can show.
+    {
+        const QSignalBlocker blockLayer(guideColorLayer_);
+        guideColorLayer_->clear();
+        guideColorLayer_->addItem(tr("(none)"), QString());
+        if (document_) {
+            for (const PaintedMap& m : document_->maps()) {
+                if (m.kind == "guides") guideColorLayer_->addItem(QString::fromStdString(m.name), QString::fromStdString(m.name));
+            }
+        }
+        guideColorLayer_->setCurrentIndex(std::max(0, guideColorLayer_->findData(QString::fromStdString(settings_.guideColorLayer))));
+    }
     if (document_) scalpMapChannel_->setCurrentText(QString::fromStdString(document_->scalpMapChannel()));
     const bool cards = document_ && document_->session().hasCardsNode();
     cardsView_->setEnabled(cards);
@@ -104,6 +116,72 @@ void MainWindow::applyDisplayOptions() {
     if (maps_) maps_->invalidate();
     if (cardsChanged) reevaluate();  // the view builds the cards (ViewRequest::wantCards)
     else redisplay();
+}
+
+MainWindow::PaintView MainWindow::currentPaintView() const {
+    PaintView v;
+    v.colorMode = settings_.colorMode;
+    v.colorSource = settings_.colorSource;
+    v.colorMin = settings_.colorMin;
+    v.colorMax = settings_.colorMax;
+    v.guideColorMode = settings_.guideColorMode;
+    v.guideColorLayer = settings_.guideColorLayer;
+    return v;
+}
+
+void MainWindow::setPaintView(const PaintView& v) {
+    // Through the display panel's controls, so they show it (applyDisplayOptions reads them).
+    {
+        const QSignalBlocker a(colorMode_), b(colorSource_), c(colorMin_), d(colorMax_), e(guideColorMode_), f(guideColorLayer_);
+        colorMode_->setCurrentIndex(std::max(0, colorMode_->findData(v.colorMode)));
+        refreshDisplayChoices();  // the sources the mode offers
+        colorSource_->setEditText(QString::fromStdString(v.colorSource));
+        colorMin_->setValue(v.colorMin);
+        colorMax_->setValue(v.colorMax);
+        settings_.guideColorMode = v.guideColorMode;
+        settings_.guideColorLayer = v.guideColorLayer;
+        guideColorMode_->setCurrentIndex(v.guideColorMode == 1 ? 1 : 0);
+        guideColorLayer_->setCurrentIndex(std::max(0, guideColorLayer_->findData(QString::fromStdString(v.guideColorLayer))));
+    }
+    applyDisplayOptions();
+    refreshProperties();
+}
+
+void MainWindow::showPaintView(const std::string& map, const std::string& kind) {
+    if (map.empty()) return;
+    if (!paintBefore_) paintBefore_ = currentPaintView();
+    PaintView v = currentPaintView();
+    v.colorMode = kAttributeColors;  // Maya's view_map: the strands by the map, black 0 to white 1
+    v.colorSource = map;
+    v.colorMin = 0.0;
+    v.colorMax = 1.0;
+    if (kind == "guides") {  // a guide layer on the guides too (Blender's Show on Guides)
+        v.guideColorMode = 1;
+        v.guideColorLayer = map;
+    }
+    setPaintView(v);
+    paintShown_ = currentPaintView();
+}
+
+void MainWindow::endPaintView() {
+    if (!paintBefore_) return;
+    const PaintView before = *paintBefore_;
+    paintBefore_.reset();
+    // What painting set and nobody changed since goes back; what the artist changed stays.
+    const PaintView now = currentPaintView();
+    PaintView v = now;
+    if (now.colorMode == paintShown_.colorMode && now.colorSource == paintShown_.colorSource && now.colorMin == paintShown_.colorMin &&
+        now.colorMax == paintShown_.colorMax) {
+        v.colorMode = before.colorMode;
+        v.colorSource = before.colorSource;
+        v.colorMin = before.colorMin;
+        v.colorMax = before.colorMax;
+    }
+    if (now.guideColorMode == paintShown_.guideColorMode && now.guideColorLayer == paintShown_.guideColorLayer) {
+        v.guideColorMode = before.guideColorMode;
+        v.guideColorLayer = before.guideColorLayer;
+    }
+    if (!(v == now)) setPaintView(v);
 }
 
 void MainWindow::applyProps() {

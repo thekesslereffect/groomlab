@@ -836,7 +836,7 @@ void ReferenceWindow::loadPhotos() {
                     p->camera = cameraFrom(j.value("camera", json()), p->width, p->height);
                 } catch (const std::exception&) {
                 }
-                p->picture = QImage(p->image);
+                p->picture = QImage(QString::fromStdString(doc->referenceImageFile(p->image.toStdString())));
                 if (j.contains("display") && j["display"].is_object()) p->display = j["display"].dump();
                 photos_.push_back(std::move(p));
             }
@@ -899,6 +899,10 @@ int ReferenceWindow::importPhoto(const QString& path) {
     auto p = std::make_unique<ReferencePhoto>();
     p->name = QFileInfo(path).completeBaseName();
     p->image = QFileInfo(path).absoluteFilePath();
+    // Copied into the groom's references folder (Maya's), stored relative to the groom.
+    if (const std::string stored = main_->document()->importReferenceImage(p->image.toStdString()); !stored.empty()) {
+        p->image = QString::fromStdString(stored);
+    }
     p->width = picture.width();
     p->height = picture.height();
     p->picture = std::move(picture);
@@ -1243,7 +1247,7 @@ const ReferenceViewPreview* ReferenceWindow::preview() {
         try {
             ReferenceView view;
             view.camera = *p->camera;
-            view.image = loadRefImage(p->image.toStdString(), 3);
+            view.image = loadRefImage(main_ && main_->document() ? main_->document()->referenceImageFile(p->image.toStdString()) : p->image.toStdString(), 3);
             if (!p->mask.isEmpty()) view.mask = loadRefImage(p->mask.toStdString(), 1);
             view.hints = p->editor.strokes();
             view.maskStrokes = p->editor.maskStrokes();
@@ -1297,7 +1301,7 @@ bool ReferenceWindow::generate() {
             if (!p->camera) continue;
             ReferenceView view;
             view.camera = *p->camera;
-            view.image = loadRefImage(p->image.toStdString(), 3);
+            view.image = loadRefImage(main_ && main_->document() ? main_->document()->referenceImageFile(p->image.toStdString()) : p->image.toStdString(), 3);
             if (!p->mask.isEmpty()) view.mask = loadRefImage(p->mask.toStdString(), 1);
             view.hints = p->editor.strokes();
             view.maskStrokes = p->editor.maskStrokes();

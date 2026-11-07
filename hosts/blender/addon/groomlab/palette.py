@@ -451,6 +451,7 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         box.label(text="Show on")
         row = box.row(align=True)
         row.prop(t, "show_on_guides", toggle=True)
+        row.prop(t, "show_on_strands", toggle=True)
         row.prop(t, "show_on_scalp", toggle=True)
         if m is not None and m.channels > 1:
             row.prop(t, "scalp_channel", text="")

@@ -3768,6 +3768,46 @@ TEST(AppCards, BuildBakeAndExportCards) {
     std::filesystem::remove_all(dir);
 }
 
+// The FBX game exports (Maya's export_cards_unreal / export_cards_unity): the maps, the hair cap's
+// maps, the manifest and the meshes as FBX into a folder.
+TEST(AppCards, UnrealAndUnityCardsAsFbx) {
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_TRUE(doc);
+    std::string cards;
+    ASSERT_EQ(doc->addCardsNode(&cards), "");
+    const std::string dir = tempPath("groomlab_app_engine_cards");
+    std::filesystem::remove_all(dir);
+    auto has = [](const std::vector<std::string>& files, const std::string& end) {
+        return std::any_of(files.begin(), files.end(), [&](const std::string& f) {
+            return f.size() >= end.size() && f.compare(f.size() - end.size(), end.size(), end) == 0;
+        });
+    };
+    std::vector<std::string> warnings;
+    const std::vector<std::string> unreal = doc->exportEngineCards(dir, "hair", false, 64, 1.0f, &warnings);
+    for (const char* f : {"hair_Color.tga", "hair_Depth.tga", "hair_AO_world.tga", "hair_cards.json", "hair_cards.fbx"}) {
+        EXPECT_TRUE(has(unreal, f)) << f;
+        EXPECT_TRUE(std::filesystem::exists(std::filesystem::u8path(dir + "/" + f))) << f;
+    }
+    {
+        std::ifstream in(std::filesystem::u8path(dir + "/hair_cards.json"), std::ios::binary);
+        const nlohmann::json manifest = nlohmann::json::parse(in);
+        EXPECT_EQ(manifest["mesh"], "hair_cards.fbx");
+        EXPECT_GT(manifest["cards"].get<int>(), 0);
+        EXPECT_TRUE(manifest["maps"].contains("Color"));
+    }
+    // Unity Feathers: the strands for Unity's hair package and the manifest (no rachis without feathers).
+    const std::vector<std::string> feathers = doc->exportUnityFeathers(dir, "hairF", &warnings);
+    EXPECT_TRUE(has(feathers, "hairF_strands.abc"));
+    EXPECT_TRUE(has(feathers, "hairF_unity_feathers.json"));
+    EXPECT_FALSE(has(feathers, "hairF_rachis.fbx"));
+    const std::vector<std::string> unity = doc->exportEngineCards(dir, "hairU", true, 64, 1.0f, &warnings);
+    for (const char* f : {"hairU_BaseColor.png", "hairU_Mask.png", "hairU_unity.json", "hairU_cards.fbx"}) EXPECT_TRUE(has(unity, f)) << f;
+    std::ifstream fbx(std::filesystem::u8path(dir + "/hairU_cards.fbx"), std::ios::binary);
+    std::string head(23, ' ');
+    fbx.read(head.data(), 23);
+    EXPECT_EQ(head, std::string("Kaydara FBX Binary  \0\x1a\0", 23));
+}
+
 TEST(AppCards, BakedCardsAreCutOutByTheirCoverage) {
     // The textured cards (makeCardSurface: the bake's preview as the albedo, the coverage in its
     // alpha) are cut away where the coverage is below the cutoff, as Maya's card shader cuts
@@ -3896,13 +3936,14 @@ TEST(AppCards, SavedGroomNamesItsBakeForAnotherHost) {
     const CardBakeFiles bake = doc->bakeCards(doc->defaultBakeDirectory(), doc->defaultBakeName(), 64, 1.0f);
     doc->save(groom);
     const GroomFile file = readGroomFile(groom);
-    EXPECT_EQ(std::filesystem::path(file.cardBake.prefix), std::filesystem::path(dir + "/named_cards/named_").lexically_normal());
+    // In the groom's cards folder (Maya's layout: groomlab/<name>/cards).
+    EXPECT_EQ(std::filesystem::path(file.cardBake.prefix), std::filesystem::path(dir + "/groomlab/named/cards/named_").lexically_normal());
     EXPECT_EQ(file.cardBake.strands, bake.stamp);
     EXPECT_EQ(file.upAxis, "Y");
     {
         std::ifstream in(groom, std::ios::binary);
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        EXPECT_NE(text.find("\"prefix\":\"named_cards/named_\""), std::string::npos);  // relative: it moves with the groom
+        EXPECT_NE(text.find("\"prefix\":\"groomlab/named/cards/named_\""), std::string::npos);  // relative: it moves with the groom
     }
 
     const QImage own(QString::fromStdString(bake.preview));

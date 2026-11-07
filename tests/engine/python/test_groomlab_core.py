@@ -1348,7 +1348,7 @@ class ExtrasTest(SceneMixin, unittest.TestCase):
         self.assertEqual(gl.card_map_names(), ["Depth", "Coverage", "Tangent", "Attribute", "Color", "AO", "Normal"])
         self.assertEqual(gl.card_bake_suffixes()[-1], "Atlas.json")
         self.assertEqual(gl.card_bake_files("a/b_")[4], "a/b_Color.tga")
-        self.assertEqual(gl.groom_file_card_bake_prefix("hair"), "hair_cards/hair_")
+        self.assertEqual(gl.groom_file_card_bake_prefix("hair"), "groomlab/hair/cards/hair_")
         text = gl.format_card_maps("a/b_", "cards:1", 2)
         self.assertEqual(gl.parse_card_maps(text)["Coverage"], "a/b_Coverage.tga")
         self.assertEqual(gl.card_maps_prefix(text), "a/b_")

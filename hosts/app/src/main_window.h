@@ -124,6 +124,8 @@ public:
     // A .groom file, or a mesh (.obj, .abc) a new groom is made on. False (and a message) on error.
     bool openPath(const QString& path);
     bool openGroom(const QString& path);
+    // The viewport's display settings as the Properties panel set them (tests, scripts).
+    const DisplaySettings& displaySettings() const { return settings_; }
     // `group`: the OBJ's faces under that group alone (a sample's body); not a recent file then.
     bool newGroomOnMesh(const QString& meshPath, const QString& group = {});
     // "Start from a preset" with no groom open: a new groom on `meshPath` (empty: a file dialog,
@@ -499,6 +501,12 @@ public:
     bool bakeScaleMaps(const QString& directory = {}, int resolution = 2048);
     // Utilities > Find Missing Files: relinked to files of the same name under `folder`.
     bool findMissingFiles(const QString& folder);
+    // Collect Files (Maya's): GroomDocument::collectFiles, reported.
+    bool collectFiles();
+    // The FBX game exports (Maya's): Unreal or Unity cards into a folder, the scales' mesh to a file.
+    bool exportEngineCards(const QString& directory, bool unity);
+    bool exportScalesFbx(const QString& path, bool unity = false);
+    bool exportUnityFeathers(const QString& directory);
     // Export > Scales Instancer (USD): the groom at this frame as USD, the scales a PointInstancer.
     bool exportScalesUsd(const QString& path);
     // Review > Strand Count HUD: the stats line over the viewport (strands, guides, the time per
@@ -641,6 +649,11 @@ private:
     void refreshSurfaces();  // the look panel's surface list: the scalp and the props
     void refreshDisplayChoices();  // the color sources and the maps the display panel offers
     void applyDisplayOptions();    // the display panel's choices into the settings and the renderer
+    // While the Paint brush is on a map (Maya's show_while_painting): the strands colored by it
+    // (0 to 1) and, a guide layer, the guides; endPaintView puts back what the display showed
+    // before, except what was changed since (Maya's end_painting).
+    void showPaintView(const std::string& map, const std::string& kind);
+    void endPaintView();
     // Auto Range: the color range at the lowest and highest value of the source on the strands
     // shown (false: they have no such channel).
     bool autoColorRange();
@@ -788,6 +801,23 @@ private:
     QSpinBox* guideSmoothing_ = nullptr;
     QLineEdit* isolateGroup_ = nullptr;
     QComboBox* guideColorMode_ = nullptr;
+    QComboBox* guideColorLayer_ = nullptr;
+    // The display before painting started and as painting set it (showPaintView, endPaintView).
+    struct PaintView {
+        int colorMode = 0;
+        std::string colorSource;
+        double colorMin = 0.0, colorMax = 1.0;
+        int guideColorMode = 0;
+        std::string guideColorLayer;
+        bool operator==(const PaintView& o) const {
+            return colorMode == o.colorMode && colorSource == o.colorSource && colorMin == o.colorMin && colorMax == o.colorMax &&
+                   guideColorMode == o.guideColorMode && guideColorLayer == o.guideColorLayer;
+        }
+    };
+    PaintView currentPaintView() const;
+    void setPaintView(const PaintView& view);
+    std::optional<PaintView> paintBefore_;
+    PaintView paintShown_;
     QComboBox* sculptDisplay_ = nullptr;
     ValueSlider* sculptDensity_ = nullptr;
     ValueSlider* cardDensitySlider_ = nullptr;

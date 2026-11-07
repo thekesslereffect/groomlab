@@ -78,7 +78,8 @@ def main(exe, groom, work):
     assert "Wrote" in log and "Baked" in log, log
 
     # Simulate, bake, save: a Simulate node between the guides and Interpolate, baked to frame 6
-    # beside the groom (which is in the work folder), the saved groom naming the bake.
+    # into the groom's caches folder (groomlab/full/caches), then saved as sim.groom: the bake
+    # comes along into its own folder (Maya's follow_scene_files) and the saved groom names it.
     with open(saved, encoding="utf-8") as f:
         graph = json.load(f)["graph"]
     for c in graph["connections"]:
@@ -95,8 +96,8 @@ def main(exe, groom, work):
     assert "Baked the simulation to frame 6" in log, log
     with open(sim_saved, encoding="utf-8") as f:
         sims = json.load(f)["simCaches"]
-    assert sims["sim"]["file"] == "full_sim/full_sim.abc" and len(sims["sim"]["stamp"]) == 16, sims
-    with open(os.path.join(work, "full_sim", "full_sim.abc"), "rb") as f:
+    assert sims["sim"]["file"] == "groomlab/sim/caches/full_sim_sim.abc" and len(sims["sim"]["stamp"]) == 16, sims
+    with open(os.path.join(work, "groomlab", "sim", "caches", "full_sim_sim.abc"), "rb") as f:
         assert f.read(5) == b"Ogawa", "the bake is an Ogawa Alembic archive"
     print("cli exports: ok")
 

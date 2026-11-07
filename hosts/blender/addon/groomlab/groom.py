@@ -241,6 +241,64 @@ def _file_safe(name):
     return re.sub(r"[^A-Za-z0-9_.-]", "_", name) or "_"
 
 
+def asset_folder(kind="", blend_path=None):
+    """Where GroomLab keeps the .blend's files, as Maya keeps a scene's: <.blend's folder>/groomlab/
+    <.blend's name>/<kind> (masks, cards, exports, caches, renders, references), so two .blend
+    files in one folder never share files; "" while the file is untitled (the helper's temp
+    folders, taken along by the first save). `blend_path`: the file about to be saved."""
+    path = bpy.data.filepath if blend_path is None else blend_path
+    if not path:
+        return ""
+    path = os.path.abspath(bpy.path.abspath(path))
+    stem = os.path.splitext(os.path.basename(path))[0]
+    folder = os.path.join(os.path.dirname(path), "groomlab", _file_safe(stem), kind) if kind else \
+        os.path.join(os.path.dirname(path), "groomlab", _file_safe(stem))
+    return folder.replace("\\", "/")
+
+
+def copy_into(kind, path):
+    """A file copied into the .blend's `kind` folder (asset_folder: Maya's references for photos):
+    the same file there used as it is, else a free name (name_2...). Returns the copy's path, or
+    `path` itself while the .blend is untitled or when it cannot be copied."""
+    import filecmp
+    import shutil
+    folder = asset_folder(kind)
+    if not folder or not os.path.isfile(path):
+        return path
+    os.makedirs(folder, exist_ok=True)
+    stem, ext = os.path.splitext(os.path.basename(path))
+    target, n = os.path.join(folder, stem + ext), 2
+    while os.path.exists(target) and not (os.path.samefile(target, path) or filecmp.cmp(target, path, shallow=False)):
+        target, n = os.path.join(folder, "%s_%d%s" % (stem, n, ext)), n + 1
+    if not os.path.exists(target):
+        try:
+            shutil.copy2(path, target)
+        except OSError:
+            return path
+    return target.replace("\\", "/")
+
+
+def follow_files(scalp, rt, blend_path):
+    """Save As (Maya's follow_scene_files): the files the groom names (the graph's images and
+    Alembic files, its Simulate bakes, its card bake, its caches) copied into the new .blend's
+    folders and the groom pointed at the copies; texture maps move with send_maps_dir. Returns
+    the files copied."""
+    new = os.path.abspath(bpy.path.abspath(blend_path)) if blend_path else ""
+    if not new:
+        return []
+    old = os.path.abspath(bpy.data.filepath) if bpy.data.filepath else ""
+    if old and os.path.normcase(old) == os.path.normcase(new):
+        return []
+    args = {"newBase": os.path.dirname(new).replace("\\", "/"), "newRoot": asset_folder("", new)}
+    if old:
+        args["oldBase"] = os.path.dirname(old).replace("\\", "/")
+        args["oldRoot"] = asset_folder("", old)
+    r = _call("files_follow", session=rt.session, **args)
+    for w in r.get("warnings") or []:
+        print("GroomLab: %s" % w)
+    return r.get("copied") or []
+
+
 def maps_dir(scalp, blend_path=None):
     """Where the groom's texture maps go, as Maya keeps a scene's: <.blend's folder>/groomlab/<.blend's
     name>/masks/<scalp>, so two .blend files in one folder never share maps; "" while the file is
@@ -892,8 +950,10 @@ def snapshot_all(blend_path=None):
         live.append((scalp, rt))
         try:
             send_maps_dir(scalp, rt, blend_path)
+            if blend_path:
+                follow_files(scalp, rt, blend_path)
         except HelperError as e:
-            print("GroomLab: the maps of %s were not moved beside the file: %s" % (scalp.name, e))
+            print("GroomLab: the files of %s were not moved beside the file: %s" % (scalp.name, e))
     for fn in before_save:  # (the states kept with the maps where they are now)
         fn()
     for scalp, rt in live:

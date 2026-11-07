@@ -44,7 +44,12 @@ void AppActions::addOutputBindings(ui::Bindings& b, MainWindow& w) {
     b["strands.toMesh"] = {run([m] { m->askStrandsToMesh(); }), {}, groomOpen};
     b["scales.bakeMaps"] = {run([m] { m->bakeScaleMaps(); }), {}, groomOpen};
     b["files.findMissing"] = {run([m] { m->askFindMissingFiles(); }), {}, groomOpen};
+    b["files.collect"] = {run([m] { m->collectFiles(); }), {}, [m] { return m->document_ != nullptr && !m->document_->path().empty(); }};
     b["export.scalesUsd"] = {run([m] { m->askExportScalesUsd(); }), {}, groomOpen};
+    b["export.unrealCards"] = {run([m] { m->exportEngineCards(QString(), false); }), {}, groomOpen};
+    b["export.unityCards"] = {run([m] { m->exportEngineCards(QString(), true); }), {}, groomOpen};
+    b["export.scalesFbx"] = {run([m] { m->exportScalesFbx(QString()); }), {}, groomOpen};
+    b["export.unityFeathers"] = {run([m] { m->exportUnityFeathers(QString()); }), {}, groomOpen};
 
     // Theme: New Theme from Current (its name asked), Reload Theme, Open Themes Folder.
     b["theme.new"] = {run([m] { m->askNewTheme(); }), {}, {}, {}, {}, QStringLiteral("themeNew")};

@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -14,6 +15,7 @@
 #include <variant>
 
 #include "groomlab/alembic_io.h"
+#include "groomlab/asset_files.h"
 #include "groomlab/attributes.h"
 #include "groomlab/flow.h"
 #include "groomlab/graph_edit.h"
@@ -118,6 +120,7 @@ GroomDocument::GroomDocument(GroomFile file, std::string path) : path_(std::move
     // panels edit values that are there and the file saved holds the whole look.
     loadGraph(scene_->file().data.graphJson);
     loadMaps();
+    controlKeys_ = scene_->file().controlKeys;
     // The groups' own colors and the hidden groups as the file keeps them (Maya's attributes' text).
     {
         std::istringstream words(scene_->file().guideGroupColors);
@@ -191,11 +194,26 @@ const PaintedMap* GroomDocument::map(const std::string& name) const {
     return nullptr;
 }
 
+std::string GroomDocument::assetFolder(const std::string& kind) const {
+    if (path_.empty()) {
+        // Untitled: a folder of this groom's own in the temp folder (two untitled grooms never
+        // share files), taken along by the first save.
+        if (untitledRoot_.empty()) {
+            static int untitled = 0;
+            std::error_code ec;
+            const std::filesystem::path temp = std::filesystem::temp_directory_path(ec);
+            const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            untitledRoot_ = forwardSlashes((temp / "groomlab" / ("untitled_" + std::to_string(now) + "_" + std::to_string(++untitled))).u8string());
+        }
+        return kind.empty() ? untitledRoot_ : untitledRoot_ + "/" + kind;
+    }
+    const std::filesystem::path groom = std::filesystem::u8path(path_);
+    return groomlab::assetFolder(forwardSlashes(groom.parent_path().u8string()), groom.stem().u8string(), kind);
+}
+
 std::string GroomDocument::mapsDirectory() const {
     if (path_.empty()) return {};
-    const std::filesystem::path groom = std::filesystem::u8path(path_);
-    // As Maya and Blender keep a scene's: <folder>/groomlab/<groom file's name>/masks.
-    return forwardSlashes((groom.parent_path() / "groomlab" / groom.stem() / "masks").u8string());
+    return assetFolder("masks");  // as Maya and Blender keep a scene's: groomlab/<name>/masks
 }
 
 std::string GroomDocument::textureMapFile(const std::string& name) const {
@@ -677,7 +695,12 @@ std::string GroomDocument::paintParam(const std::string& node, const std::string
     } catch (const std::exception& e) {
         return e.what();
     }
-    if (kind != "vertices" && kind != "texture") return "a setting's map lives on the scalp: vertices or texture, not '" + kind + "'";
+    if (kind != "vertices" && kind != "texture" && kind != "guides") {
+        return "a setting's map is on the guides, the scalp's vertices or a texture, not '" + kind + "'";
+    }
+    if (kind == "guides" && !(session().storedHierarchy() && !session().storedHierarchy()->guides().empty())) {
+        return "the groom has no guides to paint on: add guides, or paint on the scalp's vertices";
+    }
     // A new map named for the param (free of the maps and guide layers there), white: the param
     // as it was, black 0.
     const std::string base = sanitizeMapName(node + "_" + name);
@@ -956,6 +979,90 @@ std::vector<GroomDocument::ControlSlider> GroomDocument::controlSliders() const 
         if (std::none_of(out.begin(), out.end(), [&](const ControlSlider& o) { return o.name == c.name; })) out.push_back(c);
     }
     return out;
+}
+
+void GroomDocument::setFrame(double frame) {
+    time_ = frameToSeconds(frame, framesPerSecond());
+    applyControlKeys();
+}
+
+void GroomDocument::applyControlKeys() {
+    if (controlKeys_.empty()) return;
+    std::map<std::string, float> controls = session().data().controls;
+    bool changed = false;
+    const double at = frame();
+    for (const auto& [name, keys] : controlKeys_) {
+        if (keys.empty()) continue;
+        const auto value = static_cast<float>(controlKeyValue(keys, at));
+        auto it = controls.find(name);
+        if (it == controls.end() || it->second != value) {
+            controls[name] = value;
+            changed = true;
+        }
+    }
+    if (changed) session().setControls(std::move(controls));
+}
+
+std::string GroomDocument::controlOf(const std::string& node, const std::string& param) const {
+    const json& connections = graph_.contains("connections") ? graph_["connections"] : json::array();
+    for (const json& c : connections) {
+        if (c.value("to", std::string()) != node || c.value("input", std::string()) != param) continue;
+        const json* from = nodeJson(c.value("from", std::string()));
+        if (from && from->value("type", std::string()) == "Control") {
+            return from->value("params", json::object()).value("name", std::string("control"));
+        }
+    }
+    return {};
+}
+
+bool GroomDocument::paramKeyed(const std::string& node, const std::string& param) const {
+    const std::string control = controlOf(node, param);
+    const auto it = controlKeys_.find(control);
+    return !control.empty() && it != controlKeys_.end() && !it->second.empty();
+}
+
+bool GroomDocument::paramKeyedHere(const std::string& node, const std::string& param) const {
+    const std::string control = controlOf(node, param);
+    const auto it = controlKeys_.find(control);
+    return !control.empty() && it != controlKeys_.end() && hasControlKey(it->second, frame());
+}
+
+std::string GroomDocument::setParamKey(const std::string& node, const std::string& param) {
+    if (!nodeJson(node)) return "no node '" + node + "'";
+    std::string control = controlOf(node, param);
+    if (control.empty()) {
+        // Keyed through a Control node of its own (Maya keys its ctl_ attribute, Blender its property).
+        const json value = paramOrDefault(node, param);
+        if (!value.is_number()) return node + "." + param + " is not a number: only numbers can be keyed";
+        const std::string error = addControl(node, param);
+        if (!error.empty()) return error;
+        control = controlOf(node, param);
+        if (control.empty()) return "the param could not be driven by a control";
+    }
+    double value = 0.0;
+    for (const ControlSlider& c : controlSliders()) {
+        if (c.name == control) value = c.value;
+    }
+    setControlKey(controlKeys_[control], frame(), value);
+    dirty_ = true;
+    return {};
+}
+
+std::string GroomDocument::deleteParamKey(const std::string& node, const std::string& param) {
+    const std::string control = controlOf(node, param);
+    auto it = controlKeys_.find(control);
+    if (control.empty() || it == controlKeys_.end() || !removeControlKey(it->second, frame())) return "no key here";
+    if (it->second.empty()) controlKeys_.erase(it);
+    dirty_ = true;
+    applyControlKeys();
+    return {};
+}
+
+std::string GroomDocument::removeParamAnimation(const std::string& node, const std::string& param) {
+    const std::string control = controlOf(node, param);
+    if (control.empty() || !controlKeys_.erase(control)) return "the param has no keys";
+    dirty_ = true;  // (its value now stays the control's)
+    return {};
 }
 
 bool GroomDocument::setControlValue(const std::string& name, double value) {
@@ -1683,6 +1790,7 @@ std::string GroomDocument::transferToScalp(MeshPtr scalp, const TransferOptions&
     referencePhotos_.reset();
     loadGraph(scene_->file().data.graphJson);
     loadMaps();
+    controlKeys_ = scene_->file().controlKeys;
     paints_.clear();
     mapViewValues_.reset();
     mapViewKey_ = 0;
@@ -2318,10 +2426,17 @@ GroomFile GroomDocument::currentFile() const {
     file.data.scaleReference = session().scaleReference();
     file.data.scaleTransformReference = data.scaleTransformReference;
     file.simCaches = simBakes_;
+    file.controlKeys = controlKeys_;
     return file;
 }
 
 void GroomDocument::save(const std::string& path) {
+    savedCopies_.clear();
+    saveWarnings_.clear();
+    // Save As (or the first save): the files the groom names come along into the new file's
+    // folders and the groom names the copies (Maya's follow_scene_files).
+    const bool movesTo = path_.empty() || std::filesystem::u8path(path).lexically_normal() != std::filesystem::u8path(path_).lexically_normal();
+    if (movesTo) followFiles(path);
     GroomFile file = currentFile();
     MapCatalog catalog = file.data.maps;
     // The last bake (written or adopted), relative to the groom when it can be: another host

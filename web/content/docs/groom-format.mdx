@@ -62,6 +62,7 @@ GroomLab always writes the fields marked *always*; the others only when they hol
 | `sculpts` | object | none | Sculpt nodes' edits by node name: `{"sculpt1": {"guides": {"<id>": [t, ax, ay, scale, ...]}}}`, per edited guide one sample per segment (where along it, a turn in its own frame, a length factor). |
 | `transferMarkers` | array | none | Marker pairs for Transfer Groom: `[{"old": {"face", "u", "v", "point"}, "new": {...}}]`, each side a point on its scalp (a triangle and barycentrics, and the point). |
 | `controls` | object | none | `{"name": number}`: Control values when the file was saved. |
+| `controlKeys` | object | none | `{"name": [[frame, value], ...]}`: a Control's keys (the app's param keys), frames ascending. A host takes the value at each frame from a smooth curve through them that never goes past two keys' values (monotone cubic), held at the first and last key outside them. |
 | `maps` | object | none | The painted maps, by name ([below](#maps)). |
 | `scalp` | object or null | null | The scalp mesh, inline ([below](#scalp)). *Always.* |
 | `scalps` | array | none | The groom's other scalps, joined after `scalp` ([below](#other-scalps)). |

@@ -42,13 +42,6 @@ const std::string kUiFolder = std::string(GROOMLAB_TEST_DATA) + "/../../engine/u
 // parity checklist (docs: build/probe/app_parity.md, section 4); bind one in app_actions.cpp (and
 // take it off here) as it lands.
 const std::set<std::string> ALLOWED_MISSING_APP = {
-    // The GroomLab menu's FBX exports: the meshes are written by the host's own FBX exporter (Maya's,
-    // Blender's: the helper answers them as arrays, pipeline.cpp); the app has no FBX writer yet.
-    // (Unity Feathers: its strands .abc and manifest could go without it, but not the rachis FBX.)
-    "export.unrealCards", "export.unityCards", "export.unityFeathers", "export.scalesFbx",
-    // The Graph Editor's param menu: a setting painted on the guides (a guide layer): the app's
-    // GroomDocument::paintParam makes scalp maps only (vertices, texture) for a setting.
-    "param.paintGuides",
 };
 // Ids the app does its own way (n/a in the parity audit).
 const std::set<std::string> NOT_IN_APP = {
@@ -268,10 +261,10 @@ TEST(AppUi, MenuBarFromTheDefinitionsHidesWhatTheAppDoesNotRun) {
               (std::vector<std::string>{"Add Simulate Node", "Simulate Range", "Bake Simulation", "Clear Simulation", "-", "Export Guides for Simulation...", "Load Guide Cache..."}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Utilities"))),
               (std::vector<std::string>{"To Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "-", "Delete All Flow Arrows", "-",
-                                        "Transfer Groom to Scalp...", "-", "Find Missing Files..."}));
+                                        "Transfer Groom to Scalp...", "-", "Find Missing Files...", "Collect Files"}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Export"))),
-              (std::vector<std::string>{"Alembic...", "USD...", "V-Ray Scene...", "-", "Unreal Groom...", "Unity Strands (.abc)...", "glTF Cards...",
-                                        "Card Maps...", "-", "Scales Instancer (USD)..."}));
+              (std::vector<std::string>{"Alembic...", "USD...", "V-Ray Scene...", "-", "Unreal Groom...", "Unreal Cards...", "Unity Strands (.abc)...",
+                                        "Unity Feathers...", "Unity Cards...", "glTF Cards...", "Card Maps...", "-", "Scales Mesh (FBX)...", "Scales Instancer (USD)..."}));
     EXPECT_EQ(shown(submenu(groomlab, QStringLiteral("Render"))),
               (std::vector<std::string>{"Render Frame in RenderMan", "Render Turntable in RenderMan", "-", "Render Frame in V-Ray",
                                         "Render Turntable in V-Ray", "-", "RenderMan Location...", "V-Ray Standalone Location..."}));

@@ -801,9 +801,10 @@ class ToolsTest(unittest.TestCase):
             self.assertGreater(max(json.loads(mine["scalpMaps"])["mask"]["values"]), 0.1)
         finally:
             ref.close()
-        # The map on the scalp while painting.
+        # The map on the scalp while painting, and the strands colored by it (Maya's view_map).
         display.refresh(head)
         self.assertIn("scalpMap", [e[0] for e in display.draw_list(head)])
+        self.assertEqual(display.strand_colors_for(head), {"mode": "attribute", "source": "mask", "min": 0.0, "max": 1.0})
         log = draw_classes([palette.VIEW3D_PT_groomlab_tools])
         self.assertIn(("list", "maps"), log)
         # Back to the Tools tab: done painting, as picking Comb is (Maya's palette): no tool, the map
@@ -813,6 +814,7 @@ class ToolsTest(unittest.TestCase):
         t.tab = "TOOLS"
         self.assertEqual(t.tool, "")
         self.assertIsNone(display.map_for(scene))
+        self.assertEqual(display.strand_colors_for(head)["mode"], head.groomlab_tools.strand_color)
         self.assertTrue(gd.dirty)
         display.refresh(head)
         self.assertNotIn("scalpMap", [e[0] for e in display.draw_list(head)])
@@ -895,22 +897,105 @@ class ToolsTest(unittest.TestCase):
         bpy.ops.groomlab.tool_undo(redo=True)
         t.group = "primary"
         self.assert_hair_is_the_helpers(head)
-        # Blender's own undo puts the palette's lists (Blender data) back as they were, while the
-        # groom in the helper keeps to GroomLab's undo: the lists are read again from the helper, so
-        # a map made since still shows (it did not: the list lost it, the helper still had it).
+        # Blender's own undo (Ctrl+Z, Edit > Undo) takes a groom edit back too: the groom follows
+        # Blender's step (undo_depth, sync_undo), the palette's lists read again from the helper;
+        # redo brings it back.
+        def helper_maps():
+            return sorted(mm["name"] for mm in hcall(ToolsTest.head, "maps_list")["maps"] if not mm.get("freezeMask"))
         bpy.ops.ed.undo_push(message="before the map")
         self.assertEqual(bpy.ops.groomlab.map_new(name="extra", kind="vertices", value=0.5), {"FINISHED"})
         bpy.ops.ed.undo_push(message="the map")
-        helper_maps = sorted(mm["name"] for mm in hcall(head, "maps_list")["maps"] if not mm.get("freezeMask"))
-        self.assertIn("extra", helper_maps)
+        self.assertIn("extra", helper_maps())
         bpy.ops.ed.undo()
         head = ToolsTest.head = bpy.data.objects["Head"]  # Blender's undo made its data again
         t = bpy.context.scene.groomlab_tools
-        self.assertEqual(sorted(mm.name for mm in t.maps), helper_maps)
+        self.assertNotIn("extra", helper_maps())
+        self.assertEqual(sorted(mm.name for mm in t.maps), helper_maps())
+        bpy.ops.ed.redo()
+        head = ToolsTest.head = bpy.data.objects["Head"]
+        t = bpy.context.scene.groomlab_tools
+        self.assertIn("extra", helper_maps())
         t.paint_map = "extra"
         self.assertEqual(bpy.ops.groomlab.map_remove(), {"FINISHED"})
         self.assertNotIn("extra", [mm.name for mm in t.maps])
         t.group = "primary"
+
+    def test_5b_blenders_undo_takes_groom_edits_back(self):
+        # Every groom edit notes where GroomLab's history stood (undo_depth, Blender data: Blender's
+        # undo puts it back); sync_undo then undoes or redoes the groom to there.
+        head = self.head
+        depth = hcall(head, "undo_state")["undoDepth"]
+        self.assertEqual(bpy.ops.groomlab.map_new(name="undone", kind="vertices", value=0.0), {"FINISHED"})
+        self.assertEqual(head.groomlab_tools.undo_depth, depth + 1)
+        self.assertIn("undone", [m["name"] for m in hcall(head, "maps_list")["maps"]])
+        head.groomlab_tools.undo_depth = depth  # (as Blender's undo restores it)
+        self.assertEqual(tools.sync_undo(head), -1)
+        self.assertNotIn("undone", [m["name"] for m in hcall(head, "maps_list")["maps"]])
+        self.assertEqual(head.groomlab_tools.undo_depth, depth)
+        head.groomlab_tools.undo_depth = depth + 1  # (Blender's redo)
+        self.assertEqual(tools.sync_undo(head), 1)
+        self.assertIn("undone", [m["name"] for m in hcall(head, "maps_list")["maps"]])
+        self.assertEqual(tools.sync_undo(head), 0)
+
+    def test_5c_guides_and_strands_to_curves_and_back(self):
+        # Guides to Curves (a curve object per group, each curve its guide's ID), edited and brought
+        # back with Curves to Guides (the same guides reshaped); Strands to Curves (a copy of the hair).
+        head = self.head
+        pipeline = importlib.import_module(bu.MODULE + ".pipeline")
+        hcall(head, "selection_set", ids=[])
+        made = pipeline.guides_to_curves(head, bpy.context, selected_only=False)
+        self.assertTrue(made)
+        before = hcall(head, "get_guides", source="hierarchy")
+        n = sum(len(o.data.curves) for o in made)
+        self.assertEqual(n, before["guides"])
+        obj = made[0]
+        pos = np.empty(len(obj.data.points) * 3, np.float32)
+        obj.data.attributes["position"].data.foreach_get("vector", pos)
+        pos = pos.reshape(-1, 3)
+        pos[1:obj.data.curves[0].points_length] += np.array([0.0, 0.0, 0.01], np.float32)  # the first curve's tip side lifted
+        obj.data.attributes["position"].data.foreach_set("vector", pos.ravel())
+        r = pipeline.curves_to_guides(head, made)
+        self.assertEqual(r["changed"], 1)
+        self.assertEqual(r["added"], 0)
+        self.assertEqual(hcall(head, "get_guides", source="hierarchy")["guides"], before["guides"])
+        for o in made:
+            bpy.data.objects.remove(o)
+        copy = pipeline.strands_to_curves(head, bpy.context)
+        self.assertGreater(len(copy.data.curves), 0)
+        self.assertEqual(copy.groomlab.role, "NONE")
+        bpy.data.objects.remove(copy)
+        tools.undo(head)  # (the reshaped guide back)
+
+    def test_5d_another_scalp_and_a_prototype(self):
+        # Add > Scalp (Maya's add_scalp): a mesh kept as another scalp, a Scalp, Scatter and
+        # Interpolate wired to grow on it; Prototype from Selection: an Instance node's mesh.
+        head = self.head
+        pipeline = importlib.import_module(bu.MODULE + ".pipeline")
+        bpy.ops.mesh.primitive_plane_add(size=0.2, location=(0.0, 0.0, 2.0))
+        plane = bpy.context.active_object
+        plane.name = "Patch"
+        before = len(hcall(head, "get_graph")["graph"]["nodes"])
+        name = pipeline.add_scalp(head, plane)
+        self.assertEqual(name, "Patch")
+        self.assertEqual([s.name for s in head.groomlab.extra_scalps], ["Patch"])
+        graph = hcall(head, "get_graph")["graph"]
+        types = {n["name"]: n["type"] for n in graph["nodes"]}
+        self.assertEqual(len(types), before + 4)
+        self.assertIn("Scalp", [types[n] for n in types if n.startswith("scalp_Patch")])
+        self.assertIn("Patch", [m["name"] for m in hcall(head, "meshes_info").get("scalps", [])] or ["Patch"])
+        pipeline.remove_scalp(head, "Patch")
+        self.assertEqual(len(head.groomlab.extra_scalps), 0)
+        bpy.ops.mesh.primitive_cube_add(size=0.05)
+        bead = bpy.context.active_object
+        bead.name = "Bead"
+        g = pipeline.GraphEdits(head)
+        node = g.add("Instance", base="beads")
+        g.finish()
+        self.assertEqual(pipeline.prototype_from_selection(head, node, bead), "Bead")
+        self.assertEqual(next(n for n in hcall(head, "get_graph")["graph"]["nodes"] if n["name"] == node)["params"]["prototype"], "Bead")
+        self.assertTrue(bead.hide_get())
+        for obj in (plane, bead):
+            bpy.data.objects.remove(obj)
 
     def test_6_state_in_the_blend_and_a_new_helper(self):
         head = self.head

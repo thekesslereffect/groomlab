@@ -39,7 +39,7 @@ groomlab-cli eval hair.groom -o hair.usda -f 1-48 --step 0.5
   every reader and the app look first); other files the graph names (texture params,
   `ImportCurves`) keep their paths, resolved through the file's search paths (the project and
   scene folders), so they must be reachable from where the file is evaluated.
-- **Card bake:** a groom with a bake writes it beside the file as `<name>_cards/<name>_*` (the
+- **Card bake:** a groom with a bake writes it beside the file as `groomlab/<name>/cards/<name>_*` (the
   TGA maps, the atlas and a preview: the app's layout) and names it with its stamp
   (`"cardBake"`), so the app and an import keep the cards' atlas cells and the stale check.
 - **Flat guides:** connected guide curves are stored at the exported frame. They don't animate

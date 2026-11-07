@@ -448,6 +448,9 @@ class GroomLabTools(bpy.types.PropertyGroup):
     channel_b: BoolProperty(name="B", default=True, update=_push(), description=defs.choice("paintChannel", "b")["tip"])
     channel_a: BoolProperty(name="A", default=True, update=_push(), description=defs.choice("paintChannel", "a")["tip"])
     show_on_guides: BoolProperty(name="Guides", default=False, update=_display, description="Color the guides by the map")
+    show_on_strands: BoolProperty(name="Strands", default=True, update=_display,
+                                  description="Color the strands by the map while painting, black 0 to white 1 (Maya's view_map); "
+                                              "they go back to their own colors when painting ends")
     show_on_scalp: BoolProperty(name="Scalp", default=True, update=_display,
                                 description="Show the map on the scalp (black to white), whatever its kind")
     scalp_channel: EnumProperty(name=defs.get("choices/scalpChannel")["label"], items=defs.enum_items("scalpChannel"),
@@ -587,6 +590,10 @@ class GroomLabGroomDisplay(bpy.types.PropertyGroup):
     strand_color_min: FloatProperty(name="Min", default=0.0, update=_display)
     strand_color_max: FloatProperty(name="Max", default=1.0, update=_display)
     state: StringProperty()  # the groom's state (get_state) kept in the .blend: guides, maps, selection
+    # Where GroomLab's own undo history stood after the groom's last edit (the helper's undoDepth):
+    # Blender's undo puts it back as it was at each of its steps, and the helper undoes or redoes to
+    # match (tools.sync_undo), so Ctrl+Z and Edit > Undo take groom edits back too. -1: not known.
+    undo_depth: IntProperty(default=-1)
     corrective_weights: CollectionProperty(type=GroomLabCorrectiveWeight)  # keyed with Blender's keyframes
 
 

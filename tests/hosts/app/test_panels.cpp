@@ -479,6 +479,116 @@ TEST(AppPanels, NewMapForASettingMakesLinksPaintsThenCtrlLowers) {
     EXPECT_EQ(session.settings().brush.attribute, map);
 }
 
+// Param keys (Maya's and Blender's Set Key): a param keyed drives through a Control node of its
+// own, its value keyed at frames and applied as the frame changes, saved with the groom.
+TEST(AppPanels, ParamKeysDriveAControlOverTheFrames) {
+    const std::string path = sampleCopy("groomlab_app_param_keys");
+    auto doc = GroomDocument::open(path);
+    ASSERT_TRUE(doc);
+    const std::string scatter = [&] {
+        for (const json& n : doc->graph()["nodes"]) {
+            if (n.value("type", std::string()) == "Scatter") return n.value("name", std::string());
+        }
+        return std::string();
+    }();
+    ASSERT_FALSE(scatter.empty());
+    EXPECT_FALSE(doc->paramKeyed(scatter, "density"));
+    doc->setFrame(1.0);
+    ASSERT_EQ(doc->setParamKey(scatter, "density"), "");
+    const std::string control = doc->controlOf(scatter, "density");
+    ASSERT_FALSE(control.empty()) << "keyed through a Control node of its own";
+    EXPECT_TRUE(doc->paramKeyedHere(scatter, "density"));
+    ASSERT_TRUE(doc->setControlValue(control, 0.0));
+    ASSERT_EQ(doc->setParamKey(scatter, "density"), "") << "the key at frame 1 now 0";
+    doc->setFrame(11.0);
+    ASSERT_TRUE(doc->setControlValue(control, 1.0));
+    ASSERT_EQ(doc->setParamKey(scatter, "density"), "");
+    auto valueOf = [&] {
+        for (const auto& c : doc->controlSliders()) {
+            if (c.name == control) return c.value;
+        }
+        return -1.0;
+    };
+    doc->setFrame(6.0);
+    EXPECT_GT(valueOf(), 0.2);
+    EXPECT_LT(valueOf(), 0.8);
+    EXPECT_FALSE(doc->paramKeyedHere(scatter, "density"));
+    doc->setFrame(1.0);
+    EXPECT_DOUBLE_EQ(valueOf(), 0.0);
+    // Saved and read back: the keys come along.
+    doc->save(path);
+    auto again = GroomDocument::open(path);
+    ASSERT_TRUE(again);
+    ASSERT_EQ(again->controlKeys().count(control), 1u);
+    EXPECT_EQ(again->controlKeys().at(control).size(), 2u);
+    again->setFrame(11.0);
+    for (const auto& c : again->controlSliders()) {
+        if (c.name == control) EXPECT_DOUBLE_EQ(c.value, 1.0);
+    }
+    // Delete Key at frame 11, Remove Animation.
+    EXPECT_EQ(again->deleteParamKey(scatter, "density"), "");
+    EXPECT_EQ(again->controlKeys().at(control).size(), 1u);
+    EXPECT_NE(again->deleteParamKey(scatter, "density"), "") << "no key here any more";
+    EXPECT_EQ(again->removeParamAnimation(scatter, "density"), "");
+    EXPECT_FALSE(again->paramKeyed(scatter, "density"));
+}
+
+// The groom's files as Maya keeps a scene's (groomlab/<name>/<kind>), and Save As taking them along
+// into the new file's folders (Maya's follow_scene_files); photos copied into references.
+TEST(AppPanels, AssetFoldersAndSaveAsTakesTheFilesAlong) {
+    namespace fs = std::filesystem;
+    const std::string path = sampleCopy("groomlab_app_assets");
+    const std::string base = fs::u8path(path).parent_path().generic_u8string();
+    auto doc = GroomDocument::open(path);
+    ASSERT_TRUE(doc);
+    EXPECT_EQ(doc->assetFolder("masks"), base + "/groomlab/sample/masks");
+    EXPECT_EQ(doc->mapsDirectory(), base + "/groomlab/sample/masks");
+    EXPECT_EQ(doc->defaultBakeDirectory(), base + "/groomlab/sample/cards");
+    EXPECT_EQ(doc->simulationCachePath("sim1"), base + "/groomlab/sample/caches/sample_sim1_sim.abc");
+    ASSERT_EQ(doc->createMap("tint", "texture", false, 0.5f, 32), "");
+    const std::string tintBefore = doc->textureMapFile("tint");
+    EXPECT_EQ(tintBefore, base + "/groomlab/sample/masks/tint.png");
+    ASSERT_TRUE(fs::exists(fs::u8path(tintBefore)));
+    // A photo: copied into references, stored relative to the groom.
+    const std::string photo = base + "/elsewhere/front.png";
+    fs::create_directories(fs::u8path(photo).parent_path());
+    std::ofstream(fs::u8path(photo), std::ios::binary) << "png";
+    const std::string stored = doc->importReferenceImage(photo);
+    EXPECT_EQ(stored, "groomlab/sample/references/front.png");
+    EXPECT_EQ(doc->referenceImageFile(stored), base + "/groomlab/sample/references/front.png");
+    doc->setReferencePhotos(json::array({{{"name", "front"}, {"image", stored}}}).dump());
+    doc->save(path);
+    EXPECT_TRUE(doc->savedCopies().empty()) << "saved in place: nothing moves";
+    // Save As into another folder and name: the map and the photo come along, the old ones stay.
+    const std::string other = base + "/v2/shot_v2.groom";
+    fs::create_directories(fs::u8path(other).parent_path());
+    doc->save(other);
+    const std::string newBase = base + "/v2";
+    EXPECT_EQ(doc->textureMapFile("tint"), newBase + "/groomlab/shot_v2/masks/tint.png");
+    EXPECT_TRUE(fs::exists(fs::u8path(newBase + "/groomlab/shot_v2/masks/tint.png")));
+    EXPECT_TRUE(fs::exists(fs::u8path(tintBefore))) << "the old file keeps its own";
+    EXPECT_EQ(json::parse(doc->referencePhotos())[0]["image"], "groomlab/shot_v2/references/front.png");
+    EXPECT_TRUE(fs::exists(fs::u8path(newBase + "/groomlab/shot_v2/references/front.png")));
+    EXPECT_EQ(doc->savedCopies().size(), 2u);
+    EXPECT_EQ(doc->assetFolder("exports"), newBase + "/groomlab/shot_v2/exports");
+    // Read back: the new file names its own copies.
+    auto again = GroomDocument::open(other);
+    ASSERT_TRUE(again);
+    EXPECT_EQ(again->map("tint")->texture, "groomlab/shot_v2/masks/tint.png");
+    // Collect Files: a map linked to an image outside the groom's folder copied into masks and
+    // linked there; what is inside stays.
+    const std::string library = base + "/library/skin.png";
+    fs::create_directories(fs::u8path(library).parent_path());
+    fs::copy_file(fs::u8path(newBase + "/groomlab/shot_v2/masks/tint.png"), fs::u8path(library), fs::copy_options::overwrite_existing);
+    ASSERT_EQ(doc->relinkMap("tint", library), "");
+    GroomDocument::CollectReport collected;
+    ASSERT_EQ(doc->collectFiles(&collected), "");
+    ASSERT_EQ(collected.copied.size(), 1u);
+    EXPECT_EQ(doc->map("tint")->texture, "groomlab/shot_v2/masks/skin.png");
+    EXPECT_TRUE(fs::exists(fs::u8path(newBase + "/groomlab/shot_v2/masks/skin.png")));
+    EXPECT_GE(collected.inside, 1) << "the photo was in the folder already";
+}
+
 TEST(AppPanels, MapsPanelMakesPaintsShowsAndUndoesMaps) {
     const std::string path = sampleCopy("groomlab_app_maps");
     auto doc = GroomDocument::open(path);
@@ -2173,7 +2283,23 @@ TEST(AppPanels, ParamPanelPaintsAParamInOneStep) {
     EXPECT_EQ(doc->maps().size(), edits + 1);
     EXPECT_EQ(doc->undoText(), undoBefore);
     EXPECT_NE(doc->paintParam("noSuchNode", "strength"), "");
-    EXPECT_NE(doc->paintParam(clump, "centerWeight", nullptr, "guides"), "") << "a setting's map lives on the scalp";
+    // On the guides (Paint > On Guides, Maya's paint_param kind "guides"): a guide layer, white,
+    // and the param reading it, one step.
+    const auto h = doc->session().storedHierarchy();
+    if (h && !h->guides().empty()) {
+        std::string layer;
+        bool layerMade = false;
+        EXPECT_EQ(doc->paintParam(clump, "centerWeight", &layer, "guides", &layerMade), "");
+        EXPECT_TRUE(layerMade);
+        ASSERT_TRUE(doc->map(layer));
+        EXPECT_EQ(doc->map(layer)->kind, "guides");
+        EXPECT_TRUE(doc->paramOrDefault(clump, "centerWeight").is_object()) << "the param reads the layer";
+        EXPECT_EQ(doc->undo(), "");
+        EXPECT_EQ(doc->map(layer), nullptr) << "one step: the layer and the wiring go together";
+    } else {
+        EXPECT_NE(doc->paintParam(clump, "centerWeight", nullptr, "guides"), "") << "no guides to paint on";
+    }
+    EXPECT_NE(doc->paintParam(clump, "centerWeight", nullptr, "rainbow"), "");
 }
 
 namespace {

@@ -101,6 +101,8 @@ void MainWindow::buildPanels() {
     connect(maps_, &MapsPanel::paintRequested, this, [this] {
         setUiMode(QStringLiteral("groom"));
         viewport_->setToolMode(Viewport::ToolMode::Brush);
+        const PaintedMap* map = document_ ? document_->map(maps_->selectedMap()) : nullptr;
+        if (map) showPaintView(map->name, map->kind);
         groomTools_->refresh();
         viewport_->refreshOverlay();
         refreshTool();
@@ -493,6 +495,7 @@ void MainWindow::chooseTool(const QString& id) {
         maps_->paintSelected();  // the map's kind, value and channels on the brush; brush mode (paintRequested)
     } else {
         maps_->endPainting();  // another brush: done painting
+        endPaintView();
         viewport_->setToolMode(Viewport::ToolMode::Brush);
     }
     groomTools_->refresh();

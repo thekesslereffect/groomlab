@@ -32,9 +32,14 @@ def _say(op, text, level="INFO"):
     op.report({level}, "GroomLab: " + text)
 
 
-def _export_folder():
-    """Where exports start: beside the .blend, else the temp folder (an untitled file)."""
-    return os.path.dirname(bpy.data.filepath) if bpy.data.filepath else tempfile.gettempdir()
+def _export_folder(kind="exports"):
+    """Where exports start, as Maya's: the .blend's groomlab/<name>/<kind> folder (made when missing),
+    else the temp folder (an untitled file)."""
+    folder = groom.asset_folder(kind)
+    if not folder:
+        return tempfile.gettempdir()
+    os.makedirs(folder, exist_ok=True)
+    return folder
 
 
 def _select_only(context, obj):
@@ -258,7 +263,7 @@ class GROOMLAB_OT_bake_scale_maps(_Tipped, GroomOperator):
 
     def execute(self, context):
         scalp = active_groom(context)
-        folder = bpy.path.abspath(self.directory) if self.directory else os.path.join(_export_folder(), "groomlab", "bakes")
+        folder = bpy.path.abspath(self.directory) if self.directory else _export_folder("cards")
         try:
             r = pipeline.bake_scale_maps(scalp, folder, name=scalp.name, resolution=self.resolution)
         except HelperError as e:
@@ -307,7 +312,7 @@ class GROOMLAB_OT_export_guides_sim(_Tipped, GroomOperator, ExportHelper):
 
     def invoke(self, context, event):
         if not self.filepath:
-            self.filepath = os.path.join(_export_folder(), active_groom(context).name + "_guides.abc")
+            self.filepath = os.path.join(_export_folder("caches"), active_groom(context).name + "_guides.abc")
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
@@ -872,6 +877,139 @@ class GROOMLAB_OT_find_missing_files(_Tipped, bpy.types.Operator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_add_scalp(_Tipped, GroomOperator):
+    """The selected mesh becomes another scalp of the groom: hair grows on it too (a Scalp, a Scatter and an Interpolate grow it, merged into the groom's strands)"""
+    bl_idname = "groomlab.add_scalp"
+    bl_label = "Scalp"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        meshes = [o for o in context.selected_objects if o.type == "MESH" and o is not scalp and o.groomlab.role == "NONE"]
+        if not meshes:
+            self.report({"ERROR"}, "Select the mesh to grow hair on too (with the groom's scalp active)")
+            return {"CANCELLED"}
+        try:
+            names = [pipeline.add_scalp(scalp, o) for o in meshes]
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "hair grows on %s too" % ", ".join(names))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_prototype_from_selection(_Tipped, GroomOperator):
+    """Instance the selected mesh with this Instance or Scales node (it is hidden: only its instances show and render)"""
+    bl_idname = "groomlab.prototype_from_selection"
+    bl_label = "Prototype from Selection"
+    bl_options = {"REGISTER", "UNDO"}
+
+    node: StringProperty(name="Node", options={"SKIP_SAVE"})
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        node = self.node
+        if not node:
+            from . import graph_editor
+            n = graph_editor.active_node(context)
+            node = getattr(n, "gl_name", "") if n is not None else ""
+        meshes = [o for o in context.selected_objects if o.type == "MESH" and o is not scalp and o.groomlab.role == "NONE"]
+        if not node or not meshes:
+            self.report({"ERROR"}, "Select the mesh to instance (and pick the Instance or Scales node)")
+            return {"CANCELLED"}
+        try:
+            name = pipeline.prototype_from_selection(scalp, node, meshes[0])
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "%s instances %s" % (node, name))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_cards_lod(_Tipped, GroomOperator):
+    """Set this Cards node for a budget: triangles, card count, texture variations, atlas size"""
+    bl_idname = "groomlab.cards_lod"
+    bl_label = "Cards LOD"
+    bl_options = {"REGISTER", "UNDO"}
+
+    node: StringProperty(name="Node", options={"SKIP_SAVE"})
+    lod: EnumProperty(name="Level", items=[("hero", "Hero", "~50k triangles, 4K (feathers: 8 quads a feather)"),
+                                          ("mid", "Mid", "~15k triangles, 2K (feathers: 4 quads a feather)"),
+                                          ("low", "Low", "~4k triangles, 1K (feathers: a quad a feather)")], default="mid")
+
+    def execute(self, context):
+        from . import graph, graph_editor
+        scalp = active_groom(context)
+        node = self.node
+        if not node:
+            n = graph_editor.active_node(context)
+            node = getattr(n, "gl_name", "") if n is not None else ""
+        try:
+            pipeline.call(scalp, "cards_preset", lod=self.lod, **({"node": node} if node else {}))
+            graph.refresh(scalp)
+            groom.mark(scalp, "eval")
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "%s cards on %s" % (self.lod, node or "every Cards node"))
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_card_stats(_Tipped, GroomOperator):
+    """This Cards node's cards as they are now: cards, triangles, textures, and whether the baked maps are out of date"""
+    bl_idname = "groomlab.card_stats"
+    bl_label = "Card Stats"
+
+    node: StringProperty(name="Node", options={"SKIP_SAVE"})
+
+    def execute(self, context):
+        from . import graph_editor
+        scalp = active_groom(context)
+        node = self.node
+        if not node:
+            n = graph_editor.active_node(context)
+            node = getattr(n, "gl_name", "") if n is not None else ""
+        try:
+            r = pipeline.call(scalp, "card_stats", **({"node": node} if node else {}))
+        except HelperError as e:
+            return _fail(self, e)
+        n = r.get("node") if node else None
+        totals = n or {"cards": sum(v.get("cards", 0) for v in (r.get("nodes") or {}).values()),
+                       "triangles": sum(v.get("triangles", 0) for v in (r.get("nodes") or {}).values()),
+                       "textures": sum(v.get("textures", 0) for v in (r.get("nodes") or {}).values())}
+        text = "%d cards · %d triangles · %d textures" % (totals.get("cards", 0), totals.get("triangles", 0),
+                                                                  totals.get("textures", 0))
+        if totals.get("feathers"):
+            text += " · %d feathers" % totals["feathers"]
+        stale = (n or {}).get("stale") if n is not None else r.get("stale")
+        if stale:
+            text += ": maps out of date, rebake"
+        self.report({"WARNING" if stale else "INFO"}, text)
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_collect_files(_Tipped, bpy.types.Operator):
+    """Copy every file the selected grooms (else every groom) use from outside the .blend's folder into its groomlab folder, and point them at the copies"""
+    bl_idname = "groomlab.collect_files"
+    bl_label = "Collect Files"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return bool(bpy.data.filepath)
+
+    def execute(self, context):
+        grooms = _grooms_for(context)
+        try:
+            r = pipeline.collect_files(grooms)
+        except HelperError as e:
+            return _fail(self, e)
+        for what, path in r["missing"]:
+            _say(self, "%s: %s is missing (Find Missing Files looks for it)" % (what, path), "WARNING")
+        for what, copy in r["copied"]:
+            print("GroomLab: %s -> %s" % (what, copy))
+        _say(self, "copied %d file(s) into the .blend's groomlab folder; %d already there, %d missing"
+             % (len(r["copied"]), r["inside"], len(r["missing"])))
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_copy_graph_to_grooms(_Tipped, GroomOperator):
     """The active groom's graph (its look) onto the other selected grooms; their guides kept"""
     bl_idname = "groomlab.copy_graph_to_grooms"
@@ -1012,7 +1150,9 @@ classes = (GROOMLAB_OT_export_unreal_groom, GROOMLAB_OT_export_unity_strands, GR
            GROOMLAB_OT_load_guide_cache, GROOMLAB_OT_simulate_range,
            GROOMLAB_OT_simulate_clear, GROOMLAB_OT_add_feathers, GROOMLAB_OT_add_braid, GROOMLAB_OT_add_cards,
            GROOMLAB_OT_add_collider, GROOMLAB_OT_add_sample, GROOMLAB_OT_transfer_groom, GROOMLAB_OT_turntable,
-           GROOMLAB_OT_find_missing_files, GROOMLAB_OT_copy_graph_to_grooms, GROOMLAB_OT_import_alembic_curves,
+           GROOMLAB_OT_find_missing_files, GROOMLAB_OT_collect_files, GROOMLAB_OT_add_scalp,
+           GROOMLAB_OT_prototype_from_selection, GROOMLAB_OT_cards_lod, GROOMLAB_OT_card_stats,
+           GROOMLAB_OT_copy_graph_to_grooms, GROOMLAB_OT_import_alembic_curves,
            GROOMLAB_OT_bake_to_guides)
 
 

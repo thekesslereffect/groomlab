@@ -419,12 +419,29 @@ TEST(AppLists, LeavingThePaintTabEndsPainting) {
     maps->refresh();
     ASSERT_TRUE(tools->showTab(QStringLiteral("paint")));
     maps->selectMap("tex");
+    const int modeBefore = window.displaySettings().colorMode;
     ASSERT_TRUE(maps->paintSelected());
     EXPECT_EQ(viewport->toolMode(), Viewport::ToolMode::Brush);
     EXPECT_EQ(doc->scalpMapDisplay(), "tex");
+    // The strands colored by the map, 0 to 1 (Maya's view_map).
+    EXPECT_EQ(window.displaySettings().colorMode, kAttributeColors);
+    EXPECT_EQ(window.displaySettings().colorSource, "tex");
+    EXPECT_FLOAT_EQ(window.displaySettings().colorMin, 0.0f);
+    EXPECT_FLOAT_EQ(window.displaySettings().colorMax, 1.0f);
     ASSERT_TRUE(tools->showTab(QStringLiteral("tools")));
     EXPECT_EQ(viewport->toolMode(), Viewport::ToolMode::Camera) << "another tab: done painting";
     EXPECT_EQ(doc->scalpMapDisplay(), "") << "the map painting showed comes off the scalp";
+    EXPECT_EQ(window.displaySettings().colorMode, modeBefore) << "the strands as they were";
+    // A guide layer painted: the guides show it too (Guide Color: Painted Layer), then as they were.
+    ASSERT_EQ(doc->createMap("layer", "guides", false, 0.5f), "");
+    maps->refresh();
+    ASSERT_TRUE(tools->showTab(QStringLiteral("paint")));
+    maps->selectMap("layer");
+    ASSERT_TRUE(maps->paintSelected());
+    EXPECT_EQ(window.displaySettings().guideColorMode, 1);
+    EXPECT_EQ(window.displaySettings().guideColorLayer, "layer");
+    ASSERT_TRUE(tools->showTab(QStringLiteral("tools")));
+    EXPECT_EQ(window.displaySettings().guideColorMode, 0);
     // A map shown on purpose (the maps panel's eye) stays when painting ends.
     ASSERT_TRUE(tools->showTab(QStringLiteral("paint")));
     maps->selectMap("tex");

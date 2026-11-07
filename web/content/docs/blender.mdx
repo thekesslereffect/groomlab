@@ -186,14 +186,17 @@ the full preview density returns on release.
 | **Shift** + drag | Smooth instead |
 | **Shift** + click | Solo the guide (the rest freeze) and brush its group; off a guide, unfreeze them all |
 | **B** + drag, **M** + drag | The brush radius, the strength (Maya's hotkeys) |
-| **S** | The Select tool (drag a lasso; Shift toggles, Ctrl deselects; click a guide) |
+| **S** | The Select tool (drag a lasso; Shift toggles, Ctrl deselects, Ctrl+Shift adds; click a guide) |
+| **Alt+Shift+X** | Symmetry on or off (a red line on the scalp shows where it mirrors) |
+| **Alt+Shift+G** | The guides on or off |
 | **Page Up** / **Page Down** | The group a level up or down |
 | **Y** | The pie menu |
 | **Ctrl+Z** / **Ctrl+Shift+Z** | Undo / redo the groom's edits (strokes, guide edits, maps) |
 | **Esc** or right-click | Cancel a live stroke; **Esc** again leaves the tool |
 
-Navigation (middle mouse, wheel, numpad) works as always while a tool is active. Outside a
-GroomLab tool, Ctrl+Z is Blender's own undo.
+Navigation (middle mouse, wheel, numpad) works as always while a tool is active. Blender's own
+undo (**Ctrl+Z** anywhere, **Edit > Undo**) takes groom edits back too: each stroke and edit is a
+step of Blender's history, and the groom follows it back and forth.
 
 ### The pie menu
 
@@ -546,6 +549,9 @@ Nick Rutlinh (GroomLab), CC BY 4.0".
 - **Collider**: each selected mesh (besides the groom) keeps the strands off it: a **ColliderMesh**
   and a **Collide** node before the output. The mesh follows its animation and edits: GroomLab
   sends it again whenever it moves or changes.
+- **Scalp**: each selected mesh becomes another scalp of the groom (Maya's extra scalps): hair grows
+  on it too, through a **Scalp**, a **Scatter** (the groom's own settings) and an **Interpolate**
+  merged into the strands. It follows its animation and edits as a collider does.
 - **Wind**, **Jiggle**: a node before the output.
 
 ## Simulate
@@ -596,8 +602,13 @@ GroomLab's own **Undo**, puts the groom back on the old mesh.
   a Scatter, a ToGuides...) as they are now into guides you can brush, in a root group (**baked**
   by default: made when new, added to otherwise), at the density you pick. The Graph Editor's node
   menu has it too.
+- **Utilities > Guides to Curves** makes a curve object per guide group (the selected guides, else
+  all), each curve tagged with its guide: edit them with Blender's tools, then **Curves to
+  Guides** reshapes those guides in place; any other selected curve becomes a new guide. **Strands
+  to Curves** copies the strands as they show into a curve object of their own. The Guide groups'
+  edits menu has **From Curves** (new guides) and the Part tool **From Curves** (parts).
 - **Utilities > Bake Scale Maps** bakes a scales groom into its skin's UVs as normal, height and
-  color maps (PNG, UDIM tiles too), in the `.blend`'s `groomlab/bakes` folder.
+  color maps (PNG, UDIM tiles too), in the `.blend`'s `groomlab/<file name>/cards` folder.
 - **Utilities > Copy Graph to Other Grooms...** gives the other selected grooms the active groom's
   graph and slider values; their guides stay. Painted maps the graph reads that a groom lacks are
   listed: paint or import them there.
@@ -605,6 +616,14 @@ GroomLab's own **Undo**, puts the groom back on the old mesh.
   texture maps, image and Alembic files and linked groom files to files of the same name in a
   folder you pick and its subfolders. When nothing is missing it says so, without asking for a
   folder.
+- **Utilities > Collect Files** copies every file the grooms use from outside the `.blend`'s folder
+  (texture maps, images and Alembic files the graph reads, card and simulation bakes, photos) into
+  its `groomlab` folder and points the grooms at the copies, so the folder holds everything.
+
+The `.blend` keeps GroomLab's files beside it as Maya keeps a scene's: `groomlab/<file
+name>/masks`, `cards`, `exports`, `caches`, `renders` and `references`. **Save As** takes them along
+into the new file's folder (the old file keeps its own); an unsaved file's wait in your temp folder
+until the first save.
 
 ## Export
 
@@ -638,7 +657,10 @@ your own included), the resolution, format, bit depth, padding and supersampling
 - **Jiggle** nodes: the panel marks them. Jiggle passes the strands through in Blender (it isn't
   fed the scalp's earlier frames yet), so don't rely on it in a Blender render yet.
 - The tube **outline editor**, and the **Guides from Photos window** (guide lines and mask touch-ups
-  drawn on the photo, the measured look): use Maya or the GroomLab app. Picking transfer **marker**
+  drawn on the photo, the measured look, **Align Photo**): use Maya or the GroomLab app.
+- The cards view (a Cards node's cards and baked maps in the viewport instead of the strands) and
+  **Bake Scalp**: export the cards (Unreal or Unity Cards, glTF Cards) to see them. A Cards node's
+  panel has **Card Stats** and the **LOD** levels. Picking transfer **marker**
   points is Maya's and the app's too; Blender's transfer uses the markers stored in the groom.
 - The Graph Editor's **GPU preview** (Maya's viewport).
 - The **XGen** and **Yeti** importers (Maya): import there, save a `.groom` file and open it in
