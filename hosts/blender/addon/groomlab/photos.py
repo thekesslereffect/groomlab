@@ -7,6 +7,12 @@ camera view, the same feature clicked on the mesh in any other view), Solve for 
 position, rotation and focal length (the helper's solve_camera, Maya's groomLabCameraSolve), lock
 it, and set how the photo shows (its opacity, in front of the mesh or behind it).
 
+Align Photo (Maya's and the app's Photos window, its Align stage) puts the photo and the mesh side
+by side: the 3D view splits in two, the photo through its camera on the left and the mesh in
+perspective on the right, and Pick Points runs with the camera solving live as the pairs come (4
+complete pairs: the focal length kept; 6 or more solve it too, unless Keep focal length). Esc (or
+Align Photo again) ends it and the view joins back.
+
 Guides from Photos (experimental) grows guides from the lined-up photos into the fromReference guide
 group (the helper's guides_from_photos: the core's guidesFromReference, Maya's from_reference).
 
@@ -50,6 +56,7 @@ SYMMETRIES = (("auto", "Auto", "The scalp's topology when it mirrors, else none"
 
 _previous = {}   # scene name -> the camera it showed before looking through a photo
 _picking = [False]
+_align = {}      # Align Photo's split view while it is open: {"window", "area" (the half it added)}
 _draw_handle = [None]
 
 
@@ -486,6 +493,31 @@ def solve(cam, scalp, keep_focal=False, apply=True):
     return r
 
 
+def solve_text(cam, r):
+    """What a solve says: its error, the lens, the pairs that stand out (to pick again)."""
+    bad = [str(i + 1) for i, b in enumerate(r.get("bad") or []) if b]
+    text = "%s lined up: %.2f px off on average, %.1f mm" % (cam.name, r["rms"], cam.data.lens)
+    if bad:
+        text += "; pair%s %s stand%s out: pick them again" % ("s" if len(bad) > 1 else "", ", ".join(bad),
+                                                               "" if len(bad) > 1 else "s")
+    return text, bool(bad)
+
+
+def live_solve(cam, scalp, keep_focal=False):
+    """Align Photo's solve as the pairs come (Maya's Photos window): with 4 complete pairs the camera
+    lines up keeping its focal length, with 6 or more (unless `keep_focal`) solving it too. A locked
+    camera, too few pairs or a solve that fails leave it as it is. Returns the solve, or None."""
+    if cam is None or scalp is None or cam.groomlab_photo.locked:
+        return None
+    count = len(complete_pairs(cam))
+    if count < MIN_PAIRS_FIXED:
+        return None
+    try:
+        return solve(cam, scalp, keep_focal=keep_focal or count < MIN_PAIRS)
+    except (ValueError, HelperError):
+        return None
+
+
 # ---- Morph to the photos -------------------------------------------------------------------------------
 
 MORPH_KEY = "GroomLab Photo Morph"
@@ -576,6 +608,97 @@ def look_through(context, cam):
         rv3d.view_perspective = "CAMERA"
         area.tag_redraw()
     return True
+
+
+# ---- Align Photo: the photo and the mesh side by side ------------------------------------------------
+
+def _window_region(area):
+    return next((r for r in area.regions if r.type == "WINDOW"), None)
+
+
+def _frame_scalp(rv3d, scalp):
+    """A perspective view of the scalp, framed (its bounds' center, from where the view looks)."""
+    corners = [scalp.matrix_world @ Vector(c) for c in scalp.bound_box]
+    center = sum(corners, Vector()) / 8.0
+    size = max((c - center).length for c in corners)
+    rv3d.view_perspective = "PERSP"
+    rv3d.view_location = center
+    rv3d.view_distance = max(size * 6.0, 1e-3)
+
+
+def _show_hair(area, show):
+    """The hair and guide curves in a 3D view shown or hidden (Align Photo shows the mesh alone, as
+    Maya's Photos window does: its features are what gets clicked). Returns what it was."""
+    space = area.spaces.active
+    was = getattr(space, "show_object_viewport_curves", True)
+    if hasattr(space, "show_object_viewport_curves"):
+        space.show_object_viewport_curves = show
+    return was
+
+
+def aligning():
+    """Whether Align Photo's split view is open."""
+    return bool(_align)
+
+
+def open_align(context, cam, scalp):
+    """Split the 3D view in two (Maya's Photos window): the photo through its camera on the left, the
+    mesh in perspective on the right. Returns (photo area, mesh area); raises ValueError without a
+    3D view to split."""
+    area, _rv3d = _view3d(context)
+    window = context.window
+    if area is None or window is None:
+        raise ValueError("no 3D view to align the photo in")
+    before = {a.as_pointer() for a in window.screen.areas}
+    with context.temp_override(window=window, area=area, region=_window_region(area)):
+        bpy.ops.screen.area_split(direction="VERTICAL", factor=0.5)
+    added = next((a for a in window.screen.areas if a.as_pointer() not in before), None)
+    if added is None:
+        raise ValueError("the 3D view is too small to split")
+    photo_area, mesh_area = sorted((area, added), key=lambda a: a.x)
+    _align.update(window=window, area=added, kept=area, hair=_show_hair(area, False))
+    _show_hair(added, False)
+    scene = context.scene
+    if scene.camera is not None and not is_photo(scene.camera):
+        _previous[scene.name] = scene.camera
+    scene.camera = cam
+    p = cam.groomlab_photo
+    scene.render.resolution_x, scene.render.resolution_y = p.width, p.height
+    scene.render.pixel_aspect_x = scene.render.pixel_aspect_y = 1.0
+    photo_area.spaces.active.region_3d.view_perspective = "CAMERA"
+    _frame_scalp(mesh_area.spaces.active.region_3d, scalp)
+    for a in (photo_area, mesh_area):
+        a.tag_redraw()
+    return photo_area, mesh_area
+
+
+def close_align(defer=True):
+    """The split view joined back (the half Align Photo added closed). `defer` (from the pick's modal):
+    after the event, so the modal operator does not lose its area underneath it."""
+    window, area = _align.get("window"), _align.get("area")
+    kept, hair = _align.get("kept"), _align.get("hair", True)
+    _align.clear()
+    try:
+        if kept is not None:
+            _show_hair(kept, hair)  # the view that stays shows the hair as it did
+    except (ReferenceError, AttributeError):
+        pass
+    if window is None or area is None or bpy.app.background:
+        return  # (background mode lays no areas out: closing one there never returns)
+
+    def close():
+        try:
+            if any(a.as_pointer() == area.as_pointer() for a in window.screen.areas):
+                with bpy.context.temp_override(window=window, screen=window.screen, area=area,
+                                               region=_window_region(area)):
+                    bpy.ops.screen.area_close()
+        except (RuntimeError, ReferenceError, AttributeError):
+            pass
+        return None
+    if defer:
+        bpy.app.timers.register(close, first_interval=0.01)
+    else:
+        close()
 
 
 # ---- Picking on the photo and the mesh --------------------------------------------------------------
@@ -970,10 +1093,20 @@ class GROOMLAB_OT_photo_pick(bpy.types.Operator):
                    "it; Esc when done")
         return {"RUNNING_MODAL"}
 
-    def finish(self):
+    def finish(self, keep_align=False):
         _picking[0] = False
         _show_pairs(False)
+        if not keep_align and _align:
+            close_align()
         return {"FINISHED"}
+
+    def solve_live(self, context, cam, scalp):
+        """Align Photo: the camera lines up as the pairs come (live_solve)."""
+        if not _align:
+            return
+        r = live_solve(cam, scalp, context.scene.groomlab_photos.keep_focal)
+        if r is not None:
+            context.scene.groomlab_photos.result = solve_text(cam, r)[0]
 
     def grab(self, scene, region, rv3d, cam, scalp, x, y, through):
         """The pair whose point (the photo's through its camera, else the mesh's) is under (x, y)."""
@@ -1025,7 +1158,7 @@ class GROOMLAB_OT_photo_pick(bpy.types.Operator):
         if event.type == "Z" and event.value == "PRESS" and (event.ctrl or event.oskey):
             # Blender's undo runs only once no modal operator does: end, let it, pick on after.
             _restart_pick(context.window, context.area)
-            self.finish()
+            self.finish(keep_align=True)
             return {"FINISHED", "PASS_THROUGH"}
         from . import tool_ops, window
         if self.drag is not None:
@@ -1039,6 +1172,7 @@ class GROOMLAB_OT_photo_pick(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
             if event.type == "LEFTMOUSE" and event.value == "RELEASE":
                 self.drag = None
+                self.solve_live(context, cam, scalp)
                 sync(scalp, scene)
                 _push_undo("Move Point")
                 self.redraw(context)
@@ -1066,6 +1200,7 @@ class GROOMLAB_OT_photo_pick(bpy.types.Operator):
             bound = mesh_bind(context, region, rv3d, scalp, x, y)
             if bound is not None:
                 add_pick(cam, "mesh", bound[0], bound[1])
+        self.solve_live(context, cam, scalp)
         sync(scalp, scene)
         _push_undo("Pick Point")
         self.redraw(context)
@@ -1089,13 +1224,40 @@ class GROOMLAB_OT_pairs_solve(_Tipped, bpy.types.Operator):
             r = solve(cam, scalp, keep_focal=keep)
         except (ValueError, HelperError) as e:
             return _fail(self, e)
-        bad = [str(i + 1) for i, b in enumerate(r.get("bad") or []) if b]
-        text = "%s lined up: %.2f px off on average, %.1f mm" % (cam.name, r["rms"], cam.data.lens)
-        if bad:
-            text += "; pair%s %s stand%s out: pick them again" % ("s" if len(bad) > 1 else "", ", ".join(bad),
-                                                                   "" if len(bad) > 1 else "s")
+        text, bad = solve_text(cam, r)
         context.scene.groomlab_photos.result = text
         _say(self, text, "WARNING" if bad else "INFO")
+        return {"FINISHED"}
+
+
+class GROOMLAB_OT_photo_align(_Tipped, bpy.types.Operator):
+    """The photo and the mesh side by side: click a feature on each (numbered pairs) and the camera lines up as they come, its focal length too (Esc: done)"""
+    bl_idname = "groomlab.photo_align"
+    bl_label = "Align Photo"
+
+    @classmethod
+    def poll(cls, context):
+        return _photo_op_poll(context) and active_groom(context) is not None
+
+    def execute(self, context):
+        if _align:  # again: done
+            _picking[0] = False
+            _show_pairs(False)
+            close_align(defer=False)
+            return {"FINISHED"}
+        cam, scalp = current(context.scene), active_groom(context)
+        try:
+            photo_area, _mesh_area = open_align(context, cam, scalp)
+        except (ValueError, RuntimeError) as e:
+            return _fail(self, e)
+        if not _picking[0]:
+            with context.temp_override(area=photo_area, region=_window_region(photo_area)):
+                bpy.ops.groomlab.photo_pick("INVOKE_DEFAULT")
+        r = live_solve(cam, scalp, context.scene.groomlab_photos.keep_focal)
+        if r is not None:
+            context.scene.groomlab_photos.result = solve_text(cam, r)[0]
+        _say(self, "Align Photo: click a feature on the photo (left), the same one on the mesh (right); the camera "
+                   "lines up from 4 pairs. Esc when done")
         return {"FINISHED"}
 
 
@@ -1290,6 +1452,7 @@ def draw_tab(layout, context, chars):
         _wrap(layout, "Pairs: a feature clicked on the photo (looking through its camera) and the same feature on the "
                       "mesh (in another view). 6 pairs solve the focal length too; 4 with it kept.", width=chars)
         row = layout.row(align=True)
+        row.operator("groomlab.photo_align", text="Align Photo...", depress=bool(_align), icon="SPLITSCREEN")
         row.operator("groomlab.photo_pick", text="Pick Points", depress=_picking[0], icon="RESTRICT_SELECT_OFF")
         row.prop(s, "keep_focal")
         palette.list_with_menu(layout, "GROOMLAB_UL_photo_pairs", p, "pairs", "pair_index", "GROOMLAB_MT_pair_context",
@@ -1325,7 +1488,8 @@ def draw_tab(layout, context, chars):
 
 classes = (GroomLabPhotoPair, GroomLabPhoto, GroomLabPhotos, GROOMLAB_OT_photo_import, GROOMLAB_OT_photo_look_through,
            GROOMLAB_OT_photo_select_camera, GROOMLAB_OT_photo_add_view,
-           GROOMLAB_OT_photo_rename, GROOMLAB_OT_photo_remove, GROOMLAB_OT_photo_pick, GROOMLAB_OT_pairs_solve,
+           GROOMLAB_OT_photo_rename, GROOMLAB_OT_photo_remove, GROOMLAB_OT_photo_pick, GROOMLAB_OT_photo_align,
+           GROOMLAB_OT_pairs_solve,
            GROOMLAB_OT_photos_morph, GROOMLAB_OT_pairs_clear, GROOMLAB_OT_pairs_delete, GROOMLAB_OT_pairs_repick, GROOMLAB_OT_photos_guides,
            GROOMLAB_UL_photos, GROOMLAB_UL_photo_pairs)
 
@@ -1339,6 +1503,7 @@ def register():
 
 def unregister():
     _picking[0] = False
+    _align.clear()
     if _draw_handle[0] is not None:
         bpy.types.SpaceView3D.draw_handler_remove(_draw_handle[0], "WINDOW")
         _draw_handle[0] = None

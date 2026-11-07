@@ -108,6 +108,11 @@ def draw_action(layout, item, context, text=None, icon=None, emboss=True):
     if idname.startswith("prop:"):
         data = context.scene
         path = idname[len("prop:"):].split(".")
+        if path[0] == "groom":  # a setting of the active groom (its scalp object's), not the scene's
+            from .ops import active_groom
+            data, path = active_groom(context), path[1:]
+            if data is None:
+                return None
         for part in path[:-1]:
             data = getattr(data, part)
         where.prop(data, path[-1], text=label)

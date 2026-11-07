@@ -95,6 +95,8 @@ class GROOMLAB_OT_remove_groom(GroomOperator):
         scalp.groomlab_tools.state = ""
         g = scalp.groomlab
         g.view_node = ""
+        from . import cards_view
+        cards_view.remove_objects(scalp)
         for obj in (g.guides, g.hair):
             if obj is not None:
                 data = obj.data

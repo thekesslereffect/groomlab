@@ -7,6 +7,7 @@
 #include "pipeline.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -21,6 +22,7 @@
 #include "groomlab/card_files.h"
 #include "groomlab/card_presets.h"
 #include "groomlab/cards.h"
+#include "groomlab/display.h"
 #include "groomlab/export_view.h"
 #include "groomlab/feathers.h"
 #include "groomlab/flow.h"
@@ -1662,13 +1664,163 @@ json importAlembicCurves(Session& s, const json& args) {
     return {{"node", "guides"}, {"curves", curves}, {"path", path}, {"graphError", s.groom->graphError()}};
 }
 
+// ---- The cards view and its bakes (Maya's bake_cards, bake_scalp, compare_cards, card_display) -----
+
+// The session's card bake as an absolute prefix ("": none); a relative one is the groom file's.
+std::string cardBakePrefixOf(const Session& s) {
+    std::string prefix = s.file.cardBake.prefix;
+    std::replace(prefix.begin(), prefix.end(), '\\', '/');
+    if (!prefix.empty() && !fs::u8path(prefix).is_absolute() && !s.file.directory.empty()) prefix = s.file.directory + "/" + prefix;
+    return prefix;
+}
+
+// `name`, or name_2, name_3...: the first whose files (<directory>/<name>_<suffix>) are free or
+// already the groom's own (`own`, a prefix), so a bake never writes over files it does not own
+// (Maya's _free_bake_name).
+std::string freeBakeName(const std::string& directory, const std::string& name, const std::vector<std::string>& suffixes,
+                         const std::string& own) {
+    const auto same = [](const std::string& a, const std::string& b) {
+        std::string x = fs::u8path(a).lexically_normal().generic_u8string(), y = fs::u8path(b).lexically_normal().generic_u8string();
+#ifdef _WIN32
+        std::transform(x.begin(), x.end(), x.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::transform(y.begin(), y.end(), y.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+#endif
+        return x == y;
+    };
+    std::string candidate = name;
+    for (int k = 2;; ++k) {
+        const std::string prefix = directory + "/" + candidate + "_";
+        bool taken = false;
+        if (own.empty() || !same(prefix, own)) {
+            std::error_code ec;
+            for (const std::string& f : suffixes) taken = taken || fs::exists(fs::u8path(prefix + f), ec);
+        }
+        if (!taken) return candidate;
+        candidate = name + "_" + std::to_string(k);
+    }
+}
+
+// bake_cards (Maya's bake_cards, the app's Bake Maps): the Cards nodes' maps baked into
+// `directory` as <name>_<map>.tga (Unreal's hair card layout), the atlas and the viewport's
+// preview; the groom keeps the bake (its file's "cardBake"), so rebuilt cards keep their cells,
+// the cards view shows the maps and card_stats says when they are out of date. Not an undo step.
+json bakeCardsCommand(Session& s, const json& args) {
+    const std::string directory = fs::u8path(needString(args, "directory")).generic_u8string();
+    const std::string requested = optString(args, "name", "groom");
+    int resolution = static_cast<int>(optNumber(args, "resolution", 0.0));
+    resolution = resolution > 0 ? std::clamp(resolution, 16, 16384) : 0;  // 0: the Cards nodes' atlasSize
+    const CardBake bake = bakeCardsNow(s, resolution, static_cast<float>(optNumber(args, "occlusion", 1.0)));
+    std::vector<std::string> suffixes = cardBakeSuffixes();
+    suffixes.push_back("Preview.png");
+    const std::string name = optBool(args, "exact", false) ? requested : freeBakeName(directory, requested, suffixes, cardBakePrefixOf(s));
+    const CardBakePaths at = CardBakePaths::in(directory, name);
+    std::string stamp;
+    try {
+        std::error_code ec;
+        fs::create_directories(fs::u8path(directory), ec);
+        stamp = writeCardBake(bake, at, true);
+    } catch (const std::exception& e) {
+        fail("io", e.what());
+    }
+    static int bakes = 0;  // a new number each bake: maps rewritten in place read again
+    s.file.cardBake.prefix = at.prefix;
+    s.file.cardBake.strands = stamp;
+    s.groom->setCardMaps(formatCardMaps(at.prefix, stamp, ++bakes));
+    json paths = at.files();
+    paths.push_back(at.preview());
+    return {{"paths", paths}, {"prefix", at.prefix}, {"name", name}, {"preview", at.preview()},
+            {"cards", bake.cards->cards.size()}, {"triangles", bake.cards->triangleCount()},
+            {"textures", bake.cards->textureCount()}, {"size", bake.textures.size}};
+}
+
+// bake_scalp (Maya's bake_scalp): the groom at `density` baked onto its scalp's UVs (it needs
+// them) as <name>_ScalpColor.tga (the hair's color, spread over the whole map) and
+// <name>_ScalpCoverage.tga (how much hair covers the skin), hair within `reach` of the skin
+// counting (0: 3% of the scalp's size): the hair cap's maps. `own`: the prefix of the groom's
+// last scalp bake (rewritten; another's files are not).
+json bakeScalpCommand(Session& s, const json& args) {
+    const std::string directory = fs::u8path(needString(args, "directory")).generic_u8string();
+    const std::string requested = optString(args, "name", "groom");
+    ScalpBakeSettings settings;
+    settings.size = std::clamp(static_cast<int>(optNumber(args, "resolution", 2048.0)), 16, 16384);
+    settings.reach = std::max(0.0f, static_cast<float>(optNumber(args, "reach", 0.0)));
+    ViewRequest request;
+    request.density = std::clamp(static_cast<float>(optNumber(args, "density", 1.0)), 0.0f, 1.0f);
+    request.time = s.seconds;
+    request.wantBounds = false;
+    feedSessionTime(s);
+    const ViewResult& view = s.groom->evaluate(request);
+    if (!view.errors.empty()) fail("evaluation", view.errors.front());
+    if (!view.strands) fail("evaluation", "the groom gave no strands");
+    const MeshPtr scalp = scalpOf(s, view);
+    if (!scalp || scalp->triangleCount() == 0) fail("state", "the groom has no scalp");
+    ScalpTextures t;
+    try {
+        t = bakeScalpTextures(*view.strands, *scalp, settings);
+    } catch (const std::invalid_argument& e) {
+        fail("state", std::string(e.what()) + ": give the scalp mesh UVs");
+    } catch (const std::exception& e) {
+        fail("export", e.what());
+    }
+    const std::string name = optBool(args, "exact", false)
+                                 ? requested
+                                 : freeBakeName(directory, requested, {"ScalpColor.tga", "ScalpCoverage.tga"}, optString(args, "own", ""));
+    std::vector<std::string> paths;
+    try {
+        std::error_code ec;
+        fs::create_directories(fs::u8path(directory), ec);
+        paths = writeScalpCapMaps(t, false, directory, name);
+    } catch (const std::exception& e) {
+        fail("io", e.what());
+    }
+    return {{"paths", paths}, {"prefix", directory + "/" + name + "_"}, {"name", name}, {"size", t.size}};
+}
+
+// card_view (Maya's cards view: compare_cards, card_display): the Cards nodes' cards as a mesh (the
+// atlas UVs, the strands' normals, the aoWorld UV set), with `cap` the hair cap (the scalp just
+// above itself, its UVs), and the groom's bake to texture the cards with: its preview (the color
+// darkened by the occlusion, the coverage in alpha; made from the maps for another host's bake
+// that has none) and whether the cards changed since (stale).
+json cardView(Session& s, const json& args) {
+    const ViewResult& view = evaluateNow(s, true);
+    if (!view.cards || view.cards->cards.empty()) fail("state", "the graph has no Cards node making cards: add one first");
+    std::vector<MeshOut> meshes{cardsMesh(*view.cards, "cards")};
+    if (optBool(args, "cap", false)) {
+        const MeshPtr scalp = scalpOf(s, view);
+        if (scalp && scalp->triangleCount() > 0) meshes.push_back(scalpCapMesh(*scalp, "scalpCap"));
+    }
+    json bake = nullptr;
+    const CardBakePaths at(cardBakePrefixOf(s));
+    if (!at.prefix.empty() && at.exists()) {
+        std::error_code ec;
+        if (!fs::exists(fs::u8path(at.preview()), ec)) {
+            try {
+                writeCardBakePreview(at.prefix);
+            } catch (const std::exception&) {  // maps that cannot be read: the cards draw flat
+            }
+        }
+        if (fs::exists(fs::u8path(at.preview()), ec)) bake = {{"prefix", at.prefix}, {"preview", at.preview()}};
+    }
+    const GroomStats stats = s.groom->stats();
+    return {{"bake", bake},
+            {"stale", stats.cardsStale},
+            {"cards", stats.cards},
+            {"triangles", stats.cardTriangles},
+            {"meshes", putMeshes(s, meshes, groomSpaceOf(args))}};
+}
+
 }  // namespace
+
+void applyCardBake(Session& s) {
+    const CardBakePaths at(cardBakePrefixOf(s));
+    if (!at.prefix.empty() && at.exists()) s.groom->setCardMaps(formatCardMaps(at.prefix, s.file.cardBake.strands, 0));
+}
 
 bool isPipelineCommand(const std::string& cmd) {
     static const std::set<std::string> kCommands = {
         "bake_scale_maps", "scale_mesh", "strand_mesh", "set_scalp_frames", "simulate_status", "simulate_range", "simulate_poll",
         "simulate_cancel", "simulate_bake", "simulate_clear", "set_meshes", "set_scalps", "meshes_info", "transfer",
-        "transfer_markers", "sample_meshes", "cards_preset", "card_stats", "bake_to_guides", "import_alembic_curves"};
+        "transfer_markers", "sample_meshes", "cards_preset", "card_stats", "bake_to_guides", "import_alembic_curves", "bake_cards", "bake_scalp", "card_view"};
     return kCommands.count(cmd) > 0;
 }
 
@@ -1736,6 +1888,9 @@ json runPipelineCommand(const std::string& cmd, const json& args, BlockReader& b
         if (!only.empty()) out["node"] = out["nodes"].value(only, json::object());
         return out;
     }
+    if (cmd == "bake_cards") return bakeCardsCommand(s, args);
+    if (cmd == "bake_scalp") return bakeScalpCommand(s, args);
+    if (cmd == "card_view") return cardView(s, args);
     if (cmd == "bake_to_guides") return bakeToGuides(s, args);
     if (cmd == "import_alembic_curves") return importAlembicCurves(s, args);
     return transferMarkers(s, args);

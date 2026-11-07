@@ -37,6 +37,9 @@ nlohmann::json runPipelineExport(Session& s, const nlohmann::json& args);
 // The session's groom takes the host's scalp at other frames (set_scalp_frames) as its Simulate
 // nodes' feed: called when the groom is replaced.
 void applyScalpFrames(Session& s);
+// The session's groom takes its file's card bake ("cardBake": rebuilt cards keep the atlas cells,
+// card_stats says when they changed since): called when the groom is replaced.
+void applyCardBake(Session& s);
 
 // helper.cpp's, shared: a mesh as set_scalp takes it (points, faceCounts, faceIndices, uvs,
 // restPoints, colorSets) in groom space; a mesh's polygons back; the time's inputs that come with

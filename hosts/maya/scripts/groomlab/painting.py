@@ -248,6 +248,23 @@ def remove_map(groom, name, delete_file=False):
     return changed
 
 
+def _follow_file_readers(groom, graph, old_file, new_stored):
+    """The graph's file params reading `old_file` (absolute; a texture param a groom painted in
+    the app or Blender reads its map by the file) read `new_stored` instead; True when any did.
+    `graph` changes in place."""
+    from groomlab import presets
+    if not old_file or not new_stored:
+        return False
+    key = os.path.normcase(os.path.normpath(old_file))
+    changed = False
+    for _label, params, param, stored in list(presets._file_params(graph)):
+        full = resolve_path(stored, groom) or stored
+        if os.path.normcase(os.path.normpath(full)) == key:
+            presets.set_file_param(params, param, new_stored)
+            changed = True
+    return changed
+
+
 def _retarget_map(graph, old, new):
     """Map nodes and map params reading `old` read `new` (inside compounds too: the core's
     retargetMapReaders, the app's rename too); True when any did. `graph` changes in place."""
@@ -266,6 +283,7 @@ def rename_map(groom, old, new):
     reads the same file (it keeps its own), and to a free name when one is in the way."""
     kwargs = {"rename": (old, new)}
     stored = next((m.get("texture") or "" for m in maps(groom) if m["name"] == old and m["kind"] == "texture"), "")
+    old_file = map_texture(groom, old) if stored else ""
     target = groomlab_core.renamed_map_texture(stored, old, new) if stored else ""
     if target:  # the file is named after the map (scalp_maps.h's rule, the app's too)
         full = resolve_path(target, groom)
@@ -275,7 +293,9 @@ def rename_map(groom, old, new):
     with undo_chunk("rename map"):
         cmds.groomLabScalpMaps(groom, **kwargs)
         graph = get_graph(groom)
-        if _retarget_map(graph, old, new):
+        moved = _follow_file_readers(groom, graph, old_file, next(
+            (m["texture"] for m in maps(groom) if m["name"] == new and m["kind"] == "texture"), "")) if old_file else False
+        if _retarget_map(graph, old, new) or moved:
             set_graph(groom, graph)
         if cmds.getAttr(groom + ".strandColorSource") == old:
             cmds.setAttr(groom + ".strandColorSource", new, type="string")
@@ -487,11 +507,17 @@ def set_map_texture(groom, name, path, copy=None):
         copy = not png
     if not copy and not png:
         raise ValueError("%s is not a PNG: painting writes PNG, so another format is copied as one (copy=True)" % full)
+    old_file = map_texture(groom, name) if kind == "texture" else ""
     with undo_chunk("relink map"):
         if copy:
             asset_folder("masks")  # made, and the untitled scene's warning given
-            return cmds.groomLabScalpMaps(groom, relink=name, texture=_map_texture_default(groom, name), copyFrom=full)
-        return cmds.groomLabScalpMaps(groom, relink=name, texture=portable_path(full))
+            stored = cmds.groomLabScalpMaps(groom, relink=name, texture=_map_texture_default(groom, name), copyFrom=full)
+        else:
+            stored = cmds.groomLabScalpMaps(groom, relink=name, texture=portable_path(full))
+        graph = get_graph(groom)  # texture params reading the old image read the new one
+        if old_file and _follow_file_readers(groom, graph, old_file, stored):
+            set_graph(groom, graph)
+        return stored
 
 
 def import_map(groom, path, name=None, color=None, copy=None):
@@ -765,6 +791,13 @@ def param_map(groom, node, param):
         name = value.get("guide") or value.get("colorSet")
         if name in names:
             return name, "luminance"
+        if value.get("texture"):  # the app's and Blender's painted params read a texture map by its file
+            full = os.path.normcase(os.path.normpath(resolve_path(value["texture"], groom) or value["texture"]))
+            for m in maps(groom):
+                if m["kind"] == "texture" and os.path.normcase(os.path.normpath(map_texture(groom, m["name"]))) == full:
+                    component = value.get("component") or "luminance"
+                    gray = map_channels(groom, m["name"]) != 4
+                    return m["name"], "luminance" if gray or component not in ("r", "g", "b", "a") else component
     return None
 
 

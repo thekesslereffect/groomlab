@@ -638,7 +638,7 @@ void bindGroom(py::module_& m) {
     m.def("card_bake_files", [](const std::string& prefix) { return CardBakePaths(prefix).files(); }, py::arg("prefix"),
           "A bake's files at a prefix (<folder>/<name>_): the seven maps then the atlas.");
     m.def("groom_file_card_bake_prefix", &groomFileCardBakePrefix, py::arg("stem"),
-          "\"<stem>_cards/<stem>_\": where a groom file's bake sits, relative to the file's folder.");
+          "\"groomlab/<stem>/cards/<stem>/<stem>_\": where a groom file's bake sits, relative to the file's folder.");
     m.def("format_card_maps", &formatCardMaps, py::arg("prefix"), py::arg("stamp") = std::string(), py::arg("bake") = 0,
           "The cardMaps text of a bake at a stored prefix, its stamp and bake number.");
     m.def("parse_card_maps", &parseCardMaps, py::arg("text"), "A cardMaps text as {key: value}.");

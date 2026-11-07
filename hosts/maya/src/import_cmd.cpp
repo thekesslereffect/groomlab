@@ -27,6 +27,7 @@
 #include "asset_files.h"
 #include "command_args.h"
 #include "guarded.h"
+#include "groomlab/asset_files.h"
 #include "groomlab/card_files.h"
 #include "groomlab/correctives.h"
 #include "groomlab/groom_session.h"
@@ -69,11 +70,10 @@ GroomFile readForMaya(const std::string& path, std::string* fileUpAxis = nullptr
     if (fileUpAxis) *fileUpAxis = file.upAxis;
     convertUpAxis(file, sceneUpAxis());
     if (file.cardBake.empty()) {
-        // A bake the app wrote beside the groom after saving it (groomlab/<stem>/cards/<stem>_*, or
-        // earlier versions' <stem>_cards/<stem>_*), as the app adopts one: its stamp unknown (every
-        // Cards node reads as stale until a bake).
-        CardBakePaths beside = CardBakePaths::besideGroomFile(path);
-        if (!beside.exists()) beside = CardBakePaths::legacyBesideGroomFile(path);
+        // A bake the app wrote beside the groom after saving it (groomlab/<stem>/cards/<stem>/<stem>_*,
+        // or earlier versions' places), as the app adopts one: its stamp unknown (every Cards node
+        // reads as stale until a bake).
+        const CardBakePaths beside = CardBakePaths::foundBesideGroomFile(path);
         if (beside.exists()) file.cardBake.prefix = beside.prefix;
     }
     return file;
@@ -317,6 +317,10 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
             // in the groom's masks folder (copied there, unless it is that folder's already).
             ScalpMaps maps = scalpMapsFromGroomData(file.data);
             const std::string masks = assetFolder("masks") + "/" + asset;
+            // (the image as the file found it, where the map reads it now): a texture param naming
+            // the image (the app's and Blender's painted params read their map by its file) reads
+            // the copy the groom paints, not the file's.
+            std::vector<std::pair<std::string, std::string>> movedImages;
             for (auto& [name, entry] : maps.maps) {
                 if (entry.kind != "texture") continue;
                 const std::string from = resolveFromFile(file, entry.texture);
@@ -335,6 +339,17 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
                 }
                 if (!samePath(from, to)) copyFor(from, to);
                 entry.texture = portableMayaPath(to);
+                if (!samePath(from, to)) movedImages.emplace_back(from, entry.texture);
+            }
+            std::string graphJson = file.data.graphJson.empty() ? "{}" : file.data.graphJson;
+            if (!movedImages.empty()) {
+                graphJson = followGraphFiles(graphJson, [&](const std::string& stored) {
+                    const std::string full = resolveFromFile(file, stored);
+                    for (const auto& [from, now] : movedImages) {
+                        if (samePath(full, from)) return now;
+                    }
+                    return stored;
+                });
             }
 
             // The card bake: its files in the groom's cards folder (a free name when another bake
@@ -366,7 +381,7 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
                 }
             }
 
-            modifier_.newPlugValueString(fn.findPlug("graph", true), (file.data.graphJson.empty() ? "{}" : file.data.graphJson).c_str());
+            modifier_.newPlugValueString(fn.findPlug("graph", true), graphJson.c_str());
             modifier_.newPlugValueString(fn.findPlug("guideData", true), file.data.hierarchyJson.c_str());
             modifier_.newPlugValueString(fn.findPlug("partData", true), file.data.partsJson.c_str());
             modifier_.newPlugValueString(fn.findPlug("flowData", true), file.data.flowJson.c_str());

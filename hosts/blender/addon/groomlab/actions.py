@@ -13,7 +13,8 @@ Forms of a binding:
 - An item generated from an option list (a "choices" generator: Convert to's kinds) passes its
   value to the property the binding's "$value" names ("value" when it names none).
 - ("prop:groomlab_tools.name", {}): a checkbox of the scene's setting (a checkable action that is
-  a setting, as Delete Its File Too).
+  a setting, as Delete Its File Too); ("prop:groom.groomlab_tools.name", {}) the active groom's
+  (its scalp object's: Show cards).
 
 The Graph Editor's ids (graph_ui.json: node, backdrop, Edit, Add Node, Presets and param menus)
 are bound here too, by the Graph Editor's authors; the Groom Tools' and the GroomLab menu's are
@@ -84,6 +85,10 @@ BINDINGS = {
     "cards.lodMid": ("groomlab.cards_lod", {"lod": "mid"}),
     "cards.lodLow": ("groomlab.cards_lod", {"lod": "low"}),
     "cards.stats": ("groomlab.card_stats", {}),
+    "cards.show": ("prop:groom.groomlab_tools.show_cards", {}),
+    "cards.textures": ("prop:groom.groomlab_tools.card_textures", {}),
+    "cards.bakeMaps": ("groomlab.cards_bake", {}),
+    "cards.bakeScalp": ("groomlab.cards_bake_scalp", {}),
     "node.bakeToGuides": ("groomlab.bake_to_guides", {}),
     "import.alembicCurves": ("groomlab.import_alembic_curves", {}),
     "photos.guides": ("groomlab.photos_guides", {}),
@@ -151,6 +156,7 @@ BINDINGS = {
     # Photos (the Photos tab: lists.json "photos", photos.py).
     "photo.import": ("groomlab.photo_import", {}),
     "photo.lookThrough": ("groomlab.photo_look_through", {}),
+    "photo.align": ("groomlab.photo_align", {}),
     "photo.rename": ("groomlab.photo_rename", {}),
     "photo.remove": ("groomlab.photo_remove", {}),
     "photo.selectCamera": ("groomlab.photo_select_camera", {}),

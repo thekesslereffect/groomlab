@@ -213,7 +213,9 @@ std::string GroomDocument::assetFolder(const std::string& kind) const {
 
 std::string GroomDocument::mapsDirectory() const {
     if (path_.empty()) return {};
-    return assetFolder("masks");  // as Maya and Blender keep a scene's: groomlab/<name>/masks
+    // The groom's own folder in masks, as Maya keeps a groom's (masks/<groom>) and Blender a
+    // scalp's (masks/<scalp>): groomlab/<name>/masks/<name>.
+    return assetFolder("masks") + "/" + fileSafeName(std::filesystem::u8path(path_).stem().u8string());
 }
 
 std::string GroomDocument::textureMapFile(const std::string& name) const {
@@ -303,6 +305,7 @@ std::string GroomDocument::renameMap(const std::string& from, const std::string&
     }
     const std::string kind = source->kind;
     const std::string label = "rename map " + from;
+    std::string movedFrom, movedTo;  // a texture map's file, before and after it followed the name
     if (kind == "guides") {
         const std::string error = editGuides(label, [&](GuideHierarchy& h) { h.renameAttribute(from, to); });
         if (!error.empty()) return error;
@@ -326,6 +329,8 @@ std::string GroomDocument::renameMap(const std::string& from, const std::string&
                 if (!ec) {
                     entry.texture = pathFromGroomFolder(target.u8string(), std::filesystem::u8path(path_).parent_path().u8string());
                     paints_.erase(from);
+                    movedFrom = full.generic_u8string();
+                    movedTo = entry.texture;
                 }
             }
         }
@@ -337,7 +342,10 @@ std::string GroomDocument::renameMap(const std::string& from, const std::string&
     // before and after), so an undo puts both back.
     const json before = graph_;
     bool retargeted = false;
-    const std::string graph = retargetMapReaders(graph_.dump(), from, to, &retargeted);
+    std::string graph = retargetMapReaders(graph_.dump(), from, to, &retargeted);
+    bool followed = false;  // texture params reading the file read it where it went
+    graph = retargetFileReaders(graph, movedFrom, movedTo, [this](const std::string& stored) { return resolveMapPath(stored); }, &followed);
+    retargeted = retargeted || followed;
     if (!retargeted) return {};
     graph_ = json::parse(graph);
     const std::string error = applyGraph();

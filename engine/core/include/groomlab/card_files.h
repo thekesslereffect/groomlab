@@ -41,10 +41,16 @@ struct CardBakePaths {
     explicit CardBakePaths(std::string at) : prefix(std::move(at)) {}
     // <folder>/<name>_ (forward slashes).
     static CardBakePaths in(const std::string& folder, const std::string& name);
-    // The bake beside a groom file: <its folder>/groomlab/<stem>/cards/<stem>_.
+    // The bake beside a groom file: <its folder>/groomlab/<stem>/cards/<stem>/<stem>_ (the
+    // groom's own folder in cards, as Maya keeps a groom's: cards/<groom>/<groom>_).
     static CardBakePaths besideGroomFile(const std::string& groomPath);
-    // Where earlier versions put it: <its folder>/<stem>_cards/<stem>_ (read, never written).
+    // Where earlier versions put it (read, never written): 0.42's <its folder>/groomlab/<stem>/
+    // cards/<stem>_ (flat), and before that <its folder>/<stem>_cards/<stem>_.
+    static CardBakePaths flatBesideGroomFile(const std::string& groomPath);
     static CardBakePaths legacyBesideGroomFile(const std::string& groomPath);
+    // The first of besideGroomFile, flatBesideGroomFile and legacyBesideGroomFile that holds a
+    // bake; besideGroomFile when none does.
+    static CardBakePaths foundBesideGroomFile(const std::string& groomPath);
 
     std::string map(const std::string& name) const { return prefix + name + ".tga"; }
     std::string atlas() const { return prefix + "Atlas.json"; }
@@ -61,8 +67,8 @@ struct CardBakePaths {
 // The file suffixes of a bake (Depth.tga ... AO.tga, Atlas.json): CardBakePaths::files without
 // the prefix.
 const std::vector<std::string>& cardBakeSuffixes();
-// "groomlab/<stem>/cards/<stem>_": where a groom file's bake sits, relative to the file's folder
-// (the stem made file safe in the folder's name, as assetFolder does).
+// "groomlab/<stem>/cards/<stem>/<stem>_": where a groom file's bake sits, relative to the file's
+// folder (the stem made file safe in the folders' names, as assetFolder does).
 std::string groomFileCardBakePrefix(const std::string& stem);
 
 // The cardMaps text of the bake at `prefix` (as the host stores it), with its stamp ("": none

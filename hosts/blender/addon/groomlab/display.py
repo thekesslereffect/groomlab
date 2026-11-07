@@ -367,7 +367,7 @@ def apply_strand_visibility(scalp, stroking=False):
     hair = scalp.groomlab.hair
     if hair is None:
         return
-    hide = not scalp.groomlab_tools.show_strands
+    hide = not scalp.groomlab_tools.show_strands or scalp.groomlab_tools.show_cards  # the cards view: cards instead
     if stroking and groom.scene_of(scalp).groomlab_tools.sculpt_display == "guidesOnly":
         hide = True
     if hair.hide_viewport != hide:

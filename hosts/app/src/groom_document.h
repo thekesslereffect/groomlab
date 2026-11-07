@@ -580,7 +580,8 @@ public:
     // file's folders, Maya's follow_scene_files): the files copied, and copies under another name.
     const std::vector<std::string>& savedCopies() const { return savedCopies_; }
     const std::vector<std::string>& saveWarnings() const { return saveWarnings_; }
-    // Where a texture map's file goes: assetFolder("masks") ("" until the groom is saved), and the
+    // Where a texture map's file goes: the groom's folder in assetFolder("masks"), masks/<name> as
+    // Maya keeps a groom's ("" until the groom is saved), and the
     // file of a texture map resolved against the groom's folder.
     std::string mapsDirectory() const;
     std::string textureMapFile(const std::string& name) const;

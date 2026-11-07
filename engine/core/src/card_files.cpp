@@ -48,6 +48,19 @@ CardBakePaths CardBakePaths::besideGroomFile(const std::string& groomPath) {
     return CardBakePaths((groom.parent_path() / fs::u8path(groomFileCardBakePrefix(groom.stem().u8string()))).generic_u8string());
 }
 
+CardBakePaths CardBakePaths::flatBesideGroomFile(const std::string& groomPath) {
+    const fs::path groom = fs::u8path(groomPath);
+    const std::string stem = groom.stem().u8string();
+    return CardBakePaths((groom.parent_path() / fs::u8path("groomlab/" + fileSafeName(stem) + "/cards/" + stem + "_")).generic_u8string());
+}
+
+CardBakePaths CardBakePaths::foundBesideGroomFile(const std::string& groomPath) {
+    for (const CardBakePaths& at : {besideGroomFile(groomPath), flatBesideGroomFile(groomPath), legacyBesideGroomFile(groomPath)}) {
+        if (at.exists()) return at;
+    }
+    return besideGroomFile(groomPath);
+}
+
 CardBakePaths CardBakePaths::legacyBesideGroomFile(const std::string& groomPath) {
     const fs::path groom = fs::u8path(groomPath);
     const std::string stem = groom.stem().u8string();
@@ -71,7 +84,9 @@ bool CardBakePaths::exists() const {
     return !prefix.empty() && fs::exists(fs::u8path(atlas()), ec) && fs::exists(fs::u8path(map("Color")), ec);
 }
 
-std::string groomFileCardBakePrefix(const std::string& stem) { return "groomlab/" + fileSafeName(stem) + "/cards/" + stem + "_"; }
+std::string groomFileCardBakePrefix(const std::string& stem) {
+    return "groomlab/" + fileSafeName(stem) + "/cards/" + fileSafeName(stem) + "/" + stem + "_";
+}
 
 std::string formatCardMaps(const std::string& prefix, const std::string& stamp, int bake) {
     return "Color=" + prefix + "Color.tga;Coverage=" + prefix + "Coverage.tga;AO=" + prefix + "AO.tga;AOWorld=" +

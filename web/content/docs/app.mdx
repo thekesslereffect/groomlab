@@ -452,7 +452,7 @@ none.
 - **LOD** picks **Hero**, **Mid**, **Low** or **Custom**. Sliders set cards per clump,
   layers, width, segments, variations, the atlas size and a card budget.
 - **Bake maps** writes the cards' maps (depth, coverage, tangent, attribute, color, occlusion) as
-  TGA files in the groom's cards folder (`groomlab/<file name>/cards/` beside the saved groom file;
+  TGA files in the groom's cards folder (`groomlab/<file name>/cards/<file name>/` beside the saved groom file;
   an unsaved groom's go along when it is first saved), with a busy cursor while it bakes. The
   baked atlas shows in the panel.
 
@@ -494,7 +494,7 @@ guides, scalp, maps, parts, flow and correctives. Export mode has **Save** and *
 Maya and Blender save a groom file beside the scene file, named after the groom (a source file
 every host opens, outside the scene's `groomlab` folder). The app keeps the files it makes for a
 groom in a `groomlab/<file name>/` folder beside it, one folder per kind as Maya keeps a scene's:
-`masks` (texture maps), `cards` (card bakes), `exports`, `caches` (simulation bakes, guide
+`masks` (texture maps, in the groom's own `masks/<file name>/` as Maya keeps each groom's), `cards` (card bakes), `exports`, `caches` (simulation bakes, guide
 exports), `renders` and `references` (photos, copied in). **Save As** takes them along: the
 groom's files are copied into the new file's folder and the groom names the copies (the old file
 keeps its own; a file already there with other content is never written over). An unsaved

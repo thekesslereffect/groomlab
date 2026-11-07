@@ -966,9 +966,15 @@ void GroomDocument::followFiles(const std::string& newPath) {
         oldBase = fs::absolute(from).parent_path().generic_u8string();
         const std::string stem = from.stem().u8string();
         oldRoot = groomlab::assetFolder(oldBase, stem);
+        // The groom's maps folder, masks/<name>, is the new name's (FileFollower looks at these
+        // before the old root).
+        const std::string newMaps = newRoot + "/masks/" + fileSafeName(newName);
+        extra.push_back({oldRoot + "/masks/" + fileSafeName(stem), newMaps});
+        const std::string newCards = newRoot + "/cards/" + fileSafeName(newName);
+        extra.push_back({oldRoot + "/cards/" + fileSafeName(stem), newCards});
         // Where earlier versions of the app kept them, beside the groom: into the new folders.
-        extra.push_back({oldBase + "/masks/" + stem, newRoot + "/masks"});
-        extra.push_back({oldBase + "/" + stem + "_cards", newRoot + "/cards"});
+        extra.push_back({oldBase + "/masks/" + stem, newMaps});
+        extra.push_back({oldBase + "/" + stem + "_cards", newCards});
         extra.push_back({oldBase + "/" + stem + "_sim", newRoot + "/caches"});
     } else if (!scene_->file().directory.empty()) {
         oldBase = scene_->file().directory;  // a groom made from another file: its paths resolve there
@@ -1065,7 +1071,8 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
             return stored;
         }
         std::vector<std::string> copied;
-        const std::string copy = collectFile(full, assetFolder(kind), &copied);
+        // A map or an image into the groom's maps folder (Maya's masks/<groom>), else the kind's.
+        const std::string copy = collectFile(full, kind == "masks" ? mapsDirectory() : assetFolder(kind), &copied);
         if (copy.empty()) {
             r.missing.emplace_back(what, stored);
             return stored;
@@ -1093,7 +1100,7 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
     if (graphChanged) applyGraph();
     if (bake_ && !bake_->prefix.empty() && !insideFolder(bake_->prefix + "x", dir)) {
         // The card bake as a whole: every file of its prefix into cards.
-        FileFollower f(dir, "", dir, assetFolder(""), {{fs::u8path(bake_->prefix).parent_path().generic_u8string(), assetFolder("cards")}});
+        FileFollower f(dir, "", dir, assetFolder(""), {{fs::u8path(bake_->prefix).parent_path().generic_u8string(), defaultBakeDirectory()}});
         std::vector<std::string> suffixes;
         for (const std::string& file : CardBakePaths(bake_->prefix).files()) suffixes.push_back(file.substr(bake_->prefix.size()));
         suffixes.push_back("Preview.png");

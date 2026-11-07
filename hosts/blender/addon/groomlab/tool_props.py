@@ -63,6 +63,17 @@ def _display(self, context):
     display.redraw()
 
 
+def _cards_view(self, context):
+    if props.is_quiet():
+        return
+    from . import cards_view
+    scalp = self.id_data if isinstance(self.id_data, bpy.types.Object) else None
+    if scalp is not None and scalp.groomlab.role == "SCALP":
+        cards_view.refresh_safely(scalp)
+        from . import groom
+        groom._redraw()
+
+
 def _number(name):
     """A group's enum value from its name: the choice stays on the group as others come and go
     (Blender keeps a dynamic enum's number, not its name)."""
@@ -574,6 +585,14 @@ class GroomLabGroomDisplay(bpy.types.PropertyGroup):
                              description="Draw each guide's tube (where its children grow)")
     show_flow: BoolProperty(name="Flow", default=True, update=_display, description="Draw parts and flow arrows")
     show_strands: BoolProperty(name="Strands", default=True, update=_display, description="Show the hair in the viewport")
+    # The cards view (Maya's displayCards and displayCardTextures; cards_view.py).
+    show_cards: BoolProperty(name=defs.label("cards.show"), default=False, update=_cards_view,
+                             description=defs.tip("cards.show"))
+    card_textures: BoolProperty(name=defs.label("cards.textures"), default=True, update=_cards_view,
+                                description=defs.tip("cards.textures"))
+    scalp_bake: StringProperty(subtype="FILE_PATH",  # <folder>/<name>_ of the last Bake Scalp: the hair cap's maps
+                               description="The prefix of the groom's last scalp bake (<prefix>ScalpColor.tga, "
+                                           "<prefix>ScalpCoverage.tga)")
     guide_points: EnumProperty(name="Points", items=[("off", "Off", ""), ("ends", "Roots and tips", ""),
                                                      ("all", "All", "Thinned out on grooms with many guides")],
                                default="all", update=_display, description="The guides' points drawn as dots")

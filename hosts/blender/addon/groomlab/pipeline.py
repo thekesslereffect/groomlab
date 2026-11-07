@@ -1349,6 +1349,8 @@ def move_groom(old, new):
                     k.interpolation = interp
         for k in [k for k in old.keys() if k.startswith(CONTROL_PREFIX)]:
             del old[k]
+        from . import cards_view
+        cards_view.remove_objects(old)  # the new groom makes its own
         g_old.role = "NONE"
         g_old.uid = ""
         g_old.hair = None
@@ -1600,18 +1602,18 @@ def _match_file(index, stored):
 
 def collect_files(scalps):
     """Collect Files (Maya's collect_files): every file the grooms use from outside the .blend's folder
-    copied into its groomlab folders (texture maps into the groom's maps folder, the graph's files
-    into masks, card bakes into cards, Simulate bakes into caches, photos into references) and the
+    copied into its groomlab folders (texture maps and the graph's files into the groom's maps folder,
+    masks/<scalp>, as Maya's go into masks/<groom>; card bakes into cards/<scalp>, Simulate bakes into caches, photos into references) and the
     grooms pointed at the copies; a file there already stays, a missing one is reported. Returns
     {"copied": [(what, copy)], "missing": [(what, path)], "inside": n}. Raises HelperError while the
     .blend is untitled."""
-    from . import photos, tools
+    from . import cards_view, photos, tools
     if not bpy.data.filepath:
         raise HelperError("state", "save the .blend first: its files are collected into its folder")
     folder = os.path.dirname(os.path.abspath(bpy.data.filepath)).replace("\\", "/")
     out = {"copied": [], "missing": [], "inside": 0}
     for scalp in scalps:
-        r = call(scalp, "files_collect", dir=folder, masks=groom.asset_folder("masks"), cards=groom.asset_folder("cards"),
+        r = call(scalp, "files_collect", dir=folder, masks=groom.maps_dir(scalp), cards=cards_view.bake_folder(scalp),
                  caches=groom.asset_folder("caches"))
         out["copied"] += [tuple(c) for c in r.get("copied") or []]
         out["missing"] += [tuple(m) for m in r.get("missing") or []]

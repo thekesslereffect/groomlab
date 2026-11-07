@@ -13,6 +13,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "groomlab/asset_files.h"
 #include "groomlab/paths.h"
 #include "groomlab/texture.h"
 
@@ -493,6 +494,12 @@ std::string GroomDocument::relinkMap(const std::string& name, const std::string&
     entry.kind = "texture";
     entry.texture = storedMapPath(full);
     entry.channels = channels;
+    if (kind == "texture") {  // texture params reading the map's old file read the new one
+        bool followed = false;
+        const std::string graph = retargetFileReaders(graph_.dump(), resolveMapPath(maps.maps[name].texture), entry.texture,
+                                                      [this](const std::string& stored) { return resolveMapPath(stored); }, &followed);
+        if (followed) edit.set(StrokeField::Graph, graph);
+    }
     maps.maps[name] = std::move(entry);
     edit.set(StrokeField::ScalpMaps, maps.toJson());
     paints_.erase(name);

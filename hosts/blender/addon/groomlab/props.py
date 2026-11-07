@@ -111,11 +111,17 @@ class GroomLabObject(bpy.types.PropertyGroup):
                               ("GUIDES", "Guides", "A GroomLab groom's guide curves"),
                               ("HAIR", "Hair", "A GroomLab groom's strands (written by the add-on)"),
                               ("VRAY", "V-Ray Hair", "A GroomLab groom's V-Ray scene: what V-Ray for Blender renders "
-                                                     "for it (vray.py)")], default="NONE")
+                                                     "for it (vray.py)"),
+                              ("CARDS", "Cards", "A GroomLab groom's game cards in the cards view (cards_view.py)"),
+                              ("SCALP_CAP", "Hair Cap", "A GroomLab groom's hair cap in the cards view: the scalp "
+                                                        "just above itself with the baked scalp maps")],
+                       default="NONE")
     uid: StringProperty()
     scalp: PointerProperty(type=bpy.types.Object)
     guides: PointerProperty(type=bpy.types.Object)
     hair: PointerProperty(type=bpy.types.Object)
+    cards: PointerProperty(type=bpy.types.Object)      # the cards view's card mesh (cards_view.py)
+    scalp_cap: PointerProperty(type=bpy.types.Object)  # ... and its hair cap, after Bake Scalp
     uv_map: StringProperty(description="The scalp's UV map the groom reads (empty: the active one)")
     guide_target: StringProperty(default="flat")
     # Maya's previewDensity default (every strand); the budget keeps a dense groom (fur, a big

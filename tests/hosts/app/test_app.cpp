@@ -3937,13 +3937,13 @@ TEST(AppCards, SavedGroomNamesItsBakeForAnotherHost) {
     doc->save(groom);
     const GroomFile file = readGroomFile(groom);
     // In the groom's cards folder (Maya's layout: groomlab/<name>/cards).
-    EXPECT_EQ(std::filesystem::path(file.cardBake.prefix), std::filesystem::path(dir + "/groomlab/named/cards/named_").lexically_normal());
+    EXPECT_EQ(std::filesystem::path(file.cardBake.prefix), std::filesystem::path(dir + "/groomlab/named/cards/named/named_").lexically_normal());
     EXPECT_EQ(file.cardBake.strands, bake.stamp);
     EXPECT_EQ(file.upAxis, "Y");
     {
         std::ifstream in(groom, std::ios::binary);
         const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        EXPECT_NE(text.find("\"prefix\":\"groomlab/named/cards/named_\""), std::string::npos);  // relative: it moves with the groom
+        EXPECT_NE(text.find("\"prefix\":\"groomlab/named/cards/named/named_\""), std::string::npos);  // relative: it moves with the groom
     }
 
     const QImage own(QString::fromStdString(bake.preview));

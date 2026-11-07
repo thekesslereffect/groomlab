@@ -260,6 +260,12 @@ the photo as its background image, in a **GroomLab References** collection.
   photo's, so the camera frame has the photo's shape. Click it again to go back to your view.
   **Lock** keeps the camera where it is. **Opacity**, **Front** / **Back** (the photo over the mesh
   or behind it) and the eye set how the photo shows.
+- **Align Photo...** puts the photo and the mesh side by side, as Maya's and the app's Photos
+  window does: the 3D view splits in two, the photo through its camera on the left and the mesh in
+  perspective on the right (the hair hidden in both, so the features show). Click a feature on the
+  photo and the same feature on the mesh: the pairs draw numbered, and the camera lines up as they
+  come, from 4 pairs with the focal length kept, from 6 solving it too (unless **Keep focal
+  length**). **Esc**, or **Align Photo...** again, joins the view back.
 - **Align by Points** lines the camera up with the mesh. Turn on **Pick Points**, then click a
   feature on the photo while looking through its camera, and the same feature on the mesh in
   another view (the pairs fill in turn and draw numbered; **Esc** when done). **Solve** finds the
@@ -545,7 +551,20 @@ Nick Rutlinh (GroomLab), CC BY 4.0".
   fishtail, rope, cornrow).
 - **Cards > Hero / Mid / Low**: a **Cards** node before the output (one is made when the graph has
   none), set for that level of detail: hero 6 x 2 cards a clump with flyaways, mid 2 x 1, low one
-  flat card a clump.
+  flat card a clump. The Cards node's panel then has the cards' actions, as Maya's has:
+  - **Show cards** swaps the strands for the cards in the viewport (a mesh object under the scalp,
+    rebuilt as the groom changes; renders still show the hair). **Show textures** draws them with
+    their baked maps, cut out by the coverage (Material Preview shows the maps; Solid shading the
+    flat card color); off, the flat card geometry.
+  - **Bake Maps** bakes the cards' maps (Unreal's hair card layout, the atlas, a preview) into the
+    `.blend`'s `groomlab/<file name>/cards/<groom>` folder; the groom keeps the bake, so the cards
+    view shows it and **Card Stats** says when the cards changed since.
+  - **Bake Scalp** bakes the hair near the skin into the scalp's UVs (color and coverage, it needs
+    UVs) beside them, and the cards view shows a **hair cap** under the cards: no bare skin between
+    low LOD cards.
+  - **Card Stats** and the **LOD** levels.
+
+  An untitled `.blend` bakes into a temp folder that its first save takes along.
 - **Collider**: each selected mesh (besides the groom) keeps the strands off it: a **ColliderMesh**
   and a **Collide** node before the output. The mesh follows its animation and edits: GroomLab
   sends it again whenever it moves or changes.
@@ -656,12 +675,10 @@ your own included), the resolution, format, bit depth, padding and supersampling
 
 - **Jiggle** nodes: the panel marks them. Jiggle passes the strands through in Blender (it isn't
   fed the scalp's earlier frames yet), so don't rely on it in a Blender render yet.
-- The tube **outline editor**, and the **Guides from Photos window** (guide lines and mask touch-ups
-  drawn on the photo, the measured look, **Align Photo**): use Maya or the GroomLab app.
-- The cards view (a Cards node's cards and baked maps in the viewport instead of the strands) and
-  **Bake Scalp**: export the cards (Unreal or Unity Cards, glTF Cards) to see them. A Cards node's
-  panel has **Card Stats** and the **LOD** levels. Picking transfer **marker**
-  points is Maya's and the app's too; Blender's transfer uses the markers stored in the groom.
+- The tube **outline editor**, and the **Guides from Photos window**'s drawing (guide lines and mask
+  touch-ups drawn on the photo, the measured look): use Maya or the GroomLab app. Picking transfer
+  **marker** points is Maya's and the app's too; Blender's transfer uses the markers stored in the
+  groom.
 - The Graph Editor's **GPU preview** (Maya's viewport).
 - The **XGen** and **Yeti** importers (Maya): import there, save a `.groom` file and open it in
   Blender.

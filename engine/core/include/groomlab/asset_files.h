@@ -28,7 +28,9 @@ std::string fileSafeName(const std::string& text);
 // Save As: the files a scene names, taken along into the new scene's folders. Each stored path:
 // - a file in the old scene's asset folder (`oldRoot`: <old base>/groomlab/<old name>) goes to the
 //   same place under the new one's (`newRoot`); one in an `extraRoots` folder (where an untitled
-//   scene's files went: {from, to}) to the same place under its `to`;
+//   scene's files went, or a groom's
+//   own folder taking a new name: {from, to}; looked at before the old root) to the same place
+//   under its `to`;
 // - another relative path keeps its place relative to the new base;
 // - an absolute path elsewhere stays (the machine's files), as does a file not on disk.
 // A file is copied (the old scene keeps its own), never over other content: then a free name
@@ -73,5 +75,16 @@ std::string collectFile(const std::string& path, const std::string& folder, std:
 // replaced by what it returns; the graph's text back (`changed`: whether any value changed).
 std::string followGraphFiles(const std::string& graphJson, const std::function<std::string(const std::string&)>& follow,
                              bool* changed = nullptr);
+
+// Whether two paths name the same file as the file system compares them (normal, case-blind on
+// Windows), whether or not it is there.
+bool samePathText(const std::string& a, const std::string& b);
+
+// A texture map's file moved or was relinked: the graph's file params naming `from` (an absolute
+// path; each stored value read through `resolve`) name `to` (as the host stores it) instead. The
+// app's and Blender's painted params read a texture map by its file (wireParamMap), so they follow
+// the map. The graph's text back (`changed`: whether any did).
+std::string retargetFileReaders(const std::string& graphJson, const std::string& from, const std::string& to,
+                                const std::function<std::string(const std::string&)>& resolve, bool* changed = nullptr);
 
 }  // namespace groomlab

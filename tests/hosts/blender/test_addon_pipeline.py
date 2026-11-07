@@ -485,6 +485,93 @@ class PipelineOpsTest(unittest.TestCase):
         self.assertEqual(bpy.ops.groomlab.add_sample(sample="manny"), {"FINISHED"})
         self.assertEqual(bpy.context.view_layer.objects.active.name, "manny_head")
 
+    def test_5_cards_view_bakes_and_hair_cap(self):
+        # Maya's Cards node actions in Blender: Show cards / Show textures, Bake Maps, Bake Scalp.
+        cards_view = importlib.import_module(bu.MODULE + ".cards_view")
+        head = groom_on(self.head, guides=20)
+        self.assertEqual(bpy.ops.groomlab.add_cards(lod="low"), {"FINISHED"})
+        rt = groom.ensure(head)
+        node = first(head, "Cards")
+        process.call("set_param", session=rt.session, node=node, param="maxCards", value=30)
+        groom.mark(head, "eval")
+        groom.flush()
+        t, g = head.groomlab_tools, head.groomlab
+        self.assertFalse(t.show_cards)
+        self.assertTrue(t.card_textures)
+        # Show cards: the card mesh instead of the strands (the viewport's: not rendered), flat before a bake.
+        t.show_cards = True
+        cards = g.cards
+        self.assertIsNotNone(cards)
+        self.assertEqual((cards.parent, cards.groomlab.role, cards.groomlab.scalp), (head, "CARDS", head))
+        self.assertEqual((cards.hide_viewport, cards.hide_render, cards.hide_select), (False, True, True))
+        self.assertTrue(g.hair.hide_viewport)
+        polygons = len(cards.data.polygons)
+        self.assertGreater(polygons, 0)
+        self.assertIn("aoWorld", cards.data.uv_layers)
+        self.assertFalse(any(n.type == "TEX_IMAGE" for n in cards.data.materials[0].node_tree.nodes))
+        self.assertIsNone(g.scalp_cap)  # (no scalp bake yet)
+        self.assertFalse(rt.cards_view["baked"])
+        # Bake Maps: the groom's folder in the cards folder (an untitled .blend's: the temp root, taken
+        # along by its first save); the groom keeps the bake and the cards show its preview.
+        self.assertEqual(bpy.data.filepath, "")
+        folder = cards_view.bake_folder(head)
+        self.assertEqual(folder, groom.temp_root() + "/cards/Head")
+        self.assertEqual(bpy.ops.groomlab.cards_bake(resolution=32), {"FINISHED"})
+        for f in ("Color.tga", "Coverage.tga", "AO.tga", "Atlas.json", "Preview.png"):
+            self.assertTrue(os.path.isfile("%s/Head_%s" % (folder, f)), f)
+        textures = [n for n in g.cards.data.materials[0].node_tree.nodes if n.type == "TEX_IMAGE"]
+        self.assertEqual(len(textures), 1)
+        self.assertTrue(textures[0].image.filepath.replace("\\", "/").endswith("Head_Preview.png"))
+        stats = pipeline.call(head, "card_stats")
+        self.assertEqual((stats["baked"], stats["stale"]), (True, False))
+        self.assertTrue(rt.cards_view["baked"])
+        # Show textures off: the flat card geometry.
+        t.card_textures = False
+        self.assertFalse(any(n.type == "TEX_IMAGE" for n in g.cards.data.materials[0].node_tree.nodes))
+        t.card_textures = True
+        # Bake again: the groom's own bake rewritten in place (no Head_2).
+        self.assertEqual(bpy.ops.groomlab.cards_bake(resolution=32), {"FINISHED"})
+        self.assertFalse(os.path.exists(folder + "/Head_2_Color.tga"))
+        # Bake Scalp: the hair cap under the cards, the scalp just above itself with the scalp maps.
+        self.assertEqual(bpy.ops.groomlab.cards_bake_scalp(resolution=64), {"FINISHED"})
+        self.assertEqual(t.scalp_bake, folder + "/Head_")
+        cap = g.scalp_cap
+        self.assertEqual((cap.groomlab.role, cap.hide_viewport, cap.hide_render, cap.parent), ("SCALP_CAP", False, True, head))
+        self.assertEqual(len(cap.data.polygons), len(head.data.polygons))
+        self.assertEqual(sorted(n.image.name for n in cap.data.materials[0].node_tree.nodes if n.type == "TEX_IMAGE"),
+                         ["Head_ScalpColor.tga", "Head_ScalpCoverage.tga"])
+        self.assertEqual(bpy.ops.groomlab.cards_bake_scalp(resolution=64), {"FINISHED"})
+        self.assertEqual(t.scalp_bake, folder + "/Head_")  # its own files rewritten
+        # Another groom's scalp maps there are not written over: a bake by another name takes Head_2.
+        for name in ("Other", "Other_2"):
+            self.assertEqual(process.call("bake_scalp", session=rt.session, directory=folder, name="Other", resolution=16,
+                                          own=t.scalp_bake)["name"], name)
+        # The cards follow the groom: fewer cards, a smaller mesh.
+        process.call("set_param", session=rt.session, node=node, param="maxCards", value=8)
+        groom.mark(head, "eval")
+        groom.flush()
+        self.assertLess(len(g.cards.data.polygons), polygons)
+        self.assertTrue(pipeline.call(head, "card_stats")["stale"])
+        self.assertTrue(rt.cards_view["stale"])
+        # Show cards off: the strands again, the card objects hidden.
+        t.show_cards = False
+        self.assertTrue(g.cards.hide_viewport and g.scalp_cap.hide_viewport)
+        self.assertFalse(g.hair.hide_viewport)
+        # The first save takes the bakes along into the .blend's groomlab folder.
+        blend = self.tmp("cards.blend")
+        bpy.ops.wm.save_as_mainfile(filepath=blend)
+        saved = cards_view.bake_folder(head)
+        self.assertEqual(os.path.normcase(saved), os.path.normcase(groom.asset_folder("cards") + "/Head"))
+        self.assertEqual(t.scalp_bake, saved + "/Head_")
+        self.assertTrue(os.path.isfile(t.scalp_bake + "ScalpColor.tga"))
+        t.show_cards = True
+        bake = rt.cards_view and process.call("card_view", session=rt.session)["bake"]
+        self.assertEqual(os.path.normcase(bake["prefix"]), os.path.normcase(saved + "/Head_"))
+        # Remove Groom: the cards view's objects go with it.
+        select_only(head)
+        self.assertEqual(bpy.ops.groomlab.remove_groom("EXEC_DEFAULT"), {"FINISHED"})
+        self.assertFalse(any(o.groomlab.role in ("CARDS", "SCALP_CAP") for o in bpy.data.objects))
+
 
 if __name__ == "__main__":
     bu.run(PipelineTest, PipelineOpsTest)

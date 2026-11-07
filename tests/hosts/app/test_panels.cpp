@@ -542,12 +542,12 @@ TEST(AppPanels, AssetFoldersAndSaveAsTakesTheFilesAlong) {
     auto doc = GroomDocument::open(path);
     ASSERT_TRUE(doc);
     EXPECT_EQ(doc->assetFolder("masks"), base + "/groomlab/sample/masks");
-    EXPECT_EQ(doc->mapsDirectory(), base + "/groomlab/sample/masks");
-    EXPECT_EQ(doc->defaultBakeDirectory(), base + "/groomlab/sample/cards");
+    EXPECT_EQ(doc->mapsDirectory(), base + "/groomlab/sample/masks/sample") << "the groom's own folder, as Maya's";
+    EXPECT_EQ(doc->defaultBakeDirectory(), base + "/groomlab/sample/cards/sample") << "the groom's own folder, as Maya's";
     EXPECT_EQ(doc->simulationCachePath("sim1"), base + "/groomlab/sample/caches/sample_sim1_sim.abc");
     ASSERT_EQ(doc->createMap("tint", "texture", false, 0.5f, 32), "");
     const std::string tintBefore = doc->textureMapFile("tint");
-    EXPECT_EQ(tintBefore, base + "/groomlab/sample/masks/tint.png");
+    EXPECT_EQ(tintBefore, base + "/groomlab/sample/masks/sample/tint.png");
     ASSERT_TRUE(fs::exists(fs::u8path(tintBefore)));
     // A photo: copied into references, stored relative to the groom.
     const std::string photo = base + "/elsewhere/front.png";
@@ -564,8 +564,8 @@ TEST(AppPanels, AssetFoldersAndSaveAsTakesTheFilesAlong) {
     fs::create_directories(fs::u8path(other).parent_path());
     doc->save(other);
     const std::string newBase = base + "/v2";
-    EXPECT_EQ(doc->textureMapFile("tint"), newBase + "/groomlab/shot_v2/masks/tint.png");
-    EXPECT_TRUE(fs::exists(fs::u8path(newBase + "/groomlab/shot_v2/masks/tint.png")));
+    EXPECT_EQ(doc->textureMapFile("tint"), newBase + "/groomlab/shot_v2/masks/shot_v2/tint.png") << "into the new name's folder";
+    EXPECT_TRUE(fs::exists(fs::u8path(newBase + "/groomlab/shot_v2/masks/shot_v2/tint.png")));
     EXPECT_TRUE(fs::exists(fs::u8path(tintBefore))) << "the old file keeps its own";
     EXPECT_EQ(json::parse(doc->referencePhotos())[0]["image"], "groomlab/shot_v2/references/front.png");
     EXPECT_TRUE(fs::exists(fs::u8path(newBase + "/groomlab/shot_v2/references/front.png")));
@@ -574,19 +574,51 @@ TEST(AppPanels, AssetFoldersAndSaveAsTakesTheFilesAlong) {
     // Read back: the new file names its own copies.
     auto again = GroomDocument::open(other);
     ASSERT_TRUE(again);
-    EXPECT_EQ(again->map("tint")->texture, "groomlab/shot_v2/masks/tint.png");
+    EXPECT_EQ(again->map("tint")->texture, "groomlab/shot_v2/masks/shot_v2/tint.png");
     // Collect Files: a map linked to an image outside the groom's folder copied into masks and
     // linked there; what is inside stays.
     const std::string library = base + "/library/skin.png";
     fs::create_directories(fs::u8path(library).parent_path());
-    fs::copy_file(fs::u8path(newBase + "/groomlab/shot_v2/masks/tint.png"), fs::u8path(library), fs::copy_options::overwrite_existing);
+    fs::copy_file(fs::u8path(newBase + "/groomlab/shot_v2/masks/shot_v2/tint.png"), fs::u8path(library), fs::copy_options::overwrite_existing);
     ASSERT_EQ(doc->relinkMap("tint", library), "");
     GroomDocument::CollectReport collected;
     ASSERT_EQ(doc->collectFiles(&collected), "");
     ASSERT_EQ(collected.copied.size(), 1u);
-    EXPECT_EQ(doc->map("tint")->texture, "groomlab/shot_v2/masks/skin.png");
-    EXPECT_TRUE(fs::exists(fs::u8path(newBase + "/groomlab/shot_v2/masks/skin.png")));
+    EXPECT_EQ(doc->map("tint")->texture, "groomlab/shot_v2/masks/shot_v2/skin.png");
+    EXPECT_TRUE(fs::exists(fs::u8path(newBase + "/groomlab/shot_v2/masks/shot_v2/skin.png")));
     EXPECT_GE(collected.inside, 1) << "the photo was in the folder already";
+}
+
+TEST(AppPanels, ATextureParamFollowsItsMapsFile) {
+    // A param painted into a texture reads the map by its file ({"texture": <file>}): a rename
+    // that moves the file, and a relink, take the param along (one undo step with the map).
+    namespace fs = std::filesystem;
+    const std::string path = sampleCopy("groomlab_app_texparam");
+    const std::string base = fs::u8path(path).parent_path().generic_u8string();
+    auto doc = GroomDocument::open(path);
+    ASSERT_TRUE(doc);
+    const std::string scatter = nodeOfType(*doc, "Scatter");
+    std::string map;
+    ASSERT_EQ(doc->paintParam(scatter, "density", &map, "texture"), "");
+    auto reads = [&] { return doc->paramOrDefault(scatter, "density").value("texture", std::string()); };
+    const std::string first = doc->map(map)->texture;
+    EXPECT_EQ(reads(), first);
+    ASSERT_EQ(doc->renameMap(map, "thick"), "");
+    const std::string renamed = doc->map("thick")->texture;
+    EXPECT_NE(renamed, first) << "the file follows the map's name";
+    EXPECT_EQ(reads(), renamed);
+    EXPECT_EQ(doc->undo(), "");
+    EXPECT_EQ(reads(), first);
+    EXPECT_EQ(doc->redo(), "");
+    EXPECT_EQ(reads(), renamed);
+    const std::string library = base + "/library/thick.png";
+    fs::create_directories(fs::u8path(library).parent_path());
+    fs::copy_file(fs::u8path(doc->textureMapFile("thick")), fs::u8path(library), fs::copy_options::overwrite_existing);
+    ASSERT_EQ(doc->relinkMap("thick", library), "");
+    EXPECT_EQ(reads(), doc->map("thick")->texture);
+    EXPECT_NE(reads(), renamed);
+    EXPECT_EQ(doc->undo(), "");
+    EXPECT_EQ(reads(), renamed);
 }
 
 TEST(AppPanels, MapsPanelMakesPaintsShowsAndUndoesMaps) {
@@ -628,7 +660,7 @@ TEST(AppPanels, MapsPanelMakesPaintsShowsAndUndoesMaps) {
     EXPECT_EQ(doc->map("detail")->kind, "texture");
     const std::string file = doc->textureMapFile("detail");
     EXPECT_TRUE(std::filesystem::exists(std::filesystem::u8path(file))) << file;
-    EXPECT_EQ(doc->map("detail")->texture, "groomlab/sample/masks/detail.png") << "stored relative to the groom";
+    EXPECT_EQ(doc->map("detail")->texture, "groomlab/sample/masks/sample/detail.png") << "stored relative to the groom";
     EXPECT_EQ(doc->maps().size(), layersBefore + 4);
     EXPECT_NE(panel.createFromFields(), "") << "a name taken is refused";
     // The same name twice is refused; a bad name too: the rule Maya keeps (scalp_maps.h), so
@@ -762,7 +794,7 @@ TEST(AppPanels, MapsPanelMakesPaintsShowsAndUndoesMaps) {
     ASSERT_TRUE(again->map("tint"));
     EXPECT_EQ(again->map("tint")->channels, kColorMap);
     ASSERT_TRUE(again->map("detail"));
-    EXPECT_EQ(again->map("detail")->texture, "groomlab/sample/masks/detail.png");
+    EXPECT_EQ(again->map("detail")->texture, "groomlab/sample/masks/sample/detail.png");
     EXPECT_TRUE(again->map("stiff"));
     float sumAgain = 0.0f;
     for (const float v : again->session().scalpMaps().maps.at("density").values) sumAgain += v;

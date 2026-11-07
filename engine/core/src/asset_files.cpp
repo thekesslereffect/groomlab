@@ -88,14 +88,14 @@ FileFollower::FileFollower(std::string oldBase, std::string oldRoot, std::string
       extraRoots_(std::move(extraRoots)) {}
 
 std::string FileFollower::destination(const std::string& source, const std::string& storedPath, bool relative) const {
-    for (const std::string* root : {&oldRoot_}) {
-        const std::string rest = inside(source, *root);
-        if (!rest.empty()) return (fs::u8path(newRoot_) / fs::u8path(rest)).lexically_normal().generic_u8string();
-    }
+    // The extra roots first: one may lie inside the old root (a groom's own folder that takes the
+    // new name).
     for (const auto& [from, to] : extraRoots_) {
         const std::string rest = inside(source, from);
         if (!rest.empty()) return (fs::u8path(to) / fs::u8path(rest)).lexically_normal().generic_u8string();
     }
+    const std::string rest = inside(source, oldRoot_);
+    if (!rest.empty()) return (fs::u8path(newRoot_) / fs::u8path(rest)).lexically_normal().generic_u8string();
     if (relative) return (fs::u8path(newBase_) / fs::u8path(storedPath)).lexically_normal().generic_u8string();
     return {};
 }
@@ -260,6 +260,17 @@ std::string followGraphFiles(const std::string& graphJson, const std::function<s
     });
     if (changed) *changed = any;
     return any ? graph.dump() : graphJson;
+}
+
+bool samePathText(const std::string& a, const std::string& b) { return !a.empty() && !b.empty() && key(a) == key(b); }
+
+std::string retargetFileReaders(const std::string& graphJson, const std::string& from, const std::string& to,
+                                const std::function<std::string(const std::string&)>& resolve, bool* changed) {
+    if (changed) *changed = false;
+    if (from.empty() || to.empty()) return graphJson;
+    return followGraphFiles(
+        graphJson, [&](const std::string& stored) { return samePathText(resolve ? resolve(stored) : stored, from) ? to : stored; },
+        changed);
 }
 
 }  // namespace groomlab

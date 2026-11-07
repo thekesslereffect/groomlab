@@ -1965,6 +1965,32 @@ class ToolsTest(HelperTestCase):
         self.assertFalse(os.path.exists(color_file))
         self.call("redo")
         self.assertEqual(maps()["color"]["file"], color_file)
+        # A param painted into a texture reads the map by its file (map_for_param's texture): the
+        # param follows the file through a rename and a relink.
+        width = [n["name"] for n in self.call("list_nodes")["nodes"] if n["type"] == "Width"][0]
+        thin = self.call("map_for_param", node=width, param="width", kind="texture", resolution=32)["name"]
+
+        def norm(path):
+            return os.path.normcase(os.path.normpath(path))
+
+        def width_file():
+            value = next(n for n in self.call("get_graph")["graph"]["nodes"] if n["name"] == width)["params"]["width"]
+            return norm(value["texture"])
+
+        first = maps()[thin]["file"]
+        self.assertEqual(width_file(), norm(first))
+        r = self.call("map_rename", name=thin, to="thin")
+        self.assertTrue(r["graphChanged"])
+        self.assertNotEqual(norm(r["file"]), norm(first))
+        self.assertEqual(width_file(), norm(r["file"]))
+        self.call("undo")
+        self.assertEqual(width_file(), norm(first))
+        self.call("redo")
+        other = os.path.join(self.tmp, "thin_other.png")
+        shutil.copyfile(r["file"], other)
+        self.call("map_relink", name="thin", path=other)
+        self.assertEqual(width_file(), norm(maps()["thin"]["file"]))
+        self.assertEqual(width_file(), norm(other))
         self.call("map_rename", name="layer", to="layer2")
         with self.assertRaises(HelperError):
             self.call("map_rename", name="layer2", to="dens")  # taken

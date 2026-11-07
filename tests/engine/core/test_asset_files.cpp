@@ -5,6 +5,8 @@
 #include <fstream>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 #include "groomlab/asset_files.h"
 
 using namespace groomlab;
@@ -115,4 +117,45 @@ TEST(AssetFiles, CollectFileCopiesInNeverOver) {
     EXPECT_EQ(read(masks + "/clash.png"), "theirs");
     EXPECT_EQ(collectFile(root + "/library/gone.png", masks, &copied), "");
     EXPECT_EQ(copied.size(), 4u);
+}
+
+// A groom's own folder inside the old root takes the new name (the app's masks/<name>): an extra
+// root is looked at before the old root.
+TEST(AssetFiles, AnExtraRootInsideTheOldRootWins) {
+    const std::string root = scratch("extra_first");
+    const std::string oldBase = root + "/old", newBase = root + "/new";
+    write(oldBase + "/groomlab/shot/masks/shot/crown.png", "crown");
+    write(oldBase + "/groomlab/shot/caches/sim.abc", "sim");
+    FileFollower f(oldBase, assetFolder(oldBase, "shot"), newBase, assetFolder(newBase, "shot_v2"),
+                   {{assetFolder(oldBase, "shot", "masks") + "/shot", assetFolder(newBase, "shot_v2", "masks") + "/shot_v2"}});
+    EXPECT_EQ(f.follow("groomlab/shot/masks/shot/crown.png"), "groomlab/shot_v2/masks/shot_v2/crown.png");
+    EXPECT_EQ(read(newBase + "/groomlab/shot_v2/masks/shot_v2/crown.png"), "crown");
+    EXPECT_EQ(f.follow("groomlab/shot/caches/sim.abc"), "groomlab/shot_v2/caches/sim.abc") << "the rest as the old root";
+}
+
+// A texture map's file moved or relinked: the graph's file params naming it (as `resolve` reads
+// them; compounds too) name the new one; others stay.
+TEST(AssetFiles, FileReadersFollowAMovedMap) {
+    const std::string graph = R"({"nodes": [
+        {"name": "scatter", "type": "Scatter", "params": {"density": {"texture": "masks/hair/dense.png", "component": "r", "min": 0, "max": 60}}},
+        {"name": "width", "type": "Width", "params": {"width": {"texture": "masks/hair/other.png"}}},
+        {"name": "c", "type": "Compound", "params": {"definition": {"graph": {"nodes": [
+            {"name": "inner", "type": "Clump", "params": {"strength": {"texture": "MASKS/hair/dense.png"}}}]}}}}]})";
+    auto resolve = [](const std::string& stored) { return "C:/shot/" + stored; };
+    bool changed = false;
+    const nlohmann::json out = nlohmann::json::parse(
+        retargetFileReaders(graph, "C:/shot/masks/hair/dense.png", "masks/hair/thick.png", resolve, &changed));
+    EXPECT_TRUE(changed);
+    EXPECT_EQ(out["nodes"][0]["params"]["density"]["texture"], "masks/hair/thick.png");
+    EXPECT_EQ(out["nodes"][0]["params"]["density"]["max"], 60);
+    EXPECT_EQ(out["nodes"][1]["params"]["width"]["texture"], "masks/hair/other.png");
+    const auto inner = out["nodes"][2]["params"]["definition"]["graph"]["nodes"][0]["params"]["strength"]["texture"];
+#ifdef _WIN32
+    EXPECT_EQ(inner, "masks/hair/thick.png") << "case-blind on Windows";
+#else
+    EXPECT_EQ(inner, "MASKS/hair/dense.png");
+#endif
+    EXPECT_EQ(retargetFileReaders(graph, "C:/shot/masks/hair/none.png", "x.png", resolve, &changed), graph);
+    EXPECT_FALSE(changed);
+    EXPECT_EQ(retargetFileReaders(graph, "", "x.png", resolve, &changed), graph);
 }

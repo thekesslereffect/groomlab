@@ -200,9 +200,9 @@ class GroomFileTest(unittest.TestCase):
         exported = read_json(path)
         self.assertEqual(exported["upAxis"], "Y")
         self.assertEqual([m["new"]["point"] for m in exported["transferMarkers"]], [[5, 1, 0], [6, 0, 0], [5, 0, 1]])
-        self.assertEqual(exported["cardBake"], {"prefix": "groomlab/hair/cards/hair_", "strands": stamp})
+        self.assertEqual(exported["cardBake"], {"prefix": "groomlab/hair/cards/hair/hair_", "strands": stamp})
         for name in ("Color.tga", "Atlas.json", "Preview.png"):
-            self.assertTrue(os.path.isfile(os.path.join(WORK_DIR, "exports", "groomlab", "hair", "cards", "hair_" + name)), name)
+            self.assertTrue(os.path.isfile(os.path.join(WORK_DIR, "exports", "groomlab", "hair", "cards", "hair", "hair_" + name)), name)
         self.assertEqual(exported["maps"]["dense"]["texture"], "../source/groomlab/source/masks/hair/dense.png")
 
         new_scene("imported")
@@ -462,6 +462,60 @@ class GroomFileTest(unittest.TestCase):
         self.assertIn("_2_fringe", groomlab.list_maps(imported))
         self.assertNotIn("2-fringe", groomlab.list_maps(imported))
         self.assertEqual(groomlab.map_users(imported, "_2_fringe"), [("length", "keep")])
+        self.assertEqual(groomlab.errors(imported), [])
+
+    def test_a_texture_param_reads_the_map_maya_paints(self):
+        """The app and Blender paint a setting into a texture map the param reads by its file
+        ({"texture": <the map's image>}). Imported into a scene (here the file's own folder and
+        name, as the app's groom and a Maya scene beside it share groomlab/<name>), the map's image
+        is copied for the groom: the param reads the copy, so painting it in Maya moves the groom,
+        and Paint on the param continues that map. The file's own image stays as it was."""
+        folder = new_scene("app_paint")
+        groom = groomlab.create_groom(cmds.polySphere(radius=1, subdivisionsX=30, subdivisionsY=15)[0], name="hair")
+        cmds.setAttr(groom + ".previewDensity", 1.0)
+        image = os.path.join(folder, "groomlab", "app_paint", "masks", "scatter_density.png").replace("\\", "/")
+        groomlab.add_map(groom, "scatter_density", 1.0, kind="texture", resolution=32, texture=image)
+        groomlab.set_param(groom, "scatter", "density", groomlab.texture_map(image, "r", 0.0, 60.0))
+        path = os.path.join(folder, "app_paint.groom")
+        groomlab.export_groom(groom, path)
+        stored = read_json(path)
+        self.assertEqual(stored["maps"]["scatter_density"]["texture"], "groomlab/app_paint/masks/scatter_density.png")
+        density = next(n for n in stored["graph"]["nodes"] if n["name"] == "scatter")["params"]["density"]
+        self.assertEqual(density["texture"], "groomlab/app_paint/masks/scatter_density.png")
+        before = file_bytes(image)
+
+        new_scene("app_paint")
+        imported = groomlab.import_groom(path)
+        cmds.setAttr(imported + ".previewDensity", 1.0)
+        copy = groomlab.map_texture(imported, "scatter_density")
+        self.assertNotEqual(os.path.normcase(copy), os.path.normcase(image))
+        param = next(n for n in groomlab.get_graph(imported)["nodes"] if n["name"] == "scatter")["params"]["density"]
+        self.assertEqual(os.path.normcase(groomlab.resolve_path(param["texture"], imported)), os.path.normcase(copy))
+        self.assertEqual(groomlab.param_map(imported, "scatter", "density"), ("scatter_density", "luminance"))
+        count = cmds.getAttr(imported + ".outStrandCount")
+        self.assertGreater(count, 100)
+        groomlab.brush_stroke(imported, "paint", [(0.0, 1.0, 0.0)], radius=1.5, strength=1.0, attribute="scatter_density",
+                              value=0.0, paint_kind="texture")
+        self.assertLess(cmds.getAttr(imported + ".outStrandCount"), count * 0.9)  # the stroke's top of the sphere bare
+        self.assertEqual(file_bytes(image), before)
+        self.assertEqual(groomlab.errors(imported), [])
+
+        def reads():
+            value = next(n for n in groomlab.get_graph(imported)["nodes"] if n["name"] == "scatter")["params"]["density"]
+            return os.path.normcase(os.path.normpath(groomlab.resolve_path(value["texture"], imported)))
+
+        # Renamed (its file follows the name) and relinked in Maya: the param follows the map.
+        groomlab.rename_map(imported, "scatter_density", "thick")
+        self.assertEqual(reads(), os.path.normcase(os.path.normpath(groomlab.map_texture(imported, "thick"))))
+        self.assertIn("thick", os.path.basename(groomlab.map_texture(imported, "thick")))
+        cmds.undo()
+        self.assertEqual(reads(), os.path.normcase(os.path.normpath(copy)))
+        cmds.redo()
+        relinked = os.path.join(folder, "library", "thick.png").replace("\\", "/")
+        os.makedirs(os.path.dirname(relinked))
+        shutil.copyfile(groomlab.map_texture(imported, "thick"), relinked)
+        groomlab.set_map_texture(imported, "thick", relinked)
+        self.assertEqual(reads(), os.path.normcase(os.path.normpath(relinked)))
         self.assertEqual(groomlab.errors(imported), [])
 
     @unittest.skipUnless(APP, "the standalone app is not built (GROOMLAB_BUILD_APP)")

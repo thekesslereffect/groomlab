@@ -164,6 +164,35 @@ class PhotosTest(unittest.TestCase):
         for x, image in zip(p.pairs, before):
             x.image = image
 
+        # Align Photo's live solve: the camera lines up as the pairs come (8 complete: the focal length
+        # solved too); a locked camera stays. Without a 3D view (background mode) Align Photo says why.
+        cam.matrix_world = truth @ Matrix.Translation((0.02, -0.01, 0.0))
+        cam.data.lens = 42.0
+        self.assertIsNotNone(photos.live_solve(cam, head))
+        np.testing.assert_allclose(np.array(cam.matrix_world), np.array(truth), atol=1e-3)
+        self.assertAlmostEqual(cam.data.lens, 50.0, places=1)
+        p.locked = True
+        self.assertIsNone(photos.live_solve(cam, head))
+        p.locked = False
+        # Align Photo: the 3D view split in two, the photo through its camera on the left, the mesh in
+        # perspective on the right; again: the view joined back, picking done.
+        def views():
+            return sorted((a for a in bpy.context.window.screen.areas if a.type == "VIEW_3D"), key=lambda a: a.x)
+        self.assertFalse(photos.aligning())
+        count = len(views())
+        self.assertGreater(count, 0)
+        self.assertEqual(bpy.ops.groomlab.photo_align(), {"FINISHED"})
+        self.assertTrue(photos.aligning())  # (Pick Points starts too: a modal operator, which background mode cannot run)
+        self.assertEqual(len(views()), count + 1)
+        # (Background mode lays no areas out: one half through the camera, the other in perspective.)
+        perspectives = [a.spaces.active.region_3d.view_perspective for a in views()]
+        self.assertEqual((perspectives.count("CAMERA"), "PERSP" in perspectives), (1, True))
+        self.assertEqual(scene.camera, cam)
+        self.assertEqual(bpy.ops.groomlab.photo_align(), {"FINISHED"})
+        self.assertFalse(photos.aligning())
+        self.assertFalse(photos._picking[0])
+        # (The added half closes in Blender's UI; background mode cannot close an area: checked by hand.)
+
         # Pick again, delete, keep the focal length with 4 pairs, clear.
         p.pair_index = 2
         self.assertEqual(bpy.ops.groomlab.pairs_repick(kind="mesh"), {"FINISHED"})
@@ -199,7 +228,8 @@ class PhotosTest(unittest.TestCase):
         photos.draw_tab(lay, bpy.context, 40)
         ops = [e[1] for e in lay.log if e[0] == "operator"]
         for idname in ("groomlab.photo_import", "groomlab.photo_rename", "groomlab.photo_remove",
-                       "groomlab.photo_look_through", "groomlab.photo_pick", "groomlab.pairs_solve", "groomlab.pairs_clear",
+                       "groomlab.photo_look_through", "groomlab.photo_pick", "groomlab.photo_align",
+                       "groomlab.pairs_solve", "groomlab.pairs_clear",
                        "groomlab.pairs_delete", "groomlab.photos_guides"):
             self.assertIn(idname, ops)
         self.assertIn(("menu", "GROOMLAB_MT_photo_context"), lay.log)

@@ -2348,7 +2348,7 @@ json mapRename(ToolState& t, const json& args) {
     const std::string kind = mapKindOf(s, from);
     StrokeEdit edit;
     edit.mode = "rename map " + from;
-    std::string file;
+    std::string file, movedFrom;
     if (kind == "guides") {
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { hh.renameAttribute(from, to); });
         edit.set(StrokeField::Guides, h.toJson());
@@ -2369,6 +2369,7 @@ json mapRename(ToolState& t, const json& args) {
                     fileAfter(t, std::move(source));
                     fileAfter(t, std::move(made));
                     entry.texture = target;
+                    movedFrom = full;
                 }
             }
             file = entry.texture;
@@ -2378,7 +2379,10 @@ json mapRename(ToolState& t, const json& args) {
         edit.set(StrokeField::ScalpMaps, maps.toJson());
     }
     bool retargeted = false;
-    const std::string graph = retargetMapReaders(s.groom->data().graphJson, from, to, &retargeted);
+    std::string graph = retargetMapReaders(s.groom->data().graphJson, from, to, &retargeted);
+    bool followed = false;  // texture params reading the file read it where it went
+    graph = retargetFileReaders(graph, movedFrom, file, [&s](const std::string& stored) { return resolveMapFile(s, stored); }, &followed);
+    retargeted = retargeted || followed;
     if (retargeted) edit.set(StrokeField::Graph, graph);
     commitEdit(t, std::move(edit));
     // The Paint brush on it follows.
@@ -2699,6 +2703,12 @@ json mapRelink(ToolState& t, const json& args) {
     ScalpMaps maps = s.groom->scalpMaps();
     ScalpMapEntry entry{"texture", {}, file};
     entry.channels = channels;
+    if (kind == "texture") {  // texture params reading the map's old file read the new one
+        bool followed = false;
+        const std::string graph = retargetFileReaders(s.groom->data().graphJson, resolveMapFile(s, maps.maps[name].texture), file,
+                                                      [&s](const std::string& stored) { return resolveMapFile(s, stored); }, &followed);
+        if (followed) edit.set(StrokeField::Graph, graph);
+    }
     maps.maps[name] = std::move(entry);
     dropPaints(t);
     edit.set(StrokeField::ScalpMaps, maps.toJson());
@@ -2781,6 +2791,16 @@ json mapsMoveTo(ToolState& t, const json& args) {
     if (changed) {
         dropPaints(t);
         s.groom->setScalpMaps(maps);
+        // Texture params reading a moved map's file read the copy (the painted params name it).
+        std::string graph = s.groom->data().graphJson;
+        bool graphMoved = false;
+        for (const json& m : moved) {
+            bool followed = false;
+            graph = retargetFileReaders(graph, m["from"].get<std::string>(), m["to"].get<std::string>(),
+                                        [&s](const std::string& stored) { return resolveMapFile(s, stored); }, &followed);
+            graphMoved = graphMoved || followed;
+        }
+        if (graphMoved) s.groom->setGraphJson(graph);
         BrushToolSettings& st = t.tool.settings;
         const auto it = maps.maps.find(st.brush.attribute);
         if (st.paintKind == "texture" && it != maps.maps.end()) st.paintTexture = it->second.texture;

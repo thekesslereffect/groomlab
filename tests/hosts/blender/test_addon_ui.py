@@ -187,7 +187,9 @@ class DefinitionsTest(unittest.TestCase):
         for action_id, (idname, props) in actions.BINDINGS.items():
             self.assertIn(action_id, every, action_id)
             if idname.startswith("prop:"):
-                self.assertIn(idname.split(".")[-1], t.bl_rna.properties, action_id)
+                owner = (bpy.types.Object.bl_rna.properties["groomlab_tools"].fixed_type if idname.startswith("prop:groom.")
+                         else t.bl_rna)
+                self.assertIn(idname.split(".")[-1], owner.properties, action_id)
                 continue
             module, op = idname.split(".")
             self.assertTrue(hasattr(getattr(bpy.ops, module), op), "%s: no operator %s" % (action_id, idname))

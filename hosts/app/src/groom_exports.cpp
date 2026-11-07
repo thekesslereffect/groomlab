@@ -510,7 +510,9 @@ std::vector<std::string> GroomDocument::bakeSimulation(double lastFrame, const S
 }
 
 std::string GroomDocument::defaultBakeDirectory() const {
-    return assetFolder("cards");  // Maya's cards folder: groomlab/<name>/cards (untitled: its own temp folder)
+    // The groom's own folder in cards, as Maya keeps a groom's: groomlab/<name>/cards/<name>
+    // (untitled: its own temp folder).
+    return assetFolder("cards") + "/" + fileSafeName(defaultBakeName());
 }
 
 std::string GroomDocument::defaultBakeName() const {
@@ -530,9 +532,8 @@ void GroomDocument::adoptBake() {
         std::replace(at.prefix.begin(), at.prefix.end(), '\\', '/');
         stamp = named.strands;
     } else if (!path_.empty()) {
-        // The default place (groomlab/<name>/cards), else where earlier versions baked (<stem>_cards).
-        at = CardBakePaths::besideGroomFile(path_);
-        if (!at.exists()) at = CardBakePaths::legacyBesideGroomFile(path_);
+        // The default place (groomlab/<name>/cards/<name>), else where earlier versions baked.
+        at = CardBakePaths::foundBesideGroomFile(path_);
     } else {
         return;
     }

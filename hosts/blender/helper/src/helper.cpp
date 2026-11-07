@@ -260,6 +260,7 @@ void adopt(Session& s, GroomFile file) {
     s.simJob.reset();
     applySearchPaths(s);
     applyScalpFrames(s);  // the host's scalp at other frames feeds the new groom's Simulate nodes
+    applyCardBake(s);     // the file's card bake: the cards keep its atlas, the view its maps
 }
 
 GroomFile currentFile(const Session& s) {

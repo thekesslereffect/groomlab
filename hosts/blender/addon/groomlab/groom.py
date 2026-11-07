@@ -79,6 +79,7 @@ class Runtime(object):
         self.attributes = []
         self.look = {}
         self.scalp_note = ""
+        self.cards_view = {}  # the cards view's last card_view: stale, baked, cards, triangles
 
 
 _runtimes = {}
@@ -256,6 +257,36 @@ def asset_folder(kind="", blend_path=None):
     return folder.replace("\\", "/")
 
 
+def temp_root():
+    """Where an untitled .blend's bakes go (asset_folder's layout under it) until its first save
+    takes them along (follow_files)."""
+    return os.path.join(tempfile.gettempdir(), "groomlab_blender_%d" % os.getpid()).replace("\\", "/")
+
+
+def _follow_scalp_bake(scalp, old_root, new_root):
+    """The hair cap's maps (groomlab_tools.scalp_bake) copied from `old_root` into `new_root` as
+    files_follow takes the rest; the groom pointed at the copies. Returns the files copied."""
+    import shutil
+    from . import props
+    prefix = scalp.groomlab_tools.scalp_bake
+    if not prefix or not old_root:
+        return []
+    old_root = old_root.rstrip("/") + "/"
+    if not os.path.normcase(prefix).startswith(os.path.normcase(old_root)):
+        return []
+    moved = new_root.rstrip("/") + "/" + prefix[len(old_root):]
+    copied = []
+    for m in ("ScalpColor", "ScalpCoverage"):
+        source, target = prefix + m + ".tga", moved + m + ".tga"
+        if os.path.isfile(source):
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(source, target)
+            copied.append(target)
+    with props.quiet():
+        scalp.groomlab_tools.scalp_bake = moved
+    return copied
+
+
 def copy_into(kind, path):
     """A file copied into the .blend's `kind` folder (asset_folder: Maya's references for photos):
     the same file there used as it is, else a free name (name_2...). Returns the copy's path, or
@@ -293,10 +324,17 @@ def follow_files(scalp, rt, blend_path):
     if old:
         args["oldBase"] = os.path.dirname(old).replace("\\", "/")
         args["oldRoot"] = asset_folder("", old)
+    else:  # the bakes an untitled file made in the temp root (the cards view's)
+        args["extraRoots"] = [[temp_root(), args["newRoot"]]]
     r = _call("files_follow", session=rt.session, **args)
     for w in r.get("warnings") or []:
         print("GroomLab: %s" % w)
-    return r.get("copied") or []
+    copied = list(r.get("copied") or [])
+    try:
+        copied += _follow_scalp_bake(scalp, args.get("oldRoot") or temp_root(), args["newRoot"])
+    except OSError as e:
+        print("GroomLab: the hair cap's maps did not come along: %s" % e)
+    return copied
 
 
 def maps_dir(scalp, blend_path=None):
@@ -778,6 +816,9 @@ def evaluate(scalp, rt, mode="preview", **extra):
     if r.get("serial") != rt.serial or mode != rt.mode or hair is None:
         write_hair(scalp, r)
         rt.serial, rt.mode = r.get("serial"), mode
+        if mode != "render" and scalp.groomlab_tools.show_cards:
+            from . import cards_view
+            cards_view.refresh_safely(scalp, rt)  # the cards follow the groom
     return r
 
 
