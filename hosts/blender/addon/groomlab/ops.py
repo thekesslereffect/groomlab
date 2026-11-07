@@ -2,6 +2,8 @@
 """The add-on's operators: make a groom on a mesh, sculpt its guides, presets, graph edits, .groom
 files and Alembic/USD exports."""
 
+import os
+
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
 from bpy_extras.io_utils import ExportHelper, ImportHelper
@@ -288,6 +290,20 @@ class GROOMLAB_OT_save_groom(GroomOperator, ExportHelper):
     up_axis: EnumProperty(name="Up Axis", items=[("Y", "Y (Maya)", "GroomLab's own space"), ("Z", "Z", "Z up (Blender, Houdini pipelines)")],
                           default="Y")
 
+    def invoke(self, context, event):
+        # A source file every host opens, not an export: beside the .blend, named after the groom
+        # (the file it is linked to when it has one), outside the groomlab folder; saving again
+        # overwrites it.
+        scalp = active_groom(context)
+        linked = bpy.path.abspath(scalp.groomlab.groom_file) if scalp is not None and scalp.groomlab.groom_file else ""
+        if linked:
+            self.filepath = linked
+        elif scalp is not None:
+            folder = os.path.dirname(bpy.data.filepath) if bpy.data.filepath else ""
+            self.filepath = os.path.join(folder, bpy.path.clean_name(scalp.name) + ".groom")
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
     def execute(self, context):
         scalp = active_groom(context)
         try:
@@ -404,6 +420,12 @@ class GROOMLAB_OT_load_groom(bpy.types.Operator, ImportHelper):
     def invoke(self, context, event):
         obj = groom.scalp_of(context.active_object) or context.active_object
         self.use_file_scalp = obj is None or obj.type != "MESH"
+        # Groom files sit beside the .blend (Save Groom File As's): start there, or at the linked one.
+        linked = obj.groomlab.groom_file if obj is not None and obj.type == "MESH" and obj.groomlab.groom_file else ""
+        if linked:
+            self.filepath = bpy.path.abspath(linked)
+        elif bpy.data.filepath:
+            self.filepath = os.path.dirname(bpy.data.filepath) + os.sep
         return ImportHelper.invoke(self, context, event)
 
     def execute(self, context):

@@ -28,6 +28,22 @@ def default_file(groom, kind, suffix):
     return groomlab.asset_folder(kind) + "/" + groomlab.asset_name(groom) + suffix
 
 
+def groom_files_folder():
+    """Where groom files sit: the scene's folder (the project's while the scene is untitled)."""
+    from groomlab import paths
+    return (paths.scene_folder() or paths.project_root().rstrip("/\\")).replace("\\", "/")
+
+
+def groom_source_file(groom):
+    """Save Groom File's starting file: <the scene's folder>/<the groom's asset name>.groom (the
+    project's folder while the scene is untitled). A groom file is a source file every host opens,
+    not an export: it sits beside the scene, outside its groomlab folder (which it names relative
+    to itself: groomlab/<scene>/masks/...), and saving again overwrites it, so groom files and the
+    files GroomLab keeps for them never nest inside each other's folders."""
+    import groomlab
+    return groom_files_folder() + "/" + groomlab.asset_name(groom) + ".groom"
+
+
 ASK_TO_SAVE = True  # tests turn the untitled-scene note off
 
 
@@ -280,7 +296,7 @@ def export_groom_dialog():
     if not groom:
         return
     path = cmds.fileDialog2(fileFilter="GroomLab groom (*.groom)", dialogStyle=2, fileMode=0,
-                            caption="Save Groom File As", startingDirectory=default_file(groom, "exports", ".groom"))
+                            caption="Save Groom File As", startingDirectory=groom_source_file(groom))
     if not path:
         return None
     start, end = _playback_range()
@@ -347,7 +363,7 @@ def import_groom_dialog():
     selected mesh when it is the file's scalp, else on a mesh made from the file."""
     import groomlab
     path = cmds.fileDialog2(fileFilter=_GROOM_FILES, dialogStyle=2, fileMode=1, caption="Import Groom File",
-                            startingDirectory=groomlab.asset_folder("exports"))
+                            startingDirectory=groom_files_folder())  # (groom files sit beside the scene)
     if not path or not ensure_scene_saved("this groom's painted masks and card bake"):
         return
     try:
@@ -370,7 +386,7 @@ def reload_groom_file(groom=None):
     path = groomlab.groom_file(groom)
     if not path or not os.path.isfile(path):
         picked = cmds.fileDialog2(fileFilter=_GROOM_FILES, dialogStyle=2, fileMode=1, caption="Reload from Groom File",
-                                  startingDirectory=groomlab.asset_folder("exports"))
+                                  startingDirectory=groom_files_folder())
         if not picked:
             return
         path = picked[0]
@@ -393,7 +409,7 @@ def save_groom_file(groom=None):
     path = groomlab.groom_file(groom)
     if not path:
         picked = cmds.fileDialog2(fileFilter=_GROOM_FILES, dialogStyle=2, fileMode=0, caption="Save to Groom File",
-                                  startingDirectory=default_file(groom, "exports", ".groom"))
+                                  startingDirectory=groom_source_file(groom))
         if not picked:
             return
         path = picked[0]

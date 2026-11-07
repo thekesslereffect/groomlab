@@ -482,6 +482,10 @@ can be cancelled. The same targets are in **GroomLab > Export**, with
 **File > Save** (Ctrl+S) and **File > Save As...** (Ctrl+Shift+S) write a `.groom` file: the graph,
 guides, scalp, maps, parts, flow and correctives. Export mode has **Save** and **Save as...** too.
 
+Maya and Blender save a groom file beside the scene file, named after the groom (a source file
+every host opens, outside the scene's `groomlab` folder); the app keeps the maps it paints for it
+in `groomlab/<file name>/masks/` beside it.
+
 In Maya, choose **GroomLab > Groom Files > Import Groom File...**. Select the scalp mesh first if
 the scene has it; otherwise GroomLab creates the scalp from the file. To pull later edits into a
 groom linked to the file, save in the app, then choose **GroomLab > Groom Files > Reload from

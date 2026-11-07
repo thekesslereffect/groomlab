@@ -185,6 +185,14 @@ class GroomFileTest(unittest.TestCase):
         stamp = groomlab._card_maps(groom)["Strands"]
         # The last transfer's marker pairs travel with the groom file.
         groomlab.set_transfer_markers(groom, [((0, 1, 0), (5, 1, 0)), ((1, 0, 0), (6, 0, 0)), ((0, 0, 1), (5, 0, 1))])
+        # Save Groom File's starting file: a source file beside the scene (here the project, the
+        # scene untitled), named after the groom, outside the groomlab folder.
+        from groomlab import paths
+        from groomlab.ui import menu
+        start = menu.groom_source_file(groom)
+        self.assertEqual(start, (paths.scene_folder() or paths.project_root().rstrip("/\\")).replace("\\", "/") + "/" +
+                         groomlab.asset_name(groom) + ".groom")
+        self.assertNotIn("/exports/", start)
         path = os.path.join(WORK_DIR, "exports", "hair.groom")
         os.makedirs(os.path.dirname(path))
         written = groomlab.export_groom(groom, path, scalp_cache=True, start=1, end=10)
