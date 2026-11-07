@@ -13,6 +13,24 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.43.0 (November 7, 2026)
+
+- **Blender:**
+  - **The cards view.** A Cards node's panel has **Show cards** (the cards in the viewport instead
+    of the strands, rebuilt as the groom changes; renders still show the hair) and **Show
+    textures** (the cards with their baked maps, cut out by the coverage).
+  - **Bake Maps** and **Bake Scalp** on the Cards node: the card maps, and the scalp's color and
+    coverage for a **hair cap** under the cards (the scalp needs UVs).
+  - **Align Photo** splits the 3D view into the photo through its camera and the mesh: click a
+    feature on each side and the camera lines up as you go.
+- **Painting a groom from the app or Blender in Maya.** A setting painted in the app or Blender
+  reads its texture map by the image's file; imported into Maya, the param now reads the copy
+  Maya paints, so painting it moves the groom again. Renaming or relinking a map in the app or
+  Blender takes such a param along too.
+- **A folder per groom.** Texture maps and card bakes go in the groom's own folder,
+  `groomlab/<file name>/masks/<groom>/` and `cards/<groom>/`, in every host (the app's were loose
+  in `masks` and `cards`). Files saved before keep their paths.
+
 ## 0.42.0 (November 7, 2026)
 
 - **The app and Blender work as Maya does.** A round of parity with Maya across both:
