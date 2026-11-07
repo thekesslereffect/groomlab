@@ -13,6 +13,36 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.42.0 (November 7, 2026)
+
+- **The app and Blender work as Maya does.** A round of parity with Maya across both:
+  - **Files:** every file a groom makes lives beside it in `groomlab/<file name>/` (masks, cards,
+    exports, caches, renders, references), as Maya keeps a scene's. **Save As** takes them along,
+    **Collect Files** gathers files from elsewhere into it, and photos are copied in. Texture
+    maps in Blender no longer end up in your temp folder.
+  - **Painting:** texture maps show as their image on the scalp (they looked like vertex paint),
+    the strands are colored by the map while you paint, and leaving Paint puts the display back.
+- **Groom files are source files.** Maya and Blender save a `.groom` beside the scene, named
+  after the groom, instead of in the `groomlab/exports` folder; saving again overwrites it. A
+  groom linked to a file in `exports` keeps saving there until you use **Save Groom File As...**
+  once. Card bakes saved with a groom file go in `groomlab/<name>/cards/`.
+- **Blender:**
+  - **Undo:** Blender's own undo (Ctrl+Z, Edit > Undo) takes groom edits back.
+  - **Curves:** **Guides to Curves** and **Curves to Guides** (edit guides as curve objects and
+    bring them back), **Strands to Curves**, **From Curves** for guides and parts; **Create Groom
+    from Selection** turns selected curves into guides.
+  - **Add > Scalp** grows hair on another mesh; **Prototype from Selection** on Instance and
+    Scales nodes; a Cards node's **LOD** levels and **Card Stats**.
+  - **Selecting and symmetry:** Ctrl+Shift adds to the selection, the line of symmetry shows,
+    Alt+Shift+X toggles symmetry and Alt+Shift+G the guides.
+  - **Maps and photos:** deleting a map the graph reads asks first; photos have **Select Camera**
+    and **Add Camera**.
+- **The app:**
+  - **Param keys:** Set Key, Delete Key and Remove Animation on a param; the keys play on the
+    timeline and are saved with the groom.
+  - **FBX game exports:** Unreal Cards, Unity Cards, Unity Feathers and Scales Mesh (FBX).
+  - **Painting:** a param painted **On Guides**, and a **Guide Layer** choice for Guide Color.
+
 ## 0.41.1 (November 6, 2026)
 
 - **Braid cards that capture the weave.** The Cards node's new **Braid Cards** setting gives each
