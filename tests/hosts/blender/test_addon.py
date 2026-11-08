@@ -312,6 +312,61 @@ class AddonTest(unittest.TestCase):
         self.assertGreater(os.path.getsize(abc), 1000)
         self.assertEqual(scene.frame_current, 1)
 
+    def test_5_subdivision_surface_last_smooths_the_scalp_and_keeps_its_pose(self):
+        # A Subdivision Surface modifier ending the stack: the groom grows on the surface at its
+        # render levels (match render), and is still posed by what comes before it.
+        scene = bpy.context.scene
+        head = bu.head_object("Smoothed", location=(-1.0, 0.0, 0.0))
+        groom.create_groom(bpy.context, head, preset="hair_basics", guide_count=40, guides="flat")
+        bpy.context.scene.groomlab.groom = head
+        graph.refresh(head)
+        head.groomlab.preview_density = 0.1
+        scene.frame_set(1)
+        groom.flush()
+        smooth = head.modifiers.new("Subdivision", "SUBSURF")
+        smooth.levels, smooth.render_levels = 1, 2
+        self.assertFalse(groom.deforms(head))  # smoothing alone does not pose it
+        self.assertEqual(groom.subdivision_of(head), (2, "Subdivision Surface modifier, render levels 2"))
+        depsgraph_flush()
+        rt = groom.runtime(head)
+        self.assertEqual(rt.keys["subdivision"], (2, "Subdivision Surface modifier, render levels 2"))
+        notes = " ".join(str(n) for n in rt.notes.values())
+        self.assertIn("Catmull-Clark x2", notes)
+        self.assertIn("match render: Subdivision Surface modifier", notes)
+        rest, counts, _, ids = bu.hair_arrays(head.groomlab.hair)
+
+        # Shape keys before it: the whole scalp lifted 2 cm at frame 20, the groom with it.
+        head.shape_key_add(name="Basis")
+        lift = head.shape_key_add(name="lift")
+        for v in lift.data:
+            v.co.z += 0.02
+        lift.value = 0.0
+        lift.keyframe_insert("value", frame=1)
+        lift.value = 1.0
+        lift.keyframe_insert("value", frame=20)
+        self.assertTrue(groom.deforms(head))
+        scene.frame_set(20)
+        self.assertEqual(rt.scalp_note, "")
+        pos, counts20, _, ids20 = bu.hair_arrays(head.groomlab.hair)
+        np.testing.assert_array_equal(ids20, ids)
+        np.testing.assert_array_equal(counts20, counts)
+        np.testing.assert_allclose(pos, rest + np.array([0, 0, 0.02], np.float32), atol=2e-5)
+        # The modifier shows again, and nothing is left for the handlers to take up.
+        self.assertTrue(smooth.show_viewport)
+        evaluated = head.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        self.assertGreater(len(evaluated.data.vertices), len(head.data.vertices))
+        serial = rt.serial
+        depsgraph_flush()
+        self.assertEqual(rt.serial, serial)
+
+        # Off in renders: no smoothing (another level: the scalp sent again). The viewport's
+        # depsgraph does not update for a render setting: the add-on's slow timer sees it.
+        smooth.show_render = False
+        groom.poll()
+        depsgraph_flush()
+        self.assertEqual(rt.keys["subdivision"], (0, ""))
+        scene.frame_set(1)
+
     def test_6_exports_and_files(self):
         head = self.head
         abc = self.tmp("export.abc")

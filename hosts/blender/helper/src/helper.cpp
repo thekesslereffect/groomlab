@@ -46,6 +46,7 @@
 #include "groomlab/scales.h"
 #include "groomlab/scalp_mesh.h"
 #include "groomlab/schema.h"
+#include "groomlab/subdivision.h"
 #include "groomlab/usd_writer.h"
 #include "groomlab/version.h"
 
@@ -1589,6 +1590,10 @@ json Helper::run(const std::string& cmd, const json& args) {
         if (before) {
             if (auto same = withTrianglesOf(*mesh, *before)) mesh = std::move(same);
         }
+        // Match render: the Catmull-Clark levels of the Subdivision Surface modifiers ending the
+        // scalp's stack (the add-on's subdivision_of), which the Scalp node refines it by.
+        mesh->setRenderSubdivision(std::clamp(static_cast<int>(optNumber(args, "subdivision", 0.0)), 0, kMaxSubdivisionLevels),
+                                   optString(args, "subdivisionFrom", ""));
         const std::uint64_t topology = mesh->topologyFingerprint();
         const std::size_t points = mesh->pointCount(), triangles = mesh->triangleCount();
         s.groom->setScalp(std::move(mesh));

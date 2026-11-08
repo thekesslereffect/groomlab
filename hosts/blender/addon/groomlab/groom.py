@@ -90,6 +90,7 @@ _last_cost = 0.0   # seconds the last flush took (evaluation, the hair written)
 _timer_on = False
 _rendering = False
 _exporting = False
+_reading_cage = False  # deformed_points has the scalp's Subdivision Surface modifiers off a moment
 _restore_after_render = False
 _main_thread = threading.main_thread()
 _cache = {"count": -1, "names": []}
@@ -477,14 +478,35 @@ def read_scalp(scalp):
 
 
 def deforms(scalp):
-    return bool(scalp.modifiers) or bool(scalp.data.shape_keys) or scalp.find_armature() is not None
+    """Whether the scalp is posed by more than its mesh (Subdivision Surface modifiers ending its
+    stack do not pose it: GroomLab smooths it itself, subdivision_of)."""
+    return (len(scalp.modifiers) > len(trailing_subsurfs(scalp)) or bool(scalp.data.shape_keys) or
+            scalp.find_armature() is not None)
 
 
-def deformed_points(scalp, depsgraph, n):
-    """The scalp's points after its modifiers and shape keys (the frame's pose), or None when its
-    modifiers change the point count (then the groom stays on the mesh as it is)."""
-    if depsgraph is None:
-        depsgraph = bpy.context.evaluated_depsgraph_get()
+def trailing_subsurfs(scalp):
+    """The Subdivision Surface modifiers ending the scalp's stack (the smoothing GroomLab does
+    itself: the groom is posed by the modifiers before them, and grows on the surface they make)."""
+    out = []
+    for m in reversed(scalp.modifiers):
+        if m.type != "SUBSURF":
+            break
+        out.append(m)
+    return out
+
+
+def subdivision_of(scalp):
+    """Match render: (Catmull-Clark levels, where they come from) of the trailing Subdivision
+    Surface modifiers at their render levels (Blender's renders), at most 3; (0, "") for none."""
+    levels = sum(m.render_levels for m in trailing_subsurfs(scalp)
+                 if m.show_render and m.subdivision_type == "CATMULL_CLARK")
+    levels = min(levels, 3)
+    if levels == 0:
+        return 0, ""
+    return levels, "Subdivision Surface modifier, render level%s %d" % ("" if levels == 1 else "s", levels)
+
+
+def _read_points(scalp, depsgraph, n):
     evaluated = scalp.evaluated_get(depsgraph)
     mesh = evaluated.to_mesh()
     try:
@@ -495,6 +517,28 @@ def deformed_points(scalp, depsgraph, n):
         return out.reshape(-1, 3)
     finally:
         evaluated.to_mesh_clear()
+
+
+def deformed_points(scalp, depsgraph, n):
+    """The scalp's points after its modifiers and shape keys (the frame's pose), or None when its
+    modifiers change the point count (then the groom stays on the mesh as it is). Subdivision
+    Surface modifiers ending the stack are off while it reads (the pose of the cage, which the
+    groom refines itself: subdivision_of), and on again after."""
+    shown = [m for m in trailing_subsurfs(scalp) if m.show_viewport and m.levels > 0]
+    if not shown:
+        return _read_points(scalp, depsgraph if depsgraph is not None else bpy.context.evaluated_depsgraph_get(), n)
+    global _reading_cage
+    was = _reading_cage
+    _reading_cage = True  # the handlers let these evaluations go by
+    try:
+        for m in shown:
+            m.show_viewport = False
+        return _read_points(scalp, bpy.context.evaluated_depsgraph_get(), n)
+    finally:
+        for m in shown:
+            m.show_viewport = True
+        bpy.context.evaluated_depsgraph_get()  # evaluated with them again here, so no update is left over
+        _reading_cage = was
 
 
 def _sizes(scalp):
@@ -536,15 +580,19 @@ def sync_scalp(scalp, rt, depsgraph=None, force=False, read_pose=True, topology=
     now_key = rest_key if now is rest else _key(now)
     if not full and rest_key != rt.keys.get("rest"):
         return sync_scalp(scalp, rt, depsgraph, force, read_pose, topology=True)  # another rest pose: set_scalp
-    topology = _key(counts, indices, uvs) if full else rt.keys.get("topology")
+    levels, levels_from = subdivision_of(scalp)
+    if not full and (levels, levels_from) != rt.keys.get("subdivision"):
+        return sync_scalp(scalp, rt, depsgraph, force, read_pose, topology=True)  # another level: set_scalp
+    topology = _key(counts, indices, uvs, np.array([levels], np.int32)) if full else rt.keys.get("topology")
     if full:
         rt.keys["sizes"] = sizes
     if force or topology != rt.keys.get("topology") or rest_key != rt.keys.get("rest"):
         arrays = dict(points=now, restPoints=rest, faceCounts=counts, faceIndices=indices)
         if uvs is not None:
             arrays["uvs"] = uvs
-        rt.last_scalp = _call("set_scalp", session=rt.session, **_put(**arrays))
-        rt.keys.update(topology=topology, rest=rest_key, now=now_key, sizes=sizes)
+        rt.last_scalp = _call("set_scalp", session=rt.session, subdivision=levels, subdivisionFrom=levels_from,
+                              **_put(**arrays))
+        rt.keys.update(topology=topology, rest=rest_key, now=now_key, sizes=sizes, subdivision=(levels, levels_from))
         return True
     if now_key != rt.keys.get("now"):
         _call("update_scalp", session=rt.session, **_put(points=now, restPoints=rest))
@@ -1013,9 +1061,16 @@ def restore_preview():
 
 
 def poll():
-    """A slow persistent timer: the preview back after a render that ran on another thread."""
+    """A slow persistent timer: the preview back after a render that ran on another thread; a
+    scalp's match render level changed in its render settings (a Subdivision Surface modifier's
+    render levels or render toggle: nothing the viewport's depsgraph updates for)."""
     if _restore_after_render and not _rendering:
         restore_preview()
+    if not _rendering and not _exporting:
+        for scalp in scalps():
+            rt = runtime_if_any(scalp)
+            if rt is not None and "subdivision" in rt.keys and subdivision_of(scalp) != rt.keys["subdivision"]:
+                mark(scalp, "pose")
     return 0.5
 
 

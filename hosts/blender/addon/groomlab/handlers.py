@@ -11,7 +11,7 @@ from . import groom, process, vray
 
 @persistent
 def on_depsgraph(scene, depsgraph):
-    if groom._rendering or groom._exporting or getattr(depsgraph, "mode", "VIEWPORT") == "RENDER":
+    if groom._rendering or groom._exporting or groom._reading_cage or getattr(depsgraph, "mode", "VIEWPORT") == "RENDER":
         return
     found = groom.scalps()
     if not found:
