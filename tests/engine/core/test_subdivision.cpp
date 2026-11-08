@@ -4,6 +4,7 @@
 // refined (roots on the refined surface, stable while it deforms, match render), groom files,
 // and the time a refinement takes.
 
+#include <functional>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -421,6 +422,48 @@ TEST(Subdivision, BindingStableWhileTheScalpDeforms) {
         auto cage = std::make_shared<ScalpMesh>(head->withPoints(points));
         cage->setRestPoints(head->points());
         expectRootsOn(*view.strands, *subdivideScalp(cage, 2));
+    }
+}
+
+// Guides drawn on the cage, then the scalp refined (Maya's smooth preview turned on) with no rest
+// pose: moved, turned or scaled, the scalp carries them (they do not stay where they were while
+// it slides under them).
+TEST(Subdivision, GuidesBoundOnTheCageFollowTheRefinedScalpWithoutARestPose) {
+    const auto head = quadSphere(12, 16);
+    GroomData data;
+    data.graphJson = graphWith("2");
+    data.scalp = head;
+    data.hierarchyJson = guidesOn(*head);
+    GroomSession session(data);
+    const ViewResult& first = session.evaluate(ViewRequest{});
+    ASSERT_TRUE(first.hierarchy);
+    std::vector<std::vector<Vec3f>> rest;
+    for (const HierarchyGuide& g : first.hierarchy->guides()) rest.push_back(g.points);
+    ASSERT_EQ(rest.size(), 8u);
+
+    const auto turn = [](const Vec3f& p) { return Vec3f{-p.y, p.x, p.z}; };  // 90 degrees about z
+    const std::vector<std::pair<const char*, std::function<Vec3f(const Vec3f&)>>> moves = {
+        {"moved", [](const Vec3f& p) { return p + Vec3f{5.0f, -2.0f, 1.0f}; }},
+        {"turned", turn},
+        {"scaled", [](const Vec3f& p) { return p * 1.5f; }},
+    };
+    for (const auto& [name, move] : moves) {
+        SCOPED_TRACE(name);
+        std::vector<Vec3f> points = head->points();
+        for (Vec3f& p : points) p = move(p);
+        session.updateScalpPoints(points);
+        const ViewResult& view = session.evaluate(ViewRequest{});
+        ASSERT_TRUE(view.hierarchy);
+        ASSERT_EQ(view.hierarchy->guides().size(), rest.size());
+        const float scale = std::string(name) == "scaled" ? 1.5f : 1.0f;
+        for (std::size_t i = 0; i < rest.size(); ++i) {
+            const std::vector<Vec3f>& now = view.hierarchy->guides()[i].points;
+            ASSERT_EQ(now.size(), rest[i].size());
+            // The root where the moved scalp takes it, and moved or turned, the tip too (scaled, the
+            // guide's own size is the groom's scale setting's).
+            EXPECT_LT((now.front() - move(rest[i].front())).length(), 0.05f * scale) << "guide " << i;
+            if (scale == 1.0f) EXPECT_LT((now.back() - move(rest[i].back())).length(), 0.05f) << "guide " << i;
+        }
     }
 }
 

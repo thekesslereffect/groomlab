@@ -1182,6 +1182,15 @@ HierarchyPtr GroomSession::rootedHierarchy() {
                 reboundRest_ = restKey;
             }
             source = reboundHierarchy_;
+        } else if (on && cageScalp_ && on != cageScalp_ && bound != 0 && bound != on->topologyHash() &&
+                   bound == cageScalp_->topologyHash()) {
+            // Bound on the cage (drawn with the scalp unrefined: Maya's smooth preview turned on
+            // since) and no rest pose: rebuilt on the cage as it is now, so they follow it, then
+            // rooted on the refined scalp from there (else each frame re-roots them where they
+            // were and the scalp slides under them).
+            auto onCage = std::make_shared<GuideHierarchy>(*source);
+            onCage->evaluate(cageScalp_.get());
+            source = std::move(onCage);
         }
         auto rooted = std::make_shared<GuideHierarchy>(*source);
         rooted->evaluate(on.get());
