@@ -670,6 +670,16 @@ TEST(AppPanels, ADocumentHoldsSeveralGrooms) {
     EXPECT_EQ(again.activeGroom(), 1);
     EXPECT_TRUE(again.removeGroom(1));
     EXPECT_EQ(again.groomCount(), 1);
+    // Another groom on the same scalp (eyebrows on the head): its own graph, the scalp row shared.
+    ASSERT_TRUE(again.addGroomOnScalp(0));
+    ASSERT_EQ(again.groomCount(), 2);
+    EXPECT_EQ(again.activeGroom(), 1);
+    EXPECT_EQ(again.groomAt(1)->name(), "groom");
+    EXPECT_EQ(again.groomAt(1)->file().data.scalp->pointCount(), again.groomAt(0)->file().data.scalp->pointCount());
+    ASSERT_EQ(again.outliner()->entries().size(), 2u);
+    EXPECT_EQ(again.outliner()->entries()[0].scalp, again.outliner()->entries()[1].scalp);
+    EXPECT_EQ(again.outliner()->tree()->topLevelItemCount(), 1) << "one scalp row, two grooms under it";
+    ASSERT_TRUE(again.removeGroom(1));
     // A groom file's grooms added (Maya's and Blender's save one a file).
     ASSERT_TRUE(again.addGroomOnMesh(QString::fromStdString(kSampleGroom)));
     ASSERT_EQ(again.groomCount(), 2);
@@ -680,6 +690,23 @@ TEST(AppPanels, ADocumentHoldsSeveralGrooms) {
     EXPECT_FALSE(again.removeGroom(0)) << "never the last";
     EXPECT_TRUE(again.anyGroomDirty());
     EXPECT_EQ(again.overlay()->viewport()->renderer().otherGroomCount(), 0u);
+}
+
+TEST(AppPanels, AGroomKeepsItsNameFromItsFile) {
+    // Maya's groomLab1 saved as filetest02.groom opens as groomLab1 and is saved back under it.
+    namespace fs = std::filesystem;
+    const std::string path = sampleCopy("groomlab_app_named");
+    GroomFile file = readGroomFile(path);
+    file.name = "groomLab1";
+    const std::string named = fs::u8path(path).parent_path().generic_u8string() + "/filetest02.groom";
+    writeGroomFile(named, file);
+    auto doc = GroomDocument::open(named);
+    ASSERT_TRUE(doc);
+    EXPECT_EQ(doc->name(), "groomLab1");
+    EXPECT_EQ(doc->displayName(), "groomLab1");
+    const std::string other = fs::u8path(path).parent_path().generic_u8string() + "/elsewhere.groom";
+    doc->save(other);
+    EXPECT_EQ(readGroomFile(other).name, "groomLab1");
 }
 
 TEST(AppPanels, ATextureParamFollowsItsMapsFile) {

@@ -582,6 +582,26 @@ class PipelineOpsTest(unittest.TestCase):
         self.assertEqual(bpy.ops.groomlab.remove_groom("EXEC_DEFAULT"), {"FINISHED"})
         self.assertFalse(any(o.groomlab.role in ("CARDS", "SCALP_CAP") for o in bpy.data.objects))
 
+    def test_8_a_groom_keeps_its_name_from_its_file(self):
+        # Maya's groomLab1 opened on a mesh of another name keeps its name in the file: saving it
+        # back writes the groomLab1 entry, not a second one named after the mesh.
+        groom.create_groom(bpy.context, self.head, preset="hair_basics")
+        groom.flush()
+        path = os.path.join(bu.TMP, "named.groom")
+        groom.save_groom(self.head, path, merge=False)
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["name"] = "groomLab1"
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        target = bu.head_object()
+        self.assertNotEqual(target.name, "groomLab1")
+        opened, _info, _ = groom.load_groom(bpy.context, path, target)
+        self.assertEqual(groom.groom_entry_name(opened), "groomLab1")
+        self.assertEqual(groom.groom_entry(opened, path), 0)
+        groom.save_groom(opened, path)
+        self.assertEqual(groom.groom_file_names(path), ["groomLab1"])
+
     def test_9_save_as_gives_the_groom_file_the_new_names(self):
         # (Last: it saves the .blend, the tests before it work on an untitled one.)
         # A groom file beside the .blend is named after it and the groom (two versions of a .blend

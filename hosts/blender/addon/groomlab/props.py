@@ -142,6 +142,9 @@ class GroomLabObject(bpy.types.PropertyGroup):
     snapshot: StringProperty()    # the whole groom as a .groom text, written when the .blend is saved
     groom_file: StringProperty(subtype="FILE_PATH",  # Save to / Reload from Groom File (Maya's linked file)
                                description="The groom file this groom was opened from or saved to last")
+    # The groom's name in groom files (the one it was opened with: Maya's groomLab1 stays groomLab1
+    # on another mesh); "": its scalp object's name (groom.groom_entry_name).
+    groom_name: StringProperty(description="The groom's name in groom files")
     nodes: CollectionProperty(type=GroomLabNode)
     node_index: IntProperty(update=_node_selected)
     params: CollectionProperty(type=GroomLabParam)

@@ -550,6 +550,19 @@ class GroomFileTest(unittest.TestCase):
         for p, q in zip(moved_cvs, guides):
             self.assertLess(max(abs(a - b) for a, b in zip(p, q)), 0.05)
 
+    def test_an_imported_groom_keeps_its_name(self):
+        """A groom saved into a file of another name (groomLab1 into filetest02.groom) comes back as
+        groomLab1: the file keeps each groom's name."""
+        folder = new_scene("names_kept")
+        groom = groomlab.create_groom(cmds.polySphere(subdivisionsX=12, subdivisionsY=6)[0])
+        name = cmds.listRelatives(groom, parent=True)[0]
+        path = os.path.join(folder, "filetest02.groom")
+        groomlab.export_groom(groom, path)
+        self.assertEqual(read_json(path)["name"], groomlab.asset_name(groom))
+        new_scene("names_kept2")
+        imported = groomlab.import_groom(path)
+        self.assertEqual(cmds.listRelatives(imported, parent=True)[0], name)
+
     def test_other_scalps_come_back_as_meshes(self):
         """A groom on another scalp too (Add > Scalp: the file's "scalps") imports with that scalp
         made as a mesh of its own and kept as the groom's other scalp: the same hair."""

@@ -223,8 +223,10 @@ def import_groom(path, scalp=None, name=None, caches=True, use_selection=True, i
         raise ValueError("%s holds no scalp" % path)
     if scalp is None and use_selection:
         scalp = _selected_mesh()
+    # The groom's own name, as the file keeps it (its asset name when Maya saved it, the app's or
+    # Blender's groom name); a file from before names had the file's.
     stem = os.path.splitext(os.path.basename(path))[0]
-    name = name or (re.sub(r"\W", "_", stem) or "groom")
+    name = name or re.sub(r"\W", "_", info.get("name") or "") or (re.sub(r"\W", "_", stem) or "groom")
     if name[0].isdigit():
         name = "g" + name
     mesh = None

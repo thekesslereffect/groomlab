@@ -1169,6 +1169,7 @@ def load_groom(context, path, scalp=None, index=0):
     ensure_hair_object(scalp)
     rt = ensure(scalp, scene)
     info = _call("load_groom", session=rt.session, path=path, index=int(index))
+    g.groom_name = info.get("name") or ""  # its name in groom files, kept
     # A groom of flat guides (Maya's guide curves) keeps them as a Blender Curves object (B2); every
     # other groom's guides live in the helper's hierarchy, edited with GroomLab's own tools.
     hierarchy = info.get("flatGuides", 0) == 0
@@ -1295,8 +1296,10 @@ def save_groom(scalp, path, up_axis="Y", merge=True):
 
 
 def groom_entry_name(scalp):
-    """A groom's name in a groom file: its scalp object's, file safe (the name its folders take)."""
-    return _file_safe(scalp.name)
+    """A groom's name in a groom file: the one it was opened with (a file keeps each groom's name:
+    Maya's groomLab1 opened on this mesh stays groomLab1), else its scalp object's; file safe (the
+    name its folders take)."""
+    return _file_safe(scalp.groomlab.groom_name or scalp.name)
 
 
 def groom_entry(scalp, path):

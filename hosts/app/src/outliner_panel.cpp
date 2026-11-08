@@ -23,10 +23,11 @@ OutlinerPanel::OutlinerPanel(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(6);
-    add_ = new QPushButton(tr("Add Groom..."), this);
+    add_ = new QPushButton(tr("Add Groom"), this);
     add_->setObjectName(QStringLiteral("outlinerAdd"));
-    add_->setToolTip(tr("Another groom in this document: on a mesh file (.obj or .abc), or the grooms of a groom file (.groom, "
-                        "saved by Maya, Blender or the app), each with its own scalp, graph, guides and maps"));
+    add_->setToolTip(tr("Another groom in this document: on a groom's scalp (eyebrows on the head), on a prop, on a mesh file "
+                        "(.obj or .abc), or the grooms of a groom file (.groom, saved by Maya, Blender or the app), each with its "
+                        "own graph, guides and maps"));
     layout->addWidget(add_);
     tree_ = new QTreeWidget(this);
     tree_->setObjectName(QStringLiteral("outlinerTree"));
@@ -116,7 +117,7 @@ void OutlinerPanel::showMenu(const QPoint& pos) {
         remove->setToolTip(tr("Take the groom out of the document (undo cannot bring it back; its files stay on disk)"));
         menu->addSeparator();
     }
-    menu->addAction(tr("Add Groom..."), this, &OutlinerPanel::addRequested);
+    menu->addAction(tr("Add Groom"), this, &OutlinerPanel::addRequested);
     menu->popup(tree_->viewport()->mapToGlobal(pos));
 }
 

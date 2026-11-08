@@ -141,6 +141,10 @@ public:
     // Every groom of a groom file (Maya's and Blender's save one a file: a character's grooms
     // gathered in one document), named as in the file, the last made active.
     bool addGroomsFromFile(const QString& path);
+    // Another groom on groom `index`'s scalp (the same mesh: eyebrows on the head), or on prop
+    // `index` (the prop becomes its scalp); named "groom", groom2..., made active.
+    bool addGroomOnScalp(int index);
+    bool addGroomOnProp(int index);
     bool removeGroom(int index);  // the active one: another becomes active; never the last
     bool renameGroom(int index, const QString& name);
     void setGroomVisible(int index, bool visible);  // another groom's hair shown or hidden
@@ -622,6 +626,7 @@ private:
     // A name no other groom of the document goes by: `base`, base2...
     std::string freeGroomName(const std::string& base) const;
     void installOutliner();  // the Groom Tools' Outliner tab and its signals
+    bool adoptNewGroom(std::unique_ptr<GroomDocument> groom, const std::string& baseName);  // added, named, made active
     // The timeline's range, fps, frame and Follow chip from the document (shown when it animates).
     void refreshTimeline();
     // A frame the timeline named: the document evaluated there and shown (quiet: no stderr line).

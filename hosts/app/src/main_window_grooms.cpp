@@ -7,7 +7,10 @@
 #include <filesystem>
 #include <set>
 
+#include <QCursor>
 #include <QFileDialog>
+#include <QMenu>
+#include <QPushButton>
 #include <QFileInfo>
 
 #include "groomlab/asset_files.h"
@@ -148,10 +151,14 @@ bool MainWindow::addGroomOnMesh(const QString& meshPath) {
         report(tr("Cannot make a groom on the mesh: %1 (%2)").arg(QString::fromUtf8(e.what()), meshPath));
         return false;
     }
+    return adoptNewGroom(std::move(groom), fileSafeName(QFileInfo(meshPath).completeBaseName().toStdString()));
+}
+
+bool MainWindow::adoptNewGroom(std::unique_ptr<GroomDocument> groom, const std::string& baseName) {
     // Every groom of several named (their files go in folders of their names): the first by the
     // name it went by.
     if (GroomDocument* first = groomAt(0); first && first->name().empty()) first->setName(first->displayName());
-    groom->setName(freeGroomName(fileSafeName(QFileInfo(meshPath).completeBaseName().toStdString())));
+    groom->setName(freeGroomName(baseName));
     groom->setPathFrom(document_->path());
     groom->setTime(document_->time());
     grooms_.push_back(std::move(groom));
@@ -159,6 +166,41 @@ bool MainWindow::addGroomOnMesh(const QString& meshPath) {
     activateGroom(static_cast<int>(grooms_.size()) - 1);
     refreshTitle();
     return true;
+}
+
+bool MainWindow::addGroomOnScalp(int index) {
+    const GroomDocument* on = groomAt(index);
+    if (!on || !on->file().data.scalp) return false;
+    if (refuseWhileBusy(tr("adding a groom"))) return false;
+    std::unique_ptr<GroomDocument> groom;
+    try {
+        // The same mesh (eyebrows, lashes or a second layer on the head): its own graph, guides and maps.
+        groom = GroomDocument::newOnMesh(on->file().data.scalp, on->file().source);
+    } catch (const std::exception& e) {
+        report(tr("Cannot make a groom on the scalp: %1").arg(QString::fromUtf8(e.what())));
+        return false;
+    }
+    notify(tr("New groom on %1's scalp").arg(QString::fromStdString(on->displayName())));
+    return adoptNewGroom(std::move(groom), "groom");
+}
+
+bool MainWindow::addGroomOnProp(int index) {
+    if (!document_ || index < 0 || index >= static_cast<int>(props_.size())) return false;
+    const SurfacePtr prop = props_[static_cast<std::size_t>(index)];
+    if (!prop->mesh || prop->isEye) return false;
+    if (refuseWhileBusy(tr("adding a groom"))) return false;
+    std::unique_ptr<GroomDocument> groom;
+    try {
+        groom = GroomDocument::newOnMesh(prop->mesh, prop->name);
+    } catch (const std::exception& e) {
+        report(tr("Cannot make a groom on %1: %2").arg(QString::fromStdString(prop->name), QString::fromUtf8(e.what())));
+        return false;
+    }
+    // The prop becomes the new groom's scalp (drawn as the groom's, not twice).
+    props_.erase(props_.begin() + index);
+    applyProps();
+    const std::string base = std::filesystem::u8path(prop->name).stem().u8string();
+    return adoptNewGroom(std::move(groom), fileSafeName(base.empty() ? std::string("groom") : base));
 }
 
 bool MainWindow::removeGroom(int index) {
@@ -304,11 +346,43 @@ void MainWindow::installOutliner() {
     connect(outliner_, &OutlinerPanel::visibilityChanged, this, [this](int index, bool on) { setGroomVisible(index, on); });
     connect(outliner_, &OutlinerPanel::renameRequested, this, [this](int index, const QString& name) { renameGroom(index, name); });
     connect(outliner_, &OutlinerPanel::removeRequested, this, [this](int index) { removeGroom(index); });
-    connect(outliner_, &OutlinerPanel::addRequested, this, [this] {
-        const QString path = QFileDialog::getOpenFileName(this, tr("Add Groom"), QString(),
-                                                          tr("Meshes and groom files (*.obj *.abc *.groom);;Meshes (*.obj *.abc);;Groom files (*.groom)"));
-        if (!path.isEmpty()) addGroomOnMesh(path);
+    // Add Groom: a menu of the meshes a new groom can grow on (the grooms' scalps, the props) and
+    // the files to bring one from, made each time it opens.
+    auto* menu = new QMenu(outliner_);
+    connect(menu, &QMenu::aboutToShow, this, [this, menu] {
+        menu->clear();
+        if (!document_) {
+            menu->addAction(tr("On a Mesh File..."), this, [this] {
+                const QString path = QFileDialog::getOpenFileName(this, tr("New Groom on Mesh"), QString(), tr("Meshes (*.obj *.abc)"));
+                if (!path.isEmpty()) newGroomOnMesh(path);
+            });
+            return;
+        }
+        std::set<std::string> scalps;  // a scalp shared by several grooms offered once
+        for (int i = 0; i < groomCount(); ++i) {
+            const GroomDocument* g = groomAt(i);
+            if (!g || !scalps.insert(g->file().source.empty() ? g->displayName() : g->file().source).second) continue;
+            menu->addAction(tr("On %1's Scalp").arg(QString::fromStdString(g->displayName())), this, [this, i] { addGroomOnScalp(i); })
+                ->setToolTip(tr("Another groom on the same mesh (eyebrows, lashes, a second layer): its own graph, guides and maps"));
+        }
+        for (int p = 0; p < static_cast<int>(props_.size()); ++p) {
+            if (!props_[static_cast<std::size_t>(p)]->mesh || props_[static_cast<std::size_t>(p)]->isEye) continue;
+            menu->addAction(tr("On %1").arg(QString::fromStdString(props_[static_cast<std::size_t>(p)]->name)), this,
+                            [this, p] { addGroomOnProp(p); })
+                ->setToolTip(tr("A groom on this prop: it becomes the groom's scalp"));
+        }
+        menu->addSeparator();
+        menu->addAction(tr("On a Mesh File..."), this, [this] {
+            const QString path = QFileDialog::getOpenFileName(this, tr("Add Groom on Mesh"), QString(), tr("Meshes (*.obj *.abc)"));
+            if (!path.isEmpty()) addGroomOnMesh(path);
+        });
+        menu->addAction(tr("From a Groom File..."), this, [this] {
+            const QString path = QFileDialog::getOpenFileName(this, tr("Add Grooms from File"), QString(), tr("Groom files (*.groom)"));
+            if (!path.isEmpty()) addGroomsFromFile(path);
+        });
     });
+    outliner_->addButton()->setMenu(menu);
+    connect(outliner_, &OutlinerPanel::addRequested, this, [menu] { menu->popup(QCursor::pos()); });
 }
 
 }  // namespace groomlab::app
