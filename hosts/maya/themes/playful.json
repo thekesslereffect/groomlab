@@ -1,6 +1,6 @@
 {
   "name": "Playful",
-  "description": "Charcoal and primaries: red, yellow, blue, emerald and white. Flat, round and friendly.",
+  "description": "Charcoal and primaries: red, yellow, blue, emerald and white. Flat and friendly, with Charcoal's corners.",
   "palette": {
     "red": "#FF4D4F",
     "yellow": "#FFC53D",
@@ -11,7 +11,7 @@
   },
   "ui": {
     "toolOn": "category",
-    "checkRadius": 7,
+    "checkRadius": 5,
     "card": "#2C2E34",
     "sunken": "#1F2024",
     "textDisabled": "#6E747E",
@@ -21,7 +21,7 @@
     "selection": "#233A63",
     "selectionText": "#F5F5F7",
     "sliderFill": "#2B3F66",
-    "cardRadius": 14,
+    "cardRadius": 10,
     "background": "#1C1D21",
     "panel": "#26282D",
     "raised": "#34373E",
@@ -37,7 +37,7 @@
     "animated": "#E3A3A8",
     "driven": "#E4D46C",
     "error": "red",
-    "radius": 12,
+    "radius": 7,
     "font": "Inter",
     "fontSize": 12,
     "rowHeight": 26,
@@ -52,7 +52,7 @@
     "text": "#F5F5F7",
     "textDim": "#9BA1AB",
     "selected": "white",
-    "cornerRadius": 14,
+    "cornerRadius": 10,
     "headerStyle": "filled",
     "canvasStyle": "dots",
     "shadow": false,

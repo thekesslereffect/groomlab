@@ -329,6 +329,35 @@ TEST(Retriangulate, MayasQuadSplitAndRootsMovedInPlace) {
         EXPECT_LT(std::sqrt((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y) + (p.z - q.z) * (p.z - q.z)), 0.03f) << g;
     }
     EXPECT_GT(changedFaces, 0) << "roots on the other triangles";
+
+    // The polygons again from either split (a host building its mesh: Maya's import, Blender's),
+    // each started where Maya's split gives the triangles back.
+    // (Nearly square quads: Maya splits them across 1-3, meshB's split; meshA's quads come back as
+    // quads too, but Maya's split of them would not be its triangles: not exact.)
+    for (const auto& mesh : {meshA, meshB}) {
+        const PolygonLoops loops = polygonLoops(*mesh);
+        ASSERT_EQ(loops.vertices.size(), static_cast<std::size_t>(n * n));
+        EXPECT_EQ(loops.exact, mesh == meshB);
+        for (const auto& loop : loops.vertices) EXPECT_EQ(loop.size(), 4u);
+    }
+    EXPECT_TRUE(polygonLoops(*unpolygoned).vertices.empty());
+    // One split taking another's triangles (a host's mesh kept on the groom's own split), its
+    // corners' UVs following the vertices.
+    std::vector<ScalpMesh::UV> uvs;
+    for (const auto& t : b) {
+        for (const std::int32_t v : t) uvs.push_back({points[static_cast<std::size_t>(v)].x, points[static_cast<std::size_t>(v)].z});
+    }
+    auto withUVs = std::make_shared<ScalpMesh>(*meshB);
+    withUVs->setCornerUVs(uvs);
+    const auto kept = withTrianglesOf(*withUVs, *meshA);
+    ASSERT_TRUE(kept);
+    EXPECT_EQ(kept->triangles(), meshA->triangles());
+    for (std::size_t c = 0; c < kept->cornerUVs().size(); ++c) {
+        const Vec3f& p = points[static_cast<std::size_t>(kept->triangles()[c / 3][c % 3])];
+        EXPECT_EQ(kept->cornerUVs()[c][0], p.x);
+        EXPECT_EQ(kept->cornerUVs()[c][1], p.z);
+    }
+    EXPECT_FALSE(withTrianglesOf(*meshA, *meshA)) << "the same split: nothing to do";
 }
 
 TEST(Paths, OneRuleForStoredPaths) {

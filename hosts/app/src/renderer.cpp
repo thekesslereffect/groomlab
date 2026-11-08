@@ -1390,7 +1390,24 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     const bool hair = hairShown_;
     auto hidden = [&](std::size_t i) { return !hair && isHairItem(static_cast<DisplayItemId>(i)); };
     for (std::size_t i = 0; i < items_.size(); ++i) prepare(*items_[i], (lookdev && i == strandsIndex) || hidden(i));
-    for (auto& item : otherItems_) prepare(*item, !hair);  // the other grooms' strands: lines in both paths
+    // The other grooms' strands: lines in both paths. The flat shader encodes its color to sRGB for
+    // the window; the lookdev's HDR scene is linear, then exposed and tone mapped
+    // (LightingSetup::exposure): their color goes in divided by the exposure and decoded from sRGB,
+    // so they read as the same dark gray as in the line path, not lit up.
+    const float unexpose = std::pow(2.0f, -lookdev_.lighting().exposure);
+    auto fromSrgb = [](float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); };
+    for (auto& item : otherItems_) {
+        item->fresh = false;
+        if (!item->shown || !hair) continue;
+        upload(rhi, batch, *item);
+        writeUniforms(batch, *item, mvp, eye, size, false, pixelScale);
+        if (lookdev) {
+            const std::array<float, 4> color = item->color;
+            for (int k = 0; k < 3; ++k) item->color[k] = fromSrgb(color[k] * unexpose);
+            writeUniforms(batch, *item, hdrMvp, eye, size, true, pixelScale);
+            item->color = color;
+        }
+    }
     prepare(*dots_, false);
     prepare(*tool_, false);
     // The GPU preview's run, once this frame's uploads are recorded (its targets exist) and

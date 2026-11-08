@@ -558,6 +558,37 @@ class GroomTest(HelperTestCase):
         with open(saved) as f:
             self.assertEqual([x["name"] for x in json.load(f).get("scalps", [])], ["ear"])
 
+    def test_quads_stay_quads(self):
+        # A quad mesh sent by Blender is split as Maya splits it (the same triangles in every host),
+        # comes back as quads (get_scalp, Open Groom File's mesh), through a groom file too; sent
+        # again (the next frame, another .blend), the groom keeps its own triangles.
+        n = 5
+        pts = np.array([[0.2 * i, 0.04 * np.sin(1.3 * i + 0.7 * j), 0.2 * j] for j in range(n + 1) for i in range(n + 1)],
+                       np.float32)
+        quads = []
+        for j in range(n):
+            for i in range(n):
+                v0 = j * (n + 1) + i
+                quads += [v0, v0 + 1, v0 + n + 2, v0 + n + 1]
+        counts = np.full(n * n, 4, np.int32)
+        indices = np.array(quads, np.int32)
+        s = self.h.call("new_session")["session"]
+        self.h.call("set_scalp", session=s, **self.h.put(points=pts, faceCounts=counts, faceIndices=indices))
+        got = self.h.call("get_scalp", session=s)
+        self.assertEqual(got["scalp"]["faces"], n * n)
+        self.assertTrue(got["scalp"]["facesExact"])
+        path = os.path.join(self.tmp, "quads.groom")
+        self.h.call("save_groom", session=s, path=path)
+        t = self.h.call("new_session")["session"]
+        self.h.call("load_groom", session=t, path=path)
+        loaded = self.h.call("get_scalp", session=t)
+        self.assertEqual(loaded["scalp"]["faces"], n * n)
+        self.assertEqual(loaded["scalp"]["topology"], got["scalp"]["topology"])
+        self.assertEqual(self.h.array(loaded["arrays"]["faceCounts"]).tolist(), [4] * (n * n))
+        # Sent again: its own triangles kept (the topology the same).
+        self.h.call("set_scalp", session=t, **self.h.put(points=pts, faceCounts=counts, faceIndices=indices))
+        self.assertEqual(self.h.call("get_scalp", session=t)["scalp"]["topology"], got["scalp"]["topology"])
+
     def test_a_file_of_several_grooms(self):
         # The app's document of several grooms in one file: the first at the top, the others in
         # "grooms". groom_file_names lists them; load_groom loads one by index.

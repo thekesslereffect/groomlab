@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "groomlab/groom.h"
@@ -24,6 +25,24 @@ namespace groomlab {
 // of those depends on their shape: a host that differs is met by retriangulateGroomData). Local
 // corner indices, a triple per triangle (none for fewer than 3 corners).
 std::vector<std::array<int, 3>> polygonTriangles(const std::vector<Vec3f>& corners);
+
+// Each polygon of `mesh` (ScalpMesh::polygons: its triangles in a row) as its corners in order,
+// from the triangles' edges that are not shared within the polygon, with each corner's triangle
+// corner (3 * triangle + k: its UV and colors), started where polygonTriangles gives back the
+// mesh's own triangles of it (a host that splits as Maya does rebuilds them as they were;
+// `exact`: every polygon so). Empty when the mesh has no polygons or one is not a single loop (a
+// host then makes a face of each triangle).
+struct PolygonLoops {
+    std::vector<std::vector<int>> vertices;
+    std::vector<std::vector<int>> corners;
+    bool exact = true;
+};
+PolygonLoops polygonLoops(const ScalpMesh& mesh);
+
+// `mesh` (its points, polygons, UVs, color sets, rest pose) split into `split`'s triangles, the
+// same polygons split otherwise (isRetriangulation(split, mesh)): each triangle corner's UV and
+// colors from `mesh`'s corner of that polygon and vertex. Null when they are not such a pair.
+std::shared_ptr<ScalpMesh> withTrianglesOf(const ScalpMesh& mesh, const ScalpMesh& split);
 
 // Whether `to` is `from` split otherwise: the same points (count), and both with polygons
 // (ScalpMesh::polygons) that match, polygon by polygon, as sets of vertices. False when they are

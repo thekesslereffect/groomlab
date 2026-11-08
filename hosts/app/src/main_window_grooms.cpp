@@ -259,8 +259,10 @@ void MainWindow::refreshOtherGrooms() {
     std::vector<OtherGroomView> views;
     std::vector<GroomRenderer::OtherGroom> lines;
     if (document_ && grooms_.size() > 1) {
+        // Half the active groom's preview density (fewer strands: the one worked on shows through).
         ViewRequest request = viewRequest();
         request.stopAt.clear();
+        request.density *= 0.5f;
         for (std::size_t i = 0; i < grooms_.size(); ++i) {
             GroomDocument* g = grooms_[i].get();
             if (static_cast<int>(i) == activeGroom_ || !g || hiddenGrooms_.count(g)) continue;
@@ -286,9 +288,12 @@ void MainWindow::refreshOtherGrooms() {
                 surface->name = "outliner:" + g->displayName();
                 surface->mesh = view.scalp;
                 surface->material = surfacePreset("scalp");
+                // Dimmed as its strands are: the groom worked on stands out.
+                for (float& c : surface->material.baseColor) c *= 0.35f;
                 view.surface = surface;
             }
-            if (view.lines) lines.push_back({view.lines, {0.42f, 0.42f, 0.45f, 1.0f}});  // (dimmer than the active groom)
+            // Dark gray (linear: the display brightens it to about 0.3), well under the active groom's hair.
+            if (view.lines) lines.push_back({view.lines, {0.07f, 0.07f, 0.08f, 1.0f}});
             views.push_back(std::move(view));
         }
     }

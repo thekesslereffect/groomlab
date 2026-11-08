@@ -36,6 +36,7 @@
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_package.h"
+#include "groomlab/retriangulate.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/hair_color.h"
@@ -412,12 +413,15 @@ std::shared_ptr<ScalpMesh> scalpFrom(const json& args, const HostSpace& space, B
         }
     };
     for (const std::int32_t count : counts) {
+        // Split as Maya splits it (retriangulate.h polygonTriangles: a quad across its shorter
+        // diagonal), so Blender, Maya and the app meet the same triangles on one mesh.
         const auto n = static_cast<std::size_t>(count);
-        for (std::size_t i = 1; i + 1 < n; ++i) {
-            triangles.push_back({indices[start], indices[start + i], indices[start + i + 1]});
-            corner(start);
-            corner(start + i);
-            corner(start + i + 1);
+        std::vector<Vec3f> facePoints;
+        for (std::size_t i = 0; i < n; ++i) facePoints.push_back(points[static_cast<std::size_t>(indices[start + i])]);
+        for (const std::array<int, 3>& tri : polygonTriangles(facePoints)) {
+            triangles.push_back({indices[start + static_cast<std::size_t>(tri[0])], indices[start + static_cast<std::size_t>(tri[1])],
+                                 indices[start + static_cast<std::size_t>(tri[2])]});
+            for (const int k : tri) corner(start + static_cast<std::size_t>(k));
         }
         polygons.push_back(static_cast<std::int32_t>(n - 2));
         start += n;
@@ -434,51 +438,35 @@ std::shared_ptr<ScalpMesh> scalpFrom(const json& args, const HostSpace& space, B
     return mesh;
 }
 
-// The scalp's polygons again (a fan per polygon when its triangles make one), for a host building
-// its mesh from a groom file. `exact`: every polygon came back as one face.
+// The scalp's polygons again (retriangulate.h polygonLoops: each polygon's corners from its
+// triangles, whatever split they are), for a host building its mesh from a groom file. `exact`:
+// every polygon came back as one face (else the triangles are the faces).
 void scalpFaces(const ScalpMesh& m, std::vector<std::int32_t>& counts, std::vector<std::int32_t>& indices,
                 std::vector<float>& uvs, bool& exact) {
     const auto& tris = m.triangles();
-    const auto& polys = m.polygons();
     const auto& cornerUVs = m.cornerUVs();
     const bool hasUVs = m.hasUVs();
-    exact = true;
-    auto cornerOf = [&](std::size_t tri, int c) {
-        indices.push_back(tris[tri][static_cast<std::size_t>(c)]);
+    auto corner = [&](int vertex, std::size_t triangleCorner) {
+        indices.push_back(vertex);
         if (hasUVs) {
-            uvs.push_back(cornerUVs[3 * tri + static_cast<std::size_t>(c)][0]);
-            uvs.push_back(cornerUVs[3 * tri + static_cast<std::size_t>(c)][1]);
+            uvs.push_back(cornerUVs[triangleCorner][0]);
+            uvs.push_back(cornerUVs[triangleCorner][1]);
         }
     };
-    auto triangle = [&](std::size_t tri) {
-        counts.push_back(3);
-        for (int c = 0; c < 3; ++c) cornerOf(tri, c);
-    };
-    std::size_t total = 0;
-    for (const std::int32_t n : polys) total += static_cast<std::size_t>(std::max(0, n));
-    if (polys.empty() || total != tris.size()) {
-        exact = polys.empty() || total == tris.size();
-        for (std::size_t t = 0; t < tris.size(); ++t) triangle(t);
+    const PolygonLoops loops = polygonLoops(m);
+    exact = !loops.vertices.empty() || m.polygons().empty();
+    if (loops.vertices.empty()) {
+        for (std::size_t t = 0; t < tris.size(); ++t) {
+            counts.push_back(3);
+            for (int c = 0; c < 3; ++c) corner(tris[t][static_cast<std::size_t>(c)], 3 * t + static_cast<std::size_t>(c));
+        }
         return;
     }
-    std::size_t t = 0;
-    for (const std::int32_t count : polys) {
-        const auto n = static_cast<std::size_t>(count);
-        bool fan = n >= 1;
-        for (std::size_t i = 1; fan && i < n; ++i) {
-            fan = tris[t + i][0] == tris[t][0] && tris[t + i][1] == tris[t + i - 1][2];
+    for (std::size_t f = 0; f < loops.vertices.size(); ++f) {
+        counts.push_back(static_cast<std::int32_t>(loops.vertices[f].size()));
+        for (std::size_t k = 0; k < loops.vertices[f].size(); ++k) {
+            corner(loops.vertices[f][k], static_cast<std::size_t>(loops.corners[f][k]));
         }
-        if (fan) {
-            counts.push_back(static_cast<std::int32_t>(n + 2));
-            cornerOf(t, 0);
-            cornerOf(t, 1);
-            cornerOf(t, 2);
-            for (std::size_t i = 1; i < n; ++i) cornerOf(t + i, 2);
-        } else {
-            exact = false;
-            for (std::size_t i = 0; i < n; ++i) triangle(t + i);
-        }
-        t += n;
     }
 }
 
@@ -1594,10 +1582,15 @@ json Helper::run(const std::string& cmd, const json& args) {
     // ---- The scalp ----
     if (cmd == "set_scalp") {
         Session& s = session(args);
-        auto mesh = scalpFrom(args, s.space, blocks);
+        std::shared_ptr<ScalpMesh> mesh = scalpFrom(args, s.space, blocks);
+        const MeshPtr before = s.groom->rawScalp();
+        // The groom's own polygons split otherwise (a groom made before the hosts split quads
+        // alike, a file of another host's split): kept on its own triangles, its roots as they were.
+        if (before) {
+            if (auto same = withTrianglesOf(*mesh, *before)) mesh = std::move(same);
+        }
         const std::uint64_t topology = mesh->topologyFingerprint();
         const std::size_t points = mesh->pointCount(), triangles = mesh->triangleCount();
-        const MeshPtr before = s.groom->rawScalp();
         s.groom->setScalp(std::move(mesh));
         // Flat guides keep their roots (a face and its barycentrics) while the scalp keeps its
         // triangles; on other triangles they are rooted again, as Maya roots its guide curves.
