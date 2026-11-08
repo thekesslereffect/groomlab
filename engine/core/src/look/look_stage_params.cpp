@@ -224,6 +224,10 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
         // ---- The shapers working on each strand alone ----
         case StageKind::Blend: {
             // BlendOp: mix (field 0, per point allowed) and its profile by point index.
+            if (params.has("mode") && params.getString("mode") == "chance") {
+                *why = r.name() + " picks each strand a or b by chance (the CPU's)";
+                return false;
+            }
             if (!mappable("mix", &s->value[0])) return false;
             s->ramp = r.ramp("profile");
             s->tabled = true;

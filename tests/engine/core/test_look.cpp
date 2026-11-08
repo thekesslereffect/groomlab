@@ -3869,6 +3869,51 @@ TEST(Blend, MixesStrandColorAndPigmentByTheAmount) {
     EXPECT_EQ(OperatorRegistry::instance().create(op::kBlend)->params().getString("include"), "shapeAndLook");
 }
 
+// Chance mode: each strand all a or all b, b with the mix's chance (a natural change of color: a
+// map's share of the strands another color, not every strand in between).
+TEST(Blend, ChanceModePicksWholeStrandsByTheMix) {
+    std::vector<float> xs;
+    for (int i = 0; i < 400; ++i) xs.push_back(0.01f * static_cast<float>(i));
+    const TwoLooks looks = twoLooks(xs);
+    const StrandSet& a = *looks.a;
+    const StrandSet& b = *looks.b;
+    auto picks = [&](double mix, std::int64_t seed) {
+        const StrandsPtr out = blended(looks, [&](ParamSet& p) {
+            p.set("mode", std::string("chance"));
+            p.set("mix", mix);
+            p.set("seed", seed);
+        });
+        std::vector<bool> isB;
+        for (std::size_t s = 0; s < a.strandCount(); ++s) {
+            const float pick = channelAt(*out, "blend", s);
+            EXPECT_TRUE(pick == 0.0f || pick == 1.0f) << s;
+            const StrandSet& side = pick == 1.0f ? b : a;
+            // The look and the shape of that side, whole.
+            for (const char* name : {"colorR", "colorG", "colorB", kMelaninChannel, kMelaninRednessChannel}) {
+                EXPECT_FLOAT_EQ(channelAt(*out, name, s), channelAt(side, name, s)) << name << " " << s;
+            }
+            for (std::size_t k = 0; k < out->strandPointCount(s); ++k) {
+                const std::size_t i = out->strandBegin(s) + k;
+                EXPECT_LT((out->positions()[i] - side.positions()[i]).length(), 1e-4f) << s << " " << k;
+                EXPECT_FLOAT_EQ(out->widths()[i], side.widths()[i]);
+            }
+            EXPECT_EQ(channelAt(*out, kClumpIdChannel, s), static_cast<float>(s));  // IDs: a's
+            isB.push_back(pick == 1.0f);
+        }
+        EXPECT_EQ(out->pointChannel("colorR"), nullptr);  // a whole strand each: no per-point colors
+        return isB;
+    };
+    const std::vector<bool> some = picks(0.3, 0);
+    const auto count = static_cast<double>(std::count(some.begin(), some.end(), true));
+    EXPECT_NEAR(count / 400.0, 0.3, 0.06);
+    EXPECT_EQ(picks(0.3, 0), some);   // the same strands every time
+    EXPECT_NE(picks(0.3, 7), some);   // another seed, others
+    const std::vector<bool> more = picks(0.6, 0);
+    for (std::size_t s = 0; s < some.size(); ++s) EXPECT_TRUE(!some[s] || more[s]) << s;  // a higher chance keeps those
+    for (const bool x : picks(0.0, 0)) EXPECT_FALSE(x);
+    for (const bool x : picks(1.0, 0)) EXPECT_TRUE(x);
+}
+
 TEST(Blend, APerPointAmountMixesTheColorPerPoint) {
     TwoLooks looks = twoLooks({0.1f, 0.2f});
     auto a = std::make_shared<StrandSet>(*looks.a);

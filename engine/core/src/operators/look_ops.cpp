@@ -2402,8 +2402,15 @@ public:
     std::vector<ParamSpec> paramSpecs() const override {
         return {
             // 1 by default: a plugged mask multiplies it, so the mask alone is the mix (0.5 halved it)
-            ParamSpec{"mix", 1.0, "0: a, 1: b (mappable, per point)", "fraction"}.soft(0, 1),
-            {"profile", Ramp::constant(1.0f), "Mix along the length, root to tip"},
+            ParamSpec{"mix", 1.0, "0: a, 1: b (mappable, per point; in chance mode each strand's chance of being b)",
+                      "fraction"}
+                .soft(0, 1),
+            {"mode", std::string("mix"),
+             "mix: every strand between a and b by the mix; chance: each strand all a or all b, the mix (at its "
+             "root) its chance of being b, e.g. strands of another color scattered in by a map",
+             "", {"mix", "chance"}},
+            notAnimatable({"seed", std::int64_t{0}, "Which strands chance mode picks"}).adv().when("mode", {"chance"}),
+            {"profile", Ramp::constant(1.0f), "Mix along the length, root to tip (chance mode: along the strands picked)"},
             ParamSpec{"keepLength", true, "Blend each segment's way and length from the root, so a strand midway between a "
                                           "curly look and a straight one keeps its length (off: its points blended, "
                                           "which pulls such a strand in)"}
@@ -2456,7 +2463,13 @@ private:
         }
         const ScalarField amount(params(), "mix", scalpOf(ctx));
         amount.validate(*a);
-        const bool perPoint = amount.perPoint();
+        // Chance: each strand a or b whole, b where its roll (by its ID) is under the mix at its root.
+        const bool chance = params().getString("mode") == "chance";
+        const bool perPoint = !chance && amount.perPoint();
+        const std::uint64_t seed = static_cast<std::uint64_t>(params().getInt("seed"));
+        const auto picked = [&](std::size_t s) {
+            return unitFloat(hashCombine(a->ids()[s], seed ^ 0xB1E4Dull)) < std::clamp(amount.at(*a, s), 0.0f, 1.0f) ? 1.0f : 0.0f;
+        };
         const Ramp ramp = params().getRamp("profile");
         const RampAlong profile(ramp, *a);
         const std::string channel = params().getString("mixChannel");
@@ -2500,10 +2513,26 @@ private:
         // look mixed below by the same weights.
         gpu::StageInputs with;
         with.blendWith = b;
+        // Chance: the stage mixes by each strand's pick (0 or 1), handed in as a channel of a's copy.
+        StrandsPtr stageIn = a;
+        ParamSet stageParams = params();
+        if (chance) {
+            static const char* kPick = "_blendPick";
+            auto withPicks = std::make_shared<StrandSet>(*a);
+            std::vector<float>& picks = withPicks->addStrandChannel(kPick, 0.0f);
+            parallelFor(0, a->strandCount(), [&](std::size_t s) { picks[s] = picked(s); });
+            MapRef ref;
+            ref.source = MapRef::Source::Attribute;
+            ref.name = kPick;
+            stageParams.set("mode", std::string("mix"));
+            stageParams.set("mix", ref);
+            stageParams.setField("mix", nullptr);
+            stageIn = withPicks;
+        }
         if (last) {
-            gpu::runStageOnStrands(gpu::StageKind::Blend, params(), a, remade, scalpOf(ctx), *out, std::move(with));
+            gpu::runStageOnStrands(gpu::StageKind::Blend, stageParams, stageIn, remade, scalpOf(ctx), *out, std::move(with));
         } else {
-            gpu::runStageInto(gpu::StageKind::Blend, params(), a, scalpOf(ctx), *out, std::move(with));
+            gpu::runStageInto(gpu::StageKind::Blend, stageParams, stageIn, scalpOf(ctx), *out, std::move(with));
         }
         auto blendStrand = [&](std::size_t s) {
             if (last) {  // made again from a's strand, as a full evaluation's copy of a starts it
@@ -2513,7 +2542,7 @@ private:
                     std::copy(a->widths().begin() + begin, a->widths().begin() + end, outWidths.begin() + begin);
                 }
             }
-            const float w = std::clamp(amount.at(*a, s), 0.0f, 1.0f);  // per point: the root's, for the channel
+            const float w = chance ? picked(s) : std::clamp(amount.at(*a, s), 0.0f, 1.0f);  // per point: the root's, for the channel
             if (amounts) (*amounts)[s] = w;
             const std::size_t begin = out->strandBegin(s), n = out->strandPointCount(s);
             // Same totals, different split: the strand stays a's (shape and look).
