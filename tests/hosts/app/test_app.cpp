@@ -671,17 +671,17 @@ TEST(AppTheme, EveryShippedThemeIsEmbeddedAndCharcoalIsSolid) {
     EXPECT_EQ(theme::defaultTheme(), QStringLiteral("charcoal"));
     ASSERT_EQ(theme::currentTheme(), theme::defaultTheme());
     EXPECT_FALSE(theme::glassy());
-    // Playful: solid too (the one component system), its character in tokens: round, filled headers,
-    // the categories' colors, the chosen tool tile in its category's color.
+    // Playful: solid too (the one component system), its character in tokens: Charcoal's corners,
+    // filled headers, the categories' colors, the chosen tool tile in its category's color.
     ASSERT_TRUE(theme::setTheme(QStringLiteral("playful")));
     EXPECT_FALSE(theme::glassy());
     EXPECT_TRUE(theme::glassEdge().isValid());
-    EXPECT_EQ(theme::nodeRadius(), 14.0);
+    EXPECT_EQ(theme::nodeRadius(), 10.0);
     EXPECT_FALSE(theme::tintedHeaders());
     EXPECT_EQ(theme::headerStyle(), QStringLiteral("filled"));
     EXPECT_EQ(theme::canvasStyle(), QStringLiteral("dots"));
-    EXPECT_EQ(theme::controlRadius(), 12) << "round";
-    EXPECT_EQ(theme::checkRadius(), 7) << "round checks";
+    EXPECT_EQ(theme::controlRadius(), 7) << "Charcoal's corners";
+    EXPECT_EQ(theme::checkRadius(), 5) << "Charcoal's checks";
     EXPECT_TRUE(theme::toolOnCategory());
     EXPECT_EQ(theme::segmentFill(theme::red()), theme::uiColor("selection"));
     EXPECT_EQ(theme::actionFill(theme::yellow()), theme::accentFill()) << "one primary color";

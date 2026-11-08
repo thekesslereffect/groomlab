@@ -3678,7 +3678,7 @@ class DockableWindowsTest(unittest.TestCase):
             self.assertIn("border-radius: %dpx" % theme.px(6), tools.styleSheet())
             theme.set_theme("playful")
             self.assertEqual(graph_editor.HEADER_STYLE, "filled")
-            self.assertIn("border-radius: %dpx" % theme.px(12), editor.styleSheet())
+            self.assertIn("border-radius: %dpx" % theme.px(7), editor.styleSheet())  # Charcoal's corners
             self.assertIn("font-size: %dpx" % theme.px(12), editor.styleSheet())  # text scales with Maya's UI
             menu = widgets_theme_menu(tools)
             menu.aboutToShow.emit()
