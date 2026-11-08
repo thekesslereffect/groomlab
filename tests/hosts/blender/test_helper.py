@@ -1295,7 +1295,17 @@ class ToolsTest(HelperTestCase):
         self.call("guides_edit", op="unfreeze_all")
         self.assertEqual(self.call("guides_info")["frozen"], 0)
         self.call("undo")
-        self.assertGreaterEqual(self.call("guides_info")["frozen"], 2)
+        frozen = self.call("guides_info")["frozen"]
+        self.assertGreaterEqual(frozen, 2)
+        # Invert frozen: one undo step, the frozen and the free swap.
+        total = self.call("guides_info")["guides"]
+        self.call("guides_edit", op="invert_frozen")
+        inverted = self.call("guides_info")["frozen"]
+        self.assertNotEqual(inverted, frozen)
+        self.assertGreater(inverted, 0)
+        self.assertLess(inverted, total)
+        self.call("undo")
+        self.assertEqual(self.call("guides_info")["frozen"], frozen)
 
     def test_ctrl_shift_with_a_guide_brush_paints_the_selection(self):
         # A Shape or Trim brush's Ctrl+Shift drag (stroke_begin with both): the guides the brush

@@ -352,6 +352,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
                 if "freeze" in ids:  # beside Freeze, a tile: every guide brushable again (its tooltip says so)
                     sub = grid.row(align=True)
                     sub.scale_y = TILE_SCALE
+                    sub.operator("groomlab.guides_edit", text="Invert" if in_window(layout) else "Invert Frozen",
+                                 icon_value=icons.icon("invert")).action = "INVERT_FROZEN"
                     sub.operator("groomlab.guides_edit", text="Unfreeze" if in_window(layout) else "Unfreeze All",
                                  icon_value=icons.icon("unfreeze")).action = "UNFREEZE_ALL"
         elif t.tab == "PAINT":  # Paint: one full-width button over the maps

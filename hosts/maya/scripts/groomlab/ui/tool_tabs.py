@@ -1592,6 +1592,10 @@ class PaintTab(_GroomTab):
         if self.need():
             self.run(groomlab.unfreeze_all, self.groom)
 
+    def invert_frozen(self):
+        if self.need():
+            self.run(groomlab.invert_frozen, self.groom)
+
     def toggle_view_guides(self, on):
         if self._need_map():
             groomlab.color_guides_by_map(self.groom, self.current() if on else None)

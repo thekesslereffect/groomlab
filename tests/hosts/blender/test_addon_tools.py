@@ -311,7 +311,9 @@ class ToolsTest(unittest.TestCase):
         unfreeze = [e[2] for e in log if e[0] == "op_props" and e[1] == "groomlab.guides_edit"
                     and getattr(e[2], "action", None) == "UNFREEZE_ALL"]
         self.assertTrue(unfreeze)  # Unfreeze All beside Freeze: a labeled tile
-        self.assertIn("Unfreeze All", [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.guides_edit"])
+        texts = [e[2] for e in log if e[0] == "op_text" and e[1] == "groomlab.guides_edit"]
+        self.assertIn("Unfreeze All", texts)
+        self.assertLess(texts.index("Invert Frozen"), texts.index("Unfreeze All"))  # Freeze, Invert, Unfreeze
         comb = type("Props", (), {"tool": "comb"})()
         self.assertEqual(tool_ops.GROOMLAB_OT_tool.description(bpy.context, comb), palette.help_text("comb"))
         self.assertTrue(palette.help_text("comb").startswith(

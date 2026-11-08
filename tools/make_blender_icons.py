@@ -36,7 +36,7 @@ ICON_GROUPS = {
     "create": ("place", "draw", "part", "flow", "select"),
     "shape": ("comb", "slide", "smooth", "lift", "twist", "attract", "shape"),  # "shape": the Tube brush
     "trim": ("cut", "length", "lengths", "erase"),
-    "paint": ("paint", "freeze", "unfreeze"),
+    "paint": ("paint", "freeze", "invert", "unfreeze"),
 }
 PLACEHOLDERS = {"main": "#3D7EFF", "shade": "#1F4FB3", "tint": "#A8C7FF", "ink": "#F2F2F5", "shine": "#FFFFFF",
                 "red": "#FF4D50", "yellow": "#FFC53E", "blue": "#2F7BF7", "emerald": "#2ECC90"}

@@ -174,6 +174,11 @@ void MainWindow::buildPanels() {
         document_->editGuides("unfreeze all", [](GuideHierarchy& h) { unfreezeAll(h); });
         guidesEdited();
     });
+    connect(groomTools_, &GroomTools::invertFrozenRequested, this, [this] {
+        if (!document_) return;
+        document_->editGuides("invert frozen", [](GuideHierarchy& h) { invertFrozen(h); });
+        guidesEdited();
+    });
     connect(groomTools_, &GroomTools::clearFlowRequested, this, [this] { guidesPanel_->clearFlow(); });
     connect(groomTools_, &GroomTools::isolateChanged, this, [this] {
         settings_.isolateGroup = groomTools_->isolatedGroup();

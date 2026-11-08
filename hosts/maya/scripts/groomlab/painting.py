@@ -55,6 +55,18 @@ def unfreeze_all(groom=None):
         remove_map(groom, "freeze")
 
 
+def invert_frozen(groom=None):
+    """The frozen guides unfrozen and the rest frozen: each guide's freeze value v becomes 1 - v
+    (one undo step; with nothing frozen, every guide freezes). `groom`: the groom the tools work
+    on by default."""
+    if groom is None:
+        from groomlab.groom import active_groom
+        groom = active_groom()
+        if not groom:
+            raise ValueError("select a groom to invert its frozen guides")
+    cmds.groomLabGuides(groom, invertAttribute="freeze")
+
+
 def freeze_tool(value=1.0, **brush_options):
     """Paint the freeze mask (Ctrl while painting: unfreeze)."""
     return brush_tool("paint", attribute="freeze", value=value, **brush_options)

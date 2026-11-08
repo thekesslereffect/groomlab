@@ -356,7 +356,16 @@ GroomTools::GroomTools(QWidget* parent) : QWidget(parent) {
             const QString word = e->id == "lengths" ? tr("Keys") : qs(e->label);
             buttons.push_back(makeTile(e->id, word, tileTip(*e)));
             if (e->id == "freeze") {
-                // Unfreeze All: a button, not a tool.
+                // Invert Frozen, then Unfreeze All: buttons, not tools.
+                auto* inv = new QToolButton(parent);
+                inv->setObjectName(QStringLiteral("invertFrozenTile"));
+                inv->setProperty("role", "tool");
+                inv->setText(tr("Invert"));  // (its icon: refreshTiles)
+                inv->setToolTip(tr("<b>Invert Frozen</b><br>Swap the frozen guides and the free ones: the frozen can be brushed, "
+                                   "the rest freeze"));
+                connect(inv, &QToolButton::clicked, this, &GroomTools::invertFrozenRequested);
+                allTiles_.push_back(inv);
+                buttons.push_back(inv);
                 auto* b = new QToolButton(parent);
                 b->setObjectName(QStringLiteral("unfreezeAllTile"));
                 b->setProperty("role", "tool");
@@ -701,6 +710,10 @@ void GroomTools::refreshTiles() {
             b->setProperty("iconLook", look);
             b->setIcon(toolIcon("unfreeze", BrushCategory::Guides));
         }
+        if (b->objectName() == QLatin1String("invertFrozenTile") && b->property("iconLook").toString() != look) {
+            b->setProperty("iconLook", look);
+            b->setIcon(toolIcon("invert", BrushCategory::Guides));
+        }
         if (b->property("labels").isValid() && b->property("labels").toBool() == tileLabels_) continue;
         b->setProperty("labels", tileLabels_);
         b->style()->unpolish(b);
@@ -869,9 +882,10 @@ void GroomTools::setGroupsContent(QWidget* content) {
 }
 
 QAbstractButton* GroomTools::tile(const std::string& id) const {
-    if (id == "unfreeze") {
+    if (id == "unfreeze" || id == "invert") {
+        const QLatin1String name(id == "unfreeze" ? "unfreezeAllTile" : "invertFrozenTile");
         for (QToolButton* b : allTiles_) {
-            if (b->objectName() == QLatin1String("unfreezeAllTile")) return b;
+            if (b->objectName() == name) return b;
         }
     }
     const auto it = tiles_.find(id);

@@ -87,6 +87,8 @@ const char* kSetAttribute[] = {"-sat", "-setAttribute"};
 const char* kValue[] = {"-v", "-value"};
 const char* kListAttributes[] = {"-lat", "-listAttributes"};
 const char* kRemoveAttribute[] = {"-rat", "-removeAttribute"};
+// Each guide's value of the attribute v becomes 1 - v (none: 0, so 1): Invert Frozen on "freeze".
+const char* kInvertAttribute[] = {"-iat", "-invertAttribute"};
 const char* kRenameAttribute[] = {"-rna", "-renameAttribute"};
 const char* kResample[] = {"-rsm", "-resample"};
 // Live Resample (Groom Tools' slider): the guides resampled shown as the shape's preview, from the
@@ -290,6 +292,7 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kValue[0], kValue[1], MSyntax::kDouble);
     s.addFlag(kListAttributes[0], kListAttributes[1]);
     s.addFlag(kRemoveAttribute[0], kRemoveAttribute[1], MSyntax::kString);
+    s.addFlag(kInvertAttribute[0], kInvertAttribute[1], MSyntax::kString);
     s.addFlag(kRenameAttribute[0], kRenameAttribute[1], MSyntax::kString, MSyntax::kString);
     s.addFlag(kResample[0], kResample[1], MSyntax::kLong);
     s.addFlag(kSetGroupSegments[0], kSetGroupSegments[1], MSyntax::kLong);
@@ -335,6 +338,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                             int(db.isFlagSet(kPromote[0])) + int(db.isFlagSet(kDemote[0])) + int(db.isFlagSet(kMirror[0])) +
                             int(db.isFlagSet(kSetAttribute[0])) + int(db.isFlagSet(kListAttributes[0])) +
                             int(db.isFlagSet(kRemoveAttribute[0])) + int(db.isFlagSet(kRenameAttribute[0])) +
+                            int(db.isFlagSet(kInvertAttribute[0])) +
                             int(db.isFlagSet(kResample[0])) + int(db.isFlagSet(kReshape[0])) + int(db.isFlagSet(kSetGroupSegments[0])) +
                             int(db.isFlagSet(kResetGroupSegments[0])) +
                             int(db.isFlagSet(kPreviewResample[0])) + int(db.isFlagSet(kEndPreview[0])) +
@@ -775,6 +779,10 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                     return fail(kName, "no guide attribute named " + name);
                 }
                 h->removeAttribute(name.asChar());
+            } else if (db.isFlagSet(kInvertAttribute[0])) {
+                if (!invertFrozen(*h, flagString(db, kInvertAttribute[0], "freeze").asChar())) {
+                    return fail(kName, "the groom has no guides");
+                }
             } else if (db.isFlagSet(kResample[0])) {
                 int segments = 0;
                 db.getFlagArgument(kResample[0], 0, segments);

@@ -520,6 +520,15 @@ def step_redo():
     groomlab.brush_tool("comb", radius=2000, level=0)
     cmds.groomLabBrushCtx(ctx, edit=True, debugStroke=" ".join("%d %d" % (gx + 15 * k, gy) for k in range(12)))
     check("frozen guides are left alone", cmds.groomLabGuides(groom, guidePoints=frozen) == before)
+    # Invert Frozen: the frozen guide comes free, the free ones freeze (one undo step).
+    free = cmds.groomLabGuides(groom, listGuides="primary")[2]
+    groomlab.invert_frozen(groom)
+    groomlab.brush_tool("comb", radius=2000, level=0)
+    free_before = cmds.groomLabGuides(groom, guidePoints=free)
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke=" ".join("%d %d" % (gx + 15 * k, gy) for k in range(12)))
+    check("inverted: the frozen guide moves, the free one is held",
+          cmds.groomLabGuides(groom, guidePoints=frozen) != before and
+          cmds.groomLabGuides(groom, guidePoints=free) == free_before)
     groomlab.unfreeze_all(groom)
     groomlab.isolate_group(groom, None)
     groomlab.color_guides_by_map(groom, None)

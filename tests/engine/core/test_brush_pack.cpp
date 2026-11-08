@@ -571,6 +571,28 @@ TEST(BrushPack, SoloFreezesEveryOtherGuideAndUnfreezeAllFreesThem) {
     EXPECT_FALSE(unfreezeAll(f.h)) << "nothing frozen any more";
 }
 
+TEST(BrushPack, InvertFrozenSwapsTheFrozenAndTheFree) {
+    Field f;
+    const GuideId a = f.add(0.3f, 0.3f), b = f.add(0.7f, 0.7f), c = f.add(0.5f, 0.2f);
+    f.h.evaluate(f.scalp.get());
+    // Nothing frozen: inverted, every guide freezes.
+    EXPECT_TRUE(invertFrozen(f.h));
+    for (const GuideId id : {a, b, c}) EXPECT_EQ(frozen(f.h, id), 1.0f);
+    // A soloed guide, and one painted half way: each 1 - its value.
+    soloGuides(f.h, {a});
+    f.h.setAttribute(c, "freeze", 0.25f);
+    EXPECT_TRUE(invertFrozen(f.h));
+    EXPECT_EQ(frozen(f.h, a), 1.0f);
+    EXPECT_EQ(frozen(f.h, b), 0.0f);
+    EXPECT_FLOAT_EQ(frozen(f.h, c), 0.75f);
+    // Twice: as it was.
+    EXPECT_TRUE(invertFrozen(f.h));
+    EXPECT_EQ(frozen(f.h, a), 0.0f);
+    EXPECT_EQ(frozen(f.h, b), 1.0f);
+    GuideHierarchy none;
+    EXPECT_FALSE(invertFrozen(none)) << "no guides";
+}
+
 TEST(BrushPack, PlaceSolosItsNewGuidesInTheSameStep) {
     Session g;
     const ToolView view = frontView();

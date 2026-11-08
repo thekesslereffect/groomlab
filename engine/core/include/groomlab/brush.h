@@ -326,6 +326,9 @@ void setPlacementTube(PlaceSettings& s, const std::string& json);
 void soloGuides(GuideHierarchy& hierarchy, const std::vector<GuideId>& active, const std::string& freeze = "freeze");
 // Every guide unfrozen: the freeze layer removed. False when no guide carried it.
 bool unfreezeAll(GuideHierarchy& hierarchy, const std::string& freeze = "freeze");
+// The frozen guides unfrozen and the rest frozen: each guide's freeze value v becomes 1 - v (a guide
+// without one counts as 0, so with nothing frozen every guide freezes). False without guides.
+bool invertFrozen(GuideHierarchy& hierarchy, const std::string& freeze = "freeze");
 // The Select tool's solo: the selection (and its descendants) the guides brushes work on, every
 // other guide frozen (soloGuides); an empty selection unfreezes every guide. True when the
 // freeze layer changed.

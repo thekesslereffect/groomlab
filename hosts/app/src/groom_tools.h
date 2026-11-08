@@ -13,7 +13,7 @@
 //     status      a line that takes no room while it has nothing to say
 //     tabs        palette.tabs: Tools, Paint, Correctives, Photos
 //     the grid    the tool tiles at a fixed size, as many to a row as the width takes (Tools and
-//                 Correctives: Create, Shape, Trim, Guides, Unfreeze All beside Freeze; Paint: one
+//                 Correctives: Create, Shape, Trim, Guides, Invert Frozen and Unfreeze All beside Freeze; Paint: one
 //                 full-width Paint button)
 //     no groom    palette.empty: Start a groom (New Groom on Mesh, Import ▾)
 //     the list    Tools: Guide groups (the guides panel, always open; Isolate is the eye in its
@@ -165,7 +165,7 @@ public:
 
     // ---- The pieces (tests) ---------------------------------------------------------------------
     QAbstractButton* tile(const std::string& id) const;  // the tool's first tile (the Paint tab's for Paint)
-    std::vector<QAbstractButton*> tiles() const;         // every tool tile, Unfreeze All among them
+    std::vector<QAbstractButton*> tiles() const;         // every tool tile, Invert Frozen and Unfreeze All among them
     std::vector<ToolGrid*> grids() const { return grids_; }
     BrushPanel* card() const { return card_; }
     TubePanel* tubePanel() const { return tubes_; }
@@ -188,6 +188,7 @@ signals:
     // A tile: the catalog id ("select", "freeze", "paint", "comb"...).
     void toolChosen(const QString& id);
     void unfreezeAllRequested();  // the Unfreeze All tile
+    void invertFrozenRequested();  // the Invert Frozen tile
     void settingsChanged();       // the card or a picked group edited the brush settings
     void guidesEdited();          // the card or the tubes changed the guides (a tube edit, Apply)
     void tubesPreviewed();        // the tube outline editor's live preview (no undo step): evaluate and redraw

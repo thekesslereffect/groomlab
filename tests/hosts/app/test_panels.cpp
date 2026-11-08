@@ -1138,14 +1138,14 @@ TEST(AppPanels, ValueSliderPaintsItsFillStateAndDisabledLook) {
 
 TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     // The Groom Tools' tiles (the core's catalog, Maya's grouping): Create, Shape, Trim and Guides
-    // on the Tools tab (Unfreeze All beside Freeze), Paint on the Paint tab; a grid that wraps to
+    // on the Tools tab (Invert Frozen and Unfreeze All beside Freeze), Paint on the Paint tab; a grid that wraps to
     // the dock's width, the names under the icons (Tool Labels off: icons alone, the names in the
     // tool tips).
     GroomTools tools;
     EXPECT_TRUE(tools.tileLabels()) << "labeled tiles by default";
     tools.setTileLabels(false);
-    EXPECT_EQ(tools.tiles().size(), 19u) << "Select, Freeze, the 16 tools (Paint and Length Keys among them) and Unfreeze All";
-    for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "unfreeze"}) {
+    EXPECT_EQ(tools.tiles().size(), 20u) << "Select, Freeze, the 16 tools (Paint and Length Keys among them), Invert Frozen and Unfreeze All";
+    for (const char* id : {"place", "draw", "part", "flow", "comb", "shape", "cut", "lengths", "erase", "paint", "select", "freeze", "invert", "unfreeze"}) {
         EXPECT_NE(tools.tile(id), nullptr) << id;
     }
     std::vector<std::string> tabs;
@@ -2715,6 +2715,22 @@ TEST(AppPanels, BrushPanelCurvesSymmetryAndAWidthMap) {
     EXPECT_EQ(unfreezes, 1);
     EXPECT_EQ(frozenCount(), 0u);
     EXPECT_EQ(doc->undoText(), "Undo unfreeze all");
+    // Invert Frozen: the tile between Freeze and Unfreeze; with nothing frozen, every guide freezes.
+    int inverts = 0;
+    QObject::connect(&tools, &GroomTools::invertFrozenRequested, [&] {
+        ++inverts;
+        doc->editGuides("invert frozen", [](GuideHierarchy& h) { invertFrozen(h); });
+    });
+    ASSERT_NE(tools.tile("invert"), nullptr);
+    tools.tile("invert")->click();
+    EXPECT_EQ(inverts, 1);
+    EXPECT_EQ(frozenCount(), guides);
+    EXPECT_EQ(doc->undoText(), "Undo invert frozen");
+    const std::vector<QAbstractButton*> order = tools.tiles();
+    auto place = [&](QAbstractButton* b) { return std::find(order.begin(), order.end(), b) - order.begin(); };
+    EXPECT_LT(place(tools.tile("select")), place(tools.tile("freeze")));
+    EXPECT_LT(place(tools.tile("freeze")), place(tools.tile("invert")));
+    EXPECT_LT(place(tools.tile("invert")), place(tools.tile("unfreeze")));
 }
 
 TEST(AppPanels, ParamPanelShowsTheLayersAStackHolds) {

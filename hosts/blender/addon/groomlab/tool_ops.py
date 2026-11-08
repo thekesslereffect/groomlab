@@ -782,6 +782,7 @@ GUIDE_EXTRAS = [
     ("UNLOCK", "Unlock", "Unlock the selected guides"),
     ("FREEZE", "Freeze", "Freeze the selected guides: brushes leave them alone (they draw blue)"),
     ("UNFREEZE", "Unfreeze", "Unfreeze the selected guides"),
+    ("INVERT_FROZEN", "Invert Frozen", "Swap the frozen guides and the free ones: the frozen can be brushed, the rest freeze"),
     ("UNFREEZE_ALL", "Unfreeze All", "Clear the freeze mask: every guide can be brushed again"),
     ("DELETE", "Delete Selected", "Delete the selected guides (and their children)"),
     ("SELECT_ALL", "Select All", "Select every guide of the picked group"),
@@ -830,6 +831,8 @@ class GROOMLAB_OT_guides_edit(GroomToolOperator):
                 tools.guides_edit(scalp, op)
             elif a == "UNFREEZE_ALL":
                 tools.guides_edit(scalp, "unfreeze_all")
+            elif a == "INVERT_FROZEN":
+                tools.guides_edit(scalp, "invert_frozen")
             elif a == "SELECT_ALL":
                 if group:
                     tools.selection_set(scalp, group=group, mode="replace")

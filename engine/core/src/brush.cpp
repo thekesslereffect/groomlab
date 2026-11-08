@@ -1290,6 +1290,17 @@ bool unfreezeAll(GuideHierarchy& h, const std::string& freeze) {
     return true;
 }
 
+bool invertFrozen(GuideHierarchy& h, const std::string& freeze) {
+    if (h.guides().empty()) return false;
+    std::vector<std::pair<GuideId, float>> values;
+    for (const HierarchyGuide& g : h.guides()) {
+        const auto it = g.attributes.find(freeze);
+        values.emplace_back(g.id, 1.0f - std::clamp(it == g.attributes.end() ? 0.0f : it->second, 0.0f, 1.0f));
+    }
+    for (const auto& [id, v] : values) h.setAttribute(id, freeze, v);
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Flow arrows and parts
 

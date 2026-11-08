@@ -1469,6 +1469,8 @@ json guidesEdit(ToolState& t, const json& args) {
         });
     } else if (op == "unfreeze_all") {
         editGuides(t, "unfreeze all", [&](GuideHierarchy& h) { h.removeAttribute(kFreezeTool); });
+    } else if (op == "invert_frozen") {
+        editGuides(t, "invert frozen", [&](GuideHierarchy& h) { invertFrozen(h, kFreezeTool); });
     } else if (op == "remove_layer") {
         const std::string name = needString(args, "name");
         editGuides(t, "remove layer " + name, [&](GuideHierarchy& h) { h.removeAttribute(name); });
@@ -1579,7 +1581,7 @@ json guidesEdit(ToolState& t, const json& args) {
     } else {
         fail("bad_request",
              "op is add_group, remove_group, rename_group, generate_children, delete_guides, lock, unlock, set_attribute, "
-             "freeze, unfreeze, unfreeze_all, remove_layer, mirror_all, mirror_group, promote_group, demote_group, reparent, "
+             "freeze, unfreeze, unfreeze_all, invert_frozen, remove_layer, mirror_all, mirror_group, promote_group, demote_group, reparent, "
              "resample, mirror_selection, set_group_color, set_group_segments or reset_group_segments");
     }
     r["undo"] = undoJson(t);

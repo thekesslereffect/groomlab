@@ -89,7 +89,7 @@ def rail_icon(name):
 
 # A tile's word where its name doesn't fit a tile (the name stays the tile's text: its tooltip and
 # the card say it whole), as the app's tiles show them.
-TILE_WORDS = {"lengths": "Keys", "unfreeze": "Unfreeze"}
+TILE_WORDS = {"lengths": "Keys", "unfreeze": "Unfreeze", "invert": "Invert"}
 
 
 def help_tip(tool):
@@ -1078,8 +1078,8 @@ class ToolPalette(QtWidgets.QWidget):
             tray = self.tray("tray_" + section.lower(), margins=(8, 8, 8, 8))
             label = widgets.small_label(section, role="category")
             tray.layout().addWidget(label)
-            # Beside Freeze: Unfreeze All, a button (not a tool).
-            extra = [self.unfreeze_tile()] if any(t[0] == "freeze" for t in tools) else []
+            # Beside Freeze: Invert Frozen and Unfreeze All, buttons (not tools).
+            extra = [self.invert_tile(), self.unfreeze_tile()] if any(t[0] == "freeze" for t in tools) else []
             grid = self.tool_grid(tools, extra=extra)
             tray.layout().addWidget(grid)
             grids.addWidget(tray)
@@ -1649,7 +1649,7 @@ class ToolPalette(QtWidgets.QWidget):
 
     def apply_theme(self, t):
         """A new theme: the icons in its colors (the style sheet follows by itself)."""
-        for tool, tiles in list(self.tiles.items()) + [("unfreeze", [self.buttons["unfreeze"]])]:
+        for tool, tiles in list(self.tiles.items()) + [(k, [self.buttons[k]]) for k in ("invert", "unfreeze")]:
             for button in tiles:
                 self.paint_tile(button, tool, t)
         for name, button in self.header_icons.items():
@@ -1702,6 +1702,21 @@ class ToolPalette(QtWidgets.QWidget):
                      "(a click with the Select tool where no guide is does the same)")
         b.clicked.connect(lambda: self.paint_tab.unfreeze_all())
         self.buttons.setdefault("unfreeze", b)  # its icon follows the theme
+        return b
+
+    def invert_tile(self):
+        """Invert Frozen as a tile between Freeze's and Unfreeze All's (a button, not a tool): the
+        frozen guides and the free ones swap."""
+        b = widgets.Tile()
+        b.setObjectName("invertFrozenTile")
+        b.setText("Invert Frozen")
+        b.short = TILE_WORDS.get("invert")
+        self.paint_tile(b, "invert")
+        self._tile_size(b)
+        b.setToolTip("<b>Invert Frozen</b><br>Swap the frozen guides and the free ones: the frozen can be brushed, "
+                     "the rest freeze")
+        b.clicked.connect(lambda: self.paint_tab.invert_frozen())
+        self.buttons.setdefault("invert", b)  # its icon follows the theme
         return b
 
     def wide_tools(self, tools):
