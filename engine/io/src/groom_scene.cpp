@@ -6,6 +6,7 @@
 
 #include "groomlab/alembic_io.h"
 #include "groomlab/frame_time.h"
+#include "groomlab/groom_package.h"
 #include "groomlab/sim_cache.h"
 
 namespace groomlab {
@@ -35,6 +36,19 @@ void feedTime(GroomSession& session, GroomScene& scene, const AlembicCurvesReade
 }  // namespace
 
 GroomScene::GroomScene(const std::string& groomPath) : GroomScene(readGroomFile(groomPath)) {}
+
+namespace {
+
+GroomFile namedGroom(const std::string& path, const std::string& name) {
+    std::vector<GroomFile> grooms = readGroomFiles(path);
+    const int index = groomIndex(grooms, name);
+    if (index < 0) throw GroomFileError(path + " holds no groom named '" + name + "'");
+    return std::move(grooms[static_cast<std::size_t>(index)]);
+}
+
+}  // namespace
+
+GroomScene::GroomScene(const std::string& groomPath, const std::string& groomName) : GroomScene(namedGroom(groomPath, groomName)) {}
 
 GroomScene::GroomScene(GroomFile file) : file_(std::move(file)) {
     if (!file_.scalpCache.empty()) {

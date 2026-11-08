@@ -43,7 +43,9 @@
 #include "groomlab/export_view.h"
 #include "groomlab/feathers.h"
 #include "groomlab/gltf_writer.h"
+#include "groomlab/asset_files.h"
 #include "groomlab/groom_file.h"
+#include "groomlab/groom_package.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/render_overrides.h"
 #include "groomlab/scale_maps.h"
@@ -272,48 +274,6 @@ bool scalesMode(const MArgDatabase& db, UsdCurvesWriter::Options::Scales* out) {
     else if (mode == "none") *out = S::None;
     else return false;
     return true;
-}
-
-// `full` stored relative to the groom file's folder as every host stores it (paths.h
-// portablePath: ".." allowed on the same drive, absolute on another).
-std::string relativeToFolder(const std::string& full, const fs::path& folder) {
-    return pathFromGroomFolder(full, folder.u8string());
-}
-
-// The groom's card bake (cardMaps) copied beside the groom file into its own cards folder,
-// groomlab/<stem>/cards/<stem>_<map>, the layout the app bakes into and opens a groom with, with the viewport's preview map the
-// app shows it by; the file names it with the bake's stamp. Nothing without a bake (or with
-// its files gone: a warning).
-CardBakeRef exportCardBake(const MObject& node, const fs::path& groomFile) {
-    const std::string cardMaps = MFnDependencyNode(node).findPlug("cardMaps", true).asString().asChar();
-    const std::string stored = cardMapsPrefix(cardMaps);
-    if (stored.empty()) return {};
-    const std::string placeholder = resolveNodePath(node, stored + "x");
-    const CardBakePaths from(placeholder.substr(0, placeholder.size() - 1));  // <folder>/<name>_
-    std::error_code ec;
-    if (!fs::exists(fs::u8path(from.atlas()), ec)) {
-        MGlobal::displayWarning(MString(ExportGroomCmd::kName) + ": the card bake " + from.prefix.c_str() +
-                                "* is not there; the groom file names no bake");
-        return {};
-    }
-    const CardBakePaths to = CardBakePaths::besideGroomFile(groomFile.u8string());
-    fs::create_directories(fs::u8path(to.prefix).parent_path(), ec);
-    try {
-        for (const std::string& suffix : cardBakeSuffixes()) {
-            const std::string src = from.prefix + suffix, dst = to.prefix + suffix;
-            if (samePath(src, dst) || !fs::exists(fs::u8path(src), ec)) continue;
-            fs::copy_file(fs::u8path(src), fs::u8path(dst), fs::copy_options::overwrite_existing, ec);
-            if (ec) throw std::runtime_error("could not copy " + src + ": " + ec.message());
-        }
-        writeCardBakePreview(to.prefix);
-    } catch (const std::exception& e) {
-        MGlobal::displayWarning(MString(ExportGroomCmd::kName) + ": the card bake was not written beside the groom file (" +
-                                e.what() + ")");
-        return {};
-    }
-    const auto maps = parseCardMaps(cardMaps);
-    const auto strands = maps.find("Strands");
-    return {groomFileCardBakePrefix(groomFile.stem().u8string()), strands == maps.end() ? std::string() : strands->second};
 }
 
 }  // namespace
@@ -715,6 +675,8 @@ MSyntax ExportGroomCmd::newSyntax() {
     syntax.addFlag(kScalpObjectFlag, kScalpObjectFlagLong, MSyntax::kString);
     syntax.addFlag(kGuideCacheFlag, kGuideCacheFlagLong, MSyntax::kString);
     syntax.addFlag(kGuideObjectFlag, kGuideObjectFlagLong, MSyntax::kString);
+    syntax.addFlag("-n", "-name", MSyntax::kString);     // the groom's name in the file (its asset name)
+    syntax.addFlag("-mg", "-merge", MSyntax::kBoolean);  // keep the file's other grooms
     syntax.setObjectType(MSyntax::kSelectionList, 1, 1);
     syntax.useSelectionAsDefault(true);
     syntax.enableQuery(false);
@@ -749,14 +711,30 @@ MStatus ExportGroomCmd::doIt(const MArgList& args) {
         groom.searchPaths = nodeSearchPaths(path.node());  // relative map paths resolve against the project on the farm too
         groom.source = std::string(MFileIO::currentFile().asChar()) + " " + path.fullPathName().asChar();
         const fs::path target = fs::absolute(fs::u8path(file.asChar()));
-        // The painted texture maps' files relative to the groom file, where every reader looks
-        // first (the app paints them there); the search paths still hold the scene's folders.
+        groom.name = fileSafeName(stringFlag("-n").empty() ? assetName(path) : stringFlag("-n"));
+        // Every file the groom names, absolute: the core's writer (groom_package.h, every host's)
+        // copies the ones the groom owns into the file's own folder, groomlab/<file>/<kind>/<groom>
+        // (the scene's own when the file is named after the scene: nothing copied), and names
+        // them all relative to the file.
         for (auto& [name, info] : groom.data.maps) {
-            if (info.kind == "texture" && !info.texture.empty()) {
-                info.texture = relativeToFolder(resolveNodePath(path.node(), info.texture), target.parent_path());
+            if (info.kind == "texture" && !info.texture.empty()) info.texture = resolveNodePath(path.node(), info.texture);
+        }
+        groom.data.graphJson = followGraphFiles(groom.data.graphJson, [&](const std::string& stored) {
+            return stored.find_first_of("$%") == std::string::npos ? resolveNodePath(path.node(), stored) : stored;
+        });
+        {
+            const std::string stored = cardMapsPrefix(MFnDependencyNode(path.node()).findPlug("cardMaps", true).asString().asChar());
+            if (!stored.empty()) {
+                const std::string placeholder = resolveNodePath(path.node(), stored + "x");
+                const auto maps = parseCardMaps(MFnDependencyNode(path.node()).findPlug("cardMaps", true).asString().asChar());
+                const auto strands = maps.find("Strands");
+                groom.cardBake = {placeholder.substr(0, placeholder.size() - 1), strands == maps.end() ? std::string() : strands->second};
             }
         }
-        groom.cardBake = exportCardBake(path.node(), target);
+        // The caches named for the file (relative to it: the scalp's and the guides' it was written with).
+        for (CacheRef* cache : {&groom.scalpCache, &groom.guideCache}) {
+            if (!cache->file.empty() && !isAbsolutePath(cache->file)) cache->file = (target.parent_path() / fs::u8path(cache->file)).generic_u8string();
+        }
         // The scene meshes the Instance nodes name (scales of the artist's own plates): stored,
         // so the procedural and the farm build them without the scene.
         for (const std::string& name : graphMeshPrototypes(groom.data.graphJson)) {
@@ -776,20 +754,25 @@ MStatus ExportGroomCmd::doIt(const MArgList& args) {
         } catch (const std::exception& e) {
             MGlobal::displayWarning(MString("GroomLab: ") + e.what() + " (the groom file holds no transfer markers)");
         }
-        // The Simulate nodes' bakes (simCaches), relative to the groom file: renders read them.
+        // The Simulate nodes' bakes (simCaches): renders read them.
         try {
             const MPlug sims = MFnDependencyNode(path.node()).findPlug("simCaches", true);
             for (auto& [node, ref] : simCachesFromJson(sims.isNull() ? std::string() : sims.asString().asChar())) {
-                ref.file = relativeToFolder(resolveNodePath(path.node(), ref.file), target.parent_path());
+                ref.file = resolveNodePath(path.node(), ref.file);
                 groom.simCaches[node] = ref;
             }
         } catch (const std::exception& e) {
             MGlobal::displayWarning(MString("GroomLab: ") + e.what() + " (the groom file names no simulation bakes)");
         }
+        bool merge = false;
+        if (db.isFlagSet("-mg")) db.getFlagArgument("-mg", 0, merge);
         try {
             GroomSession check(groom.data);  // refuse to write a groom that does not load
             (void)check;
-            writeGroomFile(target.u8string(), groom);
+            GroomWriteOptions options;
+            options.merge = merge;
+            const GroomWriteReport report = writeGroomsToFile(target.u8string(), {groom}, options);
+            for (const std::string& w : report.warnings) MGlobal::displayWarning(MString(kName) + ": " + w.c_str());
         } catch (const std::exception& e) {
             return fail(kName, e.what());
         }

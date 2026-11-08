@@ -473,10 +473,10 @@ void GroomDocument::invalidateSimulation() {
 }
 
 std::string GroomDocument::simulationCachePath(const std::string& node) const {
-    // Maya's sim.py: <caches>/<asset>_<node>_sim.abc (an untitled groom's caches: a temp folder of
-    // its own, taken along when it is saved).
-    const std::string stem = defaultBakeName();
-    return (fs::u8path(assetFolder("caches")) / fs::u8path(fileSafeName(stem) + "_" + node + "_sim.abc")).generic_u8string();
+    // Maya's sim.py: the groom's own folder in caches, <caches>/<groom>/<groom>_<node>_sim.abc (an
+    // untitled groom's caches: a temp folder of its own, taken along when it is saved).
+    const std::string groom = fileSafeName(defaultBakeName());
+    return (fs::u8path(assetFolder("caches")) / fs::u8path(groom) / fs::u8path(groom + "_" + node + "_sim.abc")).generic_u8string();
 }
 
 std::vector<std::string> GroomDocument::bakeSimulation(double lastFrame, const SimProgress& progress) {
@@ -515,9 +515,7 @@ std::string GroomDocument::defaultBakeDirectory() const {
     return assetFolder("cards") + "/" + fileSafeName(defaultBakeName());
 }
 
-std::string GroomDocument::defaultBakeName() const {
-    return path_.empty() ? std::string("groom") : fs::u8path(path_).stem().u8string();
-}
+std::string GroomDocument::defaultBakeName() const { return displayName(); }
 
 void GroomDocument::adoptBake() {
     // The bake the file names (its "cardBake": a groom saved by this app or exported from Maya),

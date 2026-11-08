@@ -388,7 +388,17 @@ bool MainWindow::openGroom(const QString& path) {
     try {
         working(tr("Opening %1...").arg(QFileInfo(path).fileName()));
         const BusyCursor wait;
-        setDocument(GroomDocument::open(path.toStdString()));
+        // Every groom of the file (a file holds one, or several: the first opens active).
+        const int count = GroomDocument::groomCount(path.toStdString());
+        std::vector<std::unique_ptr<GroomDocument>> others;
+        for (int i = 1; i < count; ++i) others.push_back(GroomDocument::open(path.toStdString(), i));
+        setDocument(GroomDocument::open(path.toStdString(), 0));
+        for (auto& g : others) grooms_.push_back(std::move(g));
+        if (count > 1) {
+            framed_ = false;  // Frame All on every groom
+            reevaluate();     // the other grooms drawn too
+            refreshOutliner();
+        }
     } catch (const std::exception& e) {
         report(tr("Cannot open the groom: %1 (%2)").arg(QString::fromUtf8(e.what()), path));
         return false;
@@ -433,6 +443,18 @@ void MainWindow::paramDragged(bool on) {
 
 void MainWindow::setDocument(std::unique_ptr<GroomDocument> document) {
     dropAutosave();  // the old groom's: saved or let go of before another takes its place
+    detachDocument();
+    grooms_.clear();  // a new document: this groom alone (openGroom adds a file's others)
+    grooms_.emplace_back();
+    activeGroom_ = 0;
+    groomsChanged_ = false;
+    hiddenGrooms_.clear();
+    otherViews_.clear();
+    document_ = std::move(document);
+    attachDocument();
+}
+
+void MainWindow::detachDocument() {
     landDab(false);  // the old document's dab and commit go with it
     landCommit(false);
     lastRequest_.reset();
@@ -449,7 +471,11 @@ void MainWindow::setDocument(std::unique_ptr<GroomDocument> document) {
     maps_->setDocument(nullptr);
     if (shell_->timeline()->playing()) shell_->timeline()->setPlaying(false);
     shell_->cardsPanel()->setDocument(nullptr);
-    document_ = std::move(document);
+    graphWasShown_ = graphWasShown;
+}
+
+void MainWindow::attachDocument() {
+    const bool graphWasShown = graphWasShown_;
     framed_ = false;
     lastDabMs_ = 0.0;
     settings_.hiddenGuideGroups = document_ ? document_->hiddenGroupsText() : std::string();  // (saved with the groom)
@@ -531,6 +557,7 @@ void MainWindow::setDocument(std::unique_ptr<GroomDocument> document) {
     refreshProperties();
     shell_->setNodeCount(document_ ? static_cast<int>(document_->nodes().size()) : 0);
     if (graphWasShown) setGraphShown(document_ != nullptr);
+    refreshOutliner();
 }
 
 ViewRequest MainWindow::viewRequest() const {
@@ -642,6 +669,8 @@ void MainWindow::reevaluate(bool quiet) {
         strokeCpuWhy_ = armed ? std::string() : why;
         if (!armed && !quiet) report(tr("The stroke previews on the CPU: %1").arg(QString::fromStdString(why)), false);
     }
+    // The document's other grooms at this time (their sessions keep what did not change).
+    if (grooms_.size() > 1 || !otherViews_.empty()) refreshOtherGrooms();
     if (!framed_) {
         framed_ = true;
         frameAll();
@@ -949,7 +978,7 @@ void MainWindow::askReload() {
         report(tr("No groom file to reload from: save the groom first"));
         return;
     }
-    if (!interactive_ || !document_->dirty()) {
+    if (!interactive_ || !anyGroomDirty()) {
         reloadGroom();
         return;
     }
@@ -960,7 +989,7 @@ void MainWindow::askReload() {
 }
 
 void MainWindow::confirmDiscard(const QString& doing, std::function<void()> proceed) {
-    if (!interactive_ || !document_ || !document_->dirty()) {
+    if (!interactive_ || !document_ || !anyGroomDirty()) {
         if (proceed) proceed();
         return;
     }
@@ -969,7 +998,7 @@ void MainWindow::confirmDiscard(const QString& doing, std::function<void()> proc
                       {{tr("Save"), true,
                         [this, proceed] {
                             save();  // (Save As when the groom has no file yet)
-                            if (document_ && !document_->dirty() && proceed) proceed();
+                            if (document_ && !anyGroomDirty() && proceed) proceed();
                         }},
                        {tr("Discard"), false, proceed},
                        {tr("Cancel"), false, {}}});
@@ -984,7 +1013,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         notify(tr("Stopping the %1 before closing...").arg(job_));
         return;
     }
-    if (closing_ || !interactive_ || !document_ || !document_->dirty()) {
+    if (closing_ || !interactive_ || !document_ || !anyGroomDirty()) {
         if (interactive_) saveLayout();  // the docks as they are, for the next start
         dropAutosave();                  // (saved, discarded, or nothing to keep)
         QMainWindow::closeEvent(event);
@@ -1247,7 +1276,7 @@ void MainWindow::save() {
         return;
     }
     try {
-        document_->save(document_->path());
+        writeDocument(document_->path());  // (every groom of the document)
         dropAutosave();
         notify(tr("Saved %1").arg(QFileInfo(QString::fromStdString(document_->path())).fileName()));
     } catch (const std::exception& e) {
@@ -1263,15 +1292,18 @@ void MainWindow::saveAs() {
     if (path.isEmpty()) return;
     if (!path.endsWith(QStringLiteral(".groom"), Qt::CaseInsensitive)) path += QStringLiteral(".groom");
     try {
-        document_->save(path.toStdString());
+        writeDocument(path.toStdString());  // (every groom of the document)
         dropAutosave();
         rememberRecentFile(path);
         host_->setRecentFiles(recentFiles());
-        // Maya's follow_scene_files note: the groom's files came along into the new folder.
-        const std::size_t copied = document_->savedCopies().size();
+        // Maya's follow_scene_files note: the grooms' files came along into the new folder.
+        std::size_t copied = 0;
+        for (int i = 0; i < groomCount(); ++i) copied += groomAt(i)->savedCopies().size();
         notify(copied ? tr("Saved %1: %n file(s) copied into its groomlab folder", "", static_cast<int>(copied)).arg(QFileInfo(path).fileName())
                       : tr("Saved %1").arg(QFileInfo(path).fileName()));
-        for (const std::string& w : document_->saveWarnings()) report(QString::fromStdString(w), false);
+        for (int i = 0; i < groomCount(); ++i) {
+            for (const std::string& w : groomAt(i)->saveWarnings()) report(QString::fromStdString(w), false);
+        }
     } catch (const std::exception& e) {
         report(tr("Cannot save: %1. Try Save As to another folder").arg(QString::fromUtf8(e.what())));
     }

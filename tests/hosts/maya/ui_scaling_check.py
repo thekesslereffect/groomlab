@@ -262,7 +262,7 @@ def main():
             # The option lists Maya builds widgets from.
             _expect([tools.flow_sink.itemData(i) for i in range(tools.flow_sink.count())]
                     == [c["value"] for c in d.choices("flowSink")], "flow sinks from choices.json")
-            _expect(palette.TABS == [t["id"] for t in d.get("palette/tabs")], "tabs from palette.json")
+            _expect(palette.TABS == [t["id"] for t in d.tabs()], "tabs from palette.json")
         finally:
             widgets.dispose(tools)
             widgets.dispose(editor)
@@ -374,7 +374,7 @@ def main():
             _expect(rail.height() == theme.component_px("iconRail", "width", 44) and rail.y() == 0 and rail.x() == 0
                     and rail.width() == tools.width() and not tools.scroll.isAncestorOf(rail),
                     "the page rail along the top, %d px" % rail.height())
-            _expect([b.accessibleName() for b in rail.buttons] == [t_["label"] for t_ in definitions.get("palette/tabs")]
+            _expect([b.accessibleName() for b in rail.buttons] == [t_["label"] for t_ in definitions.tabs()]
                     and all(b.toolTip().startswith(b.accessibleName()) for b in rail.buttons), "one icon per page, named")
             _expect(not tools.findChildren(QtWidgets.QTabBar), "no tab row")
             sheet = tools.styleSheet()

@@ -27,7 +27,8 @@
           "type": "object", "additionalProperties": false, "required": ["id", "label"],
           "properties": {"id": {"type": "string"}, "label": {"type": "string"}, "tip": {"type": "string"},
                          "icon": {"type": "string"},
-                         "aliases": {"type": "array", "items": {"type": "string"}}}}},
+                         "aliases": {"type": "array", "items": {"type": "string"}},
+                         "hosts": {"type": "array", "items": {"type": "string"}}}}},
         "header": {"type": "object", "additionalProperties": {
           "type": "object", "additionalProperties": false,
           "properties": {"tip": {"type": "string"}, "items": {"$ref": "#/$defs/entries"}}}},

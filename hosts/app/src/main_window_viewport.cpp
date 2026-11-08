@@ -202,13 +202,21 @@ void MainWindow::setRendererProps() {
     // The props, and the textured cards among them while they show (and the hair does).
     std::vector<SurfacePtr> props = props_;
     if (cardSurface_ && hairVisible_) props.push_back(cardSurface_);
+    for (const OtherGroomView& other : otherViews_) {  // the document's other grooms' scalps
+        if (other.surface) props.push_back(other.surface);
+    }
     viewport_->renderer().setProps(props);
     if (headless_) headless_->renderer.setProps(props);
 }
 
 Bounds MainWindow::sceneBounds() const {
     Bounds b = document_ ? document_->sceneBounds() : Bounds();
-    for (const SurfacePtr& p : props_) {
+    // The props, and the document's other grooms' scalps (Frame All fits every groom).
+    std::vector<SurfacePtr> surfaces = props_;
+    for (const OtherGroomView& other : otherViews_) {
+        if (other.surface) surfaces.push_back(other.surface);
+    }
+    for (const SurfacePtr& p : surfaces) {
         if (!p->mesh) continue;
         for (const Vec3f& v : p->mesh->points()) {
             if (!b.valid) {

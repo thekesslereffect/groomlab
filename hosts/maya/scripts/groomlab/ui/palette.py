@@ -46,8 +46,8 @@ CORRECTIVE = set(t["id"] for t in CATALOG if t.get("corrective"))
 PART = "part"
 # The tabs, the texts and the option lists: the UI definitions every host shares (engine/ui:
 # palette.json, choices.json; groomlab.ui.definitions).
-TABS = [t["id"] for t in definitions.get("palette/tabs")]
-TAB_ALIASES = dict((a, t["id"]) for t in definitions.get("palette/tabs") for a in t.get("aliases", []))  # old ids
+TABS = [t["id"] for t in definitions.tabs()]
+TAB_ALIASES = dict((a, t["id"]) for t in definitions.tabs() for a in t.get("aliases", []))  # old ids
 # What each tool does, shown under its name while it is active (the tiles' tooltips say the same).
 HINTS = dict((t["id"], t["hint"]) for t in CATALOG)
 NAMES = dict((t["id"], t["label"]) for t in CATALOG)
@@ -1380,7 +1380,7 @@ class ToolPalette(QtWidgets.QWidget):
 
         # Right under the grid: the list the tab works on (Guide groups, Maps, Layers, Photos);
         # the tool's card under it.
-        for tab in definitions.get("palette/tabs"):
+        for tab in definitions.tabs():
             self.tabs.addTab(pages[tab["id"]], tab["label"], icon=rail_icon(tab.get("icon")), tip=tab.get("tip", ""))
         self.tabs.currentChanged.connect(self.tab_changed)
         work.addWidget(self.hint)

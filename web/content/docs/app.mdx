@@ -168,7 +168,7 @@ The Groom Tools dock holds the same pieces as Maya's Groom Tools window, from th
 definitions, and the whole dock scrolls. At the top: the groom's name with its eyes (the hair alone: the strands,
 instances and cards go and come back at once while the guides stay; and the guides alone: every
 guide group; **View > Guides On/Off** and **Alt+Shift+G** too), the Graph Editor and **More**
-buttons, the four tabs and the tool grid (tiles of one size, as many to a row as the dock's width
+buttons, the tabs and the tool grid (tiles of one size, as many to a row as the dock's width
 holds, at most four; on the Paint tab one full-width **Paint** button). Under the grid, the tab's
 list, then the picked tool's card:
 
@@ -178,6 +178,7 @@ list, then the picked tool's card:
   bar and right-click menu ([Painting maps](#painting-maps)).
 - **Correctives**: shot-sculpt layers ([Correctives](#correctives)).
 - **Photos**: reference photos to groom to ([Photos](#photos)).
+- **Outliner**: the document's grooms, each under its scalp ([Several grooms](#several-grooms)).
 
 **Simulate Range**, **Studio**, **Transfer Groom to Scalp...** and **Import** are in the
 **GroomLab** menu; the render actions are also in the **Render** tab of Properties, and the export in its **Export** tab.
@@ -349,6 +350,24 @@ picked photo: the photo and the mesh side by side, point pairs clicked on each, 
 as you go. **Guides from Photos** opens the same window's Guides stage
 ([Reference photos](/docs/reference-photos)).
 
+## Several grooms
+
+A document holds several grooms, each on its own scalp, as a Maya scene or a .blend does: hair and a
+beard, or a character's fur and its creature's. The **Outliner** tab lists the scalps with the
+grooms on them.
+
+- **Add Groom...** grows another groom on a mesh file (.obj or .abc), named after it, and makes it
+  the one you work on. Pick a groom file (.groom) instead and its grooms join the document: Maya
+  and Blender save one groom a file, so a character's grooms come together here.
+- **Click** a groom to work on it: every tool, panel, the Graph Editor, undo and the exports work on
+  that groom. The others are drawn as plain gray strands with their scalps; the box beside one
+  shows or hides it. **Frame All** fits every groom.
+- **Double-click** to rename; the right-click menu has **Remove Groom** (the last one stays).
+- **Save** writes every groom into the one `.groom` file, and opening it brings them all back. Each
+  groom's painted maps and card bakes go in its own folder, `groomlab/<file name>/masks/<groom>/`
+  and `cards/<groom>/`. Maya's and Blender's **Import Groom** bring in every groom of such a file,
+  each on its own scalp; a GroomLab older than 0.44 opens the first.
+
 ## Properties
 
 The **Properties** dock follows the mode:
@@ -491,19 +510,34 @@ can be cancelled. The same targets are in **GroomLab > Export**, with **Scales I
 **File > Save** (Ctrl+S) and **File > Save As...** (Ctrl+Shift+S) write a `.groom` file: the graph,
 guides, scalp, maps, parts, flow and correctives. Export mode has **Save** and **Save as...** too.
 
-Maya and Blender save a groom file beside the scene file, named after the groom (a source file
-every host opens, outside the scene's `groomlab` folder). The app keeps the files it makes for a
+A groom file is a document of named grooms, written the same way by every host. Maya and Blender
+save the scene's grooms (the selected ones, else all) into one file beside the scene, named after it
+(`shot_v002.groom`: outside the scene's `groomlab` folder; two versions of a scene in one folder
+never share one, and Save As takes it along under the new name). Each groom is linked to the file
+and saving or reloading it touches its own entry, the others stay. The files a groom owns (its
+texture maps, card bake and Simulate bakes) go in the file's own folder,
+`groomlab/<file name>/masks|cards|caches/<groom>/`: the scene's own when the file is named after
+the scene (nothing copied), copies when it has another name, so the file always stands alone. The
+app keeps the files it makes for a
 groom in a `groomlab/<file name>/` folder beside it, one folder per kind as Maya keeps a scene's:
-`masks` (texture maps, in the groom's own `masks/<file name>/` as Maya keeps each groom's), `cards` (card bakes), `exports`, `caches` (simulation bakes, guide
+`masks` (texture maps, in the groom's own `masks/<file name>/` as Maya keeps each groom's), `cards` (card bakes), `exports`, `caches` (simulation bakes in the groom's own folder too, guide
 exports), `renders` and `references` (photos, copied in). **Save As** takes them along: the
 groom's files are copied into the new file's folder and the groom names the copies (the old file
 keeps its own; a file already there with other content is never written over). An unsaved
 groom's files wait in a temp folder until the first save.
 
 In Maya, choose **GroomLab > Groom Files > Import Groom File...**. Select the scalp mesh first if
-the scene has it; otherwise GroomLab creates the scalp from the file. To pull later edits into a
+the scene has it; otherwise GroomLab creates the scalp from the file, with the quads and n-gons of
+the mesh the groom was made on. The app splits a mesh's quads into triangles as Maya does, so a
+groom from the app sits on the same triangles in Maya; a groom saved by an app before 0.44 (its
+quads split the other way) has its roots moved onto Maya's triangles at the same places. To pull later edits into a
 groom linked to the file, save in the app, then choose **GroomLab > Groom Files > Reload from
 Groom File** in Maya (one undo step). See [The .groom format](/docs/groom-format).
+
+A file of several grooms (the [Outliner](#several-grooms)'s) imports into Maya as every groom, each
+on a mesh made from its own scalp and named after it. A groom's other scalps (Maya's **Add >
+Scalp**: an ear, a patch) come in as meshes of their own, kept as its other scalps. Each groom is
+linked to the file: **Save to Groom File** writes its own entry back, the others stay.
 
 ## Keys on params
 
@@ -527,8 +561,8 @@ made.
   renderers.
 - **Animation:** Maya's nHair (**Simulate > Legacy**). The app plays a groom file's caches and runs
   the Simulate node.
-- More than one groom in a window, and so **Copy Graph to Other Grooms...** (in the app, **Copy
-  Graph** and **Paste Graph** under Presets carry a look between grooms).
+- **Copy Graph to Other Grooms...** (in the app, **Copy Graph** and **Paste Graph** under Presets
+  carry a look between grooms).
 
 ## Themes
 

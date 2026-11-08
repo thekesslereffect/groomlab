@@ -6,7 +6,8 @@
       {"id": "tools", "label": "Tools", "icon": "ui_tools", "tip": "The brushes, guide groups and edits"},
       {"id": "paint", "label": "Paint", "icon": "groomLab_paint", "tip": "Painted maps and the painting brushes"},
       {"id": "correctives", "label": "Correctives", "icon": "ui_layers", "tip": "Correctives: sculpt layers on top of the groom", "aliases": ["sculpt"]},
-      {"id": "photos", "label": "Photos", "icon": "ui_image_plus", "tip": "Reference photos as cameras to groom to", "aliases": ["reference"]}
+      {"id": "photos", "label": "Photos", "icon": "ui_image_plus", "tip": "Reference photos as cameras to groom to", "aliases": ["reference"]},
+      {"id": "outliner", "label": "Outliner", "icon": "ui_outliner", "tip": "The document's grooms, each on its scalp: click one to work on it, the eye shows or hides it, Add Groom grows another on a mesh", "hosts": ["app"]}
     ],
     "header": {
       "groom": {"tip": "The current groom: every tool and the Graph Editor work on it. Pick one here or in the Graph Editor, or select a groom; it stays current whatever else you select"},

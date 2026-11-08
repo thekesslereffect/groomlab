@@ -16,6 +16,7 @@
 
 #include "groomlab/alembic_io.h"
 #include "groomlab/asset_files.h"
+#include "groomlab/groom_package.h"
 #include "groomlab/attributes.h"
 #include "groomlab/flow.h"
 #include "groomlab/graph_edit.h"
@@ -56,9 +57,23 @@ std::string forwardSlashes(std::string path) {
 
 }  // namespace
 
-std::unique_ptr<GroomDocument> GroomDocument::open(const std::string& path) {
+std::unique_ptr<GroomDocument> GroomDocument::open(const std::string& path) { return open(path, 0); }
+
+int GroomDocument::groomCount(const std::string& path) {
     try {
-        GroomFile file = readGroomFile(path);
+        return static_cast<int>(readGroomFiles(path).size());
+    } catch (const std::exception& e) {
+        throw std::runtime_error(e.what());
+    }
+}
+
+std::unique_ptr<GroomDocument> GroomDocument::open(const std::string& path, int index) {
+    try {
+        std::vector<GroomFile> grooms = readGroomFiles(path);
+        if (index < 0 || index >= static_cast<int>(grooms.size())) {
+            throw std::runtime_error("'" + path + "' holds no groom " + std::to_string(index));
+        }
+        GroomFile file = std::move(grooms[static_cast<std::size_t>(index)]);
         if (!file.data.scalp) throw std::runtime_error("'" + path + "' has no scalp: make a new groom on a mesh instead");
         convertUpAxis(file, "Y");  // the app is Y-up, as Maya: a Z-up file (Blender's) turns a quarter about X
         return std::unique_ptr<GroomDocument>(new GroomDocument(std::move(file), path));
@@ -107,7 +122,7 @@ std::unique_ptr<GroomDocument> GroomDocument::newOnAlembic(const std::string& ab
     }
 }
 
-GroomDocument::GroomDocument(GroomFile file, std::string path) : path_(std::move(path)) {
+GroomDocument::GroomDocument(GroomFile file, std::string path) : path_(std::move(path)), name_(file.name) {
     try {
         scene_ = std::make_unique<GroomScene>(std::move(file));
     } catch (const std::exception& e) {
@@ -215,7 +230,7 @@ std::string GroomDocument::mapsDirectory() const {
     if (path_.empty()) return {};
     // The groom's own folder in masks, as Maya keeps a groom's (masks/<groom>) and Blender a
     // scalp's (masks/<scalp>): groomlab/<name>/masks/<name>.
-    return assetFolder("masks") + "/" + fileSafeName(std::filesystem::u8path(path_).stem().u8string());
+    return assetFolder("masks") + "/" + fileSafeName(displayName());
 }
 
 std::string GroomDocument::textureMapFile(const std::string& name) const {
@@ -2438,7 +2453,31 @@ GroomFile GroomDocument::currentFile() const {
     return file;
 }
 
+void GroomDocument::setName(const std::string& name) {
+    if (name == name_) return;
+    name_ = name;
+    dirty_ = true;
+}
+
+std::string GroomDocument::displayName() const {
+    if (!name_.empty()) return name_;
+    return path_.empty() ? std::string("groom") : std::filesystem::u8path(path_).stem().u8string();
+}
+
 void GroomDocument::save(const std::string& path) {
+    GroomFile file = prepareSave(path);
+    try {
+        // The core's writer, every host's (groom_package.h): the groom's files in the file's own
+        // folder (here they are already: prepareSave took them along), paths relative to the file.
+        file.directory = std::filesystem::absolute(std::filesystem::u8path(path)).parent_path().generic_u8string();
+        writeGroomsToFile(path, {file});
+    } catch (const std::exception& e) {
+        throw std::runtime_error(e.what());
+    }
+    savedAs(path, file);
+}
+
+GroomFile GroomDocument::prepareSave(const std::string& path) {
     savedCopies_.clear();
     saveWarnings_.clear();
     // Save As (or the first save): the files the groom names come along into the new file's
@@ -2446,7 +2485,7 @@ void GroomDocument::save(const std::string& path) {
     const bool movesTo = path_.empty() || std::filesystem::u8path(path).lexically_normal() != std::filesystem::u8path(path_).lexically_normal();
     if (movesTo) followFiles(path);
     GroomFile file = currentFile();
-    MapCatalog catalog = file.data.maps;
+    file.name = name_;
     // The last bake (written or adopted), relative to the groom when it can be: another host
     // (Maya's import) takes its atlas and stamp with the groom.
     file.cardBake = {};
@@ -2456,15 +2495,14 @@ void GroomDocument::save(const std::string& path) {
     }
     // The simulation bakes the same way, relative to the groom.
     for (auto& [node, ref] : file.simCaches) ref.file = pathFromGroomFolder(ref.file, std::filesystem::u8path(path).parent_path().u8string());
-    try {
-        writeGroomFile(path, file);
-    } catch (const std::exception& e) {
-        throw std::runtime_error(e.what());
-    }
+    return file;
+}
+
+void GroomDocument::savedAs(const std::string& path, const GroomFile& written) {
     const bool moved = path != path_;
     path_ = path;
     dirty_ = false;
-    fileCatalog_ = catalog;
+    fileCatalog_ = written.data.maps;
     if (moved) {
         // Relative paths (texture maps) resolve against the new folder first, then where the
         // groom came from and its search paths.

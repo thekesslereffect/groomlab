@@ -78,6 +78,8 @@ GroomLab always writes the fields marked *always*; the others only when they hol
 | `simCaches` | object | none | Baked Simulate nodes: `{"<node>": {"file", "object", "stamp"}}`. **Unstable.** |
 | `prototypes` | object | none | Meshes the Instance nodes name, inline ([below](#prototypes)). |
 | `colliders` | object | none | Meshes the ColliderMesh nodes name, inline ([below](#colliders)). |
+| `name` | string | none | The groom's name. |
+| `grooms` | array | none | The file's other grooms ([below](#several-grooms)). |
 
 A cache reference is `{"file": "scalp.abc", "object": "headShape"}`. `object` is the object's name
 in the cache; empty takes the first match.
@@ -260,6 +262,25 @@ space, polygons, subdivision, UVs, color sets, rest pose) with its `name` (lette
 `_`, not `scalp`) and no `topology`. Readers join them after the scalp into one surface: roots in
 `"guides"` and in the strands index its triangles (the scalp's first, then each scalp's in order).
 A Scalp node whose `input` is a name reads that scalp alone. Absent for a groom of one scalp.
+
+## Several grooms
+
+```json
+{"format": "groomlab.groom", "version": 1, "name": "hair", ..., "grooms": [{"name": "beard", ...}]}
+```
+
+A file can hold several grooms, each on its own scalp (the standalone app saves a document of
+several grooms this way). The first is the file's top level, as in a file of one groom; each of the
+others is an object in `grooms` with every top-level field but `format`, `version` and `grooms`.
+Relative paths in every groom resolve against the file's folder. A reader that only knows one
+groom reads the first. Absent for a file of one groom.
+
+Every GroomLab host writes a groom file the same way (the core's `groom_package.h`): each groom's
+`name` is unique in the file, and the files a groom owns sit in the file's own folder, one folder
+per groom: `groomlab/<file name>/masks/<groom>/` (texture maps), `cards/<groom>/` (the card bake),
+`caches/<groom>/` (Simulate bakes), named relative to the file. Saving one groom into a file
+replaces the groom of its name and keeps the others. A renderer given a file and a groom name
+renders that groom (Arnold's `groomlab_procedural`: its `groom` parameter).
 
 ## Inline and external
 

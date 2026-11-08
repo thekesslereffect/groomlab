@@ -111,6 +111,12 @@ def _for_host(entry, host):
     return hosts is None or host in hosts
 
 
+def tabs(host=HOST):
+    """The Groom Tools' tabs this host has (palette.json's tabs; a tab's "hosts" says which have it:
+    the app's Outliner is its own)."""
+    return [t for t in get("palette/tabs") if _for_host(t, host)]
+
+
 def host_text(key, host, *sources):
     """An entry's label or tip ("label", "tip") on `host`: from the first source (the entry at its
     place, then its action or container) with a per-host override ("labels": {"app": ...}) or the

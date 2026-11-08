@@ -35,6 +35,7 @@
 #include "theme.h"
 #include "viewport.h"
 
+#include "groomlab/asset_files.h"
 #include "groomlab/presets.h"
 
 namespace groomlab::app {
@@ -175,12 +176,11 @@ bool MainWindow::exportGuidesForSimulation(const QString& given) {
     if (refuseWhileBusy(tr("exporting the guides"))) return false;
     QString path = given;
     if (path.isEmpty()) {
-        // In the groom's caches folder (Maya's), named after the groom.
-        const QString caches = QString::fromStdString(document_->assetFolder("caches"));
+        // In the groom's own caches folder (Maya's), named after the groom.
+        const QString groom = QString::fromStdString(fileSafeName(document_->displayName()));
+        const QString caches = QString::fromStdString(document_->assetFolder("caches")) + QStringLiteral("/") + groom;
         QDir().mkpath(caches);
-        const QString start = caches + QStringLiteral("/") +
-                              (document_->path().empty() ? QStringLiteral("groom") : QFileInfo(QString::fromStdString(document_->path())).completeBaseName()) +
-                              QStringLiteral("_guides.abc");
+        const QString start = caches + QStringLiteral("/") + groom + QStringLiteral("_guides.abc");
         path = QFileDialog::getSaveFileName(this, tr("Export Guides for Simulation"), start, tr("Alembic (*.abc)"));
         if (path.isEmpty()) return false;
     }
@@ -886,11 +886,21 @@ QString MainWindow::autosavePath() const {
 
 bool MainWindow::autosaveNow() {
     // Only between edits: the session is the worker's while a dab or a commit evaluates there.
-    if (!document_ || !document_->dirty() || busy() || dabs_.pending() || commits_.pending() || paramDragging_) return false;
+    if (!document_ || !anyGroomDirty() || busy() || dabs_.pending() || commits_.pending() || paramDragging_) return false;
     const QString path = autosavePath();
     QDir().mkpath(QFileInfo(path).absolutePath());
     try {
-        document_->writeRenderGroom(path.toStdString());
+        if (grooms_.size() > 1) {
+            // Every groom of the document, as save writes them (one file).
+            std::vector<GroomFile> files;
+            for (int i = 0; i < groomCount(); ++i) {
+                files.push_back(groomAt(i)->currentFile());
+                files.back().name = groomAt(i)->name();
+            }
+            writeGroomFiles(path.toStdString(), files);
+        } else {
+            document_->writeRenderGroom(path.toStdString());
+        }
     } catch (const std::exception& e) {
         report(tr("Cannot autosave to %1: %2").arg(path, QString::fromUtf8(e.what())), false);
         return false;

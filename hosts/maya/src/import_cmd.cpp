@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "import_cmd.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <map>
 #include <tuple>
@@ -32,6 +33,7 @@
 #include "groomlab/correctives.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/paths.h"
+#include "groomlab/retriangulate.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/scalp_paint.h"
 #include "maya_inputs.h"
@@ -50,6 +52,8 @@ const char* kMakeScalp[] = {"-ms", "-makeScalp"};
 const char* kNameFlag[] = {"-n", "-name"};
 const char* kRest[] = {"-r", "-rest"};
 const char* kCaches[] = {"-cch", "-caches"};
+const char* kIndex[] = {"-ix", "-index"};
+const char* kExtraScalp[] = {"-sc", "-scalp"};
 
 std::string sceneUpAxis() { return MGlobal::isZAxisUp() ? "Z" : "Y"; }
 
@@ -60,10 +64,22 @@ bool exists(const std::string& path) {
     return !path.empty() && fs::exists(fs::u8path(path), ec);
 }
 
-// The file read and turned into the scene's up axis (`fileUpAxis`: the axis it was written in).
-// Throws GroomFileError, for a file in another unit than Maya's centimeters too.
-GroomFile readForMaya(const std::string& path, std::string* fileUpAxis = nullptr) {
-    GroomFile file = readGroomFile(path);
+// Groom `index` of the file (a file holds one groom or several: groom_file.h), read and turned
+// into the scene's up axis (`fileUpAxis`: the axis it was written in; `names`: every groom's name,
+// in the file's order). Throws GroomFileError, for a file in another unit than Maya's centimeters
+// and an index past its grooms too.
+GroomFile readForMaya(const std::string& path, int index = 0, std::string* fileUpAxis = nullptr,
+                      std::vector<std::string>* names = nullptr) {
+    std::vector<GroomFile> grooms = readGroomFiles(path);
+    if (index < 0 || index >= static_cast<int>(grooms.size())) {
+        throw GroomFileError(path + " holds " + std::to_string(grooms.size()) + " groom" + (grooms.size() == 1 ? "" : "s") +
+                             ", no groom " + std::to_string(index));
+    }
+    if (names) {
+        names->clear();
+        for (const GroomFile& g : grooms) names->push_back(g.name);
+    }
+    GroomFile file = std::move(grooms[static_cast<std::size_t>(index)]);
     if (file.units != "cm") {
         throw GroomFileError(path + ": its units are " + file.units + "; GroomLab imports grooms in centimeters (Maya's own unit)");
     }
@@ -91,6 +107,71 @@ std::string resolveFromFile(const GroomFile& file, const std::string& stored) {
     return generic(searchPathResolver(std::move(dirs))(path));
 }
 
+// Each polygon of `mesh` (ScalpMesh::polygons: its triangles in a row) as its corners in order,
+// from the triangles' edges that are not shared within the polygon, and for each corner the
+// triangle corner it came from (3 * triangle + k: its UV and colors). Empty when the mesh has no
+// polygons or one does not make a single loop (then the triangles are the faces).
+struct PolygonLoops {
+    std::vector<std::vector<int>> vertices;
+    std::vector<std::vector<int>> corners;
+    bool exact = true;  // every polygon starts where Maya's split gives the file's triangles
+};
+PolygonLoops polygonLoops(const ScalpMesh& mesh) {
+    PolygonLoops out;
+    const auto& tris = mesh.triangles();
+    const std::vector<std::int32_t>& polygons = mesh.polygons();
+    if (polygons.empty()) return out;
+    std::size_t t = 0;
+    for (const std::int32_t count : polygons) {
+        // Directed edges of the polygon's triangles; an inner edge comes once each way.
+        std::map<std::pair<int, int>, int> edges;  // (from, to) -> the triangle corner at `from`
+        for (std::int32_t k = 0; k < count; ++k, ++t) {
+            if (t >= tris.size()) return {};
+            for (int c = 0; c < 3; ++c) edges[{tris[t][c], tris[t][(c + 1) % 3]}] = static_cast<int>(3 * t) + c;
+        }
+        std::map<int, std::pair<int, int>> next;  // vertex -> (the next corner's vertex, its triangle corner)
+        for (const auto& [edge, corner] : edges) {
+            if (edges.count({edge.second, edge.first})) continue;
+            if (next.count(edge.first)) return {};  // not a single loop
+            next[edge.first] = {edge.second, corner};
+        }
+        if (next.size() != static_cast<std::size_t>(count) + 2) return {};
+        std::vector<int> loop, corners;
+        int v = next.begin()->first;
+        for (std::size_t k = 0; k < next.size(); ++k) {
+            const auto it = next.find(v);
+            if (it == next.end()) return {};
+            loop.push_back(v);
+            corners.push_back(it->second.second);
+            v = it->second.first;
+        }
+        if (v != loop.front()) return {};
+        // The corner to start from: the one Maya's split (polygonTriangles: getTriangles) gives the
+        // file's triangles from, in their order and corner order (a file Maya or the app wrote:
+        // the roots stay on their triangles); none (another host's split): the walk's.
+        const std::size_t n = loop.size(), first = t - static_cast<std::size_t>(count);
+        for (std::size_t r = 0; r < n; ++r) {
+            std::vector<Vec3f> points;
+            for (std::size_t k = 0; k < n; ++k) points.push_back(mesh.points()[static_cast<std::size_t>(loop[(r + k) % n])]);
+            const std::vector<std::array<int, 3>> split = polygonTriangles(points);
+            bool same = split.size() == static_cast<std::size_t>(count);
+            for (std::size_t s = 0; same && s < split.size(); ++s) {
+                for (int c = 0; same && c < 3; ++c) same = loop[(r + static_cast<std::size_t>(split[s][c])) % n] == tris[first + s][c];
+            }
+            if (!same) {
+                if (r + 1 == n) out.exact = false;
+                continue;
+            }
+            std::rotate(loop.begin(), loop.begin() + static_cast<std::ptrdiff_t>(r), loop.end());
+            std::rotate(corners.begin(), corners.begin() + static_cast<std::ptrdiff_t>(r), corners.end());
+            break;
+        }
+        out.vertices.push_back(std::move(loop));
+        out.corners.push_back(std::move(corners));
+    }
+    return out;
+}
+
 // Why `mesh` is not the file's scalp as the file's guides, parts and flow are rooted on it ("" when
 // it is): as many vertices and the same triangles (faces triangulated as Maya does).
 std::string scalpMismatch(const ScalpMesh* mesh, const ScalpMesh* fileScalp) {
@@ -100,6 +181,9 @@ std::string scalpMismatch(const ScalpMesh* mesh, const ScalpMesh* fileScalp) {
         return "it has " + std::to_string(mesh->pointCount()) + " vertices and the file's scalp " +
                std::to_string(fileScalp->pointCount());
     }
+    // The same polygons split along other diagonals (another host's split of its quads): the
+    // groom's roots move onto Maya's triangles (retriangulateGroomData).
+    if (isRetriangulation(*fileScalp, *mesh)) return {};
     if (mesh->triangles() != fileScalp->triangles()) {
         return "its faces are not the file's scalp's (another topology or vertex order, " + std::to_string(mesh->triangleCount()) +
                " triangles against " + std::to_string(fileScalp->triangleCount()) + ")";
@@ -161,6 +245,12 @@ std::string info(const GroomFile& file, const std::string& fileUpAxis) {
     if (const ScalpMesh* s = file.data.scalp.get()) {
         out["scalp"] = {{"points", s->pointCount()}, {"triangles", s->triangleCount()}, {"rest", s->hasRest()},
                         {"uvs", s->hasUVs()}, {"colorSets", ownColorSets(file)}};
+        // The groom's other scalps (Add > Scalp's), in the order they join after the scalp.
+        json scalps = json::array();
+        for (const auto& [name, mesh] : file.data.scalps) {
+            if (mesh) scalps.push_back({{"name", name}, {"points", mesh->pointCount()}, {"rest", mesh->hasRest()}});
+        }
+        out["scalps"] = scalps;
     } else {
         out["scalp"] = nullptr;
     }
@@ -232,6 +322,8 @@ MSyntax ImportGroomCmd::newSyntax() {
     s.addFlag(kNameFlag[0], kNameFlag[1], MSyntax::kString);
     s.addFlag(kRest[0], kRest[1]);
     s.addFlag(kCaches[0], kCaches[1], MSyntax::kBoolean);
+    s.addFlag(kIndex[0], kIndex[1], MSyntax::kLong);
+    s.addFlag(kExtraScalp[0], kExtraScalp[1], MSyntax::kString);
     s.setObjectType(MSyntax::kSelectionList, 0, 1);
     s.useSelectionAsDefault(false);
     s.enableQuery(false);
@@ -251,15 +343,22 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
         }
         GroomFile file;
         std::string fileUpAxis;
+        std::vector<std::string> names;
+        int index = 0;
+        if (db.isFlagSet(kIndex[0])) db.getFlagArgument(kIndex[0], 0, index);
         try {
-            file = readForMaya(path, &fileUpAxis);
+            file = readForMaya(path, index, &fileUpAxis, &names);
         } catch (const std::exception& e) {
             return fail(kName, e.what());
         }
 
         if (db.isFlagSet(kInfo[0])) {
             try {
-                setResult(MString(info(file, fileUpAxis).c_str()));
+                json out = json::parse(info(file, fileUpAxis));
+                out["name"] = file.name;
+                out["index"] = index;
+                out["grooms"] = names;  // every groom's name, in the file's order (one: a file of one groom)
+                setResult(MString(out.dump().c_str()));
             } catch (const std::exception& e) {
                 return fail(kName, e.what());
             }
@@ -272,12 +371,36 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
             setResult(MString(scalpMismatch(scalp.get(), file.data.scalp.get()).c_str()));
             return MS::kSuccess;
         }
+        if (db.isFlagSet(kMakeScalp[0]) && db.isFlagSet(kExtraScalp[0])) {
+            // One of the groom's other scalps (Add > Scalp's), as a mesh of its own.
+            const std::string scalpName = flagString(db, kExtraScalp[0]).asChar();
+            MeshPtr extra;
+            for (const auto& [name, mesh] : file.data.scalps) {
+                if (name == scalpName) extra = mesh;
+            }
+            if (!extra || extra->triangleCount() == 0) return fail(kName, MString(path.c_str()) + " holds no scalp named " + scalpName.c_str());
+            const bool rest = db.isFlagSet(kRest[0]);
+            if (rest && !extra->hasRest()) return fail(kName, MString(scalpName.c_str()) + " has no rest pose in " + path.c_str());
+            mesh_ = rest ? std::make_shared<const ScalpMesh>(extra->restPose()) : extra;
+            colorSets_.clear();
+            for (const std::string& set : extra->colorSetNames()) {
+                const auto it = file.data.maps.find(set);
+                if (it == file.data.maps.end() || it->second.kind != "vertices") colorSets_.push_back(set);
+            }
+            exactPolygons_ = true;
+            name_ = flagString(db, kNameFlag[0], (scalpName + (rest ? "ScalpRest" : "Scalp")).c_str());
+            making_ = undoable_ = true;
+            return redoIt();
+        }
         if (db.isFlagSet(kMakeScalp[0])) {
             if (!file.data.scalp || file.data.scalp->triangleCount() == 0) return fail(kName, MString(path.c_str()) + " holds no scalp");
             const bool rest = db.isFlagSet(kRest[0]);
             if (rest && !file.data.scalp->hasRest()) return fail(kName, MString(path.c_str()) + "'s scalp has no rest pose");
             mesh_ = rest ? std::make_shared<const ScalpMesh>(file.data.scalp->restPose()) : file.data.scalp;
             colorSets_ = ownColorSets(file);
+            // With other scalps the roots index the scalps' triangles joined: the scalp keeps the
+            // file's triangles unless Maya splits its polygons as the file does.
+            exactPolygons_ = !file.data.scalps.empty();
             name_ = flagString(db, kNameFlag[0], (fs::u8path(path).stem().u8string() + (rest ? "ScalpRest" : "Scalp")).c_str());
             making_ = undoable_ = true;
             return redoIt();
@@ -296,7 +419,21 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
         MFnDependencyNode fn(node);
         const MeshPtr scalp = rawScalpFromNode(node);
         if (!scalp) return fail(kName, groomPath.partialPathName() + " has no scalp mesh connected");
-        const std::string mismatch = scalpMismatch(scalp.get(), file.data.scalp.get());
+        std::string mismatch = scalpMismatch(scalp.get(), file.data.scalp.get());
+        if (mismatch.empty() && file.data.scalp && !file.data.scalps.empty() && isRetriangulation(*file.data.scalp, *scalp)) {
+            mismatch = "its quads are split along other diagonals than the file's, and the groom has other scalps";
+        }
+        // The file's quads split along other diagonals than Maya's: the roots onto Maya's triangles
+        // (a groom of one scalp: with others the roots index them joined, and the scalp was made of
+        // the file's own triangles).
+        if (mismatch.empty() && file.data.scalp && file.data.scalps.empty() && isRetriangulation(*file.data.scalp, *scalp)) {
+            try {
+                retriangulateGroomData(file.data, *file.data.scalp, *scalp);
+            } catch (const std::exception& e) {
+                return fail(kName, e.what());
+            }
+            file.data.scalpFingerprint = scalp->topologyFingerprint();
+        }
         if (!mismatch.empty()) {
             return fail(kName, mismatchMessage(std::string(groomPath.partialPathName().asChar()) + "'s scalp", path, mismatch).c_str());
         }
@@ -412,6 +549,8 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
                 for (auto& [node, ref] : sims) ref.file = portableMayaPath(generic(ref.file));
                 modifier_.newPlugValueString(fn.findPlug("simCaches", true), simCachesToJson(sims).c_str());
             }
+            // Linked to the file it came from (Reload, Save to Groom File: its own entry, by name; the
+            // file's other grooms stay).
             modifier_.newPlugValueString(fn.findPlug("groomFile", true), portableMayaPath(path).c_str());
             const MPlug tick = fn.findPlug("brushTick", true);  // files read again (a map's image rewritten in place)
             modifier_.newPlugValueInt(tick, tick.asInt() + 1);
@@ -440,29 +579,43 @@ MStatus ImportGroomCmd::makeScalp() {
     if (!status) return status;
     made_ = MObjectHandle(transform);
 
-    // A face per triangle, in the file's order and corner order: the guides' roots (triangle, u, v)
-    // land where they were.
+    // The file's polygons (quads and n-gons, as the mesh it was made on had them: the app keeps
+    // them), in its order and corner order; Maya splits them as it does, and where that is not the
+    // file's split the import moves the roots onto Maya's triangles (retriangulateGroomData). A
+    // file without polygons: a face per triangle, the guides' roots landing where they were.
     MFloatPointArray points(static_cast<unsigned>(m.pointCount()));
     for (std::size_t i = 0; i < m.pointCount(); ++i) {
         const Vec3f& p = m.points()[i];
         points.set(static_cast<unsigned>(i), p.x, p.y, p.z);
     }
-    const auto triangles = static_cast<unsigned>(m.triangleCount());
-    MIntArray counts(triangles, 3), connects(triangles * 3), faces(triangles * 3);
-    for (unsigned t = 0; t < triangles; ++t) {
-        for (unsigned k = 0; k < 3; ++k) {
-            connects[3 * t + k] = m.triangles()[t][k];
-            faces[3 * t + k] = static_cast<int>(t);
+    PolygonLoops loops = polygonLoops(m);
+    if (exactPolygons_ && !loops.exact) loops = {};  // (an extra scalp: its triangles, where they were)
+    if (loops.vertices.empty()) {
+        for (std::size_t t = 0; t < m.triangleCount(); ++t) {
+            loops.vertices.push_back({m.triangles()[t][0], m.triangles()[t][1], m.triangles()[t][2]});
+            loops.corners.push_back({static_cast<int>(3 * t), static_cast<int>(3 * t + 1), static_cast<int>(3 * t + 2)});
         }
     }
+    const auto faceCount = static_cast<unsigned>(loops.vertices.size());
+    MIntArray counts(faceCount), connects, faces;
+    std::vector<int> cornerOf;  // each face-vertex's triangle corner in the file
+    for (unsigned f = 0; f < faceCount; ++f) {
+        counts[f] = static_cast<int>(loops.vertices[f].size());
+        for (std::size_t k = 0; k < loops.vertices[f].size(); ++k) {
+            connects.append(loops.vertices[f][k]);
+            faces.append(static_cast<int>(f));
+            cornerOf.push_back(loops.corners[f][k]);
+        }
+    }
+    const unsigned faceVertices = connects.length();
     // A UV per vertex and value (corners of a vertex with the same UV share it: seams stay seams).
     MFloatArray us, vs;
     MIntArray uvIds;
     if (m.hasUVs()) {
         std::map<std::tuple<int, float, float>, int> ids;
-        uvIds.setLength(triangles * 3);
-        for (unsigned c = 0; c < triangles * 3; ++c) {
-            const ScalpMesh::UV& uv = m.cornerUVs()[c];
+        uvIds.setLength(faceVertices);
+        for (unsigned c = 0; c < faceVertices; ++c) {
+            const ScalpMesh::UV& uv = m.cornerUVs()[static_cast<std::size_t>(cornerOf[c])];
             const auto key = std::make_tuple(connects[c], uv[0], uv[1]);
             auto it = ids.find(key);
             if (it == ids.end()) {
@@ -478,19 +631,19 @@ MStatus ImportGroomCmd::makeScalp() {
     MObject data = dataFn.create(&status);
     if (!status) return status;
     MFnMesh meshFn;
-    meshFn.create(static_cast<int>(points.length()), static_cast<int>(triangles), points, counts, connects, us, vs, data, &status);
+    meshFn.create(static_cast<int>(points.length()), static_cast<int>(faceCount), points, counts, connects, us, vs, data, &status);
     if (!status) return status;
     if (m.hasUVs()) meshFn.assignUVs(counts, uvIds);
     // The scalp's own color sets (painted maps go to the groom's scalpMaps instead).
     for (const std::string& set : colorSets_) {
         const std::vector<ScalpMesh::Color>* corners = m.cornerColors(set);
-        if (!corners || corners->size() != triangles * 3) continue;
+        if (!corners || corners->size() != m.triangleCount() * 3) continue;
         MString setName(set.c_str());
         setName = meshFn.createColorSetWithName(setName);
         meshFn.setCurrentColorSetName(setName);
-        MColorArray colors(triangles * 3);
-        for (unsigned c = 0; c < triangles * 3; ++c) {
-            const ScalpMesh::Color& col = (*corners)[c];
+        MColorArray colors(faceVertices);
+        for (unsigned c = 0; c < faceVertices; ++c) {
+            const ScalpMesh::Color& col = (*corners)[static_cast<std::size_t>(cornerOf[c])];
             colors.set(MColor(col[0], col[1], col[2], col[3]), c);
         }
         meshFn.setFaceVertexColors(colors, faces, connects);

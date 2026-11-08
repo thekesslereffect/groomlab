@@ -29,6 +29,7 @@ groomlab-cli and the Arnold procedural render the simulated groom too.
 """
 
 import json
+import os
 
 from maya import cmds, mel
 
@@ -173,8 +174,13 @@ def invalidate_simulation(groom, node=""):
 
 
 def simulation_cache_path(groom, node):
-    """Where bake_simulation writes a node's frames: <scene>/groomlab/<scene name>/caches/<asset>_<node>_sim.abc."""
-    return "%s/%s_%s_sim.abc" % (groomlab.asset_folder("caches"), groomlab.asset_name(groom), node)
+    """Where bake_simulation writes a node's frames: the groom's own folder in the scene's caches,
+    <scene>/groomlab/<scene name>/caches/<asset>/<asset>_<node>_sim.abc (as its masks and cards)."""
+    asset = groomlab.asset_name(groom)
+    folder = "%s/%s" % (groomlab.asset_folder("caches"), asset)
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    return "%s/%s_%s_sim.abc" % (folder, asset, node)
 
 
 def baked_simulations(groom):

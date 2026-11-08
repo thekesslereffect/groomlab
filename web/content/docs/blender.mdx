@@ -492,12 +492,19 @@ lose the colors and the look. Nothing needs setting up:
 
 ## Files
 
-- **Save Groom File As...** writes the groom in GroomLab's file conventions (Y up, centimeters).
-  Maya and the GroomLab app open it as evaluated in Blender, with the same guides. It starts
-  beside the .blend, named after the groom: a groom file is a source file, kept next to your
-  scene rather than in its `groomlab` folder, and saving again overwrites it.
+- **Save Groom File As...** writes the .blend's grooms (the selected ones, else all) into one groom
+  file, a document of named grooms, in GroomLab's file conventions (Y up, centimeters). Maya and
+  the GroomLab app open it as evaluated in Blender, with the same guides. It starts beside the
+  .blend, named after it (`shot_v002.groom`), kept next to your scene rather than in its
+  `groomlab` folder, and shares that folder: each groom's maps and bakes are under
+  `groomlab/<file name>/<kind>/<groom>/` (copied there when the file has another name). Each groom
+  is linked to the file; **Save to Groom File** writes its own entry (the others stay). Save As
+  takes the file along under the new name, so two versions of a .blend never share one.
 - **Import Groom File...** opens a groom from Maya, the app or Blender on the selected mesh, or with
   the scalp stored in the file (**Use the File's Scalp**) when you don't have the head in Blender.
+  A file of several grooms (the app's Outliner) opens every groom, each on a mesh of its own scalp
+  named after the groom and linked to the file (saving one writes its own entry). A groom's other scalps (**Add > Scalp**) come back as objects of their
+  own, kept as its other scalps.
 - **Import > Alembic Curves...** takes the selected groom's guides from an Alembic file's curves (an
   **ImportCurves** node rooted on the scalp; with a mesh selected and no groom, a groom is made on
   it first). The curves are read as GroomLab's and Maya's Alembic files have them: Y up,

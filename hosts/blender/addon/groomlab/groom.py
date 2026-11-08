@@ -334,6 +334,49 @@ def follow_files(scalp, rt, blend_path):
         copied += _follow_scalp_bake(scalp, args.get("oldRoot") or temp_root(), args["newRoot"])
     except OSError as e:
         print("GroomLab: the hair cap's maps did not come along: %s" % e)
+    try:
+        copied += _follow_groom_file(scalp, old, new)
+    except OSError as e:
+        print("GroomLab: the groom file did not come along: %s" % e)
+    return copied
+
+
+def groom_file_name(scalp=None, blend_path=None):
+    """The groom file's name beside the .blend: <.blend name>.groom, a document of the .blend's named
+    grooms that shares its groomlab folder (<groom>.groom while untitled); two versions of a .blend
+    in one folder never write each other's (Maya's menu.groom_source_file)."""
+    path = bpy.data.filepath if blend_path is None else blend_path
+    stem = _file_safe(os.path.splitext(os.path.basename(path))[0]) if path else ""
+    return (stem or (_file_safe(scalp.name) if scalp is not None else "grooms")) + ".groom"
+
+
+def _follow_groom_file(scalp, old, new):
+    """Save As: the groom file the groom is linked to, when it is the old .blend's (<old name>.groom
+    beside it), copied beside the new one as <new name>.groom and linked there, so the two files
+    never write one groom file (Maya's follow_scene_files)."""
+    import filecmp
+    import shutil
+    linked = scalp.groomlab.groom_file
+    if not linked or not old:
+        return []
+    full = os.path.abspath(bpy.path.abspath(linked))
+    if not os.path.isfile(full) or os.path.normcase(os.path.dirname(full)) != os.path.normcase(os.path.dirname(old)):
+        return []
+    old_stem = _file_safe(os.path.splitext(os.path.basename(old))[0])
+    new_stem = _file_safe(os.path.splitext(os.path.basename(new))[0])
+    base, ext = os.path.splitext(os.path.basename(full))
+    if base != old_stem:
+        return []  # a groom file of its own name: as it is
+    target, n = os.path.join(os.path.dirname(new), new_stem + ext), 2
+    while os.path.exists(target) and not filecmp.cmp(target, full, shallow=False):
+        target, n = os.path.join(os.path.dirname(new), "%s_%d%s" % (new_stem, n, ext)), n + 1
+    if os.path.normcase(target) == os.path.normcase(full):
+        return []
+    copied = []
+    if not os.path.exists(target):
+        shutil.copy2(full, target)
+        copied.append(target.replace("\\", "/"))
+    scalp.groomlab.groom_file = target.replace("\\", "/")
     return copied
 
 
@@ -1101,13 +1144,21 @@ def create_groom(context, scalp, preset="", guide_count=0, guide_points=8, guide
     return r
 
 
-def load_groom(context, path, scalp=None):
-    """Opens a .groom: into `scalp` (made a groom if it is not one), or with the file's own scalp
-    as a new mesh object when `scalp` is None. Flat guides (Maya's guide curves) become the Guides
-    Curves object; a guide hierarchy stays in the helper, for GroomLab's tools."""
+def groom_file_names(path):
+    """The grooms of a groom file by name, in its order (one, or several: the standalone app saves
+    a document of several grooms in one file)."""
+    process.client()
+    return list(_call("groom_file_names", path=path).get("grooms") or [""])
+
+
+def load_groom(context, path, scalp=None, index=0):
+    """Opens a .groom (its groom `index`, of a file of several): into `scalp` (made a groom if it is
+    not one), or with the file's own scalp as a new mesh object when `scalp` is None. Flat guides
+    (Maya's guide curves) become the Guides Curves object; a guide hierarchy stays in the helper,
+    for GroomLab's tools."""
     scene = context.scene
     if scalp is None:
-        scalp = _scalp_from_file(context, path)
+        scalp = _scalp_from_file(context, path, index)
     g = scalp.groomlab
     if g.role != "SCALP":
         g.role = "SCALP"
@@ -1117,7 +1168,7 @@ def load_groom(context, path, scalp=None):
         forget_cache()
     ensure_hair_object(scalp)
     rt = ensure(scalp, scene)
-    info = _call("load_groom", session=rt.session, path=path)
+    info = _call("load_groom", session=rt.session, path=path, index=int(index))
     # A groom of flat guides (Maya's guide curves) keeps them as a Blender Curves object (B2); every
     # other groom's guides live in the helper's hierarchy, edited with GroomLab's own tools.
     hierarchy = info.get("flatGuides", 0) == 0
@@ -1145,6 +1196,7 @@ def load_groom(context, path, scalp=None):
         write_guides(scalp, guides, client.array(gg["arrays"]["points"]), client.array(gg["arrays"]["counts"]),
                      client.array(gg["arrays"]["ids"]))
         sync_guides(scalp, rt, force=True)
+    _restore_extra_scalps(scene, scalp, rt)
     remember_graph(scalp, rt)
     r = evaluate(scalp, rt, "preview")
     shading.use_render_settings(scene)
@@ -1153,6 +1205,25 @@ def load_groom(context, path, scalp=None):
         tools.keep_state(scalp)
         tools.refresh_info(scalp, scene)
     return scalp, info, r
+
+
+def _restore_extra_scalps(scene, scalp, rt):
+    """The file's other scalps (Add > Scalp's: "scalps") as mesh objects of their own, kept as the
+    groom's other scalps (Maya's import makes them as meshes too): they show, move and deform with
+    the scene. One already kept under its name stays (Reload from Groom File)."""
+    names = [m["name"] for m in _call("meshes_info", session=rt.session).get("scalps") or []]
+    kept = scalp.groomlab.extra_scalps
+    for name in names:
+        if kept.get(name) is not None and kept.get(name).object is not None:
+            continue
+        got = _call("get_scalp", session=rt.session, name=name)
+        if not got.get("scalp"):
+            continue
+        obj = _mesh_object(scene, got, "%s_%s" % (scalp.name, name))
+        obj.matrix_world = scalp.matrix_world.copy()  # (its points are in the groom's space, as the scalp's)
+        entry = kept.get(name) or kept.add()
+        entry.name = name
+        entry.object = obj
 
 
 def remove_guides_object(scalp):
@@ -1167,27 +1238,34 @@ def remove_guides_object(scalp):
             bpy.data.hair_curves.remove(data)
 
 
-def _scalp_from_file(context, path):
-    """A mesh object of the file's scalp (its points in Blender's space and units)."""
+def _scalp_from_file(context, path, index=0):
+    """A mesh object of the file's scalp (its groom `index`'s; its points in Blender's space and
+    units), named after the groom."""
     scene = context.scene
     process.client()
     s = _call("new_session", space=space_of(scene))["session"]
     try:
-        _call("load_groom", session=s, path=path)
+        loaded = _call("load_groom", session=s, path=path, index=int(index))
         got = _call("get_scalp", session=s)
         if not got.get("scalp"):
             raise HelperError("state", "%s has no scalp: select the mesh to grow it on" % os.path.basename(path))
-        client = process.client()
-        a = got["arrays"]
-        pts = client.array(a["points"])
-        counts = client.array(a["faceCounts"]).astype(int)
-        idx = client.array(a["faceIndices"]).astype(int)
-        uvs = client.array(a["uvs"]) if "uvs" in a else None
+        # A named groom's scalp takes its name (the groom's name in the file: groom_entry_name).
+        name = loaded.get("name") or os.path.splitext(os.path.basename(path))[0] + "_scalp"
+        return _mesh_object(scene, got, name)
     finally:
         _call("close_session", session=s)
+
+
+def _mesh_object(scene, got, name):
+    """A mesh object from a get_scalp answer (its polygons, UVs), linked to the scene."""
+    client = process.client()
+    a = got["arrays"]
+    pts = client.array(a["points"])
+    counts = client.array(a["faceCounts"]).astype(int)
+    idx = client.array(a["faceIndices"]).astype(int)
+    uvs = client.array(a["uvs"]) if "uvs" in a else None
     starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
     faces = [idx[b:b + n].tolist() for b, n in zip(starts, counts)]
-    name = os.path.splitext(os.path.basename(path))[0] + "_scalp"
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(pts.tolist(), [], faces)
     if uvs is not None:
@@ -1199,14 +1277,36 @@ def _scalp_from_file(context, path):
     return obj
 
 
-def save_groom(scalp, path, up_axis="Y"):
+def save_groom(scalp, path, up_axis="Y", merge=True):
+    """The groom into the groom file at `path`, a document of named grooms (the core's
+    groom_package.h, every host's): under its name (groom_entry_name), with `merge` beside the
+    file's other grooms (its own entry replaced), else alone; the files it owns copied into the
+    file's own folder (groomlab/<file>/<kind>/<groom>: the .blend's own when the file is named
+    after it)."""
     rt = ensure(scalp)
     sync(scalp, evaluate_now=False)
     for fn in before_save:
         fn()
-    r = _call("save_groom", session=rt.session, path=path, upAxis=up_axis)
+    r = _call("save_groom", session=rt.session, path=path, upAxis=up_axis, name=groom_entry_name(scalp), merge=bool(merge))
+    for w in r.get("warnings") or []:
+        print("GroomLab: %s" % w)
     remember_graph(scalp, rt)
     return r
+
+
+def groom_entry_name(scalp):
+    """A groom's name in a groom file: its scalp object's, file safe (the name its folders take)."""
+    return _file_safe(scalp.name)
+
+
+def groom_entry(scalp, path):
+    """The index of the groom's own entry in the groom file at `path` (by its name; a file of one
+    groom: that one), or -1."""
+    names = groom_file_names(path)
+    name = groom_entry_name(scalp)
+    if name in names:
+        return names.index(name)
+    return 0 if len(names) == 1 else -1
 
 
 _card_presets = []

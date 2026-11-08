@@ -270,6 +270,9 @@ qt_add_library(groomlab_app_ui STATIC
     src/param_editors.h
     src/param_panel.cpp
     src/param_panel.h
+    src/main_window_grooms.cpp
+    src/outliner_panel.cpp
+    src/outliner_panel.h
     src/photos_panel.cpp
     src/photos_panel.h
     src/properties_panel.cpp

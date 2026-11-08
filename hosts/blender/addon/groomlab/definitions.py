@@ -120,8 +120,9 @@ def enum_default(name, empty="NONE"):
 
 
 def tabs():
-    """The Groom Tools' tabs: [{"id", "label", "tip", "aliases"?}]."""
-    return get("palette/tabs")
+    """The Groom Tools' tabs Blender has: [{"id", "label", "tip", "aliases"?}] (a tab's "hosts" says
+    which have it: the app's Outliner is its own)."""
+    return [t for t in get("palette/tabs") if _for_host(t, HOST)]
 
 
 def section(section_id):

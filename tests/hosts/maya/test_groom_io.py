@@ -185,13 +185,12 @@ class GroomFileTest(unittest.TestCase):
         stamp = groomlab._card_maps(groom)["Strands"]
         # The last transfer's marker pairs travel with the groom file.
         groomlab.set_transfer_markers(groom, [((0, 1, 0), (5, 1, 0)), ((1, 0, 0), (6, 0, 0)), ((0, 0, 1), (5, 0, 1))])
-        # Save Groom File's starting file: a source file beside the scene (here the project, the
-        # scene untitled), named after the groom, outside the groomlab folder.
+        # Save Groom File's starting file: a document of the scene's grooms beside the scene, named
+        # after it (two versions of a scene in one folder never share one), outside the groomlab folder.
         from groomlab import paths
         from groomlab.ui import menu
         start = menu.groom_source_file(groom)
-        self.assertEqual(start, (paths.scene_folder() or paths.project_root().rstrip("/\\")).replace("\\", "/") + "/" +
-                         groomlab.asset_name(groom) + ".groom")
+        self.assertEqual(start, paths.scene_folder().replace("\\", "/") + "/" + paths.scene_stem() + ".groom")
         self.assertNotIn("/exports/", start)
         path = os.path.join(WORK_DIR, "exports", "hair.groom")
         os.makedirs(os.path.dirname(path))
@@ -200,10 +199,13 @@ class GroomFileTest(unittest.TestCase):
         exported = read_json(path)
         self.assertEqual(exported["upAxis"], "Y")
         self.assertEqual([m["new"]["point"] for m in exported["transferMarkers"]], [[5, 1, 0], [6, 0, 0], [5, 0, 1]])
+        # The files the groom owns in the file's own folder (groomlab/<file>/<kind>/<groom>: the core's
+        # groom_package.h), named relative to it: the file stands alone.
+        self.assertEqual(exported["name"], "hair")
         self.assertEqual(exported["cardBake"], {"prefix": "groomlab/hair/cards/hair/hair_", "strands": stamp})
         for name in ("Color.tga", "Atlas.json", "Preview.png"):
             self.assertTrue(os.path.isfile(os.path.join(WORK_DIR, "exports", "groomlab", "hair", "cards", "hair", "hair_" + name)), name)
-        self.assertEqual(exported["maps"]["dense"]["texture"], "../source/groomlab/source/masks/hair/dense.png")
+        self.assertEqual(exported["maps"]["dense"]["texture"], "groomlab/hair/masks/hair/dense.png")
 
         new_scene("imported")
         imported = groomlab.import_groom(path)
@@ -240,7 +242,7 @@ class GroomFileTest(unittest.TestCase):
         self.assertEqual(maps["tint"]["channels"], 4)
         self.assertEqual(maps["dense"]["texture"], "groomlab/imported/masks/hair/dense.png")  # copied into this scene
         self.assertEqual(file_bytes(groomlab.resolve_path(maps["dense"]["texture"], imported)),
-                         file_bytes(os.path.join(WORK_DIR, "source", "groomlab", "source", "masks", "hair", "dense.png")))
+                         file_bytes(os.path.join(WORK_DIR, "exports", "groomlab", "hair", "masks", "hair", "dense.png")))
         self.assertEqual(list(groomlab.list_controls(imported)), ["frizzy"])
         self.assertAlmostEqual(groomlab.list_controls(imported)["frizzy"], 0.12, places=6)
         # The bake in this scene's cards folder, its stamp kept: the cards are not stale.
@@ -464,6 +466,173 @@ class GroomFileTest(unittest.TestCase):
         self.assertEqual(groomlab.map_users(imported, "_2_fringe"), [("length", "keep")])
         self.assertEqual(groomlab.errors(imported), [])
 
+    def test_a_quad_scalp_imports_as_quads(self):
+        """A groom file keeps its scalp's polygons ("polygons": triangles per polygon, as the mesh it
+        was made on had them): imported with no mesh, the scalp is made of those quads. Split as
+        Maya splits them (the app splits OBJ quads so), the groom is as it was; split along the
+        other diagonals (an older app's file), the roots move onto Maya's triangles."""
+        folder = new_scene("quads")
+        plane = cmds.polyPlane(width=2, height=2, subdivisionsX=8, subdivisionsY=8)[0]
+        cmds.move(0, 0.06, 0, plane + ".vtx[20:40]", relative=True)  # bent a little: the two splits differ a little
+        groom = groomlab.create_groom(plane, name="fur")
+        cmds.setAttr(groom + ".previewDensity", 1.0)
+        groomlab.guides_from_curves(groom, [cmds.curve(degree=1, point=[(x, 0.4, z), (x + 0.1, 0.8, z), (x + 0.2, 1.1, z + 0.1)])
+                                            for x, z in ((-0.6, -0.5), (0.1, 0.05), (0.55, 0.4))])
+
+        def guide_cvs(g):
+            """The guides' points (Guides to Curves), sorted."""
+            from groomlab import utils
+            made = utils.guides_to_curves(g)
+            out = sorted(tuple(round(c, 6) for c in cmds.pointPosition(cv)) for crv in made["curves"]
+                         for cv in cmds.ls(crv + ".cv[*]", flatten=True))
+            cmds.delete(made["group"])
+            return out
+
+        guides = guide_cvs(groom)
+        path = os.path.join(folder, "fur.groom")
+        groomlab.export_groom(groom, path)
+        count = cmds.getAttr(groom + ".outStrandCount")
+        stored = read_json(path)
+        self.assertEqual(stored["scalp"]["polygons"], [2] * 64)
+
+        new_scene("quads2")
+        imported = groomlab.import_groom(path)
+        scalp = groomlab.scalp_mesh(imported)
+        self.assertEqual(cmds.polyEvaluate(scalp, face=True), 64)  # quads, not 128 triangles
+        self.assertEqual(groomlab.errors(imported), [])
+        cmds.setAttr(imported + ".previewDensity", 1.0)
+        self.assertEqual(cmds.getAttr(imported + ".outStrandCount"), count)
+        for p, q in zip(guide_cvs(imported), guides):
+            self.assertLess(max(abs(a - b) for a, b in zip(p, q)), 1e-4)
+
+        # The other diagonal in every quad (its corners' UVs with them; the fingerprint dropped).
+        scalp_json = stored["scalp"]
+        tris, uvs = scalp_json["triangles"], scalp_json.get("uvs")
+        flipped, flipped_uvs = [], []
+        for q in range(64):
+            corners = [(tris[6 * q + k], uvs[12 * q + 2 * k:12 * q + 2 * k + 2] if uvs else None) for k in range(6)]
+            edges = {}
+            for t in range(2):
+                for c in range(3):
+                    a, b = corners[3 * t + c], corners[3 * t + (c + 1) % 3]
+                    edges[(a[0], b[0])] = a
+            boundary = {a: edges[(a, b)] for (a, b) in edges if (b, a) not in edges}
+            nxt = {a: b for (a, b) in edges if (b, a) not in edges}
+            loop = [next(iter(nxt))]
+            while len(loop) < 4:
+                loop.append(nxt[loop[-1]])
+            # The split the file does not have: the diagonal its two triangles do not share.
+            shared = [(a, b) for (a, b) in edges if (b, a) in edges][0]
+            i0 = 0 if {loop[0], loop[2]} != set(shared) else 1
+            v = loop[i0:] + loop[:i0]
+            for t in ((v[0], v[1], v[2]), (v[0], v[2], v[3])):
+                for vert in t:
+                    flipped.append(vert)
+                    if uvs:
+                        flipped_uvs.extend(boundary[vert][1])
+        scalp_json["triangles"] = flipped
+        if uvs:
+            scalp_json["uvs"] = flipped_uvs
+        scalp_json.pop("topology", None)
+        other = os.path.join(folder, "fur_other_split.groom")
+        with open(other, "w") as f:
+            json.dump(stored, f)
+        new_scene("quads3")
+        moved = groomlab.import_groom(other)
+        self.assertEqual(cmds.polyEvaluate(groomlab.scalp_mesh(moved), face=True), 64)
+        self.assertEqual(groomlab.errors(moved), [])
+        cmds.setAttr(moved + ".previewDensity", 1.0)
+        self.assertAlmostEqual(cmds.getAttr(moved + ".outStrandCount"), count, delta=count * 0.1)
+        # The guides where they were (moved onto Maya's triangles at the same points; the plane's
+        # bend differs between the splits by a little).
+        moved_cvs = guide_cvs(moved)
+        self.assertEqual(len(moved_cvs), len(guides))
+        for p, q in zip(moved_cvs, guides):
+            self.assertLess(max(abs(a - b) for a, b in zip(p, q)), 0.05)
+
+    def test_other_scalps_come_back_as_meshes(self):
+        """A groom on another scalp too (Add > Scalp: the file's "scalps") imports with that scalp
+        made as a mesh of its own and kept as the groom's other scalp: the same hair."""
+        from groomlab import extra_scalps
+        folder = new_scene("ears")
+        head = cmds.polySphere(radius=1, subdivisionsX=16, subdivisionsY=8)[0]
+        ear = cmds.polyCube(width=0.3, height=0.3, depth=0.3)[0]
+        cmds.move(1.2, 0, 0, ear)
+        groom = groomlab.create_groom(head, name="fur")
+        extra_scalps.add_scalp(groom, ear, name="ear")
+        cmds.setAttr(groom + ".previewDensity", 1.0)
+        count = cmds.getAttr(groom + ".outStrandCount")
+        path = os.path.join(folder, "fur.groom")
+        groomlab.export_groom(groom, path)
+        self.assertEqual([s["name"] for s in read_json(path)["scalps"]], ["ear"])
+        self.assertEqual([s["name"] for s in groomlab.groom_file_info(path)["scalps"]], ["ear"])
+
+        new_scene("ears2")
+        imported = groomlab.import_groom(path)
+        scalps = extra_scalps.scalps(imported)
+        self.assertEqual([s["name"] for s in scalps], ["ear"])
+        self.assertEqual(cmds.polyEvaluate(scalps[0]["mesh"], vertex=True), 8)
+        self.assertEqual(groomlab.errors(imported), [])
+        cmds.setAttr(imported + ".previewDensity", 1.0)
+        self.assertEqual(cmds.getAttr(imported + ".outStrandCount"), count)
+
+    def test_a_file_of_several_grooms_imports_each(self):
+        """The app saves a document of several grooms in one file (the first at the top, the others
+        in "grooms"): Import Groom makes each on a mesh of its own scalp, named after it, not
+        linked to the file (saving one groom there would drop the others)."""
+        folder = new_scene("several")
+        hair = groomlab.create_groom(cmds.polySphere(radius=1, subdivisionsX=20, subdivisionsY=10)[0], name="hair")
+        beard = groomlab.create_groom(cmds.polyCube(width=1, height=1, depth=1, subdivisionsX=4, subdivisionsY=4)[0],
+                                      name="beard")
+        groomlab.set_param(beard, "scatter", "density", 40.0)
+        counts = [cmds.polyEvaluate(groomlab.scalp_mesh(g), vertex=True) for g in (hair, beard)]
+        groomlab.export_groom(hair, os.path.join(folder, "hair.groom"))
+        groomlab.export_groom(beard, os.path.join(folder, "beard.groom"))
+        files = [groomlab_core.read_groom_file(os.path.join(folder, n + ".groom")) for n in ("hair", "beard")]
+        files[0].name, files[1].name = "hair", "beard"
+        path = os.path.join(folder, "head.groom")
+        groomlab_core.write_groom_files(path, files)
+        self.assertEqual(groomlab.groom_file_info(path)["grooms"], ["hair", "beard"])
+        self.assertEqual(groomlab.groom_file_info(path, 1)["name"], "beard")
+        with self.assertRaises(RuntimeError):
+            groomlab.groom_file_info(path, 2)
+
+        new_scene("several2")
+        cmds.undoInfo(state=True, infinity=True)  # (mayapy's queue: on, whatever ran before)
+        made = groomlab.import_grooms(path)
+        self.assertEqual([g.split("|")[-1] for g in made], ["hairShape", "beardShape"])
+        scalps = [groomlab.scalp_mesh(g) for g in made]
+        self.assertEqual(len(set(scalps)), 2)
+        self.assertEqual([cmds.polyEvaluate(m, vertex=True) for m in scalps], counts)
+        self.assertAlmostEqual(next(n for n in groomlab.get_graph(made[1])["nodes"] if n["name"] == "scatter")
+                               ["params"]["density"], 40.0)
+        for g in made:
+            self.assertTrue(cmds.getAttr(g + ".groomFile"))  # linked: its own entry, by name
+            self.assertEqual(groomlab.errors(g), [])
+        self.assertEqual([groomlab.groom_entry(g, path) for g in made], [0, 1])
+        # Saving one groom writes its own entry; the other stays. Reload finds each by name.
+        groomlab.set_param(made[1], "scatter", "density", 12.0)
+        groomlab.save_groom(made[1])
+        self.assertEqual(groomlab.groom_file_info(path)["grooms"], ["hair", "beard"])
+        hair_graph = read_json(path)["graph"]
+        groomlab.set_param(made[0], "scatter", "density", 99.0)
+        groomlab.reload_groom(made[0])
+        scatter = next(n for n in groomlab.get_graph(made[0], expand_default=True)["nodes"] if n["name"] == "scatter")
+        self.assertNotEqual(scatter.get("params", {}).get("density"), 99.0)  # the file's again
+        self.assertEqual(read_json(path)["graph"], hair_graph)
+        self.assertAlmostEqual(next(n for n in read_json(path)["grooms"][0]["graph"]["nodes"] if n["name"] == "scatter")
+                               ["params"]["density"], 12.0)
+        # One undo step takes them all away.
+        new_scene("several3")
+        cmds.undoInfo(state=True, infinity=True)
+        groomlab.import_grooms(path)
+        cmds.undo()
+        self.assertFalse(cmds.ls(type="groomLabShape"))
+        # One groom: as before, linked to its file.
+        one = groomlab.import_grooms(os.path.join(folder, "hair.groom"))
+        self.assertEqual(len(one), 1)
+        self.assertTrue(cmds.getAttr(one[0] + ".groomFile"))
+
     def test_a_texture_param_reads_the_map_maya_paints(self):
         """The app and Blender paint a setting into a texture map the param reads by its file
         ({"texture": <the map's image>}). Imported into a scene (here the file's own folder and
@@ -479,9 +648,10 @@ class GroomFileTest(unittest.TestCase):
         path = os.path.join(folder, "app_paint.groom")
         groomlab.export_groom(groom, path)
         stored = read_json(path)
-        self.assertEqual(stored["maps"]["scatter_density"]["texture"], "groomlab/app_paint/masks/scatter_density.png")
+        # (Written into the groom's own folder of the file, the param with it: groom_package.h.)
+        self.assertEqual(stored["maps"]["scatter_density"]["texture"], "groomlab/app_paint/masks/hair/scatter_density.png")
         density = next(n for n in stored["graph"]["nodes"] if n["name"] == "scatter")["params"]["density"]
-        self.assertEqual(density["texture"], "groomlab/app_paint/masks/scatter_density.png")
+        self.assertEqual(density["texture"], "groomlab/app_paint/masks/hair/scatter_density.png")
         before = file_bytes(image)
 
         new_scene("app_paint")
@@ -572,7 +742,8 @@ class GroomFileTest(unittest.TestCase):
         app_file = read_json(saved)
         self.assertEqual(app_file["upAxis"], "Y")
         self.assertEqual(app_file["cardBake"]["strands"], groomlab._card_maps(groom)["Strands"])  # the app took the bake
-        self.assertEqual(app_file["maps"]["dense"]["texture"], "groomlab/to_app/masks/mane/dense.png")
+        # The app's file stands alone: the map copied into its own folder (groom_package.h).
+        self.assertEqual(app_file["maps"]["dense"]["texture"], "groomlab/mane_app/masks/mane/dense.png")
         # The layout went through the app and its save as the app's node graph reads it.
         app_nodes = {n["name"]: n for n in app_file["graph"]["nodes"]}
         self.assertEqual(app_nodes["scatter"]["ui"], {"x": 123.5, "y": -40.0})

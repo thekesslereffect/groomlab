@@ -403,11 +403,12 @@ std::string resolveGroomPath(const GroomFile& file, const std::string& stored, c
     return resolvePathIn(stored, std::move(folders));
 }
 
-std::string groomFileToJson(const GroomFile& file) {
-    FloatArrays arrays;
+namespace {
+
+// One groom's object: everything a groom file holds for it but the format and version.
+json groomObject(FloatArrays& arrays, const GroomFile& file) {
     json root;
-    root["format"] = kFormat;
-    root["version"] = currentSchemaVersion(DocumentKind::GroomFile);
+    if (!file.name.empty()) root["name"] = file.name;
     root["framesPerSecond"] = file.framesPerSecond;
     root["units"] = file.units.empty() ? std::string("cm") : file.units;
     root["upAxis"] = checkedUpAxis(file.upAxis.empty() ? std::string("Y") : file.upAxis);
@@ -509,10 +510,32 @@ std::string groomFileToJson(const GroomFile& file) {
     }
     if (!file.guideGroupColors.empty()) root["guideGroupColors"] = file.guideGroupColors;
     if (!file.hiddenGuideGroups.empty()) root["hiddenGuideGroups"] = file.hiddenGuideGroups;
+    return root;
+}
+
+}  // namespace
+
+std::string groomFileToJson(const GroomFile& file) { return groomFilesToJson({file}); }
+
+std::string groomFilesToJson(const std::vector<GroomFile>& grooms) {
+    if (grooms.empty()) throw GroomFileError("groom file: no groom to write");
+    FloatArrays arrays;
+    // The first groom at the top, as a file of one groom is (a GroomLab before several grooms
+    // reads it); the others in "grooms", each a groom's object of its own.
+    json root = groomObject(arrays, grooms.front());
+    root["format"] = kFormat;
+    root["version"] = currentSchemaVersion(DocumentKind::GroomFile);
+    if (grooms.size() > 1) {
+        json others = json::array();
+        for (std::size_t i = 1; i < grooms.size(); ++i) others.push_back(groomObject(arrays, grooms[i]));
+        root["grooms"] = std::move(others);
+    }
     return arrays.resolve(root.dump());
 }
 
-GroomFile groomFileFromJson(const std::string& text, const std::string& baseDir) {
+namespace {
+
+json parsedGroomFile(const std::string& text) {
     json root;
     try {
         root = json::parse(text);
@@ -527,9 +550,14 @@ GroomFile groomFileFromJson(const std::string& text, const std::string& baseDir)
     } catch (const SchemaError& e) {
         throw GroomFileError(e.what());
     }
+    return root;
+}
 
+// One groom's object (the file's top, or an entry of "grooms").
+GroomFile groomFromObject(const json& root, const std::string& baseDir) {
     GroomFile file;
     try {
+        file.name = root.value("name", std::string());
         file.framesPerSecond = root.value("framesPerSecond", 24.0);
         file.units = root.value("units", std::string("cm"));
         file.upAxis = checkedUpAxis(root.value("upAxis", std::string("Y")));
@@ -635,6 +663,30 @@ GroomFile groomFileFromJson(const std::string& text, const std::string& baseDir)
     return file;
 }
 
+}  // namespace
+
+GroomFile groomFileFromJson(const std::string& text, const std::string& baseDir) {
+    return groomFromObject(parsedGroomFile(text), baseDir);
+}
+
+std::vector<GroomFile> groomFilesFromJson(const std::string& text, const std::string& baseDir) {
+    const json root = parsedGroomFile(text);
+    std::vector<GroomFile> out;
+    out.push_back(groomFromObject(root, baseDir));
+    if (root.contains("grooms") && root.at("grooms").is_array()) {
+        for (const json& g : root.at("grooms")) {
+            const std::string which = "groom " + std::to_string(out.size() + 1);
+            if (!g.is_object()) throw GroomFileError("groom file: " + which + " is not a groom");
+            try {
+                out.push_back(groomFromObject(g, baseDir));
+            } catch (const GroomFileError& e) {
+                throw GroomFileError(which + ": " + e.what());
+            }
+        }
+    }
+    return out;
+}
+
 std::string simCachesToJson(const std::map<std::string, SimCacheRef>& caches) { return simCachesJson(caches).dump(); }
 
 std::string scalpFingerprintText(std::uint64_t fingerprint) { return formatSimulationStamp(fingerprint); }  // 16 hex digits
@@ -652,8 +704,11 @@ std::map<std::string, SimCacheRef> simCachesFromJson(const std::string& text, co
     }
 }
 
-void writeGroomFile(const std::string& path, const GroomFile& file) {
-    const std::string text = groomFileToJson(file);
+void writeGroomFile(const std::string& path, const GroomFile& file) { writeGroomFiles(path, {file}); }
+
+void writeGroomFiles(const std::string& path, const std::vector<GroomFile>& grooms) { writeGroomFileText(path, groomFilesToJson(grooms)); }
+
+void writeGroomFileText(const std::string& path, const std::string& text) {
     // Written beside the target and moved over it, so a failure (or a reader
     // opening it meanwhile) never sees a half-written file.
     const fs::path target = fs::u8path(path);
@@ -676,13 +731,15 @@ void writeGroomFile(const std::string& path, const GroomFile& file) {
     }
 }
 
-GroomFile readGroomFile(const std::string& path) {
+GroomFile readGroomFile(const std::string& path) { return readGroomFiles(path).front(); }
+
+std::vector<GroomFile> readGroomFiles(const std::string& path) {
     std::ifstream in(fs::u8path(path), std::ios::binary);
     if (!in) throw GroomFileError("cannot read '" + path + "'");
     std::stringstream buffer;
     buffer << in.rdbuf();
     try {
-        return groomFileFromJson(buffer.str(), fs::u8path(path).parent_path().u8string());
+        return groomFilesFromJson(buffer.str(), fs::u8path(path).parent_path().u8string());
     } catch (const GroomFileError& e) {
         throw GroomFileError(path + ": " + e.what());
     }

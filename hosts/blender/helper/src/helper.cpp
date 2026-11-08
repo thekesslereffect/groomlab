@@ -35,6 +35,7 @@
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
+#include "groomlab/groom_package.h"
 #include "groomlab/groom_session.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/hair_color.h"
@@ -1502,12 +1503,29 @@ json Helper::run(const std::string& cmd, const json& args) {
     }
 
     // ---- Groom files ----
+    if (cmd == "groom_file_names") {
+        // The grooms of a file, in its order (a file holds one groom or several: groom_file.h).
+        std::error_code ec;
+        const std::string path = fs::absolute(fs::u8path(needString(args, "path")), ec).u8string();
+        if (!fs::is_regular_file(fs::u8path(path), ec)) fail("io", "no groom file '" + path + "'");
+        json names = json::array();
+        for (const GroomFile& g : readGroomFiles(path)) names.push_back(g.name);
+        return {{"grooms", names}};
+    }
     if (cmd == "load_groom") {
         Session& s = session(args);
         std::error_code ec;
         const std::string path = fs::absolute(fs::u8path(needString(args, "path")), ec).u8string();
         if (!fs::is_regular_file(fs::u8path(path), ec)) fail("io", "no groom file '" + path + "'");
-        GroomFile file = readGroomFile(path);
+        std::vector<GroomFile> grooms = readGroomFiles(path);
+        const int index = static_cast<int>(optNumber(args, "index", 0.0));
+        if (index < 0 || index >= static_cast<int>(grooms.size())) {
+            fail("bad_request", path + " holds " + std::to_string(grooms.size()) + " groom(s), no groom " + std::to_string(index));
+        }
+        json names = json::array();
+        for (const GroomFile& g : grooms) names.push_back(g.name);
+        GroomFile file = std::move(grooms[static_cast<std::size_t>(index)]);
+        const std::string name = file.name;
         if (file.units != "cm") {
             fail("unsupported", path + ": its units are " + file.units + "; GroomLab reads grooms in centimeters (Maya's own unit)");
         }
@@ -1518,6 +1536,8 @@ json Helper::run(const std::string& cmd, const json& args) {
         json info = groomInfo(s);
         info["fileUpAxis"] = fileAxis;
         info["space"] = spaceJson(s.space);
+        info["name"] = name;
+        info["grooms"] = names;  // every groom's name, in the file's order
         return info;
     }
     if (cmd == "save_groom") {
@@ -1529,7 +1549,24 @@ json Helper::run(const std::string& cmd, const json& args) {
         const fs::path target = fs::absolute(fs::u8path(path), ec);
         const std::string newDir = target.parent_path().generic_u8string();
         const std::string oldDir = s.file.directory;
-        // The caches, bakes and their paths as a file in the new folder stores them.
+        // The file written by the core's writer (groom_package.h, every host's): the groom under
+        // `name` in the file of named grooms (with `merge`, beside its other grooms), the files it
+        // owns copied into the file's own folder (groomlab/<file>/<kind>/<groom>), every path
+        // relative to the file.
+        GroomFile file = currentFile(s);  // (its paths as the session reads them: from oldDir)
+        file.directory = oldDir;
+        file.name = optString(args, "name", "");
+        if (file.source.empty()) file.source = "Blender";
+        if (axis == "Z") convertUpAxis(file, "Z");
+        GroomWriteOptions options;
+        options.merge = optBool(args, "merge", false);
+        GroomWriteReport report;
+        try {
+            report = writeGroomsToFile(target.u8string(), {file}, options);
+        } catch (const std::exception& e) {
+            fail("io", e.what());
+        }
+        // The session goes on reading its files where they are, from the new folder.
         GroomFile& f = s.file;
         f.scalpCache.file = rebase(f.scalpCache.file, oldDir, newDir);
         f.guideCache.file = rebase(f.guideCache.file, oldDir, newDir);
@@ -1541,14 +1578,11 @@ json Helper::run(const std::string& cmd, const json& args) {
             std::find(f.searchPaths.begin(), f.searchPaths.end(), oldDir) == f.searchPaths.end()) {
             f.searchPaths.push_back(oldDir);
         }
-        GroomFile file = currentFile(s);
-        if (file.source.empty()) file.source = "Blender";
-        if (axis == "Z") convertUpAxis(file, "Z");
-        writeAtomically(target.u8string(), groomFileToJson(file));
         if (f.source.empty()) f.source = file.source;
         f.directory = newDir;
         applySearchPaths(s);
-        return {{"path", target.generic_u8string()}, {"upAxis", axis}, {"units", "cm"}};
+        return {{"path", target.generic_u8string()}, {"upAxis", axis}, {"units", "cm"}, {"copied", report.copied},
+                {"warnings", report.warnings}};
     }
     if (cmd == "groom_info") {
         Session& s = session(args);
@@ -1608,7 +1642,12 @@ json Helper::run(const std::string& cmd, const json& args) {
     }
     if (cmd == "get_scalp") {
         Session& s = session(args);
-        const MeshPtr& scalp = s.groom->rawScalp();
+        // The scalp, or one of the groom's other scalps by `name` (a file's "scalps": Add > Scalp's).
+        const std::string which = optString(args, "name", "");
+        MeshPtr scalp = which.empty() ? s.groom->rawScalp() : nullptr;
+        for (const auto& [name, mesh] : s.groom->data().scalps) {
+            if (!which.empty() && name == which) scalp = mesh;
+        }
         if (!scalp) return {{"scalp", nullptr}};
         const bool groom = optString(args, "space", "host") == "groom";
         std::vector<std::int32_t> counts, indices;

@@ -377,6 +377,31 @@ void GroomRenderer::setProps(std::vector<SurfacePtr> props) {
 
 void GroomRenderer::propsChanged() { lookdev_.sceneChanged(); }
 
+void GroomRenderer::setOtherGrooms(const std::vector<OtherGroom>& grooms) {
+    std::vector<std::unique_ptr<GpuItem>> items;
+    std::vector<std::shared_ptr<const DisplayGeometry>> geometry;
+    for (const OtherGroom& g : grooms) {
+        if (!g.lines || g.lines->empty()) continue;
+        // The same geometry: its item and buffers kept.
+        std::unique_ptr<GpuItem> item;
+        for (std::size_t i = 0; i < otherGeometry_.size(); ++i) {
+            if (otherGeometry_[i] == g.lines && otherItems_[i]) item = std::move(otherItems_[i]);
+        }
+        if (!item) {
+            item = std::make_unique<GpuItem>();
+            item->pending = g.lines;
+            item->kind = kindOf(*g.lines, false);
+        }
+        item->color = g.color;
+        item->shown = true;
+        items.push_back(std::move(item));
+        geometry.push_back(g.lines);
+    }
+    otherItems_ = std::move(items);
+    otherGeometry_ = std::move(geometry);
+    lookdev_.invalidate();
+}
+
 void GroomRenderer::updateSurfaces() {
     std::vector<SurfacePtr> surfaces;
     if (showScalp_ && scalpSurface_->mesh && scalpSurface_->mesh->triangleCount() > 0) surfaces.push_back(scalpSurface_);
@@ -528,6 +553,10 @@ void GroomRenderer::releaseResources() {
     for (auto& item : propItems_) {
         item->release();
         item->ownPending = !item->ownIndices.empty();
+    }
+    for (std::size_t i = 0; i < otherItems_.size(); ++i) {
+        otherItems_[i]->release();
+        otherItems_[i]->pending = otherGeometry_[i];  // written again on the next render
     }
     main_ = PipelineSet();
     lod_->release();
@@ -856,6 +885,10 @@ void GroomRenderer::ensurePipelines(QRhi* rhi, QRhiRenderPassDescriptor* pass, i
         item->bindingsHdr.reset();
     }
     for (auto& item : propItems_) {
+        item->bindings.reset();
+        item->bindingsHdr.reset();
+    }
+    for (auto& item : otherItems_) {
         item->bindings.reset();
         item->bindingsHdr.reset();
     }
@@ -1308,6 +1341,10 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
             item->release();
             item->ownPending = !item->ownIndices.empty();
         }
+        for (std::size_t i = 0; i < otherItems_.size(); ++i) {
+            otherItems_[i]->release();
+            otherItems_[i]->pending = otherGeometry_[i];
+        }
         main_ = PipelineSet();
         hdr_ = PipelineSet();
         photoGpu_ = PhotoGpu();
@@ -1353,6 +1390,7 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
     const bool hair = hairShown_;
     auto hidden = [&](std::size_t i) { return !hair && isHairItem(static_cast<DisplayItemId>(i)); };
     for (std::size_t i = 0; i < items_.size(); ++i) prepare(*items_[i], (lookdev && i == strandsIndex) || hidden(i));
+    for (auto& item : otherItems_) prepare(*item, !hair);  // the other grooms' strands: lines in both paths
     prepare(*dots_, false);
     prepare(*tool_, false);
     // The GPU preview's run, once this frame's uploads are recorded (its targets exist) and
@@ -1379,6 +1417,9 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
             for (std::size_t i = 0; i < items_.size(); ++i) {
                 const GpuItem& item = *items_[i];
                 if (!hidden(i) && item.shown && i != strandsIndex && !isOverlay(item.kind)) draw(passCb, item, hdr_, true);
+            }
+            for (const auto& item : otherItems_) {
+                if (hair && item->shown) draw(passCb, *item, hdr_, true);
             }
         };
         lookdevActive_ = lookdev_.render(rhi, cb, target, camera, hdrMvp, depthItems);
@@ -1436,6 +1477,9 @@ void GroomRenderer::render(QRhi* rhi, QRhiCommandBuffer* cb, QRhiRenderTarget* t
         } else {
             draw(cb, item, main_, false);
         }
+    }
+    for (const auto& item : otherItems_) {
+        if (hair && item->shown) draw(cb, *item, main_, false);
     }
     if (hair) drawLod(cb, true);  // (the blendable segments' blended fragments, after everything, depth not written)
     if (photo && photo_.front) drawPhoto(cb);  // over the strands and the meshes, under the overlays

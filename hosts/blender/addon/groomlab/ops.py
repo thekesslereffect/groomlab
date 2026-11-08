@@ -293,7 +293,7 @@ class GROOMLAB_OT_toggle_group(GroomOperator):
 
 
 class GROOMLAB_OT_save_groom(GroomOperator, ExportHelper):
-    """Save the groom to a groom file (.groom; Y up, centimeters: Maya and the GroomLab app open it as it is)"""
+    """Save the .blend's grooms (the selected ones, else all) to one groom file (.groom; Y up, centimeters: Maya and the GroomLab app open it as it is)"""
     bl_idname = "groomlab.save_groom"
     bl_label = "Save Groom File"
     filename_ext = ".groom"
@@ -302,27 +302,44 @@ class GROOMLAB_OT_save_groom(GroomOperator, ExportHelper):
                           default="Y")
 
     def invoke(self, context, event):
-        # A source file every host opens, not an export: beside the .blend, named after the groom
-        # (the file it is linked to when it has one), outside the groomlab folder; saving again
-        # overwrites it.
+        # A document of the .blend's named grooms every host opens, not an export: beside the
+        # .blend, named after it (the file the groom is linked to when it has one), outside the
+        # groomlab folder; saving again writes its grooms' entries.
         scalp = active_groom(context)
         linked = bpy.path.abspath(scalp.groomlab.groom_file) if scalp is not None and scalp.groomlab.groom_file else ""
         if linked:
             self.filepath = linked
         elif scalp is not None:
             folder = os.path.dirname(bpy.data.filepath) if bpy.data.filepath else ""
-            self.filepath = os.path.join(folder, bpy.path.clean_name(scalp.name) + ".groom")
+            self.filepath = os.path.join(folder, groom.groom_file_name(scalp))  # <.blend name>.groom
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 
     def execute(self, context):
-        scalp = active_groom(context)
+        # The selected grooms, else every groom of the .blend: one file, each groom linked to it.
+        picked = [o for o in context.selected_objects if groom.is_groom(groom.scalp_of(o) or o)]
+        scalps = []
+        for o in picked:
+            s = groom.scalp_of(o) or o
+            if s not in scalps:
+                scalps.append(s)
+        if not scalps:
+            scalps = [s for s in bpy.data.objects if groom.is_groom(s)]
+        active = active_groom(context)
+        if active is not None and active in scalps:  # the active groom first: the file's first groom
+            scalps.remove(active)
+            scalps.insert(0, active)
+        if not scalps:
+            self.report({"ERROR"}, "No groom to save")
+            return {"CANCELLED"}
+        r = {}
         try:
-            r = groom.save_groom(scalp, self.filepath, up_axis=self.up_axis)
+            for i, scalp in enumerate(scalps):
+                r = groom.save_groom(scalp, self.filepath, up_axis=self.up_axis, merge=i > 0)
+                scalp.groomlab.groom_file = r.get("path") or self.filepath  # Save to / Reload from Groom File
         except HelperError as e:
             return _fail(self, e)
-        scalp.groomlab.groom_file = r.get("path") or self.filepath  # Save to / Reload from Groom File
-        self.report({"INFO"}, "Saved %s" % r["path"])
+        self.report({"INFO"}, "Saved %s (%s)" % (r.get("path", self.filepath), ", ".join(s.name for s in scalps)))
         return {"FINISHED"}
 
 
@@ -342,8 +359,14 @@ class GROOMLAB_OT_save_groom_linked(GroomOperator):
         if not path:
             self.report({"ERROR"}, "This groom has no groom file yet: Save Groom File As... first")
             return {"CANCELLED"}
+        # The groom's entry, and every other groom linked to the same file (its other grooms stay).
+        same = os.path.normcase(os.path.abspath(path))
+        others = [s for s in bpy.data.objects if groom.is_groom(s) and s != scalp and s.groomlab.groom_file
+                  and os.path.normcase(os.path.abspath(bpy.path.abspath(s.groomlab.groom_file))) == same]
         try:
             r = groom.save_groom(scalp, path)
+            for other in others:
+                groom.save_groom(other, path)
         except HelperError as e:
             return _fail(self, e)
         self.report({"INFO"}, "Saved %s" % r["path"])
@@ -366,7 +389,10 @@ class GROOMLAB_OT_reload_groom(GroomOperator):
         scalp = active_groom(context)
         path = bpy.path.abspath(scalp.groomlab.groom_file)
         try:
-            scalp, info, _ = groom.load_groom(context, path, scalp)
+            index = groom.groom_entry(scalp, path)
+            if index < 0:
+                return _fail(self, HelperError("state", "%s holds no groom named %s" % (os.path.basename(path), groom.groom_entry_name(scalp))))
+            scalp, info, _ = groom.load_groom(context, path, scalp, index)
             graph_tree.mark_replaced(scalp)
             graph.refresh(scalp)
         except HelperError as e:
@@ -419,7 +445,8 @@ class GROOMLAB_OT_review_heatmap(GroomOperator):
 
 
 class GROOMLAB_OT_load_groom(bpy.types.Operator, ImportHelper):
-    """Open a groom file (.groom, from Maya, the GroomLab app or Blender) on the selected mesh, or with the file's own scalp"""
+    """Open a groom file (.groom, from Maya, the GroomLab app or Blender) on the selected mesh, or with the file's own scalp.
+    A file of several grooms (the app's) opens every groom, each on its own scalp"""
     bl_idname = "groomlab.load_groom"
     bl_label = "Open Groom File"
     bl_options = {"REGISTER", "UNDO"}
@@ -449,6 +476,12 @@ class GROOMLAB_OT_load_groom(bpy.types.Operator, ImportHelper):
         if context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
         try:
+            names = groom.groom_file_names(self.filepath)
+        except HelperError as e:
+            return _fail(self, e)
+        if len(names) > 1:
+            return self.load_several(context, names)
+        try:
             scalp, info, _ = groom.load_groom(context, self.filepath, target)
             scalp.groomlab.groom_file = self.filepath  # Save to / Reload from Groom File
             context.scene.groomlab.groom = scalp
@@ -466,6 +499,25 @@ class GROOMLAB_OT_load_groom(bpy.types.Operator, ImportHelper):
             notes.append("the file's reference photos did not come in: %s" % e)
         for n in notes:
             self.report({"WARNING"}, sentence(n))
+        return {"FINISHED"}
+
+    def load_several(self, context, names):
+        """Every groom of a file of several, each on a mesh of its own scalp from the file (named as
+        the groom), each linked to the file: saving one writes its own entry, the others stay."""
+        made = []
+        for index, _name in enumerate(names):
+            try:
+                scalp, info, _ = groom.load_groom(context, self.filepath, None, index)
+            except HelperError as e:
+                return _fail(self, e)
+            graph_tree.mark_replaced(scalp)
+            graph.refresh(scalp)
+            scalp.groomlab.groom_file = self.filepath  # its own entry, by name (the others stay when it saves)
+            made.append(scalp)
+            for n in list(info.get("notes") or []) + list(info.get("inputErrors") or []):
+                self.report({"WARNING"}, "%s: %s" % (scalp.name, sentence(n)))
+        context.scene.groomlab.groom = made[0]
+        self.report({"INFO"}, "Opened %d grooms: %s" % (len(made), ", ".join(s.name for s in made)))
         return {"FINISHED"}
 
 

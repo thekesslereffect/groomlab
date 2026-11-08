@@ -558,6 +558,28 @@ class GroomTest(HelperTestCase):
         with open(saved) as f:
             self.assertEqual([x["name"] for x in json.load(f).get("scalps", [])], ["ear"])
 
+    def test_a_file_of_several_grooms(self):
+        # The app's document of several grooms in one file: the first at the top, the others in
+        # "grooms". groom_file_names lists them; load_groom loads one by index.
+        with open(COMPAT_GROOM) as f:
+            hair = json.load(f)
+        beard = {k: v for k, v in hair.items() if k not in ("format", "version")}
+        beard["name"] = "beard"
+        beard["graph"] = {}
+        several = dict(hair, name="hair", grooms=[beard])
+        path = os.path.join(self.tmp, "several.groom")
+        with open(path, "w") as f:
+            json.dump(several, f)
+        self.assertEqual(self.h.call("groom_file_names", path=path)["grooms"], ["hair", "beard"])
+        self.assertEqual(self.h.call("groom_file_names", path=COMPAT_GROOM)["grooms"], [""])
+        s = self.h.call("new_session")["session"]
+        info = self.h.call("load_groom", session=s, path=path, index=1)
+        self.assertEqual(info["name"], "beard")
+        self.assertEqual(info["grooms"], ["hair", "beard"])
+        first = self.h.call("load_groom", session=s, path=path)
+        self.assertEqual(first["name"], "hair")
+        self.assertEqual(self.h.request("load_groom", session=s, path=path, index=2)["error"]["code"], "bad_request")
+
     def compat_session(self):
         s = self.h.call("new_session")["session"]
         self.h.call("load_groom", session=s, path=COMPAT_GROOM)

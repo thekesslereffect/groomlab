@@ -44,6 +44,7 @@
 #include <QWheelEvent>
 #include <QSize>
 #include <QTabBar>
+#include <QTreeWidget>
 #include <QToolButton>
 
 #include <gtest/gtest.h>
@@ -84,6 +85,7 @@
 #include "graph_presets.h"
 #include "look_panel.h"
 #include "main_window.h"
+#include "outliner_panel.h"
 #include "maps_panel.h"
 #include "node_graph.h"
 #include "overlay.h"
@@ -544,7 +546,7 @@ TEST(AppPanels, AssetFoldersAndSaveAsTakesTheFilesAlong) {
     EXPECT_EQ(doc->assetFolder("masks"), base + "/groomlab/sample/masks");
     EXPECT_EQ(doc->mapsDirectory(), base + "/groomlab/sample/masks/sample") << "the groom's own folder, as Maya's";
     EXPECT_EQ(doc->defaultBakeDirectory(), base + "/groomlab/sample/cards/sample") << "the groom's own folder, as Maya's";
-    EXPECT_EQ(doc->simulationCachePath("sim1"), base + "/groomlab/sample/caches/sample_sim1_sim.abc");
+    EXPECT_EQ(doc->simulationCachePath("sim1"), base + "/groomlab/sample/caches/sample/sample_sim1_sim.abc");
     ASSERT_EQ(doc->createMap("tint", "texture", false, 0.5f, 32), "");
     const std::string tintBefore = doc->textureMapFile("tint");
     EXPECT_EQ(tintBefore, base + "/groomlab/sample/masks/sample/tint.png");
@@ -587,6 +589,97 @@ TEST(AppPanels, AssetFoldersAndSaveAsTakesTheFilesAlong) {
     EXPECT_EQ(doc->map("tint")->texture, "groomlab/shot_v2/masks/shot_v2/skin.png");
     EXPECT_TRUE(fs::exists(fs::u8path(newBase + "/groomlab/shot_v2/masks/shot_v2/skin.png")));
     EXPECT_GE(collected.inside, 1) << "the photo was in the folder already";
+}
+
+TEST(AppPanels, ADocumentHoldsSeveralGrooms) {
+    // The Outliner: a second groom on a mesh, each its own graph, undo and maps; the other drawn as
+    // plain strands and its scalp; Save writes both into one file (the first at the top), which
+    // opens with both again; switching, renaming, hiding, removing.
+    namespace fs = std::filesystem;
+    const std::string path = sampleCopy("groomlab_app_grooms");
+    const std::string base = fs::u8path(path).parent_path().generic_u8string();
+    MainWindow window;
+    window.resize(1280, 720);
+    ASSERT_TRUE(window.openGroom(QString::fromStdString(path)));
+    ASSERT_TRUE(window.outliner());
+    EXPECT_EQ(window.groomCount(), 1);
+    EXPECT_EQ(window.outliner()->entries().size(), 1u);
+    EXPECT_EQ(window.outliner()->entries()[0].name, QStringLiteral("sample"));
+    GroomDocument* hair = window.document();
+    const std::size_t hairNodes = hair->nodes().size();
+
+    const QString mesh = QString::fromStdString(std::string(GROOMLAB_TEST_DATA) + "/app/head_scalp.obj");
+    ASSERT_TRUE(window.addGroomOnMesh(mesh));
+    ASSERT_EQ(window.groomCount(), 2);
+    EXPECT_EQ(window.activeGroom(), 1);
+    GroomDocument* beard = window.document();
+    EXPECT_NE(beard, hair);
+    EXPECT_EQ(beard->name(), "head_scalp");
+    EXPECT_EQ(hair->name(), "sample") << "the first named when there are several";
+    EXPECT_EQ(window.groomAt(0), hair);
+    EXPECT_TRUE(window.anyGroomDirty());
+    EXPECT_EQ(window.overlay()->viewport()->renderer().otherGroomCount(), 1u) << "the other groom drawn";
+    ASSERT_EQ(window.outliner()->entries().size(), 2u);
+    EXPECT_TRUE(window.outliner()->entries()[1].active);
+    EXPECT_EQ(window.outliner()->entries()[1].scalp, QStringLiteral("head_scalp"));
+    // Each its own graph and undo.
+    const std::string scatter = nodeOfType(*beard, "Scatter");
+    ASSERT_EQ(beard->setParam(scatter, "density", 7.0), "");
+    EXPECT_EQ(hair->nodes().size(), hairNodes);
+    EXPECT_TRUE(window.renameGroom(1, QStringLiteral("beard")));
+    EXPECT_FALSE(window.renameGroom(1, QStringLiteral("sample"))) << "taken";
+    EXPECT_EQ(beard->name(), "beard");
+    // Hidden: not drawn.
+    ASSERT_TRUE(window.activateGroom(0));
+    EXPECT_EQ(window.document(), hair);
+    window.setGroomVisible(1, false);
+    EXPECT_EQ(window.overlay()->viewport()->renderer().otherGroomCount(), 0u);
+    window.setGroomVisible(1, true);
+    EXPECT_EQ(window.overlay()->viewport()->renderer().otherGroomCount(), 1u);
+
+    // Saved: one file, both grooms.
+    ASSERT_TRUE(window.saveTo(QString::fromStdString(path)));
+    EXPECT_FALSE(window.anyGroomDirty());
+    const std::vector<GroomFile> files = readGroomFiles(path);
+    ASSERT_EQ(files.size(), 2u);
+    EXPECT_EQ(files[0].name, "sample");
+    EXPECT_EQ(files[1].name, "beard");
+    EXPECT_NE(files[0].data.scalp->contentHash(), files[1].data.scalp->contentHash());
+    EXPECT_NE(files[1].data.graphJson.find("7"), std::string::npos);
+    EXPECT_EQ(readGroomFile(path).name, "sample") << "a reader of one groom gets the first";
+    // A texture map of the second groom goes in its own folder.
+    ASSERT_TRUE(window.activateGroom(1));
+    ASSERT_EQ(window.document()->createMap("thick", "texture", false, 1.0f, 32), "");
+    EXPECT_EQ(window.document()->textureMapFile("thick"), base + "/groomlab/sample/masks/beard/thick.png");
+
+    // Opened again: both, the first active.
+    ASSERT_TRUE(window.saveTo(QString::fromStdString(path)));
+    MainWindow again;
+    again.resize(1280, 720);
+    ASSERT_TRUE(again.openGroom(QString::fromStdString(path)));
+    ASSERT_EQ(again.groomCount(), 2);
+    EXPECT_EQ(again.activeGroom(), 0);
+    EXPECT_EQ(again.groomAt(1)->name(), "beard");
+    EXPECT_EQ(again.groomAt(1)->textureMapFile("thick"), base + "/groomlab/sample/masks/beard/thick.png");
+    EXPECT_FALSE(again.anyGroomDirty());
+    EXPECT_EQ(again.overlay()->viewport()->renderer().otherGroomCount(), 1u);
+    // The Outliner's click makes a groom active; removing one leaves the other.
+    QTreeWidgetItem* row = again.outliner()->groomItem(1);
+    ASSERT_TRUE(row);
+    emit again.outliner()->tree()->itemClicked(row, 0);
+    EXPECT_EQ(again.activeGroom(), 1);
+    EXPECT_TRUE(again.removeGroom(1));
+    EXPECT_EQ(again.groomCount(), 1);
+    // A groom file's grooms added (Maya's and Blender's save one a file).
+    ASSERT_TRUE(again.addGroomOnMesh(QString::fromStdString(kSampleGroom)));
+    ASSERT_EQ(again.groomCount(), 2);
+    EXPECT_EQ(again.activeGroom(), 1);
+    EXPECT_EQ(again.groomAt(1)->name(), "strokes");
+    ASSERT_TRUE(again.removeGroom(1));
+    EXPECT_EQ(again.activeGroom(), 0);
+    EXPECT_FALSE(again.removeGroom(0)) << "never the last";
+    EXPECT_TRUE(again.anyGroomDirty());
+    EXPECT_EQ(again.overlay()->viewport()->renderer().otherGroomCount(), 0u);
 }
 
 TEST(AppPanels, ATextureParamFollowsItsMapsFile) {
@@ -1030,7 +1123,7 @@ TEST(AppPanels, GroomToolsTilesReflowAndTheModePillClosesTheGraph) {
     }
     std::vector<std::string> tabs;
     for (int i = 0; i < tools.tabBar()->count(); ++i) tabs.push_back(tools.tabBar()->tabText(i).toStdString());
-    EXPECT_EQ(tabs, (std::vector<std::string>{"Tools", "Paint", "Correctives", "Photos"})) << "palette.json's tabs";
+    EXPECT_EQ(tabs, (std::vector<std::string>{"Tools", "Paint", "Correctives", "Photos", "Outliner"})) << "palette.json's tabs (the Outliner the app's own)";
     auto* grid = qobject_cast<ToolGrid*>(tools.tile("comb")->parentWidget());
     ASSERT_NE(grid, nullptr);
     EXPECT_EQ(grid->columnsFor(260), 4) << "at most four to a row (six 38 px icons would fit in 260 px)";

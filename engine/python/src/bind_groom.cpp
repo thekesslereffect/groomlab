@@ -15,6 +15,7 @@
 #include "groomlab/frame_time.h"
 #include "groomlab/groom.h"
 #include "groomlab/groom_file.h"
+#include "groomlab/groom_package.h"
 #include "groomlab/lod.h"
 #include "groomlab/parts.h"
 #include "groomlab/paths.h"
@@ -284,6 +285,7 @@ void bindGroom(py::module_& m) {
                           "up axis, source and search paths.")
         .def(py::init<>())
         .def(py::init([](const GroomData& data) { GroomFile f; f.data = data; return f; }), py::arg("data"))
+        .def_readwrite("name", &GroomFile::name, "The groom's name (\"\" none).")
         .def_readwrite("data", &GroomFile::data)
         .def_readwrite("scalp_cache", &GroomFile::scalpCache)
         .def_readwrite("guide_cache", &GroomFile::guideCache)
@@ -302,7 +304,31 @@ void bindGroom(py::module_& m) {
     m.def("groom_file_to_json", &groomFileToJson, py::arg("file"));
     m.def("groom_file_from_json", &groomFileFromJson, py::arg("text"), py::arg("base_dir") = std::string{});
     m.def("write_groom_file", &writeGroomFile, py::arg("path"), py::arg("file"));
-    m.def("read_groom_file", &readGroomFile, py::arg("path"));
+    m.def("read_groom_file", &readGroomFile, py::arg("path"), "The file's first groom. Raises GroomFileError.");
+    m.def("read_groom_files", &readGroomFiles, py::arg("path"),
+          "Every groom of a file (one, or several: the first, then those in \"grooms\"). Raises GroomFileError.");
+    m.def("write_groom_files", &writeGroomFiles, py::arg("path"), py::arg("grooms"),
+          "A file of several grooms (the first at the top, the others in \"grooms\"). Raises GroomFileError.");
+    m.def("groom_files_to_json", &groomFilesToJson, py::arg("grooms"));
+    m.def(
+        "write_grooms_to_file",
+        [](const std::string& path, std::vector<GroomFile> grooms, bool merge, bool copyFiles) {
+            GroomWriteOptions options;
+            options.merge = merge;
+            options.copyFiles = copyFiles;
+            const GroomWriteReport r = writeGroomsToFile(path, std::move(grooms), options);
+            return py::dict(py::arg("copied") = r.copied, py::arg("warnings") = r.warnings);
+        },
+        py::arg("path"), py::arg("grooms"), py::arg("merge") = false, py::arg("copy_files") = true,
+        "Grooms written as one groom file, every host's way (groom_package.h): each groom's files copied into "
+        "groomlab/<file>/<masks|cards|caches>/<groom>, paths relative to the file; `merge` keeps the file's other grooms. "
+        "Returns {copied, warnings}. Raises GroomFileError.");
+    m.def("groom_file_folder", &groomFileFolder, py::arg("groom_file"), py::arg("groom"), py::arg("kind"),
+          "Where a groom file keeps a groom's files of a kind: <folder>/groomlab/<file>/<kind>/<groom>.");
+    m.def("groom_index", &groomIndex, py::arg("grooms"), py::arg("name"),
+          "A groom's index among a file's grooms by name (\"\" or a file of one: 0; none: -1).");
+    m.def("merge_groom_files_json", &mergeGroomFilesJson, py::arg("existing"), py::arg("written"));
+    m.def("groom_files_from_json", &groomFilesFromJson, py::arg("text"), py::arg("base_dir") = std::string{});
     m.def("convert_up_axis", &convertUpAxis, py::arg("file"), py::arg("up_axis"),
           "Turns the file's points (scalp, rest pose, flat guides, the hierarchy's world shapes, colliders) and the graph's "
           "world-direction params into another up axis (\"Y\" or \"Z\"), a quarter turn about X. Raises GroomFileError "

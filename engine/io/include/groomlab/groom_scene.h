@@ -24,6 +24,9 @@ class GroomScene {
 public:
     // Throws GroomFileError, AlembicError (caches) or GraphError.
     explicit GroomScene(const std::string& groomPath);
+    // The groom named `groomName` of a file of several (groom_package.h groomIndex: "" the first);
+    // throws GroomFileError when the file holds none of that name.
+    GroomScene(const std::string& groomPath, const std::string& groomName);
     explicit GroomScene(GroomFile file);
     ~GroomScene();
 

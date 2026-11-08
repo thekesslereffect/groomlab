@@ -79,6 +79,9 @@ private:
     bool making_ = false;
     std::shared_ptr<const ScalpMesh> mesh_;
     std::vector<std::string> colorSets_;
+    // An extra scalp (one of the file's "scalps"): made of its polygons only when Maya splits them
+    // as the file does (the roots on it stay on their triangles), else of its triangles.
+    bool exactPolygons_ = false;
     MString name_;
     MDagModifier scalpModifier_;
     MObjectHandle made_;

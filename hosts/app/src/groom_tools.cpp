@@ -853,6 +853,11 @@ void GroomTools::setCorrectivesContent(QWidget* content) {
 
 void GroomTools::setPhotosContent(QWidget* content) { lists_.at("photos")->layout()->addWidget(content); }
 
+void GroomTools::setOutlinerContent(QWidget* content) {
+    lists_.at("outliner")->layout()->addWidget(content);
+    fitScroll(content);
+}
+
 void GroomTools::setGroupsContent(QWidget* content) {
     lists_.at("tools")->layout()->addWidget(content);
     if (auto* guides = qobject_cast<GuidesPanel*>(content)) {

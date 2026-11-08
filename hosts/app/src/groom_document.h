@@ -126,6 +126,10 @@ public:
     // Reads the file, opens its caches, makes the session. Throws std::runtime_error (a
     // GroomFileError, AlembicError or GraphError's message).
     static std::unique_ptr<GroomDocument> open(const std::string& path);
+    // Groom `index` of the file (a file holds one groom or several: groom_file.h's "grooms"), and
+    // how many a file holds.
+    static std::unique_ptr<GroomDocument> open(const std::string& path, int index);
+    static int groomCount(const std::string& path);
     // A new groom on a mesh with the default graph and no guides; `meshPath` is remembered as
     // the source. Throws std::runtime_error for a scalp without triangles.
     static std::unique_ptr<GroomDocument> newOnMesh(MeshPtr scalp, const std::string& meshPath);
@@ -139,6 +143,15 @@ public:
     GroomDocument& operator=(const GroomDocument&) = delete;
 
     const std::string& path() const { return path_; }  // "" until saved
+    // The groom's name in its file ("" for the file's own groom: it goes by the file's name). A
+    // document of several grooms names each; their files go in folders of that name
+    // (masks/<name>, cards/<name>).
+    const std::string& name() const { return name_; }
+    void setName(const std::string& name);
+    // The name the groom goes by: its own, else the file's (untitled: "groom").
+    std::string displayName() const;
+    // A groom that is part of a document of several with `path` as its file (not saved yet).
+    void setPathFrom(const std::string& path) { path_ = path; }
     // What the automatic guide colors start from (DisplaySettings::guideColorSeed): the file's name.
     std::string guideColorSeed() const;
     const GroomFile& file() const { return scene_->file(); }
@@ -624,6 +637,10 @@ public:
     // Writes the groom file with the current graph and the guides, parts, flow and correctives
     // as the session holds them (strokes and guide edits included); throws std::runtime_error.
     void save(const std::string& path);
+    // save in two halves, for a file of several grooms (writeGroomFiles): the file to write at
+    // `path` (Save As's files taken along first), then the document saved there.
+    GroomFile prepareSave(const std::string& path);
+    void savedAs(const std::string& path, const GroomFile& written);
     // The groom as save writes it (the graph, the session's guides and overlays, the maps as
     // color sets of the scalp): what a save, or another scene made from this one, starts from.
     GroomFile currentFile() const;
@@ -964,6 +981,7 @@ private:
     std::string scalpMapName_, scalpMapChannel_ = "rgb";
     ScalpMapView shownMap_;
     std::string path_;
+    std::string name_;  // the groom's name in its file ("": the file's own groom)
     nlohmann::json graph_;
     nlohmann::json specs_;  // by type
     mutable std::map<std::string, nlohmann::json> resolvedSpecs_;  // a Compound's or Input's, by its node JSON

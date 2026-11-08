@@ -30,6 +30,7 @@
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/lod.h"
 #include "groomlab/paths.h"
+#include "groomlab/retriangulate.h"
 #include "groomlab/scalp_maps.h"
 #include "groomlab/texture.h"
 #include "groomlab/usd_writer.h"
@@ -204,6 +205,130 @@ TEST(GroomFile, RoundTripsAndEvaluatesIdentically) {
     const GroomFile fromDisk = readGroomFile(path.u8string());
     EXPECT_EQ(fromDisk.scalpCache.file, (path.parent_path() / "caches/scalp.abc").lexically_normal().string());
     fs::remove(path);
+}
+
+// A file of several grooms (the app's document): the first at the top, read alone by a reader of
+// one groom; the others in "grooms", each with its own scalp, guides, maps and paths.
+TEST(GroomFile, HoldsSeveralGrooms) {
+    auto head = std::make_shared<ScalpMesh>(*sphere());
+    auto chin = std::make_shared<ScalpMesh>(sphere()->withPoints(deformed(*sphere())));
+    GroomFile hair, beard;
+    hair.name = "hair";
+    hair.data = groomData(head);
+    hair.data.maps["dense"] = {"texture", "groomlab/shot/masks/hair/dense.png", 1};
+    beard.name = "beard";
+    beard.data = groomData(chin);
+    beard.data.maps["short"] = {"vertices", "", 1};
+    beard.cardBake = {"groomlab/shot/cards/beard/beard_", "s1"};
+    auto flat = std::make_shared<GuideSet>();
+    flat->add(5, test::straightCurve({0, -1, 0}, {0, -1.2f, 0.1f}, 4));
+    flat->rootOnMesh(*chin);
+    beard.data.guides = flat;
+
+    // One groom: the file a groom file always was (its name the only addition).
+    EXPECT_EQ(groomFilesToJson({hair}), groomFileToJson(hair));
+    EXPECT_EQ(nlohmann::json::parse(groomFileToJson(hair)).count("grooms"), 0u);
+    EXPECT_THROW(groomFilesToJson({}), GroomFileError);
+
+    const std::string text = groomFilesToJson({hair, beard});
+    const nlohmann::json root = nlohmann::json::parse(text);
+    EXPECT_EQ(root.at("name"), "hair");
+    ASSERT_EQ(root.at("grooms").size(), 1u);
+    EXPECT_EQ(root.at("grooms")[0].at("name"), "beard");
+    EXPECT_EQ(root.at("grooms")[0].count("format"), 0u);
+
+    // A reader of one groom gets the first, whole.
+    const GroomFile first = groomFileFromJson(text, "C:/shots");
+    EXPECT_EQ(first.name, "hair");
+    EXPECT_EQ(first.data.scalp->contentHash(), head->contentHash());
+    EXPECT_EQ(first.data.maps.count("dense"), 1u);
+
+    const std::vector<GroomFile> all = groomFilesFromJson(text, "C:/shots");
+    ASSERT_EQ(all.size(), 2u);
+    EXPECT_EQ(all[1].name, "beard");
+    EXPECT_EQ(all[1].data.scalp->contentHash(), chin->contentHash());
+    ASSERT_TRUE(all[1].data.guides);
+    EXPECT_EQ(all[1].data.guides->contentHash(), flat->contentHash());
+    EXPECT_EQ(all[1].data.maps.count("short"), 1u);
+    EXPECT_EQ(all[1].data.maps.count("dense"), 0u) << "each groom its own maps";
+    EXPECT_EQ(fs::path(all[1].cardBake.prefix), fs::path("C:/shots/groomlab/shot/cards/beard/beard_").lexically_normal());
+    EXPECT_EQ(all[1].directory, "C:/shots");
+    EXPECT_EQ(groomFilesToJson(groomFilesFromJson(text)), text);  // exact text round trip
+
+    const fs::path path = fs::temp_directory_path() / "groomlab_test_several.groom";
+    writeGroomFiles(path.u8string(), {hair, beard});
+    EXPECT_EQ(readGroomFiles(path.u8string()).size(), 2u);
+    EXPECT_EQ(readGroomFile(path.u8string()).name, "hair");
+    fs::remove(path);
+    EXPECT_THROW(groomFilesFromJson(R"({"format": "groomlab.groom", "version": 1, "grooms": [3]})"), GroomFileError);
+}
+
+// Quads split as Maya splits them (measured in Maya 2022's MFnMesh::getTriangles): across the
+// shorter diagonal, 1-3 on a tie or near one; a groom moves from one split to the other in place.
+TEST(Retriangulate, MayasQuadSplitAndRootsMovedInPlace) {
+    using Tris = std::vector<std::array<int, 3>>;
+    EXPECT_EQ(polygonTriangles({{0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}}), (Tris{{0, 1, 3}, {3, 1, 2}})) << "a square: 1-3";
+    EXPECT_EQ(polygonTriangles({{0, 0, 0}, {2, 0, 0}, {2, 0, 1}, {0, 0, 1}}), (Tris{{0, 1, 3}, {3, 1, 2}})) << "a rectangle: 1-3";
+    EXPECT_EQ(polygonTriangles({{0, 0, 0}, {1.0005f, 0, -0.0005f}, {1, 0, 1}, {0, 0, 1}}), (Tris{{0, 1, 3}, {3, 1, 2}}))
+        << "0-2 shorter by a hair: still 1-3";
+    EXPECT_EQ(polygonTriangles({{0, 0, 0}, {1.3f, 0, -0.3f}, {1, 0, 1}, {0, 0, 1}}), (Tris{{1, 2, 0}, {0, 2, 3}})) << "0-2 shorter";
+    EXPECT_EQ(polygonTriangles({{0, 0, 0}, {1, 0, 0}, {0, 0, 1}}), (Tris{{0, 1, 2}}));
+    EXPECT_EQ(polygonTriangles({{0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0.5f, 0, 1.5f}, {0, 0, 1}}), (Tris{{0, 1, 2}, {0, 2, 3}, {0, 3, 4}}));
+    EXPECT_TRUE(polygonTriangles({{0, 0, 0}, {1, 0, 0}}).empty());
+
+    // A bent grid of quads, split along one diagonal and along the other.
+    const int n = 6;
+    std::vector<Vec3f> points;
+    for (int j = 0; j <= n; ++j) {
+        for (int i = 0; i <= n; ++i) points.push_back({0.2f * i, 0.05f * std::sin(1.3f * i + 0.7f * j), 0.2f * j});
+    }
+    std::vector<ScalpMesh::Triangle> a, b;
+    for (int j = 0; j < n; ++j) {
+        for (int i = 0; i < n; ++i) {
+            const int v0 = j * (n + 1) + i, v1 = v0 + 1, v2 = v0 + n + 2, v3 = v0 + n + 1;
+            a.push_back({v1, v2, v0});
+            a.push_back({v0, v2, v3});
+            b.push_back({v0, v1, v3});
+            b.push_back({v3, v1, v2});
+        }
+    }
+    auto meshA = std::make_shared<ScalpMesh>(points, a);
+    auto meshB = std::make_shared<ScalpMesh>(points, b);
+    meshA->setPolygons(std::vector<std::int32_t>(n * n, 2));
+    meshB->setPolygons(std::vector<std::int32_t>(n * n, 2));
+    EXPECT_TRUE(isRetriangulation(*meshA, *meshB));
+    EXPECT_FALSE(isRetriangulation(*meshA, *meshA)) << "the same triangles: nothing to move";
+    auto unpolygoned = std::make_shared<ScalpMesh>(points, b);
+    EXPECT_FALSE(isRetriangulation(*meshA, *unpolygoned)) << "no polygons to match";
+    std::vector<ScalpMesh::Triangle> other = b;
+    std::swap(other[0], other[2]);  // another polygon's triangles in the first's place
+    auto shuffled = std::make_shared<ScalpMesh>(points, other);
+    shuffled->setPolygons(std::vector<std::int32_t>(n * n, 2));
+    EXPECT_FALSE(isRetriangulation(*meshA, *shuffled));
+
+    GroomData data = groomData(meshA);
+    auto flat = std::make_shared<GuideSet>();
+    for (int k = 0; k < 12; ++k) {
+        const float x = 0.1f + 0.09f * k, z = 0.15f + 0.07f * k;
+        flat->add(static_cast<std::uint64_t>(k + 1), test::straightCurve({x, 0.2f, z}, {x, 0.6f, z + 0.1f}, 4));
+    }
+    flat->rootOnMesh(*meshA);
+    data.guides = flat;
+    GroomData moved = data;
+    moved.scalp = meshB;
+    retriangulateGroomData(moved, *meshA, *meshB);
+    ASSERT_TRUE(moved.guides);
+    ASSERT_EQ(moved.guides->guides().size(), flat->guides().size());
+    int changedFaces = 0;
+    for (std::size_t g = 0; g < flat->guides().size(); ++g) {
+        const StrandRoot& before = flat->guides()[g].root;
+        const StrandRoot& after = moved.guides->guides()[g].root;
+        changedFaces += before.face != after.face;
+        const Vec3f p = meshA->position(before), q = meshB->position(after);
+        // The same point (the two splits of a bent quad differ by up to its bend: 0.05 here).
+        EXPECT_LT(std::sqrt((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y) + (p.z - q.z) * (p.z - q.z)), 0.03f) << g;
+    }
+    EXPECT_GT(changedFaces, 0) << "roots on the other triangles";
 }
 
 TEST(Paths, OneRuleForStoredPaths) {

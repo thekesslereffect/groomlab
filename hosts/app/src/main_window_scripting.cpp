@@ -117,6 +117,12 @@ bool MainWindow::showUiPanel(const QString& name) {
     else if (n == QStringLiteral("display")) panel = AppShell::Panel::Display;
     else if (n == QStringLiteral("brush")) panel = AppShell::Panel::Brush;
     else if (n == QStringLiteral("shortcuts") || n == QStringLiteral("help")) return showHelp(QStringLiteral("shortcuts"));
+    else if (n == QStringLiteral("outliner")) {
+        // The Groom Tools' Outliner tab: the document's grooms.
+        setUiMode(QStringLiteral("groom"));
+        groomTools_->showTab(QStringLiteral("outliner"));
+        return true;
+    }
     else if (n == QStringLiteral("tubes")) {
         // The tool card's tube blocks (the Shape brush's when no tool shows them), scrolled to (Tools tab).
         setUiMode(QStringLiteral("groom"));
@@ -871,7 +877,7 @@ bool MainWindow::saveTo(const QString& path) {
         return false;
     }
     try {
-        document_->save(path.toStdString());
+        writeDocument(path.toStdString());  // (every groom of the document)
     } catch (const std::exception& e) {
         report(tr("Cannot save %1: %2").arg(path, QString::fromUtf8(e.what())));
         return false;

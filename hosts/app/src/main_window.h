@@ -61,6 +61,8 @@ class QTimer;
 
 namespace groomlab::app {
 
+class OutlinerPanel;
+
 // GroomLab is free for any use, funded by donations: Help > Support GroomLab and About link here.
 inline constexpr const char* kDonateUrl = "https://ko-fi.com/getgroomlab";
 inline constexpr const char* kDiscordUrl = "https://discord.gg/sr2rxjRVkm";  // the GroomLab community
@@ -124,6 +126,27 @@ public:
     // A .groom file, or a mesh (.obj, .abc) a new groom is made on. False (and a message) on error.
     bool openPath(const QString& path);
     bool openGroom(const QString& path);
+
+    // ---- The document's grooms (the Outliner tab) ---------------------------------------------
+    // A document holds several grooms, each on its own scalp (a file keeps them all: groom_file.h's
+    // "grooms"). One is active: every panel, tool, undo and export works on it; the others are
+    // drawn as plain strands and their scalps. Save writes them all.
+    int groomCount() const { return document_ ? static_cast<int>(grooms_.size()) : 0; }
+    int activeGroom() const { return activeGroom_; }
+    GroomDocument* groomAt(int index) const;
+    bool activateGroom(int index);
+    // Another groom on a mesh file (.obj or .abc), named after it, made active; a .groom file: its
+    // grooms (addGroomsFromFile).
+    bool addGroomOnMesh(const QString& meshPath);
+    // Every groom of a groom file (Maya's and Blender's save one a file: a character's grooms
+    // gathered in one document), named as in the file, the last made active.
+    bool addGroomsFromFile(const QString& path);
+    bool removeGroom(int index);  // the active one: another becomes active; never the last
+    bool renameGroom(int index, const QString& name);
+    void setGroomVisible(int index, bool visible);  // another groom's hair shown or hidden
+    bool groomVisible(int index) const;
+    bool anyGroomDirty() const;  // any groom with unsaved edits (the title's *, the prompts)
+    OutlinerPanel* outliner() const { return outliner_; }
     // The viewport's display settings as the Properties panel set them (tests, scripts).
     const DisplaySettings& displaySettings() const { return settings_; }
     // `group`: the OBJ's faces under that group alone (a sample's body); not a recent file then.
@@ -585,6 +608,20 @@ private:
     void showPresetsMenu();  // under the Graph Editor's Presets button (else at the pointer)
     void wireTimelineCardsAndExport();
     void setDocument(std::unique_ptr<GroomDocument> document);
+    // The panels let go of the active groom / take it (setDocument's halves; activateGroom swaps
+    // the active groom between them).
+    void detachDocument();
+    void attachDocument();
+    // The other grooms evaluated at the active one's time and handed to the renderers (their
+    // strands as lines, their scalps as props); the Outliner's rows.
+    void refreshOtherGrooms();
+    void refreshOutliner();
+    // The document written at `path`: every groom in one file (writeGroomFiles; one groom: as
+    // GroomDocument::save). Throws std::runtime_error.
+    void writeDocument(const std::string& path);
+    // A name no other groom of the document goes by: `base`, base2...
+    std::string freeGroomName(const std::string& base) const;
+    void installOutliner();  // the Groom Tools' Outliner tab and its signals
     // The timeline's range, fps, frame and Follow chip from the document (shown when it animates).
     void refreshTimeline();
     // A frame the timeline named: the document evaluated there and shown (quiet: no stderr line).
@@ -691,7 +728,24 @@ private:
     bool ensureHeadless(const QSize& size);
     OffscreenResult headlessFrame(bool readback = false);
 
-    std::unique_ptr<GroomDocument> document_;
+    std::unique_ptr<GroomDocument> document_;  // the active groom
+    // The document's grooms in the file's order (a file holds one or several): the active one's slot
+    // is empty while document_ holds it.
+    std::vector<std::unique_ptr<GroomDocument>> grooms_;
+    int activeGroom_ = 0;
+    bool graphWasShown_ = false;  // (detachDocument to attachDocument)
+    bool groomsChanged_ = false;  // a groom added or removed since the last save
+    std::set<const GroomDocument*> hiddenGrooms_;  // other grooms the Outliner hides
+    // The other grooms as last drawn: the strands each was built from, its lines and scalp prop.
+    struct OtherGroomView {
+        const GroomDocument* document = nullptr;
+        StrandsPtr strands;
+        std::shared_ptr<const DisplayGeometry> lines;
+        MeshPtr scalp;
+        SurfacePtr surface;
+    };
+    std::vector<OtherGroomView> otherViews_;
+    OutlinerPanel* outliner_ = nullptr;  // the Groom Tools' Outliner tab
     std::vector<std::pair<QPixmap, QPoint>> uiMenus_;  // setUiMenu's menus as grabbed, and where grabUi draws them (window coordinates)
     GpuLookPreview gpu_;
     struct Headless {

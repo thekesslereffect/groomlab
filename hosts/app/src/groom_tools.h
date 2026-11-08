@@ -158,6 +158,7 @@ public:
     void setCorrectivesContent(QWidget* content);
     void setGroupsContent(QWidget* content);
     void setPhotosContent(QWidget* content);
+    void setOutlinerContent(QWidget* content);  // the app's Outliner tab (palette.json's, hosts ["app"])
     // The tubes' blocks read the groom again (the selection or the solo changed, an undo, a graph
     // edit): now while a tool that shows them is on, else when one is picked.
     void refreshTubes();

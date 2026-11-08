@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "groomlab/alembic_io.h"
+#include "groomlab/retriangulate.h"
 
 namespace groomlab::app {
 
@@ -137,17 +138,15 @@ ObjContents parseObj(const std::string& text, const std::string& label, const st
                 }
             }
             polygons.push_back(static_cast<std::int32_t>(corners.size() - 2));
-            for (std::size_t k = 1; k + 1 < corners.size(); ++k) {
-                triangles.push_back({vertices[0], vertices[k], vertices[k + 1]});
-                if (everyCornerHasUV) {
-                    cornerUVs.push_back(faceUVs[0]);
-                    cornerUVs.push_back(faceUVs[k]);
-                    cornerUVs.push_back(faceUVs[k + 1]);
-                }
-                if (everyCornerHasNormal) {
-                    cornerNormals.push_back(faceNormals[0]);
-                    cornerNormals.push_back(faceNormals[k]);
-                    cornerNormals.push_back(faceNormals[k + 1]);
+            // Split as Maya splits it (retriangulate.h: a quad across its shorter diagonal), so a
+            // groom made on this mesh meets the same triangles on the mesh in Maya.
+            std::vector<Vec3f> facePoints;
+            for (const std::int32_t v : vertices) facePoints.push_back(points[static_cast<std::size_t>(v)]);
+            for (const std::array<int, 3>& tri : polygonTriangles(facePoints)) {
+                triangles.push_back({vertices[tri[0]], vertices[tri[1]], vertices[tri[2]]});
+                for (const int k : tri) {
+                    if (everyCornerHasUV) cornerUVs.push_back(faceUVs[static_cast<std::size_t>(k)]);
+                    if (everyCornerHasNormal) cornerNormals.push_back(faceNormals[static_cast<std::size_t>(k)]);
                 }
             }
         } else if (key == "o" || key == "g") {

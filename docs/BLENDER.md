@@ -147,12 +147,13 @@ All but the process ones take `"session": <id>`.
 | `new_session` | `space`, `fps` | `{"session", "space"}` |
 | `close_session` / `set_space` | `upAxis`, `metersPerUnit` | |
 | `set_options` | `followScalp`, `mapsDir` | `{"followScalp", "mapsDir"}` (followScalp: the groom's option, saved in its file; mapsDir: where new texture maps' images go, default a folder of the session's in the temp folder) |
-| `load_groom` | `path` | groom info: `fileUpAxis`, `fps`, `scalp` counts and topology, `flatGuides`, `hierarchyGuides`, `nodes`, `output`, `followScalp`, `scalpCache`/`guideCache` refs, `notes`, `inputErrors` |
+| `load_groom` | `path`, `index` (0: the file's groom of that number, a file of several grooms) | groom info: `fileUpAxis`, `fps`, `scalp` counts and topology, `flatGuides`, `hierarchyGuides`, `nodes`, `output`, `followScalp`, `scalpCache`/`guideCache` refs, `notes`, `inputErrors`, `name`, `grooms` (every groom's name) |
+| `groom_file_names` | `path` | `{"grooms": [name, ...]}`: a file's grooms in order (the app saves a document of several in one file; Open Groom File opens each on its own scalp, not linked to the file) |
 | `save_groom` | `path`, `upAxis` ("Y") | `{"path", "upAxis", "units"}` |
 | `groom_info` | | as `load_groom` |
 | `set_scalp` | `points` (n,3), `faceCounts`, `faceIndices`, `uvs` (per face corner, 2), `restPoints`, `colorSets` `{name: (corners,4)}` | `{"points", "triangles", "topology", "matchesGroom", "guidesRerooted"}` |
 | `update_scalp` | `points`, `restPoints` | the scalp's points at this frame on its topology (a deforming scalp) |
-| `get_scalp` | `space` | `points`, `faceCounts`, `faceIndices`, `uvs`, `restPoints` arrays; `facesExact` (every polygon came back as one face) |
+| `get_scalp` | `space`, `name` (one of the groom's other scalps: a file's "scalps"; default the scalp) | `points`, `faceCounts`, `faceIndices`, `uvs`, `restPoints` arrays; `facesExact` (every polygon came back as one face) |
 | `get_guides` | `source` ("auto", "flat", "hierarchy"), `space`, `pose` ("now", "rest") | `points` (n,3), `counts`, `ids` (<u8); `pose` answered |
 | `set_guides` | `points`, `counts`, `ids` (0: new), `target` ("auto", "flat", "hierarchy"), `keepMissing`, `pose` ("now", "rest"), `group` (hierarchy: the group new guides join, "Pipeline") | `{"pose", "target", "guides", "changed", "added": [{"index", "id"}], "removed", "updated"}` |
 | `set_time` | `frame` or `seconds`, `fps` | `{"seconds", "frame", "fps"}` (frame_time.h's rule) |

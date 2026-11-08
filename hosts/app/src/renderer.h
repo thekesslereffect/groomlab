@@ -64,6 +64,15 @@ public:
     // Meshes drawn beside the groom with materials of their own (a scanned head under it,
     // eyes): shaded, shadowed and casting in the lookdev path; Lambert in the line path.
     void setProps(std::vector<SurfacePtr> props);
+    // The document's other grooms (the Outliner's, not the active one): each one's strands as plain
+    // lines in its color, depth tested, drawn and hidden with the hair (their scalps come as props).
+    // A geometry already held (the same pointer) keeps its buffers.
+    struct OtherGroom {
+        std::shared_ptr<const DisplayGeometry> lines;
+        std::array<float, 4> color{0.55f, 0.55f, 0.55f, 1.0f};
+    };
+    void setOtherGrooms(const std::vector<OtherGroom>& grooms);
+    std::size_t otherGroomCount() const { return otherGeometry_.size(); }
     const std::vector<SurfacePtr>& props() const { return props_; }
     // A prop's material was edited in place: the maps are drawn again.
     void propsChanged();
@@ -254,6 +263,8 @@ private:
     SurfacePtr scalpSurface_;
     std::vector<SurfacePtr> props_;
     std::vector<std::unique_ptr<GpuItem>> propItems_;  // the line path's copies
+    std::vector<std::unique_ptr<GpuItem>> otherItems_;  // the other grooms' strand lines
+    std::vector<std::shared_ptr<const DisplayGeometry>> otherGeometry_;  // what each holds
     PipelineSet main_, hdr_;
     QRhi* rhi_ = nullptr;
     // The viewport of the pass being drawn, set again after each pipeline is bound (on Direct3D

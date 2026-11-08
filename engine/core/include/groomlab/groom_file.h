@@ -27,7 +27,12 @@
 //    "prototypes": {"<name>": {"points": [...], "triangles": [...], "normals": [...]?, "uvs": [...]?}}?,
 //    "colliders": {"<name>": {"points": [...], "triangles": [...], "polygons": [...]?, "subdivision": 2?,
 //                             "restPoints": [...]?}}?,
-//    "transferMarkers": [{"old": {"face", "u", "v", "point"}, "new": {...}}]?}
+//    "transferMarkers": [{"old": {"face", "u", "v", "point"}, "new": {...}}]?,
+//    "name": "hair"?, "grooms": [{"name": "beard", ... every field above but format and version}]?}
+//
+// A file of several grooms (the app's document holds several, each on its own scalp) keeps the
+// first at the top, as a file of one groom, and the others in "grooms": a GroomLab from before
+// several grooms opens the first.
 //
 // Numbers are stored exactly (floats in their shortest round-trip form), so a
 // groom evaluates the same from the file as in Maya; a NaN or infinity is
@@ -143,6 +148,9 @@ struct GroomFile {
     std::string guideGroupColors;
     std::string hiddenGuideGroups;
     std::string directory;      // the folder the file was read from (not stored)
+    // The groom's name ("name"; "" none). A file holds one groom, or several (the app's document of
+    // several grooms): the first at the top, the others in "grooms", each named.
+    std::string name;
 };
 
 std::string groomFileToJson(const GroomFile& file);
@@ -158,6 +166,12 @@ std::string simCachesToJson(const std::map<std::string, SimCacheRef>& caches);
 std::map<std::string, SimCacheRef> simCachesFromJson(const std::string& text, const std::string& baseDir = {});
 // `baseDir` resolves relative cache paths. Throws GroomFileError.
 GroomFile groomFileFromJson(const std::string& text, const std::string& baseDir = {});
+// Every groom of a file: the first (the file's top: all a GroomLab before several grooms reads),
+// then each of "grooms". groomFileFromJson and readGroomFile give the first. Throws GroomFileError.
+std::vector<GroomFile> groomFilesFromJson(const std::string& text, const std::string& baseDir = {});
+// A file of several grooms (the first at the top, the others in "grooms"; of one groom, exactly
+// what groomFileToJson writes). Throws GroomFileError for none.
+std::string groomFilesToJson(const std::vector<GroomFile>& grooms);
 
 // A scalp fingerprint (ScalpMesh::topologyFingerprint) as a groom file writes it (16 hex digits),
 // and back (0 for text that is not one): Maya keeps a groom's in its scalpTopology attribute.
@@ -165,7 +179,11 @@ std::string scalpFingerprintText(std::uint64_t fingerprint);
 std::uint64_t parseScalpFingerprint(const std::string& text);
 
 void writeGroomFile(const std::string& path, const GroomFile& file);  // throws GroomFileError
-GroomFile readGroomFile(const std::string& path);                      // throws GroomFileError
+GroomFile readGroomFile(const std::string& path);                      // the first groom; throws GroomFileError
+void writeGroomFiles(const std::string& path, const std::vector<GroomFile>& grooms);  // throws GroomFileError
+// A groom file's text written at `path` (beside it, then moved over it: no half-written file).
+void writeGroomFileText(const std::string& path, const std::string& text);  // throws GroomFileError
+std::vector<GroomFile> readGroomFiles(const std::string& path);                       // throws GroomFileError
 
 // The file's points turned into another up axis ("Y" or "Z"; throws GroomFileError on
 // another): the scalp and its rest pose, the flat guides and the hierarchy's world shapes (the

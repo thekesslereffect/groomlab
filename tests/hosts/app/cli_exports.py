@@ -96,8 +96,9 @@ def main(exe, groom, work):
     assert "Baked the simulation to frame 6" in log, log
     with open(sim_saved, encoding="utf-8") as f:
         sims = json.load(f)["simCaches"]
-    assert sims["sim"]["file"] == "groomlab/sim/caches/full_sim_sim.abc" and len(sims["sim"]["stamp"]) == 16, sims
-    with open(os.path.join(work, "groomlab", "sim", "caches", "full_sim_sim.abc"), "rb") as f:
+    # In the groom's own caches folder of the file (groom_package.h, every host's).
+    assert sims["sim"]["file"] == "groomlab/sim/caches/sim/full_sim_sim.abc" and len(sims["sim"]["stamp"]) == 16, sims
+    with open(os.path.join(work, "groomlab", "sim", "caches", "sim", "full_sim_sim.abc"), "rb") as f:
         assert f.read(5) == b"Ogawa", "the bake is an Ogawa Alembic archive"
     print("cli exports: ok")
 

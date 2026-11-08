@@ -615,7 +615,7 @@ void MainWindow::refreshTitle() {
     bool dirty = false;
     if (document_) {
         name = document_->path().empty() ? tr("untitled.groom") : QFileInfo(QString::fromStdString(document_->path())).fileName();
-        dirty = document_->dirty();
+        dirty = anyGroomDirty();
         title = name + (dirty ? QStringLiteral(" *") : QString()) + QStringLiteral(" — GroomLab");
     }
     setWindowTitle(title);

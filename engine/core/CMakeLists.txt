@@ -22,6 +22,8 @@ add_library(groomlab_core_objects OBJECT
     src/card_bake.cpp
     src/card_feathers.cpp
     src/asset_files.cpp
+    src/retriangulate.cpp
+    src/groom_package.cpp
     src/control_keys.cpp
     src/engine_cards.cpp
     src/engine_meshes.cpp

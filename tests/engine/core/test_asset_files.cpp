@@ -8,6 +8,8 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/asset_files.h"
+#include "groomlab/groom_file.h"
+#include "groomlab/groom_package.h"
 
 using namespace groomlab;
 namespace fs = std::filesystem;
@@ -158,4 +160,71 @@ TEST(AssetFiles, FileReadersFollowAMovedMap) {
     EXPECT_EQ(retargetFileReaders(graph, "C:/shot/masks/hair/none.png", "x.png", resolve, &changed), graph);
     EXPECT_FALSE(changed);
     EXPECT_EQ(retargetFileReaders(graph, "", "x.png", resolve, &changed), graph);
+}
+
+// A groom file as every host writes it (groom_package.h): each groom's own files in
+// groomlab/<file>/<kind>/<groom>, the params reading a map's image pointed at the copy, paths
+// relative to the file; merged by name, the other grooms kept.
+TEST(GroomPackage, WritesGroomsWithTheirFilesBesideTheFile) {
+    const std::string root = scratch("package");
+    // A groom's files somewhere else (a scene's folder), a bake and a Simulate bake.
+    write(root + "/scene/groomlab/scene/masks/hair/dense.png", "dense");
+    write(root + "/scene/groomlab/scene/cards/hair/hair_Atlas.json", "{}");
+    write(root + "/scene/groomlab/scene/cards/hair/hair_Color.tga", "color");
+    write(root + "/scene/groomlab/scene/cards/hair/hair_Preview.png", "preview");
+    write(root + "/scene/groomlab/scene/caches/hair/hair_sim_sim.abc", "sim");
+    GroomFile hair;
+    hair.name = "hair";
+    hair.data.maps["dense"] = {"texture", root + "/scene/groomlab/scene/masks/hair/dense.png", 1};
+    hair.data.graphJson = R"({"nodes": [{"name": "scatter", "type": "Scatter", "params": {"density": {"texture": ")" + root +
+                          R"(/scene/groomlab/scene/masks/hair/dense.png", "min": 0, "max": 50}}}]})";
+    hair.cardBake = {root + "/scene/groomlab/scene/cards/hair/hair_", "s1"};
+    hair.simCaches["sim"] = {root + "/scene/groomlab/scene/caches/hair/hair_sim_sim.abc", "", 7};
+    GroomFile beard;
+    beard.name = "beard";
+    const std::string path = root + "/out/look.groom";
+    const GroomWriteReport report = writeGroomsToFile(path, {hair, beard});
+    EXPECT_TRUE(report.warnings.empty()) << report.warnings.front();
+    EXPECT_EQ(read(root + "/out/groomlab/look/masks/hair/dense.png"), "dense");
+    EXPECT_EQ(read(root + "/out/groomlab/look/cards/hair/hair_Color.tga"), "color");
+    EXPECT_EQ(read(root + "/out/groomlab/look/cards/hair/hair_Preview.png"), "preview");
+    EXPECT_EQ(read(root + "/out/groomlab/look/caches/hair/hair_sim_sim.abc"), "sim");
+    const nlohmann::json written = nlohmann::json::parse(read(path));
+    EXPECT_EQ(written.at("name"), "hair");
+    EXPECT_EQ(written.at("maps").at("dense").at("texture"), "groomlab/look/masks/hair/dense.png");
+    EXPECT_EQ(written.at("graph").at("nodes")[0].at("params").at("density").at("texture"), "groomlab/look/masks/hair/dense.png")
+        << "the param reading the map's image reads the copy";
+    EXPECT_EQ(written.at("cardBake").at("prefix"), "groomlab/look/cards/hair/hair_");
+    EXPECT_EQ(written.at("simCaches").at("sim").at("file"), "groomlab/look/caches/hair/hair_sim_sim.abc");
+    ASSERT_EQ(written.at("grooms").size(), 1u);
+    EXPECT_EQ(written.at("grooms")[0].at("name"), "beard");
+    EXPECT_EQ(groomFileFolder(path, "beard", "masks"), root + "/out/groomlab/look/masks/beard");
+    EXPECT_EQ(groomFileFolder(path, "", "cards"), root + "/out/groomlab/look/cards/look");
+
+    // Merged: the beard written again replaces its own entry; the hair stays as it was.
+    beard.source = "again";
+    GroomWriteOptions merge;
+    merge.merge = true;
+    writeGroomsToFile(path, {beard}, merge);
+    std::vector<GroomFile> both = readGroomFiles(path);
+    ASSERT_EQ(both.size(), 2u);
+    EXPECT_EQ(both[0].name, "hair");
+    EXPECT_EQ(both[0].data.maps.at("dense").texture, "groomlab/look/masks/hair/dense.png");
+    EXPECT_EQ(both[1].source, "again");
+    EXPECT_EQ(groomIndex(both, "beard"), 1);
+    EXPECT_EQ(groomIndex(both, "nobody"), -1);
+    EXPECT_EQ(groomIndex(both, ""), 0);
+    // A groom whose files are in the file's folder already: nothing copied. Without merge: alone.
+    GroomFile again = both[0];
+    const GroomWriteReport inPlace = writeGroomsToFile(path, {again});
+    EXPECT_TRUE(inPlace.copied.empty());
+    EXPECT_EQ(readGroomFiles(path).size(), 1u);
+    EXPECT_THROW(writeGroomsToFile(path, {beard, beard}), GroomFileError) << "two of one name";
+    // A file of one unnamed groom (hosts' files before): the groom merged takes its place.
+    GroomFile legacy;
+    writeGroomFile(root + "/legacy.groom", legacy);
+    writeGroomsToFile(root + "/legacy.groom", {beard}, merge);
+    const std::vector<GroomFile> replaced = readGroomFiles(root + "/legacy.groom");
+    ASSERT_EQ(replaced.size(), 1u);
+    EXPECT_EQ(replaced[0].name, "beard");
 }

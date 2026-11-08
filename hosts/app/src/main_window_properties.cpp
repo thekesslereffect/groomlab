@@ -585,6 +585,7 @@ void MainWindow::buildProperties() {
         if (referenceWindow_) referenceWindow_->photosChanged();
     });
     connect(photos_, &PhotosPanel::alignRequested, this, [this](int index) { openPhotoAlign(index); });
+    installOutliner();  // ---- The Outliner tab (outliner_panel.h): the document's grooms
     // Morph to Photos / Reset Morph: the groom onto the reshaped scalp, by its UVs (else the closest
     // point: the shapes lie close), its maps carried with it.
     connect(photos_, &PhotosPanel::morphRequested, this, [this](std::shared_ptr<const ScalpMesh> scalp, const QString& what) {

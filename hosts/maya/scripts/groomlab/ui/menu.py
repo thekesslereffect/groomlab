@@ -23,9 +23,14 @@ def _selected_groom():
 
 def default_file(groom, kind, suffix):
     """A save dialog's starting file: <the scene's `kind` folder>/<the groom's asset name><suffix>
-    (file safe: no namespace colons or DAG bars reach the name)."""
+    (file safe: no namespace colons or DAG bars reach the name); caches in the groom's own folder
+    there (caches/<asset>/, as its masks and cards)."""
     import groomlab
-    return groomlab.asset_folder(kind) + "/" + groomlab.asset_name(groom) + suffix
+    asset = groomlab.asset_name(groom)
+    folder = groomlab.asset_folder(kind) + ("/" + asset if kind == "caches" else "")
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    return folder + "/" + asset + suffix
 
 
 def groom_files_folder():
@@ -34,14 +39,32 @@ def groom_files_folder():
     return (paths.scene_folder() or paths.project_root().rstrip("/\\")).replace("\\", "/")
 
 
-def groom_source_file(groom):
-    """Save Groom File's starting file: <the scene's folder>/<the groom's asset name>.groom (the
-    project's folder while the scene is untitled). A groom file is a source file every host opens,
-    not an export: it sits beside the scene, outside its groomlab folder (which it names relative
-    to itself: groomlab/<scene>/masks/...), and saving again overwrites it, so groom files and the
-    files GroomLab keeps for them never nest inside each other's folders."""
+def groom_source_file(groom=None):
+    """Save Groom File's starting file: <the scene's folder>/<scene>.groom (<the groom's asset
+    name>.groom in the project's folder while the scene is untitled). A groom file is a document of
+    the scene's named grooms that every host opens, not an export: it sits beside the scene,
+    outside its groomlab folder, and shares that folder with it (groomlab/<scene>/masks/<groom>:
+    the core's groom_package.h), so nothing is copied twice. Named after the scene, two versions of
+    a scene in one folder (shot_v001.ma, shot_v002.ma) never write each other's (Save Scene As
+    takes it along under the new scene's name: paths.follow_scene_files)."""
     import groomlab
-    return groom_files_folder() + "/" + groomlab.asset_name(groom) + ".groom"
+    from groomlab import paths
+    scene = paths.scene_stem()
+    return groom_files_folder() + "/" + (scene or (groomlab.asset_name(groom) if groom else "grooms")) + ".groom"
+
+
+def _scene_grooms():
+    """The grooms Save Groom File As writes: the selected ones, else every groom of the scene (not
+    referenced ones: their files are their own scene's)."""
+    import groomlab
+    picked = []
+    for node in cmds.ls(selection=True, long=True) or []:
+        shapes = [node] if cmds.nodeType(node) == groomlab.GROOM_TYPE else \
+            cmds.listRelatives(node, shapes=True, type=groomlab.GROOM_TYPE, fullPath=True) or []
+        picked += [g for g in shapes if g not in picked]
+    if picked:
+        return picked
+    return [g for g in cmds.ls(type=groomlab.GROOM_TYPE, long=True) or [] if not cmds.referenceQuery(g, isNodeReferenced=True)]
 
 
 ASK_TO_SAVE = True  # tests turn the untitled-scene note off
@@ -289,23 +312,24 @@ def bake_scale_maps_action():
 
 
 def export_groom_dialog():
-    """A groom file for groomlab-cli, the Arnold procedural and the standalone app, with the scalp's
-    animation cached; the groom is linked to it (Save to Groom File, Reload from Groom File)."""
+    """Save Groom File As: the scene's grooms (the selected ones, else all) in one groom file, a
+    document of named grooms for groomlab-cli, the Arnold procedural and the standalone app, each
+    with its scalp's animation cached; each groom is linked to it (Save to Groom File, Reload from
+    Groom File)."""
     import groomlab
-    groom = _selected_groom()
-    if not groom:
-        return
+    grooms = _scene_grooms()
+    if not grooms:
+        cmds.warning("GroomLab: no groom to save")
+        return None
     path = cmds.fileDialog2(fileFilter="GroomLab groom (*.groom)", dialogStyle=2, fileMode=0,
-                            caption="Save Groom File As", startingDirectory=groom_source_file(groom))
+                            caption="Save Groom File As", startingDirectory=groom_source_file(grooms[0]))
     if not path:
         return None
     start, end = _playback_range()
-    written = _run_export("Saving the groom file and caching the scalp", path[0],
-                          lambda: groomlab.export_groom(groom, path[0], scalp_cache=True, start=start, end=end),
-                          "wrote %s (the scalp cached over %d frames)" % (path[0], _frames(start, end)))
-    if written:
-        cmds.setAttr(groom + ".groomFile", groomlab.portable_path(written[0]), type="string")
-    return written
+    names = ", ".join(g.split("|")[-1] for g in grooms)
+    return _run_export("Saving the groom file and caching the scalps", path[0],
+                       lambda: groomlab.export_grooms(grooms, path[0], scalp_cache=True, start=start, end=end),
+                       "wrote %s (%s; the scalps cached over %d frames)" % (path[0], names, _frames(start, end)))
 
 
 _GROOM_FILES = "GroomLab groom (*.groom)"
@@ -359,21 +383,22 @@ def import_alembic_curves_dialog(path=None, groom=None):
 
 
 def import_groom_dialog():
-    """A groom from a groom file (Save Groom File As's, or one the standalone app saved): on the
-    selected mesh when it is the file's scalp, else on a mesh made from the file."""
+    """The grooms of a groom file (Save Groom File As's, or one the standalone app saved, which can
+    hold several): one groom on the selected mesh when it is the file's scalp, else on a mesh made
+    from the file; each of several on its own scalp from the file."""
     import groomlab
     path = cmds.fileDialog2(fileFilter=_GROOM_FILES, dialogStyle=2, fileMode=1, caption="Import Groom File",
                             startingDirectory=groom_files_folder())  # (groom files sit beside the scene)
     if not path or not ensure_scene_saved("this groom's painted masks and card bake"):
         return
     try:
-        groom = groomlab.import_groom(path[0])
+        grooms = groomlab.import_grooms(path[0])  # every groom of a file of several (the app's)
     except (RuntimeError, ValueError) as e:
         cmds.warning("GroomLab: %s" % e)
         return
-    groomlab.pin_new_groom(groom)
-    cmds.inViewMessage(amg="GroomLab: imported %s from %s" % (groom.split("|")[-1], os.path.basename(path[0])),
-                       pos="topCenter", fade=True)
+    groomlab.pin_new_groom(grooms[0])
+    cmds.inViewMessage(amg="GroomLab: imported %s from %s" % (", ".join(g.split("|")[-1] for g in grooms),
+                                                              os.path.basename(path[0])), pos="topCenter", fade=True)
 
 
 def reload_groom_file(groom=None):
@@ -400,8 +425,9 @@ def reload_groom_file(groom=None):
 
 
 def save_groom_file(groom=None):
-    """Save to Groom File: the groom written to the file it is linked to (asked for when none), for
-    the standalone app to open."""
+    """Save to Groom File: the groom written to the file it is linked to (asked for when none), with
+    every other groom of the scene linked to that file: their entries in it (its other grooms
+    stay), for the standalone app to open."""
     import groomlab
     groom = groom or _selected_groom()
     if not groom:
@@ -414,9 +440,17 @@ def save_groom_file(groom=None):
             return
         path = picked[0]
     from groomlab.ui import messages
+
+    def same(a, b):
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+    linked = [g for g in cmds.ls(type=groomlab.GROOM_TYPE, long=True) or []
+              if g != groom and groomlab.groom_file(g) and same(groomlab.groom_file(g), path)]
     try:
         with messages.busy("Saving the groom file"):
             written = groomlab.save_groom(groom, path)
+            for other in linked:
+                written += [p for p in groomlab.save_groom(other, path) if p not in written]
     except (RuntimeError, ValueError) as e:
         cmds.warning("GroomLab: %s" % e)
         return

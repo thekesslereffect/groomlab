@@ -312,7 +312,10 @@ class GROOMLAB_OT_export_guides_sim(_Tipped, GroomOperator, ExportHelper):
 
     def invoke(self, context, event):
         if not self.filepath:
-            self.filepath = os.path.join(_export_folder("caches"), active_groom(context).name + "_guides.abc")
+            name = groom._file_safe(active_groom(context).name)
+            folder = os.path.join(_export_folder("caches"), name)  # the groom's own caches folder
+            os.makedirs(folder, exist_ok=True)
+            self.filepath = os.path.join(folder, name + "_guides.abc")
         context.window_manager.fileselect_add(self)
         return {"RUNNING_MODAL"}
 

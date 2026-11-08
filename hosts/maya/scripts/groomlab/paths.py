@@ -26,6 +26,15 @@ def scene_folder():
     return os.path.dirname(scene).replace("\\", "/") if scene else ""
 
 
+def scene_stem():
+    """The open scene's name without its extension, made file safe as its groomlab folder's name is
+    (groomlab/<scene>); "" while the scene is untitled."""
+    scene = cmds.file(query=True, sceneName=True) or ""
+    if not scene:
+        return ""
+    return os.path.basename(asset_folder(create=False).rstrip("/"))  # (groomlab/<scene>: its name file safe)
+
+
 ASSET_FOLDER = "groomlab"
 ASSET_KINDS = ("masks", "cards", "exports", "caches", "renders", "references")
 _warned_untitled = []
@@ -141,8 +150,16 @@ def follow_scene_files():
                 return base
         return None
 
+    followed = {}  # a file's new path, once: a map and the params reading its image name the same copy
+
     def follow(rel):
         """A single file: its new stored path (None: nothing to copy, the path stays)."""
+        key = os.path.normcase(os.path.normpath(rel))
+        if key not in followed:
+            followed[key] = _follow_once(rel)
+        return followed[key]
+
+    def _follow_once(rel):
         if not source(rel):
             return None
         src = os.path.join(source(rel), rel)
@@ -153,6 +170,25 @@ def follow_scene_files():
             new_rel = os.path.relpath(dst, new_base).replace("\\", "/")
             cmds.warning("GroomLab: %s is already beside the saved scene with other content; this scene now uses "
                          "a copy, %s" % (rel, new_rel))
+        copy(src, dst, new_rel)
+        return new_rel
+
+    old_stem, new_stem = os.path.basename(old_prefix), os.path.basename(new_prefix)
+
+    def follow_groom_file(rel):
+        """A groom file named after the scene, beside it (<scene>.groom: menu.groom_source_file),
+        copied as the new scene's (<new scene>.groom), so the two scenes never write one. Others
+        (a file of another name, elsewhere): as any file."""
+        stem, ext = os.path.splitext(rel)
+        if "/" in rel or not source(rel) or not old_stem or stem != old_stem or not new_stem:
+            return follow(rel)
+        new_rel = new_stem + ext
+        src, dst = os.path.join(source(rel), rel), os.path.join(new_base, new_rel)
+        if conflict(src, dst):
+            dst = _unique_path(dst)
+            new_rel = os.path.relpath(dst, new_base).replace("\\", "/")
+            cmds.warning("GroomLab: a groom file of that name is already beside the saved scene with other "
+                         "content; this scene now uses %s" % new_rel)
         copy(src, dst, new_rel)
         return new_rel
 
@@ -194,10 +230,11 @@ def follow_scene_files():
                         cmds.getAttr(groom + ".cardMaps") or "", new_prefix_rel), type="string")
         for attr in ("guideCache", "groomFile"):
             value = (cmds.getAttr(groom + "." + attr) or "").replace("\\", "/")
-            if _relative(value):
-                new = follow(value)
-                if new and new != value:
-                    cmds.setAttr(groom + "." + attr, new, type="string")
+            if not _relative(value):
+                continue
+            new = follow_groom_file(value) if attr == "groomFile" else follow(value)
+            if new and new != value:
+                cmds.setAttr(groom + "." + attr, new, type="string")
         # The Simulate nodes' bakes.
         text = cmds.getAttr(groom + ".simCaches") or ""
         bakes = json.loads(text) if text.strip() else {}

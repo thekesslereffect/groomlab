@@ -45,6 +45,7 @@
 #include "groomlab/hair_color.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
+#include "groomlab/groom_package.h"
 #include "groomlab/parts.h"
 #include "groomlab/sculpt.h"
 #include "groomlab/subdivision.h"
@@ -3961,19 +3962,18 @@ TEST(AppCards, SavedGroomNamesItsBakeForAnotherHost) {
     reopened->evaluate(request);
     EXPECT_FALSE(reopened->bakeStale());  // the stamp came with the file
 
-    // A bake in a folder beside the groom's (a shared one): stored relative with "..", as Maya's
-    // export stores such a path (paths.h portablePath), and found again.
+    // A bake in a folder elsewhere (a shared one): the file stands alone, so its save copies the bake
+    // into the groom's own cards folder (groom_package.h, every host's) and names the copy.
     const std::string shared = dir + "_shared";
     std::filesystem::remove_all(shared);
     doc->bakeCards(shared, "named", 64, 1.0f);
     doc->save(groom);
-    {
-        std::ifstream in(groom, std::ios::binary);
-        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        EXPECT_NE(text.find("\"prefix\":\"../groomlab_app_named_bake_shared/named_\""), std::string::npos);
-    }
-    EXPECT_TRUE(std::filesystem::equivalent(std::filesystem::u8path(readGroomFile(groom).cardBake.prefix + "Atlas.json"),
-                                            std::filesystem::u8path(shared + "/named_Atlas.json")));
+    const std::string copied = readGroomFile(groom).cardBake.prefix;
+    EXPECT_EQ(std::filesystem::u8path(copied + "Atlas.json").lexically_normal(),
+              std::filesystem::u8path(groomFileFolder(groom, "", "cards") + "/" + std::filesystem::u8path(groom).stem().u8string() +
+                                      "_Atlas.json").lexically_normal());
+    EXPECT_TRUE(std::filesystem::exists(std::filesystem::u8path(copied + "Color.tga")));
+    EXPECT_TRUE(std::filesystem::exists(std::filesystem::u8path(shared + "/named_Atlas.json"))) << "the shared bake stays";
     reopened.reset();
     doc.reset();
     std::filesystem::remove_all(dir);

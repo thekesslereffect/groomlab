@@ -335,6 +335,7 @@ AI_PROCEDURAL_NODE_EXPORT_METHODS(GroomLabProceduralMethods);
 
 node_parameters {
     AiParameterStr("filename", "");
+    AiParameterStr("groom", "");  // the groom of a file of several, by name ("" the first)
     AiParameterFlt("frame", 1.0f);
     AiParameterFlt("fps", 0.0f);
     AiParameterFlt("density", 1.0f);
@@ -364,7 +365,7 @@ procedural_init {
     }
     const auto t0 = std::chrono::steady_clock::now();
     try {
-        auto scene = std::make_unique<groomlab::GroomScene>(filename);
+        auto scene = std::make_unique<groomlab::GroomScene>(filename, AiNodeGetStr(node, AtString("groom")).c_str());
         const float fpsParam = AiNodeGetFlt(node, AtString("fps"));
         // The param is a float: the file's own rate when it is that rate. Seconds by every host's
         // rule (frame_time.h: an NTSC rate exact), so a frame is the CLI's and Maya's to the bit.

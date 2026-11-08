@@ -968,10 +968,15 @@ void GroomDocument::followFiles(const std::string& newPath) {
         oldRoot = groomlab::assetFolder(oldBase, stem);
         // The groom's maps folder, masks/<name>, is the new name's (FileFollower looks at these
         // before the old root).
-        const std::string newMaps = newRoot + "/masks/" + fileSafeName(newName);
-        extra.push_back({oldRoot + "/masks/" + fileSafeName(stem), newMaps});
-        const std::string newCards = newRoot + "/cards/" + fileSafeName(newName);
-        extra.push_back({oldRoot + "/cards/" + fileSafeName(stem), newCards});
+        // (A named groom of a document of several keeps its folders' name; the file's own groom's
+        // is the file's.)
+        const std::string oldFolder = fileSafeName(name_.empty() ? stem : name_);
+        const std::string newFolder = fileSafeName(name_.empty() ? newName : name_);
+        const std::string newMaps = newRoot + "/masks/" + newFolder;
+        extra.push_back({oldRoot + "/masks/" + oldFolder, newMaps});
+        const std::string newCards = newRoot + "/cards/" + newFolder;
+        extra.push_back({oldRoot + "/cards/" + oldFolder, newCards});
+        extra.push_back({oldRoot + "/caches/" + oldFolder, newRoot + "/caches/" + newFolder});
         // Where earlier versions of the app kept them, beside the groom: into the new folders.
         extra.push_back({oldBase + "/masks/" + stem, newMaps});
         extra.push_back({oldBase + "/" + stem + "_cards", newCards});
@@ -1072,7 +1077,12 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
         }
         std::vector<std::string> copied;
         // A map or an image into the groom's maps folder (Maya's masks/<groom>), else the kind's.
-        const std::string copy = collectFile(full, kind == "masks" ? mapsDirectory() : assetFolder(kind), &copied);
+        // ("groomCaches": the groom's own folder in caches, as its Simulate bakes are written.)
+        const std::string copy = collectFile(full,
+                                             kind == "masks"         ? mapsDirectory()
+                                             : kind == "groomCaches" ? assetFolder("caches") + "/" + fileSafeName(displayName())
+                                                                     : assetFolder(kind),
+                                             &copied);
         if (copy.empty()) {
             r.missing.emplace_back(what, stored);
             return stored;
@@ -1118,7 +1128,7 @@ std::string GroomDocument::collectFiles(CollectReport* out) {
             r.copied.emplace_back("card bake", full);
         }
     }
-    for (auto& [node, ref] : simBakes_) ref.file = collect("simulation " + node, ref.file, "caches");
+    for (auto& [node, ref] : simBakes_) ref.file = collect("simulation " + node, ref.file, "groomCaches");
     if (!referencePhotos().empty()) {
         json photos = json::parse(referencePhotos(), nullptr, false);
         bool photosChanged = false;

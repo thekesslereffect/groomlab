@@ -300,7 +300,9 @@ def simulate_bake(scalp, last=None, directory=None, name=None, node=None, path=N
         if value is not None:
             args[key] = value
     if directory is None and bpy.data.filepath:
-        args["directory"] = groom.asset_folder("caches")  # (untitled: the helper's temp folder, moved on save)
+        # The groom's own folder in caches, as its maps and card bakes (untitled: the helper's temp
+        # folder, moved on save).
+        args["directory"] = groom.asset_folder("caches") + "/" + groom._file_safe(scalp.name)
     return _after_edit(scalp, call(scalp, "simulate_bake", **args))
 
 
@@ -1614,7 +1616,7 @@ def collect_files(scalps):
     out = {"copied": [], "missing": [], "inside": 0}
     for scalp in scalps:
         r = call(scalp, "files_collect", dir=folder, masks=groom.maps_dir(scalp), cards=cards_view.bake_folder(scalp),
-                 caches=groom.asset_folder("caches"))
+                 caches=groom.asset_folder("caches") + "/" + groom._file_safe(scalp.name))
         out["copied"] += [tuple(c) for c in r.get("copied") or []]
         out["missing"] += [tuple(m) for m in r.get("missing") or []]
         out["inside"] += int(r.get("inside") or 0)

@@ -4762,6 +4762,55 @@ class AssetFilesTest(unittest.TestCase):
         other = self.groom_under(None, scalp=cmds.polySphere()[0])
         self.assertEqual(self.density_map(other), self.home + "/shots/groomlab/other/masks/hair/density.png")
 
+    def test_a_map_and_the_param_reading_its_image_follow_to_one_copy(self):
+        # The app's painted params read a texture map by its image ({"texture": <the map's file>}).
+        # An untitled scene saved where that file's path holds other content (the app's groom
+        # beside it, as Filetest02): the map and the param get the same free name, one copy, and
+        # Paint on the param keeps painting the map.
+        groom = self.groom_under(None)
+        groomlab.add_map(groom, "scatter_density", 1.0, kind="texture", resolution=32)
+        image = groomlab.map_texture(groom, "scatter_density")
+        groomlab.set_param(groom, "scatter", "density", groomlab.texture_map(image, "r", 0.0, 60.0))
+        self.assertEqual(groomlab.param_map(groom, "scatter", "density"), ("scatter_density", "luminance"))
+        squatter = self.home + "/app/groomlab/app/masks/hair/scatter_density.png"
+        os.makedirs(os.path.dirname(squatter))
+        with open(squatter, "wb") as f:
+            f.write(b"the app's own painting")
+        self.save_as("app", "app.ma")
+        stored = groomlab.maps(groom)[0]["texture"]
+        self.assertEqual(stored, "groomlab/app/masks/hair/scatter_density_2.png")
+        density = next(n for n in groomlab.get_graph(groom)["nodes"] if n["name"] == "scatter")["params"]["density"]
+        self.assertEqual(density["texture"], stored)
+        self.assertFalse(os.path.exists(self.home + "/app/groomlab/app/masks/hair/scatter_density_3.png"))
+        self.assertEqual(groomlab.param_map(groom, "scatter", "density"), ("scatter_density", "luminance"))
+        self.assertEqual(groomlab.paint_param(groom, "scatter", "density", kind="texture", paint=False), "scatter_density")
+        self.assertEqual(groomlab.list_maps(groom), ["scatter_density"])
+        with open(squatter, "rb") as f:
+            self.assertEqual(f.read(), b"the app's own painting")
+
+    def test_save_as_gives_the_groom_file_the_new_scenes_name(self):
+        # A groom file beside the scene is named after it (a document of its named grooms): two
+        # versions of a scene in one folder never write one. Save As takes it along under the new
+        # name. Simulate bakes go in the groom's own caches folder.
+        from groomlab import sim
+        from groomlab.ui import menu
+        groom = self.groom_under(None)
+        self.save_as("shots", "shot_v001.ma")
+        first = menu.groom_source_file(groom)
+        self.assertEqual(first, self.home + "/shots/shot_v001.groom")
+        groomlab.save_groom(groom, first)
+        self.save_as("shots", "shot_v002.ma")
+        second = groomlab.groom_file(groom)
+        self.assertEqual(second, self.home + "/shots/shot_v002.groom")
+        self.assertTrue(os.path.isfile(second))
+        before = md5(first)
+        groomlab.set_param(groom, "scatter", "density", 33.0)
+        groomlab.save_groom(groom)
+        self.assertEqual(md5(first), before, "v001's groom file stays as it was")
+        self.assertNotEqual(md5(second), before)
+        self.assertEqual(sim.simulation_cache_path(groom, "simulate"),
+                         self.home + "/shots/groomlab/shot_v002/caches/hair/hair_simulate_sim.abc")
+
     def test_save_as_never_adopts_another_scenes_file(self):
         groom = self.groom_under(None)
         self.save_as("a", "hero.ma")

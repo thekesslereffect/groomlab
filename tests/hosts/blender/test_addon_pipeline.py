@@ -105,6 +105,16 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual([c["name"] for c in info["colliders"]], ["collar"])
         info = pipeline.set_other_scalps(self.head, {"patch": plane})
         self.assertEqual([(s["name"], s["points"]) for s in info["scalps"]], [("patch", 4)])
+        # Saved and opened again (the file's own scalp): the other scalp comes back as an object of
+        # its own, kept as the groom's (Maya's import makes it a mesh too).
+        path = os.path.join(bu.TMP, "patched.groom")
+        groom.save_groom(self.head, path)
+        opened, _info, _ = groom.load_groom(bpy.context, path, None)
+        kept = opened.groomlab.extra_scalps
+        self.assertEqual([e.name for e in kept], ["patch"])
+        self.assertEqual(len(kept["patch"].object.data.vertices), 4)
+        self.assertEqual([m["name"] for m in process.call("meshes_info", session=groom.ensure(opened).session)["scalps"]],
+                         ["patch"])
         self.assertEqual(pipeline.set_other_scalps(self.head, [])["scalps"], [])
         # Place a few guides, then move the groom onto a copy of the head 5 cm along X.
         rt = groom.ensure(self.head)
@@ -571,6 +581,29 @@ class PipelineOpsTest(unittest.TestCase):
         select_only(head)
         self.assertEqual(bpy.ops.groomlab.remove_groom("EXEC_DEFAULT"), {"FINISHED"})
         self.assertFalse(any(o.groomlab.role in ("CARDS", "SCALP_CAP") for o in bpy.data.objects))
+
+    def test_9_save_as_gives_the_groom_file_the_new_names(self):
+        # (Last: it saves the .blend, the tests before it work on an untitled one.)
+        # A groom file beside the .blend is named after it and the groom (two versions of a .blend
+        # in one folder never write one), and Save As takes it along under the new name. Simulate
+        # bakes and caches go in the groom's own caches folder.
+        groom.create_groom(bpy.context, self.head, preset="hair_basics")
+        groom.flush()
+        folder = os.path.join(bu.TMP, "versions")
+        os.makedirs(folder, exist_ok=True)
+        v1 = os.path.join(folder, "shot_v001.blend")
+        bpy.ops.wm.save_as_mainfile(filepath=v1)
+        name = groom.groom_file_name(self.head)
+        self.assertEqual(name, "shot_v001.groom")
+        first = os.path.join(folder, name)
+        groom.save_groom(self.head, first)
+        self.head.groomlab.groom_file = first
+        bpy.ops.wm.save_as_mainfile(filepath=os.path.join(folder, "shot_v002.blend"))
+        second = os.path.join(folder, "shot_v002.groom").replace("\\", "/")
+        self.assertEqual(os.path.normcase(self.head.groomlab.groom_file), os.path.normcase(second))
+        self.assertTrue(os.path.isfile(second))
+        self.assertTrue(os.path.isfile(first), "the first .blend keeps its own")
+        self.assertTrue(groom.asset_folder("caches").replace("\\", "/").endswith("/groomlab/shot_v002/caches"))
 
 
 if __name__ == "__main__":

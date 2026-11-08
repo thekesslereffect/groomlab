@@ -61,6 +61,7 @@
 #include "translators/shape/ShapeTranslator.h"
 
 #include "groomlab/arnold_curves.h"
+#include "groomlab/asset_files.h"
 #include "groomlab/export_view.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/lod.h"
@@ -803,6 +804,12 @@ private:
         const bool hasVariables = stored.find_first_of("$%") != std::string::npos;
         const std::string file = hasVariables ? stored : groomlab::maya::resolveNodePath(GetMayaObject(), stored);
         AiNodeSetStr(proc, AtString("filename"), AtString(file.c_str()));
+        // The groom's own entry of a file of several grooms (its asset name, as save_groom writes it).
+        MDagPath groomPath;
+        if (MDagPath::getAPathTo(GetMayaObject(), groomPath) == MS::kSuccess) {
+            if (groomPath.node().hasFn(MFn::kShape)) groomPath.pop();
+            AiNodeSetStr(proc, AtString("groom"), AtString(groomlab::fileSafeName(groomPath.fullPathName().asChar()).c_str()));
+        }
         AiNodeSetFlt(proc, AtString("frame"), static_cast<float>(GetExportFrame()));
         AiNodeSetFlt(proc, AtString("fps"), static_cast<float>(MTime(1.0, MTime::kSeconds).as(MTime::uiUnit())));
         const groomlab::RenderOverrides overrides = renderOverrides();  // the procedural applies them
