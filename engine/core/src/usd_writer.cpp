@@ -206,6 +206,7 @@ struct UsdCurvesWriter::Impl {
     std::vector<std::string> pointChannels;
     bool hasUVs = false;
     bool hasColors = false;  // primvars:displayColor (strandColors: HairColor's RGB, else from melanin)
+    bool unrealClumps = false, unrealRoughness = false;  // primvars:groom_clump_id, groom_roughness
     // Instances (Instance node): a PointInstancer beside the curves, its
     // prototypes placeholders to reference geometry into.
     std::vector<std::string> prototypes;
@@ -298,6 +299,15 @@ void UsdCurvesWriter::writeFrame(double frame, const StrandSet& strands, const S
         for (std::size_t i = 0; i < d.pointChannels.size(); ++i) {
             d.add("float[] primvars:" + names[d.strandChannels.size() + i], "interpolation = \"vertex\"");
         }
+        // Unreal's groom attributes: its USD import reads the primvars named groom_* of a curves
+        // prim with its GroomAPI (USDGroomConversion; its scalar types: int, float, float2, float3).
+        d.add("int[] primvars:groom_id", "interpolation = \"uniform\"");
+        if (d.hasUVs) d.add("float2[] primvars:groom_root_uv", "interpolation = \"uniform\"");
+        if (d.hasColors) d.add("float3[] primvars:groom_color", "interpolation = \"uniform\"");
+        d.unrealClumps = view.strandChannel(kClumpIdChannel) != nullptr;
+        d.unrealRoughness = view.strandChannel(kRoughnessChannel) != nullptr;
+        if (d.unrealClumps) d.add("int[] primvars:groom_clump_id", "interpolation = \"uniform\"");
+        if (d.unrealRoughness) d.add("float[] primvars:groom_roughness", "interpolation = \"uniform\"");
         d.instanceStart = d.attributes.size();
         const InstanceSet* set = strands.instances().get();
         if (set && std::any_of(set->instances.begin(), set->instances.end(), [](const InstanceSet::Instance& i) { return !i.meshed(); })) {
@@ -446,6 +456,34 @@ void UsdCurvesWriter::writeFrame(double frame, const StrandSet& strands, const S
         const std::vector<float>* values = view.pointChannel(c);
         emitList(pointCount, [&](TextBuffer& b, std::size_t i) { b.number(values ? (*values)[i] : 0.0f); });
     }
+    // Unreal's: groom_id a dense index (a non-negative int, as the Unreal Alembic export's).
+    emitList(strandCount, [&](TextBuffer& b, std::size_t s) { b.integer(static_cast<long long>(s)); });
+    if (d.hasUVs) {
+        emitList(strandCount, [&](TextBuffer& b, std::size_t s) {
+            const std::array<float, 2> uv = s < view.rootUVs.size() ? view.rootUVs[s] : std::array<float, 2>{0.0f, 0.0f};
+            b.raw("(");
+            b.number(uv[0]);
+            b.raw(", ");
+            b.number(uv[1]);
+            b.raw(")");
+        });
+    }
+    if (d.hasColors) {
+        emitList(strandCount, [&](TextBuffer& b, std::size_t s) {
+            const std::array<float, 3> c = s < view.colors.size() ? view.colors[s] : std::array<float, 3>{0.0f, 0.0f, 0.0f};
+            b.vec3({c[0], c[1], c[2]});
+        });
+    }
+    if (d.unrealClumps) {
+        const std::vector<float>* clumps = view.strandChannel(kClumpIdChannel);
+        emitList(strandCount, [&](TextBuffer& b, std::size_t s) {
+            b.integer(clumps ? static_cast<long long>(std::lround((*clumps)[s])) : -1LL);
+        });
+    }
+    if (d.unrealRoughness) {
+        const std::vector<float>* rough = view.strandChannel(kRoughnessChannel);
+        emitList(strandCount, [&](TextBuffer& b, std::size_t s) { b.number(rough ? std::clamp((*rough)[s], 0.0f, 1.0f) : 0.0f); });
+    }
     if (!d.prototypes.empty()) {
         // Only prototypes known from the first frame; others are left out (and the scales:
         // their own prims).
@@ -561,7 +599,11 @@ void UsdCurvesWriter::close() {
     header.raw("\n    metersPerUnit = ");
     header.number(d.options.metersPerUnit);
     header.raw("\n    upAxis = \"" + d.options.upAxis + "\"\n)\n\n");
-    header.raw("def Xform \"" + d.name + "\" (\n    customData = {\n" + marker + "    }\n    kind = \"component\"\n)\n{\n");
+    // Unreal's GroomAPI (its USD schema) on the groom's Xform: its importer makes a groom of the
+    // curves under it (on the curves prim itself it does not). A reader without the schema ignores
+    // an applied schema it does not know.
+    header.raw("def Xform \"" + d.name + "\" (\n    customData = {\n" + marker + "    }\n    kind = \"component\"\n" +
+               "    prepend apiSchemas = [\"GroomAPI\"]\n)\n{\n");
     header.raw("    def BasisCurves \"strands\"\n    {\n");
     header.raw("        uniform token type = \"linear\"\n        uniform token wrap = \"nonperiodic\"\n");
     if (d.hideStrands) header.raw("        token visibility = \"invisible\"\n");

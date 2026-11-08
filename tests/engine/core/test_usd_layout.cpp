@@ -231,6 +231,12 @@ PrimSpec strandsSpec(bool uvs, bool color, const std::map<std::string, std::stri
     if (color) s["primvars:displayColor"] = sampled("color3f[]", "uniform");
     if (hidden) s["visibility"] = plain("token");
     for (const auto& [name, interpolation] : channels) s["primvars:" + name] = sampled("float[]", interpolation.c_str());
+    // Unreal's groom attributes (its USD import's types).
+    s["primvars:groom_id"] = sampled("int[]", "uniform");
+    if (uvs) s["primvars:groom_root_uv"] = sampled("float2[]", "uniform");
+    if (color) s["primvars:groom_color"] = sampled("float3[]", "uniform");
+    if (channels.count("clumpId")) s["primvars:groom_clump_id"] = sampled("int[]", "uniform");
+    if (channels.count("roughness")) s["primvars:groom_roughness"] = sampled("float[]", "uniform");
     return s;
 }
 
@@ -341,7 +347,8 @@ void expectLayout(const std::string& text, const LayerSpec& spec) {
     const std::map<std::string, std::string> rootMetadata{
         {"customData.groomlab.layoutVersion", std::to_string(kUsdLayoutVersion)},
         {"customData.groomlab.version", "\"" + std::string(kVersionString) + "\""},
-        {"kind", "\"component\""}};
+        {"kind", "\"component\""},
+        {"apiSchemas", "[\"GroomAPI\"]"}};  // Unreal's: its USD importer makes a groom of the curves under it
     EXPECT_EQ(root->second.metadata, rootMetadata) << "the root prim's metadata";
     EXPECT_TRUE(root->second.attributes.empty()) << "the root prim has no attributes";
 
@@ -487,6 +494,8 @@ TEST(UsdLayout, StrandsChannelsAndInstancesOneFrameAndARange) {
         const Prim& curves = layer.prims.at("/hero_hair/strands");
         EXPECT_EQ(curves.attributes.at("type").value, "\"linear\"");
         EXPECT_EQ(curves.attributes.at("wrap").value, "\"nonperiodic\"");
+        // Unreal's importer takes it as a groom (its GroomAPI applied to the groom's Xform).
+        EXPECT_NE(text.find("    kind = \"component\"\n    prepend apiSchemas = [\"GroomAPI\"]\n)"), std::string::npos);
         EXPECT_EQ(curves.attributes.at("extent").counts.front(), 2u);
         EXPECT_EQ(curves.attributes.at("points").counts.front(), strands.pointCount());
         EXPECT_EQ(layer.prims.at("/hero_hair/instances").attributes.at("prototypes").value,

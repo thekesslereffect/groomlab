@@ -118,6 +118,15 @@ One curve per strand, root first.
 | `primvars:displayColor` | `color3f[]` | `uniform` | When the hair has a color (HairColor) | The hair's appearance color: linear sRGB (Rec. 709 primaries, no transfer curve), what it looks like, for viewers and display. |
 | `primvars:<attribute>` | `float[]` | `uniform` | Per strand attribute | The groom's per-strand attributes (below). |
 | `primvars:<attribute>` | `float[]` | `vertex` | Per point attribute | The groom's per-point attributes (below). |
+| `primvars:groom_id` | `int[]` | `uniform` | Always | For Unreal: the strand's index in the prim (a non-negative int, as the Unreal Alembic export's `groom_id`). |
+| `primvars:groom_root_uv` | `float2[]` | `uniform` | When the scalp has UVs | For Unreal: `primvars:st` again, under the name its importer reads. |
+| `primvars:groom_color` | `float3[]` | `uniform` | When the hair has a color | For Unreal: `primvars:displayColor` again, as the `float3` its importer reads. |
+| `primvars:groom_clump_id` | `int[]` | `uniform` | When the strands carry `clumpId` | For Unreal: the strand's clump (`-1`: none). |
+| `primvars:groom_roughness` | `float[]` | `uniform` | When the strands carry `roughness` | For Unreal: the strand's roughness, 0 to 1. |
+
+The groom's root Xform applies Unreal's `GroomAPI` schema (`prepend apiSchemas = ["GroomAPI"]`),
+so Unreal's USD importer (with **Import Groom Assets** on) makes a groom asset of the strands under
+it and reads their `groom_*` primvars. Readers that don't know the schema ignore it.
 
 ### Attribute primvars
 
@@ -289,6 +298,7 @@ def Xform "hair" (
         }
     }
     kind = "component"
+    prepend apiSchemas = ["GroomAPI"]
 )
 {
     def BasisCurves "strands"
