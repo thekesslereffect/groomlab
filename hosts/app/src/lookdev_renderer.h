@@ -90,6 +90,10 @@ void buildHairRange(const StrandSet& strands, const ScalpMesh* scalp, std::size_
 struct HairChanges {
     std::uint64_t serial = 0, changesBase = 0;
     ChangesPtr changes;
+    // The strands are what a GPU preview's drag drew last (its release committed the value it
+    // showed): where the point texture still holds that run, only the strands' entries and point
+    // colors are written (the GPU's points stay: no whole write of the points, no stall).
+    bool pointsHeld = false;
 };
 
 class LookdevRenderer {
@@ -157,6 +161,8 @@ public:
     // The last upload: whether it wrote only the changed strands, and how many.
     bool lastUploadPartial() const { return uploadPartial_; }
     std::size_t lastUploadStrands() const { return uploadStrands_; }
+    // It kept the GPU preview's points (HairChanges::pointsHeld): the strands' entries alone written.
+    bool lastUploadHeld() const { return uploadHeld_; }
 
     // The GPU look preview's targets (gpu_preview.h): the point texture the kernels write
     // (null until the hair is uploaded), its width, the points it holds, and whether this
@@ -282,6 +288,12 @@ private:
     MeshPtr scalp_;
     std::uint64_t hairVersion_ = 0, uploadedVersion_ = ~std::uint64_t{0};
     std::shared_ptr<HairBuffers> pending_;  // built, waiting for the next render
+    bool pointsHeld_ = false;      // setHair's changes.pointsHeld
+    bool pointsFromGpu_ = false;
+    bool uploadHeld_ = false;      // the last upload was a held one   // the point texture holds a GPU run's points (hairWritten), no upload since
+    // A held upload (pointsHeld_): the strands' entries and point colors alone. False when the
+    // texture does not hold the GPU's points of this layout (a whole write follows).
+    bool heldUpload(QRhiResourceUpdateBatch* batch);
     HairIndices indicesNeeded() const;      // what a whole upload of strands_ needs built
     // A whole write's buffers building ahead (setBuildAhead): for hair version `version`, on
     // `thread`, `buffers` once `done`.

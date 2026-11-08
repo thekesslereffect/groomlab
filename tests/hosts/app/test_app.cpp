@@ -4287,6 +4287,64 @@ TEST(AppGpuPreview, DragFrameMatchesTheCpuCommit) {
     }
 }
 
+TEST(AppGpuPreview, AReleaseOfTheValueTheGpuDrewKeepsItsPoints) {
+    // A drag the GPU drew, then the release's commit of that value handed over as held
+    // (HairChanges::pointsHeld, what the window says): the point texture stays (the strands'
+    // entries alone written), the frame as the drag's. Held again without a run since: written whole.
+    std::unique_ptr<QRhi> rhi = createOffscreenRhi();
+    ASSERT_TRUE(rhi);
+    if (rhi->backend() == QRhi::Null || !GpuLookPreview::supported(rhi.get())) GTEST_SKIP() << "no device with a GPU preview engine";
+    auto doc = GroomDocument::open(kSampleGroom);
+    ASSERT_EQ(doc->replaceGraph(gpuGraphJson(1500.0)), "");
+    ViewRequest request;
+    request.density = 1.0f;
+    ASSERT_EQ(doc->setParam("noise", "amplitude", 0.15), "");
+    ASSERT_TRUE(doc->evaluate(request).strands);
+    OrbitCamera camera;
+    camera.frame(doc->sceneBounds());
+    OffscreenView view(QSize(320, 240), rhi.get());
+    ASSERT_TRUE(view.ready());
+    DisplaySettings settings;
+    GpuLookPreview gpu;
+    gpu.setDocument(doc.get());
+    GroomRenderer renderer;
+    renderer.setGpuPreview(&gpu);
+    renderer.setLookdev(true);
+    LightingSetup lighting = lightingPreset("studio");
+    lighting.quality = Quality::Interactive;
+    lighting.interactiveQuality = InteractiveQuality::Full;
+    renderer.setLighting(lighting);
+    doc->display().invalidateAll();
+    feed(renderer, *doc, doc->updateDisplay(settings));
+    ASSERT_FALSE(view.frame(renderer, camera).image.isNull());
+    ASSERT_TRUE(framesUntilKernelsReady(gpu, renderer, view, camera));
+    std::string why;
+    ASSERT_TRUE(gpu.drag("noise", "amplitude", gpu::OverrideValue(0.5), &why)) << why;
+    QImage dragged = view.frame(renderer, camera).image;
+    if (!renderer.gpuRanLastFrame()) dragged = view.frame(renderer, camera).image;
+    ASSERT_TRUE(renderer.gpuRanLastFrame()) << renderer.gpuWhy();
+    EXPECT_TRUE(gpu.drewLatestValue());
+    gpu.endDrag();
+    EXPECT_FALSE(gpu.drewLatestValue());
+    auto handHeld = [&](double amplitude) {
+        EXPECT_EQ(doc->setParam("noise", "amplitude", amplitude), "");
+        doc->evaluate(request);
+        const ViewResult& v = doc->lastView();
+        HairChanges held{v.strandsSerial, v.changesBase, v.strandsChanges};
+        held.pointsHeld = true;
+        renderer.setHairStrands(v.strands, v.versions.strands, held);
+        renderer.setFrame(doc->updateDisplay(settings));
+        return view.frame(renderer, camera).image;
+    };
+    const QImage kept = handHeld(0.5);
+    EXPECT_TRUE(renderer.lookdevRenderer().lastUploadHeld()) << "the GPU's points kept";
+    EXPECT_LT(pixelsDiffering(dragged, kept), 0.03) << "the frame as the drag's (the shadow maps fit the CPU's bounds now)";
+    const QImage whole = handHeld(0.3);
+    EXPECT_FALSE(renderer.lookdevRenderer().lastUploadHeld()) << "no GPU run since: the points written whole";
+    EXPECT_GT(pixelsDiffering(kept, whole), 0.01) << "the new value shows";
+    renderer.releaseResources();
+}
+
 TEST(AppGpuPreview, StrokeDabsRunOnTheGpu) {
     // A stroke's press is the CPU's; the dabs after it evaluate the guides alone (stopAt) and
     // the GPU blends them into the strands it holds: the frame matches the CPU's evaluation of

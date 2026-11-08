@@ -80,6 +80,9 @@ public:
     // CPU as before.
     bool drag(const std::string& node, const std::string& param, const gpu::OverrideValue& value, std::string* why);
     bool dragging() const { return !overrides_.empty(); }
+    // The last successful run wrote the drag's latest value into a point texture (the lookdev
+    // path's): a release committing that value finds those points already drawn.
+    bool drewLatestValue() const { return !overrides_.empty() && wroteTexture_ && wrote_ == version_; }
     // The drag ended: the overrides go (the caller committed on the CPU; its evaluation
     // replaces the preview).
     void endDrag();
@@ -169,6 +172,8 @@ private:
     gpu::Overrides overrides_;
     std::unique_ptr<gpu::LookPlan> plan_;  // the drag's
     std::uint64_t version_ = 0, ran_ = 0;
+    std::uint64_t wrote_ = 0;    // the version the last successful run stood for
+    bool wroteTexture_ = false;  // it wrote a point texture (not the line path's buffers)
     gpu::LookBounds bounds_;
     std::string why_;
     double runMs_ = 0.0, uploadMs_ = 0.0;

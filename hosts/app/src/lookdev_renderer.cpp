@@ -178,6 +178,13 @@ struct HairChannels {
             out[6] = t.z;
             out[7] = begin + k < widths.size() ? widths[begin + k] : 0.01f;
         }
+        writeStrand(i, sd);
+    }
+    // Strand i's entry alone (12 floats): what `write` puts in `sd`.
+    void writeStrand(std::size_t i, float* sd) const {
+        const std::size_t n = s.strandPointCount(i);
+        const std::size_t begin = s.strandBegin(i);
+        const Vec3f* p = s.strandPoints(i);
         sd[0] = melanin ? (*melanin)[i] : kDefaultMelanin;
         sd[1] = redness ? (*redness)[i] : kDefaultMelaninRedness;
         sd[2] = unitFloat(hash64(static_cast<std::uint64_t>(i < ids.size() ? ids[i] : i) ^ 0x1D0D));
@@ -617,11 +624,13 @@ void LookdevRenderer::setHair(StrandsPtr strands, MeshPtr scalp, std::uint64_t v
     scalp_ = std::move(scalp);
     hairVersion_ = version;
     changes_ = changes;
+    pointsHeld_ = changes.pointsHeld;
     pending_.reset();
     sceneChanged();
     // A whole write ahead: its buffers built on a thread of their own while the frames go on
     // drawing the hair held (one build at a time: a change while one runs builds in the frame).
-    if (buildAhead_ && strands_ && gpu_->points && !partialUpload() && !(build_ && !build_->done.load(std::memory_order_acquire))) {
+    if (buildAhead_ && strands_ && gpu_->points && !partialUpload() && !(pointsHeld_ && pointsFromGpu_) &&
+        !(build_ && !build_->done.load(std::memory_order_acquire))) {
         joinBuild();
         auto job = std::make_shared<HairBuild>();
         job->version = hairVersion_;
@@ -650,6 +659,7 @@ void LookdevRenderer::hairWritten(const Bounds& bounds) {
     // The texels hold the GPU's strands now, not the CPU's of uploadedSerial_: the next change
     // writes them whole. The maps are fit to what the run can have reached.
     uploadedSerial_ = 0;
+    pointsFromGpu_ = true;
     if (bounds.valid) {
         if (!hairBounds_.valid) hairBounds_ = bounds;
         growBounds(hairBounds_, bounds.lo);
@@ -1284,6 +1294,34 @@ bool writeTextureNative(QRhi* rhi, QRhiTexture* texture, const void* data, std::
 
 }  // namespace
 
+bool LookdevRenderer::heldUpload(QRhiResourceUpdateBatch* batch) {
+    Gpu& g = *gpu_;
+    if (!pointsFromGpu_ || !strands_ || indicesNeeded() != HairIndices::None) return false;
+    QElapsedTimer timer;
+    timer.start();
+    const StrandSet& s = *strands_;
+    const HairChannels channels(s, scalp_.get());
+    std::vector<float> strandData(s.strandCount() * 12), pointColors(pointColored_ ? s.pointCount() * 4 : 0);
+    parallelFor(0, s.strandCount(), [&](std::size_t i) {
+        channels.writeStrand(i, strandData.data() + i * 12);
+        if (pointColored_) channels.writePointColors(i, pointColors.data() + s.strandBegin(i) * 4);
+    }, 256);
+    uploadTexelRange(batch, g.strands.get(), 0, s.strandCount() * 3, strandData.data());
+    if (pointColored_) uploadTexelRange(batch, g.pointColors.get(), 0, s.pointCount(), pointColors.data());
+    hairBounds_ = hairBoundsOf(s);
+    updateBounds();
+    uploadMs_ = timer.nsecsElapsed() / 1e6;
+    uploadPartial_ = true;
+    uploadStrands_ = s.strandCount();
+    uploadedThisFrame_ = true;
+    ++uploads_;
+    uploadedVersion_ = hairVersion_;
+    uploadedSerial_ = 0;  // (the GPU's points, as after a run: the next change writes them whole)
+    pointsFromGpu_ = false;  // they stand for this hair now: another held one needs another run
+    pending_.reset();
+    return true;
+}
+
 HairIndices LookdevRenderer::indicesNeeded() const {
     // None while the GPU holds this layout (the same point counts, colored alike): what the upload
     // writes in place; else the kind drawn, both before the first upload says which.
@@ -1316,6 +1354,9 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
     uploadedThisFrame_ = false;
     waitingForBuild_ = false;
     if (uploadedVersion_ == hairVersion_ && g.points) return;
+    uploadHeld_ = pointsHeld_ && heldUpload(batch);
+    if (uploadHeld_) return;
+    pointsFromGpu_ = false;
     const bool partial = partialUpload();
     if (partial) {
         QElapsedTimer timer;

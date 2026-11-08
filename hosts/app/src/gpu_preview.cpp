@@ -360,6 +360,8 @@ bool GpuLookPreview::run(QRhi* rhi, const Targets& targets, std::string* why) {
         return false;
     }
     ran_ = version_;
+    wrote_ = version_;
+    wroteTexture_ = targets.pointTexture != nullptr && !core_.strokeArmed();
     ++runs_;
     runMs_ = since(start);
     why_.clear();

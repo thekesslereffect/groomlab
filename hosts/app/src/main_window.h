@@ -753,6 +753,15 @@ private:
     OutlinerPanel* outliner_ = nullptr;  // the Groom Tools' Outliner tab
     std::vector<std::pair<QPixmap, QPoint>> uiMenus_;  // setUiMenu's menus as grabbed, and where grabUi draws them (window coordinates)
     GpuLookPreview gpu_;
+    // A drag's live value (livePreview), and the one a GPU-drawn drag was released at, with the
+    // strands shown then: the evaluation committing it keeps the GPU's points (HairChanges::pointsHeld).
+    struct LiveValue {
+        std::string node, name;
+        nlohmann::json value;
+        std::uint64_t strandsVersion = 0;
+    };
+    std::optional<LiveValue> lastLive_, gpuHeld_;
+    std::uint64_t lastStrandsVersion_ = 0;  // the strands the last evaluation showed
     struct Headless {
         std::unique_ptr<OffscreenView> view;
         GroomRenderer renderer;

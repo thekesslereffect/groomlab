@@ -522,10 +522,18 @@ void MainWindow::attachDocument() {
                     return false;
                 }
             }
+            lastLive_ = LiveValue{node, name, value, 0};
             viewport_->update();
             return true;
         };
         document_->livePreviewEnded = [this] {
+            // The GPU drew the value released: the evaluation committing it keeps those points.
+            gpuHeld_.reset();
+            if (gpu_.drewLatestValue() && lastLive_) {
+                gpuHeld_ = *lastLive_;
+                gpuHeld_->strandsVersion = lastStrandsVersion_;
+            }
+            lastLive_.reset();
             gpu_.endDrag();
             if (document_ && document_->session().liveDrag()) {
                 // Refined again: by the commit that follows, or (a release at the value it had) here.
@@ -633,7 +641,13 @@ void MainWindow::reevaluate(bool quiet) {
     settings_.tubes = tubes_->isChecked() && !showCards && shell_->mode() == OverlayHost::Mode::Groom;
     // How the strands differ from the ones shown before (a dab's incremental evaluation): the
     // renderers write only those.
-    const HairChanges changes{shown.strandsSerial, shown.changesBase, shown.strandsChanges};
+    HairChanges changes{shown.strandsSerial, shown.changesBase, shown.strandsChanges};
+    // The evaluation after a GPU-drawn drag's release, of the value it drew: the points stay.
+    if (gpuHeld_ && shown.versions.strands != gpuHeld_->strandsVersion) {
+        changes.pointsHeld = !showCards && document_->param(gpuHeld_->node, gpuHeld_->name) == gpuHeld_->value;
+        gpuHeld_.reset();
+    }
+    lastStrandsVersion_ = shown.versions.strands;
     // (The Groom Tools' eye off: the renderers hold them, drawing none.)
     // (A Scatter viewed alone: its roots are dots, with the guides': no hair to shade.)
     viewport_->renderer().setHairStrands(showCards || shown.viewedRoots ? nullptr : shown.strands, shown.versions.strands, changes);
