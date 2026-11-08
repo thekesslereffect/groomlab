@@ -1468,7 +1468,7 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
             batch->uploadStaticBuffer(buffer.get(), data.data());
             return true;
         };
-        // An RGBA32F texture kHairTextureWidth wide, the entries two texels each, the last row
+        // An RGBA32F texture kHairTextureWidth wide (a texel a point, three a strand), the last row
         // padded: a texel fetch in the vertex shader reads them on every backend. Where the
         // device computes, the GPU look preview may write the points in place (UsedWithLoadStore).
         // The padded copy is kept between uploads (the batch holds it, shared, until the frame

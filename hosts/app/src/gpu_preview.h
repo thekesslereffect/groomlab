@@ -105,7 +105,7 @@ public:
     // The points of the strands the pending run stands for (the graph's output as shown): the
     // host picks the item (or texture) holding that many.
     std::size_t outputPoints() const;
-    // Where the next run writes: the lookdev path's point texture (two RGBA32F texels a point,
+    // Where the next run writes: the lookdev path's point texture (an RGBA32F texel a point,
     // `textureWidth` wide), or the line path's vertex buffers (float3 a point; the frames when
     // lit). `pointCount` says what they hold (the run's output must match).
     struct Targets {

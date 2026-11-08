@@ -49,8 +49,8 @@
 
 namespace groomlab::app {
 
-// The hair as the GPU draws it: two texels a point (position and its strand; tangent and
-// width), three a strand (melanin, redness, random, its first point; the RGB channels and its
+// The hair as the GPU draws it: a texel a point (position and width; each point's strand a float
+// of its own, the tangent the shaders' from the points either side: hair_points.glsl), three a strand (melanin, redness, random, its first point; the RGB channels and its
 // point count; the scalp's normal at its root, what the head hides from the lights), and a
 // triangle strip's indices (a restart between strands) or a triangle list's.
 struct HairBuffers {

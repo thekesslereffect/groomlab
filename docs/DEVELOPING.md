@@ -1437,7 +1437,9 @@ need it).
 
 **Lookdev.** The viewport predicts the Arnold render (`hosts/app/src/lookdev_renderer.cpp`,
 `hosts/app/shaders/hair*.frag`, `look.h`). The strands draw as camera-facing ribbons pulled from float
-textures in the vertex shader (`hair.vert`: two texels a point, a triangle strip a strand, a
+textures in the vertex shader (`hair.vert`: a texel a point, position and width, each point's strand
+in a texture of its own written with a new layout alone and the tangent from the points either side,
+`hair_points.glsl`; a triangle strip a strand, a
 restart between strands; thinner than a pixel they are widened to one and their coverage fades
 them, so thin hair neither aliases nor vanishes). The shading is Marschner's R, TT and TRT lobes
 in Karis 2016's closed forms, their widths from aiStandardHair's roughness through d'Eon's fits,

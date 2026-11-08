@@ -45,10 +45,10 @@ struct GpuTimes {
 // shader storage). Null: the results stay in the engine (checks read them back).
 //
 // `pointTexture`: the standalone app's point texture instead of (or beside) the buffers: an
-// RGBA32F texture `textureWidth` texels wide holding two texels a point, (x y z strand) and
-// (tangent xyz, width), as its lookdev renderer builds it on the CPU (buildHairBuffers). After
-// the run a kernel writes the final points there in that layout (the widths Width's where it
-// ran, else the base's). DirectX 11: ID3D11Texture2D* made with unordered access (QRhi's
+// RGBA32F texture `textureWidth` texels wide holding a texel a point, (x y z width), as its
+// lookdev renderer builds it on the CPU (buildHairBuffers; each point's strand a texture of its
+// own, the tangent the shaders'). After the run a kernel writes the final points there in that
+// layout (the widths Width's where it ran, else the base's). DirectX 11: ID3D11Texture2D* made with unordered access (QRhi's
 // UsedWithLoadStore); OpenGL: a texture name (GLuint, cast), bound as an image. Vulkan and Metal
 // hosts to come: the same kernel through the engine of their API.
 //
