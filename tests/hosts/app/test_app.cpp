@@ -2002,17 +2002,21 @@ TEST(AppLook, HairBuffersFollowTheStrands) {
     const HairBuffers b = buildHairBuffers(strands, nullptr);
     EXPECT_EQ(b.pointCount, 6u);
     EXPECT_EQ(b.strandCount, 3u);
-    // Padded to a whole row of the 4096-wide textures (two texels a point, three a strand).
+    // Padded to a whole row of the 4096-wide textures (a texel a point: x y z width; three a strand).
     ASSERT_EQ(b.points.size(), 4096u * 4);
     ASSERT_EQ(b.strands.size(), 4096u * 4);
-    EXPECT_EQ(b.points[6 * 8], 0.0f) << "the padding is zero";
-    // The first strand: up the y axis, its points strand 0, its widths; the second strand's
-    // points say strand 1, and its texels hold its first point and count, and (no scalp) its
-    // first segment as the root normal.
+    EXPECT_EQ(b.points[6 * 4], 0.0f) << "the padding is zero";
+    // The first strand: up the y axis, its widths; each point's strand in pointStrands (a float a
+    // point, a whole row); the second strand's texels hold its first point and count, and (no
+    // scalp) its first segment as the root normal.
     EXPECT_FLOAT_EQ(b.points[4 + 1], 1.0f);
-    EXPECT_FLOAT_EQ(b.points[3], 0.0f);
-    EXPECT_FLOAT_EQ(b.points[16 + 7], 0.01f);
-    EXPECT_FLOAT_EQ(b.points[4 * 8 + 3], 1.0f);
+    EXPECT_FLOAT_EQ(b.points[3], 0.02f);
+    EXPECT_FLOAT_EQ(b.points[8 + 3], 0.01f);
+    ASSERT_EQ(b.pointStrands.size(), 4096u);
+    EXPECT_FLOAT_EQ(b.pointStrands[0], 0.0f);
+    EXPECT_FLOAT_EQ(b.pointStrands[4], 1.0f);
+    EXPECT_FLOAT_EQ(b.pointStrands[5], 2.0f);
+    EXPECT_TRUE(buildHairBuffers(strands, nullptr, HairIndices::None).pointStrands.empty()) << "a layout held: none built";
     EXPECT_FLOAT_EQ(b.strands[0], 0.7f);
     EXPECT_FLOAT_EQ(b.strands[3], 0.0f);
     EXPECT_FLOAT_EQ(b.strands[7], 3.0f);

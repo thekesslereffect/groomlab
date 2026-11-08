@@ -3995,12 +3995,12 @@ void UvWidthsCS(uint3 id : SV_DispatchThreadID) {
 
 // ---- The app's point texture (hosts/app/src/lookdev_renderer.cpp buildHairBuffers) -------------------
 //
-// The standalone app draws its lookdev ribbons from an RGBA32F texture of two texels a point,
-// (x y z strand) then (tangent xyz, width), gFlag.x texels wide (hair.vert fetches at that
-// width). After a run, the final points (gIn) are written there in that layout: the tangent is
-// the central difference buildHairBuffers takes (one-sided at the ends, up for a lone point),
-// the width gAux0's (Width's result when it ran, else the base's widths), so the app's vertex
-// shader reads the GPU's strands exactly as it reads the CPU's.
+// The standalone app draws its lookdev ribbons from an RGBA32F texture of a texel a point,
+// (x y z width), gFlag.x texels wide (hair.vert fetches at that width; each point's strand is a
+// texture of its own the layout alone writes, the tangent the shaders' own from the points either
+// side: hosts/app/shaders/hair_points.glsl). After a run, the final points (gIn) are written there
+// in that layout, the width gAux0's (Width's result when it ran, else the base's widths), so the
+// app's shaders read the GPU's strands exactly as they read the CPU's.
 
 // OpenGL binds images in a namespace of their own with few units (NVIDIA: 8), so there the
 // image takes unit 0 (GROOMLAB_SLANG_GL, set when the GLSL is embedded; in another set, as
@@ -4019,13 +4019,7 @@ void storeTexel(uint t, float4 v) {
 
 void pointTexels(uint s, uint begin, uint n, uint k) {
     const uint p = begin + k;
-    const float3 v = loadPoint(p);
-    const float3 d = loadPoint(begin + min(k + 1, n - 1)) - loadPoint(begin + (k > 0 ? k - 1 : 0));
-    const float len = len3(d);
-    const float3 t = len > 1e-12f ? d * (1.0f / len) : float3(0.0f, 1.0f, 0.0f);
-    const float w = asfloat(gAux0.Load(p * 4));
-    storeTexel(2 * p, float4(v, float(s)));
-    storeTexel(2 * p + 1, float4(t, w));
+    storeTexel(p, float4(loadPoint(p), asfloat(gAux0.Load(p * 4))));
 }
 
 [shader("compute")]

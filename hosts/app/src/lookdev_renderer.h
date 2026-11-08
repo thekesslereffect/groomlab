@@ -54,7 +54,9 @@ namespace groomlab::app {
 // point count; the scalp's normal at its root, what the head hides from the lights), and a
 // triangle strip's indices (a restart between strands) or a triangle list's.
 struct HairBuffers {
-    std::vector<float> points;      // 8 per point: x y z strand, tx ty tz width
+    std::vector<float> points;      // 4 per point: x y z width (hair_points.glsl)
+    // Each point's strand (a float a point, whole rows): built with the indices, for a new layout.
+    std::vector<float> pointStrands;
     std::vector<float> strands;     // 12 per strand: melanin redness random first, r g b count, nx ny nz 0
     // 4 per point, r g b iridescence, when the strands carry per-point colors or an iridescence
     // (hairPointColored: a tip color, Bands, FeatherColor's patterns); else empty.
@@ -77,7 +79,7 @@ enum class HairIndices { Both, Strip, List, None };
 HairBuffers buildHairBuffers(const StrandSet& strands, const ScalpMesh* scalp, HairIndices indices = HairIndices::Both);
 // The index arrays of `b` (for `strands`, as buildHairBuffers lays them out) built where missing.
 void buildHairIndices(const StrandSet& strands, HairIndices indices, HairBuffers& b);
-// The same for strands [first, end) alone: their point entries (8 floats a point, from strand
+// The same for strands [first, end) alone: their point entries (4 floats a point, from strand
 // `first`'s first point on) and strand entries (12 a strand), as a partial upload writes them
 // (DisplayItem::updated's runs), and with `pointColors` their per-point colors (4 floats a point).
 void buildHairRange(const StrandSet& strands, const ScalpMesh* scalp, std::size_t first, std::size_t end, std::vector<float>& points,
@@ -289,6 +291,7 @@ private:
     std::uint64_t hairVersion_ = 0, uploadedVersion_ = ~std::uint64_t{0};
     std::shared_ptr<HairBuffers> pending_;  // built, waiting for the next render
     bool pointsHeld_ = false;      // setHair's changes.pointsHeld
+    QByteArray pointStrandsScratch_;  // the strands of the points, for a batch's upload (kept until it runs)
     bool pointsFromGpu_ = false;
     bool uploadHeld_ = false;      // the last upload was a held one   // the point texture holds a GPU run's points (hairWritten), no upload since
     // A held upload (pointsHeld_): the strands' entries and point colors alone. False when the

@@ -51,14 +51,13 @@ void main() {
     vec2 where = unpackUnorm2x16(pix[at + 3u]);
     float t = where.x;
 
-    vec4 a0 = fetch(pointsTexture, p * 2u);
-    vec4 b0 = fetch(pointsTexture, p * 2u + 1u);
-    vec4 a1 = fetch(pointsTexture, p * 2u + 2u);
-    vec4 b1 = fetch(pointsTexture, p * 2u + 3u);
-    uint strand = uint(a0.w + 0.5);
+    vec4 a0 = fetch(pointsTexture, p);
+    vec4 a1 = fetch(pointsTexture, p + 1u);
+    uint strand = hairStrandOf(p);
     vec4 d0 = fetch(strandsTexture, strand * 3u);
     vec4 d1 = fetch(strandsTexture, strand * 3u + 1u);
     vec4 d2 = fetch(strandsTexture, strand * 3u + 2u);
+    uint first = uint(d0.w + 0.5), count = uint(d1.w + 0.5);
     bool ownColors = textureSize(pointColorsTexture, 0).x == 4096;
     vec4 own0 = ownColors ? fetch(pointColorsTexture, p) : vec4(d1.rgb, 0.0);
     vec4 own1 = ownColors ? fetch(pointColorsTexture, p + 1u) : own0;
@@ -68,7 +67,7 @@ void main() {
 
     HairPoint h;
     h.P = mix(a0.xyz, a1.xyz, t);
-    vec3 tangent = mix(b0.xyz, b1.xyz, t);
+    vec3 tangent = mix(hairTangent(p, first, count), hairTangent(p + 1u, first, count), t);
     h.T = dot(tangent, tangent) > 1e-12 ? normalize(tangent) : normalize(a1.xyz - a0.xyz + vec3(1e-9));
     h.V = normalize(eyeFrame.xyz - h.P);
     h.side = where.y * 2.0 - 1.0;

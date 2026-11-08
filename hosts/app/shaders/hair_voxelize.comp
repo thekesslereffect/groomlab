@@ -13,7 +13,7 @@ layout(local_size_x = 256) in;
 
 #include "hair_voxel.glsl"
 
-layout(binding = 2) uniform sampler2D pointsTexture;   // (x, y, z, strand), (tx, ty, tz, width)
+layout(binding = 2) uniform sampler2D pointsTexture;   // (x, y, z, width): hair_points.glsl
 layout(binding = 3) uniform sampler2D strandsTexture;  // (melanin, redness, random, first point), (r, g, b, point count), (root normal, 0)
 
 layout(std430, binding = 4) buffer Density {
@@ -24,18 +24,18 @@ vec4 fetch(sampler2D tex, uint texel) {
     return texelFetch(tex, ivec2(int(texel & 4095u), int(texel >> 12u)), 0);
 }
 
+#include "hair_points.glsl"
+
 void main() {
     uint p = gl_GlobalInvocationID.y * gridCounts.y + gl_GlobalInvocationID.x;
     if (p >= gridCounts.x) return;
-    vec4 a0 = fetch(pointsTexture, p * 2u);
-    uint s = uint(a0.w + 0.5);
+    vec4 a0 = fetch(pointsTexture, p);
+    uint s = hairStrandOf(p);
     vec4 d0 = fetch(strandsTexture, s * 3u);
     vec4 d1 = fetch(strandsTexture, s * 3u + 1u);
     uint first = uint(d0.w + 0.5), count = uint(d1.w + 0.5);
     if (p + 1u >= first + count) return;
-    vec4 b0 = fetch(pointsTexture, p * 2u + 1u);
-    vec4 a1 = fetch(pointsTexture, p * 2u + 2u);
-    vec4 b1 = fetch(pointsTexture, p * 2u + 3u);
+    vec4 a1 = fetch(pointsTexture, p + 1u);
     float voxel = gridLo.w;
     float len = length(a1.xyz - a0.xyz);
     int samples = clamp(int(ceil(len / voxel)), 1, 256);
@@ -46,7 +46,7 @@ void main() {
         vec3 pos = mix(a0.xyz, a1.xyz, t);
         ivec3 v = ivec3(floor((pos - gridLo.xyz) / voxel));
         if (any(lessThan(v, ivec3(0))) || any(greaterThanEqual(v, dims))) continue;
-        float area = mix(b0.w, b1.w, t) * gridParams.x * gridParams.y * step / (voxel * voxel);
+        float area = mix(a0.w, a1.w, t) * gridParams.x * gridParams.y * step / (voxel * voxel);
         uint at = uint((v.z * dims.y + v.y) * dims.x + v.x);
         atomicAdd(density[at], uint(area * gridParams.z + 0.5));
     }

@@ -59,6 +59,7 @@ constexpr int kBrdfLutSize = 64, kSkinLutWidth = 128, kSkinLutHeight = 64, kEnvL
 constexpr int kBindEnvPrefiltered = 18, kBindBrdf = 19, kBindSkinLut = 20, kBindAlbedo = 21, kBindNormal = 22, kBindMask = 23, kBindDetail = 24;
 constexpr int kBindShadow0 = 25, kBindSssBlurred = 28, kBindSamplerNearest = 29;  // then linear, mip repeat, mip clamp
 constexpr int kBindPointColors = 9;  // the hair's per-point colors (hair.vert, hair_lookdev.frag's per-point pass)
+constexpr int kBindPointStrands = 40;  // each point's strand (hair_points.glsl)
 constexpr int kBindVolume0 = 34;     // the hair's voxel volumes (hair_shade.comp, surface_lookdev.frag), four
 // The separable subsurface blur (sss_blur.frag): its taps, and how far the kernel reaches
 // in diffuse mean free paths (Burley's profile keeps 90 percent of its mass within five of
@@ -163,20 +164,12 @@ struct HairChannels {
         const std::size_t begin = s.strandBegin(i);
         const Vec3f* p = s.strandPoints(i);
         for (std::size_t k = 0; k < n; ++k) {
-            // The tangent: central differences inside, one-sided at the ends.
-            const Vec3f prev = p[k > 0 ? k - 1 : 0], next = p[k + 1 < n ? k + 1 : n - 1];
-            Vec3f t = next - prev;
-            const float len = t.length();
-            t = len > 1e-12f ? t * (1.0f / len) : Vec3f{0.0f, 1.0f, 0.0f};
-            float* out = points + k * 8;
+            // A texel a point (the strand and the tangent are the shaders': hair_points.glsl).
+            float* out = points + k * 4;
             out[0] = p[k].x;
             out[1] = p[k].y;
             out[2] = p[k].z;
-            out[3] = static_cast<float>(i);  // exact below 2^24 strands
-            out[4] = t.x;
-            out[5] = t.y;
-            out[6] = t.z;
-            out[7] = begin + k < widths.size() ? widths[begin + k] : 0.01f;
+            out[3] = begin + k < widths.size() ? widths[begin + k] : 0.01f;
         }
         writeStrand(i, sd);
     }
@@ -244,11 +237,11 @@ void buildHairRange(const StrandSet& s, const ScalpMesh* scalp, std::size_t firs
                     std::vector<float>& strandData, Bounds* bounds, std::vector<float>* pointColors) {
     const HairChannels channels(s, scalp);
     const std::size_t pBegin = s.strandBegin(first), pEnd = s.offsets()[end];
-    points.resize((pEnd - pBegin) * 8);
+    points.resize((pEnd - pBegin) * 4);
     strandData.resize((end - first) * 12);
     if (pointColors) pointColors->resize((pEnd - pBegin) * 4);
     parallelFor(first, end, [&](std::size_t i) {
-        channels.write(i, points.data() + (s.strandBegin(i) - pBegin) * 8, strandData.data() + (i - first) * 12);
+        channels.write(i, points.data() + (s.strandBegin(i) - pBegin) * 4, strandData.data() + (i - first) * 12);
         if (pointColors) channels.writePointColors(i, pointColors->data() + (s.strandBegin(i) - pBegin) * 4);
     }, 256);
     if (bounds) {
@@ -259,6 +252,16 @@ void buildHairRange(const StrandSet& s, const ScalpMesh* scalp, std::size_t firs
 void buildHairIndices(const StrandSet& s, HairIndices indices, HairBuffers& b) {
     const bool strip = (indices == HairIndices::Both || indices == HairIndices::Strip) && b.strip.empty();
     const bool list = (indices == HairIndices::Both || indices == HairIndices::List) && b.list.empty();
+    if (indices != HairIndices::None && b.pointStrands.empty()) {
+        // Each point's strand, a float texel a point (exact below 2^24 strands), whole rows.
+        const std::size_t rows = std::max<std::size_t>((s.pointCount() + kHairTextureWidth - 1) / kHairTextureWidth, 1);
+        b.pointStrands.assign(rows * kHairTextureWidth, 0.0f);
+        parallelFor(0, s.strandCount(), [&](std::size_t i) {
+            const std::size_t begin = s.strandBegin(i), n = s.strandPointCount(i);
+            std::fill(b.pointStrands.begin() + static_cast<std::ptrdiff_t>(begin),
+                      b.pointStrands.begin() + static_cast<std::ptrdiff_t>(begin + n), static_cast<float>(i));
+        }, 1024);
+    }
     if (!strip && !list) return;
     // The strip: two vertices a point, a restart after each strand; the list: six indices a
     // segment. Both are laid out so every strand writes its own range in parallel.
@@ -298,12 +301,12 @@ HairBuffers buildHairBuffers(const StrandSet& s, const ScalpMesh* scalp, HairInd
     HairBuffers b;
     b.pointCount = s.pointCount();
     b.strandCount = s.strandCount();
-    // Padded to whole rows of the textures (two texels a point, three a strand, four floats a
+    // Padded to whole rows of the textures (a texel a point, three a strand, four floats a
     // texel), so a texture is written from the arrays as they are.
     auto padded = [](std::size_t texels) {
         return (texels + kHairTextureWidth - 1) / kHairTextureWidth * kHairTextureWidth * 4;
     };
-    b.points.resize(std::max(padded(b.pointCount * 2), std::size_t{kHairTextureWidth * 4}));
+    b.points.resize(std::max(padded(b.pointCount), std::size_t{kHairTextureWidth * 4}));
     b.strands.resize(std::max(padded(b.strandCount * 3), std::size_t{kHairTextureWidth * 4}));
     const HairChannels channels(s, scalp);
     // Colors per point (one texel each) only where the strands have their own.
@@ -311,7 +314,7 @@ HairBuffers buildHairBuffers(const StrandSet& s, const ScalpMesh* scalp, HairInd
     if (b.pointColored) b.pointColors.resize(std::max(padded(b.pointCount), std::size_t{kHairTextureWidth * 4}));
     parallelFor(0, b.strandCount, [&](std::size_t i) {
         const std::size_t begin = s.strandBegin(i);
-        channels.write(i, b.points.data() + begin * 8, b.strands.data() + i * 12);
+        channels.write(i, b.points.data() + begin * 4, b.strands.data() + i * 12);
         if (b.pointColored) channels.writePointColors(i, b.pointColors.data() + begin * 4);
     }, 256);
     buildHairIndices(s, indices, b);
@@ -465,8 +468,10 @@ struct LookdevRenderer::Gpu {
     QRhi* rhi = nullptr;
     // The hair.
     // The points and strands as float textures the vertex shader fetches (kHairTextureWidth
-    // texels wide, two an entry), and the strip's or list's indices.
+    // texels wide: a point's one texel, a strand's three), and the strip's or list's indices.
     std::unique_ptr<QRhiTexture> points, strands;
+    // Each point's strand (R32F, a texel a point): written with a new layout alone.
+    std::unique_ptr<QRhiTexture> pointStrands;
     // The points' own colors (r g b and the iridescence, a texel each) when the strands carry
     // them; else a single texel, which tells hair.vert to take each strand's color.
     std::unique_ptr<QRhiTexture> pointColors;
@@ -572,7 +577,7 @@ struct LookdevRenderer::Gpu {
         // The objects the bindings name, by QRhi's resource ids rather than their addresses (a
         // buffer freed and the next one made can come back at the same address, and bindings
         // naming the freed objects then draw from freed memory): made again when one of them was.
-        static constexpr std::size_t kBound = 18;
+        static constexpr std::size_t kBound = 19;
         std::array<quint64, kBound> bound{};
         quint64 compositeOn = 0;  // the resolved texture the composite target draws into (its id)
         bool ready = false;
@@ -997,7 +1002,9 @@ bool LookdevRenderer::ensurePipelines(QRhi* rhi, QRhiRenderTarget* target) {
         const B pointsB = B::sampledTexture(2, vs, g.points.get(), g.nearest.get());
         const B strandsB = B::sampledTexture(3, vs, g.strands.get(), g.nearest.get());
         const B colorsB = B::sampledTexture(kBindPointColors, vs, g.pointColors.get(), g.nearest.get());
-        std::vector<B> lookdev{B::uniformBuffer(0, fs, g.frame.get()), B::uniformBuffer(1, both, g.pass[0].get()), pointsB, strandsB, colorsB};
+        const B pointStrandsB = B::sampledTexture(kBindPointStrands, vs, g.pointStrands.get(), g.nearest.get());
+        std::vector<B> lookdev{B::uniformBuffer(0, fs, g.frame.get()), B::uniformBuffer(1, both, g.pass[0].get()), pointsB, strandsB, colorsB,
+                               pointStrandsB};
         domTextures(lookdev, true);
         shadowTextures(lookdev);
         g.hairLookdevSrb = srbv(lookdev);
@@ -1010,11 +1017,13 @@ bool LookdevRenderer::ensurePipelines(QRhi* rhi, QRhiRenderTarget* target) {
         if (g.shaded) {
             std::vector<B> shade{B::uniformBuffer(0, fs, g.frame.get()), B::uniformBuffer(1, both, g.pass[kPassShade].get()),
                                  B::sampledTexture(2, fs, g.points.get(), g.nearest.get()), B::sampledTexture(3, fs, g.strands.get(), g.nearest.get()),
-                                 B::sampledTexture(kBindPointColors, fs, g.pointColors.get(), g.nearest.get())};
+                                 B::sampledTexture(kBindPointColors, fs, g.pointColors.get(), g.nearest.get()),
+                                 B::sampledTexture(kBindPointStrands, fs, g.pointStrands.get(), g.nearest.get())};
             domTextures(shade, true);
             shadowTextures(shade);
             g.pointShadeSrb = srbv(shade);
             std::vector<B> gouraud{B::uniformBuffer(0, fs, g.frame.get()), B::uniformBuffer(1, both, g.pass[kPassThick].get()), pointsB, strandsB, colorsB,
+                                   pointStrandsB,
                                    B::sampledTexture(4, vs, g.shaded.get(), g.nearest.get()),
                                    B::sampledTexture(12, fs, g.dom[kDomCamera].front.get(), g.nearest.get()),
                                    B::sampledTexture(13, fs, g.dom[kDomCamera].layers.get(), g.linear.get())};
@@ -1023,8 +1032,8 @@ bool LookdevRenderer::ensurePipelines(QRhi* rhi, QRhiRenderTarget* target) {
             g.hairGouraudThinSrb = srbv(gouraud);
         }
         for (int i = 0; i < kDomCount; ++i) {
-            g.hairDepthSrb[i] = srb({B::uniformBuffer(1, both, domView(i)), pointsB, strandsB, colorsB});
-            g.hairDomSrb[i] = srb({B::uniformBuffer(1, both, domView(i)), pointsB, strandsB, colorsB,
+            g.hairDepthSrb[i] = srb({B::uniformBuffer(1, both, domView(i)), pointsB, strandsB, colorsB, pointStrandsB});
+            g.hairDomSrb[i] = srb({B::uniformBuffer(1, both, domView(i)), pointsB, strandsB, colorsB, pointStrandsB,
                                    B::sampledTexture(5, fs, g.dom[i].front.get(), g.nearest.get())});
         }
     }
@@ -1367,7 +1376,7 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
         for (const auto& [first, end] : strandRuns(changes_.changes->strands, 64)) {
             buildHairRange(s, scalp_.get(), first, end, points, strandData, nullptr, pointColored_ ? &pointColors : nullptr);
             const std::size_t pBegin = s.strandBegin(first), pEnd = s.offsets()[end];
-            if (pEnd > pBegin) uploadTexelRange(batch, g.points.get(), pBegin * 2, (pEnd - pBegin) * 2, points.data());
+            if (pEnd > pBegin) uploadTexelRange(batch, g.points.get(), pBegin, pEnd - pBegin, points.data());
             if (pEnd > pBegin && pointColored_) uploadTexelRange(batch, g.pointColors.get(), pBegin, pEnd - pBegin, pointColors.data());
             uploadTexelRange(batch, g.strands.get(), first * 3, (end - first) * 3, strandData.data());
             strands += end - first;
@@ -1425,6 +1434,7 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
         g.points.reset();
         g.strands.reset();
         g.pointColors.reset();
+        g.pointStrands.reset();
         g.strip.reset();
         g.list.reset();
         g.hairLookdevSrb.reset();
@@ -1488,6 +1498,24 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
             batch->uploadTexture(texture.get(), QRhiTextureUploadDescription(QRhiTextureUploadEntry(0, 0, sub)));
             return true;
         };
+        // Each point's strand, one float texel each (a new layout's alone).
+        auto uploadPointStrands = [&] {
+            const std::size_t texels = b.pointStrands.size();
+            const int rows = static_cast<int>(texels / kHairTextureWidth);
+            if (rows < 1 || rows > rhi->resourceLimit(QRhi::TextureSizeMax)) return false;
+            g.pointStrands.reset(rhi->newTexture(QRhiTexture::R32F, QSize(kHairTextureWidth, rows)));
+            if (!g.pointStrands->create()) {
+                g.pointStrands.reset();
+                return false;
+            }
+            if (writeTextureNative(rhi, g.pointStrands.get(), b.pointStrands.data(), static_cast<std::size_t>(kHairTextureWidth) * 4)) {
+                return true;
+            }
+            pointStrandsScratch_ = QByteArray(reinterpret_cast<const char*>(b.pointStrands.data()), static_cast<qsizetype>(texels * 4));
+            QRhiTextureSubresourceUploadDescription sub(pointStrandsScratch_);
+            batch->uploadTexture(g.pointStrands.get(), QRhiTextureUploadDescription(QRhiTextureUploadEntry(0, 0, sub)));
+            return true;
+        };
         // Without colors of their own the points' colors texture is one texel (hair.vert then
         // reads each strand's).
         static const std::vector<float> noPointColors(4, 0.0f);
@@ -1495,7 +1523,7 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
         const bool ok = uploadTexture(g.points, b.points, pointsScratch_) && uploadTexture(g.strands, b.strands, strandsScratch_) &&
                         (b.pointColored ? uploadTexture(g.pointColors, b.pointColors, pointColorsScratch_)
                                         : uploadSingleTexel(rhi, batch, g.pointColors, noPointColors, single)) &&
-                        (sameLayout || (g.useStrip ? uploadIndices(g.strip, b.strip) : uploadIndices(g.list, b.list)));
+                        (sameLayout || ((g.useStrip ? uploadIndices(g.strip, b.strip) : uploadIndices(g.list, b.list)) && uploadPointStrands()));
         if (ok) {
             if (!sameLayout) g.indexCount = static_cast<std::uint32_t>(g.useStrip ? b.strip.size() : b.list.size());
             // The shaded points, one texel each (a target: the per-point shading pass draws it).
@@ -1521,6 +1549,7 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
             g.points.reset();
             g.strands.reset();
             g.pointColors.reset();
+            g.pointStrands.reset();
         }
     }
     hairBounds_ = b.bounds;
@@ -2530,6 +2559,7 @@ bool LookdevRenderer::ensureVis(QRhi* rhi) {
     }
     // The bindings, made again when an object they name was.
     const std::array<quint64, Gpu::Vis::kBound> bound{resourceId(g.points.get()),
+                                                      resourceId(g.pointStrands.get()),
                                                       resourceId(g.strands.get()),
                                                       resourceId(g.pointColors.get()),
                                                       resourceId(g.frame.get()),
@@ -2556,13 +2586,14 @@ bool LookdevRenderer::ensureVis(QRhi* rhi) {
         };
         const B pointsB = B::sampledTexture(2, cs, g.points.get(), g.nearest.get());
         const B strandsB = B::sampledTexture(3, cs, g.strands.get(), g.nearest.get());
+        const B pointStrandsB = B::sampledTexture(kBindPointStrands, cs, g.pointStrands.get(), g.nearest.get());
         v.fillPixelsSrb = srb({B::uniformBuffer(1, cs, v.fillPixels.get()), B::bufferLoadStore(4, cs, v.pixels.get())});
         v.fillDensitySrb = srb({B::uniformBuffer(1, cs, v.fillDensity.get()), B::bufferLoadStore(4, cs, v.density.get())});
         for (int k = 0; k < 2; ++k) {
-            v.rasterSrb[k] = srb({B::uniformBuffer(1, cs, v.uniforms[k].get()), pointsB, strandsB, B::bufferLoadStore(4, cs, v.pixels.get()),
+            v.rasterSrb[k] = srb({B::uniformBuffer(1, cs, v.uniforms[k].get()), pointsB, strandsB, pointStrandsB, B::bufferLoadStore(4, cs, v.pixels.get()),
                                   B::bufferLoadStore(5, cs, v.lod.get()), B::sampledTexture(6, cs, v.surfaceDepth.get(), g.nearest.get())});
         }
-        v.shadeSrb = srb({B::uniformBuffer(0, cs, g.frame.get()), B::uniformBuffer(1, cs, v.uniforms[1].get()), pointsB, strandsB,
+        v.shadeSrb = srb({B::uniformBuffer(0, cs, g.frame.get()), B::uniformBuffer(1, cs, v.uniforms[1].get()), pointsB, strandsB, pointStrandsB,
                           B::bufferLoadStore(4, cs, v.pixels.get()), B::imageStore(7, cs, v.hairImage.get(), 0),
                           B::sampledTexture(9, cs, g.pointColors.get(), g.nearest.get()),
                           B::sampledTexture(25, cs, g.shadow[0].distance.get(), g.nearest.get()),
@@ -2570,7 +2601,7 @@ bool LookdevRenderer::ensureVis(QRhi* rhi) {
                           B::sampledTexture(27, cs, g.shadow[2].distance.get(), g.nearest.get()),
                           B::sampledTexture(34, cs, v.volumes[0].get(), v.clamp3d.get()), B::sampledTexture(35, cs, v.volumes[1].get(), v.clamp3d.get()),
                           B::sampledTexture(36, cs, v.volumes[2].get(), v.clamp3d.get()), B::sampledTexture(37, cs, v.volumes[3].get(), v.clamp3d.get())});
-        v.voxelizeSrb = srb({B::uniformBuffer(1, cs, v.grid[0].get()), pointsB, strandsB, B::bufferLoadStore(4, cs, v.density.get())});
+        v.voxelizeSrb = srb({B::uniformBuffer(1, cs, v.grid[0].get()), pointsB, strandsB, pointStrandsB, B::bufferLoadStore(4, cs, v.density.get())});
         v.densitySrb = srb({B::uniformBuffer(1, cs, v.grid[0].get()), B::bufferLoadStore(4, cs, v.density.get()),
                             B::imageStore(5, cs, v.densityTexture.get(), 0)});
         for (int k = 0; k < kVolumeCount; ++k) {

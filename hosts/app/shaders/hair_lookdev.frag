@@ -17,7 +17,7 @@
 // the overlapping fragments'.
 
 #ifdef HAIR_POINT_SHADE
-layout(binding = 2) uniform sampler2D pointsTexture;   // (x, y, z, strand), (tx, ty, tz, width)
+layout(binding = 2) uniform sampler2D pointsTexture;   // (x, y, z, width): hair_points.glsl
 layout(binding = 3) uniform sampler2D strandsTexture;  // (melanin, redness, random, first point), (r, g, b, point count), (root normal, 0)
 layout(binding = 9) uniform sampler2D pointColorsTexture;  // (r, g, b, iridescence) a point, or one texel (hair.vert)
 vec3 vPosition;
@@ -54,6 +54,8 @@ layout(std140, binding = 1) uniform ViewBlock {
 vec4 fetch(sampler2D tex, uint texel) {
     return texelFetch(tex, ivec2(int(texel & 4095u), int(texel >> 12u)), 0);
 }
+
+#include "hair_points.glsl"
 #endif
 
 // The deep opacity maps (lookdev_renderer.cpp's kDom*): the three lights', the sky's, the camera's.
@@ -114,14 +116,13 @@ void main() {
     // The texel is the point: its data as hair.vert reads it, the ribbon's center.
     uint point = uint(gl_FragCoord.y) * 4096u + uint(gl_FragCoord.x);
     if (float(point) >= dom.y) discard;
-    vec4 a = fetch(pointsTexture, point * 2u);
-    vec4 b = fetch(pointsTexture, point * 2u + 1u);
-    uint strand = uint(a.w + 0.5);
+    vec4 a = fetch(pointsTexture, point);
+    uint strand = hairStrandOf(point);
     vec4 d0 = fetch(strandsTexture, strand * 3u);
     vec4 d1 = fetch(strandsTexture, strand * 3u + 1u);
     vec4 d2 = fetch(strandsTexture, strand * 3u + 2u);
     vPosition = a.xyz;
-    vTangent = b.xyz;
+    vTangent = hairTangent(point, uint(d0.w + 0.5), uint(d1.w + 0.5));
     vAttr = vec4(0.0, (float(point) - d0.w) / (max(d1.w, 2.0) - 1.0), 1.0, d0.z);
     vec4 own = textureSize(pointColorsTexture, 0).x == 4096 ? fetch(pointColorsTexture, point) : vec4(d1.rgb, 0.0);
     vec2 look = hairLookAlpha(own.a, 0.0);

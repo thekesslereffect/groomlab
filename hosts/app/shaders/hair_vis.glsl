@@ -23,8 +23,8 @@ layout(std140, binding = 1) uniform Vis {
     vec4 voxel;      // xyz: unused; w: unused (hair_voxelize.comp's grid is the Frame's)
 };
 
-// 4096 texels wide (lookdev_renderer.cpp's kHairTextureWidth), two texels a point, three a strand.
-layout(binding = 2) uniform sampler2D pointsTexture;   // (x, y, z, strand), (tx, ty, tz, width)
+// 4096 texels wide (lookdev_renderer.cpp's kHairTextureWidth), a texel a point, three a strand.
+layout(binding = 2) uniform sampler2D pointsTexture;   // (x, y, z, width): hair_points.glsl
 layout(binding = 3) uniform sampler2D strandsTexture;  // (melanin, redness, random, first point), (r, g, b, point count), (root normal, 0)
 
 layout(std430, binding = 4) buffer Pixels {
@@ -37,3 +37,5 @@ const uint kNoHair = 0xFFFFFFFFu;
 vec4 fetch(sampler2D tex, uint texel) {
     return texelFetch(tex, ivec2(int(texel & 4095u), int(texel >> 12u)), 0);
 }
+
+#include "hair_points.glsl"

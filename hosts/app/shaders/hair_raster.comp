@@ -53,17 +53,15 @@ vec3 toPixels(vec4 c) {
 void main() {
     uint p = gl_GlobalInvocationID.y * counts.y + gl_GlobalInvocationID.x;
     if (p >= counts.x) return;
-    vec4 a0 = fetch(pointsTexture, p * 2u);
-    uint s = uint(a0.w + 0.5);
+    vec4 a0 = fetch(pointsTexture, p);
+    uint s = hairStrandOf(p);
     vec4 d0 = fetch(strandsTexture, s * 3u);
     vec4 d1 = fetch(strandsTexture, s * 3u + 1u);
     uint first = uint(d0.w + 0.5), count = uint(d1.w + 0.5);
     if (p + 1u >= first + count) return;  // a strand's last point starts no segment
     float exponent = params2.x > 0.5 ? lodExponent[s] : 1.0;
     if (exponent <= 0.0) return;
-    vec4 b0 = fetch(pointsTexture, p * 2u + 1u);
-    vec4 a1 = fetch(pointsTexture, p * 2u + 2u);
-    vec4 b1 = fetch(pointsTexture, p * 2u + 3u);
+    vec4 a1 = fetch(pointsTexture, p + 1u);
 
     // Clipped to the near side of the eye, then rejected when wholly off one side of the view.
     vec4 c0 = viewProj * vec4(a0.xyz, 1.0), c1 = viewProj * vec4(a1.xyz, 1.0);
@@ -78,7 +76,7 @@ void main() {
         c1 = mix(c0, c1, t1);
     }
     if ((c0.x < -c0.w && c1.x < -c1.w) || (c0.x > c0.w && c1.x > c1.w) || (c0.y < -c0.w && c1.y < -c1.w) || (c0.y > c0.w && c1.y > c1.w)) return;
-    float wWorld0 = mix(b0.w, b1.w, t0), wWorld1 = mix(b0.w, b1.w, t1);
+    float wWorld0 = mix(a0.w, a1.w, t0), wWorld1 = mix(a0.w, a1.w, t1);
     vec3 s0 = toPixels(c0), s1 = toPixels(c1);
 
     // The walk along the major axis (A), across the minor (C), from the lower A to the higher.

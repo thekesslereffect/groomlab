@@ -51,8 +51,8 @@ set(GROOMLAB_LOOKDEV_SHADERS
     shaders/sss_blur.frag
     shaders/hair_composite.frag)
 # The hair's visibility path (lookdev_renderer.h, HairPath::Visibility): the strands rasterized,
-# shaded and voxelized in compute shaders (GLSL 430 on OpenGL). hair_shading.glsl, hair_vis.glsl
-# and hair_voxel.glsl are included (#include: qsb reads them beside the shader).
+# shaded and voxelized in compute shaders (GLSL 430 on OpenGL). hair_shading.glsl, hair_vis.glsl,
+# hair_voxel.glsl and hair_points.glsl are included (#include: qsb reads them beside the shader).
 set(GROOMLAB_HAIR_COMPUTE_SHADERS
     shaders/hair_clear.comp
     shaders/hair_raster.comp

@@ -4,9 +4,10 @@
 
 // Hair strands as camera-facing ribbons, pulled from textures: no vertex streams, the vertex
 // index alone says which point and which side of it this vertex is (two vertices a point, a
-// triangle strip a strand). The points sit in a float texture two texels each (position and
-// strand, tangent and width), the strands in another (pigment and random, color and point
-// range): a texel fetch in the vertex stage runs on every backend, where a storage buffer
+// triangle strip a strand). The points sit in a float texture a texel each (position and width;
+// the strand of each in a texture of its own, the tangent from the points either side:
+// hair_points.glsl), the strands in another (pigment and random, color and point range): a
+// texel fetch in the vertex stage runs on every backend, where a storage buffer
 // would not (Direct3D 11 wants feature level 11.1 for one). Each point is expanded across the
 // strand by half its width, facing the pass's viewer (the camera, or a light's orthographic
 // view for its deep opacity map). A strand thinner than a pixel is widened to one (the
@@ -35,8 +36,8 @@ layout(std140, binding = 1) uniform ViewBlock {
     vec4 dom;    // x: layer thickness; y: range (far - near); z: the scalp's hair count; w: flip y
 };
 
-// 4096 texels wide (lookdev_renderer.cpp's kHairTextureWidth), two texels a point, three a strand.
-layout(binding = 2) uniform sampler2D pointsTexture;   // (x, y, z, strand), (tx, ty, tz, width)
+// 4096 texels wide (lookdev_renderer.cpp's kHairTextureWidth), a texel a point, three a strand.
+layout(binding = 2) uniform sampler2D pointsTexture;   // (x, y, z, width)
 layout(binding = 3) uniform sampler2D strandsTexture;  // (melanin, redness, random, first point), (r, g, b, point count), (root normal, 0)
 // The points' own colors and iridescence (r, g, b, iridescence), a texel a point, where the
 // strands carry them (a tip color, Bands, FeatherColor's patterns); else a single texel:
@@ -50,19 +51,20 @@ vec4 fetch(sampler2D tex, uint texel) {
     return texelFetch(tex, ivec2(int(texel & 4095u), int(texel >> 12u)), 0);
 }
 
+#include "hair_points.glsl"
+
 void main() {
     uint vid = uint(gl_VertexIndex);
     uint point = vid >> 1u;
     float side = (vid & 1u) == 0u ? -1.0 : 1.0;
-    vec4 a = fetch(pointsTexture, point * 2u);
-    vec4 b = fetch(pointsTexture, point * 2u + 1u);
+    vec4 a = fetch(pointsTexture, point);
     vec3 p = a.xyz;
-    uint s = uint(a.w + 0.5);
-    vec3 t = b.xyz;
-    float width = b.w * pixel.z;
+    uint s = hairStrandOf(point);
+    float width = a.w * pixel.z;
     vec4 d0 = fetch(strandsTexture, s * 3u);
     vec4 d1 = fetch(strandsTexture, s * 3u + 1u);
     vec4 d2 = fetch(strandsTexture, s * 3u + 2u);
+    vec3 t = hairTangent(point, uint(d0.w + 0.5), uint(d1.w + 0.5));
     float count = max(d1.w, 2.0);
     float u = (float(point) - d0.w) / (count - 1.0);
 
