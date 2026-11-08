@@ -13,6 +13,16 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.44.2 (November 8, 2026)
+
+- **Blend picks whole strands by chance.** The Blend node's new **Mode > chance** makes each strand
+  all a or all b, the mix (a painted or textured map) its chance of being b: a natural change of
+  hair color, strands of another color scattered in, instead of every strand in between. **Seed**
+  picks other strands; raising the mix only adds strands.
+- **USD exports import into Unreal as grooms.** The USD export now carries Unreal's GroomAPI and
+  its groom attributes (root UV, color, clump, roughness), so Unreal's USD import (with **Import
+  Groom Assets** on) makes a groom asset of the strands.
+
 ## 0.44.1 (November 8, 2026)
 
 - **Guides stay on a smoothed scalp.** In Maya, guides drawn before turning on smooth mesh preview
