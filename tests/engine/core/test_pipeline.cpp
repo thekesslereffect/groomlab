@@ -18,6 +18,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/camera_solve.h"
 #include "groomlab/cards.h"
 #include "groomlab/curve.h"
 #include "groomlab/display.h"
@@ -1107,6 +1108,92 @@ TEST(GroomFile, TurnsIntoAnotherUpAxis) {
         EXPECT_EQ(y.data.scalp->contentHash(), z.data.scalp->contentHash());
     }
     EXPECT_THROW(convertUpAxis(file, "W"), GroomFileError);
+}
+
+TEST(GroomFile, UpAxisTurnsReferencePhotos) {
+    // A photo lined up in a Y-up groom (the app's Photos window: its solved camera and a landmark
+    // pair) stays lined up in the Z-up file (Blender's): the camera and the landmark's mesh point
+    // turn with the scalp, the photo's pixels stay, and the turn back is exact.
+    const CameraPose pose{rotationFromEulerXYZDegrees({-20.0, 35.0, 5.0}), {12.5, 30.25, 75.0}};
+    const double focal = 1450.0, width = 1600.0, height = 1200.0;
+    auto rotated = [](const CameraMat3& r, const CameraVec3& v) {
+        CameraVec3 out{0, 0, 0};
+        for (std::size_t i = 0; i < 3; ++i) out[i] = r[i][0] * v[0] + r[i][1] * v[1] + r[i][2] * v[2];
+        return out;
+    };
+    // A point on the scalp in front of the camera (it looks down its -Z), and where the photo shows it.
+    const CameraVec3 off = rotated(pose.rotation, {3.0, -2.0, -70.0});
+    const CameraVec3 mesh{pose.position[0] + off[0], pose.position[1] + off[1], pose.position[2] + off[2]};
+    double u = 0.0, v = 0.0;
+    ASSERT_TRUE(projectToImage(pose, focal, width, height, mesh, u, v));
+
+    auto cameraJson = [](const CameraPose& p, double f) {
+        nlohmann::json rot = nlohmann::json::array();
+        for (const auto& row : p.rotation) rot.push_back({row[0], row[1], row[2]});
+        return nlohmann::json{{"rotation", rot}, {"position", {p.position[0], p.position[1], p.position[2]}}, {"focal_px", f}};
+    };
+    const nlohmann::json photos = nlohmann::json::array(
+        {{{"name", "front"}, {"image", "references/front.png"}, {"width", 1600}, {"height", 1200}, {"mask", nullptr},
+          {"camera", cameraJson(pose, focal)},
+          {"state", {{"landmarks", nlohmann::json::array({{{"image", {u, v}}, {"mesh", {mesh[0], mesh[1], mesh[2]}}},
+                                                          {{"image", {10.0, 20.0}}, {"mesh", nullptr}}})},
+                     {"strokes", nlohmann::json::array({{{"points", {{100.0, 200.0}, {150.0, 260.0}}}, {"directed", true}}})},
+                     {"mask_strokes", nlohmann::json::array()}}},
+          {"display", {{"opacity", 0.5}, {"depth", "front"}, {"locked", false}, {"visible", true}}}},
+         {{"name", "side"}, {"image", "references/side.png"}, {"width", 800}, {"height", 600}, {"camera", nullptr}}});
+    GroomFile file;
+    file.referencePhotos = photos.dump();
+    file = groomFileFromJson(groomFileToJson(file));  // as a file holds them
+    ASSERT_EQ(file.upAxis, "Y");
+
+    auto camera = [](const nlohmann::json& cam) {
+        CameraPose p;
+        for (std::size_t i = 0; i < 3; ++i) {
+            for (std::size_t k = 0; k < 3; ++k) p.rotation[i][k] = cam.at("rotation").at(i).at(k).get<double>();
+            p.position[i] = cam.at("position").at(i).get<double>();
+        }
+        return p;
+    };
+    auto point = [](const nlohmann::json& p) { return CameraVec3{p.at(0).get<double>(), p.at(1).get<double>(), p.at(2).get<double>()}; };
+    auto toZ = [](const CameraVec3& p) { return CameraVec3{p[0], -p[2], p[1]}; };  // Y-up (x, y, z) is Z-up (x, -z, y)
+
+    convertUpAxis(file, "Z");
+    EXPECT_EQ(file.upAxis, "Z");
+    const nlohmann::json z = nlohmann::json::parse(file.referencePhotos);
+    ASSERT_EQ(z.size(), 2u);
+    const CameraPose turned = camera(z[0]["camera"]);
+    EXPECT_EQ(turned.position, toZ(pose.position));
+    for (std::size_t k = 0; k < 3; ++k) {  // each camera axis (a column) turned as a world direction
+        const CameraVec3 axis = toZ({pose.rotation[0][k], pose.rotation[1][k], pose.rotation[2][k]});
+        for (std::size_t i = 0; i < 3; ++i) EXPECT_EQ(turned.rotation[i][k], axis[i]) << i << "," << k;
+    }
+    EXPECT_EQ(z[0]["camera"]["focal_px"], focal);
+    const nlohmann::json& landmarks = z[0]["state"]["landmarks"];
+    EXPECT_EQ(point(landmarks[0]["mesh"]), toZ(mesh));
+    EXPECT_EQ(landmarks[0]["image"], nlohmann::json::array({u, v}));  // pixels stay
+    EXPECT_TRUE(landmarks[1]["mesh"].is_null());
+    EXPECT_EQ(z[0]["state"]["strokes"], photos[0]["state"]["strokes"]);
+    EXPECT_EQ(z[0]["display"], photos[0]["display"]);
+    EXPECT_TRUE(z[1]["camera"].is_null());
+    // The turned camera shows the turned point where the photo has it: still lined up.
+    double tu = 0.0, tv = 0.0;
+    ASSERT_TRUE(projectToImage(turned, focal, width, height, toZ(mesh), tu, tv));
+    EXPECT_NEAR(tu, u, 1e-9);
+    EXPECT_NEAR(tv, v, 1e-9);
+
+    // And back: the photos exactly as they were (a turn swaps and negates).
+    convertUpAxis(file, "Y");
+    EXPECT_EQ(file.upAxis, "Y");
+    EXPECT_EQ(nlohmann::json::parse(file.referencePhotos), photos);
+    convertUpAxis(file, "Y");  // already: nothing
+    EXPECT_EQ(nlohmann::json::parse(file.referencePhotos), photos);
+
+    // A Z-up file's photos (Blender's) opened Y-up.
+    GroomFile zUp;
+    zUp.upAxis = "Z";
+    zUp.referencePhotos = z.dump();
+    convertUpAxis(zUp, "Y");
+    EXPECT_EQ(nlohmann::json::parse(zUp.referencePhotos), photos);
 }
 
 // The look graph with a Gravity (straight down in a Z-up world, as a Z-up host writes it), a

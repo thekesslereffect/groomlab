@@ -77,7 +77,8 @@
 // "referencePhotos": the standalone app's Reference window (reference_edit.h): each photo's file,
 // size, mask, solved camera and edits ([{"name", "image", "width", "height", "mask", "camera":
 // {"rotation", "position", "focal_px"} or null, "state": referencePhotoStateToJson's object, and the
-// Photos tab's "display": {"opacity", "depth": "front" or "behind", "locked", "visible"}}]); read by
+// Photos tab's "display": {"opacity", "depth": "front" or "behind", "locked", "visible"}}]), world space
+// in the file's upAxis (convertUpAxis turns the cameras and the landmarks' mesh points); read by
 // no evaluation. Absent when there are none.
 // "guideGroupColors": the guide groups' own viewport colors, as Maya's groom attribute of that name
 // holds them ("name:#rrggbb name:#rrggbb", sRGB; display.h parseGuideGroupColors), and
@@ -193,7 +194,9 @@ std::vector<GroomFile> readGroomFiles(const std::string& path);                 
 // The file's points turned into another up axis ("Y" or "Z"; throws GroomFileError on
 // another): the scalp and its rest pose, the flat guides and the hierarchy's world shapes (the
 // points and frame references of its primary and locked guides), a quarter turn about X
-// (Z-up (x, y, z) is Y-up (x, z, -y)), the colliders with their rest poses and the transfer markers' points. What is stored on the
+// (Z-up (x, y, z) is Y-up (x, z, -y)), the colliders with their rest poses, the transfer markers' points
+// and the reference photos' solved cameras ("referencePhotos": each camera's rotation and position) and
+// their landmarks' mesh points, in double (the photos' pixels stay). What is stored on the
 // surface or in the guides' own frames (roots, rooted shapes, children's offsets, parts, flow,
 // correctives, sculpts) turns with them as it is. The graph's params that are world directions
 // (ParamSpec::worldDirection: Gravity's, Wind's, Bend's, Simulate's directions as vectors, a

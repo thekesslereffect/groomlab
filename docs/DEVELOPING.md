@@ -3251,7 +3251,7 @@ guides are rooted on its triangles, so the same vertices and triangles; Transfer
 covers the rest), its `restPoints` a hidden rest mesh, `guides` curves on `guideCurves[id]`.
 Every reader reads `upAxis` and `convertUpAxis` turns a file into the host's axis (a quarter turn
 about X of the scalp, rest pose, flat guides and the hierarchy's world shapes and frame
-references, and the colliders; what is stored on the surface or in the guides' frames turns as it
+references, the colliders, and the reference photos' cameras and landmark mesh points; what is stored on the surface or in the guides' frames turns as it
 is; graph params flagged ParamSpec::worldDirection turn too: directions as vectors, Mirror's axis as
 the axis it becomes). The C API's gl_session_set_up_axis is the same function. Display settings
 are not in the file. A `"license"` field (written by versions before GroomLab was free) is ignored

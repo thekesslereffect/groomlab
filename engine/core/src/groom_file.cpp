@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "groomlab/groom_file.h"
 
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <filesystem>
@@ -848,6 +849,56 @@ void convertUpAxis(GroomFile& file, const std::string& upAxis) {
             }
         }
         file.data.hierarchyJson = h.dump();
+    }
+    if (!file.referencePhotos.empty()) {
+        // The photos' solved cameras (rotation: camera axes as columns, world = R * camera; the
+        // eye) and their landmarks' mesh points, in double as stored: the photos line up with the
+        // turned scalp as they did. Pixels (photo points, flow arrows, mask touch-ups) stay.
+        json photos;
+        try {
+            photos = json::parse(file.referencePhotos);
+        } catch (const json::exception& e) {
+            throw GroomFileError(std::string("groom file: invalid referencePhotos JSON: ") + e.what());
+        }
+        auto turnD = [toY](double x, double y, double z) {
+            return toY ? std::array<double, 3>{x, z, -y} : std::array<double, 3>{x, -z, y};
+        };
+        auto isPoint = [](const json& p) {
+            return p.is_array() && p.size() == 3 && p[0].is_number() && p[1].is_number() && p[2].is_number();
+        };
+        auto turnPoint = [&](json& p) {
+            if (!isPoint(p)) return;
+            const auto v = turnD(p[0].get<double>(), p[1].get<double>(), p[2].get<double>());
+            p = {v[0], v[1], v[2]};
+        };
+        json none = json::array();
+        for (json& photo : photos.is_array() ? photos : none) {
+            if (!photo.is_object()) continue;
+            if (photo.contains("camera") && photo.at("camera").is_object()) {
+                json& cam = photo.at("camera");
+                if (cam.contains("position")) turnPoint(cam.at("position"));
+                if (cam.contains("rotation")) {
+                    json& r = cam.at("rotation");
+                    if (r.is_array() && r.size() == 3 && isPoint(r[0]) && isPoint(r[1]) && isPoint(r[2])) {
+                        json turned = r;
+                        for (std::size_t k = 0; k < 3; ++k) {  // each column, a camera axis in world space
+                            const auto c = turnD(r[0][k].get<double>(), r[1][k].get<double>(), r[2][k].get<double>());
+                            for (std::size_t i = 0; i < 3; ++i) turned[i][k] = c[i];
+                        }
+                        r = std::move(turned);
+                    }
+                }
+            }
+            if (photo.contains("state") && photo.at("state").is_object()) {
+                json& state = photo.at("state");
+                if (state.contains("landmarks") && state.at("landmarks").is_array()) {
+                    for (json& l : state.at("landmarks")) {
+                        if (l.is_object() && l.contains("mesh")) turnPoint(l.at("mesh"));
+                    }
+                }
+            }
+        }
+        file.referencePhotos = photos.dump();
     }
     // The params that are world directions (Gravity's, Wind's, Bend's, Mirror's axis...): the hair
     // falls, blows and mirrors the same way in the turned world.
