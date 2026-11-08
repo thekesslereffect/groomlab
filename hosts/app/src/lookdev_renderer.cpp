@@ -249,7 +249,45 @@ void buildHairRange(const StrandSet& s, const ScalpMesh* scalp, std::size_t firs
     }
 }
 
-HairBuffers buildHairBuffers(const StrandSet& s, const ScalpMesh* scalp) {
+void buildHairIndices(const StrandSet& s, HairIndices indices, HairBuffers& b) {
+    const bool strip = (indices == HairIndices::Both || indices == HairIndices::Strip) && b.strip.empty();
+    const bool list = (indices == HairIndices::Both || indices == HairIndices::List) && b.list.empty();
+    if (!strip && !list) return;
+    // The strip: two vertices a point, a restart after each strand; the list: six indices a
+    // segment. Both are laid out so every strand writes its own range in parallel.
+    const std::size_t strandCount = s.strandCount();
+    std::vector<std::size_t> stripAt(strandCount + 1, 0), listAt(strandCount + 1, 0);
+    for (std::size_t i = 0; i < strandCount; ++i) {
+        const std::size_t n = s.strandPointCount(i);
+        stripAt[i + 1] = stripAt[i] + (n < 2 ? 0 : 2 * n + 1);
+        listAt[i + 1] = listAt[i] + (n < 2 ? 0 : 6 * (n - 1));
+    }
+    if (strip) b.strip.resize(stripAt[strandCount]);
+    if (list) b.list.resize(listAt[strandCount]);
+    parallelFor(0, strandCount, [&](std::size_t i) {
+        const std::size_t n = s.strandPointCount(i);
+        const std::size_t begin = s.strandBegin(i);
+        if (n < 2) return;
+        if (strip) {
+            std::uint32_t* out = b.strip.data() + stripAt[i];
+            for (std::size_t k = 0; k < n; ++k) {
+                out[2 * k] = static_cast<std::uint32_t>((begin + k) * 2);
+                out[2 * k + 1] = static_cast<std::uint32_t>((begin + k) * 2 + 1);
+            }
+            out[2 * n] = 0xFFFFFFFFu;
+        }
+        if (list) {
+            std::uint32_t* out = b.list.data() + listAt[i];
+            for (std::size_t k = 0; k + 1 < n; ++k) {
+                const auto a = static_cast<std::uint32_t>((begin + k) * 2);
+                const std::uint32_t quad[6] = {a, a + 1, a + 2, a + 1, a + 3, a + 2};
+                std::memcpy(out + 6 * k, quad, sizeof quad);
+            }
+        }
+    }, 256);
+}
+
+HairBuffers buildHairBuffers(const StrandSet& s, const ScalpMesh* scalp, HairIndices indices) {
     HairBuffers b;
     b.pointCount = s.pointCount();
     b.strandCount = s.strandCount();
@@ -260,39 +298,16 @@ HairBuffers buildHairBuffers(const StrandSet& s, const ScalpMesh* scalp) {
     };
     b.points.resize(std::max(padded(b.pointCount * 2), std::size_t{kHairTextureWidth * 4}));
     b.strands.resize(std::max(padded(b.strandCount * 3), std::size_t{kHairTextureWidth * 4}));
-    // The strip: two vertices a point, a restart after each strand; the list: six indices a
-    // segment. Both are laid out so every strand writes its own range in parallel.
-    std::vector<std::size_t> stripAt(b.strandCount + 1, 0), listAt(b.strandCount + 1, 0);
-    for (std::size_t i = 0; i < b.strandCount; ++i) {
-        const std::size_t n = s.strandPointCount(i);
-        stripAt[i + 1] = stripAt[i] + (n < 2 ? 0 : 2 * n + 1);
-        listAt[i + 1] = listAt[i] + (n < 2 ? 0 : 6 * (n - 1));
-    }
-    b.strip.resize(stripAt[b.strandCount]);
-    b.list.resize(listAt[b.strandCount]);
     const HairChannels channels(s, scalp);
     // Colors per point (one texel each) only where the strands have their own.
     b.pointColored = channels.pointColored();
     if (b.pointColored) b.pointColors.resize(std::max(padded(b.pointCount), std::size_t{kHairTextureWidth * 4}));
     parallelFor(0, b.strandCount, [&](std::size_t i) {
-        const std::size_t n = s.strandPointCount(i);
         const std::size_t begin = s.strandBegin(i);
         channels.write(i, b.points.data() + begin * 8, b.strands.data() + i * 12);
         if (b.pointColored) channels.writePointColors(i, b.pointColors.data() + begin * 4);
-        if (n < 2) return;
-        std::uint32_t* strip = b.strip.data() + stripAt[i];
-        for (std::size_t k = 0; k < n; ++k) {
-            strip[2 * k] = static_cast<std::uint32_t>((begin + k) * 2);
-            strip[2 * k + 1] = static_cast<std::uint32_t>((begin + k) * 2 + 1);
-        }
-        strip[2 * n] = 0xFFFFFFFFu;
-        std::uint32_t* list = b.list.data() + listAt[i];
-        for (std::size_t k = 0; k + 1 < n; ++k) {
-            const auto a = static_cast<std::uint32_t>((begin + k) * 2);
-            const std::uint32_t quad[6] = {a, a + 1, a + 2, a + 1, a + 3, a + 2};
-            std::memcpy(list + 6 * k, quad, sizeof quad);
-        }
     }, 256);
+    buildHairIndices(s, indices, b);
     b.bounds = hairBoundsOf(s);
     return b;
 }
@@ -451,6 +466,7 @@ struct LookdevRenderer::Gpu {
     std::unique_ptr<QRhiBuffer> strip, list;
     std::uint32_t indexCount = 0;
     bool useStrip = false;
+    bool indexKindKnown = false;  // useStrip set by an upload (the device's primitive restart)
     // The points shaded once each for the interactive frame (hair_lookdev.frag under
     // HAIR_POINT_SHADE writes it, hair_gouraud.vert reads it): one RGBA16F texel a point.
     std::unique_ptr<QRhiTexture> shaded;
@@ -610,8 +626,8 @@ void LookdevRenderer::setHair(StrandsPtr strands, MeshPtr scalp, std::uint64_t v
         auto job = std::make_shared<HairBuild>();
         job->version = hairVersion_;
         try {
-            buildThread_ = std::thread([job, strands = strands_, scalp = scalp_] {
-                job->buffers = std::make_shared<HairBuffers>(buildHairBuffers(*strands, scalp.get()));
+            buildThread_ = std::thread([job, strands = strands_, scalp = scalp_, indices = indicesNeeded()] {
+                job->buffers = std::make_shared<HairBuffers>(buildHairBuffers(*strands, scalp.get(), indices));
                 job->done.store(true, std::memory_order_release);
             });
             build_ = std::move(job);
@@ -1268,6 +1284,20 @@ bool writeTextureNative(QRhi* rhi, QRhiTexture* texture, const void* data, std::
 
 }  // namespace
 
+HairIndices LookdevRenderer::indicesNeeded() const {
+    // None while the GPU holds this layout (the same point counts, colored alike): what the upload
+    // writes in place; else the kind drawn, both before the first upload says which.
+    const Gpu& g = *gpu_;
+    if (!strands_) return HairIndices::None;
+    if (g.points && g.strands && g.pointColors && (g.strip || g.list) && strands_->pointCount() == pointCount_ &&
+        strands_->strandCount() == strandCount_ && strands_->pointCount() > 0 && layoutKeyOf(*strands_) == uploadedLayout_ &&
+        hairPointColored(*strands_) == pointColored_) {
+        return HairIndices::None;
+    }
+    if (!g.indexKindKnown) return HairIndices::Both;
+    return g.useStrip ? HairIndices::Strip : HairIndices::List;
+}
+
 bool LookdevRenderer::partialUpload() const {
     // Only some strands changed from the ones the textures hold (a brush dab's incremental
     // evaluation says which; the same point counts): their texels alone are written, in runs,
@@ -1332,10 +1362,10 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
     if (!pending_) {
         QElapsedTimer timer;
         timer.start();
-        pending_ = std::make_shared<HairBuffers>(strands_ ? buildHairBuffers(*strands_, scalp_.get()) : HairBuffers());
+        pending_ = std::make_shared<HairBuffers>(strands_ ? buildHairBuffers(*strands_, scalp_.get(), indicesNeeded()) : HairBuffers());
         uploadMs_ = timer.nsecsElapsed() / 1e6;
     }
-    const HairBuffers& b = *pending_;
+    HairBuffers& b = *pending_;
     uploadPartial_ = false;
     uploadStrands_ = b.strandCount;
     uploadedThisFrame_ = true;
@@ -1372,7 +1402,12 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
     pointCount_ = b.pointCount;
     strandCount_ = b.strandCount;
     bounds_ = b.bounds;
-    if (b.pointCount > 0 && !b.strip.empty()) {
+    g.useStrip = rhi->isFeatureSupported(QRhi::PrimitiveRestart);
+    g.indexKindKnown = true;
+    // The indices only for a new layout, of the kind drawn (built here if the build left them
+    // out: the layout changed since it was asked for).
+    if (!sameLayout && strands_) buildHairIndices(*strands_, g.useStrip ? HairIndices::Strip : HairIndices::List, b);
+    if (b.pointCount > 0 && (sameLayout || !(g.useStrip ? b.strip : b.list).empty())) {
         auto uploadIndices = [&](std::unique_ptr<QRhiBuffer>& buffer, const std::vector<std::uint32_t>& data) {
             buffer.reset(rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::IndexBuffer, static_cast<quint32>(data.size() * sizeof(std::uint32_t))));
             if (!buffer->create()) {
@@ -1412,7 +1447,6 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
             batch->uploadTexture(texture.get(), QRhiTextureUploadDescription(QRhiTextureUploadEntry(0, 0, sub)));
             return true;
         };
-        g.useStrip = rhi->isFeatureSupported(QRhi::PrimitiveRestart);
         // Without colors of their own the points' colors texture is one texel (hair.vert then
         // reads each strand's).
         static const std::vector<float> noPointColors(4, 0.0f);
@@ -1422,7 +1456,7 @@ void LookdevRenderer::uploadHair(QRhi* rhi, QRhiResourceUpdateBatch* batch) {
                                         : uploadSingleTexel(rhi, batch, g.pointColors, noPointColors, single)) &&
                         (sameLayout || (g.useStrip ? uploadIndices(g.strip, b.strip) : uploadIndices(g.list, b.list)));
         if (ok) {
-            g.indexCount = static_cast<std::uint32_t>(g.useStrip ? b.strip.size() : b.list.size());
+            if (!sameLayout) g.indexCount = static_cast<std::uint32_t>(g.useStrip ? b.strip.size() : b.list.size());
             // The shaded points, one texel each (a target: the per-point shading pass draws it).
             const int rows = static_cast<int>((b.pointCount + kHairTextureWidth - 1) / kHairTextureWidth);
             if (!g.shaded || g.shaded->pixelSize() != QSize(kHairTextureWidth, std::max(rows, 1))) {

@@ -71,7 +71,12 @@ bool hairPointColored(const StrandSet& strands);
 // the channels melanin / melaninRedness / colorR,G,B (their defaults where the set lacks
 // them: HairColor's brown), the root normals from the scalp (null, or a root off it: the
 // strand's first segment).
-HairBuffers buildHairBuffers(const StrandSet& strands, const ScalpMesh* scalp);
+// `indices`: which index arrays to build (a renderer draws one kind, and none while the GPU holds
+// the strands' layout: they depend on the point counts alone).
+enum class HairIndices { Both, Strip, List, None };
+HairBuffers buildHairBuffers(const StrandSet& strands, const ScalpMesh* scalp, HairIndices indices = HairIndices::Both);
+// The index arrays of `b` (for `strands`, as buildHairBuffers lays them out) built where missing.
+void buildHairIndices(const StrandSet& strands, HairIndices indices, HairBuffers& b);
 // The same for strands [first, end) alone: their point entries (8 floats a point, from strand
 // `first`'s first point on) and strand entries (12 a strand), as a partial upload writes them
 // (DisplayItem::updated's runs), and with `pointColors` their per-point colors (4 floats a point).
@@ -277,6 +282,7 @@ private:
     MeshPtr scalp_;
     std::uint64_t hairVersion_ = 0, uploadedVersion_ = ~std::uint64_t{0};
     std::shared_ptr<HairBuffers> pending_;  // built, waiting for the next render
+    HairIndices indicesNeeded() const;      // what a whole upload of strands_ needs built
     // A whole write's buffers building ahead (setBuildAhead): for hair version `version`, on
     // `thread`, `buffers` once `done`.
     struct HairBuild {
