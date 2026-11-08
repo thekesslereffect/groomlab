@@ -13,6 +13,30 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.44.0 (November 8, 2026)
+
+- **Several grooms in the app.** A document holds several grooms, each on its own scalp, and the
+  new **Outliner** tab (the left rail's last icon) lists the scalps with their grooms. Click a
+  groom to work on it; the others are drawn dimmed, and the box beside one hides it. **Add Groom**
+  grows another on a groom's scalp (eyebrows, a second layer), on a prop, on a mesh file, or brings
+  in the grooms of a groom file. See [Several grooms](/docs/app#several-grooms).
+- **A groom file is a document of named grooms, in every host.** Maya's and Blender's **Save Groom
+  File As** write the scene's grooms (the selected ones, else all) into one file named after the
+  scene (`shot_v002.groom`); each groom is linked to it and **Save to Groom File** and **Reload**
+  touch only its own entry. Each groom's maps, card bake and Simulate bakes go in the file's own
+  folder, `groomlab/<file name>/masks|cards|caches/<groom>/`, so the file stands alone. Importing
+  a file of several grooms brings in every one, and a groom keeps its name (groomLab1 saved as
+  `filetest02.groom` comes back as groomLab1). Arnold renders a groom from such a file by its name.
+- **Quads stay quads.** A groom's scalp imports into Maya and opens in Blender as the quads of the
+  mesh it was made on, not triangles. Every host now splits quads the same way, so a groom from
+  the app or Blender also imports onto your original quad mesh in Maya.
+- **Other scalps come along.** A groom on several meshes (Maya's **Add > Scalp**: an ear, a patch)
+  imports with those meshes in Maya and Blender (Maya used to drop them).
+- **Simulate bakes** go in the groom's own `caches/<groom>/` folder, as its maps and cards do.
+- **Fixes:** painting a groom from the app in Maya moves it again, also after importing into an
+  unsaved scene and saving it; renaming or relinking a map takes the settings painted with it along.
+- **The Playful theme** has Charcoal's corners.
+
 ## 0.43.0 (November 7, 2026)
 
 - **Blender:**
