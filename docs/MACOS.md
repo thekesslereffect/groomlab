@@ -339,12 +339,26 @@ python3.12 tools/package_blender.py   # dist/GroomLab-Blender-<version>-macos-ar
 `package_app.py` deploys Qt with `macdeployqt` (plus the offscreen platform), thins to arm64, checks
 that no Mach-O loads from outside the bundle, signs ad hoc and runs the unzipped app once.
 
+**Signing and notarization work (2026-11-09).** With a Developer ID Application certificate in the
+login keychain (on a team account only the Account Holder can create it: make a certificate request
+in Keychain Access, the Account Holder turns it into the `.cer`; if double-clicking it fails with
+-25294, `security import <file>.cer -k ~/Library/Keychains/login.keychain-db`) and a notarytool
+profile (`xcrun notarytool store-credentials <profile> --apple-id ... --team-id ...`):
+
+```sh
+export GROOMLAB_SIGN_IDENTITY="Developer ID Application: <name> (<team>)" GROOMLAB_NOTARY_PROFILE=<profile>
+python3.12 tools/package_blender.py && python3.12 tools/package_app.py && python3.12 tools/package_release.py
+```
+
+`tools/macos_sign.py` signs every Mach-O (hardened runtime, secure timestamp, inside out), the app is
+notarized and stapled before its zip is made, the module and extension zips are notarized as they are
+(a zip cannot be stapled: Gatekeeper finds a loose binary's ticket online by its code hash). Checked as
+downloads (quarantined): the app is accepted offline (stapled); Maya 2027 loads the module and the
+Blender helper runs. **Gotcha:** asking Gatekeeper about a binary in the first minute after Apple
+accepts it caches "Unnotarized" for a while (spctl, or a library load "disallowed by system
+policy"); binaries asked about later pass. Wait a few minutes before checking.
+
 **Not done:**
-- Signing: everything is ad hoc. A public release needs a Developer ID Application certificate,
-  `codesign --options runtime --timestamp` (the app, its frameworks and plugins, the plugin bundles,
-  the procedural, the CLI, the helper) and notarization (`xcrun notarytool submit`, `stapler staple`
-  for the `.app`; zips cannot be stapled). Unsigned downloads are quarantined: Gatekeeper blocks the
-  app, and Maya refuses a quarantined `.bundle` silently.
 - Publishing: `publish_release.py` accepts `-maya-win64.zip` and marks releases `platform="windows"`;
   `publish_app.py` accepts `windows-x64` zips; the updaters read one `latest.json` per product (a Mac
   Maya install would be offered the Windows zip, and refuse it: `updates.PLUGIN_FILE`). They need a
@@ -402,4 +416,4 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [ ] App and Maya use the Metal backend for drags and strokes
 - [ ] Pen pressure in Maya on macOS (Maya's Qt)
 - [x] `.app` bundle with macdeployqt; packaging scripts' macOS branches (the three zips build; the publish scripts are not done: section 11)
-- [ ] Signing and notarization (with the user's Apple account)
+- [x] Signing and notarization (with the user's Apple account): the three packages notarized and accepted as downloads (section 11)
