@@ -38,6 +38,12 @@ def _start():
     exe = helper_path()
     if not os.path.isfile(exe):
         raise HelperError("missing", "the GroomLab helper is not installed (%s): reinstall the GroomLab extension" % exe)
+    if sys.platform != "win32" and not os.access(exe, os.X_OK):
+        # Blender unpacks an extension's zip with Python's zipfile, which drops the executable bit.
+        try:
+            os.chmod(exe, os.stat(exe).st_mode | 0o111)
+        except OSError:
+            pass  # read-only install: Popen says why
     client = HelperClient(exe, log=log_path())
     try:
         hello = client.call("hello", protocol=PROTOCOL)
