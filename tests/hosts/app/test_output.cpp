@@ -757,9 +757,11 @@ TEST(AppOutput, FoldedDocksOpenForShortcutsFloatingAndTheNextStart) {
     AppShell* shell = window.shell();
     IconRail* rail = shell->rightRail();
     const ui::Bindings bindings = AppActions::bindings(window);
+    // The keys as the tooltips show them (Cmd+1 on macOS).
+    auto keys = [](const QKeySequence& k) { return k.toString(QKeySequence::NativeText); };
     // The pages' shortcuts in their tooltips (from the actions: Attributes Ctrl+1, Material Ctrl+2).
-    EXPECT_TRUE(rail->button(0)->toolTip().contains(QStringLiteral("Ctrl+1"))) << rail->button(0)->toolTip().toStdString();
-    EXPECT_TRUE(rail->button(1)->toolTip().contains(QStringLiteral("Ctrl+2"))) << rail->button(1)->toolTip().toStdString();
+    EXPECT_TRUE(rail->button(0)->toolTip().contains(keys(Qt::CTRL | Qt::Key_1))) << rail->button(0)->toolTip().toStdString();
+    EXPECT_TRUE(rail->button(1)->toolTip().contains(keys(Qt::CTRL | Qt::Key_2))) << rail->button(1)->toolTip().toStdString();
     EXPECT_TRUE(rail->button(0)->toolTip().contains(QStringLiteral("fold")));  // (the open page's icon folds)
     // Ctrl+1 from a look page: Attributes again.
     shell->setPropertiesTab(AppShell::PropertiesTab::Lighting);
@@ -786,8 +788,8 @@ TEST(AppOutput, FoldedDocksOpenForShortcutsFloatingAndTheNextStart) {
     QCoreApplication::processEvents();
     // From the keyboard: View > Panels > Fold Properties (Ctrl+]) folds and opens; the left rail's
     // pages on Shift+1..4, its open page's tooltip with the fold's key.
-    EXPECT_TRUE(shell->leftRail()->button(1)->toolTip().contains(QStringLiteral("Shift+2"))) << shell->leftRail()->button(1)->toolTip().toStdString();
-    EXPECT_TRUE(rail->button(rail->current())->toolTip().contains(QStringLiteral("Ctrl+]")));
+    EXPECT_TRUE(shell->leftRail()->button(1)->toolTip().contains(keys(Qt::SHIFT | Qt::Key_2))) << shell->leftRail()->button(1)->toolTip().toStdString();
+    EXPECT_TRUE(rail->button(rail->current())->toolTip().contains(keys(Qt::CTRL | Qt::Key_BracketRight)));
     bindings.at("view.foldProperties").trigger(nullptr, true);
     EXPECT_TRUE(shell->folded(false));
     EXPECT_TRUE(bindings.at("view.foldProperties").checked(nullptr));

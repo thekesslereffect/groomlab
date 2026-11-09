@@ -300,8 +300,9 @@ TEST(AppUi, MenuBarFromTheDefinitionsHidesWhatTheAppDoesNotRun) {
     const QMenu* groomFiles = submenu(groomlab, QStringLiteral("Groom Files"));
     ASSERT_TRUE(groomFiles);
     bool saveShownWithKeys = false;
+    const QString saveKeys = QKeySequence(Qt::CTRL | Qt::Key_S).toString(QKeySequence::NativeText);  // Cmd+S on macOS
     for (QAction* a : groomFiles->actions()) {
-        if (a->text() == QStringLiteral("Save to Groom File\tCtrl+S")) saveShownWithKeys = a->shortcut().isEmpty();
+        if (a->text() == QStringLiteral("Save to Groom File\t") + saveKeys) saveShownWithKeys = a->shortcut().isEmpty();
     }
     EXPECT_TRUE(saveShownWithKeys) << "the second Save shows its keys without taking them";
     EXPECT_EQ(made.at("tool.brush")->text(), QStringLiteral("Brush\tB"));  // a single key: the viewport's, shown only
