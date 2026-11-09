@@ -33,5 +33,12 @@ install(TARGETS groomlab_procedural
     LIBRARY DESTINATION "GroomLab/procedurals" COMPONENT GroomLab
     RUNTIME DESTINATION "GroomLab/procedurals" COMPONENT GroomLab)
 # Linux: node_loader exported alone, libtbb.so.12 beside it ($ORIGIN), as kick on a farm loads it.
+# macOS: Maya.app/Contents/MacOS first (@executable_path/../MacOS from Maya's MacOS/Maya and from
+# bin/mayapy alike), where Maya keeps the TBB it has loaded, so the procedural shares it inside Maya
+# rather than loading the copy beside it as a second TBB (dyld does not merge two files by their
+# install name); kick (mtoa/<year>/bin) has no ../MacOS and takes the copy (@loader_path).
+if(APPLE)
+    set_property(TARGET groomlab_procedural APPEND PROPERTY INSTALL_RPATH "@executable_path/../MacOS")
+endif()
 groomlab_hide_static_symbols(groomlab_procedural)
 groomlab_install_runtime(groomlab_procedural "GroomLab/procedurals" GroomLab)

@@ -45,11 +45,15 @@ if(GROOMLAB_USE_TBB)
         endif()
         find_library(GROOMLAB_MAYA_TBB_LIBRARY NAMES ${_groomlab_maya_tbb_names} HINTS "${GROOMLAB_MAYA_APP}/MacOS" "${MAYA_LOCATION}/lib"
                      NO_DEFAULT_PATH)
-        add_library(groomlab_maya_tbb INTERFACE IMPORTED GLOBAL)
         if(GROOMLAB_MAYA_TBB_LIBRARY)
-            target_link_libraries(groomlab_maya_tbb INTERFACE "${GROOMLAB_MAYA_TBB_LIBRARY}")
+            # Imported as the library itself, as Linux does Maya's: the installs that carry their
+            # runtime (the Arnold procedural, which kick loads without Maya) get it beside them.
+            add_library(groomlab_maya_tbb SHARED IMPORTED GLOBAL)
+            set_target_properties(groomlab_maya_tbb PROPERTIES IMPORTED_LOCATION "${GROOMLAB_MAYA_TBB_LIBRARY}")
+            set(GROOMLAB_TBB_RUNTIME ON)
             message(STATUS "TBB: Maya bundled ${GROOMLAB_MAYA_TBB_LIBRARY}")
         else()
+            add_library(groomlab_maya_tbb INTERFACE IMPORTED GLOBAL)
             target_link_options(groomlab_maya_tbb INTERFACE "LINKER:-undefined,dynamic_lookup")
             message(STATUS "TBB: Maya's headers (${MAYA_LOCATION}), its library left to Maya's process "
                            "(set GROOMLAB_MAYA_APP to link Maya.app's)")
