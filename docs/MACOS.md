@@ -353,11 +353,11 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [ ] The Python module imports in mayapy; the GroomLab menu works (fix Windows-only Python bits) (imports; `test_updates.py` green; `os.startfile` and `GroomLab.mll` fixed, `review.py`'s `Render` was right; the menu not tried in the UI)
 - [x] MtoA translator builds and renders a groom in Arnold (`test_arnold.py` on 2025 with the procedural: 32 of 33; the turntable test's batch render aborts without an Arnold license on this Mac, `abort_on_license_fail`)
 - [ ] A Maya preset with tests; `ctest -L maya` green on the Mac
-- [ ] Maya 2026 (`macos-maya2026`)
+- [x] Maya 2026 (`macos-maya2026`) (built first time, oneTBB; in mayapy: `test_plugin.py` 23 OK, 3 skipped; `test_updates.py` 8 OK; `test_arnold.py` from the installed module 32 of 33, the turntable's batch render needing an Arnold license)
 - [ ] Maya 2027 (`macos-maya2027`: Python 3.13)
 - [ ] Maya 2024 (`macos-maya2024`: Qt 5, PySide2, Python 3.10)
 - [ ] V-Ray for Maya translator builds (`if(APPLE)` branches, section 4 item 11) and renders a groom
-- [x] Arnold procedural (`groomlab_procedural.dylib`) renders in kick (Maya 2025's MtoA: `-DGROOMLAB_BUILD_PROCEDURAL=ON`, the `macos-maya*` presets leave it off. Fixed on the way: Maya 2024/2025's TBB 2020 unloads the `libtbbmalloc` it dlopened in its last worker at exit and then frees through it, so `kick` crashed after its work; the procedural keeps that library mapped, `RTLD_NODELETE`)
+- [x] Arnold procedural (`groomlab_procedural.dylib`) renders in kick (Maya 2025 and 2026's MtoA, installed module: `-DGROOMLAB_BUILD_PROCEDURAL=ON`, the `macos-maya*` presets leave it off. Fixed on the way: TBB 2020 unloading its `libtbbmalloc` at exit (the procedural keeps it mapped); the install now carries Maya's TBB beside the procedural for kick and searches `@executable_path/../MacOS` first, so inside Maya it binds Maya's own (checked with `DYLD_PRINT_SEARCHING`; Arnold still opens the copy while scanning the folder for plugins, as on Windows and Linux). Open: `GroomLab/procedurals` is one folder for every Maya version, but each build links its Maya's TBB and Arnold: a module with several versions needs one procedural per Arnold version)
 - [ ] RenderMan procedural renders in prman (when RenderMan is installed)
 - [x] Blender extension zip installs in Blender for macOS; the helper runs (`-L blender -LE vray` green, Blender 5.2.3)
 - [ ] Slang for macOS pinned; `gpu.*kernel_targets` green
