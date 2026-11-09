@@ -30,8 +30,13 @@ if(Python3_Interpreter_FOUND)
     # Render > ... in V-Ray (vray_render.h) through the executable's flags, when V-Ray Standalone is
     # installed: a frame and a three-frame turntable of the head groom. V-Ray's license is checked
     # out per render: alone.
-    find_program(GROOMLAB_APP_VRAY vray
-        PATHS "$ENV{ProgramFiles}/Chaos/V-Ray/Standalone for x64/bin" "$ENV{VRAY_PATH}" NO_CACHE)
+    if(APPLE)  # vray.bin inside the install's VRay.app
+        file(GLOB _vray_mac_paths "/Applications/Chaos/V-Ray/Standalone_for_*/VRay.app/Contents/MacOS")
+        find_program(GROOMLAB_APP_VRAY vray.bin PATHS "$ENV{VRAY_PATH}" ${_vray_mac_paths} NO_CACHE)
+    else()
+        find_program(GROOMLAB_APP_VRAY vray
+            PATHS "$ENV{ProgramFiles}/Chaos/V-Ray/Standalone for x64/bin" "$ENV{VRAY_PATH}" NO_CACHE)
+    endif()
     if(GROOMLAB_APP_VRAY)
         add_test(NAME app.vray_render
                  COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/vray_render.py" "$<TARGET_FILE:groomlab_app>"

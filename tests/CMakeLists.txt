@@ -695,8 +695,13 @@ endif()
 # written by groomlab-cli and rendered small (vray_compare.py), its coverage, colors and motion blur;
 # with MtoA's kick and GroomLab's Arnold procedural (the Maya build) a comparison with Arnold too.
 # V-Ray's license is checked out per render: alone.
-find_program(GROOMLAB_VRAY_STANDALONE vray
-    PATHS "$ENV{ProgramFiles}/Chaos/V-Ray/Standalone for x64/bin" "$ENV{VRAY_PATH}" NO_CACHE)
+if(APPLE)  # vray.bin inside the install's VRay.app
+    file(GLOB _vray_mac_paths "/Applications/Chaos/V-Ray/Standalone_for_*/VRay.app/Contents/MacOS")
+    find_program(GROOMLAB_VRAY_STANDALONE vray.bin PATHS "$ENV{VRAY_PATH}" ${_vray_mac_paths} NO_CACHE)
+else()
+    find_program(GROOMLAB_VRAY_STANDALONE vray
+        PATHS "$ENV{ProgramFiles}/Chaos/V-Ray/Standalone for x64/bin" "$ENV{VRAY_PATH}" NO_CACHE)
+endif()
 if(GROOMLAB_VRAY_STANDALONE AND TARGET groomlab-cli)
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
