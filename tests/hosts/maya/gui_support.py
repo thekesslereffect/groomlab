@@ -169,6 +169,13 @@ def to_view(point):
     return om.MScriptUtil.getShort(xp), om.MScriptUtil.getShort(yp)
 
 
+def gpu_kernels():
+    """Whether the plugin's GPU kernels run beside the viewport (the hair's density grid, true
+    width's facing ribbons, the lit lines' frames): not on macOS yet, where Viewport 2.0's OpenGL
+    stops at 4.1 (no compute) and there is no Metal backend (docs/MACOS.md section 6)."""
+    return not cmds.about(macOS=True)
+
+
 def persp_panel():
     return next(p for p in cmds.getPanel(type="modelPanel") if cmds.modelPanel(p, query=True, camera=True) == "persp")
 

@@ -14,7 +14,7 @@ import time
 
 from maya import cmds
 
-from gui_support import CLASSIC_GRAPH, check, finish, persp_panel, process_events, say, soon, to_view
+from gui_support import CLASSIC_GRAPH, check, finish, gpu_kernels, persp_panel, process_events, say, soon, to_view
 
 FRAMES = 60
 BUDGET_FPS = 24.0
@@ -1016,6 +1016,9 @@ def true_width_check(snapshots=None):
     segments as lines with width as coverage (groomLabRibbonsThin), so they cover more of the picture
     than the lines; far away as near (no switch by distance). An orbit makes the ribbons again for
     each view (refaced); flat (lighting off) alike; off, the lines."""
+    if not gpu_kernels():
+        say("true width: skipped (its facing ribbons are made by the GPU kernels, none on macOS yet)")
+        return
     import tempfile
     import groomlab
     from groomlab.ui.qt import QtGui
@@ -1718,12 +1721,15 @@ def scale_freeze_shaders_check(snapshots=None):
     now = grid()
     say("scalefreeze grids: %s; now %s" % ([(g.get("size"), g.get("volumeSerial"), g.get("serial"), g.get("staleShaders")) for g in grids],
                                            {key: now.get(key) for key in ("size", "volumeSerial", "serial", "shadersGiven", "staleShaders")}))
-    check("scaled 1 -> 0.1 -> 1 and frozen, every hair shader holds the self-shadowing grid as it is now on %s (%s)"
-          % (api, {key: now.get(key) for key in ("volumeSerial", "serial", "shadersGiven", "staleShaders")}),
-          now.get("valid") and now.get("staleShaders") == 0 and len(now.get("shadersGiven", {})) > 0 and
-          now.get("volumeSerial", 0) > grids[0].get("volumeSerial", 0) and  # (a texture of its own at each scale)
-          all(v == [now["volumeSerial"], now["serial"]] for v in now["shadersGiven"].values()) and
-          all(g.get("staleShaders", 0) == 0 for g in grids))
+    if not gpu_kernels():
+        say("scaled 1 -> 0.1 -> 1 and frozen: the self-shadowing grid not checked (made by the GPU kernels, none on macOS yet)")
+    else:
+        check("scaled 1 -> 0.1 -> 1 and frozen, every hair shader holds the self-shadowing grid as it is now on %s (%s)"
+              % (api, {key: now.get(key) for key in ("volumeSerial", "serial", "shadersGiven", "staleShaders")}),
+              now.get("valid") and now.get("staleShaders") == 0 and len(now.get("shadersGiven", {})) > 0 and
+              now.get("volumeSerial", 0) > grids[0].get("volumeSerial", 0) and  # (a texture of its own at each scale)
+              all(v == [now["volumeSerial"], now["serial"]] for v in now["shadersGiven"].values()) and
+              all(g.get("staleShaders", 0) == 0 for g in grids))
     # Written afresh, the item holds what a fresh build holds: the same streams, and the CPU's share of
     # what it sent (the indices, the colors) the same (the GPU's lines keep their layout: not sent again).
     if built and afresh:

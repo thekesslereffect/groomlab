@@ -16,7 +16,7 @@ import os
 
 from maya import cmds
 
-from gui_support import check, finish, persp_panel, say, soon
+from gui_support import check, finish, gpu_kernels, persp_panel, say, soon
 
 SIZE = (480, 360)
 
@@ -423,9 +423,12 @@ def hair_check(snapshots=None):
     shadowed = hair_stats(shot("self_shadow_on"), background)[1]
     grid = json.loads(cmds.groomLabGraphStats(groom, hairShading=True))["grid"]
     say("hair shading grid on %s: %s" % (api, grid))
-    check("GroomLab's hair on %s shadows itself (a %s grid of %.3g cells: mean luma %.1f against %.1f unshadowed)"
-          % (api, grid.get("size"), grid.get("cell", 0), luma(shadowed), luma(unshadowed)),
-          grid.get("valid") and luma(shadowed) < 0.95 * luma(unshadowed) and luma(shadowed) > 0.05 * luma(unshadowed))
+    if not gpu_kernels():
+        say("GroomLab's hair on %s: self-shadowing not checked (its grid is made by the GPU kernels, none on macOS yet)" % api)
+    else:
+        check("GroomLab's hair on %s shadows itself (a %s grid of %.3g cells: mean luma %.1f against %.1f unshadowed)"
+              % (api, grid.get("size"), grid.get("cell", 0), luma(shadowed), luma(unshadowed)),
+              grid.get("valid") and luma(shadowed) < 0.95 * luma(unshadowed) and luma(shadowed) > 0.05 * luma(unshadowed))
     # A GPU drag moves the grid with the strands.
     serial = grid.get("serial", 0)
     if api in ("DirectX11", "OpenGLCoreProfile"):

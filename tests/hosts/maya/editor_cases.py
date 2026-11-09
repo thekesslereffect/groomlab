@@ -1851,8 +1851,10 @@ class GraphEditorTest(unittest.TestCase):
         # The Edit menu names the steps, with the keys.
         self.editor.fill_edit_menu()
         self.assertTrue(self.editor.undo_action.text().startswith("Undo groomLab graph edit"))
-        self.assertIn("Ctrl+Z", self.editor.undo_action.text())
-        self.assertIn("Ctrl+Y", self.editor.redo_action.text())
+        from groomlab.ui.qt import QtGui
+        native = lambda keys: QtGui.QKeySequence(keys).toString(QtGui.QKeySequence.NativeText)  # (⌘Z on macOS)
+        self.assertIn(native("Ctrl+Z"), self.editor.undo_action.text())
+        self.assertIn(native("Ctrl+Y"), self.editor.redo_action.text())
         self.editor.undo_action.trigger()
         wait(60)
         self.assertNotIn(name, self.editor.items)
