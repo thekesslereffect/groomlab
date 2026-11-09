@@ -3,6 +3,8 @@
 
 import functools
 import os
+import subprocess
+import sys
 
 from maya import cmds, mel
 
@@ -1831,6 +1833,8 @@ def open_docs():
     if folder:
         if hasattr(os, "startfile"):
             os.startfile(folder)  # Explorer on Windows
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", folder])  # the Finder
         else:
             cmds.showHelp(folder, absolute=True)
         _say("opened the docs folder %s" % folder)
