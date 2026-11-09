@@ -517,7 +517,7 @@ public:
         return {
             ParamSpec{"rootDepth", 0.0, "How far each strand goes on under its root, into the skin, so renders show hair "
                                         "growing out of the scalp instead of sitting on it: one point added after every "
-                                        "node, along the strand's first segment bent into the skin (0: none). For renders "
+                                        "node, carrying on the strand's own line through its root (0: none). For renders "
                                         "and render exports (Arnold, V-Ray, RenderMan, Cycles, Alembic, USD); never for "
                                         "game exports (Unreal, Unity, glTF, FBX), whose physics pins the root", "length"}
                 .atLeast(0)

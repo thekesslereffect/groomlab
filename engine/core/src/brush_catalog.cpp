@@ -46,7 +46,9 @@ std::vector<BrushEntry> makeCatalog() {
          "Drag guides along the stroke, roots pinned (Stretch: they get longer or shorter as you pull).",
          with(kShaping, {"stretch", "targets"})},
         {"slide", "Slide", C::Shape, 0, "slide", 1.0f, false,
-         "Move roots along the scalp; guides keep their shape (fix a root without redrawing).", kBrushCommon},
+         "Move roots along the scalp; guides keep their shape (fix a root without redrawing). Strength along the "
+         "guide: how much of each guide follows its root (Root Only: the root alone moves, the rest stays put)",
+         with(kBrushCommon, {"strengthProfile"})},
         {"smooth", "Smooth", C::Shape, 0, "smooth", 0.5f, false,
          "Take kinks out, lengths kept (Straighten: relax guides toward the straight line along their root direction).",
          with(kShaping, {"straighten", "targets"})},

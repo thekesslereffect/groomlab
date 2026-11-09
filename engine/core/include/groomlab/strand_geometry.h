@@ -105,10 +105,11 @@ struct StrandMeshSource {
 bool sameStrandMeshes(const std::vector<StrandMeshSource>& a, const std::vector<StrandMeshSource>& b);
 
 // The Output node's rootDepth: each strand with a point `depth` under its root, inside the skin,
-// so a render shows hair growing out of the scalp instead of sitting on it. The point lies along
-// the way back down the strand's first segment bent into the skin (the inward normal at its root
-// on `scalp` added, so a strand leaving the skin flat still goes in); off the scalp, straight back
-// down the first segment. Roots, IDs and per-strand values stay; the width and point channels are
+// so a render shows hair growing out of the scalp instead of sitting on it. The point carries on
+// the strand's own line through its root: the way from the strand's point `depth` along it (or its
+// last) back to its root, so the hair under the skin mirrors the hair just above it. Where that
+// line would not go into the skin (a strand leaving it flat or turning into it), it is tilted just
+// enough to: at least about 5 degrees under the skin at its root on `scalp`. Roots, IDs and per-strand values stay; the width and point channels are
 // the root's. Strands carrying instances or feathers (placed by where they sit along the strand)
 // and strands shorter than two points are handed on as they are; `depth` 0 or less: the same set.
 StrandsPtr withRootDepth(const StrandsPtr& strands, const ScalpMesh* scalp, float depth);

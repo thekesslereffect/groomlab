@@ -155,6 +155,9 @@ TEST(Session, RootDepthBuriesAPointUnderEachRootForRendersOnly) {
         for (std::size_t j = 0; j < plain->strandPointCount(i); ++j) ASSERT_EQ(p[j + 1], q[j]);
         EXPECT_NEAR((p[0] - p[1]).length(), 0.05f, 1e-5f);
         EXPECT_LT(p[0].length(), p[1].length() - 0.02f) << "under the skin of the sphere (radius 1)";
+        // On the strand's own line: the way down from the root is the way up to the hair above it.
+        const Vec3f down = (p[1] - p[0]).normalized(), up = (p[2] - p[1]).normalized();
+        if (up.dot(p[1].normalized()) > 0.2f) EXPECT_GT(down.dot(up), 0.995f) << "strand " << i;
         const std::size_t b = render->strandBegin(i);
         EXPECT_EQ(render->widths()[b], render->widths()[b + 1]);
     }

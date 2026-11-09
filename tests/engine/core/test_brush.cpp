@@ -620,6 +620,29 @@ TEST(Brush, SlideMovesRootsAlongTheScalpKeepingShape) {
     EXPECT_GE(s.h.guide(id)->root.face, 0);
 }
 
+TEST(Brush, SlideWithAProfileMovesTheRootAloneAndEasesTheGuide) {
+    // Strength along the guide on Slide (issue #53): Root Only moves the root along the scalp, the
+    // points near it eased after it and the rest of the guide left where it was.
+    Scene s;
+    const GuideId id = s.add(0.5f, 0.5f);
+    const std::vector<Vec3f> before = s.pts(id);
+    BrushSettings slide;
+    slide.mode = BrushMode::Slide;
+    slide.radius = 0.6f;
+    slide.strengthProfile = std::make_shared<const Ramp>(Ramp{{0.0f, 1.0f}, {0.4f, 0.0f}, {1.0f, 0.0f}});  // Root Only
+    applyBrushStroke(s.h, s.scalp.get(), slide, {{0.5f, 0.0f, 0.5f}, {0.7f, 0.0f, 0.5f}});
+    const std::vector<Vec3f>& after = s.pts(id);
+    ASSERT_EQ(after.size(), before.size());
+    EXPECT_GT(after.front().x, before.front().x + 0.05f);  // the root moved with the drag
+    EXPECT_NEAR(after.front().y, 0.0f, 1e-4f);             // on the scalp
+    EXPECT_GE(s.h.guide(id)->root.face, 0);
+    const std::size_t n = after.size();
+    for (std::size_t i = n / 2; i < n; ++i) EXPECT_LT((after[i] - before[i]).length(), 1e-5f) << "point " << i << " stays";
+    // Between: eased, less the farther from the root.
+    EXPECT_GT(after[1].x - before[1].x, after[2].x - before[2].x);
+    EXPECT_GT(after[1].x - before[1].x, 0.0f);
+}
+
 TEST(Brush, PlaceInterpolatesItsNeighbors) {
     Scene s;
     const GuideId a = s.add(0.3f, 0.5f);

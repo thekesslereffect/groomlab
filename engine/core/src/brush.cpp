@@ -398,13 +398,21 @@ Edit brushGuide(const HierarchyGuide& g, const ScalpMesh* scalp, const BrushSett
         case BrushMode::Slide: {
             // The root moves with the drag, projected onto the scalp; the guide
             // keeps its shape, turned from the old root normal to the new one.
+            // With a root-to-tip profile (strengthProfile) each point follows by
+            // its share (the root always all the way): Root Only slides the root
+            // alone, the guide's length eased from it and the rest left where it
+            // is (Ornatrix's root move).
             const float w = weigh(pts[0]) * std::clamp(s.strength, 0.0f, 1.0f);
             if (w <= 0.0f || drag.length() == 0.0f || !scalp || scalp->triangleCount() == 0) return e;
             const SurfacePoint to = scalp->closestPoint(pts[0] + drag * w);
             if (to.root.face < 0) return e;
             const Vec3f n0 = rootNormal(g, scalp).normalized(), n1 = to.normal.normalized();
             e.points.resize(n);
-            for (std::size_t i = 0; i < n; ++i) e.points[i] = to.position + rotateBetween(pts[i] - pts[0], n0, n1);
+            for (std::size_t i = 0; i < n; ++i) {
+                const Vec3f rigid = to.position + rotateBetween(pts[i] - pts[0], n0, n1);
+                const float follow = i == 0 || !profiled ? 1.0f : std::clamp(rootToTip[i], 0.0f, 1.0f);
+                e.points[i] = pts[i] + (rigid - pts[i]) * follow;
+            }
             return e;
         }
         case BrushMode::Straighten: {

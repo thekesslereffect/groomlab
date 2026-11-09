@@ -169,8 +169,10 @@ cmds.setAttr(groom + ".previewDensity", 1.0)
   the GPU preview leaves an Interpolate keeping curls to the CPU.
 - **Hair grows out of the skin in renders:** `Output.rootDepth` (0, off, by default; a length)
   adds one point under each strand's root after every node, inside the skin, so a render shows hair
-  growing out of the scalp instead of sitting on it. The point lies back along the strand's first
-  segment bent into the skin (the inward normal at the root added). Renders and render exports
+  growing out of the scalp instead of sitting on it. The point carries on the strand's own line
+  through its root (its way over the same length above the root, mirrored), so the hair under the
+  skin keeps the angle of the hair above it; a strand leaving the skin flat is tilted just enough
+  to go in (about 5 degrees). Renders and render exports
   have it (Arnold, V-Ray, RenderMan, Cycles, Alembic, USD, the procedurals); game exports never do
   (Unreal, Unity, glTF, FBX, cards, To Mesh: an engine's physics pins the root, and a point under
   it fights the body's collision); the viewport only with `rootDepthInViewport`. No node sees the

@@ -237,11 +237,10 @@ TEST(BrushPack, CurlDirectionAndNoiseBrushesAreGone) {
         EXPECT_THROW(s.setMode(brush), std::invalid_argument) << brush;
         EXPECT_EQ(brushEntry(brush), nullptr) << brush;
     }
-    for (const char* shaping : {"comb", "smooth", "lift", "twist", "attract"}) {
+    for (const char* shaping : {"comb", "smooth", "lift", "twist", "attract", "slide"}) {  // (slide: how much follows the root, issue #53)
         EXPECT_TRUE(brushEntry(shaping)->hasSetting("strengthProfile")) << shaping;
         EXPECT_TRUE(brushEntry(shaping)->hasSetting("falloffProfile")) << shaping;
     }
-    EXPECT_FALSE(brushEntry("slide")->hasSetting("strengthProfile"));
     EXPECT_TRUE(brushEntry("paint")->hasSetting("falloffProfile"));
 }
 

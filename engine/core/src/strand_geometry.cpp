@@ -572,13 +572,28 @@ StrandsPtr withRootDepth(const StrandsPtr& strands, const ScalpMesh* scalp, floa
         const std::size_t n = strands->strandPointCount(i);
         if (n == 0) return;
         const Vec3f* p = strands->strandPoints(i);
-        Vec3f back = n >= 2 ? p[0] - p[1] : Vec3f{};
+        // The strand's way over its first `depth` (the point that far along it, or its last), reversed.
+        std::size_t k = std::min<std::size_t>(1, n - 1);
+        for (float along = 0.0f; k < n; ++k) {
+            along += (p[k] - p[k - 1]).length();
+            if (along >= depth) break;
+        }
+        k = std::min(k, n - 1);
+        Vec3f back = k > 0 ? p[0] - p[k] : Vec3f{};
         back = back.length() > 0.0f ? back.normalized() : Vec3f{};
         const StrandRoot& root = strands->roots()[i];
         if (onScalp && scalp->contains(root)) {
-            const Vec3f inward = scalp->normal(root) * -1.0f;
-            const Vec3f way = back + inward;
-            back = way.length() > 1e-6f ? way.normalized() : inward;
+            // Into the skin by at least about 5 degrees (sin 5° = 0.087).
+            constexpr float kLeast = 0.087f;
+            const Vec3f normal = scalp->normal(root).normalized();
+            const float out = back.dot(normal);
+            if (back.length() == 0.0f) {
+                back = normal * -1.0f;
+            } else if (out > -kLeast) {
+                const Vec3f flat = back - normal * out;
+                const float f = flat.length();
+                back = f > 1e-6f ? (flat * (std::sqrt(1.0f - kLeast * kLeast) / f) - normal * kLeast).normalized() : normal * -1.0f;
+            }
         }
         if (back.length() == 0.0f) back = Vec3f{0.0f, -1.0f, 0.0f};
         buried[i] = p[0] + back * depth;
