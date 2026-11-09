@@ -176,6 +176,19 @@ def gpu_kernels():
     return not cmds.about(macOS=True)
 
 
+def view_pixel_scale():
+    """The 3D view's pixels per point: 2 on a Retina Mac, where Maya's view counts device pixels
+    and a brush's radius is in points; 1 elsewhere. A stroke given in the view's pixels covers
+    1 / this of the screen it would cover on Windows."""
+    if not cmds.about(macOS=True):
+        return 1.0
+    import maya.OpenMayaUI as omui
+    from groomlab.ui.qt import QtWidgets, wrap_instance
+    view = omui.M3dView.active3dView()
+    widget = wrap_instance(int(view.widget()), QtWidgets.QWidget)
+    return float(view.portWidth()) / max(widget.width(), 1)
+
+
 def persp_panel():
     return next(p for p in cmds.getPanel(type="modelPanel") if cmds.modelPanel(p, query=True, camera=True) == "persp")
 

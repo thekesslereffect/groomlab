@@ -21,7 +21,7 @@ import maya.OpenMayaUI as omui
 import maya.mel as mel
 from maya import cmds
 
-from gui_support import check, finish, later, persp_panel, say, to_view
+from gui_support import check, finish, later, persp_panel, say, to_view, view_pixel_scale
 
 state = {}
 
@@ -430,7 +430,8 @@ def step_redo():
     # Flow: a drag lays arrows on the scalp; the field draws.
     state["groomlab"].brush_tool("flow", radius=120)
     fx, fy = to_view((-0.5, 0.85, 0.5))
-    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke=" ".join("%d %d" % (fx + 12 * k, fy) for k in range(16)))
+    step = 12 * view_pixel_scale()  # (arrows every half a radius, the radius in points: the stroke's length in them too)
+    cmds.groomLabBrushCtx(ctx, edit=True, debugStroke=" ".join("%d %d" % (fx + step * k, fy) for k in range(16)))
     check("flow lays arrows", len(state["groomlab"].flow_arrows(groom)) > 2)
     import json
     pins = json.loads(cmds.getAttr(groom + ".flowData"))["pins"]
