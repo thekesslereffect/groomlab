@@ -37,6 +37,7 @@ class QLabel;
 class QMenu;
 class QPushButton;
 class QScrollArea;
+class QToolButton;
 class QTimer;
 class QVariantAnimation;
 

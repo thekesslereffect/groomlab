@@ -8,6 +8,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QCheckBox>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>

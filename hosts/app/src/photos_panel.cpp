@@ -15,6 +15,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QToolButton>
+#include <QVector3D>
 #include <QVBoxLayout>
 
 #include "groomlab/pin_morph.h"

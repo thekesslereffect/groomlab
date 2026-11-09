@@ -37,6 +37,7 @@
 
 #include <QPointer>
 #include <QString>
+#include <QTabBar>
 #include <QWidget>
 
 #include "card_parts.h"
@@ -50,7 +51,6 @@ class QLabel;
 class QMenu;
 class QPushButton;
 class QScrollArea;
-class QTabBar;
 class QToolButton;
 class QVBoxLayout;
 

@@ -41,6 +41,7 @@
 class QCheckBox;
 class QComboBox;
 class QDoubleSpinBox;
+class QHBoxLayout;
 class QLabel;
 class QPushButton;
 class QSpinBox;

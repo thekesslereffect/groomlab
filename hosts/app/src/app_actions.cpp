@@ -5,6 +5,7 @@
 #include <optional>
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDesktopServices>
 #include <QDir>

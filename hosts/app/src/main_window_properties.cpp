@@ -17,6 +17,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLocale>
+#include <QPainter>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QLineEdit>
