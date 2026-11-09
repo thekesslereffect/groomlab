@@ -351,13 +351,13 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] Maya 2025 install in place (no devkit needed); `macos-maya2025` builds `GroomLab.bundle`
 - [ ] The plugin loads in Maya 2025; a groom draws in Viewport 2.0 (Metal); brushes and drags work (CPU) (loads in mayapy: `test_plugin.py` 23 OK, 3 skipped; the Maya UI not tried yet)
 - [ ] The Python module imports in mayapy; the GroomLab menu works (fix Windows-only Python bits) (imports; `test_updates.py` green; `os.startfile` and `GroomLab.mll` fixed, `review.py`'s `Render` was right; the menu not tried in the UI)
-- [x] MtoA translator builds and renders a groom in Arnold (`test_arnold.py` on 2025: 30 of 33. Open: the turntable test's batch render aborts without an Arnold license on this Mac (`abort_on_license_fail`); and `kick` crashes at exit (SIGSEGV in TBB 2020's `private_server` destructor, a call into an image no longer mapped) only when the test runs it, after the procedural has expanded and written everything: not reproduced by hand, and pinning the procedural (`RTLD_NODELETE`) did not change it. Next: check with oneTBB (2026), and whether TBB 2020 unloads `libtbbmalloc` at exit)
+- [x] MtoA translator builds and renders a groom in Arnold (`test_arnold.py` on 2025 with the procedural: 32 of 33; the turntable test's batch render aborts without an Arnold license on this Mac, `abort_on_license_fail`)
 - [ ] A Maya preset with tests; `ctest -L maya` green on the Mac
 - [ ] Maya 2026 (`macos-maya2026`)
 - [ ] Maya 2027 (`macos-maya2027`: Python 3.13)
 - [ ] Maya 2024 (`macos-maya2024`: Qt 5, PySide2, Python 3.10)
 - [ ] V-Ray for Maya translator builds (`if(APPLE)` branches, section 4 item 11) and renders a groom
-- [ ] Arnold procedural (`groomlab_procedural.dylib`) renders in kick (builds with `-DGROOMLAB_BUILD_PROCEDURAL=ON` against MtoA's Arnold; `kick` loads it, renders and expands it; the exit crash above is open)
+- [x] Arnold procedural (`groomlab_procedural.dylib`) renders in kick (Maya 2025's MtoA: `-DGROOMLAB_BUILD_PROCEDURAL=ON`, the `macos-maya*` presets leave it off. Fixed on the way: Maya 2024/2025's TBB 2020 unloads the `libtbbmalloc` it dlopened in its last worker at exit and then frees through it, so `kick` crashed after its work; the procedural keeps that library mapped, `RTLD_NODELETE`)
 - [ ] RenderMan procedural renders in prman (when RenderMan is installed)
 - [x] Blender extension zip installs in Blender for macOS; the helper runs (`-L blender -LE vray` green, Blender 5.2.3)
 - [ ] Slang for macOS pinned; `gpu.*kernel_targets` green
