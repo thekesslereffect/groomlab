@@ -65,6 +65,7 @@
 // and a backdrop's resize are not undo steps.
 // Hidden, the graph takes no events at all: the viewport gets them as if it were not there.
 
+#include <algorithm>
 #include <functional>
 #include <limits>
 #include <map>
@@ -220,10 +221,12 @@ public:
     // View Up to Here: the node the viewport shows ("" the output). Emits viewNodeChanged.
     void setViewedNode(const std::string& node);
     const std::string& viewedNode() const { return viewed_; }
-    // The Clump whose clumps color the strands (its header's Clump Colors button lit; "" none): the
-    // host's to say, from its display (strand colors by clump, from that node's channel, viewed).
-    void setClumpColoredNode(const std::string& node);
-    const std::string& clumpColoredNode() const { return clumpColored_; }
+    // The Clumps whose clumps color the strands (their headers' Clump Colors buttons lit; none: no
+    // clump colors): the host's to say, from its display (strand colors by clump, from their channel).
+    void setClumpColoredNodes(std::vector<std::string> nodes);
+    bool clumpColored(const std::string& node) const {
+        return std::find(clumpColored_.begin(), clumpColored_.end(), node) != clumpColored_.end();
+    }
     void toggleViewSelected();  // V
     // Copy and paste (Ctrl+C, Ctrl+V): the clipboard's text, as Maya's Graph Editor writes it.
     void copySelected();
@@ -442,7 +445,7 @@ private:
     std::map<std::string, std::string> notes_;  // a note per node from its last run
     std::map<std::string, std::string> errors_;  // an error per failing node
     std::string viewed_;  // View Up to Here ("" the output)
-    std::string clumpColored_;  // setClumpColoredNode
+    std::vector<std::string> clumpColored_;  // setClumpColoredNodes
     std::map<std::string, QPointF> laidOut_;  // positions the view chose (the document has none)
     std::string selected_;
     std::vector<std::string> selection_;

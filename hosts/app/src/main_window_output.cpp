@@ -413,7 +413,7 @@ bool MainWindow::bakeFollicleMap(const QString& directory, int resolution, doubl
         report(tr("No groom open"));
         return false;
     }
-    const QString folder = directory.isEmpty() ? besideGroom(document_.get(), QStringLiteral("_follicles")) : directory;
+    const QString folder = directory.isEmpty() ? QString::fromStdString(document_->assetFolder("exports")) : directory;
     std::vector<std::string> files;
     std::string error;
     float used = 0.0f;
@@ -430,6 +430,37 @@ bool MainWindow::bakeFollicleMap(const QString& directory, int resolution, doubl
     notify(tr("Baked the follicles (radius %1) into %n map(s) in %2", "", static_cast<int>(files.size()))
                .arg(QLocale().toString(used, 'g', 3), folder));
     return true;
+}
+
+void MainWindow::bakeFollicleMapPrompt() {
+    if (!document_) {
+        report(tr("No groom open"));
+        return;
+    }
+    float measured = 0.0f;
+    {
+        const BusyCursor wait;
+        measured = document_->follicleAutoRadius();
+    }
+    std::vector<OverlayHost::TextChoice> choices;
+    for (const int resolution : {1024, 2048, 4096}) {
+        choices.emplace_back(tr("Bake %1K").arg(resolution / 1024), [this, resolution](const QString& text) {
+            bool ok = false;
+            const double radius = QLocale().toDouble(text.trimmed(), &ok);
+            const double typed = ok ? radius : text.trimmed().toDouble(&ok);
+            if (!ok || !(typed > 0.0)) {
+                report(tr("The radius is a length above 0 (scene units)"));
+                return;
+            }
+            bakeFollicleMap({}, resolution, typed);
+        });
+    }
+    host_->showTextPrompt(tr("Bake Follicle Map"),
+                          tr("How far each follicle's gradient reaches on the skin (scene units): white at the root, falling "
+                             "evenly to black at the radius, past the strands' width for a wider shadow; shape it in the skin "
+                             "shader (a clamp, a remap). From the roots' spacing: %1. Into %2.")
+                              .arg(QLocale().toString(measured, 'g', 4), QString::fromStdString(document_->assetFolder("exports"))),
+                          QLocale().toString(measured > 0.0f ? measured : 0.05f, 'g', 4), std::move(choices));
 }
 
 bool MainWindow::findMissingFiles(const QString& folder) {

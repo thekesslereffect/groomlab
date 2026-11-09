@@ -43,7 +43,7 @@ void AppActions::addOutputBindings(ui::Bindings& b, MainWindow& w) {
     // Utilities and Export.
     b["strands.toMesh"] = {run([m] { m->askStrandsToMesh(); }), {}, groomOpen};
     b["scales.bakeMaps"] = {run([m] { m->bakeScaleMaps(); }), {}, groomOpen};
-    b["follicles.bakeMap"] = {run([m] { m->bakeFollicleMap(); }), {}, groomOpen};
+    b["follicles.bakeMap"] = {run([m] { m->bakeFollicleMapPrompt(); }), {}, groomOpen};
     b["files.findMissing"] = {run([m] { m->askFindMissingFiles(); }), {}, groomOpen};
     b["files.collect"] = {run([m] { m->collectFiles(); }), {}, [m] { return m->document_ != nullptr && !m->document_->path().empty(); }};
     b["export.scalesUsd"] = {run([m] { m->askExportScalesUsd(); }), {}, groomOpen};

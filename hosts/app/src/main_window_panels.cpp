@@ -379,7 +379,6 @@ void MainWindow::wireOverlay() {
     connect(graph_, &NodeGraphView::viewNodeChanged, this, [this](const std::string& node) {
         if (node == viewNode_) return;
         viewNode_ = node;
-        refreshClumpColored();
         if (document_) reevaluate();
     });
     connect(graph_, &NodeGraphView::clumpColorsToggled, this, [this](const std::string& node) { toggleClumpColors(node); });

@@ -195,13 +195,18 @@ def bake_scale_maps(scalp, directory, name="groom", resolution=2048, max_height=
                 maxHeight=float(max_height), padding=int(padding))
 
 
-def bake_follicle_map(scalp, directory, name="groom", resolution=2048, radius=0.0, hardness=0.0, padding=8):
-    """A radial gradient round every root baked onto the scalp's UVs (Maya's bake_follicle_map):
-    <name>_FollicleMap.png (16-bit gray: white at a root, black past `radius`; 0 from the roots'
-    spacing), a UDIM tile set when the UVs leave 0-1. Returns {files, pattern, radius, udim, tiles,
-    follicles, touched}."""
+def bake_follicle_map(scalp, directory, name="groom", resolution=2048, radius=0.0, padding=8):
+    """A linear gradient round every root baked onto the scalp's UVs (Maya's bake_follicle_map):
+    <name>_FollicleMap.png (16-bit gray: 1 - distance / `radius`, white at a root, black past it; 0
+    from the roots' spacing), a UDIM tile set when the UVs leave 0-1. Returns {files, pattern,
+    radius, udim, tiles, follicles, touched}."""
     return call(scalp, "bake_follicle_map", directory=directory, name=name, resolution=int(resolution),
-                radius=float(radius), hardness=float(hardness), padding=int(padding))
+                radius=float(radius), padding=int(padding))
+
+
+def follicle_auto_radius(scalp):
+    """The follicle map's radius from the roots' spacing (Maya's follicle_auto_radius)."""
+    return float(call(scalp, "bake_follicle_map", directory="", measure=True)["radius"])
 
 
 def scale_mesh(scalp, name=None):

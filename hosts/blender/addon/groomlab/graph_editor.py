@@ -354,7 +354,7 @@ _COLOR_BEFORE_CLUMP = {}  # groom uid -> its strand color mode before a Clump Co
 
 
 class GROOMLAB_OT_graph_clump_colors(_GraphOperator):
-    """Clump Colors: color the strands by this Clump's clumps, viewing up to it. Again: the colors as they were and the output"""
+    """Clump Colors: color the strands by this Clump's clumps (its clumpChannel). Again: the colors as they were"""
     bl_idname = "groomlab.graph_clump_colors"
     bl_label = "Clump Colors"
 
@@ -371,7 +371,6 @@ class GROOMLAB_OT_graph_clump_colors(_GraphOperator):
         if graph_tree.clump_colored(scalp, node):
             before = _COLOR_BEFORE_CLUMP.pop(uid, "solid")
             d.strand_color = "solid" if before == "clump" else before
-            graph_tree.view_node(scalp, "")
             return {"FINISHED"}
         channel = graph_tree.clump_channel(node)
         if not channel:
@@ -381,8 +380,7 @@ class GROOMLAB_OT_graph_clump_colors(_GraphOperator):
             _COLOR_BEFORE_CLUMP[uid] = d.strand_color
         d.strand_color_source = channel
         d.strand_color = "clump"
-        graph_tree.view_node(scalp, node.gl_name)
-        self.report({"INFO"}, "Strands colored by %s's clumps (renders use the output)" % node.gl_name)
+        self.report({"INFO"}, "Strands colored by %s's clumps (%s)" % (node.gl_name, channel))
         return {"FINISHED"}
 
 

@@ -527,6 +527,9 @@ public:
     // Utilities > Bake Scale Maps: into `directory` ("" the groom's: <groom folder>/<name>_scales).
     bool bakeScaleMaps(const QString& directory = {}, int resolution = 2048);
     bool bakeFollicleMap(const QString& directory = {}, int resolution = 2048, double radius = 0.0);
+    // Utilities > Bake Follicle Map: the radius asked (opening on the one from the roots' spacing),
+    // the resolution its button's; into the groom's exports folder.
+    void bakeFollicleMapPrompt();
     // Utilities > Find Missing Files: relinked to files of the same name under `folder`.
     bool findMissingFiles(const QString& folder);
     // Collect Files (Maya's): GroomDocument::collectFiles, reported.
@@ -693,9 +696,9 @@ private:
     void refreshDisplayChoices();  // the color sources and the maps the display panel offers
     void applyDisplayOptions();    // the display panel's choices into the settings and the renderer
     // A Clump header's Clump Colors button: the strands colored by that node's clumps (its
-    // clumpChannel), viewed up to it; on the lit one, the color mode before and the output again.
+    // clumpChannel), the view left as it is; on a lit one, the color mode before.
     void toggleClumpColors(const std::string& node);
-    void refreshClumpColored();  // which Clump's button is lit, from the display and the view
+    void refreshClumpColored();  // which Clumps' buttons are lit, from the display
     std::string clumpChannelOf(const std::string& node, bool* isClump = nullptr) const;
     int colorModeBeforeClump_ = 0;  // kSolidColors
     // While the Paint brush is on a map (Maya's show_while_painting): the strands colored by it

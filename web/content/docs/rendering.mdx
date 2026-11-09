@@ -352,12 +352,14 @@ To use scales elsewhere:
 
 ## Follicle maps for skin shaders
 
-**GroomLab > Utilities > Bake Follicle Map** bakes a radial gradient round every strand's root into
-the scalp's UVs: a 16-bit gray PNG (one per UDIM tile), white at each root and black past the
-radius, which comes from the roots' spacing unless you give one (`groomlab.bake_follicle_map(groom,
-radius=0.05)`). Plug it into the skin shader to darken or tint the skin where hair leaves it, add
-follicle bumps, or keep a hairline's density in a game's lower levels of detail, in any renderer
-or engine.
+**GroomLab > Utilities > Bake Follicle Map** opens a window that bakes a gradient round every
+strand's root into the scalp's UVs: a 16-bit gray PNG (one per UDIM tile) in the exports folder,
+`1 - distance / radius`, white at each root falling evenly to black at the radius. The window opens
+on a radius measured from the roots' spacing; make it larger to spread the gradient past the
+strands' width. Plug it into the skin shader and shape it there (a clamp or a remap for hard dots,
+a power for softer ones) to darken or tint the skin where hair leaves it, add follicle bumps, or
+keep a hairline's density in a game's lower levels of detail, in any renderer or engine.
+`groomlab.bake_follicle_map(groom, radius=0.05)` bakes from Python.
 
 ## Level of detail
 

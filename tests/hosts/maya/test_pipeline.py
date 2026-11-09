@@ -675,8 +675,12 @@ class ScalesExportTest(unittest.TestCase):
         self.assertTrue(os.path.exists(path))
         self.assertEqual(baked["pattern"], path)
         self.assertGreater(baked["radius"], 0.0)
+        self.assertAlmostEqual(groomlab.follicle_auto_radius(self.groom), baked["radius"], places=5)
         given = groomlab.bake_follicle_map(self.groom, directory=WORK_DIR, name="body", resolution=64, radius=0.02)
         self.assertAlmostEqual(given["radius"], 0.02, places=5)
+        # By default into the scene's exports folder.
+        default = groomlab.bake_follicle_map(self.groom, resolution=32)
+        self.assertTrue(default["files"][0].startswith(groomlab.asset_folder("exports").replace("\\", "/")))
 
     def test_groom_files_carry_custom_plates(self):
         plate = cmds.polyPlane(name="myPlate", width=0.5, height=1, subdivisionsX=2, subdivisionsY=3)[0]

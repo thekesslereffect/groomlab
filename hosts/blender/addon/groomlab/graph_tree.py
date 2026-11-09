@@ -370,7 +370,7 @@ class GroomLabNodeBase(object):
         clump = self.gl_type == "Clump"
         if linkable or clump:
             row = layout.row(align=True)
-        if clump:  # Clump Colors: the strands colored by this node's clumps, viewed up to it
+        if clump:  # Clump Colors: the strands colored by this node's clumps
             scalp = getattr(self.id_data, "gl_scalp", None)
             op = row.operator("groomlab.graph_clump_colors", text="", icon="GROUP_VCOL",
                               depress=clump_colored(scalp, self))
@@ -1740,10 +1740,10 @@ def clump_channel(node):
 
 
 def clump_colored(scalp, node):
-    """Whether the strands show this Clump's clumps (its header's Clump Colors lit): viewed, colored
-    by clump from its channel."""
+    """Whether the strands show this Clump's clumps (its Clump Colors lit): colored by clump from its
+    channel."""
     channel = clump_channel(node)
-    if not channel or scalp is None or scalp.groomlab.view_node != node.gl_name:
+    if not channel or scalp is None:
         return False
     d = scalp.groomlab_tools
     return d.strand_color == "clump" and (d.strand_color_source or "clumpId") == channel

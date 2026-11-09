@@ -291,8 +291,8 @@ TEST(AppGraphEditor, ExpandInputsButtonTogglesEveryConnectableParam) {
 }
 
 TEST(AppGraphEditor, AClumpsClumpColorsButtonColorsByItsClumps) {
-    // A Clump's header: Clump Colors, Expand Inputs, View, Bypass. Clump Colors views up to it and
-    // colors the strands by its clumps (its clumpChannel); again: as before, the output viewed.
+    // A Clump's header: Clump Colors, Expand Inputs, View, Bypass. Clump Colors colors the strands
+    // by its clumps (its clumpChannel), the view left as it is; again: the colors as before.
     Window w;
     NodeGraphView* graph = w.graph();
     GroomDocument* doc = w.doc();
@@ -304,25 +304,22 @@ TEST(AppGraphEditor, AClumpsClumpColorsButtonColorsByItsClumps) {
     ASSERT_EQ(doc->setParam(clump, "clumpChannel", json("bigClumpId")), "");
     graph->refresh();
     QCoreApplication::processEvents();
+    ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("colorMode=random")));
     const QRectF card = graph->nodeRect(clump);
     const qreal scale = graph->viewScale();
     const QPointF button(card.right() - 86.0 * scale, card.top() + 14.0 * scale);
     mouse(graph, QEvent::MouseButtonPress, button, Qt::LeftButton);
-    EXPECT_EQ(graph->clumpColoredNode(), clump);
-    EXPECT_EQ(graph->viewedNode(), clump);
-    EXPECT_TRUE(w.window.setDisplayText(QStringLiteral("colorSource=bigClumpId")));  // (as it is: still lit)
-    EXPECT_EQ(graph->clumpColoredNode(), clump);
+    EXPECT_TRUE(graph->clumpColored(clump));
+    EXPECT_EQ(graph->viewedNode(), "") << "the view left as it was";
     mouse(graph, QEvent::MouseButtonPress, button, Qt::LeftButton);
-    EXPECT_EQ(graph->clumpColoredNode(), "");
+    EXPECT_FALSE(graph->clumpColored(clump));
     EXPECT_EQ(graph->viewedNode(), "");
-    // Lit from the display alone: clump colors from its channel, viewing it.
-    graph->setViewedNode(clump);
-    EXPECT_EQ(graph->clumpColoredNode(), "");
+    // Lit from the display alone: clump colors from its channel.
     ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("colorMode=clump")));
     ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("colorSource=bigClumpId")));
-    EXPECT_EQ(graph->clumpColoredNode(), clump);
+    EXPECT_TRUE(graph->clumpColored(clump));
     ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("colorSource=clumpId")));
-    EXPECT_EQ(graph->clumpColoredNode(), "") << "another channel's clumps";
+    EXPECT_FALSE(graph->clumpColored(clump)) << "another channel's clumps";
 }
 
 TEST(AppGraphEditor, ShowInnerParamPutsAnInnerParamOnTheCompound) {

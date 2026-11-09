@@ -697,12 +697,14 @@ public:
     // uvs leave 0-1). *files the files written.
     std::string bakeScaleMaps(const std::string& directory, const std::string& name, int resolution = 2048,
                               std::vector<std::string>* files = nullptr);
-    // Utilities > Bake Follicle Map (Maya's bake_follicle_map): a radial gradient round every root
-    // baked onto the scalp's uvs as <directory>/<name>_FollicleMap (16-bit gray PNG, UDIM tiles when
-    // the uvs leave 0-1); `radius` 0: from the roots' spacing. *files the files written, *used the
-    // radius baked with.
+    // Utilities > Bake Follicle Map (Maya's bake_follicle_map): a linear gradient round every root
+    // (1 - distance / radius) baked onto the scalp's uvs as <directory>/<name>_FollicleMap (16-bit
+    // gray PNG, UDIM tiles when the uvs leave 0-1); `radius` 0: from the roots' spacing. *files the
+    // files written, *used the radius baked with.
     std::string bakeFollicleMap(const std::string& directory, const std::string& name, int resolution = 2048,
                                 float radius = 0.0f, std::vector<std::string>* files = nullptr, float* used = nullptr);
+    // The radius bakeFollicleMap's 0 stands for (from the roots' spacing); 0 when it cannot say.
+    float follicleAutoRadius();
     // Find Missing Files (Maya's missing_files / find_missing_files): what the groom names that is
     // not there: texture maps ("maps", key the map), graph params naming files ("params", key
     // node.param, inside compounds compound/node.param), paths as stored.

@@ -964,7 +964,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
         tips = {"focus": "Focus: show the groom up to this node in the viewport (%s); a Clump's centers show as "
                          "dots" % shortcut_keys("graph.view"),
                 "inputs": "Expand Inputs: show or hide all connectable parameter ports",
-                "clumpColors": "Clump Colors: color the strands by this node's clumps, focused on it; again: as they were",
+                "clumpColors": "Clump Colors: color the strands by this node's clumps (its clumpChannel); again: as they were",
                 "disable": "Bypass: pass the input straight through (%s)" % shortcut_keys("graph.bypass")}
         over = next((k for k, r in self.toggle_rects().items() if r.contains(event.pos())), None)
         self.setToolTip(tips[over] if over else (self.editor.node_errors.get(self.name)
@@ -5085,8 +5085,8 @@ class GraphEditor(QtWidgets.QWidget):
             return None
 
     def clump_colored(self, name):
-        """Whether the strands show this Clump's clumps: focused on it, colored by clump from its channel."""
-        if not self.groom or self.viewed != name:
+        """Whether the strands show this Clump's clumps: colored by clump from its channel."""
+        if not self.groom:
             return False
         channel = self.clump_channel(name)
         if not channel:
@@ -5100,8 +5100,8 @@ class GraphEditor(QtWidgets.QWidget):
             return False
 
     def toggle_clump_colors(self, name):
-        """A Clump's Clump Colors: the strands colored by its clumps, focused on it; on the lit one,
-        the color mode from before and the output again."""
+        """A Clump's Clump Colors: the strands colored by its clumps (its clumpChannel), the focus left
+        as it is; on a lit one, the color mode from before."""
         if not self.groom:
             return
         from maya import cmds
@@ -5109,7 +5109,7 @@ class GraphEditor(QtWidgets.QWidget):
         if self.clump_colored(name):
             before = getattr(self, "_color_mode_before_clump", 0)
             self.silently(lambda: cmds.setAttr(self.groom + ".strandColorMode", 0 if before == review.CLUMP_MODE else before))
-            self.view_node(None)
+            self._repaint_toggles()
             return
         channel = self.clump_channel(name)
         if not channel:
@@ -5124,7 +5124,12 @@ class GraphEditor(QtWidgets.QWidget):
             cmds.setAttr(groom + ".strandColorSource", channel, type="string")
             cmds.setAttr(groom + ".strandColorMode", review.CLUMP_MODE)
         self.silently(colored)
-        self.view_node(name)
+        self._repaint_toggles()
+        self.report("strands colored by %s's clumps (%s)" % (name, channel))
+
+    def _repaint_toggles(self):
+        for item in self.items.values():
+            item.update()
 
     def set_bypass(self, names, on):
         for name in names:

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-// Bake Follicle Map: a radial gradient round each root on the skin's uvs, 1 at the root, 0 at the
-// radius (a smoothstep, hardness keeping its middle at 1), the nearest root's at each texel; the
+// Bake Follicle Map: a linear radial gradient round each root on the skin's uvs, 1 at the root, 0
+// at the radius (1 - distance / radius), the nearest root's at each texel; the
 // radius from the roots' spacing when none is given; a UDIM tile set when the uvs leave 0-1.
 
 #include <gtest/gtest.h>
@@ -59,9 +59,10 @@ TEST(FollicleMap, AGradientFromEachRootToTheRadius) {
     EXPECT_FALSE(map.udim);
     EXPECT_EQ(map.follicles, 1u);
     EXPECT_FLOAT_EQ(map.radius, 0.1f);
-    EXPECT_GT(at(map, 0.5f, 0.5f), 0.99f);
-    EXPECT_NEAR(at(map, 0.55f, 0.5f), 0.5f, 0.05f);  // halfway: the smoothstep's middle
-    EXPECT_NEAR(at(map, 0.5f, 0.45f), 0.5f, 0.05f);
+    EXPECT_GT(at(map, 0.5f, 0.5f), 0.95f);  // (the texel's middle a little off the root)
+    EXPECT_NEAR(at(map, 0.55f, 0.5f), 0.5f, 0.03f);  // halfway: half
+    EXPECT_NEAR(at(map, 0.5f, 0.45f), 0.5f, 0.03f);
+    EXPECT_NEAR(at(map, 0.575f, 0.5f), 0.25f, 0.03f);  // linear: a quarter of the way from the radius
     EXPECT_EQ(at(map, 0.62f, 0.5f), 0.0f);
     EXPECT_EQ(at(map, 0.1f, 0.1f), 0.0f);
     // Falling all the way out.
@@ -71,11 +72,10 @@ TEST(FollicleMap, AGradientFromEachRootToTheRadius) {
         EXPECT_LE(v, last + 1e-4f) << x;
         last = v;
     }
-    // Hardness 1: a dot of full value to the radius.
-    options.hardness = 1.0f;
-    const FollicleMap hard = bakeFollicleMap(*skin, strands, options);
-    EXPECT_EQ(at(hard, 0.58f, 0.5f), 1.0f);
-    EXPECT_EQ(at(hard, 0.62f, 0.5f), 0.0f);
+    // A wider radius reaches further: past the strands' width.
+    options.radius = 0.3f;
+    const FollicleMap wide = bakeFollicleMap(*skin, strands, options);
+    EXPECT_NEAR(at(wide, 0.65f, 0.5f), 0.5f, 0.03f);
 }
 
 TEST(FollicleMap, TheRadiusComesFromTheRootsSpacing) {
@@ -92,7 +92,7 @@ TEST(FollicleMap, TheRadiusComesFromTheRootsSpacing) {
     EXPECT_NEAR(map.radius, 0.04f, 1e-4f);
     EXPECT_EQ(map.follicles, grid.size());
     // Every root a dot; between two roots bare skin.
-    for (const Vec3f& p : grid) EXPECT_GT(at(map, p.x, p.z), 0.9f);
+    for (const Vec3f& p : grid) EXPECT_GT(at(map, p.x, p.z), 0.8f);  // (a texel is 0.2 of the radius here)
     EXPECT_EQ(at(map, 0.15f, 0.15f), 0.0f);
     EXPECT_GT(map.touched, 0u);
     EXPECT_LT(map.touched, map.texels);

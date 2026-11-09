@@ -274,19 +274,38 @@ class GROOMLAB_OT_bake_scale_maps(_Tipped, GroomOperator):
 
 
 class GROOMLAB_OT_bake_follicle_map(_Tipped, GroomOperator):
-    """A radial gradient round every strand's root baked into the scalp's UVs (a 16-bit gray PNG, UDIM tiles too), for skin shaders"""
+    """A linear gradient round every strand's root (1 - distance / radius) baked into the scalp's UVs (a 16-bit gray PNG, UDIM tiles too), for skin shaders"""
     bl_idname = "groomlab.bake_follicle_map"
     bl_label = "Bake Follicle Map"
 
     directory: StringProperty(name="Folder", subtype="DIR_PATH", default="",
-                              description="Where the map goes (empty: beside the .blend in groomlab/bakes)")
+                              description="Where the map goes (empty: the .blend's groomlab exports folder)")
     resolution: IntProperty(name="Resolution", default=2048, min=16, max=8192)
-    radius: FloatProperty(name="Radius", default=0.0, min=0.0, subtype="DISTANCE",
-                          description="How far each follicle's gradient reaches on the skin (0: from the roots' spacing)")
+    radius: FloatProperty(name="Radius", default=0.0, min=0.0, subtype="DISTANCE", precision=4,
+                          description="How far each follicle's gradient reaches on the skin, white at the root falling "
+                                      "evenly to black here: any length, past the strands' width for a wider shadow "
+                                      "(0: from the roots' spacing; the dialog opens on it, measured)")
+
+    def invoke(self, context, event):
+        scalp = active_groom(context)
+        if self.radius <= 0.0:
+            try:
+                self.radius = pipeline.follicle_auto_radius(scalp)
+            except HelperError:
+                pass  # (the bake says why)
+        return context.window_manager.invoke_props_dialog(self, width=360)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="White at each root, falling evenly to black at the radius:")
+        layout.label(text="shape it in the skin shader (a clamp, a remap).")
+        layout.prop(self, "radius")
+        layout.prop(self, "resolution")
+        layout.prop(self, "directory")
 
     def execute(self, context):
         scalp = active_groom(context)
-        folder = bpy.path.abspath(self.directory) if self.directory else _export_folder("cards")
+        folder = bpy.path.abspath(self.directory) if self.directory else _export_folder("exports")
         try:
             r = pipeline.bake_follicle_map(scalp, folder, name=scalp.name, resolution=self.resolution, radius=self.radius)
         except HelperError as e:

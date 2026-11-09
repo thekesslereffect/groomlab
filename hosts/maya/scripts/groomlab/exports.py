@@ -190,22 +190,31 @@ SCALE_MAPS = ("ScaleNormal", "ScaleHeight", "ScaleColor")
 FOLLICLE_MAP = "FollicleMap"
 
 
-def bake_follicle_map(groom, directory=None, name=None, resolution=2048, radius=0.0, hardness=0.0, padding=8):
-    """Bake a radial gradient round every root of the groom at the current frame onto its scalp's
+def bake_follicle_map(groom, directory=None, name=None, resolution=2048, radius=0.0, padding=8):
+    """Bake a linear gradient round every root of the groom at the current frame onto its scalp's
     uvs, for skin shaders (follicle dots, stubble shadow, a hairline's density):
-    <name>_FollicleMap.png (16-bit gray: white at a root, black past `radius`; 0 takes it from the
-    roots' spacing; `hardness` the share of the radius kept white), one per UDIM tile
-    (<name>_FollicleMap.1001.png...) when the scalp's uvs leave the 0-1 square. `directory`
-    defaults to the groom's bake folder, `name` to its asset name. Returns {"files": [paths],
-    "radius": r, "pattern": path or <UDIM> pattern}."""
-    directory = (directory or _bake_folder(groom)).replace("\\", "/")
+    <name>_FollicleMap.png, 16-bit gray, 1 - distance / `radius`: white at a root falling evenly to
+    black at `radius` (scene units, any length: past the strands' width for a wider shadow; 0 takes
+    it from the roots' spacing, follicle_auto_radius), one per UDIM tile
+    (<name>_FollicleMap.1001.png...) when the scalp's uvs leave the 0-1 square. Shape it in the
+    shader (a clamp or a remap for a hard dot). `directory` defaults to the scene's exports folder,
+    `name` to the groom's asset name. Returns {"files": [paths], "radius": r, "pattern": path or
+    <UDIM> pattern}. GroomLab > Utilities > Bake Follicle Map opens a window for it."""
+    from groomlab.paths import asset_folder
+    directory = (directory or asset_folder("exports")).replace("\\", "/")
     name = name or asset_name(groom)
     result = cmds.groomLabBakeFollicleMap(groom, directory=directory, name=name, resolution=int(resolution),
-                                          radius=float(radius), hardness=float(hardness), padding=int(padding))
+                                          radius=float(radius), padding=int(padding))
     files, used = result[:-1], float(result[-1])
     udim = any(re.search(r"\.\d{4}\.png$", f) for f in files)
     return {"files": list(files), "radius": used,
             "pattern": "%s/%s_%s%s.png" % (directory, name, FOLLICLE_MAP, ".<UDIM>" if udim else "")}
+
+
+def follicle_auto_radius(groom):
+    """The follicle map's radius from the groom's roots at the current frame: 0.4 of the median
+    distance from a root to its nearest neighbour (what bake_follicle_map's radius 0 takes)."""
+    return float(cmds.groomLabBakeFollicleMap(groom, autoRadius=True))
 
 
 def bake_scale_maps(groom, directory=None, name=None, resolution=2048, max_height=0.0, padding=8):

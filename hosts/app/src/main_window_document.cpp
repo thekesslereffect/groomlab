@@ -914,7 +914,7 @@ void MainWindow::refreshGroomColor() {
 }
 
 void MainWindow::graphEdited() {
-    refreshClumpColored();  // (a Clump's clumpChannel edited, a viewed Clump removed)
+    refreshClumpColored();  // (a Clump's clumpChannel edited, a Clump added or removed)
     reevaluate();
     refreshTimeline();  // a node reading the time (Wind, Simulate) shows it
     refreshUndoActions();

@@ -426,15 +426,18 @@ utils.copy_graph(groom, ["hair2", "hair3"], guides="keep", maps=False)
 - **Bake Node to Guides...:** a graph node's strands or guides (ToGuides, a Noise on guides, a Scatter...)
   become primary guides of a root group, to brush, mirror and give children (see [Procedural
   guides](nodes-and-fields.md#procedural-guides)). Also on a node's right-click menu in the Graph Editor: **Bake Node to Guides...**.
-- **Bake Follicle Map:** a radial gradient round every strand's root baked into the scalp's uvs,
-  for skin shaders in a renderer or a game engine (follicle dots, stubble shadow, a hairline's
-  density without the hair): `<name>_FollicleMap.png`, 16-bit gray, white at a root falling (a
-  smoothstep) to black at the radius, the nearest root's at each texel, so roots that crowd (a
-  follicular unit, a dense crown) merge; one per UDIM tile when the uvs leave the 0-1 square, in the
-  groom's bake folder. The radius comes from the roots' spacing (0.4 of the median distance to a
-  root's nearest neighbour) unless given: `bake_follicle_map(groom, radius=0.05, hardness=0.0,
-  resolution=2048)` (`hardness`: the share of the radius kept white; `groomLabBakeFollicleMap`
-  underneath). Every root at full density, at the current frame.
+- **Bake Follicle Map:** a gradient round every strand's root baked into the scalp's uvs, for skin
+  shaders in a renderer or a game engine (follicle dots, stubble shadow, a hairline's density
+  without the hair): `<name>_FollicleMap.png`, 16-bit gray, `1 - distance / radius`: white at a
+  root falling evenly to black at the radius, the nearest root's at each texel, so roots that crowd
+  (a follicular unit, a dense crown) merge; one per UDIM tile when the uvs leave the 0-1 square, in
+  the scene's exports folder. A linear gradient so the shader shapes it with plain math: a clamp or
+  a remap for a hard dot, a power for a softer one. The menu opens a window: **Radius** (opening on
+  the one from the roots' spacing, 0.4 of the median distance to a root's nearest neighbour;
+  **Measure** gives it back; any length, past the strands' width for a wider shadow), Resolution,
+  Folder and Name. From Python: `bake_follicle_map(groom, radius=0.05, resolution=2048)` (radius 0:
+  measured; `follicle_auto_radius(groom)` gives it; `groomLabBakeFollicleMap` underneath). Every
+  root at full density, at the current frame.
 - **Transfer Groom to Scalp...:** see Transfer to a new scalp. The dialog's **Project painted
   maps** (on) and **Copy mesh color sets the graph reads** (off) are `maps` and `color_sets`.
   `transfer_to_scalp` returns the counts that moved (guides, parts, flow arrows), what was

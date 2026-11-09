@@ -2,11 +2,13 @@
 #pragma once
 
 // The follicles baked into the skin's textures, for skin shaders (a renderer's or a game
-// engine's): a radial gradient round each strand's root, 1 at the root falling to 0 at `radius`
-// (on the skin, in scene units), so a shader can darken, tint or bump the skin where hair leaves
-// it (follicle dots, stubble shadow, a hairline's density) without the hair's geometry. A texel
-// takes the gradient of the root nearest it (the gradients combined by their maximum): where
-// roots crowd (a follicular unit, a dense crown) their gradients merge.
+// engine's): a linear radial gradient round each strand's root, 1 at the root falling evenly to 0
+// at `radius` (on the skin, in scene units): 1 - distance / radius, a distance field a shader
+// shapes with plain math (a clamp or a remap for a hard dot, a power for a softer one) to darken,
+// tint or bump the skin where hair leaves it (follicle dots, stubble shadow, a hairline's density)
+// without the hair's geometry. The radius may reach well past the strands' width. A texel takes
+// the gradient of the root nearest it (the gradients combined by their maximum): where roots
+// crowd (a follicular unit, a dense crown) their gradients merge.
 //
 // Each texel of the skin's uv layout is the point on the skin under it; as the scale maps
 // (scale_maps.h), a scalp whose uvs leave the 0-1 square bakes a UDIM tile set, one image per
@@ -27,9 +29,6 @@ struct FollicleMapOptions {
     // spacing, 0.4 of the median distance from a root to its nearest neighbour (the gradients
     // round neighbouring roots just short of touching).
     float radius = 0.0f;
-    // How much of the radius stays at full value before the gradient falls (0: it falls from the
-    // root; 1: a hard-edged dot). The fall is a smoothstep.
-    float hardness = 0.0f;
     int padding = 8;  // texels each uv shell's edges grow by
 };
 

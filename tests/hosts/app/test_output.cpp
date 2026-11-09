@@ -400,7 +400,13 @@ TEST(AppOutput, ImportUtilitiesAndScales) {
     ASSERT_TRUE(doc->file().data.scalp->hasUVs());
     ASSERT_TRUE(window.bakeScaleMaps(QString::fromStdString((dir / "maps").u8string()), 64)) << window.lastReport().toStdString();
     EXPECT_TRUE(fs::exists(dir / "maps" / "sample_ScaleNormal.png") || fs::exists(dir / "maps" / "sample_ScaleNormal.1001.png"));
-    // The follicles: a gradient round every root on the scalp's uvs.
+    // The follicles: a gradient round every root on the scalp's uvs (the menu asks the radius, opening on the
+    // measured one).
+    EXPECT_GT(doc->follicleAutoRadius(), 0.0f);
+    AppActions::bindings(window).at("follicles.bakeMap").trigger(nullptr, false);
+    EXPECT_TRUE(window.overlay()->promptShown());
+    EXPECT_GT(window.overlay()->promptLine().toDouble(), 0.0);
+    ASSERT_TRUE(window.overlay()->choosePrompt(QStringLiteral("Cancel")));
     ASSERT_TRUE(window.bakeFollicleMap(QString::fromStdString((dir / "follicles").u8string()), 64)) << window.lastReport().toStdString();
     EXPECT_TRUE(fs::exists(dir / "follicles" / "sample_FollicleMap.png") || fs::exists(dir / "follicles" / "sample_FollicleMap.1001.png"));
     const std::string usd = (dir / "scales.usda").u8string();

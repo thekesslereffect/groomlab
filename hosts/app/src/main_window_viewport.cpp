@@ -136,18 +136,23 @@ std::string MainWindow::clumpChannelOf(const std::string& node, bool* isClump) c
 
 void MainWindow::refreshClumpColored() {
     if (!graph_) return;
-    bool isClump = false;
-    const std::string channel = clumpChannelOf(viewNode_, &isClump);
-    const bool lit = isClump && !channel.empty() && settings_.colorMode == kClumpColors && settings_.colorSource == channel;
-    graph_->setClumpColoredNode(lit ? viewNode_ : std::string());
+    std::vector<std::string> lit;
+    if (document_ && settings_.colorMode == kClumpColors) {
+        for (const nlohmann::json& n : document_->graph().value("nodes", nlohmann::json::array())) {
+            const std::string name = n.value("name", std::string());
+            bool isClump = false;
+            const std::string channel = clumpChannelOf(name, &isClump);
+            if (isClump && !channel.empty() && channel == settings_.colorSource) lit.push_back(name);
+        }
+    }
+    graph_->setClumpColoredNodes(std::move(lit));
 }
 
 void MainWindow::toggleClumpColors(const std::string& node) {
     if (!graph_ || !colorMode_) return;
-    if (graph_->clumpColoredNode() == node) {
-        // Off: the colors as they were before, the output viewed again.
+    if (graph_->clumpColored(node)) {
+        // Off: the colors as they were before.
         colorMode_->setCurrentIndex(std::max(0, colorMode_->findData(colorModeBeforeClump_ == kClumpColors ? kSolidColors : colorModeBeforeClump_)));
-        if (viewNode_ == node) graph_->setViewedNode({});
         refreshClumpColored();
         return;
     }
@@ -164,7 +169,6 @@ void MainWindow::toggleClumpColors(const std::string& node) {
     }
     if (mode != kClumpColors) colorMode_->setCurrentIndex(std::max(0, colorMode_->findData(kClumpColors)));
     else applyDisplayOptions();
-    graph_->setViewedNode(node);
     refreshClumpColored();
 }
 

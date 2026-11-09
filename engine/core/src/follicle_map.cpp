@@ -86,7 +86,6 @@ FollicleMap bakeFollicleMap(const ScalpMesh& skin, const StrandSet& strands, con
         radius = 1e-3f * (hi - lo).length();
     }
     if (!(radius > 0.0f)) radius = 1.0f;
-    const float hardness = std::clamp(options.hardness, 0.0f, 1.0f);
     const int res = options.resolution;
     FollicleMap out;
     out.resolution = res;
@@ -141,7 +140,6 @@ FollicleMap bakeFollicleMap(const ScalpMesh& skin, const StrandSet& strands, con
     }
 
     // Every skin texel: the point under it, the nearest root's gradient there.
-    const float inner = hardness * radius;
     std::atomic<std::size_t> skinTexels{0}, touchedTexels{0};
     parallelFor(0, work.size() * static_cast<std::size_t>(bandCount), [&](std::size_t job) {
         const std::size_t ti = job / static_cast<std::size_t>(bandCount);
@@ -171,11 +169,7 @@ FollicleMap bakeFollicleMap(const ScalpMesh& skin, const StrandSet& strands, con
                     index.nearest(skin.position(at), &d2);
                     const float d = std::sqrt(d2);
                     if (!(d < radius)) continue;
-                    float v = 1.0f;
-                    if (d > inner) {
-                        const float t = 1.0f - (d - inner) / std::max(radius - inner, 1e-12f);  // 1 at inner, 0 at the radius
-                        v = t * t * (3.0f - 2.0f * t);
-                    }
+                    const float v = 1.0f - d / radius;  // linear: a distance field
                     baked.value[i] = static_cast<std::uint16_t>(std::lround(std::clamp(v, 0.0f, 1.0f) * 65535.0f));
                     if (baked.value[i] > 0) ++touchedCount;
                 }

@@ -561,11 +561,10 @@ void bindStrands(py::module_& m) {
           "[.<tile>].png; returns {files, max_height, udim, coverage}.");
     m.def("bake_follicle_map",
           [](const ScalpMesh& skin, const StrandSet& strands, const std::string& prefix, int resolution, float radius,
-             float hardness, int padding) {
+             int padding) {
               FollicleMapOptions options;
               options.resolution = resolution;
               options.radius = radius;
-              options.hardness = hardness;
               options.padding = padding;
               const FollicleMap map = bakeFollicleMap(skin, strands, options);
               py::dict out;
@@ -576,9 +575,12 @@ void bindStrands(py::module_& m) {
               return out;
           },
           py::arg("skin"), py::arg("strands"), py::arg("prefix"), py::arg("resolution") = 2048, py::arg("radius") = 0.0f,
-          py::arg("hardness") = 0.0f, py::arg("padding") = 8,
-          "Bakes a radial gradient round every root of the strands onto the skin's uvs (follicle_map.h) and writes "
-          "<prefix>FollicleMap[.<tile>].png (16-bit gray); radius 0: from the roots' spacing. Returns {files, radius, udim, follicles}.");
+          py::arg("padding") = 8,
+          "Bakes a linear radial gradient (1 - distance / radius) round every root of the strands onto the skin's uvs "
+          "(follicle_map.h) and writes <prefix>FollicleMap[.<tile>].png (16-bit gray); radius 0: from the roots' "
+          "spacing. Returns {files, radius, udim, follicles}.");
+    m.def("follicle_map_auto_radius", &follicleMapAutoRadius, py::arg("skin"), py::arg("strands"),
+          "The radius bake_follicle_map takes for 0: 0.4 of the roots' median nearest-neighbour distance.");
 }
 
 }  // namespace groomlab::py_bind

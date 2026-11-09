@@ -312,16 +312,12 @@ def bake_scale_maps_action():
 
 
 def bake_follicle_map_action():
-    """A radial gradient round every root baked into the skin's uvs, in the groom's bake folder."""
-    import groomlab
+    """The Bake Follicle Map window (its radius, resolution and folder) on the selected groom."""
     groom = _selected_groom()
     if not groom:
         return
-    from groomlab.ui import messages
-    with messages.busy("Baking the follicle map"):
-        baked = groomlab.bake_follicle_map(groom)
-    messages.done("baked the follicle map to %s (radius %.4g)" % (baked["pattern"], baked["radius"]))
-    return baked
+    from groomlab.ui import follicle_map_window
+    return follicle_map_window.show(groom)
 
 
 def export_groom_dialog():

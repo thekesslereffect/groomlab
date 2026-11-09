@@ -610,12 +610,15 @@ json bakeFollicleMapNow(Session& s, const json& args) {
     FollicleMapOptions options;
     options.resolution = static_cast<int>(optNumber(args, "resolution", 2048));
     options.radius = static_cast<float>(optNumber(args, "radius", 0.0));
-    options.hardness = static_cast<float>(optNumber(args, "hardness", 0.0));
     options.padding = static_cast<int>(optNumber(args, "padding", 8));
     if (options.resolution < 16 || options.resolution > 8192) fail("bad_request", "resolution must be 16 to 8192");
     if (options.radius < 0.0f) fail("bad_request", "radius must be 0 (from the roots' spacing) or more");
     const ViewResult& view = evaluateNow(s, false);  // (every root, none buried)
     const MeshPtr scalp = view.scalp ? view.scalp : s.groom->rawScalp();
+    if (optBool(args, "measure", false)) {  // the radius 0 stands for, nothing baked
+        if (!scalp) fail("state", "the groom has no scalp");
+        return {{"radius", follicleMapAutoRadius(*scalp, *view.strands)}};
+    }
     if (!scalp || !scalp->hasUVs()) fail("state", "the scalp has no uvs to bake the follicles onto");
     std::error_code ec;
     fs::create_directories(fs::u8path(directory), ec);

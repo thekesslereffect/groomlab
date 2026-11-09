@@ -914,6 +914,16 @@ std::string GroomDocument::bakeFollicleMap(const std::string& directory, const s
     return {};
 }
 
+float GroomDocument::follicleAutoRadius() {
+    try {
+        MeshPtr scalp;
+        const StrandsPtr strands = exportFrame(time_, 1.0f, &scalp, false, true);
+        return scalp && strands ? follicleMapAutoRadius(*scalp, *strands) : 0.0f;
+    } catch (const std::exception&) {
+        return 0.0f;
+    }
+}
+
 std::vector<GroomDocument::MissingFile> GroomDocument::missingFiles() const {
     std::vector<MissingFile> out;
     for (const PaintedMap& m : maps()) {

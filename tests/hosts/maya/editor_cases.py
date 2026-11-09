@@ -980,6 +980,35 @@ class GraphEditorTest(unittest.TestCase):
         finally:
             os.environ.pop("GROOMLAB_USER_CARD_PRESETS", None)
 
+    def test_bake_follicle_map_window(self):
+        # Utilities > Bake Follicle Map opens a window (never modal) on the groom: its radius measured
+        # from the roots' spacing, the folder the scene's exports folder; a wider radius bakes.
+        import tempfile
+        from groomlab.ui import follicle_map_window, menu
+        cmds.select(self.groom)
+        panel = menu.bake_follicle_map_action()
+        try:
+            self.assertIs(panel, follicle_map_window.window())
+            self.assertEqual(panel.groom, self.groom)
+            measured = panel.radius.value()
+            self.assertAlmostEqual(measured, groomlab.follicle_auto_radius(self.groom), places=3)
+            self.assertGreater(measured, 0.0)
+            self.assertEqual(panel.folder.text(), groomlab.asset_folder("exports"))
+            folder = tempfile.mkdtemp(prefix="groomlab_follicles_ui_")
+            panel.folder.setText(folder)
+            panel.name.setText("ui")
+            panel.resolution.setCurrentText("64")
+            panel.radius.setValue(measured * 3.0)
+            baked = panel.bake()
+            self.assertEqual([os.path.basename(f) for f in baked["files"]], ["ui_FollicleMap.png"])
+            self.assertAlmostEqual(baked["radius"], measured * 3.0, places=3)
+            self.assertIn("Wrote", panel.status.text())
+            panel.radius.setValue(1.0)
+            self.assertAlmostEqual(panel.measure(), measured, places=4)
+            self.assertAlmostEqual(panel.radius.value(), measured, places=4)
+        finally:
+            panel.close()
+
     def test_only_cards_nodes_whose_cards_changed_get_the_stale_badge(self):
         # Two Cards nodes, baked; the strands between them change: the inner node's maps are out
         # of date, the outer node's still fit. Each node's panel shows its own numbers.
@@ -1296,8 +1325,8 @@ class GraphEditorTest(unittest.TestCase):
         self.assertEqual(groomlab.errors(self.groom), [])
 
     def test_clump_colors_button(self):
-        # A Clump's header: Clump Colors (left of Expand Inputs) focuses on it and colors the strands
-        # by its clumps (its clumpChannel); again: the color mode from before, the output focused.
+        # A Clump's header: Clump Colors (left of Expand Inputs) colors the strands by its clumps (its
+        # clumpChannel), the focus left as it is; again: the color mode from before.
         from groomlab import review
         from groomlab.ui.qt import QtCore, QtWidgets
         from groomlab.ui.qt import QtTest as qt_test_module
@@ -1320,7 +1349,7 @@ class GraphEditorTest(unittest.TestCase):
         click()
         self.assertEqual(cmds.getAttr(self.groom + ".strandColorMode"), review.CLUMP_MODE)
         self.assertEqual(cmds.getAttr(self.groom + ".strandColorSource"), "bigClumpId")
-        self.assertEqual(cmds.getAttr(self.groom + ".viewNode"), name)
+        self.assertEqual(cmds.getAttr(self.groom + ".viewNode") or "", "")
         self.assertTrue(self.editor.clump_colored(name))
         click()
         self.assertEqual(cmds.getAttr(self.groom + ".strandColorMode"), review.ATTRIBUTE_MODE)

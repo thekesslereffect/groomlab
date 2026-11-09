@@ -676,8 +676,8 @@ class GraphEditorTest(unittest.TestCase):
             self.assertGreater(len(head.groomlab.hair.data.curves), 0)
         # View is refused for a node that gives no strands.
         self.assertEqual(bpy.ops.groomlab.graph_view_node(node="scalp"), {"CANCELLED"})
-        # A Clump's Clump Colors: viewed up to it, colored by its clumps (its clumpChannel); again:
-        # the colors as they were, the output.
+        # A Clump's Clump Colors: colored by its clumps (its clumpChannel), the view left as it is;
+        # again: the colors as they were.
         made, error = graph.add_node(head, "Clump", after="interpolate")
         self.assertFalse(error)
         graph.set_param(head, made, "clumpChannel", "bigClumpId")
@@ -686,7 +686,7 @@ class GraphEditorTest(unittest.TestCase):
         d.strand_color = "random"
         self.assertFalse(gt.clump_colored(head, node_of(self.tree(), made)))
         self.assertEqual(bpy.ops.groomlab.graph_clump_colors(node=made), {"FINISHED"})
-        self.assertEqual((d.strand_color, d.strand_color_source, head.groomlab.view_node), ("clump", "bigClumpId", made))
+        self.assertEqual((d.strand_color, d.strand_color_source, head.groomlab.view_node), ("clump", "bigClumpId", ""))
         self.assertTrue(gt.clump_colored(head, node_of(self.tree(), made)))
         self.assertEqual(bpy.ops.groomlab.graph_clump_colors(node=made), {"FINISHED"})
         self.assertEqual((d.strand_color, head.groomlab.view_node), ("random", ""))

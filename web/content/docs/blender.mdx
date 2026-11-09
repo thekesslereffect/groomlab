@@ -635,9 +635,10 @@ GroomLab's own **Undo**, puts the groom back on the old mesh.
   edits menu has **From Curves** (new guides) and the Part tool **From Curves** (parts).
 - **Utilities > Bake Scale Maps** bakes a scales groom into its skin's UVs as normal, height and
   color maps (PNG, UDIM tiles too), in the `.blend`'s `groomlab/<file name>/cards` folder.
-- **Utilities > Bake Follicle Map** bakes a radial gradient round every strand's root into the
-  scalp's UVs (a 16-bit gray PNG, UDIM tiles too) for skin shaders, in the same folder; its
-  Radius (0: from the roots' spacing) sets how far each follicle's gradient reaches.
+- **Utilities > Bake Follicle Map** bakes a gradient round every strand's root into the scalp's
+  UVs (a 16-bit gray PNG, UDIM tiles too) for skin shaders, in the `.blend`'s exports folder: white
+  at the root falling evenly to black at the Radius, which its dialog opens on as measured from the
+  roots' spacing (any length, past the strands' width for a wider shadow). Shape it in the shader.
 - **Utilities > Copy Graph to Other Grooms...** gives the other selected grooms the active groom's
   graph and slider values; their guides stay. Painted maps the graph reads that a groom lacks are
   listed: paint or import them there.

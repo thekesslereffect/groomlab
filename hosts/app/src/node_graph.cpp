@@ -809,9 +809,9 @@ bool NodeGraphView::clumpColorsButtonAt(const QPointF& scene, int* node) const {
     return false;
 }
 
-void NodeGraphView::setClumpColoredNode(const std::string& node) {
-    if (node == clumpColored_) return;
-    clumpColored_ = node;
+void NodeGraphView::setClumpColoredNodes(std::vector<std::string> nodes) {
+    if (nodes == clumpColored_) return;
+    clumpColored_ = std::move(nodes);
     update();
 }
 
@@ -1062,7 +1062,7 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     // this node's clumps; dim until they are, then lit on a tile.
     if (clumpColorable(node)) {
         const QRectF dots = clumpColorsButtonRect(node);
-        const bool on = !clumpColored_.empty() && clumpColored_ == node.name;
+        const bool on = clumpColored(node.name);
         QColor ink = filled ? headerText(color) : (on ? theme::uiColor("accent") : theme::textDim());
         if (on) {
             QColor tile = ink;
@@ -1980,7 +1980,7 @@ bool NodeGraphView::event(QEvent* event) {
         if (inputsButtonAt(scene, &node)) {
             tip = tr("Expand Inputs: show or hide all connectable parameter ports");
         } else if (clumpColorsButtonAt(scene, &node)) {
-            tip = tr("Clump Colors: color the strands by this node's clumps, viewing up to it; again: as they were");
+            tip = tr("Clump Colors: color the strands by this node's clumps (its clumpChannel); again: as they were");
         } else if (viewButtonAt(scene, &node)) {
             tip = tr("View: show the groom up to this node in the viewport (V); again: the output");
         } else if (bypassButtonAt(scene, &node)) {
