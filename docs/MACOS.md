@@ -345,7 +345,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] `macos-core` configures
 - [x] `macos-core` builds (core, C API + samples, CLI, Python module, Blender helper, tests)
 - [x] `ctest -L quick` green on `macos-core` (goldens and determinism included)
-- [ ] `macos-app` builds; the app opens, draws a groom on Metal, previews on the CPU (builds and starts on Metal without errors; the window not looked at yet)
+- [x] `macos-app` builds; the app opens, draws a groom on Metal, previews on the CPU (`GroomLab <file> --ui-screenshot out.png [--ui-mode look]` captures the window from inside the app, no Screen Recording permission needed: groom and look modes draw the sample groom; `--screenshot` renders it offscreen on Metal)
 - [x] `ctest -L "quick|app"` green on `macos-app`
 - [ ] Offscreen renders (thumbnails, turntables) correct on Metal
 - [x] Maya 2025 install in place (no devkit needed); `macos-maya2025` builds `GroomLab.bundle`
