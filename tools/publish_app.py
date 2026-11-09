@@ -16,6 +16,11 @@ It uploads four objects:
                                                        Download page lists them; publishing a
                                                        version again replaces its entry)
 
+macOS (a -beta-macos-arm64.zip from package_app.py on the Mac: GroomLab.app signed with a Developer ID,
+notarized and stapled): app/GroomLab-App-<version>-beta-macos-arm64.zip, app/GroomLab-App-macos-latest.zip,
+app/latest-macos.json (what the Mac app's Check for Updates reads) and app/releases-macos.json, so the
+Windows files above stay Windows'.
+
 The bucket, its credentials (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, optionally
 R2_BUCKET) and the signed upload: tools/downloads_bucket.py, as for the Maya release.
 """
@@ -33,7 +38,21 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from downloads_bucket import IMMUTABLE, PUBLIC, SHORT, json_body, read_notes, release_index, release_info, upload  # noqa: E402
 
-ZIP_NAME = re.compile(r"GroomLab-App-(?P<version>[0-9][0-9A-Za-z.]*)-(?P<channel>beta)-(?P<platform>windows-x64)\.zip")
+ZIP_NAME = re.compile(r"GroomLab-App-(?P<version>[0-9][0-9A-Za-z.]*)-(?P<channel>beta)-(?P<platform>windows-x64|macos-arm64)\.zip")
+
+
+def check_mac_app(zip_path, version, channel):
+    """Exits unless the zip's GroomLab.app is signed with a Developer ID and its notarization ticket is
+    stapled (what Gatekeeper on a user's Mac accepts without asking)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.check_call(["ditto", "-x", "-k", zip_path, tmp])
+        app = os.path.join(tmp, "GroomLab-App-%s-%s" % (version, channel), "GroomLab.app")
+        out = subprocess.run(["codesign", "-dv", "--verbose=2", app], capture_output=True, text=True).stderr
+        stapled = subprocess.run(["xcrun", "stapler", "validate", app], capture_output=True, text=True).returncode == 0
+    if "Authority=Developer ID Application" not in out or not stapled:
+        sys.exit("%s's GroomLab.app is not signed with a Developer ID and notarized: package it with --sign and "
+                 "--notarize (tools/package_app.py, docs/MACOS.md)" % os.path.basename(zip_path))
 
 
 def main():
@@ -48,28 +67,33 @@ def main():
     zip_path = args.zip
     if not zip_path:
         subprocess.check_call([sys.executable, os.path.join(ROOT, "tools", "package_app.py")])
-        zips = glob.glob(os.path.join(ROOT, "dist", "GroomLab-App-*-windows-x64.zip"))
+        zips = glob.glob(os.path.join(ROOT, "dist", "GroomLab-App-*-%s.zip" % ("macos-arm64" if sys.platform == "darwin" else "windows-x64")))
         if not zips:
             sys.exit("package_app.py made no zip in dist/")
         zip_path = max(zips, key=os.path.getmtime)
     m = ZIP_NAME.fullmatch(os.path.basename(zip_path))
     if not m:
-        sys.exit("%s is not a GroomLab app zip (GroomLab-App-<version>-beta-windows-x64.zip)" % os.path.basename(zip_path))
+        sys.exit("%s is not a GroomLab app zip (GroomLab-App-<version>-beta-windows-x64.zip or -macos-arm64.zip)" % os.path.basename(zip_path))
     version, channel, platform = m.group("version", "channel", "platform")
     with open(zip_path, "rb") as f:
         body = f.read()
+    mac = platform == "macos-arm64"
+    exe = "GroomLab.app/Contents/MacOS/GroomLab" if mac else "GroomLab.exe"
     with zipfile.ZipFile(zip_path) as z:
-        if "GroomLab-App-%s-%s/GroomLab.exe" % (version, channel) not in z.namelist():
-            sys.exit("%s holds no GroomLab-App-%s-%s/GroomLab.exe" % (zip_path, version, channel))
+        if "GroomLab-App-%s-%s/%s" % (version, channel, exe) not in z.namelist():
+            sys.exit("%s holds no GroomLab-App-%s-%s/%s" % (zip_path, version, channel, exe))
+    if mac:
+        check_mac_app(zip_path, version, channel)
 
     versioned = "app/GroomLab-App-%s-%s-%s.zip" % (version, channel, platform)
-    latest = "app/GroomLab-App-windows-latest.zip"
+    latest = "app/GroomLab-App-%s-latest.zip" % ("macos" if mac else "windows")
+    feed, index = ("app/latest-macos.json", "app/releases-macos.json") if mac else ("app/latest.json", "app/releases.json")
     info = release_info(version, versioned, body, notes, channel=channel, platform=platform)
     uploads = [
         (versioned, body, "application/zip", IMMUTABLE),
         (latest, body, "application/zip", SHORT),
-        ("app/latest.json", json_body(info), "application/json", SHORT),
-        ("app/releases.json", json_body(release_index("app/releases.json", info)), "application/json", SHORT),
+        (feed, json_body(info), "application/json", SHORT),
+        (index, json_body(release_index(index, info)), "application/json", SHORT),
     ]
     if not upload(uploads, args.dry_run):
         print(json.dumps(info, indent=2))

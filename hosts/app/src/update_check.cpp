@@ -42,7 +42,13 @@ UpdateInfo parseLatest(const QByteArray& json, const QString& current) {
 
 UpdateChecker::UpdateChecker(QObject* parent) : QObject(parent) {}
 
-QString UpdateChecker::feedUrl() { return QStringLiteral("https://downloads.getgroomlab.com/app/latest.json"); }
+QString UpdateChecker::feedUrl() {
+#ifdef Q_OS_MACOS
+    return QStringLiteral("https://downloads.getgroomlab.com/app/latest-macos.json");  // (tools/publish_app.py)
+#else
+    return QStringLiteral("https://downloads.getgroomlab.com/app/latest.json");
+#endif
+}
 
 bool UpdateChecker::updatesEnabled() { return qEnvironmentVariableIntValue("GROOMLAB_NO_UPDATES") == 0; }
 
