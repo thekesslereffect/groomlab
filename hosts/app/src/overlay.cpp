@@ -16,6 +16,7 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
@@ -1200,9 +1201,13 @@ OverlayHost::OverlayHost(Viewport* viewport, QWidget* parent) : QWidget(parent),
             card->addWidget(b);
             return b;
         };
-        action(tr("New Groom on Mesh..."), QStringLiteral("Ctrl+N"), theme::actionFill(theme::yellow()), theme::actionText(theme::ink()),
+        // The keys as the platform writes them (Cmd's symbol on macOS), as the menus show them.
+        const auto keys = [](const char* portable) {
+            return QKeySequence(QString::fromLatin1(portable)).toString(QKeySequence::NativeText);
+        };
+        action(tr("New Groom on Mesh..."), keys("Ctrl+N"), theme::actionFill(theme::yellow()), theme::actionText(theme::ink()),
                [this] { emit newRequested(); });
-        action(tr("Open Groom..."), QStringLiteral("Ctrl+O"), theme::chip(), theme::text(), [this] { emit openRequested(); });
+        action(tr("Open Groom..."), keys("Ctrl+O"), theme::chip(), theme::text(), [this] { emit openRequested(); });
         action(tr("Start from a Preset..."), QString(), theme::chip(), theme::text(), [this] { emit presetsRequested(); });
         auto* recent = new QWidget(emptyCard_);
         recentLayout_ = new QVBoxLayout(recent);
