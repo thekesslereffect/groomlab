@@ -65,7 +65,11 @@ double peakMegabytes() {
 #else
     rusage usage{};
     getrusage(RUSAGE_SELF, &usage);
+#ifdef __APPLE__
+    return static_cast<double>(usage.ru_maxrss) / (1024.0 * 1024.0);  // bytes on macOS
+#else
     return static_cast<double>(usage.ru_maxrss) / 1024.0;  // kilobytes on Linux
+#endif
 #endif
 }
 
