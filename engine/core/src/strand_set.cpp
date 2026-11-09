@@ -33,6 +33,16 @@ void detail::copyBytesParallel(void* to, const void* from, std::size_t bytes) {
     }, 1);
 }
 
+void detail::touchPagesParallel(void* at, std::size_t bytes) {
+    constexpr std::size_t kPage = 4096, kBlock = std::size_t{1} << 20;  // a page a write, 1 MB a task
+    auto* p = static_cast<volatile unsigned char*>(at);
+    if (!p || bytes == 0) return;
+    parallelFor(0, (bytes + kBlock - 1) / kBlock, [&](std::size_t b) {
+        const std::size_t end = std::min(bytes, (b + 1) * kBlock);
+        for (std::size_t i = b * kBlock; i < end; i += kPage) p[i] = 0;
+    }, 1);
+}
+
 namespace {
 std::atomic<std::size_t> taken{0};
 }  // namespace

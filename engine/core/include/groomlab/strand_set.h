@@ -10,7 +10,10 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <vector>
+
+#include "groomlab/parallel.h"
 
 #include "groomlab/instances.h"
 #include "groomlab/math.h"
@@ -104,6 +107,26 @@ struct ToArrayPool {
 
 // `bytes` from `from` to `to`, a large copy in parallel blocks.
 void copyBytesParallel(void* to, const void* from, std::size_t bytes);
+// A byte written in every page of `bytes` at `at`, across the core's threads: a fresh allocation's
+// pages faulted in (and zeroed by the system) in parallel rather than one by one as a single
+// thread first writes them.
+void touchPagesParallel(void* at, std::size_t bytes);
+
+// A new array of `size` elements (value-initialized, as std::vector<T>(size)). A large one has
+// its pages faulted in across the threads first (touchPagesParallel), so its zeroing runs over
+// memory already in: a fresh 384 MB array (2M strands' points) took about 47 ms on one thread.
+// Not from inside a parallel loop's body (insideParallelBody), where it may hold a lock the
+// loop's other bodies take: serially there.
+template <class T>
+std::vector<T>* freshArray(std::size_t size) {
+    auto* array = new std::vector<T>();
+    if (size * sizeof(T) >= ArrayPool<T>::kMinBytes && !insideParallelBody()) {
+        array->reserve(size);
+        touchPagesParallel(static_cast<void*>(array->data()), size * sizeof(T));
+    }
+    array->resize(size);
+    return array;
+}
 
 // Arrays taken rather than copied (CowArray::takeFrom) since the process started: tests and
 // timings tell an incremental evaluation's copies saved.
@@ -154,7 +177,18 @@ public:
             if (!owned_.load(std::memory_order_acquire) && !reclaim()) {
                 const std::vector<T>& from = *data_;
                 std::vector<T>* copy = detail::ArrayPool<T>::instance().take(from.size());
-                if (copy) {
+                if constexpr (std::is_trivially_copyable_v<T>) {
+                    // (A large clone outside any parallel body: its pages in and its copy in
+                    // parallel. Inside one, serially: this thread holds `lock`, which the loop's
+                    // other bodies may take, and a thread waiting on a loop runs other bodies.)
+                    if (!copy) copy = detail::freshArray<T>(from.size());
+                    if (from.empty()) {
+                    } else if (insideParallelBody()) {
+                        std::copy(from.begin(), from.end(), copy->begin());
+                    } else {
+                        detail::copyBytesParallel(copy->data(), from.data(), from.size() * sizeof(T));
+                    }
+                } else if (copy) {
                     std::copy(from.begin(), from.end(), copy->begin());
                 } else {
                     copy = new std::vector<T>(from);
@@ -173,7 +207,7 @@ public:
             if (!owned_.load(std::memory_order_acquire) && !reclaim()) {
                 const std::size_t size = data_->size();
                 std::vector<T>* array = detail::ArrayPool<T>::instance().take(size);
-                if (!array) array = new std::vector<T>(size);
+                if (!array) array = detail::freshArray<T>(size);
                 data_ = std::shared_ptr<std::vector<T>>(array, detail::ToArrayPool<T>{});
                 owned_.store(true, std::memory_order_release);
             }
@@ -187,7 +221,7 @@ public:
     std::vector<T>& sized(std::size_t size, bool* recycled = nullptr) {
         std::vector<T>* array = detail::ArrayPool<T>::instance().take(size);
         if (recycled) *recycled = array != nullptr;
-        if (!array) array = new std::vector<T>(size);
+        if (!array) array = detail::freshArray<T>(size);
         data_ = std::shared_ptr<std::vector<T>>(array, detail::ToArrayPool<T>{});
         owned_.store(true, std::memory_order_release);
         return *data_;
@@ -197,7 +231,7 @@ public:
     std::vector<T>& copyOf(const CowArray& from) {
         const std::vector<T>& source = *from.data_;
         std::vector<T>* array = detail::ArrayPool<T>::instance().take(source.size());
-        if (!array) array = new std::vector<T>(source.size());
+        if (!array) array = detail::freshArray<T>(source.size());
         if (!source.empty()) detail::copyBytesParallel(array->data(), source.data(), source.size() * sizeof(T));
         data_ = std::shared_ptr<std::vector<T>>(array, detail::ToArrayPool<T>{});
         owned_.store(true, std::memory_order_release);
@@ -233,7 +267,7 @@ public:
         }
         const std::vector<T>& before = *data_;
         std::vector<T>* array = detail::ArrayPool<T>::instance().take(total);
-        if (!array) array = new std::vector<T>(total);
+        if (!array) array = detail::freshArray<T>(total);
         if (head) detail::copyBytesParallel(array->data(), before.data(), head * sizeof(T));
         detail::copyBytesParallel(array->data() + head, tail.data(), tail.size() * sizeof(T));
         data_ = std::shared_ptr<std::vector<T>>(array, detail::ToArrayPool<T>{});

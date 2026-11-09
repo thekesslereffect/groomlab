@@ -16,7 +16,22 @@ namespace detail {
 using RangeBody = void (*)(const void* context, std::size_t begin, std::size_t end);
 void parallelRange(std::size_t begin, std::size_t end, std::size_t grain, RangeBody body, const void* context);
 
+// How many parallel loops' bodies this thread is inside (parallelFor's, parallelInvoke's pieces).
+inline thread_local int tlsParallelDepth = 0;
+struct InParallelBody {
+    InParallelBody() { ++tlsParallelDepth; }
+    ~InParallelBody() { --tlsParallelDepth; }
+    InParallelBody(const InParallelBody&) = delete;
+    InParallelBody& operator=(const InParallelBody&) = delete;
+};
+
 }  // namespace detail
+
+// Whether this thread runs inside a parallel loop's body now. A thread waiting on a loop it
+// started may run other pieces meanwhile (the backends help with nested loops), so code holding
+// a lock that a loop's bodies may take again (StrandSet's copy-on-write) starts no loop of its own
+// there: inside a body, it works serially.
+inline bool insideParallelBody() { return detail::tlsParallelDepth > 0; }
 
 // How many threads the parallel loops take: every core, unless capped. GROOMLAB_THREADS in the
 // environment caps them (read once, when the backend starts at the first parallel call; 0 or no
@@ -55,6 +70,7 @@ void parallelFor(std::size_t begin, std::size_t end, const Body& body, std::size
         begin, end, grain,
         [](const void* context, std::size_t lo, std::size_t hi) {
             const Body& b = *static_cast<const Body*>(context);
+            const detail::InParallelBody inside;
             for (std::size_t i = lo; i < hi; ++i) b(i);
         },
         &body);
@@ -73,6 +89,7 @@ void parallelInvoke(const A& a, const B& b) {
         0, 2, 1,
         [](const void* context, std::size_t lo, std::size_t hi) {
             const Both& two = *static_cast<const Both*>(context);
+            const detail::InParallelBody inside;
             for (std::size_t i = lo; i < hi; ++i) {
                 if (i == 0) {
                     (*two.a)();
