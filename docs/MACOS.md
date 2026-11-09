@@ -359,14 +359,29 @@ accepts it caches "Unnotarized" for a while (spctl, or a library load "disallowe
 policy"); binaries asked about later pass. Wait a few minutes before checking.
 
 **Not done:**
-- Publishing: `publish_release.py` accepts `-maya-win64.zip` and marks releases `platform="windows"`;
-  `publish_app.py` accepts `windows-x64` zips; the updaters read one `latest.json` per product (a Mac
-  Maya install would be offered the Windows zip, and refuse it: `updates.PLUGIN_FILE`). They need a
-  per-platform latest and a macOS branch. `publish_blender.py` already takes the zip's platform.
-  The website (`web/site.config.ts`) links Windows downloads only.
+- Publishing is ready, not run. Each product has its own macOS feed beside Windows' (the Windows files
+  are untouched): `maya/latest-macos.json`, `app/latest-macos.json`, `blender/latest-macos.json` and
+  their `releases-macos.json`, which the Mac builds' Check for Updates read; Blender's `index.json`
+  keeps one entry per platform. `publish_release.py`, `publish_app.py` and `publish_blender.py` take
+  the macOS zips (`--dry-run` shows the uploads) and refuse an unsigned Maya module or an app that is
+  not stapled. Order: package (signed, notarized), publish to the bucket, then push `main`: the site
+  (`web/app/(home)/download/page.tsx`) reads the feeds when Vercel builds it and shows a "macOS
+  (Apple silicon)" button per product once its `latest-macos.json` exists. A package must be built
+  after the commit that gave its product the Mac feed (2026-11-09), or it reads the Windows one.
 - Nothing is published without the user's go-ahead. The R2 credentials are in the Mac's login
   Keychain (`groomlab-r2-account-id`, `-access-key-id`, `-secret-access-key`), loaded into the
   environment only for a publish.
+
+**Maya's interface by hand** (everything above ran in `mayapy`; the Maya versions stay beta until
+this passes in each): install the module zip (drag `install.mel` into the viewport), restart Maya, then
+
+1. The GroomLab menu is in the main menu bar; Help > About opens.
+2. GroomLab > New Groom on a selected polySphere: strands draw in the viewport (Viewport 2.0 on Metal).
+3. Groom Tools: comb and cut strokes on the groom follow the mouse (CPU) and undo.
+4. The Graph Editor opens, a node's parameter changes the groom.
+5. Arnold: a render of the groom in the Arnold RenderView shows hair (watermarked without a license).
+6. V-Ray: the same in V-Ray's frame buffer.
+7. GroomLab > Check for Updates says it is up to date (or offers the Mac release once published).
 
 ## 12. Test tiers on the Mac
 
