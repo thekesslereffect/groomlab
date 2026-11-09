@@ -103,7 +103,7 @@ in `~/.cache/groomlab-deps/fetch` (`GROOMLAB_FETCH_CACHE`).
 | V-Ray for Maya (installed) | find it (`ls -d /Applications/Chaos*/V-Ray/*` or `/Applications/ChaosGroup/...`): the folder per Maya version holding `vray/include/vray_maya_sdk/translator_interface.h`; pass it as `-DVRAY_FOR_MAYA_LOCATION=...` | the V-Ray for Maya translator (section 4, item 11: its build is Windows-only today) |
 | Arnold SDK for macOS (optional) | `Arnold-7.x-darwin.tgz` unpacked to `~/groomlab-deps/sdks/arnold-macos` | the Arnold procedural without MtoA |
 | RenderMan Pro Server 27.3 (not installed) | `/Applications/Pixar/RenderManProServer-27.3` or `RMANTREE` | the RenderMan procedural: left out without it |
-| V-Ray Standalone (optional) | as installed; `GROOMLAB_VRAY` / the app's Render > V-Ray Standalone Location | `vray` tests only |
+| V-Ray Standalone (installed) | `/Applications/Chaos/V-Ray/Standalone_for_bigsur_univ`: the executable is `VRay.app/Contents/MacOS/vray.bin`, found there by the Maya scripts, the app and the tests (a setting or `GROOMLAB_VRAY` may name the install folder or `VRay.app`); renders need the Chaos license server (`/Applications/Chaos/VRLService`) | `vray` tests: `vray.render`, `vray.scene`, `app.vray_render` and `test_vray_render.py` pass on the Mac (2026-11-09) |
 
 Each preset's paths can be overridden on the command line (`cmake --preset macos-maya2025
 -DMAYA_LOCATION=...`) or in a `CMakeUserPresets.json` (ignored by git).
