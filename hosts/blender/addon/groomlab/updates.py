@@ -30,7 +30,8 @@ import time
 
 import bpy
 
-LATEST_URL = "https://downloads.getgroomlab.com/blender/latest.json"
+# Each platform's latest release (tools/publish_blender.py): Windows' latest.json, macOS' latest-macos.json.
+LATEST_URL = "https://downloads.getgroomlab.com/blender/%s" % ("latest-macos.json" if sys.platform == "darwin" else "latest.json")
 TIMEOUT = 10.0
 DOWNLOAD_TIMEOUT = 300.0
 CHECK_EVERY = 24 * 3600.0  # the startup check: at most once a day

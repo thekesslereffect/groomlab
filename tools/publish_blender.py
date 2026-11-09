@@ -33,7 +33,8 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
-from downloads_bucket import IMMUTABLE, PUBLIC, SHORT, json_body, read_notes, release_index, release_info, upload  # noqa: E402
+from downloads_bucket import (IMMUTABLE, PUBLIC, SHORT, json_body, published_json, read_notes, release_index,  # noqa: E402
+                              release_info, upload)
 
 
 def repository_entry(manifest, url, body):
@@ -73,13 +74,20 @@ def main():
     versioned = "blender/GroomLab-Blender-%s-%s.zip" % (version, platform)
     latest = "blender/GroomLab-Blender-%s-latest.zip" % platform
     info = release_info(version, versioned, body, notes, blender=manifest.get("blender_version_min", ""), platform=platform)
-    index = {"version": "v1", "blocklist": [], "data": [repository_entry(manifest, info["url"], body)]}
+    # Blender's repository lists one entry per platform: this platform's replaced, the others' kept.
+    entry = repository_entry(manifest, info["url"], body)
+    others = [e for e in (published_json("blender/index.json") or {}).get("data", [])
+              if platform not in (e.get("platforms") or [])]
+    index = {"version": "v1", "blocklist": [], "data": others + [entry]}
+    # Each platform's own feed and release list (macOS': latest-macos.json, releases-macos.json).
+    mac = platform.startswith("macos")
+    feed, releases = ("blender/latest-macos.json", "blender/releases-macos.json") if mac else ("blender/latest.json", "blender/releases.json")
     uploads = [
         (versioned, body, "application/zip", IMMUTABLE),
         (latest, body, "application/zip", SHORT),
-        ("blender/latest.json", json_body(info), "application/json", SHORT),
+        (feed, json_body(info), "application/json", SHORT),
         ("blender/index.json", json_body(index), "application/json", SHORT),
-        ("blender/releases.json", json_body(release_index("blender/releases.json", info)), "application/json", SHORT),
+        (releases, json_body(release_index(releases, info)), "application/json", SHORT),
     ]
     if not upload(uploads, args.dry_run):
         print(json.dumps(info, indent=2))
