@@ -751,7 +751,7 @@ if(Python3_Interpreter_FOUND)
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/hosts/renderman/test_prman_scene.py"
                 "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
     set_tests_properties(renderman.scene PROPERTIES LABELS "quick;renderman")
-    if(RenderMan_PRMAN)
+    if(RenderMan_PRMAN AND NOT APPLE)  # (macOS: RenderMan waits for 28, its first arm64 one: docs/MACOS.md)
         add_test(NAME renderman.scene_render
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/hosts/renderman/test_prman_scene.py"
                     "${PROJECT_SOURCE_DIR}/hosts/maya/scripts" "${RenderMan_PRMAN}")

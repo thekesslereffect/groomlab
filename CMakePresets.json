@@ -270,7 +270,7 @@
             "name": "macos",
             "hidden": true,
             "inherits": "base",
-            "description": "macOS on Apple silicon with Apple Clang (Xcode) and Ninja: docs/MACOS.md. 13.3: the first macOS whose libc++ has std::to_chars for floats (the .groom writer); Maya 2024 to 2027 and Qt 6.8 run there",
+            "description": "macOS on Apple silicon with Apple Clang (Xcode) and Ninja: docs/MACOS.md. 13.3: the first macOS whose libc++ has std::to_chars for floats (the .groom writer); Maya 2024 to 2027 and Qt 6.8 run there; the RenderMan procedural off: RenderMan 27.3 for macOS is Intel only, and the port is Apple silicon only (it waits for RenderMan 28)",
             "generator": "Ninja",
             "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
             "cacheVariables": {
@@ -280,7 +280,8 @@
                 "CMAKE_OSX_ARCHITECTURES": "arm64",
                 "CMAKE_OSX_DEPLOYMENT_TARGET": "13.3",
                 "CMAKE_PREFIX_PATH": "/opt/homebrew",
-                "GROOMLAB_BUILD_MAYA": "OFF"
+                "GROOMLAB_BUILD_MAYA": "OFF",
+                "GROOMLAB_BUILD_RENDERMAN": "OFF"
             }
         },
         {
@@ -295,6 +296,19 @@
             "cacheVariables": {
                 "GROOMLAB_BUILD_APP": "ON",
                 "GROOMLAB_QT_DIR": "$env{HOME}/Qt/6.8.3/macos"
+            }
+        },
+        {
+            "name": "macos-release",
+            "displayName": "macOS, what ships outside Maya: the app, groomlab-cli, the Blender helper and the Arnold procedural, without TBB",
+            "description": "No TBB (Homebrew's needs the newest macOS): the core runs on its own threads (parallel_pool.cpp). The procedural against MtoA 2024's Arnold 7.2, the oldest, which newer Arnold 7 loads: docs/MACOS.md",
+            "inherits": "macos",
+            "cacheVariables": {
+                "GROOMLAB_USE_TBB": "OFF",
+                "GROOMLAB_BUILD_APP": "ON",
+                "GROOMLAB_QT_DIR": "$env{HOME}/Qt/6.8.3/macos",
+                "GROOMLAB_BUILD_PROCEDURAL": "ON",
+                "MTOA_LOCATION": "/Applications/Autodesk/Arnold/mtoa/2024"
             }
         },
         {
@@ -385,6 +399,7 @@
         { "name": "linux-asan", "configurePreset": "linux-asan" },
         { "name": "macos-core", "configurePreset": "macos-core" },
         { "name": "macos-app", "configurePreset": "macos-app" },
+        { "name": "macos-release", "configurePreset": "macos-release" },
         { "name": "macos-maya2024", "configurePreset": "macos-maya2024" },
         { "name": "macos-maya2025", "configurePreset": "macos-maya2025" },
         { "name": "macos-maya2026", "configurePreset": "macos-maya2026" },
@@ -423,6 +438,7 @@
             "environment": { "ASAN_OPTIONS": "detect_leaks=0" }
         },
         { "name": "macos-core", "configurePreset": "macos-core", "output": { "outputOnFailure": true } },
-        { "name": "macos-app", "configurePreset": "macos-app", "output": { "outputOnFailure": true } }
+        { "name": "macos-app", "configurePreset": "macos-app", "output": { "outputOnFailure": true } },
+        { "name": "macos-release", "configurePreset": "macos-release", "output": { "outputOnFailure": true } }
     ]
 }
