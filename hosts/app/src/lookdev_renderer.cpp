@@ -58,6 +58,7 @@ constexpr int kBrdfLutSize = 64, kSkinLutWidth = 128, kSkinLutHeight = 64, kEnvL
 // The textures' bindings in surface_lookdev.frag.
 constexpr int kBindEnvPrefiltered = 18, kBindBrdf = 19, kBindSkinLut = 20, kBindAlbedo = 21, kBindNormal = 22, kBindMask = 23, kBindDetail = 24;
 constexpr int kBindShadow0 = 25, kBindSssBlurred = 28, kBindSamplerNearest = 29;  // then linear, mip repeat, mip clamp
+constexpr int kBindDomNearest = 10;  // then linear: hair_lookdev.frag's samplers of the deep opacity maps
 constexpr int kBindPointColors = 9;  // the hair's per-point colors (hair.vert, hair_lookdev.frag's per-point pass)
 constexpr int kBindPointStrands = 40;  // each point's strand (hair_points.glsl)
 constexpr int kBindVolume0 = 34;     // the hair's voxel volumes (hair_shade.comp, surface_lookdev.frag), four
@@ -975,15 +976,17 @@ bool LookdevRenderer::ensurePipelines(QRhi* rhi, QRhiRenderTarget* target) {
         s->create();
         return s;
     };
-    // The maps' samplers, at the bindings hair_lookdev.frag and scalp_lookdev.frag declare
-    // (the camera's are the hair's alone).
+    // The maps, at the bindings hair_lookdev.frag declares (the camera's are the hair's alone),
+    // and the two samplers it reads them through (Metal's 16 samplers a stage).
     auto domTextures = [&](std::vector<B>& out, bool camera) {
         const int bindings[kDomCount][2] = {{5, 6}, {7, 8}, {14, 15}, {16, 17}, {12, 13}};
         for (int i = 0; i < kDomCount; ++i) {
             if (i == kDomCamera && !camera) continue;
-            out.push_back(B::sampledTexture(bindings[i][0], fs, g.dom[i].front.get(), g.nearest.get()));
-            out.push_back(B::sampledTexture(bindings[i][1], fs, g.dom[i].layers.get(), g.linear.get()));
+            out.push_back(B::texture(bindings[i][0], fs, g.dom[i].front.get()));
+            out.push_back(B::texture(bindings[i][1], fs, g.dom[i].layers.get()));
         }
+        out.push_back(B::sampler(kBindDomNearest, fs, g.nearest.get()));
+        out.push_back(B::sampler(kBindDomNearest + 1, fs, g.linear.get()));
     };
     // Each map's view block: its light's, the sky's, or the camera's.
     auto domView = [&](int i) { return g.pass[i < kDomLights ? kPassLight + i : i == kDomSky ? kPassSky : kPassCamera].get(); };

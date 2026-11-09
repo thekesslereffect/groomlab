@@ -59,32 +59,36 @@ vec4 fetch(sampler2D tex, uint texel) {
 #endif
 
 // The deep opacity maps (lookdev_renderer.cpp's kDom*): the three lights', the sky's, the camera's.
-layout(binding = 5) uniform sampler2D domDepth0;
-layout(binding = 6) uniform sampler2D domLayers0;
-layout(binding = 7) uniform sampler2D domDepth1;
-layout(binding = 8) uniform sampler2D domLayers1;
-layout(binding = 14) uniform sampler2D domDepth2;
-layout(binding = 15) uniform sampler2D domLayers2;
-layout(binding = 16) uniform sampler2D domDepth3;
-layout(binding = 17) uniform sampler2D domLayers3;
-layout(binding = 12) uniform sampler2D domDepth4;
-layout(binding = 13) uniform sampler2D domLayers4;
+// Separate textures read through two samplers: Metal allows 16 samplers a stage, and the
+// HAIR_POINT_SHADE pass would need 17 with a sampler each.
+layout(binding = 5) uniform texture2D domDepth0;
+layout(binding = 6) uniform texture2D domLayers0;
+layout(binding = 7) uniform texture2D domDepth1;
+layout(binding = 8) uniform texture2D domLayers1;
+layout(binding = 14) uniform texture2D domDepth2;
+layout(binding = 15) uniform texture2D domLayers2;
+layout(binding = 16) uniform texture2D domDepth3;
+layout(binding = 17) uniform texture2D domLayers3;
+layout(binding = 12) uniform texture2D domDepth4;
+layout(binding = 13) uniform texture2D domLayers4;
+layout(binding = 10) uniform sampler domNearest;  // the depths
+layout(binding = 11) uniform sampler domLinear;   // the layers
 const int kDomSky = 3, kDomCamera = 4;
 const float kPassThick = 5.0, kPassThin = 6.0;
 
 float domFront(int which, vec2 uv) {
-    if (which == 0) return texture(domDepth0, uv).r;
-    if (which == 1) return texture(domDepth1, uv).r;
-    if (which == 2) return texture(domDepth2, uv).r;
-    if (which == 3) return texture(domDepth3, uv).r;
-    return texture(domDepth4, uv).r;
+    if (which == 0) return texture(sampler2D(domDepth0, domNearest), uv).r;
+    if (which == 1) return texture(sampler2D(domDepth1, domNearest), uv).r;
+    if (which == 2) return texture(sampler2D(domDepth2, domNearest), uv).r;
+    if (which == 3) return texture(sampler2D(domDepth3, domNearest), uv).r;
+    return texture(sampler2D(domDepth4, domNearest), uv).r;
 }
 vec4 domLayers(int which, vec2 uv) {
-    if (which == 0) return texture(domLayers0, uv);
-    if (which == 1) return texture(domLayers1, uv);
-    if (which == 2) return texture(domLayers2, uv);
-    if (which == 3) return texture(domLayers3, uv);
-    return texture(domLayers4, uv);
+    if (which == 0) return texture(sampler2D(domLayers0, domLinear), uv);
+    if (which == 1) return texture(sampler2D(domLayers1, domLinear), uv);
+    if (which == 2) return texture(sampler2D(domLayers2, domLinear), uv);
+    if (which == 3) return texture(sampler2D(domLayers3, domLinear), uv);
+    return texture(sampler2D(domLayers4, domLinear), uv);
 }
 
 // The number of hairs between the viewer of map `which` (a light's, the sky's, the camera's)
