@@ -37,6 +37,7 @@ The .vrscene files go under the scene's groomlab/<scene>/caches/vray folder, one
 """
 
 import os
+import sys
 
 try:
     from maya import cmds
@@ -205,7 +206,9 @@ def motion_blur():
             int(get("cam_mbGeomSamples", 2)))
 
 
-TRANSLATOR = "vraytr_groomlab" + (".dll" if os.name == "nt" else ".so")
+# The translator's file as V-Ray for Maya looks for it: vraytr_*.dll on Windows, libvraytr_*.so on macOS.
+TRANSLATOR = ("vraytr_groomlab.dll" if os.name == "nt"
+              else "libvraytr_groomlab.so" if sys.platform == "darwin" else "vraytr_groomlab.so")
 
 
 def translator_installed():
