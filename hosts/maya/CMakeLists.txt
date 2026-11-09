@@ -174,25 +174,44 @@ if(GROOMLAB_BUILD_VRAY)
             set(_program_files "$ENV{ProgramFiles}")
         endif()
         file(TO_CMAKE_PATH "${_program_files}/Chaos/V-Ray/Maya ${GROOMLAB_MAYA_YEAR} for x64" _vray_default)
+    elseif(APPLE)
+        set(_vray_default "/Applications/Chaos/V-Ray/Maya${GROOMLAB_MAYA_YEAR}")
     endif()
     set(VRAY_FOR_MAYA_LOCATION "${_vray_default}" CACHE PATH
         "V-Ray for Maya's install for this Maya version (holding vray/include/vray_maya_sdk)")
     if(EXISTS "${VRAY_FOR_MAYA_LOCATION}/vray/include/vray_maya_sdk/translator_interface.h")
         message(STATUS "V-Ray for Maya at ${VRAY_FOR_MAYA_LOCATION}")
-        add_library(vraytr_groomlab SHARED vray/groom_translator.cpp)
-        # V-Ray's base libraries, as V-Ray's samples link them: vutils and plugman (PluginBase: the
-        # keyed points parameter derives from V-Ray's), and vray.dll's import library (the parameter's
-        # texture interfaces), which V-Ray has loaded whenever it loads a translator.
-        target_link_libraries(vraytr_groomlab PRIVATE groomlab_maya_inputs
-            "${VRAY_FOR_MAYA_LOCATION}/vray/lib/vutils_s.lib" "${VRAY_FOR_MAYA_LOCATION}/vray/lib/plugman_s.lib"
-            "${VRAY_FOR_MAYA_LOCATION}/vray/lib/vray.lib")
+        if(APPLE)
+            # macOS: a bundle named libvraytr_groomlab.so, as V-Ray for Maya's own translators are (it
+            # looks for <lib>vraytr_*.<so> in VRAY_FOR_MAYA<year>_TRANSLATORS_PATH).
+            add_library(vraytr_groomlab MODULE vray/groom_translator.cpp)
+            # vutils and plugman as on Windows (libvutils_s.a, libplugman_s.a); V-Ray's own symbols
+            # (vray.lib's on Windows) come from the libvray.dylib V-Ray has loaded when it loads a
+            # translator: its translators link no libvray, which no rpath of the module would find.
+            # (ApplicationServices: vutils' process calls, as V-Ray's samples link it.)
+            target_link_libraries(vraytr_groomlab PRIVATE groomlab_maya_inputs
+                "${VRAY_FOR_MAYA_LOCATION}/vray/lib/libvutils_s.a" "${VRAY_FOR_MAYA_LOCATION}/vray/lib/libplugman_s.a"
+                "-framework ApplicationServices")
+            target_link_options(vraytr_groomlab PRIVATE "LINKER:-undefined,dynamic_lookup")
+            # No __SSE*__: V-Ray's defines.h sets NO_SSE on arm64 itself.
+            target_compile_definitions(vraytr_groomlab PRIVATE _REENTRANT NOMINMAX VUTILS_UTF8 END_USER_BUILD)
+            set_target_properties(vraytr_groomlab PROPERTIES PREFIX "lib" SUFFIX ".so")
+        else()
+            add_library(vraytr_groomlab SHARED vray/groom_translator.cpp)
+            # V-Ray's base libraries, as V-Ray's samples link them: vutils and plugman (PluginBase: the
+            # keyed points parameter derives from V-Ray's), and vray.dll's import library (the parameter's
+            # texture interfaces), which V-Ray has loaded whenever it loads a translator.
+            target_link_libraries(vraytr_groomlab PRIVATE groomlab_maya_inputs
+                "${VRAY_FOR_MAYA_LOCATION}/vray/lib/vutils_s.lib" "${VRAY_FOR_MAYA_LOCATION}/vray/lib/plugman_s.lib"
+                "${VRAY_FOR_MAYA_LOCATION}/vray/lib/vray.lib")
+            # V-Ray's headers as its SDK's own builds compile them (samples/enduser_cmake).
+            target_compile_definitions(vraytr_groomlab PRIVATE _REENTRANT NOMINMAX VUTILS_UTF8 END_USER_BUILD
+                __SSE__ __SSE2__ __SSE3__ __SSSE3__ __SSE4_1__ __SSE4_2__)
+            set_target_properties(vraytr_groomlab PROPERTIES PREFIX "")
+        endif()
         target_include_directories(vraytr_groomlab SYSTEM PRIVATE
             "${VRAY_FOR_MAYA_LOCATION}/vray/include" "${VRAY_FOR_MAYA_LOCATION}/vray/include/vray_maya_sdk")
-        # V-Ray's headers as its SDK's own builds compile them (samples/enduser_cmake).
-        target_compile_definitions(vraytr_groomlab PRIVATE _REENTRANT NOMINMAX VUTILS_UTF8 END_USER_BUILD
-            __SSE__ __SSE2__ __SSE3__ __SSSE3__ __SSE4_1__ __SSE4_2__)
         set_target_properties(vraytr_groomlab PROPERTIES
-            PREFIX ""
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/vray"
             LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/vray")
         # No groomlab::warnings here: V-Ray's headers trip /permissive- and /W4.
