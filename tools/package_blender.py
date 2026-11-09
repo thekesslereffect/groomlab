@@ -25,6 +25,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def find_blender():
+    if sys.platform == "darwin":
+        mac = "/Applications/Blender.app/Contents/MacOS/Blender"
+        return mac if os.path.isfile(mac) else None
     found = glob.glob(os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Blender Foundation", "Blender *", "blender.exe"))
     return sorted(found)[-1] if found else None
 
@@ -36,7 +39,8 @@ def manifest_of(folder):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--build", default=os.path.join(ROOT, "build", "ninja-maya2022"))
+    # macOS: the release build's helper (no TBB, macOS 13.3: docs/MACOS.md).
+    parser.add_argument("--build", default=os.path.join(ROOT, "build", "macos-release" if sys.platform == "darwin" else "ninja-maya2022"))
     parser.add_argument("--config", default="RelWithDebInfo")
     parser.add_argument("--out", default=os.path.join(ROOT, "dist"))
     parser.add_argument("--blender", default=None, help="blender executable for validation (default: found)")
@@ -55,6 +59,12 @@ def main():
                  os.path.join("bin", "LICENSE-HELPER.txt")):
         if not os.path.isfile(os.path.join(ext, need)):
             sys.exit("no %s in the install: build %s (%s) first" % (need, args.build, args.config))
+    if sys.platform == "darwin":  # the helper loads nothing from outside the extension but the system
+        links = subprocess.run(["otool", "-L", os.path.join(ext, "bin", exe)], capture_output=True, text=True).stdout
+        outside = [l.strip().split(" (")[0] for l in links.splitlines()[1:]
+                   if not l.strip().startswith(("@rpath/", "@loader_path/", "@executable_path/", "/System/", "/usr/lib/"))]
+        if outside:
+            sys.exit("the helper loads from outside the extension: %s (build %s, the macos-release preset)" % (", ".join(outside), args.build))
     for folder, dirs, _ in os.walk(ext):
         for d in [d for d in dirs if d == "__pycache__"]:
             shutil.rmtree(os.path.join(folder, d))
