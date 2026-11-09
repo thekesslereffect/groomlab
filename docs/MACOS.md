@@ -415,19 +415,18 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
   colored pixels for 1000; the light behind changing 0.045 of the pixels for 0.05). The GPU kernels' checks (true width's facing
   ribbons, the self-shadowing grid) are skipped on macOS (`gui_support.gpu_kernels()`). Open: the
   200k-strand orbit at 16 to 20 fps (budget 24, tuned on Windows); a tip blend's and value
-  randomness's pixel counts just under their Windows-tuned bars (the pictures are right); a keyed
-  three Shape/Paint brush cases (Shift+drag smoothing, an alpha stroke, smoothing across the seam:
-  see Retina below);
-  the Graph Editor's wheel zoom check (`grabWindow` of the screen against a fresh paint: the
+  randomness's pixel counts just under their Windows-tuned bars (the pictures are right); the Graph Editor's wheel zoom check (`grabWindow` of the screen against a fresh paint: the
   window compositor on macOS). (Fixed on the way: a keyed param's Graph Editor drag drew no step
-  before the release, `graph_editor._write_preview`.)
+  before the release, `graph_editor._write_preview`; three brush cases, the radius in points: Retina
+  below. Maya 2025 then: 405 passed, 4 open.)
 - **Retina**: Maya's 3D view works in device pixels on macOS (`M3dView.portWidth()` 2530 for a
-  1265-point Qt widget, ratio 2). The brushes' screen radius is in the view's pixels, so a radius of
-  50 is half the physical size it is on Windows or in the app (the circle drawn matches the
-  stroke). The three brush cases above follow from it: their strokes and radii were sized on
-  Windows. Scaling the radius by the ratio (the `-radius` flag, the B-drag label) needs the ratio:
-  the plugin links no Qt on macOS (as for pen pressure).
-  no `renderman` (not installed).
+  1265-point Qt widget, ratio 2). The brushes' radius is in points, as on Windows and in the app:
+  `-radius` and the B-drag label take and show points, the strokes and the ring use the radius times
+  the display's scale under the cursor (`display_scale.cpp`, CoreGraphics; rescaled on a display of
+  another scale). The engine's few fixed pixel sizes (a 6-pixel ring while placing, an 8 to 60
+  pixel pick range) stay in the view's pixels: half as large on a Retina Mac. Tests that stroke a
+  set number of view pixels and count on its length scale it by `gui_support.view_pixel_scale()`.
+- No `renderman` tier (not installed: RenderMan 28 for Apple silicon awaited).
 - `python3 tools/dev/test_changed.py` picks the tests for what you changed (check it runs on macOS).
 
 ## 13. Checklist (update the boxes as you go)
@@ -440,7 +439,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] `ctest -L "quick|app"` green on `macos-app`
 - [ ] Offscreen renders (thumbnails, turntables) correct on Metal
 - [x] Maya 2025 install in place (no devkit needed); `macos-maya2025` builds `GroomLab.bundle`
-- [ ] The plugin loads in Maya 2025; a groom draws in Viewport 2.0; brushes and drags work (CPU) (loads in mayapy: `test_plugin.py` 23 OK, 3 skipped; in a Maya window the GUI suites pass 400 of 409, the open ones in section 12)
+- [ ] The plugin loads in Maya 2025; a groom draws in Viewport 2.0; brushes and drags work (CPU) (loads in mayapy: `test_plugin.py` 23 OK, 3 skipped; in a Maya window the GUI suites pass 405 of 409, the open ones in section 12)
 - [ ] The Python module imports in mayapy; the GroomLab menu works (fix Windows-only Python bits) (imports; `test_updates.py` green; `os.startfile` and `GroomLab.mll` fixed, `review.py`'s `Render` was right; the menu not tried in the UI)
 - [x] MtoA translator builds and renders a groom in Arnold (`test_arnold.py` on 2025 with the procedural: 32 of 33; the turntable test's batch render aborts without an Arnold license on this Mac, `abort_on_license_fail`)
 - [ ] A Maya preset with tests; `ctest -L maya` green on the Mac
