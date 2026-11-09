@@ -341,7 +341,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 
 ## 13. Checklist (update the boxes as you go)
 
-- [ ] Xcode, Homebrew packages, Qt 6.8.3 installed
+- [x] Xcode, Homebrew packages, Qt 6.8.3 installed (Xcode's license accepted; `xcrun metal` found)
 - [x] `macos-core` configures
 - [x] `macos-core` builds (core, C API + samples, CLI, Python module, Blender helper, tests)
 - [x] `ctest -L quick` green on `macos-core` (goldens and determinism included)
