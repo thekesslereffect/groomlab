@@ -229,9 +229,10 @@ class ProtocolTest(HelperTestCase):
         self.assertEqual(self.h.request("load_groom", session=s, path=bad)["error"]["code"], "parse")
         self.assertEqual(self.h.request("set_param", session=s, node="nope", param="x", value=1)["error"]["code"],
                          "not_found")
-        # An array too short for its shape in a real block.
+        # An array too short for its shape in a real block (beyond any page: macOS gives a block's
+        # size rounded up to its 16 KB pages).
         refs = self.h.put(points=np.zeros((2, 3), np.float32))
-        refs["points"]["shape"] = [1000, 3]
+        refs["points"]["shape"] = [100000, 3]
         self.assertEqual(self.h.request("set_scalp", session=s, faceCounts=[3], faceIndices=[0, 1, 2], **refs)
                          ["error"]["code"], "bad_request")
         self.assertTrue(self.h.call("ping")["pong"])
