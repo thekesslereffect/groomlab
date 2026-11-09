@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 /**
  * What the publish scripts write next to each release: <host>/latest.json and, newest first,
  * <host>/releases.json (tools/publish_release.py for maya/, publish_blender.py for blender/,
- * publish_app.py for app/).
+ * publish_app.py for app/). A macOS release has its own <host>/latest-macos.json beside them.
  */
 interface Release {
   version: string;
@@ -79,6 +79,8 @@ interface Package {
   release?: Release | null;
   older?: Release[];
   download?: string;
+  /** The macOS (Apple silicon) release, once its latest-macos.json is published: a second button. */
+  mac?: Release | null;
   /** Where a user of this package gets the next version (under Previous versions). */
   updates?: string;
 }
@@ -90,6 +92,9 @@ const beta = (release: Release | null): Pick<Package, 'status' | 'release' | 'do
 export default async function DownloadPage() {
   const [{ latest: maya, older: olderMaya }, { latest: blender, older: olderBlender }, { latest: app, older: olderApp }] =
     await Promise.all([releases('maya'), releases('blender'), releases('app')]);
+  const [mayaMac, blenderMac, appMac] = await Promise.all(
+    ['maya', 'blender', 'app'].map((host) => published<Release>(`${host}/latest-macos.json`)),
+  );
   const req = siteConfig.requirements;
   const packages: Package[] = [
     {
@@ -103,6 +108,7 @@ export default async function DownloadPage() {
       release: maya,
       older: olderMaya,
       download: siteConfig.downloadUrl,
+      mac: mayaMac,
       updates: 'Check for Updates in the GroomLab menu offers the latest.',
     },
     {
@@ -114,6 +120,7 @@ export default async function DownloadPage() {
       requires: ['Blender 5.2 LTS', req.os],
       docs: { href: '/docs/blender', label: 'Install guide' },
       older: olderBlender,
+      mac: blenderMac,
       updates: 'Blender offers the latest once the GroomLab repository is added (see the install guide).',
     },
     {
@@ -125,6 +132,7 @@ export default async function DownloadPage() {
       requires: ['Windows 10 or 11 (64-bit)', 'A graphics card with Direct3D 11'],
       docs: { href: '/docs/app', label: 'App guide' },
       older: olderApp,
+      mac: appMac,
       updates: 'Help > Check for Updates in the app says when a newer version is out.',
     },
   ];
@@ -186,16 +194,31 @@ export default async function DownloadPage() {
                 <p className="mt-1 text-[15px] font-medium text-gl-ink-2">{p.platform}</p>
                 <p className="mt-3 text-[15px] leading-relaxed text-gl-ink-2 text-pretty">{p.what}</p>
               </div>
-              {p.status !== 'soon' && p.download && (
+              {((p.status !== 'soon' && p.download) || p.mac) && (
                 <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
-                  <a href={p.download} className={cn(button.base, button.md, button.primary)}>
-                    Download
-                    <ArrowDownToLine aria-hidden="true" className="size-4 opacity-80" strokeWidth={2.4} />
-                  </a>
-                  {p.release && (
-                    <p className="text-center text-[13px] text-gl-ink-2 sm:text-right">
-                      {megabytes(p.release.size)} · {day(p.release.date)}
-                    </p>
+                  {p.status !== 'soon' && p.download && (
+                    <>
+                      <a href={p.download} className={cn(button.base, button.md, button.primary)}>
+                        {p.mac ? 'Windows' : 'Download'}
+                        <ArrowDownToLine aria-hidden="true" className="size-4 opacity-80" strokeWidth={2.4} />
+                      </a>
+                      {p.release && (
+                        <p className="text-center text-[13px] text-gl-ink-2 sm:text-right">
+                          {megabytes(p.release.size)} · {day(p.release.date)}
+                        </p>
+                      )}
+                    </>
+                  )}
+                  {p.mac && (
+                    <>
+                      <a href={p.mac.url} className={cn(button.base, button.md, button.primary)}>
+                        macOS (Apple silicon)
+                        <ArrowDownToLine aria-hidden="true" className="size-4 opacity-80" strokeWidth={2.4} />
+                      </a>
+                      <p className="text-center text-[13px] text-gl-ink-2 sm:text-right">
+                        {megabytes(p.mac.size)} · {day(p.mac.date)} · macOS 13.3 or later
+                      </p>
+                    </>
                   )}
                 </div>
               )}
