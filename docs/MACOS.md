@@ -362,6 +362,14 @@ Blender helper runs. **Gotcha:** asking Gatekeeper about a binary in the first m
 accepts it caches "Unnotarized" for a while (spctl, or a library load "disallowed by system
 policy"); binaries asked about later pass. Wait a few minutes before checking.
 
+**Packages in `dist/` (2026-11-09)**, all with today's Viewport 2.0, brush and Graph Editor fixes:
+`GroomLab-0.45.0-maya-macos-arm64.zip` (commit a28ca9a, Maya 2024 to 2027),
+`GroomLab-App-0.45.0-beta-macos-arm64.zip` and `GroomLab-Blender-0.45.0-macos-arm64.zip` (6882a17;
+nothing in them changed since). Each notarized (accepted), the app stapled; checked as quarantined
+downloads: Gatekeeper accepts the app ("Notarized Developer ID"), every Mach-O in the module and
+the extension verifies, the module's plugin loads in mayapy 2025. `publish_*.py --dry-run` takes all
+three and lists the macOS files alone.
+
 **Not done:**
 - Publishing is ready, not run. Each product has its own macOS feed beside Windows' (the Windows files
   are untouched): `maya/latest-macos.json`, `app/latest-macos.json`, `blender/latest-macos.json` and
@@ -418,7 +426,8 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
   randomness's pixel counts just under their Windows-tuned bars (the pictures are right); the Graph Editor's wheel zoom check (`grabWindow` of the screen against a fresh paint: the
   window compositor on macOS). (Fixed on the way: a keyed param's Graph Editor drag drew no step
   before the release, `graph_editor._write_preview`; three brush cases, the radius in points: Retina
-  below. Maya 2025 then: 405 passed, 4 open.)
+  below. Then 405 passed and the same 4 open in Maya 2025, 2026 and 2027 alike; 2027 once also hit a
+  race in the Graph Editor, fixed: `frame_readable` after the editor was gone.)
 - **Retina**: Maya's 3D view works in device pixels on macOS (`M3dView.portWidth()` 2530 for a
   1265-point Qt widget, ratio 2). The brushes' radius is in points, as on Windows and in the app:
   `-radius` and the B-drag label take and show points, the strokes and the ring use the radius times
