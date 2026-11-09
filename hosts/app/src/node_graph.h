@@ -220,6 +220,10 @@ public:
     // View Up to Here: the node the viewport shows ("" the output). Emits viewNodeChanged.
     void setViewedNode(const std::string& node);
     const std::string& viewedNode() const { return viewed_; }
+    // The Clump whose clumps color the strands (its header's Clump Colors button lit; "" none): the
+    // host's to say, from its display (strand colors by clump, from that node's channel, viewed).
+    void setClumpColoredNode(const std::string& node);
+    const std::string& clumpColoredNode() const { return clumpColored_; }
     void toggleViewSelected();  // V
     // Copy and paste (Ctrl+C, Ctrl+V): the clipboard's text, as Maya's Graph Editor writes it.
     void copySelected();
@@ -312,6 +316,9 @@ signals:
     void hideRequested();
     // View Up to Here changed: the host evaluates the graph up to that node ("" the output).
     void viewNodeChanged(const std::string& node);
+    // A Clump header's Clump Colors button: the host colors the strands by that node's clumps (or,
+    // lit, back as they were).
+    void clumpColorsToggled(const std::string& node);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -391,6 +398,8 @@ private:
     bool bypassButtonAt(const QPointF& scene, int* node) const;
     bool inputsButtonAt(const QPointF& scene, int* node) const;
     bool viewButtonAt(const QPointF& scene, int* node) const;
+    bool clumpColorsButtonAt(const QPointF& scene, int* node) const;
+    static bool clumpColorable(const Node& node) { return node.type == "Clump"; }
     bool viewable(const Node& node) const;  // a strands output: View Up to Here can show it
     // The backdrop whose title bar (or, `grip`, resize corner) is under a scene point; -1 none.
     int backdropTitleAt(const QPointF& scene, bool* grip = nullptr) const;
@@ -398,6 +407,7 @@ private:
     QRectF bypassButtonRect(const Node& node) const;
     QRectF inputsButtonRect(const Node& node) const;
     QRectF viewButtonRect(const Node& node) const;  // the header's View eye (left of Expand Inputs / Bypass)
+    QRectF clumpColorsButtonRect(const Node& node) const;  // a Clump's: left of the other toggles
     void drawNode(QPainter& painter, const Node& node, bool selected);
     void forwardToViewport(QEvent* event);
     void addFromSearch();
@@ -432,6 +442,7 @@ private:
     std::map<std::string, std::string> notes_;  // a note per node from its last run
     std::map<std::string, std::string> errors_;  // an error per failing node
     std::string viewed_;  // View Up to Here ("" the output)
+    std::string clumpColored_;  // setClumpColoredNode
     std::map<std::string, QPointF> laidOut_;  // positions the view chose (the document has none)
     std::string selected_;
     std::vector<std::string> selection_;

@@ -379,8 +379,10 @@ void MainWindow::wireOverlay() {
     connect(graph_, &NodeGraphView::viewNodeChanged, this, [this](const std::string& node) {
         if (node == viewNode_) return;
         viewNode_ = node;
+        refreshClumpColored();
         if (document_) reevaluate();
     });
+    connect(graph_, &NodeGraphView::clumpColorsToggled, this, [this](const std::string& node) { toggleClumpColors(node); });
     connect(graph_, &NodeGraphView::edited, this, [this] { graphEdited(); });
     connect(graph_, &NodeGraphView::message, this, [this](const QString& text) { report(text); });
     // Escape in the graph (no search open): the viewport takes the focus back, the dock stays.

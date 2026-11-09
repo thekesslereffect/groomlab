@@ -128,8 +128,9 @@ class GraphEditorTest(unittest.TestCase):
     def test_param_panel_follows_selection_and_edits(self):
         self.editor.items["scatter"].setSelected(True)
         self.assertEqual(self.editor.params.node, "scatter")
-        # density is mappable: a MappableEditor switching to a color set.
-        editors = self.editor.params.findChildren(self.ge.MappableEditor)
+        # density is mappable: a MappableEditor switching to a color set (one per mappable param shown:
+        # follicles' too).
+        editors = [e for e in self.editor.params.findChildren(self.ge.MappableEditor) if e.spec.get("name") == "density"]
         self.assertEqual(len(editors), 1)
         self.editor.set_param("scatter", "density", 50.0)
         self.assertEqual(groomlab.get_graph(self.groom)["nodes"][2]["params"]["density"], 50.0)
@@ -1293,6 +1294,43 @@ class GraphEditorTest(unittest.TestCase):
         curve = self.editor.add_node("Curve")
         self.editor.link(curve, clump, "profile")
         self.assertEqual(groomlab.errors(self.groom), [])
+
+    def test_clump_colors_button(self):
+        # A Clump's header: Clump Colors (left of Expand Inputs) focuses on it and colors the strands
+        # by its clumps (its clumpChannel); again: the color mode from before, the output focused.
+        from groomlab import review
+        from groomlab.ui.qt import QtCore, QtWidgets
+        from groomlab.ui.qt import QtTest as qt_test_module
+        QtTest = qt_test_module()
+        self.editor.resize(1200, 600)
+        self.editor.show()
+        QtWidgets.QApplication.processEvents()
+        name = self.editor.add_node("Clump")
+        self.assertNotIn("clumpColors", self.editor.items["length"].toggle_rects())
+        self.editor.set_param(name, "clumpChannel", "bigClumpId")
+        cmds.setAttr(self.groom + ".strandColorMode", review.ATTRIBUTE_MODE)
+        view = self.editor.view
+
+        def click():
+            item = self.editor.items[name]
+            point = view.mapFromScene(item.mapToScene(item.toggle_rects()["clumpColors"].center()))
+            QtTest.QTest.mouseClick(view.viewport(), QtCore.Qt.LeftButton, QtCore.Qt.NoModifier, point)
+            wait(20)
+
+        click()
+        self.assertEqual(cmds.getAttr(self.groom + ".strandColorMode"), review.CLUMP_MODE)
+        self.assertEqual(cmds.getAttr(self.groom + ".strandColorSource"), "bigClumpId")
+        self.assertEqual(cmds.getAttr(self.groom + ".viewNode"), name)
+        self.assertTrue(self.editor.clump_colored(name))
+        click()
+        self.assertEqual(cmds.getAttr(self.groom + ".strandColorMode"), review.ATTRIBUTE_MODE)
+        self.assertEqual(cmds.getAttr(self.groom + ".viewNode"), "")
+        self.assertFalse(self.editor.clump_colored(name))
+        self.editor.delete_nodes([name])
+        self.editor.scene.clearSelection()
+        QtWidgets.QApplication.processEvents()
+        QtWidgets.QApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+        self.editor.hide()
 
     def test_feather_nodes(self):
         # Propagate and Plume sit under Feathers in the Add Node menu (Split under Utility);

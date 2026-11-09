@@ -691,6 +691,12 @@ private:
     void refreshSurfaces();  // the look panel's surface list: the scalp and the props
     void refreshDisplayChoices();  // the color sources and the maps the display panel offers
     void applyDisplayOptions();    // the display panel's choices into the settings and the renderer
+    // A Clump header's Clump Colors button: the strands colored by that node's clumps (its
+    // clumpChannel), viewed up to it; on the lit one, the color mode before and the output again.
+    void toggleClumpColors(const std::string& node);
+    void refreshClumpColored();  // which Clump's button is lit, from the display and the view
+    std::string clumpChannelOf(const std::string& node, bool* isClump = nullptr) const;
+    int colorModeBeforeClump_ = 0;  // kSolidColors
     // While the Paint brush is on a map (Maya's show_while_painting): the strands colored by it
     // (0 to 1) and, a guide layer, the guides; endPaintView puts back what the display showed
     // before, except what was changed since (Maya's end_painting).

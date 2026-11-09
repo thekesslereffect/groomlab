@@ -888,6 +888,9 @@ class NodeItem(QtWidgets.QGraphicsItem):
             left -= size + 4
         if self.mappable():
             rects["inputs"] = QtCore.QRectF(left, 8, size, size)
+            left -= size + 4
+        if self.op_type == "Clump":  # Clump Colors: the strands colored by its clumps
+            rects["clumpColors"] = QtCore.QRectF(left, 8, size, size)
         return rects
 
     def paint_toggles(self, painter, viewed, bypassed):
@@ -897,12 +900,13 @@ class NodeItem(QtWidgets.QGraphicsItem):
         for kind, rect in rects.items():
             available = self.mappable() if kind == "inputs" else []
             on = (viewed if kind == "focus" else
+                  self.editor.clump_colored(self.name) if kind == "clumpColors" else
                   (all(p in self.editor.model.param_inputs(self.name) for p in available) if kind == "inputs" else bypassed))
             ink = getattr(self, "header_ink", None)  # on a filled header: its readable color
             idle = QtGui.QColor(ink) if ink is not None else QtGui.QColor(MUTED)
             if ink is not None:
                 idle.setAlpha(150)
-            active = FOCUS if kind in ("focus", "inputs") else WARNING
+            active = FOCUS if kind in ("focus", "inputs", "clumpColors") else WARNING
             color = (ink if ink is not None else active) if on else idle
             if on:  # lit: a tile of its color under a bolder glyph (View in the blue: plainly on)
                 fill = QtGui.QColor(color)
@@ -920,6 +924,16 @@ class NodeItem(QtWidgets.QGraphicsItem):
                 painter.drawPath(path)
                 painter.setBrush(color)
                 painter.drawEllipse(c, 2.2, 2.2)
+            elif kind == "clumpColors":  # three dots of a clump: in three hues when lit
+                hues = (QtGui.QColor(240, 110, 90), QtGui.QColor(90, 200, 120), QtGui.QColor(100, 150, 245))
+                for k, at in enumerate((QtCore.QPointF(0, -3.4), QtCore.QPointF(-3.6, 2.6), QtCore.QPointF(3.6, 2.6))):
+                    if on:
+                        painter.setPen(QtCore.Qt.NoPen)
+                        painter.setBrush(hues[k])
+                    else:
+                        painter.setPen(QtGui.QPen(color, 1.3))
+                        painter.setBrush(QtCore.Qt.NoBrush)
+                    painter.drawEllipse(c + at, 2.6, 2.6)
             elif kind == "inputs":  # Maya Hypershade's three-line expand-inputs glyph
                 for dy in (-4, 0, 4):
                     painter.drawLine(c + QtCore.QPointF(-5, dy), c + QtCore.QPointF(5, dy))
@@ -939,6 +953,8 @@ class NodeItem(QtWidgets.QGraphicsItem):
                         later(lambda: editor.view_node(None if editor.viewed == name else name))
                     elif kind == "inputs":
                         later(lambda: editor.toggle_param_inputs(name))
+                    elif kind == "clumpColors":
+                        later(lambda: editor.toggle_clump_colors(name))
                     else:
                         later(lambda: editor.set_bypass([name], not editor.model.bypassed(name)))
                     return
@@ -948,6 +964,7 @@ class NodeItem(QtWidgets.QGraphicsItem):
         tips = {"focus": "Focus: show the groom up to this node in the viewport (%s); a Clump's centers show as "
                          "dots" % shortcut_keys("graph.view"),
                 "inputs": "Expand Inputs: show or hide all connectable parameter ports",
+                "clumpColors": "Clump Colors: color the strands by this node's clumps, focused on it; again: as they were",
                 "disable": "Bypass: pass the input straight through (%s)" % shortcut_keys("graph.bypass")}
         over = next((k for k, r in self.toggle_rects().items() if r.contains(event.pos())), None)
         self.setToolTip(tips[over] if over else (self.editor.node_errors.get(self.name)
@@ -5055,6 +5072,59 @@ class GraphEditor(QtWidgets.QWidget):
         for item in self.items.values():
             item.update()
         self.report("viewing %s (renders use the output)" % name if name else "")
+
+    # -- Clump Colors: a Clump header's button (the groom's strandColorMode clump, from its channel) --
+
+    def clump_channel(self, name):
+        """A Clump's clumpChannel ("" none), None for another node."""
+        try:
+            if self.model.node_type(name) != "Clump":
+                return None
+            return self.model.param(name, "clumpChannel") or ""
+        except Exception:  # noqa: BLE001 - a node gone
+            return None
+
+    def clump_colored(self, name):
+        """Whether the strands show this Clump's clumps: focused on it, colored by clump from its channel."""
+        if not self.groom or self.viewed != name:
+            return False
+        channel = self.clump_channel(name)
+        if not channel:
+            return False
+        from maya import cmds
+        from groomlab import review
+        try:
+            return (cmds.getAttr(self.groom + ".strandColorMode") == review.CLUMP_MODE
+                    and (cmds.getAttr(self.groom + ".strandColorSource") or "") == channel)
+        except (RuntimeError, ValueError):
+            return False
+
+    def toggle_clump_colors(self, name):
+        """A Clump's Clump Colors: the strands colored by its clumps, focused on it; on the lit one,
+        the color mode from before and the output again."""
+        if not self.groom:
+            return
+        from maya import cmds
+        from groomlab import review
+        if self.clump_colored(name):
+            before = getattr(self, "_color_mode_before_clump", 0)
+            self.silently(lambda: cmds.setAttr(self.groom + ".strandColorMode", 0 if before == review.CLUMP_MODE else before))
+            self.view_node(None)
+            return
+        channel = self.clump_channel(name)
+        if not channel:
+            self.report("%s writes no clump channel (its clumpChannel is empty)" % name)
+            return
+        mode = cmds.getAttr(self.groom + ".strandColorMode")
+        if mode != review.CLUMP_MODE:
+            self._color_mode_before_clump = mode
+        groom = self.groom
+
+        def colored():
+            cmds.setAttr(groom + ".strandColorSource", channel, type="string")
+            cmds.setAttr(groom + ".strandColorMode", review.CLUMP_MODE)
+        self.silently(colored)
+        self.view_node(name)
 
     def set_bypass(self, names, on):
         for name in names:

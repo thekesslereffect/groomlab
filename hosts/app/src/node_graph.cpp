@@ -307,7 +307,8 @@ void NodeGraphView::rebuild() {
         // gets a row for it: the type never runs into the port names.
         const bool typeRow = node.type != node.name && node.inputs.size() <= 1 && node.outputs.size() <= 1;
         const std::size_t rows = std::max<std::size_t>(std::max(node.inputs.size(), node.outputs.size()), 1) + (typeRow ? 1 : 0);
-        node.size = QSizeF(kNodeWidth, kHeader + kBodyPadding * 2 + rows * kRow);
+        // (A Clump a button wider: its header holds Clump Colors too.)
+        node.size = QSizeF(kNodeWidth + (clumpColorable(node) ? 23.0 : 0.0), kHeader + kBodyPadding * 2 + rows * kRow);
         float x = 0.0f, y = 0.0f;
         if (document_->nodePosition(info.name, &x, &y)) {
             node.pos = QPointF(x, y);
@@ -792,6 +793,28 @@ QRectF NodeGraphView::viewButtonRect(const Node& node) const {
     return bypassButtonRect(node).translated(-23.0, 0.0);
 }
 
+QRectF NodeGraphView::clumpColorsButtonRect(const Node& node) const {
+    // Left of the leftmost toggle: Clump Colors, Expand Inputs, View, Bypass.
+    const QRectF left = !node.linkableParams.empty() ? inputsButtonRect(node) : viewable(node) ? viewButtonRect(node) : bypassButtonRect(node);
+    return left.translated(-23.0, 0.0);
+}
+
+bool NodeGraphView::clumpColorsButtonAt(const QPointF& scene, int* node) const {
+    for (std::size_t i = 0; i < nodes_.size(); ++i) {
+        if (clumpColorable(nodes_[i]) && clumpColorsButtonRect(nodes_[i]).adjusted(-2, -2, 2, 2).contains(scene)) {
+            *node = static_cast<int>(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+void NodeGraphView::setClumpColoredNode(const std::string& node) {
+    if (node == clumpColored_) return;
+    clumpColored_ = node;
+    update();
+}
+
 bool NodeGraphView::viewable(const Node& node) const {
     return std::any_of(node.outputs.begin(), node.outputs.end(), [](const Port& p) {
         return p.type == "strands" || p.type == "Strands" || p.type == "curves" || p.type == "Curves";
@@ -918,7 +941,12 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
     const NodeBadges badges = nodeBadges(node.name);
     const bool filled = header == QLatin1String("filled");
     const qreal row = rect.y() + kHeader / 2.0;
-    qreal x = (!node.linkableParams.empty() ? inputsButtonRect(node) : viewable(node) ? viewButtonRect(node) : bypassButtonRect(node)).left() - 4.0;
+    qreal x = (clumpColorable(node) ? clumpColorsButtonRect(node)
+               : !node.linkableParams.empty() ? inputsButtonRect(node)
+               : viewable(node) ? viewButtonRect(node)
+                                : bypassButtonRect(node))
+                  .left() -
+              4.0;
     const QFont number = theme::numberFont(11);
     if (!badges.time.isEmpty()) {
         const qreal w = QFontMetricsF(number).horizontalAdvance(badges.time);
@@ -1029,6 +1057,36 @@ void NodeGraphView::drawNode(QPainter& painter, const Node& node, bool selected)
         painter.setPen(Qt::NoPen);
         painter.setBrush(ink);
         painter.drawEllipse(c, 2.2, 2.2);
+    }
+    // A Clump's Clump Colors toggle (three dots of a clump, in three hues): the strands colored by
+    // this node's clumps; dim until they are, then lit on a tile.
+    if (clumpColorable(node)) {
+        const QRectF dots = clumpColorsButtonRect(node);
+        const bool on = !clumpColored_.empty() && clumpColored_ == node.name;
+        QColor ink = filled ? headerText(color) : (on ? theme::uiColor("accent") : theme::textDim());
+        if (on) {
+            QColor tile = ink;
+            tile.setAlpha(60);
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(tile);
+            painter.drawRoundedRect(dots, 4.0, 4.0);
+        } else {
+            ink.setAlpha(filled ? 140 : 170);
+        }
+        const QPointF c = dots.center();
+        const QPointF at[3] = {c + QPointF(0.0, -3.4), c + QPointF(-3.6, 2.6), c + QPointF(3.6, 2.6)};
+        const QColor hues[3] = {QColor(240, 110, 90), QColor(90, 200, 120), QColor(100, 150, 245)};
+        for (int k = 0; k < 3; ++k) {
+            if (on) {
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(hues[k]);
+            } else {
+                QPen pen(ink, 1.3);
+                painter.setPen(pen);
+                painter.setBrush(Qt::NoBrush);
+            }
+            painter.drawEllipse(at[k], 2.6, 2.6);
+        }
     }
     if (!node.linkableParams.empty()) {
         const QRectF inputs = inputsButtonRect(node);
@@ -1313,6 +1371,10 @@ void NodeGraphView::mousePressEvent(QMouseEvent* event) {
     bool output = false;
     if (bypassButtonAt(pressScene_, &node)) {
         setBypass(nodes_[node].name, !nodes_[node].bypass);
+        return;
+    }
+    if (clumpColorsButtonAt(pressScene_, &node)) {
+        emit clumpColorsToggled(nodes_[node].name);
         return;
     }
     if (viewButtonAt(pressScene_, &node)) {
@@ -1917,6 +1979,8 @@ bool NodeGraphView::event(QEvent* event) {
         QString tip;
         if (inputsButtonAt(scene, &node)) {
             tip = tr("Expand Inputs: show or hide all connectable parameter ports");
+        } else if (clumpColorsButtonAt(scene, &node)) {
+            tip = tr("Clump Colors: color the strands by this node's clumps, viewing up to it; again: as they were");
         } else if (viewButtonAt(scene, &node)) {
             tip = tr("View: show the groom up to this node in the viewport (V); again: the output");
         } else if (bypassButtonAt(scene, &node)) {

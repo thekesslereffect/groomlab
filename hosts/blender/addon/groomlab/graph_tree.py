@@ -367,8 +367,15 @@ class GroomLabNodeBase(object):
 
     def draw_buttons(self, context, layout):
         linkable = [p["name"] for p in node_param_specs(self) if p.get("port")]
-        if linkable:
+        clump = self.gl_type == "Clump"
+        if linkable or clump:
             row = layout.row(align=True)
+        if clump:  # Clump Colors: the strands colored by this node's clumps, viewed up to it
+            scalp = getattr(self.id_data, "gl_scalp", None)
+            op = row.operator("groomlab.graph_clump_colors", text="", icon="GROUP_VCOL",
+                              depress=clump_colored(scalp, self))
+            op.node = self.gl_name
+        if linkable:
             exposed = set(json.loads(self.gl_inputs or "[]"))
             op = row.operator("groomlab.graph_toggle_inputs", text="", icon="LINENUMBERS_ON",
                               depress=all(param in exposed for param in linkable))
@@ -1720,6 +1727,26 @@ def set_evaluation(scalp, names, mode):
     for name in names:
         _call("edit_graph", session=rt.session, op="set_evaluation", name=name, mode=mode)
     _edited(scalp, rt)
+
+
+def clump_channel(node):
+    """A Clump node's clumpChannel ("" none), None for another node."""
+    if node.gl_type != "Clump":
+        return None
+    try:
+        return json.loads(node.gl_values or "{}").get("clumpChannel", "clumpId") or ""
+    except ValueError:
+        return "clumpId"
+
+
+def clump_colored(scalp, node):
+    """Whether the strands show this Clump's clumps (its header's Clump Colors lit): viewed, colored
+    by clump from its channel."""
+    channel = clump_channel(node)
+    if not channel or scalp is None or scalp.groomlab.view_node != node.gl_name:
+        return False
+    d = scalp.groomlab_tools
+    return d.strand_color == "clump" and (d.strand_color_source or "clumpId") == channel
 
 
 def view_node(scalp, name):

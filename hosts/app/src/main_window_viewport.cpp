@@ -23,6 +23,7 @@
 #include <QTimer>
 
 #include "groom_tools.h"
+#include "node_graph.h"
 #include "cards_panel.h"
 #include "export_panel.h"
 #include "glass.h"
@@ -114,8 +115,57 @@ void MainWindow::applyDisplayOptions() {
     viewport_->renderer().setLookdev(lookdevWanted_ && mode == kSolidColors);
     if (modeChanged) refreshDisplayChoices();
     if (maps_) maps_->invalidate();
+    refreshClumpColored();
     if (cardsChanged) reevaluate();  // the view builds the cards (ViewRequest::wantCards)
     else redisplay();
+}
+
+std::string MainWindow::clumpChannelOf(const std::string& node, bool* isClump) const {
+    if (isClump) *isClump = false;
+    if (!document_ || node.empty()) return {};
+    for (const nlohmann::json& n : document_->graph().value("nodes", nlohmann::json::array())) {
+        if (n.value("name", std::string()) != node) continue;
+        if (n.value("type", std::string()) != "Clump") return {};
+        if (isClump) *isClump = true;
+        const nlohmann::json params = n.value("params", nlohmann::json::object());
+        const auto it = params.find("clumpChannel");
+        return it != params.end() && it->is_string() ? it->get<std::string>() : std::string("clumpId");
+    }
+    return {};
+}
+
+void MainWindow::refreshClumpColored() {
+    if (!graph_) return;
+    bool isClump = false;
+    const std::string channel = clumpChannelOf(viewNode_, &isClump);
+    const bool lit = isClump && !channel.empty() && settings_.colorMode == kClumpColors && settings_.colorSource == channel;
+    graph_->setClumpColoredNode(lit ? viewNode_ : std::string());
+}
+
+void MainWindow::toggleClumpColors(const std::string& node) {
+    if (!graph_ || !colorMode_) return;
+    if (graph_->clumpColoredNode() == node) {
+        // Off: the colors as they were before, the output viewed again.
+        colorMode_->setCurrentIndex(std::max(0, colorMode_->findData(colorModeBeforeClump_ == kClumpColors ? kSolidColors : colorModeBeforeClump_)));
+        if (viewNode_ == node) graph_->setViewedNode({});
+        refreshClumpColored();
+        return;
+    }
+    const std::string channel = clumpChannelOf(node);
+    if (channel.empty()) {
+        report(tr("%1 writes no clump channel (its clumpChannel is empty)").arg(QString::fromStdString(node)));
+        return;
+    }
+    const int mode = colorMode_->currentData().toInt();
+    if (mode != kClumpColors) colorModeBeforeClump_ = mode;
+    {
+        const QSignalBlocker block(colorSource_);
+        colorSource_->setEditText(QString::fromStdString(channel));
+    }
+    if (mode != kClumpColors) colorMode_->setCurrentIndex(std::max(0, colorMode_->findData(kClumpColors)));
+    else applyDisplayOptions();
+    graph_->setViewedNode(node);
+    refreshClumpColored();
 }
 
 MainWindow::PaintView MainWindow::currentPaintView() const {

@@ -290,6 +290,41 @@ TEST(AppGraphEditor, ExpandInputsButtonTogglesEveryConnectableParam) {
     EXPECT_EQ(doc->connectNodes(field, "", scatter, "density"), "") << "re-expanding restores a reconnectable port";
 }
 
+TEST(AppGraphEditor, AClumpsClumpColorsButtonColorsByItsClumps) {
+    // A Clump's header: Clump Colors, Expand Inputs, View, Bypass. Clump Colors views up to it and
+    // colors the strands by its clumps (its clumpChannel); again: as before, the output viewed.
+    Window w;
+    NodeGraphView* graph = w.graph();
+    GroomDocument* doc = w.doc();
+    std::string clump = nodeOf(*doc, "Clump");
+    if (clump.empty()) {
+        ASSERT_EQ(doc->addNode("Clump", 0.0f, 0.0f, &clump), "");
+        graph->refresh();
+    }
+    ASSERT_EQ(doc->setParam(clump, "clumpChannel", json("bigClumpId")), "");
+    graph->refresh();
+    QCoreApplication::processEvents();
+    const QRectF card = graph->nodeRect(clump);
+    const qreal scale = graph->viewScale();
+    const QPointF button(card.right() - 86.0 * scale, card.top() + 14.0 * scale);
+    mouse(graph, QEvent::MouseButtonPress, button, Qt::LeftButton);
+    EXPECT_EQ(graph->clumpColoredNode(), clump);
+    EXPECT_EQ(graph->viewedNode(), clump);
+    EXPECT_TRUE(w.window.setDisplayText(QStringLiteral("colorSource=bigClumpId")));  // (as it is: still lit)
+    EXPECT_EQ(graph->clumpColoredNode(), clump);
+    mouse(graph, QEvent::MouseButtonPress, button, Qt::LeftButton);
+    EXPECT_EQ(graph->clumpColoredNode(), "");
+    EXPECT_EQ(graph->viewedNode(), "");
+    // Lit from the display alone: clump colors from its channel, viewing it.
+    graph->setViewedNode(clump);
+    EXPECT_EQ(graph->clumpColoredNode(), "");
+    ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("colorMode=clump")));
+    ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("colorSource=bigClumpId")));
+    EXPECT_EQ(graph->clumpColoredNode(), clump);
+    ASSERT_TRUE(w.window.setDisplayText(QStringLiteral("colorSource=clumpId")));
+    EXPECT_EQ(graph->clumpColoredNode(), "") << "another channel's clumps";
+}
+
 TEST(AppGraphEditor, ShowInnerParamPutsAnInnerParamOnTheCompound) {
     Window w;
     GroomDocument* doc = w.doc();

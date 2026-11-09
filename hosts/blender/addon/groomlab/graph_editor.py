@@ -350,6 +350,42 @@ class GROOMLAB_OT_graph_view_node(_GraphOperator):
         return {"FINISHED"}
 
 
+_COLOR_BEFORE_CLUMP = {}  # groom uid -> its strand color mode before a Clump Colors
+
+
+class GROOMLAB_OT_graph_clump_colors(_GraphOperator):
+    """Clump Colors: color the strands by this Clump's clumps, viewing up to it. Again: the colors as they were and the output"""
+    bl_idname = "groomlab.graph_clump_colors"
+    bl_label = "Clump Colors"
+
+    node: StringProperty(options={"SKIP_SAVE"}, description="The Clump node")
+
+    def execute(self, context):
+        scalp = context_groom(context)
+        tree = graph_tree.tree_of(scalp)
+        node = next((n for n in tree.nodes if ours(n) and n.gl_name == self.node), None) if tree else None
+        if node is None or node.gl_type != "Clump":
+            return {"CANCELLED"}
+        d = scalp.groomlab_tools
+        uid = scalp.groomlab.uid
+        if graph_tree.clump_colored(scalp, node):
+            before = _COLOR_BEFORE_CLUMP.pop(uid, "solid")
+            d.strand_color = "solid" if before == "clump" else before
+            graph_tree.view_node(scalp, "")
+            return {"FINISHED"}
+        channel = graph_tree.clump_channel(node)
+        if not channel:
+            self.report({"INFO"}, "%s writes no clump channel (its clumpChannel is empty)" % node.gl_name)
+            return {"CANCELLED"}
+        if d.strand_color != "clump":
+            _COLOR_BEFORE_CLUMP[uid] = d.strand_color
+        d.strand_color_source = channel
+        d.strand_color = "clump"
+        graph_tree.view_node(scalp, node.gl_name)
+        self.report({"INFO"}, "Strands colored by %s's clumps (renders use the output)" % node.gl_name)
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_graph_bypass(_GraphOperator):
     """Bypass: pass the selected nodes' input straight through (B; Blender's M mutes the same way)"""
     bl_idname = "groomlab.graph_bypass"
@@ -1543,7 +1579,7 @@ def _draw_overlay_now():
 _keymaps = []
 
 classes = (GROOMLAB_OT_graph_open, GROOMLAB_OT_graph_add_search, GROOMLAB_OT_graph_frame, GROOMLAB_OT_graph_duplicate,
-           GROOMLAB_OT_graph_view_node, GROOMLAB_OT_graph_bypass, GROOMLAB_OT_graph_evaluation, GROOMLAB_OT_graph_set_output,
+           GROOMLAB_OT_graph_view_node, GROOMLAB_OT_graph_clump_colors, GROOMLAB_OT_graph_bypass, GROOMLAB_OT_graph_evaluation, GROOMLAB_OT_graph_set_output,
            GROOMLAB_OT_graph_upgrade_node, GROOMLAB_OT_graph_fold, GROOMLAB_OT_graph_pick_attribute, GROOMLAB_OT_graph_tidy, GROOMLAB_OT_graph_reload,
            GROOMLAB_OT_graph_preset, GROOMLAB_OT_graph_presets_refresh, GROOMLAB_MT_graph_presets,
            GROOMLAB_MT_graph_edit, GROOMLAB_PT_graph_node, GROOMLAB_PT_graph_groom, GROOMLAB_PT_graph_presets)
