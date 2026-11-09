@@ -110,6 +110,10 @@ RenderJob::RenderJob(QObject* parent) : QObject(parent) {}
 
 RenderJob::~RenderJob() {
     if (process_ && process_->state() != QProcess::NotRunning) {
+        // A job going away reports nothing: its process' finished would reach done() and the job's
+        // finished, whose receivers may be half destroyed already (the MainWindow that owns this job
+        // deletes it as a child, after its own members are gone).
+        process_->disconnect(this);
         process_->kill();
         process_->waitForFinished(5000);
     }
