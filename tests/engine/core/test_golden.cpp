@@ -589,6 +589,8 @@ std::vector<Case> cases() {
             {"from": "split", "to": "op", "input": "shafts", "output": "b"})"},
         // Subdivide: a render's one level (each segment halved along the smooth curve).
         {"Subdivide", "op", R"({"name": "op", "type": "Subdivide", "params": {"levels": 1}})", link("interp", "op", "strands")},
+        // Spectrum: the sweep relaxed, the middle band deepened, the high band (any frizz) taken out.
+        {"Spectrum", "op", R"({"name": "op", "type": "Spectrum", "params": {"lowGain": 0.7, "midGain": 1.6, "highGain": 0.0, "lowWavelength": 4.0, "highWavelength": 0.6}})", link("interp", "op", "strands")},
     };
 }
 

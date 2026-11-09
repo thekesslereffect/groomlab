@@ -105,6 +105,7 @@ add_executable(groomlab_tests
     engine/core/test_vrscene_writer.cpp
     engine/core/test_wet.cpp
     engine/core/test_example_node.cpp
+    engine/core/test_spectrum.cpp
     # The new-node template, built as a test's operator ("TestExample": test_example_node.cpp); its
     # "internal.h" is example_node/internal.h, which gives it op::kExample.
     ${PROJECT_SOURCE_DIR}/tools/dev/new_node/example_op.cpp

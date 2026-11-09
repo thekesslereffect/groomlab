@@ -151,6 +151,7 @@ add_library(groomlab_core_objects OBJECT
     src/operators/group_op.cpp
     src/operators/hair_grid.cpp
     src/operators/subdivide_op.cpp
+    src/operators/spectrum_op.cpp
 )
 # What every user of the core's objects needs: its headers.
 add_library(groomlab_core_headers INTERFACE)

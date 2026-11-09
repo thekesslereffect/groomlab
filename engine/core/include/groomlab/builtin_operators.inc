@@ -68,6 +68,7 @@ GROOMLAB_OPERATOR(Tangle)                // Strands -> Strands (mats, wet strand
 GROOMLAB_OPERATOR(Wet)                   // Strands -> Strands (small clumps near the root merging into larger ones toward the tip)
 GROOMLAB_OPERATOR(Instance)              // Strands -> Strands (geometry instanced on them)
 GROOMLAB_OPERATOR(Scales)                // Strands -> Strands (a scale at each root, on the skin)
+GROOMLAB_OPERATOR(Spectrum)              // Curves -> Curves (the shape as bands of bending by wavelength, each scaled)
 // [motion]
 GROOMLAB_OPERATOR(Wind)                  // Curves -> Curves (bent by a wind moving through space and time)
 GROOMLAB_OPERATOR(Jiggle)                // Curves -> Curves (lag and overshoot from the scalp's recent motion)
