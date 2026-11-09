@@ -207,6 +207,10 @@ portable (a cast that is correct everywhere).
     `VRAY_FOR_MAYA<year>_TRANSLATORS_PATH`). Make those `if(APPLE)` branches; without them the
     translator is simply not built (the configure says why) and the rest builds. The plugin's
     V-Ray hook (`groomlab/vray_hook.py`, `vray_render.py`) is Python and should run as it is.
+    **Done (2026-11-09):** `if(APPLE)` branches build `libvraytr_groomlab.so` (a bundle: V-Ray loads
+    `<lib>vraytr_*.<so>`), with `libvutils_s.a`, `libplugman_s.a`, ApplicationServices and V-Ray's own
+    four symbols left to the loaded `libvray.dylib` (`dynamic_lookup`); no SSE macros (V-Ray sets
+    `NO_SSE` on arm64); `VRAY_FOR_MAYA_LOCATION` defaults to `/Applications/Chaos/V-Ray/Maya<year>`.
 12. **Maya 2024's Qt 5.** The plugin's Qt bits (`groomlab_maya_qt`, Windows-only today) and the
     module's Python UI (`groomlab/ui/qt.py`: PySide2 or PySide6) already handle Qt 5 for Maya 2022
     and 2023 on Windows; on the Mac, 2024 is the only Qt 5 one.
@@ -356,7 +360,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] Maya 2026 (`macos-maya2026`) (built first time, oneTBB; in mayapy: `test_plugin.py` 23 OK, 3 skipped; `test_updates.py` 8 OK; `test_arnold.py` from the installed module 32 of 33, the turntable's batch render needing an Arnold license)
 - [x] Maya 2027 (`macos-maya2027`: Python 3.13) (built first time: Python 3.13.9, oneTBB, MtoA 5.6.2; in mayapy: `test_plugin.py` 23 OK, 3 skipped; `test_updates.py` 8 OK; `test_arnold.py` from the installed module 32 of 33, the turntable's batch render needing an Arnold license)
 - [x] Maya 2024 (`macos-maya2024`: Qt 5, PySide2, Python 3.10) (built first time: Python 3.10.8, TBB 2020, MtoA 5.3.4; in mayapy: `test_plugin.py` 23 OK, 3 skipped; `test_updates.py` 8 OK; `test_arnold.py` 33 of 33 once Stop was fixed: Arnold 7.2 renders an unlicensed batch job with a watermark, and Stop killed only the `Render` shell script, not the batch Maya it starts (now the render's process group, macOS only; Linux's `Render` is a script too: likely the same bug there). `qt_compat_check.py --api PySide2` in mayapy 2024: Qt 5's `offscreen` plugin on macOS crashes in `QApplication::notify` (enter/leave) when `QTest.mouseMove` moves its cursor, a bare widget not, PySide6 not (92 of 92 in mayapy 2025); under `QT_QPA_PLATFORM=minimal` 91 of 92, the fill field's text undrawn (no fonts, `QT_QPA_FONTDIR=/System/Library/Fonts` did not help). The UI in Maya 2024 itself not tried)
-- [ ] V-Ray for Maya translator builds (`if(APPLE)` branches, section 4 item 11) and renders a groom
+- [ ] V-Ray for Maya translator builds (`if(APPLE)` branches, section 4 item 11) and renders a groom (builds for 2024 to 2027; in mayapy V-Ray for Maya loads it from the module and a `.vrscene` export holds the groom's `GeomMayaHair`, sampler, `BRDFHair4` and material. Not rendered: no Chaos license server on this Mac)
 - [x] Arnold procedural (`groomlab_procedural.dylib`) renders in kick (Maya 2025 and 2026's MtoA, installed module: `-DGROOMLAB_BUILD_PROCEDURAL=ON`, the `macos-maya*` presets leave it off. Fixed on the way: TBB 2020 unloading its `libtbbmalloc` at exit (the procedural keeps it mapped); the install now carries Maya's TBB beside the procedural for kick and searches `@executable_path/../MacOS` first, so inside Maya it binds Maya's own (checked with `DYLD_PRINT_SEARCHING`; Arnold still opens the copy while scanning the folder for plugins, as on Windows and Linux). Open: `GroomLab/procedurals` is one folder for every Maya version, but each build links its Maya's TBB and Arnold: a module with several versions needs one procedural per Arnold version)
 - [ ] RenderMan procedural renders in prman (when RenderMan is installed)
 - [x] Blender extension zip installs in Blender for macOS; the helper runs (`-L blender -LE vray` green, Blender 5.2.3)
