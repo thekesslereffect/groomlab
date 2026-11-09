@@ -36,6 +36,15 @@ struct HairLook;
 
 namespace groomlab::maya {
 
+// An OGSFX effect's text for this device. macOS's OpenGL stops at 4.1 (core profile): an effect
+// saying #version 430 is taken there and then draws nothing, so it says 410 (what it uses is 4.1's).
+inline std::string glslForDevice(std::string text) {
+#ifdef __APPLE__
+    if (text.compare(0, 12, "#version 430") == 0) text.replace(9, 3, "410");
+#endif
+    return text;
+}
+
 // The coverage's draw callbacks (groom_draw_override_shaders.cpp): the blend and depth states of the strand
 // lines' draws in a color pass.
 void coveragePreDraw(MHWRender::MDrawContext& context, const MHWRender::MRenderItemList& items, MHWRender::MShaderInstance*);

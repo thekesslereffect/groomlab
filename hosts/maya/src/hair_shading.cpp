@@ -850,7 +850,7 @@ const std::string& hairEffectText(const std::string& technique) {
         }
         case MHWRender::kOpenGLCoreProfile: {
             std::string& text = glsl[technique];
-            if (text.empty()) text = onlyTechnique(glslText(kGridShared), technique);
+            if (text.empty()) text = glslForDevice(onlyTechnique(glslText(kGridShared), technique));
             return text;
         }
         default: {

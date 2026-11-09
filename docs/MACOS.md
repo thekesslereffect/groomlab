@@ -243,7 +243,11 @@ their SDKs, `app.package_manifest` (Windows only).
 
 - **Now**: CPU everywhere for compute. The app's viewport draws with QRhi on Metal (its shaders are
   `.qsb` with SPIR-V, HLSL, MSL and GLSL: `hosts/app/CMakeLists.txt`). Maya's viewport draws with
-  Viewport 2.0's own device (Metal on macOS).
+  Viewport 2.0's own device: OpenGL Core Profile on this Mac (Maya 2025's default, `groomLabGpuPreview
+  -drawApi`), which macOS caps at OpenGL 4.1. The plugin's GLSL effects (the lit hair, the strand
+  lines' width as coverage) said `#version 430`: Maya took them and drew nothing (no strands, no
+  cards, no Hardware 2.0 hair). On macOS they say `#version 410` (`glslForDevice`, `hair_shading.h`);
+  nothing in them needs more.
 - **Metal compute backend** (the next big step once everything builds):
   1. Slang already compiles every kernel to Metal (`engine/gpu/cmake/check_kernel_targets.cmake`,
      `-target metal -DGROOMLAB_SLANG_LAYOUT -DGROOMLAB_SLANG_METAL`). Add a `metal` format to

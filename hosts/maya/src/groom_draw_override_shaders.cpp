@@ -519,7 +519,7 @@ std::string withLineCoverage(const char* effect, bool hlsl) {
 // stock shaders draw them opaque).
 const char* linesEffectText() {
     static const std::string hlsl = withLineCoverage(kLinesEffectHlsl, true);
-    static const std::string glsl = withLineCoverage(kLinesEffectGlsl, false);
+    static const std::string glsl = glslForDevice(withLineCoverage(kLinesEffectGlsl, false));
     const MHWRender::MRenderer* renderer = MHWRender::MRenderer::theRenderer();
     switch (renderer ? renderer->drawAPI() : MHWRender::kNone) {
         case MHWRender::kDirectX11: return hlsl.c_str();
