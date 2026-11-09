@@ -93,10 +93,14 @@ double msSince(std::chrono::steady_clock::time_point t0) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 }
 
-// The budgets assume parallel loops: gating a build without TBB would only measure that.
+// The budgets assume parallel loops: gating a build without TBB (or, on macOS, the core's own
+// threads: GROOMLAB_PARALLEL_POOL) would only measure that.
+#ifndef GROOMLAB_PARALLEL_POOL
+#define GROOMLAB_PARALLEL_POOL 0
+#endif
 TEST(Budget, GatedBuildsAreParallel) {
     if (!enforced()) GTEST_SKIP() << "budgets only report here";
-    EXPECT_TRUE(GROOMLAB_HAS_TBB) << "this build runs parallel loops serially (no TBB found at configure)";
+    EXPECT_TRUE(GROOMLAB_HAS_TBB || GROOMLAB_PARALLEL_POOL) << "this build runs parallel loops serially (no TBB found at configure)";
 }
 
 // A production-like graph: Scatter -> Interpolate -> Clump (400 centers of its own) -> Noise -> Width.

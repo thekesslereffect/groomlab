@@ -221,6 +221,13 @@ if(GROOMLAB_HAS_TBB)
     add_library(groomlab_core STATIC $<TARGET_OBJECTS:groomlab_core_objects> ${GROOMLAB_KERNEL_OBJECTS} src/parallel_tbb.cpp)
     target_link_libraries(groomlab_core PUBLIC groomlab::tbb)
     target_compile_definitions(groomlab_core PUBLIC GROOMLAB_HAS_TBB=1)
+elseif(APPLE)
+    # macOS without TBB (the packaged builds: Homebrew's TBB needs the newest macOS, and a bundled one
+    # would be another library to build and sign): the core's own threads, the C API library's backend.
+    find_package(Threads REQUIRED)
+    add_library(groomlab_core STATIC $<TARGET_OBJECTS:groomlab_core_objects> ${GROOMLAB_KERNEL_OBJECTS} src/parallel_pool.cpp)
+    target_link_libraries(groomlab_core PUBLIC Threads::Threads)
+    target_compile_definitions(groomlab_core PUBLIC GROOMLAB_HAS_TBB=0 GROOMLAB_PARALLEL_POOL=1)
 else()
     add_library(groomlab_core STATIC $<TARGET_OBJECTS:groomlab_core_objects> ${GROOMLAB_KERNEL_OBJECTS} src/parallel_serial.cpp)
     target_compile_definitions(groomlab_core PUBLIC GROOMLAB_HAS_TBB=0)
