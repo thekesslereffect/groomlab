@@ -6,13 +6,12 @@
 #include <utility>
 #include <vector>
 
+#include <maya/MApiNamespace.h>  // M3dView (a versioned namespace's class: no plain forward declaration)
 #include <maya/MDagPath.h>
 #include <maya/MPxCommand.h>
 #include <maya/MPxContext.h>
 #include <maya/MPxContextCommand.h>
 #include <maya/MSyntax.h>
-
-class M3dView;
 
 namespace groomlab::maya {
 
