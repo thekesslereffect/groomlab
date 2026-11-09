@@ -380,7 +380,7 @@ policy"); binaries asked about later pass. Wait a few minutes before checking.
 this passes in each): install the module zip (drag `install.mel` into the viewport), restart Maya, then
 
 1. The GroomLab menu is in the main menu bar; Help > About opens.
-2. GroomLab > New Groom on a selected polySphere: strands draw in the viewport (Viewport 2.0 on Metal).
+2. GroomLab > New Groom on a selected polySphere: strands draw in the viewport (Viewport 2.0: OpenGL Core Profile on this Mac).
 3. Groom Tools: comb and cut strokes on the groom follow the mouse (CPU) and undo.
 4. The Graph Editor opens, a node's parameter changes the groom.
 5. Arnold: a render of the groom in the Arnold RenderView shows hair (watermarked without a license).
@@ -405,7 +405,20 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - `-L maya` (the mayapy suites: `tests/hosts/maya/test_*.py`) needs a Maya preset that builds the
   tests: the `macos-maya*` presets set `GROOMLAB_BUILD_TESTS` off. Add one (as Windows'
   `ninja-maya2025-tests`) once the plugin loads, and run `ctest -L maya -LE "gui|arnold|vray|renderman"`;
-  then `-L arnold` with MtoA. No `gui` tier on macOS yet (the Maya GUI suites drive Windows' Maya);
+  then `-L arnold` with MtoA. The Maya GUI suites (`maya.gui`) run on macOS too, in a real Maya window
+  (`maya -script gui.mel` with `GROOMLAB_PLUGIN`, `GROOMLAB_SCRIPTS`, `GROOMLAB_TESTS`,
+  `GROOMLAB_GUI_LOG` and a scratch `MAYA_APP_DIR` whose prefs trust the plugin folder:
+  `tests/hosts/maya/trust_plugin_folder.cmake -DMAYA_YEAR=<year>`). Maya 2025, 2026-11-09: 400
+  passed, 9 failed (65 before the two Viewport 2.0 fixes: section 6, and the cards' and scales'
+  bitangent input, `groom_draw_override_fragments.cpp`). The GPU kernels' checks (true width's facing
+  ribbons, the self-shadowing grid) are skipped on macOS (`gui_support.gpu_kernels()`). Open: the
+  200k-strand orbit at 16 to 20 fps (budget 24, tuned on Windows); a tip blend's and value
+  randomness's pixel counts just under their Windows-tuned bars (the pictures are right); a keyed
+  param's Graph Editor drag draws no step before the release (`graph_editor._write_preview`'s
+  `cmds.refresh(currentView=True, force=False)`; the Attribute Editor's drag of the same plug draws);
+  three Shape/Paint brush cases (Shift+drag smoothing, an alpha stroke, smoothing across the seam);
+  the Graph Editor's wheel zoom check (`grabWindow` of the screen against a fresh paint: the
+  window compositor on macOS).
   no `renderman` (not installed).
 - `python3 tools/dev/test_changed.py` picks the tests for what you changed (check it runs on macOS).
 
@@ -419,7 +432,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] `ctest -L "quick|app"` green on `macos-app`
 - [ ] Offscreen renders (thumbnails, turntables) correct on Metal
 - [x] Maya 2025 install in place (no devkit needed); `macos-maya2025` builds `GroomLab.bundle`
-- [ ] The plugin loads in Maya 2025; a groom draws in Viewport 2.0 (Metal); brushes and drags work (CPU) (loads in mayapy: `test_plugin.py` 23 OK, 3 skipped; the Maya UI not tried yet)
+- [ ] The plugin loads in Maya 2025; a groom draws in Viewport 2.0; brushes and drags work (CPU) (loads in mayapy: `test_plugin.py` 23 OK, 3 skipped; in a Maya window the GUI suites pass 400 of 409, the open ones in section 12)
 - [ ] The Python module imports in mayapy; the GroomLab menu works (fix Windows-only Python bits) (imports; `test_updates.py` green; `os.startfile` and `GroomLab.mll` fixed, `review.py`'s `Render` was right; the menu not tried in the UI)
 - [x] MtoA translator builds and renders a groom in Arnold (`test_arnold.py` on 2025 with the procedural: 32 of 33; the turntable test's batch render aborts without an Arnold license on this Mac, `abort_on_license_fail`)
 - [ ] A Maya preset with tests; `ctest -L maya` green on the Mac
