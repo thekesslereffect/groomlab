@@ -52,6 +52,7 @@
 
 #include "groomlab/node_catalog.h"
 #include "groomlab/shortcuts.h"
+#include "graph_presets.h"  // appResourceDir
 
 namespace groomlab::app {
 
@@ -394,7 +395,7 @@ void MainWindow::openDocs() {
         return;
     }
     const QString sourceDocs = QDir(QString::fromUtf8(GROOMLAB_SHIPPED_PRESETS)).absoluteFilePath(QStringLiteral("../../../docs"));
-    for (const QString& dir : {QCoreApplication::applicationDirPath() + QStringLiteral("/docs"), QDir::cleanPath(sourceDocs)}) {
+    for (const QString& dir : {appResourceDir() + QStringLiteral("/docs"), QDir::cleanPath(sourceDocs)}) {
         if (QFileInfo(dir + QStringLiteral("/USER_GUIDE.md")).isFile()) {
             QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
             notify(tr("Opened the docs folder %1").arg(dir));

@@ -322,19 +322,35 @@ if(WIN32)
     target_sources(groomlab_app PRIVATE groomlab.rc)  # the executable's icon (groomlab.ico)
 endif()
 set_target_properties(groomlab_app PROPERTIES WIN32_EXECUTABLE TRUE OUTPUT_NAME "GroomLab")
+if(APPLE)
+    # macOS: GroomLab.app, its data in Contents/Resources (appResourceDir: Contents/MacOS is for
+    # signed code alone), its Info.plist CMake's template.
+    set_target_properties(groomlab_app PROPERTIES MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "GroomLab"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.getgroomlab.GroomLab"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
+endif()
 target_link_libraries(groomlab_app PRIVATE groomlab_app_ui nlohmann_json::nlohmann_json groomlab::warnings)
 
 # Beside the executable: the TBB runtime (as the CLI) and, on Windows, Qt's DLLs and platform
 # plugins through windeployqt, so it runs from the build folder.
 function(groomlab_app_deploy target)
+    set(_data "$<TARGET_FILE_DIR:${target}>")
+    if(APPLE)  # a .app's data in Contents/Resources (appResourceDir); a plain executable's beside it
+        get_target_property(_bundle ${target} MACOSX_BUNDLE)
+        if(_bundle)
+            set(_data "$<TARGET_BUNDLE_CONTENT_DIR:${target}>/Resources")
+        endif()
+    endif()
     # Cleared first: a preset removed from the source must not linger beside the executable.
     add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${target}>/presets"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/presets" "$<TARGET_FILE_DIR:${target}>/presets"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${target}>/nodes"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/nodes" "$<TARGET_FILE_DIR:${target}>/nodes"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:${target}>/alphas"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/alphas" "$<TARGET_FILE_DIR:${target}>/alphas"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_data}/presets"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/presets" "${_data}/presets"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_data}/nodes"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/nodes" "${_data}/nodes"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_data}/alphas"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${PROJECT_SOURCE_DIR}/hosts/maya/alphas" "${_data}/alphas"
         COMMENT "Copying the graph presets, compound nodes and brush alphas beside ${target}")
     if(WIN32)
         if(GROOMLAB_TBB_RUNTIME)
@@ -366,12 +382,18 @@ groomlab_app_deploy(groomlab_app)
 # redistributable DLLs from Visual Studio's Redist folder: InstallRequiredSystemLibraries), the
 # graph presets, the notices with Qt's LGPL texts and README_BETA.txt (hosts/app/package).
 set(GROOMLAB_APP_DIR "GroomLabApp")
-install(TARGETS groomlab_app RUNTIME DESTINATION "${GROOMLAB_APP_DIR}" COMPONENT App)
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/presets/" DESTINATION "${GROOMLAB_APP_DIR}/presets" COMPONENT App)
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/nodes/" DESTINATION "${GROOMLAB_APP_DIR}/nodes" COMPONENT App)
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/alphas/" DESTINATION "${GROOMLAB_APP_DIR}/alphas" COMPONENT App)
+if(APPLE)  # GroomLab.app in the folder, its data inside it (appResourceDir)
+    install(TARGETS groomlab_app BUNDLE DESTINATION "${GROOMLAB_APP_DIR}" COMPONENT App)
+    set(_app_data "${GROOMLAB_APP_DIR}/GroomLab.app/Contents/Resources")
+else()
+    install(TARGETS groomlab_app RUNTIME DESTINATION "${GROOMLAB_APP_DIR}" COMPONENT App)
+    set(_app_data "${GROOMLAB_APP_DIR}")
+endif()
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/presets/" DESTINATION "${_app_data}/presets" COMPONENT App)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/nodes/" DESTINATION "${_app_data}/nodes" COMPONENT App)
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/alphas/" DESTINATION "${_app_data}/alphas" COMPONENT App)
 # The sample meshes (CC BY 4.0, REUSE.toml): their OBJs (the rigs are Maya's and Blender's).
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/meshes/" DESTINATION "${GROOMLAB_APP_DIR}/meshes" COMPONENT App
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/hosts/maya/meshes/" DESTINATION "${_app_data}/meshes" COMPONENT App
         FILES_MATCHING PATTERN "*.obj")
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/package/README_BETA.txt" DESTINATION "${GROOMLAB_APP_DIR}" COMPONENT App)
 # GroomLab's RenderMan procedural (hosts/renderman, when RenderMan Pro Server's SDK is found) beside the

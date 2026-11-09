@@ -10,11 +10,17 @@
 #include <string>
 #include <vector>
 
+#include <QString>
+
 #include "groomlab/presets.h"
 
 namespace groomlab::app {
 
 class GroomDocument;
+
+// The folder the app's shipped files (presets, nodes, alphas, meshes, docs, procedurals) are in:
+// Contents/Resources inside a macOS .app, else the executable's own folder.
+QString appResourceDir();
 
 // The presets shipped with the app: the "presets" folder beside the executable (the build
 // copies hosts/maya/presets there), else the source tree's folder (a development build).

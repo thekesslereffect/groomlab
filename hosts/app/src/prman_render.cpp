@@ -3,6 +3,7 @@
 // GroomLab's procedural (prman_render.h; the process and the window: render_job.h).
 
 #include "prman_render.h"
+#include "graph_presets.h"  // appResourceDir
 
 #include <algorithm>
 #include <cmath>
@@ -282,7 +283,7 @@ QString findRenderManProcedural() {
         const QString dir = info.isFile() ? info.absolutePath() : info.absoluteFilePath();
         if (holds(dir)) return QDir::cleanPath(dir);
     }
-    const QString beside = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("procedurals/renderman"));
+    const QString beside = QDir(appResourceDir()).filePath(QStringLiteral("procedurals/renderman"));
     if (holds(beside)) return QDir::cleanPath(beside);
     // An installed GroomLab for Maya (its module's procedurals).
     const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);

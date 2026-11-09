@@ -7,6 +7,8 @@
 #include <sstream>
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 
 #include <nlohmann/json.hpp>
 
@@ -62,9 +64,19 @@ std::string titleOf(const json& preset, const std::string& fallback) {
 
 }  // namespace
 
+QString appResourceDir() {
+    const QString exe = QCoreApplication::applicationDirPath();
+#ifdef Q_OS_MACOS
+    // A .app keeps its data in Contents/Resources (Contents/MacOS is for signed code alone).
+    const QString resources = QDir::cleanPath(exe + QStringLiteral("/../Resources"));
+    if (QFileInfo(resources).isDir() && QFileInfo(exe).fileName() == QLatin1String("MacOS")) return resources;
+#endif
+    return exe;
+}
+
 std::string shippedPresetDir() {
     std::error_code ec;
-    const fs::path beside = fs::u8path(QCoreApplication::applicationDirPath().toStdString()) / "presets";
+    const fs::path beside = fs::u8path(appResourceDir().toStdString()) / "presets";
     if (fs::is_directory(beside, ec)) return beside.generic_u8string();
 #ifdef GROOMLAB_SHIPPED_PRESETS
     if (fs::is_directory(fs::u8path(GROOMLAB_SHIPPED_PRESETS), ec)) return GROOMLAB_SHIPPED_PRESETS;
@@ -74,7 +86,7 @@ std::string shippedPresetDir() {
 
 std::string shippedAlphaFolder() {
     std::error_code ec;
-    const fs::path beside = fs::u8path(QCoreApplication::applicationDirPath().toStdString()) / "alphas";
+    const fs::path beside = fs::u8path(appResourceDir().toStdString()) / "alphas";
     if (fs::is_directory(beside, ec)) return beside.generic_u8string();
 #ifdef GROOMLAB_SHIPPED_ALPHAS
     if (fs::is_directory(fs::u8path(GROOMLAB_SHIPPED_ALPHAS), ec)) return GROOMLAB_SHIPPED_ALPHAS;
@@ -84,7 +96,7 @@ std::string shippedAlphaFolder() {
 
 std::string shippedNodeFolder() {
     std::error_code ec;
-    const fs::path beside = fs::u8path(QCoreApplication::applicationDirPath().toStdString()) / "nodes";
+    const fs::path beside = fs::u8path(appResourceDir().toStdString()) / "nodes";
     if (fs::is_directory(beside, ec)) return beside.generic_u8string();
 #ifdef GROOMLAB_SHIPPED_NODES
     if (fs::is_directory(fs::u8path(GROOMLAB_SHIPPED_NODES), ec)) return GROOMLAB_SHIPPED_NODES;
@@ -94,7 +106,7 @@ std::string shippedNodeFolder() {
 
 std::string shippedMeshFolder() {
     std::error_code ec;
-    const fs::path beside = fs::u8path(QCoreApplication::applicationDirPath().toStdString()) / "meshes";
+    const fs::path beside = fs::u8path(appResourceDir().toStdString()) / "meshes";
     if (fs::is_directory(beside, ec)) return beside.generic_u8string();
 #ifdef GROOMLAB_SHIPPED_MESHES
     if (fs::is_directory(fs::u8path(GROOMLAB_SHIPPED_MESHES), ec)) return GROOMLAB_SHIPPED_MESHES;
