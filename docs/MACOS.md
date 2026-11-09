@@ -179,9 +179,23 @@ portable (a cast that is correct everywhere).
 9. **The app.** `QRhiMetalInitParams` in `offscreen.cpp` assumes Qt 6.8's public `rhi/qrhi.h`
    declares it on macOS; the app's `.qsb` shaders already carry MSL. Watch the QRhi backend in
    the window title or `GROOMLAB_APP_RHI=metal`.
+   **Found on the Mac (2026-11-09), open:** two Metal limits D3D11 and Vulkan do not have.
+   `surface_lookdev.frag` binds up to `binding = 37`, and QRhi's Metal backend puts the vertex
+   buffers after the highest binding (index 38, Metal allows 0 to 30): the app aborts on its first
+   scalp draw (`failed assertion 'buffer index (38) must be < 31'`), as do the `AppRender` surface
+   tests. Renumbering alone does not fit (30 bindings plus the vertex buffers): it needs fewer
+   bindings (texture arrays for the shadow maps, DOM layers or hair volumes). And
+   `hair_lookdev.frag` has 17 combined `sampler2D`s, over Metal's 16 samplers per stage: its MSL
+   does not compile ("a lookdev pipeline could not be made"); separate `texture2D`s with shared
+   samplers, as `surface_lookdev.frag` does, fit. Both change the shaders every backend uses.
+   Also found and fixed: Qt 6.8.3 links `-framework AGL`, which macOS 26+ SDKs lack
+   (`hosts/app/CMakeLists.txt`), and Qt headers MSVC got transitively.
 10. **Blender helper.** POSIX shared memory works on macOS with two quirks: names are capped at
-    31 bytes (handled) and an object's `st_size` is rounded up to a page (harmless here). The
-    extension zip must keep the helper's executable bit; a downloaded zip is quarantined.
+    31 bytes (`gl_` prefix: `blockNamePrefix()`, which the temp maps folders share) and an
+    object's `st_size` is rounded up to a 16 KB page (the helper cannot see a block's exact length:
+    a shape claiming less than a page more than its data reads zeros instead of being refused).
+    Blender unpacks an extension with Python's `zipfile`, which drops the helper's executable bit:
+    the add-on restores it (`process.py`). A downloaded zip is quarantined.
 11. **The V-Ray for Maya translator** (`hosts/maya/vray/groom_translator.cpp`,
     `hosts/maya/CMakeLists.txt`, "V-Ray"): its build is written for Windows. The default
     `VRAY_FOR_MAYA_LOCATION` is set on `WIN32` only (pass it on the Mac), it links
@@ -344,7 +358,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [ ] V-Ray for Maya translator builds (`if(APPLE)` branches, section 4 item 11) and renders a groom
 - [ ] Arnold procedural (`groomlab_procedural.dylib`) renders in kick
 - [ ] RenderMan procedural renders in prman (when RenderMan is installed)
-- [ ] Blender extension zip installs in Blender for macOS; the helper runs
+- [x] Blender extension zip installs in Blender for macOS; the helper runs (`-L blender -LE vray` green, Blender 5.2.3)
 - [ ] Slang for macOS pinned; `gpu.*kernel_targets` green
 - [ ] Metal compute backend (`look_engine_metal.mm`), `groomlab_gpu_tests` green on macOS
 - [ ] App and Maya use the Metal backend for drags and strokes
