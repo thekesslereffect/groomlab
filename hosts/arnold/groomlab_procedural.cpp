@@ -63,6 +63,8 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <dlfcn.h>
 #endif
 
 #include "groomlab/alembic_operators.h"
@@ -96,6 +98,22 @@ void loadRuntimeDlls() {
     dir.resize(dir.find_last_of(L"\\/") + 1);
     if (!LoadLibraryExW((dir + GROOMLAB_TBB_DLL).c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH)) {
         AiMsgWarning("[groomlab] cannot load %ls beside the procedural; put it on PATH", GROOMLAB_TBB_DLL);
+    }
+}
+#elif defined(__APPLE__)
+// TBB 2020 (Maya 2024 and 2025's) dlopens the libtbbmalloc beside it for its allocator and, in its
+// last worker thread at exit, dlcloses it and then frees its threads through it: inside Maya, which
+// links libtbbmalloc itself, nothing is unmapped, but in kick that dlopen is the only reference and
+// the worker jumped into unmapped code (SIGSEGV after the render). Opened here too, RTLD_NODELETE,
+// it stays mapped. (oneTBB's name is libtbbmalloc.2.dylib; whichever TBB this plugin loaded.)
+void loadRuntimeDlls() {
+    Dl_info tbb{};
+    const void* probe = dlsym(RTLD_DEFAULT, "TBB_runtime_interface_version");
+    if (!probe || !dladdr(probe, &tbb) || !tbb.dli_fname) return;  // no TBB in this process
+    std::string dir(tbb.dli_fname);
+    dir.resize(dir.find_last_of('/') + 1);
+    for (const char* name : {"libtbbmalloc.dylib", "libtbbmalloc.2.dylib"}) {
+        dlopen((dir + name).c_str(), RTLD_LAZY | RTLD_LOCAL | RTLD_NODELETE);  // missing: nothing to keep
     }
 }
 #else
