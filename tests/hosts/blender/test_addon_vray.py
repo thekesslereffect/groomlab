@@ -28,8 +28,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import blender_util as bu  # noqa: E402
 
 KEEP = os.environ.get("GROOMLAB_RENDER_KEEP", "")
+if sys.platform == "darwin":  # the user's Blender folder on macOS
+    _USER_BLENDER = os.path.expanduser(os.path.join("~", "Library", "Application Support", "Blender"))
+else:
+    _USER_BLENDER = os.path.join(os.environ.get("APPDATA", ""), "Blender Foundation", "Blender")
 VRAY_SCRIPTS = os.environ.get("GROOMLAB_VRAY_BLENDER_SCRIPTS") or os.path.join(
-    os.environ.get("APPDATA", ""), "Blender Foundation", "Blender", "%d.%d" % bpy.app.version[:2], "scripts")
+    _USER_BLENDER, "%d.%d" % bpy.app.version[:2], "scripts")
 
 
 def enable_vray():
