@@ -42,6 +42,8 @@ import zipfile
 
 import groomlab_core
 
+# The plugin a release zip holds for this platform (the zips are per platform).
+PLUGIN_FILE = "GroomLab.bundle" if sys.platform == "darwin" else "GroomLab.mll"
 LATEST_URL = "https://downloads.getgroomlab.com/maya/latest.json"
 TIMEOUT = 5            # seconds the check may take
 DOWNLOAD_TIMEOUT = 30  # seconds a download may stall
@@ -454,11 +456,11 @@ def _unpack(zip_path, dest, version, maya=0):
         raise UpdateError("the download is not a zip: refused")
     folder = os.path.join(dest, top)
     module = os.path.join(folder, "GroomLab")
-    if not (os.path.isfile(os.path.join(module, "plug-ins", "GroomLab.mll"))
+    if not (os.path.isfile(os.path.join(module, "plug-ins", PLUGIN_FILE))
             and os.path.isfile(os.path.join(folder, "GroomLab.mod"))):
         raise UpdateError("the release zip has no GroomLab module: refused")
     if maya and str(maya) != "2022" and not os.path.isfile(os.path.join(module, "maya%s" % maya, "plug-ins",
-                                                                          "GroomLab.mll")):
+                                                                          PLUGIN_FILE)):
         raise UpdateError("the release zip has no GroomLab for Maya %s: refused" % maya)
     if installed_version(module) != version:
         raise UpdateError("the release zip's VERSION.txt is not %s: refused" % version)

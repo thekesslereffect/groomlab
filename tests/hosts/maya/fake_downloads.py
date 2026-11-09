@@ -17,11 +17,15 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import zipfile
 
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+# The plugin's file in a module (groomlab.updates.PLUGIN_FILE).
+PLUGIN_FILE = "GroomLab.bundle" if sys.platform == "darwin" else "GroomLab.mll"
 
 ZIP_NAME = "GroomLab-0.2.0-Maya2022-Windows.zip"
 REAL_LATEST_URL = "https://downloads.getgroomlab.com/maya/latest.json"
@@ -49,7 +53,7 @@ class FakeDownloads(object):
         self.installs = self.root + "/My Tools"
         self.module = self.installs + "/GroomLab-0.1.0/GroomLab"
         write(self.module + "/VERSION.txt", "GroomLab 0.1.0 (abc1234, RelWithDebInfo)\n")
-        write(self.module + "/plug-ins/GroomLab.mll", "the running plugin")
+        write(self.module + "/plug-ins/" + PLUGIN_FILE, "the running plugin")
         self.modules = self.root + "/modules"
         self.mod = self.modules + "/GroomLab.mod"
         self.mod_text = "+ MAYAVERSION:%s GroomLab 0.1.0 %s\nPYTHONPATH+:=python\n" % (self.maya, self.module)
@@ -85,9 +89,9 @@ class FakeDownloads(object):
         path = os.path.join(self.root, "release.zip")
         top = "GroomLab-%s/" % version
         with zipfile.ZipFile(path, "w") as z:
-            z.writestr(top + "GroomLab/plug-ins/GroomLab.mll", "the new plugin")
+            z.writestr(top + "GroomLab/plug-ins/" + PLUGIN_FILE, "the new plugin")
             if self.maya != "2022":  # the running Maya's build
-                z.writestr(top + "GroomLab/maya%s/plug-ins/GroomLab.mll" % self.maya, "the new plugin")
+                z.writestr(top + "GroomLab/maya%s/plug-ins/%s" % (self.maya, PLUGIN_FILE), "the new plugin")
             z.writestr(top + "GroomLab/VERSION.txt", "GroomLab %s (def5678, RelWithDebInfo)\n" % version)
             z.writestr(top + "GroomLab/scripts/groomlab/__init__.py", "")
             z.writestr(top + "GroomLab.mod", "+ MAYAVERSION:%s GroomLab %s GroomLab\nPYTHONPATH+:=python\n"

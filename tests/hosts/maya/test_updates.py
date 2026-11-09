@@ -130,7 +130,7 @@ class UpdatesTest(unittest.TestCase):
             updates._unpack(zip_path, os.path.join(self.site.root, "unpacked-other"), "0.2.0", int(OTHER))
         self.assertIn("no GroomLab for Maya " + OTHER, str(caught.exception))
         with open(zip_path, "wb") as f:
-            f.write(self.site.release_zip(extra={"GroomLab-0.2.0/GroomLab/maya%s/plug-ins/GroomLab.mll" % OTHER: OTHER}))
+            f.write(self.site.release_zip(extra={"GroomLab-0.2.0/GroomLab/maya%s/plug-ins/%s" % (OTHER, updates.PLUGIN_FILE): OTHER}))
         self.assertTrue(os.path.isdir(updates._unpack(zip_path, os.path.join(self.site.root, "unpacked"), "0.2.0",
                                                       int(OTHER))))
 
@@ -156,7 +156,7 @@ class UpdatesTest(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.site.modules)), ["GroomLab.mod", "GroomLab.mod.bak"])
         # The running install is untouched (Windows locks its .mll); no staging folder left.
         self.assertEqual(self.site.installed_folders(), ["GroomLab-0.1.0", "GroomLab-0.2.0"])
-        with open(self.module + "/plug-ins/GroomLab.mll") as f:
+        with open(self.module + "/plug-ins/" + updates.PLUGIN_FILE) as f:
             self.assertEqual(f.read(), "the running plugin")
         # Until Maya restarts: the check says so, and a second install is refused.
         again = updates.check()
