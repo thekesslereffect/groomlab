@@ -302,6 +302,9 @@ their SDKs, `app.package_manifest` (Windows only).
 - Tests: `blender.helper` runs with Blender's Python
   (`/Applications/Blender.app/Contents/Resources/*/python/bin/python3*`, globbed already). The
   tests that start Blender itself need `-DGROOMLAB_BLENDER_EXE=/Applications/Blender.app/Contents/MacOS/Blender`.
+- V-Ray for Blender: its add-on in `~/Library/Application Support/Blender/<version>/scripts/addons/vray_blender`
+  (`blender.addon_vray` finds it there; `GROOMLAB_VRAY_BLENDER_SCRIPTS` overrides): 3 of 3 with the Chaos license
+  server running (2026-11-09). With Blender 5.2.3 the whole `-L blender` tier passes, 14 of 14.
 - `tools/package_blender.py` handles the helper's name per platform already.
 
 ## 10. Unsigned builds, signing, notarization
