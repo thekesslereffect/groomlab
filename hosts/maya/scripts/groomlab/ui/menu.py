@@ -957,7 +957,7 @@ def _standalone_renderers():
     exe = ".exe" if os.name == "nt" else ""
     return {
         "vray": {"title": "Render in V-Ray Standalone", "label": "V-Ray", "window": "GroomLab: V-Ray Standalone",
-                 "exe": "vray" + exe, "filter": "V-Ray Standalone (vray%s)" % exe, "path": vray_render.vray_path,
+                 "exe": vray_scene.EXE, "filter": "V-Ray Standalone (%s)" % vray_scene.EXE, "path": vray_render.vray_path,
                  "set_path": vray_render.set_vray_path, "not_found": vray_scene.NOT_FOUND,
                  "render": groomlab.render_vray, "busy": "Writing the V-Ray scene", "motion_blur": False,
                  "note": "Renders what the scene shows: the grooms (V-Ray's hair shader fitted to the Arnold look), the "

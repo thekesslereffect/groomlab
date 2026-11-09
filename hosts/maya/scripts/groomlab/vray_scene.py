@@ -21,18 +21,21 @@ A value that changes over the frames written (a turntable's camera and lights, a
 written as V-Ray's interpolate((frame, value), ...) keys, as the grooms' are.
 """
 
+import glob
 import math
 import os
 import re
+import sys
 
 from groomlab import render_common
 from groomlab.render_common import (IDENTITY, default_lights, first, frame_list, horizontal_fov, images_for,  # noqa: F401
                                     latest_image, mapped, unscaled)
 
 ENV_VAR = "GROOMLAB_VRAY"  # vray.exe, or the folder holding it
-EXE = "vray.exe" if os.name == "nt" else "vray"
-NOT_FOUND = ("V-Ray Standalone (vray%s) was not found: install V-Ray Standalone, or set its path with "
-             "groomlab.set_vray_path(path) (or the %s environment variable)" % (".exe" if os.name == "nt" else "", ENV_VAR))
+# macOS: vray.bin inside the install's VRay.app (Standalone_for_<os>/VRay.app/Contents/MacOS).
+EXE = "vray.exe" if os.name == "nt" else "vray.bin" if sys.platform == "darwin" else "vray"
+NOT_FOUND = ("V-Ray Standalone (%s) was not found: install V-Ray Standalone, or set its path with "
+             "groomlab.set_vray_path(path) (or the %s environment variable)" % (EXE, ENV_VAR))
 
 # Render quality: the adaptive sampler's max subdivs (samples: their square), its noise threshold and
 # brute-force GI's depth. Hair needs many samples: "final" for stills, "preview" to check a look.
@@ -49,6 +52,8 @@ def _exe_in(path):
 
 def default_paths():
     """Where V-Ray Standalone installs by default (newest layout first)."""
+    if sys.platform == "darwin":
+        return sorted(glob.glob("/Applications/Chaos/V-Ray/Standalone_for_*/VRay.app/Contents/MacOS"), reverse=True)
     roots = [os.environ.get("ProgramFiles", r"C:\Program Files"), r"C:\Program Files"] if os.name == "nt" else \
         ["/usr/ChaosGroup", "/opt/chaos", "/Applications/ChaosGroup"]
     paths = []
@@ -62,8 +67,11 @@ def find_vray(preferred=None, environ=None):
     """vray.exe: `preferred` (the user's setting), else $GROOMLAB_VRAY, else $VRAY_PATH, else the
     default install, else on the PATH. None when there is none."""
     environ = os.environ if environ is None else environ
-    return render_common.find_exe(EXE, [preferred, environ.get(ENV_VAR), environ.get("VRAY_PATH")] + default_paths(),
-                                  environ)
+    given = [preferred, environ.get(ENV_VAR), environ.get("VRAY_PATH")]
+    if sys.platform == "darwin":  # the install folder or its VRay.app given: vray.bin inside it
+        given = [p for g in given for p in ([g, os.path.join(str(g), "Contents", "MacOS"),
+                                             os.path.join(str(g), "VRay.app", "Contents", "MacOS")] if g else [g])]
+    return render_common.find_exe(EXE, given + default_paths(), environ)
 
 
 # ---------------------------------------------------------------------------
