@@ -55,13 +55,15 @@ constexpr int kPassCamera = 0, kPassLight = 1, kPassSky = 4, kPassThick = 5, kPa
 // profile (n.l x curvature), the prefiltered environment's roughness levels (one mip each,
 // surface_lookdev.frag's kEnvLevels), the micro-detail normal.
 constexpr int kBrdfLutSize = 64, kSkinLutWidth = 128, kSkinLutHeight = 64, kEnvLevels = 6, kDetailSize = 256;
-// The textures' bindings in surface_lookdev.frag.
+// The textures' bindings in surface_lookdev.frag. Every one of its bindings is 29 or less: QRhi's
+// Metal backend puts the vertex buffer after the highest binding, and Metal's last buffer slot is 30.
 constexpr int kBindEnvPrefiltered = 18, kBindBrdf = 19, kBindSkinLut = 20, kBindAlbedo = 21, kBindNormal = 22, kBindMask = 23, kBindDetail = 24;
-constexpr int kBindShadow0 = 25, kBindSssBlurred = 28, kBindSamplerNearest = 29;  // then linear, mip repeat, mip clamp
+constexpr int kBindShadow0 = 25, kBindSssBlurred = 28;
+constexpr int kBindSamplerNearest = 29, kBindSamplerLinear = 2, kBindSamplerMipRepeat = 3, kBindSamplerMipClamp = 13;
 constexpr int kBindDomNearest = 10;  // then linear: hair_lookdev.frag's samplers of the deep opacity maps
 constexpr int kBindPointColors = 9;  // the hair's per-point colors (hair.vert, hair_lookdev.frag's per-point pass)
 constexpr int kBindPointStrands = 40;  // each point's strand (hair_points.glsl)
-constexpr int kBindVolume0 = 34;     // the hair's voxel volumes (hair_shade.comp, surface_lookdev.frag), four
+constexpr int kBindVolume0 = 9;      // the hair's voxel volumes in surface_lookdev.frag, four (hair_shade.comp's: 34 on)
 // The separable subsurface blur (sss_blur.frag): its taps, and how far the kernel reaches
 // in diffuse mean free paths (Burley's profile keeps 90 percent of its mass within five of
 // the longest; the rest is folded back in by the kernel's normalization).
@@ -1066,9 +1068,9 @@ bool LookdevRenderer::ensurePipelines(QRhi* rhi, QRhiRenderTarget* target) {
             out.push_back(B::texture(kBindVolume0 + k, fs, g.vis.volumes[k] ? g.vis.volumes[k].get() : g.noVolume.get()));
         }
         out.push_back(B::sampler(kBindSamplerNearest, fs, g.nearest.get()));
-        out.push_back(B::sampler(kBindSamplerNearest + 1, fs, g.linear.get()));
-        out.push_back(B::sampler(kBindSamplerNearest + 2, fs, g.mipRepeat.get()));
-        out.push_back(B::sampler(kBindSamplerNearest + 3, fs, g.mipClamp.get()));
+        out.push_back(B::sampler(kBindSamplerLinear, fs, g.linear.get()));
+        out.push_back(B::sampler(kBindSamplerMipRepeat, fs, g.mipRepeat.get()));
+        out.push_back(B::sampler(kBindSamplerMipClamp, fs, g.mipClamp.get()));
         return out;
     };
     // The distance passes (a light's shadow map) read the material's cutout and albedo map.

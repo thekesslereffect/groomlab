@@ -158,16 +158,17 @@ layout(binding = 26) uniform texture2D shadowMap1;
 layout(binding = 27) uniform texture2D shadowMap2;
 layout(binding = 28) uniform texture2D sssBlurred;
 // The hair's voxel volumes: the hairs toward each light and the sky (hair_volume.comp).
-layout(binding = 34) uniform texture3D hairVolume0;
-layout(binding = 35) uniform texture3D hairVolume1;
-layout(binding = 36) uniform texture3D hairVolume2;
-layout(binding = 37) uniform texture3D hairVolume3;
+// (Every binding here is 29 or less: Metal's vertex buffer goes after the highest, at 30 at most.)
+layout(binding = 9) uniform texture3D hairVolume0;
+layout(binding = 10) uniform texture3D hairVolume1;
+layout(binding = 11) uniform texture3D hairVolume2;
+layout(binding = 12) uniform texture3D hairVolume3;
 // The samplers the textures above are read through (separate from them: Direct3D 11 has 16
 // sampler slots, which 19 combined samplers would exceed; QRhi pairs them on every backend).
 layout(binding = 29) uniform sampler sNearest;
-layout(binding = 30) uniform sampler sLinear;
-layout(binding = 31) uniform sampler sMipRepeat;   // the material's maps: trilinear, tiling
-layout(binding = 32) uniform sampler sMipClamp;    // the prefiltered environment: its levels the roughness, the longitude wrapping
+layout(binding = 2) uniform sampler sLinear;
+layout(binding = 3) uniform sampler sMipRepeat;    // the material's maps: trilinear, tiling
+layout(binding = 13) uniform sampler sMipClamp;    // the prefiltered environment: its levels the roughness, the longitude wrapping
 const int kDomSky = 3;
 const float kEnvLevels = 6.0;
 
