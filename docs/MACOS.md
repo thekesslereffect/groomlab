@@ -122,7 +122,7 @@ ctest --preset macos-core -L quick -j 8
 cmake --preset macos-app
 cmake --build --preset macos-app
 ctest --preset macos-app -L "quick|app" -j 8
-./build/macos-app/hosts/app/GroomLab          # a plain executable for now (see 6)
+./build/macos-app/hosts/app/GroomLab.app/Contents/MacOS/GroomLab
 
 # 3. The Maya plugin (with Maya and its macOS devkit installed): 2025 first, then 2026, 2027, 2024
 cmake --preset macos-maya2025 -DVRAY_FOR_MAYA_LOCATION=<V-Ray for Maya 2025's folder>
@@ -284,15 +284,13 @@ their SDKs, `app.package_manifest` (Windows only).
 
 ## 8. The app
 
-- Built as a plain executable (`build/macos-app/hosts/app/GroomLab`); it finds `presets/` and
-  `nodes/` beside itself (`QCoreApplication::applicationDirPath()`: `graph_presets.cpp`), which the
-  build copies there.
-- A distributable `.app`: set `MACOSX_BUNDLE TRUE` on `groomlab_app` for `APPLE`, install with
-  `BUNDLE DESTINATION`, move `presets/`, `nodes/`, `docs/` and `procedurals/` to
-  `Contents/Resources` (and teach `graph_presets.cpp`, `main_window.cpp` and `prman_render.cpp`
-  to look there on macOS), then `macdeployqt GroomLab.app` (Qt's `bin/macdeployqt`) and the TBB
-  dylib into `Contents/Frameworks`. `tools/package_app.py` is Windows-only (windeployqt, DLL
-  checks): give it a macOS branch rather than a second script.
+- `GroomLab.app` (`MACOSX_BUNDLE`, `com.getgroomlab.GroomLab`): `build/<preset>/hosts/app/GroomLab.app`,
+  run as `GroomLab.app/Contents/MacOS/GroomLab` from a terminal. Its presets, nodes, alphas and
+  meshes are in `Contents/Resources` (Contents/MacOS is for signed code alone); `appResourceDir()`
+  (`graph_presets.cpp`) is that folder inside a `.app`, else the executable's folder, for every lookup
+  (presets, nodes, alphas, meshes, docs, procedurals).
+- `--ui-screenshot out.png [--ui-mode look]` captures the window from inside the app (no Screen
+  Recording permission needed); `--screenshot` renders the scene offscreen.
 
 ## 9. The Blender add-on
 
@@ -325,12 +323,36 @@ with that one file `chmod 000`. Qt cannot read it and uses `securetransport`, wh
 still read it. The installer also shows no error when Pixar refuses a license (it expects XML): run
 `RenderMan Installer.app/Contents/MacOS/RenderMan Installer -debug` to see the server's reply.
 
-## 11. Packaging and publishing (later, with the user)
+## 11. Packaging and publishing
 
-`tools/package_release.py`, `package_app.py`, `publish_*.py` are Windows-only (`win64` zips,
-`.mll`, windeployqt, DLL manifests). A macOS release needs: the Maya module zip with
-`PLATFORM:mac` sections and `GroomLab.bundle` per Maya version, the app as a signed `.app` in a
-zip or `.dmg`, and the Blender extension zip. Nothing is published without the user's go-ahead.
+**Packaging works (2026-11-09).** Build the `macos-release` preset (the app, `groomlab-cli`, the Blender
+helper and the Arnold procedural without TBB: the core runs on its own threads, `parallel_pool.cpp`,
+10% faster than TBB over the budget tier on an M5; minimum macOS 13.3; the procedural against MtoA
+2024's Arnold 7.2, which Arnold 7.4 loads) and the `macos-maya2024` to `2027` presets, then:
+
+```sh
+python3.12 tools/package_release.py   # dist/GroomLab-<version>-maya-macos-arm64.zip (Maya 2024-2027, all beta)
+python3.12 tools/package_app.py       # dist/GroomLab-App-<version>-beta-macos-arm64.zip (GroomLab.app)
+python3.12 tools/package_blender.py   # dist/GroomLab-Blender-<version>-macos-arm64.zip (Blender validates it)
+```
+
+`package_app.py` deploys Qt with `macdeployqt` (plus the offscreen platform), thins to arm64, checks
+that no Mach-O loads from outside the bundle, signs ad hoc and runs the unzipped app once.
+
+**Not done:**
+- Signing: everything is ad hoc. A public release needs a Developer ID Application certificate,
+  `codesign --options runtime --timestamp` (the app, its frameworks and plugins, the plugin bundles,
+  the procedural, the CLI, the helper) and notarization (`xcrun notarytool submit`, `stapler staple`
+  for the `.app`; zips cannot be stapled). Unsigned downloads are quarantined: Gatekeeper blocks the
+  app, and Maya refuses a quarantined `.bundle` silently.
+- Publishing: `publish_release.py` accepts `-maya-win64.zip` and marks releases `platform="windows"`;
+  `publish_app.py` accepts `windows-x64` zips; the updaters read one `latest.json` per product (a Mac
+  Maya install would be offered the Windows zip, and refuse it: `updates.PLUGIN_FILE`). They need a
+  per-platform latest and a macOS branch. `publish_blender.py` already takes the zip's platform.
+  The website (`web/site.config.ts`) links Windows downloads only.
+- Nothing is published without the user's go-ahead. The R2 credentials are in the Mac's login
+  Keychain (`groomlab-r2-account-id`, `-access-key-id`, `-secret-access-key`), loaded into the
+  environment only for a publish.
 
 ## 12. Test tiers on the Mac
 
@@ -379,5 +401,5 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [ ] Metal compute backend (`look_engine_metal.mm`), `groomlab_gpu_tests` green on macOS
 - [ ] App and Maya use the Metal backend for drags and strokes
 - [ ] Pen pressure in Maya on macOS (Maya's Qt)
-- [ ] `.app` bundle with macdeployqt; packaging scripts' macOS branches
+- [x] `.app` bundle with macdeployqt; packaging scripts' macOS branches (the three zips build; the publish scripts are not done: section 11)
 - [ ] Signing and notarization (with the user's Apple account)
