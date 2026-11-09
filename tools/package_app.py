@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Package the standalone GroomLab app for a Windows beta: one zip that runs wherever it is unzipped.
 
+On macOS (run on the Mac; main_mac below): the App component of build/macos-release (no TBB, macOS 13.3)
+as GroomLab.app, Qt deployed into it by Qt's macdeployqt, every Mach-O checked to load nothing from
+outside the bundle but the system, signed ad hoc (a Developer ID signature and notarization are for a
+public release: docs/MACOS.md), zipped with ditto to dist/GroomLab-App-<version>-beta-macos-arm64.zip and
+run once from a clean folder.
+
     python tools/package_app.py [--build build/ninja-app] [--config RelWithDebInfo] [--out dist]
                                 [--stage-only] [--no-smoke] [--no-window]
 
@@ -188,10 +194,12 @@ def _component_name(package):
     return m.group(1).strip() if m else package["name"]
 
 
-def qt_third_party(folder, qt_dir):
+def qt_third_party(folder, qt_dir, qt_files=None, compare=True, beside="GroomLab.exe"):
     """licenses/QT_THIRD_PARTY.txt's text from Qt's SBOM: the third-party components inside the Qt
     files in `folder`, and the problems found (a Qt file the SBOM doesn't know, or one that is not
-    the Qt install's own: a modified Qt)."""
+    the Qt install's own: a modified Qt). macOS passes its Qt files (the bundle's frameworks and
+    plugins) and compare=False: macdeployqt rewrites their load commands, so no file is byte for byte
+    Qt's."""
     docs = []
     for path in sorted(glob.glob(os.path.join(qt_dir, "sbom", "*.spdx.json"))):
         with open(path, encoding="utf-8") as f:
@@ -210,8 +218,9 @@ def qt_third_party(folder, qt_dir):
                 file_owner[r["relatedSpdxElement"]] = r["spdxElementId"]
     problems, found = [], {}
     # (Qt's: Qt6*.dll and its plugin folders; GroomLab's own RenderMan procedural folder is not Qt's.)
-    qt_files = [f for f in files_of(folder) if f.lower().endswith(".dll") and not f.startswith("procedurals/") and
-                (os.path.basename(f).startswith("Qt6") or "/" in f)]
+    if qt_files is None:
+        qt_files = [f for f in files_of(folder) if f.lower().endswith(".dll") and not f.startswith("procedurals/") and
+                    (os.path.basename(f).startswith("Qt6") or "/" in f)]
     for rel in qt_files:
         name = os.path.basename(rel).lower()
         if name not in file_ids:
@@ -220,7 +229,7 @@ def qt_third_party(folder, qt_dir):
         file_id = file_ids[name]
         # Qt's own file, as installed (the SBOM's checksums are of the files before Qt signed them).
         original = os.path.join(qt_dir, "plugins", rel) if "/" in rel else os.path.join(qt_dir, "bin", rel)
-        if not os.path.isfile(original) or not filecmp.cmp(original, os.path.join(folder, rel), shallow=False):
+        if compare and (not os.path.isfile(original) or not filecmp.cmp(original, os.path.join(folder, rel), shallow=False)):
             problems.append("%s differs from %s: not Qt's binary" % (rel, original))
         todo, seen = [file_owner.get(file_id)], set()
         while todo:
@@ -235,7 +244,7 @@ def qt_third_party(folder, qt_dir):
     extracted = {e["licenseId"]: e.get("extractedText", "") for d in docs for e in d.get("hasExtractedLicensingInfos", [])}
     out = ["Third-party code inside the Qt libraries shipped with GroomLab",
            "",
-           "The Qt files beside GroomLab.exe (licenses/QT_NOTICE.txt) contain the components below, each",
+           "The Qt files beside %s (licenses/QT_NOTICE.txt) contain the components below, each" % beside,
            "under its own license. Listed from Qt's software bill of materials (the sbom folder of the Qt",
            "6.8.3 binaries); the source of each is in Qt's source archive (QT_NOTICE.txt) under",
            "qtbase/src/3rdparty or qtsvg/src/3rdparty, with its license file.",
@@ -403,6 +412,8 @@ def main():
     parser.add_argument("--no-smoke", action="store_true", help="skip the smoke run from a clean folder")
     parser.add_argument("--no-window", action="store_true", help="smoke run without the step that shows the window")
     args = parser.parse_args()
+    if sys.platform == "darwin":
+        return main_mac(args)
     build = os.path.abspath(args.build)
     if not os.path.isfile(os.path.join(build, "CMakeCache.txt")):
         sys.exit("no build in %s: configure and build the ninja-app preset first" % build)
@@ -444,6 +455,136 @@ def main():
 
     if not args.no_smoke:
         problems = smoke(zip_path, build, qt_dir, not args.no_window)
+        if problems:
+            sys.exit("the smoke run failed:\n  " + "\n  ".join(problems))
+        print("smoke run: the unzipped app runs on its own")
+
+
+# ---- macOS ------------------------------------------------------------------------------------------
+
+def _macho_files(app):
+    """Every Mach-O file in the bundle (frameworks' binaries through their real paths, once)."""
+    found = []
+    for folder, _, files in os.walk(app):
+        for name in files:
+            path = os.path.join(folder, name)
+            if os.path.islink(path):
+                continue
+            with open(path, "rb") as f:
+                magic = f.read(4)
+            if magic in (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"):
+                found.append(path)
+    return found
+
+
+def _check_links(app):
+    """Problems: a Mach-O in the bundle loading a library from outside it (anything but @rpath,
+    @executable_path, @loader_path, /System and /usr/lib), or an rpath outside it."""
+    problems = []
+    for path in _macho_files(app):
+        rel = os.path.relpath(path, app)
+        out = subprocess.run(["otool", "-L", path], capture_output=True, text=True).stdout.splitlines()
+        for line in out:
+            if not line.startswith(("\t", " ")):  # the file's own header (one per architecture)
+                continue
+            dep = line.strip().split(" (")[0]
+            if not dep.startswith(("@rpath/", "@executable_path/", "@loader_path/", "/System/", "/usr/lib/")):
+                problems.append("%s loads %s" % (rel, dep))
+        cmds = subprocess.run(["otool", "-l", path], capture_output=True, text=True).stdout.splitlines()
+        for i, line in enumerate(cmds):
+            if line.strip() == "cmd LC_RPATH" and i + 2 < len(cmds):
+                rpath = cmds[i + 2].split()[1]
+                if not rpath.startswith(("@executable_path", "@loader_path")):
+                    problems.append("%s has the rpath %s" % (rel, rpath))
+    return problems
+
+
+def _smoke_mac(zip_path, top):
+    """Unzips the package into a new temp folder and runs the app from there without a window: the
+    sample groom rendered to a PNG. Problems: no image, or a library loaded from outside the bundle
+    (the Qt the build used, Homebrew)."""
+    problems = []
+    with tempfile.TemporaryDirectory(prefix="groomlab_app_smoke_") as tmp:
+        subprocess.check_call(["ditto", "-x", "-k", zip_path, tmp])
+        exe = os.path.join(tmp, top, "GroomLab.app", "Contents", "MacOS", "GroomLab")
+        image = os.path.join(tmp, "smoke.png")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("QT_", "DYLD_", "GROOMLAB_"))}
+        env.update({"DYLD_PRINT_LIBRARIES": "1", "GROOMLAB_SETTINGS_DIR": os.path.join(tmp, "settings")})
+        run = subprocess.run([exe, SAMPLE, "--screenshot", image, "--size", "320x240"], env=env, cwd=tmp,
+                             capture_output=True, text=True, timeout=300)
+        if run.returncode != 0 or not os.path.isfile(image):
+            problems.append("no screenshot (exit %d): %s" % (run.returncode, run.stderr[-800:]))
+        for line in run.stderr.splitlines():
+            m = re.match(r"dyld\[\d+\]: <[^>]+> (.+)$", line)
+            if m and not m.group(1).startswith(("/System/", "/usr/lib/", os.path.realpath(tmp), tmp)):
+                problems.append("loaded from outside the bundle: %s" % m.group(1))
+    return problems
+
+
+def main_mac(args):
+    build = os.path.abspath(args.build if args.build != os.path.join(ROOT, "build", "ninja-app")
+                            else os.path.join(ROOT, "build", "macos-release"))
+    if not os.path.isfile(os.path.join(build, "CMakeCache.txt")):
+        sys.exit("no build in %s: configure and build the macos-release preset first" % build)
+    version = cache_value(build, "CMAKE_PROJECT_VERSION")
+    qt_dir = cache_value(build, "GROOMLAB_QT_DIR")
+    stage = os.path.join(args.out, "app_stage")
+    if os.path.isdir(stage):
+        shutil.rmtree(stage)
+    os.makedirs(stage)
+    subprocess.check_call([args.cmake, "--install", build, "--config", args.config, "--component", "App", "--prefix", stage],
+                          stdout=subprocess.DEVNULL)
+    folder = os.path.join(stage, INSTALL_DIR)
+    app = os.path.join(folder, "GroomLab.app")
+    if not os.path.isfile(os.path.join(app, "Contents", "MacOS", "GroomLab")):
+        sys.exit("no GroomLab.app in the install: build %s with GROOMLAB_BUILD_APP first" % build)
+    # Qt into the bundle (Contents/Frameworks, Contents/PlugIns), then the offscreen platform too
+    # (scripted runs and the smoke run below), which macdeployqt leaves out.
+    subprocess.check_call([os.path.join(qt_dir, "bin", "macdeployqt"), app, "-always-overwrite"], stdout=subprocess.DEVNULL)
+    offscreen = os.path.join(app, "Contents", "PlugIns", "platforms", "libqoffscreen.dylib")
+    shutil.copy2(os.path.join(qt_dir, "plugins", "platforms", "libqoffscreen.dylib"), offscreen)
+    lines = subprocess.run(["otool", "-l", offscreen], capture_output=True, text=True).stdout.splitlines()
+    rpaths = {lines[i + 2].split()[1] for i, line in enumerate(lines) if line.strip() == "cmd LC_RPATH"}  # (once per slice)
+    for rpath in sorted(rpaths):
+        subprocess.check_call(["install_name_tool", "-delete_rpath", rpath, offscreen], stderr=subprocess.DEVNULL)
+    subprocess.check_call(["install_name_tool", "-add_rpath", "@loader_path/../../Frameworks", offscreen], stderr=subprocess.DEVNULL)
+    # Apple silicon alone (docs/MACOS.md): Qt's universal binaries thinned to arm64.
+    thin = app + ".arm64"
+    subprocess.check_call(["ditto", "--arch", "arm64", app, thin])
+    shutil.rmtree(app)
+    os.rename(thin, app)
+    problems = _check_links(app)
+    contents = os.path.join("GroomLab.app", "Contents")
+    qt_files = [os.path.relpath(p, folder) for p in _macho_files(app)
+                if "/Frameworks/Qt" in p or (os.sep + "PlugIns" + os.sep) in p]
+    notices, qt_problems = qt_third_party(folder, qt_dir, qt_files=qt_files, compare=False, beside="GroomLab.app")
+    problems += qt_problems
+    if problems:
+        sys.exit("the app package is wrong:\n  " + "\n  ".join(problems))
+    with open(os.path.join(folder, "licenses", "QT_THIRD_PARTY.txt"), "w", encoding="utf-8") as f:
+        f.write(notices)
+    commit = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+    with open(os.path.join(folder, "VERSION.txt"), "w", encoding="utf-8") as f:
+        f.write("GroomLab app %s beta, macOS arm64 (%s, %s)\n" % (version, commit or "unknown commit", args.config))
+    # Ad hoc (Apple silicon runs nothing unsigned; macdeployqt and install_name_tool broke the signatures).
+    subprocess.check_call(["codesign", "--force", "--deep", "--sign", "-", app], stderr=subprocess.DEVNULL)
+    subprocess.check_call(["codesign", "--verify", "--deep", "--strict", app])
+    size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(folder) for f in fs
+               if not os.path.islink(os.path.join(d, f)))
+    print("staged GroomLab.app (%.1f MB): nothing loaded from outside the bundle, signed ad hoc, %d Qt files listed"
+          % (size / 1e6, len(qt_files)))
+    if args.stage_only:
+        return
+    top = "GroomLab-App-%s-beta" % version
+    os.rename(folder, os.path.join(stage, top))
+    zip_path = os.path.join(args.out, "%s-macos-arm64.zip" % top)
+    if os.path.exists(zip_path):
+        os.remove(zip_path)
+    subprocess.check_call(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", os.path.join(stage, top), zip_path])
+    shutil.rmtree(stage)
+    print("wrote %s (%.1f MB, commit %s)" % (zip_path, os.path.getsize(zip_path) / 1e6, commit))
+    if not args.no_smoke:
+        problems = _smoke_mac(zip_path, top)
         if problems:
             sys.exit("the smoke run failed:\n  " + "\n  ".join(problems))
         print("smoke run: the unzipped app runs on its own")
