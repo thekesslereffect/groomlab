@@ -2741,14 +2741,15 @@ std::string readFile(const std::string& path) {
 }
 
 // Whether `path` is in a maps folder a session made in the temp folder while its .blend was
-// untitled: <temp>/groomlab_<pid>_s<n>maps_<k>/ (this session's or an earlier helper's).
+// untitled: <temp>/groomlab_<pid>_s<n>maps_<k>/, gl_ on macOS (blockName: this session's or an
+// earlier helper's).
 bool inTempMapsFolder(const std::string& path) {
     std::error_code ec;
     const fs::path temp = fs::temp_directory_path(ec);
     if (ec) return false;
     const fs::path folder = fs::u8path(path).parent_path();
     const std::string name = folder.filename().u8string();
-    return name.rfind("groomlab_", 0) == 0 && name.find("maps") != std::string::npos && inFolder(folder.generic_u8string(), temp.generic_u8string());
+    return name.rfind(blockNamePrefix(), 0) == 0 && name.find("maps") != std::string::npos && inFolder(folder.generic_u8string(), temp.generic_u8string());
 }
 
 // The host's own maps folder for the groom (Blender: <blend folder>/groomlab/<blend>/masks/<scalp>,

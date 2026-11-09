@@ -78,7 +78,11 @@ private:
     std::size_t used_ = 0;
 };
 
-// A unique block name for this process: "groomlab_<pid>_<purpose>_<n>".
+// A unique block name for this process: "<blockNamePrefix()><pid>_<purpose>_<n>". The helper's
+// temp folders are named the same way.
 std::string blockName(const std::string& purpose, unsigned n);
+
+// "groomlab_" ("gl_" on macOS, whose shared memory names are short).
+const char* blockNamePrefix();
 
 }  // namespace groomlab::helper

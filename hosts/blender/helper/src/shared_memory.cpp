@@ -144,19 +144,23 @@ SharedBlock::~SharedBlock() {
 #endif
 }
 
+const char* blockNamePrefix() {
+#ifdef __APPLE__
+    // macOS caps a POSIX shared memory name at 31 bytes with its slash (PSHMNAMLEN): "/gl_<pid>_..."
+    // leaves a long session's numbers room ("/gl_99999_s12overlay_100000": 27).
+    return "gl_";
+#else
+    return "groomlab_";
+#endif
+}
+
 std::string blockName(const std::string& purpose, unsigned n) {
 #ifdef _WIN32
     const unsigned long pid = GetCurrentProcessId();
 #else
     const unsigned long pid = static_cast<unsigned long>(getpid());
 #endif
-#ifdef __APPLE__
-    // macOS caps a POSIX shared memory name at 31 bytes with its slash (PSHMNAMLEN): "/gl_<pid>_..."
-    // leaves a long session's numbers room ("/gl_99999_s12overlay_100000": 27).
-    return "gl_" + std::to_string(pid) + "_" + purpose + "_" + std::to_string(n);
-#else
-    return "groomlab_" + std::to_string(pid) + "_" + purpose + "_" + std::to_string(n);
-#endif
+    return blockNamePrefix() + std::to_string(pid) + "_" + purpose + "_" + std::to_string(n);
 }
 
 void Arena::begin(std::size_t bytes) {
