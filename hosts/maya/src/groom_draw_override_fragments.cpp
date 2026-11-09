@@ -1009,7 +1009,15 @@ bool registerHairGraph(int& state, const char* graphName, const char* fragment, 
     MHWRender::MFragmentManager* fragments = renderer ? renderer->getFragmentManager() : nullptr;
     if (!fragments) return false;
     if (fragments->hasFragment(graphName)) return (state = 1) > 0;
-    if (strands && !strandSpecularFragmentRegistered(*fragments)) return false;
+    // Without the bitangent stream: the strands (they carry none), and on macOS the cards and scales
+    // too, whose normal rides in it (cardNormal): Maya's specular reads it as a second input of the
+    // same semantic, which macOS's OpenGL does not link (the cards then drew grey, uncut).
+#ifdef __APPLE__
+    const bool noBitangent = true;
+#else
+    const bool noBitangent = strands;
+#endif
+    if (noBitangent && !strandSpecularFragmentRegistered(*fragments)) return false;
     MString hairXml;
     if (!fragments->getFragmentXML("mayaHairTubeShaderSurface", hairXml)) return false;
     std::string graph = hairXml.asChar();
@@ -1050,7 +1058,7 @@ bool registerHairGraph(int& state, const char* graphName, const char* fragment, 
                          "        <connect from=\"groomLabNormalPassThrough.mayafloat3PassThrough\" to=\"mayaHairTubeShaderColor.irNormal\" "
                          "name=\"irNormal\" />\n    </connections>");
     }
-    if (ok && strands) {
+    if (ok && noBitangent) {
         // The specular fragment without the bitangent stream, and the graph's own property of it gone.
         ok = replaceOnce(graph, "<fragment_ref name=\"mayaHairTubeShaderSpecular\" ref=\"mayaHairTubeShaderSpecular\" />",
                          "<fragment_ref name=\"mayaHairTubeShaderSpecular\" ref=\"groomLabHairTubeSpecular\" />") &&
@@ -1060,7 +1068,10 @@ bool registerHairGraph(int& state, const char* graphName, const char* fragment, 
                          "<float3  name=\"mayaBitangentIn\" ref=\"mayaHairTubeShaderSpecular.mayaBitangentIn\" semantic=\"bitangent\" "
                          "flags=\"varyingInputParam\" />",
                          "") &&
-             graph.find("semantic=\"bitangent\"") == std::string::npos;
+             (strands ? graph.find("semantic=\"bitangent\"") == std::string::npos
+                      : graph.find("\"mayaBitangentIn\"") == std::string::npos);
+    }
+    if (ok && strands) {
         // Width as coverage (kStrandCoverageFragment) after the graph's last fragment, reading the
         // uvs (their width, the strand's number) and the world position through pass-throughs
         // feeding the fragments that read them already (the color fragment u alone:
