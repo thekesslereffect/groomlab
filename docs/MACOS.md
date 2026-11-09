@@ -179,15 +179,13 @@ portable (a cast that is correct everywhere).
 9. **The app.** `QRhiMetalInitParams` in `offscreen.cpp` assumes Qt 6.8's public `rhi/qrhi.h`
    declares it on macOS; the app's `.qsb` shaders already carry MSL. Watch the QRhi backend in
    the window title or `GROOMLAB_APP_RHI=metal`.
-   **Found on the Mac (2026-11-09), open:** two Metal limits D3D11 and Vulkan do not have.
-   `surface_lookdev.frag` binds up to `binding = 37`, and QRhi's Metal backend puts the vertex
-   buffers after the highest binding (index 38, Metal allows 0 to 30): the app aborts on its first
-   scalp draw (`failed assertion 'buffer index (38) must be < 31'`), as do the `AppRender` surface
-   tests. Renumbering alone does not fit (30 bindings plus the vertex buffers): it needs fewer
-   bindings (texture arrays for the shadow maps, DOM layers or hair volumes). And
-   `hair_lookdev.frag` has 17 combined `sampler2D`s, over Metal's 16 samplers per stage: its MSL
-   does not compile ("a lookdev pipeline could not be made"); separate `texture2D`s with shared
-   samplers, as `surface_lookdev.frag` does, fit. Both change the shaders every backend uses.
+   **Found and fixed on the Mac (2026-11-09):** two Metal limits D3D11 and Vulkan do not have.
+   QRhi's Metal backend puts the vertex buffer after the highest binding and Metal's last buffer
+   slot is 30, so every binding of a pipeline with vertex input stays at 29 or less
+   (`surface_lookdev.frag`'s were up to 37: the first scalp draw aborted with "buffer index (38)
+   must be < 31"). And Metal has 16 samplers a stage: `hair_lookdev.frag`'s per-point pass had 17
+   combined `sampler2D`s; its deep opacity maps are now separate textures with two samplers.
+   Both shader changes run on every backend: check the app's renders on Windows once.
    Also found and fixed: Qt 6.8.3 links `-framework AGL`, which macOS 26+ SDKs lack
    (`hosts/app/CMakeLists.txt`), and Qt headers MSVC got transitively.
 10. **Blender helper.** POSIX shared memory works on macOS with two quirks: names are capped at
@@ -344,8 +342,8 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] `macos-core` configures
 - [x] `macos-core` builds (core, C API + samples, CLI, Python module, Blender helper, tests)
 - [x] `ctest -L quick` green on `macos-core` (goldens and determinism included)
-- [ ] `macos-app` builds; the app opens, draws a groom on Metal, previews on the CPU
-- [ ] `ctest -L "quick|app"` green on `macos-app`
+- [ ] `macos-app` builds; the app opens, draws a groom on Metal, previews on the CPU (builds and starts on Metal without errors; the window not looked at yet)
+- [x] `ctest -L "quick|app"` green on `macos-app`
 - [ ] Offscreen renders (thumbnails, turntables) correct on Metal
 - [ ] Maya 2025 devkit + install in place; `macos-maya2025` builds `GroomLab.bundle`
 - [ ] The plugin loads in Maya 2025; a groom draws in Viewport 2.0 (Metal); brushes and drags work (CPU)
