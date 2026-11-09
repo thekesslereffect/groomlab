@@ -133,7 +133,12 @@ every test once. Run them from the build folder (`cd build/win-maya2022`):
 | `renderman`, `vray`: the renderers (`-LE quick`: their scene checks are in quick) | when the RenderMan or V-Ray paths changed; before packaging | `ctest -C RelWithDebInfo -L "vray\|renderman" -LE quick` |
 
 `-j 8` runs the windowless tests side by side; the GUI session, Arnold and the timings always run
-alone (`RUN_SERIAL`), and the long mayapy suites start first (`COST`). With the Ninja presets,
+alone (`RUN_SERIAL`), and the long mayapy suites start first (`COST`). Each GoogleTest executable
+runs as a few shards, `core.shard0` to `core.shard11`, `gpu.engine.shard0`... (GoogleTest's
+sharding, `groomlab_gtest_shards` in `tests/CMakeLists.txt`), one process each instead of one a test:
+a process costs about 0.4 s to start, most of the tier's time when every test had its own (quick:
+about two minutes, from four). A failure prints its test's name; run one test with the executable
+itself, `build/ninja-maya2022/tests/RelWithDebInfo/groomlab_tests.exe --gtest_filter=Suite.Name`. With the Ninja presets,
 `ctest --preset ninja-maya2022 -L quick` runs from the checkout's root with the right
 configuration, `--output-on-failure` and `-j 12` already set. The app's tree (`ninja-app`) builds
 the core's tests too: there `-L app` runs the app's alone.

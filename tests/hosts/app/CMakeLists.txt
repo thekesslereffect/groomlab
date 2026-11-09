@@ -10,18 +10,15 @@ groomlab_path_literal(_test_data "${PROJECT_SOURCE_DIR}/tests/data")
 target_compile_definitions(groomlab_app_tests PRIVATE "GROOMLAB_TEST_DATA=${_test_data}")
 groomlab_precompile(groomlab_app_tests <gtest/gtest.h> <nlohmann/json.hpp> <QImage> <QSize> <QString>)
 groomlab_app_deploy(groomlab_app_tests)
-gtest_discover_tests(groomlab_app_tests DISCOVERY_MODE PRE_TEST TEST_LIST groomlab_app_test_list
-                     PROPERTIES LABELS quick ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-groomlab_label_discovered(groomlab_app_test_list quick app)
 # Every run of the app here (the gtest suite, the executable's scripted runs) keeps its settings
 # (recent files, the theme, autosaves, units) in a folder of the build's own, GROOMLAB_SETTINGS_DIR:
-# never the user's %APPDATA%\GroomLab\GroomLab.ini. (The discovered tests get it from a file ctest
-# includes after the discovery's, as their labels: PROPERTIES would flatten the list.)
+# never the user's %APPDATA%\GroomLab\GroomLab.ini. A folder a shard (they run side by side).
 set(GROOMLAB_APP_TEST_SETTINGS "${CMAKE_CURRENT_BINARY_DIR}/settings")
 set(_app_env "QT_QPA_PLATFORM=offscreen;GROOMLAB_SETTINGS_DIR=${GROOMLAB_APP_TEST_SETTINGS}")
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/groomlab_app_test_env.cmake"
-     "if(groomlab_app_test_list)\n  set_tests_properties(\${groomlab_app_test_list} PROPERTIES ENVIRONMENT \"${_app_env}\")\nendif()\n")
-set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${CMAKE_CURRENT_BINARY_DIR}/groomlab_app_test_env.cmake")
+groomlab_gtest_shards(groomlab_app_tests app 4 "" "quick;app" QT_QPA_PLATFORM=offscreen)
+foreach(_shard RANGE 0 3)
+    set_property(TEST app.shard${_shard} APPEND PROPERTY ENVIRONMENT "GROOMLAB_SETTINGS_DIR=${GROOMLAB_APP_TEST_SETTINGS}/shard${_shard}")
+endforeach()
 # The scripted exports and card bake through the executable's flags (no window).
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)

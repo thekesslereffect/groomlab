@@ -9,7 +9,7 @@ $ErrorActionPreference = 'Continue'
 Set-Location (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 New-Item -ItemType Directory -Force build/probe | Out-Null
 $runs = @(
-  @('ninja-maya2022', 'quick',     '-j', '6', '-L', 'quick'),
+  @('ninja-maya2022', 'quick',     '-j', '8', '-L', 'quick'),
   @('ninja-maya2022', 'maya',      '-j', '4', '-L', 'maya', '-LE', 'gui|arnold|vray|renderman'),
   @('ninja-maya2022', 'blender',   '-j', '4', '-L', 'blender', '-LE', 'vray'),
   @('ninja-maya2022', 'gpu',       '-j', '3', '-L', 'gpu', '-LE', 'quick|bench'),

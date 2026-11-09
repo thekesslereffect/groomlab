@@ -194,21 +194,34 @@ function(groomlab_label_discovered test_list)
     file(WRITE "${file}" "if(${test_list})\n  set_tests_properties(\${${test_list}} PROPERTIES LABELS \"${labels}\")\nendif()\n")
     set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${file}")
 endfunction()
+# A GoogleTest executable as `shards` ctest tests, <name>.shard<i>, each one process running its share
+# of the tests (GoogleTest's sharding: test k in shard k mod `shards`), side by side under ctest -j:
+# a test a process costs about 0.4 s of start-up (most of the time when the tests were run one by
+# one). `filter` a --gtest_filter ("" every test), `labels` a label list, ARGN the environment (a
+# list). Failures print with the test's name (--gtest_brief: the passing ones stay quiet); one test
+# alone: the executable with --gtest_filter, or ctest -R <name>.shard. COST spreads the long shards.
+function(groomlab_gtest_shards target name shards filter labels)
+    set(env ${ARGN})
+    math(EXPR last "${shards} - 1")
+    foreach(i RANGE 0 ${last})
+        set(args --gtest_brief=1)
+        if(filter)
+            list(APPEND args "--gtest_filter=${filter}")
+        endif()
+        add_test(NAME ${name}.shard${i} COMMAND ${target} ${args})
+        set_tests_properties(${name}.shard${i} PROPERTIES LABELS "${labels}" COST 100
+                             ENVIRONMENT "GTEST_TOTAL_SHARDS=${shards};GTEST_SHARD_INDEX=${i};${env}")
+    endforeach()
+endfunction()
+
+# The core's tests (Alembic and the other io suites among them) in shards; the Budget and Performance
+# tests time parallel loops: each its own process, alone, not beside other tests (ctest -j).
+groomlab_gtest_shards(groomlab_tests core 12 "-Budget.*:Performance.*" "quick;core;io")
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.27)
-    set(_io_suites "Alembic.*:ImportCurves.*:SimulationCache.*")
-    # The Budget and Performance tests time parallel loops: alone, not beside other tests (ctest -j).
-    gtest_discover_tests(groomlab_tests DISCOVERY_MODE PRE_TEST TEST_FILTER "-Budget.*:Performance.*:${_io_suites}"
-                         TEST_LIST groomlab_core_tests PROPERTIES LABELS quick)
-    gtest_discover_tests(groomlab_tests DISCOVERY_MODE PRE_TEST TEST_FILTER "${_io_suites}"
-                         TEST_LIST groomlab_io_tests PROPERTIES LABELS quick)
     gtest_discover_tests(groomlab_tests DISCOVERY_MODE PRE_TEST TEST_FILTER "Budget.*:Performance.*"
                          TEST_LIST groomlab_timing_tests PROPERTIES LABELS budget RUN_SERIAL TRUE)
-    groomlab_label_discovered(groomlab_io_tests quick io)
     groomlab_label_discovered(groomlab_timing_tests budget core)
-else()
-    gtest_discover_tests(groomlab_tests DISCOVERY_MODE PRE_TEST TEST_LIST groomlab_core_tests PROPERTIES LABELS quick)
 endif()
-groomlab_label_discovered(groomlab_core_tests quick core)
 
 # tools/dev/new_node.py finds every place a new node goes (it changes nothing with --dry-run).
 find_package(Python3 COMPONENTS Interpreter QUIET)
@@ -249,8 +262,7 @@ endif()
 if(TARGET groomlab_core_private)
     add_executable(groomlab_pool_tests engine/core/test_parallel_pool.cpp)
     target_link_libraries(groomlab_pool_tests PRIVATE groomlab_core_private groomlab::warnings GTest::gtest_main)
-    gtest_discover_tests(groomlab_pool_tests DISCOVERY_MODE PRE_TEST TEST_LIST groomlab_pool_test_list PROPERTIES LABELS quick)
-    groomlab_label_discovered(groomlab_pool_test_list quick core)
+    groomlab_gtest_shards(groomlab_pool_tests pool 1 "" "quick;core")
 endif()
 
 # The GPU look preview's kernels against the CPU operators (engine/gpu/, look_engine.h): on a device of
@@ -269,8 +281,7 @@ if(TARGET groomlab_gpu AND WIN32)
                     $<TARGET_RUNTIME_DLLS:groomlab_gpu_tests> $<TARGET_FILE_DIR:groomlab_gpu_tests>
             COMMAND_EXPAND_LISTS)
     endif()
-    gtest_discover_tests(groomlab_gpu_tests DISCOVERY_MODE PRE_TEST TEST_LIST groomlab_gpu_test_list PROPERTIES LABELS quick)
-    groomlab_label_discovered(groomlab_gpu_test_list quick gpu)
+    groomlab_gtest_shards(groomlab_gpu_tests gpu.engine 8 "" "quick;gpu")
 
     # The GPU look engine's benchmark (numbers, not checks): label "bench" alone, and it skips
     # unless GROOMLAB_BENCH=1 (GROOMLAB_BENCH_COUNTS, GROOMLAB_BENCH_OUT: bench_look_engine.cpp).
@@ -323,8 +334,7 @@ if(TARGET groomlab_capi)
                 COMMAND_EXPAND_LISTS)
         endif()
     endforeach()
-    gtest_discover_tests(groomlab_capi_tests DISCOVERY_MODE PRE_TEST TEST_LIST groomlab_capi_test_list PROPERTIES LABELS quick)
-    groomlab_label_discovered(groomlab_capi_test_list quick core)
+    groomlab_gtest_shards(groomlab_capi_tests capi 2 "" "quick;core")
 
     # Node upgrades on a node that is outdated need an operator at version 2, which no built-in
     # has yet: capi_versioned_op.cpp registers one in the core the test links, so these tests link
@@ -362,9 +372,7 @@ if(TARGET groomlab_capi)
                 COMMAND_EXPAND_LISTS)
         endif()
     endforeach()
-    gtest_discover_tests(groomlab_capi_upgrade_tests DISCOVERY_MODE PRE_TEST TEST_LIST groomlab_capi_upgrade_test_list
-                         PROPERTIES LABELS quick)
-    groomlab_label_discovered(groomlab_capi_upgrade_test_list quick core)
+    groomlab_gtest_shards(groomlab_capi_upgrade_tests capi_upgrade 1 "" "quick;core")
 
     # The SDK samples (engine/capi/samples) as a bridge runs them: a shipped groom file to OBJ
     # polylines, the default graph on an OBJ scalp, and the C sample's counts.
