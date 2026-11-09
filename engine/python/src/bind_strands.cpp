@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "groomlab/cards.h"
+#include "groomlab/follicle_map.h"
 #include "groomlab/guide_set.h"
 #include "groomlab/instances.h"
 #include "groomlab/scale_maps.h"
@@ -558,6 +559,26 @@ void bindStrands(py::module_& m) {
           py::arg("padding") = 8,
           "Bakes the scales onto the skin's uvs (scale_maps.h) and writes <prefix>ScaleNormal/ScaleHeight/ScaleColor"
           "[.<tile>].png; returns {files, max_height, udim, coverage}.");
+    m.def("bake_follicle_map",
+          [](const ScalpMesh& skin, const StrandSet& strands, const std::string& prefix, int resolution, float radius,
+             float hardness, int padding) {
+              FollicleMapOptions options;
+              options.resolution = resolution;
+              options.radius = radius;
+              options.hardness = hardness;
+              options.padding = padding;
+              const FollicleMap map = bakeFollicleMap(skin, strands, options);
+              py::dict out;
+              out["files"] = writeFollicleMap(map, prefix);
+              out["radius"] = map.radius;
+              out["udim"] = map.udim;
+              out["follicles"] = map.follicles;
+              return out;
+          },
+          py::arg("skin"), py::arg("strands"), py::arg("prefix"), py::arg("resolution") = 2048, py::arg("radius") = 0.0f,
+          py::arg("hardness") = 0.0f, py::arg("padding") = 8,
+          "Bakes a radial gradient round every root of the strands onto the skin's uvs (follicle_map.h) and writes "
+          "<prefix>FollicleMap[.<tile>].png (16-bit gray); radius 0: from the roots' spacing. Returns {files, radius, udim, follicles}.");
 }
 
 }  // namespace groomlab::py_bind

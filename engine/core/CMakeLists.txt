@@ -93,6 +93,7 @@ add_library(groomlab_core_objects OBJECT
     src/subdivision.cpp
     src/scalp_maps.cpp
     src/scalp_paint.cpp
+    src/follicle_map.cpp
     src/scale_maps.cpp
     src/scales.cpp
     src/script.cpp

@@ -74,6 +74,7 @@ BINDINGS = {
     # Utilities (pipeline_ops.py)
     "strands.toMesh": ("groomlab.to_mesh", {}),
     "scales.bakeMaps": ("groomlab.bake_scale_maps", {}),
+    "follicles.bakeMap": ("groomlab.bake_follicle_map", {}),
     "flow.deleteAll": ("groomlab.flow_clear", {}),
     "groom.transfer": ("groomlab.transfer_groom", {}),
     "graph.copyToGrooms": ("groomlab.copy_graph_to_grooms", {}),

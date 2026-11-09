@@ -48,6 +48,7 @@
 #include "groomlab/groom_package.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/render_overrides.h"
+#include "groomlab/follicle_map.h"
 #include "groomlab/scale_maps.h"
 #include "groomlab/scales.h"
 #include "groomlab/usd_writer.h"
@@ -1095,6 +1096,70 @@ MStatus BakeScaleMapsCmd::doIt(const MArgList& args) {
             MGlobal::displayInfo(MString(kName) + ": " + static_cast<unsigned>(maps.tiles.size()) + " tile(s), max height " +
                                  maps.maxHeight + ", " + static_cast<int>(100.0 * maps.covered / std::max<std::size_t>(maps.texels, 1)) +
                                  "% covered, to " + prefix.c_str() + "*");
+            setResult(result);
+        } catch (const std::exception& e) {
+            return fail(kName, e.what());
+        }
+        return MS::kSuccess;
+    });
+}
+// ---------------------------------------------------------------------------
+// groomLabBakeFollicleMap
+
+const char* BakeFollicleMapCmd::kName = "groomLabBakeFollicleMap";
+
+void* BakeFollicleMapCmd::creator() { return new BakeFollicleMapCmd(); }
+
+MSyntax BakeFollicleMapCmd::newSyntax() {
+    MSyntax s;
+    s.addFlag("-d", "-directory", MSyntax::kString);
+    s.addFlag("-n", "-name", MSyntax::kString);
+    s.addFlag("-r", "-resolution", MSyntax::kLong);
+    s.addFlag("-rad", "-radius", MSyntax::kDouble);
+    s.addFlag("-hd", "-hardness", MSyntax::kDouble);
+    s.addFlag("-p", "-padding", MSyntax::kLong);
+    s.setObjectType(MSyntax::kSelectionList, 1, 1);
+    s.useSelectionAsDefault(true);
+    s.enableQuery(false);
+    s.enableEdit(false);
+    return s;
+}
+
+MStatus BakeFollicleMapCmd::doIt(const MArgList& args) {
+    return groomlab::maya::guarded("BakeFollicleMapCmd::doIt", [&]() -> MStatus {
+        MStatus status;
+        MArgDatabase db(syntax(), args, &status);
+        if (!status) return status;
+        MDagPath path;
+        if (!groomArgument(kName, db, &path)) return MS::kFailure;
+        if (!db.isFlagSet("-d") || !db.isFlagSet("-n")) return fail(kName, "-directory and -name are required");
+        FollicleMapOptions options;
+        options.resolution = static_cast<int>(flagDouble(db, "-r", 2048));
+        options.radius = static_cast<float>(flagDouble(db, "-rad", 0.0));
+        options.hardness = static_cast<float>(flagDouble(db, "-hd", 0.0));
+        options.padding = static_cast<int>(flagDouble(db, "-p", 8));
+        if (options.resolution < 16 || options.resolution > 8192) return fail(kName, "-resolution must be 16 to 8192");
+        if (options.radius < 0.0f) return fail(kName, "-radius must be 0 (from the roots' spacing) or more");
+        // Every root at the current time (none buried: a game's strands), on the scalp it grew on.
+        NodeEvaluator evaluator(path.node(), false);
+        std::string error;
+        MeshPtr scalp;
+        const StrandsPtr strands = evaluator.evaluate(1.0f, &error, &scalp, false, true);
+        if (!error.empty()) return fail(kName, error.c_str());
+        if (!strands) return fail(kName, path.partialPathName() + " gave no strands");
+        if (!scalp || !scalp->hasUVs()) return fail(kName, path.partialPathName() + "'s scalp has no uvs to bake onto");
+        const fs::path dir = fs::u8path(flagString(db, "-d").asChar());
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        const std::string prefix = (dir / fs::u8path(std::string(flagString(db, "-n").asChar()) + "_")).generic_u8string();
+        try {
+            const FollicleMap map = bakeFollicleMap(*scalp, *strands, options);
+            MStringArray result;
+            for (const std::string& f : writeFollicleMap(map, prefix)) result.append(f.c_str());
+            result.append(MString() + map.radius);
+            MGlobal::displayInfo(MString(kName) + ": " + static_cast<unsigned>(map.follicles) + " follicles, " +
+                                 static_cast<unsigned>(map.tiles.size()) + " tile(s), radius " + map.radius + ", to " +
+                                 prefix.c_str() + "*");
             setResult(result);
         } catch (const std::exception& e) {
             return fail(kName, e.what());

@@ -187,6 +187,25 @@ def _write_mesh(mesh, path, unity=False):
 
 
 SCALE_MAPS = ("ScaleNormal", "ScaleHeight", "ScaleColor")
+FOLLICLE_MAP = "FollicleMap"
+
+
+def bake_follicle_map(groom, directory=None, name=None, resolution=2048, radius=0.0, hardness=0.0, padding=8):
+    """Bake a radial gradient round every root of the groom at the current frame onto its scalp's
+    uvs, for skin shaders (follicle dots, stubble shadow, a hairline's density):
+    <name>_FollicleMap.png (16-bit gray: white at a root, black past `radius`; 0 takes it from the
+    roots' spacing; `hardness` the share of the radius kept white), one per UDIM tile
+    (<name>_FollicleMap.1001.png...) when the scalp's uvs leave the 0-1 square. `directory`
+    defaults to the groom's bake folder, `name` to its asset name. Returns {"files": [paths],
+    "radius": r, "pattern": path or <UDIM> pattern}."""
+    directory = (directory or _bake_folder(groom)).replace("\\", "/")
+    name = name or asset_name(groom)
+    result = cmds.groomLabBakeFollicleMap(groom, directory=directory, name=name, resolution=int(resolution),
+                                          radius=float(radius), hardness=float(hardness), padding=int(padding))
+    files, used = result[:-1], float(result[-1])
+    udim = any(re.search(r"\.\d{4}\.png$", f) for f in files)
+    return {"files": list(files), "radius": used,
+            "pattern": "%s/%s_%s%s.png" % (directory, name, FOLLICLE_MAP, ".<UDIM>" if udim else "")}
 
 
 def bake_scale_maps(groom, directory=None, name=None, resolution=2048, max_height=0.0, padding=8):

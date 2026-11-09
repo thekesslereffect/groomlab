@@ -195,6 +195,15 @@ def bake_scale_maps(scalp, directory, name="groom", resolution=2048, max_height=
                 maxHeight=float(max_height), padding=int(padding))
 
 
+def bake_follicle_map(scalp, directory, name="groom", resolution=2048, radius=0.0, hardness=0.0, padding=8):
+    """A radial gradient round every root baked onto the scalp's UVs (Maya's bake_follicle_map):
+    <name>_FollicleMap.png (16-bit gray: white at a root, black past `radius`; 0 from the roots'
+    spacing), a UDIM tile set when the UVs leave 0-1. Returns {files, pattern, radius, udim, tiles,
+    follicles, touched}."""
+    return call(scalp, "bake_follicle_map", directory=directory, name=name, resolution=int(resolution),
+                radius=float(radius), hardness=float(hardness), padding=int(padding))
+
+
 def scale_mesh(scalp, name=None):
     """The groom's scales at the current frame as a mesh object parented to the scalp (Maya's
     scale_mesh): UV maps UVMap, scaleUV and scaleData, color attributes scaleColor and

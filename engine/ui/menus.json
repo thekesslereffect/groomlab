@@ -49,6 +49,7 @@
         "strands.toMesh",
         "node.bakeToGuides",
         "scales.bakeMaps",
+        "follicles.bakeMap",
         "-",
         "flow.deleteAll",
         "-",

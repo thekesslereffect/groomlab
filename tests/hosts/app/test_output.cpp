@@ -400,6 +400,9 @@ TEST(AppOutput, ImportUtilitiesAndScales) {
     ASSERT_TRUE(doc->file().data.scalp->hasUVs());
     ASSERT_TRUE(window.bakeScaleMaps(QString::fromStdString((dir / "maps").u8string()), 64)) << window.lastReport().toStdString();
     EXPECT_TRUE(fs::exists(dir / "maps" / "sample_ScaleNormal.png") || fs::exists(dir / "maps" / "sample_ScaleNormal.1001.png"));
+    // The follicles: a gradient round every root on the scalp's uvs.
+    ASSERT_TRUE(window.bakeFollicleMap(QString::fromStdString((dir / "follicles").u8string()), 64)) << window.lastReport().toStdString();
+    EXPECT_TRUE(fs::exists(dir / "follicles" / "sample_FollicleMap.png") || fs::exists(dir / "follicles" / "sample_FollicleMap.1001.png"));
     const std::string usd = (dir / "scales.usda").u8string();
     ASSERT_TRUE(window.exportScalesUsd(QString::fromStdString(usd))) << window.lastReport().toStdString();
     const std::string layer = readText(usd);

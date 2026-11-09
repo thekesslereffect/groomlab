@@ -215,6 +215,9 @@ PLUGIN_EXPORT MStatus initializePlugin(MObject obj) {
     status = plugin.registerCommand(groomlab::maya::BakeScaleMapsCmd::kName, groomlab::maya::BakeScaleMapsCmd::creator,
                                     groomlab::maya::BakeScaleMapsCmd::newSyntax);
     CHECK_MSTATUS_AND_RETURN_IT(status);
+    status = plugin.registerCommand(groomlab::maya::BakeFollicleMapCmd::kName, groomlab::maya::BakeFollicleMapCmd::creator,
+                                    groomlab::maya::BakeFollicleMapCmd::newSyntax);
+    CHECK_MSTATUS_AND_RETURN_IT(status);
 
 #if GROOMLAB_HAS_ALEMBIC
     using groomlab::maya::ExportAlembicCmd;
@@ -359,6 +362,7 @@ PLUGIN_EXPORT MStatus uninitializePlugin(MObject obj) {
 #if GROOMLAB_HAS_ALEMBIC
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::ExportAlembicCmd::kName));
 #endif
+    CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::BakeFollicleMapCmd::kName));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::BakeScaleMapsCmd::kName));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::ScaleMeshCmd::kName));
     CHECK_MSTATUS_AND_RETURN_IT(plugin.deregisterCommand(groomlab::maya::ExportGltfCmd::kName));

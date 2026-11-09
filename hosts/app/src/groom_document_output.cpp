@@ -22,6 +22,7 @@
 #include "groomlab/graph_edit.h"
 #include "groomlab/paths.h"
 #include "groomlab/presets.h"
+#include "groomlab/follicle_map.h"
 #include "groomlab/scale_maps.h"
 #include "groomlab/scales.h"
 
@@ -885,6 +886,28 @@ std::string GroomDocument::bakeScaleMaps(const std::string& directory, const std
         const ScaleMaps maps = groomlab::bakeScaleMaps(*scalp, *mesh, options);
         const std::vector<std::string> written = writeScaleMaps(maps, (fs::u8path(directory) / fs::u8path(name + "_")).generic_u8string());
         if (files) *files = written;
+    } catch (const std::exception& e) {
+        return e.what();
+    }
+    return {};
+}
+
+std::string GroomDocument::bakeFollicleMap(const std::string& directory, const std::string& name, int resolution, float radius,
+                                           std::vector<std::string>* files, float* used) {
+    if (resolution < 16 || resolution > 8192) return "the resolution is 16 to 8192";
+    try {
+        MeshPtr scalp;
+        const StrandsPtr strands = exportFrame(time_, 1.0f, &scalp, false, true);  // (every root, none buried)
+        if (!scalp || !scalp->hasUVs()) return "the scalp has no uvs to bake the follicles onto";
+        std::error_code ec;
+        fs::create_directories(fs::u8path(directory), ec);
+        FollicleMapOptions options;
+        options.resolution = resolution;
+        options.radius = radius;
+        const FollicleMap map = groomlab::bakeFollicleMap(*scalp, *strands, options);
+        const std::vector<std::string> written = writeFollicleMap(map, (fs::u8path(directory) / fs::u8path(name + "_")).generic_u8string());
+        if (files) *files = written;
+        if (used) *used = map.radius;
     } catch (const std::exception& e) {
         return e.what();
     }

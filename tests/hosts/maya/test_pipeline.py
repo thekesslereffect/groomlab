@@ -668,6 +668,16 @@ class ScalesExportTest(unittest.TestCase):
         self.assertLess(maps["max_height"], 0.1)
         self.assertEqual(maps["pattern"]["ScaleHeight"], maps["ScaleHeight"][0])
 
+    def test_bake_follicle_map(self):
+        baked = groomlab.bake_follicle_map(self.groom, directory=WORK_DIR, name="body", resolution=128)
+        path = os.path.join(WORK_DIR, "body_FollicleMap.png").replace("\\", "/")
+        self.assertEqual(baked["files"], [path])
+        self.assertTrue(os.path.exists(path))
+        self.assertEqual(baked["pattern"], path)
+        self.assertGreater(baked["radius"], 0.0)
+        given = groomlab.bake_follicle_map(self.groom, directory=WORK_DIR, name="body", resolution=64, radius=0.02)
+        self.assertAlmostEqual(given["radius"], 0.02, places=5)
+
     def test_groom_files_carry_custom_plates(self):
         plate = cmds.polyPlane(name="myPlate", width=0.5, height=1, subdivisionsX=2, subdivisionsY=3)[0]
         # Its base at the origin, +Y its length, its face toward +Z (off the skin).

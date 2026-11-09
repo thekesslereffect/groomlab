@@ -239,7 +239,7 @@ class DefinitionsTest(unittest.TestCase):
         self.assertIn(("prop", "show_hud"), review)  # Strand Count HUD: a checkbox (checkable)
         self.assertEqual(texts(drawn(bpy.types.GROOMLAB_MT_main_utilities)),
                          ["Guides to Curves", "Curves to Guides...", "Strands to Curves...",  # (Blender's curve objects)
-                          "To Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "Delete All Flow Arrows",
+                          "To Mesh...", "Bake Node to Guides...", "Bake Scale Maps", "Bake Follicle Map", "Delete All Flow Arrows",
                           "Transfer Groom to Scalp...",
                           "Copy Graph to Other Grooms...", "Find Missing Files...", "Collect Files"])
         help_ = drawn(bpy.types.GROOMLAB_MT_main_help)

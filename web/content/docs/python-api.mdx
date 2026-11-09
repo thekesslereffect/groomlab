@@ -110,6 +110,7 @@ groomlab.export_groom(groom, "C:/shots/010/hair.groom", scalp_cache=True, start=
 # Scales: an instancer for engines, an FBX mesh for Unreal, maps baked into the body's uvs.
 groomlab.export_usd(groom, "C:/game/dragon.usda", scales="instancer")
 groomlab.export_scales(groom, "C:/game/dragon_scales.fbx")
+follicles = groomlab.bake_follicle_map(groom, radius=0.05)  # {"files": [...], "radius": r, "pattern": p}
 maps = groomlab.bake_scale_maps(groom, resolution=4096)  # {"ScaleNormal": [...], ..., "max_height": h}
 ```
 

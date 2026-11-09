@@ -411,6 +411,8 @@ class PipelineOpsTest(unittest.TestCase):
             self.assertIn("PointInstancer", f.read())
         self.assertEqual(bpy.ops.groomlab.bake_scale_maps(directory=self.tmp("maps"), resolution=32), {"FINISHED"})
         self.assertEqual(len([f for f in os.listdir(self.tmp("maps")) if f.endswith(".png")]), 3)
+        self.assertEqual(bpy.ops.groomlab.bake_follicle_map(directory=self.tmp("follicles"), resolution=32), {"FINISHED"})
+        self.assertEqual([f for f in os.listdir(self.tmp("follicles")) if f.endswith(".png")], ["Lizard_FollicleMap.png"])
 
     def test_3_transfer_owned_and_undone(self):
         head = groom_on(self.head, guides=20)

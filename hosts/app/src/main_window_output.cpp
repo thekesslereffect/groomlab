@@ -408,6 +408,30 @@ bool MainWindow::bakeScaleMaps(const QString& directory, int resolution) {
     return true;
 }
 
+bool MainWindow::bakeFollicleMap(const QString& directory, int resolution, double radius) {
+    if (!document_) {
+        report(tr("No groom open"));
+        return false;
+    }
+    const QString folder = directory.isEmpty() ? besideGroom(document_.get(), QStringLiteral("_follicles")) : directory;
+    std::vector<std::string> files;
+    std::string error;
+    float used = 0.0f;
+    {
+        const BusyCursor wait;
+        error = document_->bakeFollicleMap(folder.toStdString(), document_->defaultBakeName(), resolution, static_cast<float>(radius),
+                                           &files, &used);
+    }
+    reevaluate(true);
+    if (!error.empty()) {
+        report(tr("Cannot bake the follicle map: %1").arg(QString::fromStdString(error)));
+        return false;
+    }
+    notify(tr("Baked the follicles (radius %1) into %n map(s) in %2", "", static_cast<int>(files.size()))
+               .arg(QLocale().toString(used, 'g', 3), folder));
+    return true;
+}
+
 bool MainWindow::findMissingFiles(const QString& folder) {
     if (!document_) {
         report(tr("No groom open"));

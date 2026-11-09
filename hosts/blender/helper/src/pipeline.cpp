@@ -18,6 +18,7 @@
 #include <set>
 #include <utility>
 
+#include "groomlab/follicle_map.h"
 #include "groomlab/engine_cards.h"
 #include "groomlab/card_files.h"
 #include "groomlab/card_presets.h"
@@ -600,6 +601,36 @@ json exportScalesFbx(Session& s, const json& args) {
     return {{"fbx", path},
             {"fbxSettings", unity ? json{{"upAxis", "Y"}, {"units", "m"}} : json{{"upAxis", "scene"}, {"units", "scene"}}},
             {"meshes", putMeshes(s, meshes, groomSpaceOf(args))}};
+}
+
+// Bake Follicle Map (Maya's bake_follicle_map): a gradient round every root on the scalp's uvs.
+json bakeFollicleMapNow(Session& s, const json& args) {
+    const std::string directory = needString(args, "directory");
+    const std::string name = optString(args, "name", "groom");
+    FollicleMapOptions options;
+    options.resolution = static_cast<int>(optNumber(args, "resolution", 2048));
+    options.radius = static_cast<float>(optNumber(args, "radius", 0.0));
+    options.hardness = static_cast<float>(optNumber(args, "hardness", 0.0));
+    options.padding = static_cast<int>(optNumber(args, "padding", 8));
+    if (options.resolution < 16 || options.resolution > 8192) fail("bad_request", "resolution must be 16 to 8192");
+    if (options.radius < 0.0f) fail("bad_request", "radius must be 0 (from the roots' spacing) or more");
+    const ViewResult& view = evaluateNow(s, false);  // (every root, none buried)
+    const MeshPtr scalp = view.scalp ? view.scalp : s.groom->rawScalp();
+    if (!scalp || !scalp->hasUVs()) fail("state", "the scalp has no uvs to bake the follicles onto");
+    std::error_code ec;
+    fs::create_directories(fs::u8path(directory), ec);
+    const std::string prefix = (fs::u8path(directory) / fs::u8path(name + "_")).generic_u8string();
+    try {
+        const FollicleMap map = bakeFollicleMap(*scalp, *view.strands, options);
+        const std::vector<std::string> files = writeFollicleMap(map, prefix);
+        return {{"files", files}, {"pattern", follicleMapPath(prefix, map.udim)}, {"radius", map.radius}, {"udim", map.udim},
+                {"tiles", map.tiles.size()}, {"follicles", map.follicles},
+                {"touched", map.texels ? double(map.touched) / double(map.texels) : 0.0}};
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    } catch (const std::exception& e) {
+        fail("io", e.what());
+    }
 }
 
 json bakeScaleMapsNow(Session& s, const json& args) {
@@ -1821,7 +1852,7 @@ void applyCardBake(Session& s) {
 
 bool isPipelineCommand(const std::string& cmd) {
     static const std::set<std::string> kCommands = {
-        "bake_scale_maps", "scale_mesh", "strand_mesh", "set_scalp_frames", "simulate_status", "simulate_range", "simulate_poll",
+        "bake_scale_maps", "bake_follicle_map", "scale_mesh", "strand_mesh", "set_scalp_frames", "simulate_status", "simulate_range", "simulate_poll",
         "simulate_cancel", "simulate_bake", "simulate_clear", "set_meshes", "set_scalps", "meshes_info", "transfer",
         "transfer_markers", "sample_meshes", "cards_preset", "card_stats", "bake_to_guides", "import_alembic_curves", "bake_cards", "bake_scalp", "card_view"};
     return kCommands.count(cmd) > 0;
@@ -1831,6 +1862,7 @@ json runPipelineCommand(const std::string& cmd, const json& args, BlockReader& b
     if (cmd == "sample_meshes") return sampleMeshes();
     Session& s = session();
     if (cmd == "bake_scale_maps") return bakeScaleMapsNow(s, args);
+    if (cmd == "bake_follicle_map") return bakeFollicleMapNow(s, args);
     if (cmd == "scale_mesh") {
         MeshPtr scalp;
         const auto mesh = scalesNow(s, &scalp);

@@ -311,6 +311,19 @@ def bake_scale_maps_action():
     return maps
 
 
+def bake_follicle_map_action():
+    """A radial gradient round every root baked into the skin's uvs, in the groom's bake folder."""
+    import groomlab
+    groom = _selected_groom()
+    if not groom:
+        return
+    from groomlab.ui import messages
+    with messages.busy("Baking the follicle map"):
+        baked = groomlab.bake_follicle_map(groom)
+    messages.done("baked the follicle map to %s (radius %.4g)" % (baked["pattern"], baked["radius"]))
+    return baked
+
+
 def export_groom_dialog():
     """Save Groom File As: the scene's grooms (the selected ones, else all) in one groom file, a
     document of named grooms for groomlab-cli, the Arnold procedural and the standalone app, each
@@ -2035,6 +2048,7 @@ ACTIONS = {
     "strands.toMesh": to_mesh_dialog,
     "node.bakeToGuides": bake_node_dialog,
     "scales.bakeMaps": bake_scale_maps_action,
+    "follicles.bakeMap": bake_follicle_map_action,
     "flow.deleteAll": delete_all_flow_arrows,
     "groom.transfer": transfer_dialog,
     "graph.copyToGrooms": copy_graph_dialog,

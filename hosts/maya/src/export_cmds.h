@@ -145,4 +145,19 @@ public:
     MStatus doIt(const MArgList& args) override;
     bool isUndoable() const override { return false; }
 };
+
+// groomLabBakeFollicleMap -directory d -name n [-resolution r] [-radius r] [-hardness h] [-padding p] groom
+// A radial gradient round every root of the groom at the current time baked onto its scalp's uvs
+// (follicle_map.h): <d>/<n>_FollicleMap.png (16-bit gray: white at a root, black past -radius;
+// 0: from the roots' spacing), a tile each (<n>_FollicleMap.<tile>.png) when the scalp's uvs are
+// UDIM tiles. Returns the files written, then the radius baked with as text.
+class BakeFollicleMapCmd : public MPxCommand {
+public:
+    static const char* kName;
+    static void* creator();
+    static MSyntax newSyntax();
+
+    MStatus doIt(const MArgList& args) override;
+    bool isUndoable() const override { return false; }
+};
 }  // namespace groomlab::maya

@@ -526,6 +526,7 @@ public:
     bool strandsToMesh(const QString& path, bool ribbons = false, int sides = 4, int maxStrands = 100000);
     // Utilities > Bake Scale Maps: into `directory` ("" the groom's: <groom folder>/<name>_scales).
     bool bakeScaleMaps(const QString& directory = {}, int resolution = 2048);
+    bool bakeFollicleMap(const QString& directory = {}, int resolution = 2048, double radius = 0.0);
     // Utilities > Find Missing Files: relinked to files of the same name under `folder`.
     bool findMissingFiles(const QString& folder);
     // Collect Files (Maya's): GroomDocument::collectFiles, reported.

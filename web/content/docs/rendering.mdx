@@ -350,6 +350,15 @@ To use scales elsewhere:
   normal map (OpenGL +Y; flip green in Unreal), a 16-bit height map and a color map, one tile per
   UDIM: for distant or tiny scales without geometry.
 
+## Follicle maps for skin shaders
+
+**GroomLab > Utilities > Bake Follicle Map** bakes a radial gradient round every strand's root into
+the scalp's UVs: a 16-bit gray PNG (one per UDIM tile), white at each root and black past the
+radius, which comes from the roots' spacing unless you give one (`groomlab.bake_follicle_map(groom,
+radius=0.05)`). Plug it into the skin shader to darken or tint the skin where hair leaves it, add
+follicle bumps, or keep a hairline's density in a game's lower levels of detail, in any renderer
+or engine.
+
 ## Level of detail
 
 For crowds and wide shots, the groom's **Level of Detail** attributes (Attribute Editor >

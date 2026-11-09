@@ -98,8 +98,8 @@ from groomlab.cards import (  # noqa: F401
     delete_card_map_preset, save_card_map_preset, card_material, card_mesh, card_node_kind, card_stats, cards_preset,
     compare_cards, create_card_mesh, create_cards, feather_card_triangles, scalp_cap, _card_maps, _preset_params)
 from groomlab.exports import (  # noqa: F401
-    SCALE_MAPS, bake_scale_maps, export_alembic, export_mesh, export_scales, export_usd, export_vrscene, has_scales, scale_mesh,
-    viewport_points)
+    FOLLICLE_MAP, SCALE_MAPS, bake_follicle_map, bake_scale_maps, export_alembic, export_mesh, export_scales,
+    export_usd, export_vrscene, has_scales, scale_mesh, viewport_points)
 from groomlab.braids import add_braid, add_instances, braid_paths_from_curves, set_instance_prototype  # noqa: F401
 from groomlab.feathers import (  # noqa: F401
     add_feathers, create_feather_cards, create_rachis_mesh, export_rachis, feather_designs, feather_groups,

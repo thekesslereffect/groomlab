@@ -273,6 +273,28 @@ class GROOMLAB_OT_bake_scale_maps(_Tipped, GroomOperator):
         return {"FINISHED"}
 
 
+class GROOMLAB_OT_bake_follicle_map(_Tipped, GroomOperator):
+    """A radial gradient round every strand's root baked into the scalp's UVs (a 16-bit gray PNG, UDIM tiles too), for skin shaders"""
+    bl_idname = "groomlab.bake_follicle_map"
+    bl_label = "Bake Follicle Map"
+
+    directory: StringProperty(name="Folder", subtype="DIR_PATH", default="",
+                              description="Where the map goes (empty: beside the .blend in groomlab/bakes)")
+    resolution: IntProperty(name="Resolution", default=2048, min=16, max=8192)
+    radius: FloatProperty(name="Radius", default=0.0, min=0.0, subtype="DISTANCE",
+                          description="How far each follicle's gradient reaches on the skin (0: from the roots' spacing)")
+
+    def execute(self, context):
+        scalp = active_groom(context)
+        folder = bpy.path.abspath(self.directory) if self.directory else _export_folder("cards")
+        try:
+            r = pipeline.bake_follicle_map(scalp, folder, name=scalp.name, resolution=self.resolution, radius=self.radius)
+        except HelperError as e:
+            return _fail(self, e)
+        _say(self, "baked %d follicles to %s (radius %.4g)" % (r.get("follicles", 0), r.get("pattern", folder), r.get("radius", 0.0)))
+        return {"FINISHED"}
+
+
 # ---- Simulate ----------------------------------------------------------------------------------------
 
 def playback_range(scene):
@@ -1149,7 +1171,7 @@ class GROOMLAB_OT_bake_to_guides(_Tipped, GroomOperator):
 classes = (GROOMLAB_OT_export_unreal_groom, GROOMLAB_OT_export_unity_strands, GROOMLAB_OT_export_gltf_cards,
            GROOMLAB_OT_export_scales_fbx, GROOMLAB_OT_export_scales_usd, GROOMLAB_OT_export_unreal_cards,
            GROOMLAB_OT_export_unity_cards, GROOMLAB_OT_export_unity_feathers, GROOMLAB_OT_to_mesh,
-           GROOMLAB_OT_bake_scale_maps, GROOMLAB_OT_simulate_add, GROOMLAB_OT_export_guides_sim,
+           GROOMLAB_OT_bake_scale_maps, GROOMLAB_OT_bake_follicle_map, GROOMLAB_OT_simulate_add, GROOMLAB_OT_export_guides_sim,
            GROOMLAB_OT_load_guide_cache, GROOMLAB_OT_simulate_range,
            GROOMLAB_OT_simulate_clear, GROOMLAB_OT_add_feathers, GROOMLAB_OT_add_braid, GROOMLAB_OT_add_cards,
            GROOMLAB_OT_add_collider, GROOMLAB_OT_add_sample, GROOMLAB_OT_transfer_groom, GROOMLAB_OT_turntable,
