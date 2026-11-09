@@ -6,6 +6,12 @@ guards, this guide) and checked there only so far as Windows and Linux allow: no
 "Prepared on Windows" list has run on a Mac yet. Work top to bottom, tick the checklist at the end,
 and fix what breaks in small, separate commits.
 
+**What the Mac has (2026-11-09):** Maya 2024, 2025, 2026 and 2027, Arnold (MtoA) for each, and
+V-Ray for Maya. Not RenderMan: its procedural is left out by itself (no `RMANTREE`, the configure
+says "No RenderMan SDK ... left out") and its tests with it. The Maya devkits for macOS still have to
+be downloaded (section 2). The Windows session that wrote this guide has notes the Mac cannot see:
+everything the Mac needs is here and in `docs/DEVELOPING.md`.
+
 ## Rules that still apply on the Mac
 
 - **The user's work files are off limits.** On Windows they are on the D: drive; on the Mac, any
@@ -18,7 +24,7 @@ and fix what breaks in small, separate commits.
 - **Small, focused changes.** One topic per commit; keep Windows and Linux byte-identical: new
   platform code goes behind `#ifdef __APPLE__` / `if(APPLE)`, never into the shared paths.
 - **Tests by label**, not everything every time: `ctest --preset macos-core -L quick` after a
-  change; the GUI tiers (`-L gui`) are Windows-only for now.
+  change (section 12); the GUI tiers (`-L gui`) are Windows-only for now.
 - **No format migrations.** Formats change directly; never add back-compat readers.
 - Scripted Maya sessions must never open a modal dialog the user has to click.
 
@@ -26,7 +32,7 @@ and fix what breaks in small, separate commits.
 
 | Area | What was done | Files |
 |---|---|---|
-| Presets | `macos-core`, `macos-app`, `macos-maya2025`, `macos-maya2026` (Ninja, Apple Clang, arm64, deployment target 13.3) | `CMakePresets.json` |
+| Presets | `macos-core`, `macos-app`, `macos-maya2024` to `macos-maya2027` (Ninja, Apple Clang, arm64, deployment target 13.3; 2024 and 2027 added 2026-11-09 from 2025's, their paths guesses to check) | `CMakePresets.json` |
 | GPU engine | Built without a backend off Windows when a host needs it: planning + run algorithm + a null backend whose factories throw, so hosts preview on the CPU | `engine/gpu/CMakeLists.txt`, `engine/gpu/src/look_engine_none.cpp`, `engine/gpu/src/line_frames.cpp`, `engine/gpu/src/look_chain.cpp` |
 | Maya plugin | DirectX 11 / WGL code behind `_WIN32`: no device is found, the GPU preview and GPU frames say why and the CPU draws. Maya classes declared through `<maya/MApiNamespace.h>`, not forward declarations (from Maya 2023 `MHWRender::X` is a using-declaration of a versioned namespace's class: GCC and Clang reject a plain `class X;` beside it, MSVC let it pass) | `hosts/maya/src/gpu_preview.cpp`, `gpu_lines.cpp`, `groom_draw_override_gpu.cpp` (`<OpenGL/gl.h>`), the plugin's headers, `hosts/maya/CMakeLists.txt` |
 | Maya find | `MAC_PLUGIN`; libraries from the devkit's `lib/` or `Maya.app/Contents/MacOS` (`GROOMLAB_MAYA_APP`), else `-undefined dynamic_lookup`; the plugin is a `MODULE` named `GroomLab.bundle` | `cmake/FindMaya.cmake`, `CMakeLists.txt` |
@@ -89,11 +95,12 @@ in `~/.cache/groomlab-deps/fetch` (`GROOMLAB_FETCH_CACHE`).
 
 | SDK | Where | Used by |
 |---|---|---|
-| Maya 2025 / 2026 install | `/Applications/Autodesk/maya2025` (`Maya.app/Contents/MacOS`: libraries; `Maya.app/Contents/bin/mayapy`) | running the plugin; `GROOMLAB_MAYA_APP` |
-| Maya devkit, macOS, per version | Autodesk Platform Services, "Maya devkit" for macOS: unpack `devkitBase` to `~/groomlab-deps/sdks/maya-devkit-2025-macos` (it holds `include/maya`, `include/Python311`, `include/tbb`) | `macos-maya2025` `MAYA_LOCATION` |
-| MtoA for macOS | installed with Arnold for Maya: `/Applications/Autodesk/Arnold/mtoa/2025` (`include/mtoa`, `bin/libmtoa_api.dylib`, `bin/libai.dylib`) | the MtoA translator |
+| Maya 2024 to 2027 install (installed) | `/Applications/Autodesk/maya<year>` (`Maya.app/Contents/MacOS`: libraries; `Maya.app/Contents/bin/mayapy`) | running the plugin; `GROOMLAB_MAYA_APP` |
+| Maya devkit, macOS, per version (to download) | Autodesk Platform Services, "Maya devkit" for macOS: unpack `devkitBase` to `~/groomlab-deps/sdks/maya-devkit-<year>-macos` (it holds `include/maya`, `include/Python3xx`, `include/tbb`) | `macos-maya<year>` `MAYA_LOCATION` |
+| MtoA for macOS (installed) | installed with Arnold for Maya: `/Applications/Autodesk/Arnold/mtoa/<year>` (`include/mtoa`, `bin/libmtoa_api.dylib`, `bin/libai.dylib`) | the MtoA translator |
+| V-Ray for Maya (installed) | find it (`ls -d /Applications/Chaos*/V-Ray/*` or `/Applications/ChaosGroup/...`): the folder per Maya version holding `vray/include/vray_maya_sdk/translator_interface.h`; pass it as `-DVRAY_FOR_MAYA_LOCATION=...` | the V-Ray for Maya translator (section 4, item 11: its build is Windows-only today) |
 | Arnold SDK for macOS (optional) | `Arnold-7.x-darwin.tgz` unpacked to `~/groomlab-deps/sdks/arnold-macos` | the Arnold procedural without MtoA |
-| RenderMan Pro Server 27.3 | `/Applications/Pixar/RenderManProServer-27.3` or `RMANTREE` | the RenderMan procedural |
+| RenderMan Pro Server 27.3 (not installed) | `/Applications/Pixar/RenderManProServer-27.3` or `RMANTREE` | the RenderMan procedural: left out without it |
 | V-Ray Standalone (optional) | as installed; `GROOMLAB_VRAY` / the app's Render > V-Ray Standalone Location | `vray` tests only |
 
 Each preset's paths can be overridden on the command line (`cmake --preset macos-maya2025
@@ -115,15 +122,17 @@ cmake --build --preset macos-app
 ctest --preset macos-app -L "quick|app" -j 8
 ./build/macos-app/hosts/app/GroomLab          # a plain executable for now (see 6)
 
-# 3. The Maya plugin (with Maya and its macOS devkit installed)
-cmake --preset macos-maya2025                 # or macos-maya2026
+# 3. The Maya plugin (with Maya and its macOS devkit installed): 2025 first, then 2026, 2027, 2024
+cmake --preset macos-maya2025 -DVRAY_FOR_MAYA_LOCATION=<V-Ray for Maya 2025's folder>
 cmake --build --preset macos-maya2025
 cmake --install build/macos-maya2025 --component GroomLab --prefix ~/groomlab-modules
 ```
 
 Then point Maya at the module: `MAYA_MODULE_PATH=~/groomlab-modules` in
 `~/Library/Preferences/Autodesk/maya/2025/Maya.env`, start Maya, load `GroomLab.bundle` in the
-Plug-in Manager.
+Plug-in Manager. Each version installs into the same module (`maya<year>/plug-ins`), as on Windows.
+Start with 2025 (the presets' first, Qt 6 and Python 3.11); 2024 is the odd one out (Qt 5 and
+PySide2, Python 3.10, TBB 2020: section 7).
 
 ## 4. Expected first failures (not verifiable from Windows)
 
@@ -157,8 +166,8 @@ portable (a cast that is correct everywhere).
 6. **Maya's Python.** `engine/python/CMakeLists.txt` reads the devkit's `include/Python3*/Python`
    and runs `GROOMLAB_MAYA_APP/bin/mayapy`. If `mayapy` cannot run under CMake (quarantine,
    wrapper script), set `GROOMLAB_PYTHON_ROOT` to a python.org Python of the same minor version
-   (3.11 for 2025 and 2026, 3.13 for 2027).
-7. **Maya's TBB.** Maya 2025 ships TBB 2020 (`libtbb.dylib`), 2026 oneTBB (`libtbb.12.dylib`);
+   (3.10 for 2024, 3.11 for 2025 and 2026, 3.13 for 2027).
+7. **Maya's TBB.** Maya 2024 and 2025 ship TBB 2020 (`libtbb.dylib`), 2026 and 2027 oneTBB (`libtbb.12.dylib`);
    `GroomLabTBB.cmake` looks in `Maya.app/Contents/MacOS`. Check `otool -L GroomLab.bundle` names
    `@rpath/libtbb...` the way Maya's own plugins do (compare `otool -L` on one of Maya's
    `.bundle`s in `Maya.app/Contents/plug-ins`).
@@ -171,11 +180,24 @@ portable (a cast that is correct everywhere).
 10. **Blender helper.** POSIX shared memory works on macOS with two quirks: names are capped at
     31 bytes (handled) and an object's `st_size` is rounded up to a page (harmless here). The
     extension zip must keep the helper's executable bit; a downloaded zip is quarantined.
+11. **The V-Ray for Maya translator** (`hosts/maya/vray/groom_translator.cpp`,
+    `hosts/maya/CMakeLists.txt`, "V-Ray"): its build is written for Windows. The default
+    `VRAY_FOR_MAYA_LOCATION` is set on `WIN32` only (pass it on the Mac), it links
+    `vutils_s.lib`, `plugman_s.lib` and `vray.lib` (on the Mac look in V-Ray's `vray/lib` for their
+    `.a`/`.dylib` names), defines `NOMINMAX` and the x86 `__SSE*__` macros (wrong on arm64: check
+    what V-Ray's own macOS SDK samples define) and is named `vraytr_groomlab` with no prefix (check
+    the file name and extension V-Ray for Maya loads translators by on macOS:
+    `VRAY_FOR_MAYA<year>_TRANSLATORS_PATH`). Make those `if(APPLE)` branches; without them the
+    translator is simply not built (the configure says why) and the rest builds. The plugin's
+    V-Ray hook (`groomlab/vray_hook.py`, `vray_render.py`) is Python and should run as it is.
+12. **Maya 2024's Qt 5.** The plugin's Qt bits (`groomlab_maya_qt`, Windows-only today) and the
+    module's Python UI (`groomlab/ui/qt.py`: PySide2 or PySide6) already handle Qt 5 for Maya 2022
+    and 2023 on Windows; on the Mac, 2024 is the only Qt 5 one.
 
 Things that will be skipped, not fail: the GPU device tests (`groomlab_gpu_tests`: Windows only),
 the `gpu.*kernel_targets` tests without `GROOMLAB_SLANGC`, the Maya tests (the `macos-maya*`
-presets build no tests), Arnold/RenderMan/V-Ray tests without their SDKs, `app.package_manifest`
-(Windows only).
+presets build no tests; section 12), RenderMan (not installed) and the Arnold/V-Ray tests without
+their SDKs, `app.package_manifest` (Windows only).
 
 ## 5. What is guarded and why
 
@@ -225,8 +247,10 @@ presets build no tests), Arnold/RenderMan/V-Ray tests without their SDKs, `app.p
 
 - Plugin: `GroomLab.bundle` (a Mach-O bundle), installed into the module's `plug-ins/` (Maya 2022
   layout) or `maya<year>/plug-ins/` (`hosts/maya/CMakeLists.txt`). Maya on macOS is 2024 or later
-  for Apple silicon; the presets cover 2025 and 2026 (add 2027 the same way: Python 3.13).
-- Python: Maya 2025 and 2026 are Python 3.11, 2027 is 3.13; PySide6 (Qt 6) from 2025. The
+  for Apple silicon; the presets cover 2024 to 2027 (2024's and 2027's paths copied from 2025's:
+  check them against the installs and the devkits).
+- Python: Maya 2024 is Python 3.10 with PySide2 (Qt 5), 2025 and 2026 are Python 3.11, 2027 is
+  3.13; PySide6 (Qt 6) from 2025. The
   module's Python (`hosts/maya/scripts`) is shared with Windows; look for Windows-only bits there:
   `os.startfile` (use `open` on macOS: `scripts/groomlab/ui/menu.py`), `GroomLab.mll` in
   `scripts/groomlab/updates.py`, `Render` under `MAYA_LOCATION/bin` (`review.py`: on macOS it is
@@ -278,10 +302,24 @@ zip or `.dmg`, and the Blender extension zip. Nothing is published without the u
 
 ## 12. Test tiers on the Mac
 
-- `ctest --preset macos-core -L quick -j 8`: core, io, python, C API, CLI, Blender helper.
-- `ctest --preset macos-app -L "quick|app" -j 8`: plus the app's tests (offscreen platform).
-- `-L core`, `-L io`, `-L python`, `-L blender`: one area. No `gui` tier on macOS yet (the Maya GUI
-  suites drive Windows' Maya); no `arnold`/`renderman` until those SDKs are in place.
+The tiers changed on 2026-11-09 (`docs/DEVELOPING.md` section 2): every test is in exactly one, and
+`quick` holds GoogleTest only. Each GoogleTest executable runs as a few ctest shards
+(`core.shard0` to `core.shard11`, `app.shard0`...: `groomlab_gtest_shards` in
+`tests/CMakeLists.txt`, GoogleTest's sharding), one process each. A failure prints its test's name;
+one test alone is the executable with `--gtest_filter=Suite.Name`
+(`build/macos-core/tests/groomlab_tests --gtest_filter=...`), not `ctest -R`.
+
+- `ctest --preset macos-core -L quick -j 8`: the core's, the C API's and the bindings' GoogleTest
+  (the timings, `Budget.*` and `Performance.*`, are `-L budget`, one at a time: they were tuned on
+  Windows, so treat a miss as a number to look at, not a failure to fix blindly).
+- `ctest --preset macos-core -L blender -LE vray -j 4`: the Blender helper and add-on.
+- `ctest --preset macos-app -L app -j 8`: the app's tests (offscreen platform).
+- `-L core`, `-L io`, `-L python`: one area.
+- `-L maya` (the mayapy suites: `tests/hosts/maya/test_*.py`) needs a Maya preset that builds the
+  tests: the `macos-maya*` presets set `GROOMLAB_BUILD_TESTS` off. Add one (as Windows'
+  `ninja-maya2025-tests`) once the plugin loads, and run `ctest -L maya -LE "gui|arnold|vray|renderman"`;
+  then `-L arnold` with MtoA. No `gui` tier on macOS yet (the Maya GUI suites drive Windows' Maya);
+  no `renderman` (not installed).
 - `python3 tools/dev/test_changed.py` picks the tests for what you changed (check it runs on macOS).
 
 ## 13. Checklist (update the boxes as you go)
@@ -297,9 +335,13 @@ zip or `.dmg`, and the Blender extension zip. Nothing is published without the u
 - [ ] The plugin loads in Maya 2025; a groom draws in Viewport 2.0 (Metal); brushes and drags work (CPU)
 - [ ] The Python module imports in mayapy; the GroomLab menu works (fix Windows-only Python bits)
 - [ ] MtoA translator builds and renders a groom in Arnold
+- [ ] A Maya preset with tests; `ctest -L maya` green on the Mac
 - [ ] Maya 2026 (`macos-maya2026`)
+- [ ] Maya 2027 (`macos-maya2027`: Python 3.13)
+- [ ] Maya 2024 (`macos-maya2024`: Qt 5, PySide2, Python 3.10)
+- [ ] V-Ray for Maya translator builds (`if(APPLE)` branches, section 4 item 11) and renders a groom
 - [ ] Arnold procedural (`groomlab_procedural.dylib`) renders in kick
-- [ ] RenderMan procedural renders in prman
+- [ ] RenderMan procedural renders in prman (when RenderMan is installed)
 - [ ] Blender extension zip installs in Blender for macOS; the helper runs
 - [ ] Slang for macOS pinned; `gpu.*kernel_targets` green
 - [ ] Metal compute backend (`look_engine_metal.mm`), `groomlab_gpu_tests` green on macOS

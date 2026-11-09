@@ -270,7 +270,7 @@
             "name": "macos",
             "hidden": true,
             "inherits": "base",
-            "description": "macOS on Apple silicon with Apple Clang (Xcode) and Ninja: docs/MACOS.md. 13.3: the first macOS whose libc++ has std::to_chars for floats (the .groom writer); Maya 2025 and 2026 and Qt 6.8 run there",
+            "description": "macOS on Apple silicon with Apple Clang (Xcode) and Ninja: docs/MACOS.md. 13.3: the first macOS whose libc++ has std::to_chars for floats (the .groom writer); Maya 2024 to 2027 and Qt 6.8 run there",
             "generator": "Ninja",
             "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
             "cacheVariables": {
@@ -313,6 +313,16 @@
             }
         },
         {
+            "name": "macos-maya2024",
+            "displayName": "macOS, Maya 2024 plugin (Python 3.10, Qt 5 and PySide2, TBB 2020, MtoA 5.3+)",
+            "inherits": "macos-maya-devkit",
+            "cacheVariables": {
+                "MAYA_LOCATION": "$env{HOME}/groomlab-deps/sdks/maya-devkit-2024-macos",
+                "GROOMLAB_MAYA_APP": "/Applications/Autodesk/maya2024/Maya.app/Contents",
+                "MTOA_LOCATION": "/Applications/Autodesk/Arnold/mtoa/2024"
+            }
+        },
+        {
             "name": "macos-maya2025",
             "displayName": "macOS, Maya 2025 plugin (Python 3.11, Qt 6, MtoA 5.4+)",
             "inherits": "macos-maya-devkit",
@@ -330,6 +340,16 @@
                 "MAYA_LOCATION": "$env{HOME}/groomlab-deps/sdks/maya-devkit-2026-macos",
                 "GROOMLAB_MAYA_APP": "/Applications/Autodesk/maya2026/Maya.app/Contents",
                 "MTOA_LOCATION": "/Applications/Autodesk/Arnold/mtoa/2026"
+            }
+        },
+        {
+            "name": "macos-maya2027",
+            "displayName": "macOS, Maya 2027 plugin (Python 3.13, Qt 6, oneTBB, MtoA for 2027)",
+            "inherits": "macos-maya-devkit",
+            "cacheVariables": {
+                "MAYA_LOCATION": "$env{HOME}/groomlab-deps/sdks/maya-devkit-2027-macos",
+                "GROOMLAB_MAYA_APP": "/Applications/Autodesk/maya2027/Maya.app/Contents",
+                "MTOA_LOCATION": "/Applications/Autodesk/Arnold/mtoa/2027"
             }
         }
     ],
@@ -365,8 +385,10 @@
         { "name": "linux-asan", "configurePreset": "linux-asan" },
         { "name": "macos-core", "configurePreset": "macos-core" },
         { "name": "macos-app", "configurePreset": "macos-app" },
+        { "name": "macos-maya2024", "configurePreset": "macos-maya2024" },
         { "name": "macos-maya2025", "configurePreset": "macos-maya2025" },
-        { "name": "macos-maya2026", "configurePreset": "macos-maya2026" }
+        { "name": "macos-maya2026", "configurePreset": "macos-maya2026" },
+        { "name": "macos-maya2027", "configurePreset": "macos-maya2027" }
     ],
     "testPresets": [
         {
