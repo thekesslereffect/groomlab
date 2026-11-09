@@ -48,6 +48,9 @@ public:
     // Interpolate taking the guides' length alone (take length): the caller runs it on the CPU
     // engine; else the CPU's.
     bool lengthAlone = false;
+    // Interpolate keeping curls (keepCurls): the caller keeps them after it (the CPU engine); else
+    // the CPU's.
+    bool curls = false;
     // Gravity, Bend and Displace given their direction per strand (StageInputs::directions; Direction:
     // its inclination, roll and strength per strand): the caller's; else one varying (Direction's
     // three mapped) is the CPU's.

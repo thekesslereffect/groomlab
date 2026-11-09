@@ -159,6 +159,14 @@ cmds.setAttr(groom + ".previewDensity", 1.0)
   within its region binds again only the strands near it; moved into another region, every strand
   is bound again, and a strand changing region (a guide rooted in a color no guide was) makes
   Interpolate evaluate in full. The GPU preview blends from the same binding.
+- **Interpolate keeps curls where guides blend:** guides curling out of step cancel where they
+  blend (two helices half a turn apart average to a straight strand), so the strands between curly
+  guides come out straighter than any guide. `Interpolate.keepCurls` (Curls; 0, off, by default;
+  mappable, so a mask keeps them only where it says) brings each strand's curl back to its guides'
+  blended amount, in its own phase, its length kept: a curl is a swing of the hair's direction
+  `curlLength` long or shorter (4 by default; longer swings are the strand's sweep, blended as
+  ever). Guides curling in step blend as before. Brush dabs reblend only the strands they reach;
+  the GPU preview leaves an Interpolate keeping curls to the CPU.
 - **Segments live on the Resample node:** Scatter only places roots. The **Resample** node's
   `segments` (16 by default; 0 keeps each strand's) is the strands' resolution: strands (or
   guides) through it are resampled evenly to it, and every Scatter grows its strands with it in

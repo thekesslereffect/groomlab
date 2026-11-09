@@ -91,6 +91,11 @@ bool readStageParams(StageKind kind, const StageParamReader& r, StageParams* s, 
                 *why = r.name() + " fills the guides' tubes (fillTubes): the CPU's";
                 return false;
             }
+            if (params.has("keepCurls") && !r.curls && params.getString("take") == "shape" &&
+                (mappedParam(params, "keepCurls") || number("keepCurls") > 0.0)) {
+                *why = r.name() + " keeps the guides' curls (keepCurls): the CPU's";
+                return false;
+            }
             s->value[0] = static_cast<float>(number("limitDistance"));
             s->flag[0] = static_cast<int>(r.samples);
             s->flag[1] = params.getBool("preserveLength") ? 1 : 0;

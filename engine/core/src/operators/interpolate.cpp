@@ -187,6 +187,116 @@ namespace groomlab {
 namespace {
 
 constexpr std::size_t kMinGuideSamples = 32;
+
+// keepCurls: blending guides whose curls are out of step cancels them (two helices half a turn
+// apart average to a straight line), so a strand between them is straighter than either. Each
+// guide's curl is measured as Spectrum measures a band: its unit tangents smoothed along the hair
+// over curlLength (a Gaussian, padded with the overall direction), the curl the tangents' swing
+// about that, and its envelope the swing's slope (its length over the smoothed tangent's: a
+// curl's pitch, however much it cancels its own smoothing) as a root mean square smoothed alike. That is the same however
+// a guide is turned, so a strand's due envelope is its guides' blended by the binding's weights; its
+// own swing about its own smoothing is scaled to it (at most kCurlGain times), the tangents made unit
+// again and the strand rebuilt from its root with its segments' lengths: its curl comes back in its
+// own phase, and its length stays.
+constexpr float kCurlGain = 32.0f;
+// The smoothing's sigma per curlLength: a swing curlLength long is left a tenth of itself in the
+// smoothed tangents (sqrt(ln 10 / 2) / pi), shorter ones less, so a curl's measure holds nearly all of it.
+constexpr float kCurlWaveToSigma = 0.34157f;
+
+template <typename T>
+void smoothAlong(const T* x, std::size_t n, float sigma, T* out, const T& before, const T& after) {
+    std::copy(x, x + n, out);
+    if (n < 2 || !(sigma > 0.3f)) return;
+    const int last = static_cast<int>(n) - 1;
+    const int radius = std::min(std::max(1, static_cast<int>(std::ceil(3.0f * sigma))), 4096);
+    thread_local std::vector<float> weights;
+    weights.resize(static_cast<std::size_t>(radius) + 1);
+    const float inv = -0.5f / (sigma * sigma);
+    for (int k = 0; k <= radius; ++k) weights[static_cast<std::size_t>(k)] = std::exp(static_cast<float>(k * k) * inv);
+    auto at = [&](int i) { return i < 0 ? before : i > last ? after : x[static_cast<std::size_t>(i)]; };
+    for (int i = 0; i <= last; ++i) {
+        T sum = x[static_cast<std::size_t>(i)] * weights[0];
+        float total = weights[0];
+        for (int k = 1; k <= radius; ++k) {
+            const float w = weights[static_cast<std::size_t>(k)];
+            sum = sum + (at(i - k) + at(i + k)) * w;
+            total += 2.0f * w;
+        }
+        out[static_cast<std::size_t>(i)] = sum * (1.0f / total);
+    }
+}
+
+// A polyline's curl (keepCurls): its n - 1 unit tangents (`way`), their smoothing over `sigma`
+// segments (`low`) and the swing's envelope (`envelope`); false when it is too short to have one.
+bool curlOf(const Vec3f* p, std::size_t n, float sigma, std::vector<Vec3f>& way, std::vector<Vec3f>& low,
+            std::vector<float>& envelope) {
+    if (n < 3) return false;
+    const std::size_t m = n - 1;
+    way.resize(m);
+    low.resize(m);
+    envelope.resize(m);
+    Vec3f overall = p[n - 1] - p[0];
+    if (!(overall.length() > 0.0f)) return false;
+    overall = overall.normalized();
+    Vec3f lastWay = overall;
+    for (std::size_t j = 0; j < m; ++j) {
+        const Vec3f d = p[j + 1] - p[j];
+        const float len = d.length();
+        way[j] = len > 0.0f ? d * (1.0f / len) : lastWay;
+        lastWay = way[j];
+    }
+    smoothAlong(way.data(), m, sigma, low.data(), overall, overall);
+    thread_local std::vector<float> swing2;
+    swing2.resize(m);
+    for (std::size_t j = 0; j < m; ++j) {
+        const Vec3f r = way[j] - low[j];
+        const float along2 = std::max(low[j].dot(low[j]), 1e-4f);
+        swing2[j] = r.dot(r) / along2;
+    }
+    smoothAlong(swing2.data(), m, sigma, envelope.data(), swing2.front(), swing2.back());
+    for (float& e : envelope) e = std::sqrt(std::max(e, 0.0f));
+    return true;
+}
+
+// A guide's curl envelope at `samples` samples (its rows: offsets from its root, `stride` floats a
+// row) into `to` (samples - 1 values; 0 where it has none), smoothed over curlLength.
+void guideCurlEnvelope(const float* rows, std::size_t stride, std::size_t samples, float length, float curlLength, float* to) {
+    std::fill(to, to + (samples > 0 ? samples - 1 : 0), 0.0f);
+    if (samples < 3 || !(length > 0.0f) || !(curlLength > 0.0f)) return;
+    thread_local std::vector<Vec3f> points, way, low;
+    thread_local std::vector<float> envelope;
+    points.resize(samples);
+    for (std::size_t j = 0; j < samples; ++j) points[j] = Vec3f(rows[j], rows[stride + j], rows[2 * stride + j]);
+    const float step = length / static_cast<float>(samples - 1);
+    if (!curlOf(points.data(), samples, kCurlWaveToSigma * curlLength / step, way, low, envelope)) return;
+    std::copy(envelope.begin(), envelope.end(), to);
+}
+
+// keepCurls on one strand: its points (n of them) made to curl as much as `due` says (the blended
+// guide envelope at arc fraction f: due(f)), `keep` of the way.
+template <typename Due>
+void keepStrandCurls(Vec3f* p, std::size_t n, float curlLength, float keep, const Due& due) {
+    if (n < 3 || !(keep > 0.0f)) return;
+    thread_local std::vector<Vec3f> way, low;
+    thread_local std::vector<float> envelope, lengths;
+    float total = 0.0f;
+    lengths.resize(n - 1);
+    for (std::size_t j = 0; j + 1 < n; ++j) total += (lengths[j] = (p[j + 1] - p[j]).length());
+    if (!(total > 0.0f)) return;
+    const float step = total / static_cast<float>(n - 1);
+    if (!curlOf(p, n, kCurlWaveToSigma * curlLength / step, way, low, envelope)) return;
+    const float last = static_cast<float>(n - 1);
+    for (std::size_t j = 0; j + 1 < n; ++j) {
+        const float want = due((static_cast<float>(j) + 0.5f) / last);
+        const float have = envelope[j];
+        const float gain = have > 1e-6f ? std::min(want / have, kCurlGain) : 1.0f;
+        const float g = 1.0f + keep * (gain - 1.0f);
+        const Vec3f t = low[j] + (way[j] - low[j]) * g;
+        const float len = t.length();
+        way[j] = len > 1e-8f ? t * (1.0f / len) : way[j];
+    }
+    for (std::size_t j = 0; j + 1 < n; ++j) p[j + 1] = p[j] + way[j] * lengths[j];
+}
 constexpr std::size_t kMaxNeighbors = 16;
 constexpr std::size_t kMaxCandidates = kMaxNeighbors * 4 + 2;  // candidateCount never exceeds this
 
@@ -1107,6 +1217,22 @@ public:
                                              "the strand eases back to its groomed path, so hair drapes over an ear "
                                              "instead of standing off it (take shape; needs the scalp input)"}
                 .when("take", {"shape"}),
+            ParamSpec{"keepCurls", 0.0, "Keep the guides' curls where they blend: guides curling out of step cancel "
+                                        "(two helices half a turn apart average to a straight strand), so the "
+                                        "strands between curly guides come out straighter than any guide. With "
+                                        "keepCurls each strand's curl is brought back to its guides' blended amount, "
+                                        "in its own phase, its length kept (mappable: a mask; 0: the blend as it is; "
+                                        "the CPU's)", "fraction"}
+                .range(0, 1)
+                .in("Curls")
+                .when("take", {"shape"}),
+            ParamSpec{"curlLength", 4.0, "With keepCurls: the length of hair a curl's turn takes, at most: swings this "
+                                         "long or shorter are curls kept; longer ones are the strand's sweep, blended as "
+                                         "ever", "length"}
+                .atLeast(0.01)
+                .soft(0.5, 20)
+                .in("Curls")
+                .when("take", {"shape"}),
             ParamSpec{"respectParts", true, "Never blend guides from the other side of a part"}.adv(),
             ParamSpec{"followSurface", true, "Measure how far guides reach along the scalp (the scalp input), not in a "
                                               "straight line, so they do not reach across an ear, a fold or a thin shell "
@@ -1872,8 +1998,47 @@ private:
         reader.samples = samples;
         reader.lengthAlone = lengthOnly;
         reader.tubes = true;  // (its tubes handed in, StageInputs::interpolate; none filled: none)
+        reader.curls = true;  // (keepCurls: run after it, below)
+        // keepCurls: each guide's curl envelope, then each bound strand's curl brought back to its
+        // guides' blended envelope (the strands in tubes ride them as they are).
+        const ScalarField keepCurlsField(params(), "keepCurls", align ? scalp.get() : nullptr, guides.get());
+        const bool curls = !lengthOnly && !(keepCurlsField.isConstant() && !(keepCurlsField.maximum() > 0.0f));
+        const float curlLength = static_cast<float>(params().getDouble("curlLength"));
+        std::vector<float> guideCurls;
+        if (curls && samples >= 3) {
+            guideCurls.resize(kept.size() * (samples - 1));
+            parallelFor(0, kept.size(), [&](std::size_t g) {
+                guideCurlEnvelope(offsets.data() + g * 3 * stride, stride, samples, guideLengths[g], curlLength,
+                                  guideCurls.data() + g * (samples - 1));
+            }, 8);
+        }
+        Vec3f* curlPoints = nullptr;  // the output's points, once the stage wrote them
+        auto keepCurls = [&](std::size_t s) {
+            if (guideCurls.empty()) return;
+            const Binding::Record record = bindings.record(s);
+            if (!record.bound || (fill && fill->tubeOf[s] >= 0)) return;
+            const float keep = std::clamp(keepCurlsField.at(*strands, s), 0.0f, 1.0f) * influenceAt(record.nearest2);
+            if (!(keep > 0.0f)) return;
+            const std::size_t segments = samples - 1;
+            keepStrandCurls(curlPoints + out->strandBegin(s), out->strandPointCount(s), curlLength, keep, [&](float f) {
+                const float x = std::clamp(f * static_cast<float>(segments) - 0.5f, 0.0f, static_cast<float>(segments - 1));
+                const std::size_t k = std::min(static_cast<std::size_t>(x), segments > 1 ? segments - 2 : 0);
+                const float t = segments > 1 ? x - static_cast<float>(k) : 0.0f;
+                float due = 0.0f;
+                for (std::uint32_t i = 0; i < record.count; ++i) {
+                    const float* e = guideCurls.data() + record.guide(i) * segments;
+                    const float v = segments > 1 ? e[k] * (1.0f - t) + e[k + 1] * t : e[0];
+                    due += v * record.weight(i);
+                }
+                return due;
+            });
+        };
         if (!last) {
             gpu::runStageInto(gpu::StageKind::Interpolate, reader, strands, scalp.get(), *out, std::move(blend));
+            if (!guideCurls.empty()) {
+                curlPoints = out->strandPoints(0);
+                parallelFor(0, strandCount, keepCurls, 256);
+            }
             parallelFor(0, strandCount, blendChannels, 1024);
             if (!layerChannels.empty()) {
                 parallelFor(0, strandCount, [&](std::size_t s) {
@@ -1889,8 +2054,10 @@ private:
             if (fill) writeTubeChannels(*out, *fill);
         } else {
             gpu::runStageOnStrands(gpu::StageKind::Interpolate, reader, strands, dirty, scalp.get(), *out, std::move(blend));
+            if (!guideCurls.empty()) curlPoints = out->strandPoints(0);
             forEachListed(dirty, [&](std::size_t s) {
                 thread_local Scratch scratch;
+                keepCurls(s);  // (curlPoints: set before)
                 for (std::vector<float>* channel : attrChannels) (*channel)[s] = 0.0f;
                 const std::size_t begin = out->strandBegin(s), n = out->strandPointCount(s);
                 for (std::vector<float>* channel : layerChannels) std::fill(channel->begin() + begin, channel->begin() + begin + n, 0.0f);
