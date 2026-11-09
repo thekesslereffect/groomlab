@@ -44,6 +44,9 @@ def main():
     parser.add_argument("--config", default="RelWithDebInfo")
     parser.add_argument("--out", default=os.path.join(ROOT, "dist"))
     parser.add_argument("--blender", default=None, help="blender executable for validation (default: found)")
+    # macOS: a Developer ID identity and a notarytool profile (tools/macos_sign.py); ad hoc without.
+    parser.add_argument("--sign", default=os.environ.get("GROOMLAB_SIGN_IDENTITY"), help="macOS: the Developer ID Application identity")
+    parser.add_argument("--notarize", default=os.environ.get("GROOMLAB_NOTARY_PROFILE"), help="macOS: the notarytool keychain profile")
     args = parser.parse_args()
 
     stage = os.path.join(args.out, "blender_stage")
@@ -68,6 +71,13 @@ def main():
     for folder, dirs, _ in os.walk(ext):
         for d in [d for d in dirs if d == "__pycache__"]:
             shutil.rmtree(os.path.join(folder, d))
+    if sys.platform == "darwin":  # the helper signed (Developer ID with --sign, else ad hoc)
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import macos_sign
+        macos_sign.sign_files(ext, args.sign or "-")
+        problems = macos_sign.verify_files(ext)
+        if problems:
+            sys.exit("signatures do not verify:\n  " + "\n  ".join(problems))
     manifest = manifest_of(ext)
     version, platform = manifest["version"], manifest["platforms"][0]
 
@@ -90,6 +100,13 @@ def main():
     else:
         print("no Blender found: the zip is not validated")
     print("wrote %s (%.1f MB)" % (zip_path, os.path.getsize(zip_path) / 1e6))
+    if sys.platform == "darwin" and args.notarize:
+        if not args.sign:
+            sys.exit("--notarize needs --sign (a Developer ID identity)")
+        accepted, summary = macos_sign.notarize(zip_path, args.notarize)
+        if not accepted:
+            sys.exit("notarization refused %s: %s" % (zip_path, summary))
+        print("notarized: " + summary)
 
 
 if __name__ == "__main__":

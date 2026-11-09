@@ -72,6 +72,9 @@ def main():
     parser.add_argument("--config", default="RelWithDebInfo")
     parser.add_argument("--symbols", action="store_true", help="include the plugins' .pdb")
     parser.add_argument("--out", default=os.path.join(ROOT, "dist"))
+    # macOS: a Developer ID identity and a notarytool profile (tools/macos_sign.py); ad hoc without.
+    parser.add_argument("--sign", default=os.environ.get("GROOMLAB_SIGN_IDENTITY"), help="macOS: the Developer ID Application identity")
+    parser.add_argument("--notarize", default=os.environ.get("GROOMLAB_NOTARY_PROFILE"), help="macOS: the notarytool keychain profile")
     args = parser.parse_args()
 
     if args.maya:
@@ -178,6 +181,14 @@ def main():
     with open(os.path.join(module, "VERSION.txt"), "w") as f:
         f.write("GroomLab %s (%s, %s)\n" % (version, commit or "unknown commit", args.config))
 
+    if MAC:  # every Mach-O signed (Developer ID with --sign, else ad hoc), checked
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import macos_sign
+        count = macos_sign.sign_files(stage, args.sign or "-")
+        problems = macos_sign.verify_files(stage)
+        if problems:
+            sys.exit("signatures do not verify:\n  " + "\n  ".join(problems))
+        print("signed %d Mach-O files %s" % (count, "with " + args.sign if args.sign else "ad hoc"))
     os.makedirs(args.out, exist_ok=True)
     zip_path = os.path.join(args.out, "GroomLab-%s-maya-%s.zip" % (version, "macos-arm64" if MAC else "win64"))
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
@@ -190,6 +201,13 @@ def main():
     beta = [y for y in years if y not in TESTED]
     print("wrote %s (%.1f MB, commit %s): Maya %s%s" % (zip_path, size, commit, ", ".join(years),
                                                        " (beta: %s)" % ", ".join(beta) if beta else ""))
+    if MAC and args.notarize:  # (a zip cannot be stapled: Gatekeeper asks Apple for the ticket online)
+        if not args.sign:
+            sys.exit("--notarize needs --sign (a Developer ID identity)")
+        accepted, summary = macos_sign.notarize(zip_path, args.notarize)
+        if not accepted:
+            sys.exit("notarization refused %s: %s" % (zip_path, summary))
+        print("notarized: " + summary)
 
 
 if __name__ == "__main__":

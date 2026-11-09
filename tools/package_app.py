@@ -411,6 +411,9 @@ def main():
     parser.add_argument("--stage-only", action="store_true", help="install and check the folder; no zip")
     parser.add_argument("--no-smoke", action="store_true", help="skip the smoke run from a clean folder")
     parser.add_argument("--no-window", action="store_true", help="smoke run without the step that shows the window")
+    # macOS: a Developer ID identity and a notarytool profile (tools/macos_sign.py); ad hoc without.
+    parser.add_argument("--sign", default=os.environ.get("GROOMLAB_SIGN_IDENTITY"), help="macOS: the Developer ID Application identity")
+    parser.add_argument("--notarize", default=os.environ.get("GROOMLAB_NOTARY_PROFILE"), help="macOS: the notarytool keychain profile")
     args = parser.parse_args()
     if sys.platform == "darwin":
         return main_mac(args)
@@ -566,13 +569,26 @@ def main_mac(args):
     commit = subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
     with open(os.path.join(folder, "VERSION.txt"), "w", encoding="utf-8") as f:
         f.write("GroomLab app %s beta, macOS arm64 (%s, %s)\n" % (version, commit or "unknown commit", args.config))
-    # Ad hoc (Apple silicon runs nothing unsigned; macdeployqt and install_name_tool broke the signatures).
-    subprocess.check_call(["codesign", "--force", "--deep", "--sign", "-", app], stderr=subprocess.DEVNULL)
-    subprocess.check_call(["codesign", "--verify", "--deep", "--strict", app])
+    # Signed inside out (Developer ID with --sign, else ad hoc: Apple silicon runs nothing unsigned, and
+    # macdeployqt and install_name_tool broke the signatures); notarized and stapled with --notarize.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import macos_sign
+    macos_sign.sign_app(app, args.sign or "-")
+    if args.notarize:
+        if not args.sign:
+            sys.exit("--notarize needs --sign (a Developer ID identity)")
+        submit = os.path.join(stage, "GroomLab-notarize.zip")
+        subprocess.check_call(["ditto", "-c", "-k", "--keepParent", app, submit])
+        accepted, summary = macos_sign.notarize(submit, args.notarize)
+        os.remove(submit)
+        if not accepted:
+            sys.exit("notarization refused GroomLab.app: " + summary)
+        macos_sign.staple(app)
+        print("notarized and stapled: " + summary)
     size = sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(folder) for f in fs
                if not os.path.islink(os.path.join(d, f)))
-    print("staged GroomLab.app (%.1f MB): nothing loaded from outside the bundle, signed ad hoc, %d Qt files listed"
-          % (size / 1e6, len(qt_files)))
+    print("staged GroomLab.app (%.1f MB): nothing loaded from outside the bundle, signed %s, %d Qt files listed"
+          % (size / 1e6, "with " + args.sign if args.sign else "ad hoc", len(qt_files)))
     if args.stage_only:
         return
     top = "GroomLab-App-%s-beta" % version
