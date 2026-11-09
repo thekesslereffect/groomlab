@@ -820,7 +820,8 @@ if(GROOMLAB_GUI_TESTS AND GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     # reads at startup without a question.
     add_test(NAME maya.gui_trust
         COMMAND "${CMAKE_COMMAND}" "-DAPP_DIR=${CMAKE_CURRENT_BINARY_DIR}/maya_app_dir"
-                "-DDIR=$<TARGET_FILE_DIR:GroomLab>" -P "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/trust_plugin_folder.cmake")
+                "-DDIR=$<TARGET_FILE_DIR:GroomLab>" "-DMAYA_YEAR=${GROOMLAB_MAYA_YEAR}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/trust_plugin_folder.cmake")
     set_tests_properties(maya.gui_trust PROPERTIES FIXTURES_SETUP maya_gui_trust LABELS "gui;maya")
     # GROOMLAB_GUI_SUITES (brush,viewport,...) in ctest's environment runs only those suites.
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gui.mel"
