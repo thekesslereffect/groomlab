@@ -104,6 +104,11 @@ maya_add_plugin(GroomLab
 )
 target_link_libraries(GroomLab PRIVATE groomlab_maya_inputs groomlab_maya_qt groomlab::warnings
     nlohmann_json::nlohmann_json)  # graphStatsJson
+if(APPLE)
+    # The display's pixels per point under the cursor (the brush's radius in points: display_scale.h).
+    target_sources(GroomLab PRIVATE src/display_scale.cpp)
+    target_link_libraries(GroomLab PRIVATE "-framework CoreGraphics" "-framework CoreFoundation")
+endif()
 # The Maya API headers most of the plugin's files include (none that pulls in windows.h).
 groomlab_precompile(GroomLab <nlohmann/json.hpp>
     <maya/MArgDatabase.h> <maya/MArgList.h> <maya/MDagPath.h> <maya/MDGModifier.h> <maya/MDoubleArray.h>

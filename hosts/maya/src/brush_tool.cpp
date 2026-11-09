@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "brush_tool.h"
+#include "display_scale.h"
 
 #include <algorithm>
 #include <atomic>
@@ -996,6 +997,7 @@ void BrushContext::endStroke(const ToolView& view) {
 
 bool BrushContext::simulateStroke(const std::vector<std::pair<short, short>>& points, bool ctrl, bool shift, bool draw,
                                   bool adjust) {
+    pixelScale();
     const ToolView view = activeToolView();
     if (tool_.settings.tool == BrushToolSettings::Tool::Lengths) {
         // The Length Keys tool: a press at the first point (a key added, or one picked), a drag
@@ -1119,8 +1121,18 @@ MStatus BrushContext::doDrag(MEvent& event, MHWRender::MUIDrawManager& draw, con
 MStatus BrushContext::doRelease(MEvent& event, MHWRender::MUIDrawManager&, const MHWRender::MFrameContext&) {
     return guarded("release", [&] { return release(event); });
 }
+float BrushContext::pixelScale() {
+    const float now = displayPixelScale();
+    if (now != pixelScale_) {
+        tool_.settings.screenRadius *= now / pixelScale_;
+        pixelScale_ = now;
+    }
+    return pixelScale_;
+}
+
 MStatus BrushContext::doPtrMoved(MEvent& event, MHWRender::MUIDrawManager& draw, const MHWRender::MFrameContext&) {
     return guarded("hover", [&] {
+        pixelScale();  // (the ring at the radius on this display)
         short x = 0, y = 0;
         event.getPosition(x, y);
         showSymmetry();
@@ -1135,6 +1147,7 @@ MStatus BrushContext::doPtrMoved(MEvent& event, MHWRender::MUIDrawManager& draw,
 }
 
 MStatus BrushContext::press(MEvent& event, MHWRender::MUIDrawManager& draw) {
+    pixelScale();
     short x = 0, y = 0;
     event.getPosition(x, y);
     const bool slider = event.mouseButton() == MEvent::kLeftMouse && !dragSlider.empty();
@@ -1178,8 +1191,8 @@ MStatus BrushContext::drag(MEvent& event, MHWRender::MUIDrawManager& draw) {
             s.brush.strength = std::clamp(adjustValue_ + dx * 0.01f, -10.0f, 10.0f);
             label = MString("strength ") + s.brush.strength;
         } else {
-            s.screenRadius = std::clamp(adjustRadius_ + dx, 5.0f, 2000.0f);
-            label = MString("radius ") + static_cast<int>(s.screenRadius);
+            s.screenRadius = std::clamp(adjustRadius_ + dx, 5.0f * pixelScale_, 2000.0f * pixelScale_);
+            label = MString("radius ") + static_cast<int>(s.screenRadius / pixelScale_);
         }
         drawCircle(draw, adjustX_, adjustY_);
         draw.beginDrawable();
@@ -1444,7 +1457,9 @@ MStatus BrushContextCmd::doEditFlags() {
         MString text;
         double d = 0;
         bool b = false;
-        if (args.isFlagSet(kRadiusFlag[0]) && args.getFlagArgument(kRadiusFlag[0], 0, d)) s.setScreenRadius(float(d));
+        if (args.isFlagSet(kRadiusFlag[0]) && args.getFlagArgument(kRadiusFlag[0], 0, d)) {
+            s.setScreenRadius(float(d) * context_->pixelScale());  // (points: the view's pixels)
+        }
         if (args.isFlagSet(kPressureFlag[0]) && args.getFlagArgument(kPressureFlag[0], 0, b)) s.pressure = b;
         if (args.isFlagSet(kDragSliderFlag[0]) && args.getFlagArgument(kDragSliderFlag[0], 0, text)) {
             if (text != "radius" && text != "strength" && text != "none" && text != "") {
@@ -1510,7 +1525,10 @@ MStatus BrushContextCmd::doQueryFlags() {
         MArgParser args = parser();
         const BrushToolSettings& s = context_->settings();
         if (args.isFlagSet(kModeFlag[0])) setResult(MString(context_->toolModeName().c_str()));
-        else if (args.isFlagSet(kRadiusFlag[0])) setResult(double(s.screenRadius));
+        else if (args.isFlagSet(kRadiusFlag[0])) {
+            const float scale = context_->pixelScale();  // (first: it may rescale the radius)
+            setResult(double(s.screenRadius / scale));
+        }
         else if (args.isFlagSet(kStrengthFlag[0])) setResult(double(s.brush.strength));
         else if (args.isFlagSet(kLevelFlag[0])) setResult(s.brush.level);
         else if (args.isFlagSet(kGroupFlag[0])) setResult(MString(s.brush.group.c_str()));

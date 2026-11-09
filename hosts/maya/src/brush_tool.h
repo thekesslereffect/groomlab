@@ -162,6 +162,11 @@ public:
     std::string dragSlider;
 
     BrushToolSettings& settings() { return tool_.settings; }
+    // The view's pixels per point of the brush's radius (display_scale.h: 2 on a Retina display,
+    // 1 off macOS). The radius a person sets and reads (-radius, the drag's label) is in points;
+    // tool_.settings.screenRadius, which the strokes and the ring use, in the view's pixels: kept
+    // the radius times this, rescaled when the cursor is on a display of another scale.
+    float pixelScale();
     // The Length Keys tool (Tool::Lengths): an edit by words (-lengthEdit: "scale 1.5", "length 2.5",
     // "change trim", "select 1", "deleteKey", "clear", "apply", "cancel"; throws
     // std::invalid_argument for others) and its state as JSON (-lengthState).
@@ -241,6 +246,7 @@ private:
     bool adjustStrength_ = false;
     short adjustX_ = 0, adjustY_ = 0;
     float adjustRadius_ = 0.0f, adjustValue_ = 0.0f;
+    float pixelScale_ = 1.0f;  // (pixelScale's, the last)
 
 };
 
