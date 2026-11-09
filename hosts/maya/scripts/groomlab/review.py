@@ -204,10 +204,12 @@ class TurntableJob(object):
     def __init__(self, command, folder, frames, fps=24):
         import os
         import subprocess
+        import sys
         self.folder, self.frames, self.fps = folder, frames, fps
         self.log = os.path.join(folder, "render.log")
         with open(self.log, "w") as out:
-            self.process = subprocess.Popen(command, stdout=out, stderr=subprocess.STDOUT, creationflags=self._flags())
+            self.process = subprocess.Popen(command, stdout=out, stderr=subprocess.STDOUT, creationflags=self._flags(),
+                                            start_new_session=sys.platform == "darwin")  # (render_common.kill_tree)
         self.encoder = None  # ffmpeg, once the frames are done
         self.movie = None    # the mp4's path once encoded, "" when there is none
 
@@ -248,7 +250,8 @@ class TurntableJob(object):
                 subprocess.call(["taskkill", "/F", "/T", "/PID", str(proc.pid)], stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL, creationflags=self._flags())
             else:
-                proc.kill()
+                from groomlab.render_common import kill_tree
+                kill_tree(proc)
         self.movie = self.movie or ""
 
     def wait(self, timeout=None):

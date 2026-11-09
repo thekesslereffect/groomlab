@@ -14,7 +14,9 @@ import glob
 import math
 import os
 import re
+import signal
 import subprocess
+import sys
 import time
 
 
@@ -190,6 +192,21 @@ def default_lights(camera_matrix):
 # ---------------------------------------------------------------------------
 # The renderer in the background
 
+
+def kill_tree(process):
+    """Kills `process` and what it started (off Windows). macOS: Maya's Render is a shell script that
+    starts Maya in batch mode, so killing the script alone left the render running: the renders start
+    in their own session (start_new_session) and the whole process group goes."""
+    if sys.platform == "darwin":
+        try:
+            if os.getpgid(process.pid) == process.pid:  # its own group leader: never this Maya's group
+                os.killpg(process.pid, signal.SIGKILL)
+                return
+        except OSError:  # gone already
+            return
+    process.kill()
+
+
 class RenderJob(object):
     """A renderer rendering in the background (the host stays free): poll() for progress, cancel()
     to stop it. The images land in `folder` (images_for), the renderer's output in render.log
@@ -207,7 +224,8 @@ class RenderJob(object):
         with open(self.log, "w") as out:
             self.process = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                             cwd=folder, env=env,
-                                            creationflags=self.NO_WINDOW if os.name == "nt" else 0)
+                                            creationflags=self.NO_WINDOW if os.name == "nt" else 0,
+                                            start_new_session=sys.platform == "darwin")
 
     @staticmethod
     def progress_of(log_text):
@@ -254,7 +272,7 @@ class RenderJob(object):
             subprocess.call(["taskkill", "/F", "/T", "/PID", str(self.process.pid)], stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, creationflags=self.NO_WINDOW)
         else:
-            self.process.kill()
+            kill_tree(self.process)
         try:
             self.process.wait(10)
         except subprocess.TimeoutExpired:
