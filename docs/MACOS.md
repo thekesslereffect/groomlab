@@ -98,7 +98,7 @@ in `~/.cache/groomlab-deps/fetch` (`GROOMLAB_FETCH_CACHE`).
 | SDK | Where | Used by |
 |---|---|---|
 | Maya 2024 to 2027 install (installed) | `/Applications/Autodesk/maya<year>` (`Maya.app/Contents/MacOS`: libraries; `Maya.app/Contents/bin/mayapy`) | running the plugin; `GROOMLAB_MAYA_APP` |
-| Maya devkit, macOS, per version (to download) | Autodesk Platform Services, "Maya devkit" for macOS: unpack `devkitBase` to `~/groomlab-deps/sdks/maya-devkit-<year>-macos` (it holds `include/maya`, `include/Python3xx`, `include/tbb`) | `macos-maya<year>` `MAYA_LOCATION` |
+| Maya devkit, macOS (not needed) | each macOS install has `include/maya` and `include/tbb` itself, its libraries in `Maya.app/Contents/MacOS` and Python's headers in its `Python.framework` (found through `mayapy`): the `macos-maya<year>` presets' `MAYA_LOCATION` is `/Applications/Autodesk/maya<year>` (checked 2026-11-09). A devkit still works: `-DMAYA_LOCATION=<devkitBase>` | `macos-maya<year>` `MAYA_LOCATION` |
 | MtoA for macOS (installed) | installed with Arnold for Maya: `/Applications/Autodesk/Arnold/mtoa/<year>` (`include/mtoa`, `bin/libmtoa_api.dylib`, `bin/libai.dylib`) | the MtoA translator |
 | V-Ray for Maya (installed) | find it (`ls -d /Applications/Chaos*/V-Ray/*` or `/Applications/ChaosGroup/...`): the folder per Maya version holding `vray/include/vray_maya_sdk/translator_interface.h`; pass it as `-DVRAY_FOR_MAYA_LOCATION=...` | the V-Ray for Maya translator (section 4, item 11: its build is Windows-only today) |
 | Arnold SDK for macOS (optional) | `Arnold-7.x-darwin.tgz` unpacked to `~/groomlab-deps/sdks/arnold-macos` | the Arnold procedural without MtoA |
@@ -173,6 +173,9 @@ portable (a cast that is correct everywhere).
    `GroomLabTBB.cmake` looks in `Maya.app/Contents/MacOS`. Check `otool -L GroomLab.bundle` names
    `@rpath/libtbb...` the way Maya's own plugins do (compare `otool -L` on one of Maya's
    `.bundle`s in `Maya.app/Contents/plug-ins`).
+   **Found:** Maya 2025 ships both libraries with TBB 2020's headers: `GroomLabTBB.cmake` now takes
+   `libtbb.12` only when the install has `include/oneapi/tbb`. The links match Maya's own plugins
+   (Maya's libraries by `@executable_path`, `@rpath/libtbb.dylib`).
 8. **MtoA on macOS.** The translator is a `SHARED` library named `groomLabTranslator.dylib`;
    check MtoA loads `.dylib` extensions from `MTOA_EXTENSIONS_PATH` and that `find_library(ai)`
    found `libai.dylib`.
@@ -345,16 +348,16 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [ ] `macos-app` builds; the app opens, draws a groom on Metal, previews on the CPU (builds and starts on Metal without errors; the window not looked at yet)
 - [x] `ctest -L "quick|app"` green on `macos-app`
 - [ ] Offscreen renders (thumbnails, turntables) correct on Metal
-- [ ] Maya 2025 devkit + install in place; `macos-maya2025` builds `GroomLab.bundle`
-- [ ] The plugin loads in Maya 2025; a groom draws in Viewport 2.0 (Metal); brushes and drags work (CPU)
-- [ ] The Python module imports in mayapy; the GroomLab menu works (fix Windows-only Python bits)
-- [ ] MtoA translator builds and renders a groom in Arnold
+- [x] Maya 2025 install in place (no devkit needed); `macos-maya2025` builds `GroomLab.bundle`
+- [ ] The plugin loads in Maya 2025; a groom draws in Viewport 2.0 (Metal); brushes and drags work (CPU) (loads in mayapy: `test_plugin.py` 23 OK, 3 skipped; the Maya UI not tried yet)
+- [ ] The Python module imports in mayapy; the GroomLab menu works (fix Windows-only Python bits) (imports; `test_updates.py` green; `os.startfile` and `GroomLab.mll` fixed, `review.py`'s `Render` was right; the menu not tried in the UI)
+- [x] MtoA translator builds and renders a groom in Arnold (`test_arnold.py` on 2025: 30 of 33. Open: the turntable test's batch render aborts without an Arnold license on this Mac (`abort_on_license_fail`); and `kick` crashes at exit (SIGSEGV in TBB 2020's `private_server` destructor, a call into an image no longer mapped) only when the test runs it, after the procedural has expanded and written everything: not reproduced by hand, and pinning the procedural (`RTLD_NODELETE`) did not change it. Next: check with oneTBB (2026), and whether TBB 2020 unloads `libtbbmalloc` at exit)
 - [ ] A Maya preset with tests; `ctest -L maya` green on the Mac
 - [ ] Maya 2026 (`macos-maya2026`)
 - [ ] Maya 2027 (`macos-maya2027`: Python 3.13)
 - [ ] Maya 2024 (`macos-maya2024`: Qt 5, PySide2, Python 3.10)
 - [ ] V-Ray for Maya translator builds (`if(APPLE)` branches, section 4 item 11) and renders a groom
-- [ ] Arnold procedural (`groomlab_procedural.dylib`) renders in kick
+- [ ] Arnold procedural (`groomlab_procedural.dylib`) renders in kick (builds with `-DGROOMLAB_BUILD_PROCEDURAL=ON` against MtoA's Arnold; `kick` loads it, renders and expands it; the exit crash above is open)
 - [ ] RenderMan procedural renders in prman (when RenderMan is installed)
 - [x] Blender extension zip installs in Blender for macOS; the helper runs (`-L blender -LE vray` green, Blender 5.2.3)
 - [ ] Slang for macOS pinned; `gpu.*kernel_targets` green
