@@ -4989,7 +4989,8 @@ class GraphEditor(QtWidgets.QWidget):
         self.rebuild()
         self.refresh_status()
         self.view.auto_frame = True
-        QtCore.QTimer.singleShot(0, self.view.frame_readable)  # once the view has its size
+        view = self.view  # once the view has its size, if it is still there (an editor closed at once)
+        QtCore.QTimer.singleShot(0, lambda: widgets.alive(view) and view.frame_readable())
         self.report(self.model.unreadable, trouble=bool(self.model.unreadable))
 
     def reload(self):
