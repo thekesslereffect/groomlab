@@ -198,13 +198,19 @@ void MainWindow::chooseVrayStandalone() {
     const QString path = QFileDialog::getOpenFileName(this, tr("V-Ray Standalone (vray.exe)"), current,
 #ifdef Q_OS_WIN
                                                       tr("V-Ray Standalone (vray.exe);;Programs (*.exe)")
+#elif defined(Q_OS_MACOS)
+                                                      tr("V-Ray Standalone (VRay.app vray.bin)")
 #else
                                                       tr("V-Ray Standalone (vray)")
 #endif
     );
     if (path.isEmpty()) return;
     setVrayStandalone(path);
+#ifdef Q_OS_MACOS
+    notify(tr("V-Ray Standalone: %1").arg(findVrayStandalone()));  // the vray.bin inside what was picked
+#else
     notify(tr("V-Ray Standalone: %1").arg(QDir::toNativeSeparators(path)));
+#endif
 }
 
 void MainWindow::choosePrman() {

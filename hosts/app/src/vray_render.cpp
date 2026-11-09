@@ -151,7 +151,36 @@ void writeVrayScene(const std::string& scenePath, const std::string& groomPath, 
     if (!out) throw std::runtime_error("cannot write " + scenePath);
 }
 
+#ifdef Q_OS_MACOS
+namespace {
+// macOS: vray.bin inside the install's VRay.app (Standalone_for_<os>/VRay.app/Contents/MacOS); the
+// install folder or VRay.app itself given (the file dialog picks an app bundle as a file) is read as it.
+QString vrayBinIn(const QString& path) {
+    if (path.isEmpty()) return {};
+    if (QFileInfo(path).isFile()) return QFileInfo(path).absoluteFilePath();
+    for (const QString& inside : {QStringLiteral("Contents/MacOS/vray.bin"), QStringLiteral("VRay.app/Contents/MacOS/vray.bin")}) {
+        const QFileInfo bin(QDir(path).filePath(inside));
+        if (bin.isFile()) return bin.absoluteFilePath();
+    }
+    return {};
+}
+}  // namespace
+#endif
+
 QString findVrayStandalone() {
+#ifdef Q_OS_MACOS
+    for (const QString& given : {qEnvironmentVariable("GROOMLAB_VRAY"), QSettings().value(QLatin1String(kVraySetting)).toString()}) {
+        const QString bin = vrayBinIn(given);
+        if (!bin.isEmpty()) return bin;
+    }
+    QDir chaos(QStringLiteral("/Applications/Chaos/V-Ray"));
+    QStringList installs = chaos.entryList({QStringLiteral("Standalone_for_*")}, QDir::Dirs, QDir::Name | QDir::Reversed);
+    for (const QString& install : installs) {
+        const QString bin = vrayBinIn(chaos.filePath(install));
+        if (!bin.isEmpty()) return bin;
+    }
+    return QStandardPaths::findExecutable(QStringLiteral("vray.bin"));
+#else
     const auto usable = [](const QString& path) { return !path.isEmpty() && QFileInfo(path).isFile(); };
     const QString env = qEnvironmentVariable("GROOMLAB_VRAY");
     if (usable(env)) return QFileInfo(env).absoluteFilePath();
@@ -163,9 +192,17 @@ QString findVrayStandalone() {
     if (usable(installed)) return QDir::cleanPath(installed);
 #endif
     return QStandardPaths::findExecutable(QStringLiteral("vray"));
+#endif
 }
 
-void setVrayStandalone(const QString& path) { QSettings().setValue(QLatin1String(kVraySetting), path); }
+void setVrayStandalone(const QString& path) {
+#ifdef Q_OS_MACOS
+    const QString bin = vrayBinIn(path);
+    QSettings().setValue(QLatin1String(kVraySetting), bin.isEmpty() ? path : bin);
+#else
+    QSettings().setValue(QLatin1String(kVraySetting), path);
+#endif
+}
 
 QStringList vrayArguments(const QString& scenePath, const QString& imagePath, int turntableFrames) {
     QStringList args = {QStringLiteral("-sceneFile=") + QDir::toNativeSeparators(scenePath),
