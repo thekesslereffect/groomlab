@@ -132,8 +132,9 @@ def main():
     os.environ["GROOMLAB_NO_UPDATES"] = "1"
     prefs = tempfile.mkdtemp(prefix="groomlab-qt-check-")
     os.environ["GROOMLAB_UPDATES_DIR"] = prefs
-    for folder in args.dll_dir + [args.core]:
-        os.add_dll_directory(os.path.abspath(folder))
+    if hasattr(os, "add_dll_directory"):  # Windows (macOS: the module's rpath finds its TBB)
+        for folder in args.dll_dir + [args.core]:
+            os.add_dll_directory(os.path.abspath(folder))
     sys.path[:0] = [SCRIPTS, os.path.abspath(args.core)]
     _fake_maya(args.api, prefs)
 
