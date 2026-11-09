@@ -357,8 +357,15 @@ TEST(ParamUse, EveryDeclaredParamIsReadWhereItShows) {
                     }
                 }
             }
+            // (A state set twice, a choice set to the value it had, is evaluated once.)
+            std::set<std::uint64_t> distinct;
+            std::vector<const ParamSet*> uniqueStates;
+            for (const ParamSet& params : paramStates) {
+                if (distinct.insert(params.hash()).second) uniqueStates.push_back(&params);
+            }
             for (const std::vector<Value>& inputs : inputStates) {
-                for (const ParamSet& params : paramStates) {
+                for (const ParamSet* state : uniqueStates) {
+                    const ParamSet& params = *state;
                     const std::unique_ptr<Operator> op = registry.create(type);
                     op->params() = params;
                     op->setNodeVersion(inst.version);

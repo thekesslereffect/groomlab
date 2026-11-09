@@ -54,7 +54,7 @@ if(NOT WIN32)
                 COMMAND "${CMAKE_COMMAND}" -DSLANGC=${GROOMLAB_SLANGC} -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/shaders/${_file}
                         "-DENTRIES=${_entries}" -DOUT=${CMAKE_CURRENT_BINARY_DIR}/${_name}
                         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_kernel_targets.cmake")
-            set_tests_properties(gpu.${_name} PROPERTIES LABELS "quick;gpu")
+            set_tests_properties(gpu.${_name} PROPERTIES LABELS "gpu")
         endforeach()
     endif()
     return()
@@ -230,13 +230,13 @@ if(GROOMLAB_BUILD_TESTS)
     add_test(NAME gpu.kernel_targets
         COMMAND "${CMAKE_COMMAND}" -DSLANGC=${_slangc} -DSOURCE=${_source} "-DENTRIES=${_kernels}"
                 -DOUT=${CMAKE_CURRENT_BINARY_DIR}/kernel_targets -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_kernel_targets.cmake")
-    set_tests_properties(gpu.kernel_targets PROPERTIES LABELS "quick;gpu")
+    set_tests_properties(gpu.kernel_targets PROPERTIES LABELS "gpu")
     add_test(NAME gpu.line_kernel_targets
         COMMAND "${CMAKE_COMMAND}" -DSLANGC=${_slangc} -DSOURCE=${_lines_source} "-DENTRIES=${_line_kernels}"
                 -DOUT=${CMAKE_CURRENT_BINARY_DIR}/line_kernel_targets -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_kernel_targets.cmake")
-    set_tests_properties(gpu.line_kernel_targets PROPERTIES LABELS "quick;gpu")
+    set_tests_properties(gpu.line_kernel_targets PROPERTIES LABELS "gpu")
     add_test(NAME gpu.follow_kernel_targets
         COMMAND "${CMAKE_COMMAND}" -DSLANGC=${_slangc} -DSOURCE=${_follow_source} "-DENTRIES=${_follow_kernels}"
                 -DOUT=${CMAKE_CURRENT_BINARY_DIR}/follow_kernel_targets -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_kernel_targets.cmake")
-    set_tests_properties(gpu.follow_kernel_targets PROPERTIES LABELS "quick;gpu")
+    set_tests_properties(gpu.follow_kernel_targets PROPERTIES LABELS "gpu")
 endif()

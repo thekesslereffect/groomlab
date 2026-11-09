@@ -176,9 +176,12 @@ add_test(NAME core.lod_pictures COMMAND groomlab_lod_pictures --check --strands 
          --out "${CMAKE_CURRENT_BINARY_DIR}/lod_pictures")
 set_tests_properties(core.lod_pictures PROPERTIES LABELS "pictures;core" TIMEOUT 1800 RUN_SERIAL TRUE)
 
-# Test tiers (ctest -L, docs/DEVELOPING.md section 2): `quick` (no windows: core, bindings and the
-# mayapy suites), `gui` (one Maya window running every GUI suite), `arnold` (MtoA and the
-# procedural), `renderman` (the RenderMan procedural in prman). No label filter runs all of them. Every test also has the label of the area it
+# Test tiers (ctest -L, docs/DEVELOPING.md section 2), each test in one of them: `quick` (no windows,
+# a few minutes: the core's, the bindings', the GPU engine's and the app's gtests), `maya` (the mayapy
+# suites), `blender` (the helper and the add-on in a headless Blender), `gpu` alone for the slangc
+# kernel compiles, `budget` (the timing tests, one at a time), `gui` (one Maya window running every
+# GUI suite), `arnold` (MtoA and the procedural), `renderman` (the RenderMan procedural in prman),
+# `vray`. No label filter runs all of them. Every test also has the label of the area it
 # tests: `core`, `io` (Alembic, groom scenes), `gpu`, `python`, `maya`, `app`
 # (tools/dev/test_changed.py picks them from the files a branch changed).
 #
@@ -199,9 +202,9 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.27)
     gtest_discover_tests(groomlab_tests DISCOVERY_MODE PRE_TEST TEST_FILTER "${_io_suites}"
                          TEST_LIST groomlab_io_tests PROPERTIES LABELS quick)
     gtest_discover_tests(groomlab_tests DISCOVERY_MODE PRE_TEST TEST_FILTER "Budget.*:Performance.*"
-                         TEST_LIST groomlab_timing_tests PROPERTIES LABELS quick RUN_SERIAL TRUE)
+                         TEST_LIST groomlab_timing_tests PROPERTIES LABELS budget RUN_SERIAL TRUE)
     groomlab_label_discovered(groomlab_io_tests quick io)
-    groomlab_label_discovered(groomlab_timing_tests quick core)
+    groomlab_label_discovered(groomlab_timing_tests budget core)
 else()
     gtest_discover_tests(groomlab_tests DISCOVERY_MODE PRE_TEST TEST_LIST groomlab_core_tests PROPERTIES LABELS quick)
 endif()
@@ -429,7 +432,7 @@ if(TARGET groomlab-helper AND TARGET groomlab-cli)
                 "GROOMLAB_CORE_PYTHON=${GROOMLAB_PYTHON_EXECUTABLE};GROOMLAB_CORE_PYTHONPATH=$<TARGET_FILE_DIR:groomlab_core_py>")
         endif()
         set_tests_properties(blender.helper PROPERTIES
-            LABELS "quick;blender"
+            LABELS "blender"
             ENVIRONMENT "GROOMLAB_HELPER=$<TARGET_FILE:groomlab-helper>;GROOMLAB_HELPER_TESTHOOKS=$<TARGET_FILE:groomlab-helper-testhooks>;GROOMLAB_CLI=$<TARGET_FILE:groomlab-cli>;GROOMLAB_TEST_DATA=${CMAKE_CURRENT_SOURCE_DIR}/data;${_helper_reference_env}")
     else()
         message(STATUS "blender.helper: no Python 3 with numpy (set GROOMLAB_BLENDER_PYTHON): the test is left out")
@@ -450,7 +453,7 @@ if(TARGET groomlab-helper AND TARGET groomlab-cli)
     if(_blender_exe AND _blender_numpy EQUAL 0 AND GROOMLAB_BLENDER_EXTENSION_ZIP)
         add_test(NAME blender.extension
             COMMAND "${_blender_exe}" --factory-startup --command extension validate "${GROOMLAB_BLENDER_EXTENSION_ZIP}")
-        set_tests_properties(blender.extension PROPERTIES LABELS "quick;blender")
+        set_tests_properties(blender.extension PROPERTIES LABELS "blender")
         set(_addon_env
             "GROOMLAB_CLI=$<TARGET_FILE:groomlab-cli>;GROOMLAB_TEST_DATA=${CMAKE_CURRENT_SOURCE_DIR}/data;GROOMLAB_USER_PRESETS=${CMAKE_CURRENT_BINARY_DIR}/blender_no_user_presets;GROOMLAB_USER_NODES=${CMAKE_CURRENT_BINARY_DIR}/blender_no_user_nodes")
         foreach(_t addon addon_free addon_render addon_graph addon_graph_authoring addon_tools addon_ui addon_pipeline
@@ -469,12 +472,12 @@ if(TARGET groomlab-helper AND TARGET groomlab-cli)
         set_tests_properties(blender.addon_vray PROPERTIES LABELS "blender;vray" RUN_SERIAL TRUE TIMEOUT 900
                              ENVIRONMENT "${_addon_env}")
         # Free for any use: exports with no key, no notice, Support GroomLab in the menu and About.
-        set_tests_properties(blender.addon_free PROPERTIES LABELS "quick;blender" ENVIRONMENT "${_addon_env}")
+        set_tests_properties(blender.addon_free PROPERTIES LABELS "blender" ENVIRONMENT "${_addon_env}")
         # The updater: a release served on localhost, checked and installed over the running extension.
         set_tests_properties(blender.addon_updates PROPERTIES LABELS "blender"
                              ENVIRONMENT "${_addon_env};GROOMLAB_EXTENSION_ZIP=${GROOMLAB_BLENDER_EXTENSION_ZIP}")
         # The GroomLab window's parts that need no screen (typed values, icons, theme, its operators).
-        set_tests_properties(blender.addon_window PROPERTIES LABELS "quick;blender" ENVIRONMENT "${_addon_env}")
+        set_tests_properties(blender.addon_window PROPERTIES LABELS "blender" ENVIRONMENT "${_addon_env}")
         # The UI from the shared definitions (engine/ui): every id Blender shows bound, the Groom Tools' operators.
         set_tests_properties(blender.addon_ui PROPERTIES LABELS "blender" ENVIRONMENT "${_addon_env}")
         # The Graph Editor. The test build of the helper has an operator at version 2 for the Upgrade case.
@@ -762,7 +765,7 @@ if(GROOMLAB_BUILD_MAYA AND TARGET groomlab_core_py)
         COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/ui_scaling_check.py"
                 --core "$<TARGET_FILE_DIR:groomlab_core_py>" --dll-dir "${GROOMLAB_MAYA_BIN}")
-    set_tests_properties(maya.ui_scaling PROPERTIES LABELS "quick;maya" TIMEOUT 300
+    set_tests_properties(maya.ui_scaling PROPERTIES LABELS "maya" TIMEOUT 300
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen;GROOMLAB_NO_UPDATES=1")
 endif()
 
@@ -781,7 +784,7 @@ foreach(_maya_test maya.plugin maya.graph_editor maya.pipeline maya.groom_io may
             "MAYA_APP_DIR=${_app_dir};PYTHONPATH=${GROOMLAB_MAYA_PYTHONPATH}")
         if(NOT _maya_test STREQUAL "maya.arnold" AND NOT _maya_test STREQUAL "maya.studio_render"
            AND NOT _maya_test STREQUAL "maya.vray" AND NOT _maya_test STREQUAL "maya.prman")
-            set_tests_properties(${_maya_test} PROPERTIES LABELS "quick;maya")
+            set_tests_properties(${_maya_test} PROPERTIES LABELS "maya")
         endif()
         if(_maya_test STREQUAL "maya.vray")
             set_tests_properties(${_maya_test} PROPERTIES LABELS "vray;maya")

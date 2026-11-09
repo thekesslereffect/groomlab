@@ -118,23 +118,25 @@ and uniform block bindings); Metal has one buffer table, so its check lets Slang
 unroll attribute), and fxc behind the DXBC fails on a UAV store Slang's loop form lets it flatten
 (`[branch]` on it). Check a change with `groomlab_gpu_tests`, every case on both APIs.
 
-**Tests run in three tiers**, ctest labels; every test is in one of them. Run them from the
-build folder (`cd build/win-maya2022`):
+**Tests run in tiers**, ctest labels; every test is in exactly one, so running each tier once runs
+every test once. Run them from the build folder (`cd build/win-maya2022`):
 
 | Tier | When | Command |
 | --- | --- | --- |
-| `quick`: core GoogleTest, the Python bindings, the mayapy suites (no windows, about a minute) | after every change | `ctest -C RelWithDebInfo -L quick -j 8 --output-on-failure` |
-| `gui`: one Maya window running every GUI suite (about a minute) | when the UI (`hosts/maya/scripts/groomlab/ui`), the viewport or draw override, the brush, select or reference tools, or selection changed; before packaging or pushing | `ctest -C RelWithDebInfo -L gui --output-on-failure` |
+| `quick`: the core's, the bindings', the GPU engine's and the app's GoogleTest, the C API (no windows, a few minutes) | after every change | `ctest -C RelWithDebInfo -L quick -j 8 --output-on-failure` |
+| `maya`: the mayapy suites (no windows) | when Maya's plugin or scripts changed; before packaging or pushing | `ctest -C RelWithDebInfo -L maya -LE "gui\|arnold\|vray\|renderman" -j 4` |
+| `blender`: groomlab-helper and the add-on in a headless Blender | when the Blender add-on or helper changed; before packaging or pushing | `ctest -C RelWithDebInfo -L blender -LE vray -j 4` |
+| `gpu` alone: every kernel compiled for every target with slangc (`-LE quick`: the GPU engine's gtests are in quick) | when the shaders changed; before packaging | `ctest -C RelWithDebInfo -L gpu -LE "quick\|bench" -j 3` |
+| `budget`: the `Budget.*` and `Performance.*` timings, one at a time | when an engine hot path changed; before packaging | `ctest -C RelWithDebInfo -L budget` |
+| `gui`: one Maya window running every GUI suite (OpenGL and DirectX 11) | when the UI (`hosts/maya/scripts/groomlab/ui`), the viewport or draw override, the brush, select or reference tools, or selection changed; before packaging or pushing | `ctest -C RelWithDebInfo -L gui --output-on-failure` |
 | `arnold`: MtoA export and the procedural (about a minute) | when the Arnold translator, procedural or export, or the color nodes, RenderData and shading changed; before packaging or pushing | `ctest -C RelWithDebInfo -L arnold --output-on-failure` |
-| `renderman`: the RenderMan procedural in prman (about 15 s; built only with RenderMan Pro Server) | when the RenderMan procedural, `renderman_look`, or the color nodes changed; before packaging or pushing | `ctest -C RelWithDebInfo -L renderman --output-on-failure` |
-| all (about 2.5 minutes) | before packaging (`tools/package_release.py`) and before pushing | `ctest -C RelWithDebInfo -j 8 --output-on-failure` |
+| `renderman`, `vray`: the renderers (`-LE quick`: their scene checks are in quick) | when the RenderMan or V-Ray paths changed; before packaging | `ctest -C RelWithDebInfo -L "vray\|renderman" -LE quick` |
 
-`-j 8` runs the windowless tests side by side; the GUI session, Arnold and the `Budget.*` and
-`Performance.*` timings always run alone (`RUN_SERIAL`), and the long mayapy suites start first
-(`COST`). The tier takes about two minutes whatever the `-j`: its timing tests run one at a time
-(about 70 s) and `maya.grooming` alone takes 30 to 45 s, which is why the area labels below exist.
-With the Ninja presets, `ctest --preset ninja-maya2022 -L quick` runs from the checkout's
-root with the right configuration, `--output-on-failure` and `-j 12` already set.
+`-j 8` runs the windowless tests side by side; the GUI session, Arnold and the timings always run
+alone (`RUN_SERIAL`), and the long mayapy suites start first (`COST`). With the Ninja presets,
+`ctest --preset ninja-maya2022 -L quick` runs from the checkout's root with the right
+configuration, `--output-on-failure` and `-j 12` already set. The app's tree (`ninja-app`) builds
+the core's tests too: there `-L app` runs the app's alone.
 
 **Area labels.** Every test also carries the label of what it tests: `core` (the core's
 GoogleTest), `io` (Alembic, groom scenes, simulation caches), `gpu` (the GPU kernels), `python`
@@ -151,9 +153,10 @@ ctest --preset ninja-maya2022 -L core       # or name the area yourself
 ```
 
 `test_changed.py` maps each changed path to its labels (the core's sources run `core` and
-`python`, its headers every `quick` test, the Maya UI and tools `maya` and the `gui` session, the
-Arnold translator and procedural `arnold`...) and runs ctest on them; `--print` shows the commands
-only, `--build` names another build folder.
+`python`, its headers every `quick` test and the `maya` and `blender` suites, the Maya UI and tools
+`maya` and the `gui` session, the Arnold translator and procedural `arnold`...) and runs ctest on
+them, never the timings (`budget`); `--print` shows the commands only, `--build` names another
+build folder.
 
 **Core tests** (fast, no Maya) are also one executable:
 
@@ -417,10 +420,10 @@ parallel (the zip takes whatever is in each build folder):
    `CMakeCache.txt`, that no build failed to regenerate (it leaves old binaries behind), and that
    each Maya build's configure found V-Ray for Maya ("V-Ray for Maya at ...": its translator, else
    `package_release.py` notes the version without one).
-3. **Run the tiers** on Maya 2022 (`quick`, `arnold`, `blender`, `gpu`, then `Budget.*` alone,
-   `gui`, `maya.gui_dx11`, `vray` / `renderman` where installed) and the app (`quick`, then
-   `blender|vray|renderman`). A timing budget that fails once under load is rerun alone, not
-   waved through.
+3. **Run the tiers**, each test once: on Maya 2022 `quick`, `maya`, `blender`, `gpu` (the kernel
+   compiles), `arnold`, `vray` / `renderman` where installed, `budget` and `gui` (OpenGL and
+   DirectX 11), and on the app's tree `-L app` alone (it builds the core's tests too: they ran on
+   Maya's). A timing budget that fails once under load is rerun alone, not waved through.
 4. **Linux**: `tools/dev/linux_build.ps1 -Tests all` (WSL).
 5. **Install** Maya 2022's build (`cmake --install ... --component GroomLab`).
 6. **Package** `tools/package_release.py`, `tools/package_app.py`, `tools/package_blender.py`,
@@ -498,6 +501,8 @@ runs a command in it; configure first with `... vsenv.ps1 cmake --preset ninja-m
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/dev/vsenv.ps1 cmake --build --preset ninja-maya2022
 python tools/dev/test_changed.py             # the areas the branch touched
 ctest --preset ninja-maya2022 -L quick       # the tiers, once, before merging
+ctest --preset ninja-maya2022 -L maya -LE "gui|arnold|vray|renderman"
+ctest --preset ninja-maya2022 -L blender -LE vray
 ctest --preset ninja-maya2022 -L gui
 ctest --preset ninja-maya2022 -L arnold
 ```

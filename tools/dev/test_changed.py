@@ -9,7 +9,8 @@ Without --build: build/ninja-app when the app's files changed (that tree builds 
 as the rest), build/ninja-maya2022 otherwise.
 
 Areas (ctest labels): core, io, gpu, python, maya, app, blender; gui, arnold and renderman run their sessions
-when their files changed. A change to the core's headers, the build or the test data runs every quick test.
+when their files changed. A change to the core's headers, the build or the test data runs every quick test and
+the Maya and Blender suites (no longer in quick). The timing tests (budget) never run here: ctest -L budget.
 """
 
 import argparse
@@ -109,11 +110,14 @@ def main():
         args.build = app_tree if use_app else os.path.join(ROOT, "build", "ninja-maya2022")
     runs = []
     windowless = sorted(labels - {"gui", "arnold", "renderman"})
+    # The sessions, renders, timing and benchmarks have runs (or labels) of their own.
+    excluded = ["-LE", "^(gui|arnold|renderman|vray|budget|bench|pictures)$"]
     if windowless:
         if "quick" in windowless:
-            runs.append(["-L", "quick", "-j", str(args.jobs)])
-        else:  # those areas' windowless tests
-            runs.append(["-L", "^(%s)$" % "|".join(windowless), "-L", "quick", "-j", str(args.jobs)])
+            runs.append(["-L", "quick", "-j", str(args.jobs)] + excluded)
+            windowless = ["maya", "blender"]  # (the host suites, out of quick)
+        # Those areas' windowless tests.
+        runs.append(["-L", "^(%s)$" % "|".join(windowless), "-j", str(args.jobs)] + excluded)
     for session in ("gui", "arnold", "renderman"):
         if session in labels:
             runs.append(["-L", session])

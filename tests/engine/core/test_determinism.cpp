@@ -200,9 +200,12 @@ void expectSameResults(const std::map<std::string, Made>& got, const std::map<st
 
 }  // namespace
 
-TEST(Determinism, EveryShippedPresetMakesTheSameEveryTimeInAnyOrder) {
+TEST(Determinism, EveryShippedPresetMakesTheSameEveryTimeInAnyOrderOnAnyThreads) {
     // Fresh sessions one after another: nothing one evaluation leaves behind (pooled arrays,
-    // memos, scratch, a distance field's bricks) reaches the next.
+    // memos, scratch, a distance field's bricks) reaches the next; and every parallel loop cut
+    // differently (one thread takes the ranges whole; two split and steal): no result depends on
+    // how a loop's iterations were shared out. Evaluated again on one thread, then in the reverse
+    // order on two, each against the first.
     const std::map<std::string, Made> first = evaluateAll();
     ASSERT_GT(first.size(), 30u);
     std::size_t madeSome = 0;
@@ -212,15 +215,7 @@ TEST(Determinism, EveryShippedPresetMakesTheSameEveryTimeInAnyOrder) {
     ASSERT_TRUE(first.count("parity_nodes"));
     EXPECT_TRUE(first.at("parity_nodes").error.empty()) << first.at("parity_nodes").error;
     EXPECT_GT(first.at("parity_nodes").strands, 100u);
-    expectSameResults(evaluateAll(), first, "evaluated again");
-    expectSameResults(evaluateAll(true), first, "evaluated in the reverse order");
-}
-
 #if GROOMLAB_HAS_TBB
-TEST(Determinism, EveryShippedPresetMakesTheSameOnOneThreadAsOnAll) {
-    // Every parallel loop cut differently (one thread takes the ranges whole; all of them split
-    // and steal): no result depends on how a loop's iterations were shared out.
-    const std::map<std::string, Made> all = evaluateAll();
     std::map<std::string, Made> one, two;
     {
         const tbb::global_control single(tbb::global_control::max_allowed_parallelism, 1);
@@ -230,10 +225,15 @@ TEST(Determinism, EveryShippedPresetMakesTheSameOnOneThreadAsOnAll) {
         const tbb::global_control pair(tbb::global_control::max_allowed_parallelism, 2);
         two = evaluateAll(true);
     }
-    expectSameResults(one, all, "one thread");
-    expectSameResults(two, all, "two threads");
+    expectSameResults(one, first, "evaluated again, on one thread");
+    expectSameResults(two, first, "evaluated in the reverse order, on two threads");
+#else
+    expectSameResults(evaluateAll(), first, "evaluated again");
+    expectSameResults(evaluateAll(true), first, "evaluated in the reverse order");
+#endif
 }
 
+#if GROOMLAB_HAS_TBB
 TEST(Determinism, PresetsMakeTheSameUnderTheThreadCap) {
     // The cap a host sets (parallel.h: setParallelThreads, GROOMLAB_THREADS) runs the loops on
     // fewer threads; the strands are the same bit for bit.
