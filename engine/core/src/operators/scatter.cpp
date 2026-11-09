@@ -34,6 +34,14 @@
 // half-widths, Interpolate's tubeBlend's measure): so a flat blade's or a ribbon's footprint is
 // filled, at the scatter's density, and not a disc round it.
 //
+// Follicles: scalp hair grows in follicular units, one to four hairs leaving the skin together
+// with bare skin between the units. With `follicles` (mappable: a mask) every root is a unit, and
+// extra hairs sprout beside it: follicles x (follicleHairs - 1) of them on average, each within
+// follicleRadius (mappable) of its unit's root on the rest pose. So the density counts units
+// and the hair count grows with the extras. Each extra has an ID of its own from its unit's (and
+// its draw), which a preview keeps or thins as any strand's: every preview density shows the
+// extras the render has, and raising follicles only adds hairs.
+//
 // Subdivision: on a refined scalp (the Scalp node's subdivision, smooth preview, match render) the
 // roots are placed on its cage, as on the scalp without subdivision, and each is carried onto the
 // refined surface (CageBinding): the same strands, with the same IDs, whatever the level; only
@@ -422,6 +430,19 @@ public:
                 .atLeast(0)
                 .soft(0, 1)
                 .adv(),
+            ParamSpec{"follicles", 0.0, "Follicular units: each root a unit, extra hairs sprouting beside it, as scalp hair "
+                                        "leaves the skin in ones to fours (mappable: a mask; 0: none). The density "
+                                        "counts units: the extras add to the hairs", "fraction"}
+                .range(0, 1)
+                .in("Follicles"),
+            ParamSpec{"follicleHairs", 2.5, "How many hairs a unit holds on average where follicles is 1", ""}
+                .range(1, 8)
+                .in("Follicles"),
+            ParamSpec{"follicleRadius", 0.03, "How far from its unit's root an extra hair sprouts, at most (scene units; "
+                                              "mappable)", "length"}
+                .atLeast(0)
+                .soft(0, 0.2)
+                .in("Follicles"),
         };
     }
 
@@ -789,7 +810,87 @@ public:
                 if (memoize) keepMixed(mixKey, placed, rootsHeld);
             }
         }
-        const std::vector<StrandRoot>& roots = *rootsHeld;
+        const std::vector<StrandRoot>* rootsShown = rootsHeld.get();
+
+        // Follicular units: each root a unit, its extra hairs sprouting beside it (each with an ID of
+        // its own, which the preview keeps or thins as any strand's; every unit's, the preview's or
+        // not, so a preview shows the extras the render has). Unit j's t-th possible extra exists
+        // where its draw falls under follicles x (follicleHairs - 1) / the trials: raising follicles
+        // only adds hairs.
+        const ScalarField folliclesField(params(), "follicles", mesh.get(), guides.get());
+        std::vector<StrandRoot> shownRoots;
+        if (!(folliclesField.isConstant() && !(folliclesField.maximum() > 0.0f)) && density > 0.0) {
+            const std::size_t units = placed->ids.size();
+            std::shared_ptr<const std::vector<StrandRoot>> every;
+            if (grid || randomness == 1.0f) {
+                every = std::shared_ptr<const std::vector<StrandRoot>>(placed, &placed->random);
+            } else if (randomness == 0.0f) {
+                every = std::shared_ptr<const std::vector<StrandRoot>>(placed, &placed->even);
+            } else {
+                every = all ? rootsHeld : std::make_shared<const std::vector<StrandRoot>>(mixRoots(placed->even, placed->random, restOf(), randomness));
+            }
+            const float hairs = std::clamp(static_cast<float>(params().getDouble("follicleHairs")), 1.0f, 8.0f);
+            const int trials = std::max(3, static_cast<int>(std::ceil(hairs - 1.0f)));
+            const ScalarField radiusField(params(), "follicleRadius", mesh.get(), guides.get());  // an extra's reach from its unit's root
+            const float keep = keepFraction >= 1.0f ? 2.0f : keepFraction;
+            // Each unit's chance a trial and the extras the preview shows of it.
+            std::vector<float> chance(units, 0.0f);
+            std::vector<std::uint32_t> shown(units + 1, 0);
+            auto unitHash = [&](std::size_t j) { return hashCombine(placed->ids[j], seed ^ 0xF0111C1Eull); };
+            parallelFor(0, units, [&](std::size_t j) {
+                const StrandRoot& r = (*every)[j];
+                if (r.face < 0) return;
+                chance[j] = std::clamp(folliclesField.atCageRoot(r), 0.0f, 1.0f) * (hairs - 1.0f) / static_cast<float>(trials);
+                if (!(chance[j] > 0.0f)) return;
+                const std::uint64_t h = unitHash(j);
+                for (int t = 0; t < trials; ++t) {
+                    float role = kCoreShown;
+                    if (unitFloat(hashCombine(h, static_cast<std::uint64_t>(2 * t))) < chance[j] &&
+                        previewRole(hashCombine(h, static_cast<std::uint64_t>(2 * t + 1)), keep, core, &role)) {
+                        ++shown[j + 1];
+                    }
+                }
+            }, 1024);
+            for (std::size_t j = 0; j < units; ++j) shown[j + 1] += shown[j];
+            const std::size_t extras = shown[units], base = ids.size();
+            if (extras > 0) {
+                const ScalpMesh& rest = restOf();
+                shownRoots = *rootsHeld;
+                shownRoots.resize(base + extras);
+                ids.resize(base + extras);
+                roles.resize(base + extras, kCoreShown);
+                parallelFor(0, units, [&](std::size_t j) {
+                    if (shown[j + 1] == shown[j]) return;
+                    const StrandRoot& r = (*every)[j];
+                    const std::uint64_t h = unitHash(j);
+                    const Vec3f p = rest.position(r);
+                    const Vec3f n = rest.normal(r);
+                    const float reach = std::max(0.0f, radiusField.atCageRoot(r));
+                    const Vec3f u = n.cross(std::abs(n.y) < 0.9f ? Vec3f{0.0f, 1.0f, 0.0f} : Vec3f{1.0f, 0.0f, 0.0f}).normalized();
+                    const Vec3f v = n.cross(u);
+                    std::size_t at = base + shown[j];
+                    for (int t = 0; t < trials; ++t) {
+                        float role = kCoreShown;
+                        const StrandId id = hashCombine(h, static_cast<std::uint64_t>(2 * t + 1));
+                        if (!(unitFloat(hashCombine(h, static_cast<std::uint64_t>(2 * t))) < chance[j]) || !previewRole(id, keep, core, &role)) {
+                            continue;
+                        }
+                        // Beside its unit's root: a spot within `reach` on the surface, from its ID.
+                        const float angle = 6.2831853f * unitFloat(hashCombine(id, 1));
+                        const float radius = reach * (0.35f + 0.65f * std::sqrt(unitFloat(hashCombine(id, 2))));
+                        const Vec3f spot = p + (u * std::cos(angle) + v * std::sin(angle)) * radius;
+                        const SurfacePoint hit = rest.closestPoint(spot, 2.0f * reach + 1e-6f);
+                        shownRoots[at] = hit.root.face >= 0 ? hit.root : r;
+                        ids[at] = id;
+                        roles[at] = role;
+                        ++at;
+                    }
+                }, 256);
+                for (std::size_t k = base; k < base + extras && allCoreShown; ++k) allCoreShown = roles[k] == kCoreShown;
+                rootsShown = &shownRoots;
+            }
+        }
+        const std::vector<StrandRoot>& roots = *rootsShown;
 
         const std::size_t pointsPerStrand = segments + 1;
         // Every point is written below (the widths stay 1): the positions come as they are.

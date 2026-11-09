@@ -67,6 +67,13 @@ cmds.setAttr(groom + ".previewDensity", 1.0)
 - **Fur along the guides only:** `Scatter.guideRadius` (0: off) keeps only the roots within that
   distance of a guide's root, on the rest scalp (the `guides` input: a Guides node, one group
   say), so drawn guides place the fur, a patch, a stripe or a mane, and nothing grows elsewhere.
+- **Follicular units:** scalp hair grows in units of one to four hairs leaving the skin together,
+  bare skin between them. With `Scatter.follicles` (0: off; mappable, so a map grows them on the
+  crown and the partings and leaves the rest) every root is a unit and extra hairs sprout beside
+  it, `follicles` x (`follicleHairs` - 1) a unit on average (`follicleHairs` 2.5), each within
+  `follicleRadius` (0.03 scene units; mappable) of its unit. So the density counts units and the extras add to the
+  hairs: lower the density to keep a count. Each extra has an ID of its own, so every preview
+  density shows the extras the render has, and raising `follicles` only adds hairs.
 - **Every root in the preview:** `Scatter.previewAll` (off by default) keeps all of the Scatter's
   roots in the viewport whatever the groom's `previewDensity`: for a few big pieces each strand
   carries (feather shafts, scales, leaves) that a 10% preview would leave bald. The shipped
