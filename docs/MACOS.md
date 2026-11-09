@@ -410,15 +410,23 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
   `GROOMLAB_GUI_LOG` and a scratch `MAYA_APP_DIR` whose prefs trust the plugin folder:
   `tests/hosts/maya/trust_plugin_folder.cmake -DMAYA_YEAR=<year>`). Maya 2025, 2026-11-09: 400
   passed, 9 failed (65 before the two Viewport 2.0 fixes: section 6, and the cards' and scales'
-  bitangent input, `groom_draw_override_fragments.cpp`). The GPU kernels' checks (true width's facing
+  bitangent input, `groom_draw_override_fragments.cpp`); 2024, 2026 and 2027: 399 passed, 11
+  failed each, the same cases plus two near their bars (lit ribbons' three colors: 781 clearly
+  colored pixels for 1000; the light behind changing 0.045 of the pixels for 0.05). The GPU kernels' checks (true width's facing
   ribbons, the self-shadowing grid) are skipped on macOS (`gui_support.gpu_kernels()`). Open: the
   200k-strand orbit at 16 to 20 fps (budget 24, tuned on Windows); a tip blend's and value
   randomness's pixel counts just under their Windows-tuned bars (the pictures are right); a keyed
-  param's Graph Editor drag draws no step before the release (`graph_editor._write_preview`'s
-  `cmds.refresh(currentView=True, force=False)`; the Attribute Editor's drag of the same plug draws);
-  three Shape/Paint brush cases (Shift+drag smoothing, an alpha stroke, smoothing across the seam);
+  three Shape/Paint brush cases (Shift+drag smoothing, an alpha stroke, smoothing across the seam:
+  see Retina below);
   the Graph Editor's wheel zoom check (`grabWindow` of the screen against a fresh paint: the
-  window compositor on macOS).
+  window compositor on macOS). (Fixed on the way: a keyed param's Graph Editor drag drew no step
+  before the release, `graph_editor._write_preview`.)
+- **Retina**: Maya's 3D view works in device pixels on macOS (`M3dView.portWidth()` 2530 for a
+  1265-point Qt widget, ratio 2). The brushes' screen radius is in the view's pixels, so a radius of
+  50 is half the physical size it is on Windows or in the app (the circle drawn matches the
+  stroke). The three brush cases above follow from it: their strokes and radii were sized on
+  Windows. Scaling the radius by the ratio (the `-radius` flag, the B-drag label) needs the ratio:
+  the plugin links no Qt on macOS (as for pen pressure).
   no `renderman` (not installed).
 - `python3 tools/dev/test_changed.py` picks the tests for what you changed (check it runs on macOS).
 
