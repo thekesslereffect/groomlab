@@ -13,6 +13,36 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.45.0 (November 8, 2026)
+
+- **Spectrum node: an equalizer for the hair's shape.** It splits each strand into its broad
+  sweep, its curls and waves, and its fine frizz, and turns each up or down: **highGain** 0 takes
+  frizz out and keeps the curls, **midGain** deepens or relaxes the curls, **lowGain** the overall
+  sweep. **lowWavelength** and **highWavelength** set where the bands meet; **strength** can be
+  painted.
+- **Follicular units on Scatter.** Real scalp hair grows in little groups of one to four hairs.
+  **follicles** (paintable) sprouts extra hairs beside each root, **follicleHairs** sets how many a
+  group holds and **follicleRadius** how far from the root they grow.
+- **Interpolate keeps curls.** Curly guides that curl out of step used to cancel out, so the
+  strands between them came out straighter than any guide. **keepCurls** (paintable) brings their
+  curl back, in each strand's own rhythm and at its length; **curlLength** is the longest swing
+  that counts as a curl.
+- **Hair grows out of the skin in renders.** The Output node's **rootDepth** adds a point under
+  each root, carrying on the hair's angle, so renders show hair coming out of the skin. Render
+  exports get it; game exports (Unreal, Unity, cards, glTF, FBX) never do; the viewport only with
+  **rootDepthInViewport**.
+- **Clump Colors on the Clump node.** A button on each Clump node's header colors the strands by
+  that node's clumps; again: back to your colors.
+- **Bake Follicle Map.** **Utilities > Bake Follicle Map** bakes a gradient round every root into
+  the scalp's UVs (a 16-bit PNG, UDIM tiles too) for skin shaders: white at the root falling to black
+  at the radius, which the window opens on as measured and you can widen. Shape it in the shader
+  (a clamp or a remap).
+- **Slide moves roots only.** The Slide tool now has the **Root to tip** curve: with **Root Only**
+  the roots slide along the scalp and the rest of each guide stays where it is (thanks Omar, #53).
+- **Invert frozen guides.** Groom Tools > Guides has **Invert** between Freeze and Unfreeze All.
+- **Faster viewport in the app** with millions of strands: lighter hair buffers, quicker slider
+  drags and releases.
+
 ## 0.44.2 (November 8, 2026)
 
 - **Blend picks whole strands by chance.** The Blend node's new **Mode > chance** makes each strand
