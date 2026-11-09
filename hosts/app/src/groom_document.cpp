@@ -697,7 +697,8 @@ std::string GroomDocument::clearSculptEdits(const std::string& node) {
 
 std::size_t GroomDocument::sculptedGuides(const std::string& node) const {
     try {
-        const SculptEdits* edits = SculptSet::fromJson(storedText(StrokeField::Sculpts)).node(node);
+        const SculptSet set = SculptSet::fromJson(storedText(StrokeField::Sculpts));
+        const SculptEdits* edits = set.node(node);
         return edits ? edits->guides.size() : 0;
     } catch (const std::exception&) {
         return 0;
