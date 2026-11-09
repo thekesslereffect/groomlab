@@ -364,8 +364,8 @@ TEST(ParamUse, EveryDeclaredParamIsReadWhereItShows) {
                 if (distinct.insert(params.hash()).second) uniqueStates.push_back(&params);
             }
             for (const std::vector<Value>& inputs : inputStates) {
-                for (const ParamSet* state : uniqueStates) {
-                    const ParamSet& params = *state;
+                for (const ParamSet* paramsPtr : uniqueStates) {
+                    const ParamSet& params = *paramsPtr;
                     const std::unique_ptr<Operator> op = registry.create(type);
                     op->params() = params;
                     op->setNodeVersion(inst.version);
