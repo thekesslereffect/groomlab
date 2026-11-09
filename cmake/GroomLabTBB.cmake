@@ -36,7 +36,14 @@ if(GROOMLAB_USE_TBB)
         # libtbb.12.dylib from Maya 2026), else a devkit's lib/. Neither: the devkit's headers alone,
         # and what links it leaves TBB's symbols to Maya's process, as FindMaya does Maya's own
         # (a Maya plugin and the Python module load into Maya, which has loaded its TBB).
-        find_library(GROOMLAB_MAYA_TBB_LIBRARY NAMES tbb.12 tbb HINTS "${GROOMLAB_MAYA_APP}/MacOS" "${MAYA_LOCATION}/lib"
+        # The library of the headers' TBB: Maya 2025 ships both (oneTBB's libtbb.12.dylib beside TBB
+        # 2020's libtbb.dylib) with TBB 2020's headers; oneTBB's headers (include/oneapi) from 2026.
+        if(EXISTS "${MAYA_LOCATION}/include/oneapi/tbb")
+            set(_groomlab_maya_tbb_names tbb.12 tbb)
+        else()
+            set(_groomlab_maya_tbb_names tbb)
+        endif()
+        find_library(GROOMLAB_MAYA_TBB_LIBRARY NAMES ${_groomlab_maya_tbb_names} HINTS "${GROOMLAB_MAYA_APP}/MacOS" "${MAYA_LOCATION}/lib"
                      NO_DEFAULT_PATH)
         add_library(groomlab_maya_tbb INTERFACE IMPORTED GLOBAL)
         if(GROOMLAB_MAYA_TBB_LIBRARY)
