@@ -47,4 +47,8 @@ if(MtoA_FOUND AND NOT TARGET MtoA::MtoA)
     add_library(MtoA::MtoA INTERFACE IMPORTED)
     target_include_directories(MtoA::MtoA INTERFACE "${MtoA_INCLUDE_DIR}" "${ARNOLD_INCLUDE_DIR}")
     target_link_libraries(MtoA::MtoA INTERFACE "${MtoA_API_LIBRARY}" "${ARNOLD_LIBRARY}")
+    if(APPLE)
+        # MtoA's platform/Platform.h defines DLLEXPORT, LIBEXT and its Event class by _DARWIN.
+        target_compile_definitions(MtoA::MtoA INTERFACE _DARWIN)
+    endif()
 endif()
