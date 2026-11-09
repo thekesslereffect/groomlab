@@ -74,10 +74,12 @@ the Blender add-on's platform tag (`macos-arm64`), the helper's `"macos"` platfo
    `blender.helper` test when Blender is not installed.
 3. **Qt 6.8.3** for the app (the Windows build's version), not Homebrew's newer Qt:
    ```sh
-   python3 -m pip install --user aqtinstall
-   python3 -m aqt install-qt mac desktop 6.8.3 clang_64 -m qtshadertools -O ~/Qt
+   python3.12 -m venv ~/groomlab-deps/tools/aqt-venv
+   ~/groomlab-deps/tools/aqt-venv/bin/pip install aqtinstall
+   ~/groomlab-deps/tools/aqt-venv/bin/python -m aqt install-qt mac desktop 6.8.3 clang_64 -m qtshadertools -O ~/Qt
    ```
-   It lands in `~/Qt/6.8.3/macos` (the `macos-app` preset's `GROOMLAB_QT_DIR`). The Qt online
+   Homebrew's Python refuses `pip install --user` (PEP 668: externally managed), hence the venv.
+   It lands in `~/Qt/6.8.3/macos`, 4.9 GB (the `macos-app` preset's `GROOMLAB_QT_DIR`). The Qt online
    installer works too (same folder).
 4. **Slang** (optional at first): only the `gpu.*kernel_targets` tests and the Metal backend need
    `slangc`. Download `slang-2026.19-macos-aarch64.zip` from
@@ -325,9 +327,9 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 ## 13. Checklist (update the boxes as you go)
 
 - [ ] Xcode, Homebrew packages, Qt 6.8.3 installed
-- [ ] `macos-core` configures
-- [ ] `macos-core` builds (core, C API + samples, CLI, Python module, Blender helper, tests)
-- [ ] `ctest -L quick` green on `macos-core` (goldens and determinism included)
+- [x] `macos-core` configures
+- [x] `macos-core` builds (core, C API + samples, CLI, Python module, Blender helper, tests)
+- [x] `ctest -L quick` green on `macos-core` (goldens and determinism included)
 - [ ] `macos-app` builds; the app opens, draws a groom on Metal, previews on the CPU
 - [ ] `ctest -L "quick|app"` green on `macos-app`
 - [ ] Offscreen renders (thumbnails, turntables) correct on Metal
