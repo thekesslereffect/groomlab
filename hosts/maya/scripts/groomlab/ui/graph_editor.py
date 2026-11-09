@@ -37,6 +37,7 @@ description (the panel's top, the search) is its spec's.
 import json
 import math
 import os
+import sys
 
 from groomlab.ui import qt
 from groomlab.ui.qt import QtCore, QtGui, QtWidgets
@@ -6111,6 +6112,11 @@ class GraphEditor(QtWidgets.QWidget):
                 from maya import cmds
                 self._set_silently(self._key_preview["plugs"], self._key_preview["values"])
                 cmds.refresh(currentView=True, force=False)
+                if sys.platform == "darwin":
+                    # (There that refresh draws nothing after a keyed plug's set: the redraw asked
+                    # for as Maya's Attribute Editor asks for it.)
+                    import maya.OpenMayaUI as omui
+                    omui.M3dView.scheduleRefreshAllViews()
             return
         if not (self.live and self.groom) or self.model.validate() or not self.same_groom():
             return
