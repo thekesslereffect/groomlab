@@ -301,7 +301,7 @@
             "name": "macos-maya-devkit",
             "hidden": true,
             "inherits": "macos",
-            "description": "A Maya version's plugin, its Python module and MtoA translator on macOS: MAYA_LOCATION the devkit (headers), GROOMLAB_MAYA_APP the install's Maya.app/Contents (its libraries, mayapy): docs/MACOS.md",
+            "description": "A Maya version's plugin, its Python module and MtoA translator on macOS: MAYA_LOCATION the Maya install (include/maya; a devkit works too), GROOMLAB_MAYA_APP its Maya.app/Contents (its libraries, mayapy): docs/MACOS.md",
             "cacheVariables": {
                 "GROOMLAB_BUILD_MAYA": "ON",
                 "GROOMLAB_BUILD_TESTS": "OFF",
@@ -317,7 +317,7 @@
             "displayName": "macOS, Maya 2024 plugin (Python 3.10, Qt 5 and PySide2, TBB 2020, MtoA 5.3+)",
             "inherits": "macos-maya-devkit",
             "cacheVariables": {
-                "MAYA_LOCATION": "$env{HOME}/groomlab-deps/sdks/maya-devkit-2024-macos",
+                "MAYA_LOCATION": "/Applications/Autodesk/maya2024",
                 "GROOMLAB_MAYA_APP": "/Applications/Autodesk/maya2024/Maya.app/Contents",
                 "MTOA_LOCATION": "/Applications/Autodesk/Arnold/mtoa/2024"
             }
@@ -327,7 +327,7 @@
             "displayName": "macOS, Maya 2025 plugin (Python 3.11, Qt 6, MtoA 5.4+)",
             "inherits": "macos-maya-devkit",
             "cacheVariables": {
-                "MAYA_LOCATION": "$env{HOME}/groomlab-deps/sdks/maya-devkit-2025-macos",
+                "MAYA_LOCATION": "/Applications/Autodesk/maya2025",
                 "GROOMLAB_MAYA_APP": "/Applications/Autodesk/maya2025/Maya.app/Contents",
                 "MTOA_LOCATION": "/Applications/Autodesk/Arnold/mtoa/2025"
             }
@@ -337,7 +337,7 @@
             "displayName": "macOS, Maya 2026 plugin (Python 3.11, Qt 6, oneTBB, MtoA 5.6+)",
             "inherits": "macos-maya-devkit",
             "cacheVariables": {
-                "MAYA_LOCATION": "$env{HOME}/groomlab-deps/sdks/maya-devkit-2026-macos",
+                "MAYA_LOCATION": "/Applications/Autodesk/maya2026",
                 "GROOMLAB_MAYA_APP": "/Applications/Autodesk/maya2026/Maya.app/Contents",
                 "MTOA_LOCATION": "/Applications/Autodesk/Arnold/mtoa/2026"
             }
@@ -347,7 +347,7 @@
             "displayName": "macOS, Maya 2027 plugin (Python 3.13, Qt 6, oneTBB, MtoA for 2027)",
             "inherits": "macos-maya-devkit",
             "cacheVariables": {
-                "MAYA_LOCATION": "$env{HOME}/groomlab-deps/sdks/maya-devkit-2027-macos",
+                "MAYA_LOCATION": "/Applications/Autodesk/maya2027",
                 "GROOMLAB_MAYA_APP": "/Applications/Autodesk/maya2027/Maya.app/Contents",
                 "MTOA_LOCATION": "/Applications/Autodesk/Arnold/mtoa/2027"
             }
