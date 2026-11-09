@@ -460,6 +460,9 @@ public:
     StrandSet withDensity(float density) const;
     // The given strands (indices, in the order given), with their channels.
     StrandSet subset(const std::vector<std::size_t>& strands) const;
+    // Each strand with a point before its first: `first[i]` (strandCount() of them; a strand with no
+    // points gets none), its width and point channels the first point's; the rest shared as it is.
+    StrandSet withFirstPoints(const std::vector<Vec3f>& first) const;
 
     // Checks array sizes and offsets are consistent. On failure returns false
     // and, if error is non-null, describes the first problem found.

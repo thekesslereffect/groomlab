@@ -130,6 +130,46 @@ TEST(Session, IsTheGroomAndMatchesItsOneCallEvaluate) {
     EXPECT_EQ(later.bounds.hi, view.bounds.hi);
 }
 
+TEST(Session, RootDepthBuriesAPointUnderEachRootForRendersOnly) {
+    // The Output's rootDepth: a point under each root, inside the skin, after every node, for
+    // renders (not the viewport unless asked, never a game export); roots, IDs and widths kept.
+    const StrandsPtr plain = GroomSession(groomData()).evaluate(1.0f, 0.0);
+    ASSERT_TRUE(plain && plain->strandCount() > 50);
+    auto deep = [](bool inViewport) {
+        std::string g = kGraph;
+        const std::string output = R"({"name": "output", "type": "Output"})";
+        g.replace(g.find(output), output.size(),
+                  std::string(R"({"name": "output", "type": "Output", "params": {"rootDepth": 0.05, "rootDepthInViewport": )") +
+                      (inViewport ? "true" : "false") + "}}");
+        return g;
+    };
+    GroomSession session(groomData(deep(false)));
+    const StrandsPtr render = session.evaluate(1.0f, 0.0);
+    ASSERT_EQ(render->strandCount(), plain->strandCount());
+    EXPECT_EQ(render->pointCount(), plain->pointCount() + plain->strandCount());
+    for (std::size_t i = 0; i < plain->strandCount(); ++i) {
+        ASSERT_EQ(render->strandPointCount(i), plain->strandPointCount(i) + 1);
+        EXPECT_EQ(render->ids()[i], plain->ids()[i]);
+        const Vec3f* p = render->strandPoints(i);
+        const Vec3f* q = plain->strandPoints(i);
+        for (std::size_t j = 0; j < plain->strandPointCount(i); ++j) ASSERT_EQ(p[j + 1], q[j]);
+        EXPECT_NEAR((p[0] - p[1]).length(), 0.05f, 1e-5f);
+        EXPECT_LT(p[0].length(), p[1].length() - 0.02f) << "under the skin of the sphere (radius 1)";
+        const std::size_t b = render->strandBegin(i);
+        EXPECT_EQ(render->widths()[b], render->widths()[b + 1]);
+    }
+    // A game export and the viewport: as without it.
+    EXPECT_EQ(session.evaluate(1.0f, 0.0, false, true)->contentHash(), plain->contentHash());
+    ViewRequest viewport;
+    viewport.viewport = true;
+    EXPECT_EQ(session.evaluate(viewport).strands->pointCount(), plain->pointCount());
+    // The same frame again: the same strands.
+    EXPECT_EQ(session.evaluate(1.0f, 0.0), session.evaluate(1.0f, 0.0));
+    // rootDepthInViewport: the viewport has them too.
+    GroomSession shown(groomData(deep(true)));
+    EXPECT_EQ(shown.evaluate(viewport).strands->pointCount(), plain->pointCount() + plain->strandCount());
+}
+
 TEST(Session, SettersWithTheSameInputsChangeNothing) {
     const GroomData data = groomData();
     GroomSession session(data);

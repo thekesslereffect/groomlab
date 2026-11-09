@@ -213,9 +213,10 @@ typedef struct gl_eval_options {
     float density;        /* the preview density, 0-1 (1: every strand) */
     double point_budget;  /* points the result may hold (strands thinned to fit); 0: no limit */
     const char* view_node; /* a Strands node to show instead of the graph's output; NULL or "": the output */
+    int32_t game_export;   /* nonzero: for a game engine (the Output node's rootDepth left off); 0: a render's */
 } gl_eval_options;
 
-/* Fills `options` with the defaults (density 1, no budget, the output) and its struct_size. */
+/* Fills `options` with the defaults (density 1, no budget, the output, a render's) and its struct_size. */
 GL_API void gl_eval_options_init(gl_eval_options* options);
 
 /* Evaluates the groom at the session's time. `options` may be NULL (the defaults). On GL_OK

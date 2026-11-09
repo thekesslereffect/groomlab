@@ -252,6 +252,7 @@ const ViewResult& evaluateNow(Session& s, bool cards) {
     request.wantBounds = false;
     request.wantCards = cards;
     request.cardDensity = 1.0f;
+    request.gameExport = true;  // the pipeline's: game assets (no Output rootDepth)
     feedSessionTime(s);
     const ViewResult& view = s.groom->evaluate(request);
     if (!view.errors.empty()) fail("evaluation", view.errors.front());
@@ -673,6 +674,7 @@ json exportUnityFeathers(Session& s, const json& args) {
     request.density = static_cast<float>(optNumber(args, "density", 1.0));
     request.time = s.seconds;
     request.wantBounds = false;
+    request.gameExport = true;
     feedSessionTime(s);
     const ViewResult& view = s.groom->evaluate(request);
     if (!view.errors.empty()) fail("evaluation", view.errors.front());
@@ -787,6 +789,7 @@ json strandMesh(Session& s, const json& args) {
         request.wantBounds = false;
         const StrandMeshOptions options = meshOptions(args);
         request.buildCards = options.make == StrandMeshOptions::Make::Auto || options.make == StrandMeshOptions::Make::Cards;
+        request.gameExport = true;  // (meshes: as every host's To Mesh)
         feedSessionTime(s);
         const ViewResult& view = s.groom->evaluate(request);
         if (!view.errors.empty()) fail("evaluation", view.errors.front());

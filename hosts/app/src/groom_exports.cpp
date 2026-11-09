@@ -72,12 +72,13 @@ bool continueExport(const ExportProgress& progress, std::size_t done, std::size_
 
 }  // namespace
 
-StrandsPtr GroomDocument::exportFrame(double seconds, float density, MeshPtr* scalp, bool buildCards) {
+StrandsPtr GroomDocument::exportFrame(double seconds, float density, MeshPtr* scalp, bool buildCards, bool gameExport) {
     ViewRequest request;
     request.density = renderOverrides_.densityTimes(density);  // (the render overrides' share too)
     request.time = seconds;
     request.buildCards = buildCards;  // the Cards nodes' cards on the strands (their card layers)
     request.wantBounds = false;
+    request.gameExport = gameExport;  // (no Output rootDepth for an engine)
     const ViewResult& view = scene_->view(request);
     if (!view.errors.empty()) throw std::runtime_error(view.errors.front());
     if (!view.strands) throw std::runtime_error("the groom gave no strands");
@@ -266,7 +267,7 @@ ExportResult GroomDocument::exportEngineGroom(const std::string& path, const Exp
         const std::size_t count = range.count();
         for (std::size_t i = 0; i < count; ++i) {
             MeshPtr scalp;
-            const StrandsPtr evaluated = exportFrame(frameToSeconds(range.frame(i), fps), options.density, &scalp);
+            const StrandsPtr evaluated = exportFrame(frameToSeconds(range.frame(i), fps), options.density, &scalp, false, true);
             // The hair simulates on the primary guides (the hierarchy's level 0 at this time).
             StrandSet primaries;
             if (!unity && options.guides) {
@@ -407,6 +408,7 @@ CardBake GroomDocument::bakeCardsInMemoryWith(const std::function<CardBake(Stran
         request.wantCards = true;
         request.cardDensity = 1.0f;
         request.wantBounds = false;
+        request.gameExport = true;  // cards: a game asset (no Output rootDepth)
         const ViewResult& view = scene_->view(request);
         if (!view.errors.empty()) throw std::runtime_error(view.errors.front());
         return bake(view.cardStrands, view.scalp ? view.scalp : scene_->rootScalpAt(time_));
@@ -698,7 +700,7 @@ std::vector<std::string> GroomDocument::exportUnityFeathers(const std::string& d
     e.maxStrandsPerGroup = kUnityMaxStrandsPerGroup;
     const std::string abc = dir + "/" + name + "_strands.abc";
     MeshPtr scalp;
-    const StrandsPtr strands = exportFrame(time_, 1.0f, &scalp);
+    const StrandsPtr strands = exportFrame(time_, 1.0f, &scalp, false, true);
     nlohmann::json objects = nlohmann::json::array();
     {
         EngineGroomWriter writer(abc, name, time_, frameToSeconds(1.0, framesPerSecond()), e);
@@ -733,7 +735,7 @@ std::vector<std::string> GroomDocument::exportUnityFeathers(const std::string& d
 
 std::vector<std::string> GroomDocument::exportScalesFbx(const std::string& path, bool unity) {
     MeshPtr scalp;
-    const StrandsPtr strands = exportFrame(time_, 1.0f, &scalp);
+    const StrandsPtr strands = exportFrame(time_, 1.0f, &scalp, false, true);
     const GroomFile& groomFile = file();
     const PrototypeLookup prototypes = [&groomFile](const std::string& n) -> const InstancePrototype* {
         const auto it = groomFile.prototypes.find(n);

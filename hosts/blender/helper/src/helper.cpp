@@ -1011,6 +1011,9 @@ std::size_t exportFrame(Session& s, ExportJob& job, double frame, float density)
     request.density = density;
     request.time = s.seconds;
     request.wantBounds = false;
+#if GROOMLAB_HAS_ALEMBIC
+    request.gameExport = job.engine != nullptr;  // Unreal, Unity: no Output rootDepth
+#endif
     const ViewResult& view = s.groom->evaluate(request);
     if (!view.strands) {
         fail("evaluation", view.errors.empty() ? std::string("the groom gave no strands") : view.errors.front());

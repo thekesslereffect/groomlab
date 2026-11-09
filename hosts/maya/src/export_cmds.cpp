@@ -123,6 +123,8 @@ struct FrameRange {
     // The groom's render overrides too (render_overrides.h: its renderDensity times the density,
     // its width and length scales), as a render has them.
     bool renderOverrides = false;
+    // A game engine's export (-unreal, -unity): the Output's rootDepth left off (groom_session.h ViewRequest::gameExport).
+    bool gameExport = false;
     unsigned count() const { return static_cast<unsigned>(std::floor((end - start) / step + 1e-6)) + 1; }
 };
 
@@ -227,7 +229,7 @@ MStatus forEachFrame(const char* command, const MDagPath& path, const FrameRange
 
         std::string error;
         MeshPtr scalp;
-        const StrandsPtr strands = applyRenderOverrides(evaluator.evaluate(density, &error, &scalp), overrides);
+        const StrandsPtr strands = applyRenderOverrides(evaluator.evaluate(density, &error, &scalp, false, range.gameExport), overrides);
         if (!error.empty()) return fail(command, MString("frame ") + frame + ": " + error.c_str());
         write(frame, strands ? *strands : StrandSet{}, scalp, evaluator);
         *strandTotal += strands ? strands->strandCount() : 0;
@@ -415,6 +417,7 @@ MStatus ExportAlembicCmd::doIt(const MArgList& args) {
         // Either engine's groom as every host writes it (engine_export.h): groom groups, the
         // feathers' shafts and lighter barbs; Unity's curves fitted to its importer.
         if (unreal || unity) {
+            range.gameExport = true;
             EngineExportOptions engine;
             engine.engine = unreal ? EngineExportOptions::Engine::Unreal : EngineExportOptions::Engine::Unity;
             const std::string groupsBy = flagString(db, "-grp", "").asChar();
@@ -890,7 +893,7 @@ MStatus ExportGltfCmd::doIt(const MArgList& args) {
                     evaluator.setGraphJson({});
                     std::string error;
                     MeshPtr scalp;
-                    const StrandsPtr strands = evaluator.evaluate(1.0f, &error, &scalp);
+                    const StrandsPtr strands = evaluator.evaluate(1.0f, &error, &scalp, false, true);  // (cards: a game asset)
                     if (!strands) throw std::runtime_error(error.empty() ? "the groom has no strands" : error);
                     if (!scalp || scalp->triangleCount() == 0) throw std::runtime_error("the groom has no scalp");
                     CardGltfSettings capSettings = settings;
@@ -923,7 +926,7 @@ namespace {
 MStatus scalesNow(const char* command, const MDagPath& path, std::shared_ptr<const ScaleMesh>* mesh, MeshPtr* scalp) {
     NodeEvaluator evaluator(path.node(), false);
     std::string error;
-    const StrandsPtr strands = evaluator.evaluate(1.0f, &error, scalp);
+    const StrandsPtr strands = evaluator.evaluate(1.0f, &error, scalp, false, true);  // (scales: game meshes and maps)
     if (!error.empty()) return fail(command, error.c_str());
     SceneScales scales;
     *mesh = strands ? scales.build(*strands, *scalp) : nullptr;

@@ -655,6 +655,7 @@ GL_API void gl_eval_options_init(gl_eval_options* options) {
     options->density = 1.0f;
     options->point_budget = 0.0;
     options->view_node = nullptr;
+    options->game_export = 0;
 }
 
 GL_API gl_result gl_session_evaluate(gl_session* session, const gl_eval_options* options, gl_strands** out_strands) {
@@ -678,6 +679,7 @@ GL_API gl_result gl_session_evaluate(gl_session* session, const gl_eval_options*
         request.density = o.density;
         request.pointBudget = o.point_budget;
         request.viewNode = o.view_node ? o.view_node : "";
+        request.gameExport = o.game_export != 0;
         request.time = session->time;
         request.wantBounds = false;
         const ViewResult& view = s.evaluate(request);

@@ -104,4 +104,16 @@ struct StrandMeshSource {
 // Whether two lists of sources make the same mesh (the same strands, by pointer, and options).
 bool sameStrandMeshes(const std::vector<StrandMeshSource>& a, const std::vector<StrandMeshSource>& b);
 
+// The Output node's rootDepth: each strand with a point `depth` under its root, inside the skin,
+// so a render shows hair growing out of the scalp instead of sitting on it. The point lies along
+// the way back down the strand's first segment bent into the skin (the inward normal at its root
+// on `scalp` added, so a strand leaving the skin flat still goes in); off the scalp, straight back
+// down the first segment. Roots, IDs and per-strand values stay; the width and point channels are
+// the root's. Strands carrying instances or feathers (placed by where they sit along the strand)
+// and strands shorter than two points are handed on as they are; `depth` 0 or less: the same set.
+StrandsPtr withRootDepth(const StrandsPtr& strands, const ScalpMesh* scalp, float depth);
+// The Output node's rootDepth for a view: its depth where it applies (`viewport`: only with
+// rootDepthInViewport), else 0. Read by the session after the graph (GroomSession::evaluate).
+float outputRootDepth(const ParamSet& outputParams, bool viewport);
+
 }  // namespace groomlab

@@ -1419,7 +1419,7 @@ void NodeEvaluator::refreshStoredInputs() {
     }
 }
 
-StrandsPtr NodeEvaluator::evaluate(float density, std::string* error, MeshPtr* scalp, bool buildCards) {
+StrandsPtr NodeEvaluator::evaluate(float density, std::string* error, MeshPtr* scalp, bool buildCards, bool gameExport) {
     MStatus status;
     MFnDependencyNode fn(node_, &status);
     if (!status) {
@@ -1476,7 +1476,7 @@ StrandsPtr NodeEvaluator::evaluate(float density, std::string* error, MeshPtr* s
                                                            false, session_->scalpHistoryLoopFrames(now.as(MTime::uiUnit())),
                                                            data.scalps)
                                       : nullptr);
-        return session_->evaluate(density, mayaSeconds(now), buildCards);
+        return session_->evaluate(density, mayaSeconds(now), buildCards, gameExport);
     } catch (const GraphError& e) {
         if (error) *error = e.what();
     } catch (const std::exception& e) {
@@ -1494,10 +1494,10 @@ bool NodeEvaluator::hairLook(HairLook* look) const {
 }
 
 StrandsPtr evaluateGroomNode(const MObject& node, float density, std::string* error, MeshPtr* scalp, bool buildCards,
-                             const std::string* graphJson) {
+                             const std::string* graphJson, bool gameExport) {
     NodeEvaluator evaluator(node, false);
     if (graphJson) evaluator.setGraphJson(*graphJson);
-    return evaluator.evaluate(density, error, scalp, buildCards);
+    return evaluator.evaluate(density, error, scalp, buildCards, gameExport);
 }
 
 bool prototypePath(const std::string& name, MDagPath* path) {

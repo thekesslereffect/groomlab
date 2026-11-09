@@ -7,10 +7,12 @@
 #include <memory>
 #include <numeric>
 
+#include "groomlab/export_view.h"
 #include "groomlab/frames.h"
 #include "groomlab/graph.h"
 #include "groomlab/parallel.h"
 #include "groomlab/portable_math.h"
+#include "groomlab/scalp_mesh.h"
 #include "groomlab/cards.h"
 #include "groomlab/instances.h"
 #include "groomlab/random.h"
@@ -554,6 +556,44 @@ StrandMeshSettings strandMeshSettings(const ParamSet& params) {
     s.density = std::clamp(static_cast<float>(params.getDouble("density", 1.0)), 0.0f, 1.0f);
     s.maxStrands = static_cast<std::size_t>(std::max<std::int64_t>(0, params.getInt("maxStrands", 0)));
     return s;
+}
+
+StrandsPtr withRootDepth(const StrandsPtr& strands, const ScalpMesh* scalp, float depth) {
+    if (!strands || !(depth > 0.0f) || strands->empty() || strands->instances() || !strands->featherLayers().empty() ||
+        hasBarbs(*strands)) {
+        return strands;
+    }
+    const std::size_t count = strands->strandCount();
+    std::vector<Vec3f> buried(count);
+    const bool onScalp = scalp && scalp->triangleCount() > 0;
+    bool any = false;
+    std::vector<char> made(count, 0);
+    parallelFor(0, count, [&](std::size_t i) {
+        const std::size_t n = strands->strandPointCount(i);
+        if (n == 0) return;
+        const Vec3f* p = strands->strandPoints(i);
+        Vec3f back = n >= 2 ? p[0] - p[1] : Vec3f{};
+        back = back.length() > 0.0f ? back.normalized() : Vec3f{};
+        const StrandRoot& root = strands->roots()[i];
+        if (onScalp && scalp->contains(root)) {
+            const Vec3f inward = scalp->normal(root) * -1.0f;
+            const Vec3f way = back + inward;
+            back = way.length() > 1e-6f ? way.normalized() : inward;
+        }
+        if (back.length() == 0.0f) back = Vec3f{0.0f, -1.0f, 0.0f};
+        buried[i] = p[0] + back * depth;
+        made[i] = 1;
+    }, 4096);
+    for (const char m : made) any = any || m;
+    if (!any) return strands;
+    return std::make_shared<const StrandSet>(strands->withFirstPoints(buried));
+}
+
+float outputRootDepth(const ParamSet& params, bool viewport) {
+    if (!params.has("rootDepth")) return 0.0f;
+    const auto depth = static_cast<float>(params.getDouble("rootDepth"));
+    if (!(depth > 0.0f)) return 0.0f;
+    return !viewport || params.getBool("rootDepthInViewport") ? depth : 0.0f;
 }
 
 }  // namespace groomlab

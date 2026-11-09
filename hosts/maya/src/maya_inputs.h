@@ -338,7 +338,8 @@ public:
     // At the node's current time (or an active MDGContextGuard's). Returns
     // null and sets *error on failure; *scalp, when given, receives the
     // scalp the strands grew on.
-    StrandsPtr evaluate(float density, std::string* error, MeshPtr* scalp = nullptr, bool buildCards = false);
+    StrandsPtr evaluate(float density, std::string* error, MeshPtr* scalp = nullptr, bool buildCards = false,
+                        bool gameExport = false);
     // Evaluates this graph (JSON) instead of the node's own from the next evaluate on (an
     // export of another level of detail); empty: the node's. After a first evaluation the graph
     // is swapped into the same session (GroomSession::setGraphJson): with caching on, the nodes
@@ -368,8 +369,9 @@ private:
     SimCacheInputs sims_;        // the bakes the Simulate nodes read
 };
 
-// One evaluation (NodeEvaluator for a single time); `graphJson`, when given, instead of the node's graph.
+// One evaluation (NodeEvaluator for a single time); `graphJson`, when given, instead of the node's graph;
+// `gameExport`: a game asset (cards, scalp bakes), the Output's rootDepth left off.
 StrandsPtr evaluateGroomNode(const MObject& node, float density, std::string* error, MeshPtr* scalp = nullptr,
-                             bool buildCards = false, const std::string* graphJson = nullptr);
+                             bool buildCards = false, const std::string* graphJson = nullptr, bool gameExport = false);
 
 }  // namespace groomlab::maya

@@ -377,6 +377,8 @@ TEST(ParamUse, EveryDeclaredParamIsReadWhereItShows) {
                             (void)op->evaluateOutputs(*c, inputs);
                             (void)op->note(*c);
                         }
+                        // Output's rootDepth is added by the session after the graph.
+                        if (type == op::kOutput) (void)outputRootDepth(op->params(), true);
                         // StrandMesh's settings are read by the session and the hosts making its mesh.
                         if (type == op::kToMesh) (void)strandMeshSettings(op->params());
                         // Simulate's settings are read by the session's solver (simulation.h).

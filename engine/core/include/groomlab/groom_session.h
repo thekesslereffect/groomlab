@@ -79,6 +79,11 @@ struct ViewRequest {
     // on the instanced strands carried, DisplayInputs::follow). The bounds are the carried strands'
     // all the same.
     bool hostCarries = false;
+    // A game engine's export (Unreal, Unity, glTF, FBX, cards): the Output node's rootDepth is left
+    // off (an engine's physics pins the root; a point under it fights the body's collision). Every
+    // other view that is not the viewport (renders, render exports, the procedurals) has it; the
+    // viewport has it with the Output's rootDepthInViewport.
+    bool gameExport = false;
 };
 
 // Counters that move only when what they name changed (a cache hit leaves them).
@@ -589,7 +594,7 @@ public:
     const ViewResult& last() const { return view_; }
     // The output at `density` and `seconds` (buildCards: Cards nodes build their cards), instances
     // pinned or fitted to rest. Throws what the evaluation threw (GraphError...).
-    StrandsPtr evaluate(float density, double seconds, bool buildCards = false);
+    StrandsPtr evaluate(float density, double seconds, bool buildCards = false, bool gameExport = false);
     // What evaluate(density, seconds) gives, when the last view evaluated it alike (an export of
     // the frame the viewport shows, at the view's density): its strands placed (FollowCarry
     // carried), no evaluation. Alike: the output viewed (no node), no stroke, the same density and
@@ -827,6 +832,15 @@ private:
     std::map<std::string, MeshMemo> meshMemos_;  // by node
     double lastStrandMeshMs_ = 0.0;              // the view's last evaluateStrandMeshes
     std::unique_ptr<RestPose> restPose_;        // while an instance is pinned or fitted to rest
+    // The Output's rootDepth last added: to which strands, on which scalp, how deep, and the result
+    // (a render of the same frame again, or the viewport's redraws, reuse it).
+    struct RootDepthMade {
+        std::weak_ptr<const StrandSet> from;
+        std::weak_ptr<const ScalpMesh> scalp;
+        float depth = 0.0f;
+        StrandsPtr made;
+    };
+    RootDepthMade rootDepthMade_;
     bool graphSet_ = false;
     std::string graphError_;
 

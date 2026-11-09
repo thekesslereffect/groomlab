@@ -167,6 +167,16 @@ cmds.setAttr(groom + ".previewDensity", 1.0)
   `curlLength` long or shorter (4 by default; longer swings are the strand's sweep, blended as
   ever). Guides curling in step blend as before. Brush dabs reblend only the strands they reach;
   the GPU preview leaves an Interpolate keeping curls to the CPU.
+- **Hair grows out of the skin in renders:** `Output.rootDepth` (0, off, by default; a length)
+  adds one point under each strand's root after every node, inside the skin, so a render shows hair
+  growing out of the scalp instead of sitting on it. The point lies back along the strand's first
+  segment bent into the skin (the inward normal at the root added). Renders and render exports
+  have it (Arnold, V-Ray, RenderMan, Cycles, Alembic, USD, the procedurals); game exports never do
+  (Unreal, Unity, glTF, FBX, cards, To Mesh: an engine's physics pins the root, and a point under
+  it fights the body's collision); the viewport only with `rootDepthInViewport`. No node sees the
+  point: roots, root UVs, IDs and per-strand values stay the scalp point's, and strands with
+  instances or feathers are left as they are. The C API's `gl_eval_options.game_export` and
+  Python's `game_export` ask for a game's strands.
 - **Segments live on the Resample node:** Scatter only places roots. The **Resample** node's
   `segments` (16 by default; 0 keeps each strand's) is the strands' resolution: strands (or
   guides) through it are resampled evenly to it, and every Scatter grows its strands with it in

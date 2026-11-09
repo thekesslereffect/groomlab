@@ -800,7 +800,7 @@ std::string GroomDocument::writeStrandMesh(const std::string& objPath, const Str
     try {
         MeshPtr scalp;
         const bool cards = options.make == StrandMeshOptions::Make::Auto || options.make == StrandMeshOptions::Make::Cards;
-        const StrandsPtr all = exportFrame(time_, 1.0f, &scalp, cards);
+        const StrandsPtr all = exportFrame(time_, 1.0f, &scalp, cards, true);
         // Scales, feathers, cards and instances whole (their plates and rachis are the strand set's); tubes thinned.
         const bool whole = resolveMeshMake(*all, options) != StrandMeshOptions::Make::Strands;
         const std::vector<std::size_t> keep = thinStrandsById(*all, whole ? all->strandCount() : maxStrands);
@@ -868,7 +868,7 @@ std::string GroomDocument::bakeScaleMaps(const std::string& directory, const std
     if (resolution < 16 || resolution > 8192) return "the resolution is 16 to 8192";
     try {
         MeshPtr scalp;
-        const StrandsPtr strands = exportFrame(time_, 1.0f, &scalp);
+        const StrandsPtr strands = exportFrame(time_, 1.0f, &scalp, false, true);
         const GroomFile& groomFile = file();
         const PrototypeLookup prototypes = [&groomFile](const std::string& n) -> const InstancePrototype* {
             const auto it = groomFile.prototypes.find(n);

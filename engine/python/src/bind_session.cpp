@@ -286,7 +286,7 @@ void bindSession(py::module_& m) {
         .def(
             "view",
             [](GroomSession& s, float density, double time, double pointBudget, const std::string& viewNode, float sculptDensity,
-               bool buildCards, bool wantCards, float cardDensity) {
+               bool buildCards, bool wantCards, float cardDensity, bool gameExport) {
                 ViewRequest request;
                 request.density = density;
                 request.time = time;
@@ -296,6 +296,7 @@ void bindSession(py::module_& m) {
                 request.buildCards = buildCards;
                 request.wantCards = wantCards;
                 request.cardDensity = cardDensity;
+                request.gameExport = gameExport;
                 PyView out;
                 {
                     py::gil_scoped_release release;
@@ -305,20 +306,20 @@ void bindSession(py::module_& m) {
             },
             py::arg("density") = 1.0f, py::arg("time") = 0.0, py::arg("point_budget") = 0.0, py::arg("view_node") = std::string{},
             py::arg("sculpt_density") = 1.0f, py::arg("build_cards") = false, py::arg("want_cards") = false,
-            py::arg("card_density") = 1.0f,
-            "Evaluates and returns a ViewResult. Never raises for the graph: failures are in errors.")
+            py::arg("card_density") = 1.0f, py::arg("game_export") = false,
+            "Evaluates and returns a ViewResult (game_export: for a game engine, the Output's rootDepth left off). Never raises for the graph: failures are in errors.")
         .def(
             "evaluate",
-            [](GroomSession& g, float density, double seconds, bool buildCards) -> py::object {
+            [](GroomSession& g, float density, double seconds, bool buildCards, bool gameExport) -> py::object {
                 StrandsPtr strands;
                 {
                     py::gil_scoped_release release;
-                    strands = g.evaluate(density, seconds, buildCards);
+                    strands = g.evaluate(density, seconds, buildCards, gameExport);
                 }
                 if (!strands) return py::none();
                 return py::cast(std::make_shared<StrandSet>(*strands));
             },
-            py::arg("density") = 1.0f, py::arg("seconds") = 0.0, py::arg("build_cards") = false,
+            py::arg("density") = 1.0f, py::arg("seconds") = 0.0, py::arg("build_cards") = false, py::arg("game_export") = false,
             "The strands at a density and time (a copy-on-write copy). Raises GraphError when the graph fails.")
         .def(
             "evaluate_node",

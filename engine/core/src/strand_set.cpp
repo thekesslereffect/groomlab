@@ -456,6 +456,51 @@ StrandSet StrandSet::subset(const std::vector<std::size_t>& strands) const {
     return out;
 }
 
+StrandSet StrandSet::withFirstPoints(const std::vector<Vec3f>& first) const {
+    const std::vector<std::size_t>& srcOffsets = offsets_.get();
+    const std::size_t count = strandCount();
+    StrandSet out;
+    out.ids_ = ids_;
+    out.roots_ = roots_;
+    out.strandChannels_ = strandChannels_;
+    out.instances_ = instances_;
+    out.cardLayers_ = cardLayers_;
+    out.featherLayers_ = featherLayers_;
+    std::vector<std::size_t>& offsets = out.offsets_.reset();
+    offsets.resize(count + 1);
+    offsets[0] = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        const std::size_t n = srcOffsets[i + 1] - srcOffsets[i];
+        offsets[i + 1] = offsets[i] + n + (n > 0 ? 1 : 0);
+    }
+    const std::size_t points = offsets[count];
+    const std::vector<Vec3f>& srcPositions = positions_.get();
+    const std::vector<float>& srcWidths = widths_.get();
+    std::vector<Vec3f>& positions = out.positions_.sized(points);
+    std::vector<float>& widths = out.widths_.sized(points);
+    std::vector<std::pair<const std::vector<float>*, std::vector<float>*>> perPoint;
+    for (const auto& [name, ch] : pointChannels_) {
+        Channel& to = out.pointChannels_[name];
+        to.defaultValue = ch.defaultValue;
+        perPoint.emplace_back(&ch.values.get(), &to.values.sized(points));
+    }
+    parallelFor(0, count, [&](std::size_t i) {
+        const std::size_t begin = srcOffsets[i], end = srcOffsets[i + 1], at = offsets[i];
+        if (begin == end) return;
+        const auto b = static_cast<std::ptrdiff_t>(begin), e = static_cast<std::ptrdiff_t>(end);
+        const auto to = static_cast<std::ptrdiff_t>(at + 1);
+        positions[at] = first[i];
+        std::copy(srcPositions.begin() + b, srcPositions.begin() + e, positions.begin() + to);
+        widths[at] = srcWidths[begin];
+        std::copy(srcWidths.begin() + b, srcWidths.begin() + e, widths.begin() + to);
+        for (const auto& [from, into] : perPoint) {
+            (*into)[at] = (*from)[begin];
+            std::copy(from->begin() + b, from->begin() + e, into->begin() + to);
+        }
+    }, 1024);
+    return out;
+}
+
 bool StrandSet::validate(std::string* error) const {
     auto fail = [error](const std::string& msg) {
         if (error) *error = msg;

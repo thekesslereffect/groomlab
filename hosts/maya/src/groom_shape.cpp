@@ -2387,9 +2387,9 @@ CardBake GroomShape::bakeCardsInMemory(int resolution, float occlusion, const st
     const float density = MPlug(thisMObject(), aCardDensity).asFloat();
     if (evaluator) {
         evaluator->setGraphJson(graphJson);
-        strands = evaluator->evaluate(density, &error, &scalp, true);
+        strands = evaluator->evaluate(density, &error, &scalp, true, true);  // (cards: a game asset)
     } else {
-        strands = evaluateGroomNode(thisMObject(), density, &error, &scalp, true, graphJson.empty() ? nullptr : &graphJson);
+        strands = evaluateGroomNode(thisMObject(), density, &error, &scalp, true, graphJson.empty() ? nullptr : &graphJson, true);
     }
     if (!strands) throw std::runtime_error(error.empty() ? "the groom has no strands" : error);
     // The color map in Rec.709, as an sRGB file holds it (renderingSpace(): Maya under ACES).
@@ -2401,7 +2401,7 @@ std::vector<std::string> GroomShape::exportCardMaps(const std::string& directory
     std::string error;
     MeshPtr scalp;
     const float density = MPlug(thisMObject(), aCardDensity).asFloat();
-    StrandsPtr strands = evaluateGroomNode(thisMObject(), density, &error, &scalp, true, nullptr);
+    StrandsPtr strands = evaluateGroomNode(thisMObject(), density, &error, &scalp, true, nullptr, true);
     if (!strands) throw std::runtime_error(error.empty() ? "the groom has no strands" : error);
     const CardBake bake = groomlab::bakeCardMapsInMemory(std::move(strands), std::move(scalp), settings, occlusion, renderingSpace().toRec709);
     return writeCardMaps(*bake.maps, preset, settings, directory, fileSafeName(base));
@@ -2467,9 +2467,9 @@ ScalpTextures GroomShape::bakeScalpInMemory(int resolution, float reach, float d
     StrandsPtr strands;
     if (evaluator) {
         evaluator->setGraphJson({});  // the groom's own graph
-        strands = evaluator->evaluate(std::clamp(density, 0.0f, 1.0f), &error, &scalp);
+        strands = evaluator->evaluate(std::clamp(density, 0.0f, 1.0f), &error, &scalp, false, true);
     } else {
-        strands = evaluateGroomNode(thisMObject(), std::clamp(density, 0.0f, 1.0f), &error, &scalp);
+        strands = evaluateGroomNode(thisMObject(), std::clamp(density, 0.0f, 1.0f), &error, &scalp, false, nullptr, true);
     }
     if (!strands) throw std::runtime_error(error.empty() ? "the groom has no strands" : error);
     if (!scalp || scalp->triangleCount() == 0) throw std::runtime_error("the groom has no scalp");

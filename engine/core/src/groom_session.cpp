@@ -34,6 +34,7 @@
 #include "groomlab/random.h"
 #include "groomlab/scalp_paint.h"
 #include "groomlab/subdivision.h"
+#include "groomlab/strand_geometry.h"
 #include "groomlab/strand_set.h"
 #include "groomlab/texture.h"
 
@@ -1686,6 +1687,21 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
             } else {
                 restPose_.reset();
             }
+            // The Output's rootDepth (the output shown, not a game export; the viewport by its own
+            // switch): a point under each root, after every node, on the scalp the strands are on
+            // (the rest pose while following: carried with the rest).
+            if (shown == viewed->output && strands && !request.gameExport) {
+                const Operator& output = viewed->graph.node(shown);
+                const float depth = output.typeName() == op::kOutput ? outputRootDepth(output.params(), request.viewport) : 0.0f;
+                if (depth > 0.0f) {
+                    const MeshPtr on = following_ && followRest_ ? followRest_ : scalp_;
+                    RootDepthMade& m = rootDepthMade_;
+                    if (!(m.made && m.depth == depth && m.from.lock() == strands && m.scalp.lock() == on)) {
+                        m = {strands, on, depth, withRootDepth(strands, on.get(), depth)};
+                    }
+                    strands = m.made;
+                }
+            }
             // Following the scalp: from the rest pose to the scalp now, root by root (or handed on at
             // rest to a host that carries them itself, with what carries them).
             if (following_ && request.hostCarries && strands && carriesPointsAndInstances(*strands)) {
@@ -1846,11 +1862,12 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
     return out;
 }
 
-StrandsPtr GroomSession::evaluate(float density, double seconds, bool buildCards) {
+StrandsPtr GroomSession::evaluate(float density, double seconds, bool buildCards, bool gameExport) {
     ViewRequest request;
     request.density = density;
     request.time = seconds;
     request.buildCards = buildCards;
+    request.gameExport = gameExport;
     request.wantBounds = false;  // exports and renders: the strands only
     const ViewResult& result = evaluate(request);
     if (failure_) std::rethrow_exception(failure_);
@@ -1869,6 +1886,8 @@ StrandsPtr GroomSession::viewedAsRendered(float density, double seconds) const {
         const Operator& op = graph.node(id);
         const std::string type = op.typeName();
         if (type == op::kCompound || type == op::kReference) return nullptr;
+        // The Output's rootDepth: a render has it and a game export not, the viewport by its switch.
+        if (type == op::kOutput && outputRootDepth(op.params(), false) > 0.0f) return nullptr;
         if (was.viewport && graph.evaluationMode(id) != EvaluationMode::Always) return nullptr;
         if (was.maxPoints > 0.0 && op.thinnedLastRun()) return nullptr;
     }
