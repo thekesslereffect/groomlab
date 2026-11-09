@@ -44,7 +44,8 @@ import groomlab_core
 
 # The plugin a release zip holds for this platform (the zips are per platform).
 PLUGIN_FILE = "GroomLab.bundle" if sys.platform == "darwin" else "GroomLab.mll"
-LATEST_URL = "https://downloads.getgroomlab.com/maya/latest.json"
+# Each platform's latest release (tools/publish_release.py): Windows' latest.json, macOS' latest-macos.json.
+LATEST_URL = "https://downloads.getgroomlab.com/maya/%s" % ("latest-macos.json" if sys.platform == "darwin" else "latest.json")
 TIMEOUT = 5            # seconds the check may take
 DOWNLOAD_TIMEOUT = 30  # seconds a download may stall
 CHECK_INTERVAL = 24 * 3600  # the startup check: at most once a day

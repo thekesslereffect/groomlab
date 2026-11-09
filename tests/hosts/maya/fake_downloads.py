@@ -28,7 +28,6 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 PLUGIN_FILE = "GroomLab.bundle" if sys.platform == "darwin" else "GroomLab.mll"
 
 ZIP_NAME = "GroomLab-0.2.0-Maya2022-Windows.zip"
-REAL_LATEST_URL = "https://downloads.getgroomlab.com/maya/latest.json"
 
 
 def this_maya():
@@ -131,6 +130,7 @@ class FakeDownloads(object):
     def point(self, updates):
         """groomlab.updates reads this install, its modules folder, a state folder and this server."""
         self.updates = updates
+        self.real_latest_url = updates.LATEST_URL  # (this platform's feed, put back by close)
         updates.MODULE_DIR = self.module
         updates.MOD_DIRS = [self.modules]
         updates.STATE_DIR = self.state
@@ -141,5 +141,5 @@ class FakeDownloads(object):
         self.server.server_close()
         if self.updates is not None:
             self.updates.MODULE_DIR = self.updates.MOD_DIRS = self.updates.STATE_DIR = None
-            self.updates.LATEST_URL = REAL_LATEST_URL
+            self.updates.LATEST_URL = self.real_latest_url
         shutil.rmtree(self.root, ignore_errors=True)

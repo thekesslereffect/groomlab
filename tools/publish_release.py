@@ -23,6 +23,11 @@ versions the zip has a build for (an install in another Maya is not offered it),
 built but not yet tested in their Maya (Check for Updates says so), `maya` the tested one (2022): the
 only field releases before mayaVersions read, and they all run in Maya 2022.
 
+macOS (a -maya-macos-arm64.zip from package_release.py on the Mac, its binaries signed with a Developer
+ID and notarized): maya/GroomLab-<version>-Maya-macOS.zip, maya/GroomLab-Maya-macOS-latest.zip,
+maya/latest-macos.json (what a Mac install's Check for Updates reads) and maya/releases-macos.json, so
+the Windows files above stay Windows'. Every Maya version in it is beta (no tested Maya 2022 there).
+
 The bucket, its credentials (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, optionally
 R2_BUCKET) and the signed upload: tools/downloads_bucket.py, shared with publish_blender.py and
 publish_app.py.
@@ -41,6 +46,7 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from downloads_bucket import IMMUTABLE, PUBLIC, SHORT, json_body, read_notes, release_index, release_info, upload  # noqa: E402
 
 SUFFIX = "-maya-win64.zip"
+MAC_SUFFIX = "-maya-macos-arm64.zip"
 
 
 def maya_builds(zip_path, version):
@@ -50,6 +56,20 @@ def maya_builds(zip_path, version):
             return json.loads(z.read("GroomLab-%s/GroomLab/maya_versions.json" % version).decode("utf-8"))
         except KeyError:
             sys.exit("%s has no GroomLab/maya_versions.json: package it with tools/package_release.py" % zip_path)
+
+
+def check_mac_signature(zip_path, version, builds):
+    """Exits unless the zip's plugins are signed with a Developer ID (not ad hoc: an unsigned or ad hoc
+    build is refused on a user's Mac)."""
+    import tempfile
+    year = sorted(builds)[-1]
+    member = "GroomLab-%s/GroomLab/%s" % (version, builds[year]["plugin"])
+    with tempfile.TemporaryDirectory() as tmp, zipfile.ZipFile(zip_path) as z:
+        z.extract(member, tmp)
+        out = subprocess.run(["codesign", "-dv", "--verbose=2", os.path.join(tmp, member)], capture_output=True, text=True).stderr
+    if "Authority=Developer ID Application" not in out:
+        sys.exit("%s's plugins are not signed with a Developer ID: package it with --sign and --notarize "
+                 "(tools/package_release.py, docs/MACOS.md)" % os.path.basename(zip_path))
 
 
 def main():
@@ -64,22 +84,41 @@ def main():
     zip_path = args.zip
     if not zip_path:
         subprocess.check_call([sys.executable, os.path.join(ROOT, "tools", "package_release.py")])
-        zips = glob.glob(os.path.join(ROOT, "dist", "GroomLab-*" + SUFFIX))
+        zips = glob.glob(os.path.join(ROOT, "dist", "GroomLab-*" + (MAC_SUFFIX if sys.platform == "darwin" else SUFFIX)))
         if not zips:
             sys.exit("package_release.py made no zip in dist/")
         zip_path = max(zips, key=os.path.getmtime)
     base = os.path.basename(zip_path)
-    if not (base.startswith("GroomLab-") and base.endswith(SUFFIX)):
+    mac = base.endswith(MAC_SUFFIX)
+    suffix = MAC_SUFFIX if mac else SUFFIX
+    if not (base.startswith("GroomLab-") and base.endswith(suffix)):
         sys.exit("%s is not a GroomLab release zip" % base)
-    version = base[len("GroomLab-"):-len(SUFFIX)]
+    version = base[len("GroomLab-"):-len(suffix)]
     builds = maya_builds(zip_path, version)
-    if builds.get("2022", {}).get("status") != "tested":
+    if mac:
+        check_mac_signature(zip_path, version, builds)
+    elif builds.get("2022", {}).get("status") != "tested":
         sys.exit("%s has no tested Maya 2022 build" % base)
     years = sorted(builds)
     beta = [y for y in years if builds[y].get("status") != "tested"]
 
     with open(zip_path, "rb") as f:
         body = f.read()
+    if mac:
+        versioned = "maya/GroomLab-%s-Maya-macOS.zip" % version
+        latest = "maya/GroomLab-Maya-macOS-latest.zip"
+        info = release_info(version, versioned, body, notes, mayaVersions=years, mayaBeta=beta, platform="macos")
+        uploads = [
+            (versioned, body, "application/zip", IMMUTABLE),
+            (latest, body, "application/zip", SHORT),
+            ("maya/latest-macos.json", json_body(info), "application/json", SHORT),
+            ("maya/releases-macos.json", json_body(release_index("maya/releases-macos.json", info)), "application/json", SHORT),
+        ]
+        if not upload(uploads, args.dry_run):
+            print(json.dumps(info, indent=2))
+            return
+        print("GroomLab %s for macOS is live: %s/%s" % (version, PUBLIC, latest))
+        return
     versioned = "maya/GroomLab-%s-Maya-Windows.zip" % version
     latest = "maya/GroomLab-Maya-Windows-latest.zip"
     info = release_info(version, versioned, body, notes, maya="2022", mayaVersions=years, mayaBeta=beta,
