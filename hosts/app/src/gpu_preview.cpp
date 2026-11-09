@@ -67,10 +67,12 @@ void* nativeTextureOf(QRhi* rhi, QRhiTexture* texture) {
 void* deviceOf(QRhi* rhi) {
     if (!rhi) return nullptr;
     switch (rhi->backend()) {
+#ifdef Q_OS_WIN
         case QRhi::D3D11: {
             const auto* handles = static_cast<const QRhiD3D11NativeHandles*>(rhi->nativeHandles());
             return handles ? handles->dev : nullptr;
         }
+#endif
         case QRhi::OpenGLES2: {
             const auto* handles = static_cast<const QRhiGles2NativeHandles*>(rhi->nativeHandles());
             return handles ? handles->context : nullptr;
