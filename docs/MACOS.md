@@ -102,7 +102,7 @@ in `~/.cache/groomlab-deps/fetch` (`GROOMLAB_FETCH_CACHE`).
 | MtoA for macOS (installed) | installed with Arnold for Maya: `/Applications/Autodesk/Arnold/mtoa/<year>` (`include/mtoa`, `bin/libmtoa_api.dylib`, `bin/libai.dylib`) | the MtoA translator |
 | V-Ray for Maya (installed) | find it (`ls -d /Applications/Chaos*/V-Ray/*` or `/Applications/ChaosGroup/...`): the folder per Maya version holding `vray/include/vray_maya_sdk/translator_interface.h`; pass it as `-DVRAY_FOR_MAYA_LOCATION=...` | the V-Ray for Maya translator (section 4, item 11: its build is Windows-only today) |
 | Arnold SDK for macOS (optional) | `Arnold-7.x-darwin.tgz` unpacked to `~/groomlab-deps/sdks/arnold-macos` | the Arnold procedural without MtoA |
-| RenderMan Pro Server 27.3 (not installed) | `/Applications/Pixar/RenderManProServer-27.3` or `RMANTREE` | the RenderMan procedural: left out without it |
+| RenderMan Pro Server 27.3 (installed, not used) | `/Applications/Pixar/RenderManProServer-27.3` or `RMANTREE` | the RenderMan procedural: **waits for RenderMan 28.** 27.3 for macOS is Intel only (`prman`, `libprman`, `libpxrcore`: x86_64, under Rosetta), and the macOS port is Apple silicon only (the user's decision, 2026-11-09): no x86_64 build of the procedural. Leave it out until Pixar ships arm64 |
 | V-Ray Standalone (installed) | `/Applications/Chaos/V-Ray/Standalone_for_bigsur_univ`: the executable is `VRay.app/Contents/MacOS/vray.bin`, found there by the Maya scripts, the app and the tests (a setting or `GROOMLAB_VRAY` may name the install folder or `VRay.app`); renders need the Chaos license server (`/Applications/Chaos/VRLService`) | `vray` tests: `vray.render`, `vray.scene`, `app.vray_render` and `test_vray_render.py` pass on the Mac (2026-11-09) |
 
 Each preset's paths can be overridden on the command line (`cmake --preset macos-maya2025
@@ -317,6 +317,14 @@ their SDKs, `app.package_manifest` (Windows only).
   `xcrun notarytool submit` and `xcrun stapler staple`: ask the user before anything that needs
   an Apple account.
 
+**RenderMan 27.3's installer on macOS 27** (for when it is needed again): it crashes at the license page.
+Its own Qt 6.5.3 loads `lib/Qt-6.5.3/plugins/tls/libqopensslbackend.dylib`, and Rosetta's dyld aborts
+("64-bit value does not fit in 32 bits", `fit32`). Removing the file breaks Pixar's signature (Gatekeeper:
+"damaged"; its privileged helper accepts only Pixar-signed clients). What worked: a normal copy of the app
+with that one file `chmod 000`. Qt cannot read it and uses `securetransport`, while root's signature checks
+still read it. The installer also shows no error when Pixar refuses a license (it expects XML): run
+`RenderMan Installer.app/Contents/MacOS/RenderMan Installer -debug` to see the server's reply.
+
 ## 11. Packaging and publishing (later, with the user)
 
 `tools/package_release.py`, `package_app.py`, `publish_*.py` are Windows-only (`win64` zips,
@@ -365,7 +373,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] Maya 2024 (`macos-maya2024`: Qt 5, PySide2, Python 3.10) (built first time: Python 3.10.8, TBB 2020, MtoA 5.3.4; in mayapy: `test_plugin.py` 23 OK, 3 skipped; `test_updates.py` 8 OK; `test_arnold.py` 33 of 33 once Stop was fixed: Arnold 7.2 renders an unlicensed batch job with a watermark, and Stop killed only the `Render` shell script, not the batch Maya it starts (now the render's process group, macOS only; Linux's `Render` is a script too: likely the same bug there). `qt_compat_check.py --api PySide2` in mayapy 2024: Qt 5's `offscreen` plugin on macOS crashes in `QApplication::notify` (enter/leave) when `QTest.mouseMove` moves its cursor, a bare widget not, PySide6 not (92 of 92 in mayapy 2025); under `QT_QPA_PLATFORM=minimal` 91 of 92, the fill field's text undrawn (no fonts, `QT_QPA_FONTDIR=/System/Library/Fonts` did not help). The UI in Maya 2024 itself not tried)
 - [x] V-Ray for Maya translator builds (`if(APPLE)` branches, section 4 item 11) and renders a groom (Maya 2024 to 2027: V-Ray for Maya loads it from the module, a `.vrscene` export holds the groom's `GeomMayaHair`, sampler, `BRDFHair4` and material, and with the Chaos license server running a 320x240 render shows the hair, gone when the groom is hidden; checked by a scratch script, no test of it in the tree)
 - [x] Arnold procedural (`groomlab_procedural.dylib`) renders in kick (Maya 2025 and 2026's MtoA, installed module: `-DGROOMLAB_BUILD_PROCEDURAL=ON`, the `macos-maya*` presets leave it off. Fixed on the way: TBB 2020 unloading its `libtbbmalloc` at exit (the procedural keeps it mapped); the install now carries Maya's TBB beside the procedural for kick and searches `@executable_path/../MacOS` first, so inside Maya it binds Maya's own (checked with `DYLD_PRINT_SEARCHING`; Arnold still opens the copy while scanning the folder for plugins, as on Windows and Linux). Open: `GroomLab/procedurals` is one folder for every Maya version, but each build links its Maya's TBB and Arnold: a module with several versions needs one procedural per Arnold version)
-- [ ] RenderMan procedural renders in prman (when RenderMan is installed)
+- [ ] RenderMan procedural renders in prman (waits for RenderMan 28 on arm64: 27.3 is Intel only, and the port is Apple silicon only)
 - [x] Blender extension zip installs in Blender for macOS; the helper runs (`-L blender -LE vray` green, Blender 5.2.3)
 - [ ] Slang for macOS pinned; `gpu.*kernel_targets` green
 - [ ] Metal compute backend (`look_engine_metal.mm`), `groomlab_gpu_tests` green on macOS
