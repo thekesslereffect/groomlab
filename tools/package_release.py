@@ -18,6 +18,11 @@ version built. Maya 2022 must be there: it is the tested version and the only bu
 procedural and groomlab-cli. The other versions are beta (built, not yet tested in their Maya):
 GroomLab/maya_versions.json says which, the installer and README_INSTALL.txt say so.
 
+macOS (run on the Mac): the builds are build/macos-maya<year> (2024 to 2027, against each Maya install:
+docs/MACOS.md), the plugin GroomLab.bundle in maya<year>/ for every version (no Maya 2022 there), and the
+Arnold procedural and groomlab-cli from build/macos-release (no TBB, macOS 13.3). Every version is beta
+(tested in mayapy, not yet in Maya's UI). The zip is dist/GroomLab-<version>-maya-macos-arm64.zip.
+
 Installs each build's GroomLab component into a clean staging folder (cmake --install), joins the
 .mod sections, adds tools/package/* (install.mel, install_groomlab.py, README_INSTALL.txt) and the
 user guide, and zips it to dist/GroomLab-<version>-maya-win64.zip. Debug symbols (.pdb, ~150 MB per
@@ -34,17 +39,25 @@ import sys
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TESTED = ("2022",)            # Maya versions GroomLab is tested in; the others built are beta
-SUPPORTED = ("2022", "2023", "2024", "2025", "2026", "2027")
+MAC = sys.platform == "darwin"
+if MAC:
+    TESTED = ()               # tested in mayapy, not yet in Maya's UI: beta
+    SUPPORTED = ("2024", "2025", "2026", "2027")
+    PLUGIN = "GroomLab.bundle"
+    RELEASE_BUILD = os.path.join(ROOT, "build", "macos-release")  # the procedural and groomlab-cli, without TBB
+else:
+    TESTED = ("2022",)        # Maya versions GroomLab is tested in; the others built are beta
+    SUPPORTED = ("2022", "2023", "2024", "2025", "2026", "2027")
+    PLUGIN = "GroomLab.mll"
 
 
 def build_dir(year):
-    return os.path.join(ROOT, "build", "ninja-maya%s" % year)
+    return os.path.join(ROOT, "build", ("macos-maya%s" if MAC else "ninja-maya%s") % year)
 
 
 def bin_dir(module, year):
     """A Maya version's binaries in the module: Maya 2022's at its root, the others' in maya<year>/."""
-    return module if year == "2022" else os.path.join(module, "maya%s" % year)
+    return module if year == "2022" and not MAC else os.path.join(module, "maya%s" % year)
 
 
 def mod_section(build):
@@ -63,12 +76,16 @@ def main():
 
     if args.maya:
         years = [y.strip() for y in args.maya.split(",") if y.strip()]
+    elif MAC:
+        years = [y for y in SUPPORTED if os.path.isfile(os.path.join(build_dir(y), "CMakeCache.txt"))]
     else:
         years = [y for y in SUPPORTED if y == "2022" or os.path.isfile(os.path.join(build_dir(y), "CMakeCache.txt"))]
     unknown = [y for y in years if y not in SUPPORTED]
     if unknown:
         sys.exit("not a supported Maya version: %s (%s)" % (", ".join(unknown), ", ".join(SUPPORTED)))
-    if "2022" not in years:
+    if not years:
+        sys.exit("no Maya build to package (%s)" % build_dir("<year>"))
+    if "2022" not in years and not MAC:
         sys.exit("Maya 2022 must be in the package: it is the tested version and holds the procedural and the CLI")
     years.sort()
 
@@ -83,7 +100,7 @@ def main():
         build = build_dir(year)
         subprocess.check_call(["cmake", "--install", build, "--config", args.config, "--component", "GroomLab",
                                "--prefix", stage], stdout=subprocess.DEVNULL)
-        plugin = os.path.join(bin_dir(module, year), "plug-ins", "GroomLab.mll")
+        plugin = os.path.join(bin_dir(module, year), "plug-ins", PLUGIN)
         if not os.path.isfile(plugin):
             sys.exit("no %s in the install: build %s (%s) first" % (os.path.relpath(plugin, stage), build, args.config))
         section = mod_section(build)
@@ -95,10 +112,22 @@ def main():
         if args.symbols and os.path.isfile(built_pdb):
             shutil.copy2(built_pdb, pdb)
     sections.sort()
+    if MAC:
+        # The Arnold procedural and groomlab-cli from the release build (no TBB: one procedural for every
+        # Maya's Arnold, built against the oldest), not a Maya build's (which carries that Maya's TBB).
+        shutil.rmtree(os.path.join(module, "procedurals"), ignore_errors=True)
+        shutil.rmtree(os.path.join(module, "bin"), ignore_errors=True)
+        subprocess.check_call(["cmake", "--install", RELEASE_BUILD, "--config", args.config, "--component", "GroomLab",
+                               "--prefix", stage], stdout=subprocess.DEVNULL)
+        for need in ("procedurals/groomlab_procedural.dylib", "bin/groomlab-cli"):
+            if not os.path.isfile(os.path.join(module, need)):
+                sys.exit("no %s from %s: build it first (cmake --build --preset macos-release)" % (need, RELEASE_BUILD))
     # The RenderMan procedural comes with Maya 2022's build when it found RenderMan Pro Server
     # (GROOMLAB_RMANTREE); a machine without RenderMan packages without it.
     renderman = os.path.join(module, "procedurals", "renderman", "groomlab_renderman.dll")
-    if os.path.isfile(renderman):
+    if MAC:
+        print("note: no RenderMan procedural on macOS (it waits for RenderMan 28, the first for Apple silicon)")
+    elif os.path.isfile(renderman):
         print("with the RenderMan procedural (procedurals/renderman)")
     else:
         print("note: no RenderMan procedural in the package (build %s found no RenderMan SDK: set "
@@ -131,7 +160,7 @@ def main():
         folder = bin_dir(module, year)
         builds[year] = {
             "status": "tested" if year in TESTED else "beta",
-            "plugin": os.path.relpath(os.path.join(folder, "plug-ins", "GroomLab.mll"), module).replace("\\", "/"),
+            "plugin": os.path.relpath(os.path.join(folder, "plug-ins", PLUGIN), module).replace("\\", "/"),
             "python": os.path.relpath(os.path.join(folder, "python"), module).replace("\\", "/"),
             "arnold": os.path.isdir(os.path.join(folder, "extensions")),
             "vray": os.path.isdir(os.path.join(folder, "vray")),
@@ -150,7 +179,7 @@ def main():
         f.write("GroomLab %s (%s, %s)\n" % (version, commit or "unknown commit", args.config))
 
     os.makedirs(args.out, exist_ok=True)
-    zip_path = os.path.join(args.out, "GroomLab-%s-maya-win64.zip" % version)
+    zip_path = os.path.join(args.out, "GroomLab-%s-maya-%s.zip" % (version, "macos-arm64" if MAC else "win64"))
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for folder, _, files in os.walk(stage):
             for name in sorted(files):
