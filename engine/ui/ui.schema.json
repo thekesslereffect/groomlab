@@ -71,7 +71,8 @@
             "type": "object", "additionalProperties": false, "required": ["value", "label"],
             "properties": {"value": {"type": ["string", "number"]}, "label": {"type": "string"}, "tip": {"type": "string"},
                            "convert": {"type": "string"}, "tag": {"type": "string"},
-                           "short": {"type": "string"}}}}
+                           "short": {"type": "string"},
+                           "keys": {"type": "array", "items": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "number"}}}}}}
         }
       }
     },

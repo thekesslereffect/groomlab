@@ -135,7 +135,11 @@
       "-",
       {"ref": "graph/paintMenu", "needs": ["param.linkable", "param.mappable", "groom"]},
       "-",
-      {"id": "param.driveWithSlider", "needs": ["param.linkable", "param.mappable", "groom"]}
+      {"id": "param.driveWithSlider", "needs": ["param.linkable", "param.mappable", "groom"]},
+      "-",
+      {"submenu": "Curve Presets", "id": "rampPresets", "needs": ["param.ramp"], "hosts": ["blender"],
+       "items": [{"generator": "choices", "choices": "rampPresets", "action": "param.rampPreset"}]},
+      {"id": "param.rampFlip", "needs": ["param.ramp"], "hosts": ["blender"]}
     ],
     "paintMenu": {
       "label": "Paint",

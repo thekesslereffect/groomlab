@@ -1386,6 +1386,10 @@ class GraphEditorTest(unittest.TestCase):
         ramps[0].setValue([[0, 0.2], [0.5, 1], [1, 0.1]])
         ramps[0].committed.emit(ramps[0].value())
         self.assertEqual(self.editor.model.param(propagate, "lengthProfile"), [[0, 0.2], [0.5, 1], [1, 0.1]])
+        # Its presets (right-click empty space) are the shared list: choices.json's rampPresets.
+        presets = dict((label, keys) for label, keys, _ in widgets.RampEditor.presets())
+        self.assertEqual(len(presets), 9)
+        self.assertEqual(presets["Tip Only"], [[0, 0], [0.6, 0], [1, 1]])
         self.assertEqual(groomlab.errors(self.groom), [])
         self.assertGreater(cmds.getAttr(self.groom + ".outStrandCount"), 0)
 

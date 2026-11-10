@@ -2192,10 +2192,13 @@ class RampEditor(QtWidgets.QWidget):
 
     dragged = QtCore.Signal(object)
     committed = QtCore.Signal(object)
-    PRESETS = [("Rising", [[0, 0], [1, 1]]), ("Falling", [[0, 1], [1, 0]]), ("Constant", [[0, 1], [1, 1]]),
-               ("Ease In", [[0, 0], [0.5, 0.15], [1, 1]]), ("Ease Out", [[0, 0], [0.5, 0.85], [1, 1]]),
-               ("Bell", [[0, 0], [0.5, 1], [1, 0]]), ("Tip Only", [[0, 0], [0.6, 0], [1, 1]]),
-               ("Root Only", [[0, 1], [0.4, 0], [1, 0]])]
+
+    @staticmethod
+    def presets():
+        """(label, keys, tip) of each curve preset (engine/ui/choices.json's rampPresets: every host
+        offers the same)."""
+        from groomlab.ui import definitions
+        return [(c["label"], c["keys"], c.get("tip", "")) for c in definitions.choices("rampPresets")]
 
     def __init__(self, keys, parent=None, ends=("root", "tip")):
         super(RampEditor, self).__init__(parent)
@@ -2376,8 +2379,11 @@ class RampEditor(QtWidgets.QWidget):
 
     def _presets(self, global_pos):
         menu = QtWidgets.QMenu(self)
-        for label, keys in self.PRESETS:
-            menu.addAction(label, lambda k=keys: (self.setValue(k), self.committed.emit(self.value())))
+        menu.setToolTipsVisible(True)
+        for label, keys, tip in self.presets():
+            # (A plain key list: the curve keeps its smooth or straight segments.)
+            action = menu.addAction(label, lambda k=keys: (self.setValue(k), self.committed.emit(self.value())))
+            action.setToolTip(tip)
         menu.addSeparator()
         straight = menu.addAction("Linear (straight segments)")
         straight.setCheckable(True)

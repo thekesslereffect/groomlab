@@ -304,6 +304,15 @@ class GraphEditorTest(unittest.TestCase):
         self.assertTrue(gt.sync_ramps(tree))
         self.assertEqual(self.param("noise", "profile"), [[0.0, 0.0], [0.5, 0.2], [1.0, 1.0]])
         self.assertFalse(gt.ramp_changed(curve))
+        # The param menu's Curve Presets (choices.json's rampPresets, as Maya and the app offer them)
+        # and Flip Curve: the param and the widget both.
+        self.assertIn("param.ramp", ge.param_state(noise, noise.gl_param_specs["profile"], head)[0])
+        self.assertEqual(bpy.ops.groomlab.graph_ramp_preset(node="noise", param="profile", preset="tipOnly"), {"FINISHED"})
+        self.assertEqual(self.param("noise", "profile"), [[0, 0], [0.6, 0], [1, 1]])
+        self.assertEqual(gt.ramp_value(gt.ramp_node(noise, "profile")), [[0.0, 0.0], [0.6, 0.0], [1.0, 1.0]])
+        self.assertFalse(gt.ramp_changed(gt.ramp_node(noise, "profile")))
+        self.assertEqual(bpy.ops.groomlab.graph_ramp_preset(node="noise", param="profile", preset="flip"), {"FINISHED"})
+        self.assertEqual(self.param("noise", "profile"), [[0.0, 1], [0.4, 0], [1.0, 0]])
         groom.flush()
         self.assertEqual(groom.runtime(head).errors, [])
 

@@ -18,6 +18,7 @@
 #include <QStackedWidget>
 #include <QVBoxLayout>
 
+#include "definitions.h"
 #include "glass.h"
 #include "groomlab/map_ref.h"
 #include "groomlab/ramp.h"
@@ -90,16 +91,24 @@ RampEditor::RampEditor(QWidget* parent) : QWidget(parent) {
     connect(linear_, &QAbstractButton::clicked, this, [setStraight] { setStraight(true); });
     connect(presets_, &QAbstractButton::clicked, this, [this] {
         QMenu menu(this);
-        for (const std::string& name : presetNames()) {
-            const QString title = theme::brushTitle(name);
-            menu.addAction(title, this, [this, name] {
-                const bool straight = straight_;
-                setValue(preset(name));
-                straight_ = straight;  // the interpolation is the user's, not the preset's
-                update();
-                emit edited(false);
-            });
+        menu.setToolTipsVisible(true);
+        auto apply = [this](const json& keys) {
+            const bool straight = straight_;
+            setValue(keys);
+            straight_ = straight;  // the interpolation is the user's, not the preset's
+            smooth_->setChecked(!straight_);
+            linear_->setChecked(straight_);
+            update();
+            emit edited(false);
+        };
+        for (const json& c : ui::Definitions::shipped().choices("rampPresets")) {
+            QAction* action = menu.addAction(QString::fromStdString(c.at("label").get<std::string>()), this,
+                                             [apply, keys = c.at("keys")] { apply(keys); });
+            action->setToolTip(QString::fromStdString(c.value("tip", std::string())));
         }
+        menu.addSeparator();
+        menu.addAction(tr("Flip"), this, [this, apply] { apply(flipped(value())); })
+            ->setToolTip(tr("The curve mirrored end to end (what was at the start now at the end)"));
         menu.exec(presets_->mapToGlobal(QPoint(0, presets_->height() + 4)));
     });
     setValue(json::array({json::array({0.0, 1.0})}));
@@ -107,20 +116,30 @@ RampEditor::RampEditor(QWidget* parent) : QWidget(parent) {
 
 QSize RampEditor::sizeHint() const { return QSize(220, 110 + kRampButtons); }
 
-std::vector<std::string> RampEditor::presetNames() { return {"constant", "up", "down", "ease", "bell", "taper"}; }
+std::vector<std::string> RampEditor::presetNames() {
+    std::vector<std::string> names;
+    for (const json& c : ui::Definitions::shipped().choices("rampPresets")) names.push_back(c.at("value").get<std::string>());
+    return names;
+}
 
 json RampEditor::preset(const std::string& name) {
-    auto keys = [](std::initializer_list<std::pair<float, float>> list) {
-        json out = json::array();
-        for (const auto& [t, v] : list) out.push_back(json::array({t, v}));
-        return out;
-    };
-    if (name == "up") return keys({{0.0f, 0.0f}, {1.0f, 1.0f}});
-    if (name == "down") return keys({{0.0f, 1.0f}, {1.0f, 0.0f}});
-    if (name == "ease") return keys({{0.0f, 0.0f}, {0.5f, 0.5f}, {1.0f, 1.0f}});
-    if (name == "bell") return keys({{0.0f, 0.0f}, {0.5f, 1.0f}, {1.0f, 0.0f}});
-    if (name == "taper") return keys({{0.0f, 1.0f}, {0.7f, 0.9f}, {1.0f, 0.2f}});
-    return keys({{0.0f, 1.0f}});
+    for (const json& c : ui::Definitions::shipped().choices("rampPresets")) {
+        if (c.at("value") == name) return c.at("keys");
+    }
+    return json::array({json::array({0.0, 1.0})});
+}
+
+json RampEditor::flipped(const json& value) {
+    const bool straight = value.is_object() && value.value("linear", false);
+    const json& list = value.is_object() ? value.value("keys", json::array()) : value;
+    json keys = json::array();
+    if (list.is_array()) {
+        for (auto it = list.rbegin(); it != list.rend(); ++it) {
+            if (it->is_array() && it->size() == 2 && (*it)[0].is_number()) keys.push_back(json::array({1.0 - (*it)[0].get<double>(), (*it)[1]}));
+        }
+    }
+    if (straight) return json{{"keys", keys}, {"linear", true}};
+    return keys;
 }
 
 void RampEditor::setValue(const json& value) {

@@ -1092,6 +1092,8 @@ def param_state(node, spec, scalp):
         state.add("param.linkable")
         if spec.get("mappable"):
             state.add("param.mappable")
+    if spec.get("kind") == "ramp":
+        state.add("param.ramp")  # (Blender's curve widget has no presets of its own: the menu's)
     return state, values
 
 

@@ -257,13 +257,20 @@ TEST(AppPanels, ParamEditorsRoundTripEveryKindWithoutLosingMaps) {
     EXPECT_EQ(ramp->value().value("linear", false), true);
     // A drag: live edits unrecorded, one step at the end.
     const json before = doc->paramOrDefault(width, "profile");
-    ramp->setValue(RampEditor::preset("up"));
+    ramp->setValue(RampEditor::preset("rising"));
     emit ramp->edited(true);
     emit ramp->edited(true);
     emit ramp->edited(false);
-    EXPECT_EQ(doc->paramOrDefault(width, "profile"), RampEditor::preset("up"));
+    EXPECT_EQ(doc->paramOrDefault(width, "profile"), RampEditor::preset("rising"));
     EXPECT_EQ(doc->undo(), "");
     EXPECT_EQ(doc->paramOrDefault(width, "profile"), before);
+    // The presets are the shared list (engine/ui/choices.json's rampPresets); Flip mirrors a curve
+    // end to end, straight or smooth as it was.
+    EXPECT_EQ(RampEditor::presetNames().size(), 9u);
+    EXPECT_EQ(RampEditor::preset("tipOnly"), json::parse("[[0, 0], [0.6, 0], [1, 1]]"));
+    EXPECT_EQ(RampEditor::flipped(json::parse("[[0, 0], [0.25, 0.5], [1, 1]]")), json::parse("[[0.0, 1], [0.75, 0.5], [1.0, 0]]"));
+    EXPECT_EQ(RampEditor::flipped(json::parse(R"({"keys": [[0, 1], [1, 0.5]], "linear": true})")),
+              json::parse(R"({"keys": [[0.0, 0.5], [1.0, 1]], "linear": true})"));
 
     // A mappable param holding a map: shown as its source, never replaced by the number editor.
     const std::string scatter = nodeOfType(*doc, "Scatter");

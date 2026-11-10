@@ -53,9 +53,12 @@ public:
     nlohmann::json value() const;
     bool straight() const { return straight_; }
     std::size_t keyCount() const { return keys_.size(); }
-    // The presets by name (constant, up, down, ease, bell, taper): what the preset menu offers.
+    // The presets by name (engine/ui/choices.json's rampPresets, as every host offers them): what
+    // the preset menu offers, and a preset's keys (one key at 1 for a name there is none of).
     static std::vector<std::string> presetNames();
     static nlohmann::json preset(const std::string& name);
+    // A ramp value mirrored end to end (each key at 1 - its position), straight or smooth as it was.
+    static nlohmann::json flipped(const nlohmann::json& value);
     QSize sizeHint() const override;
 
 signals:

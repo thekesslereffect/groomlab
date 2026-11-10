@@ -285,6 +285,8 @@
                            "tips": {"app": "A value per vertex of the scalp mesh, kept in the groom file"}},
     "param.paintTexture": {"label": "As Texture", "tip": "An image at the scalp's UVs in the scene's groomlab/masks folder: the finest detail, editable elsewhere, exportable",
                           "tips": {"app": "An image at the scalp's UVs in the masks folder beside the groom file: the finest detail, editable elsewhere, exportable"}},
+    "param.rampPreset": {"label": "Curve Preset", "tip": "Replace the curve with a preset (its smooth or straight segments kept). Maya: right-click the curve; the app: its Presets button", "hosts": ["blender"]},
+    "param.rampFlip": {"label": "Flip Curve", "tip": "The curve mirrored end to end (what was at the start now at the end)", "hosts": ["blender"]},
     "param.driveWithSlider": {"label": "Drive with Slider", "tip": "A Control node: this param becomes a keyable attribute on the groom (channel box), e.g. to animate a Blend from dry to wet"}
   }
 }

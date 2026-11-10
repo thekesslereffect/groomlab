@@ -220,6 +220,50 @@ class GROOMLAB_OT_graph_expose(_ParamOp):
         return {"FINISHED"}
 
 
+def ramp_preset_keys(name):
+    """A curve preset's keys (engine/ui/choices.json's rampPresets, as every host offers them)."""
+    from . import definitions
+    c = definitions.choice("rampPresets", name)
+    return [list(k) for k in c["keys"]] if c else None
+
+
+def flipped_ramp(value):
+    """A ramp value mirrored end to end (each key at 1 - its position), straight or smooth as it was."""
+    keys, linear = graph_tree.ramp_keys(value)
+    out = [[1.0 - float(p), v] for p, v in reversed(keys)]
+    return {"keys": out, "linear": True} if linear else out
+
+
+class GROOMLAB_OT_graph_ramp_preset(_ParamOp):
+    """Replace the curve with a preset, or mirror it end to end (Flip)"""
+    bl_idname = "groomlab.graph_ramp_preset"
+    bl_label = "Curve Preset"
+    action_id = "param.rampPreset"
+
+    preset: StringProperty(options={"SKIP_SAVE"}, description="A preset's name (rampPresets), or flip")
+
+    def execute(self, context):
+        scalp = _ge().context_groom(context)
+        node = _node(context, self.node)
+        if node is None or not self.param:
+            return {"CANCELLED"}
+        curve = graph_tree.ramp_node(node, self.param)
+        now = graph_tree.ramp_value(curve) if curve is not None else graph_tree.values(node).get(self.param)
+        _, linear = graph_tree.ramp_keys(now)
+        if self.preset == "flip":
+            value = flipped_ramp(now)
+        else:
+            keys = ramp_preset_keys(self.preset)
+            if keys is None:
+                return {"CANCELLED"}
+            value = {"keys": keys, "linear": True} if linear else keys  # the curve keeps its segments
+        if not graph_tree.set_param_value(scalp, node, self.param, value):
+            return {"CANCELLED"}
+        graph_tree.write_ramp(node, self.param, value)
+        _settle(scalp)
+        return {"FINISHED"}
+
+
 class GROOMLAB_OT_graph_toggle_inputs(_NodeOp):
     """Expose all connectable parameter inputs, or collapse them when all are exposed."""
     bl_idname = "groomlab.graph_toggle_inputs"
@@ -1496,6 +1540,8 @@ def _bind_all():
     bind("param.deleteKey", "groomlab.graph_delete_key", _np)
     bind("param.removeAnimation", "groomlab.graph_remove_animation", _np)
     bind("param.driveWithSlider", "groomlab.graph_add_control", _np)
+    bind("param.rampPreset", "groomlab.graph_ramp_preset", lambda ctx, item: dict(_np(ctx, item), preset=item["value"]))
+    bind("param.rampFlip", "groomlab.graph_ramp_preset", lambda ctx, item: dict(_np(ctx, item), preset="flip"))
     bind("param.paintGuides", "groomlab.graph_paint_param", lambda ctx, item: dict(_np(ctx, item), kind="guides"))
     bind("param.paintVertices", "groomlab.graph_paint_param", lambda ctx, item: dict(_np(ctx, item), kind="vertices"))
     bind("param.paintTexture", "groomlab.graph_paint_param", lambda ctx, item: dict(_np(ctx, item), kind="texture"))
@@ -1521,7 +1567,7 @@ def _bind_all():
 
 
 classes = (GROOMLAB_OT_graph_group, GROOMLAB_OT_graph_ungroup, GROOMLAB_OT_graph_show_inner, GROOMLAB_OT_graph_expose,
-           GROOMLAB_OT_graph_toggle_inputs,
+           GROOMLAB_OT_graph_ramp_preset, GROOMLAB_OT_graph_toggle_inputs,
            GROOMLAB_OT_graph_set_key, GROOMLAB_OT_graph_delete_key, GROOMLAB_OT_graph_remove_animation,
            GROOMLAB_OT_graph_add_control, GROOMLAB_OT_graph_map_source, GROOMLAB_OT_graph_edit_expression,
            GROOMLAB_OT_graph_apply_text, GROOMLAB_OT_graph_script_edit, GROOMLAB_OT_graph_script_done,
