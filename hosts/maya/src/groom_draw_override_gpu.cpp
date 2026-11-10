@@ -662,6 +662,13 @@ void GroomSubSceneOverride::updateHairGrid(const MHWRender::MFrameContext&) {
         }
     }
     gpu::LineFrames* engine = gpuLines_ ? gpuLines_->engine() : nullptr;
+    // macOS: no kernels run beside Viewport 2.0's OpenGL; the grid is made on Metal instead
+    // (GpuLines::densityOnMetal), from the strands handed to the viewport, and its texels written
+    // into the hair's texture.
+    bool metal = false;
+#ifdef __APPLE__
+    metal = !engine && gpuLines_ != nullptr && gpuFramesEnabled();
+#endif
     const StrandsPtr strands = shape_->handedStrands();
     // The cards view in the strands' place: the cards stand for them, so they keep the grid the
     // strands last made (without it they would light with no shadow at all and read far brighter
@@ -671,9 +678,9 @@ void GroomSubSceneOverride::updateHairGrid(const MHWRender::MFrameContext&) {
         forEachHairShader([&](MHWRender::MShaderInstance& s) { setHairGrid(s, &grid, strength); });
         return;
     }
-    if (!drawn || !engine || !strands) {
+    if (!drawn || (!engine && !metal) || !strands) {
         grid.valid = false;
-        grid.why = !drawn ? "no lit strands" : !engine ? (gpuLines_ ? gpuLines_->why() : std::string("no GPU")) : "no strands";
+        grid.why = !drawn ? "no lit strands" : !engine && !metal ? (gpuLines_ ? gpuLines_->why() : std::string("no GPU")) : "no strands";
         forEachHairShader([&](MHWRender::MShaderInstance& s) { setHairGrid(s, nullptr, 0.0f); });
         return;
     }
@@ -767,6 +774,50 @@ void GroomSubSceneOverride::updateHairGrid(const MHWRender::MFrameContext&) {
     hairGridStale_ = false;
     grid.settle = written;  // (made again once the lines are drawn: the next update)
     if (grid.settle) MHWRender::MRenderer::setGeometryDrawDirty(object_);
+#ifdef __APPLE__
+    if (metal) {
+        // The strands handed to the viewport (what its lines draw: their points, their widths)
+        // splatted on Metal, the texels read back and written into the hair's texture.
+        const StrandSet& s = *strands;
+        const std::size_t count = s.pointCount();
+        std::vector<float> uvs(count * 2, 0.0f);
+        const bool widths = s.widths().size() == count;
+        for (std::size_t i = 0; i < count; ++i) uvs[i * 2 + 1] = widths ? s.widths()[i] : kNoLineWidth;
+        gpu::LineFrames::DensityGrid g;
+        for (int k = 0; k < 3; ++k) {
+            g.origin[k] = origin[k];
+            g.size[k] = size[k];
+            grid.origin[k] = origin[k];
+        }
+        g.cell = static_cast<float>(cell);
+        grid.cell = g.cell;
+        g.pieceWeight = pieceWeight;
+        g.defaultWidth = 0.01f;
+        g.occlusionReach = 6.0f;
+        grid.valid = false;
+        double ms = -1.0;
+        const std::vector<float> texels =
+            count ? gpuLines_->densityOnMetal(reinterpret_cast<const float*>(s.positions().data()), uvs.data(), count, g, &ms) : std::vector<float>{};
+        MHWRender::MTexture* volume = texels.empty() ? nullptr : grid.volumeFor(size);
+        if (!volume) {
+            grid.why = count == 0 ? "no points" : texels.empty() ? gpuLines_->densityWhy() : "no texture for the grid";
+        } else if (volume->update(texels.data(), false, size[0] * 8) != MS::kSuccess) {
+            grid.why = "the grid's texture did not take its texels";
+        } else {
+            grid.valid = true;
+            grid.why.clear();
+            grid.gpuMs = ms;
+            ++grid.serial;
+            grid.pieceWeight = pieceWeight;
+            grid.density = density;
+            grid.points = count;
+            grid.strandsVersion = shape_->strandsVersion();
+            hairGridKey_ = key;
+        }
+        forEachHairShader([&](MHWRender::MShaderInstance& sh) { setHairGrid(sh, &grid, strength); });
+        return;
+    }
+#endif
     // The points as the item draws them: the ribbons' lines, else the streams bound last.
     void* positions = nullptr;
     void* uvs = nullptr;

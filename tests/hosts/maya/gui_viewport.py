@@ -14,7 +14,7 @@ import time
 
 from maya import cmds
 
-from gui_support import CLASSIC_GRAPH, check, finish, gpu_kernels, persp_panel, process_events, say, soon, to_view
+from gui_support import CLASSIC_GRAPH, check, finish, gpu_density, gpu_kernels, persp_panel, process_events, say, soon, to_view
 
 FRAMES = 60
 BUDGET_FPS = 24.0
@@ -1721,7 +1721,7 @@ def scale_freeze_shaders_check(snapshots=None):
     now = grid()
     say("scalefreeze grids: %s; now %s" % ([(g.get("size"), g.get("volumeSerial"), g.get("serial"), g.get("staleShaders")) for g in grids],
                                            {key: now.get(key) for key in ("size", "volumeSerial", "serial", "shadersGiven", "staleShaders")}))
-    if not gpu_kernels():
+    if not gpu_density():
         say("scaled 1 -> 0.1 -> 1 and frozen: the self-shadowing grid not checked (made by the GPU kernels, none on macOS yet)")
     else:
         check("scaled 1 -> 0.1 -> 1 and frozen, every hair shader holds the self-shadowing grid as it is now on %s (%s)"

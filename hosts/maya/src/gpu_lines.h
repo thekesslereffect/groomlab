@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "groomlab/gpu/line_frames.h"
 
@@ -92,6 +93,16 @@ public:
     const std::string& why() const { return why_; }
     // The engine failed (`why`): none on this device from now on.
     void fail(const std::string& why);
+#ifdef __APPLE__
+    // macOS, where Viewport 2.0 draws with OpenGL 4.1 (no compute: engine() has none): the hair's
+    // density grid on the system's Metal device. `count` points (`points`: float3 a point; `uvs`:
+    // float2, the width second) copied into buffers the GPU shares, splatted into `grid` and its
+    // texels read back (rg a cell, x fastest then y then z: what a texture of the grid's size
+    // takes); `gpuMs` the splat's milliseconds on the GPU. Empty where it could not (densityWhy()).
+    std::vector<float> densityOnMetal(const float* points, const float* uvs, std::size_t count, const gpu::LineFrames::DensityGrid& grid,
+                                      double* gpuMs);
+    const std::string& densityWhy() const { return densityWhy_; }
+#endif
     // DirectX 11: buffers for `count` points on the engine's device (`held`'s where they hold them
     // and are not more than twice as long), and MVertexBuffers naming them (positions, normals,
     // tangents, uvs) put into `vertices` (what they held goes first).
@@ -107,6 +118,16 @@ public:
                                                         std::unique_ptr<MHWRender::MIndexBuffer>* lineIndices);
 
 private:
+#ifdef __APPLE__
+    std::unique_ptr<gpu::LineFrames> metal_;  // the density grid's (densityOnMetal)
+    void* metalPoints_ = nullptr;             // shared MTLBuffers: the points, their uvs
+    void* metalUvs_ = nullptr;
+    std::size_t metalCapacity_ = 0;           // the points they hold
+    void* metalVolume_ = nullptr;             // the grid's MTLTexture
+    unsigned metalVolumeSize_[3] = {0, 0, 0};
+    std::string densityWhy_;
+    void releaseMetal();
+#endif
     std::unique_ptr<gpu::LineFrames> engine_;
     void* failedOn_ = nullptr;  // the device an engine could not be made on (not tried again)
     std::string why_;

@@ -15,8 +15,13 @@
 #endif
 
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 #include <string>
+
+#ifdef __APPLE__
+#include "groomlab/gpu/look_engine.h"  // createMetalBuffer, finishMetalRuns
+#endif
 
 #include <maya/MHWGeometry.h>
 #include <maya/MViewport2Renderer.h>
@@ -121,7 +126,60 @@ std::size_t GpuRibbonStreams::bytes() const {
 }
 
 GpuLines::GpuLines() = default;
+#ifdef __APPLE__
+GpuLines::~GpuLines() { releaseMetal(); }
+
+void GpuLines::releaseMetal() {
+    gpu::finishMetalRuns();  // (nothing the GPU still reads)
+    gpu::releaseMetalBuffer(metalPoints_);
+    gpu::releaseMetalBuffer(metalUvs_);
+    gpu::releaseMetalTexture(metalVolume_);
+    metalPoints_ = metalUvs_ = metalVolume_ = nullptr;
+    metalCapacity_ = 0;
+    metalVolumeSize_[0] = metalVolumeSize_[1] = metalVolumeSize_[2] = 0;
+    metal_.reset();
+}
+
+std::vector<float> GpuLines::densityOnMetal(const float* points, const float* uvs, std::size_t count, const gpu::LineFrames::DensityGrid& grid,
+                                            double* gpuMs) {
+    if (!gpuFramesEnabled()) {
+        densityWhy_ = "off (GROOMLAB_GPU_FRAMES=0, or groomLabGpuPreview -frames off)";
+        return {};
+    }
+    try {
+        if (!metal_) metal_ = gpu::makeMetalLineFrames(nullptr);
+        gpu::finishMetalRuns();  // (the last grid's splat done with the buffers)
+        if (count > metalCapacity_) {  // room for a little more: other counts reuse them
+            gpu::releaseMetalBuffer(metalPoints_);
+            gpu::releaseMetalBuffer(metalUvs_);
+            metalPoints_ = metalUvs_ = nullptr;
+            metalCapacity_ = 0;
+            const std::size_t room = count + count / 8 + 1;
+            metalPoints_ = gpu::createMetalBuffer(nullptr, room * 12);
+            metalUvs_ = gpu::createMetalBuffer(nullptr, room * 8);
+            metalCapacity_ = room;
+        }
+        std::memcpy(gpu::metalBufferContents(metalPoints_), points, count * 12);
+        std::memcpy(gpu::metalBufferContents(metalUvs_), uvs, count * 8);
+        if (metalVolumeSize_[0] != grid.size[0] || metalVolumeSize_[1] != grid.size[1] || metalVolumeSize_[2] != grid.size[2]) {
+            gpu::releaseMetalTexture(metalVolume_);
+            metalVolume_ = gpu::createMetalVolume(nullptr, grid.size[0], grid.size[1], grid.size[2]);
+            for (int k = 0; k < 3; ++k) metalVolumeSize_[k] = grid.size[k];
+        }
+        metal_->runDensity(metalPoints_, metalUvs_, count, grid, metalVolume_);
+        std::vector<float> texels = metal_->readVolume(metalVolume_);
+        if (gpuMs) *gpuMs = metal_->gpuMs(true);
+        densityWhy_.clear();
+        return texels;
+    } catch (const std::exception& e) {
+        densityWhy_ = e.what();
+        releaseMetal();
+        return {};
+    }
+}
+#else
 GpuLines::~GpuLines() = default;
+#endif
 
 gpu::LineFrames* GpuLines::engine() {
     if (!gpuFramesEnabled()) {
