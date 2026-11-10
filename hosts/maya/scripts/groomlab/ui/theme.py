@@ -615,6 +615,23 @@ def _check_icon(color):
     return path.replace("\\", "/")
 
 
+def _dot_icon(color):
+    """A dot in `color` for a chosen radio button: an SVG written once per color, as a style-sheet url."""
+    import tempfile
+    folder = os.path.join(tempfile.gettempdir(), "groomlab_ui")
+    path = os.path.join(folder, "dot_%s.svg" % color.lstrip("#"))
+    if not os.path.exists(path):
+        try:
+            if not os.path.isdir(folder):
+                os.makedirs(folder)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 14 14">'
+                        '<circle cx="7" cy="7" r="3" fill="%s"/></svg>' % color)
+        except (IOError, OSError):
+            return ""
+    return path.replace("\\", "/")
+
+
 def tokens(t=None, surface=None):
     """{name: "#RRGGBB" or a size in pixels}: what the style sheet is made from (the app's sheet's
     tokens, hosts/app/src/theme.cpp)."""
@@ -837,6 +854,13 @@ QCheckBox::indicator { width: {{14}}px; height: {{14}}px; border-radius: %(check
 QCheckBox::indicator:checked { background: %(checkOn)s; border-color: %(checkOnEdge)s; image: url(%(tick)s); }
 QCheckBox::indicator:disabled { background: %(panel)s; }
 QCheckBox::indicator:checked:disabled { background: %(hover)s; border-color: %(hover)s; }
+QRadioButton { background: transparent; spacing: {{8}}px; }
+QRadioButton::indicator { width: {{14}}px; height: {{14}}px; border-radius: {{8}}px; background: %(raised)s;
+    border: {{1}}px solid %(checkEdge)s; }
+QRadioButton::indicator:checked { background: %(checkOn)s; border-color: %(checkOnEdge)s; image: url(%(dot)s); }
+QRadioButton::indicator:disabled { background: %(panel)s; }
+QRadioButton::indicator:checked:disabled { background: %(hover)s; border-color: %(hover)s; }
+QRadioButton:disabled { color: %(disabled)s; }
 QSlider::groove:horizontal { height: {{6}}px; border-radius: {{3}}px; background: %(hover)s; }
 QSlider::sub-page:horizontal { background: %(accent)s; border-radius: {{3}}px; }
 QSlider::handle:horizontal { background: %(text)s; width: {{14}}px; height: {{14}}px; margin: {{-4}}px 0; border-radius: {{7}}px; }
@@ -864,6 +888,7 @@ QScrollArea { border: none; }
 %(outline_rules)s%(row_rules)s""" % dict(
         k, family='font-family: "%s"; ' % family if family else "", slider_rules=slider_rules,
         arrow=_arrow_icon(k["muted"]), tick=_check_icon(k["accentText"] if t.is_light() else k["accentInk"]),
+        dot=_dot_icon(k["accentText"] if t.is_light() else k["accentInk"]),
         outline_rules=_outline_rules(t), row_rules=_row_rules(t))
     # Fixed sizes ({{N}}px in the template) at Maya's interface scale.
     return re.sub(r"\{\{(-?\d+(?:\.\d+)?)\}\}px", lambda m: "%dpx" % round(float(m.group(1)) * scale()), sheet)

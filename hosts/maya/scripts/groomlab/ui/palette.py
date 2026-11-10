@@ -614,8 +614,11 @@ class TubePanel(QtWidgets.QWidget):
         custom = self.library_shape(self._choice)
         if custom is not None:
             self.editor.set_shape(custom["points"], custom["smooth"], editable=True)
-            if self.mirror.isChecked() and self.editor.set_mirror(True):
-                self.shape_committed(self.editor.points)  # made symmetric: saved so
+            # Mirror only for the edits to come: showing a shape never changes it. (Made symmetric
+            # and saved here, at every tick of the panel's poll, it rewrote the shape, an
+            # asymmetric one modeled or converted included, and evaluated the groom again and
+            # again: the viewport lagged in the Tube tool.) Turning Mirror on is what mirrors it.
+            self.editor.mirror = self.mirror.isChecked()
         else:
             points, smooth = self._outline(self._choice)
             self.editor.set_shape(points, smooth, editable=False, note="Built in: Duplicate it to edit a copy")

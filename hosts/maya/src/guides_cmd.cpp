@@ -2,6 +2,7 @@
 #include "guides_cmd.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <string>
 #include <variant>
@@ -65,7 +66,7 @@ const char* kGuide[] = {"-gid", "-guide"};
 const char* kListGroups[] = {"-lg", "-listGroups"};
 const char* kListGuides[] = {"-lsg", "-listGuides"};
 const char* kGuidePoints[] = {"-gp", "-guidePoints"};
-const char* kEvaluated[] = {"-ev", "-evaluated"};  // with -guidePoints: as shown (posed, shot sculpts applied)
+const char* kEvaluated[] = {"-ev", "-evaluated"};  // with -guidePoints or -tubeFrames: as shown (posed, shot sculpts applied)
 const char* kClear[] = {"-cl", "-clear"};
 const char* kLevel[] = {"-lv", "-level"};
 const char* kSelect[] = {"-sel", "-select"};
@@ -118,6 +119,12 @@ const char* kPreviewTubeShape[] = {"-pts", "-previewTubeShape"};
 // Shift+click: the guides left unfrozen while others are frozen, not those under them), with the
 // first one's tube and every shape among them.
 const char* kTubeTargets[] = {"-ttg", "-tubeTargets"};
+// One guide's section axes as the tube places them, as JSON (Utilities > Convert Tubes to GroomLab
+// Tubes fits modeled tubes to them): per guide point its position and the unit axes u and v of
+// section coordinates at twist 0 (the rotation-minimizing frame turned by the tube's roll on the
+// scalp), so a section of width w, aspect a and twist t puts (u, v) at
+// point + rotate(t) * (u * w, v * w * a) in those axes.
+const char* kTubeFrames[] = {"-tfr", "-tubeFrames"};
 
 // A tube shape op's points: [[u, v], ...].
 std::vector<SectionPoint> shapePoints(const nlohmann::json& j) {
@@ -308,6 +315,7 @@ MSyntax GuidesCmd::newSyntax() {
     s.addFlag(kEditTubeShape[0], kEditTubeShape[1], MSyntax::kString);
     s.addFlag(kPreviewTubeShape[0], kPreviewTubeShape[1], MSyntax::kString);
     s.addFlag(kTubeTargets[0], kTubeTargets[1]);
+    s.addFlag(kTubeFrames[0], kTubeFrames[1], MSyntax::kString);
     s.addFlag(kReshape[0], kReshape[1], MSyntax::kString, MSyntax::kString);
     s.makeFlagMultiUse(kReshape[0]);
     s.setObjectType(MSyntax::kSelectionList, 1, 1);
@@ -344,7 +352,8 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                             int(db.isFlagSet(kPreviewResample[0])) + int(db.isFlagSet(kEndPreview[0])) +
                             int(db.isFlagSet(kPointCounts[0])) + int(db.isFlagSet(kSetTube[0])) + int(db.isFlagSet(kTube[0])) +
                             int(db.isFlagSet(kTubeShapes[0])) + int(db.isFlagSet(kEditTubeShape[0])) +
-                            int(db.isFlagSet(kPreviewTubeShape[0])) + int(db.isFlagSet(kTubeTargets[0]));
+                            int(db.isFlagSet(kPreviewTubeShape[0])) + int(db.isFlagSet(kTubeTargets[0])) +
+                            int(db.isFlagSet(kTubeFrames[0]));
         if (actions != 1) return fail(kName, "give exactly one action flag");
 
         // The groups need no rooting: the shape's parse of guideData (kept while it is unchanged).
@@ -575,6 +584,34 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             const HierarchyGuide* g = h->guide(std::strtoull(idText.asChar(), nullptr, 10));
             if (!g) return fail(kName, "no guide " + idText);
             setResult(MString(tubeToJson(g->tube, h->scale()).c_str()));
+            return MS::kSuccess;
+        }
+        if (db.isFlagSet(kTubeFrames[0])) {
+            // With -evaluated: the guide as drawn (the evaluated hierarchy: its roll worked out on
+            // the scalp for the tube it has now), else as stored.
+            const MString idText = flagString(db, kTubeFrames[0], "");
+            HierarchyPtr shown = h;
+            if (db.isFlagSet(kEvaluated[0])) {
+                auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
+                if (shape && shape->evaluatedHierarchy()) shown = shape->evaluatedHierarchy();
+            }
+            const HierarchyGuide* g = shown->guide(std::strtoull(idText.asChar(), nullptr, 10));
+            if (!g) return fail(kName, "no guide " + idText);
+            const std::size_t n = g->points.size();
+            nlohmann::json points = nlohmann::json::array(), us = nlohmann::json::array(), vs = nlohmann::json::array();
+            if (n >= 2) {
+                const std::vector<Frame> frames = rotationMinimizingFrames(g->points.data(), n, g->frameUp);
+                for (std::size_t i = 0; i < n; ++i) {
+                    const float roll = g->tube.rollAt(static_cast<float>(i) / static_cast<float>(n - 1));
+                    const float c = std::cos(roll), s = std::sin(roll);
+                    const Vec3f u = frames[i].normal * c + frames[i].binormal * s;
+                    const Vec3f v = frames[i].normal * -s + frames[i].binormal * c;
+                    points.push_back({g->points[i].x, g->points[i].y, g->points[i].z});
+                    us.push_back({u.x, u.y, u.z});
+                    vs.push_back({v.x, v.y, v.z});
+                }
+            }
+            setResult(MString(nlohmann::json({{"points", points}, {"u", us}, {"v", vs}}).dump().c_str()));
             return MS::kSuccess;
         }
         if (db.isFlagSet(kGuidePoints[0])) {

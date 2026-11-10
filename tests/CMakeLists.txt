@@ -590,6 +590,16 @@ if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
                 "${CMAKE_CURRENT_BINARY_DIR}/to_mesh")
 endif()
 
+# Modeled hair tubes to curves and to GroomLab tubes (Utilities, issue #41): edge loops read, bevels
+# averaged away, curves in the scene or as guides, tube guides fitted to the mesh.
+if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
+    add_test(NAME maya.tube_mesh
+        COMMAND "${GROOMLAB_MAYA_BIN}/mayapy${CMAKE_EXECUTABLE_SUFFIX}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya/test_tube_mesh.py"
+                "$<TARGET_FILE:GroomLab>"
+                "${PROJECT_SOURCE_DIR}/hosts/maya/scripts")
+endif()
+
 # Importing XGen grooms (both flavors) on synthetic scenes made with XGen's API, compared with
 # XGen's own strands (pictures in the work dir). Needs Maya's XGen plugin (skipped without it).
 if(GROOMLAB_BUILD_MAYA AND TARGET GroomLab AND TARGET groomlab_alembic)

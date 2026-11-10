@@ -293,6 +293,7 @@ private:
     bool warm_ = false;
     const GraphDocument* warmBase_ = nullptr;
     std::size_t warmBaseEvaluations_ = 0;
+    std::uint64_t warmViewEvaluation_ = 0;  // the view's evaluation it warmed after (GroomSession::WarmedFor)
     std::uint64_t warmBaseGeneration_ = 0;  // (a stroke document let go and made again since: not adopted)
     // A dab: the stroke document lent (doc_), the preview guides copied as they were, and the
     // graph they were made for (graphGeneration_).
@@ -813,6 +814,28 @@ private:
     // own, so the stroke's first dab does not evict the view's cache (its release would scatter
     // and evaluate everything again), and the next stroke finds this one's results.
     std::unique_ptr<GraphDocument> sculptDoc_;
+    // What the stroke document was last warmed for (warmStroke, adoptWarm): the view's document and
+    // evaluation it followed, the density, budget, time and node it evaluated, and how many times
+    // the stroke document had evaluated then. A warm-up asking the same again (the brush tool asks
+    // at every move of the cursor) does nothing: copying and evaluating the document each time
+    // kept a thread and the idle loop busy while nothing changed.
+    struct WarmedFor {
+        bool valid = false;
+        std::uint64_t doc = 0, evaluation = 0, strokeDoc = 0;
+        float density = 0.0f;
+        double budget = 0.0, time = 0.0;
+        std::string node;
+        bool viewport = false, liveDrag = false;
+        std::size_t evaluations = 0;
+        bool sameAsks(const WarmedFor& o) const {
+            return valid && o.valid && doc == o.doc && evaluation == o.evaluation &&
+                   strokeDoc == o.strokeDoc && density == o.density && budget == o.budget && time == o.time &&
+                   node == o.node && viewport == o.viewport && liveDrag == o.liveDrag;
+        }
+    };
+    WarmedFor warmedFor_;
+    WarmedFor warmAsk(const ViewRequest& request, std::uint64_t doc, std::uint64_t evaluation) const;
+    bool warmedAlready(const ViewRequest& request) const;
     bool viewSculpt_ = false;                   // the last view evaluated sculptDoc_
     bool strokeLent_ = false;                   // sculptDoc_ is a dab's run's (detachStroke)
     std::uint64_t graphGeneration_ = 0;         // each graph set (what a lent stroke document was made of)

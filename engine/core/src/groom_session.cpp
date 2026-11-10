@@ -2082,10 +2082,33 @@ void GroomSession::releaseStrandMeshes() {
     meshMemos_.clear();
 }
 
+GroomSession::WarmedFor GroomSession::warmAsk(const ViewRequest& request, std::uint64_t doc,
+                                              std::uint64_t evaluation) const {
+    WarmedFor ask;
+    ask.valid = true;
+    ask.doc = doc;
+    ask.evaluation = evaluation;
+    ask.strokeDoc = strokeDocGeneration_;
+    ask.density = request.density * request.sculptDensity;
+    ask.budget = request.pointBudget;
+    ask.time = request.time;
+    ask.node = flat_.result(request.viewNode);
+    ask.viewport = request.viewport;
+    ask.liveDrag = liveDrag_;
+    return ask;
+}
+
+bool GroomSession::warmedAlready(const ViewRequest& request) const {
+    // Warm for these asks, and the stroke document not evaluated since (a stroke's dabs).
+    return sculptDoc_ && warmedFor_.sameAsks(warmAsk(request, docGeneration_, view_.versions.evaluation)) &&
+           sculptDoc_->graph.evaluationCount() == warmedFor_.evaluations;
+}
+
 bool GroomSession::warmStroke(const ViewRequest& request) {
     const float density = request.density * request.sculptDensity;
     // (Nothing evaluated yet: no inputs bound to warm it with.)
     if (!doc_ || hasPreview() || density == request.density || view_.versions.evaluation == 0) return false;
+    if (warmedAlready(request)) return false;  // (nothing changed since it last warmed)
     if (!sculptDoc_) {
         sculptDoc_ = std::make_unique<GraphDocument>(parsed_->clone());
         sculptDoc_->graph.setCacheIntermediates(cacheIntermediates_);
@@ -2120,12 +2143,15 @@ bool GroomSession::warmStroke(const ViewRequest& request) {
     }
     warmEvaluations_ += graph.evaluationCount() - evaluations;
     warmIncrementals_ += graph.incrementalCount() - incrementals;
+    warmedFor_ = warmAsk(request, docGeneration_, view_.versions.evaluation);
+    warmedFor_.evaluations = graph.evaluationCount();
     return graph.evaluationCount() != evaluations;
 }
 
 std::shared_ptr<DetachedEvaluation> GroomSession::detachWarm(const ViewRequest& request) {
     const float density = request.density * request.sculptDensity;
     if (!doc_ || hasPreview() || density == request.density || view_.versions.evaluation == 0) return nullptr;
+    if (warmedAlready(request)) return nullptr;  // (nothing changed since it last warmed: no copy, no run)
     if (!sculptDoc_) {
         sculptDoc_ = std::make_unique<GraphDocument>(parsed_->clone());
         sculptDoc_->graph.setCacheIntermediates(cacheIntermediates_);
@@ -2155,6 +2181,7 @@ std::shared_ptr<DetachedEvaluation> GroomSession::detachWarm(const ViewRequest& 
     job->warmBase_ = sculptDoc_.get();
     job->warmBaseEvaluations_ = sculptDoc_->graph.evaluationCount();
     job->warmBaseGeneration_ = strokeDocGeneration_;
+    job->warmViewEvaluation_ = view_.versions.evaluation;
     return job;
 }
 
@@ -2169,6 +2196,8 @@ bool GroomSession::adoptWarm(DetachedEvaluation& run) {
     warmIncrementals_ += run.doc_->graph.incrementalCount();
     run.doc_->graph.addCounts(sculptDoc_->graph.evaluationCount(), sculptDoc_->graph.incrementalCount());
     std::swap(sculptDoc_, run.doc_);  // (the old document goes with the run)
+    warmedFor_ = warmAsk(run.request_, run.basedOn_, run.warmViewEvaluation_);
+    warmedFor_.evaluations = sculptDoc_->graph.evaluationCount();
     return true;
 }
 

@@ -21,6 +21,7 @@ density keeps), never at random.
 """
 
 import json
+import math
 import os
 import shutil
 
@@ -298,6 +299,549 @@ def to_mesh_shape(groom, name=None):
     cmds.connectAttr(groom + ".outMesh", mesh + ".inMesh")
     cmds.sets(mesh, edit=True, forceElement="initialShadingGroup")
     return cmds.ls(root, long=True)[0]
+
+
+# ---------------------------------------------------------------------------
+# Modeled tubes -> curves / GroomLab tubes (tube_mesh reads them)
+
+TUBE_GROUPS = {"shape": "tubesShape", "centers": "tubesCenter", "tubes": "tubes"}
+
+
+def _mesh_shapes(nodes):
+    """The mesh shapes under `nodes` (meshes, their transforms, groups holding them), once each."""
+    shapes = []
+    for node in nodes or []:
+        if not cmds.objExists(node):
+            raise ValueError("%s does not exist" % node)
+        found = [node] if cmds.nodeType(node) == "mesh" else \
+            cmds.listRelatives(node, allDescendents=True, type="mesh", fullPath=True) or []
+        for shape in cmds.ls(found, long=True, noIntermediate=True) or []:
+            if shape not in shapes:
+                shapes.append(shape)
+    return shapes
+
+
+def _groom_meshes(groom):
+    """The groom's scalps (its own and its others), as long mesh shape names."""
+    if not groom:
+        return set()
+    shapes = [groomlab.scalp_mesh(groom)] + [s["mesh"] for s in groomlab.scalps(groom)]
+    return set(cmds.ls([s for s in shapes if s], long=True) or [])
+
+
+def selected_tube_meshes(groom=None):
+    """The selected meshes (or groups of them) that are not the groom's scalps: the tubes to convert."""
+    own = _groom_meshes(groom)
+    from groomlab.base import GROOM_TYPE
+    nodes = [n for n in cmds.ls(selection=True, long=True, objectsOnly=True) or []
+             if cmds.nodeType(n) != GROOM_TYPE and not cmds.listRelatives(n, children=True, type=GROOM_TYPE)]
+    return [s for s in _mesh_shapes(nodes) if s not in own]
+
+
+def _om_mesh(shape):
+    from maya.api import OpenMaya as om
+    sel = om.MSelectionList()
+    sel.add(shape)
+    return om.MFnMesh(sel.getDagPath(0))
+
+
+def smooth_preview(shape):
+    """Whether the mesh is drawn smoothed (smooth mesh preview: the 2 or 3 key)."""
+    try:
+        return bool(cmds.getAttr(shape + ".displaySmoothMesh"))
+    except (RuntimeError, ValueError):
+        return False
+
+
+def read_mesh_tubes(shape, smooth=None):
+    """A mesh's tubes (tube_mesh.Tube per shell, in world space), named after its transform. With
+    `smooth` (default: when the mesh is drawn smoothed, smooth_preview) each tube also carries its
+    vertices where they lie on the smooth surface (Tube.smooth_rings; Tube.use_smooth reads them)."""
+    from maya.api import OpenMaya as om
+    from groomlab import tube_mesh
+    fn = _om_mesh(shape)
+    points = [(p.x, p.y, p.z) for p in fn.getPoints(om.MSpace.kWorld)]
+    counts, connects = fn.getVertices()
+    polygons, at = [], 0
+    for c in counts:
+        polygons.append(list(connects[at:at + c]))
+        at += c
+    name = cmds.listRelatives(shape, parent=True)[0].split(":")[-1]
+    return tube_mesh.read_tubes(points, polygons, name=name,
+                                smooth=smooth_preview(shape) if smooth is None else smooth)
+
+
+def _scalp_distance(groom):
+    """A function of a point: its distance to the groom's nearest scalp (None without a scalp)."""
+    from maya.api import OpenMaya as om
+    fns = [_om_mesh(s) for s in sorted(_groom_meshes(groom))]
+    if not fns:
+        return None
+
+    def distance(p):
+        q = om.MPoint(*p)
+        return min(q.distanceTo(fn.getClosestPoint(q, om.MSpace.kWorld)[0]) for fn in fns)
+    return distance
+
+
+def _scalp_closest(groom):
+    """A function of a point: the nearest point on the groom's scalps (None without a scalp)."""
+    from maya.api import OpenMaya as om
+    fns = [_om_mesh(s) for s in sorted(_groom_meshes(groom))]
+    if not fns:
+        return None
+
+    def closest(p):
+        q = om.MPoint(*p)
+        hit = min((fn.getClosestPoint(q, om.MSpace.kWorld)[0] for fn in fns), key=q.distanceTo)
+        return (hit.x, hit.y, hit.z)
+    return closest
+
+
+ROOT_FADE = 0.25  # the share of a curve's length over which _rooted's move fades away
+
+
+def _rooted(points, closest):
+    """`points` with the root moved onto the scalp, the move fading out over the first ROOT_FADE of
+    the curve. A guide made from a curve is moved whole so its root lands on the scalp; each curve
+    of a tube would move by its own amount (the middle of a root loop lies deeper than its edge)
+    and the inner ones could leave the tube near its thin tip. Rooted here first, nothing moves
+    them whole, and every curve keeps its place in the tube past the root."""
+    if not closest or len(points) < 2:
+        return points
+    from groomlab import tube_mesh as tm
+    move = tm._sub(closest(points[0]), points[0])
+    along = [0.0]
+    for a, b in zip(points, points[1:]):
+        along.append(along[-1] + tm._dist(a, b))
+    fade = ROOT_FADE * along[-1]
+    if fade <= 1e-12:
+        return points
+    out = []
+    for p, s in zip(points, along):
+        k = max(0.0, 1.0 - s / fade)
+        out.append(tm._add(p, tm._mul(move, k * k * (3.0 - 2.0 * k))))  # smooth to nothing
+    return out
+
+
+def _read_tubes(meshes, groom, ignore_bevels, smooth=None):
+    """Every tube of `meshes`, root first, bevels merged with `ignore_bevels`, on the smooth
+    surface with `smooth` (None: each mesh as it is drawn, read_mesh_tubes): (tubes, skipped:
+    {mesh: why})."""
+    from groomlab import tube_mesh
+    shapes = _mesh_shapes(meshes)
+    if not shapes:
+        raise ValueError("select the modeled tubes (meshes)")
+    distance = _scalp_distance(groom) if groom else None
+    tubes, skipped = [], {}
+    for shape in shapes:
+        try:
+            found = read_mesh_tubes(shape, smooth)
+        except tube_mesh.TubeError as e:
+            skipped[shape.split("|")[-2] if shape.count("|") > 1 else shape] = str(e)
+            continue
+        for tube in found:
+            tube_mesh.orient(tube, distance)
+            if ignore_bevels:
+                tube.merge_bevels()  # (bevels told apart as modeled: the smooth surface rounds them away)
+            tubes.append(tube.use_smooth())
+    if not tubes:
+        raise ValueError("none of the selected meshes is an open tube GroomLab can read: " +
+                         "; ".join("%s (%s)" % kv for kv in sorted(skipped.items())))
+    return tubes, skipped
+
+
+def _curve(name, points, parent=None):
+    """A curve through `points` (a cubic through them; 2 or 3 points: a line), the points its edit points."""
+    pts = [tuple(p) for p in points]
+    degree = 3 if len(pts) >= 4 else 1
+    curve = cmds.curve(name=name, editPoint=pts, degree=degree) if degree == 3 else \
+        cmds.curve(name=name, point=pts, degree=1)
+    if parent:
+        curve = cmds.parent(curve, parent)[0]
+    return cmds.ls(curve, long=True)[0]
+
+
+def _guides_point_per_loop(groom, curves, group):
+    """`curves` as guides of `group`, each with exactly its curve's edit points (a point per edge
+    loop of its tube, as modeled): guides made from curves are resampled evenly, so they are
+    given their curves' points after."""
+    if not curves:
+        return []
+    ids = list(groomlab.guides_from_curves(groom, curves, group=group) or [])
+    if ids:
+        cmds.groomLabGuides(groom, reshape=[(str(i), _curve_shapes(c)[0]) for i, c in zip(ids, curves)])
+    return ids
+
+
+def _new_group_name(groom, base):
+    """`base`, or base2, base3... : a guide group name the groom does not have yet."""
+    taken = set(g["name"] for g in groomlab.list_guide_groups(groom))
+    name, n = base, 1
+    while name in taken:
+        n += 1
+        name = "%s%d" % (base, n)
+    return name
+
+
+def tubes_to_curves(meshes, groom=None, centers=True, centers_group=True, existing_groups=False, ignore_bevels=True,
+                    name=None, shapes=True, center_count=1, smooth=True):
+    """Modeled hair tubes (open quad tubes: `meshes`, or groups of them) as NURBS curves: with `shapes`
+    one per edge run along each tube (its shape curves, a point per edge loop), and with `centers` one through
+    each tube's middle (each section's area centroid); `center_count` above 1 fills the tube with
+    that many (the center curve and others in rings round it: tube_mesh.volume_layout). With `ignore_bevels`, loops (or runs) lying
+    much closer together than the ones beside them, a bevel holding a crease, count as one, their
+    mean. With `smooth` each vertex is read where it lies on the mesh's smooth surface (as smooth
+    mesh preview draws it), else as modeled; None: as each mesh is drawn. Roots: the end nearer the
+    scalp with a groom, else each tube's wider end.
+
+    With `groom` the curves become its guides (and leave the scene): the shape curves in guide
+    group "tubesShape", the center curves in "tubesCenter" with `centers_group`, else with the shape
+    curves in "tubesShape". With `existing_groups` they join those groups when the groom has them
+    (made when it does not); else each conversion makes new ones, numbered after the first
+    (tubesShape, tubesShape2...). Without a groom they stay in the scene as Maya curves under one group
+    (`name`, default "tubeCurves"): a group per tube of its curves (<tube>_curve1...), and with
+    `centers_group` one group of every center curve ("tubeCenterCurves"), else each center curve in
+    its tube's group. One undo step.
+
+    Returns {"tubes": n, "shape": [curves or guide IDs], "centers": [...], "group": the scene group
+    (None with a groom), "groups": {"shape": guide group, "centers": guide group} (with a groom),
+    "skipped": {mesh: why}}. Neither `shapes` nor `centers`: ValueError.
+    """
+    if not shapes and not centers:
+        raise ValueError("Choose shape curves, center curves or both")
+    with groomlab.undo_chunk("tubes to curves"):
+        tubes, skipped = _read_tubes(meshes, groom, ignore_bevels, smooth)
+        root = cmds.group(empty=True, name=name or "tubeCurves")
+        root = cmds.ls(root, long=True)[0]
+        center_holder = (cmds.group(empty=True, name="tubeCenterCurves", parent=root)
+                         if centers and centers_group else None)
+        shape_curves, centers_made = [], []
+        closest = _scalp_closest(groom) if groom else None  # (guides: rooted here, see _rooted)
+        for tube in tubes:
+            holder = (cmds.group(empty=True, name=tube.name + "_curves", parent=root)
+                      if shapes or (centers and not centers_group) else None)
+            if shapes:
+                for i, column in enumerate(tube.columns()):
+                    shape_curves.append(_curve("%s_curve%d" % (tube.name, i + 1), _rooted(column, closest), holder))
+            if centers:
+                for i, points in enumerate(tube.volume_curves(center_count)):
+                    centers_made.append(_curve("%s_center%s" % (tube.name, i + 1 if i else ""),
+                                               _rooted(points, closest), center_holder or holder))
+        result = {"tubes": len(tubes), "skipped": skipped, "group": root, "groups": {}}
+        if not groom:
+            result.update(shape=shape_curves, centers=centers_made)
+            return result
+
+        def group_for(base):
+            return base if existing_groups else _new_group_name(groom, base)
+        shape_group = group_for(TUBE_GROUPS["shape"]) if shapes or (centers and not centers_group) else None
+        groups = {"shape": shape_group,
+                  "centers": (group_for(TUBE_GROUPS["centers"]) if centers_group else shape_group) if centers else None}
+        result["shape"] = _guides_point_per_loop(groom, shape_curves, groups["shape"])
+        result["centers"] = _guides_point_per_loop(groom, centers_made, groups["centers"])
+        cmds.delete(root)
+        result.update(group=None, groups=groups)
+    return result
+
+
+def _shape_name(groom, base, taken):
+    """A library shape name from `base` (a mesh's name): only the characters a shape name takes, unique."""
+    import re
+    clean = re.sub(r"[^A-Za-z0-9 _.\-]", "_", base).strip() or "tube"
+    clean = clean[:56]
+    if clean.lower() in [s.lower() for s in groomlab.TUBE_SHAPES]:
+        clean += "_shape"
+    name, n = clean, 1
+    while name in taken:
+        n += 1
+        name = "%s_%d" % (clean, n)
+    return name
+
+
+def _tube_frames(groom, guide, evaluated=False):
+    """A guide's points and section axes (u, v: its frames turned by its roll). `evaluated`: the
+    guide as drawn, its roll worked out on the scalp for the tube it has now."""
+    if evaluated:
+        return json.loads(cmds.groomLabGuides(groom, tubeFrames=str(guide), evaluated=True))
+    return json.loads(cmds.groomLabGuides(groom, tubeFrames=str(guide)))
+
+
+def _scalp_surface(groom):
+    """A function of a point: (the nearest point on the groom's scalps, the scalp's normal there),
+    or None without a scalp."""
+    from maya.api import OpenMaya as om
+    fns = [_om_mesh(s) for s in sorted(_groom_meshes(groom))]
+    if not fns:
+        return None
+
+    def nearest(p):
+        q = om.MPoint(*p)
+        best = None
+        for fn in fns:
+            hit, normal = fn.getClosestPointAndNormal(q, om.MSpace.kWorld)[:2]
+            d = q.distanceTo(hit)
+            if best is None or d < best[0]:
+                best = (d, (hit.x, hit.y, hit.z), (normal.x, normal.y, normal.z))
+        n = best[2]
+        length = math.sqrt(sum(c * c for c in n)) or 1.0
+        return best[1], tuple(c / length for c in n)
+    return nearest
+
+
+ROOT_LIFT = 0.35  # how far the guide's second point stands off the scalp: a share of the way to the next loop
+
+
+def _tube_path(centers, surface):
+    """The guide's points through a tube's section centers: its root on the scalp under the root
+    section, and its second point straight off the scalp from there (a share of the way to the next
+    section), so the root section lies on the scalp as the modeled root loop does (a section is
+    square to the guide). Without a scalp: the centers."""
+    centers = [tuple(c) for c in centers]
+    if not surface or len(centers) < 2:
+        return centers
+    root, normal = surface(centers[0])
+    step = math.sqrt(sum((a - b) ** 2 for a, b in zip(centers[1], root)))
+    lift = tuple(r + n * ROOT_LIFT * step for r, n in zip(root, normal))
+    return [root, lift] + centers[1:]
+
+
+def _tube_columns(tube):
+    """The tube's surface as point lists along it (Tube.section_loops' points, column by column),
+    and how many of them per vertex round a loop (vertex i: column i * per)."""
+    per = SHAPE_SAMPLES if tube.smooth else 1
+    loops = tube.section_loops(per)
+    return [[loop[j] for loop in loops] for j in range(len(loops[0]))], per
+
+
+def _fit_sections(frames, tube, shape_uv, columns, root_points=0, outline=None, uncovered=None):
+    """The section at each of the guide's points, where the modeled tube crosses the plane square to
+    the guide there (tube_mesh.plane_section: the surface as drawn, so a bend's leaning loops
+    count as the tube's real thickness): [{t, twist, width, height, center}]. The twist puts each
+    shape point nearest the edge through its own vertex, so the tube turns as the modeled edges
+    turn and no more. The root's shape is the root loop's, so the first `root_points` (the root and
+    the point straight off the scalp) take the root loop itself and match it. Along the tube only
+    its thickness counts, not its shape: each section centered on the cut, as flat as the cut is
+    across the shape's axes (tube_mesh.section_box), and sized so the shape's `outline` (its drawn
+    curve, in shape coordinates) holds the cut's area: the modeled volume. With `uncovered`, each
+    section's `cover`: how much wider it must be drawn for at most that share of the cut to lie
+    outside it (tube_mesh.cover_scale; 1 at the root points: the root loop is the shape). A section
+    with no size (a pointed tip) keeps the last twist."""
+    from groomlab import tube_mesh as tm
+    surface, per = _tube_columns(tube)
+    points = frames["points"]
+    n = len(points)
+    sections, last = [], 0.0
+    for i in range(n):
+        t = i / float(n - 1)
+        center, u, v = tm.frame_at(frames, t)
+        if i < root_points:
+            cut = [col[0] for col in surface]
+        else:
+            cut = tm.plane_section(surface, center, tm._unit(tm._cross(u, v)))
+        flat = [tm.to_plane(p, center, u, v) for p in cut]
+        twist, w, h, c = tm.fit_section([flat[k * per] for k in columns], shape_uv, near=last)
+        if w > 0.0:
+            w, h, c = tm.section_box(flat, twist)
+            if outline and i >= root_points and w > 0.0 and h > 0.0:
+                held = abs(tm.signed_area(outline)) * w * h
+                cut_area = abs(tm.signed_area(flat))
+                if held > 1e-18 and cut_area > 0.0:
+                    k = math.sqrt(cut_area / held)
+                    w, h = w * k, h * k
+        cover = 1.0
+        if uncovered is not None and outline and i >= root_points and w > 0.0 and h > 0.0:
+            drawn = tm.place_outline(outline, twist, w, h, (0.0, 0.0))
+            cover = tm.cover_scale([(x - c[0], y - c[1]) for x, y in flat], drawn, uncovered)
+        last = twist
+        sections.append({"t": t, "twist": twist, "width": w, "height": h, "center": tm.from_plane(c, center, u, v),
+                         "cover": cover})
+    return sections
+
+
+def _smoothed_cover(sections, keep):
+    """The sections' cover factors evened out along the tube (two passes of 1-2-1), the first
+    `keep` (the root points) left at 1: the widths change gently where the shape parts from the
+    modeled sections."""
+    k = [1.0 if i < keep else s.get("cover", 1.0) for i, s in enumerate(sections)]
+    for _ in range(2):
+        k = [k[i] if i < keep else (k[max(i - 1, 0)] + 2.0 * k[i] + k[min(i + 1, len(k) - 1)]) * 0.25
+             for i in range(len(k))]
+    return [max(1.0, f) for f in k]
+
+
+def _reshape(groom, guide, points):
+    """The guide through `points` exactly (they become its points)."""
+    curve = _curve("glTubeFit", points)
+    try:
+        cmds.groomLabGuides(groom, reshape=[(str(guide), _curve_shapes(curve)[0])])
+    finally:
+        cmds.delete(curve)
+
+
+def _fit_tube(groom, guide, tube, shape_uv, columns, surface=None, outline=None, passes=2, padding=1.0, step=None,
+              uncovered=None):
+    """Fit guide `guide` and its tube to the modeled `tube`, against the guide as drawn (its frames
+    and the roll GroomLab works out on the scalp). Each pass cuts the tube square to the guide at
+    each of its points (_fit_sections), moves those points to the cuts' centers (the root and the
+    point straight off the scalp stay: the root lies flat on the scalp) and sets the widths and
+    aspects. The roll follows the guide's path and its sections' size, never their twist: so
+    last, on the guide as it now stays, the twists alone. The widths are set as fitted times their
+    cover factor (`uncovered`: the share of each modeled section left outside it, _fit_sections;
+    evened out, the root's 1) times `padding` (before the twists: a width moves the roll).
+    `step()` after each pass and the last (passes + 1 calls). Returns the sections."""
+    sections = []
+    for _ in range(passes):
+        frames = _tube_frames(groom, guide, evaluated=True)
+        if len(frames["points"]) < 2:
+            return sections
+        keep = 2 if surface else 0
+        sections = _fit_sections(frames, tube, shape_uv, columns, keep, outline, uncovered)
+        path = [tuple(p) for p in frames["points"][:keep]] + [s["center"] for s in sections[keep:]]
+        _reshape(groom, guide, path)
+        aspects, prev = [], 1.0
+        for s in sections:
+            a = s["height"] / s["width"] if s["width"] > 1e-9 else prev
+            prev = min(max(a, 0.01), 100.0)
+            aspects.append(prev)
+        cover = _smoothed_cover(sections, keep)
+        groomlab.set_tube(groom, guides=[guide], width=[s["width"] * k * padding for s, k in zip(sections, cover)],
+                          aspect=aspects)
+        if step:
+            step()
+    frames = _tube_frames(groom, guide, evaluated=True)
+    sections = _fit_sections(frames, tube, shape_uv, columns, 2 if surface else 0, outline)
+    groomlab.set_tube(groom, guides=[guide], twist=[s["twist"] for s in sections])
+    if step:
+        step()
+    return sections
+
+
+SHAPE_SAMPLES = 4  # a smoothed section's shape: points per edge of its loop
+
+
+def _section_shape(tube, frames, t):
+    """The tube's root section as a shape, in the guide's section axes at `t`: a point per vertex
+    of its root loop, read smooth where each lies on the smooth surface and drawn as a smooth curve
+    through them (the profile editor's smooth curve, as smooth mesh preview rounds the loop), else
+    the vertices as modeled with straight edges. Returns (points (u, v), smooth, {ring vertex: the
+    index of its point in points})."""
+    from groomlab import tube_mesh as tm
+    center, u, v = tm.frame_at(frames, t)
+    flat = [tm.to_plane(p, center, u, v) for p in tube.rings[0]]
+    pts, indices = tm.shape_points(flat)
+    return pts, tube.smooth, {i: j for j, i in enumerate(indices)}
+
+
+# Width compensation (learned on modeled locks whose sections round out away from the root): a
+# converted tube keeps its root loop's shape all along, so where the modeled sections part from that
+# shape, a section holding their area still leaves some of them outside it, and the tube reads
+# thinner than the mesh. Each section is drawn just wide enough that at most this share of the
+# modeled section lies outside it (tube_mesh.cover_scale): where the shapes agree, nothing is added
+# (a round lock: 0 to 4%); where they part, more (a kite-shaped root on rounder sections: 10 to
+# 18%). Never thinner than the volume, at most 35% wider, the root as modeled, evened along.
+TUBE_UNCOVERED = 0.05
+FIT_PASSES = 2
+
+
+class Cancelled(Exception):
+    """A long conversion stopped by the artist (its progress callback said so). `made`: whether it
+    had changed the scene yet (its one undo step takes that back; nothing made, no step to undo)."""
+
+    def __init__(self, made):
+        super(Cancelled, self).__init__("conversion cancelled")
+        self.made = made
+
+
+def tubes_to_groomlab_tubes(groom, meshes, ignore_bevels=True, group=None, smooth=True,
+                            uncovered=TUBE_UNCOVERED, padding=1.0, progress=None):
+    """Modeled hair tubes (open quad tubes: `meshes`, or groups of them) as GroomLab tube guides,
+    one to one, to keep shaping without touching the mesh: a guide through each tube's middle,
+    rooted on the scalp under its root loop and leaving it square, so the root section lies on the
+    scalp as the loop does; its tube's shape the root loop exactly (a custom shape in the groom's
+    library, one per distinct section; the mesh's name); and along it the width and flatness of
+    each of the tube's edge loops, turned as its edges turn (so a flat tube's flat side faces as
+    modeled). `smooth` (default): the tube as smooth mesh preview draws it, its limit surface: the
+    root shape the smooth curve round the root loop, each loop where it lies on that surface; else
+    straight-edged, through the vertices as modeled; None: as each mesh is drawn now.
+    `ignore_bevels`: close loops and runs (a bevel) count as one. Each section past the root is
+    widened so at most `uncovered` of the modeled section lies outside it (TUBE_UNCOVERED; None:
+    as fitted, the volume alone), then every width times `padding`. The guides go into a new root group `group` (default
+    "tubes", numbered when taken). One undo step. `progress(done, total, text)`, when given, is
+    called as the work goes (reading the meshes, then each tube's guide and shape and each fitting
+    pass: steps of equal count, so done / total is how far along it is); returning False stops
+    the conversion (Cancelled raised, after its undo chunk closed: one undo takes it all back).
+
+    Returns {"guides": [IDs], "group": the guide group, "shapes": [library shapes made],
+    "skipped": {mesh: why}}.
+    """
+    from groomlab import tube_mesh as tm
+    if not groom:
+        raise ValueError("select the groom the tubes go to")
+    count = {"done": 0, "total": 1}
+
+    def advance(text):
+        count["done"] += 1
+        if progress and progress(count["done"], count["total"], text) is False:
+            raise Cancelled(made=count["done"] > 1)  # (past reading the meshes: guides made)
+
+    with groomlab.undo_chunk("tubes to GroomLab tubes"):
+        if progress and progress(0, 1, "Reading the tubes...") is False:
+            raise Cancelled(made=False)
+        tubes, skipped = _read_tubes(meshes, groom, ignore_bevels, smooth)
+        count["total"] = 1 + len(tubes) * (2 + FIT_PASSES)
+        advance("Read %d tube%s" % (len(tubes), "" if len(tubes) == 1 else "s"))
+        surface = _scalp_surface(groom)
+        group = group or _new_group_name(groom, TUBE_GROUPS["tubes"])
+        library = {s["name"]: s for s in groomlab.tube_shapes(groom)}
+        made_shapes, guides = [], []
+        for number, tube in enumerate(tubes):
+            label = "Tube %d of %d (%s)" % (number + 1, len(tubes), tube.name)
+            # The guide through the tube's middle, rooted flat on the scalp, with a placeholder shaped
+            # tube so its sections lie as they will (on the scalp: twist 0 at the root).
+            curve = _curve("glTubeCenter", tube.centers())
+            try:
+                guide = groomlab.guides_from_curves(groom, [curve], group=group)[0]
+            finally:
+                cmds.delete(curve)
+            _reshape(groom, guide, _tube_path(tube.centers(), surface))
+            source = next((r for r in tube.rings if tm.section_radius(r) > 1e-9), tube.rings[0])
+            radius = tm.section_radius(source)
+            groomlab.set_tube(groom, guides=[guide], shape="ribbon", width=radius)
+            frames = _tube_frames(groom, guide, evaluated=True)
+            t = tm.polyline_param(frames["points"], tm.section_center(tube.rings[0]))
+            pts, smooth_shape, at = _section_shape(tube, frames, t)
+            # The library shape: one with this outline already (this run's or an earlier
+            # conversion's: converting again makes no copies), its own name's if that one is
+            # unused (taken anew), else a new one. Every library shape costs each read of the
+            # groom's guides, so copies piling up slow the tools.
+            name = None
+            for shape in library.values():
+                if (not shape["builtin"] and len(shape["points"]) == len(pts) and bool(shape["smooth"]) == smooth_shape
+                        and tm.match_fitted(pts, shape["points"])):
+                    name = shape["name"]
+                    break
+            if name is None:
+                own = library.get(_shape_name(groom, tube.name, {}))
+                if own is not None and not own["builtin"] and not own.get("users"):
+                    name = own["name"]
+                    groomlab.set_tube_shape_points(groom, name, pts, smooth=smooth_shape)
+                else:
+                    name = _shape_name(groom, tube.name, library)
+                    groomlab.add_tube_shape(groom, name, pts, smooth=smooth_shape)
+                library[name] = next(s for s in groomlab.tube_shapes(groom) if s["name"] == name)
+                made_shapes.append(name)
+            fitted_uv = tm.match_fitted(pts, library[name]["points"]) or library[name]["points"]
+            columns = sorted(at)
+            shape_uv = [fitted_uv[at[i]] for i in columns]
+            groomlab.set_tube(groom, guides=[guide], shape=name, width=radius, aspect=1.0, twist=0.0)
+            advance(label + ": its guide and shape")
+            import groomlab_core  # (the shape's curve as drawn: its area, which the sections hold)
+            drawn = [tuple(p) for p in groomlab_core.tube_shape_curve(library[name]["points"], library[name]["smooth"])]
+            _fit_tube(groom, guide, tube, shape_uv, columns, surface, outline=drawn, passes=FIT_PASSES,
+                      padding=padding, uncovered=uncovered, step=lambda: advance(label + ": fitting along it"))
+            guides.append(guide)
+    return {"guides": guides, "group": group, "shapes": made_shapes, "skipped": skipped}
 
 
 # ---------------------------------------------------------------------------
