@@ -140,15 +140,19 @@ public:
         if (!queue_) fail("no command queue");
     }
 
-    id<MTLComputeCommandEncoder> compute(id<MTLCounterSampleBuffer> samples, NSUInteger startSample) {
-        if (compute_ && startSample == MTLCounterDontSample) return compute_;
+    // The compute encoder open, or a new one: one taking timestamps at its start and end into
+    // `samples` (a sample nothing ran between is 0 on Apple's GPUs: an encoder sampled must dispatch).
+    id<MTLComputeCommandEncoder> compute(id<MTLCounterSampleBuffer> samples = nil, NSUInteger startSample = MTLCounterDontSample,
+                                         NSUInteger endSample = MTLCounterDontSample) {
+        const bool sampled = samples && (startSample != MTLCounterDontSample || endSample != MTLCounterDontSample);
+        if (compute_ && !sampled) return compute_;
         endEncoders();
-        if (samples && startSample != MTLCounterDontSample) {
+        if (sampled) {
             MTLComputePassDescriptor* pass = [MTLComputePassDescriptor computePassDescriptor];
             pass.dispatchType = MTLDispatchTypeSerial;
             pass.sampleBufferAttachments[0].sampleBuffer = samples;
             pass.sampleBufferAttachments[0].startOfEncoderSampleIndex = startSample;
-            pass.sampleBufferAttachments[0].endOfEncoderSampleIndex = MTLCounterDontSample;
+            pass.sampleBufferAttachments[0].endOfEncoderSampleIndex = endSample;
             compute_ = [buffer() computeCommandEncoderWithDescriptor:pass];
         } else {
             compute_ = [buffer() computeCommandEncoderWithDispatchType:MTLDispatchTypeSerial];
@@ -156,6 +160,7 @@ public:
         if (!compute_) fail("no compute encoder");
         return compute_;
     }
+    id<MTLComputeCommandEncoder> currentCompute() const { return compute_; }
     id<MTLBlitCommandEncoder> blit() {
         if (blit_) return blit_;
         endEncoders();

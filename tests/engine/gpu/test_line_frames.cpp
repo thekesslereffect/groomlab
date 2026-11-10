@@ -15,17 +15,22 @@
 
 #include <gtest/gtest.h>
 
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include <windows.h>
 #include <GL/gl.h>
 #include <d3d11.h>
+#endif
 
 #include "../core/test_helpers.h"
 #include "groomlab/display.h"
 #include "groomlab/follow_scalp.h"
 #include "groomlab/gpu/line_frames.h"
+#ifdef GROOMLAB_HAS_METAL
+#include "groomlab/gpu/look_engine.h"  // createMetalBuffer
+#endif
 
 namespace groomlab {
 namespace {
@@ -44,6 +49,7 @@ public:
     virtual void releaseVolume(void* volume) = 0;
 };
 
+#ifdef _WIN32
 class D3D11Device final : public Device {
 public:
     D3D11Device() {
@@ -192,9 +198,39 @@ private:
     void(APIENTRY* texImage3D_)(GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void*) = nullptr;
 };
 
+#endif  // _WIN32
+
+#ifdef GROOMLAB_HAS_METAL
+// Metal (macOS): the system's device; buffers in memory the CPU shares.
+class MetalDevice final : public Device {
+public:
+    bool available() const override { return gpu::metalSystemDevice() != nullptr; }
+    std::unique_ptr<gpu::LineFrames> frames() override { return gpu::makeMetalLineFrames(gpu::metalSystemDevice()); }
+    void* buffer(std::size_t bytes) override {
+        void* b = gpu::createMetalBuffer(gpu::metalSystemDevice(), bytes);
+        std::memset(gpu::metalBufferContents(b), 0, bytes);
+        return b;
+    }
+    void release(void* buffer) override { gpu::releaseMetalBuffer(buffer); }
+    void* volume(unsigned x, unsigned y, unsigned z) override { return gpu::createMetalVolume(gpu::metalSystemDevice(), x, y, z); }
+    std::vector<float> readVolume(void* volume, unsigned, unsigned, unsigned) override {
+        return gpu::makeMetalLineFrames(gpu::metalSystemDevice())->readVolume(volume);  // (on the device's one stream)
+    }
+    void releaseVolume(void* volume) override { gpu::releaseMetalTexture(volume); }
+};
+#endif
+
 std::unique_ptr<Device> makeDevice(const std::string& api) {
+#ifdef _WIN32
     if (api == "DirectX11") return std::make_unique<D3D11Device>();
     return std::make_unique<GLDevice>();
+#elif defined(GROOMLAB_HAS_METAL)
+    (void)api;
+    return std::make_unique<MetalDevice>();
+#else
+    (void)api;
+    return nullptr;
+#endif
 }
 
 // Wavy strands rooted on a sphere (roots on its faces, a few unrooted), `even`: every strand
@@ -929,7 +965,11 @@ TEST_P(LineFramesTest, DISABLED_DensityGridTimes) {
     device->release(lineUvs);
 }
 
+#ifdef _WIN32
 INSTANTIATE_TEST_SUITE_P(Apis, LineFramesTest, ::testing::Values("DirectX11", "OpenGL"),
+#else
+INSTANTIATE_TEST_SUITE_P(Apis, LineFramesTest, ::testing::Values("Metal"),
+#endif
                          [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
 
 }  // namespace

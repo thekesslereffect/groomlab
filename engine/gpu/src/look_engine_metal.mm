@@ -130,7 +130,7 @@ public:
         kernels_.start();
         zero_ = [device_ newBufferWithLength:65536 options:MTLResourceStorageModeShared];  // (zeros: an input not bound)
         // Timestamps at the compute encoders' starts (Apple's GPUs sample at stage boundaries).
-        samples_ = timestampSamples(device_, kMaxStamps);
+        samples_ = timestampSamples(device_, kSampleSlots);
     }
 
     GpuApi api() const override { return GpuApi::Metal; }
@@ -279,20 +279,34 @@ protected:
         }
         [encoder dispatchThreadgroups:MTLSizeMake(groupsX, groupsY, 1) threadsPerThreadgroup:MTLSizeMake(group[0], group[1], group[2])];
     }
+    // Timestamps: each encoder of a run samples at its start and end (two slots of samples_), and a
+    // stamp is the end of the encoder before it, or (none open) the start of the next one.
     void beginRun() override {
-        pendingStamp_ = MTLCounterDontSample;
+        slotsUsed_ = 0;
+        pendingStamp_ = -1;
+        ours_ = nil;
+        oursEnd_ = lastEnd_ = MTLCounterDontSample;
+        std::fill(std::begin(stampSlot_), std::end(stampSlot_), MTLCounterDontSample);
         stampCount_ = 0;
     }
     void stamp(std::size_t index) override {
         if (!samples_ || index >= kMaxStamps) return;
-        if (pendingStamp_ != MTLCounterDontSample) sampleNow();  // (two stamps with nothing between)
-        stream_->endEncoders();  // the next dispatch's encoder takes the stamp at its start
-        pendingStamp_ = index;
+        if (pendingStamp_ >= 0) stampSlot_[pendingStamp_] = lastEnd_;  // (two stamps with nothing between)
+        pendingStamp_ = -1;
+        if (ours_ && stream_->currentCompute() == ours_) {
+            stampSlot_[index] = oursEnd_;
+            stream_->endEncoders();  // the next dispatch's encoder is another
+            ours_ = nil;
+        } else {
+            pendingStamp_ = static_cast<int>(index);
+        }
     }
     void endRun(std::size_t stamps) override {
-        if (pendingStamp_ != MTLCounterDontSample) sampleNow();
+        if (pendingStamp_ >= 0) stampSlot_[pendingStamp_] = lastEnd_;  // nothing after it: the last encoder's end
+        pendingStamp_ = -1;
+        ours_ = nil;
         run_ = stream_->commit();
-        stampCount_ = samples_ ? std::min(stamps, kMaxStamps) : 0;
+        stampCount_ = samples_ ? std::min(stamps, kMaxStamps) : 0;  // (stamps' slots: stampSlot_)
         ticksPending_ = samples_ != nil;
     }
     bool stampTicks(bool wait, std::vector<std::uint64_t>* ticks, double* frequency) override {
@@ -305,15 +319,21 @@ protected:
         ticks->assign(stampCount_, 0);
         *frequency = 1e9;  // (Apple's GPU timestamps are nanoseconds, the CPU's clock)
         if (!stampCount_) return true;
-        NSData* data = [samples_ resolveCounterRange:NSMakeRange(0, stampCount_)];
-        if (!data || data.length < stampCount_ * sizeof(MTLCounterResultTimestamp)) {
+        NSData* data = slotsUsed_ ? [samples_ resolveCounterRange:NSMakeRange(0, slotsUsed_)] : nil;
+        if (!data || data.length < slotsUsed_ * sizeof(MTLCounterResultTimestamp)) {
             *frequency = 0.0;  // (as DirectX's disjoint: no times this run)
             return true;
         }
-        const auto* stamps = static_cast<const MTLCounterResultTimestamp*>(data.bytes);
+        const auto* samples = static_cast<const MTLCounterResultTimestamp*>(data.bytes);
+        std::uint64_t last = 0;
         for (std::size_t i = 0; i < stampCount_; ++i) {
-            if (stamps[i].timestamp == MTLCounterErrorValue) *frequency = 0.0;
-            (*ticks)[i] = stamps[i].timestamp;
+            const NSUInteger slot = stampSlot_[i];
+            std::uint64_t t = slot < slotsUsed_ ? samples[slot].timestamp : last;  // (none: the stamp before's)
+            if (t == MTLCounterErrorValue || t == 0) {
+                *frequency = 0.0;
+                t = last;
+            }
+            (*ticks)[i] = last = t;
         }
         return true;
     }
@@ -358,14 +378,20 @@ private:
         id<MTLBuffer> b = n >= 0 && has(n) ? buffer(n).buffer : nil;
         [encoder setBuffer:b ? b : zero_ offset:0 atIndex:index];
     }
+    // The encoder this engine dispatches into: its own still open, else a new one sampled at its
+    // start and end where there are slots left (a stamp waiting takes its start).
     id<MTLComputeCommandEncoder> encoderForDispatch() {
-        const NSUInteger start = pendingStamp_;
-        pendingStamp_ = MTLCounterDontSample;
-        return stream_->compute(samples_, start);
-    }
-    void sampleNow() {  // an encoder of its own for a stamp nothing followed
-        encoderForDispatch();
-        stream_->endEncoders();
+        if (ours_ && stream_->currentCompute() == ours_) return ours_;
+        if (!samples_ || slotsUsed_ + 2 > kSampleSlots) {
+            ours_ = nil;
+            return stream_->compute();
+        }
+        const NSUInteger start = slotsUsed_++, end = slotsUsed_++;
+        ours_ = stream_->compute(samples_, start, end);
+        oursEnd_ = lastEnd_ = end;
+        if (pendingStamp_ >= 0) stampSlot_[pendingStamp_] = start;
+        pendingStamp_ = -1;
+        return ours_;
     }
     Held buffer(int n) {
         if (n == kOutUvs) {
@@ -391,8 +417,13 @@ private:
     Held uvs_;  // the lines' uvs target (kOutUvs), written in place
     bool uvsBound_ = false;
     id<MTLTexture> texture_ = nil;  // the app's point texture
+    static constexpr std::size_t kSampleSlots = 4 * kMaxStamps;  // two an encoder
     id<MTLCounterSampleBuffer> samples_ = nil;
-    NSUInteger pendingStamp_ = MTLCounterDontSample;
+    NSUInteger slotsUsed_ = 0;
+    NSUInteger stampSlot_[kMaxStamps] = {};
+    int pendingStamp_ = -1;
+    id<MTLComputeCommandEncoder> ours_ = nil;  // the encoder this engine opened (its end sample: oursEnd_)
+    NSUInteger oursEnd_ = MTLCounterDontSample, lastEnd_ = MTLCounterDontSample;
     id<MTLCommandBuffer> run_ = nil;  // the last run's (its stamps)
     std::size_t stampCount_ = 0;
     bool ticksPending_ = false;

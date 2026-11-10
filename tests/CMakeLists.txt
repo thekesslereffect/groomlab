@@ -266,10 +266,10 @@ if(TARGET groomlab_core_private)
 endif()
 
 # The GPU look preview's kernels against the CPU operators (engine/gpu/, look_engine.h): on a device of
-# its own, skipped without one. Windows (DirectX 11, OpenGL) and macOS (Metal, the look engine's
-# alone for now: its line frames are to come); elsewhere the engine has no backend yet (engine/gpu).
+# its own, skipped without one. Windows (DirectX 11, OpenGL) and macOS (Metal); elsewhere the engine
+# has no backend yet (engine/gpu).
 if(TARGET groomlab_gpu AND APPLE)
-    add_executable(groomlab_gpu_tests engine/gpu/test_look_engine.cpp)
+    add_executable(groomlab_gpu_tests engine/gpu/test_look_engine.cpp engine/gpu/test_line_frames.cpp)
     target_link_libraries(groomlab_gpu_tests PRIVATE groomlab::gpu groomlab::core groomlab::warnings GTest::gtest_main
                           nlohmann_json::nlohmann_json)
     target_compile_definitions(groomlab_gpu_tests PRIVATE "GROOMLAB_SHIPPED_PRESETS=${_shipped_presets}")  # hair_basics

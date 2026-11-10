@@ -243,4 +243,16 @@ std::unique_ptr<LineFrames> makeGLLineFrames();
 // `bytes` long: what a host hands Viewport 2.0 as its ribbons' indices.
 ID3D11Buffer* createD3D11IndexBuffer(ID3D11Device* device, std::size_t bytes);
 
+#ifdef __APPLE__
+// On a Metal device (id<MTLDevice>; null: the system's default), on its one command stream with the
+// look engines of it (look_engine.h makeMetalLookEngine). Targets are MTLBuffers (look_engine.h
+// createMetalBuffer, or a host's), any of them; runDensity's an RG32Float 3D MTLTexture, written in
+// place where it takes shader writes, else copied into.
+std::unique_ptr<LineFrames> makeMetalLineFrames(void* device);
+// A 3D texture of x * y * z RG32Float texels on `device` (null: the default) that compute may write:
+// a density target. Retained for the caller (releaseMetalTexture).
+void* createMetalVolume(void* device, unsigned x, unsigned y, unsigned z);
+void releaseMetalTexture(void* texture);
+#endif
+
 }  // namespace groomlab::gpu

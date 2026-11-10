@@ -470,7 +470,8 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [ ] RenderMan procedural renders in prman (waits for RenderMan 28 on arm64: 27.3 is Intel only, and the port is Apple silicon only)
 - [x] Blender extension zip installs in Blender for macOS; the helper runs (`-L blender -LE vray` green, Blender 5.2.3)
 - [x] Slang for macOS pinned; `gpu.*kernel_targets` green (Slang 2026.19 for Apple silicon, fetched by `engine/gpu/CMakeLists.txt` and pinned by its SHA-256; the three tests pass: every kernel compiles for Metal and SPIR-V)
-- [ ] Metal compute backend (`look_engine_metal.mm`), `groomlab_gpu_tests` green on macOS (the look engine: done, 2026-11-09; `groomlab_gpu_tests` 227 passed, 1 skipped, every kernel against the CPU's; a Noise drag on 160k strands 4.5 ms against the CPU's 13 ms. To come: the line frames, following the scalp, the density grid (line_frames.cpp), then the hosts)
+- [x] Metal compute backend (`look_engine_metal.mm`, `line_frames_metal.mm`), `groomlab_gpu_tests` green on macOS (2026-11-09: 235 passed, 1 skipped, as on Windows: every look kernel, the line frames, ribbons, following the scalp and the density grid against the CPU's; a Noise drag on 160k strands 4.5 ms against the CPU's 13 ms. Timestamps: Apple's GPUs sample only at encoder starts and ends, and an encoder that runs nothing samples 0, so every sample comes from an encoder that dispatched)
+- [ ] The hosts on Metal: the app (`hosts/app/src/gpu_preview.cpp`: QRhi's `MTLDevice` and command queue, its buffers as targets) and Maya (no Metal draw API: the results through shared memory into Viewport 2.0's buffers, `createMetalBuffer`, `finishMetalRuns`)
 - [ ] App and Maya use the Metal backend for drags and strokes
 - [ ] Pen pressure in Maya on macOS (Maya's Qt)
 - [x] `.app` bundle with macdeployqt; packaging scripts' macOS branches (the three zips build; the publish scripts are not done: section 11)
