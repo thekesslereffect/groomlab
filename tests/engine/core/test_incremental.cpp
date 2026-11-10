@@ -1310,6 +1310,31 @@ TEST(Incremental, AStrokeDocumentWarmedAwayFromTheSessionIsAsWarm) {
     EXPECT_GT(strokeAndCompare(session, host, request, {"comb"}, 2), 0u);
 }
 
+TEST(Incremental, AWarmUpAskedAgainForTheSameDoesNothing) {
+    // The brush tool asks for a warm-up at every move of the cursor: warm already for the same
+    // view, density and node, with the stroke document not evaluated since, nothing is copied or
+    // evaluated (a copy and a run each time kept a thread and Maya's idle loop busy: the viewport
+    // lagged). A new view evaluation or another density warms again.
+    ViewRequest request;
+    request.sculptDensity = 0.6f;
+    GroomSession session(sphereGroom(kLookGraph, 24, 3));
+    session.evaluate(request);
+    std::shared_ptr<DetachedEvaluation> warm = session.detachWarm(request);
+    ASSERT_NE(warm, nullptr);
+    warm->run();
+    ASSERT_TRUE(session.adoptWarm(*warm));
+    EXPECT_EQ(session.detachWarm(request), nullptr) << "warm already: no copy";
+    EXPECT_FALSE(session.warmStroke(request));
+    ViewRequest other = request;
+    other.sculptDensity = 0.4f;
+    EXPECT_NE(session.detachWarm(other), nullptr) << "another density: warmed again";
+    // Synchronously too: warmStroke's warm-up, then the same asked again.
+    GroomSession sync(sphereGroom(kLookGraph, 24, 3));
+    sync.evaluate(request);
+    EXPECT_TRUE(sync.warmStroke(request));
+    EXPECT_EQ(sync.detachWarm(request), nullptr);
+}
+
 TEST(Incremental, AStrokesDabsEvaluatedAwayFromTheSessionLandAsDabsHere) {
     // detachStroke lends the stroke document to a run on another thread with a copy of the
     // preview guides while the tool goes on dabbing on the session; adopted, the evaluation that

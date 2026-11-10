@@ -44,6 +44,8 @@
       {"submenu": "Utilities", "id": "utilities", "items": [
         "guides.toCurves",
         "guides.curvesToGuides",
+        "tubes.toCurves",
+        "tubes.toGroomLabTubes",
         "-",
         "strands.toCurves",
         "strands.toMesh",

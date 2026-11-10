@@ -5,7 +5,10 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 
@@ -464,7 +467,40 @@ std::vector<SectionPoint> sampleTubeShapeCurve(const std::vector<SectionPoint>& 
     return denseCurve(points, smooth, samplesPerSpan(points.size()));
 }
 
+namespace {
+
+CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vector<SectionPoint>& given,
+                                        bool smooth);
+
+}  // namespace
+
 CustomTubeShapePtr makeCustomTubeShape(const std::string& name, const std::vector<SectionPoint>& given, bool smooth) {
+    // Made once per name, points and smoothness and shared after: a host command reads the groom's
+    // guides (their library with them) at every call, and sampling, checking and measuring each
+    // shape again made every such call slow on a groom with a few library shapes (a panel polling
+    // them lagged the viewport). A shape is never changed once made (a library edit makes a new
+    // one), so the same inputs may share it.
+    std::string key = name;
+    key.push_back(smooth ? 's' : 'c');  // (smooth or corners)
+    key.append(reinterpret_cast<const char*>(given.data()), given.size() * sizeof(SectionPoint));
+    static std::mutex mutex;
+    static std::unordered_map<std::string, CustomTubeShapePtr> made;
+    {
+        const std::lock_guard<std::mutex> lock(mutex);
+        const auto it = made.find(key);
+        if (it != made.end()) return it->second;
+    }
+    CustomTubeShapePtr shape = buildCustomTubeShape(name, given, smooth);  // (throws: nothing kept)
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (made.size() >= 512) made.clear();  // (shapes edited many times over: start again)
+    made.emplace(std::move(key), shape);
+    return shape;
+}
+
+namespace {
+
+CustomTubeShapePtr buildCustomTubeShape(const std::string& name, const std::vector<SectionPoint>& given,
+                                        bool smooth) {
     checkTubeShapeName(name);
     if (given.size() > kMaxTubeShapePoints) {
         throw std::invalid_argument("tube shape '" + name + "': " + std::to_string(kMaxTubeShapePoints) + " points at most");
@@ -543,6 +579,8 @@ CustomTubeShapePtr makeCustomTubeShape(const std::string& name, const std::vecto
     measureDepth(t);
     return shape;
 }
+
+}  // namespace
 
 std::vector<SectionPoint> builtinTubeShapePoints(TubeShape shape, bool* smooth) {
     std::vector<SectionPoint> pts;

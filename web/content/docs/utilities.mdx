@@ -19,6 +19,37 @@ the selected grooms), and each is one undo step.
 To edit guides with Maya tools: **Guides to Curves**, edit the curves (CVs, lattices, a sculpt
 deformer), then **Curves to Guides...**.
 
+## Modeled hair tubes
+
+Hair modeled as polygon tubes (open quad tubes, no caps; a pointed tip is fine) comes into
+GroomLab two ways, in Maya. Both read a tube as smooth mesh preview draws it (the 3 key) and work
+on every tube of the selected meshes (or groups).
+
+**Tubes to Curves...** makes curves from the tubes:
+
+- **Tube Shape:** a curve along each lengthwise edge run, a point per edge loop.
+- **Tube Center:** a curve through the middle of each tube. **Add center volume** fills the tube
+  with that many curves (the center one and rings around it, evenly laid out, staying inside the
+  tube from root to tip).
+- **Add to the selected groom** makes them guides in their own groups (*tubesShape*,
+  *tubesCenter*; new numbered groups each time, or **Add to existing guide groups**). **Convert to
+  Maya curves** leaves them in the scene, grouped in the Outliner.
+- **Count bevels as one curve:** edge loops or runs held close together to keep a crease make one
+  curve.
+
+**Convert Tubes to GroomLab Tubes** makes one tube guide per modeled tube, to keep shaping with
+GroomLab's tools:
+
+- The guide is rooted on the scalp under the tube's root loop and leaves it straight out, so the
+  root section lies on the scalp as the loop does.
+- The tube's shape is the root loop: a point per root vertex, a smooth curve through them, added
+  to the groom's tube shape library under the mesh's name (converting again reuses it).
+- Along the tube only its thickness is matched: each section is as wide and as flat as the modeled
+  tube there, and turns as its edges do. Where the modeled sections part from the root's shape (a
+  lock that rounds out), the sections are drawn a little wider, so the hair filling them does not
+  read thinner than the mesh did.
+- A progress bar shows how far along it is; Esc cancels it (nothing is changed).
+
 ## Delete All Flow Arrows
 
 Removes every flow arrow and sink from the active groom in one undo step, and reports how many

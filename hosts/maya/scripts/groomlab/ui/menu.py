@@ -1385,6 +1385,72 @@ def curves_to_guides_dialog(group=None, update=True, curves=None, groom=None):
     return result
 
 
+def tubes_report(result):
+    """What a tube conversion did, in a line (tubes_to_curves' or tubes_to_groomlab_tubes' result)."""
+    from groomlab import utils
+    if "guides" in result:  # to GroomLab tubes
+        text = "%s in guide group %s" % (utils._count(len(result["guides"]), "tube guide"), result["group"])
+        if result["shapes"]:
+            text += "; tube shape%s %s added" % ("" if len(result["shapes"]) == 1 else "s", ", ".join(result["shapes"]))
+        text += " (Interpolate's Fill Tubes fills them with hair)"
+    else:
+        made = " and ".join(utils._count(len(result[key]), noun) for key, noun in
+                            (("shape", "shape curve"), ("centers", "center curve")) if result[key]) or "no curves"
+        where = ("in %s" % result["group"].split("|")[-1] if result["group"] else
+                 "as guides (%s)" % ", ".join(sorted(set(g for g in result["groups"].values() if g))))
+        text = "%s from %s, %s" % (made, utils._count(result["tubes"], "tube"), where)
+    if result["skipped"]:
+        text += "; skipped %s" % "; ".join("%s: %s" % kv for kv in sorted(result["skipped"].items()))
+    return text
+
+
+def tubes_to_curves_window():
+    """Utilities > Tubes to Curves...: the window with its choices (never modal)."""
+    from groomlab.ui import tubes_window
+    return tubes_window.show()
+
+
+def tubes_to_groomlab_tubes_action(groom=None, meshes=None, ignore_bevels=True):
+    """Utilities > Convert Tubes to GroomLab Tubes: the selected modeled tubes as tube guides of the
+    current groom (one undo step); said what was made and what was skipped."""
+    from groomlab import utils
+    groom = groom or _selected_groom()
+    if not groom:
+        return None
+    meshes = meshes or utils.selected_tube_meshes(groom)
+    if not meshes:
+        cmds.warning("GroomLab: select the modeled tubes (meshes) along with the groom")
+        return None
+    # A progress window while it works (Esc cancels; what was made is undone).
+    shown = not cmds.about(batch=True)
+
+    def progress(done, total, text):
+        if not shown:
+            return True
+        if cmds.progressWindow(query=True, isCancelled=True):
+            return False
+        cmds.progressWindow(edit=True, progress=int(round(100.0 * done / max(total, 1))), status=text)
+        return True
+    if shown:
+        cmds.progressWindow(title="Convert Tubes to GroomLab Tubes", progress=0, maxValue=100,
+                            status="Reading the tubes...", isInterruptable=True)
+    try:
+        result = utils.tubes_to_groomlab_tubes(groom, meshes, ignore_bevels=ignore_bevels, progress=progress)
+    except utils.Cancelled as e:
+        if e.made:
+            cmds.undo()  # (the conversion is one undo step: what it made so far goes)
+        cmds.warning("GroomLab: conversion cancelled; nothing was changed")
+        return None
+    except ValueError as e:
+        cmds.warning("GroomLab: %s" % e)
+        return None
+    finally:
+        if shown:
+            cmds.progressWindow(endProgress=True)
+    _say(tubes_report(result))
+    return result
+
+
 def strands_to_curves_dialog(node=None, density=None, max_curves=None, attributes=None, degree=None, groom=None):
     """Strands to Curves: the groom's (or a node's) strands as Maya curves, capped."""
     from groomlab import utils
@@ -2044,6 +2110,8 @@ ACTIONS = {
     "export.scalesUsd": export_usd_scale_instancer_dialog,
     "guides.toCurves": guides_to_curves_action,
     "guides.curvesToGuides": curves_to_guides_dialog,
+    "tubes.toCurves": tubes_to_curves_window,
+    "tubes.toGroomLabTubes": tubes_to_groomlab_tubes_action,
     "strands.toCurves": strands_to_curves_dialog,
     "strands.toMesh": to_mesh_dialog,
     "node.bakeToGuides": bake_node_dialog,

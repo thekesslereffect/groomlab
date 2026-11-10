@@ -107,7 +107,11 @@ class TubeShapeEditor(QtWidgets.QWidget):
         """Show an outline (control points (u, v)); not while a point is dragged."""
         if self._drag is not None:
             return
-        self.points = [tuple(float(c) for c in p) for p in points]
+        points = [tuple(float(c) for c in p) for p in points]
+        if (points == self.points and bool(smooth) == self.smooth and bool(editable) == self.editable
+                and note == self.note and not self.problem):
+            return  # (the panel shows it again at every poll: nothing to sample or draw again)
+        self.points = points
         self.smooth = bool(smooth)
         self.editable = bool(editable)
         self.note = note
