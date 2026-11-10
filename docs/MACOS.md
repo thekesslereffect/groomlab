@@ -249,7 +249,8 @@ their SDKs, `app.package_manifest` (Windows only).
   cards, no Hardware 2.0 hair). On macOS they say `#version 410` (`glslForDevice`, `hair_shading.h`);
   nothing in them needs more.
 - **Metal compute backend** (the engine and line frames run on Metal: `src/look_engine_metal.mm`,
-  `src/line_frames_metal.mm`, their shared parts `src/metal_internal.h`; the app uses it; Maya next).
+  `src/line_frames_metal.mm`, their shared parts `src/metal_internal.h`; the app and Maya use it:
+  checklist below).
   Maya has no Metal draw API (2024 to 2027: `MRenderer::drawAPI()` is OpenGL Core Profile on the
   Mac), so there its results reach Viewport 2.0's buffers through the memory Apple silicon shares
   (`createMetalBuffer`, `finishMetalRuns`), copied as the CPU's are; the app draws with Metal and
@@ -438,7 +439,12 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
   window compositor on macOS). (Fixed on the way: a keyed param's Graph Editor drag drew no step
   before the release, `graph_editor._write_preview`; three brush cases, the radius in points: Retina
   below. Then 405 passed and the same 4 open in Maya 2025, 2026 and 2027 alike; 2027 once also hit a
-  race in the Graph Editor, fixed: `frame_readable` after the editor was gone.)
+  race in the Graph Editor, fixed: `frame_readable` after the editor was gone.) With Metal (drags,
+  strokes and the self-shadowing grid; the GPU preview case and self-shadowing checked again): Maya
+  2024, 2025 and 2026 435 passed, 2027 432; the open ones as above, plus in 2027 two GPU preview
+  checks whose drawn frames are the CPU's (0.0000 of the pixels differ) but whose value changes too
+  few pixels for the check's bar (0.0098 for 0.012). The orbit is slower with self-shadowing on
+  (the hair shader marches the grid each pixel): 200k strands at 13.8 fps, 18.3 with it off.
 - **Retina**: Maya's 3D view works in device pixels on macOS (`M3dView.portWidth()` 2530 for a
   1265-point Qt widget, ratio 2). The brushes' radius is in points, as on Windows and in the app:
   `-radius` and the B-drag label take and show points, the strokes and the ring use the radius times
@@ -473,7 +479,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] Slang for macOS pinned; `gpu.*kernel_targets` green (Slang 2026.19 for Apple silicon, fetched by `engine/gpu/CMakeLists.txt` and pinned by its SHA-256; the three tests pass: every kernel compiles for Metal and SPIR-V)
 - [x] Metal compute backend (`look_engine_metal.mm`, `line_frames_metal.mm`), `groomlab_gpu_tests` green on macOS (2026-11-09: 235 passed, 1 skipped, as on Windows: every look kernel, the line frames, ribbons, following the scalp and the density grid against the CPU's; a Noise drag on 160k strands 4.5 ms against the CPU's 13 ms. Timestamps: Apple's GPUs sample only at encoder starts and ends, and an encoder that runs nothing samples 0, so every sample comes from an encoder that dispatched)
 - [x] The app on Metal (`hosts/app/src/gpu_preview.cpp`: QRhi's `MTLDevice`, the engine on QRhi's command queue so a run comes before the frame drawing it, QRhi's buffers and point texture written in place; `AppGpuPreview.*` 5 of 5 on Metal, a Noise drag about 0.6 ms on the GPU)
-- [ ] Maya on Metal. Its viewport has no Metal API, and its GPU paths (`gpu_preview.cpp`, `gpu_lines.cpp`, `groom_draw_override_gpu.cpp`) write Viewport 2.0's own buffers and textures in place (DirectX 11 objects, OpenGL names). On the Mac that needs a mode of its own: the engine and line frames on the system's Metal device, their targets shared buffers (`createMetalBuffer`), then, once `finishMetalRuns`, copied into the `MVertexBuffer`s and the density `MTexture` on the CPU (unified memory: a copy, as the CPU path's upload). It brings back true width's facing ribbons and the self-shadowing grid, and drags and strokes on the GPU
+- [x] Maya on Metal, where its results can cross to Viewport 2.0's OpenGL through the CPU cheaply (2026-11-09). Drags and strokes: the look engine on the system's Metal device into buffers the GPU shares, copied into the strands item's own vertex buffers (`gpu_preview.cpp` MetalCopy: one memcpy a stream, as the CPU path's upload); the GUI suites' GPU preview case passes whole on the Mac (each frame the CPU commit's). Self-shadowing: the density grid splatted on Metal from the strands handed to the viewport, its texels written into the hair's texture (`gpu_lines.cpp` densityOnMetal; a 2 MB texture at 64 cubed). Left on the CPU: the lit lines' frames (cheap there) and true width's facing ribbons, made again for every view: their two vertices a point would cross through the CPU each orbit frame (hundreds of MB at 200k strands), so `displayRibbons` draws the CPU's ribbons on the Mac and the GUI suites skip the facing checks (`gui_support.gpu_kernels()`)
 - [ ] App and Maya use the Metal backend for drags and strokes
 - [ ] Pen pressure in Maya on macOS (Maya's Qt)
 - [x] `.app` bundle with macdeployqt; packaging scripts' macOS branches (the three zips build; the publish scripts are not done: section 11)
