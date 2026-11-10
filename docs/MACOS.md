@@ -248,7 +248,15 @@ their SDKs, `app.package_manifest` (Windows only).
   lines' width as coverage) said `#version 430`: Maya took them and drew nothing (no strands, no
   cards, no Hardware 2.0 hair). On macOS they say `#version 410` (`glslForDevice`, `hair_shading.h`);
   nothing in them needs more.
-- **Metal compute backend** (the next big step once everything builds):
+- **Metal compute backend** (in progress: the look engine runs on Metal, `src/look_engine_metal.mm`).
+  Maya has no Metal draw API (2024 to 2027: `MRenderer::drawAPI()` is OpenGL Core Profile on the
+  Mac), so there its results reach Viewport 2.0's buffers through the memory Apple silicon shares
+  (`createMetalBuffer`, `finishMetalRuns`), copied as the CPU's are; the app draws with Metal and
+  takes them in place. The kernels are Slang's Metal Shading Language, compiled by the system's
+  Metal compiler at runtime in the background (no Xcode Metal toolchain needed: it is a separate
+  download now) and cached by it (68 kernels: 1.9 s cold, 2 ms cached), with `#pragma METAL fp
+  contract(off)` so products and sums round as the CPU's (Metal fuses multiply-adds even without
+  fast math: Interpolate's clearance walk then strayed by 1e-3 at a few points). The original plan:
   1. Slang already compiles every kernel to Metal (`engine/gpu/cmake/check_kernel_targets.cmake`,
      `-target metal -DGROOMLAB_SLANG_LAYOUT -DGROOMLAB_SLANG_METAL`). Add a `metal` format to
      `embed_kernel.cmake` and embed the MSL text (compiled at runtime with
@@ -462,7 +470,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [ ] RenderMan procedural renders in prman (waits for RenderMan 28 on arm64: 27.3 is Intel only, and the port is Apple silicon only)
 - [x] Blender extension zip installs in Blender for macOS; the helper runs (`-L blender -LE vray` green, Blender 5.2.3)
 - [x] Slang for macOS pinned; `gpu.*kernel_targets` green (Slang 2026.19 for Apple silicon, fetched by `engine/gpu/CMakeLists.txt` and pinned by its SHA-256; the three tests pass: every kernel compiles for Metal and SPIR-V)
-- [ ] Metal compute backend (`look_engine_metal.mm`), `groomlab_gpu_tests` green on macOS
+- [ ] Metal compute backend (`look_engine_metal.mm`), `groomlab_gpu_tests` green on macOS (the look engine: done, 2026-11-09; `groomlab_gpu_tests` 227 passed, 1 skipped, every kernel against the CPU's; a Noise drag on 160k strands 4.5 ms against the CPU's 13 ms. To come: the line frames, following the scalp, the density grid (line_frames.cpp), then the hosts)
 - [ ] App and Maya use the Metal backend for drags and strokes
 - [ ] Pen pressure in Maya on macOS (Maya's Qt)
 - [x] `.app` bundle with macdeployqt; packaging scripts' macOS branches (the three zips build; the publish scripts are not done: section 11)

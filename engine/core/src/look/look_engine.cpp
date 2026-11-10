@@ -16,7 +16,9 @@
 
 namespace groomlab::gpu {
 
-const char* apiName(GpuApi api) { return api == GpuApi::D3D11 ? "DirectX11" : api == GpuApi::Cpu ? "CPU" : "OpenGL"; }
+const char* apiName(GpuApi api) {
+    return api == GpuApi::D3D11 ? "DirectX11" : api == GpuApi::Cpu ? "CPU" : api == GpuApi::Metal ? "Metal" : "OpenGL";
+}
 
 LookEngine::~LookEngine() = default;
 

@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 # Build step (cmake -P): one kernel of shaders/look.slang compiled by slangc for one target, embedded
 # in a header as a byte array (MSVC's string literals stop at 16 KB).
-#   -DSLANGC=<slangc.exe> -DSOURCE=<look.slang> -DENTRY=<entry point> -DFORMAT=dxbc|glsl
+#   -DSLANGC=<slangc.exe> -DSOURCE=<look.slang> -DENTRY=<entry point> -DFORMAT=dxbc|glsl|metal
 #   -DOUT=<compiled file> -DHEADER=<out .h> [-DCACHE=<folder>]
 # dxbc: DirectX 11 bytecode (cs_5_0; Slang hands its HLSL to Windows' d3dcompiler_47), as
 # `const unsigned char kLookDxbc<entry>[]`. glsl: GLSL 4.50 compute text for the OpenGL driver, as
-# `const char kLookGlsl<entry>[]`, NUL-terminated.
+# `const char kLookGlsl<entry>[]`, NUL-terminated. metal: Metal Shading Language text for the Metal
+# engine (macOS: compiled by the system's Metal compiler at runtime, which caches it), as
+# `const char kLookMetal<entry>[]`, NUL-terminated, and its threadgroup's size (Metal's dispatch
+# names it: Slang's reflection) as `const unsigned kLookMetal<entry>Group[3]`. Its buffers have
+# Slang's indices, the same in every kernel (the resources' order in look.slang).
 #
 # d3dcompiler is the slow part (ClearanceCS: minutes; slangc's HLSL for it: about a second), and every
 # kernel of a source rebuilds when the source changes. So a dxbc kernel is keyed by the HLSL slangc
@@ -20,6 +24,11 @@ if(FORMAT STREQUAL "dxbc")
 elseif(FORMAT STREQUAL "glsl")
     set(profile -profile glsl_450 -DGROOMLAB_SLANG_GL)  # (the image's binding: OpenGL's image units are few)
     set(name "kLookGlsl${ENTRY}")
+    set(type "char")
+    set(tail "0x00")
+elseif(FORMAT STREQUAL "metal")
+    set(profile -DGROOMLAB_SLANG_LAYOUT -DGROOMLAB_SLANG_METAL -reflection-json "${OUT}.json")  # one buffer table: Slang lays it out
+    set(name "kLookMetal${ENTRY}")
     set(type "char")
     set(tail "0x00")
 else()
@@ -79,6 +88,15 @@ if(tail STREQUAL "")
     string(REGEX REPLACE ",$" "" bytes "${bytes}")
     string(REGEX REPLACE ",\n$" "\n" bytes "${bytes}")
 endif()
-file(WRITE "${HEADER}.tmp" "// Generated from engine/gpu/shaders/look.slang (${ENTRY}, ${FORMAT}) by slangc.\nstatic const ${type} ${name}[] = {\n${bytes}${tail}};\n")
+set(extra "")
+if(FORMAT STREQUAL "metal")
+    file(READ "${OUT}.json" reflection)
+    string(JSON group GET "${reflection}" entryPoints 0 threadGroupSize)
+    string(JSON gx GET "${group}" 0)
+    string(JSON gy GET "${group}" 1)
+    string(JSON gz GET "${group}" 2)
+    set(extra "static const unsigned ${name}Group[3] = {${gx}, ${gy}, ${gz}};\n")
+endif()
+file(WRITE "${HEADER}.tmp" "// Generated from engine/gpu/shaders/look.slang (${ENTRY}, ${FORMAT}) by slangc.\nstatic const ${type} ${name}[] = {\n${bytes}${tail}};\n${extra}")
 file(COPY_FILE "${HEADER}.tmp" "${HEADER}" ONLY_IF_DIFFERENT)
 file(REMOVE "${HEADER}.tmp")

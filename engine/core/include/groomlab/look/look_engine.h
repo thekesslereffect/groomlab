@@ -20,7 +20,7 @@
 
 namespace groomlab::gpu {
 
-enum class GpuApi { D3D11, OpenGL, Cpu };
+enum class GpuApi { D3D11, OpenGL, Cpu, Metal };  // (Metal: macOS, look_engine_metal.mm)
 const char* apiName(GpuApi api);
 
 // Milliseconds on the GPU (timestamp queries) of the last run, per kind of node (summed over

@@ -48,4 +48,28 @@ bool glLookKernelsAllReady();
 // Forgets the kernels' programs of the context current (tests: the next engine starts them anew).
 void forgetGLLookKernels();
 
+#ifdef __APPLE__
+// The engine on a Metal device (macOS: id<MTLDevice>, as the app's QRhi hands it; null: the
+// system's default device). The kernels are Metal Shading Language from Slang, compiled by the
+// system's Metal compiler in the background (prepareMetalLookKernels; the system caches them, so
+// only a first run ever waits). Its targets are MTLBuffers (id<MTLBuffer>), written in place, and
+// the point texture an RGBA32Float MTLTexture made for shader writes. Throws std::runtime_error.
+std::unique_ptr<LookEngine> makeMetalLookEngine(void* device);
+// The system's default Metal device (id<MTLDevice>, not retained: it lives as long as the process),
+// null where there is none.
+void* metalSystemDevice();
+// Starts compiling the kernels for `device` (null: the default) without waiting; true once every
+// one is ready. Never throws.
+bool prepareMetalLookKernels(void* device);
+// A buffer of `bytes` on `device` (null: the default) in memory the CPU shares (Apple silicon's
+// unified memory): a target the kernels write that a host can read without a copy. Retained for
+// the caller (releaseMetalBuffer). metalBufferContents: its memory (the GPU's writes visible once
+// the engine's run is finished: LookEngine::finish).
+void* createMetalBuffer(void* device, std::size_t bytes);
+// Waits for every run committed so far, on any engine (a host about to read a target's memory).
+void finishMetalRuns();
+void releaseMetalBuffer(void* buffer);
+void* metalBufferContents(void* buffer);
+#endif
+
 }  // namespace groomlab::gpu

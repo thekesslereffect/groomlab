@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -29,6 +30,9 @@
 #include <d3d11.h>
 #undef near  // (windows.h: view_projection.h names a method so)
 #undef far
+#else
+#include <unistd.h>  // getpid
+#endif
 
 #include "../core/test_helpers.h"
 #include "groomlab/display.h"
@@ -69,6 +73,7 @@ public:
     virtual void release(void* buffer) = 0;
 };
 
+#ifdef _WIN32
 class D3D11Backend final : public Backend {
 public:
     D3D11Backend() {
@@ -223,6 +228,41 @@ private:
     void(APIENTRY* bufferSubData_)(GLenum, std::ptrdiff_t, std::ptrdiff_t, const void*) = nullptr;
 };
 
+#endif  // _WIN32
+
+#ifdef GROOMLAB_HAS_METAL
+// Metal (macOS): the system's device; targets are buffers in memory the CPU shares, read once the
+// runs committed are done.
+class MetalBackend final : public Backend {
+public:
+    bool available() const override { return gpu::metalSystemDevice() != nullptr; }
+    std::unique_ptr<gpu::LookEngine> engine() override { return gpu::makeMetalLookEngine(gpu::metalSystemDevice()); }
+    void* displayBuffer(std::size_t bytes) override {
+        void* b = gpu::createMetalBuffer(gpu::metalSystemDevice(), bytes);
+        std::memset(gpu::metalBufferContents(b), 0, bytes);
+        return b;
+    }
+    void* plainBuffer(std::size_t) override { return nullptr; }  // every buffer is written in place
+    std::vector<Vec3f> read(void* buffer, std::size_t count) override {
+        gpu::finishMetalRuns();
+        std::vector<Vec3f> out(count);
+        std::memcpy(out.data(), gpu::metalBufferContents(buffer), count * 12);
+        return out;
+    }
+    std::vector<float> readFloats(void* buffer, std::size_t count) override {
+        gpu::finishMetalRuns();
+        std::vector<float> out(count);
+        std::memcpy(out.data(), gpu::metalBufferContents(buffer), count * 4);
+        return out;
+    }
+    void fill(void* buffer, const void* data, std::size_t bytes) override {
+        gpu::finishMetalRuns();
+        std::memcpy(gpu::metalBufferContents(buffer), data, bytes);
+    }
+    void release(void* buffer) override { gpu::releaseMetalBuffer(buffer); }
+};
+#endif
+
 // The CPU engine (look.slang's kernels compiled to C++): its targets are float3 arrays in memory.
 class CpuBackend final : public Backend {
 public:
@@ -245,8 +285,13 @@ public:
 };
 
 std::unique_ptr<Backend> makeBackend(const std::string& name) {
+#ifdef _WIN32
     if (name == "DirectX11") return std::make_unique<D3D11Backend>();
     if (name == "OpenGL") return std::make_unique<GLBackend>();
+#endif
+#ifdef GROOMLAB_HAS_METAL
+    if (name == "Metal") return std::make_unique<MetalBackend>();
+#endif
     if (name == "CPU") return std::make_unique<CpuBackend>();
     return nullptr;
 }
@@ -392,10 +437,15 @@ GroomData paintedGroom(const std::string& graphJson) {
 // (`tag`: the backend) and process: ctest -j runs the DirectX 11 and OpenGL instances side by
 // side, and one would remove the file while the other reads it.
 std::string stripes(const std::string& tag) {
+#ifdef _WIN32
     char dir[MAX_PATH];
     GetTempPathA(MAX_PATH, dir);
     const std::string path =
         std::string(dir) + "groomlab_gpu_stripes_" + tag + "_" + std::to_string(GetCurrentProcessId()) + ".pgm";
+#else
+    const std::string path = (std::filesystem::temp_directory_path() /
+                              ("groomlab_gpu_stripes_" + tag + "_" + std::to_string(::getpid()) + ".pgm")).string();
+#endif
     FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) return path;
     std::fprintf(f, "P5\n64 16\n255\n");
@@ -1459,6 +1509,7 @@ TEST_P(LookEngineTest, AMillionRootGridTakesWidthDrags) {
     }
 }
 
+#ifdef _WIN32
 TEST(GpuPreview, AnOpenGLEngineKeepsItsKernelsCompiled) {
     // The kernels' program binaries kept (GROOMLAB_GL_CACHE: a directory of the test's own), a file
     // a kernel: the first engine's kernels compile (in the background where the driver can: a host
@@ -1544,6 +1595,7 @@ TEST(GpuPreview, AnOpenGLEngineKeepsItsKernelsCompiled) {
     std::error_code error;
     std::filesystem::remove_all(cache, error);
 }
+#endif  // _WIN32
 
 // ---- Clump, Length, Interpolate (Phase 2) -------------------------------------------------------
 
@@ -2461,6 +2513,7 @@ TEST_P(LookEngineTest, EveryPointStaysInTheBounds) {
     }
 }
 
+#ifdef _WIN32
 TEST(GpuPreview, AnOpenGLEngineKnowsWhenItsContextIsGone) {
     // What the Maya side asks before every drag (reachable()): an engine made in a context another
     // context does not share with (a new renderer, a device lost) is made again, never used.
@@ -2481,6 +2534,7 @@ TEST(GpuPreview, AnOpenGLEngineKnowsWhenItsContextIsGone) {
     again.reset();
     engine.reset();  // made in a context gone from the thread: lets go without touching the current one
 }
+#endif  // _WIN32
 
 TEST(GpuPreview, NoiseStaysUnderItsReach) {
     // lookBounds' kNoiseReach against the noise itself: its largest component over many samples.
@@ -3856,7 +3910,13 @@ TEST_P(LookEngineTest, MergeRunsADragUpItsInputBAsTheCpuDoes) {
                     GetParam().c_str(), p.base->strandCount(), gpuMs[2], cpuMs[2]);
     }
 }
+#ifdef _WIN32
 INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, ::testing::Values(std::string("DirectX11"), std::string("OpenGL"), std::string("CPU")),
+#elif defined(GROOMLAB_HAS_METAL)
+INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, ::testing::Values(std::string("Metal"), std::string("CPU")),
+#else
+INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, ::testing::Values(std::string("CPU")),
+#endif
                          [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
 
 TEST(GpuPreview, MaskedNodesAreStagesAndRenderOnlyOnesAreHandedOn) {
