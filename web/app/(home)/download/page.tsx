@@ -14,7 +14,8 @@ export const metadata: Metadata = {
 /**
  * What the publish scripts write next to each release: <host>/latest.json and, newest first,
  * <host>/releases.json (tools/publish_release.py for maya/, publish_blender.py for blender/,
- * publish_app.py for app/). A macOS release has its own <host>/latest-macos.json beside them.
+ * publish_app.py for app/). macOS has its own beside them (latest-macos.json, releases-macos.json):
+ * the platforms are released on their own, each at its own version.
  */
 interface Release {
   version: string;
@@ -47,11 +48,14 @@ async function published<T>(path: string): Promise<T | null> {
   }
 }
 
-/** The latest release and the ones before it (<host>/releases.json, newest first). */
-async function releases(host: string): Promise<{ latest: Release | null; older: Release[] }> {
+/**
+ * A platform's latest release and the ones before it: <host>/latest<suffix>.json and, newest first,
+ * <host>/releases<suffix>.json (suffix "" for Windows, "-macos" for macOS).
+ */
+async function releases(host: string, suffix = ''): Promise<{ latest: Release | null; older: Release[] }> {
   const [latest, index] = await Promise.all([
-    published<Release>(`${host}/latest.json`),
-    published<{ releases: Release[] }>(`${host}/releases.json`),
+    published<Release>(`${host}/latest${suffix}.json`),
+    published<{ releases: Release[] }>(`${host}/releases${suffix}.json`),
   ]);
   const older = (index?.releases ?? []).filter((r) => r.version !== latest?.version);
   return { latest, older };
@@ -67,72 +71,88 @@ const megabytes = (bytes: number) => `${(bytes / 1e6).toFixed(1)} MB`;
 const day = (iso: string) =>
   new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
 
+/** Newest first: by date, then by version number. */
+const newestFirst = (a: Release, b: Release) =>
+  (b.date ?? '').localeCompare(a.date ?? '') || b.version.localeCompare(a.version, undefined, { numeric: true });
+
+/** One platform's build of a package: Windows and macOS are released on their own, at their own versions. */
+interface Build {
+  platform: string;
+  release: Release | null;
+  older: Release[];
+  /** What the button downloads (Maya's Windows build: the latest zip's stable address). */
+  download?: string;
+  requires: string[];
+}
+
 interface Package {
   name: string;
-  platform: string;
-  /** A beta is listed like a release, with a Beta badge; it shows as coming soon until its latest.json is published. */
-  status: 'available' | 'beta' | 'soon';
+  /** A beta is listed with a Beta badge; with no build published it shows as coming soon. */
+  beta: boolean;
   what: string;
   includes?: string[];
+  /** What every platform needs (the platform's own needs are its build's). */
   requires?: string[];
   docs?: { href: string; label: string };
-  release?: Release | null;
-  older?: Release[];
-  download?: string;
-  /** The macOS (Apple silicon) release, once its latest-macos.json is published: a second button. */
-  mac?: Release | null;
+  builds: Build[];
   /** Where a user of this package gets the next version (under Previous versions). */
   updates?: string;
 }
 
-/** A beta's status: listed once its latest.json is published (the download is that release's file). */
-const beta = (release: Release | null): Pick<Package, 'status' | 'release' | 'download'> =>
-  release ? { status: 'beta', release, download: release.url } : { status: 'soon', release: null };
+/** A platform's build from its published releases. */
+const build = (platform: string, r: { latest: Release | null; older: Release[] }, requires: string[], download?: string): Build => ({
+  platform,
+  release: r.latest,
+  older: r.older,
+  download: r.latest ? (download ?? r.latest.url) : undefined,
+  requires,
+});
 
 export default async function DownloadPage() {
-  const [{ latest: maya, older: olderMaya }, { latest: blender, older: olderBlender }, { latest: app, older: olderApp }] =
-    await Promise.all([releases('maya'), releases('blender'), releases('app')]);
-  const [mayaMac, blenderMac, appMac] = await Promise.all(
-    ['maya', 'blender', 'app'].map((host) => published<Release>(`${host}/latest-macos.json`)),
-  );
+  const [mayaWin, mayaMac, blenderWin, blenderMac, appWin, appMac] = await Promise.all([
+    releases('maya'),
+    releases('maya', '-macos'),
+    releases('blender'),
+    releases('blender', '-macos'),
+    releases('app'),
+    releases('app', '-macos'),
+  ]);
   const req = siteConfig.requirements;
+  const mac = 'macOS 13.3 or later on Apple silicon';
   const packages: Package[] = [
     {
       name: 'GroomLab for Maya',
-      platform: `${req.maya} · ${req.os}`,
-      status: 'available',
+      beta: false,
       what: 'The plugin: Groom Tools, the Graph Editor, painting, cards and exports, rendered with Arnold or RenderMan.',
       includes: ['Arnold and RenderMan procedurals for render farms', 'groomlab-cli for caches and farms', 'Check for Updates in the GroomLab menu'],
-      requires: [req.maya, `Arnold renders: ${req.arnold}`, req.redist],
+      requires: [`Arnold renders: ${req.arnold}`],
       docs: { href: '/docs/installation', label: 'Install guide' },
-      release: maya,
-      older: olderMaya,
-      download: siteConfig.downloadUrl,
-      mac: mayaMac,
-      updates: 'Check for Updates in the GroomLab menu offers the latest.',
+      builds: [
+        build('Windows', mayaWin, [req.maya, 'Windows 10 or 11 (64-bit)', req.redist], siteConfig.downloadUrl),
+        build('macOS', mayaMac, ['Maya 2024 to 2027', mac, 'RenderMan: with RenderMan 28 for Apple silicon']),
+      ],
+      updates: 'Check for Updates in the GroomLab menu offers the latest for your platform.',
     },
     {
       name: 'GroomLab for Blender',
-      platform: 'Blender 5.2 LTS · Windows (64-bit)',
-      ...beta(blender),
+      beta: true,
       what: 'GroomLab’s tools and Graph Editor inside Blender, rendered in Cycles and EEVEE. Opens the same .groom files as Maya.',
       includes: ['A Blender extension: install the zip from disk', 'Updates through Blender’s extension repositories'],
-      requires: ['Blender 5.2 LTS', req.os],
+      requires: ['Blender 5.2 LTS'],
       docs: { href: '/docs/blender', label: 'Install guide' },
-      older: olderBlender,
-      mac: blenderMac,
+      builds: [build('Windows', blenderWin, ['Windows 10 or 11 (64-bit)']), build('macOS', blenderMac, [mac])],
       updates: 'Blender offers the latest once the GroomLab repository is added (see the install guide).',
     },
     {
       name: 'GroomLab app',
-      platform: 'Windows 10 and 11 (64-bit)',
-      ...beta(app),
+      beta: true,
       what: 'GroomLab on its own: open a scalp, groom, look-dev and export without a 3D package. Opens the same .groom files as Maya and Blender.',
-      includes: ['No installer: unzip and run GroomLab.exe', 'Check for Updates in the Help menu'],
-      requires: ['Windows 10 or 11 (64-bit)', 'A graphics card with Direct3D 11'],
+      includes: ['No installer: unzip and run it', 'Check for Updates in the Help menu'],
       docs: { href: '/docs/app', label: 'App guide' },
-      older: olderApp,
-      mac: appMac,
+      builds: [
+        build('Windows', appWin, ['Windows 10 or 11 (64-bit)', 'A graphics card with Direct3D 11']),
+        build('macOS', appMac, [mac]),
+      ],
       updates: 'Help > Check for Updates in the app says when a newer version is out.',
     },
   ];
@@ -163,160 +183,185 @@ export default async function DownloadPage() {
       </div>
 
       <ul className="mx-auto mt-14 grid max-w-4xl gap-6 sm:mt-16">
-        {packages.map((p) => (
-          <li
-            key={p.name}
-            className={cn(
-              'rounded-[28px] p-6 sm:p-8',
-              p.status !== 'soon' ? 'border border-white/[0.08] bg-gl-mist' : 'border border-dashed border-white/[0.14]',
-            )}
-          >
-            <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-              <div className="max-w-xl">
+        {packages.map((p) => {
+          const shipped = p.builds.filter((b) => b.release);
+          // What's new, once a version: platforms on the same version share it.
+          const versions = new Map<string, { release: Release; platforms: string[] }>();
+          for (const b of shipped) {
+            const r = b.release!;
+            const seen = versions.get(r.version);
+            if (seen) seen.platforms.push(b.platform);
+            else versions.set(r.version, { release: r, platforms: [b.platform] });
+          }
+          const notes = [...versions.values()].filter((v) => noteLines(v.release.notes).length > 0);
+          const older = p.builds
+            .flatMap((b) => b.older.map((release) => ({ platform: b.platform, release })))
+            .sort((a, b) => newestFirst(a.release, b.release));
+          return (
+            <li
+              key={p.name}
+              className={cn(
+                'rounded-[28px] p-6 sm:p-8',
+                shipped.length ? 'border border-white/[0.08] bg-gl-mist' : 'border border-dashed border-white/[0.14]',
+              )}
+            >
+              <div className="max-w-2xl">
                 <div className="flex flex-wrap items-center gap-3">
                   <h2 className="text-[1.5rem] font-semibold tracking-tight">{p.name}</h2>
-                  {p.status !== 'soon' && p.release && (
-                    <span className="rounded-full bg-gl-blue/15 px-3 py-1 text-[13px] font-semibold text-gl-blue-soft ring-1 ring-gl-blue/30">
-                      v{p.release.version}
-                    </span>
-                  )}
-                  {p.status === 'beta' && (
+                  {p.beta && shipped.length > 0 && (
                     <span className="rounded-full bg-gl-yellow/15 px-3 py-1 text-[13px] font-semibold text-gl-yellow ring-1 ring-gl-yellow/40">
                       Beta
                     </span>
                   )}
-                  {p.status === 'soon' && (
+                  {!shipped.length && (
                     <span className="rounded-full bg-white/[0.06] px-3 py-1 text-[13px] font-medium text-gl-ink-2">
                       Coming soon
                     </span>
                   )}
                 </div>
-                <p className="mt-1 text-[15px] font-medium text-gl-ink-2">{p.platform}</p>
                 <p className="mt-3 text-[15px] leading-relaxed text-gl-ink-2 text-pretty">{p.what}</p>
               </div>
-              {((p.status !== 'soon' && p.download) || p.mac) && (
-                <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
-                  {p.status !== 'soon' && p.download && (
-                    <>
-                      <a href={p.download} className={cn(button.base, button.md, button.primary)}>
-                        {p.mac ? 'Windows' : 'Download'}
-                        <ArrowDownToLine aria-hidden="true" className="size-4 opacity-80" strokeWidth={2.4} />
-                      </a>
-                      {p.release && (
-                        <p className="text-center text-[13px] text-gl-ink-2 sm:text-right">
-                          {megabytes(p.release.size)} · {day(p.release.date)}
-                        </p>
-                      )}
-                    </>
-                  )}
-                  {p.mac && (
-                    <>
-                      <a href={p.mac.url} className={cn(button.base, button.md, button.primary)}>
-                        macOS (Apple silicon)
-                        <ArrowDownToLine aria-hidden="true" className="size-4 opacity-80" strokeWidth={2.4} />
-                      </a>
-                      <p className="text-center text-[13px] text-gl-ink-2 sm:text-right">
-                        {megabytes(p.mac.size)} · {day(p.mac.date)} · macOS 13.3 or later
-                      </p>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
 
-            {p.status !== 'soon' && (
-              <div className="mt-6 grid gap-6 border-t border-white/[0.07] pt-6 sm:grid-cols-2">
-                {p.includes && (
-                  <div>
-                    <h3 className="text-[13px] font-semibold tracking-wide text-gl-ink-2 uppercase">Includes</h3>
-                    <ul className="mt-2 space-y-1 text-[15px] text-gl-ink">
-                      {p.includes.map((i) => (
-                        <li key={i}>{i}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {p.requires && (
-                  <div>
-                    <h3 className="text-[13px] font-semibold tracking-wide text-gl-ink-2 uppercase">Requires</h3>
-                    <ul className="mt-2 space-y-1 text-[15px] text-gl-ink">
-                      {p.requires.map((r) => (
-                        <li key={r}>{r}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {p.release?.notes && (
-                  <div className="sm:col-span-2">
-                    <h3 className="text-[13px] font-semibold tracking-wide text-gl-ink-2 uppercase">
-                      What&apos;s new in {p.release.version}
-                    </h3>
-                    <ul className="mt-2 space-y-1 text-[15px] leading-relaxed text-gl-ink">
-                      {noteLines(p.release.notes).map((line) => (
+              {shipped.length > 0 && (
+                <ul className="mt-6 grid gap-3 sm:grid-cols-2">
+                  {p.builds.map((b) => (
+                    <li
+                      key={b.platform}
+                      className={cn(
+                        'flex flex-col gap-4 rounded-2xl p-5',
+                        b.release ? 'bg-gl-paper ring-1 ring-white/[0.08]' : 'ring-1 ring-dashed ring-white/[0.12]',
+                      )}
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-[17px] font-semibold">{b.platform}</h3>
+                        {b.release ? (
+                          <span className="rounded-full bg-gl-blue/15 px-2.5 py-0.5 text-[12px] font-semibold text-gl-blue-soft ring-1 ring-gl-blue/30">
+                            v{b.release.version}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-white/[0.06] px-2.5 py-0.5 text-[12px] font-medium text-gl-ink-2">
+                            Coming soon
+                          </span>
+                        )}
+                      </div>
+                      <ul className="space-y-1 text-[14px] text-gl-ink-2">
+                        {b.requires.map((r) => (
+                          <li key={r}>{r}</li>
+                        ))}
+                      </ul>
+                      {b.release && b.download && (
+                        <div className="mt-auto">
+                          <a href={b.download} className={cn(button.base, button.md, button.primary, 'w-full justify-center')}>
+                            Download for {b.platform}
+                            <ArrowDownToLine aria-hidden="true" className="size-4 opacity-80" strokeWidth={2.4} />
+                          </a>
+                          <p className="mt-2 text-center text-[13px] text-gl-ink-2">
+                            {megabytes(b.release.size)} · {day(b.release.date)}
+                          </p>
+                          <p className="mt-1 text-center font-mono text-[11px] break-all text-gl-ink-3" title="SHA-256 of the zip">
+                            SHA-256 {b.release.sha256}
+                          </p>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {shipped.length > 0 && (
+                <div className="mt-6 grid gap-6 border-t border-white/[0.07] pt-6 sm:grid-cols-2">
+                  {p.includes && (
+                    <div>
+                      <h3 className="text-[13px] font-semibold tracking-wide text-gl-ink-2 uppercase">Includes</h3>
+                      <ul className="mt-2 space-y-1 text-[15px] text-gl-ink">
+                        {p.includes.map((i) => (
+                          <li key={i}>{i}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {p.requires && (
+                    <div>
+                      <h3 className="text-[13px] font-semibold tracking-wide text-gl-ink-2 uppercase">Requires</h3>
+                      <ul className="mt-2 space-y-1 text-[15px] text-gl-ink">
+                        {p.requires.map((r) => (
+                          <li key={r}>{r}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {notes.map((v) => (
+                    <div key={v.release.version} className="sm:col-span-2">
+                      <h3 className="text-[13px] font-semibold tracking-wide text-gl-ink-2 uppercase">
+                        What&apos;s new in {v.release.version}
+                        {versions.size > 1 && <span className="font-medium normal-case"> · {v.platforms.join(' and ')}</span>}
+                      </h3>
+                      <ul className="mt-2 space-y-1 text-[15px] leading-relaxed text-gl-ink">
+                        {noteLines(v.release.notes).map((line) => (
                           <li key={line} className="flex gap-2">
                             <span aria-hidden="true" className="mt-[0.6em] size-1.5 shrink-0 rounded-full bg-gl-blue" />
                             <span>{line}</span>
                           </li>
                         ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {p.older && p.older.length > 0 && (
-              <details className="group mt-6 border-t border-white/[0.07] pt-5">
-                <summary className="cursor-pointer list-none text-[15px] font-semibold text-gl-blue-soft select-none hover:underline">
-                  Previous versions ({p.older.length})
-                  <span aria-hidden="true" className="ml-1 inline-block transition-transform group-open:rotate-90">
-                    ›
-                  </span>
-                </summary>
-                <ul className="mt-4 space-y-4">
-                  {p.older.map((r) => (
-                    <li key={r.version} className="rounded-2xl bg-gl-paper p-4 ring-1 ring-white/[0.08]">
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="font-semibold">v{r.version}</p>
-                          <p className="text-[13px] text-gl-ink-2">
-                            {megabytes(r.size)} · {day(r.date)}
-                          </p>
-                        </div>
-                        <a
-                          href={r.url}
-                          className="inline-flex items-center gap-1.5 text-[15px] font-medium text-gl-blue-soft hover:underline"
-                        >
-                          Download v{r.version}
-                          <ArrowDownToLine aria-hidden="true" className="size-4" strokeWidth={2.4} />
-                        </a>
-                      </div>
-                      {noteLines(r.notes).length > 0 && (
-                        <ul className="mt-3 space-y-1 text-[14px] leading-relaxed text-gl-ink-2">
-                          {noteLines(r.notes).map((line) => (
-                            <li key={line}>{line}</li>
-                          ))}
-                        </ul>
-                      )}
-                      <p className="mt-2 font-mono text-[11px] break-all text-gl-ink-3">SHA-256 {r.sha256}</p>
-                    </li>
+                      </ul>
+                    </div>
                   ))}
-                </ul>
-                <p className="mt-3 text-[13px] text-gl-ink-2">
-                  Older versions are as they were released: they don&apos;t get fixes. {p.updates}
-                </p>
-              </details>
-            )}
-
-            <div className="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2">
-              {p.docs && <TextLink href={p.docs.href}>{p.docs.label}</TextLink>}
-              {p.release && (
-                <p className="font-mono text-[12px] break-all text-gl-ink-3" title="SHA-256 of the zip">
-                  SHA-256 {p.release.sha256}
-                </p>
+                </div>
               )}
-            </div>
-          </li>
-        ))}
+
+              {older.length > 0 && (
+                <details className="group mt-6 border-t border-white/[0.07] pt-5">
+                  <summary className="cursor-pointer list-none text-[15px] font-semibold text-gl-blue-soft select-none hover:underline">
+                    Previous versions ({older.length})
+                    <span aria-hidden="true" className="ml-1 inline-block transition-transform group-open:rotate-90">
+                      ›
+                    </span>
+                  </summary>
+                  <ul className="mt-4 space-y-4">
+                    {older.map(({ platform, release: r }) => (
+                      <li key={`${platform}-${r.version}`} className="rounded-2xl bg-gl-paper p-4 ring-1 ring-white/[0.08]">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div>
+                            <p className="font-semibold">
+                              v{r.version} <span className="font-medium text-gl-ink-2">· {platform}</span>
+                            </p>
+                            <p className="text-[13px] text-gl-ink-2">
+                              {megabytes(r.size)} · {day(r.date)}
+                            </p>
+                          </div>
+                          <a
+                            href={r.url}
+                            className="inline-flex items-center gap-1.5 text-[15px] font-medium text-gl-blue-soft hover:underline"
+                          >
+                            Download v{r.version}
+                            <ArrowDownToLine aria-hidden="true" className="size-4" strokeWidth={2.4} />
+                          </a>
+                        </div>
+                        {noteLines(r.notes).length > 0 && (
+                          <ul className="mt-3 space-y-1 text-[14px] leading-relaxed text-gl-ink-2">
+                            {noteLines(r.notes).map((line) => (
+                              <li key={line}>{line}</li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="mt-2 font-mono text-[11px] break-all text-gl-ink-3">SHA-256 {r.sha256}</p>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-3 text-[13px] text-gl-ink-2">
+                    Older versions are as they were released: they don&apos;t get fixes. {p.updates}
+                  </p>
+                </details>
+              )}
+
+              {p.docs && (
+                <div className="mt-6">
+                  <TextLink href={p.docs.href}>{p.docs.label}</TextLink>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
       <p className="mx-auto mt-10 max-w-2xl text-center text-sm text-gl-ink-2">
