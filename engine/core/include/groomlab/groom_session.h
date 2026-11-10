@@ -84,6 +84,11 @@ struct ViewRequest {
     // other view that is not the viewport (renders, render exports, the procedurals) has it; the
     // viewport has it with the Output's rootDepthInViewport.
     bool gameExport = false;
+    // False: the host shows no strands now (the hair hidden, the groom itself hidden) and nothing
+    // reads them: the graph is not evaluated, only the scalp, guides, parts and flow (what still
+    // draws), and the view keeps the strands it had (ViewResult::strandsKept). A host animating a
+    // character with its groom hidden pays for the guides alone.
+    bool wantStrands = true;
 };
 
 // Counters that move only when what they name changed (a cache hit leaves them).
@@ -132,6 +137,9 @@ struct ViewResult {
     float density = 1.0f;
     std::string viewedNode;          // the node shown ("" the output)
     bool viewedRoots = false;        // ... and it is a Scatter (its roots draw as dots)
+    // The strands are the last view's, not evaluated now (ViewRequest::wantStrands false, or a
+    // stopAt): not the groom at this time.
+    bool strandsKept = false;
     // ... or a Clump: its clump centers, each its root on the scalp, drawn as dots
     // (DisplayInputs::clumpCenters). Null otherwise.
     std::shared_ptr<const std::vector<Vec3f>> clumpCenters;

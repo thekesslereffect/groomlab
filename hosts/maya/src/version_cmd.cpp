@@ -208,11 +208,11 @@ MStatus GraphStatsCmd::doIt(const MArgList& args) {
             // "commits" how many so far (landed), "chained" the brush strokes pressed while one
             // evaluated (they wait for nothing: groom_shape.h chainStroke). Nothing waits for it here.
             const FramePtr frame = shape->frame();
-            char buffer[448];
+            char buffer[512];
             std::snprintf(buffer, sizeof buffer,
                           "{\"seconds\": %.6f, \"live\": %s, \"liveEvaluation\": %llu, \"version\": %llu, \"strands\": %llu, "
                           "\"evaluations\": %llu, \"backgroundEvaluations\": %llu, \"pending\": %s, \"commitMs\": %.3f, "
-                          "\"commits\": %llu, \"chained\": %llu, \"settledBy\": \"%s\"}",
+                          "\"commits\": %llu, \"chained\": %llu, \"settledBy\": \"%s\", \"strandsKept\": %s}",
                           frame ? frame->seconds : 0.0, frame && frame->liveEvaluation != 0 ? "true" : "false",
                           static_cast<unsigned long long>(frame ? frame->liveEvaluation : 0),
                           static_cast<unsigned long long>(frame ? frame->version : 0),
@@ -221,7 +221,8 @@ MStatus GraphStatsCmd::doIt(const MArgList& args) {
                           static_cast<unsigned long long>(shape->backgroundEvaluationCount()),
                           shape->commitPending() ? "true" : "false", shape->lastCommitMs(),
                           static_cast<unsigned long long>(shape->commitCount()),
-                          static_cast<unsigned long long>(shape->chainedStrokes()), shape->settledBy().c_str());
+                          static_cast<unsigned long long>(shape->chainedStrokes()), shape->settledBy().c_str(),
+                          frame && frame->view.strandsKept ? "true" : "false");
             setResult(MString(buffer));
             return MS::kSuccess;
         }

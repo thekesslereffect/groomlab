@@ -333,6 +333,10 @@ public:
     // The drawn frame's strands as the session handed them on: at rest while evaluatedFollow() is set
     // (their counts, IDs, widths and channels are the placed ones'), else evaluatedStrands().
     StrandsPtr handedStrands();
+    // Whether the viewport shows strands: the hair shown (displayHair) and the groom visible on some
+    // path (itself, its parents, its display layer). Hidden, the live evaluation skips the strands
+    // (ViewRequest::wantStrands).
+    bool strandsShown(bool displayHair) const;
     // What carries the drawn frame's strands to the scalp (ViewResult::follow), or null.
     FollowCarryPtr evaluatedFollow();
     // The viewport carries followed strands itself (on the GPU: GroomSubSceneOverride): evaluations

@@ -236,11 +236,13 @@ class GroomingTest(unittest.TestCase):
         both = (self.groom, other)
         transform = cmds.listRelatives(self.groom, parent=True, fullPath=True)[0]
         self.assertTrue(groomlab.hair_visible(self.groom))
+        shown = cmds.getAttr(self.groom + ".outStrandCount")
         groomlab.set_hair_visible(self.groom, False)
         self.assertEqual([groomlab.hair_visible(g) for g in both], [False, True])
         self.assertTrue(cmds.getAttr(transform + ".visibility"))  # the groom node stays: its guides draw
         self.assertTrue(groomlab.guides_visible(self.groom))
-        self.assertGreater(cmds.getAttr(self.groom + ".outStrandCount"), 0)  # a viewport toggle: still evaluated
+        # Hidden, the strands are kept as they were, not evaluated again (the guides are).
+        self.assertEqual(cmds.getAttr(self.groom + ".outStrandCount"), shown)
         cmds.undo()
         self.assertTrue(groomlab.hair_visible(self.groom))
         groomlab.set_guides_visible(self.groom, False)
@@ -272,6 +274,32 @@ class GroomingTest(unittest.TestCase):
         # Hardware 2.0 renders draw the hair whatever the viewport's eye says.
         from groomlab import hardware2_render
         self.assertIn(("displayHair", True), hardware2_render.GROOM_DISPLAY)
+
+    def test_a_hidden_groom_evaluates_no_strands(self):
+        # Animating with the groom hidden (its hair: the eye, displayHair; or the groom node, a parent,
+        # a layer): the rig moving the scalp evaluates the guides alone, the strands kept as they were;
+        # shown again, they are evaluated at once, where the scalp is now.
+        import json
+
+        def info():
+            return json.loads(cmds.groomLabGraphStats(self.groom, frameInfo=True))
+
+        self.assertFalse(info()["strandsKept"])
+        first = info()["strands"]
+        self.assertGreater(first, 0)
+        transform = cmds.listRelatives(self.groom, parent=True, fullPath=True)[0]
+        for hide, show in ((lambda: groomlab.set_hair_visible(self.groom, False), lambda: groomlab.set_hair_visible(self.groom, True)),
+                           (lambda: cmds.setAttr(transform + ".visibility", 0), lambda: cmds.setAttr(transform + ".visibility", 1))):
+            hide()
+            cmds.move(0.0, 0.2, 0.0, self.scalp + ".vtx[*]", relative=True)  # the rig moves the head
+            self.assertTrue(info()["strandsKept"], "hidden: no strands evaluated")
+            show()
+            now = info()
+            self.assertFalse(now["strandsKept"], "shown: evaluated again")
+            self.assertEqual(now["strands"], first)
+        # Shown, the strands are where the scalp is now (it moved up 0.4 while hidden).
+        bounds = cmds.exactWorldBoundingBox(self.groom)
+        self.assertGreater(bounds[4], 2.0)  # the top of the hair: the head moved up 0.4
 
     def test_tube_sections_are_set_read_undone_and_filled(self):
         # Tube guides: a primary's tube made a flat, twisting ribbon; its children follow; one undo

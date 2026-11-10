@@ -28,6 +28,8 @@
 #include <maya/MFnMeshData.h>
 #include <maya/MFnNumericAttribute.h>
 #include <maya/MFnNurbsCurve.h>
+#include <maya/MDagPath.h>
+#include <maya/MDagPathArray.h>
 #include <maya/MFnPluginData.h>
 #include <maya/MFnStringArrayData.h>
 #include <maya/MFnStringData.h>
@@ -1741,6 +1743,16 @@ MStatus GroomShape::evaluate(MDataBlock& data, Lane& lane) {
     request.cardDensity = data.inputValue(aCardDensity).asFloat();
     // The ToMesh nodes' meshes the viewport draws (displayMesh).
     request.wantStrandMeshes = session.hasStrandMeshNode() && data.inputValue(aDisplayMesh).asBool();
+    // The hair hidden (displayHair, the eye) or the groom itself hidden (Maya's Evaluation Manager
+    // computes the groom whenever the scalp moves, drawn or not): no strands evaluated, only the
+    // scalp and the guides (what still draws), while nothing else reads the strands here (a card
+    // mesh on outCards, a mesh on outMesh or outRachis, the render view). Renders and exports evaluate their
+    // own (NodeEvaluator). Shown again, the strands are evaluated at once (frame()).
+    if (live && !lane.renderView && !cardsConnected && !strandMeshConnected && !rachisConnected && !strandsShown(data.inputValue(aDisplayHair).asBool())) {
+        request.wantStrands = false;
+        request.wantCards = false;
+        request.wantStrandMeshes = false;
+    }
     // A live stroke's dab the GPU preview draws: the guides alone (the hand guides, or a Sculpt
     // node's), unless they are the CPU's.
     if (live) {
@@ -1751,7 +1763,7 @@ MStatus GroomShape::evaluate(MDataBlock& data, Lane& lane) {
     // time, densities, node viewed: what the GPU preview drew from), no stroke live, and nothing the
     // evaluation would need Maya for on the worker (a Simulate node steps through the host's feed,
     // the scalp's history is read live) or the cards (outCards, the cards view: built in compute).
-    if (offThread && !lane.renderView && !meshTouched && request.stopAt.empty() && !session.hasPreview() && historyFrames == 0 &&
+    if (offThread && request.wantStrands && !lane.renderView && !meshTouched && request.stopAt.empty() && !session.hasPreview() && historyFrames == 0 &&
         !request.wantCards && !request.wantStrandMeshes && request.density == lastRequest_.density && request.sculptDensity == lastRequest_.sculptDensity &&
         request.pointBudget == lastRequest_.pointBudget && request.viewNode == lastRequest_.viewNode &&
         request.time == lastRequest_.time && request.hostCarries == lastRequest_.hostCarries &&
@@ -2142,7 +2154,30 @@ FramePtr GroomShape::frame() {
     if (!status || data.isNull()) return live_.frame;
     MFnPluginData fn(data, &status);
     const auto* frameData = status ? dynamic_cast<const GroomFrameData*>(fn.constData()) : nullptr;
-    return frameData && frameData->frame ? frameData->frame : live_.frame;
+    FramePtr f = frameData && frameData->frame ? frameData->frame : live_.frame;
+    // Made with the strands hidden (the hair or the groom: the strands kept, not evaluated) and
+    // shown now: evaluated at once (showing it dirties nothing the frame came from).
+    if (f && f->view.strandsKept && !commitPending_ && !session_.hasPreview() &&
+        strandsShown(MPlug(thisMObject(), aDisplayHair).asBool())) {
+        try {
+            MDataBlock block = forceCache();
+            computeStrands(block);
+            if (live_.frame) f = live_.frame;
+        } catch (const std::exception& e) {
+            report(std::string("evaluation failed: ") + e.what(), true);
+        }
+    }
+    return f;
+}
+
+bool GroomShape::strandsShown(bool displayHair) const {
+    if (!displayHair) return false;
+    MDagPathArray paths;
+    if (MDagPath::getAllPathsTo(thisMObject(), paths) != MS::kSuccess) return true;
+    for (unsigned i = 0; i < paths.length(); ++i) {
+        if (paths[i].isVisible()) return true;
+    }
+    return false;
 }
 
 void GroomShape::ensureEvaluated() {

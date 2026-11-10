@@ -1621,10 +1621,12 @@ const ViewResult& GroomSession::evaluate(const ViewRequest& request) {
         const auto it = viewed->nodesByName.find(flat_.result(request.stopAt));
         if (it != viewed->nodesByName.end()) stopAt = it->second;
     }
-    if (stopAt) {
-        // The host runs this node and what follows: what feeds it, and the strands as they were.
+    out.strandsKept = viewed && (stopAt || !request.wantStrands);
+    if (out.strandsKept) {
+        // The host runs this node and what follows (stopAt): what feeds it; or no strands wanted:
+        // nothing of the graph. The strands as they were.
         try {
-            const std::size_t slots = viewed->graph.inputSpecs(stopAt).size();
+            const std::size_t slots = stopAt ? viewed->graph.inputSpecs(stopAt).size() : 0;
             for (std::size_t slot = 0; slot < slots; ++slot) {
                 NodeId source = 0;
                 std::size_t output = 0;
@@ -1876,7 +1878,8 @@ StrandsPtr GroomSession::evaluate(float density, double seconds, bool buildCards
 
 StrandsPtr GroomSession::viewedAsRendered(float density, double seconds) const {
     const ViewResult& view = view_;
-    if (!doc_ || failure_ || !view.strands || !view.errors.empty() || hasPreview() || viewSculpt_ || !view.viewedNode.empty()) {
+    if (!doc_ || failure_ || !view.strands || view.strandsKept || !view.errors.empty() || hasPreview() || viewSculpt_ ||
+        !view.viewedNode.empty()) {
         return nullptr;
     }
     const EvalContext& was = lastViewContext_;

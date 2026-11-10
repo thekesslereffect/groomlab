@@ -130,6 +130,35 @@ TEST(Session, IsTheGroomAndMatchesItsOneCallEvaluate) {
     EXPECT_EQ(later.bounds.hi, view.bounds.hi);
 }
 
+TEST(Session, NoStrandsWantedEvaluatesNoGraphAndKeepsTheStrands) {
+    // A host showing no strands (the hair hidden, the groom hidden while a rig animates the scalp):
+    // the graph does not run, the strands are the last view's (strandsKept), the guides follow
+    // the scalp; an export's shortcut (viewedAsRendered) never takes them for the groom now.
+    GroomSession session(groomData());
+    const ViewResult& first = session.evaluate(ViewRequest{});
+    ASSERT_TRUE(first.strands);
+    EXPECT_FALSE(first.strandsKept);
+    const StrandsPtr strands = first.strands;
+    const std::size_t runs = session.evaluationCount();
+    // The scalp moves (a rig): another scalp's points.
+    std::vector<Vec3f> moved = sphere()->points();
+    for (Vec3f& p : moved) p.y += 0.5f;
+    session.setScalp(std::make_shared<ScalpMesh>(std::move(moved), sphere()->triangles()));
+    ViewRequest hidden;
+    hidden.wantStrands = false;
+    const ViewResult& kept = session.evaluate(hidden);
+    EXPECT_TRUE(kept.strandsKept);
+    EXPECT_EQ(kept.strands, strands) << "the strands as they were";
+    EXPECT_EQ(session.evaluationCount(), runs) << "no graph evaluated";
+    EXPECT_FALSE(session.viewedAsRendered(1.0f, 0.0));
+    // Shown: evaluated, on the scalp as it is now.
+    const ViewResult& shown = session.evaluate(ViewRequest{});
+    EXPECT_FALSE(shown.strandsKept);
+    ASSERT_TRUE(shown.strands);
+    EXPECT_NE(shown.strands, strands);
+    EXPECT_NEAR(shown.strands->strandPoints(0)[0].y - strands->strandPoints(0)[0].y, 0.5f, 1e-3f);
+}
+
 TEST(Session, RootDepthBuriesAPointUnderEachRootForRendersOnly) {
     // The Output's rootDepth: a point under each root, inside the skin, after every node, for
     // renders (not the viewport unless asked, never a game export); roots, IDs and widths kept.
