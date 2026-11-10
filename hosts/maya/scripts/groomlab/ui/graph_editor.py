@@ -2052,11 +2052,31 @@ class GraphView(QtWidgets.QGraphicsView):
         later(lambda: editor.import_nodes(files, at=(at.x(), at.y())))
 
     def wheelEvent(self, event):
-        factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
+        self._drop_stale_drag(QtWidgets.QApplication.mouseButtons())
+        # The wheel's turn: Qt reports it on x with Alt held (Windows turns Alt+wheel horizontal),
+        # so either axis zooms, in and out alike; a turn of nothing (a trackpad's end) does nothing.
+        delta = event.angleDelta().y() or event.angleDelta().x()
+        if not delta:
+            event.ignore()
+            return
+        factor = 1.15 if delta > 0 else 1 / 1.15
         zoom = self.transform().m11() * factor
         if self.ZOOM_MIN * theme.scale() <= zoom <= self.ZOOM_MAX * theme.scale():
             self.scale(factor, factor)
         self.auto_frame = False
+        event.accept()
+
+    def _drop_stale_drag(self, buttons):
+        """A pan or an Alt+right zoom whose button is up (its release went to Maya's Alt navigation,
+        or outside the window): ended, its cursor given back, so it never sticks."""
+        if self._pan is not None and not buttons & (QtCore.Qt.MiddleButton | QtCore.Qt.LeftButton):
+            self._pan = None
+            self.unsetCursor()
+        if self._zoom is not None and not buttons & QtCore.Qt.RightButton:
+            self._zoom = None
+            self._snapshot = None
+            self.unsetCursor()
+            self.viewport().update()
 
     ZOOM_MIN, ZOOM_MAX = 0.05, 4.0  # x Maya's interface scale
     ZOOM_RATE = 0.005  # Alt+right-drag: the zoom doubles every ~140 px
@@ -2227,6 +2247,7 @@ class GraphView(QtWidgets.QGraphicsView):
         super(GraphView, self).mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        self._drop_stale_drag(event.buttons())
         if self._zoom is not None:
             self.zoom_drag(qt.event_pos(event))
             return

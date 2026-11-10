@@ -1736,6 +1736,41 @@ class GraphEditorTest(unittest.TestCase):
         finally:
             self.editor.close()
 
+    def test_alt_wheel_zooms_both_ways_and_no_cursor_sticks(self):
+        # Alt+wheel (Qt on Windows reports it as a horizontal turn) zooms in and out as the wheel
+        # does; a pan whose release never came (Maya's Alt navigation took it) ends at the next
+        # move with no button held, its closed hand given back.
+        from groomlab.ui.qt import QtCore, QtGui, QtWidgets
+        self.editor.resize(1000, 500)
+        self.editor.show()
+        wait(30)
+        view = self.editor.view
+        port = view.viewport()
+        at = QtCore.QPointF(port.width() / 2.0, port.height() / 2.0)
+
+        def turn(dx, dy, mods):
+            wheel = QtGui.QWheelEvent(at, port.mapToGlobal(at.toPoint()), QtCore.QPoint(0, 0), QtCore.QPoint(dx, dy),
+                                      QtCore.Qt.NoButton, mods, QtCore.Qt.NoScrollPhase, False)
+            self.app.sendEvent(port, wheel)
+            QtWidgets.QApplication.processEvents()
+            return view.transform().m11()
+
+        view.frame_all()
+        start = view.transform().m11()
+        alt = QtCore.Qt.AltModifier
+        self.assertGreater(turn(120, 0, alt), start, "Alt+wheel up zooms in")
+        self.assertAlmostEqual(turn(-120, 0, alt), start, places=4)
+        self.assertLess(turn(-120, 0, alt), start, "Alt+wheel down zooms out")
+        middle = QtCore.Qt.MiddleButton
+        self.app.sendEvent(port, QtGui.QMouseEvent(QtCore.QEvent.MouseButtonPress, at, middle, middle, alt))
+        self.assertEqual(view.cursor().shape(), QtCore.Qt.ClosedHandCursor)
+        # (no release: it went elsewhere) the next move, no button held
+        self.app.sendEvent(port, QtGui.QMouseEvent(QtCore.QEvent.MouseMove, at + QtCore.QPointF(5, 0),
+                                                   QtCore.Qt.NoButton, QtCore.Qt.NoButton, QtCore.Qt.NoModifier))
+        self.assertIsNone(view._pan)
+        self.assertNotEqual(view.cursor().shape(), QtCore.Qt.ClosedHandCursor)
+        self.editor.hide()
+
     def test_wheel_zoom_draws_what_a_fresh_paint_draws(self):
         # A tester saw the view broken while wheel-zooming (stale, larger pictures of the nodes left
         # behind): each wheel step must show what painting the view afresh shows.
