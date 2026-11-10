@@ -965,11 +965,13 @@ TEST_P(LineFramesTest, DISABLED_DensityGridTimes) {
     device->release(lineUvs);
 }
 
+// The APIs, picked outside the macro (MSVC takes no #ifdef inside a macro's arguments).
 #ifdef _WIN32
-INSTANTIATE_TEST_SUITE_P(Apis, LineFramesTest, ::testing::Values("DirectX11", "OpenGL"),
+#define GROOMLAB_LINE_FRAME_APIS ::testing::Values("DirectX11", "OpenGL")
 #else
-INSTANTIATE_TEST_SUITE_P(Apis, LineFramesTest, ::testing::Values("Metal"),
+#define GROOMLAB_LINE_FRAME_APIS ::testing::Values("Metal")
 #endif
+INSTANTIATE_TEST_SUITE_P(Apis, LineFramesTest, GROOMLAB_LINE_FRAME_APIS,
                          [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
 
 }  // namespace

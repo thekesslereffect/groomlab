@@ -3910,13 +3910,15 @@ TEST_P(LookEngineTest, MergeRunsADragUpItsInputBAsTheCpuDoes) {
                     GetParam().c_str(), p.base->strandCount(), gpuMs[2], cpuMs[2]);
     }
 }
+// The backends, picked outside the macro (MSVC takes no #ifdef inside a macro's arguments).
 #ifdef _WIN32
-INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, ::testing::Values(std::string("DirectX11"), std::string("OpenGL"), std::string("CPU")),
+#define GROOMLAB_LOOK_BACKENDS ::testing::Values(std::string("DirectX11"), std::string("OpenGL"), std::string("CPU"))
 #elif defined(GROOMLAB_HAS_METAL)
-INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, ::testing::Values(std::string("Metal"), std::string("CPU")),
+#define GROOMLAB_LOOK_BACKENDS ::testing::Values(std::string("Metal"), std::string("CPU"))
 #else
-INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, ::testing::Values(std::string("CPU")),
+#define GROOMLAB_LOOK_BACKENDS ::testing::Values(std::string("CPU"))
 #endif
+INSTANTIATE_TEST_SUITE_P(Backends, LookEngineTest, GROOMLAB_LOOK_BACKENDS,
                          [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
 
 TEST(GpuPreview, MaskedNodesAreStagesAndRenderOnlyOnesAreHandedOn) {
