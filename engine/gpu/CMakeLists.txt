@@ -35,9 +35,28 @@ if(NOT WIN32)
     add_library(groomlab::gpu ALIAS groomlab_gpu)
     message(STATUS "GPU look preview (engine/gpu): no backend on this platform yet, the hosts preview on the CPU")
     # The kernels still compile for SPIR-V and Metal with a slangc of this platform's (Slang's
-    # macos-aarch64 or linux-x86_64 release): GROOMLAB_SLANGC.
-    set(GROOMLAB_SLANGC "" CACHE FILEPATH "slangc for the gpu.*kernel_targets tests (empty: they are left out)")
-    if(GROOMLAB_BUILD_TESTS AND GROOMLAB_SLANGC)
+    # macos-aarch64 or linux-x86_64 release): GROOMLAB_SLANGC. macOS: Slang's release for Apple
+    # silicon is fetched (pinned by hash, as Windows' is) when it is empty.
+    if(APPLE)
+        set(GROOMLAB_SLANGC "" CACHE FILEPATH "slangc for the GPU kernels (empty: Slang 2026.19 for Apple silicon is fetched)")
+    else()
+        set(GROOMLAB_SLANGC "" CACHE FILEPATH "slangc for the gpu.*kernel_targets tests (empty: they are left out)")
+    endif()
+    set(_slangc "${GROOMLAB_SLANGC}")
+    if(APPLE AND NOT _slangc)
+        include(FetchContent)
+        FetchContent_Declare(slang
+            URL https://github.com/shader-slang/slang/releases/download/v2026.19/slang-2026.19-macos-aarch64.zip
+            URL_HASH SHA256=F77D89B91EC63698A7A8E5AA4316CE08B70D3211A236640EE4551F55BE85D9ED
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+            SOURCE_SUBDIR no-cmake-project)  # binaries only: nothing to add to the build
+        groomlab_cached_source(slang 2026.19)
+        FetchContent_MakeAvailable(slang)
+        groomlab_store_source(slang)
+        set(_slangc "${slang_SOURCE_DIR}/bin/slangc")
+        message(STATUS "GPU kernels: ${_slangc}")
+    endif()
+    if(GROOMLAB_BUILD_TESTS AND _slangc)
         file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../core/include/groomlab/look/look_kernels.inc" _kernel_lines REGEX "^GROOMLAB_KERNEL\\(")
         set(_kernels "")
         foreach(_line IN LISTS _kernel_lines)
@@ -51,7 +70,7 @@ if(NOT WIN32)
             set(_entries ${_checks_${_name}})
             list(POP_FRONT _entries _file)
             add_test(NAME gpu.${_name}
-                COMMAND "${CMAKE_COMMAND}" -DSLANGC=${GROOMLAB_SLANGC} -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/shaders/${_file}
+                COMMAND "${CMAKE_COMMAND}" -DSLANGC=${_slangc} -DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}/shaders/${_file}
                         "-DENTRIES=${_entries}" -DOUT=${CMAKE_CURRENT_BINARY_DIR}/${_name}
                         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_kernel_targets.cmake")
             set_tests_properties(gpu.${_name} PROPERTIES LABELS "gpu")

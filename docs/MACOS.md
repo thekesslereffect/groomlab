@@ -461,7 +461,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] Arnold procedural (`groomlab_procedural.dylib`) renders in kick (Maya 2025 and 2026's MtoA, installed module: `-DGROOMLAB_BUILD_PROCEDURAL=ON`, the `macos-maya*` presets leave it off. Fixed on the way: TBB 2020 unloading its `libtbbmalloc` at exit (the procedural keeps it mapped); the install now carries Maya's TBB beside the procedural for kick and searches `@executable_path/../MacOS` first, so inside Maya it binds Maya's own (checked with `DYLD_PRINT_SEARCHING`; Arnold still opens the copy while scanning the folder for plugins, as on Windows and Linux). Open: `GroomLab/procedurals` is one folder for every Maya version, but each build links its Maya's TBB and Arnold: a module with several versions needs one procedural per Arnold version)
 - [ ] RenderMan procedural renders in prman (waits for RenderMan 28 on arm64: 27.3 is Intel only, and the port is Apple silicon only)
 - [x] Blender extension zip installs in Blender for macOS; the helper runs (`-L blender -LE vray` green, Blender 5.2.3)
-- [ ] Slang for macOS pinned; `gpu.*kernel_targets` green
+- [x] Slang for macOS pinned; `gpu.*kernel_targets` green (Slang 2026.19 for Apple silicon, fetched by `engine/gpu/CMakeLists.txt` and pinned by its SHA-256; the three tests pass: every kernel compiles for Metal and SPIR-V)
 - [ ] Metal compute backend (`look_engine_metal.mm`), `groomlab_gpu_tests` green on macOS
 - [ ] App and Maya use the Metal backend for drags and strokes
 - [ ] Pen pressure in Maya on macOS (Maya's Qt)
