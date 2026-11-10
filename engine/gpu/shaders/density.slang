@@ -39,13 +39,19 @@
     uint4 gTable2;
 };
 
-[[vk::binding(3)]] ByteAddressBuffer gIn : register(t2);
-[[vk::binding(10)]] ByteAddressBuffer gAux1 : register(t6);
-[[vk::binding(4)]] RWByteAddressBuffer gOut : register(u0);
-#ifdef GROOMLAB_SLANG_GL
-[[vk::binding(0, 1)]] [format("rg32f")] RWTexture3D<float2> gVolume : register(u3);
+// (DirectX registers, as look.slang's; Metal's one buffer table: Slang lays them out, GROOMLAB_SLANG_LAYOUT.)
+#ifdef GROOMLAB_SLANG_LAYOUT
+#define D3D_REGISTER(r)
 #else
-[[vk::binding(11)]] [format("rg32f")] RWTexture3D<float2> gVolume : register(u3);
+#define D3D_REGISTER(r) : register(r)
+#endif
+[[vk::binding(3)]] ByteAddressBuffer gIn D3D_REGISTER(t2);
+[[vk::binding(10)]] ByteAddressBuffer gAux1 D3D_REGISTER(t6);
+[[vk::binding(4)]] RWByteAddressBuffer gOut D3D_REGISTER(u0);
+#ifdef GROOMLAB_SLANG_GL
+[[vk::binding(0, 1)]] [format("rg32f")] RWTexture3D<float2> gVolume D3D_REGISTER(u3);
+#else
+[[vk::binding(11)]] [format("rg32f")] RWTexture3D<float2> gVolume D3D_REGISTER(u3);
 #endif
 
 static const float kFixed = 65536.0f;

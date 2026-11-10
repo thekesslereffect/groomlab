@@ -27,6 +27,7 @@
 
 #include "groomlab/gpu/look_engine.h"
 #include "groomlab/look/look_engine_internal.h"
+#include "metal_internal.h"
 
 // The kernels as Metal Shading Language, compiled from shaders/look.slang by slangc when the
 // module builds (engine/gpu/CMakeLists.txt): kLookMetalNoiseCS and its group kLookMetalNoiseCSGroup...
@@ -36,7 +37,7 @@ namespace groomlab::gpu {
 
 namespace {
 
-[[noreturn]] void fail(const std::string& what) { throw std::runtime_error("GPU preview (Metal): " + what); }
+using namespace metal;
 
 // The buffers' indices in every kernel (look.slang's resources in order: Slang's layout).
 enum : NSUInteger {
@@ -55,12 +56,6 @@ enum : NSUInteger {
     kArgOut2
 };
 
-struct KernelSource {
-    const char* source;
-    const unsigned* group;
-    const char* entry;
-};
-
 const KernelSource kSources[] = {
 #define GROOMLAB_KERNEL(Name) {kLookMetal##Name##CS, kLookMetal##Name##CSGroup, #Name "CS"},
 #include "groomlab/look/look_kernels.inc"
@@ -69,106 +64,17 @@ const KernelSource kSources[] = {
 constexpr int kKernelCount = static_cast<int>(LookEngine::Kernel::Count);
 static_assert(sizeof kSources / sizeof kSources[0] == kKernelCount, "a source a kernel");
 
-MTLCompileOptions* compileOptions() {
-    // The kernels decide as the CPU does where they must (look.slang's exactDot): no fast math.
-    MTLCompileOptions* options = [MTLCompileOptions new];
-    if (@available(macOS 15.0, *)) {
-        options.mathMode = MTLMathModeSafe;
-    } else {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        options.fastMathEnabled = NO;
-#pragma clang diagnostic pop
-    }
-    return options;
-}
 
-// A device's kernels, compiled once a process, in the background (each its own library: Slang's
-// sources repeat their helpers' names). Never freed (the compiler's callbacks may outlive anything
-// else at exit).
-class MetalKernels {
-public:
-    explicit MetalKernels(id<MTLDevice> device) : device_(device) {}
+}  // namespace
 
-    void start() {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (started_) return;
-            started_ = true;
-        }
-        // (Unlocked: a compile the system has cached may call back before newLibrary returns.)
-        MTLCompileOptions* options = compileOptions();
-        for (int k = 0; k < kKernelCount; ++k) {
-            // No fused multiply-adds either (Metal contracts them even without fast math): each
-            // product and sum rounded on its own, as the CPU and DirectX 11 round them (look.slang's
-            // exactDot and the clearance walk decide on them; Slang has no `precise` for Metal).
-            NSString* source = [@"#pragma METAL fp contract(off)\n" stringByAppendingString:[NSString stringWithUTF8String:kSources[k].source]];
-            NSString* entry = [NSString stringWithUTF8String:kSources[k].entry];
-            [device_ newLibraryWithSource:source
-                                  options:options
-                        completionHandler:^(id<MTLLibrary> library, NSError* error) {
-                          if (!library) {
-                              done(k, nil, error ? error.localizedDescription.UTF8String : "the library did not compile");
-                              return;
-                          }
-                          id<MTLFunction> function = [library newFunctionWithName:entry];
-                          if (!function) {
-                              done(k, nil, "no entry point");
-                              return;
-                          }
-                          [device_ newComputePipelineStateWithFunction:function
-                                                     completionHandler:^(id<MTLComputePipelineState> pipeline, NSError* e) {
-                                                       done(k, pipeline, pipeline ? "" : e ? e.localizedDescription.UTF8String : "no pipeline");
-                                                     }];
-                        }];
-        }
-    }
-    // Whether kernel k is ready (`wait`: once it is); throws when it did not compile.
-    bool ready(int k, bool wait) {
-        start();
-        std::unique_lock<std::mutex> lock(mutex_);
-        if (wait) changed_.wait(lock, [&] { return slots_[k].done; });
-        if (slots_[k].done && !slots_[k].pipeline) fail(std::string(kSources[k].entry) + " did not compile: " + slots_[k].error);
-        return slots_[k].done;
-    }
-    bool allReady() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!started_) return false;
-        return std::all_of(std::begin(slots_), std::end(slots_), [](const Slot& s) { return s.done && s.pipeline; });
-    }
-    id<MTLComputePipelineState> pipeline(int k) {
-        ready(k, true);
-        std::lock_guard<std::mutex> lock(mutex_);
-        return slots_[k].pipeline;
-    }
+namespace metal {
 
-private:
-    void done(int k, id<MTLComputePipelineState> pipeline, const char* error) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        slots_[k].pipeline = pipeline;
-        slots_[k].error = error ? error : "";
-        slots_[k].done = true;
-        changed_.notify_all();
-    }
-
-    struct Slot {
-        id<MTLComputePipelineState> pipeline = nil;
-        std::string error;
-        bool done = false;
-    };
-    id<MTLDevice> device_;
-    std::mutex mutex_;
-    std::condition_variable changed_;
-    bool started_ = false;
-    Slot slots_[kKernelCount];
-};
-
-MetalKernels& kernelsFor(id<MTLDevice> device) {
+MetalKernels& kernelsFor(id<MTLDevice> device, const KernelSource* sources, int count) {
     static std::mutex mutex;
-    static auto* all = new std::map<void*, MetalKernels*>;  // (never freed: see MetalKernels)
+    static auto* all = new std::map<std::pair<void*, const void*>, MetalKernels*>;  // (never freed: see MetalKernels)
     std::lock_guard<std::mutex> lock(mutex);
-    MetalKernels*& k = (*all)[(__bridge void*)device];
-    if (!k) k = new MetalKernels(device);
+    MetalKernels*& k = (*all)[{(__bridge void*)device, sources}];
+    if (!k) k = new MetalKernels(device, sources, count);
     return *k;
 }
 
@@ -178,7 +84,6 @@ id<MTLDevice> deviceOf(void* device) {
     return fallback;
 }
 
-// The runs committed and not finished, on every stream (finishMetalRuns).
 std::mutex& runsMutex() {
     static std::mutex m;
     return m;
@@ -192,116 +97,40 @@ std::size_t& runsPending() {
     return n;
 }
 
-// The command stream an engine and its siblings encode into, in call order: the command buffer
-// being filled, its encoder, and the last one committed.
-class Stream {
-public:
-    explicit Stream(id<MTLDevice> device) : queue_([device newCommandQueue]) {
-        if (!queue_) fail("no command queue");
-    }
+std::shared_ptr<Stream> streamFor(id<MTLDevice> device) {
+    static std::mutex mutex;
+    static auto* all = new std::map<void*, std::shared_ptr<Stream>>;
+    std::lock_guard<std::mutex> lock(mutex);
+    std::shared_ptr<Stream>& s = (*all)[(__bridge void*)device];
+    if (!s) s = std::make_shared<Stream>(device);
+    return s;
+}
 
-    id<MTLComputeCommandEncoder> compute(id<MTLCounterSampleBuffer> samples, NSUInteger startSample) {
-        if (compute_ && startSample == MTLCounterDontSample) return compute_;
-        endEncoders();
-        if (samples && startSample != MTLCounterDontSample) {
-            MTLComputePassDescriptor* pass = [MTLComputePassDescriptor computePassDescriptor];
-            pass.dispatchType = MTLDispatchTypeSerial;
-            pass.sampleBufferAttachments[0].sampleBuffer = samples;
-            pass.sampleBufferAttachments[0].startOfEncoderSampleIndex = startSample;
-            pass.sampleBufferAttachments[0].endOfEncoderSampleIndex = MTLCounterDontSample;
-            compute_ = [buffer() computeCommandEncoderWithDescriptor:pass];
-        } else {
-            compute_ = [buffer() computeCommandEncoderWithDispatchType:MTLDispatchTypeSerial];
-        }
-        if (!compute_) fail("no compute encoder");
-        return compute_;
+id<MTLCounterSampleBuffer> timestampSamples(id<MTLDevice> device, std::size_t count) {
+    if (![device supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary]) return nil;
+    for (id<MTLCounterSet> set in device.counterSets) {
+        if (![set.name isEqualToString:MTLCommonCounterSetTimestamp]) continue;
+        MTLCounterSampleBufferDescriptor* d = [MTLCounterSampleBufferDescriptor new];
+        d.counterSet = set;
+        d.storageMode = MTLStorageModeShared;
+        d.sampleCount = count;
+        return [device newCounterSampleBufferWithDescriptor:d error:nil];
     }
-    id<MTLBlitCommandEncoder> blit() {
-        if (blit_) return blit_;
-        endEncoders();
-        blit_ = [buffer() blitCommandEncoder];
-        if (!blit_) fail("no blit encoder");
-        return blit_;
-    }
-    void endEncoders() {
-        if (compute_) [compute_ endEncoding];
-        if (blit_) [blit_ endEncoding];
-        compute_ = nil;
-        blit_ = nil;
-    }
-    // Commits what is encoded (it runs while the caller goes on); returns the command buffer.
-    id<MTLCommandBuffer> commit() {
-        endEncoders();
-        if (open_) {
-            {
-                std::lock_guard<std::mutex> lock(runsMutex());
-                ++runsPending();
-            }
-            [open_ addCompletedHandler:^(id<MTLCommandBuffer>) {
-              std::lock_guard<std::mutex> lock(runsMutex());
-              --runsPending();
-              runsDone().notify_all();
-            }];
-            [open_ commit];
-            last_ = open_;
-            open_ = nil;
-        }
-        return last_;
-    }
-    void waitIdle() {
-        commit();
-        if (last_) [last_ waitUntilCompleted];
-        if (last_ && last_.status == MTLCommandBufferStatusError) {
-            NSError* error = last_.error;
-            last_ = nil;
-            fail(std::string("a run failed on the GPU: ") + (error ? error.localizedDescription.UTF8String : "?"));
-        }
-    }
-    // Whether the GPU may still touch the buffers: work encoded, or committed and not done.
-    bool busy() const {
-        if (open_) return true;
-        return last_ && last_.status != MTLCommandBufferStatusCompleted && last_.status != MTLCommandBufferStatusError;
-    }
+    return nil;
+}
 
-private:
-    id<MTLCommandBuffer> buffer() {
-        if (!open_) open_ = [queue_ commandBuffer];
-        if (!open_) fail("no command buffer");
-        return open_;
-    }
+}  // namespace metal
 
-    id<MTLCommandQueue> queue_;
-    id<MTLCommandBuffer> open_ = nil;
-    id<MTLCommandBuffer> last_ = nil;
-    id<MTLComputeCommandEncoder> compute_ = nil;
-    id<MTLBlitCommandEncoder> blit_ = nil;
-};
-
-// A buffer by number: the engine's own, or a target the host gave.
-struct Held {
-    id<MTLBuffer> buffer = nil;
-    std::size_t bytes = 0;
-};
-
-std::size_t rounded(std::size_t bytes) { return std::max<std::size_t>((bytes + 15) & ~std::size_t{15}, 16); }
+namespace {
 
 class MetalLookEngine final : public LookEngine {
 public:
     MetalLookEngine(id<MTLDevice> device, std::shared_ptr<Stream> stream)
-        : device_(device), kernels_(kernelsFor(device)), stream_(std::move(stream)) {
+        : device_(device), kernels_(kernelsFor(device, kSources, kKernelCount)), stream_(std::move(stream)) {
         kernels_.start();
         zero_ = [device_ newBufferWithLength:65536 options:MTLResourceStorageModeShared];  // (zeros: an input not bound)
         // Timestamps at the compute encoders' starts (Apple's GPUs sample at stage boundaries).
-        if ([device_ supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary]) {
-            for (id<MTLCounterSet> set in device_.counterSets) {
-                if (![set.name isEqualToString:MTLCommonCounterSetTimestamp]) continue;
-                MTLCounterSampleBufferDescriptor* d = [MTLCounterSampleBufferDescriptor new];
-                d.counterSet = set;
-                d.storageMode = MTLStorageModeShared;
-                d.sampleCount = kMaxStamps;
-                samples_ = [device_ newCounterSampleBufferWithDescriptor:d error:nil];
-            }
-        }
+        samples_ = timestampSamples(device_, kMaxStamps);
     }
 
     GpuApi api() const override { return GpuApi::Metal; }
@@ -575,7 +404,7 @@ std::unique_ptr<LookEngine> makeMetalLookEngine(void* device) {
     @autoreleasepool {
         id<MTLDevice> d = deviceOf(device);
         if (!d) fail("no device");
-        return std::make_unique<MetalLookEngine>(d, std::make_shared<Stream>(d));
+        return std::make_unique<MetalLookEngine>(d, streamFor(d));
     }
 }
 
@@ -585,7 +414,7 @@ bool prepareMetalLookKernels(void* device) {
     @autoreleasepool {
         id<MTLDevice> d = deviceOf(device);
         if (!d) return false;
-        MetalKernels& k = kernelsFor(d);
+        MetalKernels& k = kernelsFor(d, kSources, kKernelCount);
         k.start();
         return k.allReady();
     }
