@@ -108,7 +108,7 @@ std::uint64_t DisplayGeometry::digest() const {
     add(bitangents);
     add(uvs);
     return hashCombine(h, (triangles ? 1u : 0u) + (surface ? 2u : 0u) + (cardTextures ? 4u : 0u) + (overlay ? 8u : 0u) +
-                              (mapTexture ? 16u : 0u) + (scaleSurface ? 32u : 0u));
+                              (mapTexture ? 16u : 0u) + (scaleSurface ? 32u : 0u) + (points ? 64u : 0u));
 }
 
 namespace {

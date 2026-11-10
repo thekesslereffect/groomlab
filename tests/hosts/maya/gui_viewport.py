@@ -42,6 +42,10 @@ def run():
         cards_check(os.environ.get("GROOMLAB_VIEWPORT_SNAPSHOTS"))
         finish()
         return
+    if os.environ.get("GROOMLAB_VIEWPORT_CASE") == "dots":  # the dots alone (a viewed Clump's centers)
+        clump_centers_check(os.environ.get("GROOMLAB_VIEWPORT_SNAPSHOTS"))
+        finish()
+        return
     if os.environ.get("GROOMLAB_VIEWPORT_CASE") == "colors":  # the strands' own colors alone
         strand_colors_check(os.environ.get("GROOMLAB_VIEWPORT_SNAPSHOTS"))
         finish()

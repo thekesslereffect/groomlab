@@ -123,7 +123,8 @@ void GroomSubSceneOverride::updateItem(MHWRender::MSubSceneContainer& container,
     if (!shaders) return;
     // Textured cards need the card effect; without it (it didn't compile) they draw as a plain surface.
     const bool overlay = batch.overlay && !batch.triangles && !batch.lit() && overlayShaderAvailable(*shaders);
-    const int kind = overlay ? 7
+    const int kind = batch.points ? 11  // dots: updateDots asks only where the dots effect is
+                   : overlay ? 7
                    : batch.mapTexture && mapTexture && !batch.cardTextures ? 8
                    : batch.cardTextures ? (cardShaderRegistered() ? 6 : 5)
                    : batch.scaleSurface ? (scaleShaderRegistered() ? 10 : 5)
@@ -145,6 +146,8 @@ void GroomSubSceneOverride::updateItem(MHWRender::MSubSceneContainer& container,
         MHWRender::MShaderInstance* shader = nullptr;
         if (kind == 7) {  // guides, parts, flow: over the hair
             shader = acquireOverlayShader(*shaders);
+        } else if (kind == 11) {  // dots: round, a size in pixels across
+            shader = acquireDotsShader(*shaders);
         } else if (kind == 8) {  // a map shown on the scalp: its image, unlit
             shader = shaders->getStockShader(MHWRender::MShaderManager::k3dSolidTextureShader);
         } else if (kind == 6 && hair) {  // GroomLab's hair with the baked card maps (or solid)
@@ -187,7 +190,7 @@ void GroomSubSceneOverride::updateItem(MHWRender::MSubSceneContainer& container,
             // The coverage is hashed (its top blended: coveragePreDraw) in the opaque pass: depth written.
             if (coverage) shader->setIsTransparent(false);
         }
-        if (kind == 7) buffers.shader->setIsTransparent(false);
+        if (kind == 7 || kind == 11) buffers.shader->setIsTransparent(false);
         if (kind == 6) {
             // Cut out in the opaque pass (the fragment clips, or its alpha says the samples covered:
             // alpha to coverage), as masked cards in engines: depth-correct, no sorting.
@@ -200,6 +203,7 @@ void GroomSubSceneOverride::updateItem(MHWRender::MSubSceneContainer& container,
     if (!item) {
         item = MHWRender::MRenderItem::Create(name, MHWRender::MRenderItem::MaterialSceneItem,
                                               batch.triangles ? MHWRender::MGeometry::kTriangles
+                                              : batch.points  ? MHWRender::MGeometry::kPoints
                                                               : MHWRender::MGeometry::kLines);
         item->setDrawMode(MHWRender::MGeometry::kAll);
         item->depthPriority(depthPriority);
@@ -337,8 +341,8 @@ void GroomSubSceneOverride::updateItem(MHWRender::MSubSceneContainer& container,
         if (!gpuLines) buffers.uvsKey = 0;  // (writeGpuLines wrote the uvs for these counts already)
     }
 
-    if (kind == 7) {
-        // The overlay effect's colors stream: the colors (or ones) with each vertex's pull
+    if (kind == 7 || kind == 11) {
+        // The overlay (and dots) effect's colors stream: the colors (or ones) with each vertex's pull
         // limit in the alpha, from a ray toward the camera; the geometry is kept for the next
         // camera position.
         overlayBatches_[name.asChar()] = geometry;

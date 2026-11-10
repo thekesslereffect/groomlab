@@ -245,8 +245,8 @@ bool GroomSubSceneOverride::requiresUpdate(const MHWRender::MSubSceneContainer&,
                                            const MHWRender::MFrameContext& frameContext) const {
     if (!shape_) return false;
     try {
-        // The dots are built for one camera and viewport size: another one rebuilds them.
-        if (!points_.empty()) {
+        // The CPU's dots are built for one camera and viewport size: another one rebuilds them.
+        if (!points_.empty() && !gpuDots_) {
             int ox = 0, oy = 0, width = 0, height = 0;
             frameContext.getViewportDimensions(ox, oy, width, height);
             const MMatrix camera = frameContext.getMatrix(MHWRender::MFrameContext::kViewProjMtx);
@@ -461,6 +461,44 @@ std::array<float, 4> GroomSubSceneOverride::scalpWireColor(bool* selected) const
     return {c.r, c.g, c.b, 1.0f};
 }
 
+void GroomSubSceneOverride::updateDots(MHWRender::MSubSceneContainer& container, bool rebuilt) {
+    static const float kWhite[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    const unsigned priority = MHWRender::MRenderItem::sActiveWireDepthPriority;
+    const MHWRender::MRenderer* renderer = MHWRender::MRenderer::theRenderer();
+    const MHWRender::MShaderManager* shaders = renderer ? renderer->getShaderManager() : nullptr;
+    const bool gpu = shaders && dotsShaderAvailable(*shaders);
+    if (!gpu || points_.empty() || pointSize_ <= 0.0f) {
+        if (gpuDots_ || container.find(kDotsItem)) updateItem(container, kDotsItem, kWhite, priority, nullptr, 0.0f);
+        gpuDots_ = false;
+        return;
+    }
+    // Kept while the dots, their size and their pull are (a camera move: the pull limits only,
+    // with the overlay lines' in update()).
+    const float pull = displayFlag(GroomShape::aDisplayOverlaysOnTop) ? overlayPull_ : 0.0f;
+    if (gpuDots_ && !rebuilt && container.find(kDotsItem) && pointSize_ == gpuDotsSize_ && pull == gpuDotsPull_) return;
+    auto dots = std::make_shared<DisplayGeometry>();
+    dots->points = true;
+    dots->overlay = true;  // (pulled toward the camera as the guides are)
+    const std::size_t n = points_.size();
+    dots->positions.resize(n * 3);
+    dots->colors.resize(n * 4);
+    dots->indices.resize(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        dots->positions[i * 3] = points_[i].x;
+        dots->positions[i * 3 + 1] = points_[i].y;
+        dots->positions[i * 3 + 2] = points_[i].z;
+        dots->colors[i * 4] = pointColors_[i][0];
+        dots->colors[i * 4 + 1] = pointColors_[i][1];
+        dots->colors[i * 4 + 2] = pointColors_[i][2];
+        dots->colors[i * 4 + 3] = 1.0f;
+        dots->indices[i] = static_cast<std::uint32_t>(i);
+    }
+    updateItem(container, kDotsItem, kWhite, priority, dots, pointSize_);
+    gpuDots_ = container.find(kDotsItem) != nullptr;
+    gpuDotsSize_ = pointSize_;
+    gpuDotsPull_ = pull;
+}
+
 void GroomSubSceneOverride::updateMapWires(MHWRender::MSubSceneContainer& container, bool rebuilt) {
     const auto map = items_.find(kScalpMapItem.asChar());
     const bool mapShown = map != items_.end() && map->second.shown && container.find(kScalpMapItem);
@@ -544,7 +582,7 @@ void GroomSubSceneOverride::addTubeWires(MHWRender::MUIDrawManager& draw) {
 }
 
 void GroomSubSceneOverride::addDots(MHWRender::MUIDrawManager& draw, const MHWRender::MFrameContext& context) {
-    if (points_.empty() || pointSize_ <= 0.0f) return;
+    if (gpuDots_ || points_.empty() || pointSize_ <= 0.0f) return;  // (on the GPU: updateDots)
     int ox = 0, oy = 0, width = 0, height = 0;
     context.getViewportDimensions(ox, oy, width, height);
     if (height <= 0) return;
@@ -625,6 +663,8 @@ void GroomSubSceneOverride::forgetDrawn() {
     colorDirty_ = true;
     points_.clear();
     pointColors_.clear();
+    gpuDots_ = false;
+    gpuDotsPull_ = -1.0f;
     uiDirty_ = true;
 }
 
@@ -890,7 +930,8 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
     overlayPull_ = frame.overlayPull;
     refreshOccluders();
     pointSize_ = frame.pointSize;
-    if (frame.rebuilt[static_cast<std::size_t>(DisplayPart::Guides)]) {
+    const bool dotsRebuilt = frame.rebuilt[static_cast<std::size_t>(DisplayPart::Guides)];
+    if (dotsRebuilt) {
         points_ = frame.dots.points;
         pointColors_ = frame.dots.colors;
         lastDots().dots = points_.size();
@@ -928,6 +969,7 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
     }
     updateCardWires(container, cardsRebuilt, cards);
     updateMapWires(container, mapRebuilt);
+    updateDots(container, dotsRebuilt);
     currentDraw().uploadMs = lap();
     // The maps (reloaded above when rewritten) go to the shader every time: cheap, and a
     // rebake with the same paths shows without rebuilding the cards. Without them: solid.
@@ -954,7 +996,7 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
         for (auto& [name, kept] : overlayBatches_) {
             if (overlayFresh_.count(name)) continue;
             auto it = items_.find(name);
-            if (it == items_.end() || !it->second.shown || it->second.shaderKind != 7) continue;
+            if (it == items_.end() || !it->second.shown || (it->second.shaderKind != 7 && it->second.shaderKind != 11)) continue;
             uploadOverlayColors(it->second, *kept, overlayPullLimits(*kept, overlayCamera_, overlayPull_, occluderMeshes_));
         }
     }

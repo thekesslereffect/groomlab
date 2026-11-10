@@ -44,6 +44,7 @@ inline const MString kScalpMapWiresItem("groomLabScalpMapWires");  // (not the b
 inline const MString kStrandMeshItem("groomLabStrandMesh");
 inline const MString kFlowFieldItem("groomLabFlowField");
 inline const MString kSoftSelectedItem("groomLabSoftSelectedGuides");
+inline const MString kDotsItem("groomLabDots");  // (not the builder's: updateDots)
 // The level of detail's items (updateLod): a class's strands, class 0's blendable segments, the
 // impostors.
 inline const MString kLodItemPrefix("groomLabStrandsLod");
@@ -68,6 +69,10 @@ bool scaleShaderRegistered();
 // The overlay effect (guides, parts, flow over the hair); null when it does not compile (said once).
 MHWRender::MShaderInstance* acquireOverlayShader(const MHWRender::MShaderManager& shaders);
 bool overlayShaderAvailable(const MHWRender::MShaderManager& shaders);
+// The dots effect (DisplayGeometry::points: round dots a size in pixels across, on the GPU); null,
+// and not available, on legacy OpenGL (the CPU draws the dots there: addDots).
+MHWRender::MShaderInstance* acquireDotsShader(const MHWRender::MShaderManager& shaders);
+bool dotsShaderAvailable(const MHWRender::MShaderManager& shaders);
 // The flat strand lines' effect with width as coverage; null when it does not compile (said once).
 MHWRender::MShaderInstance* acquireLinesShader(const MHWRender::MShaderManager& shaders, bool colored);
 bool linesShaderAvailable(const MHWRender::MShaderManager& shaders);

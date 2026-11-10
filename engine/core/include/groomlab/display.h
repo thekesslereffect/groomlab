@@ -73,6 +73,9 @@ struct DisplayGeometry {
     // camera by the hair's depth, DisplayFrame::overlayPull; overlayPullLimits stops them short of
     // what is in the way).
     bool overlay = false;
+    // Points (an index each), drawn as round dots a size in pixels across, facing the camera: a
+    // host's (Maya draws the guide dots, a Scatter's roots and a Clump's centers so, on the GPU).
+    bool points = false;
     bool mapTexture = false;  // drawn unlit with the scalp map's image at its uvs
     // Ribbons carried as `lines` (triangles): two vertices a point (vertexCount), two triangles a
     // segment, as wide as each point's width times `ribbonWidthScale` (strandRibbons); lit, in the

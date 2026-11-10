@@ -200,6 +200,10 @@ private:
     // scalp is selected, in the scalp's wireframe color. `rebuilt`: the map was built again (the
     // scalp moved, another map); else only shown, hidden or recolored with it.
     void updateMapWires(MHWRender::MSubSceneContainer& container, bool rebuilt);
+    // The dots (points_: guide points, a viewed Scatter's roots, a Clump's centers) as one item
+    // the dots effect draws on the GPU, made again only when they or their size change; where
+    // the effect is not (legacy OpenGL), none, and addDots draws them on the CPU.
+    void updateDots(MHWRender::MSubSceneContainer& container, bool rebuilt);
     // Maya's wireframe color for the scalp mesh now (`selected`: lead, active or hilited).
     std::array<float, 4> scalpWireColor(bool* selected) const;
     std::shared_ptr<const DisplayGeometry> mapWires_;
@@ -453,6 +457,9 @@ private:
     std::vector<Vec3f> points_;
     std::vector<std::array<float, 3>> pointColors_;
     float pointSize_ = 0.0f;
+    bool gpuDots_ = false;          // the dots are kDotsItem's (updateDots), not the CPU's (addDots)
+    float gpuDotsSize_ = 0.0f;      // the size and pull it was styled with
+    float gpuDotsPull_ = -1.0f;
     mutable bool uiDirty_ = true;
     std::uint64_t seamDrawn_ = ~std::uint64_t{0};  // the brush's symmetry line drawn (GroomShape::symmetrySeamVersion)
     // The Shape brush's tube wires (GroomShape::tubeWires): every guide it can shape (shown, not

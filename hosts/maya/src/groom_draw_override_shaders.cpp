@@ -288,6 +288,200 @@ bool overlayShaderAvailable(const MHWRender::MShaderManager& shaders) {
 
 namespace {
 
+// The dots effect: the guide dots, a Scatter's roots and a Clump's centers (DisplayGeometry::points),
+// each point a round dot gPointSize pixels across facing the camera, made by a geometry shader
+// from the point alone, so the GPU draws any number of them and a camera move rebuilds nothing.
+// Pulled toward the camera as the overlay lines are (gPull, each point's limit in its alpha).
+// DirectX 11 and the OpenGL Core Profile; legacy OpenGL has no geometry stage in CgFX here, so
+// there the dots stay the CPU's (addDots).
+const char* kDotsEffectHlsl = R"x(// GroomLab dots (DirectX 11)
+float4x4 gWXf : World;
+float4x4 gVPXf : ViewProjection;
+float4x4 gVIXf : ViewInverse;
+float2 gViewport : ViewportPixelSize;
+
+float gPull = 0.0;
+float gPointSize = 6.0;
+
+struct appdata {
+    float3 Position : POSITION;
+    float4 Color : COLOR0;
+};
+
+struct vertexOutput {
+    float4 HPosition : SV_Position;
+    float4 Color : COLOR0;
+};
+
+struct dotOutput {
+    float4 HPosition : SV_Position;
+    float4 Color : COLOR0;
+    float2 Corner : TEXCOORD0;
+};
+
+vertexOutput dotsVS(appdata IN) {
+    vertexOutput OUT = (vertexOutput)0;
+    float3 Pw = mul(float4(IN.Position, 1.0), gWXf).xyz;
+    float3 toCamera = gVIXf[3].xyz - Pw;
+    float away = length(toCamera);
+    float pull = gPull * saturate(IN.Color.a);  // the alpha: how far this point may go before something in the scene
+    if (pull > 0.0 && away > 1e-6) Pw += toCamera / away * min(pull, 0.5 * away);
+    OUT.HPosition = mul(float4(Pw, 1.0), gVPXf);
+    OUT.Color = float4(IN.Color.rgb, 1.0);
+    return OUT;
+}
+
+[maxvertexcount(4)]
+void dotsGS(point vertexOutput IN[1], inout TriangleStream<dotOutput> stream) {
+    float4 h = IN[0].HPosition;
+    if (h.w <= 0.0) return;  // behind the camera
+    float2 r = (0.5 * max(gPointSize, 1.0)) / (gViewport * 0.5);  // half the size, in NDC
+    dotOutput o;
+    o.Color = IN[0].Color;
+    o.Corner = float2(-1.0, -1.0); o.HPosition = float4(h.xy + o.Corner * r * h.w, h.zw); stream.Append(o);
+    o.Corner = float2(1.0, -1.0); o.HPosition = float4(h.xy + o.Corner * r * h.w, h.zw); stream.Append(o);
+    o.Corner = float2(-1.0, 1.0); o.HPosition = float4(h.xy + o.Corner * r * h.w, h.zw); stream.Append(o);
+    o.Corner = float2(1.0, 1.0); o.HPosition = float4(h.xy + o.Corner * r * h.w, h.zw); stream.Append(o);
+    stream.RestartStrip();
+}
+
+float4 dotsPS(dotOutput IN) : SV_Target {
+    if (dot(IN.Corner, IN.Corner) > 1.0) discard;  // round
+    return IN.Color;
+}
+
+technique10 Main {
+    pass p0 {
+        SetVertexShader(CompileShader(vs_4_0, dotsVS()));
+        SetGeometryShader(CompileShader(gs_4_0, dotsGS()));
+        SetPixelShader(CompileShader(ps_4_0, dotsPS()));
+    }
+}
+)x";
+
+const char* kDotsEffectGlsl = R"x(// GroomLab dots (OpenGL Core Profile: OGSFX)
+uniform mat4 gWXf : World;
+uniform mat4 gVPXf : ViewProjection;
+uniform mat4 gVIXf : ViewInverse;
+uniform vec2 gViewport : ViewportPixelSize;
+
+uniform float gPull = 0.0;
+uniform float gPointSize = 6.0;
+
+attribute appdata {
+    vec3 inPosition : POSITION;
+    vec4 inColor : COLOR0;
+};
+
+attribute vertexOutput {
+    vec4 Color;
+};
+
+attribute geometryInput {
+    vec4 Color;
+};
+
+attribute pixelInput {
+    vec4 Color;
+    vec2 Corner;
+};
+
+attribute pixelOutput {
+    vec4 outColor : COLOR0;
+};
+
+GLSLShader dotsVS {
+    void main() {
+        vec3 Pw = (gWXf * vec4(inPosition, 1.0)).xyz;
+        vec3 toCamera = gVIXf[3].xyz - Pw;
+        float away = length(toCamera);
+        float pull = gPull * clamp(inColor.a, 0.0, 1.0);  // the alpha: how far this point may go before something in the scene
+        if (pull > 0.0 && away > 1e-6) Pw += toCamera / away * min(pull, 0.5 * away);
+        gl_Position = gVPXf * vec4(Pw, 1.0);
+        vsOut.Color = vec4(inColor.rgb, 1.0);
+    }
+}
+
+GLSLShader dotsGS {
+    layout(points) in;
+    layout(triangle_strip, max_vertices = 4) out;
+
+    void corner(vec4 h, vec2 r, vec2 c) {
+        gl_Position = vec4(h.xy + c * r * h.w, h.zw);
+        gsOut.Color = gsIn[0].Color;
+        gsOut.Corner = c;
+        EmitVertex();
+    }
+
+    void main() {
+        vec4 h = gl_in[0].gl_Position;
+        if (h.w <= 0.0) return;  // behind the camera
+        vec2 r = (0.5 * max(gPointSize, 1.0)) / (gViewport * 0.5);  // half the size, in NDC
+        corner(h, r, vec2(-1.0, -1.0));
+        corner(h, r, vec2(1.0, -1.0));
+        corner(h, r, vec2(-1.0, 1.0));
+        corner(h, r, vec2(1.0, 1.0));
+        EndPrimitive();
+    }
+}
+
+GLSLShader dotsPS {
+    void main() {
+        if (dot(psIn.Corner, psIn.Corner) > 1.0) discard;  // round
+        outColor = psIn.Color;
+    }
+}
+
+technique Main {
+    pass p0 {
+        VertexShader (in appdata, out vertexOutput vsOut) = dotsVS;
+        GeometryShader (in geometryInput gsIn, out pixelInput gsOut) = dotsGS;
+        PixelShader (in pixelInput psIn, out pixelOutput) = dotsPS;
+    }
+}
+)x";
+
+const char* dotsEffectText() {
+    const MHWRender::MRenderer* renderer = MHWRender::MRenderer::theRenderer();
+    switch (renderer ? renderer->drawAPI() : MHWRender::kNone) {
+        case MHWRender::kDirectX11: return kDotsEffectHlsl;
+        case MHWRender::kOpenGLCoreProfile: return kDotsEffectGlsl;
+        default: return nullptr;  // legacy OpenGL: the CPU's dots
+    }
+}
+
+}  // namespace
+
+MHWRender::MShaderInstance* acquireDotsShader(const MHWRender::MShaderManager& shaders) {
+    static int state = 0;  // 0 not tried, 1 compiles, -1 failed
+    if (state < 0) return nullptr;
+    const char* text = dotsEffectText();
+    if (!text) return nullptr;
+    MHWRender::MShaderInstance* shader =
+        shaders.getEffectsBufferShader(text, static_cast<unsigned>(std::strlen(text)), "Main", nullptr, 0, true);
+    if (!shader) {
+        state = -1;
+        MGlobal::displayWarning(MString("GroomLab: the dots shader did not compile, so the dots draw on the CPU: ") +
+                                MHWRender::MShaderManager::getLastError());
+        return nullptr;
+    }
+    state = 1;
+    return shader;
+}
+
+bool dotsShaderAvailable(const MHWRender::MShaderManager& shaders) {
+    static int state = 0;
+    if (state == 0) {
+        if (!dotsEffectText()) return false;  // (no device yet, or legacy OpenGL: asked again)
+        MHWRender::MShaderInstance* probe = acquireDotsShader(shaders);
+        state = probe ? 1 : -1;
+        if (probe) shaders.releaseShader(probe);
+    }
+    return state > 0;
+}
+
+namespace {
+
 // ---- Width as coverage (displayWidthCoverage; display.h lineCoverage) ---------------------------
 //
 // The strand lines draw a pixel wide; with width as coverage each point covers the share of that
@@ -883,6 +1077,10 @@ void GroomSubSceneOverride::style(MHWRender::MRenderItem& item, ItemBuffers& buf
         buffers.shader->setParameter("gColor", color);
         buffers.shader->setParameter("gUseVertexColor", buffers.vertexColors ? 1.0f : 0.0f);
         buffers.shader->setParameter("gLineWidth", std::max(lineWidth, 1.0f));
+        buffers.shader->setParameter("gPull", displayFlag(GroomShape::aDisplayOverlaysOnTop) ? overlayPull_ : 0.0f);
+    }
+    if (kind == 11) {  // (the line width: the dots' size in pixels)
+        buffers.shader->setParameter("gPointSize", std::max(lineWidth, 1.0f));
         buffers.shader->setParameter("gPull", displayFlag(GroomShape::aDisplayOverlaysOnTop) ? overlayPull_ : 0.0f);
     }
     if (kind == 3 || kind == 4) {
