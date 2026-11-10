@@ -335,7 +335,7 @@ helper and the Arnold procedural without TBB: the core runs on its own threads, 
 2024's Arnold 7.2, which Arnold 7.4 loads) and the `macos-maya2024` to `2027` presets, then:
 
 ```sh
-python3.12 tools/package_release.py   # dist/GroomLab-<version>-maya-macos-arm64.zip (Maya 2024-2027, all beta)
+python3.12 tools/package_release.py   # dist/GroomLab-<version>-maya-macos-arm64.zip (Maya 2024-2027, tested)
 python3.12 tools/package_app.py       # dist/GroomLab-App-<version>-beta-macos-arm64.zip (GroomLab.app)
 python3.12 tools/package_blender.py   # dist/GroomLab-Blender-<version>-macos-arm64.zip (Blender validates it)
 ```
@@ -384,8 +384,10 @@ three and lists the macOS files alone.
   Keychain (`groomlab-r2-account-id`, `-access-key-id`, `-secret-access-key`), loaded into the
   environment only for a publish.
 
-**Maya's interface by hand** (everything above ran in `mayapy`; the Maya versions stay beta until
-this passes in each): install the module zip (drag `install.mel` into the viewport), restart Maya, then
+**Maya's interface by hand** (passed in Maya 2027 on 2026-11-09, with the 0.45.0 release; 2024 to
+2026 went through the same in the GUI suites, so `package_release.py` marks all four tested; run it
+again after a change to the viewport, the tools or the menu): install the module zip (drag
+`install.mel` into the viewport), restart Maya, then
 
 1. The GroomLab menu is in the main menu bar; Help > About opens.
 2. GroomLab > New Groom on a selected polySphere: strands draw in the viewport (Viewport 2.0: OpenGL Core Profile on this Mac).
@@ -448,8 +450,8 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] `ctest -L "quick|app"` green on `macos-app`
 - [ ] Offscreen renders (thumbnails, turntables) correct on Metal
 - [x] Maya 2025 install in place (no devkit needed); `macos-maya2025` builds `GroomLab.bundle`
-- [ ] The plugin loads in Maya 2025; a groom draws in Viewport 2.0; brushes and drags work (CPU) (loads in mayapy: `test_plugin.py` 23 OK, 3 skipped; in a Maya window the GUI suites pass 405 of 409, the open ones in section 12)
-- [ ] The Python module imports in mayapy; the GroomLab menu works (fix Windows-only Python bits) (imports; `test_updates.py` green; `os.startfile` and `GroomLab.mll` fixed, `review.py`'s `Render` was right; the menu not tried in the UI)
+- [x] The plugin loads in Maya 2025; a groom draws in Viewport 2.0; brushes and drags work (CPU) (loads in mayapy: `test_plugin.py` 23 OK, 3 skipped; in a Maya window the GUI suites pass 405 of 409, the open ones in section 12; by hand in Maya 2027 with the 0.45.0 release)
+- [x] The Python module imports in mayapy; the GroomLab menu works (fix Windows-only Python bits) (imports; `test_updates.py` green; `os.startfile` and `GroomLab.mll` fixed, `review.py`'s `Render` was right; the menu works in Maya 2027's UI, by hand)
 - [x] MtoA translator builds and renders a groom in Arnold (`test_arnold.py` on 2025 with the procedural: 32 of 33; the turntable test's batch render aborts without an Arnold license on this Mac, `abort_on_license_fail`)
 - [ ] A Maya preset with tests; `ctest -L maya` green on the Mac
 - [x] Maya 2026 (`macos-maya2026`) (built first time, oneTBB; in mayapy: `test_plugin.py` 23 OK, 3 skipped; `test_updates.py` 8 OK; `test_arnold.py` from the installed module 32 of 33, the turntable's batch render needing an Arnold license)

@@ -20,8 +20,8 @@ GroomLab/maya_versions.json says which, the installer and README_INSTALL.txt say
 
 macOS (run on the Mac): the builds are build/macos-maya<year> (2024 to 2027, against each Maya install:
 docs/MACOS.md), the plugin GroomLab.bundle in maya<year>/ for every version (no Maya 2022 there), and the
-Arnold procedural and groomlab-cli from build/macos-release (no TBB, macOS 13.3). Every version is beta
-(tested in mayapy, not yet in Maya's UI). The zip is dist/GroomLab-<version>-maya-macos-arm64.zip.
+Arnold procedural and groomlab-cli from build/macos-release (no TBB, macOS 13.3). Every version is
+tested (Maya 2027 by hand, 2024 to 2027 through the GUI suites in a Maya window). The zip is dist/GroomLab-<version>-maya-macos-arm64.zip.
 
 Installs each build's GroomLab component into a clean staging folder (cmake --install), joins the
 .mod sections, adds tools/package/* (install.mel, install_groomlab.py, README_INSTALL.txt) and the
@@ -41,7 +41,7 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MAC = sys.platform == "darwin"
 if MAC:
-    TESTED = ()               # tested in mayapy, not yet in Maya's UI: beta
+    TESTED = ("2024", "2025", "2026", "2027")  # GUI suites in each Maya's window; 2027 by hand too (2026-11-09)
     SUPPORTED = ("2024", "2025", "2026", "2027")
     PLUGIN = "GroomLab.bundle"
     RELEASE_BUILD = os.path.join(ROOT, "build", "macos-release")  # the procedural and groomlab-cli, without TBB

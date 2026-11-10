@@ -26,7 +26,7 @@ only field releases before mayaVersions read, and they all run in Maya 2022.
 macOS (a -maya-macos-arm64.zip from package_release.py on the Mac, its binaries signed with a Developer
 ID and notarized): maya/GroomLab-<version>-Maya-macOS.zip, maya/GroomLab-Maya-macOS-latest.zip,
 maya/latest-macos.json (what a Mac install's Check for Updates reads) and maya/releases-macos.json, so
-the Windows files above stay Windows'. Every Maya version in it is beta (no tested Maya 2022 there).
+the Windows files above stay Windows'. Its tested versions are package_release.py's (no Maya 2022 there).
 
 The bucket, its credentials (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, optionally
 R2_BUCKET) and the signed upload: tools/downloads_bucket.py, shared with publish_blender.py and
