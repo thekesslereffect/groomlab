@@ -45,6 +45,8 @@ inline const MString kStrandMeshItem("groomLabStrandMesh");
 inline const MString kFlowFieldItem("groomLabFlowField");
 inline const MString kSoftSelectedItem("groomLabSoftSelectedGuides");
 inline const MString kDotsItem("groomLabDots");  // (not the builder's: updateDots)
+inline const MString kTubeWiresItem("groomLabTubeWires");                  // (not the builder's: updateTubeWires)
+inline const MString kTubeWiresSelectedItem("groomLabTubeWiresSelected");  // the selected guides' tubes
 // The level of detail's items (updateLod): a class's strands, class 0's blendable segments, the
 // impostors.
 inline const MString kLodItemPrefix("groomLabStrandsLod");

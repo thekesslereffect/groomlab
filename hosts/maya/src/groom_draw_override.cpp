@@ -246,6 +246,8 @@ bool GroomSubSceneOverride::requiresUpdate(const MHWRender::MSubSceneContainer&,
     if (!shape_) return false;
     try {
         // The CPU's dots are built for one camera and viewport size: another one rebuilds them.
+        // The tube wires turned on or off (their guides and selection: needsUpdate's versions).
+        if (shape_->tubeWires() != tubeWiresDrawn_) return true;
         if (!points_.empty() && !gpuDots_) {
             int ox = 0, oy = 0, width = 0, height = 0;
             frameContext.getViewportDimensions(ox, oy, width, height);
@@ -322,8 +324,7 @@ bool GroomSubSceneOverride::needsUpdate() const {
 bool GroomSubSceneOverride::hasUIDrawables() const { return true; }
 
 bool GroomSubSceneOverride::areUIDrawablesDirty() const {
-    return uiDirty_ || (shape_ && (shape_->symmetrySeamVersion() != seamDrawn_ || shape_->tubeWires() != tubeWiresDrawn_ ||
-                                   (tubeWiresDrawn_ && shape_->selectionHash() != uiSelection_)));
+    return uiDirty_ || (shape_ && shape_->symmetrySeamVersion() != seamDrawn_);
 }
 
 void GroomSubSceneOverride::addUIDrawables(MHWRender::MUIDrawManager& draw, const MHWRender::MFrameContext& context) {
@@ -347,7 +348,6 @@ void GroomSubSceneOverride::addUIDrawables(MHWRender::MUIDrawManager& draw, cons
                 draw.endDrawable();
             }
         }
-        addTubeWires(draw);
         // Viewing a node other than the output: say so, since nodes after it (width, color,
         // cards...) don't show until the output is viewed again.
         if (shape_ && !shape_->viewedNode().empty()) {
@@ -532,53 +532,61 @@ void GroomSubSceneOverride::updateMapWires(MHWRender::MSubSceneContainer& contai
     }
 }
 
-void GroomSubSceneOverride::addTubeWires(MHWRender::MUIDrawManager& draw) {
+void GroomSubSceneOverride::updateTubeWires(MHWRender::MSubSceneContainer& container) {
+    const float none[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    auto giveBack = [&]() {  // their buffers given back
+        for (const MString* name : {&kTubeWiresItem, &kTubeWiresSelectedItem}) {
+            if (container.find(*name)) updateItem(container, *name, none, 0, nullptr, 1.0f);
+        }
+        tubeWiresKey_ = ~std::uint64_t{0};
+    };
     tubeWiresDrawn_ = shape_ && shape_->tubeWires();
     uiSelection_ = shape_ ? shape_->selectionHash() : 0;  // the selected tubes stand out
     if (!tubeWiresDrawn_) {
-        if (!tubeWires_.empty() || !tubeWiresSelected_.empty()) tubeWires_ = {}, tubeWiresSelected_ = {};
-        tubeWiresKey_ = ~std::uint64_t{0};
+        giveBack();
         return;
     }
     const HierarchyPtr hierarchy = shape_->evaluatedHierarchy();
-    if (!hierarchy) return;
-    const std::string hidden = MPlug(object_, GroomShape::aHiddenGuideGroups).asString().asChar();
-    std::uint64_t key = hashCombine(hashCombine(shape_->hierarchyVersion(), shape_->selectionHash()), hashChars(0x7B3u, hidden));
-    key = hashCombine(key, reinterpret_cast<std::uintptr_t>(hierarchy.get()));
-    if (key != tubeWiresKey_) {
-        tubeWiresKey_ = key;
-        tubeWires_.clear();
-        tubeWiresSelected_.clear();
-        // Every guide the brush can shape (shown, not frozen: activeTubeGuides), the selected
-        // ones (soft-selected left out) apart, to stand out.
-        const std::map<GuideId, float> selection = shape_->guideSelectionWeights();
-        const std::vector<const HierarchyGuide*> guides = activeTubeGuides(*hierarchy, hidden);
-        std::size_t points = 0;
-        for (const HierarchyGuide* g : guides) points += g->points.size();
-        // Within a budget of lines: fewer rings along each tube on a groom of many guides.
-        constexpr std::size_t kBudget = 400000;  // segment ends
-        const std::size_t perPoint = 2 * 32 + 2 * 8;
-        const std::size_t ringStep = std::max<std::size_t>(1, (points * perPoint + kBudget - 1) / kBudget);
-        for (const HierarchyGuide* g : guides) {
-            const auto it = selection.find(g->id);
-            const bool selected = it != selection.end() && it->second >= 1.0f;
-            appendTubeWire(selected ? tubeWiresSelected_ : tubeWires_, *g, hierarchy->scale(), 8, ringStep);
-        }
+    if (!hierarchy) {
+        giveBack();
+        return;
     }
-    auto lines = [&](const std::vector<Vec3f>& wire, const MColor& color, float width) {
-        if (wire.size() < 2) return;
-        MPointArray points;
-        points.setLength(static_cast<unsigned>(wire.size()));
-        for (unsigned i = 0; i < wire.size(); ++i) points.set(MPoint(wire[i].x, wire[i].y, wire[i].z), i);
-        draw.beginDrawable();
-        draw.setColor(color);
-        draw.setLineWidth(width);
-        draw.setDepthPriority(5);
-        draw.lineList(points, false);
-        draw.endDrawable();
+    const std::string hidden = MPlug(object_, GroomShape::aHiddenGuideGroups).asString().asChar();
+    std::uint64_t key = hashCombine(hashCombine(shape_->hierarchyVersion(), uiSelection_), hashChars(0x7B3u, hidden));
+    key = hashCombine(key, reinterpret_cast<std::uintptr_t>(hierarchy.get()));
+    if (key == tubeWiresKey_ && container.find(kTubeWiresItem)) return;
+    tubeWiresKey_ = key;
+    // Every guide the brush can shape (shown, not frozen: activeTubeGuides), the selected ones
+    // (soft-selected left out) apart, to stand out.
+    std::vector<Vec3f> wires, selectedWires;
+    const std::map<GuideId, float> selection = shape_->guideSelectionWeights();
+    const std::vector<const HierarchyGuide*> guides = activeTubeGuides(*hierarchy, hidden);
+    std::size_t points = 0;
+    for (const HierarchyGuide* g : guides) points += g->points.size();
+    // Within a budget of lines: fewer rings along each tube on a groom of many guides.
+    constexpr std::size_t kBudget = 400000;  // segment ends
+    const std::size_t perPoint = 2 * 32 + 2 * 8;
+    const std::size_t ringStep = std::max<std::size_t>(1, (points * perPoint + kBudget - 1) / kBudget);
+    for (const HierarchyGuide* g : guides) {
+        const auto it = selection.find(g->id);
+        const bool selected = it != selection.end() && it->second >= 1.0f;
+        appendTubeWire(selected ? selectedWires : wires, *g, hierarchy->scale(), 8, ringStep);
+    }
+    // Each as a line list (a segment's two ends a pair).
+    auto geometry = [](const std::vector<Vec3f>& ends) -> std::shared_ptr<const DisplayGeometry> {
+        if (ends.size() < 2) return nullptr;
+        auto g = std::make_shared<DisplayGeometry>();
+        g->positions.reserve(ends.size() * 3);
+        g->indices.reserve(ends.size());
+        for (std::size_t i = 0; i < ends.size(); ++i) {
+            g->positions.insert(g->positions.end(), {ends[i].x, ends[i].y, ends[i].z});
+            g->indices.push_back(static_cast<std::uint32_t>(i));
+        }
+        return g;
     };
-    lines(tubeWires_, MColor(0.45f, 0.85f, 1.0f, 0.6f), 1.0f);
-    lines(tubeWiresSelected_, MColor(1.0f, 0.7f, 0.15f, 1.0f), 2.0f);  // the selected: warm, opaque, thicker
+    const float normal[4] = {0.45f, 0.85f, 1.0f, 0.6f}, warm[4] = {1.0f, 0.7f, 0.15f, 1.0f};  // the selected: warm, opaque, thicker
+    updateItem(container, kTubeWiresItem, normal, 5, geometry(wires), 1.0f);
+    updateItem(container, kTubeWiresSelectedItem, warm, 5, geometry(selectedWires), 2.0f);
 }
 
 void GroomSubSceneOverride::addDots(MHWRender::MUIDrawManager& draw, const MHWRender::MFrameContext& context) {
@@ -665,6 +673,7 @@ void GroomSubSceneOverride::forgetDrawn() {
     pointColors_.clear();
     gpuDots_ = false;
     gpuDotsPull_ = -1.0f;
+    tubeWiresKey_ = ~std::uint64_t{0};  // (their items went with the container)
     uiDirty_ = true;
 }
 
@@ -970,6 +979,7 @@ void GroomSubSceneOverride::updateGuarded(MHWRender::MSubSceneContainer& contain
     updateCardWires(container, cardsRebuilt, cards);
     updateMapWires(container, mapRebuilt);
     updateDots(container, dotsRebuilt);
+    updateTubeWires(container);
     currentDraw().uploadMs = lap();
     // The maps (reloaded above when rewritten) go to the shader every time: cheap, and a
     // rebake with the same paths shows without rebuilding the cards. Without them: solid.

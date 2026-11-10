@@ -463,10 +463,11 @@ private:
     mutable bool uiDirty_ = true;
     std::uint64_t seamDrawn_ = ~std::uint64_t{0};  // the brush's symmetry line drawn (GroomShape::symmetrySeamVersion)
     // The Shape brush's tube wires (GroomShape::tubeWires): every guide it can shape (shown, not
-    // frozen), the selected ones' segments apart (drawn brighter), and what they were made from
-    // (the guides, the selection, the hidden groups), made again only when that changes.
-    void addTubeWires(MHWRender::MUIDrawManager& draw);
-    std::vector<Vec3f> tubeWires_, tubeWiresSelected_;
+    // frozen), the selected ones' segments apart (drawn brighter), two render items made again
+    // only when what they come from changes (the guides, the selection, the hidden groups), drawn
+    // by the GPU on every camera move (they were MUIDrawManager lines rebuilt each redraw: up to
+    // 400k segment ends a frame).
+    void updateTubeWires(MHWRender::MSubSceneContainer& container);
     std::uint64_t tubeWiresKey_ = ~std::uint64_t{0};
     bool tubeWiresDrawn_ = false;
     std::uint64_t uiSelection_ = 0;  // the guide selection the tube wires were drawn with
