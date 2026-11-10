@@ -248,7 +248,8 @@ their SDKs, `app.package_manifest` (Windows only).
   lines' width as coverage) said `#version 430`: Maya took them and drew nothing (no strands, no
   cards, no Hardware 2.0 hair). On macOS they say `#version 410` (`glslForDevice`, `hair_shading.h`);
   nothing in them needs more.
-- **Metal compute backend** (in progress: the look engine runs on Metal, `src/look_engine_metal.mm`).
+- **Metal compute backend** (the engine and line frames run on Metal: `src/look_engine_metal.mm`,
+  `src/line_frames_metal.mm`, their shared parts `src/metal_internal.h`; the app uses it; Maya next).
   Maya has no Metal draw API (2024 to 2027: `MRenderer::drawAPI()` is OpenGL Core Profile on the
   Mac), so there its results reach Viewport 2.0's buffers through the memory Apple silicon shares
   (`createMetalBuffer`, `finishMetalRuns`), copied as the CPU's are; the app draws with Metal and
@@ -471,7 +472,8 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] Blender extension zip installs in Blender for macOS; the helper runs (`-L blender -LE vray` green, Blender 5.2.3)
 - [x] Slang for macOS pinned; `gpu.*kernel_targets` green (Slang 2026.19 for Apple silicon, fetched by `engine/gpu/CMakeLists.txt` and pinned by its SHA-256; the three tests pass: every kernel compiles for Metal and SPIR-V)
 - [x] Metal compute backend (`look_engine_metal.mm`, `line_frames_metal.mm`), `groomlab_gpu_tests` green on macOS (2026-11-09: 235 passed, 1 skipped, as on Windows: every look kernel, the line frames, ribbons, following the scalp and the density grid against the CPU's; a Noise drag on 160k strands 4.5 ms against the CPU's 13 ms. Timestamps: Apple's GPUs sample only at encoder starts and ends, and an encoder that runs nothing samples 0, so every sample comes from an encoder that dispatched)
-- [ ] The hosts on Metal: the app (`hosts/app/src/gpu_preview.cpp`: QRhi's `MTLDevice` and command queue, its buffers as targets) and Maya (no Metal draw API: the results through shared memory into Viewport 2.0's buffers, `createMetalBuffer`, `finishMetalRuns`)
+- [x] The app on Metal (`hosts/app/src/gpu_preview.cpp`: QRhi's `MTLDevice`, the engine on QRhi's command queue so a run comes before the frame drawing it, QRhi's buffers and point texture written in place; `AppGpuPreview.*` 5 of 5 on Metal, a Noise drag about 0.6 ms on the GPU)
+- [ ] Maya on Metal. Its viewport has no Metal API, and its GPU paths (`gpu_preview.cpp`, `gpu_lines.cpp`, `groom_draw_override_gpu.cpp`) write Viewport 2.0's own buffers and textures in place (DirectX 11 objects, OpenGL names). On the Mac that needs a mode of its own: the engine and line frames on the system's Metal device, their targets shared buffers (`createMetalBuffer`), then, once `finishMetalRuns`, copied into the `MVertexBuffer`s and the density `MTexture` on the CPU (unified memory: a copy, as the CPU path's upload). It brings back true width's facing ribbons and the self-shadowing grid, and drags and strokes on the GPU
 - [ ] App and Maya use the Metal backend for drags and strokes
 - [ ] Pen pressure in Maya on macOS (Maya's Qt)
 - [x] `.app` bundle with macdeployqt; packaging scripts' macOS branches (the three zips build; the publish scripts are not done: section 11)
