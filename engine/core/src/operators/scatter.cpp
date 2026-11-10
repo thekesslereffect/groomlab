@@ -1004,6 +1004,39 @@ private:
 
 }  // namespace
 
+ScatteredSpots scatterSpots(const ScalpMesh& rest, double density, std::uint64_t seed,
+                            const std::function<bool(const StrandRoot&)>& kept) {
+    // Scatter's own sampling (ScatterOp::place): each face's count from its area, each sample's
+    // spot from its ID.
+    ScatteredSpots out;
+    if (!(density > 0.0) || !std::isfinite(density)) return out;
+    const std::uint64_t seedHash = hash64(seed);
+    for (std::size_t f = 0; f < rest.triangleCount(); ++f) {
+        const std::uint64_t faceHash = hashCombine(seedHash, f);
+        const double expected = rest.restTriangleArea(f) * density;
+        if (!(expected > 0.0)) continue;
+        auto count = static_cast<std::uint64_t>(std::min(expected, kMaxStrands));
+        if (unitFloat(hash64(faceHash)) < static_cast<float>(expected - static_cast<double>(count))) ++count;
+        for (std::uint64_t k = 0; k < count; ++k) {
+            const std::uint64_t id = hashCombine(faceHash, k);
+            Rng rng(id);
+            const float su = std::sqrt(rng.nextFloat());
+            const float r2 = rng.nextFloat();
+            const StrandRoot root{static_cast<std::int32_t>(f), su * (1.0f - r2), su * r2};
+            if (kept && !kept(root)) continue;
+            out.ids.push_back(id);
+            out.roots.push_back(root);
+        }
+    }
+    return out;
+}
+
+void relaxSpots(std::vector<StrandRoot>& roots, const ScalpMesh& rest, float spacing,
+                const std::function<bool(const StrandRoot&)>& allowed) {
+    relaxRoots(roots, rest, spacing, [spacing](std::size_t) { return spacing; },
+               [&allowed](const StrandRoot& root) { return !allowed || allowed(root); });
+}
+
 std::size_t scatterRelaxCount() { return relaxCount.load(); }
 std::size_t scatterRelaxIterationCount() { return relaxIterationCount.load(); }
 

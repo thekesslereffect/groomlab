@@ -830,7 +830,7 @@ TEST(ClumpCenters, PicksSpreadStableCenters) {
     EXPECT_GE(a->size(), 34u);  // about the count
     EXPECT_LE(a->size(), 50u);
 
-    const float spacing = 0.7f * std::sqrt(1.0f / 40.0f);  // kEvenShare
+    const float spacing = 0.45f * std::sqrt(1.0f / 40.0f);  // relaxed apart as Scatter's even roots (none much closer)
     for (std::size_t i = 0; i < a->size(); ++i) {
         for (std::size_t j = i + 1; j < a->size(); ++j) {
             EXPECT_GE((a->guides()[i].points[0] - a->guides()[j].points[0]).length(), spacing * 0.99f * 0.99f);  // (1% steps)
@@ -843,8 +843,8 @@ TEST(ClumpCenters, PicksSpreadStableCenters) {
 }
 
 TEST(ClumpCenters, RandomnessSpreadsOrScattersTheCentersAsScatterDoes) {
-    // randomness 0: the centers are kept apart (every one about the average spacing from its
-    // nearest, none closer than kEvenShare of it), about the count; 1: each moved to a random spot
+    // randomness 0: the centers are kept apart, relaxed as Scatter's even roots (every one about the
+    // average spacing from its nearest, none closer than half of it), about the count; 1: each moved to a random spot
     // up to a spacing from its even one, so some sit side by side; in between, in between; past 1
     // farther still. The same centers (count and IDs) at every randomness. On a sphere the spacing
     // comes from the scalp's own area, so 0 spreads as evenly there as on a plane.
@@ -889,7 +889,7 @@ TEST(ClumpCenters, RandomnessSpreadsOrScattersTheCentersAsScatterDoes) {
         std::printf("[ centers  ] nearest, of the average spacing: even %.2f (closest %.2f), half %.2f (%.2f), random "
                     "%.2f (%.2f), 1.8 %.2f (%.2f)\n", meanEven / average, minEven / average, meanHalf / average,
                     minHalf / average, meanRandom / average, minRandom / average, meanOver / average, minOver / average);
-        EXPECT_GE(minEven, 0.7f * average * 0.98f);  // (the spacing in 1% steps)
+        EXPECT_GE(minEven, 0.5f * average * 0.98f);  // (the spacing in 1% steps)
         EXPECT_LT(minHalf, minEven);
         EXPECT_LT(meanHalf, meanEven);
         EXPECT_LT(meanRandom, meanHalf);

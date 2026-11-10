@@ -8,7 +8,7 @@
   "coloredStrands": [
    18054,
    32096,
-   "e0ab40e76a5ef838"
+   "048a42d4b2057dca"
   ],
   "dimStrands": [
    0,
@@ -42,9 +42,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -93,9 +93,9 @@
  },
  "cards": {
   "cards": [
-   396,
-   1224,
-   "37d3794fe7135c4e"
+   414,
+   1296,
+   "5e40ad07d1ea25f4"
   ],
   "coloredStrands": [
    0,
@@ -134,9 +134,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -185,9 +185,9 @@
  },
  "cardsTextured": {
   "cards": [
-   396,
-   1224,
-   "6ee66e39f6e70499"
+   414,
+   1296,
+   "b05f68f790fac0ee"
   ],
   "coloredStrands": [
    0,
@@ -226,9 +226,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -284,7 +284,7 @@
   "coloredStrands": [
    18054,
    32096,
-   "b9b05522961d8999"
+   "24e086946cbedcdc"
   ],
   "dimStrands": [
    0,
@@ -318,9 +318,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -376,7 +376,7 @@
   "coloredStrands": [
    18054,
    32096,
-   "e220286b3b963b41"
+   "c0d48de0ef5b71ef"
   ],
   "dimStrands": [
    0,
@@ -410,9 +410,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -468,7 +468,7 @@
   "coloredStrands": [
    18054,
    32096,
-   "0ea8300105212d58"
+   "f72cf2ad5c6ce79c"
   ],
   "dimStrands": [
    0,
@@ -502,9 +502,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -594,9 +594,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -635,7 +635,7 @@
   "strands": [
    18054,
    32096,
-   "e2ff0c0c5e28aae8"
+   "2ed858ee5cfe5451"
   ],
   "tubes": [
    0,
@@ -686,9 +686,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -727,7 +727,7 @@
   "strands": [
    18054,
    32096,
-   "7d49bcceb7e90381"
+   "992f3da61b042024"
   ],
   "tubes": [
    0,
@@ -778,9 +778,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -819,7 +819,7 @@
   "strands": [
    18054,
    32096,
-   "7d49bcceb7e90381"
+   "992f3da61b042024"
   ],
   "tubes": [
    0,
@@ -870,9 +870,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -911,7 +911,7 @@
   "strands": [
    18054,
    32096,
-   "7d49bcceb7e90381"
+   "992f3da61b042024"
   ],
   "tubes": [
    12832,
@@ -1014,7 +1014,7 @@
   ],
   "overlayColors": [
    3200,
-   "d375b28e1082f2ef"
+   "90506fed7a17f82b"
   ],
   "rootToTip": [
    128,
@@ -1059,14 +1059,14 @@
   "instanceMarkers": [
    2406,
    9624,
-   "b710d57a08f37204"
+   "565c28d6ebce8a2e"
   ],
   "instanceMeshes": [
    0,
    0,
    "8d2c14c0859a1102"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -1105,7 +1105,7 @@
   "strands": [
    18054,
    32096,
-   "7d49bcceb7e90381"
+   "992f3da61b042024"
   ],
   "tubes": [
    0,
@@ -1156,9 +1156,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -1197,7 +1197,7 @@
   "strands": [
    18054,
    32096,
-   "7d49bcceb7e90381"
+   "992f3da61b042024"
   ],
   "tubes": [
    0,
@@ -1248,9 +1248,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -1259,7 +1259,7 @@
   "ribbons": [
    36108,
    96288,
-   "70d4b983c22fd87e"
+   "c9234fdf8c886c5a"
   ],
   "scales": [
    0,
@@ -1340,9 +1340,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -1381,7 +1381,7 @@
   "strands": [
    18054,
    32096,
-   "7d49bcceb7e90381"
+   "992f3da61b042024"
   ],
   "tubes": [
    0,
@@ -1432,9 +1432,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -1473,7 +1473,7 @@
   "strands": [
    18054,
    32096,
-   "7d49bcceb7e90381"
+   "992f3da61b042024"
   ],
   "tubes": [
    0,
@@ -1524,9 +1524,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -1565,7 +1565,7 @@
   "strands": [
    18054,
    32096,
-   "7d49bcceb7e90381"
+   "992f3da61b042024"
   ],
   "tubes": [
    0,
@@ -1616,9 +1616,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -1657,7 +1657,7 @@
   "strands": [
    18054,
    32096,
-   "7d49bcceb7e90381"
+   "992f3da61b042024"
   ],
   "tubes": [
    0,
@@ -1710,7 +1710,7 @@
    0,
    "dcd89924b76baf79"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    0,
    0,
@@ -1749,7 +1749,7 @@
   "strands": [
    18054,
    32096,
-   "7d49bcceb7e90381"
+   "992f3da61b042024"
   ],
   "tubes": [
    0,
@@ -1766,7 +1766,7 @@
   "coloredStrands": [
    18054,
    32096,
-   "7ddb715393cd14f2"
+   "38c88eef05b00d38"
   ],
   "dimStrands": [
    0,
@@ -1800,9 +1800,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -1892,9 +1892,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -1903,7 +1903,7 @@
   "ribbons": [
    36108,
    96288,
-   "5e82ae0f3b482947"
+   "b81c01ba6d95399e"
   ],
   "scales": [
    0,
@@ -1984,9 +1984,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -2047,7 +2047,7 @@
   "dimStrands": [
    18054,
    32096,
-   "e2ff0c0c5e28aae8"
+   "2ed858ee5cfe5451"
   ],
   "dots": [
    64,
@@ -2076,9 +2076,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -2134,7 +2134,7 @@
   "coloredStrands": [
    18054,
    32096,
-   "7ddb715393cd14f2"
+   "38c88eef05b00d38"
   ],
   "dimStrands": [
    0,
@@ -2168,9 +2168,9 @@
   "instanceMeshes": [
    9624,
    14436,
-   "dc756b61bce4b5f9"
+   "4fa903be91135fa3"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,
@@ -2262,7 +2262,7 @@
    0,
    "dcd89924b76baf79"
   ],
-  "overlayPull": 1.0449278354644775,
+  "overlayPull": 1.0477190017700195,
   "parts": [
    5,
    6,

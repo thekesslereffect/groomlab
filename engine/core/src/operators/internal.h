@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <initializer_list>
 #include <map>
 #include <memory>
@@ -330,5 +331,20 @@ private:
 // its centers by size, at its randomness default, every core strand allowed: preview_core.h), in
 // the order picked: Braid's paths without a braids input.
 std::vector<std::size_t> pickSpreadStrands(const StrandSet& in, const ScalpMesh* scalp, float spacing, std::uint64_t seed);
+
+// Scatter's placement, for others that place points on a scalp the way it places roots (Clump's
+// centers): spots on `rest` (a rest pose: a cage's rest points) at `density` per unit area, each
+// face's from its own area and a hash of the face and `seed` (the same spots as a Scatter of that
+// density and seed; `kept(root)` false: left out), with their IDs; `relaxSpots` moves them apart
+// as Scatter's even roots are (blue noise: each ideal `spacing` apart, `allowed(root)` where one
+// may sit; their order kept).
+struct ScatteredSpots {
+    std::vector<std::uint64_t> ids;
+    std::vector<StrandRoot> roots;
+};
+ScatteredSpots scatterSpots(const ScalpMesh& rest, double density, std::uint64_t seed,
+                            const std::function<bool(const StrandRoot&)>& kept = {});
+void relaxSpots(std::vector<StrandRoot>& roots, const ScalpMesh& rest, float spacing,
+                const std::function<bool(const StrandRoot&)>& allowed);
 
 }  // namespace groomlab

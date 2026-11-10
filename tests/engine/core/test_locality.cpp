@@ -228,14 +228,16 @@ TEST(Locality, AnEditOfTheScalpChangesEveryPresetOnlyNearIt) {
 // Scatter's even roots (randomness below 1: relaxed apart, each root until those around it settle;
 // an edit reaches at most kRelaxIterations x kRelaxReach spacings, 8.3 at this density, and its
 // ripple dies out sooner) and a preview's evenly spread share of them, and Clumps picking their own centers evenly (by
-// size) and at random: local too, re-made and posed.
+// size) and at random: local too, re-made and posed. (A Clump's centers relax as Scatter's roots do, so
+// an edit reaches as many of its spacings, up to kRelaxIterations x kRelaxReach = 48: the even Clump's
+// size keeps the far side about that many away; at randomness 1 no centers relax.)
 TEST(Locality, EvenRootsTheirPreviewAndOwnClumpsChangeOnlyNearTheEdit) {
     const MeshPtr round = sphere(false, false);
     const std::string graph = R"({"version": 1, "output": "out", "nodes": [
         {"name": "scalp", "type": "Scalp"},
         {"name": "scatter", "type": "Scatter", "params": {"density": 60.0, "randomness": 0.3, "length": 3.0}},
-        {"name": "even", "type": "Clump", "params": {"clumpBy": "size", "size": 2.0, "randomness": 0.0}},
-        {"name": "random", "type": "Clump", "params": {"clumpBy": "size", "size": 1.0, "randomness": 1.0, "clumpChannel": "small"}},
+        {"name": "even", "type": "Clump", "params": {"clumpBy": "size", "size": 0.2, "randomness": 0.0}},
+        {"name": "random", "type": "Clump", "params": {"clumpBy": "size", "size": 0.3, "randomness": 1.0, "clumpChannel": "small"}},
         {"name": "out", "type": "Output"}],
       "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
         {"from": "scatter", "to": "even", "input": "strands"}, {"from": "even", "to": "random", "input": "strands"},

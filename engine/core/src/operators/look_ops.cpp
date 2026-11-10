@@ -7,6 +7,8 @@
 // so results never depend on thread order or strand order.
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -332,12 +334,79 @@ struct CenterPlan {
     // weight left out): the same strands while no root moves.
     bool byRoots = false;
     float spacing = 0.0f;  // how far apart the centers were planned (the size, or the count's spacing)
-    // Centers on the scalp (Clump's version 2, on a scalp): each even center is a dart's spot on
-    // the rest scalp itself, not the root of the strand it lands near (`even` that strand, its
-    // axis at randomness 0), so the count is the scalp's, never the preview core's: a center takes
-    // the shape of the core strand rooted nearest its spot, moved there (clumpAxisOffsets).
+    // Centers on the scalp (Clump's version 2, on a scalp): placed as a Scatter places roots (its
+    // seeded spots at one per spacing squared, relaxed apart for the even ones: scatterSpots,
+    // relaxSpots), each even center a spot on the rest scalp itself, not the root of the strand
+    // nearest it (`even` that strand), so the count is the scalp's, never the preview core's: a
+    // center takes the shape of the core strand rooted nearest its spot, moved there
+    // (clumpAxisOffsets).
     bool onSpots = false;
 };
+// A scalp in a frame of its own, the same to the bit however the scalp is turned (a groom read in
+// another up axis: a quarter turn swaps and negates coordinates, which floats round alike only per
+// operation): the frame of its first face that is no sliver (its first corner, the edge from it and
+// its normal, in doubles), each point's coordinates there on a lattice of a millionth of that
+// edge. Relaxing on it (relaxSpots: many steps, each rounding fed into the next) gives the same
+// roots (faces and barycentrics, the same topology) in any orientation; and from that one face
+// alone, an edit of the scalp elsewhere leaves every coordinate far from it as it was (local).
+struct CanonicalScalp {
+    std::unique_ptr<ScalpMesh> mesh;
+    double origin[3] = {0, 0, 0}, axes[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}, step = 0.0;
+    Vec3f to(const Vec3f& p) const {
+        const double d[3] = {p.x - origin[0], p.y - origin[1], p.z - origin[2]};
+        float out[3];
+        for (int a = 0; a < 3; ++a) {
+            const double c = d[0] * axes[a][0] + d[1] * axes[a][1] + d[2] * axes[a][2];
+            out[a] = static_cast<float>(step > 0.0 ? std::round(c / step) * step : c);
+        }
+        return {out[0], out[1], out[2]};
+    }
+};
+CanonicalScalp canonicalScalp(const ScalpMesh& rest) {
+    CanonicalScalp c;
+    const std::vector<Vec3f>& pts = rest.points();
+    if (pts.empty()) return c;
+    double longest = 0.0;  // the longest edge of the first faces: what a sliver is next to
+    for (std::size_t f = 0; f < std::min<std::size_t>(rest.triangleCount(), 64); ++f) {
+        const auto& tri = rest.triangles()[f];
+        for (int k = 0; k < 3; ++k) {
+            const Vec3f& a = pts[static_cast<std::size_t>(tri[static_cast<std::size_t>(k)])];
+            const Vec3f& b = pts[static_cast<std::size_t>(tri[static_cast<std::size_t>((k + 1) % 3)])];
+            const double e[3] = {double(b.x) - a.x, double(b.y) - a.y, double(b.z) - a.z};
+            longest = std::max(longest, std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]));
+        }
+    }
+    for (const auto& tri : rest.triangles()) {
+        const Vec3f& a = pts[static_cast<std::size_t>(tri[0])];
+        const Vec3f& b = pts[static_cast<std::size_t>(tri[1])];
+        const Vec3f& d = pts[static_cast<std::size_t>(tri[2])];
+        const double e[3] = {double(b.x) - a.x, double(b.y) - a.y, double(b.z) - a.z};
+        const double g[3] = {double(d.x) - a.x, double(d.y) - a.y, double(d.z) - a.z};
+        const double n[3] = {e[1] * g[2] - e[2] * g[1], e[2] * g[0] - e[0] * g[2], e[0] * g[1] - e[1] * g[0]};
+        const double nl = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        const double el = std::sqrt(e[0] * e[0] + e[1] * e[1] + e[2] * e[2]);
+        if (!(nl > 1e-3 * longest * longest) || !(el > 0.0)) continue;
+        c.origin[0] = a.x;
+        c.origin[1] = a.y;
+        c.origin[2] = a.z;
+        c.step = el * 1e-6;
+        for (int k = 0; k < 3; ++k) {
+            c.axes[0][k] = e[k] / el;
+            c.axes[2][k] = n[k] / nl;
+        }
+        const double* x = c.axes[0];
+        const double* z = c.axes[2];
+        c.axes[1][0] = z[1] * x[2] - z[2] * x[1];
+        c.axes[1][1] = z[2] * x[0] - z[0] * x[2];
+        c.axes[1][2] = z[0] * x[1] - z[1] * x[0];
+        break;
+    }
+    std::vector<Vec3f> moved(pts.size());
+    for (std::size_t i = 0; i < pts.size(); ++i) moved[i] = c.to(pts[i]);
+    c.mesh = std::make_unique<ScalpMesh>(std::move(moved), rest.triangles());
+    return c;
+}
+
 // Darts per clump (per spacing squared) for kEvenShare 0.7: the density of darts whose priority
 // pick, kept kEvenShare apart, leaves one center per spacing squared (random sequential
 // adsorption, measured on a plane).
@@ -456,6 +525,69 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
     std::vector<Dart> darts;
     plan.onSpots = spots && onScalp;
     std::shared_ptr<const PointIndex> rooted;  // the candidates' roots (on the scalp)
+    if (plan.onSpots) {
+        // Centers on the scalp, placed as a Scatter places roots (scatter.cpp: the same spots for
+        // the same density and seed, relaxed the same way): spots at one per spacing squared on the
+        // rest scalp where strands grow (within twice the core strands' spacing of one: farther is
+        // bald scalp), each center's even spot its spot relaxed apart (blue noise), its random spot
+        // the spot itself, `randomness` of the way between them (placeClumpCenters), as Scatter
+        // mixes a root's. Its axis: the core strand rooted nearest its spot, moved there.
+        rooted = std::make_shared<const PointIndex>(positions);
+        std::unique_ptr<ScalpMesh> restMesh;
+        if (cage->hasRest()) restMesh = std::make_unique<ScalpMesh>(cage->restPoints(), cage->triangles());
+        const ScalpMesh& rest = restMesh ? *restMesh : *cage;
+        // Placed and relaxed on the scalp in a frame of its own (the same in any up axis), the core
+        // strands' roots taken there too; the centers' spots on the rest scalp after (by face).
+        const CanonicalScalp frame = canonicalScalp(rest);
+        const ScalpMesh& placeOn = *frame.mesh;
+        std::vector<Vec3f> framed(n);
+        for (std::size_t i = 0; i < n; ++i) framed[i] = frame.to(positions[i]);
+        const PointIndex nearest(std::move(framed));
+        const float area = cage->restTotalArea();
+        const float coreSpacing = std::sqrt(area / static_cast<float>(n));
+        const float land2 = std::max(spacing2, 4.0f * coreSpacing * coreSpacing);
+        auto grows = [&](const StrandRoot& root, std::size_t* at) {
+            float d2 = 0.0f;
+            const std::size_t c = nearest.nearest(placeOn.position(root), &d2);
+            if (at) *at = c;
+            return c != SIZE_MAX && d2 <= land2 && letThrough(c);
+        };
+        constexpr double kMostSpots = 2e6;  // clumps finer than this are below any strand spacing
+        const double density = std::min(1.0 / static_cast<double>(spacing2), kMostSpots / static_cast<double>(area));
+        ScatteredSpots spotsOn = scatterSpots(placeOn, density, seed ^ 0xA07C1u, [&](const StrandRoot& r) { return grows(r, nullptr); });
+        std::vector<StrandRoot> even = spotsOn.roots;
+        constexpr float kHexSpacing = 1.0746f;  // sqrt(2 / sqrt(3)): Scatter's spacing for one per unit area
+        relaxSpots(even, placeOn, kHexSpacing / static_cast<float>(std::sqrt(density)),
+                   [&](const StrandRoot& r) { return grows(r, nullptr); });
+        const std::size_t centers = even.size();
+        plan.even.resize(centers);
+        plan.ids.resize(centers);
+        plan.evenAt.resize(centers);
+        plan.way.resize(centers);
+        parallelFor(0, centers, [&](std::size_t c) {
+            const Vec3f at = rest.position(even[c]);
+            std::size_t nearestStrand = SIZE_MAX;
+            grows(even[c], &nearestStrand);
+            plan.even[c] = candidateStrands[nearestStrand == SIZE_MAX ? 0 : nearestStrand];
+            plan.ids[c] = hashCombine(spotsOn.ids[c], 0x5B07ull) | 1u;  // apart from the strands' IDs
+            plan.evenAt[c] = at;
+            plan.way[c] = rest.position(spotsOn.roots[c]) - at;
+        }, 64);
+        if (!weighted) {
+            plan.allowed = candidateStrands;
+            plan.index = rooted;
+        } else {
+            std::vector<Vec3f> allowedAt;
+            for (std::size_t i = 0; i < n; ++i) {
+                if (!letThrough(i)) continue;
+                plan.allowed.push_back(candidateStrands[i]);
+                allowedAt.push_back(positions[i]);
+            }
+            plan.index = std::make_shared<const PointIndex>(std::move(allowedAt));
+        }
+        plan.byRoots = weight.isConstant() && weight.maximum() >= 1.0f;
+        return plan;
+    }
     if (onScalp) {
         // On the scalp: points on its rest surface, kDartsPerClump per spacing squared, each face's
         // from its own area and hash (at most kMostDarts on the scalp: clumps finer than that are
