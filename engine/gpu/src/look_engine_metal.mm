@@ -97,12 +97,12 @@ std::size_t& runsPending() {
     return n;
 }
 
-std::shared_ptr<Stream> streamFor(id<MTLDevice> device) {
+std::shared_ptr<Stream> streamFor(id<MTLDevice> device, id<MTLCommandQueue> queue) {
     static std::mutex mutex;
-    static auto* all = new std::map<void*, std::shared_ptr<Stream>>;
+    static auto* all = new std::map<std::pair<void*, void*>, std::shared_ptr<Stream>>;
     std::lock_guard<std::mutex> lock(mutex);
-    std::shared_ptr<Stream>& s = (*all)[(__bridge void*)device];
-    if (!s) s = std::make_shared<Stream>(device);
+    std::shared_ptr<Stream>& s = (*all)[{(__bridge void*)device, (__bridge void*)queue}];
+    if (!s) s = std::make_shared<Stream>(device, queue);
     return s;
 }
 
@@ -333,7 +333,9 @@ protected:
                 *frequency = 0.0;
                 t = last;
             }
-            (*ticks)[i] = last = t;
+            // (Never before the stamp before: encoders that share nothing may overlap on the GPU, so
+            // the next one's start can come a little before the last one's end.)
+            (*ticks)[i] = last = std::max(t, last);
         }
         return true;
     }
@@ -431,11 +433,11 @@ private:
 
 }  // namespace
 
-std::unique_ptr<LookEngine> makeMetalLookEngine(void* device) {
+std::unique_ptr<LookEngine> makeMetalLookEngine(void* device, void* queue) {
     @autoreleasepool {
         id<MTLDevice> d = deviceOf(device);
         if (!d) fail("no device");
-        return std::make_unique<MetalLookEngine>(d, streamFor(d));
+        return std::make_unique<MetalLookEngine>(d, streamFor(d, (__bridge id<MTLCommandQueue>)queue));
     }
 }
 

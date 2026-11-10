@@ -53,8 +53,11 @@ void forgetGLLookKernels();
 // system's default device). The kernels are Metal Shading Language from Slang, compiled by the
 // system's Metal compiler in the background (prepareMetalLookKernels; the system caches them, so
 // only a first run ever waits). Its targets are MTLBuffers (id<MTLBuffer>), written in place, and
-// the point texture an RGBA32Float MTLTexture made for shader writes. Throws std::runtime_error.
-std::unique_ptr<LookEngine> makeMetalLookEngine(void* device);
+// the point texture an RGBA32Float MTLTexture made for shader writes. `queue`: the host's command
+// queue (id<MTLCommandQueue>: the app's QRhi's), so a run is ordered before the frame drawing its
+// results; null, one of the device's own. Engines and line frames of one device and queue share a
+// command stream. Throws std::runtime_error.
+std::unique_ptr<LookEngine> makeMetalLookEngine(void* device, void* queue = nullptr);
 // The system's default Metal device (id<MTLDevice>, not retained: it lives as long as the process),
 // null where there is none.
 void* metalSystemDevice();

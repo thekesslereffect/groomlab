@@ -57,8 +57,8 @@ id<MTLBuffer> bufferOf(void* handle) { return (__bridge id<MTLBuffer>)handle; }
 
 class MetalLineFrames final : public LineFrames {
 public:
-    explicit MetalLineFrames(id<MTLDevice> device)
-        : device_(device), kernels_(kernelsFor(device, kLineSources, kLineKernelCount)), stream_(streamFor(device)) {
+    MetalLineFrames(id<MTLDevice> device, id<MTLCommandQueue> queue)
+        : device_(device), kernels_(kernelsFor(device, kLineSources, kLineKernelCount)), stream_(streamFor(device, queue)) {
         kernels_.start();
         samples_ = timestampSamples(device_, 2);
     }
@@ -332,11 +332,11 @@ private:
 
 }  // namespace
 
-std::unique_ptr<LineFrames> makeMetalLineFrames(void* device) {
+std::unique_ptr<LineFrames> makeMetalLineFrames(void* device, void* queue) {
     @autoreleasepool {
         id<MTLDevice> d = metal::deviceOf(device);
         if (!d) metal::fail("no device");
-        return std::make_unique<MetalLineFrames>(d);
+        return std::make_unique<MetalLineFrames>(d, (__bridge id<MTLCommandQueue>)queue);
     }
 }
 

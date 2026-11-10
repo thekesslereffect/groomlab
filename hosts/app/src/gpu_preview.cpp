@@ -48,6 +48,9 @@ void* nativeBufferOf(QRhi* rhi, QRhiBuffer* buffer) {
     switch (rhi->backend()) {
         case QRhi::D3D11: return *static_cast<void* const*>(nb.objects[0]);
         case QRhi::OpenGLES2: return reinterpret_cast<void*>(static_cast<std::uintptr_t>(*static_cast<const unsigned*>(nb.objects[0])));
+#ifdef GROOMLAB_HAS_METAL
+        case QRhi::Metal: return *static_cast<void* const*>(nb.objects[0]);  // (id<MTLBuffer>; a Static buffer has one slot)
+#endif
         default: return nullptr;
     }
 }
@@ -58,6 +61,9 @@ void* nativeTextureOf(QRhi* rhi, QRhiTexture* texture) {
     switch (rhi->backend()) {
         case QRhi::D3D11: return reinterpret_cast<void*>(static_cast<std::uintptr_t>(nt.object));
         case QRhi::OpenGLES2: return reinterpret_cast<void*>(static_cast<std::uintptr_t>(nt.object));
+#ifdef GROOMLAB_HAS_METAL
+        case QRhi::Metal: return reinterpret_cast<void*>(static_cast<std::uintptr_t>(nt.object));  // (id<MTLTexture>)
+#endif
         default: return nullptr;
     }
 }
@@ -77,9 +83,24 @@ void* deviceOf(QRhi* rhi) {
             const auto* handles = static_cast<const QRhiGles2NativeHandles*>(rhi->nativeHandles());
             return handles ? handles->context : nullptr;
         }
+#ifdef GROOMLAB_HAS_METAL
+        case QRhi::Metal: {
+            const auto* handles = static_cast<const QRhiMetalNativeHandles*>(rhi->nativeHandles());
+            return handles ? handles->dev : nullptr;
+        }
+#endif
         default: return nullptr;
     }
 }
+
+#ifdef GROOMLAB_HAS_METAL
+// QRhi's command queue (Metal): the engine encodes on it, so a run is ordered before the frame
+// that draws its results.
+void* metalQueueOf(QRhi* rhi) {
+    const auto* handles = rhi && rhi->backend() == QRhi::Metal ? static_cast<const QRhiMetalNativeHandles*>(rhi->nativeHandles()) : nullptr;
+    return handles ? handles->cmdQueue : nullptr;
+}
+#endif
 
 }  // namespace
 
@@ -90,6 +111,8 @@ GpuLookPreview::~GpuLookPreview() = default;
 bool GpuLookPreview::supported(QRhi* rhi) {
 #ifdef Q_OS_WIN
     return rhi && (rhi->backend() == QRhi::D3D11 || rhi->backend() == QRhi::OpenGLES2);
+#elif defined(GROOMLAB_HAS_METAL)
+    return rhi && rhi->backend() == QRhi::Metal && rhi->isFeatureSupported(QRhi::Compute);
 #else
     (void)rhi;
     return false;
@@ -193,6 +216,14 @@ bool GpuLookPreview::drag(const std::string& node, const std::string& param, con
         return false;
     }
 #endif
+#ifdef GROOMLAB_HAS_METAL
+    // Metal: the kernels compiled (prepare starts them; the system caches them, so only a first
+    // run waits); until they are, the CPU previews the drag.
+    if (metalDevice_ && !gpu::prepareMetalLookKernels(metalDevice_)) {
+        *why = why_ = "the Metal kernels are compiling";
+        return false;
+    }
+#endif
     overrides_ = std::move(overrides);
     plan_ = std::move(p);
     why_.clear();
@@ -242,6 +273,13 @@ bool GpuLookPreview::armStroke(std::string* why) {
         return false;
     }
 #endif
+#ifdef GROOMLAB_HAS_METAL
+    if (metalDevice_ && !gpu::prepareMetalLookKernels(metalDevice_)) {
+        *why = why_ = "the Metal kernels are compiling";
+        core_.refuseStroke();
+        return false;
+    }
+#endif
     overrides_.clear();
     plan_.reset();
     why_.clear();
@@ -286,6 +324,8 @@ bool GpuLookPreview::ensureEngine(QRhi* rhi, std::string* why) {
 #ifdef Q_OS_WIN
         engine_ = rhi->backend() == QRhi::OpenGLES2 ? gpu::makeGLLookEngine()
                                                     : gpu::makeD3D11LookEngine(static_cast<ID3D11Device*>(device));
+#elif defined(GROOMLAB_HAS_METAL)
+        engine_ = gpu::makeMetalLookEngine(device, metalQueueOf(rhi));
 #else
         *why = "no engine for this platform yet";
         return false;
@@ -374,6 +414,9 @@ void GpuLookPreview::prepare(QRhi* rhi) {
 #ifdef Q_OS_WIN
     gl_ = rhi && rhi->backend() == QRhi::OpenGLES2;
     if (gl_ && enabled_ && deviceOf(rhi)) gpu::prepareGLLookKernels();
+#elif defined(GROOMLAB_HAS_METAL)
+    metalDevice_ = rhi && rhi->backend() == QRhi::Metal ? deviceOf(rhi) : nullptr;
+    if (metalDevice_ && enabled_) gpu::prepareMetalLookKernels(metalDevice_);  // (in the background)
 #else
     (void)rhi;
 #endif

@@ -136,7 +136,7 @@ std::size_t& runsPending();
 // last one committed.
 class Stream {
 public:
-    explicit Stream(id<MTLDevice> device) : queue_([device newCommandQueue]) {
+    Stream(id<MTLDevice> device, id<MTLCommandQueue> queue) : queue_(queue ? queue : [device newCommandQueue]) {
         if (!queue_) fail("no command queue");
     }
 
@@ -230,8 +230,8 @@ struct Held {
 
 inline std::size_t rounded(std::size_t bytes) { return std::max<std::size_t>((bytes + 15) & ~std::size_t{15}, 16); }
 
-// The stream of `device` (one a device, made once).
-std::shared_ptr<Stream> streamFor(id<MTLDevice> device);
+// The stream of `device` on `queue` (null: the device's own queue), made once.
+std::shared_ptr<Stream> streamFor(id<MTLDevice> device, id<MTLCommandQueue> queue = nil);
 // A timestamp sample buffer of `count` samples (null where the device samples none at encoder starts).
 id<MTLCounterSampleBuffer> timestampSamples(id<MTLDevice> device, std::size_t count);
 

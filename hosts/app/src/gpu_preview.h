@@ -130,6 +130,8 @@ public:
     // prepare last found them; DirectX 11: always).
 #ifdef Q_OS_WIN
     bool kernelsReady() const { return !gl_ || gpu::glLookKernelsAllReady(); }
+#elif defined(GROOMLAB_HAS_METAL)
+    bool kernelsReady() const { return !metalDevice_ || gpu::prepareMetalLookKernels(metalDevice_); }
 #else
     bool kernelsReady() const { return true; }
 #endif
@@ -168,6 +170,7 @@ private:
     void* device_ = nullptr;  // the QRhi device the engine was made on
     std::string engineWhy_;   // why no engine could be made on it ("" while one could, or none was tried)
     std::atomic<bool> gl_{false};  // the viewport draws through OpenGL (prepare)
+    std::atomic<void*> metalDevice_{nullptr};  // the viewport's Metal device (prepare; null: not Metal)
     gpu::LookPreview core_;   // planning, the stroke, the base the engine holds
     gpu::Overrides overrides_;
     std::unique_ptr<gpu::LookPlan> plan_;  // the drag's
