@@ -135,6 +135,8 @@ void bindHierarchy(py::module_& m) {
             s << ")";
             return s.str();
         });
+    m.def("guide_group_name", &guideGroupName, py::arg("text"),
+          "A guide group's name as it is kept: one word, spaces, commas and colons as '_' (the ends trimmed).");
     m.def("tube_shapes", &tubeShapeNames, "The tube shapes' names.");
     m.def(
         "tube_outline",
@@ -434,7 +436,8 @@ void bindHierarchy(py::module_& m) {
                  return g ? py::cast(*g) : py::none();
              },
              py::arg("id"), "The group, or None.")
-        .def("find_group", &GuideHierarchy::findGroup, py::arg("name"), "Group ID by name (NO_GROUP if absent).")
+        .def("find_group", &GuideHierarchy::findGroup, py::arg("name"),
+             "Group ID by name (NO_GROUP if absent); a name as typed finds the group it made (guide_group_name).")
         .def("group_depth", &GuideHierarchy::groupDepth, py::arg("id"))
         .def("max_depth", &GuideHierarchy::maxDepth)
         .def("remove_group", &GuideHierarchy::removeGroup, py::arg("id"), "Removes a group, its sub-groups and their guides.")

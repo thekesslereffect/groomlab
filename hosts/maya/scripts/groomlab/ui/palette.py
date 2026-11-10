@@ -1977,7 +1977,7 @@ class ToolPalette(QtWidgets.QWidget):
             return
         group = name.text().strip()
         try:
-            groomlab.add_guide_group(groom, group, parent.currentData() or None)
+            group = groomlab.add_guide_group(groom, group, parent.currentData() or None)  # one word: spaces as '_'
         except (RuntimeError, ValueError) as e:
             self.status.setText(str(e).strip())
             return

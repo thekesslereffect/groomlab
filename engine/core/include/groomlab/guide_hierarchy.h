@@ -122,6 +122,13 @@ struct ChildGenerationParams {
     std::uint64_t seed = 0;
 };
 
+// A guide group's name as it is kept: one word. The hosts' lists of group names (hidden groups,
+// group colors, a Guides node's exclude) part names at spaces and commas, and a color from its
+// name at ':', so each of those and any other whitespace becomes '_' (the ends trimmed first):
+// "Left brow" is Left_brow. addGroup, renameGroup and generateChildren name groups so; a host
+// that goes on to use the name it was given takes it from here.
+std::string guideGroupName(const std::string& text);
+
 // Tonic-style guide hierarchy: primary guides, children generated inside
 // their parents' tubes, grandchildren inside the children's tubes, and so on.
 // Children store offsets in their parent's frame, so editing a parent carries
@@ -134,7 +141,8 @@ public:
     void setGroupColor(GroupId id, const std::array<float, 3>& linearRgb);
     const std::vector<GuideGroup>& groups() const { return groups_; }
     const GuideGroup* group(GroupId id) const;
-    GroupId findGroup(const std::string& name) const;  // kNoGroup if absent
+    // kNoGroup if absent; a name as typed finds the group it made (guideGroupName).
+    GroupId findGroup(const std::string& name) const;
     int groupDepth(GroupId id) const;                   // 0 for root groups, -1 if unknown
     int maxDepth() const;                               // -1 when there are no groups
     // The deepest groups of each family: those holding guides (2 points or more) with no group
@@ -150,7 +158,7 @@ public:
 
     // Removes a group, its descendant groups and all their guides.
     void removeGroup(GroupId id);
-    // Throws std::invalid_argument when the name is empty or taken.
+    // Throws std::invalid_argument when the name is empty or taken (as guideGroupName makes it).
     void renameGroup(GroupId id, const std::string& name);
 
     // ---- Guides ---------------------------------------------------------

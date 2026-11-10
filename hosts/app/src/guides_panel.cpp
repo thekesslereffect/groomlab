@@ -497,7 +497,7 @@ bool GuidesPanel::addGroup(const std::string& parent, const std::string& name) {
             parentId = h.findGroup(parent);
             if (parentId == kNoGroup) throw std::invalid_argument("no group named " + parent);
         }
-        made = name.empty() ? uniqueName(h, parent.empty() ? "group" : parent + "_children") : name;
+        made = name.empty() ? uniqueName(h, parent.empty() ? "group" : parent + "_children") : guideGroupName(name);
         if (h.findGroup(made) != kNoGroup) throw std::invalid_argument("a group named " + made + " is there already");
         h.addGroup(made, parentId);
     });
@@ -517,7 +517,8 @@ bool GuidesPanel::removeGroup(const std::string& name) {
     });
 }
 
-bool GuidesPanel::renameGroup(const std::string& name, const std::string& to) {
+bool GuidesPanel::renameGroup(const std::string& name, const std::string& typed) {
+    const std::string to = guideGroupName(typed);  // one word: spaces as '_'
     if (!document_ || name.empty() || to.empty() || name == to) return false;
     const std::string error = document_->renameGroup(name, to);
     if (!error.empty()) {

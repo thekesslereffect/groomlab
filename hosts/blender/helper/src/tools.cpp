@@ -1367,7 +1367,7 @@ json guidesEdit(ToolState& t, const json& args) {
                 if (parentId == kNoGroup) fail("not_found", "no group named '" + parent + "'");
             }
             const std::string name = optString(args, "name", "");
-            made = name.empty() ? uniqueGroupName(h, parent.empty() ? "group" : parent + "_children") : name;
+            made = name.empty() ? uniqueGroupName(h, parent.empty() ? "group" : parent + "_children") : guideGroupName(name);
             if (h.findGroup(made) != kNoGroup) fail("bad_request", "a group named '" + made + "' is there already");
             h.addGroup(made, parentId);
         });
@@ -1375,7 +1375,7 @@ json guidesEdit(ToolState& t, const json& args) {
     } else if (op == "remove_group") {
         editGuides(t, "remove group", [&](GuideHierarchy& h) { h.removeGroup(groupNamed(h, args, "group")); });
     } else if (op == "rename_group") {
-        const std::string from = needString(args, "group"), to = needString(args, "name");
+        const std::string from = needString(args, "group"), to = guideGroupName(needString(args, "name"));  // one word
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) { hh.renameGroup(groupNamed(hh, args, "group"), to); });
         const auto color = t.groupColors.find(from);
         if (color != t.groupColors.end()) {  // its color follows it (and comes back with an undo)

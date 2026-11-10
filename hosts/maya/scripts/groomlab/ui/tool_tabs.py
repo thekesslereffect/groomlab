@@ -666,9 +666,10 @@ class GuidesTab(_GroomTab):
         name = item.data(0, QtCore.Qt.UserRole)
         text = item.text(0).strip()
         if text and text != name:  # renamed in place
-            if self.run(groomlab.rename_guide_group, self.groom, name, text):
-                item.setData(0, QtCore.Qt.UserRole, text)
-                self.owner.fill_levels(self.groom, select=text)
+            made = self.run(groomlab.rename_guide_group, self.groom, name, text)  # one word: spaces as '_'
+            if made:
+                item.setData(0, QtCore.Qt.UserRole, made)
+                self.owner.fill_levels(self.groom, select=made)
             QtCore.QTimer.singleShot(0, self.refresh)
 
     def context_menu(self, pos):
@@ -711,7 +712,9 @@ class GuidesTab(_GroomTab):
             return
         old = self.group()
         name, ok = QtWidgets.QInputDialog.getText(self, "Rename Group", "New name:", text=old)
-        if ok and name and name != old and self.run(groomlab.rename_guide_group, self.groom, old, name):
+        made = ok and name and name != old and self.run(groomlab.rename_guide_group, self.groom, old, name)
+        if made:
+            name = made  # one word: spaces as '_'
             self.refresh()
             found = self.tree.findItems(name, QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)
             if found:

@@ -2974,10 +2974,15 @@ class GuidesTabTest(unittest.TestCase):
         before = points()
         groomlab.brush_stroke(self.groom, "comb", [(0, 1.5, 0), (0.8, 1.5, 0)], radius=3.0, level=-1)
         self.assertEqual(points(), before)  # hidden: left alone
-        groomlab.rename_guide_group(self.groom, "primary", "main")  # stays hidden under its new name
-        self.assertEqual(groomlab.hidden_guide_groups(self.groom), ["main"])
-        groomlab.show_guide_group(self.groom, "main")
+        # Stays hidden under its new name, one word (a space would split the hidden list's names).
+        self.assertEqual(groomlab.rename_guide_group(self.groom, "primary", " main group"), "main_group")
+        self.assertEqual(groomlab.hidden_guide_groups(self.groom), ["main_group"])
+        self.tab.refresh()  # its eye shows it again
+        item = self.tab.tree.findItems("main_group", QtCore.Qt.MatchExactly | QtCore.Qt.MatchRecursive)[0]
+        self.assertEqual(self.tab.tree.itemWidget(item, 2).glyph, "eyeOff")
+        self.tab.tree.itemWidget(item, 2).click()
         self.assertEqual(groomlab.hidden_guide_groups(self.groom), [])
+        self.events()
         groomlab.brush_stroke(self.groom, "comb", [(0, 1.5, 0), (0.8, 1.5, 0)], radius=3.0, level=-1)
         self.assertNotEqual(points(), before)
 

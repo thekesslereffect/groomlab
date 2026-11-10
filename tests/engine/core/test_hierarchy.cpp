@@ -111,6 +111,36 @@ TEST(Hierarchy, GroupsFormATree) {
     EXPECT_EQ(h.findGroup("c"), kNoGroup);
 }
 
+// A group's name is one word: the hosts' lists of names (hidden groups, group colors, a Guides
+// node's exclude) part names at spaces and commas, so a name with a space would hide the wrong
+// groups, or none.
+TEST(Hierarchy, GroupNamesAreOneWord) {
+    EXPECT_EQ(guideGroupName("  Left brow "), "Left_brow");
+    EXPECT_EQ(guideGroupName("a,b:c\td"), "a_b_c_d");
+    EXPECT_EQ(guideGroupName("plain"), "plain");
+    GuideHierarchy h;
+    const GroupId brow = h.addGroup("Left brow");
+    EXPECT_EQ(h.group(brow)->name, "Left_brow");
+    EXPECT_EQ(h.findGroup("Left brow"), brow);  // as typed, it finds the group it made
+    EXPECT_THROW(h.addGroup("Left_brow"), std::invalid_argument);
+    const GroupId kids = h.generateChildren(brow, "brow kids", ChildGenerationParams{});
+    EXPECT_EQ(h.group(kids)->name, "brow_kids");
+    h.renameGroup(brow, "upper brow");
+    EXPECT_EQ(h.group(brow)->name, "upper_brow");
+    EXPECT_THROW(h.renameGroup(brow, "   "), std::invalid_argument);
+    // A group kept from before by a name with a space (loaded as it was) is still found by it.
+    GuideHierarchy before;
+    before.addGroup("old_one");
+    std::string text = before.toJson();
+    const std::size_t at = text.find("old_one");
+    ASSERT_NE(at, std::string::npos);
+    text.replace(at, 7, "old one");
+    const GuideHierarchy old = GuideHierarchy::fromJson(text);
+    ASSERT_EQ(old.groups().size(), 1u);
+    EXPECT_EQ(old.groups()[0].name, "old one");
+    EXPECT_EQ(old.findGroup("old one"), old.groups()[0].id);
+}
+
 TEST(Hierarchy, PrimaryGuidesRootAndFlip) {
     auto scalp = test::makePlane(8);
     GuideHierarchy h;

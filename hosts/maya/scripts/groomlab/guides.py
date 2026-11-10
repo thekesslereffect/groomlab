@@ -4,6 +4,7 @@ tools, the sculpting display, resampling and per-guide attributes."""
 
 import json
 
+import groomlab_core
 from maya import cmds
 
 from groomlab.base import ensure_plugin, undo_chunk, _shape_of
@@ -121,14 +122,17 @@ def group_users(groom, group):
 
 def add_guide_group(groom, name, parent=None):
     """A new, empty guide group: top-level, or with `parent` a child group of it
-    (guides placed in it attach to the nearest guide of the parent group)."""
+    (guides placed in it attach to the nearest guide of the parent group). Returns its name, one
+    word (spaces as '_': groomlab_core.guide_group_name)."""
     kwargs = {"under": parent} if parent else {}
     cmds.groomLabGuides(groom, addGroup=name, **kwargs)
-    return name
+    return groomlab_core.guide_group_name(name)
 
 
 def rename_guide_group(groom, old, new):
-    """Rename a guide group, and the graph params that name it (one undo step)."""
+    """Rename a guide group, and the graph params that name it (one undo step). Returns the new
+    name, one word (spaces as '_': groomlab_core.guide_group_name)."""
+    new = groomlab_core.guide_group_name(new)
     with undo_chunk("rename guide group"):
         cmds.groomLabGuides(groom, renameGroup=(old, new))
         graph = get_graph(groom)

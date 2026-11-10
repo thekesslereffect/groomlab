@@ -187,7 +187,8 @@ std::string GroomDocument::setGroupColor(const std::string& group, const std::st
     return {};
 }
 
-std::string GroomDocument::renameGroup(const std::string& from, const std::string& to) {
+std::string GroomDocument::renameGroup(const std::string& from, const std::string& typed) {
+    const std::string to = guideGroupName(typed);  // one word: spaces as '_'
     if (from.empty() || to.empty()) return "a group needs a name";
     if (from == to) return {};
     const std::map<std::string, std::string> before = groupColors_;

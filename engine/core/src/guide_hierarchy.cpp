@@ -317,8 +317,21 @@ int GuideHierarchy::resetGroupSegments(GroupId id) {
     return segments;
 }
 
-GroupId GuideHierarchy::addGroup(const std::string& name, GroupId parent) {
+std::string guideGroupName(const std::string& text) {
+    const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; };
+    std::size_t begin = 0, end = text.size();
+    while (begin < end && space(text[begin])) ++begin;
+    while (end > begin && space(text[end - 1])) --end;
+    std::string name = text.substr(begin, end - begin);
+    for (char& c : name) {
+        if (space(c) || c == ',' || c == ':') c = '_';
+    }
+    return name;
+}
+
+GroupId GuideHierarchy::addGroup(const std::string& given, GroupId parent) {
     invalidateHash();
+    const std::string name = guideGroupName(given);
     if (parent != kNoGroup && !group(parent)) throw std::invalid_argument("addGroup: unknown parent group");
     if (findGroup(name) != kNoGroup) throw std::invalid_argument("addGroup: group '" + name + "' exists");
     groups_.push_back({nextGroupId_++, name, parent});
@@ -335,6 +348,12 @@ const GuideGroup* GuideHierarchy::group(GroupId id) const {
 GroupId GuideHierarchy::findGroup(const std::string& name) const {
     for (const GuideGroup& g : groups_) {
         if (g.name == name) return g.id;
+    }
+    // A name as typed ("Left brow"): the group it made (Left_brow).
+    const std::string kept = guideGroupName(name);
+    if (kept == name) return kNoGroup;
+    for (const GuideGroup& g : groups_) {
+        if (g.name == kept) return g.id;
     }
     return kNoGroup;
 }
@@ -373,8 +392,9 @@ std::set<GroupId> GuideHierarchy::deepestGroups() const {
     return out;
 }
 
-void GuideHierarchy::renameGroup(GroupId id, const std::string& name) {
+void GuideHierarchy::renameGroup(GroupId id, const std::string& given) {
     invalidateHash();
+    const std::string name = guideGroupName(given);
     if (name.empty()) throw std::invalid_argument("a guide group needs a name");
     const GroupId existing = findGroup(name);
     if (existing != kNoGroup && existing != id) throw std::invalid_argument("a guide group named '" + name + "' exists");
