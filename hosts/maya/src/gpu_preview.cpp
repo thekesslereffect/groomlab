@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <map>
+#include <thread>
 
 // DirectX 11 and OpenGL through WGL: Windows only. Elsewhere the engine has no backend (engine/gpu,
 // look_engine_none.cpp): mayaDevice() finds none, so every drag and stroke previews on the CPU.
@@ -99,6 +100,12 @@ MayaDevice mayaDevice() {
     if (!renderer) return {};
     if (renderer->drawAPI() == MHWRender::kDirectX11) return {gpu::GpuApi::D3D11, renderer->GPUDeviceHandle()};
     if (renderer->drawAPIIsOpenGL()) return {gpu::GpuApi::OpenGL, wglGetCurrentContext()};
+#elif defined(GROOMLAB_HAS_METAL)
+    // macOS: Viewport 2.0 draws with OpenGL 4.1, which runs no kernels. The preview runs on the
+    // system's Metal device instead, into buffers the GPU shares, and its results are copied into
+    // the viewport's own buffers (runPlan).
+    MHWRender::MRenderer* renderer = MHWRender::MRenderer::theRenderer(false);
+    if (renderer && renderer->drawAPIIsOpenGL()) return {gpu::GpuApi::Metal, gpu::metalSystemDevice()};
 #endif
     return {};
 }
@@ -170,6 +177,9 @@ void prepareGpuKernels() {
 #ifdef _WIN32
     MHWRender::MRenderer* renderer = MHWRender::MRenderer::theRenderer(false);
     if (renderer && renderer->drawAPIIsOpenGL() && wglGetCurrentContext()) gpu::prepareGLLookKernels();
+#elif defined(GROOMLAB_HAS_METAL)
+    const MayaDevice device = mayaDevice();
+    if (device.api == gpu::GpuApi::Metal && device.handle) gpu::prepareMetalLookKernels(device.handle);  // (in the background)
 #endif
 }
 
@@ -179,7 +189,16 @@ namespace {
 // context current on the main thread, as the groom's draw finds them); `wait`: once they are (tests
 // before their first drag; five minutes at most).
 bool gpuKernelsReady(bool wait) {
-#ifndef _WIN32
+#if defined(GROOMLAB_HAS_METAL)
+    const MayaDevice device = mayaDevice();
+    if (device.api != gpu::GpuApi::Metal || !device.handle) return true;
+    const auto start = std::chrono::steady_clock::now();
+    while (!gpu::prepareMetalLookKernels(device.handle)) {
+        if (!wait || std::chrono::steady_clock::now() - start > std::chrono::minutes(5)) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return true;
+#elif !defined(_WIN32)
     (void)wait;
     return true;  // no kernels to wait for: no backend
 #else
@@ -314,12 +333,69 @@ void GpuLookPreview::setDrawable(bool drawable, const std::string& why) {
 }
 
 bool GpuLookPreview::wroteItemBuffers() const {
+#ifdef GROOMLAB_HAS_METAL
+    if (engine_ && engine_->api() == gpu::GpuApi::Metal) return metal_.copied;
+#endif
     return engine_ && !display_ && (engine_->api() == gpu::GpuApi::OpenGL ? engine_->wroteInPlace() : copyIntoViewportBuffers());
 }
 
 bool GpuLookPreview::wroteItemUvs() const {
+#ifdef GROOMLAB_HAS_METAL
+    if (engine_ && engine_->api() == gpu::GpuApi::Metal) return metal_.copiedUvs;
+#endif
     return engine_ && !display_ && engine_->api() == gpu::GpuApi::OpenGL && engine_->wroteUvs();
 }
+
+bool GpuLookPreview::writesItemInPlace() const {
+#ifdef GROOMLAB_HAS_METAL
+    if (engine_ && engine_->api() == gpu::GpuApi::Metal) return metal_.copied;  // (copied in: the item's own, as written in place)
+#endif
+    return engine_ && engine_->api() == gpu::GpuApi::OpenGL && engine_->wroteInPlace();
+}
+
+#ifdef GROOMLAB_HAS_METAL
+GpuLookPreview::MetalCopy::~MetalCopy() { release(); }
+
+void GpuLookPreview::MetalCopy::release() {
+    gpu::finishMetalRuns();  // (nothing the GPU still writes)
+    for (void*& b : buffers) {
+        gpu::releaseMetalBuffer(b);
+        b = nullptr;
+    }
+    capacity = 0;
+}
+
+void GpuLookPreview::MetalCopy::ensure(unsigned count, const StrandsPtr& uvs) {
+    copied = copiedUvs = false;
+    gpu::finishMetalRuns();  // (the last run done with them before the CPU writes the uvs)
+    if (count > capacity || count * 2u < capacity) {
+        release();
+        const unsigned room = count + count / 8 + 1;
+        for (int i = 0; i < 3; ++i) buffers[i] = gpu::createMetalBuffer(nullptr, std::size_t{room} * 12);
+        buffers[3] = gpu::createMetalBuffer(nullptr, std::size_t{room} * 8);
+        capacity = room;
+    }
+    this->count = count;
+    // The uvs as the CPU writes the lines' (u, width), the kernels' Width writing its own widths over them.
+    if (uvs && uvs->pointCount() == count) {
+        StrandLines(uvs, nullptr, false, nullptr).writeUvs(static_cast<float*>(gpu::metalBufferContents(buffers[3])), 2);
+    }
+}
+
+void GpuLookPreview::MetalCopy::copyInto(const GpuItemBuffers& item, bool lit, bool uvs) {
+    gpu::finishMetalRuns();
+    MHWRender::MVertexBuffer* const into[4] = {item.positions, lit ? item.normals : nullptr, lit ? item.tangents : nullptr,
+                                               uvs ? item.uvs : nullptr};
+    for (int i = 0; i < 4; ++i) {
+        if (!into[i]) continue;
+        if (into[i]->update(gpu::metalBufferContents(buffers[i]), 0, count, false) != MS::kSuccess) {
+            throw std::runtime_error("the viewport's buffer did not take the GPU's results");
+        }
+    }
+    copied = true;
+    copiedUvs = uvs && item.uvs;
+}
+#endif
 
 void GpuLookPreview::releaseDisplay() {
     if (!display_) return;
@@ -419,6 +495,14 @@ bool GpuLookPreview::accepts(GroomShape& shape, const gpu::Overrides& overrides,
         why_ = *why;
         return false;
     }
+#ifdef GROOMLAB_HAS_METAL
+    // Metal: the kernels compiled (prepareGpuKernels starts them; the system caches them, so only a
+    // first run ever waits); until they are, the CPU previews the drag.
+    if (mayaDevice().api == gpu::GpuApi::Metal && !gpu::prepareMetalLookKernels(mayaDevice().handle)) {
+        *why = why_ = "the Metal kernels are compiling";
+        return false;
+    }
+#endif
     return true;
 }
 
@@ -433,6 +517,11 @@ bool GpuLookPreview::ensureEngine() {
     engine_.reset();
     core_.forgetBase();
     try {
+#ifdef GROOMLAB_HAS_METAL
+        if (device.api == gpu::GpuApi::Metal) {
+            engine_ = gpu::makeMetalLookEngine(device.handle);
+        } else
+#endif
         engine_ = device.api == gpu::GpuApi::OpenGL ? gpu::makeGLLookEngine()
                                                     : gpu::makeD3D11LookEngine(static_cast<ID3D11Device*>(device.handle));
     } catch (const std::exception& e) {
@@ -476,6 +565,15 @@ bool GpuLookPreview::runPlan(GroomShape& shape, const gpu::LookPlan& p, const Gp
                 return false;
             }
             vp2Buffer_ = "OpenGL buffer " + std::to_string(reinterpret_cast<std::uintptr_t>(targets.positions));
+#ifdef GROOMLAB_HAS_METAL
+        } else if (engine_->api() == gpu::GpuApi::Metal) {
+            // macOS: buffers of the preview's own in memory the GPU shares, written in place, then
+            // copied into the viewport's own (copyFromMetal, after the run).
+            metal_.ensure(item.vertexCount, widths ? p.output : nullptr);
+            targets = {metal_.buffers[0], lit ? metal_.buffers[1] : nullptr, lit ? metal_.buffers[2] : nullptr, nullptr};
+            targets.uvs = widths ? metal_.buffers[3] : nullptr;
+            vp2Buffer_ = "Metal, copied into Viewport 2.0's own";
+#endif
         } else if (copyIntoViewportBuffers()) {
             // Copied into the viewport's own buffers (system-memory staged under DirectX 11: their
             // GPU copy is written, which holds until Maya uploads the staged copy again).
@@ -509,6 +607,9 @@ bool GpuLookPreview::runPlan(GroomShape& shape, const gpu::LookPlan& p, const Gp
         }
         const auto ran = std::chrono::steady_clock::now();
         engine_->run(p.run, lit, targets);
+#ifdef GROOMLAB_HAS_METAL
+        if (engine_->api() == gpu::GpuApi::Metal) metal_.copyInto(item, lit, widths);
+#endif
         lastRun_.runMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - ran).count();
         lastRun_.prepareMs = engine_->runUploadMs();
         for (int i = 0; i < 3; ++i) lastRun_.parts[i] = engine_->prepareParts()[i];
@@ -558,6 +659,13 @@ bool GpuLookPreview::armStroke(GroomShape& shape) {
         core_.refuseStroke();
         return false;
     }
+#ifdef GROOMLAB_HAS_METAL
+    if (mayaDevice().api == gpu::GpuApi::Metal && !gpu::prepareMetalLookKernels(mayaDevice().handle)) {
+        strokeWhy_ = "the Metal kernels are compiling";
+        core_.refuseStroke();
+        return false;
+    }
+#endif
     strokeWhy_.clear();
     stages_ = stageNames(*core_.strokePlan());
     shape.setGpuStroke(core_.stopAt());

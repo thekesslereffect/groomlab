@@ -125,7 +125,7 @@ public:
     bool wroteItemBuffers() const;
     // Whether the last run wrote widths into the item's own uvs (OpenGL, in place).
     bool wroteItemUvs() const;
-    bool writesItemInPlace() const { return engine_ && engine_->api() == gpu::GpuApi::OpenGL && engine_->wroteInPlace(); }
+    bool writesItemInPlace() const;
     // The override's word on whether the strands are drawn so a run can write them (lines, the
     // output's point count), with why not.
     void setDrawable(bool drawable, const std::string& why);
@@ -180,6 +180,24 @@ private:
     gpu::LookBounds bounds_, roomyBounds_;
     struct Display;
     std::unique_ptr<Display> display_;
+#ifdef GROOMLAB_HAS_METAL
+    // macOS (Metal): the run's buffers in memory the GPU shares (positions, normals, tangents
+    // float3; the lines' uvs float2), copied into the viewport's own after it.
+    struct MetalCopy {
+        void* buffers[4] = {};
+        unsigned capacity = 0, count = 0;
+        bool copied = false, copiedUvs = false;  // the last run's results went into the item's own (uvs: widths)
+        MetalCopy() = default;
+        MetalCopy(const MetalCopy&) = delete;
+        MetalCopy& operator=(const MetalCopy&) = delete;
+        ~MetalCopy();
+        void release();
+        // Buffers for `count` points (`uvs`: the lines' uvs written from these strands' point counts).
+        void ensure(unsigned count, const StrandsPtr& uvs);
+        void copyInto(const GpuItemBuffers& item, bool lit, bool uvs);
+    };
+    MetalCopy metal_;
+#endif
     std::string why_, vp2Buffer_, notDrawable_, stages_;
     bool drawable_ = false;
     std::size_t runs_ = 0, strokeRuns_ = 0;

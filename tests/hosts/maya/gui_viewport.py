@@ -2487,8 +2487,8 @@ def gpu_preview_check():
     import tempfile
 
     import groomlab
-    if not cmds.about(windows=True):
-        say("GPU preview: skipped (Windows only)")
+    if not cmds.about(windows=True) and not cmds.about(macOS=True):
+        say("GPU preview: skipped (Windows and macOS only)")
         return
     check("GPU preview: on by default", groomlab.gpu_preview())
     api = cmds.groomLabGpuPreview(drawApi=True)
