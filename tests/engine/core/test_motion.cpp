@@ -406,6 +406,17 @@ TEST(Jiggle, ParallelMatchesSerial) {
 TEST(Jiggle, HostsSampleHistoryOnlyForActiveJiggleNodes) {
     GraphDocument doc = loadGraphJson(chainGraph(R"({"name": "motion", "type": "Jiggle", "params": {"history": 7}})"));
     EXPECT_EQ(scalpHistoryFrames(doc.graph, doc.output), 7);
+    // Off where it evaluates by its evaluation mode: no history read there (an animator's
+    // renderOnly Jiggle costs the viewport nothing; a viewportOnly one, a render).
+    const NodeId jiggle = doc.node("motion");
+    doc.graph.setEvaluationMode(jiggle, EvaluationMode::RenderOnly);
+    EXPECT_EQ(scalpHistoryFrames(doc.graph, doc.output, 1), 0) << "the viewport";
+    EXPECT_EQ(scalpHistoryFrames(doc.graph, doc.output, 0), 7) << "a render";
+    EXPECT_EQ(scalpHistoryFrames(doc.graph, doc.output), 7) << "either";
+    doc.graph.setEvaluationMode(jiggle, EvaluationMode::ViewportOnly);
+    EXPECT_EQ(scalpHistoryFrames(doc.graph, doc.output, 1), 7);
+    EXPECT_EQ(scalpHistoryFrames(doc.graph, doc.output, 0), 0);
+    doc.graph.setEvaluationMode(jiggle, EvaluationMode::Always);
     doc.graph.setBypass(doc.node("motion"), true);
     EXPECT_EQ(scalpHistoryFrames(doc.graph, doc.output), 0);
     GraphDocument plain = loadGraphJson(chainGraph(""));

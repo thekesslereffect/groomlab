@@ -385,15 +385,17 @@ const Graph::Node& Graph::nodeRecord(NodeId id) const {
     return it->second;
 }
 
-bool Graph::forEachActiveUpstream(NodeId id, const ActiveNodeVisitor& visit, const std::string& prefix) const {
+bool Graph::forEachActiveUpstream(NodeId id, const ActiveNodeVisitor& visit, const std::string& prefix, int viewport) const {
     std::vector<NodeId> seen;
     std::function<bool(NodeId)> walk = [&](NodeId n) -> bool {
         if (n == kNoNode || !nodes_.count(n) || std::find(seen.begin(), seen.end(), n) != seen.end()) return true;
         seen.push_back(n);
         const Node& node = nodeRecord(n);
         const auto specs = node.op->inputs();
-        // Bypassed, it hands its first input on (as evaluateWithKeys does): only that runs.
-        const bool passThrough = node.bypass && !specs.empty() && specs[0].type == node.op->output().type &&
+        // Bypassed (or off in this context by its evaluation mode), it hands its first input on (as
+        // evaluateWithKeys does): only that runs.
+        const bool isOff = node.bypass || (viewport >= 0 && off(node, viewport != 0));
+        const bool passThrough = isOff && !specs.empty() && specs[0].type == node.op->output().type &&
                                  !node.inputs.empty() && node.inputs[0] != kNoNode;
         if (passThrough) return walk(node.inputs[0]);
         const std::string path = prefix + node.label;

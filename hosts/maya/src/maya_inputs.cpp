@@ -1470,10 +1470,10 @@ StrandsPtr NodeEvaluator::evaluate(float density, std::string* error, MeshPtr* s
         prepareSimulation(node_, *session_, sims_);  // the frame rate, the scalp at other times, the bakes
         const MTime now = fn.findPlug("time", true).asMTime();
         // The scalp's earlier frames, when a Jiggle node reads them (as the viewport does).
-        const int frames = session_->scalpHistoryFrames();
+        const int frames = session_->scalpHistoryFrames({}, 0);  // (renders and exports: a viewportOnly Jiggle is off)
         session_->setScalpHistory(frames > 0 && data.scalp
                                       ? sampleScalpHistory(node_, now, frames, joinedScalpPoints(data.scalp, data.scalps), scalpPast_,
-                                                           false, session_->scalpHistoryLoopFrames(now.as(MTime::uiUnit())),
+                                                           false, session_->scalpHistoryLoopFrames(now.as(MTime::uiUnit()), {}, 0),
                                                            data.scalps)
                                       : nullptr);
         return session_->evaluate(density, mayaSeconds(now), buildCards, gameExport);

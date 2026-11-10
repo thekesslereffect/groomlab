@@ -694,11 +694,12 @@ public:
     // brush strokes edit and write back). Null without guides. No graph run.
     HierarchyPtr authoredHierarchy() { return rootedHierarchy(); }
     // Earlier frames of the scalp the graph reads: the most `history` of the Jiggle nodes making
-    // the output (and `viewNode` when given).
-    int scalpHistoryFrames(const std::string& viewNode = {}) const;
+    // the output (and `viewNode` when given), in the viewport (`viewport` 1: a renderOnly one is
+    // off there), a render or export (0: a viewportOnly one is) or either (-1).
+    int scalpHistoryFrames(const std::string& viewNode = {}, int viewport = -1) const;
     // The frames a looping Jiggle among those reads at frame `now` past them (groom.h
     // scalpHistoryLoopFrames): the host samples these too.
-    std::vector<double> scalpHistoryLoopFrames(double now, const std::string& viewNode = {}) const;
+    std::vector<double> scalpHistoryLoopFrames(double now, const std::string& viewNode = {}, int viewport = -1) const;
     bool hasCardsNode() const;  // a Cards node makes the output
     bool hasStrandMeshNode() const;  // a StrandMesh node makes the output
     bool cardsEvaluated() const { return cardDoc_ != nullptr; }  // the last evaluation wanted cards

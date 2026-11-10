@@ -1657,14 +1657,16 @@ MStatus GroomShape::evaluate(MDataBlock& data, Lane& lane) {
     // time set by a script, an edit to its animation), every frame is read again, as the
     // animation of the frames before may have changed.
     const std::string view = data.inputValue(aViewNode).asString().asChar();
-    const int historyFrames = live ? session.scalpHistoryFrames(view) : 0;
+    // (In the viewport a renderOnly Jiggle is off: no history read for it; the render view's, its own.)
+    const int where = data.inputValue(aRenderView).asBool() ? 0 : 1;
+    const int historyFrames = live ? session.scalpHistoryFrames(view, where) : 0;
     if (live) scalpHistoryFrames_ = historyFrames;
     if (historyFrames > 0 && lane.rawScalp) {
         // Every scalp's earlier frames (the other scalps' after the groom's own), so hair on a
         // moving other scalp jiggles too.
         const bool reread = (meshTouched || scalpsTouched) && !MAnimControl::isPlaying() && !MAnimControl::isScrubbing();
         session.setScalpHistory(sampleScalpHistory(thisMObject(), now, historyFrames, joinedScalpPoints(lane.rawScalp, lane.scalps),
-                                                   scalpPast_, reread, session.scalpHistoryLoopFrames(now.as(MTime::uiUnit()), view),
+                                                   scalpPast_, reread, session.scalpHistoryLoopFrames(now.as(MTime::uiUnit()), view, where),
                                                    lane.scalps));
     } else {
         session.setScalpHistory(nullptr);

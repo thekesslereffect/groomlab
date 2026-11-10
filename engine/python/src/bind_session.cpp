@@ -348,7 +348,9 @@ void bindSession(py::module_& m) {
         .def("stats", [](const GroomSession& s) { return jsonLoads(s.stats().toJson()); },
              "What the last view did, as groomLabGraphStats reports it (dict).")
         .def("scalp_history_frames", &GroomSession::scalpHistoryFrames, py::arg("view_node") = std::string{},
-             "Earlier scalp frames the graph reads (Jiggle): hand them over with a host's scalp history.")
+             py::arg("viewport") = -1,
+             "Earlier scalp frames the graph reads (Jiggle): hand them over with a host's scalp history. viewport 1: "
+             "for the viewport (a renderOnly Jiggle off there), 0: a render or export (a viewportOnly one off), -1: either.")
         .def_property_readonly("has_cards_node", &GroomSession::hasCardsNode)
         .def("hair_look",
              [](const GroomSession& s) {

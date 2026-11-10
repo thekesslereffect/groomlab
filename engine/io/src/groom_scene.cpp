@@ -17,11 +17,13 @@ namespace {
 // cache's poses (evaluate and view share it, so a view sees what a render sees; a simulation
 // steps over other frames with the same).
 void feedTime(GroomSession& session, GroomScene& scene, const AlembicCurvesReader* guideCache, double seconds,
-              const std::string& viewNode) {
+              const std::string& viewNode, bool viewport = false) {
+    // (A Jiggle off where this evaluates, by its evaluation mode, reads no history.)
+    const int where = viewport ? 1 : 0;
     session.setScalp(scene.scalpAt(seconds));
-    session.setScalpHistory(scene.scalpHistoryAt(seconds, session.scalpHistoryFrames(viewNode),
+    session.setScalpHistory(scene.scalpHistoryAt(seconds, session.scalpHistoryFrames(viewNode, where),
                                                  session.scalpHistoryLoopFrames(secondsToFrame(seconds, session.framesPerSecond()),
-                                                                                viewNode)));
+                                                                                viewNode, where)));
     if (guideCache) {
         const StrandSet curves = guideCache->at(seconds);
         auto poses = std::make_shared<GuideSet>();
@@ -167,7 +169,7 @@ StrandsPtr GroomScene::evaluate(double seconds, float density) {
 }
 
 const ViewResult& GroomScene::view(const ViewRequest& request) {
-    feedTime(*session_, *this, guideCache_.get(), request.time, request.viewNode);
+    feedTime(*session_, *this, guideCache_.get(), request.time, request.viewNode, request.viewport);
     return session_->evaluate(request);
 }
 

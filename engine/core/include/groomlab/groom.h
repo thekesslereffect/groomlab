@@ -109,11 +109,13 @@ void setScalpHistoryExternal(ExternalInputs& externals, const ScalpHistoryPtr& h
 // How many earlier frames of the scalp the graph's result reads: the most `history` any Jiggle
 // node making `output` asks for (Graph::forEachActiveUpstream: not bypassed, on a Switch's picked
 // input, inside compounds); 0 without one. Hosts sample the scalp's past only when this is > 0.
-int scalpHistoryFrames(const Graph& graph, NodeId output);
+// `viewport` (Graph::forEachActiveUpstream's): 1 the viewport, where a renderOnly Jiggle is off, 0 a
+// render or export, where a viewportOnly one is; -1 every Jiggle not bypassed.
+int scalpHistoryFrames(const Graph& graph, NodeId output, int viewport = -1);
 // The frames a looping Jiggle making `output` reads at frame `now` past those (jiggleLoopFrame:
 // the frames before its loop's start, read from the end of its range), sorted, each once: the host
 // samples the scalp at these too (ScalpHistory's loop frames). Empty without a looping one.
-std::vector<double> scalpHistoryLoopFrames(const Graph& graph, NodeId output, double now);
+std::vector<double> scalpHistoryLoopFrames(const Graph& graph, NodeId output, double now, int viewport = -1);
 
 // Whether `output` depends on the evaluation time through the graph itself: a node upstream of
 // it (any input, inside compounds too) salts its key with the time (Wind with some strength,

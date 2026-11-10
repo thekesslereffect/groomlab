@@ -1015,7 +1015,11 @@ public:
     // is not walked (Operator::inputActive), and a compound's inner nodes that make its
     // result come right after it (Operator::forEachActiveInner). Unconnected nodes, field
     // and guide inputs never show. Paths start with `prefix`. False: `visit` stopped it.
-    bool forEachActiveUpstream(NodeId id, const ActiveNodeVisitor& visit, const std::string& prefix = {}) const;
+    // `viewport` 1 (the viewport) or 0 (renders, exports): a node its evaluation mode turns off
+    // there (renderOnly in the viewport, viewportOnly elsewhere) passes its first input on as a
+    // bypassed one does; -1: the modes left out (every node not bypassed).
+    bool forEachActiveUpstream(NodeId id, const ActiveNodeVisitor& visit, const std::string& prefix = {},
+                               int viewport = -1) const;
 
     // Evaluates a node, reusing cached results where keys are unchanged: its primary output.
     Value evaluate(NodeId id, const EvalContext& ctx = {});

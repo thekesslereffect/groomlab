@@ -76,7 +76,7 @@ void setScalpHistoryExternal(ExternalInputs& externals, const ScalpHistoryPtr& h
     if (history) externals.set("scalpHistory", history, history->hash);
 }
 
-int scalpHistoryFrames(const Graph& graph, NodeId output) {
+int scalpHistoryFrames(const Graph& graph, NodeId output, int viewport) {
     if (!graph.hasNode(output)) return 0;
     std::int64_t frames = 0;
     graph.forEachActiveUpstream(output, [&](const std::string&, const Operator& op) {
@@ -84,13 +84,13 @@ int scalpHistoryFrames(const Graph& graph, NodeId output) {
             frames = std::max(frames, op.params().getInt("history"));
         }
         return true;
-    });
+    }, {}, viewport);
     return static_cast<int>(frames);
 }
 
-std::vector<double> scalpHistoryLoopFrames(const Graph& graph, NodeId output, double now) {
+std::vector<double> scalpHistoryLoopFrames(const Graph& graph, NodeId output, double now, int viewport) {
     if (!graph.hasNode(output)) return {};
-    const auto plain = static_cast<double>(scalpHistoryFrames(graph, output));
+    const auto plain = static_cast<double>(scalpHistoryFrames(graph, output, viewport));
     std::vector<double> frames;
     graph.forEachActiveUpstream(output, [&](const std::string&, const Operator& op) {
         if (op.typeName() != op::kJiggle || !op.params().getBool("loop")) return true;
@@ -104,7 +104,7 @@ std::vector<double> scalpHistoryLoopFrames(const Graph& graph, NodeId output, do
             frames.push_back(frame);
         }
         return true;
-    });
+    }, {}, viewport);
     std::sort(frames.begin(), frames.end());
     frames.erase(std::unique(frames.begin(), frames.end(), [](double a, double b) { return std::abs(a - b) < 1e-6; }), frames.end());
     return frames;

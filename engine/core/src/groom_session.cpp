@@ -2352,25 +2352,27 @@ void GroomSession::releaseStroke() {
 
 // ---- What the last evaluation made ----------------------------------------------------------
 
-int GroomSession::scalpHistoryFrames(const std::string& viewNode) const {
+int GroomSession::scalpHistoryFrames(const std::string& viewNode, int viewport) const {
     if (!doc_) return 0;
-    int frames = groomlab::scalpHistoryFrames(doc_->graph, doc_->output);
+    int frames = groomlab::scalpHistoryFrames(doc_->graph, doc_->output, viewport);
     if (!viewNode.empty()) {
         const auto viewed = doc_->nodesByName.find(flat_.result(viewNode));
-        if (viewed != doc_->nodesByName.end()) frames = std::max(frames, groomlab::scalpHistoryFrames(doc_->graph, viewed->second));
+        if (viewed != doc_->nodesByName.end()) {
+            frames = std::max(frames, groomlab::scalpHistoryFrames(doc_->graph, viewed->second, viewport));
+        }
     }
     return frames;
 }
 
-std::vector<double> GroomSession::scalpHistoryLoopFrames(double now, const std::string& viewNode) const {
+std::vector<double> GroomSession::scalpHistoryLoopFrames(double now, const std::string& viewNode, int viewport) const {
     if (!doc_) return {};
     // Past the most frames either reads (the history's plain frames).
-    const int plain = scalpHistoryFrames(viewNode);
-    std::vector<double> frames = groomlab::scalpHistoryLoopFrames(doc_->graph, doc_->output, now);
+    const int plain = scalpHistoryFrames(viewNode, viewport);
+    std::vector<double> frames = groomlab::scalpHistoryLoopFrames(doc_->graph, doc_->output, now, viewport);
     if (!viewNode.empty()) {
         const auto viewed = doc_->nodesByName.find(flat_.result(viewNode));
         if (viewed != doc_->nodesByName.end()) {
-            const std::vector<double> more = groomlab::scalpHistoryLoopFrames(doc_->graph, viewed->second, now);
+            const std::vector<double> more = groomlab::scalpHistoryLoopFrames(doc_->graph, viewed->second, now, viewport);
             frames.insert(frames.end(), more.begin(), more.end());
         }
     }
@@ -2643,7 +2645,7 @@ GroomStats GroomSession::stats() const {
             if (const auto c = out.channels.find(flat_.result(compound)); c != out.channels.end()) out.channels[compound] = c->second;
         }
     }
-    out.scalpHistoryFrames = scalpHistoryFrames(v.viewedNode);
+    out.scalpHistoryFrames = scalpHistoryFrames(v.viewedNode, lastViewContext_.viewport ? 1 : 0);
     // The instances whose strand the view has (what resolve would place), counted without placing them.
     // Counted once per result (a host asks for stats after every evaluation, and between them).
     if (strands && strands->instances() && !strands->instances()->empty()) {
