@@ -3902,7 +3902,8 @@ class DockableWindowsTest(unittest.TestCase):
             entries = [utilities + "|" + i for i in cmds.menu(utilities, query=True, itemArray=True)
                        if not cmds.menuItem(i, query=True, divider=True)]
             self.assertEqual([cmds.menuItem(i, query=True, label=True) for i in entries],
-                             ["Guides to Curves", "Curves to Guides...", "Strands to Curves...", "To Mesh...",
+                             ["Guides to Curves", "Curves to Guides...", "Tubes to Curves...",
+                              "Convert Tubes to GroomLab Tubes", "Strands to Curves...", "To Mesh...",
                               "Bake Node to Guides...", "Bake Scale Maps", "Bake Follicle Map", "Delete All Flow Arrows",
                               "Transfer Groom to Scalp...",
                               "Copy Graph to Other Grooms...", "Find Missing Files...", "Collect Files"])
