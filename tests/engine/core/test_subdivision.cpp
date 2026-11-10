@@ -1007,15 +1007,25 @@ Layout layoutOf(GroomSession& session) {
     const GraphDocument* doc = session.viewDocument();
     const NodeId scatter = doc->nodesByName.at("scatter"), autoClump = doc->nodesByName.at("auto");
     out.scattered = valueAs<StrandsPtr>(doc->graph.cachedValue(scatter));
-    // The first Clump's own centers: the strands it chose (by root).
+    // The first Clump's own centers: the strands it chose (by root), each moved to its spot on the
+    // scalp (ClumpState::offsets), by its ID.
     ClumpState state;
     EXPECT_TRUE(clumpState(doc->graph.node(autoClump), valueAs<StrandsPtr>(doc->graph.cachedValue(autoClump)), &state));
     out.chosen = state.chosen;
+    std::vector<std::uint64_t> ids(out.chosen.size());
+    for (std::size_t g = 0; g < ids.size(); ++g) ids[g] = out.scattered->ids()[out.chosen[g]];
+    for (std::size_t c = 0; c < state.centerGuides.size() && c < state.centerIds.size(); ++c) {
+        if (state.centerGuides[c] < ids.size()) ids[state.centerGuides[c]] = state.centerIds[c];
+    }
     auto centers = std::make_shared<GuideSet>();
-    for (const std::size_t s : out.chosen) {
+    for (std::size_t g = 0; g < out.chosen.size(); ++g) {
+        const std::size_t s = out.chosen[g];
         const Vec3f* pts = out.scattered->strandPoints(s);
-        centers->add(out.scattered->ids()[s], std::vector<Vec3f>(pts, pts + out.scattered->strandPointCount(s))).root =
-            out.scattered->roots()[s];
+        std::vector<Vec3f> axis(pts, pts + out.scattered->strandPointCount(s));
+        if (g < state.offsets.size()) {
+            for (Vec3f& q : axis) q = q + state.offsets[g];
+        }
+        centers->add(ids[g], std::move(axis)).root = out.scattered->roots()[s];
     }
     out.centers = centers;
     return out;
@@ -1083,7 +1093,7 @@ TEST(SubdivisionBinding, TheLevelKeepsTheStrandsAndTheirClumps) {
     }
 }
 
-// Focus on a Clump picking its own centers: its strands, its centers as dots at their roots on the
+// Focus on a Clump picking its own centers: its strands, its centers as dots at their spots on the
 // scalp drawn (the guides' dots, in the theme's clumpCenters color). Off again: no dots.
 TEST(ClumpCenterDots, AViewedClumpDrawsItsCenters) {
     const auto head = quadSphere(12, 16);
@@ -1109,7 +1119,7 @@ TEST(ClumpCenterDots, AViewedClumpDrawsItsCenters) {
         ASSERT_EQ(autoView.clumpCenters->size(), layout.centers->size());
         for (std::size_t c = 0; c < layout.centers->size(); ++c) {
             const Vec3f& dot = (*autoView.clumpCenters)[c];
-            EXPECT_LT((dot - surface.position(layout.centers->guides()[c].root)).length(), 1e-5f);
+            EXPECT_LT((dot - layout.centers->guides()[c].points[0]).length(), 1e-5f);  // its axis's root (its spot)
             EXPECT_LT((surface.closestPoint(dot).position - dot).length(), 1e-4f);  // on the scalp drawn
         }
         const DisplayFrame& frame = builder.update(DisplayInputs::fromView(autoView), settings);

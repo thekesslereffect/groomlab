@@ -14,7 +14,7 @@
     {"name": "guides", "type": "Guides", "ui": {"x": 0, "y": 180}},
     {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 15.0, "guideRadius": 1.0}, "ui": {"x": 240, "y": 0}},
     {"name": "interpolate", "type": "Interpolate", "params": {"fillTubes": true, "tubeBlend": 0.35}, "ui": {"x": 480, "y": 0}},
-    {"name": "clump", "type": "Clump", "params": {"clumpBy": "size", "size": 0.6, "strength": 0.5, "followTubes": true, "profile": [[0, 0], [0.3, 0.25], [0.8, 0.6], [1, 0.7]]}, "ui": {"x": 720, "y": 0}},
+    {"name": "clump", "type": "Clump", "version": 1, "params": {"clumpBy": "size", "size": 0.6, "strength": 0.5, "followTubes": true, "profile": [[0, 0], [0.3, 0.25], [0.8, 0.6], [1, 0.7]]}, "ui": {"x": 720, "y": 0}},
     {"name": "noise", "type": "Noise", "params": {"amplitude": 0.02, "frequency": 2.0}, "ui": {"x": 960, "y": 0}},
     {"name": "color", "type": "HairColor", "params": {"melanin": 0.55, "redness": 0.1, "melaninRandom": 0.04}, "ui": {"x": 1200, "y": 0}},
     {"name": "width", "type": "Width", "params": {"width": 0.007, "profile": [[0, 1], [0.6, 0.85], [1, 0.1]]}, "ui": {"x": 1440, "y": 0}},

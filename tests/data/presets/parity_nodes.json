@@ -11,7 +11,7 @@
     {"name": "merge", "type": "Merge"},
     {"name": "merge2", "type": "Merge"},
     {"name": "interpolate", "type": "Interpolate"},
-    {"name": "clump", "type": "Clump", "params": {"count": 400, "strength": 0.8, "lockRadius": 0.05, "volumize": 0.4, "strengthRandom": 0.5, "lockRadiusRandom": 0.3, "copyAmount": 0.5, "copyNeighbors": 2}},
+    {"name": "clump", "type": "Clump", "version": 1, "params": {"count": 400, "strength": 0.8, "lockRadius": 0.05, "volumize": 0.4, "strengthRandom": 0.5, "lockRadiusRandom": 0.3, "copyAmount": 0.5, "copyNeighbors": 2}},
     {"name": "transform", "type": "Transform", "params": {"rotate": [5.0, 20.0, 0.0], "translateRandom": [0.02, 0.0, 0.02], "rotateRandom": [3.0, 15.0, 0.0], "scaleRandom": 0.15, "seed": 2}},
     {"name": "direction", "type": "Direction", "params": {"inclination": 40.0, "roll": 15.0, "rollRandom": 30.0, "strength": 0.5}},
     {"name": "bend", "type": "Bend", "params": {"angle": -110.0, "start": 0.4, "end": 1.0, "randomness": 0.4}},

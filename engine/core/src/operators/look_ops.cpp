@@ -332,6 +332,11 @@ struct CenterPlan {
     // weight left out): the same strands while no root moves.
     bool byRoots = false;
     float spacing = 0.0f;  // how far apart the centers were planned (the size, or the count's spacing)
+    // Centers on the scalp (Clump's version 2, on a scalp): each even center is a dart's spot on
+    // the rest scalp itself, not the root of the strand it lands near (`even` that strand, its
+    // axis at randomness 0), so the count is the scalp's, never the preview core's: a center takes
+    // the shape of the core strand rooted nearest its spot, moved there (clumpAxisOffsets).
+    bool onSpots = false;
 };
 // Darts per clump (per spacing squared) for kEvenShare 0.7: the density of darts whose priority
 // pick, kept kEvenShare apart, leaves one center per spacing squared (random sequential
@@ -339,8 +344,9 @@ struct CenterPlan {
 constexpr float kDartsPerClump = 4.98f;
 
 // `scale`: the groom's (EvalContext::scale), the spacing by count rounds at.
+// `spots`: centers on the scalp (CenterPlan::onSpots), where there is one.
 CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::size_t count, float size,
-                            const ScalarField& weight, std::uint64_t seed, double scale = 1.0) {
+                            const ScalarField& weight, std::uint64_t seed, double scale = 1.0, bool spots = false) {
     CenterPlan plan;
     const bool bySize = size > 0.0f && std::isfinite(size);
     if (in.empty() || (count == 0 && !bySize)) return plan;
@@ -444,8 +450,11 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
     struct Dart {
         std::uint64_t priority;
         std::uint32_t candidate;
+        std::int32_t face = -1;  // centers on the scalp: the dart's face of the cage and its spot there
+        Vec3f at;
     };
     std::vector<Dart> darts;
+    plan.onSpots = spots && onScalp;
     std::shared_ptr<const PointIndex> rooted;  // the candidates' roots (on the scalp)
     if (onScalp) {
         // On the scalp: points on its rest surface, kDartsPerClump per spacing squared, each face's
@@ -469,6 +478,14 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
         }
         rooted = std::make_shared<const PointIndex>(positions);
         const PointIndex& nearest = *rooted;
+        // Where strands grow: a dart within the spacing of a candidate; with centers on the scalp,
+        // spaced finer than the core strands can be, within twice their spacing (a spot farther
+        // from every one of them is bald scalp: past 2 spacings, about 1 in 300000 at random).
+        float land2 = spacing2;
+        if (plan.onSpots) {
+            const float coreSpacing = std::sqrt(static_cast<float>(area) / static_cast<float>(n));
+            land2 = std::max(spacing2, 4.0f * coreSpacing * coreSpacing);
+        }
         darts.resize(first[faces]);
         parallelFor(0, faces, [&](std::size_t f) {
             const std::uint64_t faceHash = hashCombine(seedHash, f);
@@ -479,9 +496,11 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
                 const float r2 = rng.nextFloat();
                 const StrandRoot root{static_cast<std::int32_t>(f), su * (1.0f - r2), su * r2};
                 float d2 = 0.0f;
-                const std::size_t c = nearest.nearest(cage->restPositionOr(root, cage->position(root)), &d2);
-                const bool lands = c != SIZE_MAX && d2 <= spacing2 && letThrough(c);
-                darts[at] = {hash64(id), lands ? static_cast<std::uint32_t>(c) : std::numeric_limits<std::uint32_t>::max()};
+                const Vec3f spot = cage->restPositionOr(root, cage->position(root));
+                const std::size_t c = nearest.nearest(spot, &d2);
+                const bool lands = c != SIZE_MAX && d2 <= land2 && letThrough(c);
+                darts[at] = {hash64(id), lands ? static_cast<std::uint32_t>(c) : std::numeric_limits<std::uint32_t>::max(),
+                             static_cast<std::int32_t>(f), spot};
             }
         }, 64);
     } else {
@@ -520,10 +539,14 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
     // apart, and a distance at the very edge would go either way with the rounding of the scene's
     // scale; this keeps such a pair on one side at every scale.
     const float barred = apart * (1.0f - 1e-4f);
+    std::vector<std::int32_t> evenFaces;  // centers on the scalp: each one's face of the cage
     for (const Dart& dart : darts) {
         const std::uint32_t i = dart.candidate;
-        if (i >= n || taken[i]) continue;  // no strands grow here, or a center already
-        const Vec3f& r = positions[i];
+        if (i >= n) continue;  // no strands grow here
+        // Centers on the scalp: the dart's spot, however many share the strand nearest it; else
+        // that strand's root, once.
+        if (!plan.onSpots && taken[i]) continue;
+        const Vec3f& r = plan.onSpots ? dart.at : positions[i];
         bool tooClose = false;
         centersNear.around(r, [&](const Vec3f& q, std::uint32_t) {
             tooClose = (q - r).length() < barred;
@@ -533,8 +556,11 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
         centersNear.add(r, i);
         taken[i] = 1;
         plan.even.push_back(candidateStrands[i]);
-        plan.ids.push_back(in.ids()[candidateStrands[i]]);
+        // A spot's ID: its dart's (the same while the scalp's faces and the sizing are), apart
+        // from the strands' (a hash of a 64-bit number, 0 never).
+        plan.ids.push_back(plan.onSpots ? (hashCombine(dart.priority, 0x5B07ull) | 1u) : in.ids()[candidateStrands[i]]);
         plan.evenAt.push_back(r);
+        if (plan.onSpots) evenFaces.push_back(dart.face);
     }
     // 3. Each center's way to its random spot: anywhere in the disc kRandomReach spacings around it
     // on the scalp (square to its rest face's normal; off one, in the ball), by a hash of its ID.
@@ -546,8 +572,8 @@ CenterPlan planClumpCenters(const StrandSet& in, const ScalpMesh* scalp, std::si
         // scalp is turned (a groom read in another up axis grows the same clumps, turned).
         Vec3f normal{}, edge{};
         if (onScalp) {
-            const StrandRoot root = binding.toCage(in.roots()[plan.even[c]]);
-            const auto& tri = cage->triangles()[static_cast<std::size_t>(root.face)];
+            const std::int32_t face = plan.onSpots ? evenFaces[c] : binding.toCage(in.roots()[plan.even[c]]).face;
+            const auto& tri = cage->triangles()[static_cast<std::size_t>(face)];
             const std::vector<Vec3f>& pts = cage->hasRest() ? cage->restPoints() : cage->points();
             const Vec3f a = pts[static_cast<std::size_t>(tri[0])];
             edge = pts[static_cast<std::size_t>(tri[1])] - a;
@@ -603,6 +629,56 @@ std::vector<std::size_t> placeClumpCenters(const CenterPlan& plan, float randomn
     return chosen;
 }
 
+// Centers on the scalp (CenterPlan::onSpots): per center c below `count` (its axis strand
+// `strands[c]` of `in`, its spot `at[c]` on the rest scalp), how far its axis moves from its
+// strand's root to its spot on the scalp as it is now: the spot's way from that root on the rest
+// scalp, turned as the root's face of the cage turned from its rest pose (its first edge and its
+// normal), so the clumps move with a moving head (a stretch of the scalp left out: the ways are a
+// core strand's spacing or so). Zero from `count` on (centers that are their strands: a tube's).
+std::vector<Vec3f> clumpAxisOffsets(const StrandSet& in, const ScalpMesh* scalp, const std::vector<std::size_t>& strands,
+                                    const std::vector<Vec3f>& at, std::size_t count) {
+    std::vector<Vec3f> out(strands.size());
+    const CageBinding binding(scalp);
+    const ScalpMesh* cage = binding.cage();
+    if (!cage) return out;
+    const std::vector<Vec3f>& now = cage->points();
+    const std::vector<Vec3f>& rest = cage->hasRest() ? cage->restPoints() : now;
+    parallelFor(0, std::min({count, strands.size(), at.size()}), [&](std::size_t c) {
+        const std::size_t s = strands[c];
+        const std::size_t points = in.strandPointCount(s);
+        const Vec3f way = at[c] - binding.stablePosition(in.roots()[s], points ? in.strandPoints(s)[0] : Vec3f{});
+        out[c] = way;
+        const StrandRoot root = binding.toCage(in.roots()[s]);
+        if (&rest == &now || root.face < 0 || static_cast<std::size_t>(root.face) >= cage->triangleCount()) return;
+        const auto& tri = cage->triangles()[static_cast<std::size_t>(root.face)];
+        auto frame = [&](const std::vector<Vec3f>& p, Vec3f* e, Vec3f* o, Vec3f* n) {
+            const Vec3f a = p[static_cast<std::size_t>(tri[0])];
+            const Vec3f edge = p[static_cast<std::size_t>(tri[1])] - a;
+            const Vec3f normal = edge.cross(p[static_cast<std::size_t>(tri[2])] - a);
+            if (!(edge.dot(edge) > 0.0f) || !(normal.dot(normal) > 0.0f)) return false;
+            *e = edge.normalized();
+            *n = normal.normalized();
+            *o = n->cross(*e);
+            return true;
+        };
+        Vec3f e0, o0, n0, e1, o1, n1;
+        if (!frame(rest, &e0, &o0, &n0) || !frame(now, &e1, &o1, &n1)) return;
+        out[c] = e1 * way.dot(e0) + o1 * way.dot(o0) + n1 * way.dot(n0);
+    }, 256);
+    // The axis's root back on the scalp drawn (a spot moved by the randomness went along its
+    // face's plane, a chord off a curved scalp): the scalp's point nearest where it moved to.
+    if (scalp && scalp->triangleCount() > 0) {
+        parallelFor(0, std::min({count, strands.size(), at.size()}), [&](std::size_t c) {
+            const std::size_t s = strands[c];
+            if (in.strandPointCount(s) == 0) return;
+            const Vec3f root = in.strandPoints(s)[0];
+            const SurfacePoint near = scalp->closestPoint(root + out[c]);
+            if (near.root.face >= 0) out[c] = near.position - root;
+        }, 256);
+    }
+    return out;
+}
+
 // Clump's followTubes: the centers of its own for strands filling tube guides (an Interpolate's
 // fillTubes: tubeId, tubeU, tubeV). Of the centers `strands` (their IDs `ids`, their spots `at`)
 // picked over the whole scalp, those on a strand in a tube give way; then each tube picks its own
@@ -614,7 +690,8 @@ std::vector<std::size_t> placeClumpCenters(const CenterPlan& plan, float randomn
 // gathering it toward one at the same distance along gathers it in section space: the clumps
 // flatten, twist and taper with the tube. Tubes in their numbers' order, each picked on its own:
 // the same whatever the thread count.
-void addTubeCenters(const StrandSet& in, const std::vector<float>& tubeIds, const ScalpMesh* scalp, float spacing,
+// Returns how many of the centers given stay (the first ones, in their order).
+std::size_t addTubeCenters(const StrandSet& in, const std::vector<float>& tubeIds, const ScalpMesh* scalp, float spacing,
                     float randomness, const ScalarField& weight, std::uint64_t seed, double scale,
                     std::vector<std::size_t>& strands, std::vector<StrandId>& ids, std::vector<Vec3f>& at) {
     std::size_t kept = 0;
@@ -628,7 +705,7 @@ void addTubeCenters(const StrandSet& in, const std::vector<float>& tubeIds, cons
     strands.resize(kept);
     ids.resize(kept);
     at.resize(kept);
-    if (!(spacing > 0.0f) || !std::isfinite(spacing)) return;
+    if (!(spacing > 0.0f) || !std::isfinite(spacing)) return kept;
     const PreviewCore core(in);
     const bool weighted = !weight.isConstant() || weight.maximum() < 1.0f;
     std::map<float, std::vector<std::size_t>> byTube;
@@ -671,6 +748,7 @@ void addTubeCenters(const StrandSet& in, const std::vector<float>& tubeIds, cons
         ids.insert(ids.end(), p.ids.begin(), p.ids.end());
         at.insert(at.end(), p.at.begin(), p.at.end());
     }
+    return kept;
 }
 
 // The region number followTubes gives a strand in tube n (kTubeRegionBase + n): apart from any
@@ -690,9 +768,12 @@ std::vector<float> clumpNumbers(const std::vector<const ClumpCenter*>& centers) 
 // toward the tip as the profile ramp says, onto the clump's axis at the same
 // arc length from the root. Chain Clumps (with different sizes, or guide levels
 // as centers) for multi-level clumping. centersFrom says where its centers come from: pick
-// (the default) picks them among its strands (clumpBy: about `count`, or `size` apart, the strands
-// `centerWeight` lets through; planClumpCenters, placeClumpCenters), so a Clump alone clumps; each
-// axis is the picked strand. The others take the centers input, guides or strands
+// (the default) picks them on the scalp where its strands grow (clumpBy: about `count`, or `size`
+// apart, near the strands `centerWeight` lets through; planClumpCenters, placeClumpCenters), so a
+// Clump alone clumps, as many clumps as asked; each axis is the core strand rooted nearest its
+// spot, moved there (clumpAxisOffsets: Yeti's and XGen's clump curves, the groom's shape there).
+// (Version 1, saved before: the centers are strands of the preview core themselves, each axis its
+// strand, so at most a few thousand.) The others take the centers input, guides or strands
 // (a low-density Scatter, ToGuides, guide levels): inputPoints, they
 // only place the clumps (a single point will do) and each axis is the core strand the
 // clump gathers nearest its center's root (XGen's clump guides: the hair as grown
@@ -720,6 +801,9 @@ public:
     // The rest scalp places roots for the nearest-center search; parts limit it.
     std::vector<std::string> externalInputs() const override { return {"scalp", "parts"}; }
     std::string typeName() const override { return op::kClump; }
+    // 2: centers it picks lie on the scalp, as many as the count asks (CenterPlan::onSpots); nodes
+    // saved before keep 1, their centers among the strands' preview core (at most a few thousand).
+    int version() const override { return 2; }
     std::string category() const override { return "look"; }
     std::vector<PortSpec> inputs() const override {
         return {{"strands", PortType::Strands}, {"centers", PortType::Curves, true}};  // guides or strands
@@ -732,8 +816,9 @@ public:
                 .soft(-1, 1),
             {"profile", Ramp{{0.0f, 0.0f}, {0.4f, 0.5f}, {1.0f, 1.0f}}, "Pull along the length, root to tip"},
             ParamSpec{"centersFrom", std::string("pick"),
-                      "Where the clumps' centers come from: pick: it picks them among the strands (clumpBy), each axis "
-                      "the picked strand, and a centers input is ignored; inputPoints: the centers input (guides or "
+                      "Where the clumps' centers come from: pick: it picks them on the scalp where strands grow "
+                      "(clumpBy: as many as it asks), each axis the shape of the hair grown nearest, moved there, and "
+                      "a centers input is ignored; inputPoints: the centers input (guides or "
                       "strands: a Scatter, guides, single points) only says where the clumps are (their roots), each "
                       "axis the strand it gathers nearest its center's root (the hair as grown there); inputCurves: each "
                       "axis is the center curve itself (groomed clump curves, a Noise on the centers waving each clump "
@@ -888,6 +973,7 @@ public:
         state->centerIds = made_.ids;
         state->centerRoots = made_.roots;
         state->picked = made_.picked;
+        state->offsets = made_.offsets;
         return true;
     }
     // Masked: its state answers for the mixed result the graph keeps (Operator::resultMixed).
@@ -918,6 +1004,7 @@ private:
         std::vector<StrandId> ids;              // per center: its ID (ClumpState::centerIds)
         std::shared_ptr<const std::vector<float>> numbers;  // per center: its number (clumpNumbers; none without a channel)
         std::vector<std::size_t> picked;        // centers of its own: the strand each guide is (ClumpState)
+        std::vector<Vec3f> offsets;             // centers on the scalp: per guide, its axis's offset (ClumpState)
         // Regions (regionChannel): the strands' regions' hash (0: none), each center's region, and
         // whether some center's is its nearest strand's.
         std::uint64_t regionHash = 0;
@@ -995,6 +1082,9 @@ private:
         GuidesPtr centerGuideSet;
         StrandsPtr centerStrands;
         std::vector<std::size_t> centerIndices;  // (strands as centers) each center's strand
+        // Centers on the scalp (CenterPlan::onSpots): per center its axis's offset from its strand
+        // (clumpAxisOffsets), its curve that strand's resampled, moved by it.
+        std::vector<Vec3f> axisOffsets;
         auto guideCenters = [&](const GuidesPtr& guides) {
             centerGuideSet = guides;
             given.resize(guides->guides().size());
@@ -1072,15 +1162,18 @@ private:
                 // profile, radius... picks again from nothing new); the centers are the chosen
                 // strands as they come now. A weight that varies per strand picks anew.
                 const bool keyed = weight.isConstant();
+                // Version 2: centers on the scalp (CenterPlan::onSpots); 1 (saved before, a Wet's
+                // levels): among the strands, as many as the preview core holds at most.
+                const bool spots = nodeVersion() >= 2;
                 const std::uint64_t key =
-                    keyed ? pickKey(*in, scalpOf(ctx), sizing, weight.maximum(), seed) : 0;
+                    keyed ? hashCombine(pickKey(*in, scalpOf(ctx), sizing, weight.maximum(), seed), spots ? 2u : 1u) : 0;
                 std::shared_ptr<const Pick> pick = keyed ? findPick(key) : nullptr;
                 // A dab moves no root: incrementally, only a kept pick by roots (the same centers,
                 // as they come now); anything else picks in full.
                 if (incremental && !(pick && pick->byRoots)) return false;
                 if (!pick) {
                     pick = std::make_shared<const Pick>(
-                        planClumpCenters(*in, scalpOf(ctx), sizing.count, sizing.size, weight, seed, ctx.scale));
+                        planClumpCenters(*in, scalpOf(ctx), sizing.count, sizing.size, weight, seed, ctx.scale, spots));
                     if (keyed) keepPick(key, pick);
                 }
                 // Each center moved `randomness` of its way to its random spot, the strand rooted
@@ -1089,11 +1182,15 @@ private:
                 // randomness moves the borders between clumps only a little.
                 std::vector<std::size_t> now = placeClumpCenters(*pick, sizing.randomness, &pickedAt);
                 std::vector<StrandId> nowIds = pick->ids;
+                std::size_t planned = now.size();  // the plan's (the rest a tube's, followTubes)
                 if (tubeIds) {
-                    addTubeCenters(*in, *tubeIds, scalpOf(ctx), pick->spacing, sizing.randomness, weight, seed, ctx.scale, now,
-                                   nowIds, pickedAt);
+                    planned = addTubeCenters(*in, *tubeIds, scalpOf(ctx), pick->spacing, sizing.randomness, weight, seed,
+                                             ctx.scale, now, nowIds, pickedAt);
                 }
                 strandCenters(in, now, &nowIds);
+                // Each axis its strand moved from the strand's root to the center's spot (its curve
+                // resampled, then moved: as look.slang CentersCS makes it).
+                if (pick->onSpots) axisOffsets = clumpAxisOffsets(*in, scalpOf(ctx), now, pickedAt, planned);
                 for (ClumpCenter& c : given) c.region = c.feather = c.side = std::numeric_limits<float>::quiet_NaN();  // (a pick's carry none)
                 if (pick->byRoots && !tubeIds) chosen = now;
                 picked = now;
@@ -1180,6 +1277,9 @@ private:
                 thread_local std::vector<Vec3f> resampled;
                 resampled.resize(kCenterSamples);
                 resampleByArcLengthInto(g.points, g.count, resampled.data(), kCenterSamples);
+                if (guide < axisOffsets.size()) {
+                    for (Vec3f& q : resampled) q = q + axisOffsets[guide];
+                }
                 starts[c] = resampled.front();
                 std::copy(resampled.begin(), resampled.end(), curves.begin() + static_cast<std::ptrdiff_t>(c * kCenterSamples));
             }
@@ -1538,6 +1638,7 @@ private:
             for (std::size_t c = 0; c < used.size(); ++c) made_.ids[c] = used[c]->id;
             made_.numbers = numbers;
             made_.picked = std::move(picked);
+            made_.offsets = std::move(axisOffsets);
             made_.queries = std::move(queries);
             made_.partsKey = partsKey;
             made_.regionHash = regionHash;

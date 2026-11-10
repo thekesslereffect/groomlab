@@ -266,6 +266,9 @@ struct ClumpInputs {
     // make them from the strands it moved.
     std::shared_ptr<const std::vector<Vec3f>> curves;
     std::shared_ptr<const std::vector<std::uint32_t>> chosen;
+    // With `chosen`: per center how far its curve lies from that strand (a Clump's centers on the
+    // scalp: ClumpState::offsets), the curve the strand moved by it; null: none (every curve its strand).
+    std::shared_ptr<const std::vector<Vec3f>> offsets;
     // centersFrom inputCurves, the centers made by a branch the run moves (a Scatter's strands
     // through an Interpolate of the stroke's guides, a Noise): that branch's own run, made on the
     // GPU before the Clump; `chosen` then names each center's strand of its result.

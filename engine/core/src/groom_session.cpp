@@ -1514,15 +1514,15 @@ std::shared_ptr<const std::vector<Vec3f>> GroomSession::clumpCenterDots(GraphDoc
         centers = valueAs<GuidesPtr>(value);
         centerStrands = valueAs<StrandsPtr>(value);
     } else {
-        // A Clump picking its own centers: the strands they are (their roots), else the centers'
-        // curves as it kept them.
+        // A Clump picking its own centers: the strands they are (their roots), else (centers on the
+        // scalp, its axes moved to their spots: ClumpState::offsets) the centers' curves as it kept them.
         ClumpState state;
         const StrandsPtr made = valueAs<StrandsPtr>(doc.graph.cachedValue(node));
         if (!made || !clumpState(op, made, &state)) return dots;
         if (doc.graph.inputSource(node, 0, &source, &output)) doc.graph.evaluateOutput(source, output, ctx);
         const StrandsPtr in = doc.graph.inputSource(node, 0, &source, &output)
                                   ? valueAs<StrandsPtr>(doc.graph.cachedValue(source, output)) : nullptr;
-        if (in && !state.chosen.empty()) {
+        if (in && !state.chosen.empty() && state.offsets.empty()) {
             for (const std::size_t s : state.chosen) {
                 if (s < in->strandCount() && in->strandPointCount(s) > 0) dots->push_back(at(in->roots()[s], in->strandPoints(s)[0]));
             }

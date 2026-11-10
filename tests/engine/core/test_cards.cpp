@@ -913,13 +913,15 @@ TEST(Cards, SegmentsByLengthAndCrossStyles) {
 }
 
 // A head of hair: a sphere scalp, a few hundred strands in two dozen loose clumps.
+// (Its Clump at version 1, its centers among the strands: the cards' numbers below were recorded on
+// that layout of its clumps.)
 StrandsPtr clumpedHead() {
     GroomData d;
     d.scalp = test::makeSphere(16, 24, 1.0f);
     d.graphJson = R"j({"version": 1, "output": "out", "nodes": [
         {"name": "scalp", "type": "Scalp"},
         {"name": "scatter", "type": "Scatter", "params": {"density": 40.0}},
-        {"name": "clump", "type": "Clump", "params": {"count": 24, "strength": 0.7}},
+        {"name": "clump", "type": "Clump", "version": 1, "params": {"count": 24, "strength": 0.7}},
         {"name": "out", "type": "Output"}, {"name": "resolution", "type": "Resample", "params": {"segments": 12}}],
       "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
         {"from": "scatter", "to": "clump", "input": "strands"},

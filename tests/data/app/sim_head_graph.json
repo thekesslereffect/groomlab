@@ -12,7 +12,7 @@
     {"name": "scatter", "type": "Scatter", "params": {"density": 120.0, "length": 14.0}},
     {"name": "interpolate", "type": "Interpolate"},
     {"name": "collide", "type": "Collide", "params": {"offset": 0.08, "maxDepth": 30.0, "iterations": 2}},
-    {"name": "clump", "type": "Clump", "params": {"count": 400, "strength": 0.55, "profile": [[0, 0], [0.4, 0.5], [1, 1]]}},
+    {"name": "clump", "type": "Clump", "version": 1, "params": {"count": 400, "strength": 0.55, "profile": [[0, 0], [0.4, 0.5], [1, 1]]}},
     {"name": "noise", "type": "Noise", "params": {"amplitude": 0.2, "frequency": 2.5}},
     {"name": "color", "type": "HairColor", "params": {"melanin": 0.35, "redness": 0.2, "melaninRandom": 0.1}},
     {"name": "width", "type": "Width", "params": {"width": 0.007, "profile": [[0, 1], [1, 0.3]]}},

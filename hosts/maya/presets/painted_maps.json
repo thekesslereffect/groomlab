@@ -15,7 +15,7 @@
     {"name": "guides", "type": "Guides", "ui": {"x": 0, "y": 180}},
     {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 15.0}, "ui": {"x": 240, "y": 0}},
     {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
-    {"name": "clump", "type": "Clump", "params": {"clumpBy": "size", "size": 0.9, "strength": 1.0, "profile": [[0, 0], [0.4, 0.3], [1, 0.9]]}, "paramInputs": ["strength"], "ui": {"x": 960, "y": 0}},
+    {"name": "clump", "type": "Clump", "version": 1, "params": {"clumpBy": "size", "size": 0.9, "strength": 1.0, "profile": [[0, 0], [0.4, 0.3], [1, 0.9]]}, "paramInputs": ["strength"], "ui": {"x": 960, "y": 0}},
     {"name": "frizzNoise", "type": "Noise", "params": {"fraction": 1.0, "amplitude": 0.15, "frequency": 9.0, "octaves": 1}, "paramInputs": ["fraction"], "ui": {"x": 1200, "y": 0}},
     {"name": "length", "type": "Length", "params": {"keep": 1.0}, "paramInputs": ["keep"], "ui": {"x": 1440, "y": 0}},
     {"name": "groomMasks", "type": "Map", "params": {"name": "groomMasks"}, "ui": {"x": 720, "y": 360}},

@@ -2100,7 +2100,8 @@ def cards_check(snapshots=None):
     groomlab.set_graph(groom, CLASSIC_GRAPH)  # these cases name and wire that chain's nodes
     groomlab.set_param(groom, "scatter", "density", 3000.0)
     graph = groomlab.get_graph(groom, expand_default=True)
-    graph["nodes"].insert(-1, {"name": "clump", "type": "Clump", "params": {"count": 40, "strength": 0.7}})
+    # (Clump's version 1, its centers strands: the clumps' random hues this check's margin was set on.)
+    graph["nodes"].insert(-1, {"name": "clump", "type": "Clump", "version": 1, "params": {"count": 40, "strength": 0.7}})
     graph["nodes"].insert(-1, {"name": "color", "type": "HairColor",
                                "params": {"melanin": 0.2, "hueRandom": 0.6, "clumpShare": 1.0}})
     graph["connections"] = [c for c in graph["connections"] if c["to"] != "output"]

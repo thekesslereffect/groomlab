@@ -1068,7 +1068,15 @@ void LookEngine::putStageInputs(const LookRun& run) {
                     std::vector<float> words(bytes / 4, 0.0f);  // the curves and frames the kernels write
                     withNormals(words.data());
                     write(auxBuffer(k, 1), words.data(), bytes, true);
-                    write(auxBuffer(k, 2), data->chosen->data(), data->chosen->size() * 4, false);
+                    // Per center 4 words (look.slang CentersCS): its strand, then how far its curve
+                    // lies from it (ClumpInputs::offsets; zero without).
+                    std::vector<std::uint32_t> centers(data->centers * 4, 0u);
+                    const bool moved = data->offsets && data->offsets->size() == data->centers;
+                    for (std::size_t c = 0; c < data->centers; ++c) {
+                        centers[c * 4] = (*data->chosen)[c];
+                        if (moved) std::memcpy(&centers[c * 4 + 1], &(*data->offsets)[c], 12);
+                    }
+                    write(auxBuffer(k, 2), centers.data(), centers.size() * 4, false);
                     held.b = data->chosen.get();
                     held.alive[1] = data->chosen;
                     held.framesMade = false;

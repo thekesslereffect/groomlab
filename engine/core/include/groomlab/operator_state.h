@@ -68,6 +68,10 @@ struct ClumpState {
     // made from (`chosen` only when by roots alone; a centerWeight varying per strand picks by its
     // values too, which hold while what they read does).
     std::vector<std::size_t> picked;
+    // A Clump of centersFrom pick with its centers on the scalp (version 2): per guide (as `picked`),
+    // how far its axis lies from that strand (the strand's root to the center's spot), the curve
+    // being the strand moved by it. Empty otherwise (each axis its strand as it is).
+    std::vector<Vec3f> offsets;
 };
 // False when `op` is not a Clump or kept nothing for `output`.
 // (`output`: the Clump's last result, or what the graph handed on of it with no strand hidden:

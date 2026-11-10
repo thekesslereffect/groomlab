@@ -222,6 +222,9 @@ private:
     void ensureLevels(std::size_t count) const {
         while (levels_.size() < count) {
             std::unique_ptr<Operator> clump = OperatorRegistry::instance().create(op::kClump);
+            // Its levels pick their centers among the strands, as Clump's version 1 (a Wet's look
+            // stays the one it was saved with; centers on the scalp are Clump's version 2).
+            clump->setNodeVersion(1);
             levels_.push_back(std::move(clump));
         }
     }

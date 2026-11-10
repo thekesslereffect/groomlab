@@ -16,7 +16,7 @@
     {"name": "flow", "type": "Flow", "params": {"lift": 14.0, "bend": 0.55, "rollRandom": 8.0}, "ui": {"x": 720, "y": 0}},
     {"name": "guides", "type": "Guides", "ui": {"x": 240, "y": 180}},
     {"name": "interpolate", "type": "Interpolate", "params": {"take": "shape", "preserveLength": true}, "ui": {"x": 480, "y": 180}},
-    {"name": "clump", "type": "Clump", "params": {"clumpBy": "size", "size": 1.2, "strength": 0.7, "profile": [[0, 0], [0.4, 0.8], [1, 1]]}, "ui": {"x": 720, "y": 180}},
+    {"name": "clump", "type": "Clump", "version": 1, "params": {"clumpBy": "size", "size": 1.2, "strength": 0.7, "profile": [[0, 0], [0.4, 0.8], [1, 1]]}, "ui": {"x": 720, "y": 180}},
     {"name": "guideAreas", "type": "Map", "params": {"name": "guideAreas", "min": 0.0, "max": 1.0}, "ui": {"x": 720, "y": 360}},
     {"name": "blend", "type": "Blend", "params": {"mix": 1.0, "include": "shapeAndLook"}, "paramInputs": ["mix"], "ui": {"x": 960, "y": 0}},
     {"name": "frizzNoise", "type": "Noise", "params": {"fraction": 0.1, "amplitude": 0.08, "frequency": 5.0, "octaves": 1}, "ui": {"x": 1200, "y": 0}},

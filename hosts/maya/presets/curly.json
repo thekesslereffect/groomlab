@@ -16,7 +16,7 @@
     {"name": "guides", "type": "Guides", "ui": {"x": 0, "y": 180}},
     {"name": "scatter", "type": "Scatter", "params": {"density": 80.0, "length": 15.0}, "ui": {"x": 240, "y": 0}},
     {"name": "interpolate", "type": "Interpolate", "ui": {"x": 480, "y": 0}},
-    {"name": "clump", "type": "Clump", "params": {"clumpBy": "size", "size": 0.7, "strength": 0.75, "profile": [[0, 0.2], [0.25, 0.8], [1, 1]]}, "ui": {"x": 960, "y": 0}},
+    {"name": "clump", "type": "Clump", "version": 1, "params": {"clumpBy": "size", "size": 0.7, "strength": 0.75, "profile": [[0, 0.2], [0.25, 0.8], [1, 1]]}, "ui": {"x": 960, "y": 0}},
     {"name": "curl", "type": "Curl", "params": {"radius": 0.45, "frequency": 0.4, "randomness": 0.35, "coherence": "clump", "profile": [[0, 0.1], [0.2, 1], [1, 1]]}, "ui": {"x": 1200, "y": 0}},
     {"name": "frizzNoise", "type": "Noise", "params": {"fraction": 0.12, "amplitude": 0.1, "frequency": 10.0, "octaves": 1}, "ui": {"x": 1440, "y": 0}},
     {"name": "width", "type": "Width", "params": {"width": 0.008, "profile": [[0, 1], [1, 0.4]]}, "ui": {"x": 1920, "y": 0}},

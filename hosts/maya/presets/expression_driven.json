@@ -16,7 +16,7 @@
     {"name": "crownLength", "type": "Expression", "params": {"expression": "# 1 on top of the head, $nape underneath: longer hair at the crown\n$top = smoothstep($ny, -0.2, 0.8);\nmix($nape, 1, $top)", "min": 0.0, "max": 1.0, "variables": "{\"nape\": {\"value\": 0.5, \"control\": \"crownLength_nape\"}}"}, "ui": {"x": 480, "y": 180}},
     {"name": "length", "type": "Length", "params": {"keep": 1.0}, "paramInputs": ["keep"], "ui": {"x": 720, "y": 0}},
     {"name": "clumpByLength", "type": "Expression", "params": {"expression": "$length / $longest", "min": 0.3, "max": 1.0}, "ui": {"x": 960, "y": 360}},
-    {"name": "clump", "type": "Clump", "params": {"clumpBy": "size", "size": 0.9, "strength": 1.0, "profile": [[0, 0], [0.4, 0.3], [1, 0.9]]}, "paramInputs": ["strength"], "ui": {"x": 1200, "y": 0}},
+    {"name": "clump", "type": "Clump", "version": 1, "params": {"clumpBy": "size", "size": 0.9, "strength": 1.0, "profile": [[0, 0], [0.4, 0.3], [1, 0.9]]}, "paramInputs": ["strength"], "ui": {"x": 1200, "y": 0}},
     {"name": "width", "type": "Width", "params": {"width": 0.007, "profile": [[0, 1], [0.75, 0.75], [1, 0.25]]}, "ui": {"x": 1680, "y": 0}},
     {"name": "color", "type": "HairColor", "params": {"melanin": 0.75, "redness": 0.15, "melaninRandom": 0.08}, "ui": {"x": 1440, "y": 0}},
     {"name": "resample", "type": "Resample", "params": {"segments": 16}, "ui": {"x": 1920, "y": 0}},

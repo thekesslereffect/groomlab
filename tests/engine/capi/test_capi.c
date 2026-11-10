@@ -373,9 +373,9 @@ static void testUpgrade(void) {
     CHECK_OK(gl_session_create(&session));
     CHECK_OK(gl_session_load_file(session, compatGroom()));
     CHECK_OK(gl_session_get_graph_json(session, &before));
-    CHECK_OK(gl_session_upgrade_node(session, "clump", &upgraded));
+    CHECK_OK(gl_session_upgrade_node(session, "scatter", &upgraded));
     CHECK(upgraded == 0);
-    CHECK_OK(gl_session_upgrade_node(session, "scatter", NULL));
+    CHECK_OK(gl_session_upgrade_node(session, "width", NULL));
     CHECK_OK(gl_session_get_graph_json(session, &after));
     CHECK(before && after && strcmp(before, after) == 0);
     gl_free(before);

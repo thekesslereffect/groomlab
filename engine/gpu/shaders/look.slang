@@ -2191,8 +2191,9 @@ void LengthCS(uint3 id : SV_DispatchThreadID) {
 
 // ---- Clump's centers made from the strands (its own choice, its resampling) ----------------------
 //
-// Center c is strand gAux0[c] of the points in, resampled by arc length to CENTER_SAMPLES points
-// into gOut at c * CENTER_SAMPLES; with gFlag.y, its rotation-minimizing frames (tangent, normal,
+// Center c is strand gAux0[4c] of the points in, moved by gAux0[4c + 1..3] (a Clump's centers on
+// the scalp: its axis from that strand's root to its spot; zero otherwise), resampled by arc length
+// to CENTER_SAMPLES points into gOut at c * CENTER_SAMPLES; with gFlag.y, its rotation-minimizing frames (tangent, normal,
 // binormal per sample) at word gAux.y. gFlag.x: the centers; gFlag.z: the curves are in gOut
 // already (the CPU's, or ShareCS's), only their frames are made.
 
@@ -2241,15 +2242,16 @@ void CentersCS(uint3 id : SV_DispatchThreadID) {
     if (gFlag.z != 0) {
         for (uint i = 0; i < CENTER_SAMPLES; ++i) pts[i] = asfloat(gOut.Load3((base + i) * 12));
     } else {
-        const uint s = gAux0.Load(c * 4);
+        const uint s = gAux0.Load(c * 16);
+        const float3 moved = asfloat(gAux0.Load3(c * 16 + 4));
         const uint begin = strandBegin(s), count = strandCountOf(s);
         if (count < 2) {
-            const float3 p = count == 1 ? loadPoint(begin) : float3(0, 0, 0);
+            const float3 p = count == 1 ? loadPoint(begin) + moved : float3(0, 0, 0);
             for (uint i = 0; i < CENTER_SAMPLES; ++i) pts[i] = p;
         } else {
             const float step = strandLength(begin, count) / float(CENTER_SAMPLES - 1);
             ArcWalk w = arcWalkStart(begin);
-            for (uint i = 0; i < CENTER_SAMPLES; ++i) pts[i] = arcWalkAt(w, begin, count, step * float(i));
+            for (uint i = 0; i < CENTER_SAMPLES; ++i) pts[i] = arcWalkAt(w, begin, count, step * float(i)) + moved;
         }
         for (uint i = 0; i < CENTER_SAMPLES; ++i) storePoint(gOut, base + i, pts[i]);
     }

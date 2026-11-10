@@ -83,7 +83,7 @@ TEST(CApiUpgrade, AFailedUpgradeLeavesTheGraph) {
     session.setGraphJson(graphWithOldLift(session.graphJson()));
     const std::string graph = session.graphJson();
     EXPECT_THROW(session.upgradeNode("nobody"), api::Error);
-    EXPECT_FALSE(session.upgradeNode("clump"));  // current already
+    EXPECT_FALSE(session.upgradeNode("scatter"));  // current already
     EXPECT_EQ(session.graphJson(), graph);
 }
 

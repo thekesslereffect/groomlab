@@ -6,7 +6,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <array>
 #include <functional>
+#include <map>
 #include <set>
 
 #include <nlohmann/json.hpp>
@@ -81,9 +83,21 @@ GuidesPtr ownCenters(LookGraph& lg, NodeId clump) {
     const StrandsPtr in = lg.eval(source);
     ClumpState state;
     if (!clumpState(lg.g.node(clump), out, &state)) return centers;
-    for (const std::size_t s : state.chosen) {
+    // Each center's ID (its strand's, or with its centers on the scalp its spot's), and its axis:
+    // its strand, moved to its spot (ClumpState::offsets).
+    std::vector<std::uint64_t> ids(state.chosen.size());
+    for (std::size_t g = 0; g < ids.size(); ++g) ids[g] = in->ids()[state.chosen[g]];
+    for (std::size_t c = 0; c < state.centerGuides.size() && c < state.centerIds.size(); ++c) {
+        if (state.centerGuides[c] < ids.size()) ids[state.centerGuides[c]] = state.centerIds[c];
+    }
+    for (std::size_t g = 0; g < state.chosen.size(); ++g) {
+        const std::size_t s = state.chosen[g];
         const Vec3f* pts = in->strandPoints(s);
-        centers->add(in->ids()[s], std::vector<Vec3f>(pts, pts + in->strandPointCount(s))).root = in->roots()[s];
+        std::vector<Vec3f> axis(pts, pts + in->strandPointCount(s));
+        if (g < state.offsets.size()) {
+            for (Vec3f& p : axis) p = p + state.offsets[g];
+        }
+        centers->add(ids[g], std::move(axis)).root = in->roots()[s];
     }
     return centers;
 }
@@ -974,6 +988,52 @@ TEST(ClumpCenters, CentersStayPutWhenTheScatterDensityChanges) {
         if (nearest < spacing * 0.5f) ++stayed;
     }
     EXPECT_GE(stayed, a.size() * 7 / 10);  // most centers within half a spacing of where they were
+}
+
+TEST(ClumpCenters, AsManyClumpsAsTheCountAsksOnTheScalp) {
+    // Version 2 picks its centers on the scalp: 20000 clumps of 100000 strands (5 a clump), far
+    // more than the 6250 strands of the preview core every center of version 1 had to be; each
+    // clump with an axis of its own (its tips gathered apart from the others'). The same clumps in
+    // a preview as in the render. Version 1 (saved before) keeps its centers among the core.
+    LookGraph lg(100000.0);
+    const NodeId clump = lg.add(op::kClump, lg.scatter);
+    lg.g.node(clump).params().set("count", std::int64_t{20000});
+    lg.g.node(clump).params().set("strength", 1.0);
+    auto clumps = [&](float preview, std::map<std::uint64_t, long>* byStrand, std::size_t* tips) {
+        EvalContext ctx;
+        ctx.externals = &lg.ext;
+        ctx.previewDensity = preview;
+        const StrandsPtr out = lg.g.evaluateStrands(clump, ctx);
+        const std::vector<float>* ids = out->strandChannel("clumpId");
+        EXPECT_NE(ids, nullptr);
+        std::set<long> numbers;
+        std::set<std::array<long, 3>> ends;
+        for (std::size_t s = 0; ids && s < out->strandCount(); ++s) {
+            numbers.insert(std::lround((*ids)[s]));
+            if (byStrand) (*byStrand)[out->ids()[s]] = std::lround((*ids)[s]);
+            const Vec3f tip = out->strandPoints(s)[out->strandPointCount(s) - 1];
+            ends.insert({std::lround(tip.x * 1e4f), std::lround(tip.y * 1e4f), std::lround(tip.z * 1e4f)});
+        }
+        if (tips) *tips = ends.size();
+        return numbers.size();
+    };
+    std::map<std::uint64_t, long> render, preview;
+    std::size_t tips = 0;
+    const std::size_t made = clumps(1.0f, &render, &tips);
+    std::printf("[ clumps   ] count 20000 on 100000 strands: %zu clumps, %zu tips apart\n", made, tips);
+    EXPECT_GE(made, 16000u);
+    EXPECT_LE(made, 24000u);
+    EXPECT_GE(tips, made * 9 / 10);  // an axis each
+    clumps(0.2f, &preview, nullptr);
+    std::size_t same = 0;
+    for (const auto& [id, number] : preview) same += render.count(id) && render.at(id) == number ? 1 : 0;
+    EXPECT_EQ(same, preview.size()) << "a preview's strands in the render's clumps";
+
+    lg.g.node(clump).setNodeVersion(1);
+    lg.g.clearCache();
+    const std::size_t before = clumps(1.0f, nullptr, nullptr);
+    std::printf("[ clumps   ] version 1: %zu clumps\n", before);
+    EXPECT_LE(before, 6250u);  // at most the preview core's strands
 }
 
 TEST(NoiseOp, WorldIsCoherentStrandIsIndependent) {
@@ -4260,8 +4320,11 @@ TEST(Clump, WithoutCentersPicksItsOwn) {
         now += (out->strandPoints(s)[n - 1] - out->strandPoints(0)[n - 1]).length();
     }
     EXPECT_LT(now, 0.6f * was);
-    // At randomness 0 (each center its even strand, by its ID, the strands clumping by its root) the
-    // same strands as guides on its centers input: the same clumps.
+    // Version 1 (its centers among the strands, as saved before), at randomness 0 (each center its
+    // even strand, by its ID, the strands clumping by its root): the same strands as guides on its
+    // centers input, the same clumps. (Version 2's centers lie on the scalp between the strands:
+    // ClumpCenters.AsManyClumpsAsTheCountAsksOnTheScalp.)
+    lg.g.node(clump).setNodeVersion(1);
     lg.g.node(clump).params().set("randomness", 0.0);
     const StrandsPtr evenOut = lg.eval(clump);
     ids = evenOut->strandChannel("clumpId");
@@ -4275,6 +4338,7 @@ TEST(Clump, WithoutCentersPicksItsOwn) {
     const StrandsPtr same = lg.eval(fed);
     EXPECT_EQ(maxDisplacement(*same, *evenOut), 0.0f);
     EXPECT_EQ(*same->strandChannel("clumpId"), *ids);
+    lg.g.node(clump).setNodeVersion(2);
     // centersFrom decides, never the link: pick ignores linked centers (a note says how to use
     // them), and an input mode with nothing linked clumps nothing (a note says what to change).
     lg.g.node(clump).params().set("count", std::int64_t{5});

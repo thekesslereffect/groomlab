@@ -2142,11 +2142,15 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                     // too (`picked`): those hold while what the weight reads does (below).
                     const bool byRoots = kept && own && !state.chosen.empty();
                     const std::vector<std::size_t>& chosen = byRoots ? state.chosen : state.picked;
+                    std::shared_ptr<std::vector<Vec3f>> offsets;  // centers on the scalp: each axis moved from its strand
                     if (kept && own && !chosen.empty()) {
                         ok = true;
+                        const bool moved = !state.offsets.empty();
+                        if (moved) offsets = std::make_shared<std::vector<Vec3f>>();
                         for (const std::size_t g : state.centerGuides) {
-                            ok = ok && g < chosen.size();
+                            ok = ok && g < chosen.size() && (!moved || g < state.offsets.size());
                             if (ok) strands->push_back(static_cast<std::uint32_t>(chosen[g]));
+                            if (ok && moved) offsets->push_back(state.offsets[g]);
                         }
                         memo.weighed = !byRoots;
                     } else if (kept && fromStrands && state.axes.size() == state.centerGuides.size()) {
@@ -2174,6 +2178,7 @@ bool LookInputs::read(const GraphDocument& doc, const LookChain& chain, const Lo
                         auto made = std::make_shared<ClumpInputs>(*memo.fixed);
                         made->curves = nullptr;
                         made->chosen = std::move(strands);
+                        made->offsets = std::move(offsets);
                         memo.made = std::move(made);
                     }
                 }

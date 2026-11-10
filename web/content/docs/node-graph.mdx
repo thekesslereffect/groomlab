@@ -99,7 +99,7 @@ Clump pulls strands toward clump centers. Main parameters:
 | Param | Effect | Typical |
 | --- | --- | --- |
 | `strength` | Pull toward the center, mappable. Negative values push strands away (fur parting around whiskers, horns, eyes): strands within twice `repelRadius` (advanced) move out, those at the center to `repelRadius`, keeping their order so none cross at the part. | 0.5-0.9 |
-| `centersFrom` | Source of the clump centers: `pick` selects them among the strands; `inputPoints` or `inputCurves` take them from the `centers` input (see below). | `pick` |
+| `centersFrom` | Source of the clump centers: `pick` places them on the scalp where strands grow, as many as `clumpBy` asks (tens of thousands on a dense groom), each clump's axis the hair grown nearest, moved to its center; `inputPoints` or `inputCurves` take them from the `centers` input (see below). A Clump saved by an earlier GroomLab, and the shipped presets' Clumps, keep picking among the strands (a few thousand at most) until you upgrade the node. | `pick` |
 | `clumpBy`, `count`, `size` | With `pick`: about `count` clumps, or (`clumpBy` `size`) clumps about `size` apart, so a body gets more clumps than a head at the same clump size. | 300 clumps |
 | `randomness` | 0 distributes the centers evenly, 1 places them at random. | |
 | `lockRadius` | Gathers strands into a round lock of this radius (dreads, wet strings); each strand keeps its place around the lock, so strands never cross in it. Add a Twist after it for ropes. | 0 |

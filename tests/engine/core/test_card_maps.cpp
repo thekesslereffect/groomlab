@@ -32,10 +32,12 @@ namespace {
 
 namespace fs = std::filesystem;
 
+// (Its Clump at version 1, its centers among the strands: TheOldBakeIsTheSameBytes hashes bakes of
+// these clumps, recorded from older code.)
 const char* kFurGraph = R"j({"version": 1, "output": "out", "nodes": [
         {"name": "scalp", "type": "Scalp"},
         {"name": "scatter", "type": "Scatter", "params": {"density": 800.0}},
-        {"name": "clump", "type": "Clump", "params": {"count": 12, "strength": 0.8}},
+        {"name": "clump", "type": "Clump", "version": 1, "params": {"count": 12, "strength": 0.8}},
         {"name": "out", "type": "Output"}, {"name": "resolution", "type": "Resample", "params": {"segments": 10}}],
       "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},
         {"from": "scatter", "to": "resolution", "input": "strands"}, {"from": "resolution", "to": "clump", "input": "strands"},

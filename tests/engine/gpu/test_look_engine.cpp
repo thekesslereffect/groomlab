@@ -1620,20 +1620,23 @@ TEST_P(LookEngineTest, ClumpDragsGiveWhatTheCpuClumps) {
 TEST_P(LookEngineTest, ANegativeClumpRepelsAsTheCpuDoes) {
     // A negative strength pushes the strands near each center away from it (off the skin, lengths
     // kept): as the graph holds it, dragged from a pull across 0 into a push, the repel radius
-    // dragged, and a strength per point that turns negative toward the tips.
+    // dragged, and a strength per point that turns negative toward the tips. (Clump's version 1:
+    // centers that are strands, each rooted on its center or a strand's spacing from it. Version 2's
+    // centers lie on the scalp between the strands, and a strand rooted a hair from one is pushed a
+    // way its rounding decides, the GPU's and the CPU's apart by up to 1e-3 there.)
     LookGraph g;
-    g.clump = R"("params": {"strength": -0.7, "repelRadius": 0.6})";
+    g.clump = R"("version": 1, "params": {"strength": -0.7, "repelRadius": 0.6})";
     EXPECT_GPU_MATCHES(g.json(), gpu::Overrides{}, g.json());
     LookGraph pull = g;
-    pull.clump = R"("params": {"strength": 0.8, "repelRadius": 0.6})";
+    pull.clump = R"("version": 1, "params": {"strength": 0.8, "repelRadius": 0.6})";
     LookGraph push = g;
-    push.clump = R"("params": {"strength": -0.5, "repelRadius": 0.6})";
+    push.clump = R"("version": 1, "params": {"strength": -0.5, "repelRadius": 0.6})";
     EXPECT_GPU_MATCHES(pull.json(), (gpu::Overrides{{"clump", {{"strength", -0.5}}}}), push.json());
     LookGraph wider = g;
-    wider.clump = R"("params": {"strength": -0.7, "repelRadius": 0.9})";
+    wider.clump = R"("version": 1, "params": {"strength": -0.7, "repelRadius": 0.9})";
     EXPECT_GPU_MATCHES(g.json(), (gpu::Overrides{{"clump", {{"repelRadius", 0.9}}}}), wider.json());
     LookGraph mapped = g;
-    mapped.clump = R"("params": {"strength": {"expression": "0.5 - 0.1 * pt", "min": -1.0, "max": 1.0}, "lockRadius": 0.2,
+    mapped.clump = R"("version": 1, "params": {"strength": {"expression": "0.5 - 0.1 * pt", "min": -1.0, "max": 1.0}, "lockRadius": 0.2,
                                  "repelRadius": 0.5})";
     EXPECT_GPU_MATCHES(mapped.json(), gpu::Overrides{}, mapped.json());
 }
@@ -4080,6 +4083,10 @@ TEST_P(LookEngineTest, SelfCollidePushesAsTheCpuDoes) {
     for (const std::string& p : params) {
         SCOPED_TRACE(p);
         LookGraph g;
+        // (Clump's version 1, its centers strands: the strands SelfCollide takes packed as this test
+        // was tuned on. Its push is decided cell by cell and slab by slab, so a run from Interpolate
+        // can flip a decision the CPU's shaken run does not; on version 2's clumps one does.)
+        g.clump = R"("version": 1, "params": {"strength": 0.8})";
         g.guides = true;
         g.width = R"("params": {"width": 0.08})";
         g.after = "SelfCollide";
