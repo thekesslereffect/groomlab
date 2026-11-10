@@ -193,7 +193,9 @@ export default async function DownloadPage() {
             if (seen) seen.platforms.push(b.platform);
             else versions.set(r.version, { release: r, platforms: [b.platform] });
           }
-          const notes = [...versions.values()].filter((v) => noteLines(v.release.notes).length > 0);
+          const notes = [...versions.values()]
+            .filter((v) => noteLines(v.release.notes).length > 0)
+            .sort((a, b) => newestFirst(a.release, b.release));
           const older = p.builds
             .flatMap((b) => b.older.map((release) => ({ platform: b.platform, release })))
             .sort((a, b) => newestFirst(a.release, b.release));
