@@ -58,13 +58,16 @@ float distance2ToTriangle(const Vec3f& p, const Vec3f& a, const Vec3f& b, const 
         if (d3 >= 0.0f && d4 <= d3) {
             q = b;
         } else if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) {
-            q = a + ab * (d1 / (d1 - d3));
+            q = a + ab * (d1 - d3 != 0.0f ? d1 / (d1 - d3) : 0.0f);
         } else if (d6 >= 0.0f && d5 <= d6) {
             q = c;
         } else if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) {
-            q = a + ac * (d2 / (d2 - d6));
+            q = a + ac * (d2 - d6 != 0.0f ? d2 / (d2 - d6) : 0.0f);
         } else if (va <= 0.0f && d4 - d3 >= 0.0f && d5 - d6 >= 0.0f) {
-            q = b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)));
+            const float den = (d4 - d3) + (d5 - d6);
+            q = b + (c - b) * (den != 0.0f ? (d4 - d3) / den : 0.0f);
+        } else if (!(std::abs(va + vb + vc) > 0.0f)) {  // a degenerate triangle (on a line): the nearest corner
+            return std::min({ap.dot(ap), bp.dot(bp), cp.dot(cp)});
         } else {
             const float inverse = 1.0f / (va + vb + vc);
             q = a + ab * (vb * inverse) + ac * (vc * inverse);

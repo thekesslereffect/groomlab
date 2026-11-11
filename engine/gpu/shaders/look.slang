@@ -557,6 +557,15 @@ float2 closestBarycentric(float3 p, float3 a, float3 b, float3 c) {
             den = vabc;
         }
     }
+    if (!(abs(den) > 0.0f)) {
+        // A degenerate triangle (two corners at one point, or on a line): a point on it, never
+        // NaN, as scalp_mesh.h's closestBarycentric guards it.
+        if (kind == 2) return float2(1.0f, 0.0f);
+        if (kind != 3) return float2(0.0f, 0.0f);
+        const float3 cp = p - c;
+        const float da = exactDot(ap, ap), db = exactDot(bp, bp), dc = exactDot(cp, cp);
+        return float2(db < da && db <= dc ? 1.0f : 0.0f, dc < da && dc < db ? 1.0f : 0.0f);
+    }
     const float q = divExact(num, den);
     if (kind == 0) return float2(q, 0.0f);
     if (kind == 1) return float2(0.0f, q);

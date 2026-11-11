@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -27,7 +28,9 @@ struct SurfacePoint {
 
 // Closest point on triangle abc to p, as barycentric (u, v) with
 // point = a + u * (b - a) + v * (c - a). Ericson, Real-Time Collision Detection 5.1.5. (Inline:
-// the closest-point walks weigh it for every triangle they meet.)
+// the closest-point walks weigh it for every triangle they meet.) A degenerate triangle (two
+// corners at one point, or all three on a line) gives a point on it, never NaN: its divisions
+// by zero are guarded, as scalp_paint.cpp's distanceSquaredToTriangle guards them.
 inline void closestBarycentric(const Vec3f& p, const Vec3f& a, const Vec3f& b, const Vec3f& c, float& u, float& v) {
     const Vec3f ab = b - a, ac = c - a, ap = p - a;
     const float d1 = ab.dot(ap), d2 = ac.dot(ap);
@@ -38,24 +41,32 @@ inline void closestBarycentric(const Vec3f& p, const Vec3f& a, const Vec3f& b, c
     if (d3 >= 0.0f && d4 <= d3) { u = 1; v = 0; return; }
 
     const float vc = d1 * d4 - d3 * d2;
-    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) { u = d1 / (d1 - d3); v = 0; return; }
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f) { u = d1 - d3 != 0.0f ? d1 / (d1 - d3) : 0.0f; v = 0; return; }
 
     const Vec3f cp = p - c;
     const float d5 = ab.dot(cp), d6 = ac.dot(cp);
     if (d6 >= 0.0f && d5 <= d6) { u = 0; v = 1; return; }
 
     const float vb = d5 * d2 - d1 * d6;
-    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) { u = 0; v = d2 / (d2 - d6); return; }
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f) { u = 0; v = d2 - d6 != 0.0f ? d2 / (d2 - d6) : 0.0f; return; }
 
     const float va = d3 * d6 - d5 * d4;
     if (va <= 0.0f && (d4 - d3) >= 0.0f && (d5 - d6) >= 0.0f) {
-        const float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        const float den = (d4 - d3) + (d5 - d6);
+        const float w = den != 0.0f ? (d4 - d3) / den : 0.0f;
         u = 1.0f - w;
         v = w;
         return;
     }
 
-    const float denom = 1.0f / (va + vb + vc);
+    const float sum = va + vb + vc;
+    if (!(std::abs(sum) > 0.0f)) {  // all three on a line: the nearest corner
+        const float da = ap.dot(ap), db = bp.dot(bp), dc = cp.dot(cp);
+        u = db < da && db <= dc ? 1.0f : 0.0f;
+        v = dc < da && dc < db ? 1.0f : 0.0f;
+        return;
+    }
+    const float denom = 1.0f / sum;
     u = vb * denom;
     v = vc * denom;
 }

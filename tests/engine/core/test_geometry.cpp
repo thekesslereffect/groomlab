@@ -149,6 +149,30 @@ TEST(ScalpMesh, ClosestPointProjectsOntoSurface) {
     EXPECT_NEAR(edge.position.x, 0.0f, 1e-5f);
 }
 
+TEST(ScalpMesh, ClosestBarycentricOnDegenerateTrianglesIsNeverNaN) {
+    // Two corners at one point (a welded seam's sliver), or all three on a line: a point on the
+    // triangle, never NaN (it was 0/0 there).
+    const Vec3f a(0, 0, 0), b(1, 0, 0), c(2, 0, 0);
+    struct Case {
+        Vec3f p, a, b, c;
+    };
+    for (const Case& k : {Case{{3, 1, 0}, a, a, b}, Case{{0.5f, 1, 0}, a, a, b}, Case{{-1, 1, 0}, a, b, b},
+                          Case{{0.5f, 1, 0}, a, b, c}, Case{{5, 1, 0}, a, b, c}, Case{{1, 1, 0}, a, a, a}}) {
+        float u = -1, v = -1;
+        closestBarycentric(k.p, k.a, k.b, k.c, u, v);
+        ASSERT_TRUE(std::isfinite(u) && std::isfinite(v)) << k.p.x;
+        const Vec3f q = k.a + (k.b - k.a) * u + (k.c - k.a) * v;
+        EXPECT_TRUE(std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z));
+        EXPECT_GE(q.x, -1e-6f);
+        EXPECT_LE(q.x, 2.0f + 1e-6f);
+    }
+    // A plain triangle is as before.
+    float u = 0, v = 0;
+    closestBarycentric({0.25f, 1, 0.25f}, {0, 0, 0}, {1, 0, 0}, {0, 0, 1}, u, v);
+    EXPECT_FLOAT_EQ(u, 0.25f);
+    EXPECT_FLOAT_EQ(v, 0.25f);
+}
+
 TEST(ScalpMesh, TreeQueryMatchesBruteForce) {
     const auto mesh = test::makeSphere(40, 80, 1.0f);  // 6400 triangles
     Rng rng(7);

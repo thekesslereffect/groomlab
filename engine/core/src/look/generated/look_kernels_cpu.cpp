@@ -7464,9 +7464,9 @@ static Vector<float, 2>  closestBarycentric_0(Vector<float, 3>  p_22, Vector<flo
 
     }
 
-    float num_0;
-
     float den_0;
+
+    float num_0;
 
     float vb_0;
 
@@ -7475,11 +7475,11 @@ static Vector<float, 2>  closestBarycentric_0(Vector<float, 3>  p_22, Vector<flo
     if(_S644)
     {
 
-        num_0 = d1_3;
-
         den_0 = d13_0;
 
         kind_8 = 0U;
+
+        num_0 = d1_3;
 
         vb_0 = 0.0f;
 
@@ -7547,11 +7547,11 @@ static Vector<float, 2>  closestBarycentric_0(Vector<float, 3>  p_22, Vector<flo
         if(_S644)
         {
 
-            num_0 = d2_0;
-
             den_0 = d26_0;
 
             kind_8 = 1U;
+
+            num_0 = d2_0;
 
         }
         else
@@ -7586,21 +7586,21 @@ static Vector<float, 2>  closestBarycentric_0(Vector<float, 3>  p_22, Vector<flo
             if(_S644)
             {
 
-                num_0 = d43_0;
-
                 den_0 = sum_4;
 
                 kind_8 = 2U;
+
+                num_0 = d43_0;
 
             }
             else
             {
 
-                num_0 = 1.0f;
-
                 den_0 = vabc_0;
 
                 kind_8 = 3U;
+
+                num_0 = 1.0f;
 
             }
 
@@ -7610,6 +7610,81 @@ static Vector<float, 2>  closestBarycentric_0(Vector<float, 3>  p_22, Vector<flo
 
     }
 
+    if(!((F32_abs((den_0))) > 0.0f))
+    {
+
+        if(kind_8 == 2U)
+        {
+
+            return Vector<float, 2> (1.0f, 0.0f);
+        }
+
+        if(kind_8 != 3U)
+        {
+
+            return Vector<float, 2> (0.0f, 0.0f);
+        }
+
+        Vector<float, 3>  cp_1 = p_22 - c_23;
+        float da_0 = exactDot_0(ap_0, ap_0);
+
+        float db_0 = exactDot_0(bp_0, bp_0);
+
+        float dc_0 = exactDot_0(cp_1, cp_1);
+        if(db_0 < da_0)
+        {
+
+            _S644 = db_0 <= dc_0;
+
+        }
+        else
+        {
+
+            _S644 = false;
+
+        }
+
+        if(_S644)
+        {
+
+            den_0 = 1.0f;
+
+        }
+        else
+        {
+
+            den_0 = 0.0f;
+
+        }
+
+        if(dc_0 < da_0)
+        {
+
+            _S644 = dc_0 < db_0;
+
+        }
+        else
+        {
+
+            _S644 = false;
+
+        }
+
+        if(_S644)
+        {
+
+            num_0 = 1.0f;
+
+        }
+        else
+        {
+
+            num_0 = 0.0f;
+
+        }
+
+        return Vector<float, 2> (den_0, num_0);
+    }
     float q_1 = divExact_0(num_0, den_0);
     if(kind_8 == 0U)
     {
