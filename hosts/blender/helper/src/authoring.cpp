@@ -26,6 +26,7 @@
 #include "groomlab/expression.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/graph.h"
+#include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_session.h"
@@ -145,31 +146,14 @@ std::vector<std::string> namesOf(const json& v, const char* what) {
     return out;
 }
 
-// GraphModel.expose_param: a param an input port (a mappable number or a color field a Field port,
-// a ramp a Curve port, any other a Value port), where the param can take one.
-void exposeParam(GraphEdit& edit, const std::string& node, const std::string& param) {
-    const json spec = paramSpecOf(edit, node, param);
-    if (!spec.contains("port") || spec["port"].is_null()) {
-        fail("bad_request", node + "." + param + " cannot be an input: it sets the node's own ports");
+// GraphModel.expose_param: the core's (graph_controls.h), its GraphError a bad request.
+void exposeParamRequest(GraphEdit& edit, const std::string& node, const std::string& param) {
+    specOf(edit, node);
+    try {
+        groomlab::exposeParam(edit, node, param);
+    } catch (const GraphError& e) {
+        fail("bad_request", e.what());
     }
-    for (const json& p : specOf(edit, node).value("inputs", json::array())) {
-        if (p.value("param", false)) continue;
-        if (p.value("name", std::string()) == param) fail("bad_request", node + " already has an input named '" + param + "'");
-    }
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, node);
-    json& exposed = n["paramInputs"];
-    if (!exposed.is_array()) exposed = json::array();
-    if (std::find(exposed.begin(), exposed.end(), json(param)) == exposed.end()) exposed.push_back(param);
-    const json params = specOf(edit, node).value("params", json::array());
-    auto rank = [&](const json& name) {
-        for (std::size_t i = 0; i < params.size(); ++i) {
-            if (params[i].value("name", std::string()) == name.get<std::string>()) return i;
-        }
-        return params.size();
-    };
-    std::stable_sort(exposed.begin(), exposed.end(), [&](const json& a, const json& b) { return rank(a) < rank(b); });
-    edit = GraphEdit(g.dump());
 }
 
 // GraphModel.unexpose_param: the port goes with what fed it; the param keeps its own value.
@@ -286,166 +270,46 @@ void insertOnLink(GraphEdit& edit, const std::string& from, const std::string& t
 
 // ---- Controls (params.py): Control nodes' sliders, Expression variables, keyed params ----------
 
-std::string controlName(const std::string& wanted) {
-    std::string out;
-    for (const char c : wanted) out += std::isalnum(static_cast<unsigned char>(c)) || c == '_' ? c : '_';
-    if (out.empty() || std::isdigit(static_cast<unsigned char>(out[0]))) out = "p_" + out;
-    return out;
-}
-
-void eachNode(const json& graph, const std::function<void(const json&)>& fn) {
-    if (!graph.is_object()) return;
-    for (const json& n : graph.value("nodes", json::array())) {
-        if (!n.is_object()) continue;
-        fn(n);
-        if (n.value("type", std::string()) == "Compound" && n.contains("params") && n["params"].is_object() &&
-            n["params"].contains("definition") && n["params"]["definition"].is_object()) {
-            eachNode(n["params"]["definition"].value("graph", json::object()), fn);
-        }
-    }
-}
-
 double numberOr(const json& v, double fallback) { return v.is_number() ? v.get<double>() : fallback; }
 
-// Every control the graph reads (params.py's _controls_in): {name: what it is}.
-json controlsOf(const json& graph) {
-    json out = json::object();
-    eachNode(graph, [&](const json& n) {
-        const std::string type = n.value("type", std::string());
-        const json params = n.contains("params") && n["params"].is_object() ? n["params"] : json::object();
-        const std::string node = n.value("name", std::string());
-        if (type == "Control") {
-            out[params.value("name", std::string("control"))] = {{"kind", "control"},
-                                                                {"node", node},
-                                                                {"default", numberOr(params.value("default", json()), 0.0)},
-                                                                {"min", numberOr(params.value("min", json()), 0.0)},
-                                                                {"max", numberOr(params.value("max", json()), 1.0)}};
-        } else if (type == "Expression" && params.contains("variables")) {
-            json variables = params["variables"];
-            if (variables.is_string()) variables = json::parse(variables.get<std::string>(), nullptr, false);
-            if (variables.is_object()) {
-                for (const auto& [var, value] : variables.items()) {
-                    if (!value.is_object() || !value.contains("control") || !value["control"].is_string()) continue;
-                    out[value["control"].get<std::string>()] = {{"kind", "variable"},
-                                                                {"node", node},
-                                                                {"variable", var},
-                                                                {"default", numberOr(value.value("value", json()), 0.0)},
-                                                                {"min", numberOr(value.value("min", json()), 0.0)},
-                                                                {"max", numberOr(value.value("max", json()), 1.0)}};
-                }
-            }
-        }
-        if (n.contains("paramControls") && n["paramControls"].is_object()) {
-            for (const auto& [param, control] : n["paramControls"].items()) {
-                const json own = params.contains(param) ? params[param] : json(nullptr);
-                if (control.is_array()) {
-                    for (std::size_t i = 0; i < control.size(); ++i) {
-                        if (!control[i].is_string()) continue;
-                        const double d = own.is_array() && own.size() == 3 ? numberOr(own[i], 0.0) : 0.0;
-                        out[control[i].get<std::string>()] = {{"kind", "keyed"}, {"node", node}, {"param", param}, {"component", i}, {"default", d}};
-                    }
-                } else if (control.is_string()) {
-                    double d = 0.0;
-                    if (own.is_number()) d = own.get<double>();
-                    if (own.is_boolean()) d = own.get<bool>() ? 1.0 : 0.0;
-                    out[control.get<std::string>()] = {{"kind", "keyed"}, {"node", node}, {"param", param}, {"default", d}};
-                }
-            }
-        }
-    });
-    return out;
-}
+// Every control the graph reads (params.py's _controls_in): {name: what it is}, the core's
+// (graph_controls.h controlsJson: a keyed param it leaves out at its spec's default).
+json controlsOf(const json& graph) { return json::parse(controlsJson(graph.dump())); }
 
 // params.py's add_control: a Control node (its slider: name, default, range) driving node.param,
-// the param exposed first.
+// the param exposed first: the core's (graph_controls.h addControl), as Maya and the app make it.
 json addControl(Session& s, GraphEdit& edit, const json& args) {
     const std::string node = needString(args, "node"), param = needString(args, "param");
-    const json spec = paramSpecOf(edit, node, param);
-    const std::string name = controlName(optString(args, "name", param));
-    if (controlsOf(graphJsonOf(edit)).contains(name)) fail("bad_request", "the groom has a control named '" + name + "' already");
-    const double lo = optNumber(args, "min", 0.0), hi = optNumber(args, "max", 1.0);
-    double value = lo;
-    if (args.contains("default") && args["default"].is_number()) {
-        value = args["default"].get<double>();
-    } else {
-        const json g = graphJsonOf(edit);
-        json own = spec.value("default", json());
-        for (const json& n : g["nodes"]) {
-            if (n.value("name", std::string()) == node && n.contains("params") && n["params"].contains(param)) own = n["params"][param];
-        }
-        if (own.is_number()) value = own.get<double>();
+    paramSpecOf(edit, node, param);
+    const std::optional<double> value =
+        args.contains("default") && args["default"].is_number() ? std::optional<double>(args["default"].get<double>()) : std::nullopt;
+    std::string control;
+    try {
+        control = groomlab::addControl(edit, node, param, optString(args, "name", ""), value, optNumber(args, "min", 0.0),
+                                       optNumber(args, "max", 1.0), groomSizeOf(s));
+    } catch (const GraphError& e) {
+        fail("bad_request", e.what());
     }
-    double x = 0.0, y = 0.0;
-    {
-        const json g = graphJsonOf(edit);
-        for (const json& n : g["nodes"]) {
-            if (n.value("name", std::string()) != node || !n.contains("ui") || !n["ui"].is_object()) continue;
-            x = numberOr(n["ui"].value("x", json()), 0.0);
-            y = numberOr(n["ui"].value("y", json()), 0.0);
-        }
-    }
-    const json params = {{"name", name}, {"default", value}, {"min", lo}, {"max", hi}};
-    const std::string control = edit.addNode("Control", edit.uniqueName(name + "Control"), params.dump(), x - 240.0, y + 160.0, groomSizeOf(s));
-    const json exposed = graphJsonOf(edit);
-    bool already = false;
-    for (const json& n : exposed["nodes"]) {
-        if (n.value("name", std::string()) != node || !n.contains("paramInputs") || !n["paramInputs"].is_array()) continue;
-        already = std::find(n["paramInputs"].begin(), n["paramInputs"].end(), json(param)) != n["paramInputs"].end();
-    }
-    if (!already) exposeParam(edit, node, param);
-    edit.connect(control, node, param);
-    return {{"node", control}, {"control", name}};
-}
-
-// GraphModel.keyable: why a param cannot be keyed in place ("" when it can).
-std::string notKeyable(const GraphEdit& edit, const std::string& node, const json& spec, const json& value) {
-    if (edit.nodeType(node) == "Control") return "a Control node's params make its slider: drive the slider's control itself";
-    if (spec.contains("animatable") && spec["animatable"].is_boolean() && !spec["animatable"].get<bool>()) {
-        return "it sets how many strands, points or cards there are, or where they go: that must stay the same on every frame";
-    }
-    const std::string kind = spec.value("kind", std::string());
-    if (kind != "float" && kind != "int" && kind != "bool" && kind != "vec3") return "only numbers, switches and vectors can be keyed";
-    if (value.is_object()) return "it reads a map: set it back to a value to key it";
-    return {};
+    json g = graphJsonOf(edit);
+    const json made = nodeIn(g, control).value("params", json::object());
+    return {{"node", control}, {"control", made.value("name", param)}};
 }
 
 // params.py's set_param_key, its first part: node.param linked to a control of its own
 // (<node>_<param>, numbered when taken; three for a vector: X Y Z, or R G B for a color), at the
-// param's value. The host keys the control (set_controls on each frame).
+// param's value: the core's (graph_controls.h linkControl). The host keys the control
+// (set_controls on each frame).
 json linkControl(GraphEdit& edit, const json& args) {
     const std::string node = needString(args, "node"), param = needString(args, "param");
-    const json spec = paramSpecOf(edit, node, param);
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, node);
-    json& params = n["params"];
-    if (!params.is_object()) params = json::object();
-    const json value = params.contains(param) ? params[param] : spec.value("default", json());
-    if (n.contains("paramControls") && n["paramControls"].is_object() && n["paramControls"].contains(param)) {
-        return {{"control", n["paramControls"][param]}, {"changed", false}};
+    paramSpecOf(edit, node, param);
+    const std::string before = edit.toJson();
+    std::string control;
+    try {
+        control = groomlab::linkControl(edit, node, param, optString(args, "control", ""));
+    } catch (const GraphError& e) {
+        fail("bad_request", e.what());
     }
-    const std::string why = notKeyable(edit, node, spec, value);
-    if (!why.empty()) fail("bad_request", node + "." + param + " cannot be keyed: " + why);
-    const bool vector = spec.value("kind", std::string()) == "vec3";
-    const std::string suffixes = spec.value("unit", std::string()) == "color" ? "RGB" : "XYZ";
-    const json taken = controlsOf(g);
-    std::string base = controlName(optString(args, "control", node + "_" + param));
-    std::string name = base;
-    auto free = [&](const std::string& c) {
-        if (taken.contains(c)) return false;
-        for (const char x : std::string("XYZRGB")) {
-            if (taken.contains(c + x)) return false;
-        }
-        return true;
-    };
-    for (int i = 1; !free(name); ++i) name = base + std::to_string(i);
-    json control = name;
-    if (vector) control = json::array({name + suffixes[0], name + suffixes[1], name + suffixes[2]});
-    if (!params.contains(param)) params[param] = value;  // stored, so its kind is known
-    json& links = n["paramControls"];
-    if (!links.is_object()) links = json::object();
-    links[param] = control;
-    edit = GraphEdit(g.dump());
-    return {{"control", control}, {"changed", true}};
+    return {{"control", json::parse(control)}, {"changed", edit.toJson() != before}};
 }
 
 // params.py's remove_param_animation: the param back to its own value (the control's value now
@@ -1038,7 +902,7 @@ bool runGraphAuthoring(Session& s, const std::string& op, const json& args, json
         r["names"] = edit.expand(name);
         label = "ungroup";
     } else if (op == "expose_param") {
-        exposeParam(edit, needString(args, "name"), needString(args, "param"));
+        exposeParamRequest(edit, needString(args, "name"), needString(args, "param"));
         label = "expose param";
     } else if (op == "unexpose_param") {
         unexposeParam(edit, needString(args, "name"), needString(args, "param"));

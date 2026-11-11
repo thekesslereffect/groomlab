@@ -14,6 +14,7 @@
 
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
+#include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
@@ -563,6 +564,60 @@ TEST(GraphJson, AnIntegerParamOutOfRangeIsAnError) {
     EXPECT_THROW(loadGraphJson(with("1e300")), GraphError);
     EXPECT_THROW(loadGraphJson(with("-1e19")), GraphError);
     EXPECT_THROW(loadGraphJson(with("9.3e18")), GraphError);
+}
+
+TEST(GraphControls, EveryHostMakesAndReadsControlsAlike) {
+    // graph_controls.h: Maya's params.py, the Blender helper and the app make controls through it.
+    using nlohmann::json;
+    EXPECT_EQ(controlName("width"), "width");
+    EXPECT_EQ(controlName("noise.amplitude"), "noise_amplitude");
+    EXPECT_EQ(controlName("3d"), "p_3d");
+    EXPECT_EQ(controlName(""), "p_");
+    GraphEdit edit(defaultGraphJson());
+    // A Control node driving width.width: named after the param, its slider 0-1 widened to take
+    // the value in, the param exposed and connected; a second one numbered; a name asked for and
+    // taken refused.
+    const std::string control = addControl(edit, "width", "width", {}, 3.0);
+    json g = json::parse(edit.toJson());
+    json made, width;
+    for (const json& n : g["nodes"]) {
+        if (n["name"] == control) made = n;
+        if (n["name"] == "width") width = n;
+    }
+    EXPECT_EQ(made["type"], "Control");
+    EXPECT_EQ(made["params"]["name"], "width");
+    EXPECT_DOUBLE_EQ(made["params"]["default"].get<double>(), 3.0);
+    EXPECT_DOUBLE_EQ(made["params"]["min"].get<double>(), 0.0);
+    EXPECT_DOUBLE_EQ(made["params"]["max"].get<double>(), 3.0) << "widened to take the start in";
+    EXPECT_NE(std::find(width["paramInputs"].begin(), width["paramInputs"].end(), json("width")), width["paramInputs"].end());
+    const double widthX = width.contains("ui") ? width["ui"].value("x", 0.0) : 0.0;  // (the default graph: no positions)
+    EXPECT_DOUBLE_EQ(made["ui"]["x"].get<double>(), widthX - 240.0);
+    const std::string second = addControl(edit, "length", "fraction");
+    EXPECT_THROW(addControl(edit, "noise", "amplitude", "width"), GraphError);
+    // Keyed params: <node>_<param>, a vector three, the value stored; keyed again: the same.
+    EXPECT_EQ(linkControl(edit, "noise", "amplitude"), "\"noise_amplitude\"");
+    EXPECT_EQ(linkControl(edit, "noise", "amplitude"), "\"noise_amplitude\"");
+    EXPECT_EQ(linkControl(edit, "color", "dye"), R"(["color_dyeR","color_dyeG","color_dyeB"])");
+    EXPECT_EQ(linkControl(edit, "length", "randomness", {}, {"length_randomness"}), "\"length_randomness1\"") << "a name the host holds";
+    EXPECT_NE(notKeyable(edit, "scatter", "density"), "") << "not animatable";
+    EXPECT_NE(notKeyable(edit, control, "default"), "") << "a Control node's own";
+    EXPECT_THROW(linkControl(edit, "scatter", "density"), GraphError);
+    // Every control read back: a keyed param's default its own value, else its spec's.
+    const json controls = json::parse(controlsJson(edit.toJson()));
+    EXPECT_EQ(controls["width"]["kind"], "control");
+    EXPECT_EQ(controls["noise_amplitude"]["kind"], "keyed");
+    EXPECT_EQ(controls["color_dyeG"]["component"], 1);
+    json unset = json::parse(edit.toJson());
+    for (json& n : unset["nodes"]) {
+        if (n["name"] == "noise") n["params"].erase("amplitude");
+    }
+    const json spec = json::parse(GraphEdit(unset.dump()).nodeSpecJson("noise"));
+    double amplitudeDefault = 0.0;
+    for (const json& p : spec["params"]) {
+        if (p["name"] == "amplitude") amplitudeDefault = p["default"].get<double>();
+    }
+    EXPECT_DOUBLE_EQ(json::parse(controlsJson(unset.dump()))["noise_amplitude"]["default"].get<double>(), amplitudeDefault);
+    (void)second;
 }
 
 TEST(GraphEdit, EveryHostEditsAGraphAlike) {

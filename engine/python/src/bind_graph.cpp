@@ -9,6 +9,7 @@
 #include "groomlab/attributes.h"
 #include "groomlab/field.h"
 #include "groomlab/graph.h"
+#include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
@@ -580,6 +581,12 @@ void bindGraph(py::module_& m) {
         "Every host's shortcuts in one table (shortcuts.h): [{id, context, keys, action, hotkey_set}] for host "
         "'maya', 'app' or 'blender' ('' : all). hotkey_set: Maya binds it with the GroomLab hotkey set.");
 
+    // Controls every host makes and reads (graph_controls.h): Control nodes' sliders, Expression
+    // variables with a control, keyed params.
+    m.def("control_name", &controlName, py::arg("wanted"), "A control's name from any text (letters, digits, _).");
+    m.def("controls_json", &controlsJson, py::arg("graph_json"),
+          "Every control the graph reads: {name: {kind, node, default, ...}} as JSON (graph_controls.h).");
+
     // The editors' edits of a graph's JSON every host makes (graph_edit.h): Maya's GraphModel
     // and the standalone app's node graph.
     py::class_<GraphEdit>(m, "GraphEdit",
@@ -590,6 +597,23 @@ void bindGraph(py::module_& m) {
         .def("has_node", &GraphEdit::hasNode, py::arg("name"))
         .def("node_type", &GraphEdit::nodeType, py::arg("name"))
         .def("node_names", &GraphEdit::nodeNames)
+        .def("not_keyable", [](const GraphEdit& e, const std::string& node, const std::string& param) { return notKeyable(e, node, param); },
+             py::arg("node"), py::arg("param"), "Why node.param cannot be keyed in place (\"\" when it can).")
+        .def("expose_param", [](GraphEdit& e, const std::string& node, const std::string& param) { exposeParam(e, node, param); },
+             py::arg("node"), py::arg("param"), "node.param as an input port (graph_controls.h).")
+        .def("add_control",
+             [](GraphEdit& e, const std::string& node, const std::string& param, const std::string& name, std::optional<double> value,
+                double min, double max, std::optional<double> groomSize) {
+                 return addControl(e, node, param, name, value, min, max, groomSize);
+             },
+             py::arg("node"), py::arg("param"), py::arg("name") = std::string(), py::arg("default") = py::none(),
+             py::arg("min") = 0.0, py::arg("max") = 1.0, py::arg("groom_size") = py::none(),
+             "A Control node driving node.param (graph_controls.h addControl); returns the Control node's name.")
+        .def("link_control",
+             [](GraphEdit& e, const std::string& node, const std::string& param, const std::string& wanted,
+                const std::vector<std::string>& taken) { return linkControl(e, node, param, wanted, taken); },
+             py::arg("node"), py::arg("param"), py::arg("wanted") = std::string(), py::arg("taken") = std::vector<std::string>(),
+             "Keys node.param on a control of its own (graph_controls.h linkControl); returns the control as JSON.")
         .def("unique_name", &GraphEdit::uniqueName, py::arg("base"))
         .def("add_node", &GraphEdit::addNode, py::arg("type"), py::arg("name") = std::string(),
              py::arg("params_json") = std::string(), py::arg("x") = py::none(), py::arg("y") = py::none(),

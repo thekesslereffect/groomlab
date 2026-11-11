@@ -19,6 +19,7 @@
 #include "groomlab/groom_package.h"
 #include "groomlab/attributes.h"
 #include "groomlab/flow.h"
+#include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_pins.h"
 #include "groomlab/graph_io.h"
@@ -963,27 +964,13 @@ std::string GroomDocument::addControl(const std::string& node, const std::string
     const json* n = nodeJson(node);
     if (!n) return "no node '" + node + "'";
     if (!spec("Control")) return "this build has no Control node";
-    const json value = paramOrDefault(node, param);
-    const double start = value.is_number() ? value.get<double>() : 0.0;
-    float x = 0.0f, y = 0.0f;
-    nodePosition(node, &x, &y);
     std::string name;
     const std::string error = editGraph("drive " + node + "." + param + " with a slider", [&](json& g) {
+        // Every host's (graph_controls.h): a control named after the param (numbered until free),
+        // its slider 0 to 1 widened to take the param's value in, left of and below the node.
         GraphEdit edit(g.dump());
-        name = edit.uniqueName(param + "Control");
-        // Its slider spans 0 to 1 (or to the value, past 1), starting where the param is.
-        const json params = {{"name", param}, {"default", start}, {"min", std::min(0.0, start)}, {"max", std::max(1.0, start)}};
-        edit.addNode("Control", name, params.dump(), x - 230.0, y + 160.0);
+        name = groomlab::addControl(edit, node, param);
         g = json::parse(edit.toJson());
-        for (json& m : g["nodes"]) {
-            if (m.value("name", std::string()) != node) continue;
-            json inputs = m.value("paramInputs", json::array());
-            if (std::find(inputs.begin(), inputs.end(), json(param)) == inputs.end()) inputs.push_back(param);
-            m["paramInputs"] = inputs;
-        }
-        GraphEdit wired(g.dump());
-        wired.connect(name, node, param);
-        g = json::parse(wired.toJson());
     });
     if (error.empty() && made) *made = name;
     return error;

@@ -664,19 +664,13 @@ class GraphModel(object):
         """Give a param an input port: a mappable param a Field port (Field, FieldNoise, ... drive it),
         a color param that takes a color field (colorField: a Map's rgb output colors it) one too, a
         ramp param a Curve port (a Curve node drives it), any other a Value port (a Value node, or an
-        Expression set to give a value, sets it for the whole node)."""
-        spec = self.param_spec(name, param)
-        if spec is None:
-            raise GraphError("%s has no param %r" % (name, param))
-        if not linkable(spec):
-            raise GraphError("%s.%s cannot be an input: it sets the node's own ports" % (name, param))
-        if any(p["name"] == param for p in self._base_inputs(name)):
-            raise GraphError("%s already has an input named %r" % (name, param))
-        exposed = self._node(name).setdefault("paramInputs", [])
-        if param not in exposed:
-            exposed.append(param)
-            order = {p["name"]: i for i, p in enumerate(self.node_spec(name)["params"])}
-            exposed.sort(key=lambda p: order.get(p, len(order)))
+        Expression set to give a value, sets it for the whole node). The core's (graph_controls.h
+        exposeParam), every host's."""
+        self._node(name)
+        edit = self._edit()
+        with _core_errors():
+            edit.expose_param(name, param)
+        self._take(edit)
 
     def unexpose_param(self, name, param):
         """Remove a param's input port (and what was connected to it); the param keeps its own value."""
@@ -699,19 +693,11 @@ class GraphModel(object):
 
     def keyable(self, name, param):
         """None when the param can be keyed in place, else why not."""
-        spec = self.param_spec(name, param)
-        if spec is None:
+        if self.param_spec(name, param) is None:
             return "%s has no param %r" % (self.node_type(name), param)
-        if self.node_type(name) == "Control":
-            return "a Control node's params make its slider: key the slider (ctl_ attribute) itself"
-        if spec.get("animatable") is False:
-            return ("it sets how many strands, points or cards there are, or where they go: that must stay the same "
-                    "on every frame (motion blur, Alembic and Unreal groom caches)")
-        if spec.get("kind") not in ("float", "int", "bool", "vec3"):
-            return "only numbers, switches and vectors can be keyed"
-        if isinstance(self.param(name, param), dict):
-            return "it reads a map: set it back to a value to key it"
-        return None
+        with _core_errors():  # the core's reasons (graph_controls.h notKeyable), every host's
+            why = self._edit().not_keyable(name, param)
+        return why or None
 
     def link_control(self, name, param, control):
         """Key a param from the groom's control(s): `control` a name, or [x, y, z] names for a vector."""

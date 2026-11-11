@@ -4,6 +4,8 @@ attributes it reads (controls and keyed params)."""
 
 import json
 
+import groomlab_core
+
 from maya import cmds
 
 from groomlab.base import undo_chunk, undoable
@@ -247,19 +249,16 @@ def add_control(groom, node, param, name=None, default=None, min=0.0, max=1.0):
     """
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
-    name = name or param
-    if default is None:
-        value = model.param(node, param)
-        default = float(value) if isinstance(value, (int, float)) else float(min)
-    x, y = model.position(node)
-    control = model.add_node("Control", name=model.unique_name(name + "Control"),
-                             params={"name": name, "default": float(default), "min": float(min), "max": float(max)},
-                             pos=(x - gm.LAYOUT_DX, y + 160.0))
-    if param not in model.param_inputs(node):
-        model.expose_param(node, param)
-    model.connect(control, node, param)
+    model.position(node)  # (a node the graph lacks: GraphError)
+    # Every host's (graph_controls.h addControl): the param's own name numbered until free unless
+    # `name` is given, the slider's range widened to take its start in, left of and below the node.
+    edit = model._edit()
+    with gm._core_errors():
+        control = edit.add_control(node, param, name or "", None if default is None else float(default), float(min),
+                                   float(max))
+    model._take(edit)
     model.save(groom)
-    return groom + "." + CONTROL_PREFIX + name
+    return groom + "." + CONTROL_PREFIX + model.param(control, "name")
 
 
 # -- Keyed params: Set Key on a param in the Graph Editor ------------------------------------------
@@ -275,11 +274,9 @@ def _model(groom):
 
 
 def _control_name(groom, model, node, param):
-    """A free control name for node.param: <node>_<param>, numbered when taken."""
-    import re
-    base = re.sub(r"[^A-Za-z0-9_]", "_", "%s_%s" % (node, param))
-    if not re.match(r"^[A-Za-z_]", base):
-        base = "p_" + base
+    """A free control name for node.param: <node>_<param> (the core's control_name, every host's),
+    numbered when taken by the graph's controls or the groom's ctl_ attributes."""
+    base = groomlab_core.control_name("%s_%s" % (node, param))
     taken = set(_controls_in(model.to_dict()))
     taken |= {a[len(CONTROL_PREFIX):] for a in cmds.listAttr(groom, userDefined=True) or [] if a.startswith(CONTROL_PREFIX)}
     name, i = base, 1
