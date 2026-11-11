@@ -2,6 +2,7 @@
 #include "groomlab/correctives.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <stdexcept>
 
@@ -226,6 +227,39 @@ std::vector<GuideId> Correctives::record(const std::string& name, const GuideHie
         }
     }
     return recorded;
+}
+
+void CorrectiveLayer::keyAt(double seconds, float w) {
+    for (auto& [t, v] : weightCurve) {
+        if (std::abs(t - seconds) < 1e-6) {
+            v = w;
+            return;
+        }
+    }
+    weightCurve.emplace_back(seconds, w);
+    std::sort(weightCurve.begin(), weightCurve.end());
+}
+
+std::string Correctives::freeLayerName(const std::string& wanted, const std::string& current,
+                                       const std::vector<std::string>& taken) const {
+    std::string trimmed = wanted;
+    const auto first = trimmed.find_first_not_of(" \t");
+    trimmed = first == std::string::npos ? std::string() : trimmed.substr(first, trimmed.find_last_not_of(" \t") - first + 1);
+    std::string base;
+    for (const char ch : trimmed) base += std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' ? ch : '_';
+    if (base.empty()) base = "corrective";
+    if (std::isdigit(static_cast<unsigned char>(base[0]))) base = "c" + base;
+    auto isTaken = [&](const std::string& n) {
+        if (n == current) return false;
+        return layer(n) != nullptr || std::find(taken.begin(), taken.end(), n) != taken.end();
+    };
+    std::string name = base;
+    for (int n = 2; isTaken(name); ++n) name = base + "_" + std::to_string(n);
+    return name;
+}
+
+std::string Correctives::newLayerName(bool allFrames, double frame) const {
+    return allFrames ? "sculpt" + std::to_string(layers.size() + 1) : "shot" + std::to_string(std::lround(frame));
 }
 
 }  // namespace groomlab

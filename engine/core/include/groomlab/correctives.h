@@ -44,6 +44,10 @@ struct CorrectiveLayer {
     // Weight at a time: the weight curve (linear between samples, held past
     // its ends), else weight x a smoothstep fade in and out.
     float weightAt(double seconds) const;
+    // Full weight on every frame: no keys, held before and after (a sculpt; else a shot fix).
+    bool allFrames() const { return weightCurve.empty() && holdBefore && holdAfter; }
+    // The weight curve's value at `seconds` set (a key added, or the one there changed), kept sorted.
+    void keyAt(double seconds, float w);
 };
 
 class Correctives {
@@ -53,6 +57,17 @@ public:
     bool empty() const;  // no layer with offsets
     CorrectiveLayer* layer(const std::string& name);
     const CorrectiveLayer* layer(const std::string& name) const;
+
+    // A layer's name as every host makes it from `wanted` (Maya's shots.py, the Blender helper, the
+    // app): letters, digits and _ (a host names an attribute or property after it), "c" before a
+    // leading digit, "corrective" for nothing; then _2, _3... until no other layer has it, nor any
+    // of `taken` (names the host holds otherwise: Maya's attributes). `current`: the layer being
+    // renamed, which keeps its own name.
+    std::string freeLayerName(const std::string& wanted, const std::string& current = {},
+                              const std::vector<std::string>& taken = {}) const;
+    // A new layer's name before freeLayerName: sculpt<N> (every frame; N the stack's size + 1) or
+    // shot<F> (a fix at frame F, rounded).
+    std::string newLayerName(bool allFrames, double frame) const;
 
     // {"layers": [{"name", "time", "fadeIn", "fadeOut", "holdBefore", "holdAfter",
     //   "weight", "enabled", "slot"?, "weightCurve"?: [[seconds, w], ...],

@@ -34,29 +34,6 @@ QString qs(const std::string& s) { return QString::fromStdString(s); }
 constexpr int kKindRole = Qt::UserRole;      // "layer", "node" or "base"
 constexpr int kNameRole = Qt::UserRole + 1;  // the corrective's or the node's name
 
-// A layer name not yet taken: base, base1, base2...
-std::string uniqueLayerName(const Correctives& c, const std::string& base) {
-    if (!c.layer(base)) return base;
-    for (int k = 1;; ++k) {
-        const std::string name = base + std::to_string(k);
-        if (!c.layer(name)) return name;
-    }
-}
-
-bool allFrames(const CorrectiveLayer& l) { return l.weightCurve.empty() && l.holdBefore && l.holdAfter; }
-
-// The weight curve's value at a time put in (a key), the curve kept sorted.
-void keyAt(CorrectiveLayer& l, double seconds, float w) {
-    for (auto& [t, v] : l.weightCurve) {
-        if (std::abs(t - seconds) < 1e-6) {
-            v = w;
-            return;
-        }
-    }
-    l.weightCurve.emplace_back(seconds, w);
-    std::sort(l.weightCurve.begin(), l.weightCurve.end());
-}
-
 }  // namespace
 
 CorrectivesPanel::CorrectivesPanel(QWidget* parent) : QWidget(parent) {
@@ -257,7 +234,7 @@ void CorrectivesPanel::refresh() {
             item->setCheckState(0, l->enabled ? Qt::Checked : Qt::Unchecked);
             QString keys;
             if (!l->weightCurve.empty()) keys = QStringLiteral("◆ %1").arg(l->weightCurve.size());
-            else if (allFrames(*l)) keys = tr("all frames");
+            else if (l->allFrames()) keys = tr("all frames");
             else if (document_) keys = tr("frame %1 ± %2").arg(std::lround(l->time * document_->framesPerSecond())).arg(std::lround(std::max(l->fadeIn, l->fadeOut) * document_->framesPerSecond()));
             item->setText(2, keys);
             QString tip = tr("%1: %n guide(s) corrected", "", static_cast<int>(l->offsets.size())).arg(qs(l->name));
@@ -460,7 +437,9 @@ bool CorrectivesPanel::addLayer(bool allFrames, double fadeFrames) {
     std::string made;
     const bool ok = editLayers("add corrective", [&](Correctives& c) {
         CorrectiveLayer layer;
-        layer.name = made = uniqueLayerName(c, allFrames ? "layer" : "shot" + std::to_string(frame));
+        // Every host's names (correctives.h): sculpt<N> or shot<F>, made free (the app named them
+        // "layer", "layer1" before, unlike Maya and Blender).
+        layer.name = made = c.freeLayerName(c.newLayerName(allFrames, static_cast<double>(frame)));
         layer.time = seconds;
         layer.holdBefore = layer.holdAfter = allFrames;
         layer.fadeIn = layer.fadeOut = allFrames ? 0.5 : fade;
@@ -487,7 +466,7 @@ bool CorrectivesPanel::setLayerWeight(const std::string& name, float weight) {
     return editLayers("corrective weight", [&](Correctives& c) {
         CorrectiveLayer& l = *findLayer(c, name);
         const float w = std::clamp(weight, 0.0f, 1.0f);
-        if (!l.weightCurve.empty()) keyAt(l, now, w);  // keyed: keyed here, as auto key does
+        if (!l.weightCurve.empty()) l.keyAt(now, w);  // keyed: keyed here, as auto key does
         else l.weight = w;
     });
 }
@@ -500,11 +479,13 @@ bool CorrectivesPanel::setLayerEnabled(const std::string& name, bool enabled) {
 bool CorrectivesPanel::renameLayer(const std::string& name, const std::string& to) {
     if (name.empty() || to.empty() || name == to) return false;
     const bool retarget = target_ == name;  // the refresh after the edit drops a target that is gone
+    std::string clean;
     const bool ok = editLayers("rename corrective", [&](Correctives& c) {
-        if (c.layer(to)) throw std::invalid_argument("a corrective named " + to + " exists");
-        findLayer(c, name)->name = to;
+        // As Maya and Blender rename it (correctives.h freeLayerName): letters, digits and _, free.
+        clean = c.freeLayerName(to, name);
+        findLayer(c, name)->name = clean;
     });
-    if (ok && retarget) setTargetLayer(to);
+    if (ok && retarget) setTargetLayer(clean);
     return ok;
 }
 
@@ -541,13 +522,13 @@ bool CorrectivesPanel::keyWeight(const std::string& name) {
     return editLayers("key corrective weight", [&](Correctives& c) {
         CorrectiveLayer& l = *findLayer(c, name);
         const float w = picked ? shown : l.weightAt(now);
-        if (l.weightCurve.empty() && !allFrames(l)) {
+        if (l.weightCurve.empty() && !l.allFrames()) {
             // A fix's fades become keys first (Maya's Fix Frame keys them), so keying keeps its shape.
             if (!l.holdBefore) l.weightCurve.emplace_back(l.time - l.fadeIn, 0.0f);
             l.weightCurve.emplace_back(l.time, l.weight);
             if (!l.holdAfter) l.weightCurve.emplace_back(l.time + l.fadeOut, 0.0f);
         }
-        keyAt(l, now, w);
+        l.keyAt(now, w);
         l.holdBefore = l.holdAfter = true;  // the curve holds past its ends
     });
 }
@@ -557,7 +538,7 @@ bool CorrectivesPanel::clearKeys(const std::string& name) {
     const double now = document_->time();
     return editLayers("clear corrective keys", [&](Correctives& c) {
         CorrectiveLayer& l = *findLayer(c, name);
-        if (allFrames(l)) return;
+        if (l.allFrames()) return;
         l.weight = l.weightAt(now);
         l.weightCurve.clear();
         l.holdBefore = l.holdAfter = true;
@@ -581,7 +562,7 @@ std::optional<double> CorrectivesPanel::layerFrame(const std::string& name) cons
     double seconds = 0.0;
     if (!l->weightCurve.empty()) {
         seconds = std::max_element(l->weightCurve.begin(), l->weightCurve.end(), [](const auto& a, const auto& b) { return a.second < b.second; })->first;
-    } else if (!allFrames(*l)) {
+    } else if (!l->allFrames()) {
         seconds = l->time;
     } else {
         return std::nullopt;

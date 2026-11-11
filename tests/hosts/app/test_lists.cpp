@@ -354,30 +354,30 @@ TEST(AppLists, CorrectivesStackBarMenuAndKeys) {
     bindings.at("corrective.new").trigger(nullptr, false);
     doc->setFrame(10.0);
     bindings.at("corrective.fixFrame").trigger(nullptr, false);
-    EXPECT_EQ(panel->layerNames(), (std::vector<std::string>{"layer", "shot10"}));
+    EXPECT_EQ(panel->layerNames(), (std::vector<std::string>{"sculpt1", "shot10"}));
     QTreeWidget* tree = panel->tree();
     ASSERT_EQ(tree->topLevelItemCount(), 3);
     EXPECT_EQ(tree->topLevelItem(0)->text(0), QStringLiteral("shot10"));
     EXPECT_EQ(tree->topLevelItem(2)->text(0), QStringLiteral("Base groom"));
     EXPECT_EQ(panel->currentLayer(), "shot10") << "a new corrective is what brushes sculpt into";
     EXPECT_EQ(panel->layerFrame("shot10"), std::optional<double>(10.0));
-    EXPECT_FALSE(panel->layerFrame("layer")) << "every frame";
+    EXPECT_FALSE(panel->layerFrame("sculpt1")) << "every frame";
     // The right-click menu on a corrective; none on the base groom.
     std::unique_ptr<QMenu> menu(panel->contextMenu(rowOf(tree, tree->topLevelItem(1))));
     ASSERT_TRUE(menu);
-    EXPECT_EQ(panel->currentLayer(), "layer");
+    EXPECT_EQ(panel->currentLayer(), "sculpt1");
     EXPECT_EQ(shown(menu.get()),
               (std::vector<std::string>{"Go to Its Frame", "Key Weight Here", "Clear Keys (every frame)", "Rename", "-", "Solo", "Delete"}));
     EXPECT_EQ(panel->contextMenu(rowOf(tree, tree->topLevelItem(2))), nullptr);
     // Up, solo (again: all on), each one undo step.
     bindings.at("corrective.up").trigger(nullptr, false);
-    EXPECT_EQ(panel->layerNames(), (std::vector<std::string>{"shot10", "layer"}));
+    EXPECT_EQ(panel->layerNames(), (std::vector<std::string>{"shot10", "sculpt1"}));
     EXPECT_EQ(doc->undoText(), "Undo move corrective stroke");
-    ASSERT_TRUE(panel->soloLayer("layer"));
+    ASSERT_TRUE(panel->soloLayer("sculpt1"));
     Correctives c = Correctives::fromJson(doc->storedText(StrokeField::Correctives));
     EXPECT_FALSE(c.layer("shot10")->enabled);
-    EXPECT_TRUE(c.layer("layer")->enabled);
-    ASSERT_TRUE(panel->soloLayer("layer"));
+    EXPECT_TRUE(c.layer("sculpt1")->enabled);
+    ASSERT_TRUE(panel->soloLayer("sculpt1"));
     c = Correctives::fromJson(doc->storedText(StrokeField::Correctives));
     EXPECT_TRUE(c.layer("shot10")->enabled);
     // Keyed: a fix's fades become keys, the weight keyed here; Clear Keys: on every frame again.
@@ -396,7 +396,7 @@ TEST(AppLists, CorrectivesStackBarMenuAndKeys) {
     bindings.at("corrective.goTo").trigger(nullptr, false);
     EXPECT_DOUBLE_EQ(doc->frame(), 10.0);
     bindings.at("corrective.delete").trigger(nullptr, false);
-    EXPECT_EQ(panel->layerNames(), std::vector<std::string>{"layer"});
+    EXPECT_EQ(panel->layerNames(), std::vector<std::string>{"sculpt1"});
     // A frame moves the weights alone: no rebuild.
     const int rebuilds = panel->rebuilds();
     panel->frameChanged();

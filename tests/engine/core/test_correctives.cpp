@@ -94,6 +94,35 @@ TEST(Correctives, RecordThenApplyReproducesTheSculpt) {
     EXPECT_LT(maxDistance(fromJson, more), 1e-5f);
 }
 
+TEST(Correctives, EveryHostNamesAndKeysLayersAlike) {
+    // correctives.h: Maya's shots.py, the Blender helper and the app (which once named them
+    // "layer", "layer1" and took a rename as typed).
+    Correctives c;
+    EXPECT_EQ(c.newLayerName(true, 0.0), "sculpt1");
+    EXPECT_EQ(c.newLayerName(false, 11.6), "shot12");
+    EXPECT_EQ(c.freeLayerName(" hair fix! "), "hair_fix_");
+    EXPECT_EQ(c.freeLayerName("3d"), "c3d");
+    EXPECT_EQ(c.freeLayerName(""), "corrective");
+    CorrectiveLayer a;
+    a.name = "shot12";
+    c.layers.push_back(a);
+    EXPECT_EQ(c.freeLayerName("shot12"), "shot12_2");
+    EXPECT_EQ(c.freeLayerName("shot12", "shot12"), "shot12") << "renaming a layer to its own name";
+    EXPECT_EQ(c.freeLayerName("fix", {}, {"fix", "fix_2"}), "fix_3") << "names the host holds";
+    EXPECT_EQ(c.newLayerName(true, 0.0), "sculpt2");
+    // Keys: set or changed, kept sorted; a layer with none, held both ways, is on every frame.
+    CorrectiveLayer& l = c.layers.front();
+    l.holdBefore = l.holdAfter = true;
+    EXPECT_TRUE(l.allFrames());
+    l.keyAt(2.0, 1.0f);
+    l.keyAt(1.0, 0.0f);
+    l.keyAt(2.0, 0.5f);
+    ASSERT_EQ(l.weightCurve.size(), 2u);
+    EXPECT_DOUBLE_EQ(l.weightCurve[0].first, 1.0);
+    EXPECT_FLOAT_EQ(l.weightCurve[1].second, 0.5f);
+    EXPECT_FALSE(l.allFrames());
+}
+
 TEST(Correctives, FadeAndHold) {
     CorrectiveLayer l;
     l.time = 2.0;

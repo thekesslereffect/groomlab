@@ -508,23 +508,6 @@ double fpsOf(const Session& s) { return s.groom->framesPerSecond(); }
 double frameOf(const Session& s, double seconds) { return secondsToFrame(seconds, fpsOf(s)); }
 double secondsOf(const Session& s, double frame) { return frameToSeconds(frame, fpsOf(s)); }
 
-// shots.py's _clean_name: letters, digits and _ (a host may name a property after it), not starting
-// with a digit, unique ("_2", "_3"...).
-std::string cleanLayerName(const Correctives& c, const std::string& wanted, const std::string& current = {}) {
-    std::string base;
-    std::string trimmed = wanted;
-    trimmed.erase(0, trimmed.find_first_not_of(" \t"));
-    trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
-    for (const char ch : trimmed) base += std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' ? ch : '_';
-    if (base.empty()) base = "corrective";
-    if (std::isdigit(static_cast<unsigned char>(base[0]))) base = "c" + base;
-    std::string name = base;
-    for (int n = 2; name != current && c.layer(name); ++n) name = base + "_" + std::to_string(n);
-    return name;
-}
-
-bool allFrames(const CorrectiveLayer& l) { return l.weightCurve.empty() && l.holdBefore && l.holdAfter; }
-
 json layerJson(const Session& s, const CorrectiveLayer& l) {
     json keys = json::array();
     for (const auto& [seconds, w] : l.weightCurve) keys.push_back({frameOf(s, seconds), w});
@@ -532,7 +515,7 @@ json layerJson(const Session& s, const CorrectiveLayer& l) {
     if (!l.weightCurve.empty()) {
         const auto peak = std::max_element(l.weightCurve.begin(), l.weightCurve.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
         frame = frameOf(s, peak->first);
-    } else if (!allFrames(l)) {
+    } else if (!l.allFrames()) {
         frame = frameOf(s, l.time);
     }
     json j = {{"name", l.name},
@@ -542,7 +525,7 @@ json layerJson(const Session& s, const CorrectiveLayer& l) {
               {"weightNow", l.enabled ? l.weightAt(s.seconds) : 0.0f},
               {"keyed", !l.weightCurve.empty()},
               {"keys", keys},
-              {"allFrames", allFrames(l)},
+              {"allFrames", l.allFrames()},
               {"frame", frame},
               {"fadeIn", l.fadeIn * fpsOf(s)},
               {"fadeOut", l.fadeOut * fpsOf(s)},
@@ -608,9 +591,8 @@ json correctiveNew(Session& s, const json& args) {
     for (const char* key : {"fade", "fadeIn", "fadeOut"}) fades = fades || (args.contains(key) && !args[key].is_null());
     const bool all = optBool(args, "allFrames", !fades);
     CorrectiveLayer layer;
-    const std::string base = optString(args, "name", all ? "sculpt" + std::to_string(c.layers.size() + 1)
-                                                         : "shot" + std::to_string(std::lround(frame)));
-    layer.name = cleanLayerName(c, base);
+    // Every host's names (correctives.h): sculpt<N> or shot<F>, made free.
+    layer.name = c.freeLayerName(optString(args, "name", c.newLayerName(all, frame)));
     layer.time = secondsOf(s, frame);
     layer.holdBefore = layer.holdAfter = all;
     if (all) {
@@ -629,19 +611,6 @@ json correctiveNew(Session& s, const json& args) {
     s.groom->setSculptTarget({});
     setShotLayer(s, name);
     return {{"name", name}, {"layers", layersJson(s)}, {"target", targetJson(s)}, {"undo", undoStateJson(s)}};
-}
-
-// The weight curve's value at a time put in (a key), the curve kept sorted.
-void keyAt(CorrectiveLayer& l, double seconds, float w) {
-    auto& curve = l.weightCurve;
-    for (auto& [t, v] : curve) {
-        if (std::abs(t - seconds) < 1e-6) {
-            v = w;
-            return;
-        }
-    }
-    curve.emplace_back(seconds, w);
-    std::sort(curve.begin(), curve.end());
 }
 
 // corrective_set (shots.py's set_layer, the app's weight and checkbox): on or off, its weight (a
@@ -677,10 +646,10 @@ json correctiveSet(Session& s, const json& args) {
         l.weight = weighted ? weightArg(args) : 1.0f;
     } else if (retimes(args)) {
         const double at = args.contains("frame") && args["frame"].is_number() ? args["frame"].get<double>()
-                          : !allFrames(l)                                     ? frameOf(s, l.time)
+                          : !l.allFrames()                                     ? frameOf(s, l.time)
                                                                               : frameOf(s, s.seconds);
         double in = 6.0, out = 6.0;
-        const bool wasFix = !allFrames(l) && l.weightCurve.empty();
+        const bool wasFix = !l.allFrames() && l.weightCurve.empty();
         fadesOf(args, in, out, wasFix ? l.fadeIn * fpsOf(s) : 6.0, wasFix ? l.fadeOut * fpsOf(s) : 6.0);
         float peak = l.weight;
         if (!l.weightCurve.empty()) {
@@ -696,7 +665,7 @@ json correctiveSet(Session& s, const json& args) {
     } else if (weighted) {
         const float w = weightArg(args);
         if (!l.weightCurve.empty()) {
-            keyAt(l, s.seconds, w);
+            l.keyAt(s.seconds, w);
         } else {
             l.weight = w;
         }
@@ -710,7 +679,7 @@ json correctiveRename(Session& s, const json& args) {
     const std::string name = needString(args, "name"), to = needString(args, "to");
     CorrectiveLayer& l = layerOf(c, name);
     if (to == name) return commitLayers(s, "rename corrective", c, {{"name", name}});
-    const std::string clean = cleanLayerName(c, to, name);
+    const std::string clean = c.freeLayerName(to, name);
     if (clean != to) {
         fail("bad_request", "'" + to + "' cannot name a corrective (taken, or not letters, digits and _): try '" + clean + "'");
     }
@@ -762,7 +731,7 @@ json correctiveDelete(Session& s, const json& args) {
 json correctiveClearKeys(Session& s, const json& args) {
     Correctives c = correctivesOf(s);
     CorrectiveLayer& l = layerOf(c, needString(args, "name"));
-    if (!allFrames(l)) {
+    if (!l.allFrames()) {
         l.weight = l.weightAt(s.seconds);
         l.weightCurve.clear();
         l.holdBefore = l.holdAfter = true;

@@ -1309,10 +1309,10 @@ TEST(AppPanels, CorrectivesPanelAddsLayersAndAimsTheBrush) {
     EXPECT_FALSE(session.shotSculpt());
     // A layer on every frame: the brushes sculpt into it from now on.
     EXPECT_TRUE(panel.addLayer(true));
-    EXPECT_EQ(panel.layerNames(), std::vector<std::string>{"layer"});
-    EXPECT_EQ(panel.targetLayer(), "layer");
+    EXPECT_EQ(panel.layerNames(), std::vector<std::string>{"sculpt1"});
+    EXPECT_EQ(panel.targetLayer(), "sculpt1");
     EXPECT_TRUE(session.shotSculpt());
-    EXPECT_EQ(session.shotLayer(), "layer");
+    EXPECT_EQ(session.shotLayer(), "sculpt1");
     EXPECT_EQ(doc->undoText(), "Undo add corrective stroke");
     // One fixed to this frame, with a fade; the weight and the switch, each a step.
     doc->setFrame(12.0);
@@ -1324,21 +1324,23 @@ TEST(AppPanels, CorrectivesPanelAddsLayersAndAimsTheBrush) {
     ASSERT_TRUE(c.layer("shot12"));
     EXPECT_NEAR(c.layer("shot12")->time, 12.0 / doc->framesPerSecond(), 1e-9);
     EXPECT_NEAR(c.layer("shot12")->fadeIn, 6.0 / doc->framesPerSecond(), 1e-9);
-    EXPECT_TRUE(c.layer("layer")->holdBefore);
-    EXPECT_TRUE(panel.setLayerWeight("layer", 0.4f));
-    EXPECT_TRUE(panel.setLayerEnabled("layer", false));
+    EXPECT_TRUE(c.layer("sculpt1")->holdBefore);
+    EXPECT_TRUE(panel.setLayerWeight("sculpt1", 0.4f));
+    EXPECT_TRUE(panel.setLayerEnabled("sculpt1", false));
     c = Correctives::fromJson(doc->storedText(StrokeField::Correctives));
-    EXPECT_FLOAT_EQ(c.layer("layer")->weight, 0.4f);
-    EXPECT_FALSE(c.layer("layer")->enabled);
+    EXPECT_FLOAT_EQ(c.layer("sculpt1")->weight, 0.4f);
+    EXPECT_FALSE(c.layer("sculpt1")->enabled);
     EXPECT_EQ(panel.targetLayer(), "shot12") << "an edit of another layer keeps the target";
     EXPECT_TRUE(panel.renameLayer("shot12", "lift"));
     EXPECT_EQ(panel.targetLayer(), "lift");
-    EXPECT_FALSE(panel.renameLayer("lift", "layer")) << "a name taken";
+    // A name taken (or one of other characters): made free, as Maya and Blender rename layers.
+    EXPECT_TRUE(panel.renameLayer("lift", "sculpt1"));
+    EXPECT_EQ(panel.targetLayer(), "sculpt1_2");
     // Back to the base groom: ordinary strokes; a removed target lets the brush go too.
     panel.setTargetLayer({});
     EXPECT_FALSE(session.shotSculpt());
-    panel.setTargetLayer("lift");
-    EXPECT_TRUE(panel.removeLayer("lift"));
+    panel.setTargetLayer("sculpt1_2");
+    EXPECT_TRUE(panel.removeLayer("sculpt1_2"));
     EXPECT_EQ(panel.targetLayer(), "");
     EXPECT_FALSE(session.shotSculpt());
     EXPECT_FALSE(panel.removeLayer("nope"));
