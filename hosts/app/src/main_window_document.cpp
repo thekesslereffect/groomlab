@@ -563,7 +563,7 @@ void MainWindow::attachDocument() {
     refreshTitle();
     refreshGroomColor();
     refreshProperties();
-    shell_->setNodeCount(document_ ? static_cast<int>(document_->nodes().size()) : 0);
+    shell_->setNodeCount(document_ ? static_cast<int>(document_->nodeCount()) : 0);
     if (graphWasShown) setGraphShown(document_ != nullptr);
     refreshOutliner();
 }
@@ -922,7 +922,7 @@ void MainWindow::graphEdited() {
     refreshGroomColor();
     refreshStarter();  // a look node added: the first-groom step ticks
     shell_->exportPanel()->setCardsAvailable(!document_ || !document_->cardsNodes().empty());  // (a Cards node added or gone)
-    shell_->setNodeCount(document_ ? static_cast<int>(document_->nodes().size()) : 0);
+    shell_->setNodeCount(document_ ? static_cast<int>(document_->nodeCount()) : 0);
     if (graphShown()) graph_->refresh();
     params_->refresh();
     graphParams_->refresh();

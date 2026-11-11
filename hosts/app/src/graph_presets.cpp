@@ -183,7 +183,7 @@ std::string applyPresetText(GroomDocument& document, const std::string& text, bo
     }
     const std::string error = document.editGraph("preset " + done.title, [&](json& g) { g = json::parse(graph); });
     if (!error.empty()) return error;
-    done.nodes = document.nodes().size();
+    done.nodes = document.nodeCount();
     if (applied) *applied = done;
     return {};
 }
@@ -213,7 +213,7 @@ std::string insertPresetFile(GroomDocument& document, const std::string& path, c
         g = json::parse(insertPresetJson(g.dump(), text, size, after, presetNodeName(stem), &made));
     });
     if (!error.empty()) return error;
-    done.nodes = document.nodes().size();
+    done.nodes = document.nodeCount();
     done.nodeMade = made;
     if (applied) *applied = done;
     return {};

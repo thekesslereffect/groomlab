@@ -1882,6 +1882,10 @@ std::vector<GroomDocument::NodeInfo> GroomDocument::nodes() const {
     return out;
 }
 
+std::size_t GroomDocument::nodeCount() const {
+    return graph_.contains("nodes") && graph_["nodes"].is_array() ? graph_["nodes"].size() : 0;
+}
+
 json* GroomDocument::nodeJson(const std::string& node) {
     if (!graph_.contains("nodes")) return nullptr;
     for (json& n : graph_["nodes"]) {

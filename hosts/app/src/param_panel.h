@@ -215,6 +215,8 @@ private:
     QVBoxLayout* list_ = nullptr;
     QWidget* formHost_ = nullptr;
     std::vector<Row> rows_;
+    // The row of param `name`, null when the form has none.
+    const Row* rowNamed(const std::string& name) const;
     std::vector<Section> sections_;
     std::string type_;  // the shown node's operator type (the folds are kept by it)
     bool updating_ = false;

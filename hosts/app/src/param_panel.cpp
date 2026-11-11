@@ -1030,18 +1030,21 @@ void ParamPanel::updateVisibility() {
     updateGeometry();
 }
 
-bool ParamPanel::rowShown(const std::string& name) const {
+const ParamPanel::Row* ParamPanel::rowNamed(const std::string& name) const {
     for (const Row& r : rows_) {
-        if (r.name == name) return r.host && r.host->isVisibleTo(const_cast<ParamPanel*>(this));
+        if (r.name == name) return &r;
     }
-    return false;
+    return nullptr;
+}
+
+bool ParamPanel::rowShown(const std::string& name) const {
+    const Row* r = rowNamed(name);
+    return r && r->host && r->host->isVisibleTo(const_cast<ParamPanel*>(this));
 }
 
 std::string ParamPanel::sectionOf(const std::string& name) const {
-    for (const Row& r : rows_) {
-        if (r.name == name) return r.section;
-    }
-    return {};
+    const Row* r = rowNamed(name);
+    return r ? r->section : std::string();
 }
 
 ValueSlider* ParamPanel::numberSlider(const std::string& name) const {
@@ -1186,26 +1189,20 @@ json ParamPanel::valueOf(const Row& row) const {
 }
 
 json ParamPanel::shownValue(const std::string& name) const {
-    for (const Row& r : rows_) {
-        if (r.name == name) return valueOf(r);
-    }
-    return nullptr;
+    const Row* r = rowNamed(name);
+    return r ? valueOf(*r) : json(nullptr);
 }
 
 QString ParamPanel::description() const { return description_->isVisibleTo(const_cast<ParamPanel*>(this)) ? description_->text() : QString(); }
 
 std::string ParamPanel::editorKind(const std::string& name) const {
-    for (const Row& r : rows_) {
-        if (r.name == name) return r.editor;
-    }
-    return {};
+    const Row* r = rowNamed(name);
+    return r ? r->editor : std::string();
 }
 
 QString ParamPanel::attributeNote(const std::string& name) const {
-    for (const Row& r : rows_) {
-        if (r.name == name && r.attributeNote) return r.attributeNote->text();
-    }
-    return {};
+    const Row* r = rowNamed(name);
+    return r && r->attributeNote ? r->attributeNote->text() : QString();
 }
 
 QStringList ParamPanel::attributeChoices(const std::string& name) const {
@@ -1219,24 +1216,18 @@ QStringList ParamPanel::attributeChoices(const std::string& name) const {
 }
 
 RampEditor* ParamPanel::rampEditor(const std::string& name) const {
-    for (const Row& r : rows_) {
-        if (r.name == name) return r.ramp;
-    }
-    return nullptr;
+    const Row* r = rowNamed(name);
+    return r ? r->ramp : nullptr;
 }
 
 ColorEditor* ParamPanel::colorEditor(const std::string& name) const {
-    for (const Row& r : rows_) {
-        if (r.name == name) return r.color;
-    }
-    return nullptr;
+    const Row* r = rowNamed(name);
+    return r ? r->color : nullptr;
 }
 
 MapSourceEditor* ParamPanel::mapEditor(const std::string& name) const {
-    for (const Row& r : rows_) {
-        if (r.name == name) return r.map;
-    }
-    return nullptr;
+    const Row* r = rowNamed(name);
+    return r ? r->map : nullptr;
 }
 
 void ParamPanel::refresh() {

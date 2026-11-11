@@ -100,7 +100,7 @@ void MainWindow::setGraphShown(bool shown) {
         graph_->setNodeErrors(document_->nodeErrors());
     }
     const bool hadFocus = graph_->hasFocus();
-    shell_->setGraphShown(shown, shown ? graph_->nodeCount() : (document_ ? static_cast<int>(document_->nodes().size()) : 0));
+    shell_->setGraphShown(shown, shown ? graph_->nodeCount() : (document_ ? static_cast<int>(document_->nodeCount()) : 0));
     if (!shown && hadFocus) viewport_->setFocus();
 }
 
@@ -242,7 +242,7 @@ bool MainWindow::setUiPrompt(const QString& name) {
         // As an interactive window asks (an edit made first when none is), nothing done on a choice.
         const bool was = interactive_;
         interactive_ = true;
-        if (document_ && !document_->dirty() && !document_->nodes().empty()) {
+        if (document_ && !document_->dirty() && document_->nodeCount() > 0) {
             const std::string node = document_->nodes().front().name;
             float x = 0.0f, y = 0.0f;
             document_->nodePosition(node, &x, &y);
@@ -270,7 +270,7 @@ bool MainWindow::setUiPrompt(const QString& name) {
             report(tr("No groom open: no autosave to offer"));
             return false;
         }
-        if (!document_->dirty() && !document_->nodes().empty()) {
+        if (!document_->dirty() && document_->nodeCount() > 0) {
             const std::string node = document_->nodes().front().name;
             float x = 0.0f, y = 0.0f;
             document_->nodePosition(node, &x, &y);
@@ -627,7 +627,7 @@ void MainWindow::copyGraph() {
     }
     QApplication::clipboard()->setText(QString::fromStdString(graphAsText(*document_)));
     report(tr("Copied the graph as text (%n nodes): paste it with Presets > Paste Graph on any groom, or save it as a .json preset", "",
-              static_cast<int>(document_->nodes().size())),
+              static_cast<int>(document_->nodeCount())),
            false);
 }
 

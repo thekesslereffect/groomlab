@@ -208,6 +208,8 @@ public:
     };
     // The nodes as the JSON lists them (the default graph's when the file said {}).
     std::vector<NodeInfo> nodes() const;
+    // How many there are (nodes().size() without the list).
+    std::size_t nodeCount() const;
     struct ConnectionInfo {
         std::string from, output, to, input;  // output "": the source's first
     };

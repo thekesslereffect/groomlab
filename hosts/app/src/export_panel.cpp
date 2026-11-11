@@ -247,6 +247,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     density_ = new ValueSlider(this);
     density_->setCaption(tr("Density"));
     density_->setRange(0.01, 1.0);
+    density_->setLimits(0.01, 1.0);  // (a typed 0 or 150% is no share of the strands)
     density_->setValue(1.0);
     density_->setFill(theme::yellow());
     density_->setFormat([](double v) { return QString::number(std::lround(v * 100.0)) + QStringLiteral("%"); });
@@ -367,6 +368,7 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     occlusion_ = new ValueSlider(cardOptions_);
     occlusion_->setCaption(tr("Occlusion"));
     occlusion_->setRange(0.0, 1.0);
+    occlusion_->setLimits(0.0, 1.0);
     occlusion_->setValue(1.0);
     occlusion_->setFill(theme::purple());
     occlusion_->setFormat([](double v) { return QString::number(v, 'f', 2); });
