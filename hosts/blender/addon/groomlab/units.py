@@ -8,6 +8,7 @@ spec's other units with a fixed suffix."""
 import json
 
 SCENE_LENGTH = {"length", "width"}
+FRACTION_FACTOR = 100.0  # a fraction shows as a percentage (every host's: choices.json unitFixed)
 SUFFIX = {"density": "/cm²", "angle": "°", "turns": " turns", "seconds": " s", "pixels": " px"}
 
 
@@ -53,11 +54,14 @@ def effective(spec, value_of):
 
 
 def to_ui(unit, value, scene):
-    """A param's stored value (centimeters) as the panel shows it."""
+    """A param's stored value (centimeters) as the panel shows it; a fraction as a percentage, as
+    in Maya and the app (engine/ui/choices.json unitFixed: x100)."""
     if unit in SCENE_LENGTH:
         return value / cm_per_unit(scene)
     if unit == "perLength":
         return value * cm_per_unit(scene)
+    if unit == "fraction":
+        return value * FRACTION_FACTOR
     return value
 
 
@@ -66,7 +70,17 @@ def from_ui(unit, value, scene):
         return value * cm_per_unit(scene)
     if unit == "perLength":
         return value / cm_per_unit(scene)
+    if unit == "fraction":
+        return value / FRACTION_FACTOR
     return value
+
+
+def per_time(node_type, param):
+    """What follows a rate over time's unit (engine/ui/choices.json unitPerTime: Simulate's gravity
+    "/s²"), "" for any other param."""
+    from . import definitions
+    key = "%s.%s" % (node_type, param)
+    return next((c["label"] for c in definitions.choices("unitPerTime") if c["value"] == key), "")
 
 
 def suffix(unit, scene):

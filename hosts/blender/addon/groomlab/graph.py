@@ -153,8 +153,8 @@ def _set_widget(p, value, scene):
     elif kind == "float" and isinstance(value, (int, float)) and not isinstance(value, bool):
         if unit in units.SCENE_LENGTH:
             p.widget, p.value_length = "length", units.to_ui(unit, float(value), scene)
-        elif unit == "fraction":
-            p.widget, p.value_factor = "factor", float(value)
+        elif unit == "fraction":  # as a percentage (units.to_ui), as in Maya and the app
+            p.widget, p.value_factor = "factor", units.to_ui(unit, float(value), scene)
         else:
             p.widget, p.value_float = "float", units.to_ui(unit, float(value), scene)
     elif kind == "vec3" and isinstance(value, list) and len(value) == 3:
@@ -215,7 +215,7 @@ def widget_value(p, scene):
     if w == "length":
         return units.from_ui(p.unit, float(p.value_length), scene)
     if w == "factor":
-        return float(p.value_factor)
+        return units.from_ui("fraction", float(p.value_factor), scene)
     if w == "float":
         return units.from_ui(p.unit, float(p.value_float), scene)
     if w == "color":

@@ -14,6 +14,7 @@
 #include <set>
 #include <string>
 
+#include <QSettings>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -3725,9 +3726,17 @@ TEST(AppPanels, NumbersShowTheSpecsDecimalsWithoutTrailingZeros) {
     EXPECT_EQ(fraction.decimals, 1);
     EXPECT_EQ(displayUnit("fraction", false, 4).decimals, 1);
     EXPECT_EQ(displayUnit("angle", false, 3).decimals, 1);
+    // Lengths in the unit picked: by default every host's (engine/ui/choices.json: cm, µm, /cm²);
+    // scene units bare when picked.
+    const QVariant pickedBefore = QSettings().value(QStringLiteral("units/length"));
+    QSettings().remove(QStringLiteral("units/length"));
+    EXPECT_EQ(unitChoice("length"), "cm");
+    EXPECT_EQ(displayUnit("length", false, 2).suffix, QStringLiteral(" cm"));
+    setUnitChoice("length", "scene");
     EXPECT_EQ(displayUnit("length", false, 2).decimals, 2);
     EXPECT_TRUE(displayUnit("length", false, 2).suffix.isEmpty());
-    // In the panel: Simulate's gravity reads "<n> /s²"; a fraction 35% (not 35.0%); a length 0.35.
+    // In the panel: Simulate's gravity reads "<n> units/s²" in scene units, "<n> cm/s²" in cm
+    // (unitPerTime); a fraction 35% (not 35.0%); a length 0.35.
     auto doc = GroomDocument::open(kSampleGroom);
     ASSERT_TRUE(doc);
     std::string sim;
@@ -3741,11 +3750,23 @@ TEST(AppPanels, NumbersShowTheSpecsDecimalsWithoutTrailingZeros) {
     ASSERT_NE(gravity, nullptr);
     // (A new node's lengths are fitted to the scalp: the sample's small head pulls 98, not 980.)
     const double g = doc->paramOrDefault(sim, "gravity").get<double>();
-    EXPECT_EQ(gravity->shownText(), trimmedNumber(g, 1) + QStringLiteral(" /s²"));
+    EXPECT_EQ(gravity->shownText(), trimmedNumber(g, 1) + QStringLiteral(" units/s²"));
     for (const ValueSlider* slider : panel.findChildren<ValueSlider*>()) {
         const QString text = slider->shownText();
         const QString number = text.section(QLatin1Char(' '), 0, 0).remove(QLatin1Char('%')).remove(QStringLiteral("°"));
         if (number.contains(QLatin1Char('.'))) EXPECT_FALSE(number.endsWith(QLatin1Char('0'))) << text.toStdString();
+    }
+    setUnitChoice("length", "cm");
+    ParamPanel inCm;
+    inCm.setDocument(doc.get());
+    inCm.showNode(sim);
+    const ValueSlider* gravityCm = inCm.findChild<QWidget*>(QStringLiteral("paramRow_gravity"))->findChild<ValueSlider*>();
+    ASSERT_NE(gravityCm, nullptr);
+    EXPECT_TRUE(gravityCm->shownText().endsWith(QStringLiteral(" cm/s²"))) << gravityCm->shownText().toStdString();
+    if (pickedBefore.isValid()) {
+        QSettings().setValue(QStringLiteral("units/length"), pickedBefore);
+    } else {
+        QSettings().remove(QStringLiteral("units/length"));
     }
 }
 

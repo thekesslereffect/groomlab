@@ -16,25 +16,22 @@ pixels, and a per-length rate per the length unit picked:
 
 from maya import cmds
 
+from groomlab.ui import definitions
+
+# Every host's units (engine/ui/choices.json: unitLength, unitWidth, unitDensity, unitFixed,
+# unitPerTime), read once here as this module has always held them.
+_PICKED = {"length": "unitLength", "width": "unitWidth", "density": "unitDensity"}
 # kind -> [(key, label, display units per scene unit)]
-UNITS = {
-    "length": [("cm", "cm", 1.0), ("mm", "mm", 10.0), ("m", "m", 0.01), ("in", "in", 1.0 / 2.54),
-               ("scene", "units", 1.0)],
-    "width": [("um", u"µm", 1e4), ("mm", "mm", 10.0), ("cm", "cm", 1.0), ("scene", "units", 1.0)],
-    "density": [("cm2", u"/cm²", 1.0), ("mm2", u"/mm²", 0.01), ("in2", u"/in²", 2.54 ** 2),
-                ("scene", "/unit²", 1.0)],
-}
-DEFAULTS = {"length": "cm", "width": "um", "density": "cm2"}
+UNITS = {kind: [(c["value"], c["label"], float(c["factor"])) for c in definitions.choices(name)]
+         for kind, name in _PICKED.items()}
+DEFAULTS = {kind: definitions.choice_default(name) for kind, name in _PICKED.items()}
 # What real hair measures, in scene units: sliders of that kind center on it.
 TYPICAL = {"density": 200.0}  # hairs per cm² on a human scalp (roughly 150-300)
 # The spec's units no one picks (graph.h ParamSpec::unit): kind -> (key, label, factor).
-FIXED = {"fraction": ("percent", "%", 100.0), "angle": ("deg", u"°", 1.0), "turns": ("turns", "turns", 1.0),
-         "seconds": ("s", "s", 1.0), "pixels": ("px", "px", 1.0)}
-
-
+FIXED = {c["value"]: (c["value"], c["label"], float(c["factor"])) for c in definitions.choices("unitFixed")}
 # Params whose number is a rate of their unit over time (the spec's unit measures the length part):
 # (node type, param) -> what follows the unit. Simulate's gravity is 980 cm/s², not 980 cm.
-PER_TIME = {("Simulate", "gravity"): u"/s²"}
+PER_TIME = {tuple(c["value"].split(".", 1)): c["label"] for c in definitions.choices("unitPerTime")}
 
 
 def param_label(kind, op_type=None, param=None):

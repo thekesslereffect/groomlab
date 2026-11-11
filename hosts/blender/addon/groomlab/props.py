@@ -65,7 +65,7 @@ class GroomLabParam(bpy.types.PropertyGroup):
     value_int: IntProperty(update=_push)
     value_float: FloatProperty(update=_push, precision=4)
     value_length: FloatProperty(update=_push, subtype="DISTANCE", unit="LENGTH", precision=5)
-    value_factor: FloatProperty(update=_push, subtype="FACTOR", soft_min=0.0, soft_max=1.0)
+    value_factor: FloatProperty(update=_push, subtype="PERCENTAGE", soft_min=0.0, soft_max=100.0, precision=1)  # a fraction: %
     value_color: FloatVectorProperty(update=_push, subtype="COLOR", size=3, min=0.0, soft_max=1.0)
     value_vector: FloatVectorProperty(update=_push, size=3)
     value_enum: EnumProperty(items=_choices, update=_push)

@@ -129,7 +129,13 @@ class GraphEditorTest(unittest.TestCase):
         rna = clump.bl_rna.properties
         self.assertEqual(rna["p_strength"].soft_min, -1.0)
         self.assertEqual(rna["p_strength"].soft_max, 1.0)
-        self.assertEqual(rna["p_strengthRandom"].subtype, "FACTOR")
+        # A fraction as a percentage, as Maya and the app show it: 0.25 stored reads 25 %.
+        self.assertEqual(rna["p_strengthRandom"].subtype, "PERCENTAGE")
+        self.assertEqual(rna["p_strengthRandom"].soft_max, 100.0)
+        self.assertAlmostEqual(clump.p_strengthRandom, 100.0 * self.param("clump", "strengthRandom"), 4)
+        self.assertAlmostEqual(gt.property_value(clump, next(s for s in gt._specs()["Clump"]["params"]
+                                                            if s["name"] == "strengthRandom"), bpy.context.scene),
+                               self.param("clump", "strengthRandom"), 6)
         self.assertIn("clump center", rna["p_strength"].description)
         self.assertAlmostEqual(clump.p_strength, self.param("clump", "strength"), 6)
         self.assertEqual(node_of(tree, "scatter").bl_rna.properties["p_length"].unit, "LENGTH")

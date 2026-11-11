@@ -170,6 +170,58 @@
         {"value": "tipOnly", "label": "Tip Only", "tip": "Zero until past the middle, then up to 1 at the end", "keys": [[0, 0], [0.6, 0], [1, 1]]},
         {"value": "rootOnly", "label": "Root Only", "tip": "1 at the start, down to zero before the middle", "keys": [[0, 1], [0.4, 0], [1, 0]]}
       ]
+    },
+    "unitLength": {
+      "label": "Length",
+      "tip": "Lengths in the panels (the groom stores centimeters, scene units: 1 unit = 1 cm); factor: shown = stored x factor. Every host's (Blender shows lengths in its own scene units)",
+      "default": "cm",
+      "items": [
+        {"value": "cm", "label": "cm", "factor": 1.0},
+        {"value": "mm", "label": "mm", "factor": 10.0},
+        {"value": "m", "label": "m", "factor": 0.01},
+        {"value": "in", "label": "in", "factor": 0.39370078740157477},
+        {"value": "scene", "label": "units", "factor": 1.0}
+      ]
+    },
+    "unitWidth": {
+      "label": "Width",
+      "tip": "Hair widths in the panels: micrometers by default, what real hair measures (60 µm)",
+      "default": "um",
+      "items": [
+        {"value": "um", "label": "µm", "factor": 10000.0},
+        {"value": "mm", "label": "mm", "factor": 10.0},
+        {"value": "cm", "label": "cm", "factor": 1.0},
+        {"value": "scene", "label": "units", "factor": 1.0}
+      ]
+    },
+    "unitDensity": {
+      "label": "Density",
+      "tip": "Hair density in the panels: hairs per square centimeter by default, what density is quoted in",
+      "default": "cm2",
+      "items": [
+        {"value": "cm2", "label": "/cm²", "factor": 1.0},
+        {"value": "mm2", "label": "/mm²", "factor": 0.01},
+        {"value": "in2", "label": "/in²", "factor": 6.4516},
+        {"value": "scene", "label": "/unit²", "factor": 1.0}
+      ]
+    },
+    "unitFixed": {
+      "label": "Fixed units",
+      "tip": "The spec's units no one picks (graph.h ParamSpec::unit): their suffix and factor (a fraction shows as a percentage)",
+      "items": [
+        {"value": "fraction", "label": "%", "factor": 100.0},
+        {"value": "angle", "label": "°", "factor": 1.0},
+        {"value": "turns", "label": "turns", "factor": 1.0},
+        {"value": "seconds", "label": "s", "factor": 1.0},
+        {"value": "pixels", "label": "px", "factor": 1.0}
+      ]
+    },
+    "unitPerTime": {
+      "label": "Per time",
+      "tip": "Params whose number is a rate of their unit over time (\"<node type>.<param>\"): what follows the unit (Simulate's gravity is 980 cm/s²)",
+      "items": [
+        {"value": "Simulate.gravity", "label": "/s²"}
+      ]
     }
   }
 }

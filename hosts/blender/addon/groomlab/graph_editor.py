@@ -1201,6 +1201,8 @@ def draw_param(layout, node, spec, scene, mapped, inputs, drivers, collection, c
     name = spec["name"]
     unit = graph_tree._unit_of(node, spec)  # (unitWhen: as the node's values have it)
     label = graph_tree.pretty(name) + (" ◆" if name in inputs else "")
+    if unit and units.per_time(node.gl_type, name):  # a rate over time (Simulate's gravity): its length per s²
+        label += " (per %s)" % units.per_time(node.gl_type, name).lstrip("/")
     suffix = units.suffix(unit, scene) if unit not in units.SCENE_LENGTH else ""
     driver = drivers.get(name)
     scalp = node.id_data.gl_scalp
@@ -1275,7 +1277,7 @@ SOFT_LIMIT = 1e9  # past this a property's soft range is Blender's "none" (FLT_M
 
 def fill_slider(node, prop, spec):
     """Whether a number param draws as a fill slider (the name inside, filled by the value): when its
-    property has a soft range to fill (the spec's softMin/softMax or min/max, a fraction's 0-1). Blender's
+    property has a soft range to fill (the spec's softMin/softMax or min/max, a fraction's 0-100 %). Blender's
     number fields drag and take typed values either way."""
     if spec.get("kind") not in ("float", "int"):
         return False

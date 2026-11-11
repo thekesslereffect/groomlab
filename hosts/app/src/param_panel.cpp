@@ -25,6 +25,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include "definitions.h"
 #include "glass.h"
 #include "groom_document.h"
 #include "param_editors.h"
@@ -68,22 +69,41 @@ QString prettyName(const std::string& name) {
 
 // How a number shows: the spec's unit (graph.h ParamSpec::unit) as a suffix, a fraction as a
 // percentage, with the spec's decimals (its "decimals": the same in every host; as a percentage
-// two fewer, 0 to 1; degrees 1) and the trailing zeros dropped when shown. Scene units (length,
-// width, density, perLength) show bare unless Edit > Units picks real ones (unitChoice); an
-// acceleration in them (Simulate's gravity) shows "/s²" after the number.
+// two fewer, 0 to 1; degrees 1) and the trailing zeros dropped when shown. Lengths, widths and
+// densities in the unit Edit > Units picks (unitChoice; by default every host's: cm, µm, /cm²);
+// the units and their factors are every host's (engine/ui/choices.json: unitLength, unitWidth,
+// unitDensity, unitFixed, unitPerTime).
+namespace {
+const char* unitList(const std::string& kind) {
+    if (kind == "length") return "unitLength";
+    if (kind == "width") return "unitWidth";
+    if (kind == "density") return "unitDensity";
+    return nullptr;
+}
+}  // namespace
+
 std::vector<UnitChoice> unitChoices(const std::string& kind) {
-    if (kind == "length") return {{"scene", "units", 1.0}, {"cm", "cm", 1.0}, {"mm", "mm", 10.0}, {"m", "m", 0.01}, {"in", "in", 1.0 / 2.54}};
-    if (kind == "width") return {{"scene", "units", 1.0}, {"um", "µm", 1e4}, {"mm", "mm", 10.0}, {"cm", "cm", 1.0}};
-    if (kind == "density") return {{"scene", "/unit²", 1.0}, {"cm2", "/cm²", 1.0}, {"mm2", "/mm²", 0.01}, {"in2", "/in²", 2.54 * 2.54}};
-    return {};
+    std::vector<UnitChoice> out;
+    if (const char* list = unitList(kind)) {
+        for (const json& c : ui::Definitions::shipped().choices(list)) {
+            out.push_back({c.value("value", std::string()), c.value("label", std::string()), c.value("factor", 1.0)});
+        }
+    }
+    return out;
 }
 
 std::string unitChoice(const std::string& kind) {
-    const std::string key = QSettings().value(QStringLiteral("units/") + QString::fromStdString(kind), QStringLiteral("scene")).toString().toStdString();
+    const char* list = unitList(kind);
+    const std::string fallback =
+        list ? ui::Definitions::shipped().get("choices").at(list).value("default", std::string("scene")) : std::string("scene");
+    const std::string key = QSettings()
+                                .value(QStringLiteral("units/") + QString::fromStdString(kind), QString::fromStdString(fallback))
+                                .toString()
+                                .toStdString();
     for (const UnitChoice& c : unitChoices(kind)) {
         if (c.key == key) return key;
     }
-    return "scene";
+    return fallback;
 }
 
 void setUnitChoice(const std::string& kind, const std::string& key) {
@@ -115,12 +135,15 @@ DisplayUnit displayUnit(const std::string& unit, bool integer, int specDecimals)
         const int shift = static_cast<int>(std::lround(std::log10(c.factor)));
         return {c.factor, QStringLiteral(" ") + QString::fromStdString(c.label), std::clamp(decimals - shift, 0, 6)};
     }
-    if (unit == "fraction" && !integer) return {100.0, QStringLiteral("%"), std::clamp(decimals - 2, 0, 1)};
-    if (unit == "angle") return {1.0, QStringLiteral("°"), 1};
-    if (unit == "turns") return {1.0, QStringLiteral(" turns"), decimals};
-    if (unit == "seconds") return {1.0, QStringLiteral(" s"), decimals};
-    if (unit == "pixels") return {1.0, QStringLiteral(" px"), integer ? 0 : decimals};
-    if (unit == "acceleration") return {1.0, QStringLiteral(" /s²"), decimals};
+    // The fixed units (unitFixed): a word after a space, a sign (%, °) right after the number.
+    for (const json& c : ui::Definitions::shipped().choices("unitFixed")) {
+        if (c.value("value", std::string()) != unit) continue;
+        const QString label = QString::fromStdString(c.value("label", std::string()));
+        const QString suffix = !label.isEmpty() && label.at(0).isLetter() ? QStringLiteral(" ") + label : label;
+        if (unit == "fraction") return integer ? DisplayUnit{1.0, QString(), decimals} : DisplayUnit{c.value("factor", 100.0), suffix, std::clamp(decimals - 2, 0, 1)};
+        if (unit == "angle") return {c.value("factor", 1.0), suffix, 1};
+        return {c.value("factor", 1.0), suffix, unit == "pixels" && integer ? 0 : decimals};
+    }
     return {1.0, QString(), decimals};
 }
 
@@ -471,9 +494,16 @@ QWidget* ParamPanel::numberEditor(Row& row, const json& p, const json& value, co
     const bool unitHolds = unitWhen.is_null() || conditionHolds(unitWhen, document_->paramOrDefault(node_, unitWhen.value("param", std::string())));
     row.unit = unitHolds ? p.value("unit", std::string()) : std::string();
     row.unitWhen = unitWhen;
-    // Simulate's gravity is a length per second squared: its number carries "/s²" (scene units).
-    const std::string shownUnit = (row.unit == "length" && name == "gravity") ? std::string("acceleration") : row.unit;
-    const DisplayUnit unit = displayUnit(shownUnit, integer, p.value("decimals", -1));
+    // A rate over time (unitPerTime: Simulate's gravity, a length per second squared): its unit,
+    // then what follows it (980 cm/s²).
+    DisplayUnit unit = displayUnit(row.unit, integer, p.value("decimals", -1));
+    if (const json* nodeSpec = document_ ? document_->nodeSpec(node_) : nullptr) {
+        const std::string key = nodeSpec->value("type", std::string()) + "." + name;
+        for (const json& c : ui::Definitions::shipped().choices("unitPerTime")) {
+            if (c.value("value", std::string()) != key) continue;
+            unit.suffix = (unit.suffix.isEmpty() ? QStringLiteral(" units") : unit.suffix) + QString::fromStdString(c.value("label", std::string()));
+        }
+    }
     const double f = unit.factor;
     row.factor = f;
     const double defaultValue = (p.value("default", json(0.0)).is_number() ? p["default"].get<double>() : 0.0) * f;
