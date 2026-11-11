@@ -146,22 +146,6 @@ struct Evaluating {
     ~Evaluating() { tEvaluating.pop_back(); }
 };
 
-// The direction U grows in across `face` of a scalp with UVs (zero where the UVs give none).
-Vec3f uvTangent(const ScalpMesh& scalp, std::int32_t face) {
-    const auto& tri = scalp.triangles()[static_cast<std::size_t>(face)];
-    const auto& uv = scalp.cornerUVs();
-    const std::size_t c = static_cast<std::size_t>(face) * 3;
-    if (c + 2 >= uv.size()) return {};
-    const Vec3f a = scalp.points()[static_cast<std::size_t>(tri[0])];
-    const Vec3f e1 = scalp.points()[static_cast<std::size_t>(tri[1])] - a;
-    const Vec3f e2 = scalp.points()[static_cast<std::size_t>(tri[2])] - a;
-    const float du1 = uv[c + 1][0] - uv[c][0], dv1 = uv[c + 1][1] - uv[c][1];
-    const float du2 = uv[c + 2][0] - uv[c][0], dv2 = uv[c + 2][1] - uv[c][1];
-    const float det = du1 * dv2 - du2 * dv1;
-    if (!(std::fabs(det) > 1e-12f)) return {};
-    return (e1 * dv2 - e2 * dv1) / det;
-}
-
 // A root's frame: x the U direction laid on the surface (any perpendicular where the UVs give
 // none), y the normal, z their cross product.
 struct UvFrame {
@@ -170,7 +154,7 @@ struct UvFrame {
 UvFrame uvFrame(const ScalpMesh& scalp, const StrandRoot& root) {
     UvFrame f;
     f.y = scalp.normal(root);
-    Vec3f t = uvTangent(scalp, root.face);
+    Vec3f t = scalp.uvTangent(root.face);
     t = t - f.y * t.dot(f.y);
     f.x = t.length() > 1e-9f ? t.normalized() : anyPerpendicular(f.y);
     f.z = f.x.cross(f.y);

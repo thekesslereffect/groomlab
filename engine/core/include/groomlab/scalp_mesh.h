@@ -194,6 +194,10 @@ public:
     bool hasUVs() const { return !cornerUVs_.empty(); }
     const std::vector<UV>& cornerUVs() const { return cornerUVs_; }
     UV uvAt(const StrandRoot& root) const;  // (0, 0) without UVs
+    // The direction U grows in across triangle `face` (dP/du from its corners' UVs, not normalized):
+    // what a root frame takes as its x (Bend, Direction, Transform, Displace, Reference); zero where
+    // the UVs give none (no UVs, or none across the face).
+    Vec3f uvTangent(std::int32_t face) const;
 
     // Named color sets (e.g. painted with Maya's Paint Vertex Color tool).
     void setCornerColors(const std::string& name, std::vector<Color> colors);

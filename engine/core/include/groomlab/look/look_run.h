@@ -343,7 +343,7 @@ struct HairGridInputs {
 // operators take it), read on the strands the node took (fixed while the scalp and the roots are),
 // 8 floats a strand: the scalp's normal there xyz, 1 when rooted on the scalp (0: not, its first
 // segment the normal); the scalp's U direction across the root's face from its UVs xyz (zero: none,
-// transform_ops.cpp uvTangent), 0.
+// ScalpMesh::uvTangent), 0.
 struct RootInputs {
     std::shared_ptr<const std::vector<float>> frames;
 };

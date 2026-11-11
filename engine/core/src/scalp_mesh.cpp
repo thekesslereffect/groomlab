@@ -178,6 +178,22 @@ void ScalpMesh::setCornerUVs(std::vector<UV> uvs) {
     updateHash();
 }
 
+Vec3f ScalpMesh::uvTangent(std::int32_t face) const {
+    if (face < 0 || static_cast<std::size_t>(face) >= triangles_.size()) return {};
+    const auto& tri = triangles_[static_cast<std::size_t>(face)];
+    const auto& uv = cornerUVs();
+    const std::size_t c = static_cast<std::size_t>(face) * 3;
+    if (c + 2 >= uv.size()) return {};
+    const Vec3f a = points_[static_cast<std::size_t>(tri[0])];
+    const Vec3f e1 = points_[static_cast<std::size_t>(tri[1])] - a;
+    const Vec3f e2 = points_[static_cast<std::size_t>(tri[2])] - a;
+    const float du1 = uv[c + 1][0] - uv[c][0], dv1 = uv[c + 1][1] - uv[c][1];
+    const float du2 = uv[c + 2][0] - uv[c][0], dv2 = uv[c + 2][1] - uv[c][1];
+    const float det = du1 * dv2 - du2 * dv1;
+    if (!(std::fabs(det) > 1e-12f)) return {};
+    return (e1 * dv2 - e2 * dv1) / det;
+}
+
 ScalpMesh::UV ScalpMesh::uvAt(const StrandRoot& root) const {
     if (cornerUVs_.empty() || !contains(root) || static_cast<std::size_t>(root.face) * 3 + 2 >= cornerUVs_.size()) {
         return {0.0f, 0.0f};

@@ -501,27 +501,6 @@ bool mappedPerPoint(StageKind kind, int i) {
                       kind == StageKind::Blend || kind == StageKind::Displace);
 }
 
-namespace {
-
-// transform_ops.cpp uvTangent: the direction U grows in across face `face` of a scalp with UVs
-// (zero where the UVs give none).
-Vec3f scalpUvTangent(const ScalpMesh& scalp, std::int32_t face) {
-    const auto& tri = scalp.triangles()[static_cast<std::size_t>(face)];
-    const auto& uv = scalp.cornerUVs();
-    const std::size_t c = static_cast<std::size_t>(face) * 3;
-    if (c + 2 >= uv.size()) return {};
-    const Vec3f a = scalp.points()[static_cast<std::size_t>(tri[0])];
-    const Vec3f e1 = scalp.points()[static_cast<std::size_t>(tri[1])] - a;
-    const Vec3f e2 = scalp.points()[static_cast<std::size_t>(tri[2])] - a;
-    const float du1 = uv[c + 1][0] - uv[c][0], dv1 = uv[c + 1][1] - uv[c][1];
-    const float du2 = uv[c + 2][0] - uv[c][0], dv2 = uv[c + 2][1] - uv[c][1];
-    const float det = du1 * dv2 - du2 * dv1;
-    if (!(std::fabs(det) > 1e-12f)) return {};
-    return (e1 * dv2 - e2 * dv1) / det;
-}
-
-}  // namespace
-
 void writeRootFrames(const StrandSet& in, const ScalpMesh* scalp, float* frames, const std::vector<std::uint32_t>* which) {
     const bool uvs = scalp && scalp->hasUVs();
     parallelFor(0, which ? which->size() : in.strandCount(), [&](std::size_t s) {
@@ -532,7 +511,7 @@ void writeRootFrames(const StrandSet& in, const ScalpMesh* scalp, float* frames,
             return;
         }
         const Vec3f n = scalp->normal(root);
-        const Vec3f u = uvs ? scalpUvTangent(*scalp, root.face) : Vec3f{};
+        const Vec3f u = uvs ? scalp->uvTangent(root.face) : Vec3f{};
         to[0] = n.x;
         to[1] = n.y;
         to[2] = n.z;
