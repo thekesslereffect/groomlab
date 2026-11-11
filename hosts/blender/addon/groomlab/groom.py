@@ -477,6 +477,13 @@ def read_scalp(scalp):
     return rest.reshape(-1, 3), counts, indices, uvs
 
 
+def selected_curves(context, scalp=None):
+    """The selected curve objects that are no groom's (a groom's guides or hair are curves too: never
+    taken as new guides), `scalp` left out."""
+    return [o for o in context.selected_objects if o.type in ("CURVE", "CURVES") and o is not scalp and
+            o.groomlab.role == "NONE"]
+
+
 def selected_faces(obj):
     """The polygons of mesh object `obj` selected in Edit Mode now, as indices (ascending; the
     scalp's polygons as read_scalp sends them): faces as they are; vertices and edges as the faces

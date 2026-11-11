@@ -156,11 +156,7 @@ MStatus TransferCmd::doIt(const MArgList& args) {
 
         if (db.isFlagSet(kMapsFrom[0])) {
             std::set<std::string> only;
-            for (unsigned i = 0; i < db.numberOfFlagUses(kMap[0]); ++i) {
-                MArgList use;
-                db.getFlagArgumentList(kMap[0], i, use);
-                only.insert(use.asString(0).asChar());
-            }
+            for (const MString& map : multiStrings(db, kMap[0])) only.insert(map.asChar());
             TransferMethod method = db.isFlagSet(kFit[0]) ? TransferMethod::Bounds : TransferMethod::Closest;
             try {
                 if (db.isFlagSet(kMethod[0])) method = transferMethodFromName(flagString(db, kMethod[0]).asChar());

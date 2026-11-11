@@ -995,6 +995,12 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(str(stored[child]["parent"]), new_parent)
         cmds.undo()
         self.assertEqual(cmds.getAttr(self.groom + ".guideData"), start)
+        # A typo is no guide id: it used to read as 0 (no parent), making the guides primary.
+        with self.assertRaises(RuntimeError):
+            cmds.groomLabGuides(self.groom, reparent="12a", guide=[child])
+        with self.assertRaises(RuntimeError):
+            cmds.groomLabGuides(self.groom, setAttribute="frizz", value=1.0, guide=["x"])
+        self.assertEqual(cmds.getAttr(self.groom + ".guideData"), start)
 
         groomlab.promote_group(self.groom, "children")
         depths = {g["name"]: g for g in groomlab.list_guide_groups(self.groom)}

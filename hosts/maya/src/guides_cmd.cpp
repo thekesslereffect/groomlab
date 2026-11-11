@@ -196,17 +196,6 @@ bool samePoints(const std::vector<Vec3f>& a, const std::vector<Vec3f>& b) {
     return true;
 }
 
-std::vector<MString> multiStrings(const MArgDatabase& db, const char* flag) {
-    std::vector<MString> values;
-    const unsigned uses = db.numberOfFlagUses(flag);
-    for (unsigned i = 0; i < uses; ++i) {
-        MArgList args;
-        db.getFlagArgumentList(flag, i, args);
-        values.push_back(args.asString(0));
-    }
-    return values;
-}
-
 // A row per group: name|parent|depth|guides|color, the color the group draws in when the groom's
 // guideGroupColors gives it none (its own, a ToGuides node's, else its automatic one), "#rrggbb".
 void describeGroups(const GuideHierarchy& h, const std::string& colorSeed, MStringArray& out) {
@@ -232,7 +221,7 @@ int axisIndex(MString text) {
 
 std::vector<GuideId> parseIds(const std::vector<MString>& texts) {
     std::vector<GuideId> ids;
-    for (const MString& t : texts) ids.push_back(std::strtoull(t.asChar(), nullptr, 10));
+    for (const MString& t : texts) ids.push_back(guideIdOf(t));
     return ids;
 }
 
@@ -581,7 +570,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
         if (db.isFlagSet(kTube[0])) {
             // The tube at the size shown (GuideHierarchy::scale): {"shape", "width", "aspect", "twist"}.
             const MString idText = flagString(db, kTube[0], "");
-            const HierarchyGuide* g = h->guide(std::strtoull(idText.asChar(), nullptr, 10));
+            const HierarchyGuide* g = h->guide(guideIdOf(idText));
             if (!g) return fail(kName, "no guide " + idText);
             setResult(MString(tubeToJson(g->tube, h->scale()).c_str()));
             return MS::kSuccess;
@@ -595,7 +584,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
                 if (shape && shape->evaluatedHierarchy()) shown = shape->evaluatedHierarchy();
             }
-            const HierarchyGuide* g = shown->guide(std::strtoull(idText.asChar(), nullptr, 10));
+            const HierarchyGuide* g = shown->guide(guideIdOf(idText));
             if (!g) return fail(kName, "no guide " + idText);
             const std::size_t n = g->points.size();
             nlohmann::json points = nlohmann::json::array(), us = nlohmann::json::array(), vs = nlohmann::json::array();
@@ -621,7 +610,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                 auto* shape = dynamic_cast<GroomShape*>(groomFn.userNode());
                 if (shape && shape->evaluatedHierarchy()) shown = shape->evaluatedHierarchy();
             }
-            const HierarchyGuide* g = shown->guide(std::strtoull(idText.asChar(), nullptr, 10));
+            const HierarchyGuide* g = shown->guide(guideIdOf(idText));
             if (!g) return fail(kName, "no guide " + idText);
             MDoubleArray xyz;
             for (const Vec3f& p : g->points) {
@@ -768,7 +757,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             } else if (db.isFlagSet(kLock[0]) || db.isFlagSet(kUnlock[0])) {
                 const bool lock = db.isFlagSet(kLock[0]);
                 for (const MString& idText : multiStrings(db, kGuide[0])) {
-                    const GuideId id = std::strtoull(idText.asChar(), nullptr, 10);
+                    const GuideId id = guideIdOf(idText);
                     const HierarchyGuide* g = h->guide(id);
                     if (!g) return fail(kName, "no guide " + idText);
                     if (!g->isChild()) return fail(kName, "guide " + idText + " is a primary guide; only children lock");
@@ -777,7 +766,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
             } else if (db.isFlagSet(kClear[0])) {
                 *h = GuideHierarchy{};
             } else if (db.isFlagSet(kReparent[0])) {
-                const GuideId parent = std::strtoull(flagString(db, kReparent[0], "").asChar(), nullptr, 10);
+                const GuideId parent = guideIdOf(flagString(db, kReparent[0], "0"));
                 const std::vector<GuideId> ids = targets();
                 if (ids.empty()) return fail(kName, "-reparent: give -guide IDs or select guides");
                 h->reparent(ids, parent);
@@ -870,7 +859,7 @@ MStatus GuidesCmd::doIt(const MArgList& args) {
                     MArgList a;
                     db.getFlagArgumentList(kReshape[0], i, a);
                     const MString idText = a.asString(0), curve = a.asString(1);
-                    const GuideId id = std::strtoull(idText.asChar(), nullptr, 10);
+                    const GuideId id = guideIdOf(idText);
                     const HierarchyGuide* g = h->guide(id);
                     if (!g) return fail(kName, "no guide " + idText);
                     MObject data;

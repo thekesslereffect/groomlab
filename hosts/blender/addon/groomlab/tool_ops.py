@@ -1380,11 +1380,6 @@ class GROOMLAB_OT_guides_reparent(GroomToolOperator):
 
 # ---- Parts and flow (the Part and Flow tools' cards) -------------------------------------------------
 
-def _selected_curves(context, scalp):
-    return [o for o in context.selected_objects if o.type in ("CURVE", "CURVES") and o is not scalp and
-            o.groomlab.role == "NONE"]
-
-
 class GROOMLAB_OT_guides_from_curves(GroomToolOperator):
     """Add the selected curve objects as primary guides (each curve's first point its root), in the guide group picked (Maya's From Curves)"""
     bl_idname = "groomlab.guides_from_curves"
@@ -1394,7 +1389,7 @@ class GROOMLAB_OT_guides_from_curves(GroomToolOperator):
     def execute(self, context):
         from . import pipeline
         scalp = active(context)
-        curves = _selected_curves(context, scalp)
+        curves = groom.selected_curves(context, scalp)
         if not curves:
             self.report({"ERROR"}, "Select curve objects (Curve or hair Curves) drawn from the scalp")
             return {"CANCELLED"}
@@ -1441,8 +1436,7 @@ class GROOMLAB_OT_curves_to_guides(GroomToolOperator):
     def execute(self, context):
         from . import pipeline
         scalp = active(context)
-        objects = [o for o in context.selected_objects if o.type in ("CURVE", "CURVES") and o is not scalp and
-                   o.groomlab.role == "NONE"]
+        objects = groom.selected_curves(context, scalp)
         if not objects:
             self.report({"ERROR"}, "Select curve objects (from Guides to Curves, or drawn from the scalp)")
             return {"CANCELLED"}
@@ -1480,7 +1474,7 @@ class GROOMLAB_OT_parts_from_curves(GroomToolOperator):
     def execute(self, context):
         from . import pipeline
         scalp = active(context)
-        lines = [p for o in _selected_curves(context, scalp) for p in pipeline.curve_points(o, scalp)]
+        lines = [p for o in groom.selected_curves(context, scalp) for p in pipeline.curve_points(o, scalp)]
         if not lines:
             self.report({"ERROR"}, "Select curve objects (Curve or hair Curves) along the parts")
             return {"CANCELLED"}

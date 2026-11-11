@@ -12,6 +12,16 @@
 #include <maya/MPlug.h>
 #include <maya/MStatus.h>
 #include <maya/MString.h>
+#include <cctype>
+#include <cerrno>
+#include <cstdint>
+#include <cstdlib>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include <maya/MArgDatabase.h>
+#include <maya/MArgList.h>
 #include <maya/MStringArray.h>
 
 #include "groom_shape.h"
@@ -31,6 +41,30 @@ double flagDouble(const Args& db, const char* flag, double fallback) {
     double v = fallback;
     if (db.isFlagSet(flag)) db.getFlagArgument(flag, 0, v);
     return v;
+}
+
+// A multi-use string flag's values, one per use, in order (-guide 3 -guide 7).
+inline std::vector<MString> multiStrings(const MArgDatabase& db, const char* flag) {
+    std::vector<MString> values;
+    const unsigned uses = db.numberOfFlagUses(flag);
+    for (unsigned i = 0; i < uses; ++i) {
+        MArgList args;
+        db.getFlagArgumentList(flag, i, args);
+        values.push_back(args.asString(0));
+    }
+    return values;
+}
+
+// A guide id as a command takes it: digits only (0 is no guide); anything else throws
+// std::invalid_argument (a typo never reads as 0: -reparent would make the guides primary).
+inline std::uint64_t guideIdOf(const MString& text) {
+    const std::string s = text.asChar();
+    bool digits = !s.empty();
+    for (const char c : s) digits = digits && std::isdigit(static_cast<unsigned char>(c)) != 0;
+    errno = 0;
+    const unsigned long long id = digits ? std::strtoull(s.c_str(), nullptr, 10) : 0;
+    if (!digits || errno == ERANGE) throw std::invalid_argument("not a guide id: '" + s + "'");
+    return static_cast<std::uint64_t>(id);
 }
 
 template <class Args>

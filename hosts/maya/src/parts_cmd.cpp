@@ -93,10 +93,7 @@ MStatus PartsCmd::doIt(const MArgList& args) {
             MString base = "part";
             if (db.isFlagSet(kNameFlag[0])) db.getFlagArgument(kNameFlag[0], 0, base);
             MStringArray added;
-            for (unsigned i = 0; i < db.numberOfFlagUses(kFromCurves[0]); ++i) {
-                MArgList a;
-                db.getFlagArgumentList(kFromCurves[0], i, a);
-                const MString curve = a.asString(0);
+            for (const MString& curve : multiStrings(db, kFromCurves[0])) {
                 MObject data;
                 if (!curveWorldData(curve, data)) return fail(kName, curve + " is not a nurbsCurve");
                 try {

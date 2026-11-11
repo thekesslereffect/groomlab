@@ -232,46 +232,54 @@ def import_reference(image_path, name=None, groom=None, copy=True):
     base = name or os.path.splitext(os.path.basename(image_path))[0] + "_ref"
     selection = cmds.ls(selection=True, long=True) or []  # kept: the groom stays the active one
     with groomlab.undo_chunk("import reference"):
-        transform, shape = cmds.camera()
-        transform = cmds.rename(transform, _unique_name(base))
-        transform = cmds.parent(transform, _group())[0]
-        transform = cmds.ls(transform, long=True)[0]
-        shape = _shape(transform)
-        for attr, kind in (("glReference", "bool"), ("glRefWidth", "long"), ("glRefHeight", "long"),
-                           ("glRefRms", "double"), ("glRefKeepFocal", "bool")):
-            cmds.addAttr(transform, longName=attr, shortName=attr, attributeType=kind)
-        for attr in ("glRefImage", "glRefPairs", "glRefDepth"):
-            cmds.addAttr(transform, longName=attr, shortName=attr, dataType="string")
-        cmds.setAttr(transform + ".glReference", True)
-        cmds.setAttr(transform + ".glRefWidth", width)
-        cmds.setAttr(transform + ".glRefHeight", height)
-        cmds.setAttr(transform + ".glRefRms", -1.0)
-        cmds.setAttr(transform + ".glRefImage", groomlab.portable_path(path), type="string")
-        cmds.setAttr(transform + ".glRefPairs", "[]", type="string")
-        cmds.setAttr(transform + ".glRefDepth", "front", type="string")
-        # The film back takes the photo's aspect; the whole gate shows in the view (overscan).
-        cmds.setAttr(shape + ".horizontalFilmAperture", FILM_WIDTH)
-        cmds.setAttr(shape + ".verticalFilmAperture", FILM_WIDTH * height / float(width))
-        cmds.setAttr(shape + ".filmFit", 3)  # Overscan
-        cmds.setAttr(shape + ".overscan", 1.05)
-        cmds.setAttr(shape + ".focalLength", DEFAULT_FOCAL)
-        cmds.setAttr(shape + ".displayFilmGate", False)
-        cmds.setAttr(shape + ".displayResolution", False)
-        plane = cmds.imagePlane(camera=transform, fileName=path)
-        plane_shape = cmds.ls(plane[1], long=True)[0] if len(plane) > 1 else image_plane(transform)
-        # The photo covers the film gate exactly, whatever the view's shape.
-        cmds.setAttr(plane_shape + ".fit", 4)  # To Size
-        cmds.setAttr(plane_shape + ".sizeX", FILM_WIDTH)
-        cmds.setAttr(plane_shape + ".sizeY", FILM_WIDTH * height / float(width))
-        cmds.setAttr(plane_shape + ".displayOnlyIfCurrent", True)
-        cmds.setAttr(plane_shape + ".alphaGain", DEFAULT_OPACITY)
-        _place(transform, groom)
-        _apply_depth(transform)
-        if selection:
-            cmds.select(selection, replace=True)
-        else:
-            cmds.select(clear=True)
+        try:
+            transform = _make_reference_camera(path, base, width, height, groom)
+        finally:  # the selection back, also when making the camera failed
+            if selection:
+                cmds.select(selection, replace=True)
+            else:
+                cmds.select(clear=True)
     return _name(transform)
+
+
+def _make_reference_camera(path, base, width, height, groom):
+    """import_reference's camera, image plane and attributes: the camera's transform."""
+    transform, shape = cmds.camera()
+    transform = cmds.rename(transform, _unique_name(base))
+    transform = cmds.parent(transform, _group())[0]
+    transform = cmds.ls(transform, long=True)[0]
+    shape = _shape(transform)
+    for attr, kind in (("glReference", "bool"), ("glRefWidth", "long"), ("glRefHeight", "long"),
+                       ("glRefRms", "double"), ("glRefKeepFocal", "bool")):
+        cmds.addAttr(transform, longName=attr, shortName=attr, attributeType=kind)
+    for attr in ("glRefImage", "glRefPairs", "glRefDepth"):
+        cmds.addAttr(transform, longName=attr, shortName=attr, dataType="string")
+    cmds.setAttr(transform + ".glReference", True)
+    cmds.setAttr(transform + ".glRefWidth", width)
+    cmds.setAttr(transform + ".glRefHeight", height)
+    cmds.setAttr(transform + ".glRefRms", -1.0)
+    cmds.setAttr(transform + ".glRefImage", groomlab.portable_path(path), type="string")
+    cmds.setAttr(transform + ".glRefPairs", "[]", type="string")
+    cmds.setAttr(transform + ".glRefDepth", "front", type="string")
+    # The film back takes the photo's aspect; the whole gate shows in the view (overscan).
+    cmds.setAttr(shape + ".horizontalFilmAperture", FILM_WIDTH)
+    cmds.setAttr(shape + ".verticalFilmAperture", FILM_WIDTH * height / float(width))
+    cmds.setAttr(shape + ".filmFit", 3)  # Overscan
+    cmds.setAttr(shape + ".overscan", 1.05)
+    cmds.setAttr(shape + ".focalLength", DEFAULT_FOCAL)
+    cmds.setAttr(shape + ".displayFilmGate", False)
+    cmds.setAttr(shape + ".displayResolution", False)
+    plane = cmds.imagePlane(camera=transform, fileName=path)
+    plane_shape = cmds.ls(plane[1], long=True)[0] if len(plane) > 1 else image_plane(transform)
+    # The photo covers the film gate exactly, whatever the view's shape.
+    cmds.setAttr(plane_shape + ".fit", 4)  # To Size
+    cmds.setAttr(plane_shape + ".sizeX", FILM_WIDTH)
+    cmds.setAttr(plane_shape + ".sizeY", FILM_WIDTH * height / float(width))
+    cmds.setAttr(plane_shape + ".displayOnlyIfCurrent", True)
+    cmds.setAttr(plane_shape + ".alphaGain", DEFAULT_OPACITY)
+    _place(transform, groom)
+    _apply_depth(transform)
+    return transform
 
 
 def image_plane_cameras():

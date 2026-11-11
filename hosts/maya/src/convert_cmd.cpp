@@ -175,11 +175,8 @@ MStatus ConvertCmd::doIt(const MArgList& args) {
             if (!h || h->guides().empty()) return fail(kName, "the groom has no guides");
             std::vector<const HierarchyGuide*> chosen;
             if (db.isFlagSet(kGuide[0])) {
-                for (unsigned i = 0; i < db.numberOfFlagUses(kGuide[0]); ++i) {
-                    MArgList a;
-                    db.getFlagArgumentList(kGuide[0], i, a);
-                    const MString text = a.asString(0);
-                    const HierarchyGuide* g = h->guide(std::strtoull(text.asChar(), nullptr, 10));
+                for (const MString& text : multiStrings(db, kGuide[0])) {
+                    const HierarchyGuide* g = h->guide(guideIdOf(text));
                     if (!g) return fail(kName, "no guide " + text);
                     chosen.push_back(g);
                 }

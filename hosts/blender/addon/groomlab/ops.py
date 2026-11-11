@@ -57,7 +57,7 @@ class GROOMLAB_OT_add_groom(bpy.types.Operator):
         if context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
         # Selected curves become primary guides (Maya's create_groom_from_selection).
-        curves = [o for o in context.selected_objects if o.type in ("CURVE", "CURVES") and o is not scalp]
+        curves = groom.selected_curves(context, scalp)  # (never another groom's guides or hair)
         added = 0
         from . import tools
         try:

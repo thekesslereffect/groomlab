@@ -124,7 +124,8 @@ def add_scalp(groom, mesh, name=None, rest=True, wire=True):
         if own_scalp else None
     own_interp = next((c for c, port in model.downstream_of(own_scatter) if model.node_type(c) == "Interpolate"), None) \
         if own_scatter else None
-    guides = next((n for n in model.order if model.node_type(n) == "Guides"), None)
+    # The guides the hair reads (its Interpolate's): never the first Guides node there is (a braid's).
+    guides = model.source_of(own_interp, "guides") if own_interp else None
     scalp_node = model.add_node("Scalp", name=model.unique_name("scalp_" + name), params={
         "input": name, "subdivision": model.param(own_scalp, "subdivision") if own_scalp else "matchRender"})
     scatter_params = dict(model.nodes[own_scatter]["params"]) if own_scatter else {}

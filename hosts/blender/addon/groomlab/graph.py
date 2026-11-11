@@ -139,13 +139,22 @@ def active_node(scalp):
 
 # ---- Params -----------------------------------------------------------------------------------
 
+# A mapped param's source (graph_authoring.MAP_SOURCES' keys) as its note names it.
+_MAP_SOURCES = (("texture", "texture"), ("colorSet", "color set"), ("attribute", "attribute"), ("guide", "painted map"),
+                ("expression", "expression"))
+
+
+def _map_source(value):
+    return next((name for key, name in _MAP_SOURCES if key in value), "map")
+
+
 def _set_widget(p, value, scene):
     kind, unit = p.kind, p.unit
     p.raw = json.dumps(value)
     p.widget = "fixed"
     p.note = ""
     if isinstance(value, dict):
-        p.note = "mapped (%s): edit the map in Maya or the GroomLab app" % (value.get("kind") or value.get("type") or "map")
+        p.note = "mapped (%s): edit the map in Maya or the GroomLab app" % _map_source(value)
     elif kind == "bool" and isinstance(value, bool):
         p.widget, p.value_bool = "bool", value
     elif kind == "int" and isinstance(value, int) and not isinstance(value, bool):
