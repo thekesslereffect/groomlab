@@ -3,7 +3,6 @@
 glTF cards."""
 
 import json
-import math
 import os
 
 from maya import cmds, mel
@@ -200,17 +199,14 @@ def _unity_points(value, what):
 
 def _barb_lod(lod, barb_density, barb_width_scale):
     """(barb_density, barb_width_scale) for a lighter groom, as export_unreal_groom's `lod`."""
-    if lod is not None:
-        if lod not in UNREAL_LODS:
-            raise ValueError("lod must be one of %s" % (sorted(UNREAL_LODS),))
-        barb_density = UNREAL_LODS[lod] if barb_density is None else barb_density
-    if barb_density is not None:
-        barb_density = float(barb_density)
-        if not 0.0 < barb_density <= 1.0:
-            raise ValueError("barb_density must be above 0 and at most 1")
-        if barb_width_scale is None:
-            barb_width_scale = 1.0 / math.sqrt(barb_density)
-    return barb_density, barb_width_scale
+    if lod is not None and lod not in UNREAL_LODS:
+        raise ValueError("lod must be one of %s" % (sorted(UNREAL_LODS),))
+    if lod is None and barb_density is None:
+        return None, barb_width_scale
+    # Every host's rule (engine_export.h setBarbLod): the lod's share, each kept barb 1/sqrt wider.
+    import groomlab_core
+    return groomlab_core.barb_lod(lod or "", None if barb_density is None else float(barb_density),
+                                  None if barb_width_scale is None else float(barb_width_scale))
 
 
 def _unity_strands_kwargs(path, scale, resample_to, start, end, step, density, groups, shafts, barb_points, lod,

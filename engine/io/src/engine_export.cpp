@@ -10,6 +10,29 @@
 
 namespace groomlab {
 
+double barbWidthScaleFor(double density) { return density > 0.0 ? 1.0 / std::sqrt(density) : 1.0; }
+
+void setBarbLod(EngineExportOptions& options, const std::string& lod, std::optional<double> density, std::optional<double> widthScale) {
+    double share = 1.0;
+    bool given = false;
+    if (!lod.empty()) {
+        if (lod == "high") share = 1.0;
+        else if (lod == "mid") share = 0.5;
+        else if (lod == "low") share = 0.25;
+        else throw std::invalid_argument("lod is high, mid or low");
+        given = true;
+    }
+    if (density) {
+        share = *density;
+        given = true;
+    }
+    if (!(share > 0.0 && share <= 1.0)) throw std::invalid_argument("barb density must be above 0 and at most 1");
+    const double width = widthScale ? *widthScale : (given ? barbWidthScaleFor(share) : 1.0);
+    if (!(width > 0.0)) throw std::invalid_argument("barb width scale must be above 0");
+    options.barbDensity = static_cast<float>(share);
+    options.barbWidthScale = static_cast<float>(width);
+}
+
 std::string EngineExportOptions::problem() const {
     if (!(barbDensity > 0.0f && barbDensity <= 1.0f)) return "the barb density must be above 0 and at most 1";
     if (!(barbWidthScale > 0.0f)) return "the barb width scale must be positive";

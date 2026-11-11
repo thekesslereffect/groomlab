@@ -21,6 +21,7 @@
 #include <QVBoxLayout>
 
 #include "glass.h"
+#include "groomlab/engine_export.h"
 #include "groomlab/asset_files.h"
 #include "theme.h"
 
@@ -290,6 +291,10 @@ ExportPanel::ExportPanel(QWidget* parent) : GlassPanel(parent, 24.0) {
     barbWidth_->setToolTip(tr("Each barb kept this many times as wide, so the vanes keep their coverage"));
     engineLayout->addWidget(captionLabel(tr("Barb width"), engineOptions_), 3, 0);
     engineLayout->addWidget(barbWidth_, 3, 1);
+    // A lower density widens each kept barb by 1 / sqrt(share), as every host does (engine_export.h
+    // setBarbLod), so the vanes keep their look; typed after, the width stays as typed.
+    connect(barbDensity_, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+            [this](double share) { barbWidth_->setValue(barbWidthScaleFor(share)); });
     outputLayout->addWidget(engineOptions_);
 
     unrealOptions_ = new QWidget(this);

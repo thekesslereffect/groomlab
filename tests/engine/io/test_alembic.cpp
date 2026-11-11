@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <cmath>
 #include <gtest/gtest.h>
 
 #include <cstdio>
@@ -33,6 +34,25 @@ StrandSet makeStrands(std::size_t count, float xOffset) {
         s.addStrand(1000 + i, {{x, 0, 0}, {x, 1, 0}, {x, 2, 0}}, {0.02f, 0.01f, 0.0f});
     }
     return s;
+}
+
+TEST(Alembic, ALighterFeatherExportWidensTheBarbsKept) {
+    // engine_export.h setBarbLod, every host's (Maya's game.py, the Blender helper, the app): the
+    // lod's share of barbs, each kept one 1/sqrt(share) wider unless a width is given.
+    EngineExportOptions e;
+    setBarbLod(e, "mid");
+    EXPECT_FLOAT_EQ(e.barbDensity, 0.5f);
+    EXPECT_NEAR(e.barbWidthScale, 1.0 / std::sqrt(0.5), 1e-6);
+    setBarbLod(e, "low", 0.1);
+    EXPECT_FLOAT_EQ(e.barbDensity, 0.1f) << "a density given wins over the lod's";
+    setBarbLod(e, "", 0.25, 1.5);
+    EXPECT_FLOAT_EQ(e.barbWidthScale, 1.5f);
+    setBarbLod(e, "");
+    EXPECT_FLOAT_EQ(e.barbDensity, 1.0f);
+    EXPECT_FLOAT_EQ(e.barbWidthScale, 1.0f);
+    EXPECT_THROW(setBarbLod(e, "ultra"), std::invalid_argument);
+    EXPECT_THROW(setBarbLod(e, "", 0.0), std::invalid_argument);
+    EXPECT_THROW(setBarbLod(e, "", 0.5, 0.0), std::invalid_argument);
 }
 
 TEST(Alembic, RoundTripsAnimatedCurves) {

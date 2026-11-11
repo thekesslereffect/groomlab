@@ -59,6 +59,16 @@ struct EngineExportOptions {
     std::string problem() const;
 };
 
+// A lighter feather groom for heavy shots (every host's: Maya's game.py, the Blender helper, the
+// app): the barbs kept, the lod's share ("high" 1, "mid" 0.5, "low" 0.25; "" none) unless `density`
+// is given, and each kept one widened by `widthScale`, else by 1 / sqrt(share) so the vanes keep
+// their look. Throws std::invalid_argument for another lod, a share outside (0, 1] or a width scale
+// of 0 or less.
+void setBarbLod(EngineExportOptions& options, const std::string& lod, std::optional<double> density = std::nullopt,
+                std::optional<double> widthScale = std::nullopt);
+// The width scale that keeps a share of barbs looking as the whole: 1 / sqrt(share).
+double barbWidthScaleFor(double density);
+
 class EngineGroomWriter {
 public:
     // Throws std::invalid_argument (EngineExportOptions::problem) or AlembicError.

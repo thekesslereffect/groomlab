@@ -826,24 +826,15 @@ EngineExportOptions engineOptions(const json& args, bool unreal) {
     if (args.contains("shafts") && !args["shafts"].is_null()) e.shafts = optBool(args, "shafts", true);
     // A lighter groom for heavy shots: the barbs thinned to the lod's share (by ID), each kept one
     // wider by 1/sqrt(share) so the vanes keep their look (game.py UNREAL_LODS, _barb_lod).
-    double density = 1.0;
-    bool given = false;
-    const std::string lod = optString(args, "lod", "");
-    if (!lod.empty()) {
-        static const std::map<std::string, double> kLods = {{"high", 1.0}, {"mid", 0.5}, {"low", 0.25}};
-        const auto it = kLods.find(lod);
-        if (it == kLods.end()) fail("bad_request", "lod is high, mid or low");
-        density = it->second;
-        given = true;
+    // (Every host's rule: engine_export.h setBarbLod.)
+    std::optional<double> density, width;
+    if (args.contains("barbDensity") && !args["barbDensity"].is_null()) density = optNumber(args, "barbDensity", 1.0);
+    if (args.contains("barbWidthScale") && !args["barbWidthScale"].is_null()) width = optNumber(args, "barbWidthScale", 1.0);
+    try {
+        setBarbLod(e, optString(args, "lod", ""), density, width);
+    } catch (const std::invalid_argument& error) {
+        fail("bad_request", error.what());
     }
-    if (args.contains("barbDensity") && !args["barbDensity"].is_null()) {
-        density = optNumber(args, "barbDensity", 1.0);
-        given = true;
-    }
-    if (!(density > 0.0 && density <= 1.0)) fail("bad_request", "barbDensity must be above 0 and at most 1");
-    e.barbDensity = static_cast<float>(density);
-    e.barbWidthScale = static_cast<float>(optNumber(args, "barbWidthScale", given ? 1.0 / std::sqrt(density) : 1.0));
-    if (!(e.barbWidthScale > 0.0f)) fail("bad_request", "barbWidthScale must be above 0");
     if (unreal) {
         e.featherGuides = optBool(args, "featherGuides", false);
         e.iridescenceAo = optBool(args, "iridescenceAo", false);

@@ -8,6 +8,7 @@
 #if GROOMLAB_PY_HAS_ALEMBIC
 #include "groomlab/alembic_io.h"
 #include "groomlab/alembic_operators.h"
+#include "groomlab/engine_export.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_scene.h"
 #include "groomlab/sim_cache.h"
@@ -59,6 +60,16 @@ void bindAlembic(py::module_& m) {
     py::class_<AlembicCurvesFrame>(m, "AlembicCurvesFrame", "One sample of an Alembic curves object: time and strands.")
         .def_readonly("seconds", &AlembicCurvesFrame::seconds)
         .def_readonly("strands", &AlembicCurvesFrame::strands);
+    m.def(
+        "barb_lod",
+        [](const std::string& lod, std::optional<double> density, std::optional<double> widthScale) {
+            EngineExportOptions e;
+            setBarbLod(e, lod, density, widthScale);
+            return std::make_pair(static_cast<double>(e.barbDensity), static_cast<double>(e.barbWidthScale));
+        },
+        py::arg("lod") = std::string(), py::arg("density") = py::none(), py::arg("width_scale") = py::none(),
+        "(barb density, barb width scale) of a lighter feather export, every host's (engine_export.h setBarbLod); "
+        "ValueError for another lod or a share outside (0, 1].");
     m.def("read_alembic_curves",
           [](const std::string& path, const std::string& name) {
               py::gil_scoped_release release;
