@@ -2030,6 +2030,15 @@ class ToolsTest(HelperTestCase):
         for bad in ({"faces": []}, {"faces": "0 1"}, {"faces": [-1]}):
             with self.assertRaises(HelperError):
                 self.call("map_fill", name="lids", value=1.0, **bad)
+        # The param's own map there already, its link gone: linked again (its painting back, as
+        # Maya's paint_param), not a numbered copy.
+        width = [n["name"] for n in self.call("list_nodes")["nodes"] if n["type"] == "Width"][0]
+        own = "%s_width" % width
+        self.call("map_create", name=own, kind="vertices", value=0.25)
+        r = self.call("map_for_param", node=width, param="width", kind="vertices")
+        self.assertEqual((r["name"], r["made"], r["reused"]), (own, False, True))
+        self.assertEqual(self.call("map_users", name=own)["users"], [[width, "width"]])
+        self.assertEqual({v for v in values(own)}, {0.25})
         # The Whole Faces brush setting.
         self.call("tool_set", tool="paint", settings={"paintWholeFaces": True})
         self.assertTrue(self.call("tool_get")["settings"]["paintWholeFaces"])

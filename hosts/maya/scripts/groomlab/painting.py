@@ -877,7 +877,9 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
         if found and not name:
             name, channel = found
         else:
-            name = name or "%s_%s" % (node, param)
+            # The param's own map (the core's paramMapName, every host's): one of that name there
+            # already (its link since gone) is linked again, its painting back.
+            name = name or groomlab_core.param_map_name(node, param)
             if kind == "guides" and name not in list_maps(groom) and not any(g["count"] for g in list_guide_groups(groom)):
                 raise ValueError("the groom has no guides to paint on: add guides, or paint on the scalp's vertices")
             if channel != "luminance" and name not in list_maps(groom):

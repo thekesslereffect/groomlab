@@ -2441,6 +2441,16 @@ TEST(AppPanels, ParamPanelPaintsAParamInOneStep) {
     EXPECT_FALSE(made);
     EXPECT_EQ(doc->maps().size(), edits + 1);
     EXPECT_EQ(doc->undoText(), undoBefore);
+    // The param's own map still there with its link gone: linked again, its painting back (every
+    // host: paramMapName), not a numbered copy.
+    ASSERT_EQ(doc->setParam(clump, "strength", strength), "");
+    EXPECT_EQ(doc->paramOrDefault(clump, "strength"), strength);
+    made = true;
+    EXPECT_EQ(doc->paintParam(clump, "strength", &again, "texture", &made), "");
+    EXPECT_EQ(again, map);
+    EXPECT_FALSE(made);
+    EXPECT_EQ(doc->maps().size(), edits + 1);
+    EXPECT_EQ(doc->paramOrDefault(clump, "strength")["colorSet"], map) << "as the vertex map it is";
     EXPECT_NE(doc->paintParam("noSuchNode", "strength"), "");
     // On the guides (Paint > On Guides, Maya's paint_param kind "guides"): a guide layer, white,
     // and the param reading it, one step.

@@ -561,6 +561,8 @@ void bindGroom(py::module_& m) {
     m.def("valid_map_name", &validMapName, py::arg("name"), "Letters, digits and _, not starting with a digit.");
     m.def("map_name_error", &mapNameError, py::arg("name"), "Why a name cannot name a map (\"\" when it can).");
     m.def("sanitize_map_name", &sanitizeMapName, py::arg("name"), "A valid map name made from any text.");
+    m.def("param_map_name", &paramMapName, py::arg("node"), py::arg("param"),
+          "The map a param's own map is named (<node>_<param>, sanitized); one of that name already is linked again.");
     m.def("retarget_map_readers",
           [](const std::string& graphJson, const std::string& from, const std::string& to) {
               bool changed = false;

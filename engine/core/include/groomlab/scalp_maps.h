@@ -67,6 +67,13 @@ bool validMapName(const std::string& name);
 std::string mapNameError(const std::string& name);
 // A valid name made from `name`: every other character _, a leading digit after a _ ("map" for "").
 std::string sanitizeMapName(const std::string& name);
+// The map a param's own map is named (Paint on a setting, New Map > for a setting): "<node>_<param>",
+// sanitized. When the groom has a map of that name already (made for the param before, its link
+// since gone), every host links that map again, whatever its kind, its painting back, rather than
+// making another.
+inline std::string paramMapName(const std::string& node, const std::string& param) {
+    return sanitizeMapName(node + "_" + param);
+}
 
 // The graph (its JSON, graph_io.h) with every reader of map `from` reading `to`: Map nodes by
 // name (a Map node without one reads "mask"), HairColor's map and Interpolate's regionMap by name, map params whose guide or

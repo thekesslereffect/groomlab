@@ -1938,6 +1938,8 @@ void commitMaps(ToolState& t, const std::string& label, const ScalpMaps& maps) {
 // faces get the value or fill, the rest 0 (a color map: black, alpha 1).
 ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalp, const std::string& name, const std::string& kind, bool color,
                                float value, const PaintColor& fill, int resolution, const std::vector<std::int32_t>& faces = {});
+// "vertices", "texture", "guides", or "" for no map of that name.
+std::string mapKindOf(Session& s, const std::string& name);
 
 // The scalp polygons `args` "faces" names (Maya's -faces: a make or fill limited to them); empty
 // when it names none. Polygon indices of the mesh set_scalp sent (Blender's mesh.polygons).
@@ -2068,6 +2070,28 @@ json mapForParam(ToolState& t, const json& args) {
     // A map made here with `faces` is white on them, black elsewhere (one the param reads already stays).
     const std::vector<std::int32_t> faces = facesArg(args);
     const std::vector<std::uint8_t> faceTriangles = faces.empty() ? std::vector<std::uint8_t>{} : polygonTriangles(*scalp, faces);
+    // The param's own map (paramMapName) there already, its link gone: linked again, whatever its
+    // kind, its painting back (every host does).
+    bool reused = false;
+    if (map.empty()) {
+        const std::string own = paramMapName(node, param);
+        const std::string ownKind = mapKindOf(s, own);
+        if (!ownKind.empty()) {
+            std::string graph;
+            try {
+                graph = wireParamMap(graphBefore, s.groom->scalpMaps(), node, param, own, ownKind);
+            } catch (const std::exception& e) {
+                fail("bad_request", e.what());
+            }
+            StrokeEdit edit;
+            edit.mode = "map " + node + "." + param;
+            edit.set(StrokeField::Graph, std::move(graph));
+            t.host.commit(std::move(edit));
+            map = own;
+            mapKind = ownKind;
+            reused = true;
+        }
+    }
     if (map.empty() && kind == "vertices" && faces.empty()) {
         try {
             const ParamMapBinding b = paintParamMap(t.host, t.tool.settings, node, param);  // made and linked: one step
@@ -2079,11 +2103,7 @@ json mapForParam(ToolState& t, const json& args) {
     } else if (map.empty() && kind == "guides") {
         // A guide layer (Maya's paint_param kind "guides"): every primary guide carries it at 1 (white:
         // the look stays), children inherit it, strands blend it; the layer and its link one step.
-        std::set<std::string> taken;
-        for (const json& m : mapsList(t)["maps"]) taken.insert(m["name"].get<std::string>());
-        const std::string base = sanitizeMapName(node + "_" + param);
-        map = base;
-        for (int k = 1; taken.count(map); ++k) map = base + std::to_string(k);
+        map = paramMapName(node, param);  // (free: one of that name was linked above)
         GuideHierarchy h = editedGuides(t, [&](GuideHierarchy& hh) {
             bool any = false;
             for (const HierarchyGuide& g : hh.guides()) {
@@ -2108,11 +2128,7 @@ json mapForParam(ToolState& t, const json& args) {
     } else if (map.empty()) {
         // A texture (or a vertex map on faces): white, linked in the same step; a texture's image
         // beside the groom, linked by its file.
-        std::set<std::string> taken;
-        for (const json& m : mapsList(t)["maps"]) taken.insert(m["name"].get<std::string>());
-        const std::string base = sanitizeMapName(node + "_" + param);
-        map = base;
-        for (int k = 1; taken.count(map); ++k) map = base + std::to_string(k);
+        map = paramMapName(node, param);  // (free: one of that name was linked above)
         ScalpMaps maps = s.groom->scalpMaps();
         maps.maps[map] = newScalpMapEntry(s, *scalp, map, kind, false, 1.0f, PaintColor{1.0f, 1.0f, 1.0f, 1.0f},
                                           static_cast<int>(optNumber(args, "resolution", 1024.0)), faces);
@@ -2138,7 +2154,8 @@ json mapForParam(ToolState& t, const json& args) {
     st.paintTexture = mapKind == "texture" && entry != s.groom->scalpMaps().maps.end() ? entry->second.texture : std::string();
     st.brush.value = 1.0f;
     const bool changed = s.groom->data().graphJson != graphBefore;
-    return {{"name", map}, {"kind", mapKind}, {"made", changed}, {"graphChanged", changed}, {"tool", toolJson(t)}, {"undo", undoJson(t)}};
+    return {{"name", map}, {"kind", mapKind}, {"made", changed && !reused}, {"reused", reused}, {"graphChanged", changed},
+            {"tool", toolJson(t)}, {"undo", undoJson(t)}};
 }
 
 // ---- Map management (Maya's painting.py over groomLabScalpMaps) ---------------------------------------

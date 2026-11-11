@@ -725,11 +725,18 @@ std::string GroomDocument::paintParam(const std::string& node, const std::string
     if (kind == "guides" && !(session().storedHierarchy() && !session().storedHierarchy()->guides().empty())) {
         return "the groom has no guides to paint on: add guides, or paint on the scalp's vertices";
     }
-    // A new map named for the param (free of the maps and guide layers there), white: the param
+    // The param's own map (paramMapName): one of that name already (made for it before, its link
+    // gone) is linked again, whatever its kind, its painting back; else a new one, white: the param
     // as it was, black 0.
-    const std::string base = sanitizeMapName(node + "_" + name);
-    std::string map = base;
-    for (int k = 1; this->map(map); ++k) map = base + std::to_string(k);
+    const std::string map = paramMapName(node, name);
+    if (const PaintedMap* existing = this->map(map)) {
+        const std::string kindThere = existing->kind;
+        const std::string error = editGraph("map " + node + "." + name, [&](json& g) {
+            g = json::parse(wireParamMap(g.dump(), session().scalpMaps(), node, name, map, kindThere));
+        });
+        if (error.empty() && mapName) *mapName = map;
+        return error;
+    }
     std::string error = createMap(map, kind, false, 1.0f, 1024, PaintColor{1.0f, 1.0f, 1.0f, 1.0f});
     if (!error.empty()) return error;
     error = editGraph("map " + node + "." + name,

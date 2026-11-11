@@ -577,14 +577,18 @@ ParamMapBinding bindParamMap(const std::string& graphJson, const ScalpMaps& maps
         out.kind = source.kind;
         return out;
     }
+    // The param's own map (paramMapName): one of that name already is linked again, its painting back.
+    out.map = paramMapName(node, param);
+    const std::vector<std::string> layers = guides ? guides->attributeNames() : std::vector<std::string>{};
+    const auto existing = maps.maps.find(out.map);
+    if (existing != maps.maps.end() || std::find(layers.begin(), layers.end(), out.map) != layers.end()) {
+        out.kind = existing != maps.maps.end() ? existing->second.kind : std::string("guides");
+        out.maps = maps;
+        out.graphJson = wireParamMap(graphJson, out.maps, node, param, out.map, out.kind);
+        return out;
+    }
     if (vertexCount == 0) throw std::runtime_error("no scalp to paint the " + param + " map on");
     // A new map, white: 1 x the param's value, as it was.
-    const std::vector<std::string> layers = guides ? guides->attributeNames() : std::vector<std::string>{};
-    const std::string base = sanitizeMapName(node + "_" + param);
-    out.map = base;
-    for (int k = 1; maps.maps.count(out.map) || std::find(layers.begin(), layers.end(), out.map) != layers.end(); ++k) {
-        out.map = base + std::to_string(k);
-    }
     out.kind = "vertices";
     out.maps = withVertexMap(maps, out.map, std::vector<float>(vertexCount, 1.0f), kGrayMap);
     out.graphJson = wireParamMap(graphJson, out.maps, node, param, out.map, out.kind);

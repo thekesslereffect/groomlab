@@ -313,9 +313,12 @@ TEST(BrushPack, BindParamMapFindsOrWiresTheMap) {
     EXPECT_EQ(paramMapOf(b.graphJson, b.maps, nullptr, "width", "width").map, "width_width");
     EXPECT_EQ(paramMapOf(b.graphJson, b.maps, nullptr, "width", "width").kind, "vertices");
     EXPECT_EQ(paramMapOf(b.graphJson, b.maps, nullptr, "noise", "amplitude").map, "") << "a number: no map";
-    // A name taken already: the next free one.
+    // The param's own map there already, its link gone: linked again (its painting back), no new map.
     ParamMapBinding taken = bindParamMap("", b.maps, nullptr, 7, "width", "width");
-    EXPECT_EQ(taken.map, "width_width1");
+    EXPECT_EQ(taken.map, "width_width");
+    EXPECT_EQ(taken.kind, "vertices");
+    EXPECT_EQ(taken.maps.maps.size(), b.maps.maps.size());
+    ASSERT_FALSE(taken.graphJson.empty());
 
     // A Map node wired to the param (Maya's Graph Editor's Paint), a guide layer, an expression.
     const std::string mapNode = R"({"nodes": [{"name": "w", "type": "Width"}, {"name": "thick", "type": "Map", "params": {"name": "thick"}}],
