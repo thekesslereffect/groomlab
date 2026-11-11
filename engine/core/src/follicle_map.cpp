@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "texel_padding.h"
 #include "groomlab/follicle_map.h"
 
 #include <algorithm>
@@ -185,32 +186,8 @@ FollicleMap bakeFollicleMap(const ScalpMesh& skin, const StrandSet& strands, con
     for (std::size_t ti = 0; ti < work.size(); ++ti) {
         std::vector<std::uint8_t>& filled = work[ti]->filled;
         std::vector<std::uint16_t>& value = out.tiles[ti].value;
-        const std::size_t n = static_cast<std::size_t>(res);
-        for (int pass = 0; pass < options.padding; ++pass) {
-            std::vector<std::vector<std::pair<std::size_t, std::size_t>>> rows(n);
-            parallelFor(0, n, [&](std::size_t y) {
-                for (std::size_t x = 0; x < n; ++x) {
-                    const std::size_t i = y * n + x;
-                    if (filled[i]) continue;
-                    std::size_t from = i;
-                    if (x > 0 && filled[i - 1] == 1) from = i - 1;
-                    else if (x + 1 < n && filled[i + 1] == 1) from = i + 1;
-                    else if (y > 0 && filled[i - n] == 1) from = i - n;
-                    else if (y + 1 < n && filled[i + n] == 1) from = i + n;
-                    if (from != i) rows[y].emplace_back(i, from);
-                }
-            }, 16);
-            bool grew = false;
-            for (const auto& row : rows) {
-                for (const auto& [to, from] : row) {
-                    value[to] = value[from];
-                    filled[to] = 2;  // (not a source until the next pass)
-                    grew = true;
-                }
-            }
-            if (!grew) break;
-            for (std::uint8_t& f : filled) f = f ? 1 : 0;
-        }
+        padByNeighbors(filled, static_cast<std::size_t>(res), options.padding,
+                       [&](std::size_t to, std::size_t from) { value[to] = value[from]; });
     }
     return out;
 }

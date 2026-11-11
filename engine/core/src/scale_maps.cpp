@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include "texel_padding.h"
 #include "groomlab/portable_math.h"
 #include "groomlab/scale_maps.h"
 
@@ -215,33 +216,11 @@ ScaleMaps bakeScaleMaps(const ScalpMesh& skin, const ScaleMesh& scales, const Sc
     for (std::size_t ti = 0; ti < work.size(); ++ti) {
         std::vector<std::uint8_t>& filled = work[ti]->filled;
         ScaleMaps::Tile& baked = out.tiles[ti];
-        for (int pass = 0; pass < options.padding; ++pass) {
-            std::vector<std::vector<std::pair<std::size_t, std::size_t>>> rows(static_cast<std::size_t>(res));
-            parallelFor(0, static_cast<std::size_t>(res), [&](std::size_t y) {
-                for (std::size_t x = 0; x < static_cast<std::size_t>(res); ++x) {
-                    const std::size_t i = y * static_cast<std::size_t>(res) + x;
-                    if (filled[i]) continue;
-                    std::size_t from = i;
-                    if (x > 0 && filled[i - 1] == 1) from = i - 1;
-                    else if (x + 1 < static_cast<std::size_t>(res) && filled[i + 1] == 1) from = i + 1;
-                    else if (y > 0 && filled[i - static_cast<std::size_t>(res)] == 1) from = i - static_cast<std::size_t>(res);
-                    else if (y + 1 < static_cast<std::size_t>(res) && filled[i + static_cast<std::size_t>(res)] == 1) from = i + static_cast<std::size_t>(res);
-                    if (from != i) rows[y].emplace_back(i, from);
-                }
-            }, 16);
-            bool grew = false;
-            for (const auto& row : rows) {
-                for (const auto& [to, from] : row) {
-                    std::copy_n(baked.normal.begin() + static_cast<std::ptrdiff_t>(3 * from), 3, baked.normal.begin() + static_cast<std::ptrdiff_t>(3 * to));
-                    std::copy_n(baked.color.begin() + static_cast<std::ptrdiff_t>(4 * from), 4, baked.color.begin() + static_cast<std::ptrdiff_t>(4 * to));
-                    baked.height[to] = baked.height[from];
-                    filled[to] = 2;  // (not a source until the next pass)
-                    grew = true;
-                }
-            }
-            if (!grew) break;
-            for (std::uint8_t& f : filled) f = f ? 1 : 0;
-        }
+        padByNeighbors(filled, static_cast<std::size_t>(res), options.padding, [&](std::size_t to, std::size_t from) {
+            std::copy_n(baked.normal.begin() + static_cast<std::ptrdiff_t>(3 * from), 3, baked.normal.begin() + static_cast<std::ptrdiff_t>(3 * to));
+            std::copy_n(baked.color.begin() + static_cast<std::ptrdiff_t>(4 * from), 4, baked.color.begin() + static_cast<std::ptrdiff_t>(4 * to));
+            baked.height[to] = baked.height[from];
+        });
     }
     return out;
 }

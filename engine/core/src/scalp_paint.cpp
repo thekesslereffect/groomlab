@@ -1022,7 +1022,10 @@ void buildSeams(TexelTable& t, const ScalpMesh& scalp) {
 }
 
 // The uncovered texels within kPadding steps (4-neighbor) of the covered ones, each with the
-// nearest covered texel of those its neighbors copy (ring by ring, as toBytes grows its padding).
+// nearest covered texel of those its neighbors copy, ring by ring: the live preview's padding, one
+// source a texel so a dab updates it in place. (The saved file's padding, toBytes, grows the same
+// rings but averages each new texel's neighbors: the two differ only off the UV islands, in texels
+// a render filters toward at an island's edge, never in a painted one.)
 void buildPadding(TexelTable& t) {
     const int width = t.width, height = t.height;
     const std::size_t texels = t.covered.size();
