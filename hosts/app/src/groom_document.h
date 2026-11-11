@@ -324,18 +324,27 @@ public:
     };
     std::vector<ControlSlider> controlSliders() const;
     // A control's value (GroomSession::setControls; saved in the file's "controls"): dirty, no undo
-    // step (a slider as Maya's keyable attribute, which the host keeps). False for no such control.
+    // step (a slider as Maya's keyable attribute, which the host keeps). False for no such control
+    // (any the graph reads: graph_controls.h controlsJson).
     bool setControlValue(const std::string& name, double value);
+    // A control's value now: the session's, else its default (the slider's start, the keyed
+    // param's own value). 0 for no such control.
+    double controlValue(const std::string& name) const;
     // Param keys (Maya's and Blender's Set Key on a param, the app's own keyframes): a param keyed
-    // drives through a Control node of its own (made as Drive with Slider makes one, an undo step),
-    // whose value is keyed at frames and applied whenever the frame changes (setFrame), saved with
-    // the groom ("controlKeys"). Setting, deleting and removing keys are no undo step (a host's
-    // keyframes, as setControlValue is the host's slider). "" or the error.
+    // the first time is linked to a control of its own, in place (graph_controls.h linkControl, an
+    // undo step: three for a vector, X Y Z or R G B), as Maya keys its ctl_ attribute and Blender
+    // its property; a param a Control node drives keys that control. The controls' values are keyed
+    // at frames and applied whenever the frame changes (setFrame), saved with the groom
+    // ("controlKeys"). Setting and deleting keys are no undo step (a host's keyframes, as
+    // setControlValue is the host's slider); the last key deleted, or Remove Animation, unlinks the
+    // param at its value then (unlinkControl, an undo step). "" or the error.
     std::string setParamKey(const std::string& node, const std::string& param);
     std::string deleteParamKey(const std::string& node, const std::string& param);
     std::string removeParamAnimation(const std::string& node, const std::string& param);
-    // The control a param reads (a Control node wired into it), "" none; whether it has keys, and
-    // one at the frame shown.
+    // The controls a param reads: its own (paramControls: one, or a vector's three), else a Control
+    // node wired into it; empty none. controlOf: the first, "" none. Whether it has keys, and one at
+    // the frame shown.
+    std::vector<std::string> paramControlNames(const std::string& node, const std::string& param) const;
     std::string controlOf(const std::string& node, const std::string& param) const;
     bool paramKeyed(const std::string& node, const std::string& param) const;
     bool paramKeyedHere(const std::string& node, const std::string& param) const;
@@ -1015,6 +1024,12 @@ private:
     std::vector<std::string> savedCopies_, saveWarnings_;
     std::map<std::string, ControlKeys> controlKeys_;  // the keyed controls (the file's "controlKeys")
     void applyControlKeys();
+    // A param keyed in place back to a value of its own, at its control's value now (an undo step);
+    // false when it was not keyed in place.
+    bool unlinkParam(const std::string& node, const std::string& param);
+    // A value set on node `n`'s param: a param keyed in place takes it on its control(s) (and the
+    // key at this frame, if any).
+    void keyedParamTakes(const nlohmann::json& n, const std::string& param, const nlohmann::json& value);
     mutable std::string untitledRoot_;  // an untitled groom's asset folder (assetFolder)
     // refinedFileScalp's meshes by level, for the file's scalp they were refined from.
     mutable MeshPtr refinedFrom_;

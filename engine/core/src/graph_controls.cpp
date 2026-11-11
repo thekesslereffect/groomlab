@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdint>
 #include <functional>
 #include <set>
 
@@ -227,6 +229,42 @@ std::string linkControl(GraphEdit& edit, const std::string& node, const std::str
     links[param] = control;
     edit = GraphEdit(g.dump());
     return control.dump();
+}
+
+std::string unlinkControl(GraphEdit& edit, const std::string& node, const std::string& param, const std::map<std::string, float>& values) {
+    const json spec = paramSpec(edit, node, param);
+    json g = graphOf(edit);
+    json& n = nodeIn(g, node);
+    if (!n.contains("paramControls") || !n["paramControls"].is_object() || !n["paramControls"].contains(param)) return {};
+    const json control = n["paramControls"][param];
+    auto valueOf = [&](const json& c, double fallback) {
+        if (!c.is_string()) return fallback;
+        const auto it = values.find(c.get<std::string>());
+        return it == values.end() ? fallback : static_cast<double>(it->second);
+    };
+    json& params = n["params"];
+    if (!params.is_object()) params = json::object();
+    if (control.is_array() && control.size() == 3) {
+        json own = params.contains(param) && params[param].is_array() && params[param].size() == 3 ? params[param] : json::array({0.0, 0.0, 0.0});
+        for (std::size_t i = 0; i < 3; ++i) own[i] = valueOf(control[i], numberOr(own[i], 0.0));
+        params[param] = own;
+    } else {
+        const json own = params.contains(param) ? params[param] : spec.value("default", json());
+        const double v = valueOf(control, numberOr(own, 0.0));
+        const std::string kind = spec.value("kind", std::string());
+        if (kind == "int") {
+            params[param] = static_cast<std::int64_t>(std::llround(v));
+        } else if (kind == "bool") {
+            params[param] = v >= 0.5;
+        } else {
+            params[param] = v;
+        }
+    }
+    const json value = params[param];
+    n["paramControls"].erase(param);
+    if (n["paramControls"].empty()) n.erase("paramControls");
+    edit = GraphEdit(g.dump());
+    return value.dump();
 }
 
 }  // namespace groomlab

@@ -658,6 +658,19 @@ TEST(GraphControls, EveryHostMakesAndReadsControlsAlike) {
         if (p["name"] == "amplitude") amplitudeDefault = p["default"].get<double>();
     }
     EXPECT_DOUBLE_EQ(json::parse(controlsJson(unset.dump()))["noise_amplitude"]["default"].get<double>(), amplitudeDefault);
+    // Remove Animation: the param back to its control's value now (a vector's three), the link gone.
+    EXPECT_EQ(unlinkControl(edit, "noise", "amplitude", {{"noise_amplitude", 0.25f}}), "0.25");
+    EXPECT_EQ(unlinkControl(edit, "color", "dye", {{"color_dyeG", 0.5f}}).substr(0, 1), "[");
+    EXPECT_EQ(unlinkControl(edit, "noise", "amplitude"), "") << "not keyed any more";
+    const json after = json::parse(edit.toJson());
+    for (const json& n : after["nodes"]) {
+        if (n["name"] == "noise") {
+            EXPECT_FALSE(n.contains("paramControls"));
+            EXPECT_DOUBLE_EQ(n["params"]["amplitude"].get<double>(), 0.25);
+        }
+        if (n["name"] == "color") EXPECT_DOUBLE_EQ(n["params"]["dye"][1].get<double>(), 0.5);
+    }
+    EXPECT_TRUE(json::parse(controlsJson(edit.toJson())).contains("length_randomness1")) << "the others stay keyed";
     (void)second;
 }
 

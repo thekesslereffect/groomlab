@@ -489,42 +489,48 @@ TEST(AppPanels, NewMapForASettingMakesLinksPaintsThenCtrlLowers) {
     EXPECT_EQ(session.settings().brush.attribute, map);
 }
 
-// Param keys (Maya's and Blender's Set Key): a param keyed drives through a Control node of its
-// own, its value keyed at frames and applied as the frame changes, saved with the groom.
+// Param keys (Maya's and Blender's Set Key): a param keyed is linked to a control of its own in
+// place (graph_controls.h linkControl: <node>_<param>, no Control node), its value keyed at frames
+// and applied as the frame changes, saved with the groom; Remove Animation leaves it at its value.
 TEST(AppPanels, ParamKeysDriveAControlOverTheFrames) {
     const std::string path = sampleCopy("groomlab_app_param_keys");
     auto doc = GroomDocument::open(path);
     ASSERT_TRUE(doc);
-    const std::string scatter = [&] {
+    auto firstOf = [&](const std::string& type) {
         for (const json& n : doc->graph()["nodes"]) {
-            if (n.value("type", std::string()) == "Scatter") return n.value("name", std::string());
+            if (n.value("type", std::string()) == type) return n.value("name", std::string());
         }
         return std::string();
-    }();
-    ASSERT_FALSE(scatter.empty());
-    EXPECT_FALSE(doc->paramKeyed(scatter, "density"));
+    };
+    const std::string scatter = firstOf("Scatter"), node = firstOf("Length");
+    ASSERT_FALSE(node.empty());
+    const std::string param = "randomness";
+    EXPECT_NE(doc->setParamKey(scatter, "density"), "") << "not animatable: never keyed (as in Maya and Blender)";
+    EXPECT_FALSE(doc->paramKeyed(node, param));
+    const std::size_t nodes = doc->graph()["nodes"].size();
     doc->setFrame(1.0);
-    ASSERT_EQ(doc->setParamKey(scatter, "density"), "");
-    const std::string control = doc->controlOf(scatter, "density");
-    ASSERT_FALSE(control.empty()) << "keyed through a Control node of its own";
-    EXPECT_TRUE(doc->paramKeyedHere(scatter, "density"));
+    ASSERT_EQ(doc->setParamKey(node, param), "");
+    const std::string control = doc->controlOf(node, param);
+    EXPECT_EQ(control, node + "_" + param) << "keyed in place, named as every host names it";
+    EXPECT_EQ(doc->graph()["nodes"].size(), nodes) << "no Control node";
+    EXPECT_TRUE(doc->paramKeyedHere(node, param));
     ASSERT_TRUE(doc->setControlValue(control, 0.0));
-    ASSERT_EQ(doc->setParamKey(scatter, "density"), "") << "the key at frame 1 now 0";
+    ASSERT_EQ(doc->setParamKey(node, param), "") << "the key at frame 1 now 0";
     doc->setFrame(11.0);
     ASSERT_TRUE(doc->setControlValue(control, 1.0));
-    ASSERT_EQ(doc->setParamKey(scatter, "density"), "");
-    auto valueOf = [&] {
-        for (const auto& c : doc->controlSliders()) {
-            if (c.name == control) return c.value;
-        }
-        return -1.0;
-    };
+    ASSERT_EQ(doc->setParamKey(node, param), "");
     doc->setFrame(6.0);
-    EXPECT_GT(valueOf(), 0.2);
-    EXPECT_LT(valueOf(), 0.8);
-    EXPECT_FALSE(doc->paramKeyedHere(scatter, "density"));
+    EXPECT_GT(doc->controlValue(control), 0.2);
+    EXPECT_LT(doc->controlValue(control), 0.8);
+    EXPECT_FALSE(doc->paramKeyedHere(node, param));
     doc->setFrame(1.0);
-    EXPECT_DOUBLE_EQ(valueOf(), 0.0);
+    EXPECT_DOUBLE_EQ(doc->controlValue(control), 0.0);
+    // The param set while a key sits at this frame: the control and the key take it.
+    ASSERT_EQ(doc->setParam(node, param, 0.5), "");
+    EXPECT_DOUBLE_EQ(doc->controlValue(control), 0.5);
+    doc->setFrame(11.0);
+    doc->setFrame(1.0);
+    EXPECT_DOUBLE_EQ(doc->controlValue(control), 0.5) << "the key at frame 1 took it";
     // Saved and read back: the keys come along.
     doc->save(path);
     auto again = GroomDocument::open(path);
@@ -532,15 +538,16 @@ TEST(AppPanels, ParamKeysDriveAControlOverTheFrames) {
     ASSERT_EQ(again->controlKeys().count(control), 1u);
     EXPECT_EQ(again->controlKeys().at(control).size(), 2u);
     again->setFrame(11.0);
-    for (const auto& c : again->controlSliders()) {
-        if (c.name == control) EXPECT_DOUBLE_EQ(c.value, 1.0);
-    }
-    // Delete Key at frame 11, Remove Animation.
-    EXPECT_EQ(again->deleteParamKey(scatter, "density"), "");
+    EXPECT_DOUBLE_EQ(again->controlValue(control), 1.0);
+    // Delete Key at frame 11; Remove Animation: plain again, at its value now.
+    EXPECT_EQ(again->deleteParamKey(node, param), "");
     EXPECT_EQ(again->controlKeys().at(control).size(), 1u);
-    EXPECT_NE(again->deleteParamKey(scatter, "density"), "") << "no key here any more";
-    EXPECT_EQ(again->removeParamAnimation(scatter, "density"), "");
-    EXPECT_FALSE(again->paramKeyed(scatter, "density"));
+    EXPECT_NE(again->deleteParamKey(node, param), "") << "no key here any more";
+    again->setFrame(1.0);
+    EXPECT_EQ(again->removeParamAnimation(node, param), "");
+    EXPECT_FALSE(again->paramKeyed(node, param));
+    EXPECT_EQ(again->controlOf(node, param), "") << "unlinked";
+    EXPECT_DOUBLE_EQ(again->paramOrDefault(node, param).get<double>(), 0.5);
 }
 
 // The groom's files as Maya keeps a scene's (groomlab/<name>/<kind>), and Save As taking them along

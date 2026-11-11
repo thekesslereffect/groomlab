@@ -985,71 +985,137 @@ void GroomDocument::applyControlKeys() {
     if (changed) session().setControls(std::move(controls));
 }
 
-std::string GroomDocument::controlOf(const std::string& node, const std::string& param) const {
+std::vector<std::string> GroomDocument::paramControlNames(const std::string& node, const std::string& param) const {
+    std::vector<std::string> names;
+    const json* n = nodeJson(node);
+    if (!n) return names;
+    // Keyed in place (graph_controls.h linkControl): its own control, or a vector's three.
+    if (n->contains("paramControls") && (*n)["paramControls"].is_object() && (*n)["paramControls"].contains(param)) {
+        const json& control = (*n)["paramControls"][param];
+        if (control.is_string()) names.push_back(control.get<std::string>());
+        for (const json& c : control.is_array() ? control : json::array()) {
+            if (c.is_string()) names.push_back(c.get<std::string>());
+        }
+        return names;
+    }
+    // A Control node wired into it (Drive with a Slider).
     const json& connections = graph_.contains("connections") ? graph_["connections"] : json::array();
     for (const json& c : connections) {
         if (c.value("to", std::string()) != node || c.value("input", std::string()) != param) continue;
         const json* from = nodeJson(c.value("from", std::string()));
         if (from && from->value("type", std::string()) == "Control") {
-            return from->value("params", json::object()).value("name", std::string("control"));
+            names.push_back(from->value("params", json::object()).value("name", std::string("control")));
         }
     }
-    return {};
+    return names;
+}
+
+std::string GroomDocument::controlOf(const std::string& node, const std::string& param) const {
+    const std::vector<std::string> names = paramControlNames(node, param);
+    return names.empty() ? std::string() : names.front();
 }
 
 bool GroomDocument::paramKeyed(const std::string& node, const std::string& param) const {
-    const std::string control = controlOf(node, param);
-    const auto it = controlKeys_.find(control);
-    return !control.empty() && it != controlKeys_.end() && !it->second.empty();
+    for (const std::string& name : paramControlNames(node, param)) {
+        const auto it = controlKeys_.find(name);
+        if (it != controlKeys_.end() && !it->second.empty()) return true;
+    }
+    return false;
 }
 
 bool GroomDocument::paramKeyedHere(const std::string& node, const std::string& param) const {
-    const std::string control = controlOf(node, param);
-    const auto it = controlKeys_.find(control);
-    return !control.empty() && it != controlKeys_.end() && hasControlKey(it->second, frame());
+    for (const std::string& name : paramControlNames(node, param)) {
+        const auto it = controlKeys_.find(name);
+        if (it != controlKeys_.end() && hasControlKey(it->second, frame())) return true;
+    }
+    return false;
+}
+
+double GroomDocument::controlValue(const std::string& name) const {
+    const std::map<std::string, float>& values = session().data().controls;
+    const auto set = values.find(name);
+    if (set != values.end()) return set->second;
+    const json controls = json::parse(controlsJson(graph_.dump()), nullptr, false);
+    if (controls.is_object() && controls.contains(name) && controls[name].is_object()) {
+        const json d = controls[name].value("default", json());
+        if (d.is_number()) return d.get<double>();
+    }
+    return 0.0;
 }
 
 std::string GroomDocument::setParamKey(const std::string& node, const std::string& param) {
     if (!nodeJson(node)) return "no node '" + node + "'";
-    std::string control = controlOf(node, param);
-    if (control.empty()) {
-        // Keyed through a Control node of its own (Maya keys its ctl_ attribute, Blender its property).
-        const json value = paramOrDefault(node, param);
-        if (!value.is_number()) return node + "." + param + " is not a number: only numbers can be keyed";
-        const std::string error = addControl(node, param);
+    std::vector<std::string> names = paramControlNames(node, param);
+    if (names.empty()) {
+        // Keyed in place, as Maya keys its ctl_ attribute and Blender its property: a control of its
+        // own (never a name the file keeps keys for already).
+        std::vector<std::string> taken;
+        for (const auto& [name, keys] : controlKeys_) taken.push_back(name);
+        const std::string error = editGraph("key " + node + "." + param, [&](json& g) {
+            GraphEdit edit(g.dump());
+            linkControl(edit, node, param, {}, taken);
+            g = json::parse(edit.toJson());
+        });
         if (!error.empty()) return error;
-        control = controlOf(node, param);
-        if (control.empty()) return "the param could not be driven by a control";
+        names = paramControlNames(node, param);
+        if (names.empty()) return "the param could not be keyed";
     }
-    double value = 0.0;
-    for (const ControlSlider& c : controlSliders()) {
-        if (c.name == control) value = c.value;
+    // Each control keyed at its value now (a new one: the param's own value).
+    std::map<std::string, float> controls = session().data().controls;
+    bool changed = false;
+    for (const std::string& name : names) {
+        const double value = controlValue(name);
+        setControlKey(controlKeys_[name], frame(), value);
+        if (!controls.count(name)) {
+            controls[name] = static_cast<float>(value);
+            changed = true;
+        }
     }
-    setControlKey(controlKeys_[control], frame(), value);
+    if (changed) session().setControls(std::move(controls));
     dirty_ = true;
     return {};
 }
 
 std::string GroomDocument::deleteParamKey(const std::string& node, const std::string& param) {
-    const std::string control = controlOf(node, param);
-    auto it = controlKeys_.find(control);
-    if (control.empty() || it == controlKeys_.end() || !removeControlKey(it->second, frame())) return "no key here";
-    if (it->second.empty()) controlKeys_.erase(it);
+    bool removed = false;
+    for (const std::string& name : paramControlNames(node, param)) {
+        auto it = controlKeys_.find(name);
+        if (it == controlKeys_.end() || !removeControlKey(it->second, frame())) continue;
+        removed = true;
+        if (it->second.empty()) controlKeys_.erase(it);
+    }
+    if (!removed) return "no key here";
     dirty_ = true;
     applyControlKeys();
+    // The last key gone: a param keyed in place is plain again, at its value now (Maya's).
+    if (!paramKeyed(node, param)) unlinkParam(node, param);
     return {};
 }
 
 std::string GroomDocument::removeParamAnimation(const std::string& node, const std::string& param) {
-    const std::string control = controlOf(node, param);
-    if (control.empty() || !controlKeys_.erase(control)) return "the param has no keys";
-    dirty_ = true;  // (its value now stays the control's)
+    bool erased = false;
+    for (const std::string& name : paramControlNames(node, param)) erased = controlKeys_.erase(name) > 0 || erased;
+    const bool unlinked = unlinkParam(node, param);
+    if (!erased && !unlinked) return "the param has no keys";
+    dirty_ = true;  // (a Control node's value stays the control's)
     return {};
 }
 
+bool GroomDocument::unlinkParam(const std::string& node, const std::string& param) {
+    const json* n = nodeJson(node);
+    if (!n || !n->contains("paramControls") || !(*n)["paramControls"].is_object() || !(*n)["paramControls"].contains(param)) return false;
+    const std::map<std::string, float> values = session().data().controls;
+    const std::string error = editGraph("remove animation " + node + "." + param, [&](json& g) {
+        GraphEdit edit(g.dump());
+        unlinkControl(edit, node, param, values);  // the param at its control's value now
+        g = json::parse(edit.toJson());
+    });
+    return error.empty();
+}
+
 bool GroomDocument::setControlValue(const std::string& name, double value) {
-    const std::vector<ControlSlider> sliders = controlSliders();
-    if (std::none_of(sliders.begin(), sliders.end(), [&](const ControlSlider& c) { return c.name == name; })) return false;
+    const json known = json::parse(controlsJson(graph_.dump()), nullptr, false);
+    if (!known.is_object() || !known.contains(name)) return false;
     std::map<std::string, float> controls = session().data().controls;
     if (controls.count(name) && controls[name] == static_cast<float>(value)) return true;
     controls[name] = static_cast<float>(value);
@@ -2030,6 +2096,30 @@ void GroomDocument::commitPreview() {
     applyParam(p.node, p.name, p.value, false);
 }
 
+void GroomDocument::keyedParamTakes(const json& n, const std::string& param, const json& value) {
+    // A param keyed in place reads its control(s) (graph_controls.h): the value goes there too, as
+    // Maya's set_param_value sets the ctl_ attribute: it holds until the frame changes, and a key at
+    // this frame takes it.
+    if (!n.contains("paramControls") || !n["paramControls"].is_object() || !n["paramControls"].contains(param)) return;
+    const json& control = n["paramControls"][param];
+    std::vector<std::pair<std::string, double>> set;
+    auto number = [](const json& v) { return v.is_boolean() ? (v.get<bool>() ? 1.0 : 0.0) : v.is_number() ? v.get<double>() : 0.0; };
+    if (control.is_string() && (value.is_number() || value.is_boolean())) set.emplace_back(control.get<std::string>(), number(value));
+    if (control.is_array() && value.is_array() && control.size() == value.size()) {
+        for (std::size_t i = 0; i < control.size(); ++i) {
+            if (control[i].is_string()) set.emplace_back(control[i].get<std::string>(), number(value[i]));
+        }
+    }
+    if (set.empty()) return;
+    std::map<std::string, float> controls = session().data().controls;
+    for (const auto& [name, v] : set) {
+        controls[name] = static_cast<float>(v);
+        const auto keys = controlKeys_.find(name);
+        if (keys != controlKeys_.end() && hasControlKey(keys->second, frame())) setControlKey(keys->second, frame(), v);
+    }
+    session().setControls(std::move(controls));
+}
+
 std::string GroomDocument::applyParam(const std::string& node, const std::string& name, const json& value, bool record) {
     json* n = nodeJson(node);
     if (!n) return "no node '" + node + "'";
@@ -2037,6 +2127,7 @@ std::string GroomDocument::applyParam(const std::string& node, const std::string
     if (!params.is_object()) params = json::object();
     const json before = params.contains(name) ? params[name] : json(nullptr);
     if (before == value) return {};
+    keyedParamTakes(*n, name, value);
     params[name] = value;
     const std::string error = applyGraph();
     if (!error.empty()) {

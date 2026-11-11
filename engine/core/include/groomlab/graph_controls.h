@@ -10,6 +10,7 @@
 // Maya's params.py / graph.py, the Blender helper and the app make and read controls through
 // these, so a control is named, ranged and placed the same in every host.
 
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -58,5 +59,12 @@ std::string addControl(GraphEdit& edit, const std::string& node, const std::stri
 // keyed (notKeyable).
 std::string linkControl(GraphEdit& edit, const std::string& node, const std::string& param, const std::string& wanted = {},
                         const std::vector<std::string>& taken = {});
+
+// Unkeys node.param (Maya's and Blender's Remove Animation): its link to its control(s) gone, the
+// param back to a value of its own: each control's value in `values` (the host's controls now),
+// else the value it keeps; an int rounded, a switch on from 0.5. Returns that value as JSON, ""
+// when the param was not keyed (nothing changed). GraphError for no such node or param.
+std::string unlinkControl(GraphEdit& edit, const std::string& node, const std::string& param,
+                          const std::map<std::string, float>& values = {});
 
 }  // namespace groomlab

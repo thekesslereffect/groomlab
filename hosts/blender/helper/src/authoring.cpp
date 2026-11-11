@@ -270,8 +270,6 @@ void insertOnLink(GraphEdit& edit, const std::string& from, const std::string& t
 
 // ---- Controls (params.py): Control nodes' sliders, Expression variables, keyed params ----------
 
-double numberOr(const json& v, double fallback) { return v.is_number() ? v.get<double>() : fallback; }
-
 // Every control the graph reads (params.py's _controls_in): {name: what it is}, the core's
 // (graph_controls.h controlsJson: a keyed param it leaves out at its spec's default).
 json controlsOf(const json& graph) { return json::parse(controlsJson(graph.dump())); }
@@ -316,42 +314,15 @@ json linkControl(GraphEdit& edit, const json& args) {
 // when the session has it).
 json unlinkControl(Session& s, GraphEdit& edit, const json& args) {
     const std::string node = needString(args, "node"), param = needString(args, "param");
-    const json spec = paramSpecOf(edit, node, param);
-    json g = graphJsonOf(edit);
-    json& n = nodeIn(g, node);
-    if (!n.contains("paramControls") || !n["paramControls"].is_object() || !n["paramControls"].contains(param)) {
-        return {{"changed", false}};
+    paramSpecOf(edit, node, param);
+    std::string value;
+    try {
+        value = groomlab::unlinkControl(edit, node, param, s.groom->data().controls);  // (graph_controls.h)
+    } catch (const GraphError& e) {
+        fail("bad_request", e.what());
     }
-    const json control = n["paramControls"][param];
-    const std::map<std::string, float>& values = s.groom->data().controls;
-    const std::string kind = spec.value("kind", std::string());
-    auto valueOf = [&](const json& c, double fallback) {
-        if (!c.is_string()) return fallback;
-        const auto it = values.find(c.get<std::string>());
-        return it == values.end() ? fallback : static_cast<double>(it->second);
-    };
-    json& params = n["params"];
-    if (!params.is_object()) params = json::object();
-    if (control.is_array() && control.size() == 3) {
-        json own = params.contains(param) && params[param].is_array() ? params[param] : json::array({0.0, 0.0, 0.0});
-        for (std::size_t i = 0; i < 3; ++i) own[i] = valueOf(control[i], numberOr(own[i], 0.0));
-        params[param] = own;
-    } else {
-        const json own = params.contains(param) ? params[param] : spec.value("default", json());
-        const double fallback = own.is_boolean() ? (own.get<bool>() ? 1.0 : 0.0) : numberOr(own, 0.0);
-        const double v = valueOf(control, fallback);
-        if (kind == "int") {
-            params[param] = static_cast<std::int64_t>(std::llround(v));
-        } else if (kind == "bool") {
-            params[param] = v >= 0.5;
-        } else {
-            params[param] = v;
-        }
-    }
-    n["paramControls"].erase(param);
-    if (n["paramControls"].empty()) n.erase("paramControls");
-    edit = GraphEdit(g.dump());
-    return {{"changed", true}, {"value", params[param]}};
+    if (value.empty()) return {{"changed", false}};
+    return {{"changed", true}, {"value", json::parse(value)}};
 }
 
 // ---- The node library (nodes.py) ----------------------------------------------------------------
