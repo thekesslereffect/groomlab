@@ -218,6 +218,12 @@ struct ScalpMapView {
     }
 };
 
+// A texture map's view (ScalpMapView kind "texture") sampled at the scalp's vertices, as the app and
+// the Blender helper draw it per vertex: the brush's live image while painting, else the file's, each
+// vertex at its first corner's uv; the view's channels per vertex (a gray map's file read as its
+// luminance, its preview's r g b alike). Null when the file cannot be read or the scalp has no UVs.
+std::shared_ptr<std::vector<float>> textureMapAtVertices(const ScalpMapView& view, const ScalpMesh& scalp);
+
 // What the last evaluation did, for editors and tools (groomLabGraphStats).
 struct GroomStats {
     std::string view;  // the node shown

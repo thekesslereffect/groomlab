@@ -2971,34 +2971,10 @@ ScalpMapView mapView(Session& s, const std::string& name, const std::string& cha
         return view;
     }
     if (textured) return view;
-    const std::size_t per = view.channels == 4 ? 4 : 1;
-    auto values = std::make_shared<std::vector<float>>(scalp->pointCount() * per, 0.0f);
-    std::vector<std::uint8_t> seen(scalp->pointCount(), 0);
-    const auto& uvs = scalp->cornerUVs();
-    const auto& triangles = scalp->triangles();
-    for (std::size_t tri = 0; tri < triangles.size(); ++tri) {
-        for (std::size_t k = 0; k < 3; ++k) {
-            const auto v = static_cast<std::size_t>(triangles[tri][k]);
-            if (seen[v]) continue;
-            seen[v] = 1;
-            const float u = uvs[tri * 3 + k][0], w = uvs[tri * 3 + k][1];
-            std::array<float, 4> c{};
-            if (view.preview) {
-                const int pw = view.preview->width(), ph = view.preview->height();
-                if (pw <= 0 || ph <= 0) continue;
-                const int x = std::clamp(static_cast<int>(std::floor(u * static_cast<float>(pw))), 0, pw - 1);
-                const int y = std::clamp(static_cast<int>(std::floor(w * static_cast<float>(ph))), 0, ph - 1);
-                const std::vector<std::uint8_t>& rgba = view.preview->rgba();
-                const std::size_t at = (static_cast<std::size_t>(y) * static_cast<std::size_t>(pw) + static_cast<std::size_t>(x)) * 4;
-                if (at + 3 >= rgba.size()) continue;
-                for (std::size_t i = 0; i < 4; ++i) c[i] = rgba[at + i] / 255.0f;
-                if (per == 1) c[0] = (c[0] + c[1] + c[2]) / 3.0f;
-            } else {
-                c = image->sample(u, w);
-                if (per == 1) c[0] = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
-            }
-            for (std::size_t i = 0; i < per; ++i) (*values)[v * per + i] = c[i];
-        }
+    const std::shared_ptr<std::vector<float>> values = textureMapAtVertices(view, *scalp);  // every host's (groom_session.h)
+    if (!values) {
+        view.kind.clear();
+        return view;
     }
     view.kind = "vertices";
     view.values = values;
