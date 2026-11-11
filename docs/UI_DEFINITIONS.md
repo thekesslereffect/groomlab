@@ -48,7 +48,9 @@ strip's `output.export`).
 
 Maya (`hosts/maya/scripts/groomlab/ui/definitions.py`) loads the files from the module's `ui/`
 folder (installed beside `themes/`), else from the source tree's `engine/ui`, and resolves a
-container for the host and a state (`definitions.resolve`). Each window keeps a table `{action id:
+container for the host and a state (`definitions.resolve`). Maya and Blender share one Python
+reader, `engine/ui/ui_definitions.py`, shipped beside the files: each host's `definitions.py`
+loads it from there and adds its own helpers (Maya's binders, Blender's enum items). Each window keeps a table `{action id:
 binding}`: a callable, a method name, or a function of the owner (`menu.ACTIONS`,
 `ToolPalette.ACTIONS`, `GuidesTab.ACTIONS`, `NodeItem.ACTIONS`, `ParamPanel.param_actions`...);
 `widgets.fill_menu` builds a Qt menu from a container and a table, `menu._build` the GroomLab menu
@@ -72,8 +74,8 @@ its `ALLOWED_MISSING` list (the parity checklist). A new host action:
 add it to `actions.json`, list it in a container, bind it in each host that shows it (or give it
 `hosts`), and run `ctest -R "ui.definitions|maya.ui_scaling|AppUi"`. `ui.definitions` also holds
 Maya's and Blender's loaders to the cases in `tests/engine/ui/resolve_cases.json`, which the app's
-`AppUi.ResolveMatchesTheSharedCases` checks too: a change to how entries resolve goes into all three
-loaders and the cases.
+`AppUi.ResolveMatchesTheSharedCases` checks too: a change to how entries resolve goes into
+`ui_definitions.py`, the app's loader and the cases.
 
 ## Properties (the Attribute Editor)
 

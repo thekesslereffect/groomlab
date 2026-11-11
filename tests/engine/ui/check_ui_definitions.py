@@ -492,8 +492,9 @@ def project(items):
 
 
 def check_loaders():
-    """Maya's and Blender's definitions.py resolve resolve_cases.json's cases as it says, for every
-    host (the app's ui_definitions.cpp is held to the same cases by its own test)."""
+    """Maya's and Blender's definitions.py (both through engine/ui/ui_definitions.py) resolve
+    resolve_cases.json's cases as it says, for every host (the app's ui_definitions.cpp is held to
+    the same cases by its own test)."""
     import copy
     import importlib.util
     with io.open(CASES, encoding="utf-8") as f:
@@ -502,7 +503,7 @@ def check_loaders():
         spec = importlib.util.spec_from_file_location("groomlab_definitions_" + loader, path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        module._doc = copy.deepcopy(cases["doc"])
+        module._ui._doc = copy.deepcopy(cases["doc"])  # (the shared reader, engine/ui/ui_definitions.py)
         for case in cases["cases"]:
             gens = dict((name, (lambda made: lambda entry: copy.deepcopy(made))(made))
                         for name, made in case.get("generators", {}).items())

@@ -26,7 +26,8 @@ install(FILES ${_addon_look_fonts} DESTINATION "GroomLabBlender/fonts" COMPONENT
 install(FILES ${_addon_look_themes} DESTINATION "GroomLabBlender/themes" COMPONENT Blender)
 # The UI structure every host shares (engine/ui/*.json, Apache-2.0 data): plain files the add-on reads
 # without the engine (docs/UI_DEFINITIONS.md).
-file(GLOB _addon_ui CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/engine/ui/*.json")
+# ui_definitions.py: their reader, Maya's too (definitions.py loads it from there).
+file(GLOB _addon_ui CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/engine/ui/*.json" "${PROJECT_SOURCE_DIR}/engine/ui/ui_definitions.py")
 install(FILES ${_addon_ui} DESTINATION "GroomLabBlender/ui" COMPONENT Blender)
 
 # The extension assembled in the build tree (the Blender component installed into

@@ -265,7 +265,9 @@ endforeach()" COMPONENT GroomLab)
 install(FILES "${PROJECT_SOURCE_DIR}/hosts/app/fonts/Inter[opsz,wght].ttf" "${PROJECT_SOURCE_DIR}/hosts/app/fonts/OFL-Inter.txt"
     DESTINATION "${GROOMLAB_MODULE_DIR}/fonts" COMPONENT GroomLab)
 # The UI structure every host shares (engine/ui: menus, lists, choices...), read by scripts/groomlab/ui/definitions.py.
-install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/ui/" DESTINATION "${GROOMLAB_MODULE_DIR}/ui" COMPONENT GroomLab)
+# Their reader (ui_definitions.py) with them; never a source tree's bytecode.
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/engine/ui/" DESTINATION "${GROOMLAB_MODULE_DIR}/ui" COMPONENT GroomLab
+        PATTERN "__pycache__" EXCLUDE)
 install(DIRECTORY nodes/ DESTINATION "${GROOMLAB_MODULE_DIR}/nodes" COMPONENT GroomLab)  # compound nodes (.glnode) shipped with every host
 install(DIRECTORY alphas/ DESTINATION "${GROOMLAB_MODULE_DIR}/alphas" COMPONENT GroomLab)  # brush alphas shipped with every host
 # The sample meshes (CC BY 4.0): Nika, Manny, the wolf, Buddy (its rig, buddy_rig.ma; the .fbx is Blender's).
