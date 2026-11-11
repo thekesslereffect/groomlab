@@ -50,44 +50,6 @@ void writeBytes(const std::string& path, const std::optional<std::string>& bytes
     out.write(bytes->data(), static_cast<std::streamsize>(bytes->size()));
 }
 
-// Whether `path` lies inside `folder` (case-insensitive on Windows), as the helper's inFolder.
-bool inFolder(const std::string& path, const std::string& folder) {
-    if (path.empty() || folder.empty()) return false;
-    auto norm = [](const std::string& p) {
-        std::string out = std::filesystem::u8path(p).lexically_normal().generic_u8string();
-#ifdef _WIN32
-        std::transform(out.begin(), out.end(), out.begin(), [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
-#endif
-        return out;
-    };
-    std::string f = norm(folder);
-    while (!f.empty() && f.back() == '/') f.pop_back();
-    const std::string p = norm(path);
-    return p.size() > f.size() + 1 && p.compare(0, f.size(), f) == 0 && p[f.size()] == '/';
-}
-
-bool samePath(const std::string& a, const std::string& b) {
-    std::error_code ec;
-    if (std::filesystem::equivalent(std::filesystem::u8path(a), std::filesystem::u8path(b), ec)) return true;
-    return std::filesystem::u8path(a).lexically_normal() == std::filesystem::u8path(b).lexically_normal();
-}
-
-bool pngPath(const std::string& path) {
-    std::string ext = std::filesystem::u8path(path).extension().u8string();
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
-    return ext == ".png";
-}
-
-// An image is gray when every texel's r, g and b agree (the helper's imageIsGray).
-bool imageIsGray(const Texture& image) {
-    const Texture::Image* im = image.image();
-    if (!im) return false;
-    for (std::size_t i = 0; i + 2 < im->rgba.size(); i += 4) {
-        if (im->rgba[i] != im->rgba[i + 1] || im->rgba[i + 1] != im->rgba[i + 2]) return false;
-    }
-    return true;
-}
-
 // The group names a Guides node's exclude holds (a list, or names split by commas and spaces).
 std::vector<std::string> groupList(const json& value) {
     std::vector<std::string> out;
@@ -264,11 +226,7 @@ std::string GroomDocument::missingMapFile(const std::string& name) const {
 // ---- Maps: files --------------------------------------------------------------------------------
 
 std::string GroomDocument::freeMapFile(const std::string& name) const {
-    const std::filesystem::path folder = std::filesystem::u8path(mapsDirectory());
-    std::filesystem::path file = folder / (name + ".png");
-    std::error_code ec;
-    for (int k = 2; std::filesystem::exists(file, ec); ++k) file = folder / (name + "_" + std::to_string(k) + ".png");
-    return forwardSlashes(file.u8string());
+    return freeFilePath((std::filesystem::u8path(mapsDirectory()) / (name + ".png")).u8string());
 }
 
 std::string GroomDocument::storedMapPath(const std::string& full) const {
@@ -287,8 +245,8 @@ std::string GroomDocument::mapImageFile(const std::string& map, const std::strin
         throw std::runtime_error(path + " does not read as an image: " + e.what());
     }
     if (!image || image->isUdim() || !image->image()) throw std::runtime_error("a map's image is one file over UVs 0-1, not a UDIM tile set");
-    if (channels) *channels = imageIsGray(*image) ? kGrayMap : kColorMap;
-    if (pngPath(path)) return forwardSlashes(std::filesystem::u8path(path).u8string());  // in place: painting edits it
+    if (channels) *channels = isGrayImage(*image) ? kGrayMap : kColorMap;
+    if (isPngPath(path)) return forwardSlashes(std::filesystem::u8path(path).u8string());  // in place: painting edits it
     // Another format is copied into the maps folder as a PNG (painting writes PNG).
     if (mapsDirectory().empty()) throw std::runtime_error("save the groom first: a JPEG, TGA, PSD... is copied as a PNG into the groomlab folder beside it");
     const std::string target = freeMapFile(map);
@@ -393,10 +351,10 @@ std::string GroomDocument::removeMap(const std::string& name, bool deleteFile, b
         const std::string file = kind == "texture" ? resolveMapPath(maps.maps[name].texture) : std::string();
         maps.maps.erase(name);
         const bool shared = std::any_of(maps.maps.begin(), maps.maps.end(), [&](const auto& m) {
-            return m.second.kind == "texture" && !file.empty() && samePath(resolveMapPath(m.second.texture), file);
+            return m.second.kind == "texture" && !file.empty() && sameFile(resolveMapPath(m.second.texture), file);
         });
         std::error_code ec;
-        if (deleteFile && !file.empty() && !shared && inFolder(file, mapsDirectory()) && std::filesystem::is_regular_file(std::filesystem::u8path(file), ec)) {
+        if (deleteFile && !file.empty() && !shared && insideFolder(file, mapsDirectory()) && std::filesystem::is_regular_file(std::filesystem::u8path(file), ec)) {
             Edit::FileState state{file, readBytes(file), std::nullopt};
             std::filesystem::remove(std::filesystem::u8path(file), ec);
             if (!ec) {

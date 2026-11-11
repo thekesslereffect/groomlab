@@ -25,6 +25,7 @@
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/parts.h"
 #include "groomlab/scalp_paint.h"
+#include "groomlab/asset_files.h"
 #include "groomlab/texture.h"
 #include "maya_inputs.h"
 #include "groomlab/scalp_maps.h"
@@ -85,7 +86,7 @@ std::vector<std::string> TransferCmd::projectMaps(ScalpMaps& maps, const std::se
         const std::string folder = assetFolder("masks") + "/" + assetName(groom);
         std::error_code ec;
         std::filesystem::create_directories(std::filesystem::u8path(folder), ec);
-        const std::string target = uniqueFilePath(folder + "/" + name + ".png");
+        const std::string target = freeFilePath(folder + "/" + name + ".png");
         paint.save(target);
         written_.push_back({target, fileBytes(target)});
         return portableMayaPath(target);

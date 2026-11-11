@@ -24,6 +24,7 @@
 #include "groom_shape.h"
 #include "groomlab/guide_hierarchy.h"
 #include "groomlab/scalp_paint.h"
+#include "groomlab/asset_files.h"
 #include "groomlab/texture.h"
 #include "command_args.h"
 #include "guarded.h"
@@ -238,7 +239,7 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
         // earlier): it gets a free name beside it, stored the way the given path was.
         auto freshTexture = [&](const std::string& stored) {
             const std::string full = resolve(stored);
-            const std::string free = uniqueFilePath(full);
+            const std::string free = freeFilePath(full);
             return free == full ? stored : portableMayaPath(free);
         };
         auto texturePaint = [&](const std::string& stored, int channels) -> TexturePaint {
@@ -342,7 +343,7 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                     mapsChanged = true;
                     const bool shared = !file.empty() && (fileUsedByOtherGroom(groomNode, file) ||
                         std::any_of(maps.maps.begin(), maps.maps.end(), [&](const auto& m) {
-                            return m.second.kind == "texture" && samePath(resolve(m.second.texture), file);
+                            return m.second.kind == "texture" && sameFile(resolve(m.second.texture), file);
                         }));
                     if (db.isFlagSet(kDeleteFile[0]) && !file.empty() && !shared && fileStamp(file) != 0) {
                         deleted_ = {file, fileBytes(file), {}};

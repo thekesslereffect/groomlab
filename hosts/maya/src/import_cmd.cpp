@@ -398,21 +398,21 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
                     continue;
                 }
                 std::string to = masks + "/" + name + fs::u8path(from).extension().u8string();
-                if (samePath(fs::u8path(from).parent_path().u8string(), masks)) {
+                if (sameFile(fs::u8path(from).parent_path().u8string(), masks)) {
                     to = generic(from);  // the groom's own (the file came from this scene): read in place
                 } else if (exists(to) && fileBytes(to) != fileBytes(from)) {
-                    to = uniqueFilePath(to);
+                    to = freeFilePath(to);
                 }
-                if (!samePath(from, to)) copyFor(from, to);
+                if (!sameFile(from, to)) copyFor(from, to);
                 entry.texture = portableMayaPath(to);
-                if (!samePath(from, to)) movedImages.emplace_back(from, entry.texture);
+                if (!sameFile(from, to)) movedImages.emplace_back(from, entry.texture);
             }
             std::string graphJson = file.data.graphJson.empty() ? "{}" : file.data.graphJson;
             if (!movedImages.empty()) {
                 graphJson = followGraphFiles(graphJson, [&](const std::string& stored) {
                     const std::string full = resolveFromFile(file, stored);
                     for (const auto& [from, now] : movedImages) {
-                        if (samePath(full, from)) return now;
+                        if (sameFile(full, from)) return now;
                     }
                     return stored;
                 });
@@ -431,7 +431,7 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
                     std::string to;
                     for (int n = 1;; ++n) {
                         to = folder + "/" + asset + (n > 1 ? "_" + std::to_string(n) : std::string()) + "_";
-                        if (samePath(from + "Atlas.json", to + "Atlas.json")) break;
+                        if (sameFile(from + "Atlas.json", to + "Atlas.json")) break;
                         bool free = !bakePrefixUsedByOtherGroom(node, to);
                         for (const std::string& f : cardBakeSuffixes()) {
                             free = free && (!exists(to + f) || !exists(from + f) || fileBytes(to + f) == fileBytes(from + f));
@@ -439,7 +439,7 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
                         if (free) break;
                     }
                     for (const std::string& f : cardBakeSuffixes()) {
-                        if (exists(from + f) && !samePath(from + f, to + f)) copyFor(from + f, to + f);
+                        if (exists(from + f) && !sameFile(from + f, to + f)) copyFor(from + f, to + f);
                     }
                     static int bakes = 0;  // a new stamp each time: the viewport reads the maps again
                     cardMaps = formatCardMaps(portableMayaPath(to), file.cardBake.strands, 1000000 + ++bakes);

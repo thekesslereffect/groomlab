@@ -26,14 +26,6 @@ std::string fileSafeName(const std::string& text);
 std::string assetName(const MDagPath& groom);
 // The scene's folder for `kind` (absolute, forward slashes; not created).
 std::string assetFolder(const std::string& kind);
-// `path` when nothing is there, else the first free <stem>_2<ext>, <stem>_3<ext>...
-std::string uniqueFilePath(const std::string& path);
-// Whether the file name ends in .png (any case). Painting a texture map writes PNG bytes to
-// its file, so a map is painted only into a .png: a map linked to a JPEG, TGA, PSD... paints a
-// PNG copy (groomlab.set_map_texture makes it), never the source.
-bool isPngPath(const std::string& path);
-// The same file (both resolved; compared canonically, case-insensitively on Windows).
-bool samePath(const std::string& a, const std::string& b);
 
 // Whether a groomLabShape other than `groom` names the file `full` (resolved): as a texture
 // map, or as one of its card bake's files (every file of the bake's prefix).

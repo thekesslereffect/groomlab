@@ -104,6 +104,12 @@ TexturePtr cachedTexture(const std::string& path);
 // extension loadTexture reads (.png, .jpg, .jpeg, .tga, .bmp, .psd, .gif, .hdr, .pic, .pnm, .ppm,
 // .pgm, any case), or names a UDIM tile set (<UDIM>). Nothing is read.
 bool isImagePath(const std::string& name);
+// Whether the file name ends in .png (any case). Painting a texture map writes PNG bytes to its
+// file, so a map is painted only into a .png: a map linked to a JPEG, TGA, PSD... paints a PNG
+// copy, never the source.
+bool isPngPath(const std::string& path);
+// Whether every texel's r, g and b agree (a gray map's image); false for a UDIM set.
+bool isGrayImage(const Texture& image);
 
 // A cheap hash of the file's path, size and modification time (0 if missing), for
 // cache keys of anything that reads the file. For a UDIM path, of every tile

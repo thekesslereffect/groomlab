@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <gtest/gtest.h>
 
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -10,6 +11,7 @@
 #include "groomlab/asset_files.h"
 #include "groomlab/groom_file.h"
 #include "groomlab/groom_package.h"
+#include "groomlab/texture.h"
 
 using namespace groomlab;
 namespace fs = std::filesystem;
@@ -160,6 +162,37 @@ TEST(AssetFiles, FileReadersFollowAMovedMap) {
     EXPECT_EQ(retargetFileReaders(graph, "C:/shot/masks/hair/none.png", "x.png", resolve, &changed), graph);
     EXPECT_FALSE(changed);
     EXPECT_EQ(retargetFileReaders(graph, "", "x.png", resolve, &changed), graph);
+}
+
+// The texture-map file rules every host shares: a free name beside a file that is there, the
+// same file through a folder spelled another way, a map painted only into a .png, gray images.
+TEST(AssetFiles, MapFileRulesEveryHostShares) {
+    const std::string dir = scratch("map_rules");
+    EXPECT_EQ(freeFilePath(dir + "/mask.png"), dir + "/mask.png");
+    write(dir + "/mask.png", "a");
+    write(dir + "/mask_2.png", "b");
+    EXPECT_EQ(freeFilePath(dir + "/mask.png"), dir + "/mask_3.png");
+
+    EXPECT_TRUE(sameFile(dir + "/mask.png", dir + "/sub/../mask.png"));
+    EXPECT_TRUE(sameFile(dir + "/new.png", dir + "/./new.png")) << "not there yet: compared as text";
+    EXPECT_FALSE(sameFile(dir + "/mask.png", dir + "/mask_2.png"));
+    EXPECT_FALSE(sameFile("", ""));
+#ifdef _WIN32
+    std::string upper = dir;
+    for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    EXPECT_TRUE(sameFile(upper + "/MASK.PNG", dir + "/mask.png"));
+#endif
+    EXPECT_TRUE(insideFolder(dir + "/a/b.png", dir));
+    EXPECT_FALSE(insideFolder(dir + "x/b.png", dir));
+
+    EXPECT_TRUE(isPngPath("C:/maps/Mask.PNG"));
+    EXPECT_FALSE(isPngPath("C:/maps.png/mask.jpg"));
+
+    const TexturePtr gray = textureFromPixels(2, 1, 4, {10, 10, 10, 255, 200, 200, 200, 255});
+    const TexturePtr color = textureFromPixels(2, 1, 4, {10, 10, 10, 255, 200, 201, 200, 255});
+    ASSERT_TRUE(gray && color);
+    EXPECT_TRUE(isGrayImage(*gray));
+    EXPECT_FALSE(isGrayImage(*color));
 }
 
 // A groom file as every host writes it (groom_package.h): each groom's own files in

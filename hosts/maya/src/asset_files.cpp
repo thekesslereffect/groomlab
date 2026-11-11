@@ -19,6 +19,7 @@
 
 #include "groom_shape.h"
 #include "maya_inputs.h"
+#include "groomlab/asset_files.h"
 #include "groomlab/card_files.h"
 #include "groomlab/scalp_maps.h"
 
@@ -111,29 +112,10 @@ std::string assetFolder(const std::string& kind) {
     return kind.empty() ? base : base + "/" + kind;
 }
 
-bool isPngPath(const std::string& path) {
-    std::string ext = fs::u8path(path).extension().u8string();
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return ext == ".png";
-}
-
-std::string uniqueFilePath(const std::string& path) {
-    std::error_code ec;
-    if (!fs::exists(fs::u8path(path), ec)) return path;
-    const fs::path p = fs::u8path(path);
-    const std::string stem = p.stem().u8string(), ext = p.extension().u8string();
-    for (int n = 2;; ++n) {
-        const fs::path candidate = p.parent_path() / fs::u8path(stem + "_" + std::to_string(n) + ext);
-        if (!fs::exists(candidate, ec)) return candidate.generic_u8string();
-    }
-}
-
-bool samePath(const std::string& a, const std::string& b) { return !a.empty() && comparable(a) == comparable(b); }
-
 bool fileUsedByOtherGroom(const MObject& groom, const std::string& full) {
     return anyOtherGroom(groom, [&](const MObject& node, GroomShape& shape) {
         for (const auto& [name, entry] : shape.scalpMaps().maps) {
-            if (entry.kind == "texture" && !entry.texture.empty() && samePath(resolveNodePath(node, entry.texture), full)) {
+            if (entry.kind == "texture" && !entry.texture.empty() && sameFile(resolveNodePath(node, entry.texture), full)) {
                 return true;
             }
         }
@@ -152,7 +134,7 @@ std::string forkTextureFile(const MDagPath& groom, const std::string& mapName, c
     const std::string folder = assetFolder("masks") + "/" + assetName(groom);
     std::error_code ec;
     fs::create_directories(fs::u8path(folder), ec);
-    const std::string target = uniqueFilePath(folder + "/" + mapName + ".png");
+    const std::string target = freeFilePath(folder + "/" + mapName + ".png");
     if (fs::exists(fs::u8path(full), ec)) {
         noteFileWritten();
         fs::copy_file(fs::u8path(full), fs::u8path(target), ec);

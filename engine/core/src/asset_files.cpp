@@ -52,15 +52,6 @@ bool sameContent(const std::string& a, const std::string& b) {
 
 bool hasVariable(const std::string& s) { return s.find('$') != std::string::npos || s.find('%') != std::string::npos; }
 
-// file -> file_2, file_3... (before the extension) until one is free.
-std::string freeName(const std::string& path) {
-    const fs::path p = fs::u8path(path);
-    std::error_code ec;
-    fs::path out = p;
-    for (int k = 2; fs::exists(out, ec); ++k) out = p.parent_path() / (p.stem().u8string() + "_" + std::to_string(k) + p.extension().u8string());
-    return out.generic_u8string();
-}
-
 }  // namespace
 
 std::string fileSafeName(const std::string& text) {
@@ -116,7 +107,7 @@ std::string FileFollower::follow(const std::string& storedPath) {
     std::string target = destination(source, storedPath, relative);
     if (target.empty() || key(target) == key(source)) return relative ? stored(source, true) : storedPath;
     if (fs::exists(fs::u8path(target), ec) && !sameContent(source, target)) {
-        const std::string free = freeName(target);
+        const std::string free = freeFilePath(target);
         warnings_.push_back(target + " holds other content: this scene now uses " + free);
         target = free;
     }
@@ -263,6 +254,27 @@ std::string followGraphFiles(const std::string& graphJson, const std::function<s
 }
 
 bool samePathText(const std::string& a, const std::string& b) { return !a.empty() && !b.empty() && key(a) == key(b); }
+
+bool sameFile(const std::string& a, const std::string& b) {
+    if (a.empty() || b.empty()) return false;
+    std::error_code ec;
+    if (fs::equivalent(fs::u8path(a), fs::u8path(b), ec)) return true;
+    // Not both there: canonical as far as they exist (a folder's links), then as samePathText.
+    auto canonical = [](const std::string& p) {
+        std::error_code e;
+        const fs::path c = fs::weakly_canonical(fs::u8path(p), e);
+        return e ? p : c.generic_u8string();
+    };
+    return samePathText(canonical(a), canonical(b));
+}
+
+std::string freeFilePath(const std::string& path) {
+    const fs::path p = fs::u8path(path);
+    std::error_code ec;
+    fs::path out = p;
+    for (int k = 2; fs::exists(out, ec); ++k) out = p.parent_path() / (p.stem().u8string() + "_" + std::to_string(k) + p.extension().u8string());
+    return out.generic_u8string();
+}
 
 std::string retargetFileReaders(const std::string& graphJson, const std::string& from, const std::string& to,
                                 const std::function<std::string(const std::string&)>& resolve, bool* changed) {

@@ -2193,45 +2193,8 @@ MeshPtr mapScalp(Session& s) {
     return scalp;
 }
 
-// Whether `path` lies inside `folder` (both absolute; case-insensitive on Windows).
-bool inFolder(const std::string& path, const std::string& folder) {
-    if (path.empty() || folder.empty()) return false;
-    auto norm = [](const std::string& p) {
-        std::string out = fs::u8path(p).lexically_normal().generic_u8string();
-#ifdef _WIN32
-        std::transform(out.begin(), out.end(), out.begin(), [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
-#endif
-        return out;
-    };
-    std::string f = norm(folder);
-    while (!f.empty() && f.back() == '/') f.pop_back();
-    const std::string p = norm(path);
-    return p.size() > f.size() + 1 && p.compare(0, f.size(), f) == 0 && p[f.size()] == '/';
-}
-
-bool samePath(const std::string& a, const std::string& b) {
-    std::error_code ec;
-    if (fs::equivalent(fs::u8path(a), fs::u8path(b), ec)) return true;
-    return fs::u8path(a).lexically_normal() == fs::u8path(b).lexically_normal();
-}
-
-// A new file never replaces one that is there: `file`, else file_2, file_3... beside it.
-std::string freeFile(const std::string& file) {
-    const fs::path p = fs::u8path(file);
-    fs::path out = p;
-    std::error_code ec;
-    for (int k = 2; fs::exists(out, ec); ++k) out = p.parent_path() / (p.stem().u8string() + "_" + std::to_string(k) + p.extension().u8string());
-    return out.generic_u8string();
-}
-
 // A texture map's default file: <maps folder>/<map>.png, a free name.
-std::string defaultMapFile(Session& s, const std::string& name) { return freeFile((fs::u8path(mapsFolder(s)) / (name + ".png")).generic_u8string()); }
-
-bool pngPath(const std::string& path) {
-    std::string ext = fs::u8path(path).extension().u8string();
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); });
-    return ext == ".png";
-}
+std::string defaultMapFile(Session& s, const std::string& name) { return freeFilePath((fs::u8path(mapsFolder(s)) / (name + ".png")).generic_u8string()); }
 
 // A texture paint written to `file` (made or rewritten) as part of the next commit's undo step.
 void writePaint(ToolState& t, const TexturePaint& paint, const std::string& file) {
@@ -2373,10 +2336,10 @@ json mapRemove(ToolState& t, const json& args) {
         const std::string file = kind == "texture" ? resolveMapFile(s, maps.maps[name].texture) : std::string();
         maps.maps.erase(name);
         const bool shared = std::any_of(maps.maps.begin(), maps.maps.end(), [&](const auto& m) {
-            return m.second.kind == "texture" && samePath(resolveMapFile(s, m.second.texture), file);
+            return m.second.kind == "texture" && sameFile(resolveMapFile(s, m.second.texture), file);
         });
         std::error_code ec;
-        if (optBool(args, "deleteFile", false) && !file.empty() && !shared && inFolder(file, mapsFolder(s)) &&
+        if (optBool(args, "deleteFile", false) && !file.empty() && !shared && insideFolder(file, mapsFolder(s)) &&
             fs::is_regular_file(fs::u8path(file), ec)) {
             FileEdit e = fileBefore(file);
             fs::remove(fs::u8path(file), ec);
@@ -2417,8 +2380,8 @@ json mapRename(ToolState& t, const json& args) {
             const std::string full = resolveMapFile(s, entry.texture);
             const std::string renamed = renamedMapTexture(full, from, to);
             std::error_code ec;
-            if (!renamed.empty() && inFolder(full, mapsFolder(s)) && fs::is_regular_file(fs::u8path(full), ec)) {
-                const std::string target = freeFile(renamed);
+            if (!renamed.empty() && insideFolder(full, mapsFolder(s)) && fs::is_regular_file(fs::u8path(full), ec)) {
+                const std::string target = freeFilePath(renamed);
                 FileEdit source = fileBefore(full), made = fileBefore(target);
                 fs::rename(fs::u8path(full), fs::u8path(target), ec);
                 if (!ec) {
@@ -2500,8 +2463,8 @@ json mapConvert(ToolState& t, const json& args) {
         } else if (to == "texture") {
             if (!scalp->hasUVs()) fail("state", "the scalp has no UVs for a texture map");
             const std::string wanted = optString(args, "texture", "");
-            if (!wanted.empty() && !pngPath(wanted)) fail("bad_request", "a texture map's file is a PNG (painting writes PNG)");
-            file = wanted.empty() ? defaultMapFile(s, name) : freeFile(wanted);
+            if (!wanted.empty() && !isPngPath(wanted)) fail("bad_request", "a texture map's file is a PNG (painting writes PNG)");
+            file = wanted.empty() ? defaultMapFile(s, name) : freeFilePath(wanted);
             const TexturePaint paint = from == "guides" ? textureFromGuides(flat, name, *scalp, resolution, resolution)
                                                         : textureFromVertexMap(vertices, channels, *scalp, resolution, resolution);
             writePaint(t, paint, file);
@@ -2700,7 +2663,7 @@ std::string mapImageFile(ToolState& t, const std::string& name, const std::strin
         fail("bad_request", full + " does not read as an image: " + e.what());
     }
     if (!image || image->isUdim() || !image->image()) fail("bad_request", "a map's image is one file over UVs 0-1, not a UDIM tile set");
-    const bool png = pngPath(full);
+    const bool png = isPngPath(full);
     const bool copy = given(args, "copy") ? settingBool(args["copy"], "copy") : !png;
     if (!copy && !png) fail("bad_request", full + " is not a PNG: painting writes PNG, so another format is copied as one (copy true)");
     if (!copy) return fs::u8path(full).generic_u8string();
@@ -2719,15 +2682,6 @@ std::string mapImageFile(ToolState& t, const std::string& name, const std::strin
     }
     fileAfter(t, std::move(e));
     return target;
-}
-
-bool imageIsGray(const Texture& image) {
-    const Texture::Image* im = image.image();
-    if (!im) return false;
-    for (std::size_t i = 0; i + 2 < im->rgba.size(); i += 4) {
-        if (im->rgba[i] != im->rgba[i + 1] || im->rgba[i + 1] != im->rgba[i + 2]) return false;
-    }
-    return true;
 }
 
 // Maya's import_map: a new texture map reading the image `path`, named `name` or after the file
@@ -2750,7 +2704,7 @@ json mapImport(ToolState& t, const json& args) {
     if (!mapKindOf(s, name).empty()) fail("bad_request", "the groom already has a map named '" + name + "'");
     TexturePtr image;
     const std::string file = mapImageFile(t, name, path, args, image);
-    const bool color = given(args, "color") ? settingBool(args["color"], "color") : !imageIsGray(*image);
+    const bool color = given(args, "color") ? settingBool(args["color"], "color") : !isGrayImage(*image);
     ScalpMaps maps = s.groom->scalpMaps();
     ScalpMapEntry entry{"texture", {}, file};
     entry.channels = color ? kColorMap : kGrayMap;
@@ -2822,7 +2776,7 @@ bool inTempMapsFolder(const std::string& path) {
     if (ec) return false;
     const fs::path folder = fs::u8path(path).parent_path();
     const std::string name = folder.filename().u8string();
-    return name.rfind(blockNamePrefix(), 0) == 0 && name.find("maps") != std::string::npos && inFolder(folder.generic_u8string(), temp.generic_u8string());
+    return name.rfind(blockNamePrefix(), 0) == 0 && name.find("maps") != std::string::npos && insideFolder(folder.generic_u8string(), temp.generic_u8string());
 }
 
 // The host's own maps folder for the groom (Blender: <blend folder>/groomlab/<blend>/masks/<scalp>,
@@ -2847,13 +2801,13 @@ json mapsMoveTo(ToolState& t, const json& args) {
     for (auto& [name, entry] : maps.maps) {
         if (entry.kind != "texture" || entry.texture.empty()) continue;
         const std::string file = resolveMapFile(s, entry.texture);
-        if (inFolder(file, now) || !(inFolder(file, old) || inTempMapsFolder(file)) || !fs::is_regular_file(fs::u8path(file), ec)) continue;
+        if (insideFolder(file, now) || !(insideFolder(file, old) || inTempMapsFolder(file)) || !fs::is_regular_file(fs::u8path(file), ec)) continue;
         fs::create_directories(fs::u8path(now), ec);
         // Under its name, or the same image already there (copied before); else a free name.
         const fs::path wanted = fs::u8path(now) / fs::u8path(file).filename();
         std::string target = wanted.generic_u8string();
         if (!fs::exists(wanted, ec) || readFile(target) != readFile(file)) {
-            target = freeFile(target);
+            target = freeFilePath(target);
             fs::copy_file(fs::u8path(file), fs::u8path(target), fs::copy_options::none, ec);
             if (ec) {
                 ec.clear();

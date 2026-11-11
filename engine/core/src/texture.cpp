@@ -335,6 +335,21 @@ bool isImagePath(const std::string& name) {
     return std::any_of(std::begin(kImages), std::end(kImages), [&](const char* e) { return ext == e; });
 }
 
+bool isPngPath(const std::string& path) {
+    std::string ext = std::filesystem::u8path(path).extension().u8string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return ext == ".png";
+}
+
+bool isGrayImage(const Texture& image) {
+    const Texture::Image* im = image.image();
+    if (!im) return false;
+    for (std::size_t i = 0; i + 2 < im->rgba.size(); i += 4) {
+        if (im->rgba[i] != im->rgba[i + 1] || im->rgba[i + 1] != im->rgba[i + 2]) return false;
+    }
+    return true;
+}
+
 std::uint64_t fileStamp(const std::string& path) {
     if (!tStamps) return stampWithPath(path);
     auto it = tStamps->find(path);

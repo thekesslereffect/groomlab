@@ -79,6 +79,13 @@ std::string followGraphFiles(const std::string& graphJson, const std::function<s
 // Whether two paths name the same file as the file system compares them (normal, case-blind on
 // Windows), whether or not it is there.
 bool samePathText(const std::string& a, const std::string& b);
+// Whether two paths name the same file: the file system says so (links, Windows' short names)
+// when both are there, else samePathText of the paths made canonical as far as they exist.
+bool sameFile(const std::string& a, const std::string& b);
+
+// `path` when nothing is there, else the first free <stem>_2<ext>, <stem>_3<ext>... beside it
+// (forward slashes): a new file never replaces one that is there.
+std::string freeFilePath(const std::string& path);
 
 // A texture map's file moved or was relinked: the graph's file params naming `from` (an absolute
 // path; each stored value read through `resolve`) name `to` (as the host stores it) instead. The
