@@ -15,6 +15,7 @@ import re
 from groomlab.ui.qt import QtCore, QtGui, QtWidgets
 
 from groomlab import expressions
+from groomlab.base import no_undo
 from groomlab.ui import theme, widgets
 
 WORD = re.compile(r"\$?[A-Za-z_][A-Za-z0-9_]*(\.[xyzrgb])?$")
@@ -406,11 +407,8 @@ class VariablesEditor(QtWidgets.QWidget):
             from maya import cmds
             if self._drag_start is None:
                 self._drag_start = float(cmds.getAttr(attr))
-            cmds.undoInfo(stateWithoutFlush=False)
-            try:
+            with no_undo():
                 cmds.setAttr(attr, float(value))
-            finally:
-                cmds.undoInfo(stateWithoutFlush=True)
             return
         self.store(name, value)
         self.previewed.emit(dict(self.variables))
@@ -420,11 +418,8 @@ class VariablesEditor(QtWidgets.QWidget):
         if attr:  # one undo step from where the drag began
             from maya import cmds
             if self._drag_start is not None:
-                cmds.undoInfo(stateWithoutFlush=False)
-                try:
+                with no_undo():
                     cmds.setAttr(attr, self._drag_start)
-                finally:
-                    cmds.undoInfo(stateWithoutFlush=True)
                 self._drag_start = None
             cmds.setAttr(attr, float(value))
             self.variables[name]["value"] = float(value)  # the fallback where no host control is set

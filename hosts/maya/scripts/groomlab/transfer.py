@@ -4,6 +4,7 @@
 import json
 import math
 
+from groomlab.base import no_undo
 from maya import cmds
 
 from groomlab.base import ensure_plugin, undo_chunk, _original_shape, _scalp_shape, _shape_of
@@ -247,8 +248,7 @@ def show_markers(groom, scalp, markers):
     if meshes:
         box = cmds.exactWorldBoundingBox(meshes)
         size = max(sum((box[i + 3] - box[i]) ** 2 for i in range(3)) ** 0.5, 1e-6)
-    cmds.undoInfo(stateWithoutFlush=False)
-    try:
+    with no_undo():
         group = cmds.group(empty=True, name=MARKER_GROUP)
         for i, pair in enumerate(markers):
             for side, color in (("old", 17), ("new", 18)):
@@ -266,18 +266,13 @@ def show_markers(groom, scalp, markers):
                 cmds.setAttr(cmds.listRelatives(note, shapes=True, fullPath=True)[0] + ".displayArrow", False)
                 cmds.parent([loc, note], group)
         return cmds.ls(group, long=True)[0]
-    finally:
-        cmds.undoInfo(stateWithoutFlush=True)
 
 
 def clear_markers():
     """Removes the shown markers (show_markers' group)."""
     if cmds.objExists(MARKER_GROUP):
-        cmds.undoInfo(stateWithoutFlush=False)
-        try:
+        with no_undo():
             cmds.delete(MARKER_GROUP)
-        finally:
-            cmds.undoInfo(stateWithoutFlush=True)
 
 
 # ---- Picking points on a mesh in a view (the Transfer Groom window's marker views) -------------

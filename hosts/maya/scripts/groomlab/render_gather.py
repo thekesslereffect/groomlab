@@ -168,7 +168,8 @@ def render_meshes(grooms, which="visible"):
         shapes = cmds.ls(which, dag=True, type="mesh", noIntermediate=True, long=True) or []
     elif which == "selected":
         from groomlab import studio
-        shapes = cmds.ls(selection=True, dag=True, type="mesh", noIntermediate=True, long=True) or []
+        from groomlab.base import selected_meshes
+        shapes = selected_meshes()  # (faces selected: their mesh)
         for groom in grooms:
             shapes += studio.head_meshes(groom)
     elif which == "visible":

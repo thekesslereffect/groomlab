@@ -6,7 +6,7 @@ import os
 
 from maya import cmds
 
-from groomlab.base import GROOM_TYPE, ensure_plugin, undo_chunk, _original_shape, _scalp_shape, _shape_of
+from groomlab.base import GROOM_TYPE, ensure_plugin, no_undo, undo_chunk, _original_shape, _scalp_shape, _shape_of
 from groomlab.collision import colliders
 from groomlab.extra_scalps import scalps
 from groomlab.guides import add_guides, list_guide_groups
@@ -167,9 +167,7 @@ def _add_rig_sample(sample, path, extent_cm, scalp):
 
     Maya can't undo a file import, so none of it is recorded (an undo would leave the rig in the
     sample's namespace): delete buddy_rig to take it out."""
-    recording = cmds.undoInfo(query=True, stateWithoutFlush=True)
-    cmds.undoInfo(stateWithoutFlush=False)
-    try:
+    with no_undo():
         new = cmds.file(path, i=True, type="mayaAscii", ignoreVersion=True, mergeNamespacesOnClash=False,
                         namespace="groomlab_sample", returnNewNodes=True, preserveReferences=False) or []
         tops = cmds.ls(new, assemblies=True, long=True) or []
@@ -191,8 +189,6 @@ def _add_rig_sample(sample, path, extent_cm, scalp):
         if factor != 1.0 or cmds.upAxis(query=True, axis=True) == "z":
             _bind_where_placed(top, meshes)
         cmds.select(target, replace=True)
-    finally:
-        cmds.undoInfo(stateWithoutFlush=recording)
     return cmds.ls(target, long=False)[0]
 
 
@@ -430,6 +426,17 @@ def _notify(groom):
         except Exception:  # noqa: BLE001 (a window gone, a listener's bug: never the caller's problem)
             import traceback
             traceback.print_exc()
+
+
+def selected_grooms(selection=None):
+    """The groom shapes (long names) selected, in the selection's order, once each: a groom shape,
+    and every groom under a selected transform or group at any depth (a character's top group
+    gives its grooms). What actions on several grooms take (Save Groom File As, Collect Files,
+    Copy Graph); the tools' current groom reads the selection more narrowly (_selected_grooms)."""
+    items = (cmds.ls(selection=True, long=True) or []) if selection is None else list(selection)
+    if not items:  # (never cmds.ls([]): every node of the scene)
+        return []
+    return list(dict.fromkeys(cmds.ls(items, dag=True, type=GROOM_TYPE, long=True) or []))
 
 
 def _selected_grooms():

@@ -59,11 +59,7 @@ def _scene_grooms():
     """The grooms Save Groom File As writes: the selected ones, else every groom of the scene (not
     referenced ones: their files are their own scene's)."""
     import groomlab
-    picked = []
-    for node in cmds.ls(selection=True, long=True) or []:
-        shapes = [node] if cmds.nodeType(node) == groomlab.GROOM_TYPE else \
-            cmds.listRelatives(node, shapes=True, type=groomlab.GROOM_TYPE, fullPath=True) or []
-        picked += [g for g in shapes if g not in picked]
+    picked = groomlab.selected_grooms()  # (a character's group: its grooms)
     if picked:
         return picked
     return [g for g in cmds.ls(type=groomlab.GROOM_TYPE, long=True) or [] if not cmds.referenceQuery(g, isNodeReferenced=True)]
@@ -89,35 +85,42 @@ def ensure_scene_saved(what):
 
 def selected_meshes():
     """The selected mesh shapes: picked whole, or the meshes of selected components (faces,
-    vertices, edges)."""
-    meshes = cmds.ls(selection=True, dag=True, type="mesh", noIntermediate=True)
-    if not meshes:  # only components selected: their meshes
-        meshes = [o for o in cmds.ls(selection=True, objectsOnly=True, long=True) or []
-                  if cmds.nodeType(o) == "mesh" and not cmds.getAttr(o + ".intermediateObject")]
-    return meshes
+    vertices, edges): groomlab.selected_meshes."""
+    import groomlab
+    return groomlab.selected_meshes()
 
 
 def create_groom_from_selection():
     """Selected mesh = scalp; selected curves become primary guides. Faces of the mesh selected
     (vertices or edges: the faces they enclose): hair grows on those only, through a density map
     on the scalp's vertices (scatter_density, 1 on them, 0 elsewhere), painted further in the
-    Paint tab."""
+    Paint tab. One undo step."""
     import groomlab
-    meshes = selected_meshes()
-    curves = cmds.ls(selection=True, dag=True, type="nurbsCurve")
+    meshes = groomlab.selected_meshes()
     if not meshes:
         cmds.warning("GroomLab: select a scalp mesh, or faces of one (and optionally guide curves)")
-        return
-    faces = groomlab.selected_faces(meshes[0])
-    if not ensure_scene_saved("this groom's painted masks, card bakes and exports"):
-        return
-    groom = groomlab.create_groom(meshes[0], fit=True)  # the default hair in proportion to the scalp
-    if curves:
-        groomlab.guides_from_curves(groom, curves)
-    if faces:
-        grow_on_faces(groom, faces)
-    groomlab.pin_new_groom(groom)
-    cmds.select(groom)
+        return None
+    return new_groom_on(meshes[0], faces=groomlab.selected_faces(meshes[0]), curves=groomlab.selected_curves())
+
+
+def new_groom_on(mesh, faces=None, curves=None, then=None):
+    """A groom on `mesh` as Create Groom from Selection makes it: the default hair fitted to the
+    scalp, `curves` its primary guides, grown on `faces` only when given (grow_on_faces);
+    `then(groom)` runs after (Import > Alembic Curves: its guides). The current groom, selected;
+    one undo step. Returns the groom."""
+    import groomlab
+    ensure_scene_saved("this groom's painted masks, card bakes and exports")
+    with groomlab.undo_chunk("create groom"):
+        groom = groomlab.create_groom(mesh, fit=True)  # the default hair in proportion to the scalp
+        if curves:
+            groomlab.guides_from_curves(groom, curves)
+        if faces:
+            grow_on_faces(groom, faces)
+        if then:
+            then(groom)
+        groomlab.pin_new_groom(groom)
+        cmds.select(groom)
+    return groom
 
 
 def grow_on_faces(groom, faces):
@@ -151,7 +154,7 @@ def add_sample_action(sample):
 def guides_from_selected_curves():
     import groomlab
     groom = _selected_groom()
-    curves = cmds.ls(selection=True, dag=True, type="nurbsCurve")
+    curves = groomlab.selected_curves(groom)
     if groom and curves:
         groomlab.guides_from_curves(groom, curves)
     elif groom:
@@ -404,27 +407,25 @@ def import_alembic_curves_dialog(path=None, groom=None):
     from groomlab.ui import messages
     if not groom:
         groom = groomlab.active_groom()
-    meshes = [] if groom else cmds.ls(selection=True, dag=True, type="mesh", noIntermediate=True)
+    meshes = [] if groom else groomlab.selected_meshes()
     if not groom and not meshes:
-        messages.say("select a groom, or a scalp mesh to make one on, then Import > Alembic Curves... again")
+        messages.say("select a groom, or a scalp mesh (or faces of one) to make one on, then Import > Alembic Curves... "
+                     "again")
         return None
+    faces = groomlab.selected_faces(meshes[0]) if meshes else []
     if not path:
         picked = cmds.fileDialog2(fileFilter="Alembic (*.abc)", dialogStyle=2, fileMode=1,
                                   caption="Import Alembic Curves as Guides")
         if not picked:
             return None
         path = picked[0]
-    cmds.undoInfo(openChunk=True, chunkName="GroomLab Import Alembic Curves")
-    try:
-        with messages.busy("Reading the Alembic curves"):
-            if not groom:
-                ensure_scene_saved("this groom's painted masks, card bakes and exports")
-                groom = groomlab.create_groom(meshes[0], fit=True)
-                groomlab.pin_new_groom(groom)
-            groomlab.import_guides_from_alembic(groom, path)
-        cmds.select(groom)
-    finally:
-        cmds.undoInfo(closeChunk=True)
+    with messages.busy("Reading the Alembic curves"):
+        if groom:
+            with groomlab.undo_chunk("import alembic curves"):
+                groomlab.import_guides_from_alembic(groom, path)
+                cmds.select(groom)
+        else:  # a new groom as Create Groom from Selection makes it, the curves its guides: one undo step
+            groom = new_groom_on(meshes[0], faces=faces, then=lambda g: groomlab.import_guides_from_alembic(g, path))
     messages.done("the guides now come from %s (Utilities > Bake Node to Guides... makes them brushable)"
                   % os.path.basename(path))
     return groom
@@ -1366,18 +1367,6 @@ def _node_choices(groom):
     return [_OUTPUT] + [n for n in utils.bake_nodes(groom) if n != output]
 
 
-def _selected_curve_nodes(groom):
-    """Selected nodes holding curves (curves, or groups of them), the groom's own nodes aside."""
-    own = set(cmds.ls([groom] + (cmds.listRelatives(groom, parent=True, fullPath=True) or []), long=True))
-    out = []
-    for node in cmds.ls(selection=True, long=True) or []:
-        if node in own:
-            continue
-        if cmds.nodeType(node) == "nurbsCurve" or cmds.listRelatives(node, allDescendents=True, type="nurbsCurve"):
-            out.append(node)
-    return out
-
-
 def guides_to_curves_action(groom=None, degree=1):
     """Guides to Curves: the selected guides, else every guide, as curves grouped by guide group."""
     from groomlab import utils
@@ -1400,7 +1389,7 @@ def curves_to_guides_dialog(group=None, update=True, curves=None, groom=None):
     groom = groom or _selected_groom()
     if not groom:
         return None
-    curves = curves or _selected_curve_nodes(groom)
+    curves = curves or groomlab.selected_curves(groom)
     if not curves:
         cmds.warning("GroomLab: select curves (or their group) along with the groom")
         return None
@@ -1607,7 +1596,7 @@ def copy_graph_dialog(guides=None, maps=None, source=None, targets=None):
         return None
     if targets is None:
         mine = cmds.ls(source, long=True)
-        targets = [g for g in cmds.ls(selection=True, dag=True, type=groomlab.GROOM_TYPE, long=True) or []
+        targets = [g for g in groomlab.selected_grooms()
                    if g not in mine]
     if not targets:
         cmds.warning("GroomLab: select the grooms to copy %s's graph to (pin %s, or select it first)" % (source, source))
@@ -1641,7 +1630,7 @@ def collect_files_report(grooms=None):
     Editor and over the viewport, never in a dialog. Returns the report (None for an untitled scene)."""
     import groomlab
     if grooms is None:
-        grooms = cmds.ls(selection=True, dag=True, type=groomlab.GROOM_TYPE, long=True) or \
+        grooms = groomlab.selected_grooms() or \
             cmds.ls(type=groomlab.GROOM_TYPE, long=True) or []
     if not grooms:
         cmds.warning("GroomLab: no grooms in the scene")
@@ -1672,7 +1661,7 @@ def find_missing_files_dialog(folder=None, grooms=None, recursive=True):
     groomlab.find_missing_files' report (None when cancelled)."""
     import groomlab
     if grooms is None:
-        grooms = cmds.ls(selection=True, dag=True, type=groomlab.GROOM_TYPE, long=True) or \
+        grooms = groomlab.selected_grooms() or \
             cmds.ls(type=groomlab.GROOM_TYPE, long=True) or []
     if not grooms:
         cmds.warning("GroomLab: no grooms in the scene")
@@ -1778,7 +1767,7 @@ def add_feathers_dialog(design=None, source=None, weights=None, groom=None, grou
     groom = groom or _selected_groom()
     if not groom:
         return None
-    curves = cmds.ls(selection=True, dag=True, type="nurbsCurve", long=True) or []
+    curves = groomlab.selected_curves(groom)
     if design is None:
         fields, note = feathers_form(groom, curves)
         answer = _ask("Add Feathers", fields, note=note)
@@ -1813,7 +1802,7 @@ def add_braid_dialog(style=None, groom=None):
     groom = groom or _selected_groom()
     if not groom:
         return None
-    curves = cmds.ls(selection=True, dag=True, type="nurbsCurve", long=True) or []
+    curves = groomlab.selected_curves(groom)
     if style is None:
         answer = _ask("Braid on Curves", [
             ("style", "Style", "choice", "three", ["three", "four", "five", "fishtail", "rope", "cornrow"],
@@ -1849,13 +1838,13 @@ def add_collider_action(groom=None, mesh=None):
     if not groom:
         return None
     if mesh is None:
-        scalp = cmds.ls(groomlab.scalp_mesh(groom) or "", long=True) or [""]
-        meshes = [m for m in cmds.ls(selection=True, dag=True, type="mesh", noIntermediate=True, long=True) or []
-                  if m != scalp[0]]
-        if not meshes:
-            cmds.warning("GroomLab: select a mesh (besides the groom) to collide with")
+        # As the Attribute Editor's Pick Collider: not the scalp, not a collider it has already.
+        from groomlab.ui import pick
+        mesh = pick.usable(lambda m: pick.problem(groom, "collider", m))
+        if not mesh:
+            why = next((pick.problem(groom, "collider", m) for m in groomlab.selected_meshes()), "")
+            cmds.warning("GroomLab: %s" % (why or "select a mesh (besides the groom) to collide with"))
             return None
-        mesh = meshes[0]
     name = groomlab.add_collider(groom, mesh)
     _say("added collider %s to %s" % (name, groom))
     return name

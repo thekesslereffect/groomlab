@@ -10,7 +10,7 @@ from maya import cmds, mel
 
 import groomlab_core
 
-from groomlab.base import ensure_plugin, undo_chunk, _original_shape, _scalp_shape, _shape_of
+from groomlab.base import ensure_plugin, no_undo, undo_chunk, _original_shape, _scalp_shape, _shape_of
 from groomlab.params import CONTROL_PREFIX, get_graph, set_graph, sync_controls
 from groomlab.paths import asset_name, portable_path, resolve_path
 from groomlab.groom import create_groom, scalp_mesh, set_rest_mesh, _connect_rest
@@ -143,12 +143,9 @@ def groom_file(groom):
 
 
 def _selected_mesh():
-    for node in cmds.ls(selection=True, long=True) or []:
-        try:
-            return _shape_of(node, "mesh")
-        except ValueError:
-            continue
-    return None
+    from groomlab.base import selected_meshes
+    found = selected_meshes()  # (faces of it selected: the mesh, never the component)
+    return found[0] if found else None
 
 
 def import_grooms(path, caches=True):
@@ -409,9 +406,7 @@ def _import_scalp_cache(cache, obj, name, count):
     none. Outside the undo queue: AbcImport does not undo, and a step that half undoes would
     leave redo pointing at nodes that are gone."""
     cmds.loadPlugin("AbcImport", quiet=True)
-    recording = cmds.undoInfo(query=True, state=True)
-    cmds.undoInfo(stateWithoutFlush=False)
-    try:
+    with no_undo():
         group = cmds.createNode("transform", name=name + "ScalpCache")
         reader = cmds.AbcImport(cache.replace("\\", "/"), mode="import", reparent=group)
         meshes = [m for m in cmds.listRelatives(group, allDescendents=True, type="mesh", fullPath=True) or []
@@ -424,8 +419,6 @@ def _import_scalp_cache(cache, obj, name, count):
                 cmds.delete(reader)
             cmds.warning("GroomLab: %s has no mesh of %d vertices; the scalp stays still" % (cache, count))
             return None
-    finally:
-        cmds.undoInfo(stateWithoutFlush=recording)
     return group, meshes
 
 

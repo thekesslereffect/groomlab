@@ -1393,6 +1393,77 @@ class GroomingTest(unittest.TestCase):
             self.assertEqual(sum(1 for v in values if v == 1.0), painted)
             self.assertEqual(values[761], 1.0)
 
+    def test_no_undo_leaves_the_queue_as_it_found_it(self):
+        # Bookkeeping out of the undo queue: off inside (nested too), back on after; and a queue a
+        # user or script turned off stays off (those blocks used to turn it on whatever it was).
+        from groomlab import transfer
+        from groomlab.base import no_undo
+        self.assertTrue(cmds.undoInfo(query=True, state=True))
+        with no_undo():
+            self.assertFalse(cmds.undoInfo(query=True, state=True))
+            with no_undo():
+                self.assertFalse(cmds.undoInfo(query=True, state=True))
+            self.assertFalse(cmds.undoInfo(query=True, state=True))
+        self.assertTrue(cmds.undoInfo(query=True, state=True))
+        cmds.undoInfo(stateWithoutFlush=False)
+        try:
+            cmds.group(empty=True, name=transfer.MARKER_GROUP)
+            transfer.clear_markers()
+            self.assertFalse(cmds.objExists(transfer.MARKER_GROUP))
+            self.assertFalse(cmds.undoInfo(query=True, state=True))
+        finally:
+            cmds.undoInfo(stateWithoutFlush=True)
+
+    def test_selection_helpers_every_action_shares(self):
+        # Meshes: whole, under a group, or the mesh of selected faces; nothing selected is nothing
+        # (never every mesh of the scene: cmds.ls([])).
+        from groomlab.ui import menu, pick
+        body = cmds.polyCube(name="selBody")[0]
+        shape = cmds.ls(cmds.listRelatives(body, shapes=True, fullPath=True), long=True)[0]
+        group = cmds.group(body, name="selRig")
+        shape = cmds.ls(cmds.listRelatives(group, allDescendents=True, type="mesh", fullPath=True), long=True)[0]
+        cmds.select(clear=True)
+        self.assertEqual(groomlab.selected_meshes(), [])
+        self.assertEqual(pick.meshes(), [])
+        for picked in (group, shape, shape + ".f[0:2]", shape.rsplit("|", 1)[0] + ".vtx[0]"):
+            cmds.select(picked)
+            self.assertEqual(groomlab.selected_meshes(), [shape], picked)
+        # Curves: a group of them, the groom's own nodes left out, once each.
+        a = cmds.curve(p=[(0, 0, 0), (0, 1, 0)], degree=1)
+        b = cmds.curve(p=[(1, 0, 0), (1, 1, 0)], degree=1)
+        curves = cmds.group(a, b, name="selCurves")
+        cmds.select(curves, self.groom, a)
+        found = groomlab.selected_curves(self.groom)
+        self.assertEqual(len(found), 2)
+        self.assertTrue(all(cmds.nodeType(c) == "nurbsCurve" and c.startswith("|") for c in found))
+        self.assertEqual([t.split("|")[-1] for t in groomlab.transforms(found)], [a, b])
+
+        # Add > Collider takes faces of a mesh, and never the same mesh twice (as the AE's Pick).
+        groom = cmds.ls(type="groomLabShape")[0]
+        cmds.select(shape + ".f[0]")
+        name = menu.add_collider_action(groom)
+        self.assertTrue(name)
+        cmds.select(shape)
+        self.assertIsNone(menu.add_collider_action(groom))
+        self.assertEqual(len(groomlab.colliders(groom)), 1)
+
+        # Create Groom from Selection is one undo step (faces and curves too).
+        scalp = cmds.polySphere(radius=1, subdivisionsX=20, subdivisionsY=10)[0]
+        before = set(cmds.ls(type="groomLabShape"))
+        cmds.select(scalp + ".f[0:40]")
+        made = menu.create_groom_from_selection()
+        self.assertIn(made, cmds.ls(type="groomLabShape"))
+        self.assertTrue(groomlab.param_map(made, "scatter", "density"))
+        cmds.undo()
+        self.assertEqual(set(cmds.ls(type="groomLabShape")), before)
+
+        # Grooms: under a selected group at any depth.
+        holder = cmds.group(empty=True, name="selCharacter")
+        cmds.parent(cmds.listRelatives(self.groom, parent=True)[0], holder)
+        cmds.select(holder)
+        self.assertEqual([g.split("|")[-1] for g in groomlab.selected_grooms()], [self.groom.split("|")[-1]])
+        self.assertEqual([g.split("|")[-1] for g in menu._scene_grooms()], [self.groom.split("|")[-1]])
+
     def test_guide_layers_drive_density_and_travel_with_renames(self):
         cmds.setAttr(self.groom + ".previewDensity", 1.0)
         self.assertEqual(groomlab.add_map(self.groom, "fur"), "fur")

@@ -28,6 +28,27 @@ def undo_chunk(name):
         cmds.undoInfo(closeChunk=True)
 
 
+_no_undo_depth = [0]  # nested no_undo blocks open now: only the outermost one turns the queue off and on
+
+
+@contextlib.contextmanager
+def no_undo():
+    """What is done inside `with no_undo():` stays out of Maya's undo queue (bookkeeping: cameras,
+    marker sets, a display refresh, stored state). Only the outermost block switches the queue,
+    and back to what it found: a block inside another, or opened while the queue is off, never
+    turns it on (Maya keeps the queue's state in its prefs, so one left on or off stays so)."""
+    was = _no_undo_depth[0] == 0 and cmds.undoInfo(query=True, state=True)
+    _no_undo_depth[0] += 1
+    if was:
+        cmds.undoInfo(stateWithoutFlush=False)
+    try:
+        yield
+    finally:
+        _no_undo_depth[0] -= 1
+        if was:
+            cmds.undoInfo(stateWithoutFlush=True)
+
+
 def undoable(name):
     """Decorator: everything the function does to the scene is one undo step, named `name`."""
     def wrap(fn):
@@ -37,6 +58,52 @@ def undoable(name):
                 return fn(*args, **kwargs)
         return wrapper
     return wrap
+
+
+def _selection(selection):
+    """`selection` (a list of nodes or components), or the current selection: never cmds.ls([]),
+    which lists every node of the scene."""
+    if selection is None:
+        return cmds.ls(selection=True, long=True) or []
+    return [selection] if isinstance(selection, str) else list(selection)
+
+
+def selected_meshes(selection=None):
+    """The mesh shapes (long names, no intermediate shapes) in `selection` (the current selection
+    by default), once each: selected shapes and the meshes under selected transforms or groups,
+    then the meshes of selected components (faces, vertices, edges). Every UI action that takes
+    "the selected mesh" reads it here, so a face selection counts everywhere."""
+    items = _selection(selection)
+    if not items:
+        return []
+    found = cmds.ls(items, dag=True, type="mesh", noIntermediate=True, long=True) or []
+    # Components: their mesh (ls dag finds none for "pSphere1.f[0]").
+    found += [o for o in cmds.ls(items, objectsOnly=True, long=True) or []
+              if cmds.nodeType(o) == "mesh" and not cmds.getAttr(o + ".intermediateObject")]
+    return list(dict.fromkeys(found))
+
+
+def selected_curves(groom=None, selection=None):
+    """The nurbsCurve shapes (long names, no intermediate shapes) in `selection` (the current
+    selection by default), once each: selected curves and the curves under selected groups. With
+    `groom`, its own nodes (its transform and what is under it) are left out, so selecting the
+    groom along with the curves is fine."""
+    items = _selection(selection)
+    if not items:
+        return []
+    shapes = cmds.ls(items, dag=True, type="nurbsCurve", noIntermediate=True, long=True) or []
+    if groom and cmds.objExists(groom):
+        own = cmds.listRelatives(groom, parent=True, fullPath=True) if cmds.nodeType(groom) == GROOM_TYPE \
+            else cmds.ls(groom, long=True)
+        if own:
+            shapes = [s for s in shapes if not s.startswith(own[0] + "|")]
+    return list(dict.fromkeys(shapes))
+
+
+def transforms(shapes):
+    """The transforms (long names) of `shapes`, in order, once each."""
+    out = [(cmds.listRelatives(s, parent=True, fullPath=True) or [s])[0] for s in shapes or []]
+    return list(dict.fromkeys(out))
 
 
 def _shape_of(node, shape_type):

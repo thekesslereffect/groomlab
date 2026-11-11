@@ -2407,15 +2407,13 @@ class ToolPalette(QtWidgets.QWidget):
             self.fill_parts(groom)
 
     def parts_from_curves(self):
-        from maya import cmds
         groom = self.groom()
-        curves = cmds.ls(selection=True, dag=True, type="nurbsCurve")
+        curves = groomlab.selected_curves(groom)  # (groups of curves too)
         if not groom or not curves:
             self.status.setText("Select the part curves (and pin the groom, or select it too).")
             return
         try:
-            names = groomlab.add_part(groom, [cmds.listRelatives(c, parent=True)[0] for c in curves],
-                                      delete_curves=True)
+            names = groomlab.add_part(groom, groomlab.transforms(curves), delete_curves=True)
             groomlab.add_part_node(groom, if_missing=True)
         except (RuntimeError, ValueError) as e:
             self.status.setText(str(e))

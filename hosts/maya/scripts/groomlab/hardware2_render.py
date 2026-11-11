@@ -219,15 +219,10 @@ def _set_plug(plug, value):
         cmds.setAttr(plug, value)
 
 
-class _NoUndo(object):
+def _NoUndo():
     """Commands kept out of the undo queue (the render's changes and their undoing)."""
-
-    def __enter__(self):
-        self.was = cmds.undoInfo(query=True, stateWithoutFlush=True)
-        cmds.undoInfo(stateWithoutFlush=False)
-
-    def __exit__(self, *exc):
-        cmds.undoInfo(stateWithoutFlush=self.was)
+    from groomlab.base import no_undo
+    return no_undo()
 
 
 # ---------------------------------------------------------------------------

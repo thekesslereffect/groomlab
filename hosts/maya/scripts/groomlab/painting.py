@@ -11,7 +11,7 @@ from maya import cmds
 
 import groomlab_core
 
-from groomlab.base import undo_chunk, undoable
+from groomlab.base import no_undo, undo_chunk, undoable
 from groomlab.params import get_graph, set_graph, set_param
 from groomlab.paths import asset_folder, asset_name, portable_path, resolve_path, _bump, _unique_path
 from groomlab.guides import list_guide_groups, selected_guides, _targets
@@ -468,15 +468,12 @@ def end_paint_view(from_job=False):
         _kill_job(job)
     if not view or not groom or not cmds.objExists(groom):
         return
-    cmds.undoInfo(stateWithoutFlush=False)  # a display, not an edit: no undo step of its own
-    try:
+    with no_undo():  # a display, not an edit: no undo step of its own
         for attr, kind, value in view:
             if kind == "string":
                 cmds.setAttr(groom + "." + attr, value or "", type="string")
             else:
                 cmds.setAttr(groom + "." + attr, value)
-    finally:
-        cmds.undoInfo(stateWithoutFlush=True)
 
 
 def view_map(groom, name=None):
@@ -525,21 +522,19 @@ def export_map(groom, name, path, resolution=1024):
             shutil.copyfile(source, path)
         return path
     # Rasterized through a conversion to a texture at `path`, then the map put back as it was.
-    state = cmds.undoInfo(query=True, state=True)
     before = cmds.getAttr(groom + ".scalpMaps")
     guides = cmds.getAttr(groom + ".guideData")
     display = cmds.getAttr(groom + ".scalpMapDisplay")
     if os.path.exists(path):
         os.remove(path)  # the command never writes over a file: this one is asked for
-    try:
-        cmds.undoInfo(stateWithoutFlush=False)
-        cmds.groomLabScalpMaps(groom, convert=name, kind="texture", resolution=int(resolution), texture=path)
-        written = map_texture(groom, name)
-    finally:
-        cmds.setAttr(groom + ".scalpMaps", before or "", type="string")
-        cmds.setAttr(groom + ".guideData", guides or "", type="string")
-        cmds.setAttr(groom + ".scalpMapDisplay", display or "", type="string")
-        cmds.undoInfo(stateWithoutFlush=state)
+    with no_undo():
+        try:
+            cmds.groomLabScalpMaps(groom, convert=name, kind="texture", resolution=int(resolution), texture=path)
+            written = map_texture(groom, name)
+        finally:
+            cmds.setAttr(groom + ".scalpMaps", before or "", type="string")
+            cmds.setAttr(groom + ".guideData", guides or "", type="string")
+            cmds.setAttr(groom + ".scalpMapDisplay", display or "", type="string")
     if written and os.path.normcase(os.path.abspath(written)) != os.path.normcase(path):
         shutil.move(written, path)
     return path
@@ -631,12 +626,8 @@ def reload_map(groom, name=None):
         raise ValueError("%s is not a texture map" % name)
     files = [map_texture(groom, m["name"]) for m in maps(groom)
              if m["kind"] == "texture" and (name is None or m["name"] == name)]
-    state = cmds.undoInfo(query=True, state=True)
-    try:
-        cmds.undoInfo(stateWithoutFlush=False)
+    with no_undo():
         _bump(groom)
-    finally:
-        cmds.undoInfo(stateWithoutFlush=state)
     return files
 
 

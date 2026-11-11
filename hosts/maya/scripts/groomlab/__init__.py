@@ -38,7 +38,8 @@ groomlab_core (engine/python, beside the plugin in the module's python folder), 
 """
 
 from groomlab.base import (  # noqa: F401
-    GROOM_TYPE, PLUGIN_NAME, ensure_plugin, undo_chunk, undoable, _original_shape, _shape_of)
+    GROOM_TYPE, PLUGIN_NAME, ensure_plugin, selected_curves, selected_meshes, transforms, undo_chunk, undoable,
+    _original_shape, _shape_of)
 from groomlab.params import (  # noqa: F401
     CONTROL_PREFIX, VECTOR_SUFFIXES, add_control, control_base, copy_graph_text, delete_param_key, get_graph,
     list_controls, param_control, param_key_state, param_plugs, param_value, paste_graph_text, remove_param_animation,
@@ -87,7 +88,7 @@ from groomlab.groom import (  # noqa: F401
     guides_text,
     groom_scale, inputs_summary, list_grooms, lock_groom, pin_groom, pin_new_groom, pinned_groom, rest_mesh, scalp_mesh,
     SEEN_VAR, current_groom, on_current_groom, remove_current_groom_listener, set_current_groom,
-    hair_visible, guides_visible, set_all_hair_visible, set_all_guides_visible, set_hair_visible,
+    selected_grooms, hair_visible, guides_visible, set_all_hair_visible, set_all_guides_visible, set_hair_visible,
     set_guides_visible, toggle_all_guides,
     set_follow_scalp, set_scale_reference, set_scale_source, scale_source, set_scale_with_scalp, store_scale_references,
     set_rest_mesh, set_scalp)

@@ -37,10 +37,9 @@ def armed(groom=None, key=None):
 
 def meshes(selection=None):
     """The mesh shapes (long names, no intermediate shapes) in `selection` (the current one by default),
-    in its order: a selected transform gives its meshes."""
-    found = cmds.ls(selection if selection is not None else cmds.ls(selection=True, long=True) or [],
-                    dag=True, type="mesh", noIntermediate=True, long=True) or []
-    return list(dict.fromkeys(found))  # once each, in order
+    once each: a selected transform gives its meshes, selected faces their mesh (groomlab.selected_meshes)."""
+    from groomlab.base import selected_meshes
+    return selected_meshes(selection)
 
 
 def groom_selected(groom):

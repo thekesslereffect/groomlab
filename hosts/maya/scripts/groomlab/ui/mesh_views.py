@@ -15,35 +15,14 @@ mouse moving without a button too (hover), which a dragger context does not, and
 tool is never changed.
 """
 
-import contextlib
-
 from maya import cmds
 
+from groomlab.base import no_undo, _no_undo_depth  # noqa: F401 (no_undo: the windows' own bookkeeping out of the queue)
 from groomlab.ui.qt import QtCore, QtWidgets, shiboken, to_int
 
 MARKER_SET_TYPE = "groomLabMarkerSet"  # the plugin's locator drawing one view's points (marker_set.h)
 DOT_RADIUS = 6.0     # a marker dot's radius, logical pixels
 PICK_PIXELS = 10.0   # how near (logical pixels) a click must be to a point to grab or delete it
-
-_no_undo_depth = [0]  # nested no_undo blocks open now: only the outermost one turns the queue off and on
-
-
-@contextlib.contextmanager
-def no_undo():
-    """A window's own bookkeeping (cameras, marker sets, isolation, what it stores) kept out of
-    Maya's undo queue. Only the outermost block switches the queue, back to what it found, so a
-    nested block or one a Qt event opens inside another never leaves the queue off."""
-    was = _no_undo_depth[0] == 0 and cmds.undoInfo(query=True, state=True)
-    _no_undo_depth[0] += 1
-    if was:
-        cmds.undoInfo(stateWithoutFlush=False)
-    try:
-        yield
-    finally:
-        _no_undo_depth[0] -= 1
-        if was:
-            cmds.undoInfo(stateWithoutFlush=True)
-
 
 def undo_back_on(was_on, window_name):
     """A safety net when a window goes: the queue on again if it was on when the window opened

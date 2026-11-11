@@ -26,6 +26,7 @@ from maya import cmds
 import groomlab_core
 
 from groomlab.base import GROOM_TYPE
+from groomlab.base import no_undo
 from groomlab.params import get_graph, set_graph
 from groomlab.paths import portable_path, resolve_path
 
@@ -142,9 +143,7 @@ def sync(groom):
         return
     have = file_nodes(groom)
     wanted = {(f["kind"], f["key"]): f["resolved"] for f in file_dependencies(groom)}
-    state = cmds.undoInfo(query=True, stateWithoutFlush=True)
-    cmds.undoInfo(stateWithoutFlush=False)
-    try:
+    with no_undo():
         for key, node in have.items():
             if key not in wanted:
                 cmds.delete(node)
@@ -157,8 +156,6 @@ def sync(groom):
                 cmds.setAttr(node + ".fileKey", key, type="string")
             if not _same(cmds.getAttr(node + ".fileName"), resolved):
                 cmds.setAttr(node + ".fileName", resolved, type="string")
-    finally:
-        cmds.undoInfo(stateWithoutFlush=state)
 
 
 def sync_all():
@@ -174,12 +171,8 @@ def remove_orphans():
                if not cmds.listConnections(n + ".groom", source=True, destination=False)
                and not cmds.referenceQuery(n, isNodeReferenced=True)]
     if orphans:
-        state = cmds.undoInfo(query=True, stateWithoutFlush=True)
-        cmds.undoInfo(stateWithoutFlush=False)
-        try:
+        with no_undo():
             cmds.delete(orphans)
-        finally:
-            cmds.undoInfo(stateWithoutFlush=state)
 
 
 _pending = set()
@@ -217,15 +210,12 @@ def file_node_changed(node):
     current = next((f for f in file_dependencies(groom) if (f["kind"], f["key"]) == (kind, key)), None)
     if current is None or not path or _same(current["resolved"], path):
         return
-    state = cmds.undoInfo(query=True, stateWithoutFlush=True)
-    cmds.undoInfo(stateWithoutFlush=False)
-    try:
-        repath_file(groom, kind, key, path)
-    except (RuntimeError, ValueError) as e:
-        cmds.warning("GroomLab: %s: %s (the groom keeps %s)" % (node, e, current["path"]))
-        sync(groom)  # the node shows the groom's path again
-    finally:
-        cmds.undoInfo(stateWithoutFlush=state)
+    with no_undo():
+        try:
+            repath_file(groom, kind, key, path)
+        except (RuntimeError, ValueError) as e:
+            cmds.warning("GroomLab: %s: %s (the groom keeps %s)" % (node, e, current["path"]))
+            sync(groom)  # the node shows the groom's path again
 
 
 # ---- Collect Files ---------------------------------------------------------------------------------

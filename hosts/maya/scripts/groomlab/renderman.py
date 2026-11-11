@@ -715,11 +715,9 @@ def touch_procedurals(groom):
         current = cmds.getAttr(node + ".data") or ""
         data = update_data(current, revision=revision)
         if data != current:
-            cmds.undoInfo(stateWithoutFlush=False)
-            try:
+            from groomlab.base import no_undo
+            with no_undo():
                 cmds.setAttr(node + ".data", data, type="string")
-            finally:
-                cmds.undoInfo(stateWithoutFlush=True)
 
 
 def watch_grooms():

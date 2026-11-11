@@ -39,6 +39,7 @@ import math
 import os
 import sys
 
+from groomlab.base import no_undo
 from groomlab.ui import qt
 from groomlab.ui.qt import QtCore, QtGui, QtWidgets
 
@@ -3289,11 +3290,10 @@ class ParamPanel(QtWidgets.QScrollArea):
                                 busy="Baking the scalp maps and the hair cap...")))
         elif node_type == "Braid":
             def paths():
-                curves = cmds.ls(selection=True, dag=True, type="nurbsCurve")
+                curves = groomlab.selected_curves(groom)  # (groups of curves too)
                 if not curves:
                     raise ValueError("select curves drawn from the scalp along the braids")
-                return groomlab.braid_paths_from_curves(
-                    groom, name, [cmds.listRelatives(c, parent=True)[0] for c in curves], model=self.editor.model)
+                return groomlab.braid_paths_from_curves(groom, name, groomlab.transforms(curves), model=self.editor.model)
             buttons.append(("Paths from Selected Curves", "Selected curves, drawn from the scalp along the "
                             "braids, become this braid's paths", run(paths, lambda g: "braid paths added to %s" % g)))
         elif node_type == "Map":
@@ -3445,7 +3445,7 @@ class ParamPanel(QtWidgets.QScrollArea):
                             run(lambda: groomlab.create_hair_shader(groom), lambda s: "hair shader %s" % s)))
         elif node_type in ("Instance", "Scales"):
             def prototype():
-                picked = cmds.ls(selection=True, long=True, type="transform") or cmds.ls(selection=True, type="mesh")
+                picked = groomlab.selected_meshes()  # (a mesh, not the groom selected with it)
                 if not picked:
                     raise ValueError("select the mesh to instance")
                 return groomlab.set_instance_prototype(groom, name, picked[0], model=self.editor.model)
@@ -4894,12 +4894,8 @@ class GraphEditor(QtWidgets.QWidget):
     @staticmethod
     def silently(fn):
         """Run fn with undo off: layout and view changes never make undo steps."""
-        from maya import cmds
-        cmds.undoInfo(stateWithoutFlush=False)
-        try:
+        with no_undo():
             return fn()
-        finally:
-            cmds.undoInfo(stateWithoutFlush=True)
 
     # -- Undo and redo -----------------------------------------------------------
 
@@ -6122,14 +6118,12 @@ class GraphEditor(QtWidgets.QWidget):
     def _set_silently(self, plugs, values):
         """Set attributes outside undo (a drag's preview, or putting it back)."""
         from maya import cmds
-        cmds.undoInfo(stateWithoutFlush=False)
-        try:
-            for plug, v in zip(plugs, values):
-                cmds.setAttr(plug, v)
-        except RuntimeError:  # the attribute went (undo, another groom)
-            pass
-        finally:
-            cmds.undoInfo(stateWithoutFlush=True)
+        with no_undo():
+            try:
+                for plug, v in zip(plugs, values):
+                    cmds.setAttr(plug, v)
+            except RuntimeError:  # the attribute went (undo, another groom)
+                pass
 
     def _write_preview(self):
         self._preview_pending = False
@@ -6149,11 +6143,8 @@ class GraphEditor(QtWidgets.QWidget):
         from maya import cmds
         if self._preview_base is None:
             self._preview_base = cmds.getAttr(self.groom + ".graph") or ""
-        cmds.undoInfo(stateWithoutFlush=False)
-        try:
+        with no_undo():
             cmds.setAttr(self.groom + ".graph", self.model.to_json(), type="string")
-        finally:
-            cmds.undoInfo(stateWithoutFlush=True)
         cmds.refresh(currentView=True, force=False)
 
     def end_preview(self):
@@ -6174,11 +6165,8 @@ class GraphEditor(QtWidgets.QWidget):
             self._preview_base = None
             return
         from maya import cmds
-        cmds.undoInfo(stateWithoutFlush=False)
-        try:
+        with no_undo():
             cmds.setAttr(self.groom + ".graph", self._preview_base, type="string")
-        finally:
-            cmds.undoInfo(stateWithoutFlush=True)
         self._preview_base = None
 
     def set_param(self, name, param, value):

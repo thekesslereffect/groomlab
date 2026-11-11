@@ -220,7 +220,7 @@ class TransferWindow(QtWidgets.QWidget):
         meshes = [m for m in dict.fromkeys(meshes) if m != current]
         picked = cmds.ls(scalp, long=True) if scalp else []
         if not picked:
-            picked = [m for m in cmds.ls(selection=True, long=True, type="transform") or [] if m in meshes]
+            picked = [m for m in groomlab.transforms(groomlab.selected_meshes()) if m in meshes]  # (faces too)
         if not picked and self.scalp() in meshes:
             picked = [self.scalp()]
         self.scalp_box.blockSignals(True)
