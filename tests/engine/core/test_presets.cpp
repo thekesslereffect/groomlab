@@ -73,6 +73,50 @@ const json& nodeOfType(const json& graph, const std::string& type) {
 
 }  // namespace
 
+TEST(Presets, APastedTextIsCheckedAsEveryHostChecksIt) {
+    // presets.h presetFromText: Maya's paste_graph_text, the Blender helper's apply_preset and the
+    // app's Paste Graph refuse the same texts, saying why; a ``` block and a .groom's graph paste.
+    const std::string good = makePresetJson(defaultGraphJson(), 20.0, "look", "", "Shared");
+    EXPECT_EQ(nlohmann::json::parse(presetFromText(good))["nodes"].size(), nlohmann::json::parse(good)["nodes"].size());
+    EXPECT_NO_THROW(presetFromText("```json\n" + good + "\n```"));
+    const std::string groomFile = R"({"version": 1, "graph": )" + defaultGraphJson() + "}";
+    EXPECT_TRUE(nlohmann::json::parse(presetFromText(groomFile)).contains("nodes")) << "a .groom's graph";
+    nlohmann::json many = {{"nodes", nlohmann::json::array()}, {"connections", nlohmann::json::array()}};
+    for (std::size_t i = 0; i <= kMaxPresetNodes; ++i) many["nodes"].push_back({{"name", "n" + std::to_string(i)}, {"type", "Scalp"}});
+    nlohmann::json unknown = nlohmann::json::parse(good);
+    unknown["nodes"][0]["type"] = "Teleport";
+    nlohmann::json newer = nlohmann::json::parse(good);
+    newer["version"] = 99;
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        {"", "empty"},
+        {"hello there", "not JSON"},
+        {"[1, 2]", "no GroomLab graph"},
+        {R"({"nodes": "scalp"})", "no GroomLab graph"},
+        {R"({"groomlabNodes": []})", "copied nodes"},
+        {unknown.dump(), "unknown node type 'Teleport'"},
+        {newer.dump(), "newer GroomLab"},
+        {many.dump(), "more than " + std::to_string(kMaxPresetNodes) + " nodes"},
+        {R"({"nodes": [], "size": NaN})", "not JSON"},
+        {R"({"nodes": [{"name": "a", "type": 7}]})", "without a name and a type"},
+        {R"({"nodes": [], "connections": [{"from": 1}]})", "connections"},
+        {std::string(100000, '[') + std::string(100000, ']'), "nested too deeply"},
+        {std::string(kMaxPresetText + 1, ' ') + "{}", "MB"},
+    };
+    for (const auto& [text, why] : cases) {
+        try {
+            presetFromText(text);
+            ADD_FAILURE() << "accepted: " << text.substr(0, 80);
+        } catch (const std::invalid_argument& e) {
+            EXPECT_NE(std::string(e.what()).find(why), std::string::npos) << e.what() << " | " << text.substr(0, 80);
+            EXPECT_LT(std::string(e.what()).size(), 1000u);
+        }
+    }
+    // A string holding brackets (or an escaped quote) is no nesting.
+    nlohmann::json quoted = nlohmann::json::parse(good);
+    quoted["about"]["description"] = std::string(400, '[') + "\\\"" + std::string(400, '{');
+    EXPECT_NO_THROW(presetFromText(quoted.dump()));
+}
+
 TEST(Presets, ShippedPresetsAreFoundDescribedAndLoad) {
     const std::vector<std::string> dirs = presetSearchDirs({}, kShipped);
     ASSERT_FALSE(dirs.empty());

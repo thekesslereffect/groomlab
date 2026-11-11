@@ -18,6 +18,7 @@
 #include "groomlab/param_conditions.h"
 #include "groomlab/paths.h"
 #include "groomlab/scalp_mesh.h"
+#include "groomlab/schema.h"
 
 namespace groomlab {
 
@@ -982,6 +983,198 @@ std::optional<double> presetScalpSize(const ScalpMesh& scalp) {
     }
     const double size = std::max({hi.x - lo.x, hi.y - lo.y, hi.z - lo.z});
     return size > 0.0 ? std::optional<double>(size) : std::nullopt;
+}
+
+// ---- A look as text ---------------------------------------------------------------------------
+
+namespace {
+
+std::string unfencedText(const std::string& text) {
+    const auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return {};
+    std::string out = text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
+    if (out.rfind("```", 0) == 0) {
+        const auto newline = out.find('\n');
+        if (newline != std::string::npos && newline <= 13) {
+            std::string rest = out.substr(newline + 1);
+            const auto last = rest.find_last_not_of(" \t\r\n");
+            rest = last == std::string::npos ? std::string() : rest.substr(0, last + 1);
+            if (rest.size() >= 3 && rest.compare(rest.size() - 3, 3, "```") == 0) {
+                rest = rest.substr(0, rest.size() - 3);
+                const auto a = rest.find_first_not_of(" \t\r\n");
+                const auto b = rest.find_last_not_of(" \t\r\n");
+                return a == std::string::npos ? std::string() : rest.substr(a, b - a + 1);
+            }
+        }
+    }
+    return out;
+}
+
+bool isName(const json& v) { return v.is_string() && !v.get<std::string>().empty() && v.get<std::string>().size() <= 256; }
+
+bool finiteAll(const json& v, int depth = 0) {
+    if (depth > 64) return true;
+    if (v.is_number_float()) return std::isfinite(v.get<double>());
+    if (v.is_object() || v.is_array()) {
+        for (const json& x : v) {
+            if (!finiteAll(x, depth + 1)) return false;
+        }
+    }
+    return true;
+}
+
+void graphShape(const json& graph, const std::string& where, int depth, std::size_t& count, std::vector<std::string>& problems) {
+    if (depth > kMaxPresetDepth) {
+        problems.push_back(where + "compounds nest more than " + std::to_string(kMaxPresetDepth) + " deep");
+        return;
+    }
+    const json nodes = graph.value("nodes", json::array());
+    if (!nodes.is_array()) {
+        problems.push_back(where + "\"nodes\" is not a list");
+        return;
+    }
+    for (const json& node : nodes) {
+        if (++count > kMaxPresetNodes) return;
+        if (!node.is_object() || !isName(node.value("name", json())) || !isName(node.value("type", json()))) {
+            problems.push_back(where + "a node without a name and a type");
+            continue;
+        }
+        const std::string label = where + node["name"].get<std::string>();
+        const std::string type = node["type"].get<std::string>();
+        const json params = node.value("params", json::object());
+        if (!params.is_object()) {
+            problems.push_back(label + ": \"params\" is not an object");
+            continue;
+        }
+        const json inputs = node.value("paramInputs", json::array());
+        if (!inputs.is_array() || !std::all_of(inputs.begin(), inputs.end(), [](const json& p) { return p.is_string(); })) {
+            problems.push_back(label + ": \"paramInputs\" is not a list of names");
+        }
+        const json links = node.value("paramControls", json::object());
+        bool linksOk = links.is_object();
+        if (linksOk) {
+            for (const json& c : links) {
+                const bool three = c.is_array() && c.size() == 3 && std::all_of(c.begin(), c.end(), isName);
+                linksOk = linksOk && (isName(c) || three);
+            }
+        }
+        if (!linksOk) problems.push_back(label + ": \"paramControls\" does not name controls");
+        if (node.contains("ui") && !node["ui"].is_null()) {
+            const json& ui = node["ui"];
+            const bool ok = ui.is_object() && (!ui.contains("x") || ui["x"].is_number()) && (!ui.contains("y") || ui["y"].is_number());
+            if (!ok) problems.push_back(label + ": \"ui\" is not a position");
+        }
+        const bool library = type.rfind("node:", 0) == 0;
+        if (!library && !OperatorRegistry::instance().contains(type)) {
+            problems.push_back(label + ": unknown node type '" + type + "'");
+        }
+        if (type == "Compound" && params.contains("definition") && params["definition"].is_object()) {
+            const json& definition = params["definition"];
+            const json inner = definition.value("graph", json::object());
+            if (!inner.is_object() || !definition.value("expose", json::object()).is_object()) {
+                problems.push_back(label + ": the Compound's definition is not a graph");
+            } else {
+                graphShape(inner, label + "/", depth + 1, count, problems);
+            }
+        }
+    }
+    const json connections = graph.value("connections", json::array());
+    bool linksOk = connections.is_array();
+    if (linksOk) {
+        for (const json& c : connections) {
+            linksOk = linksOk && c.is_object() && isName(c.value("from", json())) && isName(c.value("to", json())) &&
+                      isName(c.value("input", json())) && (!c.contains("output") || c["output"].is_null() || isName(c["output"]));
+        }
+    }
+    if (!linksOk) problems.push_back(where + "\"connections\" are not links between nodes");
+    if (graph.contains("output") && !graph["output"].is_null() && !isName(graph["output"])) {
+        problems.push_back(where + "\"output\" is not a node's name");
+    }
+}
+
+}  // namespace
+
+std::string presetFromText(const std::string& text) {
+    const std::string none = "the clipboard holds no GroomLab graph";
+    if (text.find_first_not_of(" \t\r\n") == std::string::npos) throw std::invalid_argument("the clipboard is empty");
+    if (text.size() > kMaxPresetText) {
+        std::ostringstream s;
+        s.precision(1);
+        s << std::fixed << "the text is " << static_cast<double>(text.size()) / 1048576.0 << " MB, more than any groom's graph (at most "
+          << kMaxPresetText / 1048576 << " MB)";
+        throw std::invalid_argument(s.str());
+    }
+    const std::string body = unfencedText(text);
+    {
+        // Nested past any graph's depth: refused before parsing (a parse, and the value's
+        // destruction, would go as deep).
+        int depth = 0, deepest = 0;
+        bool quoted = false, escaped = false;
+        for (const char c : body) {
+            if (quoted) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == '"') quoted = false;
+                continue;
+            }
+            if (c == '"') quoted = true;
+            else if (c == '[' || c == '{') deepest = std::max(deepest, ++depth);
+            else if (c == ']' || c == '}') --depth;
+        }
+        if (deepest > 256) throw std::invalid_argument("the text is nested too deeply");
+    }
+    json data;
+    try {
+        data = json::parse(body);
+    } catch (const json::exception&) {
+        throw std::invalid_argument(none + " (it is not JSON text; copy one with Copy Graph)");
+    }
+    if (data.is_object() && data.contains("groomlabNodes")) {
+        throw std::invalid_argument("the clipboard holds copied nodes; paste them into a graph with Ctrl+V");
+    }
+    if (data.is_object() && !data.contains("nodes") && data.contains("graph") && data["graph"].is_object()) {
+        data = data["graph"];  // a .groom file's graph
+    }
+    if (!data.is_object() || !data.contains("nodes") || !data["nodes"].is_array()) {
+        throw std::invalid_argument(none + " (no \"nodes\"; copy one with Copy Graph)");
+    }
+    std::vector<std::string> problems;
+    const json version = data.contains("version") ? data["version"] : json(1);
+    const int current = currentSchemaVersion(DocumentKind::Graph);
+    if (!version.is_number() || version.get<double>() < 1) {
+        problems.push_back("\"version\" is not a version number");
+    } else if (version.get<double>() > current) {
+        problems.push_back("it was made by a newer GroomLab (graph version " + version.dump() + "; this one reads " +
+                           std::to_string(current) + ")");
+    }
+    if (data.contains("size") && !data["size"].is_null() &&
+        !(data["size"].is_number() && data["size"].get<double>() > 0.0 && data["size"].get<double>() < 1e12)) {
+        problems.push_back("\"size\" is not a scalp size");
+    }
+    const std::vector<std::pair<std::string, bool>> kinds = {
+        {"about", true}, {"requires", true}, {"controls", true}, {"backdrops", false}, {"exposed", false}};
+    for (const auto& [key, object] : kinds) {
+        if (data.contains(key) && !(object ? data[key].is_object() : data[key].is_array())) {
+            problems.push_back("\"" + key + "\" is not " + (object ? "an object" : "a list"));
+        }
+    }
+    if (!finiteAll(data)) problems.push_back("it holds a number too big to use");
+    std::size_t count = 0;
+    graphShape(data, "", 0, count, problems);
+    if (count > kMaxPresetNodes) {
+        problems.insert(problems.begin(), "it has more than " + std::to_string(kMaxPresetNodes) + " nodes, more than a groom can use");
+    }
+    if (!problems.empty()) {
+        std::string message;
+        for (std::size_t i = 0; i < std::min<std::size_t>(3, problems.size()); ++i) {
+            std::string p = problems[i];
+            if (p.size() > 200) p = p.substr(0, 200) + "...";
+            message += (i ? "; " : "") + p;
+        }
+        if (problems.size() > 3) message += " (and " + std::to_string(problems.size() - 3) + " more)";
+        throw std::invalid_argument(message);
+    }
+    return data.dump();
 }
 
 }  // namespace groomlab

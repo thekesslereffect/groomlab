@@ -33,6 +33,7 @@
 // on Windows, where both hosts save), and the folder shipped with the product; a preset in an
 // earlier directory hides one of the same name in a later one.
 
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <string>
@@ -158,6 +159,21 @@ std::vector<PresetGroup> presetRequiredGroups(const std::string& presetJson);
 // connections and output, the "backdrops" last; `controlsJson` ("" none) as "controls".
 std::string makePresetJson(const std::string& graphJson, std::optional<double> size, const std::string& title,
                            const std::string& description, const std::string& category, const std::string& controlsJson = {});
+// ---- A look as text (Copy Graph / Paste Graph in every host) -----------------------------------
+// Limits on a pasted text: characters, nodes in all (compounds' inner ones too), compounds nested.
+constexpr std::size_t kMaxPresetText = 4 * 1024 * 1024;  // a big groom's graph is well under 100 KB
+constexpr std::size_t kMaxPresetNodes = 2000;
+constexpr int kMaxPresetDepth = 16;
+// The preset a pasted text holds, as every host checks it before pasting (Maya's
+// presets.parse_text, the Blender add-on, the app): JSON only (never run), a ``` code block's
+// content, a .groom file's "graph" taken; at most kMaxPresetText characters, kMaxPresetNodes nodes
+// and kMaxPresetDepth compounds deep; the shape of a graph (nodes named and typed, params objects,
+// links between names, positions numbers, numbers finite), not from a newer GroomLab, its node
+// types known (a library node's "node:<id>" too); nodes copied with Ctrl+C refused (they paste into
+// a graph). Returns the preset's JSON (compact); throws std::invalid_argument saying why ("the
+// clipboard holds no GroomLab graph...", three problems at most).
+std::string presetFromText(const std::string& text);
+
 // The scalp size a preset is made on and fitted to: the largest extent of the mesh's bounding
 // box; nullopt for a mesh without points.
 std::optional<double> presetScalpSize(const ScalpMesh& scalp);

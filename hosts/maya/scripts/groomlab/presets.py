@@ -511,9 +511,9 @@ def _value_problem(value, spec):
 # A look as text: Copy Graph and Paste Graph (the Graph Editor), copy_graph_text and
 # paste_graph_text (groomlab). The text is a preset, so it also loads as a .json preset file.
 
-MAX_TEXT = 4 * 1024 * 1024  # characters: a big groom's graph is well under 100 KB
-MAX_NODES = 2000            # nodes in all, compounds' inner nodes too
-MAX_DEPTH = 16              # compounds inside compounds
+# The core's limits on a pasted text (presets.h presetFromText, every host's).
+MAX_TEXT = groomlab_core.MAX_PRESET_TEXT    # characters: a big groom's graph is well under 100 KB
+MAX_NODES = groomlab_core.MAX_PRESET_NODES  # nodes in all, compounds' inner nodes too
 SHARED_CATEGORY = "Shared"
 
 
@@ -533,65 +533,30 @@ def copy_text(groom):
     return json.dumps(data, indent=2)
 
 
-def _no_constant(name):
-    raise ValueError("%s is not a number JSON allows" % name)
-
-
-def _short_int(digits):
-    if len(digits.lstrip("-")) > 18:
-        raise ValueError("a number with %d digits" % len(digits))
-    return int(digits)
-
-
-def _unfenced(text):
-    """Text pasted from a chat: a ``` code block's content (```json too), else the text."""
-    text = text.strip()
-    if text.startswith("```"):
-        first, _, rest = text.partition("\n")
-        if rest.rstrip().endswith("```") and len(first.strip("`").strip()) <= 10:
-            return rest.rstrip()[:-3].strip()
-    return text
-
-
 def _clip(message, limit=200):
     return message if len(message) <= limit else message[:limit] + "..."
 
 
 def parse_text(text):
     """The preset (a dict) a text holds, checked against the operators: JSON only, never run as
-    code. ValueError, saying why, for anything else (not JSON, not a GroomLab graph, too big,
-    from a newer GroomLab, unknown node types, params or links that do not fit)."""
+    code. ValueError, saying why, for anything else: the core's checks every host makes (presets.h
+    presetFromText: not JSON, not a GroomLab graph, too big, too deep, from a newer GroomLab, unknown
+    node types, fields of the wrong kind), then the params against their specs (check)."""
     from groomlab import graph as gm
-    if not isinstance(text, str) or not text.strip():
+    if not isinstance(text, str):
         raise ValueError("cannot paste a graph: the clipboard is empty")
-    if len(text) > MAX_TEXT:
-        raise ValueError("cannot paste a graph: the text is %.1f MB, more than any groom's graph (at most %d MB)"
-                         % (len(text) / 1048576.0, MAX_TEXT // 1048576))
     try:
-        data = json.loads(_unfenced(text), parse_constant=_no_constant, parse_int=_short_int)
-    except RecursionError:
-        raise ValueError("cannot paste a graph: the text is nested too deeply")
-    except ValueError:
-        raise ValueError("cannot paste a graph: the clipboard holds no GroomLab graph (it is not JSON text; "
-                         "copy one with Copy Graph)")
-    if isinstance(data, dict) and gm.CLIPBOARD_KEY in data:
-        raise ValueError("cannot paste a graph: the clipboard holds copied nodes; paste them into a graph with Ctrl+V")
-    if not isinstance(data, dict) or not isinstance(data.get("nodes"), list):
-        raise ValueError("cannot paste a graph: the clipboard holds no GroomLab graph (no \"nodes\"; "
-                         "copy one with Copy Graph)")
+        data = json.loads(groomlab_core.preset_from_text(text))
+    except ValueError as e:
+        raise ValueError("cannot paste a graph: %s" % _clip(str(e), 800))
     try:
-        problems = _shape_problems(data)
-        if not problems:
-            problems = check(data, gm.OperatorCatalog.from_maya(), warnings=False)
-            if any("unknown node type" in p for p in problems):  # the model says it again: once is enough
-                problems = [p for p in problems if "unknown operator type" not in p]
+        problems = check(data, gm.OperatorCatalog.from_maya(), warnings=False)
     except RecursionError:
         raise ValueError("cannot paste a graph: the text is nested too deeply")
     if problems:
         more = " (and %d more)" % (len(problems) - 3) if len(problems) > 3 else ""
         raise ValueError("cannot paste the graph: " + "; ".join(_clip(p) for p in problems[:3]) + more)
     return data
-
 
 def _finite(value):
     if isinstance(value, float):
@@ -601,84 +566,6 @@ def _finite(value):
     if isinstance(value, list):
         return all(_finite(v) for v in value)
     return True
-
-
-def _shape_problems(data):
-    """What keeps a parsed text from being a graph at all (wrong kinds of fields, too many nodes,
-    numbers out of range), before the operators look at it. Empty: it has a graph's shape."""
-    from maya import cmds
-    problems = []
-    version = data.get("version", 1)
-    current = json.loads(cmds.groomLabDefaultGraph()).get("version", 1)
-    if not _is_number(version) or version < 1:
-        problems.append("\"version\" is not a version number")
-    elif version > current:
-        problems.append("it was made by a newer GroomLab (graph version %s; this one reads %s)" % (version, current))
-    size = data.get("size")
-    if size is not None and not (_is_number(size) and 0.0 < size < 1e12):
-        problems.append("\"size\" is not a scalp size (%r)" % (size,))
-    for key, kind in (("about", dict), ("requires", dict), ("controls", dict), ("backdrops", list), ("exposed", list)):
-        if key in data and not isinstance(data[key], kind):
-            problems.append("\"%s\" is not %s" % (key, "an object" if kind is dict else "a list"))
-    if not _finite(data):
-        problems.append("it holds a number too big to use")
-    count = [0]
-    _graph_shape(data, "", 0, count, problems)
-    if count[0] > MAX_NODES:
-        problems.insert(0, "it has more than %d nodes, more than a groom can use" % MAX_NODES)
-    return problems
-
-
-def _is_name(v):
-    return isinstance(v, str) and 0 < len(v) <= 256
-
-
-def _graph_shape(graph, where, depth, count, problems):
-    if depth > MAX_DEPTH:
-        problems.append("%scompounds nest more than %d deep" % (where, MAX_DEPTH))
-        return
-    nodes = graph.get("nodes", [])
-    if not isinstance(nodes, list):
-        problems.append("%s\"nodes\" is not a list" % where)
-        return
-    for node in nodes:
-        count[0] += 1
-        if count[0] > MAX_NODES:
-            return
-        if not isinstance(node, dict) or not _is_name(node.get("name")) or not _is_name(node.get("type")):
-            problems.append("%sa node without a name and a type" % where)
-            continue
-        label = where + node["name"]
-        params = node.get("params", {})
-        if not isinstance(params, dict):
-            problems.append("%s: \"params\" is not an object" % label)
-            continue
-        inputs = node.get("paramInputs", [])
-        if not isinstance(inputs, list) or not all(isinstance(p, str) for p in inputs):
-            problems.append("%s: \"paramInputs\" is not a list of names" % label)
-        links = node.get("paramControls", {})
-        if not isinstance(links, dict) or not all(
-                _is_name(c) or (isinstance(c, list) and len(c) == 3 and all(_is_name(x) for x in c))
-                for c in links.values()):
-            problems.append("%s: \"paramControls\" does not name controls" % label)
-        ui = node.get("ui")
-        if ui is not None and not (isinstance(ui, dict) and all(_is_number(ui.get(k, 0.0)) for k in ("x", "y"))):
-            problems.append("%s: \"ui\" is not a position" % label)
-        if node["type"] == "Compound":
-            definition = params.get("definition")
-            if isinstance(definition, dict):
-                inner = definition.get("graph", {})
-                if not isinstance(inner, dict) or not isinstance(definition.get("expose", {}), dict):
-                    problems.append("%s: the Compound's definition is not a graph" % label)
-                else:
-                    _graph_shape(inner, label + "/", depth + 1, count, problems)
-    connections = graph.get("connections", [])
-    if not isinstance(connections, list) or not all(
-            isinstance(c, dict) and all(_is_name(c.get(k)) for k in ("from", "to", "input"))
-            and (c.get("output") is None or _is_name(c.get("output"))) for c in connections):
-        problems.append("%s\"connections\" are not links between nodes" % where)
-    if graph.get("output") is not None and not _is_name(graph.get("output")):
-        problems.append("%s\"output\" is not a node's name" % where)
 
 
 def _backdrops_of(data):

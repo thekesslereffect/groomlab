@@ -1146,8 +1146,8 @@ def parse_text(text):
     """The preset a pasted text holds (JSON only, never run): ValueError saying why otherwise."""
     if not isinstance(text, str) or not text.strip():
         raise ValueError("cannot paste a graph: the clipboard is empty")
-    if len(text) > 64 * 1024 * 1024:
-        raise ValueError("cannot paste a graph: the text is too big")
+    if len(text) > 4 * 1024 * 1024:  # the core's limit (presets.h kMaxPresetText; the helper checks the rest)
+        raise ValueError("cannot paste a graph: the text is more than any groom's graph (at most 4 MB)")
     try:
         data = json.loads(_unfenced(text))
     except ValueError as e:

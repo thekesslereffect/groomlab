@@ -732,6 +732,10 @@ void bindGraph(py::module_& m) {
     m.def("preset_fields", [] { return presetFields(); }, "A preset's own fields: size, about, requires, backdrops, controls, exposed.");
     m.def("preset_categories", [] { return presetCategories(); }, "The Presets menu's categories, in order.");
     m.def("preset_title", &presetTitle, py::arg("name"), "A preset's title when its file gives none: its name in words.");
+    m.def("preset_from_text", &presetFromText, py::arg("text"),
+          "The preset a pasted text holds, every host's checks (presets.h presetFromText): its JSON; ValueError saying why.");
+    m.attr("MAX_PRESET_TEXT") = kMaxPresetText;
+    m.attr("MAX_PRESET_NODES") = kMaxPresetNodes;
     m.def("preset_user_dir", &presetUserDir, "The user's preset folder (GROOMLAB_USER_PRESETS, else Maya's user folder).");
 
     // Compound nodes (node_library.h): the .glnode library every host shares.

@@ -22,8 +22,6 @@ using nlohmann::json;
 
 namespace {
 
-constexpr std::size_t kMaxText = 4 * 1024 * 1024;  // characters: a big groom's graph is well under 100 KB
-
 std::string readFile(const std::string& path) {
     std::ifstream in(fs::u8path(path), std::ios::binary);
     if (!in) throw std::runtime_error("cannot read " + path);
@@ -38,20 +36,6 @@ std::optional<double> scalpSizeOf(const GroomDocument& document) {
     std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
     if (size) *size /= document.session().groomScale();
     return size;
-}
-
-// Text pasted from a chat: a ``` code block's content (```json too), else the text.
-std::string unfenced(std::string text) {
-    const auto first = text.find_first_not_of(" \t\r\n");
-    if (first == std::string::npos) return {};
-    text = text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
-    if (text.rfind("```", 0) == 0) {
-        const auto newline = text.find('\n');
-        if (newline != std::string::npos && text.size() >= 3 && text.compare(text.size() - 3, 3, "```") == 0) {
-            text = text.substr(newline + 1, text.size() - newline - 4);
-        }
-    }
-    return text;
 }
 
 std::string titleOf(const json& preset, const std::string& fallback) {
@@ -173,12 +157,15 @@ void noteFit(const GroomDocument& document, const json& preset, PresetApplied& d
 }  // namespace
 
 std::string applyPresetText(GroomDocument& document, const std::string& text, bool makeMaps, PresetApplied* applied) {
-    if (text.size() > kMaxText) return "the text is bigger than any groom's graph";
-    const std::string body = unfenced(text);
-    json preset = json::parse(body, nullptr, false);
-    if (!preset.is_object() || !preset.contains("nodes") || !preset["nodes"].is_array()) {
-        return "no GroomLab graph in the text (no \"nodes\")";
+    // Every host's checks (presets.h presetFromText): a ``` block, a .groom's graph, the limits, the
+    // shape of a graph, known node types.
+    std::string body;
+    try {
+        body = presetFromText(text);
+    } catch (const std::invalid_argument& e) {
+        return e.what();
     }
+    json preset = json::parse(body, nullptr, false);
     PresetApplied done;
     done.title = titleOf(preset, "the graph");
     if (makeMaps) {
@@ -208,9 +195,12 @@ std::string insertPresetFile(GroomDocument& document, const std::string& path, c
     } catch (const std::exception& e) {
         return e.what();
     }
-    if (text.size() > kMaxText) return "the preset is bigger than any groom's graph";
+    try {
+        text = presetFromText(text);  // every host's checks (presets.h)
+    } catch (const std::invalid_argument& e) {
+        return path + ": " + e.what();
+    }
     const json preset = json::parse(text, nullptr, false);
-    if (!preset.is_object() || !preset.contains("nodes") || !preset["nodes"].is_array()) return "no GroomLab graph in " + path;
     const std::string stem = fs::u8path(path).stem().u8string();
     PresetApplied done;
     done.title = titleOf(preset, presetTitle(stem));

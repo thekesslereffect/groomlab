@@ -1141,7 +1141,14 @@ std::string presetFile(const json& args, std::string* stem) {
 json applyPreset(Session& s, const json& args) {
     std::string stem;
     const std::string path = presetFile(args, &stem);
-    const std::string text = readText(path);
+    // Every host's checks of a preset's text (presets.h presetFromText: a pasted look, a preset
+    // file, a .groom's graph): what does not fit is refused, saying why, the graph left as it is.
+    std::string text;
+    try {
+        text = presetFromText(readText(path));
+    } catch (const std::invalid_argument& e) {
+        fail("bad_request", e.what());
+    }
     const std::optional<double> size = scalpSize(s);
     const std::string graph = completeGraphJson(applyPresetControlsToGraph(presetGraphJson(text, size), presetControlsJson(text, size)));
     s.groom->setGraphJson(graph);
