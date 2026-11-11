@@ -184,12 +184,18 @@ std::vector<std::uint32_t> weldPoints(const std::vector<Vec3f>& points) {
     const std::size_t n = points.size();
     std::vector<std::uint32_t> weld(n);
     if (n == 0) return weld;
-    Vec3f lo = points[0], hi = points[0];
+    // The bounds of the finite points (one point not finite would make them NaN, and nothing weld).
+    auto finite = [](const Vec3f& p) { return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z); };
+    Vec3f lo, hi;
+    bool any = false;
     for (const Vec3f& p : points) {
-        lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-        hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+        if (!finite(p)) continue;
+        lo = any ? Vec3f{std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)} : p;
+        hi = any ? Vec3f{std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)} : p;
+        any = true;
     }
-    const float eps = std::max((hi - lo).length() * 1e-6f, 1e-20f);
+    const float extent = any ? (hi - lo).length() * 1e-6f : 0.0f;
+    const float eps = std::isfinite(extent) && extent > 1e-20f ? extent : 1e-20f;
     constexpr std::uint64_t kAlong = 1u << 21;  // cells along an axis: (extent / eps) + 3 < 2^21
     auto cellOf = [&](const Vec3f& p, int axis) {
         const float v = axis == 0 ? p.x - lo.x : axis == 1 ? p.y - lo.y : p.z - lo.z;
@@ -199,6 +205,10 @@ std::vector<std::uint32_t> weldPoints(const std::vector<Vec3f>& points) {
     cells.reserve(n);
     for (std::size_t i = 0; i < n; ++i) {
         const Vec3f& p = points[i];
+        if (!finite(p)) {  // its own (an infinite coordinate's cell would be a cast of infinity)
+            weld[i] = static_cast<std::uint32_t>(i);
+            continue;
+        }
         const std::uint64_t cx = cellOf(p, 0), cy = cellOf(p, 1), cz = cellOf(p, 2);
         std::uint32_t found = static_cast<std::uint32_t>(i);
         for (std::uint64_t z = cz - 1; z <= cz + 1 && found == i; ++z) {

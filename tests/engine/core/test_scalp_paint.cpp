@@ -1431,6 +1431,27 @@ TEST(ScalpPaint, VertexMapsSplitAtASeamPaintAsWelded) {
         // And the smoothing crossed the seam.
         const std::size_t past = 10 * 33 + 17;  // x = 1.0625, z = 0.625
         EXPECT_GT(a[past * n], 0.05f);
+        // A point not finite (first, where the bounds once began) joins nothing and keeps the seam
+        // welded: the same paint (it once made the bounds NaN, so no seam welded).
+        std::vector<Vec3f> points = split->points();
+        points.insert(points.begin(), Vec3f{std::nanf(""), 0.0f, 0.0f});
+        std::vector<ScalpMesh::Triangle> triangles = split->triangles();
+        for (auto& t : triangles) {
+            for (auto& v : t) ++v;
+        }
+        const ScalpMesh withNan(points, triangles);
+        std::vector<float> c = stepMap(withNan);
+        const VertexNeighbors nc = VertexNeighbors::of(withNan);
+        for (int k = 0; k <= 8; ++k) {
+            const Vec3f at{0.8f + 0.05f * static_cast<float>(k), 0.0f, 0.3f};
+            stampVertexMap(c, channels, kAllChannels, withNan, at, 0.2f, 0.5f, {0.3f, 0.6f, 0.9f, 0.5f});
+        }
+        for (int k = 0; k < 10; ++k) smoothVertexMap(c, channels, kAllChannels, withNan, nc, {1.0f, 0.0f, 0.6f}, 0.3f, 1.0f);
+        float worstNan = 0.0f;
+        for (std::size_t i = 0; i < split->pointCount(); ++i) {
+            for (std::size_t ch = 0; ch < n; ++ch) worstNan = std::max(worstNan, std::abs(c[(i + 1) * n + ch] - b[i * n + ch]));
+        }
+        EXPECT_LT(worstNan, 1e-5f);
     }
 }
 

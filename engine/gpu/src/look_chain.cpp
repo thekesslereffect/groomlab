@@ -2497,12 +2497,19 @@ MeshDistanceField::Tables weldedRings(const MeshDistanceField::Tables& tables, c
     const std::vector<Vec3f>& points = mesh.points();
     const std::size_t count = points.size();
     if (count == 0) return tables;
-    Vec3f lo = points.front(), hi = lo;
+    // (A point not finite joins nothing: its cell would be a cast of NaN, undefined behaviour.)
+    auto finite = [](const Vec3f& q) { return std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z); };
+    Vec3f lo, hi;
+    bool any = false;
     for (const Vec3f& q : points) {
-        lo = {std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)};
-        hi = {std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)};
+        if (!finite(q)) continue;
+        lo = any ? Vec3f{std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)} : q;
+        hi = any ? Vec3f{std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)} : q;
+        any = true;
     }
-    const float within = std::max((hi - lo).length() * 1e-6f, 1e-30f);
+    if (!any) return tables;
+    const float size = (hi - lo).length() * 1e-6f;
+    const float within = std::isfinite(size) && size > 1e-30f ? size : 1e-30f;
     // Each vertex's group (its lowest member), the near ones joined (by cells `within` wide).
     std::vector<std::uint32_t> group(count);
     for (std::size_t v = 0; v < count; ++v) group[v] = static_cast<std::uint32_t>(v);
@@ -2515,6 +2522,7 @@ MeshDistanceField::Tables weldedRings(const MeshDistanceField::Tables& tables, c
     };
     bool shared = false;
     for (std::size_t v = 0; v < count; ++v) {
+        if (!finite(points[v])) continue;
         const std::array<std::int64_t, 3> c = cellOf(points[v]);
         for (std::int64_t dx = -1; dx <= 1; ++dx) {
             for (std::int64_t dy = -1; dy <= 1; ++dy) {
