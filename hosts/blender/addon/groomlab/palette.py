@@ -618,6 +618,8 @@ class VIEW3D_PT_groomlab_tools(bpy.types.Panel):
         m = tools.current_map(context.scene)
         col.label(text="Mode")
         col.row(align=True).prop(t, "paint_mode", expand=True)
+        if m is None or m.kind in ("vertices", "texture"):  # (a guide layer paints guides, not faces)
+            col.prop(t, "paint_whole_faces", toggle=True)
         if m is None or m.channels == 1:
             row = col.row(align=True)
             row.prop(t, "value", slider=True)

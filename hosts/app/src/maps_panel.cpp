@@ -246,6 +246,21 @@ MapsPanel::MapsPanel(QWidget* parent) : QWidget(parent) {
             if (value == "replace") button->setChecked(true);
         }
     }
+    {
+        // Whole Faces: each dab fills the scalp's faces under it, no falloff (BrushToolSettings::paintWholeFaces).
+        auto* line = new QHBoxLayout();
+        line->setContentsMargins(0, 0, 0, 0);
+        wholeFaces_ = makeChip(tr("Whole Faces"),
+                               tr("The brush fills the scalp's faces under it all the way, no falloff: masks by face (a vertex or "
+                                  "texture map; Shift+drag still smooths)"),
+                               paintBox);
+        wholeFaces_->setObjectName(QStringLiteral("paintWholeFaces"));
+        wholeFaces_->setChecked(false);
+        connect(wholeFaces_, &QToolButton::toggled, this, [this] { applyPaintSettings(); });
+        line->addWidget(wholeFaces_);
+        line->addStretch(1);
+        paintLayout->addLayout(line);
+    }
     valueRow_ = new QWidget(paintBox);
     auto* valueLine = new QHBoxLayout(valueRow_);
     valueLine->setContentsMargins(0, 0, 0, 0);
@@ -854,6 +869,7 @@ void MapsPanel::applyPaintSettings() {
         if (paintChannels_[i]->isChecked()) mask |= 1u << i;
     }
     s.paintChannels = mask == 0 ? kAllChannels : mask;
+    s.paintWholeFaces = wholeFaces_ && wholeFaces_->isChecked();
     emit brushChanged();
 }
 

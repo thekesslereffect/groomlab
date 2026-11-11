@@ -1499,7 +1499,8 @@ class GROOMLAB_OT_graph_paint_param(_ParamOp):
         from . import tools
         scalp = _ge().context_groom(context)
         try:
-            tools.map_for_param(scalp, self.target(context), self.param, kind=self.kind)
+            # A map made with faces of the scalp selected in Edit Mode: white on them only.
+            tools.map_for_param(scalp, self.target(context), self.param, kind=self.kind, faces=groom.selected_faces(scalp))
             tools.pick(context, "paint")
         except HelperError as e:
             return _fail(self, e)

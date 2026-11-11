@@ -1092,6 +1092,61 @@ class ToolsTest(unittest.TestCase):
         scene.frame_set(1)
         np.testing.assert_allclose(bu.hair_arrays(head.groomlab.hair)[0], rest, atol=1e-6)
 
+    def test_8_faces_selected_in_edit_mode(self):
+        """Maya's face masks: Create Groom on faces picked in Edit Mode grows hair there only (a
+        density map, scatter_density); New Map and Fill with faces picked act on them; Whole Faces."""
+        import bmesh
+        head = bu.head_object("Lids", location=(-1.0, 0.0, 0.0))
+        bpy.context.view_layer.objects.active = head
+        mesh = head.data
+        starts = [p.loop_start for p in mesh.polygons]
+        totals = [p.loop_total for p in mesh.polygons]
+
+        def corners(faces):
+            return {mesh.loops[i].vertex_index for f in faces for i in range(starts[f], starts[f] + totals[f])}
+
+        def pick(faces):
+            if head.mode != "EDIT":
+                bpy.ops.object.mode_set(mode="EDIT")
+            bm = bmesh.from_edit_mesh(mesh)
+            for v in bm.verts:
+                v.select = False
+            for e in bm.edges:
+                e.select = False
+            for f in bm.faces:
+                f.select = f.index in faces
+            bmesh.update_edit_mesh(mesh)
+
+        def values(name):
+            return json.loads(texts(head)["scalpMaps"])[name]["values"]
+
+        lids = list(range(0, 40))
+        pick(lids)
+        self.assertEqual(groom.selected_faces(head), lids)
+        self.assertEqual(bpy.ops.groomlab.add_groom("EXEC_DEFAULT"), {"FINISHED"})
+        self.assertEqual(head.mode, "OBJECT")
+        self.assertEqual(groom.selected_faces(head), [])  # Object Mode: no mask
+        scatter = next(n["name"] for n in hcall(head, "list_nodes")["nodes"] if n["type"] == "Scatter")
+        self.assertEqual(hcall(head, "map_users", name="scatter_density")["users"], [[scatter, "density"]])
+        got = values("scatter_density")
+        self.assertEqual({i for i, v in enumerate(got) if v == 1.0}, corners(lids))
+        # New Map with faces picked: white on them; Fill on other faces fills those only.
+        other = list(range(100, 110))
+        pick(other)
+        self.assertEqual(bpy.ops.groomlab.map_new(name="brow", kind="vertices", value=0.0), {"FINISHED"})
+        self.assertEqual({i for i, v in enumerate(values("brow")) if v == 1.0}, corners(other))
+        bpy.context.scene.groomlab_tools.paint_map = "scatter_density"
+        bpy.context.scene.groomlab_tools.value = 0.5
+        self.assertEqual(bpy.ops.groomlab.map_fill(), {"FINISHED"})
+        self.assertEqual({i for i, v in enumerate(values("scatter_density")) if v == 0.5}, corners(other))
+        bpy.ops.object.mode_set(mode="OBJECT")
+        # Whole Faces goes to the brush.
+        t = bpy.context.scene.groomlab_tools
+        t.paint_whole_faces = True
+        tools.pick(bpy.context, "paint")
+        self.assertTrue(hcall(head, "tool_get")["settings"]["paintWholeFaces"])
+        t.paint_whole_faces = False
+
 
 if __name__ == "__main__":
     bu.run(ToolsTest)

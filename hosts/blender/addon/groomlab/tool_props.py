@@ -451,6 +451,9 @@ class GroomLabTools(bpy.types.PropertyGroup):
     paint_mode: EnumProperty(name=defs.get("choices/paintMode")["label"], items=defs.enum_items("paintMode"),
                              default=defs.enum_default("paintMode"), update=_push(),
                              description=defs.get("choices/paintMode")["tip"])
+    paint_whole_faces: BoolProperty(name="Whole Faces", default=False, update=_push(),
+                                    description="The brush fills the scalp's faces under it all the way, no falloff: "
+                                                "masks by face (a vertex or texture map; Shift+drag still smooths)")
     paint_color: FloatVectorProperty(name="Color", size=4, default=(1.0, 1.0, 1.0, 1.0), min=0.0, max=1.0,
                                      subtype="COLOR_GAMMA", update=_push(),
                                      description="The color the Paint brush paints on a color map (Ctrl: its inverse)")

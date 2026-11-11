@@ -32,7 +32,7 @@ class GroomOperator(bpy.types.Operator):
 
 
 class GROOMLAB_OT_add_groom(bpy.types.Operator):
-    """Grow a GroomLab groom on the selected mesh (any selected curves become its primary guides): place and shape its guides with the Groom Tools, GroomLab makes the hair from them"""
+    """Grow a GroomLab groom on the selected mesh (any selected curves become its primary guides; faces selected in Edit Mode: hair on those only, through a density map painted further in Groom Tools > Paint): place and shape its guides with the Groom Tools, GroomLab makes the hair from them"""
     bl_idname = "groomlab.add_groom"
     bl_label = "Create Groom from Selection"
     bl_options = {"REGISTER", "UNDO"}
@@ -52,26 +52,32 @@ class GROOMLAB_OT_add_groom(bpy.types.Operator):
 
     def execute(self, context):
         scalp = context.active_object
+        # Faces selected in Edit Mode: the hair grows on those only (Maya's create_groom_from_selection).
+        faces = groom.selected_faces(scalp)
         if context.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
         # Selected curves become primary guides (Maya's create_groom_from_selection).
         curves = [o for o in context.selected_objects if o.type in ("CURVE", "CURVES") and o is not scalp]
         added = 0
+        from . import tools
         try:
             groom.create_groom(context, scalp, preset=self.preset, guide_count=self.guides, guide_points=self.guide_points)
             context.scene.groomlab.groom = scalp
             if curves:
                 from . import pipeline
                 added = pipeline.guides_from_curves(scalp, curves, "primary")
+            masked = tools.grow_on_faces(scalp, faces) if faces else None
             graph.refresh(scalp)
         except HelperError as e:
             return _fail(self, e)
-        from . import tools
         try:
             tools.refresh_info(scalp, context.scene)
         except HelperError:
             pass
-        if added:
+        if masked:
+            self.report({"INFO"}, "New groom on the %d selected faces: %s (Groom Tools > Paint) is white there, black "
+                                  "elsewhere" % (len(faces), masked))
+        elif added:
             self.report({"INFO"}, "New groom created with %d guide%s from the selected curves" % (added, "" if added == 1 else "s"))
         else:
             self.report({"INFO"}, "New groom created: place its guides with Groom Tools > Place")

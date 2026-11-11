@@ -603,6 +603,15 @@ TEST(AppGroomTools, PaintsValueAndFillAreInThePaintCard) {
     bool value = false;
     for (ValueSlider* s : block->findChildren<ValueSlider*>()) value = value || s->caption() == QStringLiteral("Value");
     EXPECT_TRUE(value);
+    // Whole Faces: the brush fills the faces under it (BrushToolSettings::paintWholeFaces).
+    auto* wholeFaces = card->findChild<QToolButton*>(QStringLiteral("paintWholeFaces"));
+    ASSERT_NE(wholeFaces, nullptr);
+    EXPECT_TRUE(block->isAncestorOf(wholeFaces));
+    EXPECT_FALSE(session.settings().paintWholeFaces);
+    wholeFaces->setChecked(true);
+    EXPECT_TRUE(session.settings().paintWholeFaces);
+    wholeFaces->setChecked(false);
+    EXPECT_FALSE(session.settings().paintWholeFaces);
     // The tool's card right under the grid, the tab's list under it; on Paint the Maps list first
     // (what is painted, then how): the header's + New Map and Import glyphs, the picked map's box.
     EXPECT_EQ(maps.bar()->ids(), (std::vector<std::string>{"map.new", "map.import"}));

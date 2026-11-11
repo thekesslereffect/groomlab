@@ -3725,13 +3725,17 @@ class ParamPanel(QtWidgets.QScrollArea):
             return
         if kind == "texture" and not menu.ensure_scene_saved("texture maps"):
             return
+        # Faces of the scalp selected: a map made here is white on them only (the Paint tab's New Map too).
+        faces = groomlab.selected_scalp_faces(groom)
         try:
-            name = groomlab.paint_param(groom, node, param, kind=kind)
+            name = groomlab.paint_param(groom, node, param, kind=kind, faces=faces)
             from groomlab.ui import palette
             palette.show(tab="paint")
             palette.select_map(name)
             where = {"guides": "the guides", "vertices": "the scalp's vertices", "texture": "a texture"}[kind]
             message = "painting %s.%s on %s (map %s): Ctrl lowers it, strokes paint it back" % (node, param, where, name)
+            if faces:
+                message += " (a map made now is white on the %d selected faces only)" % len(faces)
         except (RuntimeError, ValueError, gm.GraphError) as e:
             self.editor.report(str(e))
             return

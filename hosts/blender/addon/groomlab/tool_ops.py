@@ -929,18 +929,27 @@ class GROOMLAB_OT_map_new(GroomToolOperator):
     def execute(self, context):
         scalp = active(context)
         target = self.chosen()
+        # Faces of the scalp selected in Edit Mode: the new map is white on them, black elsewhere.
+        faces = groom.selected_faces(scalp)
         try:
             if target:
                 # A setting's map lives on the scalp (vertices or a texture).
                 kind = self.kind if self.kind in ("vertices", "texture") else "vertices"
-                r = tools.map_for_param(scalp, target[0], target[1], kind=kind, resolution=int(self.resolution))
+                r = tools.map_for_param(scalp, target[0], target[1], kind=kind, resolution=int(self.resolution), faces=faces)
                 tools.pick(context, "paint")
-                tools.status(context.scene, "%s %s, which %s.%s reads: Ctrl paints it toward 0%s, strokes back toward the "
+                on = " (white on the %d selected faces)" % len(faces) if faces and r.get("made") else ""
+                tools.status(context.scene, "%s %s, which %s.%s reads%s: Ctrl paints it toward 0%s, strokes back toward the "
                                             "value" % ("Made" if r.get("made") else "Painting", r["name"], target[0],
-                                                       target[1], " (no hair there)" if target[1] == "density" else ""))
+                                                       target[1], on, " (no hair there)" if target[1] == "density" else ""))
                 return {"FINISHED"}
-            tools.map_create(scalp, self.name.strip(), kind=self.kind, color=self.color and self.kind != "guides",
-                             value=self.value, resolution=int(self.resolution))
+            name = self.name.strip()
+            if faces:
+                tools.map_create(scalp, name, kind=self.kind, color=self.color and self.kind != "guides",
+                                 value=1.0, fill=(1.0, 1.0, 1.0, 1.0), resolution=int(self.resolution), faces=faces)
+                tools.status(context.scene, "Made %s: white on the %d selected faces" % (name, len(faces)))
+            else:
+                tools.map_create(scalp, name, kind=self.kind, color=self.color and self.kind != "guides",
+                                 value=self.value, resolution=int(self.resolution))
         except HelperError as e:
             return _fail(self, e)
         tools.push_safely(context)
@@ -958,8 +967,9 @@ class GROOMLAB_OT_paint_param(GroomToolOperator):
     param: StringProperty(name="Param")
 
     def execute(self, context):
+        scalp = active(context)
         try:
-            tools.map_for_param(active(context), self.node, self.param)
+            tools.map_for_param(scalp, self.node, self.param, faces=groom.selected_faces(scalp))
             tools.pick(context, "paint")
         except HelperError as e:
             return _fail(self, e)
@@ -1014,7 +1024,7 @@ class GROOMLAB_OT_map_remove(MapOperator):
 
 class GROOMLAB_OT_map_fill(MapOperator):
     """Set the map to the value (a color map: to the color, in the channels ticked): a guide map on the selected
-    guides when some are, else everywhere"""
+    guides when some are, on the scalp's faces selected in Edit Mode when some are, else everywhere"""
     bl_idname = "groomlab.map_fill"
     bl_label = "Fill"
     bl_options = {"REGISTER", "UNDO"}
@@ -1022,16 +1032,20 @@ class GROOMLAB_OT_map_fill(MapOperator):
     def execute(self, context):
         t = context.scene.groomlab_tools
         m = tools.current_map(context.scene)
+        scalp = active(context)
+        selected = m.kind == "guides" and t.selected_count > 0
+        faces = [] if selected else groom.selected_faces(scalp)
         try:
             if m.channels > 1:
                 channels = "".join(c for c, on in zip("rgba", (t.channel_r, t.channel_g, t.channel_b, t.channel_a)) if on)
-                tools.map_fill(active(context), m.name, color=list(t.paint_color), channels=channels or "rgba",
-                               mode=t.paint_mode)
+                tools.map_fill(scalp, m.name, color=list(t.paint_color), channels=channels or "rgba",
+                               mode=t.paint_mode, faces=faces)
             else:
-                tools.map_fill(active(context), m.name, value=float(t.value),
-                               selected=m.kind == "guides" and t.selected_count > 0, mode=t.paint_mode)
+                tools.map_fill(scalp, m.name, value=float(t.value), selected=selected, mode=t.paint_mode, faces=faces)
         except HelperError as e:
             return _fail(self, e)
+        if faces:
+            tools.status(context.scene, "Filled %s on the %d selected faces." % (m.name, len(faces)))
         return {"FINISHED"}
 
 

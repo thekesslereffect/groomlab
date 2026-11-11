@@ -235,7 +235,7 @@ def settings_of(scene, tool=None):
         m = current_map(scene)
         channels = "".join(c for c, on in zip("rgba", (t.channel_r, t.channel_g, t.channel_b, t.channel_a)) if on)
         s.update(value=float(t.value), paintColor=[float(c) for c in t.paint_color], paintChannels=channels or "rgba",
-                 paintMode=t.paint_mode)
+                 paintMode=t.paint_mode, paintWholeFaces=bool(t.paint_whole_faces))
         if m is not None:
             s.update(attribute=m.name, paintKind=m.kind)
             if m.kind == "texture" and m.texture:
@@ -496,11 +496,15 @@ def guides_edit(scalp, op, **args):
     return r
 
 
-def map_create(scalp, name, kind="guides", color=False, value=0.0, fill=None, resolution=1024):
+def map_create(scalp, name, kind="guides", color=False, value=0.0, fill=None, resolution=1024, faces=None):
+    """A new map. With `faces` (the scalp's polygon indices: groom.selected_faces) only those faces
+    get the value or fill, the rest 0 (a color map black; a guide layer: the guides rooted there)."""
     args = {"name": name, "kind": kind, "value": float(value), "resolution": int(resolution)}
     if color:
         args["color"] = True
         args["fill"] = [float(c) for c in (fill or (value, value, value, 1.0))]
+    if faces:
+        args["faces"] = [int(f) for f in faces]
     r = call(scalp, "map_create", **args)
     scene = groom.scene_of(scalp)
     after_edit(scalp, scene, r.get("undo"), refresh=True)
@@ -534,11 +538,15 @@ def setting_targets(scalp):
     return settings, others
 
 
-def map_for_param(scalp, node, param, kind="vertices", resolution=1024):
+def map_for_param(scalp, node, param, kind="vertices", resolution=1024, faces=None):
     """New Map > For a setting: the map node.param reads, or a white one (`kind`: vertices or
     texture) made and linked to it, one undo step (helper map_for_param); picked in the Paint tab,
-    painted toward 1 (Ctrl: toward 0; on Density, no hair). The caller picks the Paint tool."""
-    r = call(scalp, "map_for_param", node=node, param=param, kind=kind, resolution=int(resolution))
+    painted toward 1 (Ctrl: toward 0; on Density, no hair). A map made with `faces` (the scalp's
+    polygon indices) is white on those faces only. The caller picks the Paint tool."""
+    args = {"node": node, "param": param, "kind": kind, "resolution": int(resolution)}
+    if faces:
+        args["faces"] = [int(f) for f in faces]
+    r = call(scalp, "map_for_param", **args)
     scene = groom.scene_of(scalp)
     follow_graph(scalp, r)
     after_edit(scalp, scene, r.get("undo"), refresh=True)
@@ -547,6 +555,22 @@ def map_for_param(scalp, node, param, kind="vertices", resolution=1024):
         scene.groomlab_tools.value = 1.0
     refresh_info(scalp, scene)
     return r
+
+
+def grow_on_faces(scalp, faces):
+    """Hair on these faces of the scalp only (Maya's grow_on_faces): the Scatter's density reads a
+    vertex map 1 on them, 0 elsewhere (made, or filled so when it reads one already). Returns the
+    map's name; None when the graph has no Scatter."""
+    rt = groom.ensure(scalp)
+    g = process.call("get_graph", session=rt.session)["graph"]
+    scatter = next((n["name"] for n in g.get("nodes") or [] if n.get("type") == "Scatter"), None)
+    if not scatter:
+        return None
+    r = map_for_param(scalp, scatter, "density", kind="vertices", faces=faces)
+    if not r.get("made"):  # it read a map already: that map, 1 on the faces only
+        map_fill(scalp, r["name"], value=0.0)
+        map_fill(scalp, r["name"], value=1.0, faces=faces)
+    return r["name"]
 
 
 def map_remove(scalp, name, delete_file=False):
@@ -593,10 +617,13 @@ def map_set_channels(scalp, name, channels):
     return _map_edit(scalp, "map_set_channels", name=name, channels=int(channels))
 
 
-def map_fill(scalp, name, value=None, color=None, channels="rgba", selected=False, mode="replace"):
-    """Set a map to `value` everywhere (any kind), or a guide layer on the selected guides only; a
-    color map takes `color` (r, g, b[, a]) in the channels of `channels`."""
+def map_fill(scalp, name, value=None, color=None, channels="rgba", selected=False, mode="replace", faces=None):
+    """Set a map to `value` everywhere (any kind), or a guide layer on the selected guides only, or
+    only on `faces` (the scalp's polygon indices; a guide layer: the guides rooted there); a color
+    map takes `color` (r, g, b[, a]) in the channels of `channels`."""
     args = {"name": name, "channels": channels or "rgba", "selected": bool(selected), "paintMode": mode}
+    if faces:
+        args["faces"] = [int(f) for f in faces]
     if value is not None:
         args["value"] = float(value)
     if color is not None:

@@ -477,6 +477,38 @@ def read_scalp(scalp):
     return rest.reshape(-1, 3), counts, indices, uvs
 
 
+def selected_faces(obj):
+    """The polygons of mesh object `obj` selected in Edit Mode now, as indices (ascending; the
+    scalp's polygons as read_scalp sends them): faces as they are; vertices and edges as the faces
+    all of whose corners they hold, else as the faces they touch (Maya's selected_faces). [] when
+    `obj` is not in Edit Mode (a selection kept in Object Mode is often stale: a new mesh starts all
+    selected), when nothing is selected, or when every face is (no mask)."""
+    if obj is None or obj.type != "MESH" or obj.mode != "EDIT":
+        return []
+    obj.update_from_editmode()
+    mesh = obj.data
+    n = len(mesh.polygons)
+    if not n:
+        return []
+    picked = np.zeros(n, bool)
+    mesh.polygons.foreach_get("select", picked)
+    faces = np.flatnonzero(picked)
+    if not len(faces):  # vertices or edges holding no whole face: the faces they touch
+        points = np.zeros(len(mesh.vertices), bool)
+        mesh.vertices.foreach_get("select", points)
+        if not points.any():
+            return []
+        corners = np.empty(len(mesh.loops), np.int32)
+        mesh.loops.foreach_get("vertex_index", corners)
+        totals = np.empty(n, np.int32)
+        mesh.polygons.foreach_get("loop_total", totals)
+        face_of_corner = np.repeat(np.arange(n, dtype=np.int32), totals)
+        faces = np.unique(face_of_corner[points[corners]])
+    if len(faces) == n:
+        return []
+    return [int(f) for f in faces]
+
+
 def deforms(scalp):
     """Whether the scalp is posed by more than its mesh (Subdivision Surface modifiers ending its
     stack do not pose it: GroomLab smooths it itself, subdivision_of)."""

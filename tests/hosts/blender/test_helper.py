@@ -1994,6 +1994,46 @@ class ToolsTest(HelperTestCase):
         self.assertEqual(again["copied"], [])
         self.assertGreaterEqual(again["inside"], 2)
 
+    def test_maps_on_faces(self):
+        # Edit Mode's selected faces (Maya's -faces): a map made or filled on them only.
+        _points, counts, indices, _uvs = HEAD
+        counts = np.asarray(counts)
+        starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
+
+        def corners(faces):
+            return {int(v) for f in faces for v in indices[starts[f]:starts[f] + counts[f]]}
+
+        def values(name):
+            return json.loads(self.texts()["scalpMaps"])[name]["values"]
+
+        faces = [0, 1, 2, 3]
+        self.call("map_create", name="lids", kind="vertices", value=1.0, faces=faces)
+        got = values("lids")
+        self.assertEqual({i for i, v in enumerate(got) if v == 1.0}, corners(faces))
+        self.assertEqual({v for v in got}, {0.0, 1.0})
+        # Fill on one face: its corners only; one undo step.
+        self.call("map_fill", name="lids", value=0.5, faces=[faces[0]])
+        self.assertEqual({i for i, v in enumerate(values("lids")) if v == 0.5}, corners([faces[0]]))
+        self.call("undo")
+        self.assertEqual(values("lids"), got)
+        # A setting's map made on faces: white there, linked.
+        scatter = [n["name"] for n in self.call("list_nodes")["nodes"] if n["type"] == "Scatter"][0]
+        r = self.call("map_for_param", node=scatter, param="density", kind="vertices", faces=faces)
+        self.assertTrue(r["made"])
+        self.assertEqual(self.call("map_users", name=r["name"])["users"], [[scatter, "density"]])
+        self.assertEqual({i for i, v in enumerate(values(r["name"])) if v == 1.0}, corners(faces))
+        # A texture on faces: not the plain black image.
+        black = self.call("map_create", name="black", kind="texture", value=0.0, resolution=64)["file"]
+        masked = self.call("map_create", name="masked", kind="texture", value=1.0, resolution=64, faces=faces)["file"]
+        with open(black, "rb") as a, open(masked, "rb") as b:
+            self.assertNotEqual(a.read(), b.read())
+        for bad in ({"faces": []}, {"faces": "0 1"}, {"faces": [-1]}):
+            with self.assertRaises(HelperError):
+                self.call("map_fill", name="lids", value=1.0, **bad)
+        # The Whole Faces brush setting.
+        self.call("tool_set", tool="paint", settings={"paintWholeFaces": True})
+        self.assertTrue(self.call("tool_get")["settings"]["paintWholeFaces"])
+
     def test_map_management(self):
         self.place_guides(3)
         folder = self.call("maps_list")["folder"]

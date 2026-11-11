@@ -589,6 +589,7 @@ void applySettings(ToolState& t, const json& settings) {
                 s.setPaintColor(c);
             } else if (key == "paintChannels") s.paintChannels = channelMask(settingString(v, k).empty() ? std::string("rgba") : settingString(v, k));
             else if (key == "paintMode") s.brush.paintMode = paintModeFromString(settingString(v, k));
+            else if (key == "paintWholeFaces") s.paintWholeFaces = settingBool(v, k);
             else if (key == "smoothStrength") s.setSmoothStrength(settingNumber(v, k));
             else if (key == "alpha") {
                 try {
@@ -666,6 +667,7 @@ json settingsJson(const ToolState& t) {
     j["paintColor"] = s.paintColor;
     j["paintChannels"] = channelLetters(s.paintChannels);
     j["paintMode"] = paintModeName(s.brush.paintMode);
+    j["paintWholeFaces"] = s.paintWholeFaces;
     j["smoothStrength"] = s.smoothStrength;
     j["alpha"] = s.alphaPath;
     j["alphaRotation"] = s.alphaRotationName();
@@ -1932,9 +1934,32 @@ void commitMaps(ToolState& t, const std::string& label, const ScalpMaps& maps) {
 }
 
 // A new scalp map's entry (vertices: `value` or `fill` at every vertex; texture: its image written
-// in the maps folder, a free name), not committed.
+// in the maps folder, a free name), not committed. With `faces` (scalp polygon indices) only those
+// faces get the value or fill, the rest 0 (a color map: black, alpha 1).
 ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalp, const std::string& name, const std::string& kind, bool color,
-                               float value, const PaintColor& fill, int resolution);
+                               float value, const PaintColor& fill, int resolution, const std::vector<std::int32_t>& faces = {});
+
+// The scalp polygons `args` "faces" names (Maya's -faces: a make or fill limited to them); empty
+// when it names none. Polygon indices of the mesh set_scalp sent (Blender's mesh.polygons).
+std::vector<std::int32_t> facesArg(const json& args) {
+    std::vector<std::int32_t> faces;
+    if (!args.contains("faces") || args["faces"].is_null()) return faces;
+    const json& f = args["faces"];
+    if (!f.is_array()) fail("bad_request", "faces is a list of the scalp's polygon indices");
+    for (const json& v : f) {
+        if (!v.is_number_integer() || v.get<long long>() < 0 || v.get<long long>() > std::numeric_limits<std::int32_t>::max()) {
+            fail("bad_request", "faces is a list of the scalp's polygon indices");
+        }
+        faces.push_back(v.get<std::int32_t>());
+    }
+    if (faces.empty()) fail("bad_request", "faces names no face");
+    return faces;
+}
+
+// Whether guide `g`'s root lies on the flagged triangles (polygonTriangles of the faces).
+bool rootedOn(const HierarchyGuide& g, const std::vector<std::uint8_t>& triangles) {
+    return g.root.face >= 0 && static_cast<std::size_t>(g.root.face) < triangles.size() && triangles[static_cast<std::size_t>(g.root.face)] != 0;
+}
 
 json mapCreate(ToolState& t, const json& args) {
     Session& s = t.session;
@@ -1955,13 +1980,16 @@ json mapCreate(ToolState& t, const json& args) {
     }
     const MeshPtr scalp = s.groom->cageScalp();
     if (!scalp) fail("state", "no scalp to paint on: set_scalp first");
+    const std::vector<std::int32_t> faces = facesArg(args);
     if (kind == "guides") {
         if (color) fail("bad_request", "a guide layer is gray: make a color map on the scalp's vertices or as a texture");
+        // On faces: the value on the guides rooted on them, 0 on the rest.
+        const std::vector<std::uint8_t> triangles = faces.empty() ? std::vector<std::uint8_t>{} : polygonTriangles(*scalp, faces);
         editGuides(t, "create map " + name, [&](GuideHierarchy& h) {
             bool any = false;
             for (const HierarchyGuide& g : h.guides()) {
                 if (g.parent != kNoGuide) continue;  // children inherit their primary's
-                h.setAttribute(g.id, name, value);
+                h.setAttribute(g.id, name, faces.empty() || rootedOn(g, triangles) ? value : 0.0f);
                 any = true;
             }
             if (!any) fail("state", "no primary guides to carry the layer: place some first");
@@ -1969,7 +1997,7 @@ json mapCreate(ToolState& t, const json& args) {
         return {{"name", name}, {"kind", kind}, {"undo", undoJson(t)}};
     }
     ScalpMaps maps = s.groom->scalpMaps();
-    maps.maps[name] = newScalpMapEntry(s, *scalp, name, kind, color, value, fill, static_cast<int>(optNumber(args, "resolution", 1024.0)));
+    maps.maps[name] = newScalpMapEntry(s, *scalp, name, kind, color, value, fill, static_cast<int>(optNumber(args, "resolution", 1024.0)), faces);
     commitMaps(t, "create map " + name, maps);
     json r = {{"name", name}, {"kind", kind}, {"undo", undoJson(t)}};
     if (kind == "texture") r["file"] = maps.maps[name].texture;
@@ -1977,21 +2005,25 @@ json mapCreate(ToolState& t, const json& args) {
 }
 
 ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalpMesh, const std::string& name, const std::string& kind, bool color,
-                               float value, const PaintColor& fill, int resolution) {
+                               float value, const PaintColor& fill, int resolution, const std::vector<std::int32_t>& faces) {
     const ScalpMesh* scalp = &scalpMesh;
     ScalpMapEntry entry;
     entry.channels = color ? kColorMap : kGrayMap;
+    // On faces: 0 (a color map black, alpha 1) with the value or fill on them.
+    const PaintColor onFaces = color ? fill : PaintColor{value, value, value, value};
+    const PaintColor everywhere = faces.empty() ? onFaces : PaintColor{0.0f, 0.0f, 0.0f, color ? 1.0f : 0.0f};
     if (kind == "vertices") {
         entry.kind = "vertices";
         const std::size_t n = scalp->pointCount();
         entry.values.resize(n * static_cast<std::size_t>(entry.channels));
         for (std::size_t v = 0; v < n; ++v) {
             if (color) {
-                for (std::size_t c = 0; c < 4; ++c) entry.values[v * 4 + c] = fill[c];
+                for (std::size_t c = 0; c < 4; ++c) entry.values[v * 4 + c] = everywhere[c];
             } else {
-                entry.values[v] = value;
+                entry.values[v] = everywhere[0];
             }
         }
+        if (!faces.empty()) fillVertexMapFaces(entry.values, entry.channels, kAllChannels, onFaces, PaintMode::Replace, *scalp, faces);
     } else if (kind == "texture") {
         if (!scalp->hasUVs()) fail("state", "the scalp has no UVs to paint a texture map on");
         const fs::path folder = fs::u8path(mapsFolder(s));
@@ -2000,7 +2032,8 @@ ScalpMapEntry newScalpMapEntry(Session& s, const ScalpMesh& scalpMesh, const std
         try {
             fs::create_directories(file.parent_path());
             const int size = std::clamp(resolution, BrushToolSettings::kMinPaintResolution, BrushToolSettings::kMaxPaintResolution);
-            const TexturePaint paint = color ? TexturePaint(*scalp, size, size, fill) : TexturePaint(*scalp, size, size, value);
+            TexturePaint paint = color ? TexturePaint(*scalp, size, size, everywhere) : TexturePaint(*scalp, size, size, everywhere[0]);
+            if (!faces.empty()) paint.fillTriangles(polygonTriangles(*scalp, faces), onFaces, kAllChannels);
             paint.save(file.generic_u8string());
         } catch (const std::exception& e) {
             fail("io", std::string("cannot write the map's image: ") + e.what());
@@ -2032,7 +2065,10 @@ json mapForParam(ToolState& t, const json& args) {
         fail("bad_request", e.what());
     }
     std::string map = found.map, mapKind = found.kind;
-    if (map.empty() && kind == "vertices") {
+    // A map made here with `faces` is white on them, black elsewhere (one the param reads already stays).
+    const std::vector<std::int32_t> faces = facesArg(args);
+    const std::vector<std::uint8_t> faceTriangles = faces.empty() ? std::vector<std::uint8_t>{} : polygonTriangles(*scalp, faces);
+    if (map.empty() && kind == "vertices" && faces.empty()) {
         try {
             const ParamMapBinding b = paintParamMap(t.host, t.tool.settings, node, param);  // made and linked: one step
             map = b.map;
@@ -2052,7 +2088,7 @@ json mapForParam(ToolState& t, const json& args) {
             bool any = false;
             for (const HierarchyGuide& g : hh.guides()) {
                 if (g.parent != kNoGuide) continue;  // children inherit their primary's
-                hh.setAttribute(g.id, map, 1.0f);
+                hh.setAttribute(g.id, map, faces.empty() || rootedOn(g, faceTriangles) ? 1.0f : 0.0f);
                 any = true;
             }
             if (!any) fail("state", "the groom has no guides to paint on: add guides, or paint on the scalp's vertices");
@@ -2070,18 +2106,19 @@ json mapForParam(ToolState& t, const json& args) {
         t.host.commit(std::move(edit));
         mapKind = "guides";
     } else if (map.empty()) {
-        // A texture: its image beside the groom, white, linked by its file in the same step.
+        // A texture (or a vertex map on faces): white, linked in the same step; a texture's image
+        // beside the groom, linked by its file.
         std::set<std::string> taken;
         for (const json& m : mapsList(t)["maps"]) taken.insert(m["name"].get<std::string>());
         const std::string base = sanitizeMapName(node + "_" + param);
         map = base;
         for (int k = 1; taken.count(map); ++k) map = base + std::to_string(k);
         ScalpMaps maps = s.groom->scalpMaps();
-        maps.maps[map] = newScalpMapEntry(s, *scalp, map, "texture", false, 1.0f, PaintColor{1.0f, 1.0f, 1.0f, 1.0f},
-                                          static_cast<int>(optNumber(args, "resolution", 1024.0)));
+        maps.maps[map] = newScalpMapEntry(s, *scalp, map, kind, false, 1.0f, PaintColor{1.0f, 1.0f, 1.0f, 1.0f},
+                                          static_cast<int>(optNumber(args, "resolution", 1024.0)), faces);
         std::string graph;
         try {
-            graph = wireParamMap(graphBefore, maps, node, param, map, "texture");
+            graph = wireParamMap(graphBefore, maps, node, param, map, kind);
         } catch (const std::exception& e) {
             fail("bad_request", e.what());
         }
@@ -2090,7 +2127,7 @@ json mapForParam(ToolState& t, const json& args) {
         edit.set(StrokeField::Graph, std::move(graph));
         edit.set(StrokeField::ScalpMaps, maps.toJson());
         t.host.commit(std::move(edit));
-        mapKind = "texture";
+        mapKind = kind;
     }
     // The Paint brush on it, toward 1: strokes paint the param back to its value, Ctrl toward 0.
     BrushToolSettings& st = t.tool.settings;
@@ -2558,10 +2595,22 @@ json mapFill(ToolState& t, const json& args) {
     if (byColor && selected) fail("bad_request", "Fill Selected sets a guide layer, which is gray; a color fills a color map");
     if (byColor && channels != kColorMap) fail("bad_request", "a color fills a color map; " + name + " is gray (a value fills it)");
     if (selected && kind != "guides") fail("bad_request", "Fill Selected sets a guide layer on the selected guides; " + name + " lives on the scalp");
+    // `faces`: only those polygons of the scalp (a guide layer: the guides rooted on them).
+    const std::vector<std::int32_t> faces = facesArg(args);
+    if (!faces.empty() && selected) fail("bad_request", "fill the selected guides or the selected faces, not both");
+    const MeshPtr faceScalp = faces.empty() ? MeshPtr() : mapScalp(s);
+    const std::vector<std::uint8_t> faceTriangles = faces.empty() ? std::vector<std::uint8_t>{} : polygonTriangles(*faceScalp, faces);
     const std::string label = "fill map " + name;
     if (kind == "guides") {
         editGuides(t, label, [&](GuideHierarchy& h) {
-            if (selected) {
+            if (!faces.empty()) {
+                for (const HierarchyGuide& g : h.guides()) {
+                    if (!rootedOn(g, faceTriangles)) continue;
+                    float current = 0.0f;
+                    h.effectiveAttribute(g, name, &current);
+                    h.setAttribute(g.id, name, compositePaintValue(current, value, paintMode));
+                }
+            } else if (selected) {
                 for (const GuideId id : targetGuides(t, h, args, false, "fill selected")) {
                     if (const HierarchyGuide* g = h.guide(id)) {
                         float current = 0.0f;
@@ -2588,7 +2637,12 @@ json mapFill(ToolState& t, const json& args) {
                 for (std::size_t i = 3; i < entry.values.size(); i += 4) entry.values[i] = 1.0f;
             }
         }
-        fillMapValues(entry.values, channels, mask, per == 1 ? PaintColor{value, value, value, value} : color, paintMode);
+        const PaintColor target = per == 1 ? PaintColor{value, value, value, value} : color;
+        if (!faces.empty()) {
+            fillVertexMapFaces(entry.values, channels, mask, target, paintMode, *scalp, faces);
+        } else {
+            fillMapValues(entry.values, channels, mask, target, paintMode);
+        }
         StrokeEdit edit;
         edit.mode = label;
         edit.set(StrokeField::ScalpMaps, maps.toJson());
@@ -2597,7 +2651,9 @@ json mapFill(ToolState& t, const json& args) {
         // The file rewritten: its bytes before and after are the undo step.
         const ScalpMapEntry entry = s.groom->scalpMaps().maps.at(name);
         const std::shared_ptr<TexturePaint> paint = openPaint(s, entry, resolutionOf(args));
-        if (channels == kColorMap) {
+        if (!faces.empty()) {
+            paint->fillTriangles(faceTriangles, channels == kColorMap ? color : PaintColor{value, value, value, value}, mask, paintMode);
+        } else if (channels == kColorMap) {
             paint->fill(color, mask, paintMode);
         } else {
             paint->fill(value, paintMode);
