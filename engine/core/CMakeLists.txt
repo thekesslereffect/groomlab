@@ -75,6 +75,7 @@ add_library(groomlab_core_objects OBJECT
     src/parts.cpp
     src/transfer.cpp
     src/transfer_markers_edit.cpp
+    src/param_conditions.cpp
     src/paths.cpp
     src/presets.cpp
     src/shortcuts.cpp

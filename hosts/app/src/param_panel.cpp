@@ -30,6 +30,7 @@
 #include "param_editors.h"
 #include "theme.h"
 #include "groomlab/graph_io.h"
+#include "groomlab/param_conditions.h"
 #include "groomlab/node_catalog.h"
 #include "groomlab/simulation.h"
 
@@ -135,17 +136,9 @@ std::string sectionFor(const json& p, bool headed) {
     return headed ? group : std::string();
 }
 
-// Whether a showWhen's own part holds (graph.h ParamCondition): its {"param", "in"} for the param's
-// value (a bool as "true" or "false", a number as JSON writes it). No param: it holds.
-bool conditionHolds(const json& condition, const json& value) {
-    if (!condition.is_object()) return true;
-    if (condition.value("param", std::string()).empty()) return true;
-    const std::string text = value.is_string() ? value.get<std::string>() : value.is_boolean() ? (value.get<bool>() ? "true" : "false") : value.dump();
-    for (const json& v : condition.value("in", json::array())) {
-        if (v.is_string() && v.get<std::string>() == text) return true;
-    }
-    return false;
-}
+// Whether a showWhen's (or unitWhen's) own part holds: the core's rule (param_conditions.h), so a
+// 3.0 stored for an int param reads "3" here as in the Graph Editors.
+bool conditionHolds(const json& condition, const json& value) { return groomlab::conditionHolds(condition, value); }
 
 // Folded sections by operator type and section, for the session (Advanced folded unless opened).
 std::map<std::pair<std::string, std::string>, bool>& foldedSections() {

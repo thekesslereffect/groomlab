@@ -20,17 +20,35 @@ def cm_per_unit(scene):
     return 100.0 * meters_per_unit(scene)
 
 
+def condition_text(value):
+    """A param's value as a showWhen or unitWhen compares it: the core's rule (param_conditions.h:
+    conditionText), which the add-on cannot call: a bool "true"/"false", a text as it is, a whole
+    number as an integer ("3", also when stored as 3.0), any other number as JSON writes it."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, float) and value.is_integer() and abs(value) < 9.0e15:
+        return str(int(value))
+    return json.dumps(value)
+
+
+def condition_holds(condition, value):
+    """Whether a condition ({"param", "in"}: showWhen, unitWhen) holds for its param's `value` (the
+    core's conditionHolds). No condition: it holds."""
+    if not isinstance(condition, dict) or not condition.get("param"):
+        return True
+    return condition_text(value) in (condition.get("in") or [])
+
+
 def effective(spec, value_of):
     """What a param measures for its node now: its spec's unit while its unitWhen holds (graph.h
     ParamSpec::unitWhen: Noise's frequency is per scene unit in world space, per strand length in
     strand space), else "" (unitless). `value_of(param)`: the node's value of another param."""
     unit = spec.get("unit") or ""
     when = spec.get("unitWhen")
-    if unit and when:
-        v = value_of(when.get("param"))
-        text = ("true" if v else "false") if isinstance(v, bool) else v if isinstance(v, str) else json.dumps(v)
-        if text not in (when.get("in") or []):
-            return ""
+    if unit and when and not condition_holds(when, value_of(when.get("param"))):
+        return ""
     return unit
 
 

@@ -167,16 +167,7 @@ def shown_when(spec, value_of, spec_of=None):
         param = condition.get("param")
         if not param:
             return True
-        value = value_of(param)
-        if isinstance(value, bool):
-            text = "true" if value else "false"
-        elif isinstance(value, str):
-            text = value
-        elif isinstance(value, float) and value.is_integer():
-            text = str(int(value))  # 3.0 stored for an int param (a graph from an older Maya) reads as "3"
-        else:
-            text = json.dumps(value)
-        if text not in (condition.get("in") or []):
+        if not units.condition_holds(condition, value_of(param)):  # (the core's rule: 3.0 reads "3")
             return False
         seen.add(spec.get("name"))
         spec = spec_of(param) if spec_of else None

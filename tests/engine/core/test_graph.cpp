@@ -18,6 +18,7 @@
 #include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
 #include "groomlab/node_catalog.h"
+#include "groomlab/param_conditions.h"
 #include "groomlab/random.h"
 #include "test_helpers.h"
 #include "groomlab/simulation.h"
@@ -1069,6 +1070,24 @@ TEST(ParamSpecs, LimitsClampOnceAndEveryFieldReachesTheSpecs) {
     EXPECT_TRUE(onlyB["advanced"].get<bool>());
     EXPECT_EQ(onlyB["showWhen"]["param"].get<std::string>(), "mode");
     EXPECT_EQ(onlyB["showWhen"]["in"][0].get<std::string>(), "b");
+}
+
+TEST(ParamSpecs, ConditionsReadValuesByOneRule) {
+    // Every host's rule (param_conditions.h; Blender's units.condition_text repeats it): a bool as
+    // true/false, a text as it is, a whole number as an integer also when stored as 3.0.
+    using nlohmann::json;
+    EXPECT_EQ(conditionText(json(true)), "true");
+    EXPECT_EQ(conditionText(json("fishtail")), "fishtail");
+    EXPECT_EQ(conditionText(json(3)), "3");
+    EXPECT_EQ(conditionText(json(3.0)), "3") << "an int param a Python host stored as a float";
+    EXPECT_EQ(conditionText(json(-2.0)), "-2");
+    EXPECT_EQ(conditionText(json(0.5)), "0.5");
+    const json when = {{"param", "layers"}, {"in", {"2", "3"}}};
+    EXPECT_TRUE(conditionHolds(when, json(3.0)));
+    EXPECT_TRUE(conditionHolds(when, json(2)));
+    EXPECT_FALSE(conditionHolds(when, json(4)));
+    EXPECT_TRUE(conditionHolds(json(), json(4))) << "no condition: it holds";
+    EXPECT_TRUE(conditionHolds(json::object(), json(4)));
 }
 
 TEST(ParamSpecs, EveryOperatorsRangesAreSound) {

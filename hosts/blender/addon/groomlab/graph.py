@@ -272,9 +272,7 @@ def visible(p, by_name):
         other = by_name.get(when.get("param", "")) if when else None
         if other is None:
             return True
-        value = json.loads(other.raw or "null")
-        text = ("true" if value else "false") if isinstance(value, bool) else value if isinstance(value, str) else json.dumps(value)
-        if text not in when.get("in", []):
+        if not units.condition_holds(when, json.loads(other.raw or "null")):  # (the core's rule: 3.0 reads "3")
             return False
         p = other
     return True

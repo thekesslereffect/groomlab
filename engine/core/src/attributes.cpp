@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "groomlab/graph_io.h"
+#include "groomlab/param_conditions.h"
 #include "groomlab/operators.h"
 
 namespace groomlab {
@@ -37,7 +38,7 @@ std::string conditionText(const ParamValue& value) {
     if (const bool* b = std::get_if<bool>(&value)) return *b ? "true" : "false";
     if (const std::string* s = std::get_if<std::string>(&value)) return *s;
     if (const std::int64_t* i = std::get_if<std::int64_t>(&value)) return std::to_string(*i);
-    if (const double* d = std::get_if<double>(&value)) return json(*d).dump();
+    if (const double* d = std::get_if<double>(&value)) return groomlab::conditionText(json(*d));  // (3.0: "3")
     return {};
 }
 

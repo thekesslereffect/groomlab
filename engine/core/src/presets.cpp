@@ -15,6 +15,7 @@
 
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
+#include "groomlab/param_conditions.h"
 #include "groomlab/paths.h"
 #include "groomlab/scalp_mesh.h"
 
@@ -261,17 +262,11 @@ json paramValueOf(const json& node, const std::string& param) {
     return spec ? spec->value("default", json()) : json();
 }
 
-// Whether a condition ({"param", "in"}: ParamSpec::unitWhen, ParamCondition) holds on `node`:
-// its param's value written as the condition writes it (a bool true or false, a number as JSON
-// writes it, a text as it is) among `in`. No condition (or not an object): it holds.
-bool conditionHolds(const json& node, const json& condition) {
+// Whether a condition ({"param", "in"}: ParamSpec::unitWhen, ParamCondition) holds on `node`: its
+// param's value (as set, else its default) by param_conditions.h's rule. No condition: it holds.
+bool nodeConditionHolds(const json& node, const json& condition) {
     if (!condition.is_object() || condition.value("param", std::string()).empty()) return true;
-    const json value = paramValueOf(node, condition["param"].get<std::string>());
-    const std::string text = value.is_string() ? value.get<std::string>() : value.dump();
-    for (const json& v : condition.value("in", json::array())) {
-        if (v.is_string() && v.get<std::string>() == text) return true;
-    }
-    return false;
+    return groomlab::conditionHolds(condition, paramValueOf(node, condition["param"].get<std::string>()));
 }
 
 // What `param` of `node` measures: its spec's unit while its unitWhen holds (ParamSpec::unitWhen);
@@ -298,7 +293,7 @@ std::string unitOf(const json& node, const std::string& param, int depth = 0) {
         return innerNode ? unitOf(*innerNode, spec.substr(dot + 1), depth + 1) : std::string();
     }
     const json* spec = paramSpec(type, param);
-    if (!spec || !conditionHolds(node, spec->value("unitWhen", json()))) return {};
+    if (!spec || !nodeConditionHolds(node, spec->value("unitWhen", json()))) return {};
     return spec->value("unit", std::string());
 }
 
