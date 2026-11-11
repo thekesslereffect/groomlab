@@ -967,6 +967,7 @@ class PaintTab(_GroomTab):
         self.paint_color = (1.0, 1.0, 1.0, 1.0)  # what paint puts on a color map (r g b a, 0-1)
         self.paint_channels = CHANNELS          # the channels it changes
         self.paint_mode = "replace"
+        self.paint_whole_faces = False  # the brush fills the faces under it (Whole Faces)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -1045,13 +1046,18 @@ class PaintTab(_GroomTab):
         modes.setToolTip(definitions.get("choices/paintMode")["tip"])
         controls.addWidget(widgets.small_label("Mode"))
         controls.addWidget(modes)
+        self.whole_faces = widgets.chip("Whole Faces", "The brush fills the scalp's faces under it all the way, "
+                                        "no falloff: masks by face (a vertex or texture map; Shift+drag still "
+                                        "smooths)", False, "paintWholeFaces")
+        self.whole_faces.toggled.connect(self.whole_faces_changed)
+        controls.addWidget(widgets.chip_row((self.whole_faces,)))
         self.value = widgets.SoftSlider(1.0, 0.0, 1.0, minimum=0.0, maximum=1.0, key=None, label="Value")
         self.value.setToolTip("What the Paint brush paints toward, and what Fill sets")
         self.value.committed.connect(lambda v: self.owner.push(value=v))
         fill = QtWidgets.QPushButton("Fill")
         fill.setObjectName("paintFill")
-        fill.setToolTip("Set the map to the value: on the selected guides when some are (a guide map), else "
-                        "everywhere")
+        fill.setToolTip("Set the map to the value: on the selected guides when some are (a guide map), on "
+                        "the scalp's selected faces when some are, else everywhere")
         fill.clicked.connect(lambda: self.fill())
         row = QtWidgets.QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
@@ -1223,19 +1229,25 @@ class PaintTab(_GroomTab):
         if kind == "texture" and self.groom:
             texture = next((m["texture"] for m in groomlab.maps(self.groom) if m["name"] == self.current()), "")
         return {"paint_kind": kind, "paint_texture": texture, "paint_color": self.paint_color,
-                "paint_channels": self.paint_channels}
+                "paint_channels": self.paint_channels, "paint_mode": self.paint_mode,
+                "paint_whole_faces": self.paint_whole_faces}
 
     def context_flags(self):
         """paint_flags as the brush context's flags."""
         flags = self.paint_flags()
         return {"paintKind": flags["paint_kind"], "paintTexture": flags["paint_texture"],
                 "paintColor": tuple(flags["paint_color"]), "paintChannels": flags["paint_channels"],
-                "paintMode": self.paint_mode}
+                "paintMode": flags["paint_mode"], "paintWholeFaces": flags["paint_whole_faces"]}
 
     def paint_mode_changed(self, mode):
         self.paint_mode = mode or "replace"
         if self.owner.tool == "paint":
             self.owner.push(paintMode=self.paint_mode)
+
+    def whole_faces_changed(self, on):
+        self.paint_whole_faces = bool(on)
+        if self.owner.tool == "paint":
+            self.owner.push(paintWholeFaces=self.paint_whole_faces)
 
     # -- Color maps --------------------------------------------------------------
 
@@ -1414,11 +1426,13 @@ class PaintTab(_GroomTab):
         name, kind, resolution, color, target = dialog.values()
         if kind == "texture" and not menu.ensure_scene_saved("texture maps"):
             return None
+        # Faces of the scalp selected: the new map is white on them, black elsewhere.
+        faces = groomlab.selected_scalp_faces(self.groom)
         if target:
-            return self.map_for_setting(target[0], target[1], kind=kind, resolution=resolution)
-        return self.make_map(name, kind, resolution=resolution, color=color)
+            return self.map_for_setting(target[0], target[1], kind=kind, resolution=resolution, faces=faces)
+        return self.make_map(name, kind, resolution=resolution, color=color, faces=faces)
 
-    def map_for_setting(self, node, param, kind="vertices", resolution=1024):
+    def map_for_setting(self, node, param, kind="vertices", resolution=1024, faces=None):
         """+ New Map > for a setting: the map node.param reads, or a white one made (`kind`) and
         linked to it (groomlab.paint_param, the Graph Editor's Paint), picked, and the Paint brush
         on it toward 1 (Ctrl: toward 0; on Density, no hair), all one undo step. Returns the
@@ -1428,7 +1442,8 @@ class PaintTab(_GroomTab):
         from groomlab.base import undo_chunk
         with undo_chunk("map for %s.%s" % (node, param)):
             before = groomlab.param_map(self.groom, node, param)
-            name = self.run(groomlab.paint_param, self.groom, node, param, kind=kind, resolution=resolution, paint=False)
+            name = self.run(groomlab.paint_param, self.groom, node, param, kind=kind, resolution=resolution, paint=False,
+                            faces=faces)
             if not name:
                 return None
             self.refresh(force=True)
@@ -1444,17 +1459,28 @@ class PaintTab(_GroomTab):
                 self.map_changed(name)
             else:
                 self.owner.activate("paint")
-        self.status("%s %s, which %s.%s reads: Ctrl paints it toward 0%s, strokes back toward the value" %
+        self.status("%s %s, which %s.%s reads%s: Ctrl paints it toward 0%s, strokes back toward the value" %
                     ("Painting" if before else "Made", name, node, param,
+                     " (white on the %d selected faces)" % len(faces) if faces and not before else "",
                      " (no hair there)" if param == "density" else ""))
         return name
 
-    def make_map(self, name, kind, resolution=1024, color=False):
-        """Make a map (a color map: black, alpha 1) and pick it; New Map's work after the dialog."""
-        if name and self.run(groomlab.add_map, self.groom, name, 0.0, kind=kind, resolution=resolution,
-                             color=(0.0, 0.0, 0.0, 1.0) if color else None):
+    def make_map(self, name, kind, resolution=1024, color=False, faces=None):
+        """Make a map (a color map: black, alpha 1) and pick it; New Map's work after the dialog.
+        With `faces` (the scalp's selected faces) it is white on them, black elsewhere."""
+        if not name:
+            return None
+        if faces:
+            ok = self.run(groomlab.add_map, self.groom, name, 1.0, kind=kind, resolution=resolution,
+                          color=(1.0, 1.0, 1.0, 1.0) if color else None, faces=faces)
+        else:
+            ok = self.run(groomlab.add_map, self.groom, name, 0.0, kind=kind, resolution=resolution,
+                          color=(0.0, 0.0, 0.0, 1.0) if color else None)
+        if ok:
             self.refresh()
             self.select(name)
+            if faces:
+                self.status("Made %s: white on the %d selected faces" % (name, len(faces)))
             return name
         return None
 
@@ -1576,20 +1602,23 @@ class PaintTab(_GroomTab):
 
     def fill(self, selected_only=None):
         """Set the map to the value: on the selected guides when there are some and the map lives on
-        the guides (`selected_only` None), else everywhere."""
+        the guides (`selected_only` None), on the scalp's selected faces when some are, else
+        everywhere."""
         if not self._need_map():
-            return
-        if self.current_channels() == 4:  # a color map: the color, in the channels ticked
-            if self.run(groomlab.fill_map, self.groom, self.current(), color=self.paint_color,
-                        channels=self.paint_channels, mode=self.paint_mode):
-                self.status("Filled %s's %s with the color." % (self.current(), self.paint_channels))
             return
         if selected_only is None:
             selected_only = self.current_kind() == "guides" and bool(groomlab.selected_guides(self.groom))
+        faces = [] if selected_only else groomlab.selected_scalp_faces(self.groom)
+        where = " on the %d selected faces" % len(faces) if faces else ""
+        if self.current_channels() == 4:  # a color map: the color, in the channels ticked
+            if self.run(groomlab.fill_map, self.groom, self.current(), color=self.paint_color,
+                        channels=self.paint_channels, mode=self.paint_mode, faces=faces):
+                self.status("Filled %s's %s with the color%s." % (self.current(), self.paint_channels, where))
+            return
         if self.run(groomlab.fill_map, self.groom, self.current(), self.value.value(), selected_only=selected_only,
-                    mode=self.paint_mode):
+                    mode=self.paint_mode, faces=faces):
             self.status("Filled %s with %g%s." % (self.current(), self.value.value(),
-                                                  " on the selected guides" if selected_only else ""))
+                                                  " on the selected guides" if selected_only else where))
 
     def unfreeze_all(self):
         if self.need():

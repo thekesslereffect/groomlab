@@ -150,13 +150,53 @@ def _check_map_name(name):
         raise ValueError(error)
 
 
-def add_map(groom, name, value=0.0, kind="guides", resolution=1024, texture=None, color=None):
+_FACE_RANGE = re.compile(r"\.f\[(\d+)(?::(\d+))?\]$")
+
+
+def selected_faces(mesh):
+    """The faces of `mesh` (a mesh shape or its transform) selected now, as polygon indices
+    (ascending): faces as they are; vertices and edges as the faces all of whose corners they
+    hold, else as the faces they touch. [] when none of the mesh's components is selected."""
+    from groomlab.base import _shape_of
+    try:
+        shape = cmds.ls(_shape_of(mesh, "mesh"), long=True)[0]
+    except (ValueError, RuntimeError, IndexError):
+        return []
+    components = [c for c in cmds.ls(selection=True, long=True) or []
+                  if "." in c and (cmds.ls(c, objectsOnly=True, long=True) or [None])[0] == shape]
+    if not components:
+        return []
+    found = (cmds.polyListComponentConversion(components, toFace=True, internal=True) or
+             cmds.polyListComponentConversion(components, toFace=True) or [])
+    faces = set()
+    for item in cmds.ls(found) or []:
+        m = _FACE_RANGE.search(item)
+        if m:
+            first = int(m.group(1))
+            faces.update(range(first, int(m.group(2) or first) + 1))
+    return sorted(faces)
+
+
+def selected_scalp_faces(groom):
+    """The faces of the groom's scalp mesh selected now (selected_faces); [] when none are."""
+    from groomlab.base import _scalp_shape
+    shape = _scalp_shape(groom)
+    return selected_faces(shape) if shape else []
+
+
+def _faces_flag(faces):
+    return " ".join(str(int(f)) for f in faces)
+
+
+def add_map(groom, name, value=0.0, kind="guides", resolution=1024, texture=None, color=None, faces=None):
     """A new map filled with `value`: a guide layer (`kind` "guides", on every primary guide,
     children inheriting), a vertex map ("vertices") or a texture map ("texture": a PNG of
     `resolution` square in the scene's masks folder (masks/<asset_name>/<name>.png; a free
     <name>_2.png when that file is taken), or at `texture`, stored relative
     to the scene). `color` makes a color map (vertices or texture; r g b a): (r, g, b[, a]) fills
-    it with that color, True with (value, value, value, 1). Returns the name."""
+    it with that color, True with (value, value, value, 1). With `faces` (polygon indices of the
+    scalp: selected_scalp_faces) only those faces get the value or color, the rest 0 (a color
+    map: black, alpha 1); a guide layer, the guides rooted on them. Returns the name."""
     _check_map_name(name)
     if kind not in MAP_KINDS:
         raise ValueError("a map's kind is guides, vertices or texture, not %r" % kind)
@@ -173,16 +213,30 @@ def add_map(groom, name, value=0.0, kind="guides", resolution=1024, texture=None
         _check_png(texture)
         kwargs["texture"] = portable_path(texture) if texture else _map_texture_default(groom, name)
         kwargs["resolution"] = int(resolution)
+    if faces:
+        kwargs["faces"] = _faces_flag(faces)
     cmds.groomLabScalpMaps(groom, **kwargs)
     return name
 
 
-def fill_map(groom, name, value=None, selected_only=False, color=None, channels="rgba", mode="replace"):
+def fill_map(groom, name, value=None, selected_only=False, color=None, channels="rgba", mode="replace", faces=None):
     """Set a map to `value` everywhere, or (a guide layer) on the selected guides only. A color
     map takes `color` (r, g, b[, a]) in the channels of `channels` (a subset of "rgba"), or
-    `value` in its r g b (its alpha kept)."""
+    `value` in its r g b (its alpha kept). With `faces` (polygon indices of the scalp:
+    selected_scalp_faces) only those faces are filled (a guide layer: the guides rooted on them)."""
     if value is None and color is None:
         raise ValueError("fill a map with a value or a color")
+    if faces:
+        if selected_only:
+            raise ValueError("fill the selected guides or the selected faces, not both")
+        if not map_kind(groom, name):
+            raise ValueError("no map named %r" % name)
+        kwargs = {"fill": name, "paintMode": mode, "faces": _faces_flag(faces)}
+        if color is not None:
+            kwargs.update(fillColor=_rgba(color), fillChannels=channels or "rgba")
+        else:
+            kwargs["value"] = float(value)
+        return cmds.groomLabScalpMaps(groom, **kwargs)
     if color is not None:
         if selected_only:
             raise ValueError("Fill Selected sets a guide layer, which is gray; a color fills a color map")
@@ -759,21 +813,23 @@ MAP_CHANNELS = ("luminance", "r", "g", "b", "a", "rgb")
 
 
 @undoable("use map")
-def use_map(groom, node, param, name, kind="guides", resolution=1024, channel="luminance"):
+def use_map(groom, node, param, name, kind="guides", resolution=1024, channel="luminance", faces=None):
     """Drive a mappable param with map `name` (made, filled 1, if there is none: `kind`,
     `resolution` for a texture) through a Map node (one per map, reused): the param is exposed
     as an input the node feeds, and its own value multiplies the map (white = the value, black
     = 0). `channel` picks the Map node's output the param reads: one channel of a color map
     ("r", "g", "b", "a": masks packed in one map, so one Map node feeds several params) or its
     luminance; "rgb", its color, for a color param (HairColor's color, dye or tipColor: the map
-    colors each strand by its root, times the param's color). Returns the Map node's name."""
+    colors each strand by its root, times the param's color). A map made here with `faces` (scalp
+    polygon indices: selected_scalp_faces) is 1 on those faces and 0 elsewhere: hair grows on a face
+    selection only (a Density map). Returns the Map node's name."""
     from groomlab import graph as gm
     if channel not in MAP_CHANNELS:
         raise ValueError("channel is one of %s, not %r" % (MAP_CHANNELS, channel))
     if name not in list_maps(groom):
         if channel == "rgb" and kind == "guides":
             raise ValueError("a guide layer is gray: a color map lives on the scalp's vertices or in a texture")
-        add_map(groom, name, 1.0, kind=kind, resolution=resolution, color=channel == "rgb")
+        add_map(groom, name, 1.0, kind=kind, resolution=resolution, color=channel == "rgb", faces=faces)
     model = gm.GraphModel.from_groom(groom)
     if node not in model.order:
         raise ValueError("graph has no node named %r" % node)
@@ -813,7 +869,8 @@ def param_map(groom, node, param):
     return None
 
 
-def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, paint=True, channel="luminance"):
+def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, paint=True, channel="luminance",
+                faces=None):
     """Paint a mappable param (+ New Map > for a setting in the Paint tab, and the Graph Editor's
     right-click a param > Paint): the map it reads already when it reads one, else the map `name`
     (default "<node>_<param>"; made white, so the look stays as it is) fed to it through a Map
@@ -821,8 +878,9 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
     starts on it toward 1 (the param's own value); Ctrl paints toward 0 (on a density map: no
     hair). With `channel` ("r", "g", "b" or "a") the param reads that output of the map's Map
     node, a channel of a color map `name` (made if missing: packed masks), and the brush paints
-    that channel only. The map, its link and what painting shows are one undo step. Returns the
-    map's name."""
+    that channel only. A map made here with `faces` (scalp polygon indices: selected_scalp_faces)
+    is white on those faces only, black elsewhere (a map the param already reads is left as it
+    is). The map, its link and what painting shows are one undo step. Returns the map's name."""
     with undo_chunk("paint %s.%s" % (node, param)):
         found = param_map(groom, node, param)
         if found and not name:
@@ -834,8 +892,8 @@ def paint_param(groom, node, param, kind="guides", name=None, resolution=1024, p
             if channel != "luminance" and name not in list_maps(groom):
                 if kind == "guides":
                     raise ValueError("a guide layer is gray: paint a channel of a map on the scalp's vertices or a texture")
-                add_map(groom, name, 1.0, kind=kind, resolution=resolution, color=True)
-            use_map(groom, node, param, name, kind=kind, resolution=resolution, channel=channel)
+                add_map(groom, name, 1.0, kind=kind, resolution=resolution, color=True, faces=faces)
+            use_map(groom, node, param, name, kind=kind, resolution=resolution, channel=channel, faces=faces)
         if paint:
             if channel in ("r", "g", "b", "a"):
                 paint_map(groom, name, value=1.0, color=(1.0, 1.0, 1.0, 1.0), channels=channel)

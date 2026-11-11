@@ -1344,6 +1344,55 @@ class GroomingTest(unittest.TestCase):
                          "old_density")
         self.assertNotIn("scatter_density", groomlab.list_maps(self.groom))
 
+    def test_face_selections_make_fill_and_grow_maps(self):
+        # The scalp's selected faces (vertices: the faces they enclose) as polygon indices.
+        cmds.select(self.scalp + ".f[680:799]")  # the last rows of the sphere's 800 faces, both caps among them
+        faces = groomlab.selected_scalp_faces(self.groom)
+        self.assertEqual(faces, list(range(680, 800)))
+        cmds.select(self.scalp + ".vtx[761]")  # the north pole alone encloses no face: the 40 it touches
+        self.assertEqual(groomlab.selected_scalp_faces(self.groom), list(range(760, 800)))
+        cmds.select(clear=True)
+        self.assertEqual(groomlab.selected_scalp_faces(self.groom), [])
+
+        # A map made on them: 1 on their vertices, 0 elsewhere; Fill on faces changes only theirs.
+        groomlab.add_map(self.groom, "top", 1.0, kind="vertices", faces=faces)
+        values = cmds.groomLabScalpMaps(self.groom, values="top")
+        corners = set(int(re.search(r"\[(\d+)\]", v).group(1)) for v in cmds.ls(
+            cmds.polyListComponentConversion(self.scalp + ".f[680:799]", toVertex=True), flatten=True))
+        self.assertEqual(set(i for i, v in enumerate(values) if v == 1.0), corners)  # Maya's own
+        self.assertEqual(set(values), {0.0, 1.0})
+        groomlab.fill_map(self.groom, "top", 0.5, faces=[40])  # a quad near the bottom: its 4 corners
+        values = cmds.groomLabScalpMaps(self.groom, values="top")
+        self.assertEqual(sum(1 for v in values if v == 0.5), 4)
+        self.assertEqual(values[761], 1.0)
+        cmds.undo()
+        self.assertFalse(any(v == 0.5 for v in cmds.groomLabScalpMaps(self.groom, values="top")))
+
+        # Create Groom from Selection with faces selected: hair grows on them only.
+        from groomlab.ui import menu
+        other = cmds.polySphere(radius=1, subdivisionsX=40, subdivisionsY=20)[0]
+        cmds.select(other + ".f[680:799]")
+        before = set(cmds.ls(type="groomLabShape"))
+        menu.create_groom_from_selection()
+        made = (set(cmds.ls(type="groomLabShape")) - before).pop()
+        self.assertEqual(groomlab.param_map(made, "scatter", "density"), ("scatter_density", "luminance"))
+        on_faces = cmds.getAttr(made + ".outStrandCount")
+        self.assertGreater(on_faces, 0)
+        groomlab.fill_map(made, "scatter_density", 1.0)
+        self.assertGreater(cmds.getAttr(made + ".outStrandCount"), 3 * on_faces)
+
+        # The Paint brush's Whole Faces: a tiny dab on the north pole fills the triangle under it (the
+        # pole and two ring vertices); without it, only the pole is within reach.
+        groomlab.brush_tool("paint", attribute="top", paint_kind="vertices", paint_whole_faces=True, activate=False)
+        for whole, painted in ((False, 1), (True, 3)):
+            name = "dab%d" % painted
+            groomlab.add_map(self.groom, name, 0.0, kind="vertices")
+            groomlab.brush_stroke(self.groom, "paint", [(0.0, 1.0, 0.0)], radius=0.01, strength=1.0, attribute=name,
+                                  value=1.0, paint_kind="vertices", hardness=1.0, paint_whole_faces=whole)
+            values = cmds.groomLabScalpMaps(self.groom, values=name)
+            self.assertEqual(sum(1 for v in values if v == 1.0), painted)
+            self.assertEqual(values[761], 1.0)
+
     def test_guide_layers_drive_density_and_travel_with_renames(self):
         cmds.setAttr(self.groom + ".previewDensity", 1.0)
         self.assertEqual(groomlab.add_map(self.groom, "fur"), "fur")

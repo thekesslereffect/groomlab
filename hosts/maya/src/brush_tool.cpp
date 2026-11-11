@@ -102,6 +102,8 @@ const char* kSmoothStrengthFlag[] = {"-sms", "-smoothStrength"};
 const char* kPaintColorFlag[] = {"-pco", "-paintColor"};
 const char* kPaintChannelsFlag[] = {"-pch", "-paintChannels"};
 const char* kPaintModeFlag[] = {"-pmd", "-paintMode"};
+// Paint fills the faces under the brush whole (BrushToolSettings::paintWholeFaces).
+const char* kPaintWholeFacesFlag[] = {"-pwf", "-paintWholeFaces"};
 // Paint on a scalp map through an alpha (brush_alpha.h): its file ("" none), rotation (fixed,
 // stroke, random), angle (degrees), spacing (of the brush's diameter) and invert.
 const char* kAlphaFlag[] = {"-alp", "-alpha"};
@@ -263,6 +265,7 @@ void addBrushFlags(MSyntax& s) {
     s.addFlag(kPaintColorFlag[0], kPaintColorFlag[1], MSyntax::kDouble, MSyntax::kDouble, MSyntax::kDouble, MSyntax::kDouble);
     s.addFlag(kPaintChannelsFlag[0], kPaintChannelsFlag[1], MSyntax::kString);
     s.addFlag(kPaintModeFlag[0], kPaintModeFlag[1], MSyntax::kString);
+    s.addFlag(kPaintWholeFacesFlag[0], kPaintWholeFacesFlag[1], MSyntax::kBoolean);
     s.addFlag(kAlphaFlag[0], kAlphaFlag[1], MSyntax::kString);
     s.addFlag(kAlphaRotationFlag[0], kAlphaRotationFlag[1], MSyntax::kString);
     s.addFlag(kAlphaAngleFlag[0], kAlphaAngleFlag[1], MSyntax::kDouble);
@@ -333,6 +336,7 @@ MStatus applyBrushFlags(const Args& args, BrushToolSettings& s, const char* comm
     if (args.isFlagSet(kMatchFlag[0]) && args.getFlagArgument(kMatchFlag[0], 0, b)) s.place.matchNeighbors = b;
     if (args.isFlagSet(kSoloNewFlag[0]) && args.getFlagArgument(kSoloNewFlag[0], 0, b)) s.place.soloNewGuides = b;
     if (args.isFlagSet(kCollideFlag[0]) && args.getFlagArgument(kCollideFlag[0], 0, b)) s.brush.collide = b;
+    if (args.isFlagSet(kPaintWholeFacesFlag[0]) && args.getFlagArgument(kPaintWholeFacesFlag[0], 0, b)) s.paintWholeFaces = b;
     if (args.isFlagSet(kMaskScalpFlag[0]) && args.getFlagArgument(kMaskScalpFlag[0], 0, b)) s.maskByScalp = b;
     if (args.isFlagSet(kStretchFlag[0]) && args.getFlagArgument(kStretchFlag[0], 0, b)) s.brush.stretch = b;
     if (args.isFlagSet(kStraightenFlag[0]) && args.getFlagArgument(kStraightenFlag[0], 0, b)) s.brush.straighten = b;
@@ -1576,6 +1580,7 @@ MStatus BrushContextCmd::doQueryFlags() {
             setResult(color);
         } else if (args.isFlagSet(kPaintChannelsFlag[0])) setResult(MString(channelLetters(s.paintChannels).c_str()));
         else if (args.isFlagSet(kPaintModeFlag[0])) setResult(MString(paintModeName(s.brush.paintMode)));
+        else if (args.isFlagSet(kPaintWholeFacesFlag[0])) setResult(s.paintWholeFaces);
         else if (args.isFlagSet(kAlphaFlag[0])) setResult(MString(s.alphaPath.c_str()));
         else if (args.isFlagSet(kAlphaRotationFlag[0])) setResult(MString(s.alphaRotationName().c_str()));
         else if (args.isFlagSet(kAlphaAngleFlag[0])) setResult(double(s.alphaAngle));

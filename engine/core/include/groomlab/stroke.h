@@ -85,6 +85,11 @@ struct BrushToolSettings {
     // map: toward 0, or 1 while brush.value is 0: grayCtrlTarget); Shift+drag smooths them.
     PaintColor paintColor{1.0f, 1.0f, 1.0f, 1.0f};
     unsigned paintChannels = kAllChannels;
+    // Whole Faces: a dab on a scalp map (vertices or texture) fills the faces under it (the host's
+    // polygons whose center it covers, and the one under its center: polygonsUnderDab) all the way,
+    // by the strength, the falloff left out: masks by face, as a face selection fills them.
+    // Smoothing (Shift+drag) smooths as ever.
+    bool paintWholeFaces = false;
     PaintColor paintTarget(bool inverted) const {
         PaintColor c = paintColor;
         if (inverted) {
@@ -233,6 +238,7 @@ struct MapDab {
     // The mirrored dab weighs each point by the dab's own weight at its mirror image (an alpha's
     // pattern mirrored), not by a world sphere.
     bool mirrorWeight = false;
+    bool wholeFaces = false;  // BrushToolSettings::paintWholeFaces (not while smoothing)
     // A dab of `brush` (the pressed settings: Ctrl's value already flipped) on a map of `channels`:
     // a color map toward s.paintTarget(inverted), a gray map toward brush.value. Smoothing runs
     // s.smoothStrength x `smoothScale` (the pen's pressure; a scripted stroke's |strength|), in

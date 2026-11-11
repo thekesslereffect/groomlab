@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -53,6 +55,10 @@ const char* kSetChannels[] = {"-sch", "-setChannels"};
 const char* kRelink[] = {"-rl", "-relink"};
 const char* kCopyFrom[] = {"-cf", "-copyFrom"};
 const char* kDeleteFile[] = {"-df", "-deleteFile"};
+// The scalp's faces (polygon indices, space separated): -make makes the map 0 with -value (or
+// -fillColor) on those faces only; -fill fills those faces only. A guide layer: the guides
+// rooted on them.
+const char* kFaces[] = {"-fcs", "-faces"};
 
 
 bool hasLayer(const GuideHierarchy& h, const std::string& name) {
@@ -116,6 +122,7 @@ MSyntax ScalpMapsCmd::newSyntax() {
     s.addFlag(kRelink[0], kRelink[1], MSyntax::kString);
     s.addFlag(kCopyFrom[0], kCopyFrom[1], MSyntax::kString);
     s.addFlag(kDeleteFile[0], kDeleteFile[1]);
+    s.addFlag(kFaces[0], kFaces[1], MSyntax::kString);
     s.setObjectType(MSyntax::kSelectionList, 0, 1);
     s.useSelectionAsDefault(true);
     s.enableQuery(false);
@@ -261,6 +268,24 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
             return true;
         };
         const bool makeColor = db.isFlagSet(kColor[0]);
+        // -faces: the polygons a make or fill is limited to (none given: everywhere).
+        const bool onFaces = db.isFlagSet(kFaces[0]);
+        std::vector<std::int32_t> faces;
+        if (onFaces) {
+            std::istringstream words(flagString(db, kFaces[0]).asChar());
+            long long f = 0;
+            while (words >> f) {
+                if (f >= 0 && f <= std::numeric_limits<std::int32_t>::max()) faces.push_back(static_cast<std::int32_t>(f));
+            }
+            if (faces.empty()) return fail(kName, "-faces names no face");
+            if (!scalp) return fail(kName, "the groom has no scalp mesh");
+        }
+        // A guide layer on faces: the guides rooted on them (their root's triangle in one).
+        const std::vector<std::uint8_t> faceTriangles = onFaces ? polygonTriangles(*scalp, faces) : std::vector<std::uint8_t>{};
+        auto rootedOnFaces = [&](const HierarchyGuide& g) {
+            return g.root.face >= 0 && static_cast<std::size_t>(g.root.face) < faceTriangles.size() &&
+                   faceTriangles[static_cast<std::size_t>(g.root.face)] != 0;
+        };
 
         try {
             if (db.isFlagSet(kAdd[0])) {
@@ -271,22 +296,28 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                 if (makeColor && kind == "guides") {
                     return fail(kName, "a guide layer is gray: make a color map on the scalp's vertices or as a texture");
                 }
+                // On faces: 0 (a color map: black, alpha 1) with the value or color on those faces.
+                const PaintColor base{0.0f, 0.0f, 0.0f, 1.0f};
                 if (kind == "guides") {
                     for (const HierarchyGuide& g : h->guides()) {
-                        if (h->groupDepth(g.group) == 0) h->setAttribute(g.id, name, value);  // children inherit
+                        if (h->groupDepth(g.group) != 0) continue;  // children inherit
+                        h->setAttribute(g.id, name, !onFaces || rootedOnFaces(g) ? value : 0.0f);
                     }
                     guidesChanged = true;
                 } else if (kind == "vertices") {
                     if (!scalp) return fail(kName, "the groom has no scalp mesh");
-                    ScalpMapEntry entry{"vertices", filledVertexMap(scalp->pointCount(), makeColor ? kColorMap : kGrayMap, color), ""};
-                    entry.channels = makeColor ? kColorMap : kGrayMap;
+                    const int channels = makeColor ? kColorMap : kGrayMap;
+                    ScalpMapEntry entry{"vertices", filledVertexMap(scalp->pointCount(), channels, onFaces ? base : color), ""};
+                    if (onFaces) fillVertexMapFaces(entry.values, channels, kAllChannels, color, PaintMode::Replace, *scalp, faces);
+                    entry.channels = channels;
                     maps.maps[name] = std::move(entry);
                     mapsChanged = true;
                 } else if (kind == "texture") {
                     if (texturePath.empty()) return fail(kName, "a texture map needs -texture <file>");
                     if (!scalp) return fail(kName, "the groom has no scalp mesh");
-                    const TexturePaint paint = makeColor ? TexturePaint(*scalp, resolution, resolution, color)
-                                                         : TexturePaint(*scalp, resolution, resolution, value);
+                    TexturePaint paint = makeColor ? TexturePaint(*scalp, resolution, resolution, onFaces ? base : color)
+                                                   : TexturePaint(*scalp, resolution, resolution, onFaces ? 0.0f : value);
+                    if (onFaces) paint.fillTriangles(faceTriangles, color, kAllChannels);
                     const std::string stored = freshTexture(texturePath);
                     writeTexture(paint, stored);
                     ScalpMapEntry entry{"texture", {}, stored};
@@ -369,6 +400,7 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                 const unsigned mask = byColor ? fillMask : (fillMask & 0x7u);
                 if (kind == "guides") {
                     for (const HierarchyGuide& g : h->guides()) {
+                        if (onFaces && !rootedOnFaces(g)) continue;
                         float current = 0.0f;
                         h->effectiveAttribute(g, name, &current);
                         h->setAttribute(g.id, name, compositePaintValue(current, value, paintMode));
@@ -381,14 +413,19 @@ MStatus ScalpMapsCmd::doIt(const MArgList& args) {
                         // Refitted to this scalp.
                         entry.values = filledVertexMap(scalp->pointCount(), channels, PaintColor{0.0f, 0.0f, 0.0f, 1.0f});
                     }
-                    fillMapValues(entry.values, channels, mask, per == 1 ? PaintColor{value, value, value, value} : color,
-                                  paintMode);
+                    const PaintColor target = per == 1 ? PaintColor{value, value, value, value} : color;
+                    if (onFaces) {
+                        fillVertexMapFaces(entry.values, channels, mask, target, paintMode, *scalp, faces);
+                    } else {
+                        fillMapValues(entry.values, channels, mask, target, paintMode);
+                    }
                     mapsChanged = true;
                 } else {
                     // A file another groom reads too: this groom gets its own copy first.
                     mapsChanged = ownFile(name) || mapsChanged;
                     TexturePaint paint = texturePaint(maps.maps[name].texture, channels);
-                    if (channels == kColorMap) paint.fill(color, mask, paintMode);
+                    if (onFaces) paint.fillTriangles(faceTriangles, channels == kColorMap ? color : PaintColor{value, value, value, value}, mask, paintMode);
+                    else if (channels == kColorMap) paint.fill(color, mask, paintMode);
                     else paint.fill(value, paintMode);
                     writeTexture(paint, maps.maps[name].texture);
                 }

@@ -80,6 +80,32 @@ std::shared_ptr<const SurfaceTopology> surfaceTopology(const ScalpMesh& scalp);
 std::vector<std::int32_t> reachedFaces(const SurfaceTopology& surface, std::int32_t seed, const Vec3f& center, float radius,
                                        std::vector<std::uint8_t>& reached);
 
+// ---- Faces (the host's polygons) --------------------------------------------
+
+// A map filled on whole faces: the host's polygons (ScalpMesh::polygons(): a quad is one face,
+// not its two triangles; without them every triangle is a face of its own). What a face selection
+// fills (Create Groom from faces, a new map with faces selected, Fill Selected) and what the
+// Paint brush's Whole Faces fills under it.
+struct ScalpPolygons {
+    std::vector<std::uint32_t> polygonOf;    // per triangle: its polygon
+    std::vector<std::uint32_t> firstTriangle;  // per polygon + 1: its triangles' range
+    std::size_t count() const { return firstTriangle.empty() ? 0 : firstTriangle.size() - 1; }
+    static ScalpPolygons of(const ScalpMesh& scalp);
+};
+// Per triangle: 1 when it belongs to one of the polygons `faces` (indices past the mesh ignored).
+std::vector<std::uint8_t> polygonTriangles(const ScalpMesh& scalp, const std::vector<std::int32_t>& faces);
+// The vertices of the triangles flagged in `triangles` (ascending, each once).
+std::vector<std::uint32_t> trianglesVertices(const ScalpMesh& scalp, const std::vector<std::uint8_t>& triangles);
+// The polygons a Whole Faces dab fills, as triangle flags: those on the surface the dab reaches
+// (reachedFaces from the triangle nearest `center`) whose center lies within `radius`, and the
+// polygon under the center whatever its size (a brush smaller than a face still fills it). Empty
+// (all 0) when the dab misses the scalp.
+std::vector<std::uint8_t> polygonsUnderDab(const ScalpMesh& scalp, const Vec3f& center, float radius);
+// A vertex map (values per vertex: `channels` 1 or 4) filled on the vertices of polygons `faces`
+// only, compositing in `mode` (fillMapValues on those). Returns the vertices changed.
+std::size_t fillVertexMapFaces(std::vector<float>& values, int channels, unsigned mask, const PaintColor& color,
+                               PaintMode mode, const ScalpMesh& scalp, const std::vector<std::int32_t>& faces);
+
 // ---- Vertex maps ----------------------------------------------------------
 
 // One brush stamp on a vertex map (values.size() == scalp.pointCount()): each
@@ -271,6 +297,15 @@ public:
     std::size_t stampReach(const Reach& reach, float strength, const PaintColor& target, unsigned mask,
                            PaintMode mode = PaintMode::Replace, bool fromEditStart = false);
     std::size_t smoothReach(const Reach& reach, float strength, unsigned mask = kAllChannels);
+    // A Whole Faces dab's reach: every covered texel of the triangles flagged in `triangles`
+    // (polygonsUnderDab), weight 1, found within the sphere of `radius` around `center` holding
+    // them (a dab's polygons: near it).
+    Reach reachOfTriangles(const std::vector<std::uint8_t>& triangles, const Vec3f& center, float radius) const;
+    // The covered texels of the triangles flagged in `triangles` set to `color` in the channels of
+    // `mask` (a gray map: color[0]), composited in `mode`: a face selection filled. Returns the
+    // texels changed.
+    std::size_t fillTriangles(const std::vector<std::uint8_t>& triangles, const PaintColor& color, unsigned mask = kAllChannels,
+                              PaintMode mode = PaintMode::Replace);
     // Every texel `value`: a color map's r g b (its alpha kept).
     void fill(float value, PaintMode mode = PaintMode::Replace);
     // The channels of `mask` set to the color's (a gray map: value = color[0]).

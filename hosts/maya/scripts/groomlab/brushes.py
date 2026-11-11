@@ -42,7 +42,7 @@ def brush_stroke(groom, mode, points, radius=0.25, strength=1.0, level=0, group=
                  targets="guides", paint_kind="guides", paint_texture="", paint_resolution=1024, hardness=0.0,
                  smooth_strength=1.0, paint_color=None, paint_channels="rgba", strength_profile=None,
                  falloff_profile=None, solo_new_guides=False, tube_channel="width", tube=None,
-                 paint_mode="replace"):
+                 paint_mode="replace", paint_whole_faces=False):
     """Apply one scripted brush stroke (one undo step) to a groom's guides, parts or flow arrows.
 
     `points` is the stroke path in world space; each point stamps a brush
@@ -102,6 +102,8 @@ def brush_stroke(groom, mode, points, radius=0.25, strength=1.0, level=0, group=
               "strengthProfile": curve_text(strength_profile), "falloffProfile": curve_text(falloff_profile),
               "soloNewGuides": bool(solo_new_guides), "tubeChannel": _tube_channel(tube_channel)}
     kwargs["paintMode"] = paint_mode
+    if paint_whole_faces:
+        kwargs["paintWholeFaces"] = True  # (brush_tool's: the faces under each stamp filled whole)
     if tube is not None:
         kwargs["placeTube"] = _placement_tube(tube)
     if group:
@@ -180,7 +182,7 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
                targets="guides", paint_color=None, paint_channels="rgba", mask_by_scalp=True, strength_profile=None,
                falloff_profile=None, solo_new_guides=False, tube_channel="width", tube=None, activate=True,
                paint_mode="replace", alpha="", alpha_rotation="fixed", alpha_angle=0.0, alpha_spacing=0.25,
-               alpha_invert=False):
+               alpha_invert=False, paint_whole_faces=False):
     """Configure the interactive GroomLab brush (radius in pixels) and make it the current tool.
 
     Select the groom first; then drag over it in the viewport. Each drag is one undo step.
@@ -217,6 +219,9 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
       stroke goes plus it, "random" a random angle per stamp. Stamps fall `alpha_spacing` x the
       brush's diameter apart; `alpha_invert` paints where the image is black. Guide maps and
       Shift+drag smoothing take no alpha.
+    - `paint_whole_faces` (paint on a scalp map: vertices or texture): each dab fills the scalp's
+      faces under it all the way (those whose center it covers, and the one under it), no falloff:
+      masks by face.
     - `tube_channel` (shape): what the Tube brush paints on the tubes near it: "width",
       "flatness" or "twist" (a negative strength does the opposite).
     - `tube` (place, draw): the new guides' tube, as in brush_stroke (the Groom Tools' Tubes panel
@@ -245,7 +250,8 @@ def brush_tool(mode="comb", radius=60, strength=1.0, level=0, group="", propagat
               "strengthProfile": curve_text(strength_profile), "falloffProfile": curve_text(falloff_profile),
               "soloNewGuides": bool(solo_new_guides), "tubeChannel": _tube_channel(tube_channel),
               "alpha": alpha or "", "alphaRotation": alpha_rotation, "alphaAngle": float(alpha_angle),
-              "alphaSpacing": float(alpha_spacing), "alphaInvert": bool(alpha_invert)}
+              "alphaSpacing": float(alpha_spacing), "alphaInvert": bool(alpha_invert),
+              "paintWholeFaces": bool(paint_whole_faces)}
     kwargs.update(_paint_color_flags(paint_color, paint_channels))
     if attribute:
         kwargs["attribute"] = attribute

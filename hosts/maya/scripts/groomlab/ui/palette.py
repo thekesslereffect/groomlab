@@ -1996,11 +1996,9 @@ class ToolPalette(QtWidgets.QWidget):
         self.status.setText("Added %s (selected): click Create Groom from Selection." % part)
 
     def create_groom(self):
-        from maya import cmds
         from groomlab.ui import menu
-        meshes = cmds.ls(selection=True, dag=True, type="mesh", noIntermediate=True)
-        if not meshes:
-            self.status.setText("Select the scalp mesh (and any guide curves) first.")
+        if not menu.selected_meshes():
+            self.status.setText("Select the scalp mesh, or faces of one (and any guide curves), first.")
             return
         try:
             menu.create_groom_from_selection()

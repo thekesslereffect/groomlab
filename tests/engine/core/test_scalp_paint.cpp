@@ -233,6 +233,70 @@ TEST(ScalpPaint, TextureTableCoversTheScalpAndStampsTexels) {
     EXPECT_EQ(gray[16 * 32 + 30], 0);    // beyond the padding
 }
 
+TEST(ScalpPaint, FacesFillWholePolygons) {
+    // A 4 x 4 plane of quads: polygon z * 4 + x is cell (x, z), its two triangles 2p and 2p + 1.
+    auto plane = uvPlane(4);
+    plane->setPolygons(std::vector<std::int32_t>(16, 2));
+    const auto at = [](int x, int z) { return static_cast<std::size_t>(z * 5 + x); };
+    // A face selection on a vertex map: the quad's four corners, nothing else.
+    std::vector<float> values(plane->pointCount(), 0.0f);
+    EXPECT_EQ(fillVertexMapFaces(values, kGrayMap, kAllChannels, {1.0f, 1.0f, 1.0f, 1.0f}, PaintMode::Replace, *plane, {5}), 4u);
+    for (std::size_t v = 0; v < values.size(); ++v) {
+        const bool corner = v == at(1, 1) || v == at(2, 1) || v == at(1, 2) || v == at(2, 2);
+        EXPECT_EQ(values[v], corner ? 1.0f : 0.0f) << v;
+    }
+    EXPECT_EQ(fillVertexMapFaces(values, kGrayMap, kAllChannels, {0.5f, 0.5f, 0.5f, 0.5f}, PaintMode::Replace, *plane, {99}), 0u);
+    // Without polygons every triangle is a face.
+    auto triangles = uvPlane(4);
+    std::vector<float> one(triangles->pointCount(), 0.0f);
+    EXPECT_EQ(fillVertexMapFaces(one, kGrayMap, kAllChannels, {1.0f, 1.0f, 1.0f, 1.0f}, PaintMode::Replace, *triangles, {10}), 3u);
+    // A texture map: the quad's texels (u and v 0.25 to 0.5), nothing else.
+    TexturePaint paint(*plane, 32, 32, 0.0f);
+    EXPECT_GT(paint.fillTriangles(polygonTriangles(*plane, {5}), {1.0f, 1.0f, 1.0f, 1.0f}), 0u);
+    const auto texel = [&](float u, float v) {
+        const int x = static_cast<int>(u * 32.0f), y = static_cast<int>((1.0f - v) * 32.0f);
+        return paint.values()[static_cast<std::size_t>(y) * 32 + static_cast<std::size_t>(x)];
+    };
+    EXPECT_EQ(texel(0.375f, 0.375f), 1.0f);
+    EXPECT_EQ(texel(0.8f, 0.375f), 0.0f);
+    EXPECT_EQ(texel(0.375f, 0.8f), 0.0f);
+    // A dab's faces: the one under its center however small the dab, plus those whose center it
+    // covers (the four beside it, 0.25 away; not the diagonal ones, 0.35 away).
+    const Vec3f middle{0.375f, 0.0f, 0.375f};
+    const auto count = [](const std::vector<std::uint8_t>& flags) { return std::count(flags.begin(), flags.end(), 1); };
+    const std::vector<std::uint8_t> small = polygonsUnderDab(*plane, middle, 0.05f);
+    EXPECT_EQ(count(small), 2);
+    EXPECT_TRUE(small[10] && small[11]);
+    EXPECT_EQ(count(polygonsUnderDab(*plane, middle, 0.3f)), 10);
+    // The Paint brush's Whole Faces: a small dab fills its quad's corners all the way.
+    BrushToolSettings settings;
+    settings.paintWholeFaces = true;
+    BrushSettings brush;
+    brush.mode = BrushMode::Attribute;
+    brush.value = 1.0f;
+    brush.strength = 1.0f;
+    std::vector<float> painted(plane->pointCount(), 0.0f);
+    MapCanvas canvas;
+    canvas.vertices = &painted;
+    const MapDab dab = MapDab::of(settings, brush, kGrayMap, false, 1.0f);
+    EXPECT_TRUE(dab.wholeFaces);
+    EXPECT_EQ(paintMapDab(canvas, *plane, dab, middle, 0.05f, sphereWeight(middle, 0.05f), true), 4u);
+    EXPECT_EQ(painted, values);
+    // ...and on a texture, the quad's texels.
+    TexturePaint brushed(*plane, 32, 32, 0.0f);
+    MapCanvas textureCanvas;
+    textureCanvas.texture = &brushed;
+    EXPECT_GT(paintMapDab(textureCanvas, *plane, dab, middle, 0.05f, sphereWeight(middle, 0.05f), true), 0u);
+    EXPECT_EQ(brushed.values(), paint.values());
+    // Off, the same dab paints the falloff's few vertices inside it: none of the corners, 0.177 away.
+    settings.paintWholeFaces = false;
+    std::vector<float> plain(plane->pointCount(), 0.0f);
+    canvas.vertices = &plain;
+    EXPECT_EQ(paintMapDab(canvas, *plane, MapDab::of(settings, brush, kGrayMap, false, 1.0f), middle, 0.05f,
+                          sphereWeight(middle, 0.05f), true),
+              0u);
+}
+
 TEST(ScalpPaint, SmoothingBlendsNeighbors) {
     // A vertex map with a hard step at x = 0.5: smoothing at the step spreads it, and only
     // within the brush; the sum barely moves (the blur takes from one side, gives to the other).

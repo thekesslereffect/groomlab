@@ -610,6 +610,7 @@ MapDab MapDab::of(const BrushToolSettings& s, const BrushSettings& b, int channe
     d.mirrorAxis = b.mirrorAxis;
     d.mirrorCenter = b.mirrorCenter;
     d.mirrorTopology = b.mirrorTopology;
+    d.wholeFaces = s.paintWholeFaces && !d.smoothing;
     return d;
 }
 
@@ -619,6 +620,27 @@ namespace {
 std::size_t dabOnce(MapCanvas& map, const ScalpMesh& scalp, const MapDab& d, const Vec3f& c, float radius,
                     const BrushWeightFn& w, bool threadSafe) {
     std::size_t changed = 0;
+    if (d.wholeFaces && (map.vertices || map.texture)) {
+        // The faces under the dab, every one of their vertices or texels at full weight.
+        const std::vector<std::uint8_t> faces = polygonsUnderDab(scalp, c, radius);
+        const std::vector<std::uint32_t> corners = trianglesVertices(scalp, faces);
+        if (corners.empty()) return 0;
+        if (map.vertices) {
+            VertexReach reach;
+            reach.reserve(corners.size());
+            for (const std::uint32_t v : corners) reach.emplace_back(v, 1.0f);
+            return stampVertexReach(*map.vertices, map.channels, d.mask, scalp, reach, d.strength, d.target, d.mode,
+                                    d.fromStrokeStart ? map.strokeStartVertices : nullptr);
+        }
+        // A texture: the faces' texels, found in the sphere around their corners.
+        Vec3f mid{0.0f, 0.0f, 0.0f};
+        for (const std::uint32_t v : corners) mid = mid + scalp.points()[v];
+        mid = mid * (1.0f / static_cast<float>(corners.size()));
+        float reachOut = 0.0f;
+        for (const std::uint32_t v : corners) reachOut = std::max(reachOut, (scalp.points()[v] - mid).length());
+        return map.texture->stampReach(map.texture->reachOfTriangles(faces, mid, reachOut * 1.001f + 1e-6f), d.strength, d.target,
+                                       d.mask, d.mode, d.fromStrokeStart);
+    }
     if (map.vertices) {
         const VertexReach reach = vertexReach(scalp, c, radius, w);
         static const VertexNeighbors none;

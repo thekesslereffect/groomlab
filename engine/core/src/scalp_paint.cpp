@@ -413,6 +413,118 @@ VertexReach vertexReach(const ScalpMesh& scalp, const Vec3f& center, float radiu
     return out;
 }
 
+ScalpPolygons ScalpPolygons::of(const ScalpMesh& scalp) {
+    ScalpPolygons out;
+    const std::size_t tris = scalp.triangleCount();
+    out.polygonOf.resize(tris);
+    out.firstTriangle.push_back(0);
+    const std::vector<std::int32_t>& counts = scalp.polygons();
+    if (counts.empty()) {  // every triangle a face of its own
+        for (std::size_t t = 0; t < tris; ++t) {
+            out.polygonOf[t] = static_cast<std::uint32_t>(t);
+            out.firstTriangle.push_back(static_cast<std::uint32_t>(t + 1));
+        }
+        return out;
+    }
+    std::size_t t = 0;
+    for (std::size_t p = 0; p < counts.size(); ++p) {
+        for (std::int32_t k = 0; k < counts[p] && t < tris; ++k, ++t) out.polygonOf[t] = static_cast<std::uint32_t>(p);
+        out.firstTriangle.push_back(static_cast<std::uint32_t>(t));
+    }
+    return out;
+}
+
+std::vector<std::uint8_t> polygonTriangles(const ScalpMesh& scalp, const std::vector<std::int32_t>& faces) {
+    const ScalpPolygons polygons = ScalpPolygons::of(scalp);
+    std::vector<std::uint8_t> out(scalp.triangleCount(), 0);
+    for (const std::int32_t face : faces) {
+        if (face < 0 || static_cast<std::size_t>(face) >= polygons.count()) continue;
+        for (std::uint32_t t = polygons.firstTriangle[static_cast<std::size_t>(face)];
+             t < polygons.firstTriangle[static_cast<std::size_t>(face) + 1]; ++t) {
+            out[t] = 1;
+        }
+    }
+    return out;
+}
+
+std::vector<std::uint32_t> trianglesVertices(const ScalpMesh& scalp, const std::vector<std::uint8_t>& triangles) {
+    std::vector<std::uint8_t> used(scalp.pointCount(), 0);
+    const std::size_t n = std::min(triangles.size(), scalp.triangleCount());
+    for (std::size_t t = 0; t < n; ++t) {
+        if (!triangles[t]) continue;
+        for (const std::int32_t v : scalp.triangles()[t]) used[static_cast<std::size_t>(v)] = 1;
+    }
+    std::vector<std::uint32_t> out;
+    for (std::size_t v = 0; v < used.size(); ++v) {
+        if (used[v]) out.push_back(static_cast<std::uint32_t>(v));
+    }
+    return out;
+}
+
+std::vector<std::uint8_t> polygonsUnderDab(const ScalpMesh& scalp, const Vec3f& center, float radius) {
+    std::vector<std::uint8_t> out(scalp.triangleCount(), 0);
+    if (!(radius > 0.0f) || scalp.triangleCount() == 0) return out;
+    const SurfacePoint hit = scalp.closestPoint(center, radius);
+    if (hit.root.face < 0) return out;
+    const ScalpPolygons polygons = ScalpPolygons::of(scalp);
+    const std::shared_ptr<const SurfaceTopology> surface = surfaceTopology(scalp);
+    std::vector<std::uint8_t> reached;
+    std::vector<std::uint32_t> candidates;
+    for (const std::int32_t t : reachedFaces(*surface, hit.root.face, center, radius, reached)) {
+        candidates.push_back(polygons.polygonOf[static_cast<std::size_t>(t)]);
+    }
+    std::sort(candidates.begin(), candidates.end());
+    candidates.erase(std::unique(candidates.begin(), candidates.end()), candidates.end());
+    const std::uint32_t under = polygons.polygonOf[static_cast<std::size_t>(hit.root.face)];
+    const std::vector<Vec3f>& points = scalp.points();
+    const float r2 = radius * radius;
+    for (const std::uint32_t p : candidates) {
+        const std::uint32_t first = polygons.firstTriangle[p], last = polygons.firstTriangle[p + 1];
+        bool take = p == under;
+        if (!take) {
+            // The polygon's center: the mean of its triangles' corners (each corner once).
+            std::vector<std::int32_t> corners;
+            for (std::uint32_t t = first; t < last; ++t) {
+                for (const std::int32_t v : scalp.triangles()[t]) corners.push_back(v);
+            }
+            std::sort(corners.begin(), corners.end());
+            corners.erase(std::unique(corners.begin(), corners.end()), corners.end());
+            Vec3f sum{0.0f, 0.0f, 0.0f};
+            for (const std::int32_t v : corners) sum = sum + points[static_cast<std::size_t>(v)];
+            const Vec3f d = sum * (1.0f / static_cast<float>(std::max<std::size_t>(corners.size(), 1))) - center;
+            take = d.dot(d) <= r2;
+        }
+        if (!take) continue;
+        for (std::uint32_t t = first; t < last; ++t) out[t] = 1;
+    }
+    return out;
+}
+
+std::size_t fillVertexMapFaces(std::vector<float>& values, int channels, unsigned mask, const PaintColor& color,
+                               PaintMode mode, const ScalpMesh& scalp, const std::vector<std::int32_t>& faces) {
+    requireChannels(channels, "fillVertexMapFaces");
+    const auto n = static_cast<std::size_t>(channels);
+    if (values.size() != scalp.pointCount() * n) {
+        throw std::invalid_argument("fillVertexMapFaces: one value per scalp vertex and channel");
+    }
+    const unsigned m = channels == kGrayMap ? 1u : (mask & kAllChannels);
+    std::size_t changed = 0;
+    for (const std::uint32_t v : trianglesVertices(scalp, polygonTriangles(scalp, faces))) {
+        bool any = false;
+        for (std::size_t c = 0; c < n; ++c) {
+            if (!(m & (1u << c))) continue;
+            float& x = values[v * n + c];
+            const float next = compositePaintValue(x, color[c], mode);
+            if (next != x) {
+                x = next;
+                any = true;
+            }
+        }
+        if (any) ++changed;
+    }
+    return changed;
+}
+
 std::size_t stampVertexReach(std::vector<float>& values, int channels, unsigned mask, const ScalpMesh& scalp,
                              const VertexReach& reach, float strength, const PaintColor& target, PaintMode mode,
                              const std::vector<float>* strokeStart) {
@@ -1271,6 +1383,51 @@ std::size_t TexturePaint::stampReach(const Reach& reach, float strength, const P
         dirty_.unite({static_cast<int>(left), static_cast<int>(lo), static_cast<int>(right) + 1, static_cast<int>(hi) + 1});
     }
     return changed;
+}
+
+TexturePaint::Reach TexturePaint::reachOfTriangles(const std::vector<std::uint8_t>& triangles, const Vec3f& center,
+                                                   float radius) const {
+    Reach out;
+    const TexelTable& t = *table_;
+    if (t.nx == 0 || radius <= 0.0f) return out;
+    const auto flagged = [&](std::int32_t face) {
+        return face >= 0 && static_cast<std::size_t>(face) < triangles.size() && triangles[static_cast<std::size_t>(face)];
+    };
+    const int ix0 = std::clamp(static_cast<int>((center.x - radius - t.gridLo.x) / t.cell), 0, t.nx - 1);
+    const int ix1 = std::clamp(static_cast<int>((center.x + radius - t.gridLo.x) / t.cell), 0, t.nx - 1);
+    const int iy0 = std::clamp(static_cast<int>((center.y - radius - t.gridLo.y) / t.cell), 0, t.ny - 1);
+    const int iy1 = std::clamp(static_cast<int>((center.y + radius - t.gridLo.y) / t.cell), 0, t.ny - 1);
+    const int iz0 = std::clamp(static_cast<int>((center.z - radius - t.gridLo.z) / t.cell), 0, t.nz - 1);
+    const int iz1 = std::clamp(static_cast<int>((center.z + radius - t.gridLo.z) / t.cell), 0, t.nz - 1);
+    for (int iz = iz0; iz <= iz1; ++iz) {
+        for (int iy = iy0; iy <= iy1; ++iy) {
+            for (int ix = ix0; ix <= ix1; ++ix) {
+                const std::size_t c = (static_cast<std::size_t>(iz) * static_cast<std::size_t>(t.ny) + static_cast<std::size_t>(iy)) *
+                                          static_cast<std::size_t>(t.nx) + static_cast<std::size_t>(ix);
+                for (std::uint32_t k = t.cellStart[c]; k < t.cellStart[c + 1]; ++k) {
+                    const std::size_t i = t.cellTexels[k];
+                    if (flagged(t.roots[i].face)) out.emplace_back(i, 1.0f);
+                }
+            }
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+std::size_t TexturePaint::fillTriangles(const std::vector<std::uint8_t>& triangles, const PaintColor& color, unsigned mask,
+                                        PaintMode mode) {
+    requireNotEditing("fillTriangles");
+    Reach reach;
+    const TexelTable& t = *table_;
+    for (std::size_t i = 0; i < t.roots.size(); ++i) {
+        const std::int32_t face = t.roots[i].face;
+        if (face >= 0 && static_cast<std::size_t>(face) < triangles.size() && triangles[static_cast<std::size_t>(face)]) {
+            reach.emplace_back(i, 1.0f);
+        }
+    }
+    const PaintColor target = channels_ == kGrayMap ? PaintColor{color[0], color[0], color[0], color[0]} : color;
+    return stampReach(reach, 1.0f, target, mask, mode, false);
 }
 
 std::size_t TexturePaint::smooth(const Vec3f& center, float radius, float strength, const BrushWeightFn& weight, unsigned mask) {

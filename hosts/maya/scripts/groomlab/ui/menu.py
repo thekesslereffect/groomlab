@@ -87,21 +87,58 @@ def ensure_scene_saved(what):
     return True
 
 
-def create_groom_from_selection():
-    """Selected mesh = scalp; selected curves become primary guides."""
-    import groomlab
+def selected_meshes():
+    """The selected mesh shapes: picked whole, or the meshes of selected components (faces,
+    vertices, edges)."""
     meshes = cmds.ls(selection=True, dag=True, type="mesh", noIntermediate=True)
+    if not meshes:  # only components selected: their meshes
+        meshes = [o for o in cmds.ls(selection=True, objectsOnly=True, long=True) or []
+                  if cmds.nodeType(o) == "mesh" and not cmds.getAttr(o + ".intermediateObject")]
+    return meshes
+
+
+def create_groom_from_selection():
+    """Selected mesh = scalp; selected curves become primary guides. Faces of the mesh selected
+    (vertices or edges: the faces they enclose): hair grows on those only, through a density map
+    on the scalp's vertices (scatter_density, 1 on them, 0 elsewhere), painted further in the
+    Paint tab."""
+    import groomlab
+    meshes = selected_meshes()
     curves = cmds.ls(selection=True, dag=True, type="nurbsCurve")
     if not meshes:
-        cmds.warning("GroomLab: select a scalp mesh (and optionally guide curves)")
+        cmds.warning("GroomLab: select a scalp mesh, or faces of one (and optionally guide curves)")
         return
+    faces = groomlab.selected_faces(meshes[0])
     if not ensure_scene_saved("this groom's painted masks, card bakes and exports"):
         return
     groom = groomlab.create_groom(meshes[0], fit=True)  # the default hair in proportion to the scalp
     if curves:
         groomlab.guides_from_curves(groom, curves)
+    if faces:
+        grow_on_faces(groom, faces)
     groomlab.pin_new_groom(groom)
     cmds.select(groom)
+
+
+def grow_on_faces(groom, faces):
+    """Hair on these faces of the scalp only: the Scatter's density reads a vertex map 1 on them, 0
+    elsewhere (made, or filled so when it reads one already). Returns the map's name."""
+    import groomlab
+    from groomlab import graph as gm
+    model = gm.GraphModel.from_groom(groom)
+    scatter = next((n for n in model.order if model.node_type(n) == "Scatter"), None)
+    if not scatter:
+        cmds.warning("GroomLab: the groom has no Scatter to limit to the selected faces")
+        return None
+    found = groomlab.param_map(groom, scatter, "density")
+    if found:
+        name = found[0]
+        groomlab.fill_map(groom, name, 0.0)
+        groomlab.fill_map(groom, name, 1.0, faces=faces)
+    else:
+        name = groomlab.paint_param(groom, scatter, "density", kind="vertices", paint=False, faces=faces)
+    _say("Hair on the %d selected faces: %s (Paint tab) is white there, black elsewhere" % (len(faces), name))
+    return name
 
 
 def add_sample_action(sample):
