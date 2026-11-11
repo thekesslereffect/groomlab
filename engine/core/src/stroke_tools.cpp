@@ -483,7 +483,10 @@ ParamSource sourceOf(nlohmann::json& g, const nlohmann::json& node, const ScalpM
     for (const char* key : {"colorSet", "guide"}) {
         if (value->contains(key) && (*value)[key].is_string()) {
             out.map = (*value)[key].get<std::string>();
-            out.kind = std::string(key) == "guide" ? "guides" : kindOf(out.map);
+            out.kind = kindOf(out.map);
+            // A painted map named ("guide"): whatever kind the groom's map of that name is; a guide
+            // layer not painted yet is one of the guides.
+            if (out.kind.empty() && std::string(key) == "guide") out.kind = "guides";
             if (out.kind.empty()) out.foreign = "reads the color set " + out.map + ", which is no map of the groom";
             return out;
         }

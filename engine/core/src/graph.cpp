@@ -110,6 +110,8 @@ std::uint64_t mapParamsKey(const ParamSet& params, const EvalContext& ctx) {
         }
         if (!map || map->source == MapRef::Source::Attribute) continue;
         if (map->source == MapRef::Source::Texture) key = hashCombine(key, fileStamp(resolvePath(map->name)));
+        // A painted map named: whatever kind it is (a texture map's stamp, a vertex map's color set).
+        if (map->source == MapRef::Source::Guide) key = hashCombine(key, paintedMapSalt(ctx, map->name));
         // The scalp's key is its surface; a color set read from it adds its own hash.
         if (map->source == MapRef::Source::ColorSet) key = hashCombine(key, colorSetSalt(ctx, map->name));
         const ExternalInputs::Entry* scalp = ctx.externals ? ctx.externals->find("scalp") : nullptr;

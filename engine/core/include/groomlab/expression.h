@@ -117,6 +117,10 @@ struct ExpressionEnvironment {
     double frame = 0.0;
     // The map of that name; null when there is none (map("name") is then an error).
     std::function<ExpressionMapPtr(const std::string& name)> map;
+    // The image file of the groom's texture map of that name (its "maps" catalog); empty when the
+    // name is no texture map. A param naming a painted map reads a texture map through it
+    // (ScalarField), whatever kind the map picked was.
+    std::function<std::string(const std::string& name)> paintedTexture;
 };
 // Sets the environment for expressions compiled on this thread while it lives; nested scopes
 // put the outer one back. Null: none.

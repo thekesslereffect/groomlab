@@ -78,6 +78,16 @@ ScalarField::ScalarField(const ParamSet& params, const std::string& name, const 
     cage_ = CageBinding(scalp_);
 
     const std::string where = "param '" + name + "': ";
+    if (map_.source == MapRef::Source::Guide) {
+        // A painted map picked by name reads whatever kind it is: a texture map its image (a vertex
+        // map is found as a color set of the scalp, a guide map on the guides, below).
+        const ExpressionEnvironment* environment = ExpressionEnvironmentScope::current();
+        const std::string file = environment && environment->paintedTexture ? environment->paintedTexture(map_.name) : "";
+        if (!file.empty()) {
+            map_.source = MapRef::Source::Texture;
+            map_.name = file;
+        }
+    }
     switch (map_.source) {
         case MapRef::Source::Texture:
             if (!scalp_ || !scalp_->hasUVs()) throw GraphError(where + "a texture map needs a scalp with UVs");
@@ -521,7 +531,23 @@ ExpressionEnvironment expressionEnvironment(const EvalContext& ctx) {
         found->maps[name] = made;
         return made;
     };
+    environment.paintedTexture = [catalog](const std::string& name) -> std::string {
+        if (!catalog) return {};
+        const auto it = catalog->maps.find(name);
+        return it != catalog->maps.end() && it->second.kind == "texture" ? it->second.texture : std::string();
+    };
     return environment;
+}
+
+std::uint64_t paintedMapSalt(const EvalContext& ctx, const std::string& name) {
+    const MapInfo* info = catalogMap(ctx, name);
+    const std::string kind = info ? info->kind : "";
+    if (kind == "texture") {
+        return hashCombine(hashString(hash64(0x7A1E), info->texture), info->texture.empty() ? 0 : fileStamp(resolvePath(info->texture)));
+    }
+    const ScalpMesh* scalp = scalpOf(ctx);
+    if (kind == "vertices" || (kind.empty() && scalp && scalp->hasColorSet(name))) return colorSetSalt(ctx, name);
+    return 0;  // a layer of the guides: the node's guides key it (its own key stays, so strokes evaluate incrementally)
 }
 
 std::uint64_t expressionSalt(const std::string& text, const EvalContext& ctx) {

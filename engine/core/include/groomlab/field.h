@@ -206,5 +206,9 @@ ExpressionEnvironment expressionEnvironment(const EvalContext& ctx);
 // color set or guide layers). 0 when it reads neither: a time-independent expression keeps its
 // node cached from frame to frame.
 std::uint64_t expressionSalt(const std::string& text, const EvalContext& ctx);
+// What a param naming the groom's painted map `name` ({"guide": name}) adds to a cache key in ctx:
+// a texture map's file and stamp, a vertex map's color set; 0 for a layer of the guides (the
+// node's guides key it, and its own key stays put while strokes paint them).
+std::uint64_t paintedMapSalt(const EvalContext& ctx, const std::string& name);
 
 }  // namespace groomlab

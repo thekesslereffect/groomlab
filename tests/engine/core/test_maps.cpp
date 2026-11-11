@@ -134,6 +134,57 @@ TEST(Maps, APaintedMapOnTheScalpsVerticesReadsThere) {
     EXPECT_EQ(mg.eval(mg.scatter)->strandCount(), asColorSet);
 }
 
+TEST(Maps, APaintedMapThatIsATextureReadsItsImage) {
+    // The same for a texture map: a painted map named reads the catalog's image, in a param and
+    // in a Layers stack feeding Scatter (it failed: "a guide map here needs guides"). Repainting
+    // the image re-evaluates.
+    const std::string right = tempPath("groomlab_painted_right.pgm"), top = tempPath("groomlab_painted_top.pgm");
+    writePgm(right, 32, 32, [](int x, int) { return x < 16 ? 0 : 255; });  // white where x > 0.5
+    writePgm(top, 32, 32, [](int, int y) { return y < 16 ? 255 : 0; });    // white where z > 0.5 (rows top down)
+    auto groomWith = [&](const std::string& densityParams, const std::string& extraNodes, const std::string& extraLinks) {
+        GroomData d;
+        d.scalp = mappedPlane();
+        d.graphJson = R"j({"version": 1, "output": "out", "nodes": [
+            {"name": "scalp", "type": "Scalp"},
+            {"name": "scatter", "type": "Scatter", "params": )j" + densityParams + R"j(},)j" + extraNodes + R"j(
+            {"name": "out", "type": "Output"}],
+          "connections": [{"from": "scalp", "to": "scatter", "input": "scalp"},)j" + extraLinks + R"j(
+            {"from": "scatter", "to": "out", "input": "strands"}]})j";
+        d.maps["right"] = {"texture", right};
+        d.maps["top"] = {"texture", top};
+        return std::make_unique<Groom>(d);
+    };
+
+    const auto direct = groomWith(R"({"density": {"guide": "right", "min": 0.0, "max": 800.0}})", "", "");
+    const StrandsPtr painted = direct->evaluate(1.0f, 0.0);
+    ASSERT_TRUE(painted);
+    std::size_t left = 0, rightSide = 0;
+    for (std::size_t s = 0; s < painted->strandCount(); ++s) (painted->strandPoints(s)[0].x < 0.5f ? left : rightSide)++;
+    EXPECT_NEAR(static_cast<double>(rightSide), 400.0, 80.0);
+    EXPECT_LT(left, rightSide / 10);
+
+    // Layers: the right half times the top half (multiply), the user's stack.
+    const auto stacked = groomWith(R"({"density": 800.0}, "paramInputs": ["density"])",
+                                   R"j({"name": "layers", "type": "Layers", "params": {"layers": 2,
+                                        "layer1": {"guide": "right", "component": "r", "min": 0.0, "max": 1.0},
+                                        "layer2": {"guide": "top", "component": "r", "min": 0.0, "max": 1.0},
+                                        "layer2Mode": "multiply"}},)j",
+                                   R"j({"from": "layers", "to": "scatter", "input": "density"},)j");
+    const StrandsPtr quarter = stacked->evaluate(1.0f, 0.0);
+    ASSERT_TRUE(quarter);
+    EXPECT_NEAR(static_cast<double>(quarter->strandCount()), 200.0, 60.0);
+    for (std::size_t s = 0; s < quarter->strandCount(); ++s) {
+        const Vec3f root = quarter->strandPoints(s)[0];
+        if (root.x < 0.1f || root.x > 0.9f || root.z < 0.1f || root.z > 0.9f) continue;  // the edges (filtering wraps)
+        EXPECT_TRUE(root.x > 0.4f && root.z > 0.4f) << root.x << ", " << root.z;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    writePgm(top, 32, 32, [](int, int) { return 0; });  // the top layer painted black
+    EXPECT_EQ(stacked->evaluate(1.0f, 0.0)->strandCount(), 0u);
+    std::remove(right.c_str());
+    std::remove(top.c_str());
+}
+
 TEST(Maps, TextureDensityFollowsTheImageAndReloads) {
     const std::string path = tempPath("groomlab_density.pgm");
     writePgm(path, 64, 64, [](int x, int) { return x * 255 / 63; });  // black left, white right
