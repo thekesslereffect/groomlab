@@ -55,9 +55,10 @@ void writePrmanScene(const std::string& scenePath, const PrmanScene& scene, cons
 // std::runtime_error when txmake fails.
 std::string prmanEnvironmentTexture(const QString& prman, const std::string& scenePath, const RenderStage& stage);
 
-// prman: GROOMLAB_PRMAN (the executable, its folder or RenderMan Pro Server's), else the one chosen
-// in Render > RenderMan Location... (saved), RMANTREE's, the newest default install
-// (Pixar/RenderManProServer-*/bin), prman on PATH. Empty when there is none.
+// prman, as Maya's prman_scene.find_prman looks: the one chosen in Render > RenderMan Location...
+// (saved), else GROOMLAB_PRMAN (the executable, its folder or RenderMan Pro Server's), RMANTREE's,
+// the newest default install (Pixar/RenderManProServer-*/bin), prman on PATH. Empty when there is
+// none.
 QString findPrman();
 void setPrman(const QString& path);
 // prman's executable in `path` (the file, its folder, or an install folder with bin/), or "".

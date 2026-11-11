@@ -38,9 +38,10 @@ using VrayStage = RenderStage;
 // lighting has an environment). Throws std::runtime_error when a file cannot be written.
 void writeVrayScene(const std::string& scenePath, const std::string& groomPath, const RenderStage& stage);
 
-// V-Ray Standalone's executable: GROOMLAB_VRAY, else the one chosen in Render > V-Ray Standalone
-// Location... (saved), the default install (Chaos/V-Ray/Standalone for x64/bin), vray on PATH.
-// Empty when there is none.
+// V-Ray Standalone's executable, as Maya's vray_scene.find_vray looks: the one chosen in Render >
+// V-Ray Standalone Location... (saved), else GROOMLAB_VRAY, VRAY_PATH (each the file, its folder
+// or an install folder with bin/), the default installs (Chaos or Chaos Group/V-Ray/Standalone
+// for x64/bin), vray on PATH. Empty when there is none.
 QString findVrayStandalone();
 void setVrayStandalone(const QString& path);
 

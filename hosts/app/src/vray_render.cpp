@@ -167,10 +167,14 @@ QString vrayBinIn(const QString& path) {
 }  // namespace
 #endif
 
+// As Maya's vray_scene.find_vray: the user's choice, GROOMLAB_VRAY, VRAY_PATH, the default
+// installs, the PATH.
 QString findVrayStandalone() {
+    const QStringList given = {QSettings().value(QLatin1String(kVraySetting)).toString(), qEnvironmentVariable("GROOMLAB_VRAY"),
+                               qEnvironmentVariable("VRAY_PATH")};
 #ifdef Q_OS_MACOS
-    for (const QString& given : {qEnvironmentVariable("GROOMLAB_VRAY"), QSettings().value(QLatin1String(kVraySetting)).toString()}) {
-        const QString bin = vrayBinIn(given);
+    for (const QString& g : given) {
+        const QString bin = vrayBinIn(g);
         if (!bin.isEmpty()) return bin;
     }
     QDir chaos(QStringLiteral("/Applications/Chaos/V-Ray"));
@@ -181,16 +185,32 @@ QString findVrayStandalone() {
     }
     return QStandardPaths::findExecutable(QStringLiteral("vray.bin"));
 #else
-    const auto usable = [](const QString& path) { return !path.isEmpty() && QFileInfo(path).isFile(); };
-    const QString env = qEnvironmentVariable("GROOMLAB_VRAY");
-    if (usable(env)) return QFileInfo(env).absoluteFilePath();
-    const QString chosen = QSettings().value(QLatin1String(kVraySetting)).toString();
-    if (usable(chosen)) return chosen;
 #ifdef Q_OS_WIN
-    const QString programFiles = qEnvironmentVariable("ProgramFiles", QStringLiteral("C:/Program Files"));
-    const QString installed = QDir(programFiles).filePath(QStringLiteral("Chaos/V-Ray/Standalone for x64/bin/vray.exe"));
-    if (usable(installed)) return QDir::cleanPath(installed);
+    const QString exe = QStringLiteral("vray.exe");
+    const QStringList roots = {qEnvironmentVariable("ProgramFiles", QStringLiteral("C:/Program Files")), QStringLiteral("C:/Program Files")};
+#else
+    const QString exe = QStringLiteral("vray");
+    const QStringList roots = {QStringLiteral("/usr/ChaosGroup"), QStringLiteral("/opt/chaos"), QStringLiteral("/Applications/ChaosGroup")};
 #endif
+    // vray at `path`: the file, its folder, or an install folder with bin/.
+    const auto in = [&](const QString& path) -> QString {
+        if (path.isEmpty()) return {};
+        if (QFileInfo(path).isFile()) return QFileInfo(path).absoluteFilePath();
+        for (const QString& candidate : {QDir(path).filePath(exe), QDir(path).filePath(QStringLiteral("bin/") + exe)}) {
+            if (QFileInfo(candidate).isFile()) return QDir::cleanPath(QFileInfo(candidate).absoluteFilePath());
+        }
+        return {};
+    };
+    QStringList candidates = given;
+    for (const QString& root : roots) {
+        for (const QString& vendor : {QStringLiteral("Chaos"), QStringLiteral("Chaos Group")}) {
+            candidates << QDir(root).filePath(vendor + QStringLiteral("/V-Ray/Standalone for x64/bin"));
+        }
+    }
+    for (const QString& c : candidates) {
+        const QString found = in(c);
+        if (!found.isEmpty()) return found;
+    }
     return QStandardPaths::findExecutable(QStringLiteral("vray"));
 #endif
 }

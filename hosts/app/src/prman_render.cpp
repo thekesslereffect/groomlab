@@ -246,18 +246,29 @@ QString prmanIn(const QString& given) {
 }
 
 QString findPrman() {
-    QString found = prmanIn(qEnvironmentVariable("GROOMLAB_PRMAN"));
-    if (found.isEmpty()) found = prmanIn(QSettings().value(QLatin1String(kPrmanSetting)).toString());
+    // As Maya's prman_scene.find_prman: the user's choice, GROOMLAB_PRMAN, RMANTREE, the newest
+    // default install, the PATH.
+    QString found = prmanIn(QSettings().value(QLatin1String(kPrmanSetting)).toString());
+    if (found.isEmpty()) found = prmanIn(qEnvironmentVariable("GROOMLAB_PRMAN"));
     if (found.isEmpty()) found = prmanIn(qEnvironmentVariable("RMANTREE"));
     if (!found.isEmpty()) return found;
 #ifdef Q_OS_WIN
-    const QDir pixar(QDir(qEnvironmentVariable("ProgramFiles", QStringLiteral("C:/Program Files"))).filePath(QStringLiteral("Pixar")));
+    const QStringList roots = {QDir(qEnvironmentVariable("ProgramFiles", QStringLiteral("C:/Program Files"))).filePath(QStringLiteral("Pixar")),
+                               QStringLiteral("C:/Program Files/Pixar")};
 #else
-    const QDir pixar(QStringLiteral("/opt/pixar"));
+    const QStringList roots = {QStringLiteral("/opt/pixar"), QStringLiteral("/Applications/Pixar")};
 #endif
-    QStringList installs = pixar.entryList({QStringLiteral("RenderManProServer-*")}, QDir::Dirs, QDir::Name);
+    QStringList installs;  // full paths, each once
+    for (const QString& root : roots) {
+        const QDir pixar(root);
+        for (const QString& name : pixar.entryList({QStringLiteral("RenderManProServer-*")}, QDir::Dirs, QDir::Name)) {
+            const QString path = QDir::cleanPath(pixar.filePath(name));
+            if (!installs.contains(path, Qt::CaseInsensitive)) installs << path;
+        }
+    }
     // Newest first: 27.10 after 27.3 (by the numbers, not the text).
-    std::sort(installs.begin(), installs.end(), [](const QString& a, const QString& b) {
+    std::sort(installs.begin(), installs.end(), [](const QString& pa, const QString& pb) {
+        const QString a = QFileInfo(pa).fileName(), b = QFileInfo(pb).fileName();
         const QStringList va = a.mid(a.indexOf(QLatin1Char('-')) + 1).split(QLatin1Char('.'));
         const QStringList vb = b.mid(b.indexOf(QLatin1Char('-')) + 1).split(QLatin1Char('.'));
         for (int i = 0; i < std::max(va.size(), vb.size()); ++i) {
@@ -267,7 +278,7 @@ QString findPrman() {
         return false;
     });
     for (const QString& install : installs) {
-        found = prmanIn(pixar.filePath(install));
+        found = prmanIn(install);
         if (!found.isEmpty()) return found;
     }
     return QStandardPaths::findExecutable(QStringLiteral("prman"));
