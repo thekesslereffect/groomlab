@@ -6446,8 +6446,10 @@ TEST(CpuEngine, TheOperatorsGiveTheirStagesBits) {
                 const Value cpu = op.evaluate(ctx, inputs);
                 ClumpState state;
             ASSERT_TRUE(clumpState(op, valueAs<StrandsPtr>(cpu), &state));
-            stageInputs.clump = gpu::clumpInputs(state.assigned, state.curves, state.centerNormals, state.centerIds,
-                                                 static_cast<std::uint64_t>(op.params().getInt("seed")));
+            auto clump = gpu::clumpInputs(state.assigned, state.curves, state.centerNormals, state.centerIds,
+                                          static_cast<std::uint64_t>(op.params().getInt("seed")));
+            clump->spots = !state.offsets.empty();  // centers on the scalp (version 2), as ClumpOp says
+            stageInputs.clump = std::move(clump);
         }
         if (kind == gpu::StageKind::Tangle || kind == gpu::StageKind::BlendNeighbors) {
                 const Value cpu = op.evaluate(ctx, inputs);
