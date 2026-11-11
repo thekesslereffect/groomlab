@@ -1052,10 +1052,8 @@ PICK_GRAB_PX = 10.0  # a press this near a pair's point drags it instead of pick
 
 def _push_undo(message):
     """A Blender undo step for a change made inside a modal operator (they record none of their own)."""
-    try:
-        bpy.ops.ed.undo_push(message=message)
-    except RuntimeError:
-        pass
+    from . import tools
+    tools.push_undo_step(message)
 
 
 def _restart_pick(window, area):

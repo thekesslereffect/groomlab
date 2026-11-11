@@ -20,7 +20,7 @@ from . import definitions as defs
 from . import graph, graph_tree, graph_ui, groom, process, props
 from .graph_tree import ours
 from .graph_ui import ActionTip, action_prop, bind
-from .helper_client import HelperError, sentence
+from .helper_client import cancelled, HelperError
 
 CONTROL_PREFIX = "ctl_"   # a control's value on the groom (its scalp object): a keyable custom property
 KEYABLE_KINDS = ("float", "int", "bool", "vec3")
@@ -37,9 +37,7 @@ def _ge():
     return graph_editor
 
 
-def _fail(op, e):
-    op.report({"ERROR"}, sentence(e.message if isinstance(e, HelperError) else str(e)))
-    return {"CANCELLED"}
+_fail = cancelled  # (helper_client.cancelled: every operator module's)
 
 
 def _node(context, name=""):
@@ -48,7 +46,7 @@ def _node(context, name=""):
     if not name:
         return ge.active_node(context)
     tree = ge.context_tree(context)
-    return next((n for n in tree.nodes if ours(n) and n.gl_name == name), None) if tree is not None else None
+    return graph_tree.node_named(tree, name)
 
 
 def _select(scalp, names):
@@ -328,7 +326,7 @@ def key_state(scalp, node, param):
     if not names:
         driver = json.loads(node.gl_drivers or "{}").get(param)
         tree = node.id_data
-        src = next((n for n in tree.nodes if ours(n) and n.gl_name == driver), None) if driver else None
+        src = graph_tree.node_named(tree, driver)
         return "driven" if src is not None and src.gl_type == "Control" else None
     frame = groom.scene_of(scalp).frame_current
     curves = [c for c in (fcurve(scalp, n) for n in names) if c is not None]
@@ -363,10 +361,8 @@ def ensure_control_props(scalp, names, values, spec=None):
             try:
                 ui = scalp.id_properties_ui(key)
                 kw = {"description": "GroomLab control %s (the graph's own units: centimeters for lengths)" % name}
-                if spec is not None:
-                    for src, dst in (("softMin", "soft_min"), ("softMax", "soft_max"), ("min", "min"), ("max", "max")):
-                        if isinstance(spec.get(src), (int, float)):
-                            kw[dst] = float(spec[src])
+                if spec is not None:  # the graph's own units: the spec's limits as they are (soft within hard)
+                    kw.update(graph_tree.spec_limits(spec, float))
                 ui.update(**kw)
             except (TypeError, AttributeError):
                 pass
@@ -382,7 +378,7 @@ def _param_value(scalp, node, param):
 def link_param(scalp, node, param):
     """Key node.param in place: linked to a control of its own (link_control), its ctl_ property(ies)
     made with the value now. Returns the control names."""
-    tree_node = next((n for n in graph_tree.tree_of(scalp).nodes if ours(n) and n.gl_name == node), None)
+    tree_node = graph_tree.node_named(graph_tree.tree_of(scalp), node)
     names = control_names(tree_node, param) if tree_node is not None else []
     if names:
         return names
@@ -557,22 +553,13 @@ def _push_all_controls(*_args):
 
 # ---- Map sources: texture, color set, attribute, painted map, expression --------------------------
 
-MAP_SOURCES = (("texture", "Texture", "An image at the scalp's UVs (a file path)"),
-               ("colorSet", "Color Set", "A color set (Blender: a color attribute) of the scalp"),
-               ("attribute", "Attribute", "A strand attribute a node upstream writes"),
-               ("guide", "Painted Map", "A map painted in Groom Tools > Paint (on the guides or the scalp)"),
-               ("expression", "Expression", "A formula per strand (u, v, t, rand, the params...)"))
-MAP_KEYS = tuple(s[0] for s in MAP_SOURCES)
+MAP_SOURCES = graph.MAP_SOURCES
+MAP_KEYS = graph.MAP_KEYS
 COMPONENTS = (("DEFAULT", "Default", "The map's own value (a texture: its luminance)"), ("r", "R", ""), ("g", "G", ""),
               ("b", "B", ""), ("a", "A", ""), ("luminance", "Luminance", ""))
 
 
-def map_source(value):
-    """(source, name) of a map value; (None, "") for a plain value."""
-    if not isinstance(value, dict):
-        return None, ""
-    source = next((k for k in MAP_KEYS if k in value), None)
-    return source, value.get(source, "") if source else ""
+map_source = graph.map_source
 
 
 def set_map(scalp, node, param, value):
@@ -653,7 +640,7 @@ def expression_text_name(node, param):
 def edit_expression(scalp, node, param, show=False):
     """The expression of node.param in a text block of its own (made, or written again from the
     graph); shown in a Text Editor of the window when there is one. Returns the text."""
-    tree_node = next((n for n in graph_tree.tree_of(scalp).nodes if ours(n) and n.gl_name == node), None)
+    tree_node = graph_tree.node_named(graph_tree.tree_of(scalp), node)
     value = graph_tree.values(tree_node).get(param) if tree_node is not None else None
     code = value.get("expression", "") if isinstance(value, dict) else ""
     name = expression_text_name(node, param)
@@ -680,7 +667,7 @@ def apply_expression(text):
     state = _text_state.setdefault(text.name, {"applied": None, "errors": []})
     if scalp is None or not node:
         return False
-    tree_node = next((n for n in graph_tree.tree_of(scalp).nodes if ours(n) and n.gl_name == node), None)
+    tree_node = graph_tree.node_named(graph_tree.tree_of(scalp), node)
     old = graph_tree.values(tree_node).get(param) if tree_node is not None else None
     value = {k: v for k, v in (old or {}).items() if k not in MAP_KEYS} if isinstance(old, dict) else {}
     value["expression"] = code
@@ -719,7 +706,7 @@ def edit_script(scalp, node, show=False):
     """A script node's file in two text blocks: its script (the code) and its header (the rest, as
     JSON); checked as they change (script_errors) and taken by the node when they check (live, as
     Maya's script editor). Returns (script text, header text)."""
-    tree_node = next((n for n in graph_tree.tree_of(scalp).nodes if ours(n) and n.gl_name == node), None)
+    tree_node = graph_tree.node_named(graph_tree.tree_of(scalp), node)
     definition = dict(graph_tree.values(tree_node).get("definition") or {}) if tree_node is not None else {}
     code = definition.pop("script", "")
     names = script_text_names(node)
@@ -1519,7 +1506,7 @@ def _np(ctx, _item):
 
 def _node_of(ctx):
     tree = ctx.tree
-    return next((n for n in tree.nodes if ours(n) and n.gl_name == ctx.node), None) if tree is not None and ctx.node else None
+    return graph_tree.node_named(tree, ctx.node)
 
 
 def _bind_all():

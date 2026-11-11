@@ -415,7 +415,14 @@ def _scale():
     return units.cm_per_unit(scene)
 
 
-def _ranged(spec, conv):
+def node_named(tree, name):
+    """The GroomLab node named `name` in `tree` (None: no tree, no name or no such node)."""
+    if tree is None or not name:
+        return None
+    return next((n for n in tree.nodes if ours(n) and n.gl_name == name), None)
+
+
+def spec_limits(spec, conv):
     """min/max/soft_min/soft_max kwargs from a ParamSpec (converted, soft within hard)."""
     kw = {}
     lo, hi = spec.get("min"), spec.get("max")
@@ -447,20 +454,20 @@ def param_property(spec, update, file_path=False):
     if kind == "float":
         if unit in units.SCENE_LENGTH:
             conv = lambda v: float(v) / scale  # noqa: E731
-            return FloatProperty(subtype="DISTANCE", unit="LENGTH", precision=4, **_ranged(spec, conv), **common)
+            return FloatProperty(subtype="DISTANCE", unit="LENGTH", precision=4, **spec_limits(spec, conv), **common)
         if unit == "perLength":
             conv = lambda v: float(v) * scale  # noqa: E731
-            return FloatProperty(precision=3, **_ranged(spec, conv), **common)
+            return FloatProperty(precision=3, **spec_limits(spec, conv), **common)
         if unit == "fraction":  # a percentage (units.to_ui), as Maya and the app show it
-            kw = _ranged(spec, lambda v: float(v) * units.FRACTION_FACTOR)
+            kw = spec_limits(spec, lambda v: float(v) * units.FRACTION_FACTOR)
             kw.setdefault("soft_min", 0.0)
             kw.setdefault("soft_max", 100.0)
             return FloatProperty(subtype="PERCENTAGE", precision=max(0, min(1, int(spec.get("decimals", 3)) - 2)), **kw,
                                  **common)
         # The core's decimals (the spec's), as every host shows the number.
-        return FloatProperty(precision=max(0, min(6, int(spec.get("decimals", 3)))), **_ranged(spec, float), **common)
+        return FloatProperty(precision=max(0, min(6, int(spec.get("decimals", 3)))), **spec_limits(spec, float), **common)
     if kind == "int":
-        return IntProperty(**{k: int(round(v)) for k, v in _ranged(spec, float).items()}, **common)
+        return IntProperty(**{k: int(round(v)) for k, v in spec_limits(spec, float).items()}, **common)
     if kind == "bool":
         return BoolProperty(**common)
     if kind == "vec3":
@@ -795,7 +802,7 @@ def values_changed(scalp, node_name):
     tree = tree_of(scalp)
     if tree is None:
         return
-    node = next((n for n in tree.nodes if ours(n) and n.gl_name == node_name), None)
+    node = node_named(tree, node_name)
     if node is None:
         return
     rt = groom.ensure(scalp)

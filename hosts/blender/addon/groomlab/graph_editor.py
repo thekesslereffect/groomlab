@@ -17,7 +17,7 @@ from bpy.props import BoolProperty, EnumProperty, StringProperty
 from . import graph, graph_authoring, graph_tree, graph_ui, groom, process, units
 from .graph_tree import TREE, ours
 from .graph_ui import ActionTip, MenuContext, action_prop, bind
-from .helper_client import HelperError, sentence
+from .helper_client import cancelled, HelperError
 
 _folded = {}       # (operator type, section) -> folded, for the session (Maya: unset = Advanced folded)
 _deferred = {}     # key -> (fn, args): run once from a timer (not while Blender draws)
@@ -239,9 +239,7 @@ class _EditorOperator(ActionTip, bpy.types.Operator):
         return editor_tree(context) is not None
 
 
-def _fail(op, e):
-    op.report({"ERROR"}, sentence(e.message if isinstance(e, HelperError) else str(e)))
-    return {"CANCELLED"}
+_fail = cancelled  # (helper_client.cancelled: every operator module's)
 
 
 class GROOMLAB_OT_graph_open(_GraphOperator):
@@ -337,7 +335,7 @@ class GROOMLAB_OT_graph_view_node(_GraphOperator):
             return {"FINISHED"}
         name = self.node or (active_node(context).gl_name if active_node(context) else "")
         tree = graph_tree.tree_of(scalp)
-        node = next((n for n in tree.nodes if ours(n) and n.gl_name == name), None) if tree else None
+        node = graph_tree.node_named(tree, name)
         if node is None:
             self.report({"INFO"}, "No node selected: select the node to view, then press V")
             return {"CANCELLED"}
@@ -363,7 +361,7 @@ class GROOMLAB_OT_graph_clump_colors(_GraphOperator):
     def execute(self, context):
         scalp = context_groom(context)
         tree = graph_tree.tree_of(scalp)
-        node = next((n for n in tree.nodes if ours(n) and n.gl_name == self.node), None) if tree else None
+        node = graph_tree.node_named(tree, self.node)
         if node is None or node.gl_type != "Clump":
             return {"CANCELLED"}
         d = scalp.groomlab_tools
@@ -461,7 +459,7 @@ class GROOMLAB_OT_graph_upgrade_node(_GraphOperator):
     @classmethod
     def description(cls, context, properties):
         tree = context_tree(context) if context is not None else None
-        node = next((n for n in tree.nodes if ours(n) and n.gl_name == properties.node), None) if tree else None
+        node = graph_tree.node_named(tree, properties.node)
         if node is None:
             return cls.__doc__
         newest = node.gl_spec.get("version", 1)
@@ -803,7 +801,7 @@ def _n(ctx, _item):
 
 def _tree_node(ctx):
     tree = ctx.tree
-    return next((n for n in tree.nodes if ours(n) and n.gl_name == ctx.node), None) if tree is not None and ctx.node else None
+    return graph_tree.node_named(tree, ctx.node)
 
 
 def _bind_editor():
@@ -1160,10 +1158,8 @@ def draw_params(layout, context, node, scene):
 
 
 def _map_label(value):
-    source = next((k for k in ("texture", "colorSet", "attribute", "expression", "guide") if k in value), None)
-    label = {"texture": "texture", "colorSet": "color set", "attribute": "attribute", "expression": "expression",
-             "guide": "painted map"}.get(source, "map")
-    name = value.get(source) if source else ""
+    source, name = graph.map_source(value)
+    label = graph.map_source_name(source)
     if source == "expression" and isinstance(name, str):
         name = name.strip().splitlines()[0][:32] if name.strip() else ""
     return "%s %s" % (label, name if isinstance(name, str) else "")
@@ -1263,7 +1259,7 @@ def draw_param(layout, node, spec, scene, mapped, inputs, drivers, collection, c
     else:
         row.prop(node, prop, text=label + suffix, slider=fill_slider(node, prop, spec))
     if driver:
-        src = next((n for n in node.id_data.nodes if ours(n) and n.gl_name == driver), None)
+        src = graph_tree.node_named(node.id_data, driver)
         row.label(text="x %s" % driver, icon=KEY_ICONS["driven"] if src is not None and src.gl_type == "Control" else "LINKED")
     if spec.get("mappable") and spec.get("port") and not driver:
         op = row.operator("groomlab.graph_map_source", text="", icon="IMAGE_DATA")
@@ -1324,7 +1320,7 @@ class GROOMLAB_OT_graph_pick_attribute(bpy.types.Operator):
 
     def execute(self, context):
         tree = editor_tree(context)
-        target = next((n for n in tree.nodes if ours(n) and n.gl_name == self.node), None) if tree else None
+        target = graph_tree.node_named(tree, self.node)
         if target is None:
             return {"CANCELLED"}
         if not self.pick:  # the menu of what reaches the node

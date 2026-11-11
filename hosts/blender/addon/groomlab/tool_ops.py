@@ -20,7 +20,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from . import actions, display, groom, icons, process, props, tools
 from . import definitions as defs
-from .helper_client import HelperError, sentence
+from .helper_client import cancelled, HelperError, sentence
 
 # The marking menu (engine/ui/marking_menu.json, Maya's hotkeys.py): the brushes reached for most
 # around it, the rest of the catalog after them, then its tail.
@@ -69,9 +69,7 @@ NAV_PASS = {"MIDDLEMOUSE", "WHEELUPMOUSE", "WHEELDOWNMOUSE", "WHEELINMOUSE", "WH
 SLIDER_KEYS = {"B": "radius", "M": "strength", "F": "radius"}
 
 
-def _fail(op, e):
-    op.report({"ERROR"}, sentence(e.message if isinstance(e, HelperError) else str(e)))
-    return {"CANCELLED"}
+_fail = cancelled  # (helper_client.cancelled: every operator module's)
 
 
 def active(context):

@@ -139,13 +139,33 @@ def active_node(scalp):
 
 # ---- Params -----------------------------------------------------------------------------------
 
-# A mapped param's source (graph_authoring.MAP_SOURCES' keys) as its note names it.
-_MAP_SOURCES = (("texture", "texture"), ("colorSet", "color set"), ("attribute", "attribute"), ("guide", "painted map"),
-                ("expression", "expression"))
+# A param's map sources (its value an object with one of these keys): key, label, tip; and the
+# name a sentence gives it. The Map Source menu, the param's note and the Graph Editor's row.
+MAP_SOURCES = (("texture", "Texture", "An image at the scalp's UVs (a file path)"),
+               ("colorSet", "Color Set", "A color set (Blender: a color attribute) of the scalp"),
+               ("attribute", "Attribute", "A strand attribute a node upstream writes"),
+               ("guide", "Painted Map", "A map painted in Groom Tools > Paint (on the guides or the scalp)"),
+               ("expression", "Expression", "A formula per strand (u, v, t, rand, the params...)"))
+MAP_KEYS = tuple(s[0] for s in MAP_SOURCES)
+_SOURCE_NAMES = {"texture": "texture", "colorSet": "color set", "attribute": "attribute", "guide": "painted map",
+                 "expression": "expression"}
+
+
+def map_source(value):
+    """(source, name) of a map value; (None, "") for a plain value."""
+    if not isinstance(value, dict):
+        return None, ""
+    source = next((k for k in MAP_KEYS if k in value), None)
+    return source, value.get(source, "") if source else ""
+
+
+def map_source_name(source):
+    """A source as a sentence names it ("color set", "painted map"); "map" for none."""
+    return _SOURCE_NAMES.get(source, "map")
 
 
 def _map_source(value):
-    return next((name for key, name in _MAP_SOURCES if key in value), "map")
+    return map_source_name(map_source(value)[0])
 
 
 def _set_widget(p, value, scene):

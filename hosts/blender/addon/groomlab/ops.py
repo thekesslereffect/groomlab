@@ -9,7 +9,7 @@ from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, St
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 
 from . import graph, graph_tree, groom, vray
-from .helper_client import HelperError, sentence
+from .helper_client import cancelled, HelperError, sentence
 
 
 def active_groom(context):
@@ -20,9 +20,7 @@ def active_groom(context):
     return groom.scalp_of(context.active_object)
 
 
-def _fail(op, e):
-    op.report({"ERROR"}, sentence(e.message if isinstance(e, HelperError) else str(e)))
-    return {"CANCELLED"}
+_fail = cancelled  # (helper_client.cancelled: every operator module's)
 
 
 class GroomOperator(bpy.types.Operator):

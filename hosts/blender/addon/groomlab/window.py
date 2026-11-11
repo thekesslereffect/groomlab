@@ -394,10 +394,8 @@ def _push_undo():
     if uikit.changed:
         label = uikit.changed[-1]
         del uikit.changed[:]
-        try:
-            bpy.ops.ed.undo_push(message="GroomLab: %s" % label)
-        except RuntimeError:
-            pass
+        from . import tools
+        tools.push_undo_step(label)
 
 
 class _PressModal(object):

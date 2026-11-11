@@ -39,6 +39,13 @@ class HelperError(RuntimeError):
         self.message = message
 
 
+def cancelled(op, e):
+    """An operator's failure: `e` (a HelperError's message, else the exception's text) reported as an
+    error, {"CANCELLED"} returned. Every operator module's _fail."""
+    op.report({"ERROR"}, sentence(e.message if isinstance(e, HelperError) else str(e)))
+    return {"CANCELLED"}
+
+
 def _open_block(name):
     if sys.platform == "win32" or sys.version_info < (3, 13):
         return shared_memory.SharedMemory(name=name)
