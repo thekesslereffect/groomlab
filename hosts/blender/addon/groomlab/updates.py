@@ -92,16 +92,59 @@ def off_reason():
     return ""
 
 
+_IDENTIFIER = re.compile(r"^[0-9A-Za-z-]+$")
+
+
 def parse_version(text):
-    m = re.match(r"^\s*(\d+)\.(\d+)(?:\.(\d+))?", text or "")
-    return tuple(int(g or 0) for g in m.groups()) if m else None
+    """The core's semver.h parseSemVer, which the add-on cannot call (Maya and the app do): ([numbers],
+    [pre-release identifiers]) of "1.2.0", "v1.3.0-beta.2", "1.2.0+build.5" (a leading v and +build
+    ignored), None when it is not a version."""
+    text = (text or "").strip()
+    if text.startswith("v"):
+        text = text[1:]
+    if "+" in text:
+        text, build = text.split("+", 1)
+        if not all(_IDENTIFIER.match(p) for p in build.split(".")):
+            return None
+    numbers, _, pre = text.partition("-")
+    parts = numbers.split(".")
+    if not all(p.isdigit() and p.isascii() for p in parts):
+        return None
+    if _ and not all(_IDENTIFIER.match(p) for p in pre.split(".")):
+        return None
+    nums = [p.lstrip("0") or "0" for p in parts]
+    while len(nums) > 1 and nums[-1] == "0":
+        nums.pop()
+    return nums, (pre.split(".") if _ else [])
 
 
 def compare_versions(a, b):
+    """-1, 0 or 1 as `a` is older than, the same as or newer than `b` (semver.h compareVersions): the
+    numbers part by part, then a release after its pre-releases (1.3.0-beta.2 < 1.3.0), the
+    identifiers one by one (numeric by value, below alphanumeric ones). ValueError for no version."""
     va, vb = parse_version(a), parse_version(b)
     if va is None or vb is None:
         raise ValueError("not a version: %r, %r" % (a, b))
-    return (va > vb) - (va < vb)
+    (na, pa), (nb, pb) = va, vb
+    for i in range(max(len(na), len(nb))):
+        x, y = (na[i] if i < len(na) else "0"), (nb[i] if i < len(nb) else "0")
+        c = (len(x) > len(y)) - (len(x) < len(y)) or (x > y) - (x < y)
+        if c:
+            return c
+    if bool(pa) != bool(pb):
+        return -1 if pa else 1  # a release after its pre-releases
+    for x, y in zip(pa, pb):
+        nx, ny = x.isdigit(), y.isdigit()
+        if nx != ny:
+            return -1 if nx else 1  # numeric identifiers below alphanumeric ones
+        if nx:
+            x, y = x.lstrip("0") or "0", y.lstrip("0") or "0"
+            c = (len(x) > len(y)) - (len(x) < len(y)) or (x > y) - (x < y)
+        else:
+            c = (x > y) - (x < y)
+        if c:
+            return c
+    return (len(pa) > len(pb)) - (len(pa) < len(pb))
 
 
 # ---- The release ---------------------------------------------------------------------------------
@@ -172,9 +215,12 @@ def check(url=None, timeout=None):
         newer = False
     notes = str(info.get("notes") or "").strip()
     wanted = str(info.get("platform") or "")
-    needs = parse_version(str(info.get("blender") or "")) or (0, 0, 0)
+    needs = str(info.get("blender") or "")
     fits_platform = not wanted or wanted == platform()
-    fits_blender = tuple(bpy.app.version) >= needs
+    try:  # (the release's Blender version as compare_versions reads it)
+        fits_blender = not needs or compare_versions("%d.%d.%d" % tuple(bpy.app.version[:3]), needs) >= 0
+    except ValueError:
+        fits_blender = True
     waiting = newer and _installed == latest
     if not newer:
         message = "GroomLab %s is the latest version" % current

@@ -595,15 +595,9 @@ class GraphEdits(object):
         self.reload()
 
     def unique_name(self, base):
-        """The core's rule (GraphEdit::uniqueName): `base` with its first letter lowered, else base1, base2..."""
-        base = base[:1].lower() + base[1:]
-        taken = set(self.names())
-        if base not in taken:
-            return base
-        i = 1
-        while "%s%d" % (base, i) in taken:
-            i += 1
-        return "%s%d" % (base, i)
+        """The core's rule (GraphEdit::uniqueName): graph_tree.unique_name, the add-on's one copy."""
+        from . import graph_tree
+        return graph_tree.unique_name(base, set(self.names()))
 
     def source_of(self, node, input_name):
         c = next((c for c in self.graph["connections"] if c["to"] == node and c["input"] == input_name), None)

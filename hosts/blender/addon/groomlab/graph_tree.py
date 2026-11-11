@@ -1675,15 +1675,19 @@ def insertions(have, want, known):
 
 
 def unique_name(base, taken):
-    """`base` as a node name the graph does not have yet: letters, digits and _, a number added."""
+    """`base` as a node name the graph does not have yet: the core's rule (GraphEdit::uniqueName, Maya's
+    and the app's): its first letter lowered when free, else base1, base2... (the add-on cannot call
+    it); letters, digits and _ first, as a name the add-on makes up may hold others."""
     base = re.sub(r"\W", "_", base or "node") or "node"
     if base[0].isdigit():
         base = "n" + base
-    name, k = base, 1
-    while name in taken:
-        name = "%s%d" % (base, k)
+    base = base[:1].lower() + base[1:]
+    if base not in taken:
+        return base
+    k = 1
+    while "%s%d" % (base, k) in taken:
         k += 1
-    return name
+    return "%s%d" % (base, k)
 
 
 # ---- Edits the editor's operators make ----------------------------------------------------------

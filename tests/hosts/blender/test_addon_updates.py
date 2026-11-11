@@ -67,6 +67,21 @@ class UpdatesTest(unittest.TestCase):
             json.dump(info, f)
         return self.server.url + "latest.json"
 
+    def test_0_versions_sort_as_the_core_sorts_them(self):
+        # The core's semver.h (test_semver.cpp's cases): a pre-release before its release, which the
+        # add-on's own copy once read as equal (1.3.0-beta.2 offered no update to 1.3.0).
+        older = ["0.1.0", "0.1.1", "0.2.0-alpha", "0.2.0-alpha.1", "0.2.0-alpha.beta", "0.2.0-beta.2", "0.2.0-beta.10",
+                 "0.2.0-beta.11", "0.2.0-rc.1", "0.2.0", "0.9.9", "0.10.0", "1.0.0"]
+        for a, b in zip(older, older[1:]):
+            self.assertEqual(updates.compare_versions(a, b), -1, (a, b))
+            self.assertEqual(updates.compare_versions(b, a), 1, (b, a))
+        self.assertEqual(updates.compare_versions("1.3.0-beta.2", "1.3.0"), -1)
+        self.assertEqual(updates.compare_versions(" v1.3.0-beta.2+exp.sha.5114f85 ", "1.3.0-beta.2"), 0)
+        self.assertEqual(updates.compare_versions("1.2", "1.2.0"), 0)
+        self.assertEqual(updates.compare_versions("1.0.0-01", "1.0.0-1"), 0)
+        for bad in ("", "latest", "1.", "1..2", "1.2.x", "1.2.0-", "1.2.0+", "vv1.0", "1.0 beta"):
+            self.assertIsNone(updates.parse_version(bad), bad)
+
     def test_1_off_without_online_access_and_bound(self):
         self.assertTrue(OFF_REASON())  # background mode: Blender's online access is off
         self.assertFalse(updates.check_due())  # never at startup in background mode
