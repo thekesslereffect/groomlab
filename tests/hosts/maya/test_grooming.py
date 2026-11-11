@@ -3731,6 +3731,14 @@ class GroomingTest(unittest.TestCase):
         self.assertEqual(groomlab.list_parts(self.groom), [])
         cmds.redo()
         self.assertEqual(groomlab.list_parts(self.groom), ["crown"])
+        # A locked groom takes no part edits (as no part strokes); listing them still works.
+        groomlab.lock_groom(self.groom)
+        with self.assertRaises(RuntimeError):
+            groomlab.add_part(self.groom, [part], name="locked")
+        with self.assertRaises(RuntimeError):
+            groomlab.remove_part(self.groom, "crown")
+        self.assertEqual(groomlab.list_parts(self.groom), ["crown"])
+        groomlab.lock_groom(self.groom, False)
         cmds.delete(part)  # the part is stored on the groom; the curve is no longer needed
         self.assertEqual(groomlab.errors(self.groom), [])
         parted = self.strand_extent()

@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "asset_files.h"
+#include "command_args.h"
 #include "groom_draw_override.h"
 #include "guarded.h"
 #include "groom_shape.h"
@@ -178,20 +179,13 @@ MStatus GraphStatsCmd::doIt(const MArgList& args) {
     return groomlab::maya::guarded("GraphStatsCmd::doIt", [&]() -> MStatus {
         MStatus parsed;
         MArgDatabase db(syntax(), args, &parsed);
+        if (!parsed) return parsed;
         MStringArray names;
-        MSelectionList sel;
-        if (!parsed || db.getObjects(names) != MS::kSuccess || names.length() < 1 || sel.add(names[0]) != MS::kSuccess) {
-            MGlobal::displayError("groomLabGraphStats: name a groomLabShape");
-            return MS::kFailure;
-        }
+        db.getObjects(names);
         MDagPath path;
-        if (sel.getDagPath(0, path) != MS::kSuccess) return MS::kFailure;
-        path.extendToShape();
-        auto* shape = dynamic_cast<GroomShape*>(MFnDagNode(path).userNode());
-        if (!shape) {
-            MGlobal::displayError("groomLabGraphStats: " + names[0] + " is not a groomLabShape");
-            return MS::kFailure;
-        }
+        if (!groomArgument("groomLabGraphStats", names, &path)) return MS::kFailure;
+        GroomShape* shape = groomShapeOf(path);
+        if (!shape) return MS::kFailure;
         if (db.isFlagSet("-evaluations")) {
             // How many times the groom evaluated live (after evaluating it when dirty; a frame cached
             // playback restored is not evaluated again): what shows its stats asks for them again
@@ -383,16 +377,10 @@ MStatus BakeCardsCmd::doIt(const MArgList& args) {
         MStatus status;
         MArgDatabase db(syntax(), args, &status);
         if (!status) return status;
-        MSelectionList sel;
-        db.getObjects(sel);
         MDagPath path;
-        if (sel.getDagPath(0, path) != MS::kSuccess) return MS::kFailure;
-        path.extendToShape();
-        auto* shape = dynamic_cast<GroomShape*>(MFnDagNode(path).userNode());
-        if (!shape) {
-            MGlobal::displayError(MString(kName) + ": select or name a groomLabShape");
-            return MS::kFailure;
-        }
+        if (!groomArgument(kName, db, &path)) return MS::kFailure;
+        GroomShape* shape = groomShapeOf(path);
+        if (!shape) return MS::kFailure;
         // Named by default after the groom's asset name (its full path, file safe): two grooms
         // of the same short name, or a namespaced one, never meet in a file name.
         MString directory, name = assetName(path).c_str();

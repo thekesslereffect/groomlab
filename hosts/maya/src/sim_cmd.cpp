@@ -10,6 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "command_args.h"
 #include "groom_shape.h"
 #include "groomlab/sim_cache.h"
 #include "groomlab/simulation.h"
@@ -42,19 +43,10 @@ MStatus SimulateCmd::doIt(const MArgList& args) {
         MStatus status;
         MArgDatabase db(syntax(), args, &status);
         if (!status) return status;
-        MSelectionList sel;
-        db.getObjects(sel);
         MDagPath path;
-        if (sel.getDagPath(0, path) != MS::kSuccess) {
-            MGlobal::displayError("groomLabSimulate: name a groomLabShape");
-            return MS::kFailure;
-        }
-        path.extendToShape();
-        auto* shape = dynamic_cast<GroomShape*>(MFnDagNode(path).userNode());
-        if (!shape) {
-            MGlobal::displayError("groomLabSimulate: " + path.partialPathName() + " is not a groomLabShape");
-            return MS::kFailure;
-        }
+        if (!groomArgument("groomLabSimulate", db, &path)) return MS::kFailure;
+        GroomShape* shape = groomShapeOf(path);
+        if (!shape) return MS::kFailure;
         MString node;
         if (db.isFlagSet("-node")) db.getFlagArgument("-node", 0, node);
         if (db.isFlagSet("-toFrame")) {

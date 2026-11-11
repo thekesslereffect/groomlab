@@ -377,21 +377,6 @@ GroomShape* groomShape(const MDagPath& path) {
     return dynamic_cast<GroomShape*>(MFnDagNode(path).userNode());
 }
 
-// A groom from a referenced file: every stroke rewrites its whole guideData,
-// which the reference records as an edit (and reapplies on load). Refused unless
-// the groom carries a true `allowReferenceEdits` attribute (add it to opt in).
-bool referenceEditAllowed(const MDagPath& groom) {
-    MFnDagNode fn(groom);
-    if (!fn.isFromReferencedFile()) return true;
-    MStatus status;
-    const MPlug allow = fn.findPlug("allowReferenceEdits", true, &status);
-    return status && !allow.isNull() && allow.asBool();
-}
-
-const char* kReferenceRefused =
-    ": the groom is from a referenced file; brushing would record its whole guide data as a "
-    "reference edit. Edit it in its own scene, or add a boolean attribute allowReferenceEdits (on) to allow it";
-
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -521,8 +506,7 @@ MStatus BrushStrokeCmd::doIt(const MArgList& args) {
         MSelectionList selection;
         db.getObjects(selection);
         if (!groomInSelection(selection, groom_)) return fail(kName, "select or name a groomLabShape");
-        if (MFnDagNode(groom_).findPlug("locked", true).asBool()) return fail(kName, groom_.partialPathName() + " is locked");
-        if (!referenceEditAllowed(groom_)) return fail(kName, groom_.partialPathName() + kReferenceRefused);
+        if (!editableGroom(kName, groom_)) return MS::kFailure;
 
         settings_.setMode("comb");  // unless -mode says otherwise
         const MStatus flags = applyBrushFlags(db, settings_, kName);

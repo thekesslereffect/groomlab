@@ -33,6 +33,7 @@
 
 #include "gpu_lines.h"
 #include "groom_draw_override.h"
+#include "command_args.h"
 #include "groom_shape.h"
 #include "groomlab/display.h"
 #include "guarded.h"
@@ -899,19 +900,11 @@ MStatus GpuPreviewCmd::doIt(const MArgList& args) {
             return MS::kSuccess;
         }
         MStringArray names;
-        MSelectionList sel;
+        db.getObjects(names);
         MDagPath path;
-        if (db.getObjects(names) != MS::kSuccess || names.length() < 1 || sel.add(names[0]) != MS::kSuccess ||
-            sel.getDagPath(0, path) != MS::kSuccess) {
-            MGlobal::displayError("groomLabGpuPreview: name a groomLabShape");
-            return MS::kFailure;
-        }
-        path.extendToShape();
-        auto* shape = dynamic_cast<GroomShape*>(MFnDagNode(path).userNode());
-        if (!shape) {
-            MGlobal::displayError("groomLabGpuPreview: " + names[0] + " is not a groomLabShape");
-            return MS::kFailure;
-        }
+        if (!groomArgument("groomLabGpuPreview", names, &path)) return MS::kFailure;
+        GroomShape* shape = groomShapeOf(path);
+        if (!shape) return MS::kFailure;
         GpuLookPreview* preview = gpuLookPreviewFor(shape);
         if (db.isFlagSet("-stats")) {
             setResult(MString(preview ? preview->statsJson(db.isFlagSet("-wait")).c_str() : "{}"));

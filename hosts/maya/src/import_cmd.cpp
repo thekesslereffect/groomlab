@@ -342,14 +342,8 @@ MStatus ImportGroomCmd::doIt(const MArgList& args) {
         }
 
         // Applying the file to a groom.
-        MSelectionList objects;
-        db.getObjects(objects);
         MDagPath groomPath;
-        if (objects.getDagPath(0, groomPath) != MS::kSuccess) return fail(kName, "name the groomLabShape to read the file into");
-        groomPath.extendToShape();
-        if (MFnDagNode(groomPath).typeName() != GroomShape::kTypeName) {
-            return fail(kName, groomPath.partialPathName() + " is not a groomLabShape");
-        }
+        if (!groomArgument(kName, db, &groomPath)) return MS::kFailure;
         const MObject node = groomPath.node();
         MFnDependencyNode fn(node);
         const MeshPtr scalp = rawScalpFromNode(node);

@@ -84,7 +84,9 @@ MStatus PartsCmd::doIt(const MArgList& args) {
             setResult(names);
             return MS::kSuccess;
         }
-    
+        // An edit: as a part stroke, not on a locked groom (nor one from a referenced file).
+        if (!editableGroom(kName, groom)) return MS::kFailure;
+
         if (db.isFlagSet(kFromCurves[0])) {
             const MeshPtr scalp = joinedScalpFromNode(fn.object());  // with the groom's other scalps
             if (!scalp || scalp->triangleCount() == 0) return fail(kName, "the groom has no scalp mesh");
