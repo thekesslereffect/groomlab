@@ -783,81 +783,17 @@ def import_alembic_curves(scalp, path, object_name="", samples=24):
     return r
 
 
-def _feather_design(rt, design):
-    """(the design's Compound node, its shafts' Scatter params) of preset feathers_<design>, fitted
-    to the scalp (Maya's _feather_design)."""
-    graph = process.call("preset_graph", session=rt.session, name="feathers_" + design)["graph"]
-    node = next((n for n in graph.get("nodes", []) if n.get("type") == "Compound"), None)
-    if node is None:
-        raise HelperError("state", "preset feathers_%s has no feather design (a Compound node)" % design)
-    shafts = next((n for n in graph["nodes"] if n.get("type") == "Scatter"), None)
-    params = (shafts or {}).get("params", {})
-    return node, {k: params[k] for k in ("density", "length") if k in params}
-
-
-def _propagates_in(params):
-    """The params of the Propagate nodes inside a Compound's params (and its compounds'), to edit in place."""
-    for node in ((params.get("definition") or {}).get("graph") or {}).get("nodes", []):
-        if node.get("type") == "Propagate":
-            yield node.setdefault("params", {})
-        elif node.get("type") == "Compound":
-            for inner in _propagates_in(node.setdefault("params", {})):
-                yield inner
-
-
-def _feather_groups(g):
-    """{groupName: groupId} of the feather designs already in the graph (their Propagates')."""
-    groups = {}
-    for n in g.graph["nodes"]:
-        found = [n.get("params") or {}] if n.get("type") == "Propagate" else \
-            list(_propagates_in(n.get("params") or {})) if n.get("type") == "Compound" else []
-        for params in found:
-            gid = int(params.get("groupId", 0) or 0)
-            if gid > 0:
-                groups.setdefault(params.get("groupName") or "group%d" % gid, gid)
-    return groups
-
-
 def feather_guide_groups(scalp):
     """The guide groups whose guides grow one feather each (Maya's feather_guide_groups): the groups
     of the Guides nodes feeding a feather design (a Propagate, or a Compound with one), in the
-    graph's order; a "feathers" group the graph does not read yet too."""
+    graph's order (every host's: graph_inserts.h); a "feathers" group the graph does not read yet too."""
     from . import tools
     rt = groom.ensure(scalp)
-    graph = process.call("get_graph", session=rt.session)["graph"]
-    nodes = graph.get("nodes") or []
-    designs = {n["name"] for n in nodes if n.get("type") == "Propagate" or
-               (n.get("type") == "Compound" and any(True for _ in _propagates_in(n.get("params") or {})))}
-    feeds = {}
-    for c in graph.get("connections") or []:
-        feeds.setdefault(c["from"], []).append(c["to"])
-    found = []
-    for n in nodes:
-        groups = str((n.get("params") or {}).get("group") or "").replace(",", " ").split() \
-            if n.get("type") == "Guides" else []
-        if not groups:
-            continue
-        seen, todo = set(), [n["name"]]
-        while todo:
-            name = todo.pop()
-            if name not in seen:
-                seen.add(name)
-                todo += feeds.get(name, [])
-        if seen & designs:
-            found += [g for g in groups if g not in found]
+    found = list(process.call("feather_groups", session=rt.session).get("guideGroups") or [])
     if "feathers" not in found and tools.is_hierarchy(scalp) and \
             "feathers" in [g.get("name") for g in (tools.call(scalp, "guides_info").get("groups") or [])]:
         found.append("feathers")
     return found
-
-
-def exclude_from_hair_guides(g, group):
-    """Braid paths and feather shafts are not hair: Guides nodes reading every guide leave `group` out."""
-    for n in g.of_type("Guides"):
-        if not g.param(n, "group"):
-            excluded = str(g.param(n, "exclude", "") or "").replace(",", " ").split()
-            if group not in excluded:
-                g.set_param(n, "exclude", " ".join(excluded + [group]))
 
 
 def _ensure_group(scalp, group):
@@ -1025,133 +961,40 @@ def add_feathers(scalp, design="contour", source="scatter", weights=None, curves
     """Add > Feathers (Maya's add_feathers): barbs on shafts, a design from the preset feathers_<design>
     (or several sharing the shafts through a Split, `weights` their shares). `source` "scatter": a new
     Scatter shaped by the guides; "guides": the guide group `group` (curve objects `curves` join it
-    first), each guide a hand-placed feather. Merged with the hair before the output (`keep_hair`).
-    Returns {"shafts", "split", "designs", "merge"}."""
+    first), each guide a hand-placed feather; "node" or "node.output": what a node of the graph gives.
+    Merged with the hair before the output (`keep_hair`). Every host's graph edit (graph_inserts.h
+    insertFeathers). Returns {"shafts", "split", "designs", "merge"}."""
     designs = [design] if isinstance(design, str) else list(design)
-    if not designs or len(designs) > 4:
-        raise HelperError("bad_request", "one to four feather designs (a Split has four outputs)")
-    weights = [1.0] * len(designs) if not weights else [float(w) for w in weights]
-    if len(weights) != len(designs):
-        raise HelperError("bad_request", "one weight per design")
-    rt = _session(scalp)
-    parts = [_feather_design(rt, d) for d in designs]
-    if source == "guides":
+    if source == "guides":  # the guides before the graph reads them
         _ensure_group(scalp, group)
         if curves:
             guides_from_curves(scalp, curves, group)
     g = GraphEdits(scalp)
-    out = g.output
-    made = []
-    if source == "scatter":
-        scatter_params = dict(parts[0][1])
-        if density is not None:
-            scatter_params["density"] = float(density)
-        scalp_node = next(iter(g.of_type("Scalp")), None)
-        if scalp_node is None:
-            scalp_node = g.add("Scalp", base="scalp")
-            made.append(scalp_node)
-        guides = next((n for n in g.of_type("Guides") if not g.param(n, "group")), None)
-        if guides is None:
-            guides = g.add("Guides", base="guides")
-            made.append(guides)
-        scatter = g.add("Scatter", base="featherShafts", params=scatter_params)
-        shapes = g.add("Interpolate", base="featherShapes")
-        g.connect(scalp_node, scatter, "scalp")
-        g.connect(scatter, shapes, "strands")
-        g.connect(guides, shapes, "guides")
-        g.connect(scalp_node, shapes, "scalp")
-        shafts = shapes
-        made += [scatter, shapes]
-    elif source == "guides":
-        exclude_from_hair_guides(g, group)
-        shafts = next((n for n in g.of_type("Guides") if g.param(n, "group") == group), None)
-        if shafts is None:
-            shafts = g.add("Guides", base="featherGuides", params={"group": group})
-            made.append(shafts)
-    else:
-        raise HelperError("bad_request", "source is scatter or guides, not %r" % source)
-    feeds = [(shafts, None)]
-    split = None
-    if len(designs) > 1:
-        params = {"weight" + letter: 0.0 for letter in "ABCD"}
-        params.update({"weight" + "ABCD"[i]: w for i, w in enumerate(weights)})
-        split = g.add("Split", base="featherSplit", params=params)
-        g.connect(shafts, split, "strands")
-        feeds = [(split, "abcd"[i]) for i in range(len(designs))]
-        made.append(split)
-    names = []
-    groups = _feather_groups(g)
-    for (src, output), (node, _), design_name in zip(feeds, parts, designs):
-        # Each design a groom group of its own (groupId, groupName on its Propagate): Unreal gives it
-        # its own material, LODs and physics. The same design again joins its group.
-        params = json.loads(json.dumps(node.get("params", {})))
-        if design_name not in groups:
-            groups[design_name] = max(list(groups.values()) + [0]) + 1
-        for propagate in _propagates_in(params):
-            propagate["groupId"] = groups[design_name]
-            propagate["groupName"] = design_name
-        name = g.add("Compound", base=node["name"], params=params)
-        g.connect(src, name, "shafts", output=output)
-        names.append(name)
-    feathers = names[0]
-    merges = []
-    for other in names[1:]:
-        merge = g.add("Merge", base="featherMerge")
-        g.connect(feathers, merge, "a")
-        g.connect(other, merge, "b")
-        feathers = merge
-        merges.append(merge)
-    # A row under the output: shafts, split, designs, then their merges.
-    x, y = g.position(out)
-    y += 2 * LAYOUT_DY
-    x -= (len(made) + 2) * LAYOUT_DX
-    positions = {n: (x + i * LAYOUT_DX, y) for i, n in enumerate(made)}
-    positions.update({n: (x + len(made) * LAYOUT_DX, y + i * LAYOUT_DY) for i, n in enumerate(names)})
-    positions.update({n: (x + (len(made) + 1) * LAYOUT_DX, y + i * LAYOUT_DY) for i, n in enumerate(merges)})
-    g.set_positions(positions)
-    final = None
-    if keep_hair and g.source_of(out, "strands"):
-        final = g.add("Merge", base="feathersMerge")
-        g.insert_before(out, final, "strands", "a")
-        g.connect(feathers, final, "b")
-    else:
-        g.connect(feathers, out, "strands")
+    args = {"op": "insert_feathers", "designs": designs, "source": source, "group": group, "keepHair": bool(keep_hair)}
+    if weights:
+        args["weights"] = [float(w) for w in weights]
+    if density is not None:
+        args["density"] = float(density)
+    r = g.edit(**args)
     g.finish()
-    return {"shafts": shafts, "split": split, "designs": names, "merge": final}
-
-
-BRAID_STYLES = ("three", "four", "five", "fishtail", "rope", "cornrow")
+    return {k: r.get(k) for k in ("shafts", "split", "designs", "merge")}
 
 
 def add_braid(scalp, curves=None, style="three", group="braids", width=0.25, tightness=1.0, region=0.25,
               dutch=False, feed=None):
     """Add > Braid on Curves (Maya's add_braid): curve objects `curves` (drawn from the scalp along the
     braids) become guide group `group`, else its guides are the paths (draw them with Draw); a Braid
-    node after the Interpolate braids the strands along them (cornrows fed along the scalp). Returns
-    the Braid node's name."""
-    if style not in BRAID_STYLES:
-        raise HelperError("bad_request", "style is one of %s" % ", ".join(BRAID_STYLES))
-    if feed is None:
-        feed = style == "cornrow"
-    _ensure_group(scalp, group)
+    node after the Interpolate braids the strands along them (cornrows fed along the scalp). Every
+    host's graph edit (graph_inserts.h insertBraid). Returns the Braid node's name."""
+    _ensure_group(scalp, group)  # the guides before the graph reads them
     if curves:
         guides_from_curves(scalp, curves, group)
-    g = GraphEdits(scalp)
-    exclude_from_hair_guides(g, group)
-    chain_interpolates = [n for n in g.of_type("Interpolate") if g.downstream_of(n)]
-    after = "interpolate" if g.node_type("interpolate") == "Interpolate" else next(iter(chain_interpolates), None)
-    if after is None:
-        raise HelperError("state", "the groom's graph has no Interpolate node to braid after")
-    paths = next((n for n in g.of_type("Guides") if g.param(n, "group") == group), None)
-    if paths is None:
-        paths = g.add("Guides", base="braidPaths", params={"group": group})
     params = {"style": style, "width": float(width), "tightness": float(tightness), "region": float(region),
-              "dutch": bool(dutch), "feed": bool(feed)}
-    braid = g.add("Braid", base="braid", params=params)
-    g.insert_after(after, braid)
-    g.connect(paths, braid, "braids")
-    x, y = g.position(after)
-    g.set_positions({paths: (x, y + 2 * LAYOUT_DY)})
+              "dutch": bool(dutch)}
+    if feed is not None:
+        params["feed"] = bool(feed)  # (left out: on for a cornrow)
+    g = GraphEdits(scalp)
+    braid = g.edit(op="insert_braid", group=group, params=params)["name"]
     g.finish()
     return braid
 

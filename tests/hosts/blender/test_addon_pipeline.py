@@ -346,6 +346,15 @@ class PipelineOpsTest(unittest.TestCase):
         self.assertTrue(hair_guides)
         self.assertTrue(all("braids" in str(param(head, n, "exclude")) for n in hair_guides))
         self.assertEqual(process.call("node_status", session=rt.session).get("graphError", ""), "")
+        # A second braid of the group reads the same paths (graph_inserts.h insertBraid, every host's);
+        # a style the Braid has not is refused.
+        braids = [n["name"] for n in graph_of(head)["nodes"] if n["type"] == "Braid"]
+        second = pipeline.add_braid(head, style="cornrow")
+        self.assertNotIn(second, braids)
+        self.assertEqual(link(head, second, "braids"), link(head, braid, "braids"))
+        self.assertIs(param(head, second, "feed"), True)
+        with self.assertRaises(Exception):
+            pipeline.add_braid(head, style="plait")
         # The feathers' choice in the shared words: scattered feathers, or one feather per guide.
         items = {i.identifier: i.name for i in
                  bpy.ops.groomlab.add_feathers.get_rna_type().properties["source"].enum_items}

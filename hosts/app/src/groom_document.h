@@ -676,11 +676,12 @@ public:
     // just before the output fed by it (and by the scalp): Maya's add_collider. An existing
     // ColliderMesh of that name: the graph left alone (*made its name).
     std::string addCollider(const std::string& meshName, std::string* made = nullptr);
-    // Feathers (Maya's add_feathers): each design a preset's feather Compound ((name, the preset's
-    // JSON): feathers_<design>), several sharing the shafts through a Split (`weights` their
-    // shares, empty: equal), merged with the hair before the output. `source` "scatter": a new
-    // Scatter shaped by the guides; "guides": guide group `group` (made when missing), each of its
-    // guides a hand-placed feather. *made the first design's node.
+    // Feathers, every host's (graph_inserts.h insertFeathers): each design a preset's feather
+    // Compound ((name, the preset's JSON): feathers_<design>), several sharing the shafts through a
+    // Split (`weights` their shares, empty: equal), merged with the hair before the output.
+    // `source` "scatter": a new Scatter shaped by the guides; "guides": guide group `group` (made
+    // when missing), each of its guides a hand-placed feather; "node" or "node.output": what a node
+    // gives. *made the first design's node.
     std::string addFeathers(const std::vector<std::pair<std::string, std::string>>& designs, const std::vector<double>& weights,
                             const std::string& source, const std::string& group = "feathers", std::string* made = nullptr);
     // The guide groups whose guides grow one feather each (the groups of the Guides nodes feeding a
@@ -688,7 +689,8 @@ public:
     // (Maya's feather_guide_groups).
     std::vector<std::string> featherGuideGroups();
     // A Braid node after the Interpolate, its paths guide group `group` (made when missing; draw the
-    // paths in it with the Draw tool): Maya's add_braid. `style` one of braidStyles().
+    // paths in it with the Draw tool): every host's (graph_inserts.h insertBraid). `style` one of
+    // braidStyles().
     std::string addBraid(const std::string& style, const std::string& group = "braids", std::string* made = nullptr);
     // The Braid node's styles, in the core spec's order (three, four, five, fishtail, rope, cornrow).
     std::vector<std::string> braidStyles() const;

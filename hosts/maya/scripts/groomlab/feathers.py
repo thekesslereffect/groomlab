@@ -7,9 +7,9 @@ import os
 from maya import cmds, mel
 
 from groomlab.base import undoable
-from groomlab.guides import add_guide_group, guides_from_curves, list_guide_groups
+from groomlab.guides import guides_from_curves, list_guide_groups
 from groomlab.cards import cards_preset, compare_cards, _cards_nodes, _strands_reaching
-from groomlab.braids import _exclude_from_hair_guides
+from groomlab.braids import _ensure_guide_group
 
 
 # Feathers: barbs grown off shafts (the Propagate node), designs from the feathers_* presets
@@ -23,55 +23,10 @@ def feather_designs():
 
 
 def _feather_design(groom, design):
-    """(the design's Compound node, its shafts' Scatter params) from the preset feathers_<design>,
-    fitted to the groom's scalp."""
+    """(design, the preset feathers_<design>'s graph as JSON, fitted to the groom's scalp): what
+    the core's insertFeathers takes."""
     from groomlab import presets
-    graph = presets.preset_for(groom, "feathers_" + design)
-    node = next((n for n in graph.get("nodes", []) if n.get("type") == "Compound"), None)
-    if node is None:
-        raise ValueError("preset feathers_%s has no feather design (a Compound node)" % design)
-    shafts = next((n for n in graph["nodes"] if n.get("type") == "Scatter"), None)
-    params = (shafts or {}).get("params", {})
-    return node, {k: params[k] for k in ("density", "length") if k in params}
-
-
-def _feather_shafts(groom, model, source, group, scatter_params):
-    """The node (and output) giving the shafts: a new Scatter shaped by the guides, the guides of
-    `group`, or an existing node ("node" or "node.output"). Returns (node, output, new nodes)."""
-    if source == "scatter":
-        scalp = model.first_of("Scalp")
-        added = []
-        if scalp is None:
-            scalp = model.add_node("Scalp", name=model.unique_name("scalp"))
-            added.append(scalp)
-        guides = next((n for n in model.order if model.node_type(n) == "Guides" and not model.param(n, "group")),
-                      None)
-        if guides is None:
-            guides = model.add_node("Guides", name=model.unique_name("guides"))
-            added.append(guides)
-        scatter = model.add_node("Scatter", name=model.unique_name("featherShafts"), params=scatter_params)
-        shapes = model.add_node("Interpolate", name=model.unique_name("featherShapes"))
-        model.connect(scalp, scatter, "scalp")
-        model.connect(scatter, shapes, "strands")
-        model.connect(guides, shapes, "guides")
-        model.connect(scalp, shapes, "scalp")
-        return shapes, None, added + [scatter, shapes]
-    if source == "guides":
-        if group not in [g["name"] for g in list_guide_groups(groom)]:
-            add_guide_group(groom, group)
-        _exclude_from_hair_guides(model, group)  # feather shafts are not hair guides
-        node = next((n for n in model.order if model.node_type(n) == "Guides" and model.param(n, "group") == group),
-                    None)
-        if node is not None:
-            return node, None, []
-        node = model.add_node("Guides", name=model.unique_name("featherGuides"), params={"group": group})
-        return node, None, [node]
-    name, _, output = str(source).partition(".")
-    if name not in model.nodes:
-        raise ValueError("source must be 'scatter', 'guides' or a node of the graph (node or node.output), not %r"
-                         % source)
-    model.output_spec(name, output or None)  # raises for an output it does not have
-    return name, output or None, []
+    return design, json.dumps(presets.preset_for(groom, "feathers_" + design))
 
 
 def _propagates_in(params):
@@ -99,46 +54,12 @@ def _graph_propagates(model):
     return found
 
 
-def _feather_groups(model):
-    """{groupName: groupId} of the feather designs already in the graph (their Propagates')."""
-    groups = {}
-    for _, params in _graph_propagates(model):
-        gid = int(params.get("groupId", 0) or 0)
-        if gid > 0:
-            groups.setdefault(params.get("groupName") or "group%d" % gid, gid)
-    return groups
-
-
-def _feather_guide_groups(model):
-    """The guide groups whose guides grow one feather each in `model`: the groups of the Guides
-    nodes (their `group`) that feed a feather design (a Propagate, or a Compound with one), in
-    the graph's order."""
-    designs = {name for name, _ in _graph_propagates(model)}
-    found = []
-    for name in model.order:
-        if model.node_type(name) != "Guides":
-            continue
-        groups = [g for g in str(model.param(name, "group") or "").replace(",", " ").split() if g]
-        if not groups:
-            continue
-        seen, todo = set(), [name]
-        while todo:
-            n = todo.pop()
-            if n in seen:
-                continue
-            seen.add(n)
-            todo += [dst for dst, _ in model.downstream_of(n)]
-        if seen & designs:
-            found += [g for g in groups if g not in found]
-    return found
-
-
 def feather_guide_groups(groom):
     """The guide groups of `groom` whose guides grow one feather each (add_feathers with source
     "guides", the hand_placed_feathers preset): flight_left, tail... A "feathers" group the graph
     does not read yet is one too (the group the hand-placed feathers go into by default)."""
     from groomlab import graph as gm
-    groups = _feather_guide_groups(gm.GraphModel.from_groom(groom))
+    groups = list(gm.GraphModel.from_groom(groom)._edit().feather_guide_groups())  # every host's (graph_inserts.h)
     if "feathers" not in groups and "feathers" in [g["name"] for g in list_guide_groups(groom)]:
         groups.append("feathers")
     return groups
@@ -148,7 +69,8 @@ def feather_groups(groom):
     """{groupId: groupName} of the groom's feather designs: the groom groups the Unreal export
     writes besides the hair (group 0)."""
     from groomlab import graph as gm
-    return {gid: name for name, gid in _feather_groups(gm.GraphModel.from_groom(groom)).items()}
+    groups = gm.GraphModel.from_groom(groom)._edit().feather_groups()  # every host's (graph_inserts.h)
+    return {gid: name for name, gid in groups.items()}
 
 
 @undoable("feathers")
@@ -172,71 +94,25 @@ def add_feathers(groom, design="contour", source="scatter", weights=None, densit
     """
     from groomlab import graph as gm
     designs = [design] if isinstance(design, str) else list(design)
-    if not designs or len(designs) > 4:
-        raise ValueError("one to four feather designs (a Split has four outputs)")
-    weights = [1.0] * len(designs) if weights is None else [float(w) for w in weights]
-    if len(weights) != len(designs):
-        raise ValueError("one weight per design")
     parts = [_feather_design(groom, d) for d in designs]
+    model = gm.GraphModel.from_groom(groom)
+    # Every host's (graph_inserts.h insertFeathers): the shafts, the split, the designs (each a
+    # groom group of its own: Unreal gives it its own material, LODs and physics), their merges.
+    edit = model._edit()
+    with gm._core_errors():
+        made = edit.insert_feathers(parts, [] if weights is None else [float(w) for w in weights], str(source), group,
+                                    bool(keep_hair), None if density is None else float(density), model.groom_size)
+    model._take(edit)
+    # The guides before the graph reads them (a Guides node of a group there is not fails).
     if curves:
         guides_from_curves(groom, curves, group=group)
-    model = gm.GraphModel.from_groom(groom)
-    out = model.output
-    scatter_params = dict(parts[0][1])
-    if density is not None:
-        scatter_params["density"] = float(density)
-    shafts, shaft_output, made = _feather_shafts(groom, model, source, group, scatter_params)
-    split = None
-    feeds = [(shafts, shaft_output)]
-    if len(designs) > 1:
-        params = {"weight" + letter: 0.0 for letter in "ABCD"}
-        params.update({"weight" + "ABCD"[i]: w for i, w in enumerate(weights)})
-        split = model.add_node("Split", name=model.unique_name("featherSplit"), params=params)
-        model.connect(shafts, split, "strands", output=shaft_output)
-        feeds = [(split, "abcd"[i]) for i in range(len(designs))]
-        made.append(split)
-    names = []
-    groups = _feather_groups(model)
-    for (src, output), (node, _), design_name in zip(feeds, parts, designs):
-        # Each design is a groom group of its own (groupId, groupName on its Propagate): Unreal
-        # gives it its own material, LODs and physics. The same design again joins its group.
-        params = json.loads(json.dumps(node.get("params", {})))
-        if design_name not in groups:
-            groups[design_name] = max(list(groups.values()) + [0]) + 1
-        for propagate in _propagates_in(params):
-            propagate["groupId"] = groups[design_name]
-            propagate["groupName"] = design_name
-        name = model.add_node("Compound", name=model.unique_name(node["name"]), params=params)
-        model.connect(src, name, "shafts", output=output)
-        names.append(name)
-    feathers = names[0]
-    merges = []
-    for other in names[1:]:
-        merge = model.add_node("Merge", name=model.unique_name("featherMerge"))
-        model.connect(feathers, merge, "a")
-        model.connect(other, merge, "b")
-        feathers = merge
-        merges.append(merge)
-    # A row under the output: shafts, split, designs, then their merges.
-    x, y = model.position(out)
-    y += 2 * gm.LAYOUT_DY
-    x -= (len(made) + 2) * gm.LAYOUT_DX
-    for i, n in enumerate(made):
-        model.set_position(n, x + i * gm.LAYOUT_DX, y)
-    for i, n in enumerate(names):
-        model.set_position(n, x + len(made) * gm.LAYOUT_DX, y + i * gm.LAYOUT_DY)
-    for i, n in enumerate(merges):
-        model.set_position(n, x + (len(made) + 1) * gm.LAYOUT_DX, y + i * gm.LAYOUT_DY)
-    final = None
-    if keep_hair and model.source_of(out, "strands"):
-        final = model.add_node("Merge", name=model.unique_name("feathersMerge"))
-        model.insert_before(out, final, "strands")
-        model.connect(feathers, final, "b")
-    else:
-        model.connect(feathers, out, "strands")
+    elif source == "guides":
+        _ensure_guide_group(groom, group)
     model.save(groom)
+    feathers = (made["merges"] or made["designs"])[-1]
     made_cards = create_feather_cards(groom, feathers=feathers, lod=cards_lod) if cards else None
-    return {"shafts": shafts, "split": split, "designs": names, "merge": final, "cards": made_cards}
+    return {"shafts": made["shafts"], "split": made["split"], "designs": list(made["designs"]), "merge": made["merge"],
+            "cards": made_cards}
 
 
 def _feather_branch_end(model):

@@ -147,13 +147,6 @@ struct GraphEdits {
         }
         e = GraphEdit(g.dump());
     }
-    void setParam(const std::string& node, const std::string& param, const json& value) {
-        json g = now();
-        for (json& n : g["nodes"]) {
-            if (n.value("name", std::string()) == node) n["params"][param] = value;
-        }
-        e = GraphEdit(g.dump());
-    }
 };
 
 // Where a motion node goes (Maya's motion_anchor): just before the output, but before the Collide
@@ -169,70 +162,6 @@ std::string motionAnchor(const json& g, const std::string& output) {
         anchor = feed.from;
     }
     return anchor;
-}
-
-// Braid paths and feather shafts are not hair: Guides nodes reading every guide leave `group` out.
-void excludeFromHairGuides(GraphEdits& edit, const std::string& group) {
-    const json g = edit.now();
-    for (const std::string& n : ofType(g, "Guides")) {
-        const json own = paramOf(g, n, "group");
-        if (own.is_string() && !own.get<std::string>().empty()) continue;
-        const json ex = paramOf(g, n, "exclude");
-        std::string text = ex.is_string() ? ex.get<std::string>() : std::string();
-        std::replace(text.begin(), text.end(), ',', ' ');
-        std::vector<std::string> words;
-        std::string word;
-        for (const char c : text + " ") {
-            if (c == ' ') {
-                if (!word.empty()) words.push_back(word);
-                word.clear();
-            } else {
-                word += c;
-            }
-        }
-        if (std::find(words.begin(), words.end(), group) != words.end()) continue;
-        words.push_back(group);
-        std::string joined;
-        for (const std::string& w : words) joined += (joined.empty() ? "" : " ") + w;
-        edit.setParam(n, "exclude", joined);
-    }
-}
-
-// The params of the Propagate nodes inside a Compound's params (and its compounds'), to edit in
-// place (Blender's _propagates_in).
-void propagatesIn(json& params, std::vector<json*>* out) {
-    if (!params.is_object() || !params.contains("definition") || !params["definition"].is_object()) return;
-    json& definition = params["definition"];
-    if (!definition.contains("graph") || !definition["graph"].is_object() || !definition["graph"].contains("nodes")) return;
-    for (json& node : definition["graph"]["nodes"]) {
-        const std::string type = node.value("type", std::string());
-        if (type == "Propagate") {
-            if (!node.contains("params") || !node["params"].is_object()) node["params"] = json::object();
-            out->push_back(&node["params"]);
-        } else if (type == "Compound") {
-            if (!node.contains("params") || !node["params"].is_object()) node["params"] = json::object();
-            propagatesIn(node["params"], out);
-        }
-    }
-}
-
-// {group name: groupId} of the feather designs already in the graph (their Propagates').
-std::map<std::string, int> featherGroups(const json& g) {
-    std::map<std::string, int> groups;
-    for (const json& n : g.value("nodes", json::array())) {
-        json params = n.value("params", json::object());
-        std::vector<json*> found;
-        if (n.value("type", std::string()) == "Propagate") found.push_back(&params);
-        else if (n.value("type", std::string()) == "Compound") propagatesIn(params, &found);
-        for (const json* p : found) {
-            const int id = p->contains("groupId") && (*p)["groupId"].is_number() ? (*p)["groupId"].get<int>() : 0;
-            if (id <= 0) continue;
-            const std::string name = p->contains("groupName") && (*p)["groupName"].is_string() ? (*p)["groupName"].get<std::string>()
-                                                                                                 : "group" + std::to_string(id);
-            groups.emplace(name, id);
-        }
-    }
-    return groups;
 }
 
 // ---- Files ----------------------------------------------------------------------------------------
@@ -447,46 +376,8 @@ std::string GroomDocument::ensureGuideGroup(const std::string& name) {
 }
 
 std::vector<std::string> GroomDocument::featherGuideGroups() {
-    // The groups of the Guides nodes (their `group`) that feed a feather design: a Propagate, or a
-    // Compound with one (Maya's feather_guide_groups).
-    std::set<std::string> designs;
-    for (const json& n : graph_.value("nodes", json::array())) {
-        json params = n.value("params", json::object());
-        std::vector<json*> found;
-        if (n.value("type", std::string()) == "Propagate") found.push_back(&params);
-        else if (n.value("type", std::string()) == "Compound") propagatesIn(params, &found);
-        if (!found.empty()) designs.insert(n.value("name", std::string()));
-    }
-    std::vector<std::string> groups;
-    for (const std::string& guides : ofType(graph_, "Guides")) {
-        const json own = paramOf(graph_, guides, "group");
-        std::string text = own.is_string() ? own.get<std::string>() : std::string();
-        std::replace(text.begin(), text.end(), ',', ' ');
-        std::vector<std::string> names;
-        std::string word;
-        for (const char c : text + " ") {
-            if (c != ' ') {
-                word += c;
-            } else if (!word.empty()) {
-                names.push_back(word);
-                word.clear();
-            }
-        }
-        if (names.empty()) continue;
-        std::set<std::string> seen;
-        std::vector<std::string> todo{guides};
-        bool feeds = false;
-        while (!todo.empty() && !feeds) {
-            const std::string n = todo.back();
-            todo.pop_back();
-            if (!seen.insert(n).second) continue;
-            feeds = designs.count(n) > 0;
-            for (const auto& [to, input] : fedBy(graph_, n)) todo.push_back(to);
-        }
-        for (const std::string& name : names) {
-            if (feeds && std::find(groups.begin(), groups.end(), name) == groups.end()) groups.push_back(name);
-        }
-    }
+    // The groups of the Guides nodes feeding a feather design, every host's (graph_inserts.h).
+    std::vector<std::string> groups = groomlab::featherGuideGroups(GraphEdit(graph_.dump()));
     const HierarchyPtr h = session().authoredHierarchy();
     if (std::find(groups.begin(), groups.end(), "feathers") == groups.end() && h && h->findGroup("feathers") != kNoGroup) {
         groups.push_back("feathers");
@@ -496,151 +387,36 @@ std::vector<std::string> GroomDocument::featherGuideGroups() {
 
 std::string GroomDocument::addFeathers(const std::vector<std::pair<std::string, std::string>>& designs, const std::vector<double>& weights,
                                        const std::string& source, const std::string& group, std::string* made) {
-    if (designs.empty() || designs.size() > 4) return "one to four feather designs (a Split has four outputs)";
-    std::vector<double> shares = weights.empty() ? std::vector<double>(designs.size(), 1.0) : weights;
-    if (shares.size() != designs.size()) return "one weight per design";
-    if (source != "scatter" && source != "guides") return "the shafts come from scatter or guides, not '" + source + "'";
     const MeshPtr& scalp = file().data.scalp;
     const std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
-    // Each design: its preset's feather Compound, fitted to this scalp, and its shafts' Scatter params.
-    struct Part {
-        std::string design;
-        json compound;
-        json scatter = json::object();
-    };
-    std::vector<Part> parts;
+    // Each design's preset fitted to this scalp.
+    std::vector<FeatherDesign> fitted;
     for (const auto& [design, text] : designs) {
-        json preset;
         try {
-            preset = json::parse(presetGraphJson(text, size));
+            fitted.push_back({design, presetGraphJson(text, size)});
         } catch (const std::exception& e) {
             return "cannot read the feather design " + design + ": " + e.what();
         }
-        Part part;
-        part.design = design;
-        for (const json& n : preset.value("nodes", json::array())) {
-            const std::string type = n.value("type", std::string());
-            if (type == "Compound" && part.compound.is_null()) part.compound = n;
-            if (type == "Scatter" && part.scatter.empty()) {
-                const json p = n.value("params", json::object());
-                for (const char* k : {"density", "length"}) {
-                    if (p.contains(k)) part.scatter[k] = p[k];
-                }
-            }
-        }
-        if (part.compound.is_null()) return "the feather design " + design + " has no feather (a Compound node)";
-        parts.push_back(std::move(part));
+    }
+    // Every host's graph edit (graph_inserts.h insertFeathers), tried first: the guide group is not
+    // made for feathers the graph cannot take.
+    auto insert = [&](json& g) {
+        GraphEdit edit(g.dump());
+        const FeatherNodes nodes = insertFeathers(edit, fitted, weights, source, group, true, std::nullopt, size);
+        g = json::parse(edit.toJson());
+        return nodes.designs.front();
+    };
+    try {
+        json trial = graph_;
+        insert(trial);
+    } catch (const std::exception& e) {
+        return e.what();
     }
     if (source == "guides") {
         if (const std::string error = ensureGuideGroup(group); !error.empty()) return error;
     }
     std::string first;
-    const std::string error = editGraph("add feathers", [&](json& g) {
-        GraphEdits edit(g, size);
-        const std::string out = edit.e.outputNode();
-        if (out.empty()) throw std::runtime_error("the graph has no output");
-        std::vector<std::string> made_;
-        std::string shafts;
-        if (source == "scatter") {
-            const json now = edit.now();
-            std::string scalpNode = ofType(now, "Scalp").empty() ? std::string() : ofType(now, "Scalp").front();
-            if (scalpNode.empty()) {
-                scalpNode = edit.add("Scalp", "scalp", nullptr);
-                made_.push_back(scalpNode);
-            }
-            std::string guides;
-            for (const std::string& n : ofType(now, "Guides")) {
-                const json own = paramOf(now, n, "group");
-                if (!own.is_string() || own.get<std::string>().empty()) {
-                    guides = n;
-                    break;
-                }
-            }
-            if (guides.empty()) {
-                guides = edit.add("Guides", "guides", nullptr);
-                made_.push_back(guides);
-            }
-            const std::string scatter = edit.add("Scatter", "featherShafts", parts.front().scatter);
-            const std::string shapes = edit.add("Interpolate", "featherShapes", nullptr);
-            edit.e.connect(scalpNode, scatter, "scalp");
-            edit.e.connect(scatter, shapes, "strands");
-            edit.e.connect(guides, shapes, "guides");
-            edit.e.connect(scalpNode, shapes, "scalp");
-            shafts = shapes;
-            made_.push_back(scatter);
-            made_.push_back(shapes);
-        } else {
-            excludeFromHairGuides(edit, group);
-            const json now = edit.now();
-            for (const std::string& n : ofType(now, "Guides")) {
-                const json own = paramOf(now, n, "group");
-                if (own.is_string() && own.get<std::string>() == group) shafts = n;
-            }
-            if (shafts.empty()) {
-                shafts = edit.add("Guides", "featherGuides", json{{"group", group}});
-                made_.push_back(shafts);
-            }
-        }
-        std::vector<std::pair<std::string, std::string>> feeds{{shafts, ""}};
-        if (parts.size() > 1) {
-            json params = json::object();
-            for (int i = 0; i < 4; ++i) params[std::string("weight") + "ABCD"[i]] = i < static_cast<int>(shares.size()) ? shares[i] : 0.0;
-            const std::string split = edit.add("Split", "featherSplit", params);
-            edit.e.connect(shafts, split, "strands");
-            feeds.clear();
-            for (std::size_t i = 0; i < parts.size(); ++i) feeds.emplace_back(split, std::string(1, "abcd"[i]));
-            made_.push_back(split);
-        }
-        // Each design a groom group of its own (groupId, groupName on its Propagate): Unreal gives it
-        // its own material, LODs and physics; the same design again joins its group.
-        std::map<std::string, int> groups = featherGroups(edit.now());
-        std::vector<std::string> names;
-        for (std::size_t i = 0; i < parts.size(); ++i) {
-            json params = parts[i].compound.value("params", json::object());
-            if (!groups.count(parts[i].design)) {
-                int most = 0;
-                for (const auto& [n, id] : groups) most = std::max(most, id);
-                groups[parts[i].design] = most + 1;
-            }
-            std::vector<json*> propagates;
-            propagatesIn(params, &propagates);
-            for (json* p : propagates) {
-                (*p)["groupId"] = groups[parts[i].design];
-                (*p)["groupName"] = parts[i].design;
-            }
-            const std::string name = edit.add("Compound", parts[i].compound.value("name", std::string("feathers")), params);
-            edit.e.connect(feeds[i].first, name, "shafts", feeds[i].second);
-            names.push_back(name);
-        }
-        std::string feathers = names.front();
-        std::vector<std::string> merges;
-        for (std::size_t i = 1; i < names.size(); ++i) {
-            const std::string merge = edit.add("Merge", "featherMerge", nullptr);
-            edit.e.connect(feathers, merge, "a");
-            edit.e.connect(names[i], merge, "b");
-            feathers = merge;
-            merges.push_back(merge);
-        }
-        // A row under the output: the shafts, the split, the designs, then their merges.
-        if (const auto at = positionOf(edit.now(), out)) {
-            const double y = at->second + 2 * kDY;
-            const double x = at->first - static_cast<double>(made_.size() + 2) * kDX;
-            json positions = json::object();
-            for (std::size_t i = 0; i < made_.size(); ++i) positions[made_[i]] = {x + static_cast<double>(i) * kDX, y};
-            for (std::size_t i = 0; i < names.size(); ++i) positions[names[i]] = {x + static_cast<double>(made_.size()) * kDX, y + static_cast<double>(i) * kDY};
-            for (std::size_t i = 0; i < merges.size(); ++i) positions[merges[i]] = {x + static_cast<double>(made_.size() + 1) * kDX, y + static_cast<double>(i) * kDY};
-            edit.setPositions(positions);
-        }
-        if (!feedOf(edit.now(), out, "strands").from.empty()) {
-            const std::string final_ = edit.add("Merge", "feathersMerge", nullptr);
-            edit.insertBefore(out, final_, "strands", "a");
-            edit.e.connect(feathers, final_, "b");
-        } else {
-            edit.e.connect(feathers, out, "strands");
-        }
-        first = names.front();
-        g = edit.now();
-    });
+    const std::string error = editGraph("add feathers", [&](json& g) { first = insert(g); });
     if (error.empty() && made) *made = first;
     return error;
 }
@@ -659,43 +435,25 @@ std::vector<std::string> GroomDocument::braidStyles() const {
 }
 
 std::string GroomDocument::addBraid(const std::string& style, const std::string& group, std::string* made) {
-    // The styles the core's Braid takes (its spec's choices): every host offers the same.
-    const std::vector<std::string> styles = braidStyles();
-    if (std::find(styles.begin(), styles.end(), style) == styles.end()) {
-        std::string list;
-        for (const std::string& s : styles) list += (list.empty() ? "" : ", ") + s;
-        return "the braid's style is one of " + list + ", not '" + style + "'";
-    }
-    // Checked first: the group is not made for a graph that cannot take a braid.
-    std::string after;
-    {
-        if (typeOf(graph_, "interpolate") == "Interpolate") after = "interpolate";
-        for (const std::string& n : ofType(graph_, "Interpolate")) {
-            if (after.empty() && !fedBy(graph_, n).empty()) after = n;
-        }
-        if (after.empty()) return "the groom's graph has no Interpolate node to braid after";
+    const MeshPtr& scalp = file().data.scalp;
+    const std::optional<double> size = scalp ? presetScalpSize(*scalp) : std::nullopt;
+    // Every host's graph edit (graph_inserts.h insertBraid: the style one of the Braid's, after the
+    // Interpolate), tried first: the group is not made for a graph that cannot take a braid.
+    auto insert = [&](json& g) {
+        GraphEdit edit(g.dump());
+        const std::string name = insertBraid(edit, group, json{{"style", style}}.dump(), {}, size);
+        g = json::parse(edit.toJson());
+        return name;
+    };
+    try {
+        json trial = graph_;
+        insert(trial);
+    } catch (const std::exception& e) {
+        return e.what();
     }
     if (const std::string error = ensureGuideGroup(group); !error.empty()) return error;
     std::string name;
-    const MeshPtr& scalp = file().data.scalp;
-    const std::string error = editGraph("add braid", [&](json& g) {
-        GraphEdits edit(g, scalp ? presetScalpSize(*scalp) : std::nullopt);
-        excludeFromHairGuides(edit, group);
-        std::string paths;
-        for (const std::string& n : ofType(edit.now(), "Guides")) {
-            const json own = paramOf(edit.now(), n, "group");
-            if (own.is_string() && own.get<std::string>() == group) paths = n;
-        }
-        if (paths.empty()) paths = edit.add("Guides", "braidPaths", json{{"group", group}});
-        name = edit.add("Braid", "braid", json{{"style", style}, {"feed", style == "cornrow"}});
-        const auto downstream = fedBy(edit.now(), after);
-        if (!downstream.empty()) edit.insertBetween(after, downstream.front().first, name, "strands");
-        else edit.e.connect(after, name, "strands");
-        edit.place(name, after, kDX / 2.0, kDY);
-        edit.e.connect(paths, name, "braids");
-        edit.place(paths, after, 0.0, 2 * kDY);
-        g = edit.now();
-    });
+    const std::string error = editGraph("add braid", [&](json& g) { name = insert(g); });
     if (error.empty() && made) *made = name;
     return error;
 }

@@ -1841,6 +1841,13 @@ json Helper::run(const std::string& cmd, const json& args) {
         Session& s = session(args);
         return {{"graph", parseGraph(*s.groom)}};
     }
+    if (cmd == "feather_groups") {
+        // The feather designs' groom groups ({name: id}) and the guide groups growing one feather
+        // per guide (graph_inserts.h): Maya's feather_groups and feather_guide_groups.
+        Session& s = session(args);
+        const GraphEdit edit(graphText(*s.groom));
+        return {{"groups", featherGroups(edit)}, {"guideGroups", featherGuideGroups(edit)}};
+    }
     if (cmd == "graph_channels") {
         // The attributes per node as the graph is set (attributes.h), the guide layers as the
         // guides' painted maps.
@@ -1950,6 +1957,35 @@ json Helper::run(const std::string& cmd, const json& args) {
             if (args.contains("offset") && args["offset"].is_number()) offset = args["offset"].get<double>();
             if (args.contains("friction") && args["friction"].is_number()) friction = args["friction"].get<double>();
             r["name"] = insertCollider(edit, needString(args, "mesh"), optBool(args, "wire", true), offset, friction, scalpSize(s));
+        } else if (op == "insert_braid") {  // Add > Braid, every host's
+            const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
+            r["name"] = insertBraid(edit, optString(args, "group", "braids"), params.dump(), optString(args, "after", ""), scalpSize(s));
+        } else if (op == "insert_feathers") {  // Add > Feathers, every host's: designs by name (presets feathers_<name>)
+            if (!args.contains("designs") || !args["designs"].is_array()) fail("bad_request", "designs is a list of feather design names");
+            std::vector<FeatherDesign> designs;
+            for (const json& d : args["designs"]) {
+                if (!d.is_string()) fail("bad_request", "designs is a list of feather design names");
+                const std::string text = readText(presetFile(json{{"name", "feathers_" + d.get<std::string>()}}, nullptr));
+                designs.push_back({d.get<std::string>(), presetGraphJson(text, scalpSize(s))});
+            }
+            std::vector<double> weights;
+            if (args.contains("weights") && args["weights"].is_array()) {
+                for (const json& w : args["weights"]) {
+                    if (!w.is_number()) fail("bad_request", "weights are numbers");
+                    weights.push_back(w.get<double>());
+                }
+            }
+            std::optional<double> density;
+            if (args.contains("density") && args["density"].is_number()) density = args["density"].get<double>();
+            const FeatherNodes made = insertFeathers(edit, designs, weights, optString(args, "source", "scatter"),
+                                                     optString(args, "group", "feathers"), optBool(args, "keepHair", true), density,
+                                                     scalpSize(s));
+            auto orNull = [](const std::string& name) { return name.empty() ? json() : json(name); };
+            r["shafts"] = made.shafts;
+            r["split"] = orNull(made.split);
+            r["designs"] = made.designs;
+            r["merges"] = made.merges;
+            r["merge"] = orNull(made.merge);
         } else if (op == "set_positions" || op == "set_bypass" || op == "set_evaluation") {
             // The editors' fields of a node (graph_io.h): its "ui" position, as Maya's Graph Editor and
             // the app keep it, "bypass" (Disable) and "evaluation" (when it runs). Set here rather

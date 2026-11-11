@@ -1,23 +1,29 @@
 # SPDX-License-Identifier: Apache-2.0
 """Braids (paths drawn from the scalp) and instancing (geometry on the strands)."""
 
+import json
+
 from maya import cmds
 
 from groomlab.base import undoable
-from groomlab.guides import guides_from_curves
+from groomlab.guides import add_guide_group, guides_from_curves, list_guide_groups
 
 
 def _exclude_from_hair_guides(model, group):
-    """Braid paths are not hair: Guides nodes reading all guides leave `group` out.
-    Returns True when the model changed."""
-    changed = False
-    for n in model.order:
-        if model.node_type(n) == "Guides" and not model.param(n, "group"):
-            excluded = model.param(n, "exclude").replace(",", " ").split()
-            if group not in excluded:
-                model.set_param(n, "exclude", " ".join(excluded + [group]))
-                changed = True
+    """Braid paths and feather shafts are not hair: Guides nodes reading all guides leave `group`
+    out (every host's: graph_inserts.h excludeFromHairGuides). Returns True when the model changed."""
+    from groomlab import graph as gm
+    edit = model._edit()
+    with gm._core_errors():
+        changed = edit.exclude_from_hair_guides(group)
+    if changed:
+        model._take(edit)
     return changed
+
+
+def _ensure_guide_group(groom, group):
+    if group not in [g["name"] for g in list_guide_groups(groom)]:
+        add_guide_group(groom, group)
 
 
 def braid_paths_from_curves(groom, braid, curves, model=None):
@@ -71,7 +77,7 @@ def set_instance_prototype(groom, node, mesh, model=None):
 
 @undoable("braid")
 def add_braid(groom, curves=None, style="three", group="braids", width=0.25, tightness=1.0, region=0.25,
-              dutch=False, after="interpolate", feed=None, feed_until=None):
+              dutch=False, after=None, feed=None, feed_until=None):
     """Braid strands along paths; returns the Braid node's name.
 
     `curves` (drawn from the scalp along the braid) become the guide group
@@ -84,29 +90,28 @@ def add_braid(groom, curves=None, style="three", group="braids", width=0.25, tig
     default for cornrows) strands within `region` of anywhere along the path
     join where they grow, as in cornrows and French braids, but only along
     the first `feed_until` (0-1) of the path: past it the braid hangs free.
-    The Braid node goes after `after`, so noise and frizz later add
-    flyaways. It writes the `braidId` and `braidFlat` strand channels the
-    Cards node builds braid cards from.
+    The Braid node goes after `after` (default: the Interpolate), so noise
+    and frizz later add flyaways. It writes the `braidId` and `braidFlat`
+    strand channels the Cards node builds braid cards from.
     """
-    if feed is None:
-        feed = style == "cornrow"
     from groomlab import graph as gm
-    if curves:
-        guides_from_curves(groom, curves, group=group)
-    model = gm.GraphModel.from_groom(groom)
-    _exclude_from_hair_guides(model, group)
-    paths = next((n for n in model.order if model.node_type(n) == "Guides" and model.param(n, "group") == group), None)
-    if paths is None:
-        paths = model.add_node("Guides", name=model.unique_name("braidPaths"), params={"group": group})
-    params = {"style": style, "width": width, "tightness": tightness, "region": region, "dutch": dutch,
-              "feed": bool(feed)}
+    params = {"style": style, "width": float(width), "tightness": float(tightness), "region": float(region),
+              "dutch": bool(dutch)}
+    if feed is not None:
+        params["feed"] = bool(feed)  # (left out: on for a cornrow)
     if feed_until is not None:
         params["feedUntil"] = float(feed_until)
-    braid = model.add_node("Braid", name=model.unique_name("braid"), params=params)
-    model.insert_after(after, braid)
-    model.connect(paths, braid, "braids")
-    x, y = model.position(after)
-    model.set_position(paths, x, y + 2 * gm.LAYOUT_DY)
+    model = gm.GraphModel.from_groom(groom)
+    # Every host's (graph_inserts.h insertBraid): where it goes, its paths' Guides node.
+    edit = model._edit()
+    with gm._core_errors():
+        braid = edit.insert_braid(group, json.dumps(params), after or "", model.groom_size)
+    model._take(edit)
+    # The guides before the graph reads them (a Guides node of a group there is not fails).
+    if curves:
+        guides_from_curves(groom, curves, group=group)
+    else:
+        _ensure_guide_group(groom, group)  # draw the paths in it with the Draw tool
     model.save(groom)
     return braid
 

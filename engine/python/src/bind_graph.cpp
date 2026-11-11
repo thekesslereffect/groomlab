@@ -614,6 +614,39 @@ void bindGraph(py::module_& m) {
              py::arg("mesh_name"), py::arg("wire") = true, py::arg("offset") = py::none(), py::arg("friction") = py::none(),
              py::arg("groom_size") = py::none(),
              "Add > Collider's graph (graph_inserts.h): a ColliderMesh node, and with `wire` a Collide before the output.")
+        .def("insert_braid",
+             [](GraphEdit& e, const std::string& group, const std::string& paramsJson, const std::string& after,
+                std::optional<double> groomSize) { return insertBraid(e, group, paramsJson, after, groomSize); },
+             py::arg("group") = std::string("braids"), py::arg("params_json") = std::string(), py::arg("after") = std::string(),
+             py::arg("groom_size") = py::none(),
+             "Add > Braid (graph_inserts.h): a Braid node after the Interpolate, its paths the group's Guides node.")
+        .def("insert_feathers",
+             [](GraphEdit& e, const std::vector<std::pair<std::string, std::string>>& designs, const std::vector<double>& weights,
+                const std::string& source, const std::string& group, bool keepHair, std::optional<double> density,
+                std::optional<double> groomSize) {
+                 std::vector<FeatherDesign> list;
+                 for (const auto& [name, preset] : designs) list.push_back({name, preset});
+                 const FeatherNodes made = insertFeathers(e, list, weights, source, group, keepHair, density, groomSize);
+                 py::dict out;
+                 auto orNone = [](const std::string& s) { return s.empty() ? py::object(py::none()) : py::object(py::str(s)); };
+                 out["shafts"] = made.shafts;
+                 out["split"] = orNone(made.split);
+                 out["designs"] = made.designs;
+                 out["merges"] = made.merges;
+                 out["merge"] = orNone(made.merge);
+                 return out;
+             },
+             py::arg("designs"), py::arg("weights") = std::vector<double>(), py::arg("source") = std::string("scatter"),
+             py::arg("group") = std::string("feathers"), py::arg("keep_hair") = true, py::arg("density") = py::none(),
+             py::arg("groom_size") = py::none(),
+             "Add > Feathers (graph_inserts.h): designs [(name, fitted preset JSON)] on shafts; returns {shafts, split, designs, "
+             "merges, merge}.")
+        .def("exclude_from_hair_guides", [](GraphEdit& e, const std::string& group) { return excludeFromHairGuides(e, group); },
+             py::arg("group"), "The hair's Guides nodes leave guide group `group` out (graph_inserts.h); True when that changed.")
+        .def("feather_groups", [](const GraphEdit& e) { return featherGroups(e); },
+             "{groupName: groupId} of the feather designs in the graph (graph_inserts.h).")
+        .def("feather_guide_groups", [](const GraphEdit& e) { return featherGuideGroups(e); },
+             "The guide groups whose Guides nodes feed a feather design, in the graph's order (graph_inserts.h).")
         .def("insert_before",
              [](GraphEdit& e, const std::string& anchor, const std::string& node, const std::string& input,
                 const std::string& nodeInput) { insertBefore(e, anchor, node, input, nodeInput); },

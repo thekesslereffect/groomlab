@@ -607,6 +607,104 @@ TEST(GraphInserts, EveryHostAddsAFeatureAlike) {
     EXPECT_THROW(insertBefore(edit, "scalp", sim), GraphError) << "nothing feeds the scalp's strands";
 }
 
+TEST(GraphInserts, BraidsAndFeathersLandAlikeInEveryHost) {
+    // graph_inserts.h insertBraid / insertFeathers: Maya's braids.py and feathers.py, the Blender
+    // helper and the app add them through these.
+    using nlohmann::json;
+    auto graph = [](const GraphEdit& e) { return json::parse(e.toJson()); };
+    auto param = [&](const GraphEdit& e, const std::string& node, const std::string& name) {
+        const json g = graph(e);  // (held: a temporary's member would dangle in the loop)
+        for (const json& n : g["nodes"]) {
+            if (n["name"] == node) return n.value("params", json::object()).value(name, json());
+        }
+        return json();
+    };
+    auto source = [&](const GraphEdit& e, const std::string& to, const std::string& input) {
+        const json g = graph(e);
+        for (const json& c : g["connections"]) {
+            if (c["to"] == to && c["input"] == input) return c["from"].get<std::string>();
+        }
+        return std::string();
+    };
+    GraphEdit edit(defaultGraphJson());
+    setNodePosition(edit, "interpolate", 300.0, 0.0);
+    std::string fed;  // what the Interpolate fed first
+    const json start = graph(edit);
+    for (const json& c : start["connections"]) {
+        if (fed.empty() && c["from"] == "interpolate") fed = c["to"].get<std::string>();
+    }
+    ASSERT_FALSE(fed.empty());
+
+    // A cornrow after the Interpolate, fed along the scalp, its paths a Guides node of the group.
+    const std::string braid = insertBraid(edit, "braids", R"({"style": "cornrow", "width": 0.3})");
+    EXPECT_EQ(edit.nodeType(braid), "Braid");
+    EXPECT_EQ(source(edit, braid, "strands"), "interpolate");
+    EXPECT_EQ(source(edit, fed, "strands"), braid);
+    EXPECT_EQ(param(edit, braid, "feed"), true);
+    EXPECT_EQ(param(edit, braid, "width"), 0.3);
+    const std::string paths = source(edit, braid, "braids");
+    ASSERT_EQ(edit.nodeType(paths), "Guides");
+    EXPECT_EQ(param(edit, paths, "group"), "braids");
+    EXPECT_EQ(param(edit, "guides", "exclude"), "braids") << "braid paths are not hair";
+    EXPECT_EQ(nodePosition(edit, braid), std::make_pair(300.0 + kInsertColumn / 2.0, kInsertRow));
+    EXPECT_EQ(nodePosition(edit, paths), std::make_pair(300.0, 2.0 * kInsertRow));
+    // A second braid of the group reads the same paths; the exclusion is not repeated.
+    const std::string second = insertBraid(edit, "braids", R"({"style": "three"})");
+    EXPECT_EQ(source(edit, second, "braids"), paths);
+    EXPECT_EQ(param(edit, second, "feed"), false);
+    EXPECT_EQ(param(edit, "guides", "exclude"), "braids");
+    EXPECT_THROW(insertBraid(edit, "braids", R"({"style": "plait"})"), GraphError);
+    EXPECT_THROW(insertBraid(edit, "braids", {}, "nothing"), GraphError);
+    EXPECT_THROW(insertBraid(edit, ""), GraphError);
+
+    // Two designs sharing scattered shafts through a Split, merged with the hair before the output.
+    auto design = [](const std::string& name) {
+        std::ifstream in(std::filesystem::u8path(presetPath("feathers_" + name, {GROOMLAB_SHIPPED_PRESETS})));
+        std::stringstream text;
+        text << in.rdbuf();
+        return FeatherDesign{name, presetGraphJson(text.str(), std::nullopt)};
+    };
+    const std::string output = edit.outputNode();
+    const std::string hair = source(edit, output, "strands");
+    setNodePosition(edit, output, 1000.0, 0.0);
+    const FeatherNodes made = insertFeathers(edit, {design("contour"), design("down")}, {3.0, 1.0});
+    EXPECT_EQ(edit.nodeType(made.shafts), "Interpolate");
+    EXPECT_EQ(edit.nodeType(source(edit, made.shafts, "strands")), "Scatter");
+    EXPECT_EQ(source(edit, made.split, "strands"), made.shafts);
+    EXPECT_EQ(param(edit, made.split, "weightA"), 3.0);
+    EXPECT_EQ(param(edit, made.split, "weightC"), 0.0);
+    ASSERT_EQ(made.designs.size(), 2u);
+    ASSERT_EQ(made.merges.size(), 1u);
+    EXPECT_EQ(source(edit, made.designs[1], "shafts"), made.split);
+    EXPECT_EQ(source(edit, output, "strands"), made.merge);
+    EXPECT_EQ(source(edit, made.merge, "a"), hair);
+    EXPECT_EQ(source(edit, made.merge, "b"), made.merges.front());
+    EXPECT_EQ((featherGroups(edit)), (std::map<std::string, int>{{"contour", 1}, {"down", 2}}));
+    EXPECT_EQ(nodePosition(edit, made.designs[0]), std::make_pair(1000.0 - 2.0 * kInsertColumn, 2.0 * kInsertRow));
+    EXPECT_TRUE(featherGuideGroups(edit).empty()) << "scattered shafts are no guide group";
+
+    // Hand-placed: a guide group's guides, the same design joining its groom group, the hair's
+    // Guides leaving the group out; without keepHair the feathers feed the output alone.
+    const FeatherNodes placed = insertFeathers(edit, {design("contour")}, {}, "guides", "flight", false);
+    EXPECT_EQ(param(edit, placed.shafts, "group"), "flight");
+    EXPECT_TRUE(placed.split.empty());
+    EXPECT_TRUE(placed.merge.empty());
+    EXPECT_EQ(source(edit, output, "strands"), placed.designs.front());
+    EXPECT_EQ(param(edit, "guides", "exclude"), "braids flight");
+    EXPECT_EQ(featherGroups(edit).at("contour"), 1);
+    EXPECT_EQ(featherGuideGroups(edit), std::vector<std::string>{"flight"});
+    // A node's output as the shafts.
+    const FeatherNodes split = insertFeathers(edit, {design("down")}, {}, made.split + ".b");
+    EXPECT_EQ(split.shafts, made.split);
+    EXPECT_EQ(featherGroups(edit).at("down"), 2);
+
+    EXPECT_THROW(insertFeathers(edit, {}), GraphError);
+    EXPECT_THROW(insertFeathers(edit, {design("down"), design("down")}, {1.0}), GraphError);
+    EXPECT_THROW(insertFeathers(edit, {design("down")}, {}, "nothing"), GraphError);
+    EXPECT_THROW(insertFeathers(edit, {FeatherDesign{"empty", R"({"nodes": []})"}}), GraphError);
+    EXPECT_FALSE(excludeFromHairGuides(edit, "flight")) << "already left out";
+}
+
 TEST(GraphControls, EveryHostMakesAndReadsControlsAlike) {
     // graph_controls.h: Maya's params.py, the Blender helper and the app make controls through it.
     using nlohmann::json;
