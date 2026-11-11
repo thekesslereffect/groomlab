@@ -59,6 +59,15 @@
         {"value": "all", "label": "All channels"}
       ]
     },
+    "lengthChange": {
+      "label": "Guides",
+      "tip": "How a guide takes its new length",
+      "default": "scale",
+      "items": [
+        {"value": "scale", "label": "Scale", "tip": "The whole guide scaled about its root: curls and bends keep their shape"},
+        {"value": "trim", "label": "Trim", "tip": "Cut at the tip, or extended along its last direction: curls keep their size"}
+      ]
+    },
     "featherSource": {
       "label": "Feathers",
       "tip": "Where the feathers grow: scattered over the scalp, or one on each guide of a guide group",

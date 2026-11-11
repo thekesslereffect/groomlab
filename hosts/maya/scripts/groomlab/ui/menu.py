@@ -1696,9 +1696,6 @@ def find_missing_files_dialog(folder=None, grooms=None, recursive=True):
 
 # ---- GroomLab > Add: the graph's building blocks from the menu -----------------------------------
 
-FEATHER_DESIGNS = ("contour", "down", "flight", "afterfeather", "barred")
-
-
 def feathers_form(groom, curves=()):
     """Add > Feathers' form for `groom` with `curves` selected: (fields, note) as _ask takes them.
     The choice reads "Scattered feathers (shaped by the guides)" or "One feather per guide
@@ -1707,6 +1704,7 @@ def feathers_form(groom, curves=()):
     go into is picked from the groom's groups or typed (a new one: flight_left, tail), the
     groom's feathers group first (default "feathers")."""
     import groomlab
+    from groomlab import feathers
     from groomlab.ui import definitions
     feather_groups = groomlab.feather_guide_groups(groom)
     group = feather_groups[0] if feather_groups else "feathers"
@@ -1716,7 +1714,7 @@ def feathers_form(groom, curves=()):
     source = "guides" if (curves or feather_groups) else definitions.choice_default("featherSource")
     sources = definitions.choices("featherSource")
     fields = [
-        ("design", "Design", "edit", "contour", list(FEATHER_DESIGNS),
+        ("design", "Design", "edit", "contour", feathers.feather_designs(),
          "One design, or several separated by commas (an assortment: contour, down)"),
         ("weights", "Weights", "edit", "", [], "The assortment's shares, one per design (3, 1); empty: equal"),
         ("source", definitions.get("choices/featherSource").get("label", "Feathers"), "choice", source,

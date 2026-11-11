@@ -388,16 +388,15 @@ BrushPanel::BrushPanel(QWidget* parent) : QFrame(parent) {
         rows->addWidget(segmentRow(keys_, &chips, tr("Guides")));
         auto* group = new QButtonGroup(keys_);
         group->setExclusive(true);
-        for (const auto& [value, label, tip] : {std::tuple<const char*, QString, QString>{
-                                                    "scale", tr("Scale"), tr("The whole guide scaled about its root: curls and bends keep their shape")},
-                                                {"trim", tr("Trim"), tr("Cut at the tip, or extended along its last direction: curls keep their size")}}) {
-            QToolButton* c = makeChip(label, tip, keys_);
-            c->setObjectName(QStringLiteral("lengthChange_") + QLatin1String(value));
-            c->setProperty("change", QString::fromLatin1(value));
+        for (const ui::json& item : defs().choices("lengthChange")) {
+            const std::string value = item.value("value", std::string());
+            QToolButton* c = makeChip(qs(item.value("label", std::string())), qs(item.value("tip", std::string())), keys_);
+            c->setObjectName(QStringLiteral("lengthChange_") + qs(value));
+            c->setProperty("change", qs(value));
             group->addButton(c);
             chips->addWidget(c);
             lengthChanges_.push_back(c);
-            connect(c, &QToolButton::clicked, this, [this, value = std::string(value)] {
+            connect(c, &QToolButton::clicked, this, [this, value] {
                 const LengthChange change = lengthChangeFromName(value);
                 lengthsEdit("change", [change](LengthKeyTool& lk, StrokeHost& h, const BrushToolSettings& s) { lk.setChange(h, s, change); });
             });

@@ -526,7 +526,7 @@ class GROOMLAB_OT_add_feathers(_Tipped, GroomOperator):
 
     design: StringProperty(name="Design", default="contour",
                            description="One design, or several separated by commas (an assortment: contour, down); "
-                                       "contour, down, flight, afterfeather, barred, or a feathers_<name> preset of yours")
+                                       "a feathers_<design> preset's design (contour, down, flight...) or one saved as yours")
     weights: StringProperty(name="Weights", default="",
                             description="The assortment's shares, one per design (3, 1); empty: equal")
     # engine/ui/choices.json's featherSource: the words every host shows.

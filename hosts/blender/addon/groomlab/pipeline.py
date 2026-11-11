@@ -734,9 +734,6 @@ def add_cards(scalp, lod="mid"):
     return nodes[0]
 
 
-FEATHER_DESIGNS = ("contour", "down", "flight", "afterfeather", "barred")
-
-
 def feather_designs():
     """The feather designs there are: the presets named feathers_<design>."""
     from . import graph as graph_mod

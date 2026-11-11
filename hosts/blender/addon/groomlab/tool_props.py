@@ -556,12 +556,11 @@ class GroomLabTools(bpy.types.PropertyGroup):
                               description="The length the selected key gives the guide nearest it (its scale set to "
                                           "match)",
                               update=_length_edit("length", lambda t: {"value": t.length_key}))
-    length_change: EnumProperty(name="New length", default="SCALE",
-                                items=[("SCALE", "Scale", "The whole guide scaled about its root: curls and bends keep "
-                                                          "their shape"),
-                                       ("TRIM", "Trim", "Cut at the tip, or extended along its last direction: curls "
-                                                        "keep their size")],
-                                update=_length_edit("change", lambda t: {"name": t.length_change.lower()}))
+    # engine/ui/choices.json's lengthChange (identifiers its values: scale, trim).
+    length_change: EnumProperty(name=defs.get("choices/lengthChange")["label"], default=defs.enum_default("lengthChange"),
+                                items=defs.enum_items("lengthChange"),
+                                description=defs.get("choices/lengthChange")["tip"],
+                                update=_length_edit("change", lambda t: {"name": t.length_change}))
     children_count: IntProperty(name="Children", default=5, min=1, max=500,
                                 description="Children per guide for Edit Guides > Children (the selected guides, else the "
                                             "picked group)")

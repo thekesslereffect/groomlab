@@ -9,7 +9,7 @@ scales; refresh() follows it."""
 import json
 
 from groomlab.ui.qt import QtWidgets
-from groomlab.ui import theme, widgets
+from groomlab.ui import definitions, theme, widgets
 
 import groomlab
 
@@ -79,11 +79,11 @@ class LengthKeysBox(QtWidgets.QWidget):
         self.change_group = QtWidgets.QButtonGroup(self)
         self.change_group.setExclusive(True)
         self.change_buttons = {}
-        for value, label, tip in (("scale", "Scale", "The whole guide scaled about its root: curls and bends keep "
-                                   "their shape"),
-                                  ("trim", "Trim", "Cut at the tip, or extended along its last direction: curls keep "
-                                   "their size")):
-            b = widgets.chip(label, "How a guide takes its new length: " + tip, value == "scale", "lengthChange_" + value)
+        changes = definitions.get("choices/lengthChange")
+        for c in changes["items"]:
+            value = c["value"]
+            b = widgets.chip(c["label"], "%s: %s" % (changes["tip"], c["tip"]), value == changes["default"],
+                             "lengthChange_" + value)
             b.clicked.connect(lambda _=False, v=value: self.edit("change %s" % v))
             self.change_group.addButton(b)
             self.change_buttons[value] = b

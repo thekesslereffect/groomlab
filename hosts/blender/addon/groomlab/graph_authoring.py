@@ -16,6 +16,7 @@ import tempfile
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
 
+from . import definitions as defs
 from . import graph, graph_tree, graph_ui, groom, process, props
 from .graph_tree import ours
 from .graph_ui import ActionTip, action_prop, bind
@@ -1492,8 +1493,7 @@ class GROOMLAB_OT_graph_paint_param(_ParamOp):
     bl_idname = "groomlab.graph_paint_param"
     bl_label = "Paint"
 
-    kind: EnumProperty(items=(("guides", "On Guides", ""), ("vertices", "On Scalp Vertices", ""), ("texture", "As Texture", "")),
-                       default="vertices")
+    kind: EnumProperty(name=defs.get("choices/mapKind")["label"], items=defs.enum_items("mapKind"), default="vertices")
 
     def execute(self, context):
         from . import tools

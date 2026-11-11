@@ -879,7 +879,7 @@ def sync_lengths(scene, state):
         if 0 <= key < len(scales):
             t.length_scale = float(scales[key])
             t.length_key = float(state["lengths"][key])
-        t.length_change = (state.get("change") or "scale").upper()
+        t.length_change = state.get("change") or "scale"
     finally:
         _length_syncing[0] = False
 
