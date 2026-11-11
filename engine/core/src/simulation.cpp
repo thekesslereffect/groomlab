@@ -1762,28 +1762,33 @@ void GuideSolver::Impl::solve(const SimInputs& in, int frames, const std::functi
         if (!(repulsionShare > 0.0f) || !(radius > 0.0f)) return;
         const float most = kMostRepulsion * radius;
         const float inv = 1.0f / radius;
-        auto cellOf = [&](const Vec3f& p, int* c) {
-            c[0] = static_cast<int>(std::floor(p.x * inv));
-            c[1] = static_cast<int>(std::floor(p.y * inv));
-            c[2] = static_cast<int>(std::floor(p.z * inv));
+        // A cell's index along an axis: 64-bit and clamped (a small radius over a large scene, or a
+        // point gone to NaN in a sim that blew up, cast to int was undefined behaviour).
+        auto axisCell = [&](float v) -> std::int64_t {
+            const double q = std::floor(static_cast<double>(v) * static_cast<double>(inv));
+            return std::isfinite(q) ? static_cast<std::int64_t>(std::clamp(q, -1e15, 1e15)) : 0;
         };
-        auto key = [](int cx, int cy, int cz) {
-            return hashCombine(hashCombine(hash64(static_cast<std::uint64_t>(static_cast<std::int64_t>(cx))),
-                                           static_cast<std::uint64_t>(static_cast<std::int64_t>(cy))),
-                               static_cast<std::uint64_t>(static_cast<std::int64_t>(cz)));
+        auto cellOf = [&](const Vec3f& p, std::int64_t* c) {
+            c[0] = axisCell(p.x);
+            c[1] = axisCell(p.y);
+            c[2] = axisCell(p.z);
+        };
+        auto key = [](std::int64_t cx, std::int64_t cy, std::int64_t cz) {
+            return hashCombine(hashCombine(hash64(static_cast<std::uint64_t>(cx)), static_cast<std::uint64_t>(cy)),
+                               static_cast<std::uint64_t>(cz));
         };
         std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> grid;
         grid.reserve(x.size());
         for (std::size_t i = 0; i < x.size(); ++i) {
             if (i == begin[guideOf[i]]) continue;  // roots stay
-            int c[3];
+            std::int64_t c[3];
             cellOf(x[i], c);
             grid[key(c[0], c[1], c[2])].push_back(static_cast<std::uint32_t>(i));
         }
         push.assign(x.size(), Vec3f{});
         parallelFor(0, x.size(), [&](std::size_t i) {
             if (i == begin[guideOf[i]]) return;
-            int c[3];
+            std::int64_t c[3];
             cellOf(x[i], c);
             Vec3f sum{};
             for (int dx = -1; dx <= 1; ++dx) {

@@ -426,40 +426,22 @@ public:
         }
         const float margin = offset + bodyOffset + 1e-6f;
         const float meet = offset + margin;
-        const float cell = std::max(2.0f * longest + margin, 1e-6f);
-        auto cellOf = [&](const Vec3f& p) {
-            return std::array<std::int64_t, 3>{static_cast<std::int64_t>(std::floor(p.x / cell)),
-                                               static_cast<std::int64_t>(std::floor(p.y / cell)),
-                                               static_cast<std::int64_t>(std::floor(p.z / cell))};
-        };
-        auto key = [](std::int64_t x, std::int64_t y, std::int64_t z) {
-            return hashCombine(hashCombine(hash64(static_cast<std::uint64_t>(x)), static_cast<std::uint64_t>(y)),
-                               static_cast<std::uint64_t>(z));
-        };
-        std::unordered_map<std::uint64_t, std::vector<std::uint32_t>> grid;
-        for (std::size_t fi = 0; fi < feathers.size(); ++fi) {
-            const auto c = cellOf(feathers[fi].root);
-            grid[key(c[0], c[1], c[2])].push_back(static_cast<std::uint32_t>(fi));
-        }
+        // The feathers' roots in the shared grid (internal.h CellGrid): a cell's in index order, the
+        // cells visited as before, so each feather finds its neighbours in the same order.
+        std::vector<Vec3f> roots(feathers.size());
+        for (std::size_t fi = 0; fi < feathers.size(); ++fi) roots[fi] = feathers[fi].root;
+        const CellGrid grid(roots, 2.0f * longest + margin);
         std::vector<std::vector<std::uint32_t>> near(feathers.size()), under(feathers.size());
         parallelFor(0, feathers.size(), [&](std::size_t b) {
             const Feather& fb = feathers[b];
-            const auto c = cellOf(fb.root);
             std::vector<std::uint32_t>& list = near[b];
-            for (std::int64_t dx = -1; dx <= 1; ++dx) {
-                for (std::int64_t dy = -1; dy <= 1; ++dy) {
-                    for (std::int64_t dz = -1; dz <= 1; ++dz) {
-                        const auto it = grid.find(key(c[0] + dx, c[1] + dy, c[2] + dz));
-                        if (it == grid.end()) continue;
-                        for (const std::uint32_t a : it->second) {
-                            const Feather& fa = feathers[a];
-                            if (a == b || !fa.core || fa.up.dot(fb.up) < kSameSide) continue;
-                            if ((fa.root - fb.root).length() > fa.reach + fb.reach + margin) continue;
-                            list.push_back(a);
-                        }
-                    }
-                }
-            }
+            grid.around(fb.root, [&](std::uint32_t a) {
+                const Feather& fa = feathers[a];
+                if (a == b || !fa.core || fa.up.dot(fb.up) < kSameSide) return true;
+                if ((fa.root - fb.root).length() > fa.reach + fb.reach + margin) return true;
+                list.push_back(a);
+                return true;
+            });
             std::sort(list.begin(), list.end());
             for (const std::uint32_t a : list) {
                 if (lowerOf(a, b) && sweptBoxesMeet(feathers[a], fb, depthOf(feathers[a]), meet)) under[b].push_back(a);

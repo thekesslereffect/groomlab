@@ -188,6 +188,13 @@ void resampleStrand(const StrandSet& source, StrandSet& out, std::size_t s, bool
                     const std::vector<const std::vector<float>*>& inPoint, const std::vector<std::vector<float>*>& outPoint,
                     std::vector<float>& outWidths);
 
+// A coordinate's cell along an axis in a grid of cubes `cell` wide: 64-bit, clamped, and 0 for a
+// coordinate not finite (a cast of NaN or infinity is undefined behaviour).
+inline std::int64_t gridCell(float v, float cell) {
+    const double q = std::floor(static_cast<double>(v) / static_cast<double>(cell));
+    return std::isfinite(q) ? static_cast<std::int64_t>(std::clamp(q, -1e15, 1e15)) : 0;
+}
+
 // Points binned in a world-aligned grid of cubes `cell` wide (at least the farthest a query
 // reaches): a query visits the points of a point's cell and its 26 neighbours. What a query finds
 // within its reach is the same whatever the cell, and depends only on the points near it (an
@@ -208,8 +215,7 @@ public:
     }
     // The key of p's cell, and of the cell (dx, dy, dz) from it.
     std::uint64_t keyOf(const Vec3f& p, std::int64_t dx = 0, std::int64_t dy = 0, std::int64_t dz = 0) const {
-        return cellKey(static_cast<std::int64_t>(std::floor(p.x / cell_)) + dx, static_cast<std::int64_t>(std::floor(p.y / cell_)) + dy,
-                       static_cast<std::int64_t>(std::floor(p.z / cell_)) + dz);
+        return cellKey(gridCell(p.x, cell_) + dx, gridCell(p.y, cell_) + dy, gridCell(p.z, cell_) + dz);
     }
     static std::uint64_t cellKey(std::int64_t x, std::int64_t y, std::int64_t z) {
         return hashCombine(hashCombine(hash64(static_cast<std::uint64_t>(x)), static_cast<std::uint64_t>(y)), static_cast<std::uint64_t>(z));
@@ -243,9 +249,7 @@ class GrowingCellGrid {
 public:
     explicit GrowingCellGrid(float cell) : cell_(std::max(cell, 1e-6f)) {}
     std::uint64_t keyOf(const Vec3f& p, std::int64_t dx = 0, std::int64_t dy = 0, std::int64_t dz = 0) const {
-        return CellGrid::cellKey(static_cast<std::int64_t>(std::floor(p.x / cell_)) + dx,
-                                 static_cast<std::int64_t>(std::floor(p.y / cell_)) + dy,
-                                 static_cast<std::int64_t>(std::floor(p.z / cell_)) + dz);
+        return CellGrid::cellKey(gridCell(p.x, cell_) + dx, gridCell(p.y, cell_) + dy, gridCell(p.z, cell_) + dz);
     }
     void add(const Vec3f& p, std::uint32_t index) { cells_[keyOf(p)].push_back({p, index}); }
     // Calls visit(point, index) for those added in p's cell and its neighbours until it returns false.
