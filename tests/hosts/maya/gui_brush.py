@@ -814,6 +814,21 @@ def step_redo():
     hotkeys.marking_menu_release()
     hotkeys.tool("cut")
     check("a hotkey starts a tool", cmds.groomLabBrushCtx(ctx, query=True, mode=True) == "cut")
+    # With the Groom Tools closed, a tool that cannot start says why (as the palette does): no traceback.
+    from groomlab.ui import palette as palette_module
+    real_current, real_part = palette_module.current, groomlab.draw_part_tool
+
+    def no_scalp(*_args, **_kwargs):
+        raise RuntimeError("the groom has no scalp connected")
+    palette_module.current, groomlab.draw_part_tool = (lambda: None), no_scalp
+    try:
+        hotkeys.tool("part")
+        raised = False
+    except RuntimeError:
+        raised = True
+    finally:
+        palette_module.current, groomlab.draw_part_tool = real_current, real_part
+    check("a hotkey tool that cannot start says why, no traceback", not raised)
     # B / M held: a left drag sets the brush radius / strength (Maya's own B elsewhere).
     check("B is bound to the brush radius drag",
           cmds.hotkey("b", query=True, name=True) == "GroomLabBrushRadiusPressNameCommand")

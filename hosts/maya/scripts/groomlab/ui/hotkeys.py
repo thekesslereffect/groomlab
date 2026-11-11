@@ -46,23 +46,33 @@ def overflow():
 
 
 def tool(mode):
-    """Start a tool on the active groom, keeping the palette's settings when it is open."""
+    """Start a tool on the active groom, keeping the palette's settings when it is open. Paint
+    opens the Groom Tools (its Paint tab picks the map to paint, or makes one, as its tile does).
+    What stops a tool is said over the viewport, as the palette says it, never a traceback."""
     import groomlab
-    from groomlab.ui import palette
+    from groomlab.ui import messages, palette
     window = palette.current()
+    if window is None and mode == "paint":
+        window = palette.show(tab="paint")
     if window is not None:
         window.activate(mode)
         return
-    if mode == "select":
-        groomlab.select_tool()
-    elif mode == "part":
-        groom = groomlab.active_groom()
-        if groom:
-            groomlab.draw_part_tool(groom)
-    elif mode == "freeze":
-        groomlab.freeze_tool()
-    else:
-        groomlab.brush_tool(mode)
+    if mode != "select" and not groomlab.active_groom():
+        # As the palette: said, and a brush is still picked (it brushes the groom selected next).
+        messages.say("select a groom first; tools work on the selected groom")
+        if mode == "part":  # (drawing a part needs the groom now)
+            return
+    try:
+        if mode == "select":
+            groomlab.select_tool()
+        elif mode == "part":
+            groomlab.draw_part_tool(groomlab.active_groom())
+        elif mode == "freeze":
+            groomlab.freeze_tool()
+        else:
+            groomlab.brush_tool(mode)
+    except (RuntimeError, ValueError) as e:
+        messages.say(messages.plain(e))
 
 
 def step_level(delta):
