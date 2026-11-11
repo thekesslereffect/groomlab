@@ -926,15 +926,13 @@ def transfer_to_scalp(groom, scalp, fit=False, maps=True, color_sets=False, meth
 # Copy the look
 
 
-# Image files' extensions (texture.h's isImagePath): HairColor's map naming one is a file, not a map.
-_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".pnm", ".ppm", ".pgm")
-
 
 def graph_maps(graph):
     """Painted maps a graph reads by name: Map nodes' maps, HairColor's map and Interpolate's
-    regionMap (not an image file's path), guide maps (guide layers) and color set maps (a vertex map
-    or a mesh color set: color set maps), inside compounds too.
-    {name: how it is read}."""
+    regionMap (not an image file's path: the core's rule, presets.is_image_path), guide maps (guide
+    layers) and color set maps (a vertex map or a mesh color set: color set maps), inside compounds
+    too. {name: how it is read}."""
+    from groomlab import presets
     found = {}
     for node in graph.get("nodes", []):
         params = node.get("params") or {}
@@ -942,7 +940,7 @@ def graph_maps(graph):
             found.setdefault(params.get("name", "mask"), "map")
         for param, how, kind in (("map", "map", "HairColor"), ("regionMap", "map", "Interpolate")):
             value = params.get(param) if node.get("type") == kind else None
-            if isinstance(value, str) and value and not value.lower().endswith(_IMAGE_EXTENSIONS):
+            if isinstance(value, str) and value and not presets.is_image_path(value):
                 found.setdefault(value, how)
         for value in params.values():
             if isinstance(value, dict):

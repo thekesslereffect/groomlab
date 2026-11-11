@@ -734,12 +734,12 @@ UDIM_TOKENS = ("<UDIM>", "<udim>", "%(UDIM)d")
 # Text params naming a file: ImportCurves' Alembic file, FeatherColor's feather images (HairColor's
 # map names one when it is an image's path: is_image_path).
 FILE_PARAM_NAMES = ("path", "texture", "textureRight")
-IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".pnm", ".ppm", ".pgm")
 
 
 def is_image_path(name):
-    """Whether a name is an image file's (texture.h's isImagePath): an image extension, or a UDIM set."""
-    return isinstance(name, str) and (name.lower().endswith(IMAGE_EXTENSIONS) or "<UDIM>" in name)
+    """Whether a name is an image file's: the core's rule (texture.h's isImagePath: an extension it
+    reads, or a UDIM set), every host's."""
+    return isinstance(name, str) and groomlab_core.is_image_path(name)
 
 
 def file_exists(path):

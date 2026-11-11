@@ -469,6 +469,8 @@ void bindStrands(py::module_& m) {
           [](const std::string& path) { return std::const_pointer_cast<Texture>(loadTexture(path)); },
           py::arg("path"), "Loads an image through the process-wide cache. Raises TextureError.");
     m.def("file_stamp", &fileStamp, py::arg("path"), "Hash of a file's path, size and modification time (0 if missing).");
+    m.def("is_image_path", &isImagePath, py::arg("name"),
+          "Whether a map name is an image file the core reads (its extension, or a <UDIM> pattern): every host's rule.");
 
     // ---- Scales ----------------------------------------------------------
     py::class_<ScaleMesh::Scale>(m, "Scale", "One scale of a ScaleMesh: its frame and its shader data.")

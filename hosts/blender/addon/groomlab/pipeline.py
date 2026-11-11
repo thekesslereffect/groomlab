@@ -1518,8 +1518,8 @@ def copy_graph(source, targets):
 
 UDIM_TOKENS = ("<UDIM>", "<udim>", "%(UDIM)d")
 FILE_PARAM_NAMES = ("path", "texture", "textureRight")  # ImportCurves' Alembic file, FeatherColor's images
-IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".pnm", ".ppm", ".pgm",
-                    ".exr", ".tif", ".tiff")
+# The images the core reads (texture.h isImagePath, stb_image): an .exr or .tif is no map it can read.
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tga", ".bmp", ".psd", ".gif", ".hdr", ".pic", ".pnm", ".ppm", ".pgm")
 CONTROL_PREFIX = "ctl_"  # graph_authoring's: a slider's value on the groom (its scalp object)
 
 
