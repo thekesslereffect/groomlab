@@ -422,10 +422,17 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - `ctest --preset macos-core -L blender -LE vray -j 4`: the Blender helper and add-on.
 - `ctest --preset macos-app -L app -j 8`: the app's tests (offscreen platform).
 - `-L core`, `-L io`, `-L python`: one area.
-- `-L maya` (the mayapy suites: `tests/hosts/maya/test_*.py`) needs a Maya preset that builds the
-  tests: the `macos-maya*` presets set `GROOMLAB_BUILD_TESTS` off. Add one (as Windows'
-  `ninja-maya2025-tests`) once the plugin loads, and run `ctest -L maya -LE "gui|arnold|vray|renderman"`;
-  then `-L arnold` with MtoA. The Maya GUI suites (`maya.gui`) run on macOS too, in a real Maya window
+- `-L maya` (the mayapy suites: `tests/hosts/maya/test_*.py`) and `-L arnold`: the
+  `macos-maya2024-tests` to `macos-maya2027-tests` presets (each version's plugin with the core, the
+  CLI, the Arnold procedural and every test, `GROOMLAB_MAYA_BIN` the install's `Maya.app/Contents/bin`,
+  where `mayapy` and `maya` are on macOS), as Windows' `ninja-maya20XX-tests`:
+  `cmake --preset macos-maya2025-tests && cmake --build build/macos-maya2025-tests &&
+  ctest --test-dir build/macos-maya2025-tests -L "maya|arnold" -LE "vray|renderman"`. 2026-11-11, every
+  version: 18 of 19, the one open being `maya.gui` (the GUI session through ctest: 433 passed and
+  the same 7 open checks in each version, below); `maya.gui_dx11` is Windows' alone. The core's
+  `-L budget`: 57 of 58, `Budget.InterpolateHalfMillion` passing and missing by turns (one of its
+  times 131 ms for 90, tuned on Windows).
+  The Maya GUI suites (`maya.gui`) run on macOS too, in a real Maya window
   (`maya -script gui.mel` with `GROOMLAB_PLUGIN`, `GROOMLAB_SCRIPTS`, `GROOMLAB_TESTS`,
   `GROOMLAB_GUI_LOG` and a scratch `MAYA_APP_DIR` whose prefs trust the plugin folder:
   `tests/hosts/maya/trust_plugin_folder.cmake -DMAYA_YEAR=<year>`). Maya 2025, 2026-11-09: 400
@@ -468,7 +475,7 @@ one test alone is the executable with `--gtest_filter=Suite.Name`
 - [x] The plugin loads in Maya 2025; a groom draws in Viewport 2.0; brushes and drags work (CPU) (loads in mayapy: `test_plugin.py` 23 OK, 3 skipped; in a Maya window the GUI suites pass 405 of 409, the open ones in section 12; by hand in Maya 2027 with the 0.45.0 release)
 - [x] The Python module imports in mayapy; the GroomLab menu works (fix Windows-only Python bits) (imports; `test_updates.py` green; `os.startfile` and `GroomLab.mll` fixed, `review.py`'s `Render` was right; the menu works in Maya 2027's UI, by hand)
 - [x] MtoA translator builds and renders a groom in Arnold (`test_arnold.py` on 2025 with the procedural: 32 of 33; the turntable test's batch render aborts without an Arnold license on this Mac, `abort_on_license_fail`)
-- [ ] A Maya preset with tests; `ctest -L maya` green on the Mac
+- [x] A Maya preset with tests; `ctest -L maya` green on the Mac (`macos-maya20XX-tests`, 2026-11-11: every mayapy suite and Arnold passes in Maya 2024 to 2027; the GUI session's open checks in section 12)
 - [x] Maya 2026 (`macos-maya2026`) (built first time, oneTBB; in mayapy: `test_plugin.py` 23 OK, 3 skipped; `test_updates.py` 8 OK; `test_arnold.py` from the installed module 32 of 33, the turntable's batch render needing an Arnold license)
 - [x] Maya 2027 (`macos-maya2027`: Python 3.13) (built first time: Python 3.13.9, oneTBB, MtoA 5.6.2; in mayapy: `test_plugin.py` 23 OK, 3 skipped; `test_updates.py` 8 OK; `test_arnold.py` from the installed module 32 of 33, the turntable's batch render needing an Arnold license)
 - [x] Maya 2024 (`macos-maya2024`: Qt 5, PySide2, Python 3.10) (built first time: Python 3.10.8, TBB 2020, MtoA 5.3.4; in mayapy: `test_plugin.py` 23 OK, 3 skipped; `test_updates.py` 8 OK; `test_arnold.py` 33 of 33 once Stop was fixed: Arnold 7.2 renders an unlicensed batch job with a watermark, and Stop killed only the `Render` shell script, not the batch Maya it starts (now the render's process group, macOS only; Linux's `Render` is a script too: likely the same bug there). `qt_compat_check.py --api PySide2` in mayapy 2024: Qt 5's `offscreen` plugin on macOS crashes in `QApplication::notify` (enter/leave) when `QTest.mouseMove` moves its cursor, a bare widget not, PySide6 not (92 of 92 in mayapy 2025); under `QT_QPA_PLATFORM=minimal` 91 of 92, the fill field's text undrawn (no fonts, `QT_QPA_FONTDIR=/System/Library/Fonts` did not help). The UI in Maya 2024 itself not tried)

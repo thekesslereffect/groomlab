@@ -641,7 +641,7 @@ if(TARGET Arnold::Arnold AND (MTOA_LOCATION OR GROOMLAB_ARNOLD_SDK))
     add_executable(groomlab_arnold_tests hosts/arnold/test_arnold_curves.cpp)
     target_link_libraries(groomlab_arnold_tests PRIVATE groomlab::core Arnold::Arnold GTest::gtest_main)
     target_include_directories(groomlab_arnold_tests PRIVATE "${PROJECT_SOURCE_DIR}/hosts/arnold/include")
-    if(GROOMLAB_TBB_RUNTIME)
+    if(WIN32 AND GROOMLAB_TBB_RUNTIME)  # (TARGET_RUNTIME_DLLS: Windows' DLLs; elsewhere the rpaths find TBB)
         add_custom_command(TARGET groomlab_arnold_tests POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     $<TARGET_RUNTIME_DLLS:groomlab_arnold_tests> $<TARGET_FILE_DIR:groomlab_arnold_tests>
@@ -860,14 +860,16 @@ if(GROOMLAB_GUI_TESTS AND GROOMLAB_BUILD_MAYA AND TARGET GroomLab)
     # The quit suite too: Maya quits with the panels open on that device as well; cached
     # playback, whose frames the viewport draws from the cache; and Hardware 2.0 renders
     # (gui_render.py), which draw through Viewport 2.0.
-    add_test(NAME maya.gui_dx11
-        COMMAND "${GROOMLAB_MAYA_BIN}/maya${CMAKE_EXECUTABLE_SUFFIX}" -script "${CMAKE_CURRENT_BINARY_DIR}/gui.mel")
-    set_tests_properties(maya.gui_dx11 PROPERTIES
-        TIMEOUT 900
-        RUN_SERIAL TRUE
-        LABELS "gui;maya"
-        FIXTURES_REQUIRED maya_gui_trust
-        ENVIRONMENT "MAYA_DEBUG_ENABLE_CRASH_REPORTING=0;MAYA_VP2_DEVICE_OVERRIDE=VirtualDeviceDx11;GROOMLAB_GUI_SUITES=viewport,brush,cached_playback,render,quit;MAYA_APP_DIR=${CMAKE_CURRENT_BINARY_DIR}/maya_app_dir;PYTHONPATH=${GROOMLAB_MAYA_PYTHONPATH};GROOMLAB_PLUGIN=$<TARGET_FILE:GroomLab>;GROOMLAB_SCRIPTS=${PROJECT_SOURCE_DIR}/hosts/maya/scripts;GROOMLAB_TESTS=${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya;GROOMLAB_GUI_LOG=${CMAKE_CURRENT_BINARY_DIR}/gui_dx11.log")
+    if(WIN32)  # (DirectX 11: Windows alone)
+        add_test(NAME maya.gui_dx11
+            COMMAND "${GROOMLAB_MAYA_BIN}/maya${CMAKE_EXECUTABLE_SUFFIX}" -script "${CMAKE_CURRENT_BINARY_DIR}/gui.mel")
+        set_tests_properties(maya.gui_dx11 PROPERTIES
+            TIMEOUT 900
+            RUN_SERIAL TRUE
+            LABELS "gui;maya"
+            FIXTURES_REQUIRED maya_gui_trust
+            ENVIRONMENT "MAYA_DEBUG_ENABLE_CRASH_REPORTING=0;MAYA_VP2_DEVICE_OVERRIDE=VirtualDeviceDx11;GROOMLAB_GUI_SUITES=viewport,brush,cached_playback,render,quit;MAYA_APP_DIR=${CMAKE_CURRENT_BINARY_DIR}/maya_app_dir;PYTHONPATH=${GROOMLAB_MAYA_PYTHONPATH};GROOMLAB_PLUGIN=$<TARGET_FILE:GroomLab>;GROOMLAB_SCRIPTS=${PROJECT_SOURCE_DIR}/hosts/maya/scripts;GROOMLAB_TESTS=${CMAKE_CURRENT_SOURCE_DIR}/hosts/maya;GROOMLAB_GUI_LOG=${CMAKE_CURRENT_BINARY_DIR}/gui_dx11.log")
+    endif()
     # The presets' contact sheets (gui_presets.py): every shipped preset applied as the Presets menu
     # applies it and drawn by Viewport 2.0, on OpenGL and on DirectX 11, into
     # GROOMLAB_PRESET_SHEET_DIR (default: <temp>/groomlab_preset_sheet). A look-over tool (label

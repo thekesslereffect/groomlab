@@ -365,6 +365,44 @@
                 "GROOMLAB_MAYA_APP": "/Applications/Autodesk/maya2027/Maya.app/Contents",
                 "MTOA_LOCATION": "/Applications/Autodesk/Arnold/mtoa/2027"
             }
+        },
+        {
+            "name": "macos-maya-tests",
+            "hidden": true,
+            "inherits": "macos-maya-devkit",
+            "description": "A Maya version's plugin with the core and every test, run in that Maya's install and its MtoA, as Windows' ninja-maya20XX-tests: GROOMLAB_MAYA_BIN is Maya.app/Contents/bin (mayapy and maya live there on macOS); docs/MACOS.md, Test tiers",
+            "cacheVariables": {
+                "GROOMLAB_BUILD_TESTS": "ON",
+                "GROOMLAB_GUI_TESTS": "ON",
+                "GROOMLAB_BUILD_CLI": "ON",
+                "GROOMLAB_BUILD_CAPI": "ON",
+                "GROOMLAB_BUILD_BLENDER_HELPER": "ON",
+                "GROOMLAB_BUILD_PROCEDURAL": "ON"
+            }
+        },
+        {
+            "name": "macos-maya2024-tests",
+            "displayName": "macOS, Maya 2024 plugin + core + every test, run in the installed Maya 2024",
+            "inherits": ["macos-maya-tests", "macos-maya2024"],
+            "cacheVariables": { "GROOMLAB_MAYA_BIN": "/Applications/Autodesk/maya2024/Maya.app/Contents/bin" }
+        },
+        {
+            "name": "macos-maya2025-tests",
+            "displayName": "macOS, Maya 2025 plugin + core + every test, run in the installed Maya 2025",
+            "inherits": ["macos-maya-tests", "macos-maya2025"],
+            "cacheVariables": { "GROOMLAB_MAYA_BIN": "/Applications/Autodesk/maya2025/Maya.app/Contents/bin" }
+        },
+        {
+            "name": "macos-maya2026-tests",
+            "displayName": "macOS, Maya 2026 plugin + core + every test, run in the installed Maya 2026",
+            "inherits": ["macos-maya-tests", "macos-maya2026"],
+            "cacheVariables": { "GROOMLAB_MAYA_BIN": "/Applications/Autodesk/maya2026/Maya.app/Contents/bin" }
+        },
+        {
+            "name": "macos-maya2027-tests",
+            "displayName": "macOS, Maya 2027 plugin + core + every test, run in the installed Maya 2027",
+            "inherits": ["macos-maya-tests", "macos-maya2027"],
+            "cacheVariables": { "GROOMLAB_MAYA_BIN": "/Applications/Autodesk/maya2027/Maya.app/Contents/bin" }
         }
     ],
     "buildPresets": [
@@ -403,7 +441,11 @@
         { "name": "macos-maya2024", "configurePreset": "macos-maya2024" },
         { "name": "macos-maya2025", "configurePreset": "macos-maya2025" },
         { "name": "macos-maya2026", "configurePreset": "macos-maya2026" },
-        { "name": "macos-maya2027", "configurePreset": "macos-maya2027" }
+        { "name": "macos-maya2027", "configurePreset": "macos-maya2027" },
+        { "name": "macos-maya2024-tests", "configurePreset": "macos-maya2024-tests" },
+        { "name": "macos-maya2025-tests", "configurePreset": "macos-maya2025-tests" },
+        { "name": "macos-maya2026-tests", "configurePreset": "macos-maya2026-tests" },
+        { "name": "macos-maya2027-tests", "configurePreset": "macos-maya2027-tests" }
     ],
     "testPresets": [
         {
@@ -439,6 +481,10 @@
         },
         { "name": "macos-core", "configurePreset": "macos-core", "output": { "outputOnFailure": true } },
         { "name": "macos-app", "configurePreset": "macos-app", "output": { "outputOnFailure": true } },
-        { "name": "macos-release", "configurePreset": "macos-release", "output": { "outputOnFailure": true } }
+        { "name": "macos-release", "configurePreset": "macos-release", "output": { "outputOnFailure": true } },
+        { "name": "macos-maya2024-tests", "configurePreset": "macos-maya2024-tests", "output": { "outputOnFailure": true } },
+        { "name": "macos-maya2025-tests", "configurePreset": "macos-maya2025-tests", "output": { "outputOnFailure": true } },
+        { "name": "macos-maya2026-tests", "configurePreset": "macos-maya2026-tests", "output": { "outputOnFailure": true } },
+        { "name": "macos-maya2027-tests", "configurePreset": "macos-maya2027-tests", "output": { "outputOnFailure": true } }
     ]
 }
