@@ -18,6 +18,7 @@
 
 #include "groomlab/curve.h"
 #include "groomlab/frames.h"
+#include "groomlab/math.h"
 #include "groomlab/parallel.h"
 #include "groomlab/random.h"
 #include "groomlab/scalp_mesh.h"
@@ -28,17 +29,6 @@ namespace {
 
 constexpr float kTwoPi = 6.28318530718f;
 
-
-// Linear sample of values placed evenly on t in [0, 1].
-template <class T>
-T sampleEven(const std::vector<T>& values, float t, T fallback) {
-    if (values.empty()) return fallback;
-    if (values.size() == 1) return values[0];
-    const float x = std::clamp(t, 0.0f, 1.0f) * static_cast<float>(values.size() - 1);
-    const auto i = std::min(static_cast<std::size_t>(x), values.size() - 2);
-    const float f = x - static_cast<float>(i);
-    return values[i] * (1.0f - f) + values[i + 1] * f;
-}
 
 float paramAt(std::size_t i, std::size_t n) { return n > 1 ? static_cast<float>(i) / static_cast<float>(n - 1) : 0.0f; }
 
@@ -56,11 +46,6 @@ void fitLayers(HierarchyGuide& g) {
     for (auto& [name, values] : g.pointAttributes) {
         if (values.size() != g.points.size()) values = resampleLayer(values, g.points.size());
     }
-}
-
-float smoothstep01(float x) {
-    x = std::clamp(x, 0.0f, 1.0f);
-    return x * x * (3.0f - 2.0f * x);
 }
 
 // The root footprint a shaped tube's children root on (GuideHierarchy::resolveFollower): the
@@ -87,7 +72,7 @@ FootprintTurn footprintTurn(const HierarchyGuide& parent, const Frame& rootFrame
     const Vec3f normal = parent.rootNormal.normalized();
     const Vec3f tangent = rootFrame.tangent;
     const float c = std::clamp(tangent.dot(normal), -1.0f, 1.0f);
-    const float w = smoothstep01((std::acos(c) - kUpright) / (kSlanted - kUpright));
+    const float w = smoothstep(0.0f, 1.0f, (std::acos(c) - kUpright) / (kSlanted - kUpright));
     if (!(w > 0.0f) || c < -1.0f + 1e-4f) return out;
     const Vec3f target = (tangent * (1.0f - w) + normal * w).normalized();
     out.turn = Rotation(tangent, target);
@@ -133,8 +118,8 @@ std::vector<float> sectionRoll(const std::vector<Vec3f>& points, const std::vect
                 const float nl = std::max(nrm.length(), 1e-12f);
                 if (len > 1e-4f * nl) {
                     const float d = (sp.position - points[i]).length();
-                    weight = (1.0f - smoothstep01((d - kNear * extent) / ((kFar - kNear) * extent))) *
-                             smoothstep01(len / nl / 0.5f);
+                    weight = (1.0f - smoothstep(0.0f, 1.0f, (d - kNear * extent) / ((kFar - kNear) * extent))) *
+                             smoothstep(0.0f, 1.0f, len / nl / 0.5f);
                     // The angle turning the binormal onto `across` about the tangent (twist's way:
                     // v = cos * binormal - sin * normal).
                     target = std::atan2(-across.dot(frames[i].normal), across.dot(frames[i].binormal));

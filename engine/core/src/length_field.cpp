@@ -10,6 +10,7 @@
 
 #include "groomlab/curve.h"
 #include "groomlab/guide_hierarchy.h"
+#include "groomlab/math.h"
 #include "groomlab/scalp_mesh.h"
 #include "groomlab/surface_paths.h"
 
@@ -24,11 +25,6 @@ constexpr float kInf = std::numeric_limits<float>::infinity();
 constexpr float kFadeOver = 1.0f;
 // The fronts' limit: the scalp's extent times this (every vertex of a piece reached).
 constexpr float kLimitExtents = 4.0f;
-
-float smoothstep01(float x) {
-    x = std::clamp(x, 0.0f, 1.0f);
-    return x * x * (3.0f - 2.0f * x);
-}
 
 }  // namespace
 
@@ -175,7 +171,7 @@ float LengthField::scaleAt(const Vec3f& point) const {
     }
     float fade = 1.0f;
     if (std::isfinite(spacing_) && spacing_ > 0.0f && nearest > spacing_) {
-        fade = 1.0f - smoothstep01((nearest - spacing_) / (kFadeOver * spacing_));
+        fade = 1.0f - smoothstep(0.0f, 1.0f, (nearest - spacing_) / (kFadeOver * spacing_));
     }
     return std::exp(static_cast<float>(sum / weights) * fade);
 }

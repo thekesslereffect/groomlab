@@ -13,6 +13,7 @@
 #include <unordered_map>
 
 #include "groomlab/brush.h"
+#include "groomlab/curve.h"
 #include "groomlab/hair_color.h"
 #include "groomlab/parallel.h"
 #include "groomlab/random.h"
@@ -1655,31 +1656,6 @@ Grown grow(const Context& ctx, const SurfacePoint& root, float sign, float maxLe
     return g;
 }
 
-float polylineLength(const std::vector<Vec3f>& pts) {
-    float l = 0.0f;
-    for (std::size_t i = 1; i < pts.size(); ++i) l += (pts[i] - pts[i - 1]).length();
-    return l;
-}
-
-std::vector<Vec3f> resampled(const std::vector<Vec3f>& pts, int count) {
-    std::vector<Vec3f> out;
-    if (pts.size() < 2 || count < 2) return pts;
-    const float total = polylineLength(pts);
-    std::size_t seg = 1;
-    float before = 0.0f;
-    for (int i = 0; i < count; ++i) {
-        const float s = total * static_cast<float>(i) / static_cast<float>(count - 1);
-        while (seg + 1 < pts.size() && before + (pts[seg] - pts[seg - 1]).length() < s) {
-            before += (pts[seg] - pts[seg - 1]).length();
-            ++seg;
-        }
-        const float len = (pts[seg] - pts[seg - 1]).length();
-        const float f = len > 1e-12f ? std::clamp((s - before) / len, 0.0f, 1.0f) : 0.0f;
-        out.push_back(pts[seg - 1] * (1.0f - f) + pts[seg] * f);
-    }
-    return out;
-}
-
 // The polyline's first `length` units.
 std::vector<Vec3f> truncated(const std::vector<Vec3f>& pts, float length) {
     std::vector<Vec3f> out;
@@ -2270,7 +2246,7 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
     std::vector<std::uint8_t> grownSeam;
     for (std::size_t i : live) {
         const Grown& g = ways[choice[i]][i];
-        if (g.points.size() < 3 || polylineLength(g.points) < minLength) {
+        if (g.points.size() < 3 || arcLength(g.points) < minLength) {
             ++result.rootsShort;
             continue;
         }
@@ -2281,8 +2257,8 @@ ReferenceGuidesResult guidesFromReference(const ScalpMesh& scalp, const std::vec
         // it): hair is mostly shorter than the longest, so it is trimmed (calibrated on the synthetic
         // heads: such guides came out 1.15x too long).
         if (options.maxLength > 0.0f && g.stop == "length" && options.lengthTrim < 1.0f && !drawnLength[i])
-            path = truncated(path, options.lengthTrim * polylineLength(path));
-        guide.points = resampled(path, std::max(2, options.points));
+            path = truncated(path, options.lengthTrim * arcLength(path));
+        guide.points = resampleByArcLength(path.data(), path.size(), static_cast<std::size_t>(std::max(2, options.points)));
         guide.points[0] = roots[i].position;
         guide.confidence = g.confidence;
         guide.stop = g.stop;

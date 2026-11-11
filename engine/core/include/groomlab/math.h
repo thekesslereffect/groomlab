@@ -3,7 +3,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "groomlab/portable_math.h"
 #include "groomlab/shared/groom_math.h"
@@ -120,6 +122,18 @@ inline float roundToDecadeStep(float value, int stepsPerDecade, bool up = false)
     // A hair over a step (rounding, as a scaled value's logarithm carries) stays on it.
     const double whole = up ? std::ceil(steps - 1e-9) : std::round(steps);
     return static_cast<float>(pm::pow(10.0, whole / stepsPerDecade));
+}
+
+// Linear sample of `values` placed evenly on t in [0, 1] (t clamped); `fallback` when empty. A
+// tube's width/aspect/twist lists and a guide's per-point layers and child offsets sample so.
+template <class T>
+T sampleEven(const std::vector<T>& values, float t, T fallback) {
+    if (values.empty()) return fallback;
+    if (values.size() == 1) return values[0];
+    const float x = std::clamp(t, 0.0f, 1.0f) * static_cast<float>(values.size() - 1);
+    const auto i = std::min(static_cast<std::size_t>(x), values.size() - 2);
+    const float f = x - static_cast<float>(i);
+    return values[i] * (1.0f - f) + values[i + 1] * f;
 }
 
 }  // namespace groomlab

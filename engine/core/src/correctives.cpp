@@ -10,6 +10,7 @@
 
 #include "groomlab/curve.h"
 #include "groomlab/frames.h"
+#include "groomlab/math.h"
 
 namespace groomlab {
 
@@ -18,9 +19,6 @@ using json = nlohmann::json;
 namespace {
 
 constexpr float kMoved = 1e-4f;  // a move that counts as sculpted, as a share of the guide's length
-
-// smoothstep from 0 to 1 of a share of a fade (clamped in double, then a float: the same).
-float smoothstep01(double t) { return smoothstep(0.0f, 1.0f, static_cast<float>(t)); }
 
 // Guides with offsets in any enabled layer weighted at `seconds`, by depth.
 std::map<int, std::vector<GuideId>> correctedByDepth(const GuideHierarchy& h, const std::vector<CorrectiveLayer>& layers,
@@ -54,9 +52,9 @@ float CorrectiveLayer::weightAt(double seconds) const {
     }
     float w = 1.0f;
     if (seconds < time && !holdBefore) {
-        w = fadeIn > 0.0 ? smoothstep01(1.0 - (time - seconds) / fadeIn) : (time - seconds < 1e-6 ? 1.0f : 0.0f);
+        w = fadeIn > 0.0 ? smoothstep(0.0f, 1.0f, static_cast<float>(1.0 - (time - seconds) / fadeIn)) : (time - seconds < 1e-6 ? 1.0f : 0.0f);
     } else if (seconds > time && !holdAfter) {
-        w = fadeOut > 0.0 ? smoothstep01(1.0 - (seconds - time) / fadeOut) : (seconds - time < 1e-6 ? 1.0f : 0.0f);
+        w = fadeOut > 0.0 ? smoothstep(0.0f, 1.0f, static_cast<float>(1.0 - (seconds - time) / fadeOut)) : (seconds - time < 1e-6 ? 1.0f : 0.0f);
     }
     return w * weight;
 }

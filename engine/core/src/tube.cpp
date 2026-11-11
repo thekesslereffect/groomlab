@@ -12,6 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "groomlab/math.h"
 #include "groomlab/portable_math.h"
 #include "groomlab/random.h"
 
@@ -22,16 +23,6 @@ namespace {
 constexpr float kPi = 3.14159265358979f;
 constexpr std::size_t kShapes = 4;
 constexpr std::size_t kOutlinePoints = kTubeOutlinePoints;
-
-// Linear sample of values placed evenly on t in [0, 1] (as the guide hierarchy samples its lists).
-float sampleEven(const std::vector<float>& values, float t, float fallback) {
-    if (values.empty()) return fallback;
-    if (values.size() == 1) return values[0];
-    const float x = std::clamp(t, 0.0f, 1.0f) * static_cast<float>(values.size() - 1);
-    const auto i = std::min(static_cast<std::size_t>(x), values.size() - 2);
-    const float f = x - static_cast<float>(i);
-    return values[i] * (1.0f - f) + values[i + 1] * f;
-}
 
 // A built-in shape's outline and what is measured on it once.
 using ShapeTable = TubeOutline;
