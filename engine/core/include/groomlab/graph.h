@@ -855,7 +855,13 @@ public:
     // own operator may pass {}.
     void registerType(const std::string& typeName, NodeInfo info, Factory factory);
     // Drops a type (a test's own operator, registered for the test only).
-    void unregisterType(const std::string& typeName) { types_.erase(typeName); }
+    void unregisterType(const std::string& typeName) {
+        types_.erase(typeName);
+        ++generation_;
+    }
+    // Moves on with every type registered or dropped: what a cache of the types' specs compares
+    // (their count alone misses one dropped and another registered).
+    std::uint64_t generation() const { return generation_; }
     bool contains(const std::string& typeName) const;
     std::unique_ptr<Operator> create(const std::string& typeName) const;
     std::vector<std::string> typeNames() const;
@@ -868,6 +874,7 @@ private:
         NodeInfo info;
     };
     std::map<std::string, Type> types_;
+    std::uint64_t generation_ = 0;
 };
 
 // ---------------------------------------------------------------------------

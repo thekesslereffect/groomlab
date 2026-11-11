@@ -26,13 +26,14 @@ constexpr double kLayoutColumn = 240.0;  // a new node's column right of the gra
 std::string quoted(const std::string& s) { return "'" + s + "'"; }
 
 // Every registered operator's spec (operatorSpecsJson), by type: read once (again when an operator
-// was registered since: a test's).
+// was registered or dropped since: a test's; the registry's generation, not the count, which one
+// dropped and another registered leaves as it was).
 const std::map<std::string, json>& catalog() {
     static std::map<std::string, json> specs;
-    static std::size_t registered = 0;
+    static std::uint64_t registered = 0;
     static std::mutex mutex;
     std::lock_guard<std::mutex> lock(mutex);
-    const std::size_t now = OperatorRegistry::instance().typeNames().size();
+    const std::uint64_t now = OperatorRegistry::instance().generation();
     if (specs.empty() || now != registered) {
         std::map<std::string, json> out;
         for (json& spec : json::parse(operatorSpecsJson())) {

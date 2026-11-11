@@ -306,6 +306,7 @@ OperatorRegistry& OperatorRegistry::instance() {
 
 void OperatorRegistry::registerType(const std::string& typeName, NodeInfo info, Factory factory) {
     types_[typeName] = {std::move(factory), std::move(info)};
+    ++generation_;
 }
 
 bool OperatorRegistry::contains(const std::string& typeName) const {
