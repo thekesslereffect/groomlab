@@ -579,13 +579,17 @@ void MainWindow::askFeathers() {
 void MainWindow::askBraid() {
     if (!document_) return;
     std::vector<OverlayHost::PromptChoice> choices;
-    const std::pair<QString, QString> styles[] = {{tr("Three"), QStringLiteral("three")}, {tr("Fishtail"), QStringLiteral("fishtail")},
-                                                  {tr("Rope"), QStringLiteral("rope")}, {tr("Cornrow"), QStringLiteral("cornrow")}};
-    for (const auto& [label, style] : styles) choices.push_back({label, style == QStringLiteral("three"), [this, style = style] { addBraid(style); }});
+    // The core Braid's styles (its spec), as Maya's and Blender's menus offer them.
+    for (const std::string& name : document_->braidStyles()) {
+        QString label = QString::fromStdString(name);
+        label[0] = label[0].toUpper();
+        const QString style = QString::fromStdString(name);
+        choices.push_back({label, style == QStringLiteral("three"), [this, style] { addBraid(style); }});
+    }
     choices.push_back({tr("Cancel"), false, {}});
     host_->showPrompt(tr("Braid on Curves"),
                       tr("The braids group's guides become braid paths (draw them from the scalp with the Draw tool). Three: a classic "
-                         "plait; Fishtail; Rope: two strands twisted; Cornrow: fed along the scalp."),
+                         "plait; Four, Five: more sections; Fishtail; Rope: two strands twisted; Cornrow: fed along the scalp."),
                       std::move(choices));
 }
 

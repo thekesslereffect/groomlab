@@ -302,6 +302,12 @@ TEST(AppOutput, FeathersAndBraidsAskInThePrompt) {
     ASSERT_NE(doc->session().authoredHierarchy()->findGroup("braids"), kNoGroup);
     EXPECT_NE(doc->param(hair, "exclude").get<std::string>().find("braids"), std::string::npos);
     EXPECT_TRUE(linked(*doc, "interpolate", braid, "strands") || !nodeOfType(*doc, "Interpolate").empty());
+    // Every style the core's Braid takes (its spec): four and five sections too, as in Maya and Blender.
+    EXPECT_EQ(doc->braidStyles(), (std::vector<std::string>{"three", "four", "five", "fishtail", "rope", "cornrow"}));
+    std::string four;
+    EXPECT_EQ(doc->addBraid("four", "braids", &four), "");
+    EXPECT_EQ(doc->param(four, "style"), json("four"));
+    EXPECT_NE(doc->addBraid("plait"), "");
 }
 
 TEST(AppOutput, HandPlacedFlightFeathersPresetDrawsIntoItsGroup) {

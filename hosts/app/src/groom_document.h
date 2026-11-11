@@ -677,8 +677,10 @@ public:
     // (Maya's feather_guide_groups).
     std::vector<std::string> featherGuideGroups();
     // A Braid node after the Interpolate, its paths guide group `group` (made when missing; draw the
-    // paths in it with the Draw tool): Maya's add_braid. `style` three, fishtail, rope or cornrow.
+    // paths in it with the Draw tool): Maya's add_braid. `style` one of braidStyles().
     std::string addBraid(const std::string& style, const std::string& group = "braids", std::string* made = nullptr);
+    // The Braid node's styles, in the core spec's order (three, four, five, fishtail, rope, cornrow).
+    std::vector<std::string> braidStyles() const;
     // A root guide group of that name, made when missing (one undo step then).
     std::string ensureGuideGroup(const std::string& name);
     // Import > Alembic Curves (Maya's import_guides_from_alembic): the graph's "guides" node becomes

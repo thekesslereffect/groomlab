@@ -710,10 +710,26 @@ std::string GroomDocument::addFeathers(const std::vector<std::pair<std::string, 
     return error;
 }
 
+std::vector<std::string> GroomDocument::braidStyles() const {
+    std::vector<std::string> out;
+    if (const nlohmann::json* braid = spec("Braid")) {
+        for (const nlohmann::json& p : braid->value("params", nlohmann::json::array())) {
+            if (p.value("name", std::string()) != "style") continue;
+            for (const nlohmann::json& c : p.value("choices", nlohmann::json::array())) {
+                if (c.is_string()) out.push_back(c.get<std::string>());
+            }
+        }
+    }
+    return out;
+}
+
 std::string GroomDocument::addBraid(const std::string& style, const std::string& group, std::string* made) {
-    static const char* const kStyles[] = {"three", "fishtail", "rope", "cornrow"};
-    if (std::none_of(std::begin(kStyles), std::end(kStyles), [&](const char* s) { return style == s; })) {
-        return "the braid's style is three, fishtail, rope or cornrow, not '" + style + "'";
+    // The styles the core's Braid takes (its spec's choices): every host offers the same.
+    const std::vector<std::string> styles = braidStyles();
+    if (std::find(styles.begin(), styles.end(), style) == styles.end()) {
+        std::string list;
+        for (const std::string& s : styles) list += (list.empty() ? "" : ", ") + s;
+        return "the braid's style is one of " + list + ", not '" + style + "'";
     }
     // Checked first: the group is not made for a graph that cannot take a braid.
     std::string after;
