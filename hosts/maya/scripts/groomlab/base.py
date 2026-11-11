@@ -28,6 +28,22 @@ def undo_chunk(name):
         cmds.undoInfo(closeChunk=True)
 
 
+@contextlib.contextmanager
+def kept_selection():
+    """The selection as it was before the block, put back however the block ends (what made a
+    camera or curves selects them; the groom stays the active one). Nodes the block deleted drop
+    out; an empty selection comes back empty."""
+    selection = cmds.ls(selection=True, long=True) or []
+    try:
+        yield
+    finally:
+        selection = [n for n in selection if cmds.objExists(n)]
+        if selection:
+            cmds.select(selection, replace=True)
+        else:
+            cmds.select(clear=True)
+
+
 _no_undo_depth = [0]  # nested no_undo blocks open now: only the outermost one turns the queue off and on
 
 

@@ -129,7 +129,7 @@ def add_part_node(groom, width=0.1, strength=1.0, after="interpolate", if_missin
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
     if if_missing:
-        existing = next((n for n in model.order if model.node_type(n) == "Part"), None)
+        existing = model.first_of("Part")
         if existing:
             return existing
     if after not in model.nodes:

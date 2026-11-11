@@ -3147,8 +3147,6 @@ class ParamPanel(QtWidgets.QScrollArea):
         """What graph_ui.json's nodeActions run in Maya for node `name`, on the editor's groom
         ({action id: a callable}): the Cards exports, Simulate's range, bake and clear, Bake Node to
         Guides, a Sculpt node's Clear, a compound's Ungroup and saves."""
-        import groomlab
-        from maya import cmds
         from groomlab.ui import menu
         editor = self.editor
         run = self.action_runner
@@ -3162,24 +3160,15 @@ class ParamPanel(QtWidgets.QScrollArea):
                 traceback.print_exc()
                 editor.report("%s (details in the Script Editor)" % plain_message(e), trouble=True)
 
+        # The menu's exports (their dialogs, defaults and messages), for this groom.
         def unreal():
-            folder = cmds.fileDialog2(fileMode=3, dialogStyle=2, caption="Folder for the Unreal cards",
-                                      startingDirectory=groomlab.asset_folder("exports"))
-            return groomlab.export_cards_unreal(editor.groom, folder[0]) if folder else None
+            return menu.export_unreal_cards_dialog(groom=editor.groom)
 
         def unity():
-            folder = cmds.fileDialog2(fileMode=3, dialogStyle=2, caption="Folder for the Unity cards",
-                                      startingDirectory=groomlab.asset_folder("exports"))
-            return groomlab.export_cards_unity(editor.groom, folder[0]) if folder else None
+            return menu.export_unity_cards_dialog(groom=editor.groom)
 
         def gltf():
-            path = cmds.fileDialog2(fileFilter="glTF binary (*.glb);;glTF (*.gltf)", dialogStyle=2, fileMode=0,
-                                    caption="Export glTF Cards",
-                                    startingDirectory="%s/%s_cards.glb" % (groomlab.asset_folder("exports"),
-                                                                            groomlab.asset_name(editor.groom)))
-            if not path:
-                return None
-            return groomlab.export_cards_gltf(editor.groom, path[0], binary=not path[0].lower().endswith(".gltf"))
+            return menu.export_gltf_cards_dialog(groom=editor.groom)
 
         return {
             "export.cardMaps": lambda: later(card_maps),

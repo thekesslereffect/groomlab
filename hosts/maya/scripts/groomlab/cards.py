@@ -94,9 +94,8 @@ def create_cards(groom, segments=None, width_scale=None, density=None, clump_cha
     if from_guides is not None:
         guides = None
         if from_guides:
-            feeding = [model.source_of(n, "guides") for n in model.order if model.node_type(n) == "Interpolate"]
-            guides = next((g for g in feeding if g), None) or next(
-                (n for n in model.order if model.node_type(n) == "Guides"), None)
+            feeding = [model.source_of(n, "guides") for n in model.of_type("Interpolate")]
+            guides = next((g for g in feeding if g), None) or model.first_of("Guides")
             if guides is None:
                 raise ValueError("%s has no Guides node to lay the cards along" % groom)
         for target in targets:
@@ -110,7 +109,7 @@ def create_cards(groom, segments=None, width_scale=None, density=None, clump_cha
 
 def _cards_nodes(model):
     """The Cards nodes of a GraphModel (its own, not those inside compounds), in its order."""
-    return [n for n in model.order if model.node_type(n) == "Cards"]
+    return model.of_type("Cards")
 
 
 def _follow_cards_view(groom, node):

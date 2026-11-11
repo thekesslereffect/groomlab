@@ -619,6 +619,14 @@ class GraphModel(object):
     def node_type(self, name):
         return self._node(name)["type"]
 
+    def of_type(self, node_type):
+        """The nodes of a type, in the graph's order."""
+        return [n for n in self.order if self.node_type(n) == node_type]
+
+    def first_of(self, node_type):
+        """The first node of a type in the graph's order, None when it has none."""
+        return next((n for n in self.order if self.node_type(n) == node_type), None)
+
     _specs = {}  # node_spec's answers (the core's text) by what they depend on, kept per process
 
     def node_spec(self, name):

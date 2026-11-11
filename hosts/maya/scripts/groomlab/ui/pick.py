@@ -364,12 +364,8 @@ def label(mesh):
 
 
 def _say(text, warning=False):
-    if warning:
-        cmds.warning("GroomLab: %s" % text)
-    try:
-        cmds.inViewMessage(amg="GroomLab: " + text, pos="topCenter", fade=True)
-    except RuntimeError:  # batch: no viewport
-        pass
+    from groomlab.ui import messages
+    messages.say(text, warning=warning)
 
 
 def _short(node):

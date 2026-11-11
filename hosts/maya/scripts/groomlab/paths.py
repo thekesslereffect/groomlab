@@ -14,6 +14,7 @@ import groomlab_core
 
 from groomlab.base import GROOM_TYPE
 from groomlab.params import get_graph
+from groomlab.ui import messages
 
 
 def project_root():
@@ -58,14 +59,8 @@ def asset_folder(kind=None, create=True):
     if not scene_folder():
         if not _warned_untitled and not cmds.about(batch=True):
             _warned_untitled.append(True)
-            cmds.warning("GroomLab: the scene is untitled, so its files go under the project's %s/untitled folder; "
-                         "save the scene first to keep them beside it" % ASSET_FOLDER)
-            try:
-                cmds.inViewMessage(amg="GroomLab: <hl>save the scene</hl> to keep its masks, bakes and exports beside "
-                                       "it (they go under the project's %s/untitled folder until then)" % ASSET_FOLDER,
-                                   pos="topCenter", fade=True, fadeStayTime=6000)
-            except RuntimeError:
-                pass
+            messages.say("<hl>save the scene</hl> to keep its masks, bakes and exports beside it (they go under the "
+                         "project's %s/untitled folder until then)" % ASSET_FOLDER, seconds=6, markup=True)
     folder = cmds.groomLabPaths(assetFolder=kind or "").replace("\\", "/")
     if create and not os.path.isdir(folder):
         os.makedirs(folder)
@@ -299,8 +294,8 @@ def follow_scene_files():
                 _bump(groom)
         if not cmds.about(batch=True):
             try:
-                cmds.inViewMessage(amg="GroomLab: %d file(s) copied into the saved scene's folder (%s)"
-                                       % (len(copied), new_base + "/" + new_prefix), pos="topCenter", fade=True)
+                messages.say("%d file(s) copied into the saved scene's folder (%s)"
+                             % (len(copied), new_base + "/" + new_prefix), warning=False)
             except RuntimeError:
                 pass
     return copied

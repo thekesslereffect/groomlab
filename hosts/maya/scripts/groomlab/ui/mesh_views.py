@@ -17,7 +17,7 @@ tool is never changed.
 
 from maya import cmds
 
-from groomlab.base import no_undo, _no_undo_depth  # noqa: F401 (no_undo: the windows' own bookkeeping out of the queue)
+from groomlab.base import kept_selection, no_undo, _no_undo_depth  # noqa: F401 (no_undo: the windows' own bookkeeping out of the queue)
 from groomlab.ui.qt import QtCore, QtWidgets, shiboken, to_int
 
 MARKER_SET_TYPE = "groomLabMarkerSet"  # the plugin's locator drawing one view's points (marker_set.h)
@@ -121,14 +121,8 @@ class MeshView(object):
         """The pane, editor, camera and marker set (once)."""
         if self.editor:
             return False
-        selection = cmds.ls(selection=True, long=True) or []  # kept: a new camera selects itself
-        with no_undo():
+        with no_undo(), kept_selection():  # (a new camera selects itself)
             self._make(wireframe)
-            selection = [n for n in selection if cmds.objExists(n)]
-            if selection:
-                cmds.select(selection, replace=True)
-            else:
-                cmds.select(clear=True)
         return True
 
     def _make(self, wireframe):

@@ -130,22 +130,18 @@ def read_scene_records():
     problem = ""
     try:
         path = os.path.join(folder, "yeti_nodes.ma").replace("\\", "/")
-        selection = cmds.ls(selection=True, long=True) or []
+        from groomlab.base import kept_selection
         try:
-            cmds.select(shapes, replace=True)
-            cmds.file(path, force=True, exportSelected=True, type="mayaAscii", constructionHistory=False,
-                      channels=False, constraints=False, expressions=False, shader=False, preserveReferences=True)
+            with kept_selection():
+                cmds.select(shapes, replace=True)
+                cmds.file(path, force=True, exportSelected=True, type="mayaAscii", constructionHistory=False,
+                          channels=False, constraints=False, expressions=False, shader=False, preserveReferences=True)
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 nodes, _ = yf.read_ma(f.read())
             if nodes:
                 return nodes, "the scene's Yeti nodes, exported as Maya ASCII"
         except RuntimeError as e:
             problem = str(e).strip()
-        finally:
-            if selection:
-                cmds.select(selection, replace=True)
-            else:
-                cmds.select(clear=True)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
     scene = cmds.file(query=True, sceneName=True) or ""

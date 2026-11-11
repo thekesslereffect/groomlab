@@ -114,7 +114,7 @@ def _simulate_preset(groom, params, node, model):
     own = model is None
     if own:
         model = gm.GraphModel.from_groom(groom)
-    nodes = [n for n in model.order if model.node_type(n) == "Simulate"]
+    nodes = model.of_type("Simulate")
     if node is not None and node not in nodes:
         raise ValueError("the graph has no Simulate node %r" % node)
     targets = [node] if node is not None else nodes

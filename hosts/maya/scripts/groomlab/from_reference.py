@@ -47,7 +47,7 @@ import os
 from maya import cmds
 from maya.api import OpenMaya as om
 
-from groomlab.base import ensure_plugin, undo_chunk
+from groomlab.base import ensure_plugin, kept_selection, undo_chunk
 from groomlab.guides import guides_from_curves, list_guide_groups, remove_guide_group
 
 GROUP = "fromReference"
@@ -318,8 +318,7 @@ def guides_from_reference(groom, views, group=GROUP, replace=True, guide_count=3
     result = gl.guides_from_reference(scalp, prepared, **kwargs)
 
     ids = []
-    selection = cmds.ls(selection=True, long=True) or []  # kept: the groom stays the active one
-    with undo_chunk("guides from reference"):
+    with undo_chunk("guides from reference"), kept_selection():  # (the groom stays the active one)
         if replace and group in [g["name"] for g in list_guide_groups(groom)]:
             remove_guide_group(groom, group)
         curves = []
@@ -331,11 +330,6 @@ def guides_from_reference(groom, views, group=GROUP, replace=True, guide_count=3
         finally:
             if curves:
                 cmds.delete(curves)
-            selection = [n for n in selection if cmds.objExists(n)]
-            if selection:
-                cmds.select(selection, replace=True)
-            else:
-                cmds.select(clear=True)
     out = {k: v for k, v in result.items() if k not in ("guides", "scalp_coverage")}
     out["guide_ids"] = list(ids or [])
     box = cmds.exactWorldBoundingBox(shape)
@@ -448,7 +442,7 @@ def measured_look_preview(groom, measured=None):
         values = measured.get(op_type)
         if not values:
             continue
-        node = next((n for n in model.order if model.node_type(n) == op_type), None) \
+        node = model.first_of(op_type) \
             if op_type in ("HairColor", "Scatter") else _target(model, op_type, chain)
         for param, value in values.items():
             if param == "densityMap":
@@ -495,7 +489,7 @@ def apply_measured_look(groom, measured=None, types=None):
                 continue
             chain = _chain(model)
             if op_type == "HairColor":
-                node = next((n for n in model.order if model.node_type(n) == "HairColor"), None)
+                node = model.first_of("HairColor")
                 if node is None:
                     node = model.add_node("HairColor")
                     model.insert_before(_insert_at_color(model, chain), node)
@@ -510,7 +504,7 @@ def apply_measured_look(groom, measured=None, types=None):
         model.save(groom)
         density = (measured.get("Scatter") or {}).get("densityMap")
         if density:
-            scatter = next((n for n in model.order if model.node_type(n) == "Scatter"), None)
+            scatter = model.first_of("Scatter")
             if scatter:
                 painting.use_map(groom, scatter, "density", DENSITY_MAP, kind="vertices")
                 _set_vertex_map(groom, DENSITY_MAP, density)

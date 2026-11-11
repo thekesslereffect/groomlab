@@ -39,7 +39,7 @@ def _feather_shafts(groom, model, source, group, scatter_params):
     """The node (and output) giving the shafts: a new Scatter shaped by the guides, the guides of
     `group`, or an existing node ("node" or "node.output"). Returns (node, output, new nodes)."""
     if source == "scatter":
-        scalp = next((n for n in model.order if model.node_type(n) == "Scalp"), None)
+        scalp = model.first_of("Scalp")
         added = []
         if scalp is None:
             scalp = model.add_node("Scalp", name=model.unique_name("scalp"))

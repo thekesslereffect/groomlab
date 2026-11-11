@@ -53,17 +53,20 @@ def plain(error):
     return text
 
 
-def say(text, warning=True, seconds=5):
-    """`text` over the viewport (not in batch) and on the command line (a warning, or printed)."""
+def say(text, warning=True, seconds=5, markup=False):
+    """`text` over the viewport (not in batch) and on the command line (a warning, or printed): every
+    GroomLab message over the viewport goes through here. `markup`: the text's <hl>...</hl> shows
+    highlighted over the viewport (the command line gets it without the tags); else a "<" is text."""
     from maya import cmds
+    line = "GroomLab: " + (re.sub(r"</?hl>", "", text) if markup else text)
     if warning:
-        cmds.warning("GroomLab: " + text)
+        cmds.warning(line)
     else:
-        print("GroomLab: " + text)
+        print(line)
     try:
         if not cmds.about(batch=True):
-            cmds.inViewMessage(amg="GroomLab: " + text.replace("<", "&lt;"), pos="topCenter", fade=True,
-                               fadeStayTime=int(seconds * 1000))
+            cmds.inViewMessage(amg="GroomLab: " + (text if markup else text.replace("<", "&lt;")), pos="topCenter",
+                               fade=True, fadeStayTime=int(seconds * 1000))
     except RuntimeError:
         pass
 

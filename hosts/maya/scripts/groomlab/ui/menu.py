@@ -9,7 +9,7 @@ import sys
 from maya import cmds, mel
 
 from groomlab.links import DOCS_URL, DONATE_URL, REPO_URL
-from groomlab.ui import definitions
+from groomlab.ui import definitions, messages
 
 MENU = "groomLabMenu"
 
@@ -77,9 +77,8 @@ def ensure_scene_saved(what):
     import groomlab
     if not ASK_TO_SAVE or cmds.about(batch=True) or groomlab.scene_folder():
         return True
-    cmds.inViewMessage(amg="GroomLab: the scene is untitled, so %s go under %s/groomlab for now and move "
-                           "beside the scene when you save it" % (what, groomlab.project_root().rstrip("/")),
-                       pos="topCenter", fade=True, fadeStayTime=4000)
+    messages.say("the scene is untitled, so %s go under %s/groomlab for now and move beside the scene when you "
+                 "save it" % (what, groomlab.project_root().rstrip("/")), warning=False, seconds=4)
     return True
 
 
@@ -129,7 +128,7 @@ def grow_on_faces(groom, faces):
     import groomlab
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
-    scatter = next((n for n in model.order if model.node_type(n) == "Scatter"), None)
+    scatter = model.first_of("Scatter")
     if not scatter:
         cmds.warning("GroomLab: the groom has no Scatter to limit to the selected faces")
         return None
@@ -147,8 +146,8 @@ def grow_on_faces(groom, faces):
 def add_sample_action(sample):
     import groomlab
     part = groomlab.add_sample(sample)
-    cmds.inViewMessage(amg="Added <hl>%s</hl> (selected): Create Groom from Selection grows hair on it." % part,
-                       pos="topCenter", fade=True)
+    messages.say("added <hl>%s</hl> (selected): Create Groom from Selection grows hair on it." % part, warning=False,
+                 markup=True)
 
 
 def guides_from_selected_curves():
@@ -256,7 +255,7 @@ def export_unreal_dialog():
                             startingDirectory=default_file(groom, "exports", "_unreal.abc"))
     if path:
         groomlab.export_unreal_groom(groom, path[0])
-        cmds.inViewMessage(amg="GroomLab: wrote %s for Unreal's groom importer" % path[0], pos="topCenter", fade=True)
+        messages.say("wrote %s for Unreal's groom importer" % path[0], warning=False)
 
 
 def export_unity_strands_dialog():
@@ -269,7 +268,7 @@ def export_unity_strands_dialog():
                             startingDirectory=default_file(groom, "exports", "_unity.abc"))
     if path:
         groomlab.export_unity_strands(groom, path[0])
-        cmds.inViewMessage(amg="GroomLab: wrote %s for Unity's hair package" % path[0], pos="topCenter", fade=True)
+        messages.say("wrote %s for Unity's hair package" % path[0], warning=False)
 
 
 def export_unity_feathers_dialog():
@@ -283,34 +282,39 @@ def export_unity_feathers_dialog():
                               startingDirectory=groomlab.asset_folder("exports"))
     if folder:
         result = groomlab.export_unity_feathers(groom, folder[0])
-        cmds.inViewMessage(amg="GroomLab: wrote %s (%d strand groups)" % (result["abc"], len(result["groups"])),
-                           pos="topCenter", fade=True)
+        messages.say("wrote %s (%d strand groups)" % (result["abc"], len(result["groups"])), warning=False)
 
 
-def export_unity_cards_dialog():
-    """The cards for Unity: FBX (meters, Y up), PNG maps and a manifest into a folder."""
+def export_unity_cards_dialog(groom=None):
+    """The cards for Unity: FBX (meters, Y up), PNG maps and a manifest into a folder (asked). The
+    menu's and the Graph Editor's. Returns the export's result, None when cancelled."""
     import groomlab
-    groom = _selected_groom()
+    groom = groom or _selected_groom()
     if not groom:
-        return
+        return None
     folder = cmds.fileDialog2(fileMode=3, dialogStyle=2, caption="Folder for the Unity cards",
                               startingDirectory=groomlab.asset_folder("exports"))
-    if folder:
-        result = groomlab.export_cards_unity(groom, folder[0])
-        cmds.inViewMessage(amg="GroomLab: wrote %s" % result["fbx"], pos="topCenter", fade=True)
+    if not folder:
+        return None
+    result = groomlab.export_cards_unity(groom, folder[0])
+    messages.say("wrote %s" % result["fbx"], warning=False)
+    return result
 
 
-def export_gltf_cards_dialog():
-    """The cards as glTF 2.0 (.glb with the maps inside, or .gltf beside its files)."""
+def export_gltf_cards_dialog(groom=None):
+    """The cards as glTF 2.0 (.glb with the maps inside, or .gltf beside its files), the path asked.
+    The menu's and the Graph Editor's. Returns the files written, None when cancelled."""
     import groomlab
-    groom = _selected_groom()
+    groom = groom or _selected_groom()
     if not groom:
-        return
+        return None
     path = cmds.fileDialog2(fileFilter="glTF binary (*.glb);;glTF (*.gltf)", dialogStyle=2, fileMode=0,
                             caption="Export glTF Cards", startingDirectory=default_file(groom, "exports", "_cards.glb"))
-    if path:
-        written = groomlab.export_cards_gltf(groom, path[0], binary=not path[0].lower().endswith(".gltf"))
-        cmds.inViewMessage(amg="GroomLab: wrote %s" % written[0], pos="topCenter", fade=True)
+    if not path:
+        return None
+    written = groomlab.export_cards_gltf(groom, path[0], binary=not path[0].lower().endswith(".gltf"))
+    messages.say("wrote %s" % written[0], warning=False)
+    return written
 
 
 def export_usd_scale_instancer_dialog():
@@ -324,7 +328,7 @@ def export_usd_scale_instancer_dialog():
                             startingDirectory=default_file(groom, "exports", "_scales.usda"))
     if path:
         groomlab.export_usd(groom, path[0], scales="instancer")
-        cmds.inViewMessage(amg="GroomLab: wrote %s" % path[0], pos="topCenter", fade=True)
+        messages.say("wrote %s" % path[0], warning=False)
 
 
 def export_scales_fbx_dialog():
@@ -337,7 +341,7 @@ def export_scales_fbx_dialog():
                             startingDirectory=default_file(groom, "exports", "_scales.fbx"))
     if path:
         groomlab.export_scales(groom, path[0])
-        cmds.inViewMessage(amg="GroomLab: wrote %s" % path[0], pos="topCenter", fade=True)
+        messages.say("wrote %s" % path[0], warning=False)
 
 
 def bake_scale_maps_action():
@@ -446,8 +450,8 @@ def import_groom_dialog():
         cmds.warning("GroomLab: %s" % e)
         return
     groomlab.pin_new_groom(grooms[0])
-    cmds.inViewMessage(amg="GroomLab: imported %s from %s" % (", ".join(g.split("|")[-1] for g in grooms),
-                                                              os.path.basename(path[0])), pos="topCenter", fade=True)
+    messages.say("imported %s from %s" % (", ".join(g.split("|")[-1] for g in grooms), os.path.basename(path[0])),
+                 warning=False)
 
 
 def reload_groom_file(groom=None):
@@ -469,8 +473,7 @@ def reload_groom_file(groom=None):
     except (RuntimeError, ValueError) as e:
         cmds.warning("GroomLab: %s" % e)
         return
-    cmds.inViewMessage(amg="GroomLab: %s reloaded from %s" % (groom.split("|")[-1], os.path.basename(path)),
-                       pos="topCenter", fade=True)
+    messages.say("%s reloaded from %s" % (groom.split("|")[-1], os.path.basename(path)), warning=False)
 
 
 def save_groom_file(groom=None):
@@ -503,7 +506,7 @@ def save_groom_file(groom=None):
     except (RuntimeError, ValueError) as e:
         cmds.warning("GroomLab: %s" % e)
         return
-    cmds.inViewMessage(amg="GroomLab: wrote %s" % ", ".join(written), pos="topCenter", fade=True)
+    messages.say("wrote %s" % ", ".join(written), warning=False)
 
 
 def render_from_groom_file_dialog():
@@ -799,8 +802,8 @@ def symmetry_sync(from_negative=False):
     groom = _selected_groom()
     if groom:
         created = groomlab.symmetry_sync(groom, "x", from_negative=from_negative)
-        cmds.inViewMessage(amg="GroomLab: symmetry synced %s (%d guides)"
-                           % ("-X to +X" if from_negative else "+X to -X", len(created)), pos="topCenter", fade=True)
+        messages.say("symmetry synced %s (%d guides)" % ("-X to +X" if from_negative else "+X to -X", len(created)),
+                     warning=False)
 
 
 def toggle_density_heatmap():
@@ -958,8 +961,7 @@ def render_turntable_dialog():
         if entry in _TURNTABLES:
             _TURNTABLES.remove(entry)
         if job.ok():
-            cmds.inViewMessage(amg="GroomLab: turntable ready%s" % (" (turntable.mp4)" if job.movie else ""),
-                               pos="topCenter", fade=True)
+            messages.say("turntable ready%s" % (" (turntable.mp4)" if job.movie else ""), warning=False)
             QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(job.folder))
         elif not progress.wasCanceled():
             cmds.warning("GroomLab: the turntable render stopped early; see %s" % job.log)
@@ -1265,9 +1267,7 @@ def reparent_dialog():
 
 def _say(text):
     """A result: in the Script Editor, and over the viewport in a UI session."""
-    print("GroomLab: " + text)
-    if not cmds.about(batch=True):
-        cmds.inViewMessage(amg="GroomLab: " + text, pos="topCenter", fade=True)
+    messages.say(text, warning=False)
 
 
 def delete_all_flow_arrows(groom=None):
@@ -1749,8 +1749,7 @@ def draw_guides_into(groom, group):
     except (RuntimeError, ValueError) as e:
         cmds.warning("GroomLab: cannot start the Draw tool: %s" % e)
         return False
-    cmds.inViewMessage(amg="GroomLab: draw guides from the skin into <hl>%s</hl>: each one is a feather" % group,
-                       pos="topCenter", fade=True)
+    messages.say("draw guides from the skin into <hl>%s</hl>: each one is a feather" % group, warning=False, markup=True)
     return True
 
 
@@ -2018,9 +2017,8 @@ def show_all(what, on):
     grooms = (groomlab.set_all_guides_visible if what == "guides" else groomlab.set_all_hair_visible)(on)
     if cmds.about(batch=True):
         return grooms
-    cmds.inViewMessage(amg="GroomLab: %s %s" % (
-        "every groom's guides" if what == "guides" else "every groom's hair", "shown" if on else "hidden"),
-        pos="topCenter", fade=True)
+    messages.say("%s %s" % (
+        "every groom's guides" if what == "guides" else "every groom's hair", "shown" if on else "hidden"), warning=False)
     return grooms
 
 
@@ -2029,8 +2027,7 @@ def install_hotkeys():
     listing what it changed: the set switched to and each key it rebound."""
     from groomlab.ui import hotkeys
     name = hotkeys.install()
-    cmds.inViewMessage(amg="GroomLab: hotkey set '%s' is active. Hold Y + left click for the marking menu." % name,
-                       pos="topCenter", fade=True)
+    messages.say("hotkey set '%s' is active. Hold Y + left click for the marking menu." % name, warning=False)
     if not cmds.about(batch=True):
         _text_window("groomLabHotkeyChanges", "GroomLab: Hotkeys Installed", hotkeys.changes_text())
     return hotkeys.last_changes

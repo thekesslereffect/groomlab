@@ -232,7 +232,7 @@ def to_mesh_nodes(groom):
     """The groom's ToMesh nodes (its own, not those inside compounds), in graph order."""
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
-    return [n for n in model.order if model.node_type(n) == "ToMesh"]
+    return model.of_type("ToMesh")
 
 
 @groomlab.undoable("add to mesh")

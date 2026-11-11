@@ -230,15 +230,9 @@ def import_reference(image_path, name=None, groom=None, copy=True):
     width, height = image_size(image_path)
     path = _copy_in(image_path) if copy else os.path.abspath(image_path).replace("\\", "/")
     base = name or os.path.splitext(os.path.basename(image_path))[0] + "_ref"
-    selection = cmds.ls(selection=True, long=True) or []  # kept: the groom stays the active one
-    with groomlab.undo_chunk("import reference"):
-        try:
-            transform = _make_reference_camera(path, base, width, height, groom)
-        finally:  # the selection back, also when making the camera failed
-            if selection:
-                cmds.select(selection, replace=True)
-            else:
-                cmds.select(clear=True)
+    from groomlab.base import kept_selection
+    with groomlab.undo_chunk("import reference"), kept_selection():  # (the groom stays the active one)
+        transform = _make_reference_camera(path, base, width, height, groom)
     return _name(transform)
 
 

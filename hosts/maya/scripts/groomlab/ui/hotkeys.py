@@ -18,7 +18,7 @@ makes a "GroomLab" hotkey set (a copy of the current one) with:
 
 from maya import cmds, mel
 
-from groomlab.ui import definitions
+from groomlab.ui import definitions, messages
 
 CATEGORY = "GroomLab"
 MARKING_MENU = "groomLabMarkingMenu"
@@ -87,7 +87,7 @@ def step_level(delta):
     if cmds.contextInfo(ctx, exists=True):
         level = max(0, cmds.groomLabBrushCtx(ctx, query=True, level=True) + delta)
         cmds.groomLabBrushCtx(ctx, edit=True, level=level)
-        cmds.inViewMessage(amg="GroomLab: level %d" % level, pos="topCenter", fade=True)
+        messages.say("level %d" % level, warning=False)
 
 
 def toggle_symmetry():
@@ -106,8 +106,7 @@ def toggle_symmetry():
     else:
         return "none"
     label = {"x": "World X", "topology": "Topology"}.get(name, name)
-    cmds.inViewMessage(amg="GroomLab: symmetry " + ("off" if name == "none" else "on (%s)" % label),
-                       pos="topCenter", fade=True)
+    messages.say("symmetry " + ("off" if name == "none" else "on (%s)" % label), warning=False)
     return name
 
 
@@ -116,7 +115,7 @@ def toggle_all_guides():
     whether they show now."""
     import groomlab
     on = groomlab.toggle_all_guides()
-    cmds.inViewMessage(amg="GroomLab: every groom's guides " + ("shown" if on else "hidden"), pos="topCenter", fade=True)
+    messages.say("every groom's guides " + ("shown" if on else "hidden"), warning=False)
     return on
 
 
