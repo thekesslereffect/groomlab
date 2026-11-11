@@ -51,21 +51,16 @@ def add_simulate(groom, name=None, preset=None, **params):
     exactly as it was. Returns the node's name."""
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
-    def interpolates(src):
-        return [(dst, i) for dst, i in model.downstream_of(src) if model.node_type(dst) == "Interpolate"]
-    guides = [n for n in model.order if model.node_type(n) == "Guides" and interpolates(n)]
-    if not guides:
-        raise ValueError("%s's graph has no Guides node feeding an Interpolate" % groom)
-    source = guides[0]
-    consumers = interpolates(source)
     values = simulate_preset_params(preset) if preset else {}
     values.update({k: v for k, v in params.items() if v is not None})
-    node = model.add_node("Simulate", name=name, params=values)
-    for dst, input_name in consumers:
-        model.connect(node, dst, input_name)
-    model.connect(source, node, "guides")
-    x, y = model.position(source)
-    model.set_position(node, x + gm.LAYOUT_DX / 2, y + gm.LAYOUT_DY)
+    # Every host's (graph_inserts.h insertSimulate): where it goes and what it feeds.
+    edit = model._edit()
+    with gm._core_errors():
+        node = edit.insert_simulate(json.dumps(values), model.groom_size)
+        if name and name != node:
+            edit.rename_node(node, name)
+            node = name
+    model._take(edit)
     model.save(groom)
     return node
 
@@ -79,25 +74,11 @@ def add_guide_cache(groom, path, object_name=""):
     groom's guideCache attribute, set_guide_cache, still poses older scenes.)"""
     from groomlab import graph as gm
     model = gm.GraphModel.from_groom(groom)
-    params = {"path": groomlab.portable_path(path), "object": object_name or ""}
-    for node in [n for n in model.order if model.node_type(n) == "GuideCache"]:
-        source = model.source_of(node, "guides")
-        if source is None or model.node_type(source) == "Guides":
-            for k, v in params.items():
-                model.set_param(node, k, v)
-            model.save(groom)
-            return node
-    guides = [n for n in model.order if model.node_type(n) == "Guides" and model.downstream_of(n)]
-    if not guides:
-        raise ValueError("%s's graph has no Guides node feeding the groom" % groom)
-    source = guides[0]
-    consumers = list(model.downstream_of(source))
-    node = model.add_node("GuideCache", params=params)
-    for dst, input_name in consumers:
-        model.connect(node, dst, input_name)
-    model.connect(source, node, "guides")
-    x, y = model.position(source)
-    model.set_position(node, x + gm.LAYOUT_DX / 2, y + gm.LAYOUT_DY)
+    # Every host's (graph_inserts.h insertGuideCache).
+    edit = model._edit()
+    with gm._core_errors():
+        node = edit.insert_guide_cache(groomlab.portable_path(path), object_name or "", model.groom_size)
+    model._take(edit)
     model.save(groom)
     return node
 

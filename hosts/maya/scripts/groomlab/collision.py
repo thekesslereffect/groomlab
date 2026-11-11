@@ -100,26 +100,15 @@ def add_collider(groom, mesh, name=None, wire=True, offset=None, before="output"
             set_collider_friction(groom, name, friction)
         return name
     model = gm.GraphModel.from_groom(groom)
-    node = next((n for n in model.order if model.node_type(n) == "ColliderMesh"
-                 and model.param(n, "name") == name), None)
-    if node is None:
-        node = model.add_node("ColliderMesh", name=model.unique_name(name), params={"name": name})
-    elif friction is None and not wire:
-        return node  # a ColliderMesh node reads it already (one added in the Graph Editor): the graph stays
-    if friction is not None:
-        model.set_param(node, "friction", max(-1.0, min(1.0, float(friction))))
-    if wire:
-        params = {} if offset is None else {"offset": float(offset)}
-        collide = model.add_node("Collide", name=model.unique_name("collide_" + name), params=params)
-        model.insert_before(before, collide)
-        model.connect(node, collide, "collider")
-        if model.source_of(collide, "scalp") is None:
-            scalp = next((n for n in model.order if model.node_type(n) == "Scalp"
-                          and model.param(n, "input") == "scalp"), None)
-            if scalp:
-                model.connect(scalp, collide, "scalp")  # off the scalp too, as Collide is meant
-        x, y = model.position(collide)
-        model.set_position(node, x - 220.0, y - 60.0)
+    if before != "output" and wire:
+        raise ValueError("a collider's Collide goes before the output (the Graph Editor moves it)")
+    # Every host's graph (graph_inserts.h insertCollider): a ColliderMesh reading it, a Collide
+    # before the output, off the scalp too.
+    edit = model._edit()
+    with gm._core_errors():
+        node = edit.insert_collider(name, bool(wire), None if offset is None else float(offset),
+                                    None if friction is None else float(friction), model.groom_size)
+    model._take(edit)
     model.save(groom)
     return node
 

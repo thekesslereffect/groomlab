@@ -54,6 +54,7 @@ add_library(groomlab_core_objects OBJECT
     src/graph_io.cpp
     src/graph_controls.cpp
     src/graph_edit.cpp
+    src/graph_inserts.cpp
     src/graph_pins.cpp
     src/graph_compound.cpp
     src/guide_hierarchy.cpp

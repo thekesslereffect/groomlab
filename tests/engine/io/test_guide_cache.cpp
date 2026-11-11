@@ -11,6 +11,8 @@
 #include "groomlab/alembic_operators.h"
 #include "groomlab/graph.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
+#include "groomlab/graph_io.h"
 #include "groomlab/guide_set.h"
 #include "groomlab/operators.h"
 
@@ -197,4 +199,29 @@ TEST(GuideCache, AMissingFileIsTheNodesError) {
 }
 
 }  // namespace
+TEST(GuideCache, LoadGuideCacheGoesAfterTheGuidesInEveryHost) {
+    // graph_inserts.h insertGuideCache (Maya's add_guide_cache, the Blender helper, the app): right
+    // after the Guides node, feeding all it fed; loaded again, the same node reads the new file.
+    registerAlembicOperators(OperatorRegistry::instance());
+    GraphEdit edit(defaultGraphJson());
+    const std::string cache = insertGuideCache(edit, "sims/take1.abc", "hair");
+    const nlohmann::json g = nlohmann::json::parse(edit.toJson());
+    bool fromGuides = false, intoInterpolate = false, guidesStillDirect = false;
+    for (const nlohmann::json& c : g["connections"]) {
+        fromGuides = fromGuides || (c["from"] == "guides" && c["to"] == cache && c["input"] == "guides");
+        intoInterpolate = intoInterpolate || (c["from"] == cache && c["to"] == "interpolate" && c["input"] == "guides");
+        guidesStillDirect = guidesStillDirect || (c["from"] == "guides" && c["to"] == "interpolate");
+    }
+    EXPECT_TRUE(fromGuides);
+    EXPECT_TRUE(intoInterpolate);
+    EXPECT_FALSE(guidesStillDirect);
+    EXPECT_EQ(insertGuideCache(edit, "sims/take2.abc"), cache);
+    const nlohmann::json again = nlohmann::json::parse(edit.toJson());
+    for (const nlohmann::json& n : again["nodes"]) {
+        if (n["name"] != cache) continue;
+        EXPECT_EQ(n["params"]["path"], "sims/take2.abc");
+        EXPECT_EQ(n["params"]["object"], "");
+    }
+}
+
 }  // namespace groomlab

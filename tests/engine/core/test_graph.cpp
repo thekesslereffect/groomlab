@@ -16,6 +16,7 @@
 #include "groomlab/graph.h"
 #include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
 #include "groomlab/node_catalog.h"
@@ -564,6 +565,46 @@ TEST(GraphJson, AnIntegerParamOutOfRangeIsAnError) {
     EXPECT_THROW(loadGraphJson(with("1e300")), GraphError);
     EXPECT_THROW(loadGraphJson(with("-1e19")), GraphError);
     EXPECT_THROW(loadGraphJson(with("9.3e18")), GraphError);
+}
+
+TEST(GraphInserts, EveryHostAddsAFeatureAlike) {
+    // graph_inserts.h: Maya's sim.py and collision.py, the Blender helper and the app add these.
+    using nlohmann::json;
+    auto feeds = [](const GraphEdit& e, const std::string& from, const std::string& to, const std::string& input) {
+        const json g = json::parse(e.toJson());  // (held: a temporary's member would dangle in the loop)
+        for (const json& c : g["connections"]) {
+            if (c["from"] == from && c["to"] == to && c["input"] == input) return true;
+        }
+        return false;
+    };
+    GraphEdit edit(defaultGraphJson());
+    setNodePosition(edit, "guides", 100.0, 50.0);
+    // Simulate between the guides and the Interpolate, half a column right and a row below.
+    const std::string sim = insertSimulate(edit, R"({"damping": 0.5})");
+    EXPECT_EQ(edit.nodeType(sim), "Simulate");
+    EXPECT_TRUE(feeds(edit, "guides", sim, "guides"));
+    EXPECT_TRUE(feeds(edit, sim, "interpolate", "guides"));
+    EXPECT_FALSE(feeds(edit, "guides", "interpolate", "guides"));
+    EXPECT_EQ(nodePosition(edit, sim), std::make_pair(100.0 + kInsertColumn / 2.0, 50.0 + kInsertRow));
+    // (Load Guide Cache: tests/engine/io, where the GuideCache operator is registered.)
+    // A collider: its ColliderMesh, a Collide before the output on the scalp too.
+    const std::string output = edit.outputNode();
+    const std::string collider = insertCollider(edit, "collar.obj", true, 0.1);
+    EXPECT_EQ(edit.nodeType(collider), "ColliderMesh");
+    std::string collide;
+    const json wired = json::parse(edit.toJson());
+    for (const json& c : wired["connections"]) {
+        if (c["to"] == output && c["input"] == "strands") collide = c["from"].get<std::string>();
+    }
+    ASSERT_EQ(edit.nodeType(collide), "Collide");
+    EXPECT_TRUE(feeds(edit, collider, collide, "collider"));
+    EXPECT_TRUE(feeds(edit, "scalp", collide, "scalp"));
+    // The same mesh with no wire: the graph left alone.
+    const std::string before = edit.toJson();
+    EXPECT_EQ(insertCollider(edit, "collar.obj", false), collider);
+    EXPECT_EQ(edit.toJson(), before);
+    EXPECT_THROW(insertCollider(edit, "scalp"), GraphError);
+    EXPECT_THROW(insertBefore(edit, "scalp", sim), GraphError) << "nothing feeds the scalp's strands";
 }
 
 TEST(GraphControls, EveryHostMakesAndReadsControlsAlike) {

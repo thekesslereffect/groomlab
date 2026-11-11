@@ -16,6 +16,7 @@
 #include <map>
 #include <stdexcept>
 
+#include "groomlab/graph_inserts.h"
 #include "groomlab/alembic_io.h"
 #include "groomlab/asset_files.h"
 #include "groomlab/card_files.h"
@@ -395,30 +396,10 @@ std::string GroomDocument::addSimulateNode(std::string* made) {
     std::string name;
     const MeshPtr& scalp = file().data.scalp;
     const std::string error = editGraph("add Simulate", [&](json& g) {
-        GraphEdits edit(g, scalp ? presetScalpSize(*scalp) : std::nullopt);
-        const json now = edit.now();
-        auto interpolates = [&](const std::string& source) {
-            std::vector<std::pair<std::string, std::string>> out;
-            for (const auto& [to, input] : fedBy(now, source)) {
-                if (typeOf(now, to) == "Interpolate") out.emplace_back(to, input);
-            }
-            return out;
-        };
-        std::string source;
-        for (const std::string& n : ofType(now, "Guides")) {
-            if (!interpolates(n).empty()) {
-                source = n;
-                break;
-            }
-        }
-        if (source.empty()) throw std::runtime_error("the groom's graph has no Guides node feeding an Interpolate");
-        const auto consumers = interpolates(source);
-        const auto at = positionOf(now, source);
-        name = edit.add("Simulate", "Simulate", nullptr,
-                        at ? std::optional<std::pair<double, double>>({at->first + kDX / 2.0, at->second + kDY}) : std::nullopt);
-        for (const auto& [to, input] : consumers) edit.e.connect(name, to, input);
-        edit.e.connect(source, name, "guides");
-        g = edit.now();
+        // Every host's (graph_inserts.h): between the guides and the Interpolates they feed.
+        GraphEdit edit(g.dump());
+        name = insertSimulate(edit, {}, scalp ? presetScalpSize(*scalp) : std::nullopt);
+        g = json::parse(edit.toJson());
     });
     if (error.empty() && made) *made = name;
     return error;
@@ -428,37 +409,10 @@ std::string GroomDocument::addGuideCacheNode(const std::string& path, std::strin
     std::string name;
     const MeshPtr& scalp = file().data.scalp;
     const std::string error = editGraph("load guide cache", [&](json& g) {
-        GraphEdits edit(g, scalp ? presetScalpSize(*scalp) : std::nullopt);
-        const json now = edit.now();
-        const json params = {{"path", path}};
-        // A GuideCache on the Guides node already: it reads the new file.
-        for (const std::string& n : ofType(now, "GuideCache")) {
-            bool fedByGuides = false;
-            for (const std::string& src : ofType(now, "Guides")) {
-                for (const auto& [to, input] : fedBy(now, src)) fedByGuides = fedByGuides || (to == n && input == "guides");
-            }
-            if (fedByGuides) {
-                edit.setParam(n, "path", path);
-                name = n;
-                g = edit.now();
-                return;
-            }
-        }
-        std::string source;
-        for (const std::string& n : ofType(now, "Guides")) {
-            if (!fedBy(now, n).empty()) {
-                source = n;
-                break;
-            }
-        }
-        if (source.empty()) throw std::runtime_error("the groom's graph has no Guides node feeding the groom");
-        const auto consumers = fedBy(now, source);
-        const auto at = positionOf(now, source);
-        name = edit.add("GuideCache", "GuideCache", params,
-                        at ? std::optional<std::pair<double, double>>({at->first + kDX / 2.0, at->second + kDY}) : std::nullopt);
-        for (const auto& [to, input] : consumers) edit.e.connect(name, to, input);
-        edit.e.connect(source, name, "guides");
-        g = edit.now();
+        // Every host's (graph_inserts.h): right after the Guides node, or the GuideCache there.
+        GraphEdit edit(g.dump());
+        name = insertGuideCache(edit, path, {}, scalp ? presetScalpSize(*scalp) : std::nullopt);
+        g = json::parse(edit.toJson());
     });
     if (error.empty() && made) *made = name;
     return error;
@@ -476,29 +430,10 @@ std::string GroomDocument::addCollider(const std::string& meshName, std::string*
     std::string name;
     const MeshPtr& scalp = file().data.scalp;
     const std::string error = editGraph("add collider " + meshName, [&](json& g) {
-        GraphEdits edit(g, scalp ? presetScalpSize(*scalp) : std::nullopt);
-        const std::string output = edit.e.outputNode();
-        if (output.empty()) throw std::runtime_error("the graph has no output");
-        // Node names of letters, digits and _ (a prop's name may be a file's: "collar.obj").
-        std::string base;
-        for (const char c : meshName) base += std::isalnum(static_cast<unsigned char>(c)) || c == '_' ? c : '_';
-        if (base.empty() || std::isdigit(static_cast<unsigned char>(base[0]))) base = "collider" + base;
-        name = edit.add("ColliderMesh", base, json{{"name", meshName}});
-        const std::string collide = edit.add("Collide", "collide_" + base, nullptr);
-        edit.insertBefore(output, collide);
-        edit.e.connect(name, collide, "collider");
-        const json now = edit.now();
-        if (feedOf(now, collide, "scalp").from.empty()) {
-            for (const std::string& s : ofType(now, "Scalp")) {
-                const json input = paramOf(now, s, "input");
-                if (input.is_null() || (input.is_string() && input.get<std::string>() == "scalp")) {
-                    edit.e.connect(s, collide, "scalp");  // off the scalp too, as Collide is meant
-                    break;
-                }
-            }
-        }
-        edit.place(name, collide, -220.0, -60.0);
-        g = edit.now();
+        // Every host's graph (graph_inserts.h): a ColliderMesh, a Collide before the output.
+        GraphEdit edit(g.dump());
+        name = insertCollider(edit, meshName, true, std::nullopt, std::nullopt, scalp ? presetScalpSize(*scalp) : std::nullopt);
+        g = json::parse(edit.toJson());
     });
     if (error.empty() && made) *made = name;
     return error;

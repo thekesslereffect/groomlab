@@ -669,19 +669,7 @@ def add_simulate(scalp, params=None):
     Interpolate they feed, so the strands follow the simulated guides; bypass or delete it and the
     groom is as it was. Returns the node's name."""
     g = GraphEdits(scalp)
-
-    def interpolates(src):
-        return [(dst, i) for dst, i in g.downstream_of(src) if g.node_type(dst) == "Interpolate"]
-    guides = [n for n in g.of_type("Guides") if interpolates(n)]
-    if not guides:
-        raise HelperError("state", "the groom's graph has no Guides node feeding an Interpolate")
-    source = guides[0]
-    consumers = interpolates(source)
-    x, y = g.position(source)
-    node = g.add("Simulate", params=params or {}, at=(x + LAYOUT_DX / 2, y + LAYOUT_DY))
-    for dst, input_name in consumers:
-        g.connect(node, dst, input_name)
-    g.connect(source, node, "guides")
+    node = g.edit(op="insert_simulate", params=params or {})["name"]  # every host's (graph_inserts.h)
     g.finish()
     return node
 
@@ -692,24 +680,7 @@ def add_guide_cache(scalp, path, object_name=""):
     fed, so the guides take the cache's poses and the groom stays. A GuideCache already there
     reads the new file. Returns the node's name."""
     g = GraphEdits(scalp)
-    params = {"path": path, "object": object_name or ""}
-    for node in g.of_type("GuideCache"):
-        source = g.source_of(node, "guides")
-        if source is None or g.node_type(source) == "Guides":
-            for k, v in params.items():
-                g.set_param(node, k, v)
-            g.finish()
-            return node
-    guides = [n for n in g.of_type("Guides") if g.downstream_of(n)]
-    if not guides:
-        raise HelperError("state", "the groom's graph has no Guides node feeding the groom")
-    source = guides[0]
-    consumers = list(g.downstream_of(source))
-    x, y = g.position(source)
-    node = g.add("GuideCache", params=params, at=(x + LAYOUT_DX / 2, y + LAYOUT_DY))
-    for dst, input_name in consumers:
-        g.connect(node, dst, input_name)
-    g.connect(source, node, "guides")
+    node = g.edit(op="insert_guide_cache", path=path, object=object_name or "")["name"]  # every host's (graph_inserts.h)
     g.finish()
     return node
 
@@ -739,18 +710,7 @@ def add_collider(scalp, obj, name=None, wire=True):
     if existing and node is not None:
         groom.mark(scalp, "eval")
         return node
-    if node is None:
-        node = g.add("ColliderMesh", base=name, params={"name": name})
-    if wire:
-        collide = g.add("Collide", base="collide_" + name)
-        g.insert_before(g.output, collide)
-        g.connect(node, collide, "collider")
-        if g.source_of(collide, "scalp") is None:
-            scalp_node = next((n for n in g.of_type("Scalp") if g.param(n, "input", "scalp") == "scalp"), None)
-            if scalp_node:
-                g.connect(scalp_node, collide, "scalp")  # off the scalp too, as Collide is meant
-        x, y = g.position(collide)
-        g.set_positions({node: (x - 220.0, y - 60.0)})
+    node = g.edit(op="insert_collider", mesh=name, wire=bool(wire))["name"]  # every host's (graph_inserts.h)
     g.finish()
     return node
 

@@ -11,6 +11,7 @@
 #include "groomlab/graph.h"
 #include "groomlab/graph_controls.h"
 #include "groomlab/graph_edit.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom.h"
 #include "groomlab/operator_state.h"
@@ -597,6 +598,33 @@ void bindGraph(py::module_& m) {
         .def("has_node", &GraphEdit::hasNode, py::arg("name"))
         .def("node_type", &GraphEdit::nodeType, py::arg("name"))
         .def("node_names", &GraphEdit::nodeNames)
+        .def("insert_simulate",
+             [](GraphEdit& e, const std::string& paramsJson, std::optional<double> groomSize) { return insertSimulate(e, paramsJson, groomSize); },
+             py::arg("params_json") = std::string(), py::arg("groom_size") = py::none(),
+             "Add > Simulate (graph_inserts.h): a Simulate node between the guides and the Interpolates they feed.")
+        .def("insert_guide_cache",
+             [](GraphEdit& e, const std::string& path, const std::string& object, std::optional<double> groomSize) {
+                 return insertGuideCache(e, path, object, groomSize);
+             },
+             py::arg("path"), py::arg("object") = std::string(), py::arg("groom_size") = py::none(),
+             "Load Guide Cache (graph_inserts.h): a GuideCache node right after the Guides node, or the one there reading the file.")
+        .def("insert_collider",
+             [](GraphEdit& e, const std::string& mesh, bool wire, std::optional<double> offset, std::optional<double> friction,
+                std::optional<double> groomSize) { return insertCollider(e, mesh, wire, offset, friction, groomSize); },
+             py::arg("mesh_name"), py::arg("wire") = true, py::arg("offset") = py::none(), py::arg("friction") = py::none(),
+             py::arg("groom_size") = py::none(),
+             "Add > Collider's graph (graph_inserts.h): a ColliderMesh node, and with `wire` a Collide before the output.")
+        .def("insert_before",
+             [](GraphEdit& e, const std::string& anchor, const std::string& node, const std::string& input,
+                const std::string& nodeInput) { insertBefore(e, anchor, node, input, nodeInput); },
+             py::arg("anchor"), py::arg("node"), py::arg("input") = std::string("strands"), py::arg("node_input") = std::string("strands"),
+             "`node` between what feeds anchor's input and anchor, a row below it (graph_inserts.h).")
+        .def("insert_between",
+             [](GraphEdit& e, const std::string& src, const std::string& dst, const std::string& node, const std::string& nodeInput) {
+                 insertBetween(e, src, dst, node, nodeInput);
+             },
+             py::arg("src"), py::arg("dst"), py::arg("node"), py::arg("node_input") = std::string("strands"),
+             "Every link from src into dst through `node` (graph_inserts.h).")
         .def("not_keyable", [](const GraphEdit& e, const std::string& node, const std::string& param) { return notKeyable(e, node, param); },
              py::arg("node"), py::arg("param"), "Why node.param cannot be keyed in place (\"\" when it can).")
         .def("expose_param", [](GraphEdit& e, const std::string& node, const std::string& param) { exposeParam(e, node, param); },

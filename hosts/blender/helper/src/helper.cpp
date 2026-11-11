@@ -32,6 +32,7 @@
 #include "groomlab/follow_scalp.h"
 #include "groomlab/frame_time.h"
 #include "groomlab/graph.h"
+#include "groomlab/graph_inserts.h"
 #include "groomlab/graph_edit.h"
 #include "groomlab/graph_io.h"
 #include "groomlab/groom_file.h"
@@ -1941,6 +1942,16 @@ json Helper::run(const std::string& cmd, const json& args) {
             r["upgraded"] = edit.upgradeNode(needString(args, "name"));
         } else if (op == "update_library_node") {  // a node from the library takes its newer copy
             r["updated"] = edit.updateLibraryNode(needString(args, "name"), scalpSize(s));
+        } else if (op == "insert_simulate") {  // Add > Simulate, every host's (graph_inserts.h)
+            const json& params = args.contains("params") && args["params"].is_object() ? args["params"] : json::object();
+            r["name"] = insertSimulate(edit, params.dump(), scalpSize(s));
+        } else if (op == "insert_guide_cache") {  // Load Guide Cache, every host's
+            r["name"] = insertGuideCache(edit, needString(args, "path"), optString(args, "object", ""), scalpSize(s));
+        } else if (op == "insert_collider") {  // Add > Collider's graph, every host's
+            std::optional<double> offset, friction;
+            if (args.contains("offset") && args["offset"].is_number()) offset = args["offset"].get<double>();
+            if (args.contains("friction") && args["friction"].is_number()) friction = args["friction"].get<double>();
+            r["name"] = insertCollider(edit, needString(args, "mesh"), optBool(args, "wire", true), offset, friction, scalpSize(s));
         } else if (op == "set_positions" || op == "set_bypass" || op == "set_evaluation") {
             // The editors' fields of a node (graph_io.h): its "ui" position, as Maya's Graph Editor and
             // the app keep it, "bypass" (Disable) and "evaluation" (when it runs). Set here rather
