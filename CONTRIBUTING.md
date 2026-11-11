@@ -29,7 +29,12 @@ Thanks for helping. Bug reports, presets, docs fixes and code are all welcome.
    several hosts (menus, the Groom Tools, list menus, Graph Editor menus, Properties) is defined
    once in `engine/ui/*.json` ([docs/UI_DEFINITIONS.md](docs/UI_DEFINITIONS.md)): change it
    there so every host gets it, and bind any new action id in each host (the binding tests list
-   what a host has not done yet).
+   what a host has not done yet). Logic works the same way: what a menu action does to the graph
+   (Add Braid, Add Simulate...), a param's units and when it shows, controls and keys, file and
+   map rules live once in `engine/core` and every host calls them. If a second host needs
+   something one host already does, move it to the core first. The table under "What every host
+   does, written once" in [docs/DEVELOPING.md](docs/DEVELOPING.md) section 6 says where each
+   piece lives.
 2. Follow the conventions in [docs/DEVELOPING.md](docs/DEVELOPING.md), section 6 ("Rules").
    Format C++ with the repository's `.clang-format`. Stored formats change in place, with no
    migrations. Add or update tests with the change. Golden files change only for intended

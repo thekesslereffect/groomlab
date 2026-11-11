@@ -13,6 +13,43 @@ version. While GroomLab is in early access, a node's params can still change bet
 param renamed, or two merged into one); the entries below say when one does and what to set. Once
 it leaves early access, saved grooms will keep their look across updates.
 
+## 0.46.0 (November 11, 2026)
+
+- **As many clumps as you ask for.** A new Clump node picks its centers on the scalp, the way a
+  Scatter places roots, so a count of 20,000 gives 20,000 clumps on a dense groom (a Clump picking
+  its own centers used to stop at a few thousand), and the preview shows the render's clumps.
+  Clump nodes in saved grooms keep their look; add a new Clump for the new centers.
+- **Grow and paint on selected faces.** Create Groom from Selection with faces selected grows hair
+  on those faces only (eyelashes on the lids). With scalp faces selected, the Paint tab's New Map
+  starts white on them and Fill fills only them. The Paint card's **Whole Faces** fills each face
+  under the brush. In Maya, in Blender (faces picked in Edit Mode) and in the app (Whole Faces).
+- **Modeled hair tubes into GroomLab (#41).** Maya's **Utilities > Tubes to Curves** turns hair
+  modeled as quad tubes into curves or guides; **Convert Tubes to GroomLab Tubes** makes each a
+  tube guide that keeps its shape.
+- **Hiding the hair speeds up animation in Maya.** With the hair hidden (the eye, or the groom
+  hidden), moving the rig no longer runs the groom (150k strands: 85 ms a move before, under 3 ms
+  now). A Jiggle set to renderOnly no longer slows posing either.
+- **A faster Maya viewport**: a Scatter's roots, guide points, clump centers and the Tube brush's
+  wires draw on the GPU.
+- **Maya, Blender and the app work alike.** Add Simulate, Load Guide Cache, Add Collider, Add
+  Braid and Add Feathers make the same nodes in every host, and units, curve presets, corrective
+  layer names, Paste Graph and painting a setting behave the same everywhere. The app now shows
+  lengths, widths and densities in cm, µm and /cm² by default (a unit you picked stays); Blender
+  shows fractions as percentages.
+- **Fixes:**
+  - Create Groom and Alembic import take face selections, and Create Groom is one undo.
+  - Add Collider no longer adds the same mesh twice; Collect Files and Save Groom File As act only
+    on the grooms you selected.
+  - Maya no longer turns undo back on after you turned it off.
+  - A hotkey or the marking menu starts a tool as the Groom Tools do (Paint opens the Paint tab);
+    a tool that cannot start says why.
+  - A texture map picked as a setting's painted map works (a Layers stack feeding Scatter density).
+  - Painting a setting links its own map again instead of making a numbered copy (app, Blender).
+  - A guide group named with a space now takes one word (spaces become _), so its eye toggle works.
+  - The app's Braid on Curves offers all six styles; a locked groom takes no part edits.
+  - Maya's Graph Editor: Alt+wheel zooms both ways, and the pan cursor no longer sticks.
+  - Blender's Create Groom no longer takes other grooms' curves.
+
 ## 0.45.1 (November 9, 2026)
 
 - **macOS (Apple silicon).** GroomLab now runs on the Mac: the Maya module for Maya 2024 to 2027
